@@ -93,10 +93,18 @@ export function install(): void {
   autoUpdater.quitAndInstall(false, true);
 }
 
+/** FRIDAY_NO_UPDATE_CHECK=1: the app never asks GitHub for a newer version, nor downloads one. */
+const OFF = process.env.FRIDAY_NO_UPDATE_CHECK === "1";
+const OFF_SAYS = "Update checks are off (FRIDAY_NO_UPDATE_CHECK=1).";
+
 /** Ask the feed now. Safe to call from a button. */
 export function check(): UpdateState {
   if (!app.isPackaged) {
     set({ stage: "unsupported", error: "Updates only apply to an installed copy of Friday." });
+    return state;
+  }
+  if (OFF) {
+    set({ stage: "unsupported", error: OFF_SAYS });
     return state;
   }
   if (state.stage === "checking" || state.stage === "downloading" || state.stage === "ready") return state;
@@ -138,6 +146,10 @@ export function registerUpdates(): void {
   // A checkout has nothing to update, and saying so beats a silent no-op.
   if (!app.isPackaged) {
     state = { stage: "unsupported", error: "Updates only apply to an installed copy of Friday.", current: app.getVersion() };
+    return;
+  }
+  if (OFF) {
+    state = { stage: "unsupported", error: OFF_SAYS, current: app.getVersion() };
     return;
   }
 

@@ -195,7 +195,7 @@ Also in the box: Friday Code, Friday's own agent, on a model of yours (an API ke
 
 Friday listens on `127.0.0.1` only, so nothing else on your network can reach it, and it answers only its own page: a request from any other site, or from a page being previewed, is refused. What it keeps is one folder on your computer, readable only by you.
 
-It sends nothing to us: no account, no analytics, no telemetry. It talks to GitHub for the pull requests, issues and skills you ask it about, and reads each coding tool's remaining usage from that tool's own provider, with the sign-in the tool already has. A model you add in Settings › Your models is called from your computer, and its key is kept there and sent only to that model's own server. The desktop app also asks GitHub which release is the latest, twice a day, so it can tell you when there's a new one (`FRIDAY_NO_UPDATE_CHECK=1` turns that off).
+It sends nothing to us: no account, no analytics, no telemetry. It talks to GitHub for the pull requests, issues and skills you ask it about, and reads each coding tool's remaining usage from that tool's own provider, with the sign-in the tool already has. A model you add in Settings › Your models is called from your computer, and its key is kept there and sent only to that model's own server. The desktop app also asks GitHub for a newer release while it's open (when it starts, when you come back to it, and every ten minutes), downloads it from there, and installs it when you restart (`FRIDAY_NO_UPDATE_CHECK=1` turns that off).
 
 ## Developing
 

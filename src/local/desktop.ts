@@ -7,16 +7,7 @@ import { execFile } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  app,
-  BrowserWindow,
-  dialog,
-  ipcMain,
-  Menu,
-  nativeTheme,
-  session,
-  shell,
-} from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, session, shell } from "electron";
 import { MAC_CSS, THEME_WATCH, WIN_CSS } from "../desktop-chrome.js";
 import { registerTerminal, stopTerminals } from "../desktop-terminal.js";
 import { registerUpdates } from "../desktop-update.js";
@@ -35,32 +26,12 @@ const loginPath: Promise<void> =
   process.platform === "win32"
     ? Promise.resolve()
     : new Promise((resolve) => {
-        const sh =
-          process.env.SHELL ||
-          (process.platform === "darwin" ? "/bin/zsh" : "/bin/bash");
-        const child = execFile(
-          sh,
-          ["-ilc", 'printf "__FRIDAY_PATH__%s__FRIDAY_PATH__" "$PATH"'],
-          {
-            timeout: 5000,
-            env: { ...process.env, DISABLE_AUTO_UPDATE: "true" },
-          },
-          (_err, out) => {
-            const found = /__FRIDAY_PATH__(.*?)__FRIDAY_PATH__/s.exec(
-              String(out ?? ""),
-            )?.[1];
-            if (found)
-              process.env.PATH = [
-                ...new Set(
-                  [
-                    ...found.split(":"),
-                    ...(process.env.PATH ?? "").split(":"),
-                  ].filter(Boolean),
-                ),
-              ].join(":");
-            resolve();
-          },
-        );
+        const sh = process.env.SHELL || (process.platform === "darwin" ? "/bin/zsh" : "/bin/bash");
+        const child = execFile(sh, ["-ilc", 'printf "__FRIDAY_PATH__%s__FRIDAY_PATH__" "$PATH"'], { timeout: 5000, env: { ...process.env, DISABLE_AUTO_UPDATE: "true" } }, (_err, out) => {
+          const found = /__FRIDAY_PATH__(.*?)__FRIDAY_PATH__/s.exec(String(out ?? ""))?.[1];
+          if (found) process.env.PATH = [...new Set([...found.split(":"), ...(process.env.PATH ?? "").split(":")].filter(Boolean))].join(":");
+          resolve();
+        });
         child.stdin?.end();
       });
 
@@ -105,21 +76,10 @@ function open(url: string) {
     // No title bar: the page draws its own header there, as in the product app. On macOS the traffic lights sit in it, 17px down
     // so their centre lines up with the header's; elsewhere the window's buttons are drawn over its right end.
     ...(process.platform === "darwin"
-      ? {
-          titleBarStyle: "hiddenInset" as const,
-          trafficLightPosition: { x: 16, y: 17 },
-        }
-      : {
-          titleBarStyle: "hidden" as const,
-          titleBarOverlay: OVERLAY[lastTheme()],
-        }),
+      ? { titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 16, y: 17 } }
+      : { titleBarStyle: "hidden" as const, titleBarOverlay: OVERLAY[lastTheme()] }),
     // webviewTag: the Preview panel draws the app being built in a <webview>, locked down below.
-    webPreferences: {
-      contextIsolation: true,
-      sandbox: true,
-      webviewTag: true,
-      preload: path.join(here, "preload.cjs"),
-    },
+    webPreferences: { contextIsolation: true, sandbox: true, webviewTag: true, preload: path.join(here, "preload.cjs") },
   });
   // A preview's <webview> is somebody's dev server's page: its own cookie jar, nothing of Node's, and no permissions (location,
   // camera, external apps), whatever the page that made it asked for. As in the product app (desktop/main.ts).
@@ -138,9 +98,7 @@ function open(url: string) {
   // The product app's window chrome (desktop-chrome.ts): the header band that drags, with the window's buttons in it, and the
   // page laid out below it; and the page's light or dark choice reported back for the window's buttons.
   win.webContents.on("did-finish-load", () => {
-    void win?.webContents.insertCSS(
-      process.platform === "darwin" ? MAC_CSS : WIN_CSS,
-    );
+    void win?.webContents.insertCSS(process.platform === "darwin" ? MAC_CSS : WIN_CSS);
     void win?.webContents.executeJavaScript(THEME_WATCH).catch(() => {});
   });
   // The window is Friday's, whatever a page calls itself.
@@ -161,22 +119,15 @@ function open(url: string) {
 }
 
 /** A request from Friday's own page in one of its windows, never a previewed site or a page it was sent to. */
-const fromApp = (
-  e: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent,
-): boolean =>
-  !!friday &&
-  !!BrowserWindow.fromWebContents(e.sender) &&
-  (e.senderFrame?.url ?? e.sender.getURL()).startsWith(friday.url);
+const fromApp = (e: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent): boolean =>
+  !!friday && !!BrowserWindow.fromWebContents(e.sender) && (e.senderFrame?.url ?? e.sender.getURL()).startsWith(friday.url);
 
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
   // Choosing where a coding agent works, in the system's own folder picker: all the page gets back is the path chosen.
   ipcMain.handle("friday:pick-folder", async (e) => {
     if (!win || !fromApp(e)) return null;
-    const r = await dialog.showOpenDialog(win, {
-      title: "Choose the folder your coding agent works in",
-      properties: ["openDirectory", "createDirectory"],
-    });
+    const r = await dialog.showOpenDialog(win, { title: "Choose the folder your coding agent works in", properties: ["openDirectory", "createDirectory"] });
     return r.canceled ? null : (r.filePaths[0] ?? null);
   });
   // Real shells for the terminal panel (desktop-terminal.ts), as in the product app.
@@ -195,15 +146,7 @@ else {
   });
   app.on("second-instance", () => friday && open(friday.url));
   app.whenReady().then(async () => {
-    if (process.platform === "darwin")
-      Menu.setApplicationMenu(
-        Menu.buildFromTemplate([
-          { role: "appMenu" },
-          { role: "editMenu" },
-          { role: "viewMenu" },
-          { role: "windowMenu" },
-        ]),
-      );
+    if (process.platform === "darwin") Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: "appMenu" }, { role: "editMenu" }, { role: "viewMenu" }, { role: "windowMenu" }]));
     await loginPath;
     friday = await startLocal();
     open(friday.url);
@@ -224,9 +167,6 @@ else {
     e.preventDefault();
     stopTerminals();
     for (const w of BrowserWindow.getAllWindows()) w.destroy();
-    void Promise.race([
-      friday.close(),
-      new Promise((r) => setTimeout(r, 5000)),
-    ]).finally(() => app.exit(0));
+    void Promise.race([friday.close(), new Promise((r) => setTimeout(r, 5000))]).finally(() => app.exit(0));
   });
 }
