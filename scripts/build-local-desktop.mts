@@ -33,4 +33,15 @@ await build({
   banner: { js: "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);" },
   logLevel: "warning",
 });
+// The page's bridge (src/local/preload.ts): CommonJS, which a sandboxed preload has to be.
+await build({
+  entryPoints: [path.join(root, "src/local/preload.ts")],
+  outfile: path.join(dist, "preload.cjs"),
+  bundle: true,
+  platform: "node",
+  format: "cjs",
+  target: "node22",
+  external: ["electron"],
+  logLevel: "warning",
+});
 console.log("Desktop build ready in dist/");

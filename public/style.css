@@ -6150,6 +6150,8 @@ html.desktop-mac .win-nav { display: flex; position: fixed; top: 5px; left: 84px
 .win-nav .win-nav-panel.on { color: var(--ink); }
 /* In the app, Search sits in the window's bar beside the sidebar's button (WindowNav): the sidebar's own would be a second one. */
 html.desktop .sidebar-search { display: none; }
+/* The local edition has no workspace name for that row (Sidebar.tsx), so in the app it holds nothing and goes. */
+html.desktop .sb-head-local { display: none; }
 /* The session header's title starts after the toolbar rather than under it. */
 /* Right after the toolbar, beside the list's button, whether the chat list is open or put away (Arun, 2026-10-18): the list
    starts under the window's bar, so the bar is one strip across the window and the title has no reason to jump over it. */
@@ -9685,10 +9687,11 @@ html.desktop .home { padding-top: calc(max(7.5vh, 48px) + 40px); }
 .feed-item .group.is-user { gap: 4px; }
 .feed-item .delivery { margin: 0 6px; font-size: 11.5px; }
 .feed-item .delivery.seen { color: color-mix(in srgb, var(--agent) 80%, var(--text-muted)); }
-/* Where a mouse can hover, a message's actions (copy, branch, thumbs) wait for it; on touch they stay. */
+/* An agent's reply keeps its actions (copy, thumbs, retry) in view (Arun, 2026-10-26: "make sure those buttons are there
+   without needing to hover"). Your own messages' wait for a mouse to come near them; on touch they stay. */
 @media (hover: hover) {
-  :is(.feed-item .group.is-user, .rsp) :is(.msg-actions, .rsp-actions) { opacity: 0; transition: opacity var(--dass-fast, 120ms) ease; }
-  :is(.feed-item .group.is-user, .rsp):is(:hover, :focus-within) :is(.msg-actions, .rsp-actions) { opacity: 1; }
+  .feed-item .group.is-user .msg-actions { opacity: 0; transition: opacity var(--dass-fast, 120ms) ease; }
+  .feed-item .group.is-user:is(:hover, :focus-within) .msg-actions { opacity: 1; }
 }
 
 /* The agent's reply: a smaller mark, the name beside it, the reply under the name, 8px between its parts. */
@@ -10717,11 +10720,11 @@ html.dark .sb-panel-inner.dass-panel::before {
     radial-gradient(120% 50% at 0% 0%, rgb(255 255 255 / .1), transparent 60%);
 }
 /* The same glass on what sits in it: the New session button and the row of places. */
-.dass-panel button.rounded-lg.border.border-sidebar-border, .dass-panel .sb-places {
+.dass-panel button.rounded-lg.border.border-sidebar-border, .dass-panel .sb-dock {
   background: linear-gradient(180deg, rgb(255 255 255 / .7), rgb(255 255 255 / .25)), color-mix(in srgb, var(--bg) 70%, transparent) !important;
   box-shadow: inset 0 1px 0 rgb(255 255 255 / .9), 0 1px 2px rgb(0 0 0 / .06) !important;
 }
-html.dark .dass-panel button.rounded-lg.border.border-sidebar-border, html.dark .dass-panel .sb-places {
+html.dark .dass-panel button.rounded-lg.border.border-sidebar-border, html.dark .dass-panel .sb-dock {
   background: linear-gradient(180deg, rgb(255 255 255 / .09), rgb(255 255 255 / .025)), color-mix(in srgb, var(--bg) 60%, transparent) !important;
   box-shadow: inset 0 1px 0 rgb(255 255 255 / .12), 0 1px 2px rgb(0 0 0 / .3) !important;
 }
@@ -10957,10 +10960,23 @@ html.dark .dass-panel button.rounded-lg.border.border-sidebar-border, html.dark 
 .branch-head { margin: 6px 7px 2px; font-size: 11px; font-weight: 600; letter-spacing: .02em; color: var(--faint); }
 /* ── The open-source edition's one line about Friday Team (TeamTip.tsx): in the sidebar's foot, and under a session's settings ── */
 .team-tip { display: flex; align-items: center; gap: 7px; margin: 0; padding: 6px 4px 6px 8px; border-radius: 8px; font-size: 12px; line-height: 1.35; color: var(--text-muted); }
-.team-tip > svg { flex: none; opacity: 0.8; }
-.team-tip > span { min-width: 0; flex: 1 1 auto; }
-.team-tip .link-btn { font-size: inherit; }
+.team-tip-go { display: flex; align-items: center; gap: 7px; flex: 1 1 auto; min-width: 0; margin: -6px -4px -6px -8px; padding: 6px 4px 6px 8px; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background-color .12s, color .12s; }
+.team-tip-go:hover { background: var(--hover); color: var(--ink); }
+.team-tip-go:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.team-tip-go > svg { flex: none; opacity: 0.8; }
+.team-tip-go > span { min-width: 0; flex: 1 1 auto; }
+.team-tip-go b { font-weight: 600; color: var(--ink); }
 .team-tip-x { flex: none; opacity: 0.7; }
 .team-tip-x:hover { opacity: 1; }
 .team-tip.in-foot { margin: 2px -4px 0; background: color-mix(in srgb, var(--card) 70%, transparent); border: 1px solid var(--border); }
 .team-tip.in-pop { margin: 4px 14px 14px; padding-top: 10px; border-top: 1px solid var(--border); border-radius: 0; padding-left: 0; }
+
+/* The foot's one card (Sidebar.tsx Foot): one row on one glass. Your avatar, the places spread across the middle, then the
+   theme and settings, every control the same 36px square. The places' own card gives up its edge to it. */
+.sb-dock { display: flex; align-items: center; gap: 2px; margin: 8px 0 10px; padding: 4px; border: 1px solid var(--border); border-radius: 14px; background: color-mix(in srgb, var(--bg) 78%, transparent); -webkit-backdrop-filter: blur(8px) saturate(1.2); backdrop-filter: blur(8px) saturate(1.2); box-shadow: var(--shadow-xs, none); }
+.sb-dock .sb-places { flex: 1; min-width: 0; justify-content: space-around; margin: 0; padding: 0; border: 0; border-radius: 0; background: none !important; box-shadow: none !important; -webkit-backdrop-filter: none; backdrop-filter: none; }
+.sb-dock .sb-place { width: 36px; height: 36px; }
+.sb-dock-me { flex: none; display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 10px; background: transparent; cursor: pointer; transition: background-color .12s; }
+.sb-dock-me:hover, .sb-dock-me[data-state="open"] { background: var(--hover); }
+.sb-dock-me:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.sb-dock .dass-rail-btn { flex: none; width: 36px !important; height: 36px !important; border-radius: 10px; }

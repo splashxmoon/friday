@@ -4,10 +4,12 @@
  * GitHub Actions (.github/workflows/release.yml).
  */
 import { execFile } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, dialog, Menu, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell } from "electron";
+import { MAC_CSS, THEME_WATCH, WIN_CSS } from "../desktop-chrome.js";
 import { startLocal, type Started } from "./start.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -72,6 +74,27 @@ async function checkForUpdate(): Promise<void> {
 let friday: Started | null = null;
 let win: BrowserWindow | null = null;
 
+/**
+ * The window's own buttons in the page's colours, as the product app draws them (desktop/main.ts): on Windows and Linux the
+ * title bar is hidden and its buttons drawn over the page, in these colours, 40px tall to fit the page's header. macOS keeps its
+ * traffic lights, set into the header.
+ */
+const OVERLAY = {
+  dark: { color: "#1c1c1c", symbolColor: "#ededed", height: 40 },
+  light: { color: "#ffffff", symbolColor: "#18181b", height: 40 },
+} as const;
+const themeFile = () => path.join(app.getPath("userData"), "theme");
+/** The theme the page last showed, so the window opens in it rather than flashing the other one. */
+function lastTheme(): "dark" | "light" {
+  try {
+    const t = readFileSync(themeFile(), "utf8").trim();
+    if (t === "dark" || t === "light") return t;
+  } catch {
+    // Not chosen yet: the system's.
+  }
+  return nativeTheme.shouldUseDarkColors ? "dark" : "light";
+}
+
 function open(url: string) {
   if (win && !win.isDestroyed()) {
     if (win.isMinimized()) win.restore();
@@ -80,12 +103,28 @@ function open(url: string) {
   win = new BrowserWindow({
     width: 1440,
     height: 920,
-    minWidth: 900,
-    minHeight: 600,
+    minWidth: 1100,
+    minHeight: 700,
     title: "Friday",
-    backgroundColor: "#141416",
-    webPreferences: { contextIsolation: true, sandbox: true },
+    backgroundColor: OVERLAY[lastTheme()].color,
+    show: false,
+    autoHideMenuBar: true,
+    // No title bar: the page draws its own header there, as in the product app. On macOS the traffic lights sit in it, 17px down
+    // so their centre lines up with the header's; elsewhere the window's buttons are drawn over its right end.
+    ...(process.platform === "darwin"
+      ? { titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 16, y: 17 } }
+      : { titleBarStyle: "hidden" as const, titleBarOverlay: OVERLAY[lastTheme()] }),
+    webPreferences: { contextIsolation: true, sandbox: true, preload: path.join(here, "preload.cjs") },
   });
+  win.once("ready-to-show", () => win?.show());
+  // The product app's window chrome (desktop-chrome.ts): the header band that drags, with the window's buttons in it, and the
+  // page laid out below it; and the page's light or dark choice reported back for the window's buttons.
+  win.webContents.on("did-finish-load", () => {
+    void win?.webContents.insertCSS(process.platform === "darwin" ? MAC_CSS : WIN_CSS);
+    void win?.webContents.executeJavaScript(THEME_WATCH).catch(() => {});
+  });
+  // The window is Friday's, whatever a page calls itself.
+  win.on("page-title-updated", (e) => e.preventDefault());
   // Friday's own pages stay in the window; anything else (GitHub, a docs link, Friday Team) opens in the browser.
   const own = (u: string) => u.startsWith(url);
   win.webContents.setWindowOpenHandler(({ url: u }) => {
@@ -103,6 +142,18 @@ function open(url: string) {
 
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
+  // The page's light or dark choice (preload.ts setTheme): the window buttons and background follow it where the OS draws them.
+  ipcMain.on("friday:theme", (e, theme: unknown) => {
+    if (!win || e.sender !== win.webContents) return;
+    const which = theme === "light" ? "light" : "dark";
+    try {
+      writeFileSync(themeFile(), which);
+      win.setBackgroundColor(OVERLAY[which].color);
+      if (process.platform !== "darwin") win.setTitleBarOverlay(OVERLAY[which]);
+    } catch {
+      // Not every platform draws an overlay; the window is fine without one.
+    }
+  });
   app.on("second-instance", () => friday && open(friday.url));
   app.whenReady().then(async () => {
     if (process.platform === "darwin") Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: "appMenu" }, { role: "editMenu" }, { role: "viewMenu" }, { role: "windowMenu" }]));

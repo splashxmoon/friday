@@ -25,7 +25,7 @@ export type SessionPlan = {
 };
 
 /** Where the open-source edition points someone who wants to work with teammates. */
-export const TEAM_URL = "https://www.tryfridaywork.com";
+export const TEAM_URL = "https://www.tryfridaywork.com/team";
 
 /** What the hosted entry plugs in. */
 export interface PaidHooks {

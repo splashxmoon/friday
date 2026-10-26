@@ -1,4 +1,4 @@
-import { ChevronRightIcon, FolderGit2Icon, MoonIcon, PlusIcon, SearchIcon, SettingsIcon, SunIcon, LogOutIcon, XIcon } from "lucide-react";
+import { ChevronRightIcon, FolderGit2Icon, PlusIcon, SearchIcon, SettingsIcon, LogOutIcon, XIcon } from "lucide-react";
 import { useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -197,12 +197,11 @@ function Head({ p }: { p: SidebarProps }) {
   const agents = p.view === "agents";
   return (
     <div className="flex shrink-0 flex-col gap-2 px-1">
-      <div className="flex items-center gap-1">
+      {/* In the local edition this row is only the search button, which the desktop app moves into its header: there it goes. */}
+      <div className={`flex items-center gap-1${isLocal() ? " sb-head-local" : ""}`}>
         {/* The workspace's name where the logo was (Arun, 2026-10-24: "get rid of logo and make the workspace/team name replace
             its place"): which team you're in is what this corner should say. */}
         <div className="panel-title brand flex min-w-0 flex-1 items-center gap-2">
-          {/* The local edition has no workspaces: the corner is the app's name. */}
-          {isLocal() && <span className="truncate text-[14px] font-semibold text-sidebar-accent-foreground">Friday</span>}
         </div>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -289,18 +288,23 @@ function Foot({ p }: { p: SidebarProps }) {
     // Its line runs the sidebar's full width, edge to edge, level with the page's footer line beside it.
     <div className="dass-foot -mx-[10px] mt-auto flex shrink-0 flex-col justify-center gap-1 border-t border-sidebar-border px-[14px]">
       {isLocal() && <TeamTip className="in-foot" />}
-      <PlaceIcons p={p} />
-      <div className="flex items-center gap-1">
+      {/* One card at the foot (Arun, 2026-10-26: "integrate the profile thing, light and dark mode and settings button into the
+          card where the agent board, code review and usage buttons are"): the places on top, who you are and the app's own
+          controls under them. */}
+      {/* One row (Arun, 2026-10-26: "in a row together, the profile thing can just be the circle"): you, as your avatar, then
+          the places, then the theme and settings. Your name and plan are in the menu the avatar opens. */}
+      <div className="sb-dock">
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button type="button" className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1.5 py-1.5 text-left outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring data-[state=open]:bg-sidebar-accent" aria-label="Account" data-tour="Account">
-              <Avatar name={p.identity.name || "?"} id={p.identity.id} size={28} />
-              <span className="flex min-w-0 flex-col leading-tight">
-                <span className="truncate text-[13px] font-medium text-sidebar-accent-foreground">{p.identity.name || "Set your name"}</span>
-                <span className="truncate text-[11px] text-[var(--text-muted)]">{w ? `${w.personal ? "Personal" : w.name} · ${plan}` : plan}</span>
-              </span>
-            </button>
-          </DropdownMenuTrigger>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <button type="button" className="sb-dock-me" aria-label={`Account: ${p.identity.name || "set your name"}, ${w ? `${w.personal ? "Personal" : w.name} · ${plan}` : plan}`} data-tour="Account">
+                  <Avatar name={p.identity.name || "?"} id={p.identity.id} size={26} />
+                </button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent side="top">{p.identity.name || "Account"}</TooltipContent>
+          </Tooltip>
           <DropdownMenuContent side="top" align="start" className="w-64">
             <div className="px-2 py-1.5">
               <div className="flex items-center gap-2">
@@ -315,6 +319,7 @@ function Foot({ p }: { p: SidebarProps }) {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        <PlaceIcons p={p} />
         <UpdateRailButton />
         <Tooltip>
           <TooltipTrigger asChild>
@@ -327,7 +332,8 @@ function Foot({ p }: { p: SidebarProps }) {
                 setLook(currentLook());
               }}
             >
-              {nextLook === "light" ? <SunIcon className="size-4" /> : <MoonIcon className="size-4" />}
+              {/* The places' own icon set and size, so the row reads as one (Arun, 2026-10-26). */}
+              <Icon name={nextLook === "light" ? "sun" : "moon"} size={19} />
             </button>
           </TooltipTrigger>
           <TooltipContent side="top">Switch to {nextLook}</TooltipContent>
@@ -335,7 +341,7 @@ function Foot({ p }: { p: SidebarProps }) {
         <Tooltip>
           <TooltipTrigger asChild>
             <button type="button" className="dass-rail-btn size-8" data-active={p.view === "settings"} aria-label="Settings" onClick={p.onOpenSettings}>
-              <SettingsIcon className="size-4" />
+              <Icon name="settings" size={19} />
             </button>
           </TooltipTrigger>
           <TooltipContent side="top">Settings</TooltipContent>

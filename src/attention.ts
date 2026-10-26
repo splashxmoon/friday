@@ -93,7 +93,9 @@ export function attentionIn(state: SessionState, meId: string): Attention[] {
     // It stopped, and you are the one who can restart it. Not a coding tool out on its usage limit: Friday hands its task to
     // another agent and it carries on when the limit lifts, and its tab says so; a card nagging about it sat for an hour on
     // Arun's screen (2026-10-25: "can you get rid of this for me").
-    if (run.status === "error" && driver?.id === meId && !limitHit(run.error)) out.push(of("stopped", run.error || "The run stopped.", run.sinceSeq, lane));
+    // Nor a turn the server's restart cut off (engine/hub.ts): it picks up again by itself when the tool reconnects, so
+    // there's nothing to do. In the desktop app that's every time the app is quit or updated mid-turn.
+    if (run.status === "error" && driver?.id === meId && !limitHit(run.error) && !/^The server restarted in the middle of /.test(run.error ?? "")) out.push(of("stopped", run.error || "The run stopped.", run.sinceSeq, lane));
   }
 
   // A message from another session waiting for someone who can steer its agent to let it through: it sat there unseen.

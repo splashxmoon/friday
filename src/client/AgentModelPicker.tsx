@@ -347,15 +347,15 @@ export function AgentModelPicker({
         </div>
 
         <div className="amp-main" onKeyDown={walk}>
-          <div className="amp-head">
-            <span className="amp-head-mark">{cliMark ?? <EngineMark tool="" size={14} />}</span>
-            <span className="amp-head-name">{engine ? ENGINE_NAMES[engine] : fridayName}</span>
-            {route && (
+          {/* No name over the column (Arun, 2026-10-26: "get rid of the tool text above the effort section"): the tool is the one
+              picked on the left. Only Smart routing's meter, when it chose. */}
+          {route && (
+            <div className="amp-head">
               <span className="amp-route" title={route.why}>
                 <TierMeter tier={route.tier} />
               </span>
-            )}
-          </div>
+            </div>
+          )}
           {power}
           {/* Always there, so the list starts at the same place for every tool. */}
           {modelCount > 0 && (

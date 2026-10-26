@@ -29,14 +29,13 @@ export function TeamTip({ className = "" }: { className?: string }) {
   };
   return (
     <p className={`team-tip ${className}`}>
-      <Icon name="users" size={13} />
-      <span>
-        Working with teammates in the same session is{" "}
-        <button type="button" className="link-btn" onClick={() => startTeam()}>
-          Friday Team
-        </button>
-        .
-      </span>
+      {/* The whole line is the link (Arun, 2026-10-26: "make this entire thing clickable"), to Friday Team's page. */}
+      <button type="button" className="team-tip-go" onClick={() => startTeam()}>
+        <Icon name="users" size={13} />
+        <span>
+          Working with teammates in the same session is <b>Friday Team</b>.
+        </span>
+      </button>
       <button type="button" className="icon-btn tiny team-tip-x" aria-label="Dismiss" title="Don't show this again" onClick={dismiss}>
         <Icon name="x" size={12} />
       </button>

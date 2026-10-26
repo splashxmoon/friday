@@ -150,7 +150,7 @@ import { webSourcesIn, webUrl } from "../web-sources.js";
 import { Mascot, runMood } from "./Mascot.js";
 import { AgentSwitch, EngineMark, switchesAgent } from "./AgentSwitch.js";
 import type { EffortChoice } from "./AgentModelPicker.js";
-import { ownModel, startTeam } from "./edition.js";
+import { isLocal, ownModel, startTeam } from "./edition.js";
 import { agentLook, laneIdByName, laneLabel, reasonFor, suggestTarget, tintOfColor, tintOfEngine, wakesOnItsOwn, type Signals } from "./handoff-ui.js";
 import type { AgentView } from "../agents.js";
 import { RaceCard } from "./Race.js";
@@ -1214,8 +1214,9 @@ export function Activity({
           )}
         </div>
       )}
-      {/* One agent on Solo has nothing to switch between and no one else's messages to filter out: no bar for it. */}
-      {!pin && (filter !== "all" || lanes.length > 0 || startingNow.length > 0 || needs.length > 0 || (!solo && events.length > 15)) && inHead(
+      {/* One agent on Solo has nothing to switch between and no one else's messages to filter out: no bar for it. Except in the
+          local edition, where the bar's + is how a second agent joins, and a team of agents is the point. */}
+      {!pin && (filter !== "all" || lanes.length > 0 || startingNow.length > 0 || needs.length > 0 || (!solo && events.length > 15) || (isLocal() && Object.keys(state.engines).length > 0)) && inHead(
       <div className={`feed-toolbar${headSlot ? " in-head" : ""}`}>
         {(
           <div className="lane-tabs-wrap">
