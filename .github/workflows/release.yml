@@ -1,0 +1,120 @@
+# Builds the desktop app for macOS, Windows and Linux and publishes it as a GitHub release.
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# A small job makes a draft release first, each platform builds on its own machine (a .dmg can only be made on a Mac) and
+# uploads its installers to that draft, and once all three have, the release is published and becomes "latest", which is
+# what the download links in the README point at.
+#
+# Signing is optional. With no secrets the installers are unsigned: macOS asks you to open the app with a right-click the
+# first time, and Windows SmartScreen asks you to confirm. Add these repository secrets to sign (and notarize) them:
+#   MAC_CSC_LINK, MAC_CSC_KEY_PASSWORD           a Developer ID Application certificate (.p12, base64) and its password
+#   APPLE_API_KEY, APPLE_API_KEY_ID, APPLE_API_ISSUER   an App Store Connect API key (.p8, whole or base64) for notarizing
+#   WIN_CSC_LINK, WIN_CSC_KEY_PASSWORD           a Windows code-signing certificate (.pfx, base64) and its password
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  # Builds every platform without releasing anything, to check the build.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Make the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --title "Friday $TAG" --generate-notes
+          fi
+
+  build:
+    needs: prepare
+    if: ${{ always() && (needs.prepare.result == 'success' || needs.prepare.result == 'skipped') }}
+    strategy:
+      # One platform failing shouldn't throw away the others' installers.
+      fail-fast: false
+      matrix:
+        os: [macos-14, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - name: Build the installers
+        shell: bash
+        env:
+          # Each is passed on only when it's set: electron-builder reads an empty CSC_LINK as a path and fails on it.
+          MAC_CERT: ${{ secrets.MAC_CSC_LINK }}
+          MAC_CERT_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          WIN_CERT: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CERT_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: |
+          args=(--publish never)
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            if [ -n "$MAC_CERT" ] && [ -n "$APPLE_KEY" ]; then
+              export CSC_LINK="$MAC_CERT" CSC_KEY_PASSWORD="$MAC_CERT_PASSWORD"
+              # notarytool opens APPLE_API_KEY as a file, so the secret (the .p8 itself, or its base64) is written to one.
+              if printf %s "$APPLE_KEY" | grep -q "BEGIN PRIVATE KEY"; then
+                printf %s "$APPLE_KEY" > "$RUNNER_TEMP/AuthKey.p8"
+              else
+                printf %s "$APPLE_KEY" | base64 -d > "$RUNNER_TEMP/AuthKey.p8" 2>/dev/null || true
+              fi
+              openssl pkey -in "$RUNNER_TEMP/AuthKey.p8" -noout 2>/dev/null || {
+                echo "::error::APPLE_API_KEY isn't a whole .p8 key, or its base64. Paste the output of: base64 -i AuthKey_XXXXXXXXXX.p8"
+                exit 1
+              }
+              export APPLE_API_KEY="$RUNNER_TEMP/AuthKey.p8"
+              export APPLE_API_KEY_ID="$(printf %s "$APPLE_KEY_ID" | tr -d '[:space:]')"
+              export APPLE_API_ISSUER="$(printf %s "$APPLE_ISSUER" | tr -d '[:space:]')"
+            else
+              export CSC_IDENTITY_AUTO_DISCOVERY=false
+              args+=(-c.mac.notarize=false)
+              echo "::warning::No Developer ID certificate and notarization key: building an unsigned Mac app."
+            fi
+          elif [ "$RUNNER_OS" = "Windows" ] && [ -n "$WIN_CERT" ]; then
+            export WIN_CSC_LINK="$WIN_CERT" WIN_CSC_KEY_PASSWORD="$WIN_CERT_PASSWORD"
+          fi
+          npm run desktop:dist -- "${args[@]}"
+
+      # Only what people download (and electron-builder's checksums beside them), never the unpacked app folders.
+      - name: Attach the installers to the draft
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(release/*.dmg release/*.zip release/*.exe release/*.AppImage release/*.blockmap release/latest*.yml)
+          [ ${#files[@]} -gt 0 ] || { echo "::error::No installers were built."; exit 1; }
+          gh release upload "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+          echo "### Friday $TAG ($RUNNER_OS)" >> "$GITHUB_STEP_SUMMARY"
+          for f in "${files[@]}"; do echo "- ${f##*/}" >> "$GITHUB_STEP_SUMMARY"; done
+
+  publish:
+    needs: build
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest

@@ -17,11 +17,18 @@
 </p>
 
 <p align="center">
-  <code>npx github:splashxmoon/friday</code>
+  <a href="https://github.com/splashxmoon/friday/releases/latest/download/Friday-arm64.dmg"><b>Mac (Apple silicon)</b></a> ·
+  <a href="https://github.com/splashxmoon/friday/releases/latest/download/Friday-x64.dmg"><b>Mac (Intel)</b></a> ·
+  <a href="https://github.com/splashxmoon/friday/releases/latest/download/Friday-Setup.exe"><b>Windows</b></a> ·
+  <a href="https://github.com/splashxmoon/friday/releases/latest/download/Friday-x86_64.AppImage"><b>Linux</b></a>
+  <br/>or, with Node.js 22: <code>npx github:splashxmoon/friday</code>
 </p>
 
 <p align="center">
-  <img src="docs/assets/hero.png" alt="Friday's home screen: a task box, the coding tool it goes to, and your year of work" width="960" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/hero-dark.png" />
+    <img src="docs/assets/hero.png" alt="Friday with six agents at work at once: Claude Code and Codex, each on its own task in its own repository, listed in the sidebar and under Right now" width="960" />
+  </picture>
 </p>
 
 Works with the subscriptions you already have. If a coding tool is installed and signed in on your computer, Friday can drive it:
@@ -77,7 +84,23 @@ What we sell is [Friday Team](https://www.tryfridaywork.com), the hosted version
 > - OpenCode: `opencode auth login`
 > - Gemini CLI: run `gemini` once and sign in
 
-Then, with Node.js 22 or newer and Git:
+### The desktop app
+
+| | |
+| --- | --- |
+| Mac, Apple silicon | [Friday-arm64.dmg](https://github.com/splashxmoon/friday/releases/latest/download/Friday-arm64.dmg) |
+| Mac, Intel | [Friday-x64.dmg](https://github.com/splashxmoon/friday/releases/latest/download/Friday-x64.dmg) |
+| Windows | [Friday-Setup.exe](https://github.com/splashxmoon/friday/releases/latest/download/Friday-Setup.exe) |
+| Linux | [Friday-x86_64.AppImage](https://github.com/splashxmoon/friday/releases/latest/download/Friday-x86_64.AppImage) (`chmod +x` it, then run it) |
+
+Every version is on the [releases page](https://github.com/splashxmoon/friday/releases). The app is Friday in a window of its own, with the same server inside it, on `127.0.0.1` only.
+
+> [!NOTE]
+> Until the installers are signed, your computer will ask before opening one. On Windows, choose **More info**, then **Run anyway**. On a Mac, if it says Friday is damaged or can't be checked, move it to Applications and run `xattr -dr com.apple.quarantine /Applications/Friday.app` once.
+
+### From a terminal
+
+With Node.js 22 or newer and Git:
 
 ```bash
 npx github:splashxmoon/friday
@@ -168,7 +191,11 @@ npm install
 npm run typecheck
 npm test
 npm run build:css    # after changing styles
+npm run desktop      # build the desktop app and open it
+npm run desktop:dist # package installers for this computer into release/
 ```
+
+Pushing a `v*` tag builds the installers for every platform on GitHub Actions and publishes them as a release ([release.yml](.github/workflows/release.yml)).
 
 Issues and pull requests are welcome. For anything large, open an issue first so we can talk it through.
 

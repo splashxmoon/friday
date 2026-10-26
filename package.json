@@ -22,8 +22,11 @@
   "engines": {
     "node": ">=22"
   },
+  "main": "dist/main.mjs",
   "scripts": {
     "start": "node bin/friday.mjs",
+    "desktop": "tsx scripts/build-local-desktop.mts && electron .",
+    "desktop:dist": "tsx scripts/build-local-desktop.mts && electron-builder",
     "build:css": "tailwindcss -i src/client/styles/globals.css -o public/tailwind.css --minify",
     "typecheck": "tsc --noEmit",
     "test": "node scripts/test.mjs"
@@ -36,6 +39,7 @@
     "@codemirror/search": "^6.7.2",
     "@codemirror/state": "^6.7.6",
     "@codemirror/view": "^6.43.15",
+    "@homebridge/node-pty-prebuilt-multiarch": "^0.14.1",
     "@lezer/highlight": "^1.2.5",
     "@radix-ui/react-use-controllable-state": "^1.2.6",
     "@xterm/addon-fit": "^0.11.0",
@@ -69,9 +73,88 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@types/ws": "^8.18.1",
+    "electron": "^44.3.0",
+    "electron-builder": "^26.15.3",
     "tailwindcss": "^4.3.3",
     "tw-animate-css": "^1.4.0",
     "typescript": "^7.0.2"
+  },
+  "build": {
+    "appId": "com.tryfridaywork.friday.local",
+    "productName": "Friday",
+    "asar": false,
+    "npmRebuild": false,
+    "electronLanguages": [
+      "en-US"
+    ],
+    "files": [
+      "dist/**/*",
+      "public/**/*",
+      "package.json",
+      "!node_modules/**/*",
+      "node_modules/@homebridge/node-pty-prebuilt-multiarch/lib/**/*",
+      "!node_modules/@homebridge/node-pty-prebuilt-multiarch/lib/**/*.map",
+      "node_modules/@homebridge/node-pty-prebuilt-multiarch/build/Release/**/*",
+      "node_modules/@homebridge/node-pty-prebuilt-multiarch/package.json"
+    ],
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "Friday-${arch}.${ext}",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "notarize": true,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Friday uses the microphone for voice input."
+      }
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Development",
+      "artifactName": "Friday-${arch}.${ext}"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "artifactName": "Friday-Setup.${ext}",
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": "always",
+      "shortcutName": "Friday"
+    },
+    "beforePack": "build/before-pack.cjs",
+    "afterPack": "build/after-pack.cjs",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "splashxmoon",
+        "repo": "friday"
+      }
+    ]
   },
   "overrides": {
     "ioredis-mock": {
@@ -80,5 +163,12 @@
     "@types/ioredis-mock": {
       "ioredis": "$ioredis"
     }
+  },
+  "allowScripts": {
+    "@homebridge/node-pty-prebuilt-multiarch@0.14.1": true,
+    "@parcel/watcher@2.5.1": true,
+    "electron-winstaller@5.4.0": true,
+    "esbuild@0.28.2": true,
+    "fsevents@2.3.3": true
   }
 }
