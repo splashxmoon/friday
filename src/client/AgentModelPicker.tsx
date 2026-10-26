@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactElement } from "react";
 import { createPortal } from "react-dom";
+import { isOwnModel } from "../own-model-id.js";
+import { ownName, useOwnModels } from "./ownModelStore.js";
 import { ENGINE_NAMES, ENGINE_TOOLS, type EngineEffort, type EngineTool, type Thinking } from "../types.js";
 import type { Plan } from "../plan-types.js";
 import { EngineMark, VendorMark } from "./BrandMarks.js";
@@ -14,7 +16,7 @@ import { forValue } from "../routing.js";
 
 /**
  * Friday Code's own side of the picker: its models, the person's own models it can run on, and how hard it reasons. The hosted
- * Friday's; in the local edition only the coding tools are offered, so each of these answers as if there were none.
+ * Friday's; in the local edition only the person's own models, so Friday Code is offered once they have set one up.
  */
 const fridaySide: {
   useOwnModels: (identity?: Identity) => { choice: string; name: string; model: string; local?: boolean }[];
@@ -27,6 +29,7 @@ const fridaySide: {
   /** The plan a model needs, said on its row when this plan can't run it. */
   proName: string;
 } = { useOwnModels: () => [], vendorOf: () => undefined, thinkingLabel: () => "", label: (id) => id || "Default", isOwn: () => false, catalogSize: 0, proName: "" };
+Object.assign(fridaySide, { useOwnModels, label: (id: string) => (isOwnModel(id) ? ownName(id) : id || "Default"), isOwn: isOwnModel });
 
 /** What a coding agent's row says about the machine it would run on. */
 export interface ToolState {
@@ -335,6 +338,7 @@ export function AgentModelPicker({
         <div className="amp-tools" role="group" aria-label={machineName ? `Tools on ${machineName}` : "Tools"}>
           <div className="amp-col-label">Who works</div>
           {here.map((t) => toolRow(t, ENGINE_NAMES[t], <EngineMark tool={t} size={18} />, toolState(t), engine === t, () => onEngine(t)))}
+          {own.length > 0 && friday}
           {away.length > 0 && (
             <>
               <button type="button" className="amp-more" aria-expanded={others || away.includes(engine as EngineTool)} onClick={() => setOthers((v) => !v)}>
@@ -367,6 +371,16 @@ export function AgentModelPicker({
           <div ref={list} className="amp-models" role="menu" aria-label="Models">
             {!engine ? (
               <>
+                {group("Your models", own.map((m) => modelRow(m.choice, m.name, m.local ? `${m.model} · on your computer` : `${m.model} · your key`, fridayModelId === m.choice, <Icon name="zap" size={14} />, true, false, `${m.name} ${m.model} ${m.local ? "local" : "key"}`)))}
+                {!query && (
+                  <button type="button" data-row className="amp-model amp-add" onClick={() => (setOpen(false), window.dispatchEvent(new CustomEvent("friday:settings", { detail: { tab: "own-models" } })))}>
+                    <span className="amp-model-mark" aria-hidden>
+                      <Icon name="plus" size={14} />
+                    </span>
+                    <span className="amp-model-name">Your own key or local model…</span>
+                  </button>
+                )}
+                {query && !hits && <p className="amp-none">No model matches “{query}”.</p>}
               </>
             ) : (
               <>

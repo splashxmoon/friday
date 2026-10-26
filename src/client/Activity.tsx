@@ -150,7 +150,8 @@ import { webSourcesIn, webUrl } from "../web-sources.js";
 import { Mascot, runMood } from "./Mascot.js";
 import { AgentSwitch, EngineMark, switchesAgent } from "./AgentSwitch.js";
 import type { EffortChoice } from "./AgentModelPicker.js";
-import { isLocal, ownModel, startTeam } from "./edition.js";
+import { isLocal, startTeam } from "./edition.js";
+import { isOwnModel } from "../own-model-id.js";
 import { agentLook, laneIdByName, laneLabel, reasonFor, suggestTarget, tintOfColor, tintOfEngine, wakesOnItsOwn, type Signals } from "./handoff-ui.js";
 import type { AgentView } from "../agents.js";
 import { RaceCard } from "./Race.js";
@@ -5901,7 +5902,7 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
   // button's tooltip still says how to send now.
   const liveHint = mode === "drive" && running && state.openQuestions[lane]?.to !== me.id && interrupt ? "Cuts the current step short" : "";
   // Friday Code on Solo is only Team's when it isn't running on somebody's own model.
-  const fridayHere = !state.engines[lane]?.tool && !ownModel(state.options.model);
+  const fridayHere = !state.engines[lane]?.tool && !isOwnModel(state.options.model);
   const placeholder = toPeople
     ? "Say something to the people here. @name tells them…"
     : ctx.solo && fridayHere && (mode === "drive" || mode === "claim")

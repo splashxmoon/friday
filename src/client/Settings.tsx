@@ -13,6 +13,7 @@ import { Avatar, FridayMark, Icon } from "./icons.js";
 import type { Identity } from "./storage.js";
 import { Hint, Skeleton, SkeletonLines, barHeight } from "./ui.js";
 import { EngineMark } from "./BrandMarks.js";
+import { OwnModelsSection } from "./OwnModels.js";
 import {
   AboutTab,
   AppearanceTab,
@@ -95,6 +96,15 @@ export const SECTIONS: SectionDef[] = [
     blurb: "The computer your coding agents run on, and the tools on it.",
     keywords:
       "computer machine connect link claude code codex cursor sign in install account folder runner",
+  },
+  {
+    id: "own-models",
+    label: "Your models",
+    group: "This computer",
+    icon: "key",
+    blurb:
+      "Your own API keys, and models running on this computer, for Friday's agent.",
+    keywords: "own model api key byok bring your own ollama lm studio local openai anthropic gemini groq deepseek mistral friday code",
   },
   {
     id: "data",
@@ -332,6 +342,7 @@ export function SettingsPage({
             {current.id === "notifications" && <NotificationsTab identity={identity} />}
             {current.id === "shortcuts" && <ShortcutsTab />}
             {current.id === "computer" && <ComputerSection identity={identity} />}
+            {current.id === "own-models" && <OwnModelsSection identity={identity} workspace={workspace} />}
             {current.id === "data" && <DataTab />}
             {current.id === "about" && <AboutTab onReplayTour={() => window.dispatchEvent(new Event("friday:tour"))} />}
           </div>

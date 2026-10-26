@@ -1,7 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
 import type { SessionState } from "../session/projection.js";
-import { CLAUDE_POINTER, isMissing, READ_BY, RULES_TEMPLATE, RULE_FILES, type RuleFile, unnumbered, withMemoryRules } from "../project-rules.js";
+import {
+  CLAUDE_POINTER,
+  isMissing,
+  READ_BY,
+  RULES_TEMPLATE,
+  RULE_FILES,
+  type RuleFile,
+  unnumbered,
+  withMemoryRules,
+} from "../project-rules.js";
 import type { Member } from "../types.js";
+import { isLocal } from "./edition.js";
 import { Icon } from "./icons.js";
 import type { Send } from "./useSession.js";
 
@@ -16,10 +26,27 @@ import type { Send } from "./useSession.js";
 
 type Loaded = Record<RuleFile, string | null>;
 
-export function RulesPanel({ state, sid, invite, me, send, lane }: { state: SessionState; sid: string; invite: string; me: Member; send: Send; lane?: string }) {
-  const hasFolder = Object.values(state.engines).some((e) => e.online) || !!state.upload;
+export function RulesPanel({
+  state,
+  sid,
+  invite,
+  me,
+  send,
+  lane,
+}: {
+  state: SessionState;
+  sid: string;
+  invite: string;
+  me: Member;
+  send: Send;
+  lane?: string;
+}) {
+  const hasFolder =
+    Object.values(state.engines).some((e) => e.online) || !!state.upload;
   const viewer = me.role === "viewer";
-  const mayEdit = !viewer && (me.role === "owner" || state.driver?.id === me.id || !state.driver);
+  const mayEdit =
+    !viewer &&
+    (me.role === "owner" || state.driver?.id === me.id || !state.driver);
   const [files, setFiles] = useState<Loaded | null>(null);
   const [open, setOpen] = useState<RuleFile>("AGENTS.md");
   const [draft, setDraft] = useState<string | undefined>(undefined);
@@ -32,16 +59,23 @@ export function RulesPanel({ state, sid, invite, me, send, lane }: { state: Sess
     await Promise.all(
       RULE_FILES.map(async (f) => {
         try {
-          const r = await fetch(`/api/sessions/${encodeURIComponent(sid)}/repo?op=read${viewer ? "" : "&raw=1"}&path=${encodeURIComponent(f)}&invite=${encodeURIComponent(invite)}${lane ? `&lane=${encodeURIComponent(lane)}` : ""}`);
+          const r = await fetch(
+            `/api/sessions/${encodeURIComponent(sid)}/repo?op=read${viewer ? "" : "&raw=1"}&path=${encodeURIComponent(f)}&invite=${encodeURIComponent(invite)}${lane ? `&lane=${encodeURIComponent(lane)}` : ""}`,
+          );
           const j = (await r.json()) as { output?: string; error?: string };
-          if (!j.error && typeof j.output === "string" && !isMissing(j.output)) got[f] = viewer ? unnumbered(j.output) : j.output;
+          if (!j.error && typeof j.output === "string" && !isMissing(j.output))
+            got[f] = viewer ? unnumbered(j.output) : j.output;
         } catch {
           // Unreadable is the same as absent here: the panel offers to create it.
         }
       }),
     );
     setFiles(got);
-    setOpen((cur) => (got[cur] !== null ? cur : (RULE_FILES.find((f) => got[f] !== null) ?? "AGENTS.md")));
+    setOpen((cur) =>
+      got[cur] !== null
+        ? cur
+        : (RULE_FILES.find((f) => got[f] !== null) ?? "AGENTS.md"),
+    );
   }, [sid, invite, lane, viewer]);
 
   useEffect(() => {
@@ -60,11 +94,19 @@ export function RulesPanel({ state, sid, invite, me, send, lane }: { state: Sess
     return (
       <div className="rules rules-empty">
         <p className="rules-empty-title">No folder yet</p>
-        <p className="rules-empty-sub">Connect a folder to this session and its AGENTS.md or CLAUDE.md shows up here, for everyone to read and change.</p>
+        <p className="rules-empty-sub">
+          Connect a folder to this session and its AGENTS.md or CLAUDE.md shows
+          up here, for everyone to read and change.
+        </p>
       </div>
     );
   }
-  if (!files) return <div className="rules rules-empty"><p className="rules-empty-sub">Reading the folder…</p></div>;
+  if (!files)
+    return (
+      <div className="rules rules-empty">
+        <p className="rules-empty-sub">Reading the folder…</p>
+      </div>
+    );
 
   const existing = RULE_FILES.filter((f) => files[f] !== null);
   const write = async (path: RuleFile, content: string) => {
@@ -72,7 +114,11 @@ export function RulesPanel({ state, sid, invite, me, send, lane }: { state: Sess
     setErr("");
     const r = await send({ type: "folder.write", path, content, quiet: true });
     setSaving(false);
-    if (!r.ok) return setErr(r.error ?? "Couldn't save that file. Check the computer is still connected, then try again.");
+    if (!r.ok)
+      return setErr(
+        r.error ??
+          "Couldn't save that file. Check the computer is still connected, then try again.",
+      );
     setFiles((f) => (f ? { ...f, [path]: content } : f));
     setOpen(path);
     setDraft(undefined);
@@ -88,10 +134,19 @@ export function RulesPanel({ state, sid, invite, me, send, lane }: { state: Sess
         </span>
         <p className="rules-empty-title">No project instructions yet</p>
         <p className="rules-empty-sub">
-          An AGENTS.md at the top of the repository tells every agent how work is done here: how to run the tests, what not to touch, how the team writes things. Friday Code, Codex and Cursor read it. Claude Code reads CLAUDE.md.
+          An AGENTS.md at the top of the repository tells every agent how work
+          is done here: how to run the tests, what not to touch, how the team
+          writes things. Friday Code, Codex and Cursor read it. Claude Code
+          reads CLAUDE.md.
         </p>
         {err && <p className="rules-err">{err}</p>}
-        <button type="button" className="btn primary small" disabled={!mayEdit || saving} title={mayEdit ? "" : "Only the driver or an owner can create it"} onClick={() => void write("AGENTS.md", RULES_TEMPLATE)}>
+        <button
+          type="button"
+          className="btn primary small"
+          disabled={!mayEdit || saving}
+          title={mayEdit ? "" : "Only the driver or an owner can create it"}
+          onClick={() => void write("AGENTS.md", RULES_TEMPLATE)}
+        >
           Create AGENTS.md
         </button>
       </div>
@@ -109,7 +164,14 @@ export function RulesPanel({ state, sid, invite, me, send, lane }: { state: Sess
       <div className="rules-head">
         <div className="rules-tabs" role="tablist">
           {existing.map((f) => (
-            <button key={f} type="button" role="tab" aria-selected={f === open} className={f === open ? "on" : ""} onClick={() => setOpen(f)}>
+            <button
+              key={f}
+              type="button"
+              role="tab"
+              aria-selected={f === open}
+              className={f === open ? "on" : ""}
+              onClick={() => setOpen(f)}
+            >
               {f}
             </button>
           ))}
@@ -124,7 +186,12 @@ export function RulesPanel({ state, sid, invite, me, send, lane }: { state: Sess
         aria-label={`${open}, the project's standing instructions`}
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={(e) => {
-          if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s" && dirty && mayEdit) {
+          if (
+            (e.metaKey || e.ctrlKey) &&
+            e.key.toLowerCase() === "s" &&
+            dirty &&
+            mayEdit
+          ) {
             e.preventDefault();
             void write(open, value);
           }
@@ -134,49 +201,98 @@ export function RulesPanel({ state, sid, invite, me, send, lane }: { state: Sess
       <div className="rules-foot">
         {mayEdit ? (
           <>
-            <span className="rules-state">{saving ? "Saving…" : saved ? "Saved" : dirty ? "Unsaved changes" : "Everyone's agents read this at the start of each run"}</span>
+            <span className="rules-state">
+              {saving
+                ? "Saving…"
+                : saved
+                  ? "Saved"
+                  : dirty
+                    ? "Unsaved changes"
+                    : "Everyone's agents read this at the start of each run"}
+            </span>
             {dirty && (
-              <button type="button" className="btn ghost small" onClick={() => setDraft(undefined)}>
+              <button
+                type="button"
+                className="btn ghost small"
+                onClick={() => setDraft(undefined)}
+              >
                 Revert
               </button>
             )}
-            <button type="button" className="btn primary small" disabled={!dirty || saving} onClick={() => void write(open, value)}>
+            <button
+              type="button"
+              className="btn primary small"
+              disabled={!dirty || saving}
+              onClick={() => void write(open, value)}
+            >
               Save
             </button>
           </>
         ) : (
-          <span className="rules-state">Only the driver or an owner can change this</span>
+          <span className="rules-state">
+            Only the driver or an owner can change this
+          </span>
         )}
       </div>
       {/* What Friday remembers about this team, written where every tool reads it: one press, then save. */}
-      {mayEdit && open === "AGENTS.md" && (
+      {mayEdit && open === "AGENTS.md" && !isLocal() && (
         <button
           type="button"
           className="rules-add"
           onClick={() =>
             void fetch("/api/memory", { credentials: "same-origin" })
-              .then((r) => r.json() as Promise<{ enabled?: boolean; entries?: { text: string; scope: string }[] }>)
+              .then(
+                (r) =>
+                  r.json() as Promise<{
+                    enabled?: boolean;
+                    entries?: { text: string; scope: string }[];
+                  }>,
+              )
               .then((r) => {
-                const entries = (r.entries ?? []).filter((e) => e.scope === "workspace" || e.scope === "personal");
-                if (!entries.length) return setErr("Friday has nothing remembered yet. It learns as you work, and you can add to it under Settings › Memory.");
+                const entries = (r.entries ?? []).filter(
+                  (e) => e.scope === "workspace" || e.scope === "personal",
+                );
+                if (!entries.length)
+                  return setErr(
+                    "Friday has nothing remembered yet. It learns as you work, and you can add to it under Settings › Memory.",
+                  );
                 const next = withMemoryRules(text, entries);
-                if (next === text) return setErr("Everything Friday remembers is already in this file.");
+                if (next === text)
+                  return setErr(
+                    "Everything Friday remembers is already in this file.",
+                  );
                 setDraft(next);
               })
               .catch(() => setErr("Couldn't read what Friday remembers."))
           }
         >
-          <Icon name="book" size={13} /> Add what Friday remembers, so the rules travel with the code
+          <Icon name="book" size={13} /> Add what Friday remembers, so the rules
+          travel with the code
         </button>
       )}
       {mayEdit && pointer && (
-        <button type="button" className="rules-add" onClick={() => void write("CLAUDE.md", CLAUDE_POINTER)}>
-          <Icon name="plus" size={13} /> Add a CLAUDE.md that points here, so Claude Code follows the same rules
+        <button
+          type="button"
+          className="rules-add"
+          onClick={() => void write("CLAUDE.md", CLAUDE_POINTER)}
+        >
+          <Icon name="plus" size={13} /> Add a CLAUDE.md that points here, so
+          Claude Code follows the same rules
         </button>
       )}
       {mayEdit && files[other] === null && open === "CLAUDE.md" && (
-        <button type="button" className="rules-add" onClick={() => void write("AGENTS.md", text.trim() === CLAUDE_POINTER.trim() ? RULES_TEMPLATE : text)}>
-          <Icon name="plus" size={13} /> Add an AGENTS.md too, for Codex and Cursor
+        <button
+          type="button"
+          className="rules-add"
+          onClick={() =>
+            void write(
+              "AGENTS.md",
+              text.trim() === CLAUDE_POINTER.trim() ? RULES_TEMPLATE : text,
+            )
+          }
+        >
+          <Icon name="plus" size={13} /> Add an AGENTS.md too, for Codex and
+          Cursor
         </button>
       )}
     </div>

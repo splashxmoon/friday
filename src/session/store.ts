@@ -432,6 +432,8 @@ export class SessionStore {
         for (const [j, e] of cleaned) write.lset(key, j, JSON.stringify(e));
         write.set(shield, String(read), "PX", SHIELDED_MS);
         await write.exec().catch((e: Error) => console.error(`[store] keeping ${sid} hidden:`, e.message));
+        // A session deleted during this read keeps no marker of it. (Plain commands: the local edition's store has no scripts.)
+        if (!(await this.redis.exists(key))) await this.redis.del(shield);
       }
       // Each change set's patches as one string however often it was logged, references filled in (patches.ts).
       const found = { repeats: 0 };

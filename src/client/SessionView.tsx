@@ -488,7 +488,7 @@ export function SessionView({
       setTab(t);
       if (!same) setHistory(false);
       if (!same && doc.open) onDocChange({ open: false });
-    } else if (e.shiftKey && e.key.toLowerCase() === "h") {
+    } else if (e.shiftKey && e.key.toLowerCase() === "h" && !isLocal()) {
       e.preventDefault();
       setHistory(!history);
       if (!history) setBench(false);
@@ -921,7 +921,6 @@ export function SessionView({
             onPick={pickPanel}
             onPicker={() => setPicking(true)}
             badges={{ files: Object.values(state.diffs).reduce((n, d) => n + d.files.length, 0), working: state.run.status === "running" || Object.values(state.laneRuns).some((r) => r.status === "running") }}
-            onHistory={() => (setHistory(true), setBench(false))}
             headless={solo}
             addAgent={<Lanes state={state} me={me} agents={agents} identity={identity} send={send} onConnect={(tool) => setConnect({ lane: "", ...(tool ? { tool } : {}) })} onRace={() => setRacing(true)} solo={solo} />}
           />

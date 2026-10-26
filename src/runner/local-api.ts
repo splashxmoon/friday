@@ -23,6 +23,7 @@ import { browse, cloneRepo, defaultCloneRoot, describe, findByName, ghBin, githu
 import { githubCancel, githubConnect, githubDisconnect, githubStatus } from "./github.js";
 import { githubItem, localRepo, prAct, prReview, type DraftComment, type PrAction } from "./pr-actions.js";
 import { savedDirs, startDirs } from "./extra-dirs.js";
+import { detectLocal, discoverModels, listOwnModels, ownComplete, ownVision, removeOwnModel, saveOwnModel, testOwnModel } from "./own-models.js";
 
 /**
  * Everything Friday can ask someone's machine to do on their behalf: what
@@ -327,6 +328,56 @@ export async function callHost(method: string, params: Record<string, unknown> =
       return githubItem({ url: str(params.url, 300) });
     case "repo.local":
       return localRepo({ repo: str(params.repo, 200) });
+    // Your own models, kept on this computer with their keys (own-models.ts). Nothing here sends a key anywhere but its model's server.
+    case "models.own.list":
+      return listOwnModels();
+    case "models.own.save":
+      return saveOwnModel({
+        ...(str(params.id, 20) ? { id: str(params.id, 20) } : {}),
+        ...(typeof params.name === "string" ? { name: str(params.name, 60) } : {}),
+        ...(typeof params.baseUrl === "string" ? { baseUrl: str(params.baseUrl, 300) } : {}),
+        ...(typeof params.model === "string" ? { model: str(params.model, 200) } : {}),
+        ...(typeof params.apiKey === "string" ? { apiKey: str(params.apiKey, 500) } : {}),
+        ...(typeof params.provider === "string" ? { provider: str(params.provider, 30) } : {}),
+        ...(typeof params.vision === "boolean" ? { vision: params.vision } : {}),
+      });
+    case "models.own.vision":
+      return ownVision({ id: str(params.id, 20) });
+    case "models.own.remove":
+      return removeOwnModel({ id: str(params.id, 20) });
+    case "models.own.test":
+      return testOwnModel({ id: str(params.id, 20) });
+    case "models.own.discover":
+      return discoverModels({ baseUrl: str(params.baseUrl, 300), apiKey: str(params.apiKey, 500), id: str(params.id, 20) });
+    case "models.own.detect":
+      return detectLocal();
+    // A step of Friday's agent on one of those models: asked by the server, answered here, the text passed back as it comes.
+    case "llm.complete": {
+      let gathered = "";
+      let thought = "";
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const flush = () => {
+        if (timer) clearTimeout(timer);
+        timer = null;
+        if (gathered || thought) ctx.progress?.({ ...(gathered ? { d: gathered } : {}), ...(thought ? { r: thought } : {}) });
+        gathered = thought = "";
+      };
+      const soon = () => (timer ??= setTimeout(flush, 60));
+      try {
+        return await ownComplete(
+          {
+            id: str(params.id, 20),
+            system: typeof params.system === "string" ? params.system : "",
+            messages: Array.isArray(params.messages) ? (params.messages as never) : [],
+            tools: Array.isArray(params.tools) ? (params.tools as never) : [],
+            ...(str(params.reasoningEffort, 10) ? { reasoningEffort: str(params.reasoningEffort, 10) } : {}),
+          },
+          ctx.progress ? { delta: (t) => ((gathered += t), soon()), reasoning: (t) => ((thought += t), soon()) } : {},
+        );
+      } finally {
+        flush();
+      }
+    }
     case "skills.install": {
       const tools = (Array.isArray(params.tools) ? params.tools : []).filter((t): t is EngineTool => ENGINE_TOOLS.includes(t as EngineTool));
       const name = str(params.name, 60);

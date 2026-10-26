@@ -28,6 +28,10 @@ import { ops } from "./ops.js";
 import { WebSocket, WebSocketServer } from "ws";
 import { fetchIssue, fetchPr, issueRef, parseIssueUrl, parsePrLink, prRef } from "./github-issue.js";
 import { ProviderError, type LLM } from "./agent/llm.js";
+import { OwnModelLLM } from "./agent/own-model.js";
+import { isOwnModel, ownModelParts } from "./own-model-id.js";
+import { AgentRuntime } from "./agent/runtime.js";
+import { defaultTools, type AgentTool } from "./agent/tools.js";
 import { SESSION_COOKIE, SESSION_MAX_AGE_S, clearSessionCookie, readCookie, sessionCookie, signActor, signInvite, signSession, verifyActor, verifyInvite, verifySession, signReplay, verifyReplay } from "./auth.js";
 import { hideSecrets, hideSecretsIn } from "./secrets.js";
 import { applyPrStatus, boardCards, sortCards, summaryOf, waitingOn, weekOf, type BoardCard, type SessionSummary } from "./board.js";
@@ -227,6 +231,7 @@ export interface AppOptions {
   prefix: string;
   secret: string;
   llm: LLM;
+  tools?: AgentTool[];
   driverGraceMs: number;
   /** Where attachments are stored. */
   dataDir?: string;
@@ -561,11 +566,15 @@ export async function createApp(o: AppOptions) {
         "This session has no folder yet. Attach one with the folder button in the composer and it becomes a working copy you can read, search and edit — or connect a machine from the session header to work in a checkout there, which also allows running commands.",
     };
   };
-  const llm: LLM = o.llm;
+  // No model of Friday's own (o.llm says so), only yours, set up in Settings › Your models and called from this computer.
+  const llm: LLM = new OwnModelLLM(o.llm, (userId, method, params, onProgress) => callHost(method, params, { serverUrl: selfUrl, user: { id: userId, name: "" }, runners: localRunners, progress: onProgress }));
   // The agents in a session talking to each other (agent-mesh.ts): coding tools through their runner, Friday Code directly. A
   // coding tool's hand_off is Friday Code's own, so the same lane rules and bounce limit hold for both.
   const mesh = new AgentMesh(store, bus, (sid, from, req) => handOff(store, bus, sid, from, req));
-  const allowedModel = async (_workspaceId: string, _model: string, _actorId?: string): Promise<string> => "";
+  // Friday Code, only ever on one of your own models: nothing metered, and no skills, memory, hubs or other sessions to reach.
+  const runtime = new AgentRuntime(store, bus, llm, o.tools ?? defaultTools, { mesh, readRepo: openFolder, resolveFiles: (sid, atts) => resolveAttachments(files, sid, atts), works: (s) => isOwnModel(s.options.model) });
+  /** Only a model of your own, and only chosen by you: there is nothing else for Friday Code to run on here. */
+  const allowedModel = async (_workspaceId: string, model: string, actorId?: string): Promise<string> => (isOwnModel(model) && ownModelParts(model)?.owner === actorId ? model : "");
 
 
   /**
@@ -990,6 +999,7 @@ export async function createApp(o: AppOptions) {
       if (lane !== MAIN_LANE) await store.append(sid, friday, { type: "lane.removed", laneId: lane });
     }
     await hub.release(sid, why);
+    await runtime.stopSession(sid, why);
     for (const [ws, watched] of watching) if (watched === sid) closeSaying(ws, 4003, why);
     for (const id of Object.keys(state.members)) await Promise.all([redis.zrem(`${o.prefix}mine:${id}`, sid), redis.srem(`${o.prefix}hidden:${id}`, sid)]);
     await removeSession(sid);
@@ -1102,7 +1112,7 @@ export async function createApp(o: AppOptions) {
         // "" is a choice — it means Friday's model — so absent and empty are
         // not the same thing here: treating them alike ran an agent's frontier
         // model while the composer said Friday.
-        model: "",
+        model: await allowedModel(ctx.workspace.id, typeof body.model === "string" ? str(body.model, 80) : "", owner.id),
         ...(["fast", "balanced", "deep"].includes(String(body.thinking)) ? { thinking: body.thinking as Thinking } : {}),
         agent,
         ...(issueRef(body.issue) ? { issue: issueRef(body.issue)! } : {}),
@@ -2662,6 +2672,7 @@ export async function createApp(o: AppOptions) {
       await new Promise<void>((r) => server.close(() => r()));
       await drain();
       for (const t of timers) clearTimeout(t);
+      await runtime.shutdown();
       await drain();
     },
   };

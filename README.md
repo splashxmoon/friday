@@ -189,13 +189,13 @@ Point a session at a folder, choose the branch it works on, or have it start a n
 </tr>
 </table>
 
-Also in the box: a live feed of every message, command and file change; approvals when a tool asks before running something; your dev server previewed beside the session; skills and saved commands shared across your tools; and sessions your tools come back to by themselves after a restart.
+Also in the box: Friday Code, Friday's own agent, on a model of yours (an API key from OpenAI, Anthropic, Google and others, or a model running on your computer with Ollama or LM Studio, added in Settings › Your models); a live feed of every message, command and file change; approvals when a tool asks before running something; your dev server previewed beside the session; skills and saved commands shared across your tools; and sessions your tools come back to by themselves after a restart.
 
 ## Privacy
 
 Friday listens on `127.0.0.1` only, so nothing else on your network can reach it, and it answers only its own page: a request from any other site, or from a page being previewed, is refused. What it keeps is one folder on your computer, readable only by you.
 
-It sends nothing to us: no account, no analytics, no telemetry. It talks to GitHub for the pull requests, issues and skills you ask it about, and reads each coding tool's remaining usage from that tool's own provider, with the sign-in the tool already has. The desktop app also asks GitHub which release is the latest, twice a day, so it can tell you when there's a new one (`FRIDAY_NO_UPDATE_CHECK=1` turns that off).
+It sends nothing to us: no account, no analytics, no telemetry. It talks to GitHub for the pull requests, issues and skills you ask it about, and reads each coding tool's remaining usage from that tool's own provider, with the sign-in the tool already has. A model you add in Settings › Your models is called from your computer, and its key is kept there and sent only to that model's own server. The desktop app also asks GitHub which release is the latest, twice a day, so it can tell you when there's a new one (`FRIDAY_NO_UPDATE_CHECK=1` turns that off).
 
 ## Developing
 
@@ -224,7 +224,7 @@ No. Friday drives the coding CLIs you already use, as they are. There's nothing 
 Claude Code, Codex, Cursor, GitHub Copilot, Gemini CLI, OpenCode, Devin CLI, Junie, Kiro, Factory Droid, Grok Build, Cline, Kilo Code, Amp, and any agent that speaks the Agent Client Protocol (ACP).
 
 **Does it cost anything, or use my API keys?**
-Friday is free and MIT licensed. The work runs on each tool's own plan and sign-in, so there are no keys to paste and nothing extra to pay.
+Friday is free and MIT licensed. The work runs on each tool's own plan and sign-in, so there are no keys to paste and nothing extra to pay. If you'd like Friday Code, Friday's own agent, too, give it a key of yours or a model on your computer in Settings › Your models: then it runs on that.
 
 **What happens when one agent runs out of usage?**
 Its task goes to the agent best placed to finish it, with its notes, files and plan, so the work keeps going.
