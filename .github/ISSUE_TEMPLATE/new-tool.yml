@@ -1,0 +1,21 @@
+name: Support another coding tool
+description: Ask for a coding agent or CLI that Friday doesn't run yet.
+labels: [enhancement]
+body:
+  - type: input
+    id: tool
+    attributes:
+      label: The tool
+      placeholder: Name and link
+    validations:
+      required: true
+  - type: dropdown
+    id: acp
+    attributes:
+      label: Does it speak the Agent Client Protocol (ACP)?
+      options: ["Yes", "No", "Not sure"]
+  - type: textarea
+    id: how
+    attributes:
+      label: How it's started and signs in
+      description: Its command, how it reports progress (JSON, ACP, plain text), and its sign-in command.

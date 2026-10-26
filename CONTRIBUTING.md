@@ -35,4 +35,4 @@ This repository is published from the source Friday Team is built from too. When
 
 ## Reporting a security problem
 
-Please don't put the details in a public issue. Open one that says only that you have a security report, and we'll give you a private way to send it.
+Please don't put the details in a public issue. [SECURITY.md](SECURITY.md) says where to send it.

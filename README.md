@@ -5,8 +5,8 @@
 <h1 align="center">Friday</h1>
 
 <p align="center">
-  <strong>Your coding agents, side by side, on your own computer.</strong><br/>
-  Run Claude Code, Codex, Cursor and a dozen more from one place. They split the work on a shared task board, message each other as they go, and you review it all before it ships.
+  <strong>The open-source harness for coding agents that work as a team.</strong><br/>
+  Run Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot and more from one place. They split the work on a shared task board, message each other as they go, hand off when one hits its usage limit, and you review it all before it ships.
 </p>
 
 <p align="center">
@@ -201,6 +201,30 @@ npm run desktop:dist # package installers for this computer into release/
 Pushing a `v*` tag builds the installers for every platform on GitHub Actions and publishes them as a release ([release.yml](.github/workflows/release.yml)).
 
 Issues and pull requests are welcome: [CONTRIBUTING.md](CONTRIBUTING.md) says how. For anything large, open an issue first so we can talk it through.
+
+## FAQ
+
+**How do I run Claude Code and Codex at the same time on one project?**
+Start a session in your repository with one of them, then add the other from the session's agent bar. Each can work in its own copy of the repository (a Git worktree), so they don't overwrite each other, and Friday keeps them talking.
+
+**Is this a multi-agent framework I have to code against?**
+No. Friday drives the coding CLIs you already use, as they are. There's nothing to write: you pick the tools and give them the job.
+
+**Which coding agents does it support?**
+Claude Code, Codex, Cursor, GitHub Copilot, Gemini CLI, OpenCode, Devin CLI, Junie, Kiro, Factory Droid, Grok Build, Cline, Kilo Code, Amp, and any agent that speaks the Agent Client Protocol (ACP).
+
+**Does it cost anything, or use my API keys?**
+Friday is free and MIT licensed. The work runs on each tool's own plan and sign-in, so there are no keys to paste and nothing extra to pay.
+
+**What happens when one agent runs out of usage?**
+Its task goes to the agent best placed to finish it, with its notes, files and plan, so the work keeps going.
+
+**Does my code leave my computer?**
+Not through Friday. It runs on `127.0.0.1` with no account and no server of ours; your coding tools talk to their own providers as they always do.
+
+---
+
+If Friday saves you time, a ⭐ helps other people find it.
 
 ## License
 

@@ -1,0 +1,20 @@
+name: Feature request
+description: An idea that would make Friday more useful.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you're trying to do
+      description: The job, not the solution. What gets in your way today?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help
+  - type: input
+    id: tools
+    attributes:
+      label: Coding tools you use with Friday
+      placeholder: Claude Code, Codex, Gemini CLI …
