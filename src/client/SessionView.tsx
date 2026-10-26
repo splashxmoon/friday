@@ -29,6 +29,8 @@ import { BranchButton } from "./Branches.js";
 import { ClaudeMark } from "./BrandMarks.js";
 import { ConnectDialog } from "./Engine.js";
 import { BenchOrHistory, TAB_LABEL, Workbench, useTab, type Tab } from "./Workbench.js";
+import { joinPath, openIn, preferredEditor } from "./openIn.js";
+import { markdownFileName, sessionMarkdown } from "../session-markdown.js";
 import { Lanes } from "./Lanes.js";
 import { OverlapNotice } from "./Overlap.js";
 import { RaceDialog } from "./Race.js";
@@ -102,6 +104,11 @@ export function SessionView({
   connections: McpPublic[];
 }) {
   const s = useSession(sid, invite, identity);
+  /** The latest state, for listeners added once. */
+  const stateRef = useRef(s.state);
+  stateRef.current = s.state;
+  const eventsRef = useRef(s.events);
+  eventsRef.current = s.events;
   // Solo or Team, for this session's own workspace: on Solo nobody else steers and Friday's own agent isn't there.
   // Asked again once this person is in: the plan answers members only, and someone arriving by a link isn't one yet.
   const sessionPlan = sessionWorkspace.useSessionPlan(sid, invite, s.me?.id);
@@ -180,8 +187,14 @@ export function SessionView({
   const [openFile, setOpenFile] = useState<{ path: string; line?: number; at: number } | null>(null);
   useEffect(() => {
     const on = (e: Event) => {
-      const { path, line } = (e as CustomEvent<{ path: string; line?: number }>).detail;
+      const { path, line, outside } = (e as CustomEvent<{ path: string; line?: number; outside?: boolean }>).detail;
       e.preventDefault();
+      // ⌘-click: in your own editor, at the line, when the session's folder is on this computer (desktop-native.ts).
+      const dir = (stateRef.current?.engines[MAIN_LANE] ?? Object.values(stateRef.current?.engines ?? {})[0])?.cwd;
+      if (outside && dir && window.fridayDesktop?.openIn) {
+        void preferredEditor().then((ed) => (ed ? openIn(ed, joinPath(dir, path), line) : "No editor found on this computer.")).then((err) => err && console.warn("[open in]", err));
+        return;
+      }
       setOpenFile({ path, ...(line ? { line } : {}), at: Date.now() });
       setTab("tree");
       setBench(true);
@@ -528,6 +541,23 @@ export function SessionView({
     return () => removeEventListener("keydown", on);
   }, []);
 
+  /** The session as Markdown, copied or saved as a file; what was loaded of it, which a long session fetches in full first. */
+  const exportMarkdown = async (how: "copy" | "save") => {
+    const st = stateRef.current;
+    if (!st) return;
+    const md = sessionMarkdown(st.title, eventsRef.current, (lane) => laneLabel(st, lane));
+    if (how === "copy") return void navigator.clipboard?.writeText(md);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([md], { type: "text/markdown" }));
+    a.download = markdownFileName(st.title);
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  };
+  useEffect(() => {
+    const on = (e: Event) => void exportMarkdown((e as CustomEvent<{ how?: "copy" | "save" }>).detail?.how ?? "copy");
+    addEventListener("friday:export-markdown", on);
+    return () => removeEventListener("friday:export-markdown", on);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // What ⌘K offers here: the wheel, the agent and the panels, by the names people use for them.
   useEffect(() => {
     const st = s.state;
@@ -543,7 +573,10 @@ export function SessionView({
     if (st.run.status === "running" && mayStop) act("pause", "Stop the agent's task", "pause", () => send({ type: "run.pause" }));
     if (st.run.status === "paused" && mayStop) act("resume", "Resume the agent", "play", () => send({ type: "run.resume" }));
     for (const v of VIEWS) act(`open-${v.tab}`, `Open ${v.label}`, v.icon, () => (setTab(v.tab), setBench(true)));
-    act("history", "Open history", "clock", () => (setHistory(true), setBench(false)));
+    if (!isLocal()) act("history", "Open history", "clock", () => (setHistory(true), setBench(false)));
+    // The whole session as Markdown (session-markdown.ts), for a pull request, an issue or a file of its own.
+    act("md-copy", "Copy this session as Markdown", "copy", () => void exportMarkdown("copy"));
+    act("md-save", "Save this session as Markdown", "download", () => void exportMarkdown("save"));
     act("ask", "Write to the agent", "message", () => document.getElementById("composer-input")?.focus(), "/");
     act("file", "Open a file…", "file", () => (setTab("files"), setBench(true), setTimeout(() => dispatchEvent(new CustomEvent("friday:quick-open")), 60)), shortcut("⌘P"));
     // Every agent by name, and what is waiting: the palette is where a keyboard goes when it doesn't know the number.

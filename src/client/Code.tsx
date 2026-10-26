@@ -6,6 +6,7 @@ import { EFFORT_LEVELS, ENGINE_EFFORT_INFO, ENGINE_NAMES, ENGINE_TOOLS, type Att
 import { api } from "./api.js";
 import { AttachButton, AttachedRow, PICK_FOLDER, pasteAttach, uploadAll, type Attached } from "./Attach.js";
 import { Icon, type IconName } from "./icons.js";
+import { rememberAsk, walkAsks } from "./askHistory.js";
 import { NoMachine, connectThisComputer, hostApi, useMachine } from "./local.js";
 import { HeroTitle } from "./HeroTitle.js";
 import { HomeActivity } from "./HomeActivity.js";
@@ -477,9 +478,13 @@ export function Code({
     };
   };
 
+  /** Where ↑ has got to in your past asks (askHistory.ts); -1 while the box holds your own text. */
+  const askAt = useRef(-1);
   const submit = async () => {
     if (blocked && goal.trim()) return setNudged(true);
     if (!goal.trim() || busy || blocked) return;
+    rememberAsk(goal);
+    askAt.current = -1;
     // With an issue, the agent reads the issue itself after what was typed, and the session is called what the issue is.
     const text = issue ? withIssue(goal, issue) : pr ? withPr(goal, pr) : goal.trim();
     // Whether a machine will join this session before the first instruction.
@@ -864,6 +869,8 @@ export function Code({
               grow(e.target);
             }}
             onKeyDown={(e) => {
+              // ↑ in an empty box: what you asked before, in any session.
+              if (!busy && walkAsks(e, e.currentTarget, askAt, (t) => setGoal(t))) return;
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
                 void submit();

@@ -89,6 +89,11 @@ declare global {
         install(): Promise<boolean>;
         onState(fn: (s: DesktopUpdate) => void): () => void;
       };
+      /** Open a folder, or a file at a line, in this computer's editor, file manager or terminal (from the app after 0.1.74 / 0.1.4). */
+      openTargets?(): Promise<{ id: string; label: string; editor: boolean }[]>;
+      openIn?(target: string, path: string, line?: number): Promise<{ ok: boolean; error?: string }>;
+      /** The dock's count of what waits on you; 0 clears it. */
+      setBadge?(n: number): void;
       /** Tell the app which theme is showing, so the window buttons match it. */
       setTheme?(theme: "dark" | "light"): void;
       /** Real shells on this computer, drawn by the terminal panel. */

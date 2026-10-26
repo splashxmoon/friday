@@ -14,6 +14,11 @@ contextBridge.exposeInMainWorld("fridayDesktop", {
   trafficLightY: 17,
   /** Which theme the page shows, so Windows and Linux draw the window buttons in its colours. */
   setTheme: (theme: "dark" | "light"): void => ipcRenderer.send("friday:theme", theme),
+  /** Open a folder, or a file at a line, in this computer's own editor, file manager or terminal (desktop-native.ts). */
+  openTargets: (): Promise<{ id: string; label: string; editor: boolean }[]> => ipcRenderer.invoke("friday:open-targets"),
+  openIn: (target: string, path: string, line?: number): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke("friday:open-in", { target, path, line }),
+  /** How many things wait on you, on the dock icon; 0 clears it. */
+  setBadge: (n: number): void => ipcRenderer.send("friday:badge", n),
   /** The system's folder picker, for where a coding agent works. */
   pickFolder: (): Promise<string | null> => ipcRenderer.invoke("friday:pick-folder"),
   /** Where a file or folder dropped on the page is on this computer. */

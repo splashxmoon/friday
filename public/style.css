@@ -10998,3 +10998,34 @@ html.dark .dass-panel button.rounded-lg.border.border-sidebar-border, html.dark 
 .sb-dock-me:hover, .sb-dock-me[data-state="open"] { background: var(--hover); }
 .sb-dock-me:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
 .sb-dock .dass-rail-btn { flex: none; width: 36px !important; height: 36px !important; border-radius: 10px; }
+
+/* Themes in Settings › Appearance (SettingsPrefs.tsx ThemeCard, ThemeMaker): a gallery of small windows in each theme's colours,
+   and the maker's colour wells. */
+.thm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px; width: 100%; margin: 4px 0 2px; }
+.thm-card { position: relative; display: flex; flex-direction: column; border-radius: 10px; }
+.thm-pick { display: flex; flex-direction: column; gap: 6px; padding: 6px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); color: var(--ink-2); font: inherit; font-size: 12px; text-align: left; cursor: pointer; transition: border-color .12s, background-color .12s; }
+.thm-pick:hover { border-color: var(--border-hover); background: var(--hover); }
+.thm-card[data-on] .thm-pick { border-color: var(--border-focus); box-shadow: 0 0 0 1px var(--border-focus); color: var(--ink); }
+.thm-swatch { position: relative; display: flex; height: 58px; border-radius: 6px; overflow: hidden; box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 12%, transparent); }
+.thm-side { width: 28%; height: 100%; }
+.thm-lines { display: flex; flex: 1; flex-direction: column; justify-content: center; gap: 6px; padding: 0 9px; }
+.thm-lines i { display: block; height: 4px; border-radius: 2px; }
+.thm-lines .thm-pill { width: 34%; height: 9px; border-radius: 5px; }
+.thm-name { display: flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; padding: 0 2px; white-space: nowrap; text-overflow: ellipsis; }
+.thm-acts { position: absolute; top: 9px; right: 9px; display: flex; gap: 2px; padding: 2px; border-radius: 7px; background: color-mix(in srgb, var(--panel) 88%, transparent); box-shadow: 0 1px 3px rgb(0 0 0 / .18); }
+.thm-maker { display: flex; flex-direction: column; gap: 14px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
+.thm-maker-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.thm-maker-colours { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+.thm-colour { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--ink); cursor: pointer; }
+.thm-colour input[type="color"] { width: 30px; height: 30px; padding: 0; border: 1px solid var(--border-strong); border-radius: 8px; background: none; cursor: pointer; }
+.thm-colour input[type="color"]::-webkit-color-swatch-wrapper { padding: 3px; }
+.thm-colour input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 5px; }
+.thm-colour span { display: flex; flex-direction: column; line-height: 1.25; }
+.thm-colour code { font-size: 11px; color: var(--text-muted); }
+.thm-maker-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+
+/* Find in a shell's output (Terminal.tsx FindBar): over the top right of the grid, as an editor's find is. */
+.term-shell { position: relative; }
+.term-find { position: absolute; top: 6px; right: 10px; z-index: 3; display: flex; align-items: center; gap: 4px; padding: 3px 4px 3px 9px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--panel); color: var(--text-muted); box-shadow: 0 4px 14px rgb(0 0 0 / .18); }
+.term-find input { width: 180px; height: 24px; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: 12.5px; }
+.term-find-count { min-width: 52px; font-size: 11.5px; text-align: right; font-variant-numeric: tabular-nums; }

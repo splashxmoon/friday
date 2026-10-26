@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "./api.js";
 import type { Identity } from "./storage.js";
 import { AppUpdate } from "./AppUpdate.js";
@@ -26,7 +26,8 @@ import {
   type SessionLayout,
 } from "./prefs.js";
 import { chime } from "./chime.js";
-import { applyFonts, applyTheme, readFonts, readTheme, vscodeTheme, type CustomTheme, type Fonts } from "./theme.js";
+import { applyFonts, applyTheme, FRIDAY_PALETTES, forgetTheme, keepTheme, PRESETS, readFonts, readTheme, readThemeFile, savedThemes, themeFile, themeFromPalette, type CustomTheme, type Fonts, type Palette } from "./theme.js";
+import { Icon } from "./icons.js";
 import { DownloadIcon, ExternalLinkIcon, UploadIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,17 +46,30 @@ export function AppearanceTab() {
   const [custom, setCustom] = useState<CustomTheme | null>(readTheme);
   const [fonts, setFonts] = useState<Fonts>(readFonts);
   const [themeErr, setThemeErr] = useState("");
+  const [mine, setMine] = useState<CustomTheme[]>(savedThemes);
+  /** The theme maker, open on a palette: a new one, or one of yours to change. */
+  const [making, setMaking] = useState<{ palette: Palette; id?: string } | null>(null);
+  const use = (t: CustomTheme | null) => (applyTheme(t), setCustom(t));
   const importTheme = async (file: File | undefined) => {
     if (!file) return;
     setThemeErr("");
     try {
-      const t = vscodeTheme(JSON.parse(await file.text()));
-      if (!t) return setThemeErr("That file isn't a VS Code colour theme: it has no colors.");
-      applyTheme(t);
-      setCustom(t);
+      const t = readThemeFile(JSON.parse(await file.text()));
+      if (!t) return setThemeErr("That file isn't a theme: neither one of Friday's nor a VS Code colour theme (it has no colors).");
+      // Kept with yours, so it is still there after you try another.
+      const list = keepTheme(t);
+      setMine(list);
+      use(list[0]!);
     } catch {
       setThemeErr("Couldn't read that file as JSON.");
     }
+  };
+  const share = (t: CustomTheme) => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([themeFile(t)], { type: "application/json" }));
+    a.download = `${t.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "theme"}.friday-theme.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   };
   const setFont = (which: keyof Fonts, value: string) => {
     const next = { ...fonts, [which]: value.trim() || undefined } as Fonts;
@@ -85,22 +99,86 @@ export function AppearanceTab() {
             ]}
           />
         </Row>
+        {/* Themes (Arun, 2026-10-26: "building custom themes and stuff in the appearance page"): Friday's own look, the ones people
+            ask for by name, and yours, made here from four colours or brought from VS Code or a friend's theme file. */}
         <Row
+          stack
           label="Colours"
-          hint={custom ? `${custom.name}: a VS Code theme, ${custom.dark ? "dark" : "light"}. Picking Light, Dark or System above puts it away.` : "Bring the colours you use in VS Code: the theme's JSON file (an extension's, or File › Preferences › Generate Color Theme From Current Settings). Its token colours colour the editor and the diffs too."}
+          hint={custom ? `${custom.name}, ${custom.dark ? "dark" : "light"}. Picking Light, Dark or System above goes back to Friday's own.` : "Friday's own, a theme you know, or one of yours. Its editor colours colour the code and the diffs too."}
         >
-          <span className="flex items-center gap-2">
+          <div className="thm-grid" role="radiogroup" aria-label="Theme">
+            <ThemeCard name="Friday" on={!custom} onPick={() => use(null)} swatch={theme === "light" || (theme === "system" && matchMedia("(prefers-color-scheme: light)").matches) ? FRIDAY_PALETTES.light : FRIDAY_PALETTES.dark} />
+            {mine.map((t) => (
+              <ThemeCard
+                key={t.id}
+                name={t.name}
+                on={custom?.id === t.id}
+                onPick={() => use(t)}
+                swatch={t.palette ?? t}
+                actions={
+                  <>
+                    {t.palette && (
+                      <button type="button" className="icon-btn tiny" title={`Change ${t.name}`} aria-label={`Change ${t.name}`} onClick={() => setMaking({ palette: t.palette!, id: t.id! })}>
+                        <Icon name="pencil" size={12} />
+                      </button>
+                    )}
+                    <button type="button" className="icon-btn tiny" title={`Save ${t.name} as a file to share`} aria-label={`Export ${t.name}`} onClick={() => share(t)}>
+                      <Icon name="download" size={12} />
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-btn tiny"
+                      title={`Delete ${t.name}`}
+                      aria-label={`Delete ${t.name}`}
+                      onClick={() => {
+                        setMine(forgetTheme(t.id!));
+                        if (custom?.id === t.id) use(null);
+                      }}
+                    >
+                      <Icon name="trash" size={12} />
+                    </button>
+                  </>
+                }
+              />
+            ))}
+            {PRESETS.map((t) => (
+              <ThemeCard key={t.id} name={t.name} on={custom?.id === t.id} onPick={() => use(t)} swatch={t.palette!} />
+            ))}
+          </div>
+          <span className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => setMaking({ palette: { ...(custom?.palette ?? (document.documentElement.classList.contains("dark") ? FRIDAY_PALETTES.dark : FRIDAY_PALETTES.light)), name: custom?.palette ? `${custom.name} (mine)` : "My theme" } })}>
+              <Icon name="plus" size={13} /> Make your own
+            </Button>
             <label className="btn small ghost" style={{ cursor: "pointer" }}>
-              <UploadIcon className="size-3.5" /> {custom ? "Replace" : "Import a VS Code theme"}
-              <input type="file" accept=".json,application/json" className="sr-only" onChange={(e) => void importTheme(e.target.files?.[0])} />
+              <UploadIcon className="size-3.5" /> Import a theme file
+              <input type="file" accept=".json,application/json" className="sr-only" onChange={(e) => (void importTheme(e.target.files?.[0]), (e.target.value = ""))} />
             </label>
-            {custom && (
-              <Button variant="outline" size="sm" onClick={() => (applyTheme(null), setCustom(null))}>
-                Remove
+            {custom && !custom.id?.startsWith("mine:") && (
+              <Button variant="ghost" size="sm" onClick={() => share(custom)}>
+                <DownloadIcon className="size-3.5" /> Export this one
               </Button>
             )}
           </span>
+          <span className="muted small">A file is one of Friday's (exported here) or a VS Code colour theme: an extension's JSON, or File › Preferences › Generate Color Theme From Current Settings.</span>
         </Row>
+        {making && (
+          <ThemeMaker
+            start={making.palette}
+            onCancel={() => {
+              setMaking(null);
+              // The live preview put away: whatever was chosen before comes back.
+              const kept = readTheme();
+              applyTheme(kept, false);
+              if (!kept) chooseTheme(themeChoice());
+            }}
+            onSave={(p) => {
+              const list = keepTheme(themeFromPalette(p, making.id));
+              setMine(list);
+              use(list[0]!);
+              setMaking(null);
+            }}
+          />
+        )}
         {themeErr && <Note ok={false}>{themeErr}</Note>}
         <Row label="Interface font" hint="A font installed on this computer, or a Google Fonts name; empty is Friday's own (Geist, Inter for replies).">
           <Input value={fonts.ui ?? ""} placeholder="Geist" aria-label="Interface font" className="h-8 w-56 text-[13px]" onChange={(e) => setFonts({ ...fonts, ui: e.target.value })} onBlur={(e) => setFont("ui", e.target.value)} onKeyDown={(e) => e.key === "Enter" && setFont("ui", (e.target as HTMLInputElement).value)} />
@@ -150,6 +228,93 @@ export function AppearanceTab() {
         </Row>
       </SettingsGroup>
     </section>
+  );
+}
+
+/** One theme in the gallery: a small picture of the window in its colours, and its name. */
+function ThemeCard({ name, on, onPick, swatch, actions }: { name: string; on: boolean; onPick: () => void; swatch: Palette | CustomTheme; actions?: ReactNode }) {
+  const c =
+    "bg" in swatch
+      ? { bg: swatch.bg, side: swatch.sidebar ?? swatch.bg, ink: swatch.ink, accent: swatch.accent, muted: `color-mix(in srgb, ${swatch.ink} 40%, ${swatch.bg})` }
+      : { bg: swatch.vars["--bg"], side: swatch.vars["--sidebar"], ink: swatch.vars["--ink"], accent: swatch.vars["--accent"], muted: swatch.vars["--text-muted"] };
+  return (
+    <div className="thm-card" data-on={on || undefined}>
+      <button type="button" role="radio" aria-checked={on} className="thm-pick" onClick={onPick} title={on ? `${name} is on` : `Use ${name}`}>
+        <span className="thm-swatch" style={{ background: c.bg }} aria-hidden>
+          <span className="thm-side" style={{ background: c.side }} />
+          <span className="thm-lines">
+            <i style={{ background: c.ink, width: "70%" }} />
+            <i style={{ background: c.muted, width: "48%" }} />
+            <i className="thm-pill" style={{ background: c.accent }} />
+          </span>
+        </span>
+        <span className="thm-name">
+          {on && <Icon name="check" size={12} />}
+          {name}
+        </span>
+      </button>
+      {actions && <span className="thm-acts">{actions}</span>}
+    </div>
+  );
+}
+
+const MAKER_COLOURS: [keyof Palette, string][] = [
+  ["bg", "Background"],
+  ["sidebar", "Sidebar"],
+  ["ink", "Text"],
+  ["accent", "Accent"],
+  ["green", "Done and added"],
+  ["amber", "Waiting"],
+  ["red", "Errors and removed"],
+];
+
+/** Four colours (and three more if you like) into a whole theme, shown on the app as you pick them. */
+function ThemeMaker({ start, onCancel, onSave }: { start: Palette; onCancel: () => void; onSave: (p: Palette) => void }) {
+  const [p, setP] = useState<Palette>(start);
+  // Live, without keeping it: Cancel puts back what was there.
+  useEffect(() => applyTheme(themeFromPalette(p), false), [p]);
+  const set = (k: keyof Palette, v: string) => setP((x) => ({ ...x, [k]: v }));
+  const flip = (dark: boolean) => setP((x) => (x.dark === dark ? x : { ...FRIDAY_PALETTES[dark ? "dark" : "light"], name: x.name, accent: x.accent, ...(x.tokens ? { tokens: x.tokens } : {}) }));
+  return (
+    <div className="thm-maker" role="group" aria-label="Make a theme">
+      <div className="thm-maker-head">
+        <Input value={p.name} maxLength={60} aria-label="Theme name" className="h-8 w-56 text-[13px]" onChange={(e) => set("name", e.target.value)} />
+        <Choice<"dark" | "light">
+          label="Light or dark"
+          value={p.dark ? "dark" : "light"}
+          onChange={(v) => flip(v === "dark")}
+          options={[
+            ["dark", "Dark"],
+            ["light", "Light"],
+          ]}
+        />
+      </div>
+      <div className="thm-maker-colours">
+        {MAKER_COLOURS.map(([k, label]) => {
+          const v = (p[k] as string | undefined) ?? (k === "sidebar" ? p.bg : "#888888");
+          return (
+            <label key={k} className="thm-colour">
+              <input type="color" value={/^#[0-9a-f]{6}$/i.test(v) ? v : "#888888"} onChange={(e) => set(k, e.target.value)} aria-label={label} />
+              <span>
+                {label}
+                <code>{v}</code>
+              </span>
+            </label>
+          );
+        })}
+      </div>
+      <div className="thm-maker-foot">
+        <span className="muted small">Shown on the app as you pick. Saved, it stays with your themes on this computer; Export makes a file to share.</span>
+        <span className="flex gap-2">
+          <Button variant="ghost" size="sm" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button size="sm" disabled={!p.name.trim()} onClick={() => onSave({ ...p, name: p.name.trim() })}>
+            Save theme
+          </Button>
+        </span>
+      </div>
+    </div>
   );
 }
 

@@ -599,16 +599,19 @@ export class SessionCore {
         if (state.run.status === "running" || Object.values(state.laneRuns).some((r) => r.status === "running")) return fail("Stop the run first, then undo.");
         // A rewind names a message, and the checkpoint has to be the one taken for it: nobody rewinds to a stray id.
         let rewoundTo: number | undefined;
+        /** Every file back to the checkpoint, not only what its run changed: a rewind to a message, of everything after it. */
+        let whole = false;
         if (cmd.rewindTo !== undefined) {
-          // A coding tool keeps its own conversation, which a rewind here cannot reach: it can only be undone.
-          if (state.engines[lane]?.tool) return fail("That coding tool keeps its own conversation, so only its files can be put back. Use Undo.");
           const at = Number(cmd.rewindTo);
           if (!Number.isInteger(at) || checkpointBefore(await this.store.events(sid), at) !== cmd.sha) return fail("That message has no checkpoint to go back to.");
-          rewoundTo = at;
+          // A coding tool keeps its own conversation, which a rewind here cannot reach: its files go back to before the message,
+          // and the conversation stays as it is, in the log and in the tool (Arun, 2026-10-26: rewind for the coding tools too).
+          if (state.engines[lane]?.tool) whole = true;
+          else rewoundTo = at;
         }
         // Only what that run changed, when its end was saved: what the person did since, in other files, is left alone.
         const until = runEndAfter(await this.store.events(sid), lane, cmd.sha);
-        const r = await folderAt({ op: "restore", ref: cmd.sha, ...(until && rewoundTo === undefined ? { until } : {}) });
+        const r = await folderAt({ op: "restore", ref: cmd.sha, ...(until && rewoundTo === undefined && !whole ? { until } : {}) });
         const done = parseJson<{ undo?: string; after?: string | null; restored?: number; removed?: number; error?: string }>(r.output);
         if (!done?.undo) return fail(done?.error ?? (r.output || "Couldn't undo that."));
         const after = typeof done.after === "string" && /^[0-9a-f]{40}$/.test(done.after) ? done.after : undefined;

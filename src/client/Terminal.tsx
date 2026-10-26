@@ -14,6 +14,7 @@ import { ToolResult, ToolResultOutput } from "@/components/agents/tool-result";
 import { MAIN_LANE, type SessionEvent } from "../types.js";
 import type { Send } from "./useSession.js";
 import { Icon } from "./icons.js";
+import { joinPath, openIn, preferredEditor } from "./openIn.js";
 import { problemsIn, scriptsIn, type Problem, type Script } from "./Problems.js";
 import { relTime } from "./ui.js";
 import { commandFailed } from "../receipt.js";
@@ -300,7 +301,7 @@ export function TerminalPanel({
           that dies when you look at another is not a terminal. */}
       {terms.map((id, i) => (
         <div key={id} className={`term-side-pane ${i === at ? "" : "away"}`}>
-          <LocalShell id={id} cwd={cwd} onOutput={(text) => setOut((all) => ({ ...all, [id]: text }))} />
+          <LocalShell id={id} cwd={cwd} onOutput={(text) => setOut((all) => ({ ...all, [id]: text }))} {...(onOpenFile ? { onOpenFile } : {})} />
         </div>
       ))}
       </div>
@@ -397,9 +398,14 @@ function forgetScreen(id: string): void {
  * xterm arrives on its own chunk, because the browser build has no shell to
  * draw and shouldn't carry the code for one.
  */
-function LocalShell({ id, cwd, onOutput }: { id: string; cwd?: string; onOutput: (text: string) => void }) {
+function LocalShell({ id, cwd, onOutput, onOpenFile }: { id: string; cwd?: string; onOutput: (text: string) => void; onOpenFile?: (path: string, line?: number) => void }) {
   const host = useRef<HTMLDivElement>(null);
   const [err, setErr] = useState("");
+  const termRef = useRef<import("@xterm/xterm").Terminal | null>(null);
+  const opener = useRef(onOpenFile);
+  opener.current = onOpenFile;
+  // ⌘F: find in what the shell printed, its scrollback included (Emdash, Superset and cmux all have it).
+  const [finding, setFinding] = useState(false);
   // What this shell has printed, for the problems list to read. Kept in a ref
   // and reported on a timer: a state update per chunk would re-render the
   // panel on every character a build prints.
@@ -428,7 +434,47 @@ function LocalShell({ id, cwd, onOutput }: { id: string; cwd?: string; onOutput:
       term.loadAddon(fit);
       term.open(el);
       fit.fit();
-      stop.push(() => term.dispose());
+      termRef.current = term;
+      stop.push(() => ((termRef.current = null), term.dispose()));
+      // ⌘F (Ctrl+Shift+F off a Mac, where Ctrl+F is the shell's own) finds in the output rather than going to the shell.
+      term.attachCustomKeyEventHandler((e) => {
+        const mac = /Mac/.test(navigator.platform);
+        if (e.type === "keydown" && e.key.toLowerCase() === "f" && (mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && e.shiftKey)) {
+          e.preventDefault();
+          setFinding(true);
+          return false;
+        }
+        return true;
+      });
+      // A file the output names (a stack trace, a compiler's error, ls) is a link: pressed, it opens in the session's files at
+      // its line; ⌘-pressed, in your own editor (openIn.ts), as in an answer.
+      const links = term.registerLinkProvider({
+          provideLinks(y, done) {
+            const line = term.buffer.active.getLine(y - 1)?.translateToString(true) ?? "";
+            const found: import("@xterm/xterm").ILink[] = [];
+            for (const m of line.matchAll(FILE_IN_OUTPUT)) {
+              const file = m[1]!;
+              const at = Number(m[2] ?? m[4] ?? 0) || undefined;
+              const shown = m[0].slice(m[0].indexOf(file));
+              const start = (m.index ?? 0) + m[0].indexOf(file);
+              found.push({
+                // Columns count from 1, and the end is the link's last column.
+                range: { start: { x: start + 1, y }, end: { x: start + shown.length, y } },
+                text: shown,
+                decorations: { underline: true, pointerCursor: true },
+                activate: (ev) => {
+                  if ((ev.metaKey || ev.ctrlKey) && cwd && window.fridayDesktop?.openIn)
+                    return void preferredEditor().then((ed) => ed && openIn(ed, joinPath(cwd, file), at));
+                  // The session's files are named from its folder: an absolute path inside it is opened by its part in there.
+                  const base = cwd?.replace(/[\\/]+$/, "");
+                  opener.current?.(base && file.startsWith(`${base}/`) ? file.slice(base.length + 1) : file.replace(/^\.\//, ""), at);
+                },
+              });
+            }
+            done(found.length ? found : undefined);
+          },
+        });
+      stop.push(() => links.dispose());
       // Held until what the screen showed before is drawn, so the old screen comes first and the new output after it.
       let drawn = false;
       const early: string[] = [];
@@ -525,7 +571,80 @@ function LocalShell({ id, cwd, onOutput }: { id: string; cwd?: string; onOutput:
   return (
     <div className="term-shell">
       {err && <p className="error small term-shell-err">{err}</p>}
+      {finding && <FindBar term={termRef} onClose={() => (setFinding(false), termRef.current?.focus())} />}
       <div ref={host} className="term-shell-host" />
+    </div>
+  );
+}
+
+/** A file named in a shell's output, with its line: `src/a.ts:12:3`, `./b.py:4`, `C:\x\y.cs(12,3)`, or a bare `name.ext`. */
+const FILE_IN_OUTPUT = /(?:^|[\s'"(\[=])((?:[A-Za-z]:[\\/]|\.{1,2}\/|\/|~\/)?(?:[\w@.+-]+[\\/])*[\w@+-][\w@.+-]*\.[A-Za-z][\w]{0,7})(?::(\d+)(?::(\d+))?|\((\d+),(\d+)\))?(?=$|[\s'"),:\]])/g;
+
+/** Every place the text is in the shell's buffer, scrollback included, top to bottom. */
+function matchesIn(term: import("@xterm/xterm").Terminal, query: string): { row: number; col: number }[] {
+  const q = query.toLowerCase();
+  const out: { row: number; col: number }[] = [];
+  if (!q) return out;
+  const buf = term.buffer.active;
+  for (let row = 0; row < buf.length && out.length < 1000; row++) {
+    const text = buf.getLine(row)?.translateToString(true).toLowerCase() ?? "";
+    for (let col = text.indexOf(q); col !== -1; col = text.indexOf(q, col + q.length)) out.push({ row, col });
+  }
+  return out;
+}
+
+function FindBar({ term, onClose }: { term: { current: import("@xterm/xterm").Terminal | null }; onClose: () => void }) {
+  const [q, setQ] = useState("");
+  const [hits, setHits] = useState<{ row: number; col: number }[]>([]);
+  const [at, setAt] = useState(-1);
+  const show = (list: { row: number; col: number }[], i: number) => {
+    const t = term.current;
+    const h = list[i];
+    if (!t || !h) return;
+    t.select(h.col, h.row, q.length);
+    t.scrollToLine(Math.max(0, h.row - Math.floor(t.rows / 2)));
+  };
+  const search = (query: string) => {
+    setQ(query);
+    const t = term.current;
+    const list = t ? matchesIn(t, query) : [];
+    setHits(list);
+    // The newest first: what you look for is usually what was just printed.
+    const i = list.length - 1;
+    setAt(i);
+    if (i >= 0) show(list, i);
+    else t?.clearSelection();
+  };
+  const step = (by: number) => {
+    if (!hits.length) return;
+    const i = (at + by + hits.length) % hits.length;
+    setAt(i);
+    show(hits, i);
+  };
+  return (
+    <div className="term-find" role="search">
+      <Icon name="search" size={13} />
+      <input
+        autoFocus
+        value={q}
+        placeholder="Find in the output"
+        aria-label="Find in the terminal's output"
+        onChange={(e) => search(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") (e.preventDefault(), onClose());
+          else if (e.key === "Enter") (e.preventDefault(), step(e.shiftKey ? 1 : -1));
+        }}
+      />
+      <span className="term-find-count">{q ? (hits.length ? `${at + 1} of ${hits.length}` : "None") : ""}</span>
+      <button type="button" className="icon-btn tiny" aria-label="Earlier match" title="Earlier (Enter)" disabled={!hits.length} onClick={() => step(-1)}>
+        <Icon name="chevronUp" size={13} />
+      </button>
+      <button type="button" className="icon-btn tiny" aria-label="Later match" title="Later (⇧Enter)" disabled={!hits.length} onClick={() => step(1)}>
+        <Icon name="chevronDown" size={13} />
+      </button>
+      <button type="button" className="icon-btn tiny" aria-label="Close find" onClick={onClose}>
+        <Icon name="x" size={13} />
+      </button>
     </div>
   );
 }
@@ -645,6 +764,21 @@ const LIGHT_ANSI = {
  * silent — xterm keeps its own default and the grid sits in a black rectangle
  * inside a white panel.
  */
+/** Any colour the browser can paint, as rgba(): drawn on one pixel and read back. */
+function asRgba(colour: string): string | null {
+  try {
+    const ctx = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
+    if (!ctx) return null;
+    ctx.canvas.width = ctx.canvas.height = 1;
+    ctx.fillStyle = colour;
+    ctx.fillRect(0, 0, 1, 1);
+    const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
+    return `rgba(${r}, ${g}, ${b}, ${Math.round((a! / 255) * 100) / 100})`;
+  } catch {
+    return null;
+  }
+}
+
 function themeFrom(el: HTMLElement): { background: string; foreground: string; cursor: string; selectionBackground: string; [colour: string]: string } {
   const probe = document.createElement("span");
   probe.style.display = "none";
@@ -653,13 +787,17 @@ function themeFrom(el: HTMLElement): { background: string; foreground: string; c
     probe.style.color = "";
     probe.style.color = value;
     const out = getComputedStyle(probe).color;
-    return probe.style.color ? out : fallback;
+    if (!probe.style.color) return fallback;
+    // A mix (a theme's derived colours, color-mix) computes as color(srgb …), which xterm doesn't read: as rgba, through a pixel.
+    return /^rgba?\(/.test(out) ? out : (asRgba(out) ?? fallback);
   };
   const theme = {
     background: read("var(--code-bg)", "#181818"),
     foreground: read("var(--ink)", "#ededed"),
     cursor: read("var(--violet)", "#ededed"),
     selectionBackground: read("var(--hover-strong)", "#3a3a5c"),
+    // What Find selected shows while its box has the keys, rather than vanishing with the focus.
+    selectionInactiveBackground: read("color-mix(in srgb, var(--amber) 38%, transparent)", "#7a5a1a"),
   };
   probe.remove();
   // On a light terminal the shells' own colours were made for a dark one: PowerShell's yellow command and grey arguments

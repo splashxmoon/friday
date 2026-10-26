@@ -9,6 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, session, shell } from "electron";
 import { MAC_CSS, THEME_WATCH, WIN_CSS } from "../desktop-chrome.js";
+import { registerNative } from "../desktop-native.js";
 import { registerTerminal, stopTerminals } from "../desktop-terminal.js";
 import { registerUpdates } from "../desktop-update.js";
 import { startLocal, type Started } from "./start.js";
@@ -132,6 +133,8 @@ else {
   });
   // Real shells for the terminal panel (desktop-terminal.ts), as in the product app.
   registerTerminal(fromApp);
+  // "Open in" your editor, file manager or terminal, and the dock's count of what waits on you (desktop-native.ts).
+  registerNative(fromApp);
   // The page's light or dark choice (preload.ts setTheme): the window buttons and background follow it where the OS draws them.
   ipcMain.on("friday:theme", (e, theme: unknown) => {
     if (!win || e.sender !== win.webContents) return;

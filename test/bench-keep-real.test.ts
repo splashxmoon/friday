@@ -10,7 +10,8 @@ import { container, propsOf, type FakeElement } from "./fake-dom.js";
  */
 const XTERM = `export class Terminal {
   constructor() { globalThis.__xterms = (globalThis.__xterms ?? 0) + 1; this.cols = 80; this.rows = 24; this.options = {}; this.written = ""; globalThis.__xterm = this; }
-  loadAddon() {} open() {} focus() {} dispose() {}
+  loadAddon() {} open() {} focus() {} dispose() {} attachCustomKeyEventHandler() {}
+  registerLinkProvider() { return { dispose() {} }; }
   write(d) { this.written += d; }
   onData(f) { this.typed = f; return { dispose() {} }; }
 }`;

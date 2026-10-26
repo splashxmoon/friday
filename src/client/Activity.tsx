@@ -128,6 +128,7 @@ import { useToolLimits } from "./toolLimits.js";
 import { ApprovalCard } from "@/components/aicss/ApprovalCard";
 import { askReply, parseChoices, type Ask } from "./ask-choices.js";
 import { ASK_FOCUS } from "./Attention.js";
+import { rememberAsk, walkAsks } from "./askHistory.js";
 import { hiddenNotes } from "../session-notes.js";
 import type { AgentStatus } from "../agents-hub.js";
 import { ALL, agentKey, focusAgent, jumpToNeeds, markSeen, nextKey, openedAt, useAgents, useFocusedAgent, useSeen } from "./agentFocus.js";
@@ -2128,11 +2129,25 @@ function HumanMessage({ ev, ctx }: { ev: Ev<"instruction"> | Ev<"suggestion">; c
   can.current = () => ({ fork, again: () => prefillComposer(b.text), ...(mayRewind ? { rewind } : {}) });
 
   // Going back to before this message: its files, and the agent's memory of what followed. Only where there is a checkpoint to go to,
-  // only for Friday's own agent (a coding tool keeps its own conversation), only while nothing is running, and only for who can undo.
+  // only while nothing is running, and only for who can undo. A coding tool keeps its own conversation, which Friday can't wind back:
+  // there it is the files only, said so, and the log keeps everything after (Claude Code, Zed and Factory restore code alone too).
   const checkpoint = b.type === "instruction" && !b.text.startsWith("[session]") ? ctx.checkpoints.get(ev.seq) : undefined;
   const anyRunning = state.run.status === "running" || Object.values(state.laneRuns).some((r) => r.status === "running");
-  const mayRewind = !!checkpoint && !state.engines[said]?.tool && (me.role === "owner" || driving) && !anyRunning && !isSetAside(ctx.rewinds, ev.seq, said);
+  const mayRewind = !!checkpoint && (me.role === "owner" || driving) && !anyRunning && !isSetAside(ctx.rewinds, ev.seq, said);
+  const tool = state.engines[said]?.tool;
   const rewind = () => {
+    if (tool)
+      return ask({
+        title: "Put the files back to before this message?",
+        body: `The files go back to how they were before this was acted on. ${ENGINE_NAMES[tool]} keeps its own conversation, so it still remembers what came after; the message goes back into the box so you can tell it what changed.`,
+        action: "Restore the files",
+        danger: true,
+        onConfirm: async () => {
+          const r = await send({ type: "folder.restore", sha: checkpoint!, lane: said, rewindTo: ev.seq });
+          if (!r.ok) return ctx.notify(r.error ?? "Couldn't restore. The folder may have moved on since; check the Diff tab, then try again.");
+          if (b.type === "instruction") prefillComposer(b.text);
+        },
+      });
     const n = rewindImpact(ctx.events, ev.seq);
     const parts = [n.runs ? `${n.runs} run${n.runs === 1 ? "" : "s"}` : "", n.messages > 1 ? `${n.messages} messages` : "", n.files ? `${n.files} file${n.files === 1 ? "" : "s"} the agent changed` : ""].filter(Boolean);
     ask({
@@ -2826,10 +2841,13 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   // What to do next, as words: the last line of the response, not decoration on it.
   // The run can be taken back from its own answer: the files go back to before it started, and the agent forgets it.
   const rewindable = !!item.checkpoint && !!item.ended && !active && canUndo(ctx, item.checkpoint.lane);
+  const runTool = item.checkpoint ? ctx.state.engines[item.checkpoint.lane]?.tool : undefined;
   const rewindHere = () =>
     ask({
-      title: "Rewind to before this run?",
-      body: "The files go back to how they were before this run started, and the agent forgets what it did in it. The log keeps all of it, and you can redo it from the feed.",
+      title: runTool ? "Put the files back to before this run?" : "Rewind to before this run?",
+      body: runTool
+        ? `The files go back to how they were before this run started. ${ENGINE_NAMES[runTool]} keeps its own conversation, so it still remembers the run; the log keeps all of it too.`
+        : "The files go back to how they were before this run started, and the agent forgets what it did in it. The log keeps all of it, and you can redo it from the feed.",
       action: "Rewind to here",
       danger: true,
       onConfirm: async () => {
@@ -5919,6 +5937,8 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
         ? "Suggest a redirect…"
         : "You're watching this session";
 
+  /** Where ↑ has got to in your past asks; -1 while the box holds your own text. */
+  const askAt = useRef(-1);
   const onSubmit = async (msg: PromptInputMessage) => {
     const text = msg.text.trim();
     const now = interruptNext.current;
@@ -5940,6 +5960,8 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
       return;
     }
     if (mode === "view" || (!text && !msg.files.length)) return;
+    rememberAsk(text);
+    askAt.current = -1;
     // The shield would hide a typed key from the agent too, so it doesn't go: it stays in the box and the notice says why.
     // Thrown, so the box keeps its attachments.
     if (hideSecrets(text).hidden > 0) {
@@ -6044,6 +6066,8 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
             onKeyDown={(e) => {
               // A list of commands or files that is open takes the arrows, Enter and Escape.
               if (shortcuts.onKeyDown(e)) return;
+              // ↑ in an empty box: what you asked before (askHistory.ts).
+              if (walkAsks(e, e.currentTarget, askAt, prefillComposer)) return;
               // ⌘↵ sends past a running step instead of queueing behind it.
               // The modifier is the whole interrupt control for anyone who
               // finds it, and the caption says so while a run is live.

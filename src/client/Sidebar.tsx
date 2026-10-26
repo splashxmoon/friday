@@ -890,6 +890,7 @@ function ChatRow({
     <div
       ref={ref}
       className="dass-row"
+      data-sid={r.sid}
       data-active={active}
       data-menu={menuOpen || !!ctx}
       role="button"

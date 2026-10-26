@@ -712,10 +712,49 @@ export function App() {
   // Global keyboard shortcuts.
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
+  // For the keys that move between sessions: the list, what waits on you, and the sessions in the order you were last in them.
+  const moveRef = useRef({ recents, items: attention.items, here: route.kind === "session" ? route.sid : "" });
+  moveRef.current = { recents, items: attention.items, here: route.kind === "session" ? route.sid : "" };
+  const visited = useRef<string[]>([]);
   useEffect(() => {
+    if (route.kind === "session") visited.current = [route.sid, ...visited.current.filter((x) => x !== route.sid)].slice(0, 20);
+  }, [route]);
+  useEffect(() => {
+    /** Into a session of this person's list, by its id. */
+    const go = (sid: string | undefined) => {
+      const r = sid ? moveRef.current.recents.find((x) => x.sid === sid) : undefined;
+      if (r) navigate({ kind: "session", sid: r.sid, invite: r.invite });
+      return !!r;
+    };
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
       const k = e.key.toLowerCase();
+      const { items, here } = moveRef.current;
+      // ⌘⌥1–9: the sidebar's sessions, in the order it shows them (⌘1–4 are a session's panels). By the key, not the character:
+      // ⌥ turns 1 into ¡ on a Mac.
+      if (mod && e.altKey && !e.shiftKey && /^Digit[1-9]$/.test(e.code)) {
+        const rows = [...document.querySelectorAll<HTMLElement>(".dass-row[data-sid]")].filter((el) => el.offsetParent !== null);
+        if (go(rows[Number(e.code.slice(5)) - 1]?.dataset.sid)) e.preventDefault();
+        return;
+      }
+      // Ctrl+Tab: back to the session you were in before this one, as an editor flips between its last two files; ⇧ goes on
+      // down the list of the ones you've been in.
+      if (e.ctrlKey && !e.metaKey && !e.altKey && e.key === "Tab") {
+        const seen = visited.current.filter((x) => x !== here && moveRef.current.recents.some((r) => r.sid === x));
+        const fallback = moveRef.current.recents.filter((r) => r.sid !== here).sort((a, b) => b.openedAt - a.openedAt).map((r) => r.sid);
+        const order = [...seen, ...fallback.filter((x) => !seen.includes(x))];
+        if (go(e.shiftKey ? order[order.length - 1] : order[0])) e.preventDefault();
+        return;
+      }
+      // ⌘⇧U: the next session that waits on you, after this one, round to the first (as cmux binds it).
+      if (mod && e.shiftKey && !e.altKey && k === "u") {
+        const sids = [...new Set(items.map((i) => i.sid))];
+        if (!sids.length) return;
+        e.preventDefault();
+        const at = sids.indexOf(here);
+        go(sids[(at + 1) % sids.length]);
+        return;
+      }
       // ⌘K opens the palette, as every tool of this kind binds it (Arun, 2026-10-25, after T3 Code, Orca and MonoCode). It used
       // to mean "new session" alone; that is the palette's first row, so ⌘K then Enter still starts one, and typing a task into it
       // offers to start a session with those words. ⌘⇧P too, the way every editor binds it.

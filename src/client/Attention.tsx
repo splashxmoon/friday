@@ -164,6 +164,9 @@ export function useAttention(identity: Identity, recents: RecentSession[], withS
   // A session deleted or removed leaves at once, before the server is next asked.
   const here = useMemo(() => new Set(sids.split(",")), [sids]);
   const shown = useMemo(() => items.filter((i) => here.has(i.sid)), [items, here]);
+  // The count on the dock icon in the desktop app: what waits on you, gone the moment it is answered.
+  useEffect(() => window.fridayDesktop?.setBadge?.(shown.length), [shown.length]);
+  useEffect(() => () => window.fridayDesktop?.setBadge?.(0), []);
   return { items: shown, working, previews, crews, prs, overlaps, summaries, loaded, gone };
 }
 
@@ -181,6 +184,14 @@ function notify(it: Attention): void {
     n.onclick = () => {
       window.focus();
       n.close();
+      // At what it is about: the session, and a question's own card.
+      if (it.kind === "ask")
+        try {
+          sessionStorage.setItem(ASK_FOCUS, `${it.sid}:${it.seq}`);
+        } catch {
+          // Blocked storage: the session still opens, at its newest.
+        }
+      window.dispatchEvent(new CustomEvent("friday:open-session", { detail: { sid: it.sid } }));
     };
   } catch {
     // Notifications are a courtesy; a browser that refuses them changes nothing.
@@ -196,6 +207,7 @@ function notifyDone(title: string, what: string, sid: string): void {
     n.onclick = () => {
       window.focus();
       n.close();
+      window.dispatchEvent(new CustomEvent("friday:open-session", { detail: { sid } }));
     };
   } catch {
     // Notifications are a courtesy; a browser that refuses them changes nothing.

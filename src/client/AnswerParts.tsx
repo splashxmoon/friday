@@ -7,6 +7,7 @@ import { pathOf, rehypeAnswer } from "./answer-format.js";
 import { languageFor } from "./DiffView.js";
 import { FileIcon } from "./fileIcons.js";
 import { Icon } from "./icons.js";
+import { IS_MAC } from "./Shortcuts.js";
 import { LiveBlock, LiveImage } from "./LiveBlock.js";
 
 /**
@@ -43,16 +44,20 @@ function useCopy(text: string) {
   ] as const;
 }
 
-/** A file the answer names: pressed, it opens in the session's file view; where there is none (a replay), it copies the path. */
+/**
+ * A file the answer names: pressed, it opens in the session's file view; where there is none (a replay), it copies the path.
+ * ⌘-pressed (Ctrl elsewhere) in the desktop app, it opens in your own editor at its line instead.
+ */
 function FileChip({ text, path, line }: { text: string; path: string; line?: number }) {
   const [copied, copy] = useCopy(path);
-  const open = () => {
+  const open = (e: { metaKey: boolean; ctrlKey: boolean }) => {
+    const outside = e.metaKey || e.ctrlKey;
     // The session view takes the event and says so; nobody taking it means there is no file view here.
-    const taken = !window.dispatchEvent(new CustomEvent("friday:open-file", { detail: { path, line }, cancelable: true }));
+    const taken = !window.dispatchEvent(new CustomEvent("friday:open-file", { detail: { path, line, outside }, cancelable: true }));
     if (!taken) copy();
   };
   return (
-    <button type="button" className="file-chip" onClick={open} title={copied ? "Path copied" : `Open ${path}${line ? ` at line ${line}` : ""}`} aria-label={`Open ${text}`}>
+    <button type="button" className="file-chip" onClick={open} title={copied ? "Path copied" : `Open ${path}${line ? ` at line ${line}` : ""}${window.fridayDesktop?.openIn ? ` · ${IS_MAC ? "⌘" : "Ctrl"}-click for your editor` : ""}`} aria-label={`Open ${text}`}>
       <FileIcon path={path} size={14} />
       <code>{text}</code>
     </button>
