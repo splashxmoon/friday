@@ -12,7 +12,7 @@
 <p align="center">
   <a href="https://github.com/splashxmoon/friday/stargazers"><img src="https://img.shields.io/github/stars/splashxmoon/friday?style=flat&label=%E2%98%85&color=08C" alt="GitHub stars" /></a>
   <img src="https://img.shields.io/badge/license-MIT-08C?style=flat" alt="License: MIT" />
-  <img src="https://img.shields.io/badge/macOS%20%7C%20Linux-4493F8?style=flat" alt="macOS and Linux" />
+  <img src="https://img.shields.io/badge/macOS%20%7C%20Windows%20%7C%20Linux-4493F8?style=flat" alt="macOS, Windows and Linux" />
   <a href="https://github.com/splashxmoon/friday/actions/workflows/ci.yml"><img src="https://github.com/splashxmoon/friday/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
 </p>
 
