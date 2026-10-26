@@ -25,10 +25,7 @@
 </p>
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/hero-dark.png" />
-    <img src="docs/assets/hero.png" alt="Friday with six agents at work at once: Claude Code and Codex, each on its own task in its own repository, listed in the sidebar and under Right now" width="960" />
-  </picture>
+  <img src="docs/assets/hero.png" alt="Friday with four sessions and nine agents at work: in each session Claude Code and Codex take a part of the job, shown working side by side in the sidebar and under Right now" width="960" />
 </p>
 
 Works with the subscriptions you already have. If a coding tool is installed and signed in on your computer, Friday can drive it:
@@ -54,6 +51,12 @@ Works with the subscriptions you already have. If a coding tool is installed and
 ## Your agents, working as a team
 
 Friday doesn't just run your coding tools next to each other: it lets them work together. One agent can split a job into a **task board**; the others pick up the tasks that suit them, each in its own files, and every finished task is checked (its tests run, another agent reviews it) before it counts as done. Along the way they **message each other** directly: a heads-up about a rename, a question one of them waits on, an answer that comes back. You see every message as it happens.
+
+<p align="center">
+  <img src="docs/assets/agents-in-session.png" alt="One session with three agents at work: Claude Code on the checkout, Codex writing its tests, and a second Claude Code keeping the old cart working, each in its own copy of the repository" width="960" />
+</p>
+
+An agent you add to a session can work in its own copy of the repository, so three of them can change the same project at once without stepping on each other.
 
 <table>
 <tr>
@@ -182,7 +185,7 @@ Also in the box: a live feed of every message, command and file change; approval
 
 Friday listens on `127.0.0.1` only, so nothing else on your network can reach it, and it answers only its own page: a request from any other site, or from a page being previewed, is refused. What it keeps is one folder on your computer, readable only by you.
 
-It sends nothing to us: no account, no analytics, no telemetry. It talks to GitHub for the pull requests, issues and skills you ask it about, and reads each coding tool's remaining usage from that tool's own provider, with the sign-in the tool already has.
+It sends nothing to us: no account, no analytics, no telemetry. It talks to GitHub for the pull requests, issues and skills you ask it about, and reads each coding tool's remaining usage from that tool's own provider, with the sign-in the tool already has. The desktop app also asks GitHub which release is the latest, twice a day, so it can tell you when there's a new one (`FRIDAY_NO_UPDATE_CHECK=1` turns that off).
 
 ## Developing
 
@@ -197,7 +200,7 @@ npm run desktop:dist # package installers for this computer into release/
 
 Pushing a `v*` tag builds the installers for every platform on GitHub Actions and publishes them as a release ([release.yml](.github/workflows/release.yml)).
 
-Issues and pull requests are welcome. For anything large, open an issue first so we can talk it through.
+Issues and pull requests are welcome: [CONTRIBUTING.md](CONTRIBUTING.md) says how. For anything large, open an issue first so we can talk it through.
 
 ## License
 

@@ -444,9 +444,11 @@ export async function createApp(o: AppOptions) {
     Promise.race([prStatusFor(sid, lane, workspaceId, url).catch(() => null), new Promise<null>((done) => setTimeout(() => done(null), 1200).unref?.())]);
   const sessionsAfter = async (_uid: string) => 0;
   const runnersOnline = new Map<WebSocket, string>();
+  /** The open-source edition's one person (local/identity.ts), by the name they gave themselves in Settings, if they did. */
+  const localNamed = async () => localAccount({ id: o.local!.user.id, name: (await redis.get(`${o.prefix}local:name`).catch(() => null)) || o.local!.user.name });
   const identity: (req: http.IncomingMessage) => Promise<Account | null> =
-    // The open-source edition: the person at this computer, always (local/identity.ts), by the name they gave it, if they did.
-    async () => localAccount({ id: o.local!.user.id, name: (await redis.get(`${o.prefix}local:name`).catch(() => null)) || o.local!.user.name });
+    // The open-source edition: the person at this computer, always.
+    localNamed;
   /**
    * Who is asking, and whose workspace they are in. Everything scoped hangs
    * off this: a person with no membership of a workspace never gets its
@@ -2235,7 +2237,7 @@ export async function createApp(o: AppOptions) {
       (async () => {
         const actor = verifyActor(o.secret, url.searchParams.get("token"), sid);
         // A token minted before the account ended its sessions is no permission at all.
-        const account = actor ? localAccount(o.local!.user) : null;
+        const account = actor ? await localNamed() : null;
         if (!account) return closeSaying(ws, 4001, "This runner has no permission to act in that session. Start it from Friday again.");
         me.id = account.id;
         me.name = account.name;
@@ -2407,7 +2409,8 @@ export async function createApp(o: AppOptions) {
 
     const ready = (async () => {
       // Fill in who this is before anything asks: no account, no session.
-      const account = localAccount(o.local!.user);
+      // In a session, too, by the name they gave themselves, not this computer's account name.
+      const account = await localNamed();
       if (!account) reject(4001, "Sign in to join this session.");
       me.id = account!.id;
       me.name = account!.name;

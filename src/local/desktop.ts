@@ -4,9 +4,10 @@
  * GitHub Actions (.github/workflows/release.yml).
  */
 import { execFile } from "node:child_process";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, Menu, shell } from "electron";
+import { app, BrowserWindow, dialog, Menu, shell } from "electron";
 import { startLocal, type Started } from "./start.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -30,6 +31,43 @@ const loginPath: Promise<void> =
         });
         child.stdin?.end();
       });
+
+/**
+ * A newer version, said once per version: the app asks GitHub which release is the latest, a few seconds after it opens and
+ * twice a day after that, and offers the download page. Nothing else is sent; FRIDAY_NO_UPDATE_CHECK=1 turns it off.
+ * (It doesn't install itself: an app that replaces itself has to be signed first, on macOS above all.)
+ */
+const RELEASES = "https://github.com/splashxmoon/friday/releases/latest";
+const newer = (a: string, b: string) => {
+  const [x, y] = [a, b].map((v) => v.replace(/^v/, "").split(/[.-]/).map((n) => Number(n) || 0));
+  for (let i = 0; i < 3; i++) if (x![i]! !== y![i]!) return x![i]! > y![i]!;
+  return false;
+};
+async function checkForUpdate(): Promise<void> {
+  if (process.env.FRIDAY_NO_UPDATE_CHECK === "1") return;
+  try {
+    const r = await fetch("https://api.github.com/repos/splashxmoon/friday/releases/latest", { headers: { accept: "application/vnd.github+json" }, signal: AbortSignal.timeout(10_000) });
+    if (!r.ok) return;
+    const latest = String(((await r.json()) as { tag_name?: string }).tag_name ?? "").replace(/^v/, "");
+    if (!latest || !newer(latest, app.getVersion())) return;
+    const file = path.join(app.getPath("userData"), "update.json");
+    const told = await readFile(file, "utf8").then((t) => (JSON.parse(t) as { told?: string }).told, () => undefined);
+    if (told === latest) return;
+    await writeFile(file, JSON.stringify({ told: latest })).catch(() => {});
+    const opts = {
+      type: "info" as const,
+      buttons: ["Download", "Later"],
+      defaultId: 0,
+      cancelId: 1,
+      message: `Friday ${latest} is out`,
+      detail: `You have ${app.getVersion()}. Install the new one over this one: your sessions and settings stay where they are.`,
+    };
+    const { response } = win && !win.isDestroyed() ? await dialog.showMessageBox(win, opts) : await dialog.showMessageBox(opts);
+    if (response === 0) void shell.openExternal(RELEASES);
+  } catch {
+    // Offline, or GitHub didn't answer: asked again later.
+  }
+}
 
 let friday: Started | null = null;
 let win: BrowserWindow | null = null;
@@ -72,6 +110,8 @@ else {
     friday = await startLocal();
     open(friday.url);
     app.on("activate", () => friday && open(friday.url));
+    setTimeout(() => void checkForUpdate(), 5_000);
+    setInterval(() => void checkForUpdate(), 12 * 60 * 60_000).unref();
   });
   app.on("window-all-closed", () => {
     if (process.platform !== "darwin") app.quit();
