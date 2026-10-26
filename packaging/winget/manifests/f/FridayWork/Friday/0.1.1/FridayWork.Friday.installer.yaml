@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.10.0.schema.json
+PackageIdentifier: FridayWork.Friday
+PackageVersion: 0.1.1
+InstallerType: nullsoft
+Scope: user
+InstallModes:
+  - silent
+  - silentWithProgress
+UpgradeBehavior: install
+ReleaseDate: 2026-10-26
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/splashxmoon/friday/releases/download/v0.1.1/Friday-Setup.exe
+    InstallerSha256: 27DE73549E1CB8EBAED5CA972F70C933CCCBF912B55CCB0026610515719054E4
+ManifestType: installer
+ManifestVersion: 1.10.0

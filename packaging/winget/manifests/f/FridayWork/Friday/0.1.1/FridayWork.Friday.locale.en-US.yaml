@@ -1,0 +1,29 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.10.0.schema.json
+PackageIdentifier: FridayWork.Friday
+PackageVersion: 0.1.1
+PackageLocale: en-US
+Publisher: Friday Work
+PublisherUrl: https://www.tryfridaywork.com
+PublisherSupportUrl: https://github.com/splashxmoon/friday/issues
+Author: Arun Dass
+PackageName: Friday
+PackageUrl: https://github.com/splashxmoon/friday
+License: MIT
+LicenseUrl: https://github.com/splashxmoon/friday/blob/main/LICENSE
+ShortDescription: Open-source harness for coding agents that work as a team.
+Description: |-
+  Friday runs the coding agents you already use, such as Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot and OpenCode, as one team on your own computer.
+  One agent splits a job into a task board and the others take parts of it, they message each other as they work, each can work in its own Git worktree, and a tool that runs out of usage hands its task to another.
+  It runs on 127.0.0.1 with no account, on each tool's own plan.
+Moniker: friday
+Tags:
+  - ai
+  - claude-code
+  - codex
+  - coding-agents
+  - cursor
+  - developer-tools
+  - multi-agent
+ReleaseNotesUrl: https://github.com/splashxmoon/friday/releases/tag/v0.1.1
+ManifestType: defaultLocale
+ManifestVersion: 1.10.0

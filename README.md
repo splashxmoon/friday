@@ -96,6 +96,13 @@ What we sell is [Friday Team](https://www.tryfridaywork.com), the hosted version
 | Windows | [Friday-Setup.exe](https://github.com/splashxmoon/friday/releases/latest/download/Friday-Setup.exe) |
 | Linux | [Friday-x86_64.AppImage](https://github.com/splashxmoon/friday/releases/latest/download/Friday-x86_64.AppImage) (`chmod +x` it, then run it) |
 
+On a Mac, Homebrew installs it too:
+
+```bash
+brew tap splashxmoon/friday https://github.com/splashxmoon/friday
+brew install --cask friday
+```
+
 Every version is on the [releases page](https://github.com/splashxmoon/friday/releases). The app is Friday in a window of its own, with the same server inside it, on `127.0.0.1` only.
 
 > [!NOTE]
