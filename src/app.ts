@@ -27,6 +27,7 @@ import { Redis } from "ioredis";
 import { ops } from "./ops.js";
 import { WebSocket, WebSocketServer } from "ws";
 import { fetchIssue, fetchPr, issueRef, parseIssueUrl, parsePrLink, prRef } from "./github-issue.js";
+import { AutomationStore, cleanAutomation, describeWhen, describeWho, dueAutomation, promptFor as automationPrompt, WAIT_FOR_COMPUTER_MS, type Automation, type AutomationRun } from "./automations.js";
 import { ProviderError, type LLM } from "./agent/llm.js";
 import { OwnModelLLM } from "./agent/own-model.js";
 import { isOwnModel, ownModelParts } from "./own-model-id.js";
@@ -322,6 +323,8 @@ export async function createApp(o: AppOptions) {
   };
 
 
+  /** Automations hearing a session's events (set below, once the automations are). */
+  let automationsHear: ((sid: string, ev: Pick<SessionEvent, "lane" | "body">) => void) | null = null;
   store.onAppended = (sid, ev) => {
     // A plan naming a file another agent is on: said in the feed now, before either writes it (collisions.ts plannedOverlapsFor).
     if (ev.body.type === "agent.message" && ev.body.toolCalls.some((c) => c.name === "update_plan" || c.name === "todo" || c.name === "TodoWrite")) {
@@ -841,6 +844,139 @@ export async function createApp(o: AppOptions) {
     if (token) await links.call(token, "stop", { sid, lane }, 30_000);
     else if (localHost()) await callHost("stop", { sid, lane }, hostCtx(owner));
   };
+  // ── Automations (automations.ts): the coding tools working on their own ──────────────────────────
+  const automations = new AutomationStore(redis, o.prefix);
+  /** A coding tool started for an automation's run: on the main lane, or a lane of its own beside it; in its own copy of the folder, or a new project folder when there is none. */
+  const startTool = async (sid: string, owner: { id: string; name: string }, p: { tool: EngineTool; cwd: string; mode: EngineMode; copy: boolean; newLane?: string; project: string }) => {
+    const params = {
+      sid,
+      invite: signInvite(o.secret, sid, "owner"),
+      actorToken: signActor(o.secret, sid, owner.id),
+      tool: p.tool,
+      mode: p.mode,
+      ...(p.cwd ? { cwd: p.cwd } : { noFolder: true, project: p.project }),
+      ...(p.cwd && p.copy ? { worktree: "lane", carry: true, copyName: p.newLane || ENGINE_NAMES[p.tool] } : {}),
+      ...(p.newLane ? { newLane: p.newLane } : {}),
+    };
+    const token = links.tokenFor(owner.id);
+    if (token) return links.call<{ lane: string }>(token, "start", params, 10 * 60_000);
+    if (localHost()) return (await callHost("start", params, hostCtx(owner))) as { lane: string };
+    throw new Error("Your computer isn't connected.");
+  };
+  const computerHere = (ownerId: string) => !!links.tokenFor(ownerId) || !!localHost();
+  /**
+   * One run of an automation: a session of its own, owned by the automation's owner, told what to do, with its coding tool
+   * (and any team beside it) started on the owner's computer. A run its owner's computer isn't there for waits for it, or is
+   * skipped, as the automation says. Returns the run as it stands.
+   */
+  const runAutomation = async (ws: string, a: Automation, trigger: string, event: string, waiting?: AutomationRun): Promise<AutomationRun> => {
+    let run: AutomationRun = waiting ?? { id: randomBytes(5).toString("hex"), at: Date.now(), trigger, status: "starting" };
+    if (!waiting) {
+      if (!(await automations.countRun(ws, a.id, a.limits.perDay))) {
+        run = { ...run, status: "skipped", note: `It has already run ${a.limits.perDay} time${a.limits.perDay === 1 ? "" : "s"} today, its limit.`, ended: Date.now() };
+        await automations.addRun(ws, a.id, run);
+        return run;
+      }
+      await automations.addRun(ws, a.id, run);
+    }
+    const set = async (change: Partial<AutomationRun>) => (run = (await automations.updateRun(ws, a.id, run.id, change)) ?? { ...run, ...change });
+    try {
+      // On someone's own computer (the open-source edition, or run from here), there are no accounts and no Friday agent to run.
+      const tool = a.who.tool;
+      if ((tool as string) === "friday") throw new Error("Automations here run your coding tools. Pick one of them instead."); // as string: kept wide for the lines below
+      if (tool !== "friday" && !computerHere(a.ownerId)) {
+        if (a.limits.offline === "skip") return await set({ status: "skipped", note: "Your computer wasn't connected.", ended: Date.now() });
+        if (!waiting) await redis.zadd(automations.waitingKey(), Date.now(), `${ws} ${a.id} ${run.id} ${Buffer.from(event).toString("base64url")}`);
+        return await set({ status: "waiting", note: "Waiting for your computer to connect." });
+      }
+      const owner: Member = { id: a.ownerId, name: a.ownerName, role: "owner" };
+      const agent = ((): NonNullable<Parameters<typeof store.create>[3]>["agent"] => null)(); // No saved agents here (typed, not narrowed to null).
+      const sid = randomBytes(6).toString("base64url");
+      const model = tool === "friday" ? await allowedModel(ws, a.who.model || agent?.model || "", a.ownerId) : "";
+      await store.create(sid, a.name.slice(0, 120), owner, { webSearch: false, controlMode: "ask", mcp: true, model, agent }, ws);
+      await redis.set(automations.runOfKey(sid), JSON.stringify({ ws, id: a.id, run: run.id }), "EX", 14 * 24 * 3600);
+      if (tool !== "friday") await store.append(sid, { id: owner.id, name: owner.name, kind: "human" }, { type: "engine.expected", tool, hostId: owner.id, hostName: owner.name });
+      const team = tool === "friday" ? [] : a.who.team;
+      if (team.length) await core.handle(sid, owner, { type: "lead.set", lane: MAIN_LANE });
+      await core.handle(sid, owner, { type: "instruct", text: automationPrompt(a, event) });
+      const invite = signInvite(o.secret, sid, "owner");
+      await set({ status: "running", sid, invite, note: "" });
+      if (tool !== "friday") {
+        await startTool(sid, owner, { tool, cwd: a.folder, mode: a.who.mode, copy: a.copy, project: a.name });
+        // A team needs a folder to share: with a new project folder for each run, the lead works alone.
+        if (a.folder) for (const t of team) await startTool(sid, owner, { tool: t, cwd: a.folder, mode: a.who.mode, copy: true, newLane: ENGINE_NAMES[t], project: a.name });
+      }
+      return run;
+    } catch (e) {
+      return await set({ status: "failed", note: (e as Error).message.slice(0, 300), ended: Date.now() });
+    }
+  };
+  /** Every 30 seconds: automations whose time has come, and runs waiting for a computer that has connected since. */
+  const tickAutomations = async (now = new Date()): Promise<AutomationRun[]> => {
+    const started: AutomationRun[] = [];
+    const go = (ws: string, a: Automation, trigger: string, event: string, waiting?: AutomationRun) =>
+      runAutomation(ws, a, trigger, event, waiting).then((r) => void started.push(r), (e) => console.error("[automations]", e));
+    for (const ws of await redis.smembers(automations.workspacesKey()).catch(() => [] as string[])) {
+      for (const a of await automations.list(ws).catch(() => [] as Automation[])) {
+        const slot = dueAutomation(a, now);
+        if (!slot) continue;
+        // Friday's own agent runs on Team: on Solo its schedule waits, kept, rather than leaving a failed run each time.
+        if ((a.who.tool as string) === "friday") continue;
+        if (!(await automations.claimSlot(ws, a.id, slot))) continue;
+        await go(ws, a, describeWhen(a.when), `It's ${now.toISOString().slice(0, 16).replace("T", " ")} UTC.`);
+      }
+    }
+    for (const entry of await redis.zrangebyscore(automations.waitingKey(), "-inf", "+inf").catch(() => [] as string[])) {
+      const [ws, id, runId, ev] = entry.split(" ");
+      const a = ws && id ? await automations.get(ws, id) : null;
+      const run = a && runId ? (await automations.runs(ws!, a.id)).find((r) => r.id === runId) : undefined;
+      if (!a || !run || run.status !== "waiting") {
+        await redis.zrem(automations.waitingKey(), entry);
+        continue;
+      }
+      if (now.getTime() - run.at > WAIT_FOR_COMPUTER_MS) {
+        await redis.zrem(automations.waitingKey(), entry);
+        await automations.updateRun(ws!, a.id, run.id, { status: "skipped", note: "Your computer didn't connect within 12 hours.", ended: now.getTime() });
+        continue;
+      }
+      if (!computerHere(a.ownerId)) continue;
+      // Taken off the list before it starts, so a second node seeing it at the same moment doesn't start it again.
+      if (!(await redis.zrem(automations.waitingKey(), entry))) continue;
+      await go(ws!, a, run.trigger, Buffer.from(ev ?? "", "base64url").toString("utf8"), run);
+    }
+    return started;
+  };
+  const automationLoop = setInterval(() => void tickAutomations().catch((e) => console.error("[automations]", e)), 30_000);
+  automationLoop.unref();
+  /** A run's end: the automation's own run marked done or failed (and its owner told, if asked), and any automation watching the session started. */
+  automationsHear = (sid, ev) => {
+    // A run cut off by a lost connection carries on when the machine is back: neither the run's end nor a failure.
+    if (ev.body.type !== "run.ended" || ev.body.cut || (ev.lane ?? MAIN_LANE) !== MAIN_LANE) return;
+    const outcome = ev.body.outcome;
+    const error = ev.body.error;
+    void (async () => {
+      const mine = await redis.get(automations.runOfKey(sid));
+      if (mine && outcome !== "waiting") {
+        const { ws, id, run } = JSON.parse(mine) as { ws: string; id: string; run: string };
+        const a = await automations.get(ws, id);
+        const done = await automations.updateRun(ws, id, run, { status: outcome === "done" ? "done" : "failed", ended: Date.now(), ...(error ? { note: error.slice(0, 300) } : {}) });
+        void a; void done; // Nobody to message here: the run shows on the Automations page.
+      }
+      for (const entry of await redis.smembers(automations.watchKey(sid))) {
+        const [ws, id] = entry.split(" ");
+        const a = ws && id ? await automations.get(ws, id) : null;
+        if (!a || !a.on || a.when.kind !== "session") continue;
+        if ((a.when.on === "finished" && outcome !== "done") || (a.when.on === "failed" && outcome !== "error")) continue;
+        const state = await store.state(sid);
+        const m = state.members[a.ownerId];
+        if (!m || m.removed) continue;
+        const said = (await store.events(sid)).findLast((e) => (e.lane ?? MAIN_LANE) === MAIN_LANE && e.body.type === "agent.message" && !!e.body.text.trim());
+        const last = said?.body.type === "agent.message" ? said.body.text.trim().slice(0, 2000) : "";
+        const what = `The agent in “${state.title}” ${outcome === "done" ? "finished" : `stopped on an error${error ? `: ${error}` : ""}`}.${last ? `\n\nIts last words:\n${last}` : ""}`;
+        await runAutomation(ws!, a, `${outcome === "done" ? "finished" : "failed"} in “${state.title}”`, what);
+      }
+    })().catch((e) => console.error("[automations]", e));
+  };
 
   const hubs = new Hubs({
     store,
@@ -1080,6 +1216,30 @@ export async function createApp(o: AppOptions) {
 
 
 
+    /**
+     * A way in from outside: a URL an agent's owner pastes into GitHub, a
+     * pager or a script. It starts a session running that agent, owned by the
+     * agent's owner, with whatever was posted as the first thing it is told.
+     * The key in the URL is the only credential, so a wrong one is
+     * indistinguishable from an agent that isn't there.
+     */
+    // An automation's webhook (automations.ts): whatever is posted is what started the run. The key is the only credential.
+    const autoHook = url.pathname.match(/^\/api\/hooks\/automation\/([\w-]{1,60})\/([\w-]{4,40})$/);
+    if (autoHook && req.method === "POST") {
+      const a = await automations.get(autoHook[1]!, autoHook[2]!);
+      const given = Buffer.from(url.searchParams.get("key") ?? "");
+      const want = Buffer.from(a?.when.kind === "webhook" ? a.when.secret : "");
+      if (!a || !want.length || given.length !== want.length || !timingSafeEqual(given, want)) return json(res, 404, { error: "Not found" });
+      if (!a.on) return json(res, 409, { error: "This automation is paused." });
+      let payload = "";
+      try {
+        payload = (await readBody(req, 200_000)).toString("utf8").slice(0, 8000).trim();
+      } catch {
+        return json(res, 413, { error: "That payload is too large." });
+      }
+      const run = await runAutomation(autoHook[1]!, a, "webhook", payload || "(The webhook was called with nothing in it.)");
+      return json(res, 202, { run: { id: run.id, status: run.status, ...(run.note ? { note: run.note } : {}) } });
+    }
 
 
 
@@ -1926,6 +2086,64 @@ export async function createApp(o: AppOptions) {
     }
 
 
+    // Automations (automations.ts): everyone in the workspace sees them; only an automation's owner changes it, runs it, or
+    // sees its webhook's address, which is its only credential.
+    if (url.pathname === "/api/automations" || url.pathname.startsWith("/api/automations/")) {
+      const ctx = await context(req);
+      if (!ctx) return json(res, 401, { error: "Sign in first." });
+      const ws = ctx.workspace.id;
+      const me = ctx.me;
+      const base = (o.appUrl || selfUrl).replace(/\/+$/, "");
+      const view = async (a: Automation) => ({
+        ...a,
+        when: a.when.kind === "webhook" ? { kind: "webhook", ...(a.ownerId === me.id ? { url: `${base}/api/hooks/automation/${ws}/${a.id}?key=${a.when.secret}` } : {}) } : a.when,
+        says: { when: describeWhen(a.when), who: describeWho(a.who) },
+        mine: a.ownerId === me.id,
+        runs: await automations.runs(ws, a.id, 6),
+        today: await automations.runsToday(ws, a.id),
+      });
+      // A session's events are only for someone in it: watching one hands its agent's last words to the new run.
+      const inSession = async (c: ReturnType<typeof cleanAutomation>) => {
+        if (c.when.kind !== "session") return c;
+        const st = await store.state(c.when.sessionId).catch(() => null);
+        const m = st?.members[me.id];
+        if (!st || !m || m.removed) throw new Error("Pick a session you're in.");
+        return { ...c, when: { ...c.when, sessionTitle: st.title } };
+      };
+      try {
+        if (req.method === "GET" && url.pathname === "/api/automations") {
+          return json(res, 200, { automations: await Promise.all((await automations.list(ws)).map(view)) });
+        }
+        if (req.method === "POST" && url.pathname === "/api/automations") {
+          const made: Automation = { id: randomBytes(6).toString("base64url"), ownerId: me.id, ownerName: me.name, created: Date.now(), ...(await inSession(cleanAutomation(await readJson(req)))) };
+          await automations.put(ws, made);
+          return json(res, 201, { automation: await view(made) });
+        }
+        const one = url.pathname.match(/^\/api\/automations\/([\w-]{4,40})(\/run|\/runs)?$/);
+        if (!one) return json(res, 404, { error: "Not found" });
+        const a = await automations.get(ws, one[1]!);
+        if (!a) return json(res, 404, { error: "That automation isn't there any more." });
+        if (req.method === "GET" && one[2] === "/runs") return json(res, 200, { runs: await automations.runs(ws, a.id, 30) });
+        if (a.ownerId !== me.id) return json(res, 403, { error: `This is ${a.ownerName}'s automation: only they can change or run it.` });
+        if (req.method === "POST" && one[2] === "/run") {
+          const body = (await readJson(req)) as { event?: unknown };
+          const run = await runAutomation(ws, a, "Run now", typeof body.event === "string" ? body.event.slice(0, 8000) : "");
+          return json(res, 202, { run });
+        }
+        if (req.method === "PATCH" && !one[2]) {
+          const next: Automation = { ...a, ...(await inSession(cleanAutomation(await readJson(req), a))) };
+          await automations.put(ws, next, a);
+          return json(res, 200, { automation: await view(next) });
+        }
+        if (req.method === "DELETE" && !one[2]) {
+          await automations.remove(ws, a.id);
+          return json(res, 200, { ok: true });
+        }
+        return json(res, 404, { error: "Not found" });
+      } catch (e) {
+        return json(res, 400, { error: (e as Error).message });
+      }
+    }
 
 
 

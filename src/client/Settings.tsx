@@ -54,14 +54,7 @@ interface SectionDef {
 }
 
 export const SECTIONS: SectionDef[] = [
-  {
-    id: "profile",
-    label: "Profile",
-    group: "You",
-    icon: "user",
-    blurb: "Who you are to everyone you work with.",
-    keywords: "name display email account id sign out log out provider",
-  },
+  // No Profile on your own computer: there is no account (Arun, 2026-10-26: "get rid of ... the profile page in settings").
   {
     id: "appearance",
     label: "Appearance",
@@ -149,14 +142,14 @@ let MISSING: Record<string, string> = {};
 /** A section by any name it has had: the old tab names keep working for links and for openSettings("account"). */
 export function settingsSection(id: string | null | undefined): string {
   const aliases: Record<string, string> = {
-    account: "profile",
+    account: "appearance",
     team: "members",
     people: "members",
     machine: "computer",
     tools: "computer",
   };
   const s = aliases[id ?? ""] ?? id ?? "";
-  return SECTIONS.some((x) => x.id === s) ? s : "profile";
+  return SECTIONS.some((x) => x.id === s) ? s : "appearance";
 }
 
 export interface Me {
@@ -326,9 +319,7 @@ export function SettingsPage({
           <div className="min-w-0 pb-16">
             <PageHeader as="h2" titleRef={head} eyebrow={missing.group} title={missing.label} subtitle={MISSING[missing.id] ?? `${missing.label} comes with a Team plan.`} />
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => onSection("profile")}>
-                Back to Profile
-              </Button>
+              <Button variant="outline" size="sm" onClick={() => onSection("appearance")}>Back to Appearance</Button>
               <Button size="sm" onClick={() => startTeam()}>
                 See plans
               </Button>

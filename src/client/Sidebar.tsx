@@ -243,6 +243,7 @@ function PlaceIcons({ p }: { p: SidebarProps }) {
     { icon: "board", label: "Agent Board", on: p.view === "board", go: p.onOpenBoard, warm: "board" },
     { icon: "gitPullRequest", label: "Code Review", on: p.view === "review", go: p.onOpenReview, warm: "review", count: p.reviewsWaiting, needs: true },
     ...(team ? [{ icon: "book" as const, label: "Team library", on: p.view === "library", go: p.onOpenLibrary, warm: "library" as const }] : []),
+    { icon: "zap", label: "Automations", on: p.view === "automations" || p.view === "agents", go: p.onOpenAutomations, warm: "automations" },
     { icon: "usage", label: "Usage", on: p.view === "usage", go: p.onOpenUsage, warm: "usage" },
     ...(team ? [{ icon: "users" as const, label: "People", on: p.view === "people", go: p.onOpenPeople, warm: "people" as const, count: requests || undefined, needs: requests > 0 }] : []),
   ];
@@ -294,31 +295,7 @@ function Foot({ p }: { p: SidebarProps }) {
       {/* One row (Arun, 2026-10-26: "in a row together, the profile thing can just be the circle"): you, as your avatar, then
           the places, then the theme and settings. Your name and plan are in the menu the avatar opens. */}
       <div className="sb-dock">
-        <DropdownMenu>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <DropdownMenuTrigger asChild>
-                <button type="button" className="sb-dock-me" aria-label={`Account: ${p.identity.name || "set your name"}, ${w ? `${w.personal ? "Personal" : w.name} · ${plan}` : plan}`} data-tour="Account">
-                  <Avatar name={p.identity.name || "?"} id={p.identity.id} size={26} />
-                </button>
-              </DropdownMenuTrigger>
-            </TooltipTrigger>
-            <TooltipContent side="top">{p.identity.name || "Account"}</TooltipContent>
-          </Tooltip>
-          <DropdownMenuContent side="top" align="start" className="w-64">
-            <div className="px-2 py-1.5">
-              <div className="flex items-center gap-2">
-                <span className="truncate text-sm font-medium">{p.identity.name || "Set your name"}</span>
-                <span className="ml-auto rounded-full border px-1.5 text-[10.5px] text-muted-foreground">{plan}</span>
-              </div>
-              {p.email && <div className="truncate text-xs text-muted-foreground">{p.email}</div>}
-            </div>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={p.onOpenSettings}>
-              <SettingsIcon /> Settings
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {/* No account on your own computer, so no avatar and its menu (Arun, 2026-10-26: "get rid of the profile button"). */}
         <PlaceIcons p={p} />
         <UpdateRailButton />
         <Tooltip>

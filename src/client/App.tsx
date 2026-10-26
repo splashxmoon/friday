@@ -26,6 +26,7 @@ const pages = {
   // The session screen too, with the feed, the markdown renderer and the animations only it draws: over half the startup
   // script on Home and Settings. It is warmed first, and a link straight to a session asks for it as the app starts.
   session: () => import("./SessionView.js").then((m) => (sessionCode = m)),
+  automations: () => import("./Automations.js"),
   board: () => import("./Board.js"),
   review: () => import("./CodeReview.js"),
   usage: () => import("./UsagePage.js"),
@@ -42,6 +43,7 @@ function SessionView(p: ComponentProps<typeof LazySessionView>) {
 }
 // Only for someone opening a recording link, who has no account and needs nothing else here.
 const Board = lazy(() => pages.board().then((m) => ({ default: m.Board })));
+const AutomationsPage = lazy(() => pages.automations().then((m) => ({ default: m.AutomationsPage })));
 const CodeReview = lazy(() => pages.review().then((m) => ({ default: m.CodeReview })));
 import { WindowNav } from "./WindowNav.js";
 import { askToShowDiff } from "./focusDiff.js";
@@ -643,7 +645,7 @@ export function App() {
   const [switches, setSwitches] = useState(0);
 
   // Settings opens where it was last left, from the rail; anything else that asks for it names a section.
-  const lastSettings = useRef("profile");
+  const lastSettings = useRef("appearance");
   useEffect(() => {
     if (route.kind === "settings") lastSettings.current = route.section;
   }, [route]);
@@ -1090,6 +1092,14 @@ export function App() {
             connections={connections}
             doc={{ open: layout.docOpen, width: layout.docWidth }}
             onDocChange={(d) => setLayout({ ...(d.open !== undefined ? { docOpen: d.open } : {}), ...(d.width !== undefined ? { docWidth: d.width } : {}) })}
+          />
+        ) : route.kind === "automations" ? (
+          <AutomationsPage
+            identity={identity}
+            agents={agents}
+            recents={recents}
+            onOpen={(sid, invite) => navigate({ kind: "session", sid, invite })}
+            onSavedAgents={() => navigate({ kind: "agents" })}
           />
         ) : route.kind === "board" ? (
           <Board
