@@ -100,6 +100,7 @@ On a Mac, Homebrew installs it too:
 
 ```bash
 brew tap splashxmoon/friday https://github.com/splashxmoon/friday
+brew trust splashxmoon/friday
 brew install --cask friday
 ```
 
