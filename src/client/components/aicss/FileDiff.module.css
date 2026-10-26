@@ -1,0 +1,59 @@
+.diff { border-radius: 12px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.05), 0 2px 4px rgba(0,0,0,0.02), 0 0 0 0.5px rgba(0,0,0,0.08); padding: 12px 16px 16px; overflow: hidden; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+.diffHead {
+  display: flex; align-items: center; gap: 8px;
+  margin: -12px -16px 0; padding: 10px 12px 10px 16px;
+  background: transparent; border-bottom: 0.5px solid #e6e8ec; font-size: 12.5px;
+}
+.diffFileWrap { display: inline-flex; align-items: center; gap: 7px; }
+.diffIcon { display: block; width: 15px; height: 15px; color: #a1a1a1; flex: none; }
+.diffFile { color: #1a1a1a; line-height: 1; }
+.diffStat { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; font-size: 12px; line-height: 1; }
+.diffStat .add { color: #15a06a; }
+.diffStat .del { color: #dc2626; }
+.diffBody {
+  position: relative;
+  margin: 0 -16px -16px; overflow-x: auto; overflow-y: hidden;
+  padding: 4px 0; font-size: 12.5px; line-height: 20px;
+  scrollbar-width: none; -ms-overflow-style: none;
+}
+.diffBody::-webkit-scrollbar { display: none; }
+.diffLines { position: relative; width: max-content; min-width: 100%; }
+/* full-height gutter divider at the line-number edge (32px + 32px).
+   Lives on the inner track so it stays aligned while the body scrolls. */
+.diffLines::before { content: ""; position: absolute; top: 0; bottom: 0; left: 64px; width: 0.5px; background: #e6e8eb; z-index: 1; pointer-events: none; }
+.diffRow {
+  position: relative;
+  display: grid; grid-template-columns: 32px 32px 18px 1fr; align-items: stretch;
+}
+.diffRow .ln, .diffRow .sign { user-select: none; color: var(--faint); font-size: 11px; }
+.diffRow .ln { text-align: right; padding: 0 7px; }
+.diffRow .sign { text-align: center; }
+.diffRow code { white-space: pre; padding: 0 12px 0 8px; color: var(--text-muted); }
+/* left accent bar: solid green for additions, red hatch for deletions */
+.diffRow.add::before, .diffRow.del::before {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 3px;
+}
+.diffRow.add::before { background: #15a06a; }
+.diffRow.del::before {
+  background: repeating-linear-gradient(45deg, #dc2626 0, #dc2626 1.5px, transparent 1.5px, transparent 3px);
+}
+.diffRow.add { background: rgba(26, 127, 55, 0.09); }
+.diffRow.add .sign, .diffRow.add .new { color: #15a06a; }
+.diffRow.add code { color: #1a1a1a; }
+.diffRow.del { background: rgba(207, 34, 46, 0.09); }
+.diffRow.del .sign, .diffRow.del .old { color: #dc2626; }
+.diffRow.del code { color: #1a1a1a; }
+:global(.dark) .diff { background: #1a1a1a; box-shadow: 0 1px 2px rgba(0,0,0,0.4), 0 2px 4px rgba(0,0,0,0.3), 0 0 0 0.5px rgba(255,255,255,0.12); }
+:global(.dark) .diffHead { border-bottom-color: #303030; }
+:global(.dark) .diffFile { color: #f5f5f5; }
+:global(.dark) .diffStat .add { color: #34d399; }
+:global(.dark) .diffStat .del { color: #f87171; }
+:global(.dark) .diffLines::before { background: #303030; }
+:global(.dark) .diffRow.add { background: rgba(63, 185, 80, 0.15); }
+:global(.dark) .diffRow.add::before { background: #34d399; }
+:global(.dark) .diffRow.add .sign, :global(.dark) .diffRow.add .new { color: #34d399; }
+:global(.dark) .diffRow.add code { color: #f5f5f5; }
+:global(.dark) .diffRow.del { background: rgba(248, 81, 73, 0.15); }
+:global(.dark) .diffRow.del::before { background: repeating-linear-gradient(45deg, #f87171 0, #f87171 1.5px, transparent 1.5px, transparent 3px); }
+:global(.dark) .diffRow.del .sign, :global(.dark) .diffRow.del .old { color: #f87171; }
+:global(.dark) .diffRow.del code { color: #f5f5f5; }

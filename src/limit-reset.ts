@@ -1,0 +1,79 @@
+/**
+ * A coding tool out of usage, read from how its run ended, and when it can go on.
+ *
+ * Claude Code and Codex stop mid-task when the account's 5-hour or weekly allowance runs out, and say when it comes back
+ * in their own words: "resets 3pm (America/New_York)", "try again in 2 hours 13 minutes", an epoch after a bar. Read
+ * here on the client, which knows the clock the person reads, so "3pm" without a zone is their 3pm.
+ */
+
+export const LIMIT = /usage limit|session limit|weekly limit|5-hour limit|rate limit|quota|too many requests|hit your limit|\b429\b/i;
+
+export interface LimitHit {
+  /** When the allowance comes back, as a time; null when the message didn't say. */
+  resetsAt: number | null;
+}
+
+const UNIT: Record<string, number> = { d: 86_400_000, h: 3_600_000, m: 60_000, s: 1000 };
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+
+/** How far `tz` runs ahead of UTC at `t`, in ms. */
+function offsetAt(t: number, tz: string): number {
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", second: "numeric" })
+      .formatToParts(new Date(t))
+      .map((x) => [x.type, Number(x.value)]),
+  ) as Record<string, number>;
+  return Date.UTC(p.year!, p.month! - 1, p.day!, p.hour!, p.minute!, p.second!) - t;
+}
+
+/** A wall-clock time in a zone, as a time. */
+function wallTime(y: number, mo: number, d: number, h: number, mi: number, tz: string): number {
+  const guess = Date.UTC(y, mo, d, h, mi);
+  const t = guess - offsetAt(guess, tz);
+  // Across a clock change the first guess is an hour out; the offset at the answer settles it.
+  return guess - offsetAt(t, tz);
+}
+
+/** Whether this run ended on a usage limit, and when it lifts. */
+export function limitHit(error: string | undefined, now = Date.now(), tz?: string): LimitHit | null {
+  if (!error || !LIMIT.test(error)) return null;
+  // Claude Code's older form: "Claude AI usage limit reached|1760000000".
+  const epoch = /\|(\d{10})\b/.exec(error);
+  if (epoch) return { resetsAt: Number(epoch[1]) * 1000 };
+  // "try again in 2 hours 13 minutes", "resets in 4h 12m", "retry in 37s".
+  const span = /\b(?:try again|retry|resets?|available)\s+(?:in|after)\s+((?:\d+(?:\.\d+)?\s*(?:days?|d|hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\b[\s,]*(?:and\s+)?)+)/i.exec(error);
+  if (span) {
+    let ms = 0;
+    for (const [, n, u] of span[1]!.matchAll(/(\d+(?:\.\d+)?)\s*([a-z]+)/gi)) ms += Number(n) * (UNIT[u!.toLowerCase()[0]!] ?? 0);
+    if (ms > 0) return { resetsAt: now + Math.round(ms) };
+  }
+  // "resets 3pm (America/New_York)", "resets Oct 14, 3pm", "reset at 3:04 PM", "try again at Oct 14th, 2025 3:04 PM".
+  const at = /\b(?:resets?|try again|retry|available again)\s+(?:at\s+|on\s+)?(?:([a-z]{3})[a-z]*\.?\s+(\d{1,2})(?!\d)(?:st|nd|rd|th)?,?\s*(?:(\d{4}),?\s*)?(?:at\s+)?)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b(?:\s*\(([A-Za-z_]+(?:\/[A-Za-z_+-]+)*)\))?/i.exec(error);
+  if (at) {
+    const [, mon, day, year, hh, mm, ap, zone] = at;
+    const month = mon ? MONTHS.indexOf(mon.toLowerCase()) : -1;
+    let h = Number(hh);
+    const mi = Number(mm ?? 0);
+    // A bare number with no colon, no am/pm and no date is a count of something, not a time.
+    if ((mon && month < 0) || (!mm && !ap && !mon) || h > 23 || mi > 59 || (ap && (h < 1 || h > 12))) return { resetsAt: null };
+    if (ap) h = (h % 12) + (ap.toLowerCase() === "pm" ? 12 : 0);
+    let zoneId = zone || tz || Intl.DateTimeFormat().resolvedOptions().timeZone;
+    try {
+      offsetAt(now, zoneId);
+    } catch {
+      zoneId = tz || Intl.DateTimeFormat().resolvedOptions().timeZone;
+    }
+    const today = new Intl.DateTimeFormat("en-US", { timeZone: zoneId, year: "numeric", month: "numeric", day: "numeric" }).formatToParts(new Date(now));
+    const part = (k: string) => Number(today.find((x) => x.type === k)!.value);
+    if (month >= 0) {
+      let t = wallTime(year ? Number(year) : part("year"), month, Number(day), h, mi, zoneId);
+      // "Jan 2" read on Dec 30 is next year's.
+      if (!year && t < now - 86_400_000) t = wallTime(part("year") + 1, month, Number(day), h, mi, zoneId);
+      return { resetsAt: t };
+    }
+    let t = wallTime(part("year"), part("month") - 1, part("day"), h, mi, zoneId);
+    if (t <= now - 60_000) t = wallTime(part("year"), part("month") - 1, part("day") + 1, h, mi, zoneId);
+    return { resetsAt: t };
+  }
+  return { resetsAt: null };
+}

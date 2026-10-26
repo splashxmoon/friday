@@ -1,0 +1,84 @@
+{
+  "name": "friday-work",
+  "version": "0.1.0",
+  "description": "Your coding agents (Claude Code, Codex, Cursor and more) side by side, on your own computer. No account, nothing hosted.",
+  "license": "MIT",
+  "homepage": "https://www.tryfridaywork.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/splashxmoon/friday.git"
+  },
+  "type": "module",
+  "bin": {
+    "friday": "bin/friday.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "public",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node bin/friday.mjs",
+    "build:css": "tailwindcss -i src/client/styles/globals.css -o public/tailwind.css --minify",
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/test.mjs"
+  },
+  "dependencies": {
+    "@codemirror/autocomplete": "^6.20.4",
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/language-data": "^6.5.2",
+    "@codemirror/search": "^6.7.2",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.15",
+    "@lezer/highlight": "^1.2.5",
+    "@radix-ui/react-use-controllable-state": "^1.2.6",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "ai": "^7.0.97",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "cmdk": "^1.1.1",
+    "esbuild": "^0.28.2",
+    "ioredis": "^6.0.0",
+    "ioredis-mock": "8.13.1",
+    "jszip": "^3.10.2",
+    "lucide-react": "^1.44.0",
+    "motion": "^13.2.0",
+    "nanoid": "^5.1.16",
+    "radix-ui": "^1.6.7",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "rehype-katex": "^7.0.1",
+    "remark-math": "^6.0.0",
+    "shiki": "^4.4.3",
+    "streamdown": "^2.6.0",
+    "tailwind-merge": "^3.6.0",
+    "thinking-orbs": "0.3.2",
+    "ws": "^8.21.3",
+    "tsx": "^4.23.13"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.3",
+    "@types/node": "^22.20.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/ws": "^8.18.1",
+    "tailwindcss": "^4.3.3",
+    "tw-animate-css": "^1.4.0",
+    "typescript": "^7.0.2"
+  },
+  "overrides": {
+    "ioredis-mock": {
+      "ioredis": "$ioredis"
+    },
+    "@types/ioredis-mock": {
+      "ioredis": "$ioredis"
+    }
+  }
+}

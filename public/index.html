@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script>
+    // Before the first paint, or the app flashes dark and then turns white.
+    // The class is what both stylesheets key off, so it is all that changes.
+    try {
+      var t = localStorage.getItem("mpa.theme");
+      if (t === "light" || (t !== "dark" && t !== "glass" && window.matchMedia && matchMedia("(prefers-color-scheme: light)").matches)) {
+        document.documentElement.classList.remove("dark");
+      }
+    } catch (e) {}
+  </script>
+  <script>
+    // Asked while the app downloads rather than after it: the first screen needs who you are, your workspace and your
+    // sessions, and each of those used to wait for two megabytes of script first. The app takes these once (early.ts).
+    // Here, above the stylesheets, because a script below one waits for it: in the body these left only once style.css had
+    // arrived, most of the way through the load.
+    // A recording or watch link asks for the recording instead (ReplayPage takes it): someone with no account has no "you",
+    // and those three were 401s in their console. Same tests as the app's readRoute (App.tsx) and the server's (fast-load.ts).
+    (function () {
+      var get = function (u) {
+        return fetch(u, { credentials: "same-origin" }).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
+      };
+      var q = new URLSearchParams(location.search);
+      if (!q.get("view") && !(q.get("session") && q.get("invite")) && q.get("replay") && q.get("t")) {
+        var c = window.crypto;
+        var w = ((c && c.randomUUID && c.randomUUID()) || Math.random().toString(36).slice(2) + Date.now().toString(36)).replace(/[^\w-]/g, "");
+        var src = "/api/replay/" + encodeURIComponent(q.get("replay")) + "?t=" + encodeURIComponent(q.get("t")) + (q.get("live") === "1" ? "&live=1&w=" + w : "");
+        var res = fetch(src).then(function (r) { return r.text().then(function (text) { return { ok: r.ok, status: r.status, text: text }; }); });
+        res.catch(function () {});
+        window.__early = { replay: { src: src, w: w, res: res } };
+        return;
+      }
+      window.__early = { me: get("/api/me"), workspace: get("/api/workspace"), mine: get("/api/sessions/mine") };
+    })();
+  </script>
+<head>
+  <title>Friday</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <!-- Fetched beside the page rather than before it: as a plain stylesheet a slow font host held back the first paint for
+       seconds, a blank window. The text shows in the fallback font until these arrive (display=swap). -->
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&family=Inter:wght@400;500;600;700&family=Work+Sans:wght@400;500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" />
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&family=Inter:wght@400;500;600;700&family=Work+Sans:wght@400;500;600;700&display=swap" /></noscript>
+  <!-- Tailwind + shadcn tokens (AI Elements), then any CSS the libraries bundle, then the app's own styles. -->
+  <link rel="stylesheet" href="/tailwind.css" />
+  <!-- Typeset maths in answers (KaTeX, the version the client bundles): fetched beside the page, like the fonts above, so it
+       never holds back the first paint. -->
+  <link rel="preload" as="style" href="https://cdn.jsdelivr.net/npm/katex@0.16.47/dist/katex.min.css" crossorigin="anonymous" onload="this.onload=null;this.rel='stylesheet'" />
+  <link rel="stylesheet" href="/app.css" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
