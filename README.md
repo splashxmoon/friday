@@ -106,8 +106,10 @@ brew install --cask friday
 
 Every version is on the [releases page](https://github.com/splashxmoon/friday/releases). The app is Friday in a window of its own, with the same server inside it, on `127.0.0.1` only.
 
+The Mac app is signed and notarized by Apple, so it opens like any other.
+
 > [!NOTE]
-> Until the installers are signed, your computer will ask before opening one. On Windows, choose **More info**, then **Run anyway**. On a Mac, if it says Friday is damaged or can't be checked, move it to Applications and run `xattr -dr com.apple.quarantine /Applications/Friday.app` once.
+> The Windows installer isn't signed yet, so Windows asks before running it the first time: choose **More info**, then **Run anyway**.
 
 ### From a terminal
 

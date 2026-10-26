@@ -21,11 +21,4 @@ cask "friday" do
     "~/Library/Preferences/com.tryfridaywork.friday.local.plist",
     "~/Library/Saved Application State/com.tryfridaywork.friday.local.savedState",
   ]
-
-  # Until the Mac builds are signed and notarized, macOS blocks the first open.
-  # Remove this caveat when a signed release ships.
-  caveats <<~EOS
-    If macOS says Friday can't be opened or is damaged, run this once:
-      xattr -dr com.apple.quarantine "#{appdir}/Friday.app"
-  EOS
 end
