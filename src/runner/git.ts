@@ -360,15 +360,22 @@ export async function startRepo(cwd: string, who: { name: string; email?: string
   await git(dir, [...ident, "commit", "-q", "--allow-empty", "--no-verify", "-m", "Starting point\n\nWhat was in this folder when Friday made it a git repository, so each agent can work in its own copy."], [0], 120_000);
 }
 
-export async function addWorktree(cwd: string, name?: string, carry = false): Promise<{ path: string; branch: string; repo: RepoInfo | null; include?: () => Promise<string[]> }> {
+/**
+ * `on`: a copy on a branch of the person's choosing rather than one of Friday's own, for a folder whose uncommitted work keeps
+ * it where it is (Arun, 2026-10-26). `branch` alone is an existing branch (or origin's, which git then tracks); with `base`,
+ * `branch` is a new one started from `base`.
+ */
+export async function addWorktree(cwd: string, name?: string, carry = false, on?: { branch: string; base?: string }): Promise<{ path: string; branch: string; repo: RepoInfo | null; include?: () => Promise<string[]> }> {
   const root = (await git(cwd, ["rev-parse", "--show-toplevel"])).trim();
   const own = name ? slug(name) || "agent" : "";
   // A lane's copy is a spare made ahead of time when there is one (see topUpSpares): `worktree add` is 3-9s of the attach.
-  const spare = own ? await takeSpare(root, own) : null;
+  // Not for a branch of its own: a spare is cut at the folder's HEAD, on a branch of Friday's.
+  const spare = own && !on ? await takeSpare(root, own) : null;
   const id = spare?.id ?? randomUUID().slice(0, 8);
   const dir = spare?.dir ?? (own ? path.join(worktreeRoot(), `${slug(path.basename(root)) || "repo"}-${id}`) : path.join(tmpdir(), `friday-race-${id}`));
-  const branch = own ? `friday/${own}-${id}` : `friday/race-${id}`;
-  if (!spare) await git(root, ["worktree", "add", "-q", "-b", branch, dir, "HEAD"]);
+  const branch = on?.branch ?? (own ? `friday/${own}-${id}` : `friday/race-${id}`);
+  if (on) await git(root, on.base ? ["worktree", "add", "-q", "-b", on.branch, dir, on.base] : ["worktree", "add", "-q", dir, on.branch], [0], 120_000);
+  else if (!spare) await git(root, ["worktree", "add", "-q", "-b", branch, dir, "HEAD"]);
   if (carry) {
     const { tree } = await snapshotTree(root);
     await git(dir, ["read-tree", "-m", "-u", "HEAD", tree]);

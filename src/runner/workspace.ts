@@ -26,6 +26,8 @@ export interface FolderInfo {
   mtime?: number;
   /** Uncommitted changes to tracked files, when asked about one folder: somebody is working in it, so it isn't moved to a new branch. */
   dirty?: boolean;
+  /** Said with `dirty`: this runner can start an agent in a copy on another branch (local-api start's `aside`). */
+  canAside?: boolean;
   /** The folders kept for this one that its tool may work in too (extra-dirs.ts), when asked for them. */
   dirs?: string[];
   /**

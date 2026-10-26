@@ -493,6 +493,8 @@ export function Code({
     const target = pr?.head && !pr.fork && folder?.isRepo ? pr.head : newBranchName || pickedBranch || resumeBranch;
     // A new branch starts from the one picked, rather than whatever the folder is on.
     const branchFrom = newBranchName && pickedBranch && target === newBranchName ? branchRef(branches?.find((b) => b.name === pickedBranch), pickedBranch) : undefined;
+    // Set when the folder's uncommitted work keeps it where it is: the agent works in a copy on this branch instead.
+    let aside: { branch: string; base?: string } | undefined;
     setBusy(true);
     setErr("");
     // Said under the box as it goes: starting takes a few seconds, and a spinner alone said nothing about which of them was slow.
@@ -501,24 +503,29 @@ export function Code({
         setAttachNote("Checking the folder…");
         const now = await hostApi<{ folder: FolderInfo }>(identity, `/api/runner/describe?path=${encodeURIComponent(folder.path)}&dirty=1`).catch(() => null);
         // Uncommitted work in it no longer makes a copy by itself (Arun, 2026-10-24: copies only when asked): the agent works in
-        // the folder as it is, as it would in a terminal. It still isn't switched to another branch from under that work.
+        // the folder as it is, as it would in a terminal. It still isn't switched to another branch from under that work: with
+        // another branch picked, it works in a copy on that branch instead and the work stays where it is (Arun, 2026-10-26:
+        // "fix this problem", a new branch from friday/claude-b37001cc refused over changes on fix/round2-stability).
         const dirty = !!now?.folder.dirty;
+        const canAside = !!now?.folder.canAside;
         // A pull request's branch, or the one a conversation ended on, is somebody else's work to stand on.
-        if (dirty && target && target !== newBranchName && now!.folder.branch !== target) {
+        if (dirty && canAside && target && target !== newBranchName && now!.folder.branch !== target && target !== resumeBranch) aside = { branch: target };
+        else if (dirty && target && target !== newBranchName && now!.folder.branch !== target) {
           setErr(`${folder.name} has uncommitted changes on ${now!.folder.branch ?? "its current branch"}, so it won't be switched to ${target}${pr ? ", where the pull request is" : target === pickedBranch ? "" : ", where that conversation is"}. Commit or stash them, then send again.`);
           setAttachNote("");
           setBusy(false);
           return;
         }
         // Nor moved to another branch to start a new one from it: the changes would go with it, onto a branch they weren't made on.
-        if (dirty && branchFrom && now!.folder.branch !== pickedBranch) {
+        if (dirty && canAside && branchFrom && now!.folder.branch !== pickedBranch) aside = { branch: newBranchName, base: branchFrom };
+        else if (dirty && branchFrom && now!.folder.branch !== pickedBranch) {
           setErr(`${folder.name} has uncommitted changes on ${now!.folder.branch ?? "its current branch"}, so the new branch won't be started from ${pickedBranch}. Commit or stash them, or start it from ${now!.folder.branch ?? "the current branch"}, then send again.`);
           setAttachNote("");
           setBusy(false);
           return;
         }
       }
-      setAttachNote("Creating the session…");
+      setAttachNote(aside ? `${folder!.name} has uncommitted changes, so this works in a separate copy on ${aside.branch}. Your changes stay where they are.` : "Creating the session…");
       const r = await api<{ sessionId: string; invites: Record<string, string> }>(identity, "/api/sessions", {
         method: "POST",
         body: JSON.stringify({
@@ -571,8 +578,9 @@ export function Code({
               ...(model ? { model } : {}),
               ...(engine && account && tool?.accounts?.some((a) => a.id === account) ? { account } : {}),
               // A pull request's own branch, when that is what the session is about; never a copy of the folder unasked.
-              ...(folder ? { branch: target } : {}),
-              ...(branchFrom ? { branchFrom } : {}),
+              // Or, with uncommitted work in the folder, a copy of it on that branch (local-api start's `aside`).
+              ...(folder ? (aside ? { worktree: "lane", copyName: engine || "friday", aside } : { branch: target }) : {}),
+              ...(branchFrom && !aside ? { branchFrom } : {}),
               // Continuing a past conversation belongs to the CLI that had it.
               // Switching to Friday Code keeps the folder — that is a place,
               // and places don't belong to an agent — but drops the resume,
@@ -697,7 +705,8 @@ export function Code({
                     folder with them, and the branch is chosen as for any folder. */}
                 {folder.isRepo && (
                   <span className="ws-branch-set">
-                    <Switch on={newBranch} onChange={(v) => (setNewBranch(v), setErr(""))} label="New branch" />
+                    {/* Off, a base picked for the new branch becomes the branch worked on: not one git has checked out in another folder. */}
+                    <Switch on={newBranch} onChange={(v) => (setNewBranch(v), setErr(""), !v && branches?.find((b) => b.name === pickBranch)?.elsewhere && setPickBranch(""))} label="New branch" />
                     <span className={`ws-branch-toggle ${newBranch ? "on" : ""}`}>New branch</span>
                     {newBranch ? (
                       <>

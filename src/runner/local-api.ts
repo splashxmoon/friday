@@ -290,7 +290,9 @@ export async function callHost(method: string, params: Record<string, unknown> =
         params.branches ? remoteBranchesOf(p) : null,
       ]);
       const branchList = branches ? [...branches.branches.map((b) => ({ name: b.name, ...(b.elsewhere ? { elsewhere: b.elsewhere } : {}) })), ...(remote ?? []).map((name) => ({ name, remote: true as const }))] : null;
-      return { folder: { ...folder, ...(repo ? { dirty: repo.dirty } : {}), ...(dirs ? { dirs } : {}), ...(branchList ? { branches: branchList } : {}) } };
+      // `canAside`: a start can put the agent in a copy on another branch (start's `aside`), so the page offers that rather than
+      // turning a folder with uncommitted work away. A runner without it says nothing, and the page asks for a commit as before.
+      return { folder: { ...folder, ...(repo ? { dirty: repo.dirty, canAside: true } : {}), ...(dirs ? { dirs } : {}), ...(branchList ? { branches: branchList } : {}) } };
     }
     case "find":
       return { matches: await findByName(str(params.name, 200)) };
@@ -550,8 +552,12 @@ export async function callHost(method: string, params: Record<string, unknown> =
         // A folder never put in git is made a repository first, on this computer only (startRepo): a copy is a git worktree.
         if (!(await repoInfo(cwd))) await startRepo(cwd, { name: ctx.user.name });
         copyOf = cwd;
-        const w = await addWorktree(cwd, params.worktree === "lane" ? str(params.newLane, 40) || str(params.copyName, 40) || "agent" : undefined, params.carry === true).catch((e: Error) => {
-          throw new Error(`Couldn't make a separate copy to race in: ${e.message}`);
+        // Set aside: a copy on the branch the person picked (or a new one from it), the folder's uncommitted work left where it is.
+        const ref = (v: unknown, n: number) => (/^[\w./-]+$/.test(str(v, n)) && !str(v, n).startsWith("-") ? str(v, n) : "");
+        const aside = params.aside && typeof params.aside === "object" ? (params.aside as Record<string, unknown>) : null;
+        const on = aside && ref(aside.branch, 108) ? { branch: ref(aside.branch, 108), ...(ref(aside.base, 108) ? { base: ref(aside.base, 108) } : {}) } : undefined;
+        const w = await addWorktree(cwd, params.worktree === "lane" ? str(params.newLane, 40) || str(params.copyName, 40) || "agent" : undefined, params.carry === true, on).catch((e: Error) => {
+          throw new Error(on ? `Couldn't make a separate copy on ${on.branch}: ${e.message}` : `Couldn't make a separate copy to race in: ${e.message}`);
         });
         cwd = w.path;
         raceBranch = w.branch;
