@@ -14,4 +14,15 @@ contextBridge.exposeInMainWorld("fridayDesktop", {
   trafficLightY: 17,
   /** Which theme the page shows, so Windows and Linux draw the window buttons in its colours. */
   setTheme: (theme: "dark" | "light"): void => ipcRenderer.send("friday:theme", theme),
+  /** Its updates (desktop-update.ts): the version it is, whether a newer one is downloading or ready, and the restart into it. */
+  update: {
+    state: (): Promise<unknown> => ipcRenderer.invoke("friday:update-state"),
+    check: (): Promise<unknown> => ipcRenderer.invoke("friday:update-check"),
+    install: (): Promise<boolean> => ipcRenderer.invoke("friday:update-install"),
+    onState: (fn: (s: unknown) => void): (() => void) => {
+      const h = (_e: unknown, s: unknown) => fn(s);
+      ipcRenderer.on("friday:update-state", h);
+      return () => void ipcRenderer.off("friday:update-state", h);
+    },
+  },
 });
