@@ -53,7 +53,6 @@ import { isLocal, ownModel, planLimits, planNow } from "./edition.js";
 import type { SkillTemplate } from "../skill-catalog.js";
 import type { WorkspaceUsage } from "./workspace-types.js";
 import { Icon } from "./icons.js";
-import { Tour } from "./Tour.js";
 import { Setup } from "./Setup.js";
 import { QuickPrompt } from "./QuickPrompt.js";
 import { quickText, sendQuickTo, startQuick } from "./quick-send.js";
@@ -1045,7 +1044,6 @@ export function App() {
         {panelOpen && <div className="sb-backdrop" onClick={() => setLayout({ sidebarCollapsed: true })} />}
       </>
       <main id="main" className="main" tabIndex={-1}>
-        {identity.id && <Tour userId={identity.id} hasHistory={recents.length > 0} onHome={() => navigate({ kind: "home" })} solo={planLimits(planNow(workspace)).fridayAgent === "none"} auto={false} />}
         {/* Someone new is set up first (this computer, its coding tools, GitHub), not toured: the tour waits behind it. */}
         {identity.id && route.kind === "home" && <Setup identity={identity} hasHistory={recents.length > 0} onDone={() => requestAnimationFrame(() => document.querySelector<HTMLElement>(".composer textarea, textarea")?.focus())} />}
 

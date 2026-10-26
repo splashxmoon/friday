@@ -213,7 +213,10 @@ export function Setup({ identity, hasHistory, onDone }: { identity: Identity; ha
         </section>
 
         <footer className="setup-foot">
-          {i === 0 ? (
+          {/* No tour in the open-source edition (Arun, 2026-10-26: "get rid of the tour on the open source version"). */}
+          {i === 0 && isLocal() ? (
+            <span />
+          ) : i === 0 ? (
             <button type="button" className="tour-skip" onClick={() => (finish(false), window.dispatchEvent(new Event("friday:tour")))}>
               Take the one-minute tour instead
             </button>

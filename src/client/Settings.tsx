@@ -120,7 +120,7 @@ export const SECTIONS: SectionDef[] = [
     label: "About",
     group: "More",
     icon: "help",
-    blurb: "Updates, release notes and the tour.",
+    blurb: "Updates, release notes and setup.",
     keywords: "version update release notes tour desktop app",
   },
 ];

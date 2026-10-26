@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "./api.js";
 import type { Identity } from "./storage.js";
 import { AppUpdate } from "./AppUpdate.js";
+import { isLocal } from "./edition.js";
 import { ShortcutList } from "./Shortcuts.js";
 import { openOutside } from "./openOutside.js";
 import {
@@ -404,16 +405,19 @@ export function AboutTab({ onReplayTour }: { onReplayTour?: () => void }) {
       <AppUpdate />
       {/* Things to do are buttons on the right of a row, not dimmer text in the value column beside "A browser". */}
       <SettingsGroup title="Learn">
+        {/* The open-source edition has no tour: only setting up this computer again. */}
         <Row
-          label="Guided tour"
-          hint="A minute's walk through the parts of Friday."
+          label={isLocal() ? "Setup" : "Guided tour"}
+          hint={isLocal() ? "This computer, its coding tools and GitHub, as when Friday first opened." : "A minute's walk through the parts of Friday."}
         >
           <Button variant="outline" size="sm" onClick={() => window.dispatchEvent(new Event("friday:setup"))}>
             Set up this computer
           </Button>
-          <Button variant="outline" size="sm" onClick={onReplayTour}>
-            Replay the tour
-          </Button>
+          {!isLocal() && (
+            <Button variant="outline" size="sm" onClick={onReplayTour}>
+              Replay the tour
+            </Button>
+          )}
         </Row>
         <Row label="Release notes" hint="What changed in each version.">
           <Button variant="outline" size="sm" onClick={() => openOutside(RELEASES)}>
