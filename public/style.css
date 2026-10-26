@@ -6152,6 +6152,9 @@ html.desktop-mac .win-nav { display: flex; position: fixed; top: 5px; left: 84px
 html.desktop .sidebar-search { display: none; }
 /* The local edition has no workspace name for that row (Sidebar.tsx), so in the app it holds nothing and goes. */
 html.desktop .sb-head-local { display: none; }
+/* Without that row, New session sat 3px under the window's back, forward and list buttons on a Mac: room between them
+   (Arun, 2026-10-26: "add some spacer from the buttons above for the new session button"). */
+html.desktop-mac .sb-head-local + button { margin-top: 12px; }
 /* The session header's title starts after the toolbar rather than under it. */
 /* Right after the toolbar, beside the list's button, whether the chat list is open or put away (Arun, 2026-10-18): the list
    starts under the window's bar, so the bar is one strip across the window and the title has no reason to jump over it. */
@@ -6913,7 +6916,23 @@ html.desktop:not(.desktop-mac) .home-tools { top: 5px; right: calc(var(--band-ri
 .mb-inline .mb-where-text { font-size: 12px; font-weight: 500; color: var(--ink-2); }
 .mb-inline .mb-path { font-size: 10.5px; }
 .mb-inline .mb-tools { gap: 4px; }
-.mb-inline .mb-tool { gap: 8px; padding: 5px 8px 5px 5px; border-radius: 9px; background: color-mix(in srgb, var(--panel) 88%, transparent); }
+/* One list, a row per tool, as a settings page has it (Arun, 2026-10-26: "design this better please"): the tool on the left, its
+   accounts or its one action on the right, and an opened account list under its own row only. As wrapping cards, their
+   widths went three then two, a card with accounts stood taller than one without, and opening one stretched the whole row. */
+.mb-inline .mb-tools { gap: 0; border: 1px solid var(--border); border-radius: 12px; background: color-mix(in srgb, var(--panel) 88%, transparent); overflow: hidden; }
+.mb-inline .mb-tool { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px 10px; padding: 8px 8px 8px 10px; border: 0; border-radius: 0; background: none; }
+.mb-inline .mb-tool + .mb-tool, .mb-inline .mb-more { border-top: 1px solid var(--border); }
+.mb-inline .mb-tool.out { box-shadow: inset 2px 0 0 var(--amber); }
+.mb-inline .mb-tool > * { grid-column: 1 / -1; }
+.mb-inline .mb-tool > .mb-tool-line { grid-column: 1; grid-row: 1; }
+.mb-inline .mb-tool > .mb-tool-go, .mb-inline .mb-tool > .mb-tool-more, .mb-inline .mb-tool > .acct > .acct-sum { grid-column: 2; grid-row: 1; }
+.mb-inline .mb-tool > .acct { display: contents; }
+.mb-inline .mb-tool > .acct > :not(.acct-sum) { grid-column: 1 / -1; }
+.mb-inline .mb-tool .acct-sum { width: auto; max-width: 240px; min-height: 28px; border-color: var(--border); }
+.mb-inline .mb-tool .acct-list { margin: 0; }
+.mb-inline .mb-more .more-tools { padding: 9px 12px; border-radius: 0; font-size: 12px; }
+/* Left to right: a path cut from its start lost its leading slash ("Users/arundass/"). */
+.mb-inline .mb-path { direction: ltr; }
 .mb-inline .mb-tool-mark { width: 24px; height: 24px; border-radius: 7px; }
 .mb-inline .mb-tool-mark svg, .mb-inline .mb-tool-mark img { width: 14px; height: 14px; }
 .mb-inline .mb-tool-id { line-height: 1.25; }
@@ -7071,8 +7090,6 @@ button.ao-row { gap: 12px; }
 .danger-text { color: var(--red); }
 .settings-page .settings-danger { padding-top: 16px; }
 .set-computer { padding: 16px 18px; }
-.set-computer .mb-inline .mb-tools { flex-direction: row; flex-wrap: wrap; }
-.set-computer .mb-inline .mb-tool { flex: 1 1 210px; }
 
 /* Joining a workspace from an invite link. */
 .modal.join-ws { width: min(420px, 92vw); padding: 26px 26px 20px; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }

@@ -302,7 +302,8 @@ export function DataTab() {
       </SettingsGroup>
       <Note>{note?.ok ? note.text : ""}</Note>
       <Note ok={false}>{note && !note.ok ? note.text : ""}</Note>
-      <ShareAnalytics />
+      {/* The open-source edition has no analytics to share, so nothing to turn off: it was a switch showing On for nothing. */}
+      {!isLocal() && <ShareAnalytics />}
       {/* Reset can be taken back, so it asks nothing first: one press, and Undo on the line that says it happened. */}
       <SettingsGroup title="Start over">
         <Row
