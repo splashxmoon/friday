@@ -14,7 +14,9 @@ const git = (cwd: string, ...a: string[]) => execFileSync("git", a, { cwd, encod
 test("a folder never put in git is made a repository on this computer, and an agent gets its own copy of it", async (t) => {
   const dir = await mkdtemp(path.join(tmpdir(), "friday-start-repo-"));
   process.env.FRIDAY_WORKTREES = path.join(dir, "..", `${path.basename(dir)}-wt`);
-  t.after(() => Promise.all([rm(dir, { recursive: true, force: true }), rm(process.env.FRIDAY_WORKTREES!, { recursive: true, force: true })]));
+  // Windows keeps a folder busy a moment after git leaves it: tried again rather than failed.
+  const gone = (d: string) => rm(d, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+  t.after(() => Promise.all([gone(dir), gone(process.env.FRIDAY_WORKTREES!)]));
   const project = path.join(dir, "Friday Assistant");
   await mkdir(path.join(project, "src"), { recursive: true });
   await mkdir(path.join(project, "node_modules", "left-pad"), { recursive: true });

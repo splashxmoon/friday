@@ -29,7 +29,8 @@ test("every coding tool is told the skills on this computer it doesn't load itse
     await skill(path.join(home, ".codex", "skills"), "own", "name: design-taste\ndescription: Codex's own design skill.");
     await skill(path.join(home, ".codex", "skills"), ".system", "name: hidden\ndescription: Built in.");
 
-    const codex = await skillsNote("codex", cwd, home);
+    // Folders as this computer writes them: read with forward slashes, whatever the platform.
+    const codex = (await skillsNote("codex", cwd, home)).replaceAll(path.sep, "/");
     assert.match(codex, /^Skills on this computer that Codex doesn't load by itself/);
     assert.match(codex, /In \.\/\.claude\/skills:\n- token-optimizer: Keep context small\./, "the repository's, first, by its own path");
     assert.match(codex, /In ~\/\.claude\/skills:\n- reverse-engineer \(folder reverse\): Reverse engineer native and browser targets\./, "a folded description in one line, and the folder when it isn't the name");
@@ -38,13 +39,13 @@ test("every coding tool is told the skills on this computer it doesn't load itse
     assert.doesNotMatch(codex, /shared-one|hidden/, "Codex reads ~/.agents itself, and a folder starting with a dot is none");
 
     // Claude Code loads its own folders and its plugins: told only of the rest.
-    const claude = await skillsNote("claude", cwd, home);
+    const claude = (await skillsNote("claude", cwd, home)).replaceAll(path.sep, "/");
     assert.match(claude, /- shared-one: For any agent\./);
     assert.doesNotMatch(claude, /Codex's own/, "Codex's design-taste goes by a name Claude Code has a skill of its own by");
     assert.doesNotMatch(claude, /copywriting|token-optimizer|reverse-engineer/);
 
     // OpenCode reads Claude Code's folders itself, not its plugins.
-    const opencode = await skillsNote("opencode", cwd, home);
+    const opencode = (await skillsNote("opencode", cwd, home)).replaceAll(path.sep, "/");
     assert.match(opencode, /copywriting/);
     assert.doesNotMatch(opencode, /token-optimizer|reverse-engineer|shared-one/);
 

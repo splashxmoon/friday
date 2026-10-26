@@ -188,6 +188,8 @@ export async function startPreview(cwd: string, script?: string, envBase?: NodeJ
     env: { ...childEnv(envBase), ...folderVars(cwd), PORT: String(port), BROWSER: "none", PATH: childPath() },
     stdio: ["ignore", "pipe", "pipe"],
     shell: process.platform === "win32",
+    // Its own process group on macOS and Linux, so stopping it stops everything the script started (stopPreview).
+    detached: process.platform !== "win32",
     windowsHide: true,
   });
   entry.child = child;
@@ -352,7 +354,15 @@ export function stopPreview(cwd: string): boolean {
   // On Windows the script runs under a shell, and killing the shell leaves the
   // dev server it started running — holding its port and its folder open.
   if (pid && process.platform === "win32") execFile("taskkill", ["/pid", String(pid), "/T", "/F"], { windowsHide: true }, () => {});
-  else r.child?.kill("SIGTERM");
+  // Elsewhere the same holds where /bin/sh is dash (Ubuntu, Debian): npm's shell doesn't hand itself over to the script, so
+  // killing npm left the dev server running. The script runs in its own process group (startPreview): the whole group goes.
+  else if (pid) {
+    try {
+      process.kill(-pid, "SIGTERM");
+    } catch {
+      r.child?.kill("SIGTERM");
+    }
+  }
   r.server?.close();
   return true;
 }

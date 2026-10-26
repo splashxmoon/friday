@@ -15,6 +15,8 @@ async function repo(t: test.TestContext): Promise<string> {
   t.after(() => rm(r, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }));
   await writeFile(path.join(r, "a.txt"), "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten\n");
   git(r, "init", "-q", "-b", "main");
+  // The file's own line endings, not Windows git's CRLF on checkout: the hunks are read as written.
+  git(r, "config", "core.autocrlf", "false");
   git(r, "add", "-A");
   git(r, "commit", "-qm", "init");
   return r;

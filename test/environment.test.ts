@@ -8,6 +8,8 @@ import test from "node:test";
 
 const home = mkdtempSync(path.join(os.tmpdir(), "friday-env-home-"));
 process.env.HOME = home;
+// Windows finds the home folder through USERPROFILE.
+process.env.USERPROFILE = home;
 const { describeEnvironment, folderSetup, folderVars, saveEnvironment } = await import("../src/runner/environment.js");
 test.after(() => rmSync(home, { recursive: true, force: true }));
 
@@ -37,8 +39,11 @@ test("what is kept is the owner's alone, in their home, never in the folder", ()
   const dir = project();
   saveEnvironment(dir, { vars: { KEY: "v" } });
   const kept = path.join(home, ".friday", "environments");
-  assert.equal(statSync(kept).mode & 0o777, 0o700);
-  for (const f of readdirSync(kept)) assert.equal(statSync(path.join(kept, f)).mode & 0o777, 0o600, `${f} is read by its owner only`);
+  // Windows has no Unix modes to read: there it's the profile folder's own permissions that keep it the owner's.
+  if (process.platform !== "win32") {
+    assert.equal(statSync(kept).mode & 0o777, 0o700);
+    for (const f of readdirSync(kept)) assert.equal(statSync(path.join(kept, f)).mode & 0o777, 0o600, `${f} is read by its owner only`);
+  } else assert.ok(statSync(kept).isDirectory());
   for (const f of ["env", ".friday.json", "environment.json"]) assert.throws(() => statSync(path.join(dir, f)), { code: "ENOENT" }, `nothing written in the folder (${f})`);
 });
 

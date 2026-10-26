@@ -40,6 +40,8 @@ test("Claude Code, Copilot and Gemini are started with the other folders as thei
 
 test("codex exec gets --add-dir when it may write in its sandbox, and not when it only reads", () => {
   const writes = codexExec.args(spec({ dirs, mode: "full" }));
+  // On Windows a Codex that may write runs without its folder sandbox (adapters.ts says why), so there is none to widen.
+  if (process.platform === "win32") return void assert.ok(!writes.includes("--add-dir"));
   assert.ok(writes.join(" ").includes("--add-dir /work/shared --add-dir /work/docs"));
   assert.equal(writes.at(-1), "-", "the prompt still comes on stdin");
   const resumed = codexExec.args(spec({ dirs, mode: "full", resumeId: "r1" }));
