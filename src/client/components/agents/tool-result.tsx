@@ -311,8 +311,6 @@ export function ToolResult({
           <div className="overflow-hidden rounded-xl bg-muted/80">
           <div
             ref={viewportRef}
-            role="log"
-            aria-live="polite"
             className="scrollbar-hide overflow-y-auto"
             style={{ maxHeight }}
           >

@@ -14,6 +14,7 @@ import { reviewTarget } from "./tool-commands.js";
 import { ampConfig, claudeConfig, codexConfig, type FridayMcp } from "./friday-mcp.js";
 import { readFileSync, statSync } from "node:fs";
 import { pathToFileURL } from "node:url";
+import { randomUUID } from "node:crypto";
 
 /**
  * Adapters for the coding CLIs people already have: Claude Code, Codex and
@@ -56,7 +57,18 @@ export type AdapterOut =
       window?: number;
     }
   /** A subagent or background task the tool started, or a change in where one stands (see the `agent.task` event). */
-  | { kind: "task"; id: string; status: AgentTaskStatus; description?: string; agentType?: string; background?: boolean; summary?: string }
+  | {
+      kind: "task";
+      id: string;
+      status: AgentTaskStatus;
+      description?: string;
+      agentType?: string;
+      background?: boolean;
+      summary?: string;
+      /** While it works: what it is doing now, in a few words, and how many steps it has taken (see subagentDoing). */
+      doing?: string;
+      steps?: number;
+    }
   /**
    * The turn's final word. `held`: said while its background tasks still run, and it carries on by itself once they finish,
    * so this counts as done if the process ends here but doesn't end the turn (see noteBackground).
@@ -104,6 +116,8 @@ export interface TurnSpec {
    * a picture is seen and not only named (Arun, 2026-10-18: the tools as capable in Friday as on their own).
    */
   files?: string[];
+  /** Which of the tool's accounts on this computer it runs as (accounts.ts), when not its own sign-in: what it says of its limits is that account's. */
+  account?: string;
   /** The project's MCP servers (its .mcp.json), for a tool spoken to over ACP: passed with the conversation (see mcp-servers.ts). */
   acpMcp?: AcpMcpServer[];
   /** Flags this tool's installed version refused (see Adapter.optional): left off from then on. */
@@ -246,6 +260,15 @@ const MAX_OUTPUT = 20_000;
 
 const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}\n…[truncated ${s.length - n} chars]` : s);
 const str = (v: unknown) => (typeof v === "string" ? v : "");
+
+/** What a coding tool is told when it asks the person something with nobody there to ask: decide, and say what was chosen. */
+export const DECIDE_YOURSELF = "Nobody is being asked in Auto. Decide for yourself, and say in your answer what you chose and why.";
+
+/** Codex's requestUserInput answered for each question it asked (`questions[].id`), with DECIDE_YOURSELF. */
+export function decideAnswers(params: unknown): Record<string, { answers: string[] }> {
+  const qs = (params as { questions?: unknown } | null)?.questions;
+  return Object.fromEntries((Array.isArray(qs) ? qs : []).flatMap((q) => (typeof (q as { id?: unknown })?.id === "string" ? [[(q as { id: string }).id, { answers: [DECIDE_YOURSELF] }]] : [])));
+}
 const json = (line: string): Record<string, any> | null => {
   try {
     const v = JSON.parse(line);
@@ -295,6 +318,38 @@ const usage = (input: number, cached: number, output: number, ctx?: { context: n
   input + cached + output > 0 ? [{ kind: "usage", input, cached, output, ...(ctx && ctx.context > 0 ? { context: ctx.context, ...(ctx.window ? { window: ctx.window } : {}) } : {}) }] : [];
 
 const firstLine = (s: string) => (s.split("\n").find((l) => l.trim()) ?? "").trim().slice(0, 120);
+
+const base = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
+/**
+ * A subagent's step, said the way its card says it while it works: "Reading Sidebar.tsx", "Running npm test" (Arun, 2026-10-27:
+ * "add a better design for tracking subagents"). From the tool name and arguments claudeTool gives.
+ */
+export function subagentDoing(t: { name: string; args: Record<string, unknown> }): string {
+  const a = t.args;
+  const short = (v: unknown, n = 60) => {
+    const x = firstLine(str(v));
+    return x.length > n ? `${x.slice(0, n - 1)}…` : x;
+  };
+  switch (t.name) {
+    case "shell":
+      return `Running ${short(a.command)}`;
+    case "read":
+      return `Reading ${base(str(a.path))}`;
+    case "edit":
+    case "write":
+      return `Editing ${base(str(a.path))}`;
+    case "search":
+      return `Searching for ${short(a.pattern, 40)}`;
+    case "web_search":
+      return `Searching the web for ${short(a.query, 48)}`;
+    case "web_fetch":
+      return `Reading ${short(str(a.url).replace(/^https?:\/\/(www\.)?/, ""), 48)}`;
+    case "todo":
+      return "Planning its steps";
+    default:
+      return `Using ${t.name.replace(/^mcp__/, "").replace(/__/g, " ")}`;
+  }
+}
 
 // ── Claude Code ──────────────────────────────────────────────────────
 
@@ -361,6 +416,12 @@ function blockText(content: unknown): string {
   return content.map((c) => (c && typeof c === "object" && c.type === "text" ? str(c.text) : "")).join("");
 }
 
+
+/** Claude Code's own permission mode for a turn: Plan's, or edits allowed and the rest by --allowedTools. */
+function claudeMode(t: TurnSpec): string {
+  return t.mode === "plan" ? "plan" : "acceptEdits";
+}
+
 export const claude: Adapter = {
   tool: "claude",
   bins: ["claude"],
@@ -379,7 +440,7 @@ export const claude: Adapter = {
     // A flag of the process, so the kept one (keyed on its arguments) starts again for the next turn when it changes.
     ...(t.effort ? ["--effort", t.effort] : []),
     "--permission-mode",
-    t.mode === "plan" ? "plan" : "acceptEdits",
+    claudeMode(t),
     // Folders beside its own, one flag each: the flag takes several, and a value of its own never swallows the next flag.
     ...(t.dirs ?? []).flatMap((d) => ["--add-dir", d]),
     // What needs a yes is asked as a control_request on stdout, and the turn waits for the answer on stdin.
@@ -406,13 +467,18 @@ export const claude: Adapter = {
     ...(t.resumeId ? ["--resume", t.resumeId, ...(t.fork ? ["--fork-session"] : [])] : []),
   ],
   stdin: (t) => t.prompt,
-  parser() {
+  parser(t) {
     const names = new Map<string, string>();
     /** How much its last model call was handed (fresh, written to the cache and read from it): the context it is at now. */
     let context = 0;
     /** Its background tasks still running: a `result` while there are any is not the end of the turn. */
     const running = new Set<string>();
     const task = taskTracker();
+    /**
+     * The subagents it sent off, by the call that started them: what each is doing and how many steps it has taken, said on its
+     * task at most every few seconds while it works, so its card and the status bar can follow it without the log filling up.
+     */
+    const subs = new Map<string, { id: string; steps: number; at: number }>();
     /** What each command was, so a test that failed inside a chain is reported as failing. */
     const commands = new Map<string, string>();
     return (line) => {
@@ -425,11 +491,14 @@ export const claude: Adapter = {
           if (m.task_id && (m.subtype === "task_started" || m.subtype === "task_updated" || m.subtype === "task_notification")) {
             const id = str(m.task_id);
             if (m.subtype === "task_started") {
+              if (m.tool_use_id && m.task_type !== "local_bash") subs.set(str(m.tool_use_id), { id, steps: 0, at: 0 });
               const agentType = str(m.subagent_type) || (m.task_type === "local_bash" ? "command" : "");
               return task({ kind: "task", id, status: "running", description: str(m.description) || firstLine(str(m.prompt)), ...(agentType ? { agentType } : {}), background: !!m.is_backgrounded });
             }
             const status = TASK_STATUS[str(m.patch?.status ?? m.status)];
-            return status ? task({ kind: "task", id, status, ...(str(m.summary) ? { summary: cut(str(m.summary), 2000) } : {}) }) : [];
+            // Back: how many steps it took, said with how it ended.
+            const steps = m.tool_use_id ? subs.get(str(m.tool_use_id))?.steps : undefined;
+            return status ? task({ kind: "task", id, status, ...(str(m.summary) ? { summary: cut(str(m.summary), 2000) } : {}), ...(steps ? { steps } : {}) }) : [];
           }
           // A request that failed and will be tried again (an overloaded API, a dropped connection). Said where the room
           // can see it, or the lane sits silent for the minutes the retries take.
@@ -447,7 +516,19 @@ export const claude: Adapter = {
           return [];
         }
         case "assistant": {
-          if (m.parent_tool_use_id) return [];
+          if (m.parent_tool_use_id) {
+            // A subagent's own step: counted, and said on its task now and then.
+            const sub = subs.get(str(m.parent_tool_use_id));
+            const uses: any[] = Array.isArray(m.message?.content) ? m.message.content.filter((b: any) => b?.type === "tool_use") : [];
+            if (!sub || !uses.length) return [];
+            sub.steps += uses.length;
+            const last = uses.at(-1);
+            const doing = subagentDoing(claudeTool(str(last.name), last.input && typeof last.input === "object" ? last.input : {}));
+            const now = Date.now();
+            if (now - sub.at < 4000) return [];
+            sub.at = now;
+            return [{ kind: "task", id: sub.id, status: "running", doing, steps: sub.steps }];
+          }
           const mu = m.message?.usage;
           if (mu) {
             const held = count(mu.input_tokens) + count(mu.cache_creation_input_tokens) + count(mu.cache_read_input_tokens);
@@ -479,7 +560,7 @@ export const claude: Adapter = {
             });
         }
         case "rate_limit_event":
-          noteClaudeEvent(m);
+          noteClaudeEvent(m, t?.account);
           return [];
         case "control_request": {
           const r = m.request;
@@ -613,7 +694,7 @@ export const codexExec: Adapter = {
     // So on Windows its shell commands are NOT confined to the folder once it may write: only its own file changes are held to it.
     const sandbox = !writes ? "read-only" : process.platform === "win32" ? "danger-full-access" : "workspace-write";
     // One argument for the whole setting, so its quotes reach Codex as written on Windows too.
-    const base = [...(t.friday ? codexConfig(t.friday) : []), "exec", "--json", "--skip-git-repo-check", ...(t.model ? ["--model", t.model] : []), ...(t.effort ? ["-c", `model_reasoning_effort="${t.effort}"`] : []), "--sandbox", sandbox];
+    const base = [...(t.friday ? codexConfig(t.friday) : []), ...codexExtras(t), "exec", "--json", "--skip-git-repo-check", ...(t.model ? ["--model", t.model] : []), ...(t.effort ? ["-c", `model_reasoning_effort="${t.effort}"`] : []), "--sandbox", sandbox];
     if (t.mode === "full" && sandbox === "workspace-write") base.push("-c", "sandbox_workspace_write.network_access=true");
     // The folders beside its own, writable as the folder is. Read-only reads them anyway, and danger-full-access holds it to none.
     if (sandbox === "workspace-write") for (const d of t.dirs ?? []) base.push("--add-dir", d);
@@ -766,11 +847,17 @@ function appPolicy(t: TurnSpec): { sandboxPolicy: Record<string, unknown>; appro
   // On Windows its sandbox runs commands as another account that can't look at the person's own profile folder (see codexExec).
   // dangerFullAccess there confines nothing to the folder: whenever it writes, approvalPolicy is "never", so Codex never asks and
   // the grantRoot check in `approval` (in `codex`) never runs. Neither its shell commands nor its file changes are held to the folder.
-  const sandboxPolicy = !writes ? { type: "readOnly", networkAccess: true } : process.platform === "win32" ? { type: "dangerFullAccess" } : { type: "workspaceWrite", networkAccess: t.mode === "full", writableRoots: t.dirs ?? [] };
+  const sandboxPolicy: Record<string, unknown> = !writes ? { type: "readOnly", networkAccess: true } : process.platform === "win32" ? { type: "dangerFullAccess" } : { type: "workspaceWrite", networkAccess: t.mode === "full", writableRoots: t.dirs ?? [] };
   // Auto asks too, and Friday answers yes itself (see `approval` in `codex`): Codex stays in its sandbox until something needs
   // more, then goes beyond it as it would for a person who always approves. With "never" a command that needed more (a global
   // install, a cache outside the folder) just failed in Auto, with nobody to ask (Arun, 2026-10-18).
   return { sandboxPolicy, approvalPolicy: t.mode === "full" || (t.ask && !writes) ? "on-request" : "never" };
+}
+
+/** Settings the session adds to Codex's own, as `-c` overrides ahead of the subcommand. */
+function codexExtras(t: TurnSpec): string[] {
+  void t;
+  return [];
 }
 
 /** What Codex asks for when it wants more reach than its sandbox gives (`item/permissions/requestApproval`), in a few words. */
@@ -802,7 +889,7 @@ export const codex: Adapter = {
   status: { args: ["login", "status"] },
   dialect: "codex",
   // Friday's MCP server as `-c` settings ahead of the subcommand (friday-mcp.ts).
-  args: (t) => [...(t.friday ? codexConfig(t.friday) : []), "app-server"],
+  args: (t) => [...(t.friday ? codexConfig(t.friday) : []), ...codexExtras(t), "app-server"],
   interactive: true,
   stdin: () => `${JSON.stringify({ id: 0, method: "initialize", params: { clientInfo: { name: "friday", title: "Friday", version: "1" } } })}\n`,
   parser(t, io) {
@@ -892,6 +979,13 @@ export const codex: Adapter = {
       return [];
     };
     const opened = (how: "start" | "resume" | "fork") => (s: Rpc): AdapterOut[] => {
+      // Open in another program as well (the ChatGPT app's Codex, a terminal): Codex lets one writer have a conversation, so it
+      // carries on from a copy of it, its memory with a new id, rather than not at all (Arun, 2026-10-26: Codex "couldn't find its
+      // earlier conversation" while it was open in the Codex app).
+      if (how === "resume" && turn.resumeId && /active writer/i.test(s.error?.message ?? "")) {
+        ask("thread/fork", { threadId: turn.resumeId, cwd: wire.cwd }, opened("fork"));
+        return [];
+      }
       if (s.error) return failed(how === "start" ? "It couldn't start a conversation" : `thread/${how} failed`, s.error);
       tid = str(s.result?.thread?.id);
       if (!tid) return finish("It didn't start a conversation.");
@@ -1112,7 +1206,10 @@ export const codex: Adapter = {
         if (m.method === "item/commandExecution/requestApproval" || m.method === "item/fileChange/requestApproval") return approval(m.id, str(m.method), m.params);
         if (m.method === "item/permissions/requestApproval") return permissions(m.id, m.params);
         if (m.method === "mcpServer/elicitation/request") return elicit(m.id, m.params);
-        if (m.method === "item/tool/requestUserInput") wire.write(line({ id: m.id, result: { answers: {} } }));
+        // A question for the person mid-turn: nobody is asked here, so each question is answered with what Claude Code's
+        // AskUserQuestion is told in Auto (runner.ts), rather than nothing, which left it waiting on an answer that was empty
+        // (Arun, 2026-10-28: "we need to ensure teams can work basically while you are away").
+        if (m.method === "item/tool/requestUserInput") wire.write(line({ id: m.id, result: { answers: decideAnswers(m.params) } }));
         else wire.write(line({ id: m.id, error: { code: -32601, message: `Friday doesn't offer ${str(m.method)}` } }));
         return [];
       }
@@ -1920,7 +2017,10 @@ export const grok: Adapter = acp({
   login: ["login"],
   logout: ["logout"],
   status: anyOf([".grok/auth.json"], ["XAI_API_KEY"]),
-  args: (t) => ["agent", ...(t.model ? ["-m", t.model] : []), "stdio"],
+  // Its permission mode said on the command line every turn, so a `grok` config set to always-approve can't skip Friday's
+  // questions in Manual or Plan; Auto approves in Grok itself, as Friday would answer yes to everything anyway (Arun,
+  // 2026-10-27: "can we look into adding support for … grok"; as T3 Code starts it).
+  args: (t) => [...(t.mode === "full" ? [] : ["--permission-mode", "default"]), "agent", ...(t.mode === "full" ? ["--always-approve"] : []), ...(t.model ? ["-m", t.model] : []), "stdio"],
   modelAtStart: true,
   env: (t): Record<string, string> => ({ GROK_DISABLE_AUTOUPDATER: "1", ...(t.mode === "plan" ? { GROK_SANDBOX: "read-only" } : {}) }),
 });
@@ -2015,7 +2115,314 @@ export const amp: Adapter = {
   },
 };
 
-export const ADAPTERS: Record<EngineTool, Adapter> = { claude, codex, cursor, copilot, opencode, gemini, devin, junie, kiro, droid, grok, cline, kilo, amp, acp: custom };
+/**
+ * Muse Code (Meta's coding agent, `muse`), over its own Muse Session Protocol (Arun, 2026-10-27: "can we look into adding
+ * support for muse"): `muse serve` speaks JSON-RPC, one message a line each way on stdio, as T3 Code and OpenClaw drive it.
+ *
+ * One process a turn, as the ACP tools are: `initialize`, then the conversation opened (`session/resume` for one it had, so it
+ * keeps its memory, else `session/start` under an id Friday mints), then `turn/start`, and stdin closed once `turn/completed`
+ * says the turn is over. What it does comes as items (`item/started`, `item/delta`, `item/completed`): its words, its
+ * reasoning, its tool calls with their output, and the subagents it sends off. Auto starts it with `approvalMode: allowAll`;
+ * Manual and Plan with `promptUnmatched`, so it asks (`approval/request`, acknowledged, then answered by `approval/decide`):
+ * Manual lets a change to a file through and puts a command to a person, Plan refuses any change and asks about the rest.
+ */
+/** Muse's tools as the session's cards are named, by the words in their names. */
+function museCard(tool: string, raw: Record<string, unknown>): { name: string; args: Record<string, unknown> } {
+  const where = str(raw.path) || str(raw.file_path) || str(raw.filePath) || str(raw.file);
+  const t = tool.toLowerCase();
+  if (/bash|shell|exec|command|terminal/.test(t)) return { name: "shell", args: { command: str(raw.command) || str(raw.cmd), ...(raw.description ? { description: raw.description } : {}) } };
+  if (/web_?search/.test(t)) return { name: "web_search", args: { query: str(raw.query) } };
+  if (/fetch|browse|url/.test(t)) return { name: "web_fetch", args: { url: str(raw.url) } };
+  if (/grep|glob|search|find|list|ls/.test(t)) return { name: "search", args: { pattern: str(raw.pattern) || str(raw.query) || str(raw.glob), ...(where ? { path: where } : {}) } };
+  if (/write|create/.test(t)) return { name: "write", args: { path: where, content: cut(str(raw.content), 2000) } };
+  if (/edit|patch|replace|apply/.test(t)) return { name: "edit", args: { path: where } };
+  if (/read|view|cat|open/.test(t)) return { name: "read", args: { path: where } };
+  return { name: tool || "tool", args: raw };
+}
+const museArgs = (v: unknown): Record<string, unknown> => {
+  if (v && typeof v === "object") return v as Record<string, unknown>;
+  const j = typeof v === "string" ? json(v) : null;
+  return j ?? {};
+};
+/** The kinds of change Manual lets through unasked, as Claude Code's acceptEdits does. */
+const MUSE_FREE_IN_EDITS = new Set(["read", "search", "edit", "write", "web_search", "web_fetch"]);
+
+export const muse: Adapter = {
+  tool: "muse",
+  bins: ["muse"],
+  login: ["login"],
+  logout: ["logout"],
+  dirs: true,
+  interactive: true,
+  unavailable: () => (process.platform === "win32" ? "Muse Code doesn't run on Windows itself: install it inside WSL." : null),
+  // Its own sandbox off only where Friday lets it act unasked; the workspace trusted, since Friday opened it there.
+  args: (t) => ["serve", "--trust-workspace", ...(t.mode === "full" ? ["--disable-sandbox"] : [])],
+  env: (): Record<string, string> => ({ MUSE_NO_AUTO_UPDATE: "1" }),
+  stdin: () => rpc({ id: 0, method: "initialize", params: { clientInfo: { name: "friday", title: "Friday", version: "1" }, capabilities: { requestedCapabilities: [] } } }),
+  parser(t, io) {
+    if (!t || !io) return () => [];
+    const turn = t;
+    const wire = io;
+    const waiting = new Map<number, (r: { result?: any; error?: { code?: number; message?: string } }) => AdapterOut[]>();
+    const ask = (method: string, params: Record<string, unknown>, then: (r: { result?: any; error?: { code?: number; message?: string } }) => AdapterOut[]) => {
+      const id = acpIds++;
+      waiting.set(id, then);
+      wire.write(rpc({ id, method, params: { ...params, commandId: randomUUID() } }));
+    };
+    let sid = "";
+    let turnId = "";
+    let over = false;
+    let text = "";
+    let thought = "";
+    /** Each item's kind, by its id, so a delta goes to the words or the reasoning. */
+    const kinds = new Map<string, string>();
+    /** Text already said for an item, so its completion doesn't say it twice. */
+    const streamed = new Map<string, number>();
+    const drawn = new Set<string>();
+    /** Subagents said to have started, and to be back: each once. */
+    const subsSeen = new Set<string>();
+    const subsBack = new Set<string>();
+    const blocked: { scope: "commands" | "turn"; item: string }[] = [];
+    let used = { input: 0, cached: 0, output: 0 };
+    let ctx = { context: 0, window: 0 };
+    const open = new Map<string, (allow: boolean | null) => void>();
+    const granted = (card: { name: string; args: Record<string, unknown> }) =>
+      turn.grant?.scope === "turn" || (turn.grant?.scope === "commands" && card.name === "shell" && turn.grant.items.includes(str(card.args.command)));
+
+    const step = (toolCalls: ToolCall[]): AdapterOut[] => {
+      if (!text && !thought && !toolCalls.length) return [];
+      const out: AdapterOut = { kind: "message", text, toolCalls, ...(thought ? { reasoning: thought } : {}) };
+      text = "";
+      thought = "";
+      return [out];
+    };
+    const finish = (error?: string): AdapterOut[] => {
+      if (over) return [];
+      over = true;
+      for (const answer of [...open.values()]) answer(null);
+      wire.end();
+      const items = blocked.slice(0, 6);
+      return [
+        ...step([]),
+        ...usage(used.input, used.cached, used.output, ctx),
+        ...(items.length ? [{ kind: "blocked" as const, scope: items.every((b) => b.scope === "commands") ? ("commands" as const) : ("turn" as const), items: items.map((b) => b.item) }] : []),
+        { kind: "done", ...(error ? { error } : {}) },
+      ];
+    };
+    const failed = (what: string, e: { code?: number; message?: string }) => finish(/auth|login|sign/i.test(str(e.message)) ? "Authentication required" : `${what}: ${str(e.message) || `error ${e.code}`}`);
+
+    const startTurn = (): AdapterOut[] => {
+      const input: Record<string, unknown>[] = [{ type: "text", text: notedPrompt(turn) }];
+      for (const f of turn.files ?? []) {
+        const mimeType = imageType(f);
+        if (!mimeType) continue;
+        try {
+          if (statSync(f).size <= IMAGE_MAX) input.push({ type: "image", mimeType, data: readFileSync(f).toString("base64") });
+        } catch {
+          // A file gone since it was attached: the prompt still names it.
+        }
+      }
+      ask(
+        "turn/start",
+        {
+          sessionId: sid,
+          input,
+          displayText: turn.prompt.slice(0, 2000) || "Attachment",
+          workspaceRoots: [wire.cwd, ...(turn.dirs ?? [])],
+          ifBusy: "queue",
+          ...(turn.effort ? { reasoningEffort: turn.effort } : {}),
+        },
+        (r) => {
+          if (r.error) return failed("The turn failed", r.error);
+          turnId = str(r.result?.turnId);
+          return [];
+        },
+      );
+      return [];
+    };
+    const opened = (r: { result?: any }): AdapterOut[] => {
+      sid = str(r.result?.session?.sessionId) || sid;
+      return [{ kind: "session", id: sid }, ...startTurn()];
+    };
+    const startFresh = (): AdapterOut[] => {
+      sid = randomUUID();
+      ask(
+        "session/start",
+        {
+          sessionId: sid,
+          workspaceRoot: wire.cwd,
+          ...(turn.model ? { modelId: turn.model } : {}),
+          providerId: "meta",
+          approvalMode: turn.mode === "full" ? "allowAll" : "promptUnmatched",
+          permissionProfile: turn.mode === "full" ? ":unrestricted" : ":ask-me",
+        },
+        (r) => (r.error ? failed("Muse Code couldn't start the conversation", r.error) : opened(r)),
+      );
+      return [];
+    };
+    const openSession = (): AdapterOut[] => {
+      if (!turn.resumeId) return startFresh();
+      sid = turn.resumeId;
+      // Its own conversation again, so it remembers; one it no longer has starts over.
+      ask("session/resume", { sessionId: sid, excludeItems: true, permissionProfile: turn.mode === "full" ? ":unrestricted" : ":ask-me" }, (r) => (r.error ? startFresh() : opened(r)));
+      return [];
+    };
+
+    /** Its question, answered as Manual and Plan answer, or by a person while the turn waits. */
+    const approval = (id: string | number, params: Record<string, any>): AdapterOut[] => {
+      wire.write(rpc({ id, result: {} }));
+      const approvalId = str(params.approvalId);
+      const requirementId = params.subject?.stages?.[0]?.requirementId ?? { approvalId, sourceIndex: 0 };
+      const choices: string[] = (Array.isArray(params.availableChoices) ? params.availableChoices : []).map((c: any) => str(c?.choiceId ?? c?.id ?? c)).filter(Boolean);
+      const pick = (allow: boolean) => (allow ? (choices.find((c) => c === "allow_once") ?? choices.find((c) => c.startsWith("allow")) ?? "allow_once") : (choices.find((c) => c === "abort" || c === "deny" || c.startsWith("reject")) ?? "abort"));
+      const raw = museArgs(params.rawArgs);
+      const card = params.subject?.kind === "shell" ? { name: "shell", args: { command: str(params.subject.command) || str(raw.command) } } : museCard(str(params.toolName), raw);
+      const answer = (allow: boolean | null) => {
+        if (!open.delete(approvalId)) return;
+        ask("approval/decide", { sessionId: sid, approvalId, requirementId, choiceId: pick(!!allow) }, () => []);
+      };
+      open.set(approvalId, answer);
+      if (turn.mode === "full" || granted(card) || (turn.mode === "edits" && MUSE_FREE_IN_EDITS.has(card.name)) || (turn.mode === "plan" && ["read", "search", "web_search", "web_fetch"].includes(card.name))) {
+        answer(true);
+        return [];
+      }
+      if (turn.mode === "plan" && (card.name === "edit" || card.name === "write")) {
+        answer(false);
+        return [];
+      }
+      if (turn.ask) return [{ kind: "ask", requestId: approvalId, tool: card.name, input: card.args, reply: (allow) => answer(allow) }];
+      answer(false);
+      blocked.push(askedItem(card.name, card.args));
+      return [];
+    };
+
+    const item = (method: string, it: Record<string, any>): AdapterOut[] => {
+      const id = str(it.itemId);
+      const kind = str(it.kind);
+      if (id && kind) kinds.set(id, kind);
+      switch (kind) {
+        case "agentMessage":
+        case "reasoning": {
+          if (method !== "item/completed") return [];
+          const full = kind === "reasoning" ? (Array.isArray(it.summary) ? it.summary.map(str).join("\n") : str(it.summary)) : str(it.text);
+          const rest = full.slice(streamed.get(id) ?? 0);
+          if (!rest) return [];
+          if (kind === "reasoning") thought += rest;
+          else text += rest;
+          return [{ kind: "delta", text: rest, channel: kind === "reasoning" ? "reasoning" : "text" }];
+        }
+        case "toolCall": {
+          // Sending a subagent off, waiting on it and reading what it found are its subagent card, not steps of their own.
+          if (/^subagent_/.test(str(it.tool))) return [];
+          const callId = str(it.callId) || id;
+          const card = museCard(str(it.tool), museArgs(it.args));
+          const out: AdapterOut[] = [];
+          if (!drawn.has(callId)) {
+            drawn.add(callId);
+            out.push(...step([call(callId, card.name, card.args)]));
+          }
+          if (method === "item/completed") {
+            const bad = it.status === "failed" || it.status === "cancelled" || !!it.failureReason;
+            out.push(result(callId, card.name, str(it.visibleOutput) || str(it.output) || str(it.failureReason), bad));
+          }
+          return out;
+        }
+        case "subagent": {
+          const taskId = str(it.subagentId) || id;
+          const description = firstLine(str(it.objective) || str(it.fallbackText).replace(/^Subagent:\s*/, ""));
+          const out: AdapterOut[] = [];
+          if (!subsSeen.has(taskId)) {
+            subsSeen.add(taskId);
+            out.push({ kind: "task", id: taskId, status: "running", ...(description ? { description } : {}), ...(it.role ? { agentType: str(it.role) } : {}) });
+          }
+          // Back once it has a result (Muse says so on an update, still "inProgress"), or once its item ends.
+          const summary = str(it.result?.summary) || str(it.result?.text);
+          const ended = method === "item/completed" || !!summary || !!it.failureReason;
+          if (ended && !subsBack.has(taskId)) {
+            subsBack.add(taskId);
+            const status = it.status === "failed" || (it.failureReason && !summary) ? "error" : it.status === "cancelled" ? "stopped" : "done";
+            out.push({ kind: "task", id: taskId, status, ...(summary ? { summary: cut(summary, 2000) } : {}) });
+          }
+          return out;
+        }
+        default:
+          // Its own reminders, workflows and the echo of the instruction: the room sees what they lead to instead.
+          return [];
+      }
+    };
+
+    const parse = ((line: string): AdapterOut[] => {
+      const m = json(line);
+      if (!m || over) return [];
+      // A question it asks, with an id of its own to answer.
+      if (m.method && m.id !== undefined) {
+        if (m.method === "approval/request") return approval(m.id, m.params ?? {});
+        wire.write(rpc({ id: m.id, error: { code: -32601, message: `Friday doesn't handle ${str(m.method)}` } }));
+        return [];
+      }
+      // The answer to something Friday asked.
+      if (m.id !== undefined && !m.method) {
+        if (m.id === 0) {
+          if (m.error) return failed("Muse Code didn't start", m.error);
+          wire.write(rpc({ method: "initialized" }));
+          return openSession();
+        }
+        const then = waiting.get(Number(m.id));
+        waiting.delete(Number(m.id));
+        return then ? then(m) : [];
+      }
+      const p = m.params ?? {};
+      if (sid && p.sessionId && p.sessionId !== sid) {
+        // A subagent's own session: its approvals come to Friday by request; what it does is its parent's subagent item.
+        return [];
+      }
+      switch (m.method) {
+        case "item/delta": {
+          const id = str(p.itemId);
+          const kind = kinds.get(id);
+          const d = str(p.delta);
+          if (!d || (kind !== "agentMessage" && kind !== "reasoning")) return [];
+          streamed.set(id, (streamed.get(id) ?? 0) + d.length);
+          if (kind === "reasoning") thought += d;
+          else text += d;
+          return [{ kind: "delta", text: d, channel: kind === "reasoning" ? "reasoning" : "text" }];
+        }
+        case "item/started":
+        case "item/updated":
+        case "item/completed":
+          return p.item && typeof p.item === "object" ? item(m.method, p.item) : [];
+        case "session/tokenUsage": {
+          const u = p.usage ?? {};
+          const cached = count(u.cacheReadTokens) || count(u.cachedTokens);
+          used = { input: used.input + Math.max(0, count(u.inputTokens) - cached), cached: used.cached + cached, output: used.output + count(u.outputTokens) };
+          return [];
+        }
+        case "session/contextUsage":
+          ctx = { context: count(p.usedTokens), window: count(p.windowTokens) };
+          return [];
+        case "turn/completed": {
+          if (turnId && p.turnId && p.turnId !== turnId) return [];
+          const end = str(p.terminal);
+          return finish(end === "failed" ? str(p.error?.message) || str(p.failureReason) || "The turn failed" : undefined);
+        }
+        case "session/closed":
+          return finish(turnId ? undefined : "Muse Code closed the conversation before the turn began");
+        default:
+          return [];
+      }
+    }) as Parser;
+    parse.cancel = () => {
+      if (sid && turnId && !over) ask("turn/interrupt", { sessionId: sid, turnId }, () => []);
+    };
+    return parse;
+  },
+  explain(error) {
+    if (/authentication required|not logged in|muse login/i.test(error)) return "Muse Code isn't signed in on this computer: run `muse login` in a terminal there, then try again.";
+    return error;
+  },
+};
+
+export const ADAPTERS: Record<EngineTool, Adapter> = { claude, codex, cursor, copilot, opencode, gemini, devin, junie, kiro, droid, grok, cline, kilo, amp, muse, acp: custom };
 
 // ── finding the executables ──────────────────────────────────────────
 

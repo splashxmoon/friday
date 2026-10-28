@@ -19,8 +19,8 @@ export function EmptyState({ icon, title, children, action, tone, className }: {
           {icon}
         </div>
       )}
-      <h2 className="m-0 text-[17px] font-semibold tracking-tight text-[var(--ink)]">{title}</h2>
-      {children && <div className="text-[13.5px] leading-relaxed text-[var(--text-muted)]">{children}</div>}
+      <h2 className="m-0 text-[18px] font-semibold tracking-tight text-[var(--ink)]">{title}</h2>
+      {children && <div className="text-[14px] leading-relaxed text-[var(--text-muted)]">{children}</div>}
       {action && <div className="mt-2 flex flex-wrap items-center justify-center gap-2">{action}</div>}
     </div>
   );

@@ -203,8 +203,19 @@ export function AutomationsPage({
     void load();
   };
 
+  // The sidebar's Automations, pressed while an automation is open, is the way back to the list.
+  useEffect(() => {
+    const again = (e: Event) => (e as CustomEvent).detail === "automations" && setEditing(null);
+    addEventListener("friday:same-page", again);
+    return () => removeEventListener("friday:same-page", again);
+  }, []);
+
   if (editing)
     return (
+      <>
+      {/* The confirm the editor's Delete asks, shown with the editor: it showed only on the list, so Delete seemed to do nothing
+          and its question came up later, back on the list (2026-10-27 audit). */}
+      {confirmUI}
       <Editor
         identity={identity}
         agents={agents}
@@ -230,6 +241,7 @@ export function AutomationsPage({
           })
         }
       />
+      </>
     );
 
   const start = (draft: Partial<Draft>) => setEditing({ id: null, draft: { ...blank(), ...Object.fromEntries(Object.entries(draft).filter(([, v]) => v !== undefined)) } });
@@ -245,12 +257,12 @@ export function AutomationsPage({
               {/* Saved agents are the product's (Agent Studio): the open-source edition's automations run your coding tools. */}
               {!isLocal() && (
                 <Tip label="Instructions you saved once, to pick under Who">
-                  <Button variant="outline" size="sm" className="h-8 border-[var(--border)] bg-[var(--bg)] px-3 text-[12.5px] shadow-none" onClick={onSavedAgents}>
+                  <Button variant="outline" size="sm" className="h-8 border-[var(--border)] bg-[var(--bg)] px-3 text-[13px] shadow-none" onClick={onSavedAgents}>
                     Saved agents
                   </Button>
                 </Tip>
               )}
-              <Button size="sm" className="h-8 px-3 text-[12.5px]" onClick={() => start({})}>
+              <Button size="sm" className="h-8 px-3 text-[13px]" onClick={() => start({})}>
                 <PlusIcon /> New automation
               </Button>
             </>
@@ -291,7 +303,7 @@ export function AutomationsPage({
                     <t.icon className="size-4" />
                   </span>
                   <span className="mt-3 text-[14px] font-medium">{t.title}</span>
-                  <span className="mt-1 text-[12.5px] leading-snug text-[var(--text-muted)]">{t.blurb}</span>
+                  <span className="mt-1 text-[13px] leading-snug text-[var(--text-muted)]">{t.blurb}</span>
                   <span className="mt-auto flex items-center justify-between pt-4">
                     <WhenChip when={made.when ?? { kind: "manual" }} />
                     <span className="auto-use">
@@ -306,7 +318,7 @@ export function AutomationsPage({
                 <PlusIcon className="size-4" />
               </span>
               <span className="mt-3 text-[14px] font-medium">Start from scratch</span>
-              <span className="mt-1 text-[12.5px] leading-snug text-[var(--text-muted)]">Your own trigger, tool and instructions.</span>
+              <span className="mt-1 text-[13px] leading-snug text-[var(--text-muted)]">Your own trigger, tool and instructions.</span>
             </button>
           </div>
         </section>
@@ -346,14 +358,9 @@ function Intro({ onStart }: { onStart: () => void }) {
     <div className="auto-intro">
       <div className="flex min-w-0 flex-col justify-center gap-3">
         <h2 className="text-[20px] leading-tight font-semibold tracking-[-0.01em]">Put your coding tools on autopilot</h2>
-        <p className="max-w-[420px] text-[13.5px] leading-relaxed text-[var(--text-muted)]">
+        <p className="max-w-[420px] text-[14px] leading-relaxed text-[var(--text-muted)]">
           Say when it runs, which coding tool does it and what it's told. Each run opens a session of its own, so you can see what it did and step in.
         </p>
-        <div>
-          <Button size="sm" className="h-8 px-3 text-[12.5px]" onClick={onStart}>
-            <PlusIcon /> New automation
-          </Button>
-        </div>
       </div>
       <ol className="auto-steps" aria-label="An example">
         {steps.map((st) => (
@@ -361,7 +368,7 @@ function Intro({ onStart }: { onStart: () => void }) {
             <span className="auto-tile">
               <st.icon className="size-3.5" />
             </span>
-            <span className="w-12 shrink-0 text-[11.5px] font-medium tracking-wide text-[var(--text-muted)] uppercase">{st.label}</span>
+            <span className="w-12 shrink-0 text-[12px] font-medium tracking-wide text-[var(--text-muted)] uppercase">{st.label}</span>
             <span className="truncate text-[13px]">{st.text}</span>
           </li>
         ))}
@@ -383,10 +390,10 @@ function Row({ a, busy, onEdit, onRun, onToggle, onOpen }: { a: View; busy: bool
       </span>
       <button type="button" className="min-w-0 flex-1 text-left focus-visible:outline-none" onClick={onEdit} aria-label={`Edit ${a.name}`}>
         <span className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-[13.5px] font-medium">{a.name}</span>
+          <span className="truncate text-[14px] font-medium">{a.name}</span>
           <WhenChip when={a.when} />
         </span>
-        <span className="mt-0.5 block truncate text-[12.5px] text-[var(--text-muted)]">
+        <span className="mt-0.5 block truncate text-[13px] text-[var(--text-muted)]">
           {/* What starts it is the chip above; this line is who does it, and where. */}
           {a.says.who}
           {a.who.tool !== "friday" ? ` · ${a.folder ? a.folder.split(/[\\/]/).filter(Boolean).at(-1) : "a new folder each run"}` : ""}
@@ -441,7 +448,7 @@ function Chip({ on, onClick, children, disabled }: { on: boolean; onClick: () =>
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[12.5px] transition-colors disabled:opacity-40",
+        "inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[13px] transition-colors disabled:opacity-40",
         on ? "border-[var(--ink-2)] bg-[var(--hover)] text-[var(--ink)]" : "border-[var(--border)] text-[var(--ink-2)] hover:bg-[var(--hover)]",
       )}
     >
@@ -506,6 +513,13 @@ function Editor({
   const setSched = (s: Partial<AgentSchedule>) => sched && set({ when: { kind: "schedule", schedule: { ...sched, ...s } } });
 
   const save = async () => {
+    // Nothing to do is no automation: one saved with an empty "Does" ran its tool on nothing, its placeholder reading like
+    // instructions it didn't have (2026-10-27 audit). A saved agent brings its own instructions.
+    if (!d.does.trim() && !d.who.agentId) {
+      setError("Say what it does: the instructions it runs with each time.");
+      document.querySelector<HTMLElement>(".automations-page textarea")?.focus();
+      return;
+    }
     setSaving(true);
     setError("");
     try {
@@ -526,17 +540,17 @@ function Editor({
     <div className="page conns-page automations-page px-6! max-[640px]:px-4!">
       <div className="page-inner"><div className="mx-auto w-full max-w-[820px]">
         <div className="mb-4 flex items-center gap-2">
-          <Button variant="ghost" size="sm" className="h-8 px-2 text-[12.5px]" onClick={onClose}>
+          <Button variant="ghost" size="sm" className="h-8 px-2 text-[13px]" onClick={onClose}>
             <ArrowLeftIcon /> Automations
           </Button>
           <div className="ml-auto flex items-center gap-2">
             {id && mine && (
-              <Button variant="ghost" size="sm" className="h-8 px-2 text-[12.5px] text-[var(--text-muted)]" onClick={() => onDelete(d.name)}>
+              <Button variant="ghost" size="sm" className="h-8 px-2 text-[13px] text-[var(--text-muted)]" onClick={() => onDelete(d.name)}>
                 <Trash2Icon /> Delete
               </Button>
             )}
             {mine && (
-              <Button size="sm" className="h-8 px-3 text-[12.5px]" disabled={saving} onClick={() => void save()}>
+              <Button size="sm" className="h-8 px-3 text-[13px]" disabled={saving} onClick={() => void save()}>
                 {saving ? "Saving…" : id ? "Save" : "Create automation"}
               </Button>
             )}
@@ -571,7 +585,12 @@ function Editor({
                       : k === "webhook"
                         ? { kind: "webhook" }
                         : k === "session"
-                          ? { kind: "session", sessionId: recents[0]?.sid ?? "", sessionTitle: recents[0]?.alias || recents[0]?.title || "", on: "finished" }
+                          ? (() => {
+                              // Not one of its own runs' sessions: its end would start the next run, and that one the next, to the
+                              // day's limit (2026-10-27 audit).
+                              const r = recents.find((x) => !history.some((h) => h.sid === x.sid));
+                              return { kind: "session" as const, sessionId: r?.sid ?? "", sessionTitle: r?.alias || r?.title || "", on: "finished" as const };
+                            })()
                           : { kind: "manual" },
                 })
               }
@@ -585,7 +604,7 @@ function Editor({
             {sched && (
               <div className="flex flex-wrap items-center gap-2">
                 <Select value={sched.every} onValueChange={(v) => setSched({ every: v as AgentSchedule["every"], ...(v === "weekly" && !sched.days.length ? { days: WEEKDAYS } : {}) })}>
-                  <SelectTrigger size="sm" aria-label="How often" className="h-8 w-[150px] text-[12.5px]">
+                  <SelectTrigger size="sm" aria-label="How often" className="h-8 w-[150px] text-[13px]">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -596,8 +615,8 @@ function Editor({
                 </Select>
                 {sched.every !== "hourly" && (
                   <>
-                    <span className="text-[12.5px] text-[var(--text-muted)]">at</span>
-                    <Input type="time" value={sched.at} onChange={(e) => setSched({ at: e.target.value })} aria-label="At" className="h-8 w-[120px] text-[12.5px] md:text-[12.5px]" />
+                    <span className="text-[13px] text-[var(--text-muted)]">at</span>
+                    <Input type="time" value={sched.at} onChange={(e) => setSched({ at: e.target.value })} aria-label="At" className="h-8 w-[120px] text-[13px] md:text-[13px]" />
                   </>
                 )}
                 <span className="text-[12px] text-[var(--text-muted)]">{sched.tz}</span>
@@ -629,12 +648,12 @@ function Editor({
                   <span className="text-[12px] text-[var(--text-muted)]">POST anything to it, from CI, GitHub or a script: what is posted is what the run is told about. Keep it secret: it is the key.</span>
                 </div>
               ) : (
-                <span className="text-[12.5px] text-[var(--text-muted)]">Its address shows here once it's created.</span>
+                <span className="text-[13px] text-[var(--text-muted)]">Its address shows here once it's created.</span>
               ))}
             {d.when.kind === "session" && (
               <div className="flex flex-wrap items-center gap-2">
                 <Select value={d.when.on} onValueChange={(v) => d.when.kind === "session" && set({ when: { ...d.when, on: v as "finished" | "failed" } })}>
-                  <SelectTrigger size="sm" aria-label="When the agent" className="h-8 w-[150px] text-[12.5px]">
+                  <SelectTrigger size="sm" aria-label="When the agent" className="h-8 w-[150px] text-[13px]">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -642,7 +661,7 @@ function Editor({
                     <SelectItem value="failed">When it fails</SelectItem>
                   </SelectContent>
                 </Select>
-                <span className="text-[12.5px] text-[var(--text-muted)]">in</span>
+                <span className="text-[13px] text-[var(--text-muted)]">in</span>
                 <Select
                   value={d.when.sessionId}
                   onValueChange={(sid) => {
@@ -650,7 +669,7 @@ function Editor({
                     if (d.when.kind === "session") set({ when: { ...d.when, sessionId: sid, sessionTitle: r?.alias || r?.title || d.when.sessionTitle } });
                   }}
                 >
-                  <SelectTrigger size="sm" aria-label="Which session" className="h-8 min-w-[200px] max-w-[320px] text-[12.5px]">
+                  <SelectTrigger size="sm" aria-label="Which session" className="h-8 min-w-[200px] max-w-[320px] text-[13px]">
                     <SelectValue placeholder="Pick a session" />
                   </SelectTrigger>
                   <SelectContent>
@@ -669,7 +688,7 @@ function Editor({
           <Part label="Who" hint="Which coding tool does it, and with whom.">
             <div className="flex flex-wrap items-center gap-2">
               <Select value={d.who.tool} onValueChange={(v) => who({ tool: v as Draft["who"]["tool"], team: d.who.team.filter((t) => t !== v) })}>
-                <SelectTrigger size="sm" aria-label="Coding tool" className="h-8 min-w-[170px] text-[12.5px]">
+                <SelectTrigger size="sm" aria-label="Coding tool" className="h-8 min-w-[170px] text-[13px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -688,7 +707,7 @@ function Editor({
               </Select>
               {!friday && (
                 <Select value={d.who.mode} onValueChange={(v) => who({ mode: v as EngineMode })}>
-                  <SelectTrigger size="sm" aria-label="What it may do" className="h-8 min-w-[150px] text-[12.5px]">
+                  <SelectTrigger size="sm" aria-label="What it may do" className="h-8 min-w-[150px] text-[13px]">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -704,7 +723,7 @@ function Editor({
             {friday ? (
               <div className="flex flex-wrap items-center gap-2">
                 <Select value={d.who.agentId || "none"} onValueChange={(v) => who({ agentId: v === "none" ? "" : v })}>
-                  <SelectTrigger size="sm" aria-label="Saved agent" className="h-8 min-w-[200px] text-[12.5px]">
+                  <SelectTrigger size="sm" aria-label="Saved agent" className="h-8 min-w-[200px] text-[13px]">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -716,7 +735,7 @@ function Editor({
                     ))}
                   </SelectContent>
                 </Select>
-                <button type="button" className="text-[12.5px] text-[var(--text-muted)] underline-offset-2 hover:underline" onClick={onSavedAgents}>
+                <button type="button" className="text-[13px] text-[var(--text-muted)] underline-offset-2 hover:underline" onClick={onSavedAgents}>
                   Manage saved agents
                 </button>
               </div>
@@ -742,12 +761,12 @@ function Editor({
           {!friday && (
             <Part label="Where" hint="The folder on your computer it works in.">
               <div className="flex items-center gap-1.5">
-                <Input value={d.folder} onChange={(e) => set({ folder: e.target.value })} placeholder="No folder: a new project folder each run" aria-label="Folder" className="h-8 text-[12.5px] md:text-[12.5px]" />
+                <Input value={d.folder} onChange={(e) => set({ folder: e.target.value })} placeholder="No folder: a new project folder each run" aria-label="Folder" className="h-8 text-[13px] md:text-[13px]" />
                 {window.fridayDesktop?.pickFolder && (
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-8 border-[var(--border)] px-2.5 text-[12.5px] shadow-none"
+                    className="h-8 border-[var(--border)] px-2.5 text-[13px] shadow-none"
                     onClick={() => void window.fridayDesktop!.pickFolder().then((p) => p && set({ folder: p }))}
                   >
                     <FolderOpenIcon /> Choose
@@ -755,7 +774,7 @@ function Editor({
                 )}
               </div>
               {d.folder && (
-                <label className="flex items-center gap-2 text-[12.5px]">
+                <label className="flex items-center gap-2 text-[13px]">
                   <Switch checked={d.copy} onCheckedChange={(copy) => set({ copy })} aria-label="Work on its own copy" />
                   Work on its own copy of the folder, so your own work there is left alone
                 </label>
@@ -764,20 +783,20 @@ function Editor({
             </Part>
           )}
 
-          <Part label="Does" hint={<>What it's told. <code className="text-[11.5px]">{"{{event}}"}</code> is what started the run.</>}>
+          <Part label="Does" hint={<>What it's told. <code className="text-[12px]">{"{{event}}"}</code> is what started the run.</>}>
             <Textarea value={d.does} onChange={(e) => set({ does: e.target.value })} placeholder="Fix whatever made the build fail, and run the tests again." aria-label="What it does" rows={5} maxLength={8000} className="text-[13px] md:text-[13px]" />
           </Part>
 
           <Part label="Then" hint="When it's done.">
             {!friday && (
-              <label className="flex items-center gap-2 text-[12.5px]">
+              <label className="flex items-center gap-2 text-[13px]">
                 <Switch checked={d.then.pr} onCheckedChange={(pr) => set({ then: { ...d.then, pr } })} aria-label="Open a pull request" />
                 Open a pull request with the change
               </label>
             )}
             {/* Told through the product's own channels: the open-source edition has none, and its runs show here. */}
             {!isLocal() && (
-              <label className="flex items-center gap-2 text-[12.5px]">
+              <label className="flex items-center gap-2 text-[13px]">
                 <Switch checked={d.then.notify} onCheckedChange={(notify) => set({ then: { ...d.then, notify } })} aria-label="Tell me" />
                 Tell me when a run ends, where my notifications go
               </label>
@@ -785,7 +804,7 @@ function Editor({
           </Part>
 
           <Part label="Limits" hint="So it can't run away.">
-            <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
+            <div className="flex flex-wrap items-center gap-2 text-[13px]">
               At most
               <Input
                 type="number"
@@ -794,15 +813,15 @@ function Editor({
                 value={d.limits.perDay}
                 onChange={(e) => set({ limits: { ...d.limits, perDay: Math.max(1, Math.min(200, Number(e.target.value) || 1)) } })}
                 aria-label="Runs a day"
-                className="h-8 w-[72px] text-[12.5px] md:text-[12.5px]"
+                className="h-8 w-[72px] text-[13px] md:text-[13px]"
               />
               runs a day
             </div>
             {!friday && (
-              <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
+              <div className="flex flex-wrap items-center gap-2 text-[13px]">
                 If my computer isn't on
                 <Select value={d.limits.offline} onValueChange={(v) => set({ limits: { ...d.limits, offline: v as "wait" | "skip" } })}>
-                  <SelectTrigger size="sm" aria-label="If my computer isn't on" className="h-8 min-w-[200px] text-[12.5px]">
+                  <SelectTrigger size="sm" aria-label="If my computer isn't on" className="h-8 min-w-[200px] text-[13px]">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -821,7 +840,7 @@ function Editor({
               Runs
             </h2>
             {history.length === 0 ? (
-              <p className="text-[12.5px] text-[var(--text-muted)]">No runs yet. {mine ? "Press Run now on the list to try it." : ""}</p>
+              <p className="text-[13px] text-[var(--text-muted)]">No runs yet. {mine ? "Press Run now on the list to try it." : ""}</p>
             ) : (
               <ul className="grid gap-1">
                 {history.map((r) => (
@@ -830,7 +849,7 @@ function Editor({
                       type="button"
                       disabled={!r.sid || !r.invite}
                       onClick={() => r.sid && r.invite && onOpen(r.sid, r.invite)}
-                      className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-[12.5px] hover:bg-[var(--hover)] disabled:hover:bg-transparent"
+                      className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-[13px] hover:bg-[var(--hover)] disabled:hover:bg-transparent"
                     >
                       <TaskMark state={runMark(r.status)} />
                       <span className="font-medium">{RUN_WORD[r.status]}</span>

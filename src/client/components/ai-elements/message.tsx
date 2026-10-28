@@ -22,7 +22,7 @@ import {
 import type { ComponentProps, HTMLAttributes, ReactElement } from "react";
 import { createContext, memo, useContext, useEffect, useState } from "react";
 import { Streamdown } from "streamdown";
-import { hasMath, mathText, useKatex } from "../../AnswerParts.js";
+import { hasMath, mathText, mediaText, useKatex } from "../../AnswerParts.js";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];
@@ -312,7 +312,8 @@ export type MessageResponseProps = ComponentProps<typeof Streamdown> & {
 
 export const MessageResponse = memo(
   ({ className, math, children, ...props }: MessageResponseProps) => {
-    const text = math && typeof children === "string" ? mathText(children) : children;
+    const said = math && typeof children === "string" ? mathText(children) : children;
+    const text = typeof said === "string" ? mediaText(said) : said;
     // An answer with maths waits for KaTeX (loaded on demand, AnswerParts), so its equations never show as their source.
     const needs = !!math && typeof text === "string" && hasMath(text);
     const ready = useKatex(needs);

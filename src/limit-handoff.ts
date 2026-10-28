@@ -1,3 +1,4 @@
+import { ownPlan, taskOwner } from "./own-plan.js";
 import { limitHit } from "./limit-reset.js";
 import { limitedLanes, stillLimited } from "./limited.js";
 import { laneName } from "./session/core.js";
@@ -9,8 +10,11 @@ import { engineName, liveMachine, MAIN_LANE, type EventBody, type SessionEvent }
  * limit, make it smart"). Its run ends on the limit mid-task; until now the session showed a card and waited for a person to
  * pick who carries on. Now Friday picks, from who could do it right now:
  *
- * - never the same tool on the same computer: that is the same sign-in, out of usage too. A tool with more than one account there
- *   (runner/accounts.ts) has already carried on as each of the others by itself before its run ends on the limit at all;
+ * - never the same tool, on this computer or anyone's: carrying on the same tool on another sign-in is getting round its usage
+ *   limit, which its maker's terms don't allow (Arun, 2026-10-27: "i do not want my account banned"), and switching to another
+ *   account of one's own is the person's choice, not Friday's (runner/accounts.ts);
+ * - never a coding tool on someone else's own plan: it takes its host's work alone (own-plan.ts), so this person's task can't
+ *   go to a teammate's Claude Code or Codex. A tool on an API key its host shares, or Friday Code, can take it;
  * - never one that is itself out of usage until later, one that is offline, one that runs on its own triggers, or one that wakes
  *   by itself when this one finishes (it is already the next step);
  * - only one working on the same code: a coding tool in the same folder, a copy of it or the same repo, or Friday Code with a
@@ -27,6 +31,8 @@ import { engineName, liveMachine, MAIN_LANE, type EventBody, type SessionEvent }
 export function limitTargets(state: SessionState, events: SessionEvent[], lane: string, now = Date.now()): { id: string; why: string }[] {
   const from = state.engines[lane];
   if (!from?.tool) return [];
+  // Whose work this is: the person the limited lane was working for (its host's, on a plan of its own).
+  const owner = taskOwner(events, lane, Number.MAX_SAFE_INTEGER) ?? from.hostId;
   const rootOf = (e: { cwd: string; copyOf?: string; root?: string }) => e.copyOf ?? e.root ?? e.cwd;
   const limited = limitedLanes(state, events, now);
   const out: { id: string; why: string; score: number }[] = [];
@@ -39,14 +45,15 @@ export function limitTargets(state: SessionState, events: SessionEvent[], lane: 
     const e = state.engines[id];
     if (e?.tool) {
       if (!e.online) continue;
-      if (e.tool === from.tool && e.hostId === from.hostId) continue;
+      if (e.tool === from.tool) continue;
+      if (ownPlan(e) && e.hostId !== owner) continue;
       if (!(rootOf(e) === rootOf(from) || (!!e.repo && e.repo === from.repo))) continue;
     } else if (!liveMachine(state, id)) continue;
     if (limited.has(id)) continue;
     const busy = runOf(state, id).status !== "idle";
     const score = (busy ? 0 : 4) + (e?.tool ? 2 : 1);
     const name = e?.tool ? engineName(e.tool) : laneName(state, id);
-    const why = `${e?.tool && e.tool === from.tool ? `${name} on ${e.hostName}'s computer, another account` : name} ${busy ? "takes it after what it is doing" : "is free"}`;
+    const why = `${name} ${busy ? "takes it after what it is doing" : "is free"}`;
     out.push({ id, why, score });
   }
   return out.sort((a, b) => b.score - a.score).map(({ id, why }) => ({ id, why }));

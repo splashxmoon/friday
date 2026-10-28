@@ -38,17 +38,24 @@ function session(engines: Record<string, LaneEngine>, more: [ActorRef, EventBody
   return [{ ...s, engines }, events];
 }
 
-test("out of usage: another account in the same code, free first; never the same sign-in, one also out, offline, or on its own triggers", () => {
+test("out of usage: another tool in the same code, free first; never the same tool, someone else's own plan, one also out, offline, or on its own triggers", () => {
   const codex = engine({ tool: "codex" });
   const [s, e] = session({ lc: engine({}), lx: codex });
   assert.deepEqual(limitTargets(s, e, "lc", NOW).map((t) => t.id), ["lx", MAIN_LANE], "Codex, free and on its own subscription, then Friday Code (borrowing the folder)");
   assert.match(limitTargets(s, e, "lc", NOW)[0]!.why, /Codex is free/);
 
-  // The same tool on the same computer is the same sign-in: out too. On a teammate's computer it is another account.
+  // Never the same tool: on this computer it is the same sign-in, out too; anywhere else, carrying on as another sign-in is getting
+  // round the tool's usage limit (Arun, 2026-10-27: "i do not want my account banned").
   const [same, e2] = session({ lc: engine({}), lx: engine({}) });
   assert.ok(!limitTargets(same, e2, "lc", NOW).some((t) => t.id === "lx"));
   const [theirs, e3] = session({ lc: engine({}), lx: engine({ hostId: "u-bo", hostName: "Bo" }) });
-  assert.match(limitTargets(theirs, e3, "lc", NOW).find((t) => t.id === "lx")?.why ?? "", /another account/);
+  assert.ok(!limitTargets(theirs, e3, "lc", NOW).some((t) => t.id === "lx"), "not a teammate's Claude Code either");
+  // A teammate's other tool on their own plan takes their work alone (own-plan.ts): Ada's task never goes to Bo's Codex. Bo's
+  // Codex on an API key Bo shares may take it.
+  const [bos, e3b] = session({ lc: engine({}), lx: engine({ tool: "codex", hostId: "u-bo", hostName: "Bo" }) });
+  assert.ok(!limitTargets(bos, e3b, "lc", NOW).some((t) => t.id === "lx"), "not Bo's Codex on Bo's ChatGPT plan");
+  const [keyed, e3c] = session({ lc: engine({}), lx: engine({ tool: "codex", hostId: "u-bo", hostName: "Bo", apiKey: true }) });
+  assert.ok(limitTargets(keyed, e3c, "lc", NOW).some((t) => t.id === "lx"), "Bo's Codex on Bo's API key");
 
   // Offline, or in another project: can't carry this on.
   const [away, e4] = session({ lc: engine({}), lx: engine({ tool: "codex", online: false }) });

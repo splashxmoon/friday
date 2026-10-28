@@ -424,8 +424,8 @@ function LocalShell({ id, cwd, onOutput, onOpenFile }: { id: string; cwd?: strin
       const [{ Terminal }, { FitAddon }] = await Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit")]);
       if (dead) return;
       const term = new Terminal({
-        fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
-        fontSize: 12.5,
+        fontFamily: '"Geist Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
+        fontSize: 13,
         cursorBlink: true,
         scrollback: 10_000,
         theme: themeFrom(el),

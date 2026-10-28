@@ -70,7 +70,7 @@ export const SECTIONS: SectionDef[] = [
     group: "You",
     icon: "bell",
     blurb:
-      "Only while Friday's window is hidden, and only when something waits on you: a question, a finished run, a failure.",
+      "Only when something waits on you: a question, a finished run, a failure. Banners come while Friday's window is hidden; the chime, if you want it, either way.",
     keywords: "alerts away banner chime sound permission",
   },
   {
@@ -286,8 +286,8 @@ export function SettingsPage({
               const items = matches.filter((s) => s.group === g);
               if (!items.length) return null;
               return (
-                <div key={g} className="flex flex-col gap-px max-[760px]:contents" role="group" aria-label={g}>
-                  <div className="px-2 pb-1 text-[11.5px] font-medium text-[var(--text-muted)] max-[760px]:hidden">{g}</div>
+                <div key={g} className="set-nav-group flex flex-col gap-px max-[760px]:contents" role="group" aria-label={g}>
+                  <div className="px-2 pb-1 text-[12px] font-medium text-[var(--text-muted)] max-[760px]:hidden">{g}</div>
                   {items.map((s) => {
                     const on = s.id === current.id && !missing;
                     return (
@@ -312,12 +312,12 @@ export function SettingsPage({
           <p className="sr-only" role="status">
             {query ? (matches.length ? `${matches.length} section${matches.length === 1 ? "" : "s"} found` : "No setting matches") : ""}
           </p>
-          {!matches.length && <p className="m-0 px-2 text-[12.5px] text-[var(--text-muted)]">No setting matches “{q.trim()}”.</p>}
+          {!matches.length && <p className="m-0 px-2 text-[13px] text-[var(--text-muted)]">No setting matches “{q.trim()}”.</p>}
         </nav>
 
         {missing ? (
           <div className="min-w-0 pb-16">
-            <PageHeader as="h2" titleRef={head} eyebrow={missing.group} title={missing.label} subtitle={MISSING[missing.id] ?? `${missing.label} comes with a Team plan.`} />
+            <PageHeader as="h2" titleRef={head} title={missing.label} subtitle={MISSING[missing.id] ?? `${missing.label} comes with a Team plan.`} />
             <div className="flex gap-2">
               <Button variant="outline" size="sm" onClick={() => onSection("appearance")}>Back to Appearance</Button>
               <Button size="sm" onClick={() => startTeam()}>
@@ -327,7 +327,7 @@ export function SettingsPage({
           </div>
         ) : (
           <div className="min-w-0 pb-16">
-            <PageHeader as="h2" titleRef={head} eyebrow={current.group} title={current.label} subtitle={current.blurb} />
+            <PageHeader as="h2" titleRef={head} title={current.label} subtitle={current.blurb} />
             {current.id === "profile" && <AccountTab identity={identity} me={me} onRename={onRename} solo={solo} />}
             {current.id === "appearance" && <AppearanceTab />}
             {current.id === "notifications" && <NotificationsTab identity={identity} />}
@@ -367,7 +367,7 @@ function AccountTab({
         <Avatar name={identity.name || "?"} id={identity.id} size={44} />
         <div className="min-w-0">
           <div className="truncate text-[15px] font-semibold text-[var(--ink)]">{identity.name || "Unnamed"}</div>
-          <div className="truncate text-[12.5px] text-[var(--text-muted)]">{isLocal() ? "On this computer" : me?.email || "No email on this account"}</div>
+          <div className="truncate text-[13px] text-[var(--text-muted)]">{isLocal() ? "On this computer" : me?.email || "No email on this account"}</div>
         </div>
       </div>
 

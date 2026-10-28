@@ -157,6 +157,18 @@ test("Edits: a file change is let through only inside the folder; one reaching b
   }
 });
 
+test("a thread open in another program (the Codex app) is carried on from a copy of it, not dropped", () => {
+  const s = server({ resumeId: "thr_open" });
+  s.say({ id: 0, result: {} });
+  const busy = s.say({ id: s.last().id, error: { code: -32600, message: "thread thr_open already has an active writer" } });
+  assert.ok(!busy.some((o) => o.kind === "done"), "the turn goes on");
+  assert.deepEqual([s.last().method, s.last().params], ["thread/fork", { threadId: "thr_open", cwd: "/work/repo" }]);
+  const forked = s.say({ id: s.last().id, result: { thread: { id: "thr_copy" } } });
+  assert.deepEqual(forked[0], { kind: "session", id: "thr_copy" });
+  assert.equal(s.last().method, "turn/start");
+  assert.equal(s.last().params.threadId, "thr_copy");
+});
+
 test("a thread it had is resumed; one it can't find ends the turn saying so, for the next to start fresh; a failed turn says why", () => {
   const s = server({ resumeId: "thr_old" });
   s.say({ id: 0, result: {} });

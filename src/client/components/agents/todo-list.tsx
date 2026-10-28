@@ -224,9 +224,9 @@ export function TodoList({
         className="group flex h-11 w-full items-center gap-2.5 rounded-2xl px-3.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <TodoHeaderIcon complete={allComplete} icon={icon} done={items.length ? completed / items.length : 0} />
-        <h3 className="min-w-0 flex-1 truncate text-sm font-medium text-foreground/90">
+        <h2 className="min-w-0 flex-1 truncate text-sm font-medium text-foreground/90">
           {title}
-        </h3>
+        </h2>
         <span
           className={cn(
             "shrink-0 text-xs font-medium tabular-nums text-muted-foreground",
@@ -266,7 +266,7 @@ export function TodoList({
           style={{ maxHeight }}
         >
           {items.length ? (
-            <ol aria-live="polite" className="space-y-0">
+            <ol className="space-y-0">
             <AnimatePresence initial={false} mode="popLayout">
               {items.map((item) => {
                 const status = item.status ?? "pending";
@@ -315,7 +315,9 @@ export function TodoList({
                         status === "cancelled" && "text-muted-foreground/55",
                       )}
                     >
-                      <span className="relative inline-block max-w-full">
+                      {/* Cut short with an ellipsis of its own: an inline block isn't cut by its line's, so a long title was clipped
+                          mid-letter (2026-10-27 audit). */}
+                      <span className="relative inline-block max-w-full truncate align-bottom">
                         {item.title}
                         <motion.span
                           aria-hidden="true"

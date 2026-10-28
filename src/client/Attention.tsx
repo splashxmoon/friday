@@ -77,7 +77,8 @@ export function useAttention(identity: Identity, recents: RecentSession[], withS
   /** What was working at the last poll, so a session that stops working — and isn't waiting on anyone — is said to have finished. */
   const wasWorking = useRef(new Map<string, Working>());
 
-  const sids = recents.map((r) => r.sid).join(",");
+  let more: string[] = [];
+  const sids = [...new Set([...recents.map((r) => r.sid), ...more])].join(",");
 
   const waitingNow = useRef(0);
   waitingNow.current = items.length;
@@ -125,13 +126,15 @@ export function useAttention(identity: Identity, recents: RecentSession[], withS
         const key = `${it.sid}:${it.seq}`;
         if (told.current.has(key)) continue;
         told.current.add(key);
-        notify(it);
+        let said = it;
+        notify(said);
         if (chimeOn()) chime();
       }
       const nowWorking = new Set((got.working ?? []).map((w) => w.sid));
       for (const [sid, w] of wasWorking.current) {
         if (nowWorking.has(sid) || got.items.some((it) => it.sid === sid)) continue;
-        notifyDone(recents.find((r) => r.sid === sid)?.title ?? "A session", w.what, sid);
+        let title = recents.find((r) => r.sid === sid)?.title ?? "A session";
+        notifyDone(title, w.what, sid);
       }
       wasWorking.current = new Map((got.working ?? []).map((w) => [w.sid, w]));
     };
@@ -327,7 +330,12 @@ export function WaitingOnYou({ identity, items, recents, onOpen, viewing }: { id
     window.addEventListener("keydown", esc);
     return () => window.removeEventListener("keydown", esc);
   }, [open]);
-  const shown = items.filter((it) => it.sid !== viewing && !done.has(keyOf(it)) && !dismissed.has(keyOf(it)) && recents.some((r) => r.sid === it.sid));
+  // Everything still waiting elsewhere, which the header's pill counts as the sidebar does; dismissing a toast hides that toast,
+  // not the wait (2026-10-27 audit: the pill went for good once its item was dismissed, while the sidebar still said "Needs you 1").
+  const counted = items.filter((it) => it.sid !== viewing && !done.has(keyOf(it)) && recents.some((r) => r.sid === it.sid));
+  const inHeader = !!viewing && !!slot;
+  // The toasts in the corner leave out what was dismissed; the list the pill opens, asked for, has them all.
+  const shown = inHeader ? counted : counted.filter((it) => !dismissed.has(keyOf(it)));
   // One line for what arrived, rather than the cards read out whole.
   const seen = useRef(new Set<string>());
   const shownKeys = shown.map(keyOf).join("|");
@@ -364,7 +372,6 @@ export function WaitingOnYou({ identity, items, recents, onOpen, viewing }: { id
   // A toast each, in the corner of the window, newest at the bottom. None goes by itself: each stays until it is closed
   // or answered, because an agent asking first is stopped until somebody does.
   const SHOWN = 3;
-  const inHeader = !!viewing && !!slot;
   const pill = inHeader
     ? createPortal(
         <button type="button" className={`wy-pill${open ? " on" : ""}`} aria-expanded={open} aria-label={`${shown.length} waiting on you`} onClick={() => setOpen((o) => !o)} title="Other sessions waiting on you">

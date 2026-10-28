@@ -94,8 +94,8 @@ export function install(): void {
 }
 
 /** FRIDAY_NO_UPDATE_CHECK=1: the app never asks GitHub for a newer version, nor downloads one. */
-const OFF = process.env.FRIDAY_NO_UPDATE_CHECK === "1";
-const OFF_SAYS = "Update checks are off (FRIDAY_NO_UPDATE_CHECK=1).";
+let OFF = process.env.FRIDAY_NO_UPDATE_CHECK === "1";
+let OFF_SAYS = "Update checks are off (FRIDAY_NO_UPDATE_CHECK=1).";
 
 /** Ask the feed now. Safe to call from a button. */
 export function check(): UpdateState {

@@ -22,8 +22,8 @@ export { PageHeader } from "./dass/PageHeader";
 export { EmptyState } from "./dass/EmptyState";
 export { PageToolbar } from "./dass/PageToolbar";
 
-/** A surface: a raised card one step off the page (--raised, the shadow scale and lit edge in style.css), 12px corners. */
-export const surface = "rounded-xl border border-[var(--border)] bg-[var(--raised)] shadow-[var(--shadow-xs),var(--edge)]";
+/** A surface: a tray, one step off the page (--tray in style.css, the tray pass), 16px corners. */
+export const surface = "tray rounded-xl border border-[var(--border)] bg-[var(--raised)] shadow-[var(--shadow-xs),var(--edge)]";
 
 /** A titled group of settings rows, as one card. */
 export function SettingsGroup({
@@ -44,15 +44,17 @@ export function SettingsGroup({
   tone?: "danger";
 }) {
   return (
-    <section className={cn("flex flex-col gap-2", className)}>
+    // A tray: its title and action on the tray, its rows on a panel inset in it (Arun, 2026-10-27, a reference to build the app's
+    // components on). Untitled, the rows' panel is the whole of it.
+    <section className={cn("tray tray-group flex flex-col", !title && "tray-bare", tone === "danger" && "tray-danger", className)}>
       {title && (
-        <div className="flex min-h-7 items-center gap-1.5 px-0.5">
+        <div className="tray-head">
           <h3 className={cn("m-0 text-[13px] font-semibold text-[var(--ink)]", tone === "danger" && "text-[var(--red)]")}>{title}</h3>
           {hint}
           {action && <div className="ml-auto flex items-center gap-2">{action}</div>}
         </div>
       )}
-      <div className={cn(surface, "divide-y divide-[var(--border)] px-4", tone === "danger" && "border-[color-mix(in_srgb,var(--red)_30%,var(--border))]")}>{children}</div>
+      <div className="tray-in divide-y divide-[var(--border)] px-4">{children}</div>
     </section>
   );
 }
@@ -86,7 +88,7 @@ export function SettingsRow({
         ) : (
           <div className="text-[13px] font-medium text-[var(--ink)]">{label}</div>
         )}
-        {hint && <div className="mt-0.5 max-w-[72ch] text-[12.5px] leading-snug text-[var(--text-muted)]">{hint}</div>}
+        {hint && <div className="mt-0.5 max-w-[72ch] text-[13px] leading-snug text-[var(--text-muted)]">{hint}</div>}
       </div>
       {children && <div className={cn("flex min-w-0 items-center gap-2", stack ? "w-full flex-col items-stretch" : "shrink-0 flex-wrap justify-end")}>{children}</div>}
     </>
@@ -113,8 +115,8 @@ export function Facts({ items, className }: { items: { term: ReactNode; detail: 
     <dl className={cn("m-0 grid gap-x-6 gap-y-2.5 sm:grid-cols-[150px_1fr]", className)}>
       {items.map((f, i) => (
         <div key={i} className="contents">
-          <dt className="text-[12.5px] font-medium text-[var(--ink-2)]">{f.term}</dt>
-          <dd className="m-0 text-[12.5px] leading-snug text-[var(--text-muted)]">{f.detail}</dd>
+          <dt className="text-[13px] font-medium text-[var(--ink-2)]">{f.term}</dt>
+          <dd className="m-0 text-[13px] leading-snug text-[var(--text-muted)]">{f.detail}</dd>
         </div>
       ))}
     </dl>
@@ -150,7 +152,7 @@ export function Choice<T extends string>({
         <ToggleGroupItem
           key={v}
           value={v}
-          className="h-[26px] min-w-0 rounded-md px-2.5 text-[12.5px] font-medium text-[var(--text-muted)] transition-colors duration-[var(--dass-fast)] hover:bg-transparent hover:text-[var(--ink)] data-[state=on]:bg-[var(--bg)] data-[state=on]:text-[var(--ink)] data-[state=on]:shadow-[0_1px_3px_rgb(0_0_0/.12),0_0_0_1px_var(--border)]"
+          className="h-[26px] min-w-0 rounded-md px-2.5 text-[13px] font-medium text-[var(--text-muted)] transition-colors duration-[var(--dass-fast)] hover:bg-transparent hover:text-[var(--ink)] data-[state=on]:bg-[var(--bg)] data-[state=on]:text-[var(--ink)] data-[state=on]:shadow-[0_1px_3px_rgb(0_0_0/.12),0_0_0_1px_var(--border)]"
         >
           {text}
         </ToggleGroupItem>
@@ -169,7 +171,7 @@ export function StateBadge({ tone, children, className, title }: { tone?: "live"
       variant="outline"
       title={title}
       className={cn(
-        "h-5 rounded-md border-[var(--border)] px-1.5 text-[11.5px] font-medium text-[var(--ink-2)]",
+        "h-5 rounded-md border-[var(--border)] px-1.5 text-[12px] font-medium text-[var(--ink-2)]",
         tone === "live" && "border-transparent bg-[color-mix(in_srgb,var(--dass-live)_14%,transparent)] text-[var(--dass-live)]",
         tone === "needs" && "border-transparent bg-[color-mix(in_srgb,var(--dass-needs)_16%,transparent)] text-[var(--dass-needs)]",
         tone === "danger" && "border-transparent bg-[color-mix(in_srgb,var(--red)_14%,transparent)] text-[var(--red)]",
@@ -184,7 +186,7 @@ export function StateBadge({ tone, children, className, title }: { tone?: "live"
 /** A line said after an action: quiet when it went well, red when it didn't. Empty, it takes no room (but stays announced). */
 export function Note({ ok = true, children, className }: { ok?: boolean; children?: ReactNode; className?: string }) {
   return (
-    <p role={ok ? "status" : "alert"} className={cn("set-note m-0 text-[12.5px]", ok ? "text-[var(--text-muted)]" : "text-[var(--red)]", className)}>
+    <p role={ok ? "status" : "alert"} className={cn("set-note m-0 text-[13px]", ok ? "text-[var(--text-muted)]" : "text-[var(--red)]", className)}>
       {children}
     </p>
   );
@@ -214,7 +216,7 @@ export function SectionHeader({
           {title}
           {count !== undefined && <span className="text-[13px] font-normal tabular-nums text-[var(--text-muted)]">{count}</span>}
         </h2>
-        {description && <p className="mt-0.5 mb-0 text-[12.5px] leading-snug text-[var(--text-muted)]">{description}</p>}
+        {description && <p className="mt-0.5 mb-0 text-[13px] leading-snug text-[var(--text-muted)]">{description}</p>}
       </div>
       {action && <div className="flex shrink-0 items-center gap-2">{action}</div>}
     </div>
@@ -257,7 +259,7 @@ export function Callout({
     <div
       role={role}
       className={cn(
-        "flex items-center gap-2.5 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3.5 py-2.5 text-[12.5px] leading-normal text-[var(--ink-2)] [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-[var(--text-muted)]",
+        "flex items-center gap-2.5 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3.5 py-2.5 text-[13px] leading-normal text-[var(--ink-2)] [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-[var(--text-muted)]",
         tone === "needs" && "border-[color-mix(in_srgb,var(--dass-needs)_35%,transparent)] bg-[color-mix(in_srgb,var(--dass-needs)_9%,transparent)] [&>svg]:text-[var(--dass-needs)]",
         tone === "danger" && "border-[color-mix(in_srgb,var(--red)_35%,transparent)] bg-[color-mix(in_srgb,var(--red)_8%,transparent)] [&>svg]:text-[var(--red)]",
         className,
@@ -300,7 +302,7 @@ export function ActionMenu({ items, label, trigger, align = "end" }: { items: ()
         {list.map((it, i) =>
           "heading" in it ? (
             it.heading ? (
-              <DropdownMenuLabel key={i} className="text-[11.5px] font-medium text-[var(--text-muted)]">
+              <DropdownMenuLabel key={i} className="text-[12px] font-medium text-[var(--text-muted)]">
                 {it.heading}
               </DropdownMenuLabel>
             ) : (
@@ -311,7 +313,7 @@ export function ActionMenu({ items, label, trigger, align = "end" }: { items: ()
               {it.mark ?? (it.checked ? <CheckIcon /> : it.icon ? <Icon name={it.icon} size={14} /> : null)}
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="truncate">{it.label}</span>
-                {it.sub && <span className="text-[11.5px] text-[var(--text-muted)]">{it.sub}</span>}
+                {it.sub && <span className="text-[12px] text-[var(--text-muted)]">{it.sub}</span>}
               </span>
               {it.hint && <span className="ml-3 max-w-40 truncate font-mono text-[11px] text-[var(--text-muted)]">{it.hint}</span>}
             </DropdownMenuItem>
@@ -351,8 +353,8 @@ export function FormDialog({
           }}
         >
           <DialogHeader>
-            <DialogTitle className="text-[17px]">{title}</DialogTitle>
-            {sub && <DialogDescription className="text-[12.5px]">{sub}</DialogDescription>}
+            <DialogTitle className="text-[18px]">{title}</DialogTitle>
+            {sub && <DialogDescription className="text-[13px]">{sub}</DialogDescription>}
           </DialogHeader>
           {children}
           <DialogFooter className="pt-1">{actions}</DialogFooter>

@@ -120,7 +120,7 @@
    follow the app's tokens (style.css), so light and dark carry through without a second palette. */
 :root,
 .dark {
-  --dass-live: #2563eb;
+  --dass-live: #1d4ed8; /* 5.7:1 on the light sidebar's grey; #2563eb was 4.4:1 (2026-10-27 audit) */
   --dass-ok: #16a34a;
   --dass-needs: var(--amber, #f2b453);
   --dass-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -142,13 +142,13 @@
     transition-duration: var(--dass-fast);
   }
   .dass-rail-btn:hover { @apply bg-sidebar-accent text-sidebar-accent-foreground; }
-  .dass-rail-btn:focus-visible { @apply ring-2 ring-sidebar-ring; }
+  .dass-rail-btn:focus-visible { box-shadow: var(--dass-ring); outline: none; }
   .dass-rail-btn[data-active="true"] { @apply bg-sidebar-accent text-sidebar-accent-foreground; box-shadow: inset 0 0 0 1px var(--border); }
   .dass-rail-btn[data-active="true"]::before {
     content: ""; position: absolute; left: -10px; top: 10px; bottom: 10px; width: 3px; border-radius: 0 3px 3px 0; background: var(--ink);
   }
   .dass-rail-badge {
-    @apply absolute -top-0.5 -right-0.5 grid h-4 min-w-4 place-items-center rounded-full px-1 text-[10px] font-semibold leading-none;
+    @apply absolute -top-0.5 -right-0.5 grid h-4 min-w-4 place-items-center rounded-full px-1 text-[11px] font-semibold leading-none;
     background: color-mix(in srgb, var(--dass-needs) 16%, var(--sidebar)); color: var(--dass-needs); box-shadow: 0 0 0 2px var(--sidebar);
   }
 
@@ -158,11 +158,11 @@
     transition-duration: var(--dass-fast);
   }
   .dass-row:hover, .dass-row[data-menu="true"] { @apply bg-sidebar-accent; }
-  .dass-row:focus-visible { @apply ring-2 ring-sidebar-ring; }
+  .dass-row:focus-visible { box-shadow: var(--dass-ring); outline: none; }
   .dass-row[data-active="true"] { @apply bg-sidebar-accent; box-shadow: inset 0 0 0 1px var(--border); }
   .dass-row[data-active="true"] .dass-row-title { @apply text-sidebar-accent-foreground font-medium; }
   .dass-row-title { @apply min-w-0 flex-1 truncate text-[13px] text-sidebar-foreground; }
-  .dass-row-sub { @apply flex min-w-0 items-center gap-1.5 pl-[18px] text-[11.5px] text-[var(--text-muted)]; }
+  .dass-row-sub { @apply flex min-w-0 items-center gap-1.5 pl-[18px] text-[12px] text-[var(--text-muted)]; }
   /* The row's actions take the time's place on hover, rather than keeping an empty slot beside it: at rest the time sits at
      the row's right edge (Arun, 2026-10-20). */
   /* At rest the actions button is out of sight but still in the Tab order, not display:none: hidden that way, Tab from a row
@@ -187,14 +187,14 @@
   .dass-dot[data-state="bad"] { background-color: var(--red); }
   .dass-dot[data-state="done"] { background-color: var(--dass-ok); }
 
-  .dass-kbd { @apply ml-auto rounded-md border border-sidebar-border px-1.5 py-px font-sans text-[10.5px] text-[var(--text-muted)]; }
+  .dass-kbd { @apply ml-auto rounded-md border border-sidebar-border px-1.5 py-px font-sans text-[11px] text-[var(--text-muted)]; }
   /* In a tooltip (dark in light mode, light in dark) the chip takes the tooltip's own ink, as the app's other tips do, rather
      than the sidebar's muted grey that vanished on it (Arun, 2026-10-20). */
   /* A page's row of controls (PageToolbar): every one 32px, so tabs, search and buttons line up on every page alike. */
   .dass-toolbar :is([data-slot="tabs-list"], [data-slot="input-group"], [data-slot="button"]:not([data-size^="icon"])) { height: 32px !important; }
   .dass-toolbar [data-slot="tabs-list"] { padding: 3px !important; }
   .dass-toolbar [data-slot="input-group-control"] { height: 100% !important; }
-  .dass-toolbar [data-slot="button"]:not([data-size^="icon"]) { padding-inline: 12px !important; font-size: 12.5px !important; }
+  .dass-toolbar [data-slot="button"]:not([data-size^="icon"]) { padding-inline: 12px !important; font-size: 13px !important; }
   [data-slot="tooltip-content"] .dass-kbd {
     display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; vertical-align: 1px;
     border-color: color-mix(in srgb, currentColor 22%, transparent); background: color-mix(in srgb, currentColor 10%, transparent);

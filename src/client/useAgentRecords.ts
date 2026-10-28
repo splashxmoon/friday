@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { AgentRecord } from "../agent-record.js";
 import { api } from "./api.js";
+import { isLocal } from "./edition.js";
 import type { Identity } from "./storage.js";
 
 /** Each agent's record, by id, with a way into the session it last ran in. */
@@ -11,6 +12,8 @@ export function useAgentRecords(identity: Identity, key: unknown = 0): Record<st
   const [records, setRecords] = useState<Record<string, AgentRecordView>>({});
   useEffect(() => {
     let live = true;
+    // The open-source edition keeps no agent directory (the server's /api/agents is the paid one's): nothing to ask for.
+    if (isLocal()) return;
     api<{ records: Record<string, AgentRecordView> }>(identity, "/api/agents/stats")
       .then((r) => live && setRecords(r.records))
       .catch(() => {});

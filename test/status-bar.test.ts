@@ -70,6 +70,44 @@ test("the ring is a coding tool's 5-hour limit, never its weekly one", async () 
   assert.equal(fiveHourOf(undefined, limits), null);
 });
 
+test("with more than one account, the ring is the 5-hour and weekly windows of the account the lane runs on", async () => {
+  const { fiveHourOf, weekOf } = await import("../src/client/gauge.js");
+  const later = Math.floor(Date.now() / 1000) + 3600;
+  const w = (kind: string, windowMinutes: number, usedPercent: number) => ({ kind, windowMinutes, usedPercent, resetsAt: later, at: Date.now() });
+  const limits = {
+    codex: null,
+    claude: null,
+    claudeWindows: [],
+    accounts: {
+      claude: [
+        { id: "default", label: "Personal", plan: "Max", windows: [w("five_hour", 300, 40), w("seven_day", 10_080, 70)] },
+        { id: "work", label: "Work", plan: "Max", windows: [w("five_hour", 300, 15), w("seven_day", 10_080, 20)] },
+      ],
+      codex: [{ id: "work", label: "Work", plan: "Pro", windows: [], out: true, outUntil: Date.now() + 3_600_000 }],
+    },
+  } as never;
+  assert.equal(fiveHourOf("claude", limits, "work")?.used, 15, "the Work account's, labelled \"Work · 5h\"");
+  assert.equal(weekOf("claude", limits, "work")?.used, 20);
+  assert.equal(fiveHourOf("claude", limits)?.used, 40, "no account named: the first, its default");
+  assert.equal(fiveHourOf("codex", limits, "work")?.used, 100, "an account out of usage is full until it comes back");
+});
+
+test("an account out until a time already past is back, and a window that started over a day or more ago says which day", async () => {
+  const { glanceOf } = await import("../src/client/gauge.js");
+  const g = glanceOf({
+    codex: null,
+    claude: null,
+    claudeWindows: [{ status: "allowed", kind: "five_hour", utilization: null, resetsAt: Math.floor(Date.now() / 1000) - 2 * 86_400, at: Date.now() }],
+    accounts: { codex: [{ id: "work", label: "Work", plan: "Pro", windows: [], out: true, outUntil: Date.now() - 60_000 }] },
+  } as never);
+  assert.equal(g.codex.rows[0]!.used, null, "not red any more");
+  assert.match(g.codex.rows[0]!.text ?? "", /^Back since /);
+  const started = g.claude.rows[0]!.text ?? "";
+  assert.match(started, /^Started over at /);
+  const day = new Date(Date.now() - 2 * 86_400_000).toLocaleString([], { weekday: "short" });
+  assert.ok(started.includes(day), `says the day: ${started}`);
+});
+
 test("a tooltip's trailing shortcut is set apart; other words are left whole", async () => {
   const { splitTip } = await import("../src/client/Tooltips.js");
   assert.deepEqual(splitTip("Files · Ctrl+2"), { text: "Files", keys: "Ctrl+2" });

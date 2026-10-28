@@ -104,6 +104,8 @@ type Week = { sessions: number; shipped: number; runs: number };
 const DOT: Record<BoardColumn, DotState> = { needs: "needs", working: "working", review: "idle", ready: "done", idle: "idle" };
 
 function Mark({ card }: { card: BoardCard }) {
+  let face = null as React.ReactNode;
+  if (face) return <span className="grid size-5 shrink-0 place-items-center">{face}</span>;
   return (
     <span className="grid size-5 shrink-0 place-items-center text-[var(--ink-2)]">
       {card.tool ? <EngineMark tool={card.tool} size={14} /> : card.agent === "Friday Code" ? <FridayMark size={14} /> : <Icon name="agent" size={14} />}
@@ -130,7 +132,7 @@ function Card({ card, onOpen, solo, focused, onFocus }: { card: BoardCard; onOpe
     // State first: the dot and what it is doing, then which piece of work, then who and where.
     <article
       className={cn(
-        "group/card relative flex cursor-pointer flex-col gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--raised)] px-3 pt-2.5 pb-2.5 shadow-[var(--shadow-xs),var(--edge)] transition-[border-color,box-shadow] duration-[var(--dass-fast)] ease-[var(--dass-ease)] hover:border-[var(--border-strong)] hover:shadow-[var(--shadow-md),var(--edge)]",
+        "board-card group/card relative flex cursor-pointer flex-col gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--raised)] px-3 pt-2.5 pb-2.5 shadow-[var(--shadow-xs),var(--edge)] transition-[border-color,box-shadow] duration-[var(--dass-fast)] ease-[var(--dass-ease)] hover:border-[var(--border-strong)] hover:shadow-[var(--shadow-md),var(--edge)]",
         "has-[[data-open]:focus-visible]:border-[var(--border-focus)] has-[[data-open]:focus-visible]:shadow-[var(--dass-ring)]",
         needsYou && "border-[color-mix(in_srgb,var(--dass-needs)_45%,var(--border))] hover:border-[color-mix(in_srgb,var(--dass-needs)_70%,var(--border))]",
       )}
@@ -148,7 +150,7 @@ function Card({ card, onOpen, solo, focused, onFocus }: { card: BoardCard; onOpe
         ref={el}
         type="button"
         data-open
-        className="block w-full min-w-0 truncate text-left text-[13.5px] leading-snug font-medium text-[var(--ink)] outline-none after:absolute after:inset-0 after:rounded-lg after:content-[''] focus-visible:shadow-none!"
+        className="block w-full min-w-0 truncate text-left text-[14px] leading-snug font-medium text-[var(--ink)] outline-none after:absolute after:inset-0 after:rounded-lg after:content-[''] focus-visible:shadow-none!"
         onFocus={onFocus}
         onClick={(e) => (e.stopPropagation(), onOpen(card.sid))}
         aria-label={`${card.title}, ${agent}: ${card.status}${card.you ? ", waiting on you" : ""}`}
@@ -161,11 +163,11 @@ function Card({ card, onOpen, solo, focused, onFocus }: { card: BoardCard; onOpe
         {card.branch && (
           <>
             <span aria-hidden>·</span>
-            <span className="min-w-0 truncate font-mono text-[11.5px]">{card.branch}</span>
+            <span className="min-w-0 truncate font-mono text-[12px]">{card.branch}</span>
           </>
         )}
       </div>
-      {card.task && card.task !== card.title && !card.title.startsWith(card.task.slice(0, 40)) && <p className="m-0 line-clamp-2 text-[12.5px] leading-snug text-[var(--ink-2)]">{card.task}</p>}
+      {card.task && card.task !== card.title && !card.title.startsWith(card.task.slice(0, 40)) && <p className="m-0 line-clamp-2 text-[13px] leading-snug text-[var(--ink-2)]">{card.task}</p>}
       {card.detail && (
         <p className="m-0 truncate text-[12px] text-[var(--text-muted)]" title={card.detail}>
           {shortPaths(card.detail)}
@@ -269,7 +271,9 @@ function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; chi
 }
 
 export function Board({ identity, recents, projects, onOpen, onNew, solo = false }: { identity: Identity; recents: RecentSession[]; projects: Project[]; onOpen: (sid: string) => void; onNew: () => void; solo?: boolean }) {
-  const { cards, week, failed, fails, at, hidden, trying, retry } = useBoard(identity, recents);
+  const board = useBoard(identity, recents);
+  let { cards } = board;
+  const { week, failed, fails, at, hidden, trying, retry } = board;
   // A retry that works takes the Try again button away; the focus goes to the board's heading, not to the page.
   const heading = useRef<HTMLHeadingElement>(null);
   const retried = useRef(false);
@@ -472,7 +476,7 @@ export function Board({ identity, recents, projects, onOpen, onNew, solo = false
                 const list = grid[i]!;
                 return (
                   // A lane: a quiet well the cards sit in, its head saying what is in it, how many, and its key.
-                  <section key={col.id} className="group/lane flex min-w-0 flex-col gap-1.5 rounded-xl bg-[var(--card)] p-1.5 shadow-[inset_0_0_0_1px_var(--border)]" aria-label={`${col.title}, ${list.length}`}>
+                  <section key={col.id} className="board-lane group/lane flex min-w-0 flex-col gap-1.5 rounded-xl bg-[var(--card)] p-1.5 shadow-[inset_0_0_0_1px_var(--border)]" aria-label={`${col.title}, ${list.length}`}>
                     <Tip label={col.hint} keys={String(i + 1)}>
                       <div className="flex h-8 items-center gap-2 px-2">
                         <Dot state={DOT[col.id]} />
@@ -515,7 +519,7 @@ export function Board({ identity, recents, projects, onOpen, onNew, solo = false
                             <Skeleton className="h-[84px] rounded-lg bg-[var(--hover)]" />
                           </>
                         ) : filtered && !shown.length ? null : (
-                          <div className="grid h-[72px] place-items-center rounded-lg border border-dashed border-[var(--border-strong)] px-3 text-center text-[12.5px] text-[var(--text-muted)] opacity-80">
+                          <div className="grid h-[72px] place-items-center rounded-lg border border-dashed border-[var(--border-strong)] px-3 text-center text-[13px] text-[var(--text-muted)] opacity-80">
                             {filtered ? "Nothing here matches" : col.empty}
                           </div>
                         ))}
@@ -541,7 +545,7 @@ export function Board({ identity, recents, projects, onOpen, onNew, solo = false
                   {idle.map((c) => (
                     <Card key={c.id} card={c} onOpen={onOpen} solo={solo} focused={focus === c.id} onFocus={() => setFocus(c.id)} />
                   ))}
-                  {!idle.length && <div className="px-2 text-[12.5px] text-[var(--text-muted)]">Nothing idle</div>}
+                  {!idle.length && <div className="px-2 text-[13px] text-[var(--text-muted)]">Nothing idle</div>}
                 </div>
               </CollapsibleContent>
             </Collapsible>

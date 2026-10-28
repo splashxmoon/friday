@@ -33,6 +33,8 @@ const STATUS: Record<AgentStatus, { icon: IconName | null; word: string }> = {
   ready: { icon: null, word: "Ready" },
 };
 const MODE: Record<EngineMode, string> = { plan: "Plan", edits: "Manual", full: "Auto" };
+/** How a mode is named on a card in a session. */
+let modeNames = (_state: SessionState): Record<EngineMode, string> => MODE;
 const CHECK_LABEL = { tests: "Tests", typecheck: "Typecheck", lint: "Lint", build: "Build" } as const;
 
 /** "0:42", "12:05", "1:02:10": a run's time on a clock, which a ticking number reads best as. */
@@ -65,7 +67,9 @@ export function AgentsHub({
   /** Opens the Diff panel, at this file when there is one. */
   onOpenDiff: (path?: string) => void;
 }) {
-  const hub = useMemo(() => hubOf(state, events, me.id), [state, events, me.id]);
+  const own = useMemo(() => hubOf(state, events, me.id), [state, events, me.id]);
+  // The agents as the panel shows them: in Arun's build, a team's as its sidebar has them.
+  let hub = own;
   const limits = useToolLimits(identity);
   const glance = useMemo(() => glanceOf(limits), [limits]);
   const working = hub.agents.some((a) => a.status === "working");
@@ -209,7 +213,7 @@ function AgentCard({ a, state, me, send, now, limit, mayDrive }: { a: HubAgent; 
   // Running time while it works; how long the run took once it is done or stopped; nothing otherwise, where a number would read as live.
   const time = !a.startedAt ? "" : a.status === "working" ? clock(now - a.startedAt) : (a.status === "done" || a.status === "failed") && a.endedAt ? clock(a.endedAt - a.startedAt) : "";
   const model = a.model ? (a.tool ? (ENGINE_MODEL_INFO[a.tool]?.find((m) => m.id === a.model)?.label ?? a.model) : a.model) : "Default model";
-  const meta = [a.tool ? model : null, a.mode ? MODE[a.mode] : null, a.branch, a.tokens ? `${shortTokens(a.tokens)} tokens` : null].filter(Boolean).join(" · ");
+  const meta = [a.tool ? model : null, a.mode ? modeNames(state)[a.mode] : null, a.branch, a.tokens ? `${shortTokens(a.tokens)} tokens` : null].filter(Boolean).join(" · ");
   const items = (): MenuItem[] => [
     { label: "Write to it", icon: "message", onSelect: focus },
     ...(mayDrive && a.status === "working" ? [{ label: "Stop this task", icon: "pause" as const, onSelect: () => void send({ type: "run.pause", ...laneArg(a.lane) }) }] : []),

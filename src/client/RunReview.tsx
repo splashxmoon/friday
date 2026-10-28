@@ -4,8 +4,9 @@ import type { DiffFile, ReviewFinding, SessionEvent } from "../types.js";
 import { driverOf, type SessionState } from "../session/projection.js";
 import { MAIN_LANE, type Member } from "../types.js";
 import { argsOf } from "./args.js";
+import { FileIcon } from "./fileIcons.js";
 import { Icon } from "./icons.js";
-import { ShipDialog } from "./Ship.js";
+import { commitWaits, ShipDialog } from "./Ship.js";
 import { useConfirm } from "./ui.js";
 import type { Send } from "./useSession.js";
 
@@ -65,6 +66,9 @@ export function prefillComposer(text: string) {
   const el = document.getElementById("composer-input") as HTMLTextAreaElement | null;
   if (!el) return;
   const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+  // Emptied first as React sees it, so the words read as a change even when they are the ones the box last held before it was
+  // cleared: otherwise React heard nothing, the box showed them and Send stayed off (2026-10-28 QA: Edit on a queued message).
+  el.value = "";
   set?.call(el, text);
   el.dispatchEvent(new Event("input", { bubbles: true }));
   el.focus();
@@ -364,6 +368,10 @@ export function ReviewCard({
   const committed = lastCommitSeq > endSeq;
   const undone = lastRestoreSeq > endSeq;
   const may = me.role === "owner" || driverOf(state, lane)?.id === me.id;
+  // A commit waits for every run in the session to finish (core.ts): said on the button while one goes, not only as an error
+  // after the dialog (2026-10-27 audit).
+  const busy = commitWaits(state);
+  const why = busy ? "Wait for the run to finish, then commit" : "";
   const branch = (state.engines[lane] ?? Object.values(state.engines)[0])?.branch;
   // Working in a separate copy: the work is brought into the person's folder with Apply, and that is what this card offers first.
   const copyOf = state.engines[lane]?.copyOf;
@@ -427,6 +435,31 @@ export function ReviewCard({
           </span>
         )}
       </button>
+      {/* Shut, the files themselves under the line, as Synara and T3 Code show a run's edits: up to three, each with its counts,
+          the rest one press away (Arun, 2026-10-27: "take some inspo from like t3, synara, orca"). A file opens the card on it. */}
+      {!open && files.length > 0 && (
+        <ul className="review-peek">
+          {files.slice(0, 3).map((f) => (
+            <li key={f.path}>
+              <button type="button" onClick={toggle} title={`${f.path}: show the diff`}>
+                <FileIcon path={f.path} size={14} />
+                <span className="review-peek-path">{f.path}</span>
+                {f.status === "added" && <span className="review-peek-new">new</span>}
+                <span className="review-peek-n">
+                  <b className="diff-add">+{f.additions}</b> <b className="diff-del">−{f.deletions}</b>
+                </span>
+              </button>
+            </li>
+          ))}
+          {files.length > 3 && (
+            <li>
+              <button type="button" className="review-peek-more" onClick={toggle}>
+                <Icon name="chevronRight" size={12} /> Show {files.length - 3} more {files.length - 3 === 1 ? "file" : "files"}
+              </button>
+            </li>
+          )}
+        </ul>
+      )}
       {open && (
         <>
           {said.length > 0 && <p className="review-explain">{said.join(" ")}</p>}
@@ -470,7 +503,7 @@ export function ReviewCard({
           </button>
           {copyOf ? (
             <>
-              <button type="button" className="btn ghost small" disabled={!may} title={may ? `Commit on ${branch ?? "the copy's branch"}, without touching ${into}` : "Only the driver or an owner can commit"} onClick={() => setShip(true)}>
+              <button type="button" className="btn ghost small" disabled={!may || busy} title={why || (may ? `Commit on ${branch ?? "the copy's branch"}, without touching ${into}` : "Only the driver or an owner can commit")} onClick={() => setShip(true)}>
                 Commit on branch
               </button>
               <button type="button" className="btn primary small" disabled={!may || applying} title={may ? `Bring these changes into ${into}` : "Only the driver or an owner can bring changes over"} onClick={() => void apply()}>
@@ -478,8 +511,9 @@ export function ReviewCard({
               </button>
             </>
           ) : (
-            <button type="button" className="btn primary small" disabled={!may} title={may ? "Commit these changes" : "Only the driver or an owner can commit"} onClick={() => setShip(true)}>
-              <Icon name="check" size={13} /> {receipt?.flags.some((f) => f.level === "bad") ? "Accept anyway" : "Accept"}
+            // Says what it does, as its title does: it opens the commit (2026-10-27 audit: "Accept" whose title said "Commit").
+            <button type="button" className="btn primary small" disabled={!may || busy} title={why || (may ? "Commit these changes" : "Only the driver or an owner can commit")} onClick={() => setShip(true)}>
+              <Icon name="check" size={13} /> {receipt?.flags.some((f) => f.level === "bad") ? "Commit anyway…" : "Commit…"}
             </button>
           )}
         </div>

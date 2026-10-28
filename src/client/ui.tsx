@@ -15,6 +15,8 @@ interface Floating {
   close: () => void;
 }
 const openSurfaces = new Set<Floating>();
+/** Whether a menu, picker or card is open: a dialog's Escape leaves the dialog open while one is (components/ui/dialog.tsx). */
+export const surfaceOpen = () => openSurfaces.size > 0;
 
 function claimSurface(self: Floating, trigger: HTMLElement | null): () => void {
   for (const other of [...openSurfaces]) {
@@ -46,8 +48,10 @@ export function useDismiss(ref: RefObject<HTMLElement | null>, onClose: () => vo
   const before = useRef<Element | null | undefined>(undefined);
   if (before.current === undefined) before.current = document.activeElement;
 
+  const me = useRef<Floating | null>(null);
   useEffect(() => {
     const self: Floating = { el: () => ref.current, close: () => close.current() };
+    me.current = self;
     return claimSurface(self, trigger ?? null);
     // Runs once per mount: a surface claims the screen when it opens.
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -102,7 +106,14 @@ export function useDismiss(ref: RefObject<HTMLElement | null>, onClose: () => vo
       if ((at as Element).closest?.("[data-owned-floating]")) return;
       if (ref.current && !ref.current.contains(at)) close.current();
     };
-    const key = (e: KeyboardEvent) => e.key === "Escape" && close.current();
+    // Escape closes the top surface only: a menu open inside a dialog closes, and the dialog stays (each listens on the document,
+    // so one press used to close them all) (2026-10-27 audit).
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const top = [...openSurfaces].at(-1);
+      if (top && me.current && top !== me.current && openSurfaces.has(me.current)) return;
+      close.current();
+    };
     document.addEventListener("mousedown", down);
     document.addEventListener("keydown", key);
     return () => {
@@ -141,7 +152,9 @@ export function placeCard(
   // and is too short to use is worse than one that opens the other way.
   const down =
     prefer === "above"
-      ? room.above < min && room.below > room.above
+      ? // Above while it holds the card's full height, or has as much room as below: on the new-session page the box sits
+        // mid-window, and the picker opened up into 300px with 500px free under it (2026-10-27 audit).
+        room.above < want && room.below > room.above
       : prefer === "below"
         ? room.below >= min || room.below >= room.above
         : room.below >= Math.min(want, min) || room.below >= room.above;
@@ -406,8 +419,11 @@ function MenuPopup({ anchor, items, onClose, above, beside, compact, end, trigge
           </div>
         ) : (
           <MenuRow key={i} onClose={onClose} {...(it.action ? { action: it.action } : {})}>
+          {/* A choice of several says which is chosen to a screen reader as it does by its tick (2026-10-27 audit: "Everything /
+              Agent work" read with no state). */}
           <button
-            role="menuitem"
+            role={"checked" in it && it.checked !== undefined ? "menuitemradio" : "menuitem"}
+            {...("checked" in it && it.checked !== undefined ? { "aria-checked": !!it.checked } : {})}
             className={`menu-item ${it.danger ? "danger" : ""} ${it.dim ? "dim" : ""}`}
             disabled={it.disabled}
             {...(it.title ? { title: it.title } : {})}

@@ -357,6 +357,9 @@ export function PreviewPanel({
       setInfo(same(s.preview));
       setOptions(same<Options | null>(o));
     } catch (e) {
+      // A session with no folder at all (nothing uploaded, no agent's folder yet) has no project to run, which isn't a fault:
+      // the browser stays, for any other page (Arun, 2026-10-26: such a session showed this error in place of its browser).
+      if (here && /no uploaded folder/i.test((e as Error).message)) return void setInfo(null);
       setErr((e as Error).message);
     }
   }, [identity, cwd, here, sid]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -967,7 +970,8 @@ export function PreviewPanel({
             )}
 
             {!(active?.url || src) &&
-              (info ? (
+              (
+              info ? (
                 <div className="preview-note">
                   <p className="muted small">
                     <span className="spinner tiny" /> Starting {info.command}…

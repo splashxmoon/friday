@@ -1,4 +1,5 @@
 import { useAgents } from "./agentFocus.js";
+import type { HubAgent } from "../agents-hub.js";
 import { useEffect, useState, type ReactNode } from "react";
 import type { SessionState } from "../session/projection.js";
 import { ENGINE_NAMES, MAIN_LANE, type SessionEvent } from "../types.js";
@@ -70,29 +71,36 @@ export function runLine(state: SessionState, events: SessionEvent[], now: number
   return { tone: "busy", text: "Working", ...(parts.length ? { detail: parts.join(" · ") } : {}) };
 }
 
-export function StatusBar({ state, events, me, where, environment, slot, onChanges }: { state: SessionState; events: SessionEvent[]; /** Who is looking, so "waiting for you" is said only to the person it waits for. */ me: string; where: ReactNode; /** The Environment button (Environment.tsx), where Commands was: the palette is still ⌘⇧P. */ environment?: ReactNode; slot: (el: HTMLElement | null) => void; onChanges: () => void }) {
+/**
+ * The bar's line with every agent counted. With several agents the main one's state was the bar's whole story: Codex failing, or
+ * three agents at work while the main one sat idle, said "Ready". The waits were already everyone's; working and stopping now are too.
+ */
+export function barLine(own: ReturnType<typeof runLine>, agents: HubAgent[]): ReturnType<typeof runLine> {
+  if (agents.length < 2 || own.tone === "wait" || own.tone === "err") return own;
+  const working = agents.filter((a) => a.status === "working");
+  if (working.length > 1) return { tone: "busy", text: `${working.length} agents working`, ...(own.tone === "busy" && own.detail ? { detail: own.detail } : {}) };
+  if (working.length === 1 && own.tone !== "busy") return { tone: "busy", text: `${working[0]!.name} working` };
+  const stopped = agents.find((a) => a.status === "failed" || a.status === "limited");
+  if (own.tone === "idle" && stopped) return { tone: "err", text: `${stopped.name} stopped`, detail: stopped.line };
+  return own;
+}
+
+/** The time, ticking only while a run is going, so an idle session costs nothing. */
+export function useRunClock(state: SessionState): number {
   const running = state.run.status === "running" || Object.values(state.laneRuns).some((r) => r.status === "running");
   const [now, setNow] = useState(Date.now);
-  // Ticks only while a run is going, so an idle session costs nothing.
   useEffect(() => {
     if (!running) return;
     setNow(Date.now());
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, [running]);
-  // With several agents the main one's state was the bar's whole story: Codex failing, or three agents at work while the
-  // main one sat idle, said "Ready". The waits were already everyone's; working and stopping now are too.
-  const agents = useAgents();
-  const own = runLine(state, events, now, me);
-  const line = ((): typeof own => {
-    if (agents.length < 2 || own.tone === "wait" || own.tone === "err") return own;
-    const working = agents.filter((a) => a.status === "working");
-    if (working.length > 1) return { tone: "busy", text: `${working.length} agents working`, ...(own.tone === "busy" && own.detail ? { detail: own.detail } : {}) };
-    if (working.length === 1 && own.tone !== "busy") return { tone: "busy", text: `${working[0]!.name} working` };
-    const stopped = agents.find((a) => a.status === "failed" || a.status === "limited");
-    if (own.tone === "idle" && stopped) return { tone: "err", text: `${stopped.name} stopped`, detail: stopped.line };
-    return own;
-  })();
+  return now;
+}
+
+export function StatusBar({ state, events, me, where, environment, slot, onChanges }: { state: SessionState; events: SessionEvent[]; /** Who is looking, so "waiting for you" is said only to the person it waits for. */ me: string; where: ReactNode; /** The Environment button (Environment.tsx), where Commands was: the palette is still ⌘⇧P. */ environment?: ReactNode; slot: (el: HTMLElement | null) => void; onChanges: () => void }) {
+  const now = useRunClock(state);
+  const line = barLine(runLine(state, events, now, me), useAgents());
   let files = 0;
   let add = 0;
   let del = 0;

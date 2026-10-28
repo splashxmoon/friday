@@ -79,6 +79,7 @@ export function AgentModelPicker({
   onThinking,
   route,
   effort,
+  ownOnly,
 }: {
   engine: EngineTool | "";
   onEngine: (t: EngineTool | "") => void;
@@ -101,6 +102,11 @@ export function AgentModelPicker({
   route?: RouteHint | null;
   /** Given for a coding tool that takes an effort level: a column of its own beside the models, and a word on the pill. */
   effort?: EffortChoice | null;
+  /**
+   * Friday Code only ever on the person's own models, and offered whether or not they have set one up, saying so when they
+   * haven't: a teammate's picker (Teammates.tsx), where Friday's own models never run.
+   */
+  ownOnly?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const btn = useRef<HTMLButtonElement>(null);
@@ -210,12 +216,13 @@ export function AgentModelPicker({
 
     // Friday's own agent is Team's: on Solo its row says so, and choosing it offers a team (7 days free) instead. Unless the
     // person has a model of their own, which Friday Code then runs on.
-    const solo = planLimits(plan).fridayAgent === "none";
-    const locked = solo && !own.length;
+    const solo = planLimits(plan).fridayAgent === "none" || !!ownOnly;
+    const locked = solo && !own.length && !ownOnly;
     const pickFriday = () => {
       if (locked) return setOpen(false), startTeam();
       onEngine("");
-      if (solo && !fridaySide.isOwn(fridayModelId)) onFridayModel(own[0]!.choice);
+      // With none set up yet (ownOnly), the column says so and how to add one, rather than picking nothing.
+      if (solo && !fridaySide.isOwn(fridayModelId) && own[0]) onFridayModel(own[0].choice);
     };
 
     /** A tool in the list on the left: its mark, its name, and in a word whether it's ready on this computer. */
@@ -225,7 +232,8 @@ export function AgentModelPicker({
       const off = !!state && (state.disabled || !!state.absent || state.ready === false);
       const ready = !!state && !off && state.ready !== undefined;
       const room = fit && !fit.out ? fit.room : undefined;
-      const word = key === "friday" ? (locked ? "Team" : solo ? "Your model" : "Friday's models") : state?.disabled || state?.absent ? "Not installed" : state?.ready === false ? "Not set up" : ready ? "Ready" : (state?.hint ?? "");
+      // A row already called "Your model" says how many are set up, not its own name again.
+      const word = key === "friday" ? (locked ? "Team" : solo ? (label === "Your model" ? (own.length ? `${own.length} set up` : "None set up") : "Your model") : "Friday's models") : state?.disabled || state?.absent ? "Not installed" : state?.ready === false ? "Not set up" : ready ? "Ready" : (state?.hint ?? "");
       const tip = [label, state?.hint, fit?.out ?? (fit && fit.success !== null ? `${Math.round(fit.success * 100)}% likely for this task` : ""), typeof room === "number" ? `${Math.round(room * 100)}% of its limits left` : ""].filter(Boolean).join(" · ");
       return (
         <button
@@ -338,7 +346,7 @@ export function AgentModelPicker({
         <div className="amp-tools" role="group" aria-label={machineName ? `Tools on ${machineName}` : "Tools"}>
           <div className="amp-col-label">Who works</div>
           {here.map((t) => toolRow(t, ENGINE_NAMES[t], <EngineMark tool={t} size={18} />, toolState(t), engine === t, () => onEngine(t)))}
-          {own.length > 0 && friday}
+          {(own.length > 0 || ownOnly) && friday}
           {away.length > 0 && (
             <>
               <button type="button" className="amp-more" aria-expanded={others || away.includes(engine as EngineTool)} onClick={() => setOthers((v) => !v)}>
@@ -372,6 +380,7 @@ export function AgentModelPicker({
             {!engine ? (
               <>
                 {group("Your models", own.map((m) => modelRow(m.choice, m.name, m.local ? `${m.model} · on your computer` : `${m.model} · your key`, fridayModelId === m.choice, <Icon name="zap" size={14} />, true, false, `${m.name} ${m.model} ${m.local ? "local" : "key"}`)))}
+                {ownOnly && !own.length && <p className="amp-none">You haven't set up a model of your own yet: a provider's key, or a model running on this computer (Ollama, LM Studio). Add one with “Your own key or local model…” below.</p>}
                 {!query && (
                   <button type="button" data-row className="amp-model amp-add" onClick={() => (setOpen(false), window.dispatchEvent(new CustomEvent("friday:settings", { detail: { tab: "own-models" } })))}>
                     <span className="amp-model-mark" aria-hidden>

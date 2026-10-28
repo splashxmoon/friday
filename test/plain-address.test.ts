@@ -19,7 +19,7 @@ test("a subagent is listed once, where it stands now, with what it was started a
     ev(2, { id: "a", status: "running", description: "Audit the router" }, "l2"),
     ev(5, { id: "a", status: "done", summary: "Found 2 bugs." }),
   ]);
-  assert.deepEqual(audit, { key: "main:a", id: "a", lane: "main", by: "Arun's Claude Code", description: "Audit the router", agentType: "general-purpose", background: true, status: "done", summary: "Found 2 bugs.", start: 1000, seq: 1, opened: true, end: 5000 });
+  assert.deepEqual(audit, { key: "main:a", id: "a", lane: "main", by: "Arun's Claude Code", description: "Audit the router", agentType: "general-purpose", background: true, status: "done", summary: "Found 2 bugs.", start: 1000, seq: 1, opened: true, end: 5000, heard: 5000 });
   assert.equal(other!.lane, "l2", "the same id in another lane is another agent's");
   // A tool starting a turn reports on what its last session left behind, already over: not something this run sent off.
   const [left] = subTasksIn([ev(9, { id: "b", status: "stopped", summary: "Background shell command didn't finish before the previous session ended" })]);

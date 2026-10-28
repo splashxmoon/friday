@@ -35,25 +35,25 @@ const LINES = [
 /** Long enough to read it and forget it is changing; short enough to notice. */
 const HOLD_MS = 5200;
 
-export function HeroTitle() {
+export function HeroTitle({ lines = LINES }: { /** Lines of its own, for a page that asks something else. */ lines?: string[] }) {
   // Start somewhere different each visit, so the first line is not always the
   // same one — the whole point is that it does not become furniture.
-  const [at, setAt] = useState(() => Math.floor(Math.random() * LINES.length));
+  const [at, setAt] = useState(() => Math.floor(Math.random() * lines.length));
 
   useEffect(() => {
     // Nobody needs a headline moving while they are trying to type under it.
     if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     // Nor while writing in the box under it.
-    const t = setInterval(() => !document.activeElement?.matches("textarea, input") && setAt((i) => (i + 1) % LINES.length), HOLD_MS);
+    const t = setInterval(() => !document.activeElement?.matches("textarea, input") && setAt((i) => (i + 1) % lines.length), HOLD_MS);
     return () => clearInterval(t);
-  }, []);
+  }, [lines.length]);
 
   return (
     <h1 className="hero-title">
       {/* aria-live would read every line out to a screen reader as it turned,
           which is noise. The heading announces once, as headings do. */}
       <span className="hero-flip">
-        <span key={at}>{LINES[at]}</span>
+        <span key={`${lines[0]}:${at}`}>{lines[at % lines.length]}</span>
       </span>
     </h1>
   );

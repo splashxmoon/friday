@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { SearchHit } from "../session-search.js";
 import { Icon, type IconName } from "./icons.js";
 import type { RecentSession } from "./storage.js";
-import { MenuButton, relTime } from "./ui.js";
+import { MenuButton, relTime, useDismiss } from "./ui.js";
 
 /**
  * Search, in its own window: sessions by their titles and by everything said in them.
@@ -160,10 +160,14 @@ export function SearchModal({ recents, onOpen, onClose }: { recents: RecentSessi
   const hover = (key: string) => () => setAt(rows.findIndex((r) => r.key === key));
 
   const clear = () => (setFrom("any"), setKind("any"), setDays(0));
+  // Tab kept inside, one dialog at a time, and the focus back where it was on close (2026-10-27 audit), as every other dialog.
+  const box = useRef<HTMLDivElement>(null);
+  useDismiss(box, onClose);
 
   return (
     <div className="quick-back" role="presentation" onMouseDown={onClose}>
       <div
+        ref={box}
         className="quick srch"
         role="dialog"
         aria-modal="true"

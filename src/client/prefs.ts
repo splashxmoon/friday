@@ -1,4 +1,5 @@
 import { setTheme, type Theme } from "./storage.js";
+import { applyFonts, applyTheme, readFonts, readTheme } from "./theme.js";
 
 /**
  * The choices a person makes about how Friday looks and behaves on this
@@ -27,7 +28,10 @@ const KEYS = {
 } as const;
 
 /** What an import may write: these keys and nothing else, whatever the file says. */
-const EXPORTABLE: string[] = Object.values(KEYS);
+/** The colour theme in use, the ones you saved, and the fonts (theme.ts): part of how it looks, so carried and put back too (2026-10-27
+    audit: Export said "your theme" and left it out, and Reset's Undo said it put everything back while the theme stayed off). */
+const LOOK_KEYS = ["mpa.theme.custom", "mpa.themes.saved", "mpa.fonts"];
+const EXPORTABLE: string[] = [...Object.values(KEYS), ...LOOK_KEYS];
 
 function read(k: string): string | null {
   try {
@@ -107,6 +111,9 @@ export function applyPrefs(): void {
   // `zoom` scales the whole interface the way the browser's own zoom does,
   // without every size in the stylesheet having to know about it.
   root.style.setProperty("zoom", textSize() === "100" ? "" : `${Number(textSize()) / 100}`);
+  // The same factor for the stylesheet: a zoomed page counts 100vh in its own, larger pixels, so the shell (100vh tall) ran past
+  // the window's foot at any size but 100% and the status bar was cut off (2026-10-27 audit). style.css divides by it.
+  root.style.setProperty("--ui-zoom", textSize() === "100" ? "" : `${Number(textSize()) / 100}`);
   root.classList.toggle("reduce-motion", reduceMotion());
 }
 
@@ -137,7 +144,7 @@ export function importPrefs(text: string): number {
   if (file.app !== "friday" || typeof file.prefs !== "object" || !file.prefs) throw new Error("That file isn't a Friday settings file.");
   let n = 0;
   for (const [k, v] of Object.entries(file.prefs)) {
-    if (!EXPORTABLE.includes(k) || typeof v !== "string" || v.length > 4000) continue;
+    if (!EXPORTABLE.includes(k) || typeof v !== "string" || v.length > (LOOK_KEYS.includes(k) ? 60_000 : 4000)) continue;
     write(k, v);
     n++;
   }
@@ -146,12 +153,18 @@ export function importPrefs(text: string): number {
   const t = read(KEYS.theme);
   if (t === "light" || t === "dark") setTheme(t);
   else if (t === "glass") chooseTheme("dark");
+  // The colour theme and fonts it carried, on the page now, not at the next launch.
+  applyTheme(readTheme(), false);
+  applyFonts(readFonts(), false);
   return n;
 }
 
 /** Back to how it looked on first launch. Leaves recent folders and the account alone. */
 export function resetPrefs(): void {
-  for (const k of [KEYS.theme, KEYS.textSize, KEYS.reduceMotion, KEYS.notify, KEYS.layout, KEYS.sessionLayout]) write(k, null);
+  // All of it, as its note says: the sound, the colour theme and the fonts too, which it used to leave behind (2026-10-27 audit).
+  for (const k of [KEYS.theme, KEYS.textSize, KEYS.reduceMotion, KEYS.notify, KEYS.chime, KEYS.layout, KEYS.sessionLayout]) write(k, null);
+  applyTheme(null);
+  applyFonts({});
   applyPrefs();
   dispatchEvent(new Event("friday:layout"));
   chooseTheme("system");

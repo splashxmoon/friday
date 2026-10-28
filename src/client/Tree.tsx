@@ -307,7 +307,8 @@ export function TreePanel({
             No folder yet. Attach one with the folder button in the composer and it appears here as a working copy — or connect a machine from the session header to work in a checkout on it.
           </p>
         ) : err ? (
-          <p className="error small">{err}</p>
+          // A folder that isn't there yet is a state, not a failure: said in the panel's quiet grey, red kept for what broke.
+          <p className={/no folder/i.test(err) ? "muted small" : "error small"}>{err}</p>
         ) : !paths ? (
           <p className="muted small">Reading the folder…</p>
         ) : !rows.length ? (

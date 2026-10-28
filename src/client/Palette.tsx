@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { SECTIONS } from "./Settings.js";
 import { Avatar, Icon, type IconName } from "./icons.js";
 import type { RecentSession } from "./storage.js";
 import { shortcut } from "./Shortcuts.js";
+import { useDismiss } from "./ui.js";
 
 export interface Action {
   id: string;
@@ -74,10 +75,14 @@ export function Palette({ actions, onClose, onNew }: { actions: Action[]; onClos
     onClose();
     a.run();
   };
+  // A dialog like the others: Tab stays in it, Escape closes it from anywhere in it, search can't open over it, and the focus goes
+  // back where it was (2026-10-27 audit: Tab walked out to the page behind, and ⌘⇧F opened a second dialog on top).
+  const box = useRef<HTMLDivElement>(null);
+  useDismiss(box, onClose);
 
   return (
     <div className="quick-back" role="presentation" onMouseDown={onClose}>
-      <div className="quick srch palette" role="dialog" aria-modal="true" aria-label="What do you want to do?" onMouseDown={(e) => e.stopPropagation()}>
+      <div ref={box} className="quick srch palette" role="dialog" aria-modal="true" aria-label="What do you want to do?" onMouseDown={(e) => e.stopPropagation()}>
         <div className="srch-find">
           <Icon name="zap" size={16} />
           <input
@@ -205,6 +210,8 @@ export function baseActions(p: {
   /** The library's first steps, from anywhere: each goes to its page and opens the same thing its button there does. */
   newAgent?: () => void;
   invite?: () => void;
+  /** The open-source edition: no Saved agents page to go to. */
+  local?: boolean;
 }): Action[] {
   return [
     { id: "new", label: "New session", hint: "↵", icon: "plus", group: "Session", run: p.newSession },
@@ -214,7 +221,7 @@ export function baseActions(p: {
     { id: "board", label: "Agent Board", icon: "board", group: "Go to", run: () => p.goto("board") },
     { id: "review", label: "Code Review", icon: "gitPullRequest", group: "Go to", run: () => p.goto("review") },
     { id: "automations", label: "Automations", icon: "zap", group: "Go to", run: () => p.goto("automations") },
-    { id: "agents", label: "Saved agents", icon: "agent", group: "Go to", run: () => p.goto("agents") },
+    ...(p.local ? [] : [{ id: "agents", label: "Saved agents", icon: "agent" as const, group: "Go to", run: () => p.goto("agents") }]),
     { id: "usage", label: "Usage", icon: "usage", group: "Go to", run: () => p.goto("usage") },
     ...(p.team === false
       ? []

@@ -11,7 +11,7 @@
  * being monochrome.
  */
 
-import { BotIcon, FactoryIcon } from "lucide-react";
+import { BotIcon, FactoryIcon, InfinityIcon } from "lucide-react";
 import { ENGINE_NAMES, type EngineTool } from "../types.js";
 
 interface MarkProps {
@@ -192,6 +192,8 @@ export function EngineMark({ tool, size = 15, className }: { tool: EngineTool | 
   if (tool === "copilot") return <CopilotMark size={size} className={className} />;
   // Factory has no mark in an open set: a factory, beside its name, says which tool it is.
   if (tool === "droid") return <FactoryIcon size={size} className={className} aria-label={ENGINE_NAMES.droid} style={{ flex: "none" }} />;
+  // Muse Code has no mark in an open set either: an infinity sign, Meta's own shape, in the text colour.
+  if (tool === "muse") return <InfinityIcon size={size} className={className} aria-label={ENGINE_NAMES.muse} style={{ flex: "none" }} />;
   if (tool === "acp") return <BotIcon size={size} className={className} aria-label={ENGINE_NAMES.acp} style={{ flex: "none" }} />;
   if (tool && TOOL_PATHS[tool]) return <PathMark d={TOOL_PATHS[tool]!} label={ENGINE_NAMES[tool]} size={size} className={className} />;
   return <FridayMark size={size} className={className} />;

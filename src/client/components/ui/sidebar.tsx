@@ -413,8 +413,8 @@ function SidebarGroupAction({
       data-sidebar="group-action"
       className={cn(
         "absolute top-3.5 right-3 flex aspect-square w-5 items-center justify-center rounded-md p-0 text-sidebar-foreground ring-sidebar-ring outline-hidden transition-transform hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
-        // Increases the hit area of the button on mobile.
-        "after:absolute after:-inset-2 md:after:hidden",
+        // A hit area past its 20px box on every screen, not only on mobile: 20px was under the 24px a pointer target needs (2026-10-27 audit).
+        "after:absolute after:-inset-1",
         "group-data-[collapsible=icon]:hidden",
         className
       )}

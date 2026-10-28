@@ -47,6 +47,16 @@ export function AppearanceTab() {
   const [fonts, setFonts] = useState<Fonts>(readFonts);
   const [themeErr, setThemeErr] = useState("");
   const [mine, setMine] = useState<CustomTheme[]>(savedThemes);
+  // The look changed from outside this page (the sidebar's light/dark button, another window): the choices here follow it, or
+  // they kept saying System while the page was dark, and pressing System did nothing (2026-10-27 audit).
+  useEffect(() => {
+    const follow = () => (setTheme(themeChoice()), setCustom(readTheme()));
+    const mo = new MutationObserver(follow);
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    addEventListener("friday:theme", follow);
+    addEventListener("storage", follow);
+    return () => (mo.disconnect(), removeEventListener("friday:theme", follow), removeEventListener("storage", follow));
+  }, []);
   /** The theme maker, open on a palette: a new one, or one of yours to change. */
   const [making, setMaking] = useState<{ palette: Palette; id?: string } | null>(null);
   const use = (t: CustomTheme | null) => (applyTheme(t), setCustom(t));
@@ -331,9 +341,11 @@ export function NotificationsTab({ identity }: { identity: Identity }) {
         <Row
           label="Alert me when I'm away"
           hint={
-            on
-              ? "A banner appears when a session needs you."
-              : "Nothing leaves the app. The sidebar still marks sessions that need you."
+            on && supported && perm === "denied"
+              ? "On, but notifications are blocked for Friday on this device, so no banner can show: allow them (Permission, below)."
+              : on
+                ? "A banner appears when a session needs you."
+                : "Nothing leaves the app. The sidebar still marks sessions that need you."
           }
         >
           <Switch
@@ -393,7 +405,7 @@ export function NotificationsTab({ identity }: { identity: Identity }) {
 export function ShortcutsTab() {
   return (
     <section className="flex flex-col gap-5">
-      <p className="m-0 text-[12.5px] text-[var(--text-muted)]">
+      <p className="m-0 text-[13px] text-[var(--text-muted)]">
         Press <kbd className="dass-kbd ml-0">?</kbd> anywhere outside a text box to see this list.
       </p>
       <ShortcutList />
@@ -473,14 +485,14 @@ export function DataTab() {
       <SettingsGroup title="Start over">
         <Row
           label="Reset to defaults"
-          hint="Theme follows the system, default size, notifications on, layout as new. Your account and sessions are untouched."
+          hint={`Theme follows the system, Friday's own colours and fonts, default size, notifications and chime on, layout as new. ${isLocal() ? "Your sessions and coding tools" : "Your account and sessions"} are untouched.`}
         >
-          <span className="set-note text-[12.5px] text-[var(--text-muted)]" role="status">
+          <span className="set-note text-[13px] text-[var(--text-muted)]" role="status">
             {reset?.text}
             {reset?.undo && (
               <>
                 {" "}
-                <Button variant="link" size="xs" ref={undoBtn} className="h-auto px-0 text-[12.5px] text-[var(--ink)] underline" onClick={reset.undo}>
+                <Button variant="link" size="xs" ref={undoBtn} className="h-auto px-0 text-[13px] text-[var(--ink)] underline" onClick={reset.undo}>
                   Undo
                 </Button>
               </>

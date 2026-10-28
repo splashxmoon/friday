@@ -617,6 +617,9 @@ export class AgentRuntime {
     let learned: Learned = {};
     let failing = 0;
     let routed = "";
+    // A lane on a model of its own rather than the session's, read once a run: undefined until it is asked, and never in an
+    // edition with nothing to ask.
+    let laneRun: { model: string; note: string; tools?: AgentTool[] } | null | undefined;
     for (let step = 0; step < this.maxSteps; step++) {
       if (slot.stopped) return;
       // New controller *before* reading the epoch: a preemption after this
@@ -641,7 +644,8 @@ export class AgentRuntime {
       if (state.engines[lane]?.tool) return;
       // A coding tool's lane whose runner is still starting: what is typed meanwhile waits for it, as it would while offline.
       if (laneDef?.engine && !state.engines[lane]) return;
-      if (this.opts.works && !this.opts.works(state)) return;
+      // A lane on its own model works whatever the session's model is.
+      if (this.opts.works && !laneRun && !this.opts.works(state)) return;
       // A lane with a trigger runs when woken; only a manual lane needs a queue.
       const automated = !!laneDef && laneDef.trigger.kind !== "manual";
       const pending = pendingFor(state, lane);
@@ -653,12 +657,16 @@ export class AgentRuntime {
       if (!startedAt) startedAt = runOf(state, lane).sinceSeq;
       if (run.status !== "running") {
         const checkpoint = await this.checkpoint(sid, state, lane);
-        if (!(await this.append(sid, lane, { type: "run.started", causedBy: pending[0] ?? state.lastSeq, ...(checkpoint ? { checkpoint } : {}) }, guard)).ok) continue;
-      }
-      if (pending.length && !(await this.append(sid, lane, { type: "instructions.delivered", seqs: pending }, guard)).ok) continue;
+        // The start and what it delivers in one write, as the hub's: a run's start takes its cause out of the queue (projection),
+        // so a delivery refused after it on its own would have lost that message.
+        const start: EventBody[] = [{ type: "run.started", causedBy: pending[0] ?? state.lastSeq, ...(checkpoint ? { checkpoint } : {}) }, ...(pending.length ? [{ type: "instructions.delivered" as const, seqs: pending }] : [])];
+        if (!(await this.store.appendAll(sid, AGENT, start, { ...guard, lane })).ok) continue;
+      } else if (pending.length && !(await this.append(sid, lane, { type: "instructions.delivered", seqs: pending }, guard)).ok) continue;
 
       const agent = laneDef ? laneDef.agent : state.options.agent;
-      const offered = await this.toolsFor(state, agent, lane);
+      // A lane on its own model may bring tools of its own besides, unless Friday's own has one by that name.
+      const base = await this.toolsFor(state, agent, lane);
+      const offered = laneRun?.tools?.length ? [...base, ...laneRun.tools.filter((t) => !base.some((b) => b.name === t.name))] : base;
       const tools = planGate ? offered.filter((t) => PLAN_TOOLS.has(t.name)) : offered;
       // Same rule as the tool list: a connected machine, or a folder somebody
       // uploaded. The two had drifted apart, which offered the repo tools and
@@ -668,21 +676,23 @@ export class AgentRuntime {
       if (pending.length) await this.runApproved(sid, lane, pending, toolMap, guard, (call, tool) => this.runTool(sid, lane, call, tool, controller.signal, slot, [...toolMap.keys()], broken, seen));
       const events = await this.store.events(sid);
       const files = await this.filesFor(sid, events);
-      const images = files.size ? await (this.llm.supportsImages?.() ?? Promise.resolve(false)).catch(() => false) : false;
+      // The lane's own model, when it has one (laneRun), else the session's: the one asked whether it sees pictures, and run.
+      const chosen = laneRun?.model ?? state.options.model;
+      const images = files.size ? await (this.llm.supportsImages?.(laneRun?.model) ?? Promise.resolve(false)).catch(() => false) : false;
 
       // ── which model (routing.ts) ──────────────────────────────────
       // On Auto, the step runs what the router picks; otherwise the session's model, and the pick is only logged (`shadow`). Not for
       // somebody's own model, which is theirs to run.
-      const own = isOwnModel(state.options.model);
+      const own = isOwnModel(chosen);
       if (!own && (pending.length || !tier)) {
         const said = events.filter((e) => e.body.type === "instruction" && pending.includes(e.seq)).map((e) => e.body as Extract<EventBody, { type: "instruction" }>);
         const text = said.map((b) => b.text).join("\n\n") || state.title;
         tier = taskTier(text, { planFirst: state.options.planFirst, attachments: said.reduce((n, b) => n + (b.attachments?.length ?? 0), 0), linked: !!(state.options.issue || state.options.pr) });
         learned = state.workspaceId && this.opts.budget?.learned ? await this.opts.budget.learned(state.workspaceId).catch(() => ({})) : {};
       }
-      const auto = isAuto(state.options.model);
+      const auto = isAuto(chosen);
       const pick = !own && tier ? routeFriday({ tier: tier.tier, tierWhy: tier.why, exploring: exploreStreak, failing, frontier: await this.frontierFor(state), learned }) : null;
-      const model = auto && pick ? pick.model : state.options.model;
+      const model = auto && pick ? pick.model : chosen;
       const effort = auto && pick ? pick.effort : (EFFORT[state.options.thinking] ?? EFFORT.balanced);
 
       // ── model call ────────────────────────────────────────────────
@@ -704,7 +714,7 @@ export class AgentRuntime {
       if (pick && tier && `${pick.model}|${pick.effort}` !== routed) {
         routed = `${pick.model}|${pick.effort}`;
         // Said without the step waiting on it: the model call starts at once, as it did before there was a pick to say.
-        void this.append(sid, lane, { type: "model.routed", model: pick.model, effort: pick.effort, tier: tier.tier, why: pick.why, room: pick.frontierLeft, ...(auto ? {} : { shadow: true, current: state.options.model }) }).catch(() => {});
+        void this.append(sid, lane, { type: "model.routed", model: pick.model, effort: pick.effort, tier: tier.tier, why: pick.why, room: pick.frontierLeft, ...(auto ? {} : { shadow: true, current: chosen }) }).catch(() => {});
       }
 
       let completion: Completion;
@@ -721,7 +731,7 @@ export class AgentRuntime {
           { planFirst: state.options.planFirst, approved: planApproved(state, lane), autoTest: state.options.autoTest },
           (pinned ??= await this.pinsText(sid, state, lane)),
           (rules ??= await this.rulesText(sid, state, lane)),
-        );
+        ) + (laneRun?.note ? `\n\n${laneRun.note}` : "");
         // Paused, cancelled or interrupted while the step was being put together: no call at all. A call on a signal that
         // is already aborted fails at once with most providers, but an own model reached through someone's computer, or a
         // coding tool started as a process, could still go ahead. The next turn of the loop sees why it stopped. Asked of the log

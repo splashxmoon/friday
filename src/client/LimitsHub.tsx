@@ -144,7 +144,10 @@ export function LimitsHub({ read }: { read: Read }) {
     );
 
   // Every tool with a window or a plan, the ones with windows first.
-  const tools = ENGINE_TOOLS.filter((t) => wins.some((w) => w.tool === t) || planOf(t, limits)).sort((a, b) => Number(wins.some((w) => w.tool === b)) - Number(wins.some((w) => w.tool === a)));
+  // Claude Code read without a figure (it said only whether its limits allow the next turn) still gets its card: it was left
+  // out altogether while the footer's card listed it (2026-10-27 audit).
+  const claudeSaid = (limits.claudeWindows ?? []).filter((w) => w.kind !== "overage");
+  const tools = ENGINE_TOOLS.filter((t) => wins.some((w) => w.tool === t) || planOf(t, limits) || (t === "claude" && claudeSaid.length > 0)).sort((a, b) => Number(wins.some((w) => w.tool === b)) - Number(wins.some((w) => w.tool === a)));
   const fives = wins.filter(isFiveHour);
   const weeklies = wins.filter(isWeekly);
   const closestWeek = [...weeklies].sort((a, b) => b.used - a.used)[0];
@@ -194,7 +197,7 @@ export function LimitsHub({ read }: { read: Read }) {
                 <b className="text-[14px] font-semibold text-[var(--ink)]">{ENGINE_NAMES[t]}</b>
                 {plan && <StateBadge className="ml-auto">{plan}</StateBadge>}
               </header>
-              {rings.length ? rings.map((w) => <WindowView key={idOf(w)} w={w} history={history} now={now} />) : <p className="m-0 text-[12.5px] text-[var(--text-muted)]">{mine.length ? "" : "No limits reported on this plan"}</p>}
+              {rings.length ? rings.map((w) => <WindowView key={idOf(w)} w={w} history={history} now={now} />) : <p className="m-0 text-[13px] text-[var(--text-muted)]">{mine.length ? "" : t === "claude" && claudeSaid.length ? (claudeSaid.some((w) => w.status === "rejected") ? "Out of usage for now: its limit was reached." : "Under the limit. Claude Code said so without a figure for how much is used.") : "No limits reported on this plan"}</p>}
               <CostLine tool={t} plan={plan} cost={costs[t]} onCost={(v) => setCosts(saveCost(t, v))} />
             </section>
           );

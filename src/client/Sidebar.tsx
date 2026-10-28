@@ -18,6 +18,7 @@ import { recordLine, useAgentRecords } from "./useAgentRecords.js";
 import type { Crew, CrewState, Preview, Working } from "../attention.js";
 import { usePrs } from "./prWatch.js";
 import { chooseTheme } from "./prefs.js";
+import { applyTheme, readTheme } from "./theme.js";
 import { currentLook, loadFolded, loadSectionOrder, saveFolded, saveSectionOrder } from "./storage.js";
 import type { Identity, Project, RecentSession } from "./storage.js";
 import { buckets, snoozePresets, snoozeWord } from "./sidebar-buckets.js";
@@ -29,6 +30,8 @@ import type { SessionSummary } from "../board.js";
 import { EngineMark } from "./BrandMarks.js";
 import { ENGINE_NAMES } from "../types.js";
 import { shortcut } from "./Shortcuts.js";
+import { byDay } from "./sidebar-days.js";
+import { api } from "./api.js";
 
 type Renaming = { kind: "session" | "project"; id: string } | null;
 const DRAG_TYPE = "application/x-mpa-session";
@@ -195,6 +198,9 @@ function SidebarWave() {
 
 function Head({ p }: { p: SidebarProps }) {
   const agents = p.view === "agents";
+  let onNew: () => void = agents ? p.onNewAgent : () => p.onNew();
+  let label = agents ? "New agent" : "New session";
+  let kbd = !agents;
   return (
     <div className="flex shrink-0 flex-col gap-2 px-1">
       {/* In the local edition this row is only the search button, which the desktop app moves into its header: there it goes. */}
@@ -213,15 +219,29 @@ function Head({ p }: { p: SidebarProps }) {
             Search <span className="dass-kbd ml-2">{shortcut("⌘⇧F")}</span>
           </TooltipContent>
         </Tooltip>
+        {/* In a browser there is no window bar with the sidebar's button: one here folds it, as ⌘B does (2026-10-27 audit: the
+            keyboard was the only way). The desktop app's window bar has its own. */}
+        {!window.fridayDesktop && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button type="button" className="dass-rail-btn sidebar-fold size-8" aria-label="Hide the sidebar" onClick={() => window.dispatchEvent(new Event("friday:fold-sidebar"))}>
+                <Icon name="sidebar" size={16} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              Hide the sidebar <span className="dass-kbd ml-2">{shortcut("⌘B")}</span>
+            </TooltipContent>
+          </Tooltip>
+        )}
       </div>
       <button
         type="button"
-        onClick={agents ? p.onNewAgent : () => p.onNew()}
+        onClick={onNew}
         className="group flex h-9 w-full items-center gap-2 rounded-lg border border-sidebar-border bg-[var(--card)] px-3 text-[13px] font-medium text-sidebar-accent-foreground shadow-xs outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring"
       >
         <PlusIcon className="size-4 text-[var(--text-muted)] group-hover:text-sidebar-accent-foreground" />
-        {agents ? "New agent" : "New session"}
-        {!agents && <span className="dass-kbd">{shortcut("⌘K")}</span>}
+        {label}
+        {kbd && <span className="dass-kbd">{shortcut("⌘K")}</span>}
       </button>
     </div>
   );
@@ -281,6 +301,13 @@ function PlaceIcons({ p }: { p: SidebarProps }) {
 
 function Foot({ p }: { p: SidebarProps }) {
   const [look, setLook] = useState(currentLook);
+  // Whatever changes the look (Settings, the system going dark at night, another window) changes this button too: it read the
+  // look once, and offered "Switch to dark" over a dark page after Settings changed it (2026-10-27 audit).
+  useEffect(() => {
+    const mo = new MutationObserver(() => setLook(currentLook()));
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => mo.disconnect();
+  }, []);
   const nextLook = look === "light" ? "dark" : "light";
   const w = p.workspace;
   // The local edition has no plan: it is yours, on this computer.
@@ -305,6 +332,9 @@ function Foot({ p }: { p: SidebarProps }) {
               className="dass-rail-btn size-8"
               aria-label={`Switch to ${nextLook} mode`}
               onClick={() => {
+                // Light or dark here is Friday's own, as in Settings: a colour theme on (Dracula, one of yours) comes off, or the
+                // button only flipped the class under it and left a mix nobody could read (2026-10-27 audit).
+                if (readTheme()) applyTheme(null);
                 chooseTheme(nextLook);
                 setLook(currentLook());
               }}
@@ -332,14 +362,14 @@ function Foot({ p }: { p: SidebarProps }) {
 
 function Group({ label, open, onToggle, count, action, drag, children, className = "" }: { label: ReactNode; open: boolean; onToggle: () => void; count?: number; action?: ReactNode; drag?: Partial<React.HTMLAttributes<HTMLDivElement>>; children: ReactNode; className?: string }) {
   return (
-    <SidebarGroup className={`p-0 ${className}`}>
+    <SidebarGroup className={`sb-tray p-0 ${className}`}>
       <Collapsible open={open} onOpenChange={onToggle}>
         <div className="group/label relative flex items-center" {...drag}>
-          <SidebarGroupLabel asChild className="h-7 flex-1 cursor-pointer gap-1 px-2 text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)] hover:text-sidebar-accent-foreground">
+          <SidebarGroupLabel asChild className="h-7 flex-1 cursor-pointer gap-1 px-2 text-[12px] font-medium normal-case tracking-normal text-[var(--text-muted)] hover:text-sidebar-accent-foreground">
             <CollapsibleTrigger>
               <ChevronRightIcon className={`size-3 transition-transform duration-200 ${open ? "rotate-90" : ""}`} />
               <span className="flex min-w-0 items-center gap-1.5 truncate">{label}</span>
-              {!!count && <span className="ml-1 font-normal normal-case tracking-normal opacity-70">{count}</span>}
+              {!!count && <span className="ml-1 font-normal normal-case tracking-normal">{count}</span>}
             </CollapsibleTrigger>
           </SidebarGroupLabel>
           {action}
@@ -474,8 +504,10 @@ function SessionsList({ p }: { p: SidebarProps }) {
   const { prs: github } = usePrs();
   const mergedUrls = new Set((github?.merged ?? []).map((x) => x.url));
   const merged = new Set([...p.attention.prs].filter(([, pr]) => pr.merged || mergedUrls.has(pr.url)).map(([sid]) => sid));
+  // The sessions this list shows.
+  let listed = p.recents;
   const beds = buckets(
-    [...p.recents].sort((a, b) => b.openedAt - a.openedAt),
+    [...listed].sort((a, b) => b.openedAt - a.openedAt),
     { needs: new Set(p.attention.items.map((i) => i.sid)), working: new Set(p.attention.working.keys()), merged },
     now,
   );
@@ -508,6 +540,24 @@ function SessionsList({ p }: { p: SidebarProps }) {
       if (target) p.updateProject(target, { collapsed: false });
     },
   });
+
+  /**
+   * Renamed here: its owner renames the session itself, for everyone and everywhere it shows (the header, the tab, ⌘K, Search,
+   * the server), as the header's rename does; anyone else, who may not, gives it a name of their own in this list (2026-10-27
+   * QA: the sidebar's rename was only ever that name of one's own). Refused, the name stays as one's own.
+   */
+  const renameSession = async (r: RecentSession, name: string) => {
+    const title = name.trim();
+    if (!title || title === (r.alias || r.title)) return;
+    if (r.role !== "owner") return p.updateRecent(r.sid, { alias: title });
+    p.updateRecent(r.sid, { title, alias: undefined });
+    try {
+      const done = await api<{ title: string }>(p.identity, `/api/sessions/${encodeURIComponent(r.sid)}/title?invite=${encodeURIComponent(r.invite)}`, { method: "POST", body: JSON.stringify({ title }) });
+      if (done.title && done.title !== title) p.updateRecent(r.sid, { title: done.title });
+    } catch {
+      p.updateRecent(r.sid, { title: r.title, alias: title });
+    }
+  };
 
   const chatMenu = (r: RecentSession): MenuItem[] => [
     { label: "Open in new tab", icon: "external", onSelect: () => window.open(`/?session=${encodeURIComponent(r.sid)}&invite=${encodeURIComponent(r.invite)}`, "_blank") },
@@ -575,9 +625,9 @@ function SessionsList({ p }: { p: SidebarProps }) {
       label={label(r)}
       compact={compact}
       onOpen={() => p.onOpen(r)}
-      onRename={(alias) => {
-        p.updateRecent(r.sid, { alias });
+      onRename={(name) => {
         setRenaming(null);
+        void renameSession(r, name);
       }}
       onCancelRename={() => setRenaming(null)}
       working={p.attention.working.get(r.sid) ?? null}
@@ -701,7 +751,7 @@ function SessionsList({ p }: { p: SidebarProps }) {
               {open && (
                 <div className="ml-3 flex flex-col gap-px border-l border-sidebar-border pl-1">
                   {items.map((r) => row(r))}
-                  {items.length === 0 && <p className="px-2 py-1 text-[11.5px] text-[var(--text-muted)]">Drag sessions here, or press + to start one.</p>}
+                  {items.length === 0 && <p className="px-2 py-1 text-[12px] text-[var(--text-muted)]">Drag sessions here, or press + to start one.</p>}
                 </div>
               )}
             </div>
@@ -725,7 +775,7 @@ function SessionsList({ p }: { p: SidebarProps }) {
         count={g.chats.length}
         drag={dragSection(id)}
       >
-        {g.chats.map((r) => row(r))}
+        {byDay(g.chats, now).map((x) => (typeof x === "string" ? <div key={`day:${x}`} className="sb-day">{x}</div> : row(x)))}
       </Group>,
     );
   }
@@ -733,7 +783,7 @@ function SessionsList({ p }: { p: SidebarProps }) {
     "recent",
     <div className={`rounded-lg ${drop === "__recent" ? "bg-sidebar-accent ring-1 ring-sidebar-ring" : ""}`} hidden={unfiled.length === 0 && repoGroups.length > 0 && !drop} {...dropZone(null)}>
       <Group label="Recent" open={isOpen("recent")} onToggle={() => toggle("recent")} count={unfiled.length || undefined} drag={dragSection("recent")}>
-        {unfiled.length === 0 && repoGroups.length === 0 ? <p className="px-2 py-1 text-xs text-[var(--text-muted)]">Sessions you start or join appear here.</p> : unfiled.map((r) => row(r))}
+        {unfiled.length === 0 && repoGroups.length === 0 ? <p className="px-2 py-1 text-xs text-[var(--text-muted)]">Sessions you start or join appear here.</p> : byDay(unfiled, now).map((x) => (typeof x === "string" ? <div key={`day:${x}`} className="sb-day">{x}</div> : row(x)))}
       </Group>
     </div>,
   );
@@ -895,13 +945,27 @@ function ChatRow({
       data-menu={menuOpen || !!ctx}
       role="button"
       tabIndex={0}
+      aria-current={active ? "page" : undefined}
       draggable={!renaming}
       onDragStart={(e) => {
         e.dataTransfer.setData(DRAG_TYPE, r.sid);
         e.dataTransfer.effectAllowed = "move";
       }}
       onClick={() => !renaming && onOpen()}
-      onKeyDown={(e) => activates(e) && !renaming && onOpen()}
+      onKeyDown={(e) => {
+        if (renaming || e.target !== e.currentTarget) return;
+        // Up and down move through the sessions, Home and End to either end, as a list does (2026-10-27 audit: Tab was the
+        // only way through a hundred of them).
+        const move = { ArrowDown: 1, ArrowUp: -1, Home: -Infinity, End: Infinity }[e.key];
+        if (move !== undefined) {
+          const rows = [...document.querySelectorAll<HTMLElement>(".dass-row")].filter((x) => x.getClientRects().length > 0);
+          const at = rows.indexOf(e.currentTarget);
+          const next = rows[Math.max(0, Math.min(rows.length - 1, Number.isFinite(move) ? at + move : move < 0 ? 0 : rows.length - 1))];
+          if (next) (e.preventDefault(), next.focus());
+          return;
+        }
+        if (activates(e)) onOpen();
+      }}
       onContextMenu={(e) => {
         if (renaming) return;
         e.preventDefault();
@@ -913,7 +977,7 @@ function ChatRow({
       <div className="flex items-center gap-2">
         <span className="dass-dot" data-state={state} title={needs ? `Needs you: ${shortPaths(needs.text)}` : working ? `Working now: ${working.what}` : undefined} />
         {renaming ? <InlineEdit value={label} onSave={onRename} onCancel={onCancelRename} /> : <span className="dass-row-title">{label}</span>}
-        {working && working.lanes > 1 && <span className="rounded-full bg-[color-mix(in_srgb,var(--dass-live)_18%,transparent)] px-1.5 text-[10.5px] font-medium text-[var(--dass-live)]">{working.lanes}</span>}
+        {working && working.lanes > 1 && <span className="rounded-full bg-[color-mix(in_srgb,var(--dass-live)_18%,transparent)] px-1.5 text-[11px] font-medium text-[var(--dass-live)]">{working.lanes}</span>}
         {!renaming && <span className="dass-row-time shrink-0 text-[11px] text-[var(--text-muted)]">{relTime(r.openedAt)}</span>}
         {!renaming && (
           <span className="dass-row-act -my-1 shrink-0">
@@ -955,9 +1019,9 @@ function ChatRow({
             <span className="truncate">
               <span className="text-sidebar-foreground">{who}:</span> {preview.text}
             </span>
-          ) : (
-            <span>Idle</span>
-          )}
+          ) : // An idle session says nothing more than its dashed ring does: one line, as T3 Code's and Synara's rows are, so the ones
+          // at work stand out (Arun, 2026-10-27: "take some inspo from like t3, synara, orca"). Its branch or your role, if any, stay.
+          null}
           {/* The branch its agents are on, as the other tools' rows carry it (Arun, 2026-10-25): where the work lands. */}
           {!compact && !quiet && r.repos?.find((u) => u.branch)?.branch && (
             <span className="dass-row-branch" title={`On branch ${r.repos.find((u) => u.branch)!.branch}`}>
@@ -966,7 +1030,7 @@ function ChatRow({
             </span>
           )}
           {r.role !== "owner" && (
-            <span className="ml-auto shrink-0 rounded-full border border-sidebar-border px-1.5 text-[10px]" title={`You are ${r.role === "editor" ? "an editor" : "a viewer"} in this session`}>
+            <span className="ml-auto shrink-0 rounded-full border border-sidebar-border px-1.5 text-[11px]" title={`You are ${r.role === "editor" ? "an editor" : "a viewer"} in this session`}>
               {r.role}
             </span>
           )}
@@ -975,3 +1039,4 @@ function ChatRow({
     </div>
   );
 }
+

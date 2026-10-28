@@ -188,7 +188,7 @@ export type SessionOptionsPatch = Partial<Omit<SessionOptions, "policy">> & { po
  * holds a key for these: the CLI runs on the host's machine, under their login,
  * and a small runner relays the session to it.
  */
-export type EngineTool = "claude" | "codex" | "cursor" | "copilot" | "opencode" | "gemini" | "devin" | "junie" | "kiro" | "droid" | "grok" | "cline" | "kilo" | "amp" | "acp";
+export type EngineTool = "claude" | "codex" | "cursor" | "copilot" | "opencode" | "gemini" | "devin" | "junie" | "kiro" | "droid" | "grok" | "cline" | "kilo" | "amp" | "muse" | "acp";
 
 /** What a person sees about a coding tool before and after it is on their machine. Its runner side is in runner/adapters.ts. */
 export interface ToolInfo {
@@ -277,6 +277,15 @@ export const TOOL_INFO: Record<EngineTool, ToolInfo> = {
     tint: "#f34e3f",
     usage: "https://ampcode.com/settings",
     note: "Runs only in Auto: it doesn't ask before it acts.",
+  },
+  // Meta's coding agent, over its own protocol (runner/adapters.ts muse). It doesn't run on Windows outside WSL.
+  muse: {
+    name: "Muse Code",
+    blurb: "Meta's coding agent",
+    docs: "https://github.com/meta-models/muse-code-sdk",
+    install: { unix: "curl -fsSL https://dev.meta.ai/install.sh | bash" },
+    tint: "#0866ff",
+    note: "macOS and Linux; on Windows, inside WSL.",
   },
   // Any other agent in the ACP registry (Qwen Code, goose, Mistral Vibe, Auggie, Kimi...), by the command somebody sets on their computer.
   acp: {
@@ -457,6 +466,8 @@ export const ENGINE_MODEL_INFO: Record<EngineTool, EngineModelInfo[]> = {
   grok: [],
   cline: [],
   kilo: [],
+  // Muse Code's own default model unless one is typed: its list depends on the account.
+  muse: [],
   // Amp picks its own models for each of its modes; the mode is what is chosen.
   amp: [
     { id: "medium", label: "Medium", blurb: "Amp's everyday mode." },
@@ -577,6 +588,12 @@ export interface EngineInfo {
    * Code's work and personal sign-ins, two Codex accounts. Absent: its only one.
    */
   account?: { id: string; label: string };
+  /**
+   * "api": its tool runs on an API key or a cloud provider its host set up (runner/api-key.ts), which the host may let a session
+   * share. Absent: on its host's own plan (Claude Free, Pro or Max; ChatGPT; the others'), so it takes its host's work alone
+   * (own-plan.ts). An older runner that doesn't say is taken as a personal plan.
+   */
+  apiKey?: true;
   branch?: string;
   mode: EngineMode;
   /**
@@ -630,6 +647,8 @@ export interface PeerNote {
   by: { id: string; name: string };
   /** Who let it through, when it waited for someone here to say yes. */
   approvedBy?: string;
+  /** How many agent-to-agent steps led to it, counted across sessions: the turn it starts goes on from there (agent-mesh behindRun). */
+  hop?: number;
 }
 
 /**
@@ -638,6 +657,7 @@ export interface PeerNote {
  * so it queues and wakes the agent like any other, and the receiving agent is told who it is from (Arun, 2026-10-19: the coding
  * tools in a session talking to each other).
  */
+
 export interface MeshNote {
   id: string;
   /**
@@ -782,6 +802,8 @@ export type EventBody =
   | { type: "suggestion.dismissed"; seq: number }
   /** An instruction taken back before the agent read it: it leaves the queue, and the feed says so. */
   | { type: "instruction.withdrawn"; seq: number }
+  /** A queued message a coding tool won't take: it runs on its host's own plan, and this is somebody else's work (own-plan.ts). Out of the queue, with why. */
+  | { type: "instruction.refused"; seq: number; why: string }
   /** The driver approved the plan a lane proposed; its editing and running tools come back. */
   | { type: "plan.approved"; /** Set when the approver changed the plan: the version that was approved. */ steps?: string[] }
   /** A teammate's verdict on the plan in front of the room: it is fine, or it needs changing first. */
@@ -817,7 +839,7 @@ export type EventBody =
    * One agent leads the others: it can assign them work (assign_task) and gets each one's report back when it is done; null,
    * none does (Arun, 2026-10-19: "have a coding tool or agent be the boss and orchestrate the other agents").
    */
-  | { type: "lead.set"; lane: string | null }
+  | { type: "lead.set"; lane: string | null; /** Friday picked it as the agents changed (a room made, a lead removed), not a person. */ auto?: true }
   /**
    * A coding tool asked to show a page it started in the session's Preview panel (the friday MCP tool show_preview), or the
    * folder's iOS app: every open page of the session opens it, as Friday Code's own show_preview does.
@@ -867,7 +889,7 @@ export type EventBody =
   | { type: "member.removed"; userId: string; name: string }
   | { type: "link.updated"; role: LinkRole; enabled: boolean; version: number }
   // Human → agent. Only the driver can append these.
-  | { type: "instruction"; text: string; interrupt: boolean; /** The people it @-mentions, by id (mentions.ts). */ mentions?: string[]; fromSuggestion?: number; attachments?: Attachment[]; handoff?: Handoff; /** A message from another session's agent (peers.ts). */ peer?: PeerNote; /** A message from another agent in this session (agent-mesh.ts). */ mesh?: MeshNote; /** Answers an `engine.approval`: the driver said yes or no to it. */ approval?: { id: string; approve: boolean }; /** An edit of a message still queued: this one takes its place in the queue, and that one is taken back. */ replaces?: number; /** Friday telling a coding tool whose turn ended short of its task to carry on (keep-going.ts). */ keepGoing?: true; /** Posted by an app on the person's behalf (Friday's token API or MCP, `sessions:write`), not typed by them: capped like a teammate's (Security R3). */ via?: "api" }
+  | { type: "instruction"; text: string; interrupt: boolean; /** The people it @-mentions, by id (mentions.ts). */ mentions?: string[]; fromSuggestion?: number; attachments?: Attachment[]; handoff?: Handoff; /** A message from another session's agent (peers.ts). */ peer?: PeerNote; /** A message from another agent in this session (agent-mesh.ts). */ mesh?: MeshNote; /** Answers an `engine.approval`: the driver said yes or no to it. */ approval?: { id: string; approve: boolean }; /** An edit of a message still queued: this one takes its place in the queue, and that one is taken back. */ replaces?: number; /** Friday telling a coding tool whose turn ended short of its task to carry on (keep-going.ts). */ keepGoing?: true; /** A reply in a side thread on an earlier message (by its seq): its answer stays in the thread, not the room's main flow. */ thread?: { root: number }; /** Posted by an app on the person's behalf (Friday's token API or MCP, `sessions:write`), not typed by them: capped like a teammate's (Security R3). */ via?: "api"; /** Friday's own message carrying on what agents set going (a wake, a carry-on): how many agent-to-agent steps led to it, so the turn it starts counts on from there rather than from nothing (agent-mesh behindRun). */ hop?: number; /** A turn of its own: never handed to a turn under way, since its answer is read from the turn it starts. */ ownTurn?: true }
   /**
    * An agent in Manual mode wants to do something it may not do unasked.
    *
@@ -1051,7 +1073,18 @@ export type EventBody =
    * A subagent (or background command) a coding tool started, as it starts and each time its status changes: Claude Code's
    * Agent tool, Codex's spawn_agent, Cursor's task tool. The latest for an `id` in a lane is where it stands. For the Tasks panel.
    */
-  | { type: "agent.task"; id: string; status: AgentTaskStatus; description?: string; agentType?: string; background?: boolean; summary?: string }
+  | {
+      type: "agent.task";
+      id: string;
+      status: AgentTaskStatus;
+      description?: string;
+      agentType?: string;
+      background?: boolean;
+      summary?: string;
+      /** A subagent at work: what it is doing now ("Reading Sidebar.tsx") and how many steps it has taken so far. */
+      doing?: string;
+      steps?: number;
+    }
   /**
    * What a coding tool's turn used, as the tool reported it at the end: `input` read fresh (written to a cache included),
    * `cached` read back from one. Friday's own steps carry theirs on `agent.message.tokens`.
@@ -1096,7 +1129,7 @@ export type EventBody =
   | { type: "context.compacted"; tool: EngineTool; before: number; window?: number }
   /** This session's agent wrote to another session (peers.ts). `held`: it waits there for someone who can steer that agent to say yes. */
   /** The answer to an agent's ask_agent (agent-mesh.ts), on the asker's lane. `auto`: taken from the end of the turn that handled it. */
-  | { type: "mesh.replied"; id: string; fromLane: string; fromName: string; toLane: string; toName: string; text: string; auto?: boolean }
+  | { type: "mesh.replied"; id: string; fromLane: string; fromName: string; toLane: string; toName: string; text: string; auto?: boolean; /** The work stopped before it was done (a stop, an error, a usage limit, its agent gone): a report on that, not a result. */ short?: boolean }
   /** The asker stopped waiting for that answer: when it comes, it reaches the asker as a message (a MeshNote of kind `reply`). */
   | { type: "mesh.unwaited"; id: string }
   /** Agents in this session may not message each other until a person resumes it: by a person, or by Friday when a limit was hit. */

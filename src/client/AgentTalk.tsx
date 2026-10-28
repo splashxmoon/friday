@@ -190,20 +190,36 @@ export function BoardCard({ ev, state, stamp }: { ev: SessionEvent; state: Sessi
   const live = state.board?.seq === ev.seq ? state.board : null;
   const tasks = live?.tasks ?? ev.body.tasks.map((t) => ({ ...t, status: "open" as const, rounds: 0 }));
   const done = tasks.filter((t) => t.status === "done").length;
-  const mark = (st: string): TaskMarkState => (st === "done" ? "done" : st === "claimed" ? "working" : st === "review" ? "review" : st === "blocked" ? "blocked" : "open");
+  // Who has it by its name now, not the name its lane had when it took it (a teammate's lane read "Main"); and "is on it" only
+  // while that agent is at work: a task held by an agent that was stopped spun on as if it were being done (2026-10-27 audit).
+  let nameOf = (lane: string): string | undefined => state.lanes.find((l) => l.id === lane)?.name;
+  // A lane since taken away is told by the name it had, never by its id ("blocked · lyXFP7w", 2026-10-28 audit).
+  const who = (t: (typeof tasks)[number]) => {
+    const lane = "lane" in t ? t.lane : undefined;
+    const said = "name" in t ? t.name : undefined;
+    return (lane ? nameOf(lane) : undefined) ?? (said && said !== lane ? said : undefined);
+  };
+  const atWork = (t: (typeof tasks)[number]) => !("lane" in t && t.lane) || ["running", "waiting_for_human"].includes(runOf(state, t.lane).status);
+  const mark = (t: (typeof tasks)[number]): TaskMarkState => (t.status === "done" ? "done" : t.status === "claimed" ? (atWork(t) ? "working" : "open") : t.status === "review" ? "review" : t.status === "blocked" ? "blocked" : "open");
   const word = (t: (typeof tasks)[number]) =>
-    "checks" in t && t.checks?.running
-      ? `${t.name} finished · checks running`
+    // A board since replaced shows its tasks as they were posted, not as "ready": it isn't live, and its tasks' state moved on
+    // to the newer one (2026-10-28 audit, Arun's room).
+    !live
+      ? ""
+      : "checks" in t && t.checks?.running
+      ? `${who(t)} finished · checks running`
       : t.status === "cancelled"
         ? "dropped"
         : t.status === "done"
-      ? `${t.name ?? ""}${"review" in t && t.review ? ` · checked by ${t.review.by}` : ""}`
+      ? `${who(t) ?? ""}${"review" in t && t.review ? ` · checked by ${t.review.by}` : ""}`
+      : t.status === "claimed" && !atWork(t)
+        ? `${who(t)} has it · not working on it now`
       : t.status === "claimed"
-        ? `${t.name} is on it${"rounds" in t && t.rounds ? ("checks" in t && t.checks?.ok === false ? " again, after its checks failed" : " again, after a review") : ""}`
+        ? `${who(t)} is on it${"rounds" in t && t.rounds ? ("checks" in t && t.checks?.ok === false ? " again, after its checks failed" : " again, after a review") : ""}`
         : t.status === "review"
-          ? `${t.name} finished${"reviewer" in t && t.reviewer ? ` · ${t.reviewer.name} is checking` : " · waiting for a check"}`
+          ? `${who(t)} finished${"reviewer" in t && t.reviewer ? ` · ${t.reviewer.name} is checking` : " · waiting for a check"}`
           : t.status === "blocked"
-            ? `blocked${t.name ? ` · ${t.name}` : ""}`
+            ? `blocked${who(t) ? ` · ${who(t)}` : ""}`
             : t.after.length
               ? `after ${t.after.join(", ")}`
               : "ready";
@@ -219,7 +235,7 @@ export function BoardCard({ ev, state, stamp }: { ev: SessionEvent; state: Sessi
       <ul className="board-tasks">
         {tasks.map((t) => (
           <li key={t.id} className={cn("board-task", `is-${t.status}`)}>
-            <TaskMark state={mark(t.status)} />
+            <TaskMark state={mark(t)} />
             <span className="board-title">{t.title}</span>
             <span className="board-who">{word(t)}</span>
           </li>
@@ -301,6 +317,7 @@ export type TaskAction = "reassign" | "retry" | "sendback" | "cancel";
 
 export function teamTasks(state: SessionState, jump: (seq: number) => void, control?: (id: string, action: TaskAction, to?: string) => void): TodoStep[] {
   const mesh = meshOf(state);
+  let boardName = (_lane: string): string | undefined => undefined;
   const who = (lane: string | undefined, name: string | undefined) => {
     if (!lane && !name) return undefined;
     const look = lane ? agentLook(state, lane, 12) : null;
@@ -311,7 +328,8 @@ export function teamTasks(state: SessionState, jump: (seq: number) => void, cont
             {look.mark}
           </span>
         )}
-        <span>{name || (lane ? laneLabel(state, lane) : "")}</span>
+        {/* The teammate's name as it is now, and never a lane's id for a name (a lane since taken away). */}
+        <span>{(lane && boardName(lane)) || (name && name !== lane ? name : lane ? laneLabel(state, lane) : "")}</span>
       </>
     );
   };
@@ -359,7 +377,9 @@ export function teamTasks(state: SessionState, jump: (seq: number) => void, cont
   for (const a of round) {
     const base = { id: `a:${a.id}`, title: taskTitle(a.text), detail: `${a.fromName} → ${a.toName}: ${a.text.slice(0, 400)}`, onSelect: () => jump(a.seq), who: who(a.toLane, a.toName) };
     const queued = pendingFor(state, a.toLane).includes(a.seq) || (!!mesh.paused && (a.toLane === MAIN_LANE ? state.pendingInstructions : (state.lanePending[a.toLane] ?? [])).includes(a.seq));
-    if (a.reply) out.push({ ...base, status: "completed", note: "Reported back" });
+    // Stopped before it was done (a stop, an error, a usage limit): still to do, not reported back.
+    if (a.reply?.short) out.push({ ...base, status: "pending", note: "Stopped", tone: "bad" });
+    else if (a.reply) out.push({ ...base, status: "completed", note: "Reported back" });
     else if (queued) out.push({ ...base, status: "pending", note: mesh.paused ? "Held" : "Queued", ...(mesh.paused ? { tone: "warn" as const } : {}) });
     else if (runOf(state, a.toLane).status === "running") out.push({ ...base, status: "active", note: "Working" });
     else if (runOf(state, a.toLane).status === "waiting_for_human") out.push({ ...base, status: "active", note: "Needs you", tone: "warn" });

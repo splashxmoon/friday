@@ -60,6 +60,12 @@ export interface SubTask {
    * subagents this run sent off, and a card of them came with every new prompt (Arun, 2026-10-24).
    */
   opened: boolean;
+  /** While it works: what it is doing now. */
+  doing?: string;
+  /** Steps it has taken, the latest count the tool gave. */
+  steps?: number;
+  /** When the tool last said anything of it: one at work and silent a long while may be stuck. */
+  heard: number;
 }
 
 export function subTasksIn(events: SessionEvent[]): SubTask[] {
@@ -86,6 +92,10 @@ export function subTasksIn(events: SessionEvent[]): SubTask[] {
       // task; a leftover report has none.
       opened: had?.opened ?? (b.status === "running" || !!b.description),
       ...(b.status !== "running" ? { end: e.ts } : {}),
+      // What it was doing as it failed stays: it is the nearest thing to a reason when the tool gives none (2026-10-27 audit).
+      ...((b.status === "running" || b.status === "error") && (b.doing ?? had?.doing) ? { doing: b.doing ?? had?.doing } : {}),
+      heard: e.ts,
+      ...((b.steps ?? had?.steps) ? { steps: b.steps ?? had?.steps } : {}),
     });
   }
   return [...all.values()];

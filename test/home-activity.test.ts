@@ -20,3 +20,12 @@ test("streaks: the longest, and the one still going", () => {
   assert.deepEqual(streaks([t(1), t(1), t(0), t(3), t(1), t(1)]), { longest: 3, current: 3 });
   assert.deepEqual(streaks([t(1), t(0)]), { longest: 1, current: 0 });
 });
+
+test("the year is the grid's days: one sent from past its end neither shows the year nor shades it (2026-10-27 QA)", () => {
+  const today = new Date(2026, 9, 27);
+  const cols = heatmap([{ day: "2026-10-28", turns: 9 }, { day: "2026-10-27", turns: 1 }], today);
+  const flat = cols.flat();
+  assert.equal(flat.reduce((n, c) => n + c.turns, 0), 1, "tomorrow isn't in it");
+  assert.equal(flat.at(-1)!.level, 4, "today, the grid's busiest, is darkest");
+  assert.equal(heatmap([{ day: "2026-10-28", turns: 9 }], today).flat().reduce((n, c) => n + c.turns, 0), 0, "nothing to show");
+});

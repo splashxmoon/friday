@@ -1,3 +1,4 @@
+import { ownPlan } from "../own-plan.js";
 import type { GoalState } from "../goal.js";
 import { engineName, MAIN_LANE, EFFORT_LEVELS, type BoardTaskDef, type EngineEffort, type EngineTool, type HubState } from "../types.js";
 import { headlineClass, pieces } from "../command-class.js";
@@ -292,7 +293,7 @@ export interface MeshAsk {
   text: string;
   hop: number;
   by: { id: string; name: string } | null;
-  reply?: { text: string; seq: number; auto?: boolean };
+  reply?: { text: string; seq: number; auto?: boolean; /** Stopped before it was done (mesh.replied short): not a result. */ short?: boolean };
   /** Work the lead assigned (assign_task), not a question. */
   task?: boolean;
   /** Where the asker stopped waiting (mesh.unwaited): an answer logged after this reaches it as a message. */
@@ -589,6 +590,10 @@ export function laneOf(s: SessionState, laneId: string): Lane | null {
  * session can run an open research lane beside a named-approver drafting lane.
  */
 export function canDriveLane(s: SessionState, userId: string, laneId: string): boolean {
+  // A coding tool on its host's own plan is steered by its host alone, whatever the session lets others do (own-plan.ts). Gone,
+  // the lane is anyone's to hold again; what is sent to that tool is still refused if it comes back (EngineHub.drain).
+  const e = s.engines[laneId];
+  if (ownPlan(e) && e.online !== false && e.hostId !== userId) return false;
   const lane = laneOf(s, laneId);
   if (!lane) return can(s, userId, "control");
   const role = roleOf(s, userId);
@@ -866,6 +871,8 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       break;
     case "lead.set":
       s.lead = b.lane;
+      // A board whose poster has gone is the new lead's: its reports and the right to post the next go to it (2026-10-28 audit).
+      if (s.board && b.lane && s.board.fromLane !== MAIN_LANE && !s.lanes.some((l) => l.id === s.board!.fromLane)) s.board = { ...s.board, fromLane: b.lane, fromName: s.lanes.find((l) => l.id === b.lane)?.name ?? s.board.fromName };
       break;
     case "board.posted":
       s.board = { fromLane: b.fromLane, fromName: b.fromName, seq: ev.seq, tasks: b.tasks.map((t) => ({ ...t, status: "open", rounds: 0 })), ...(b.check ? { check: b.check } : {}) };
@@ -927,6 +934,9 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       }
       break;
     case "lane.removed":
+      // The board's poster leaving hands the board to the lead (one is made the lead before a teammate goes), or to the lead set
+      // next (lead.set): its reports went to nobody, and nobody else could post another (2026-10-28 audit).
+      if (s.board?.fromLane === b.laneId && s.lead && s.lead !== b.laneId) s.board = { ...s.board, fromLane: s.lead, fromName: s.lanes.find((l) => l.id === s.lead)?.name ?? s.board.fromName };
       if (s.lead === b.laneId) s.lead = null;
       if (s.holds) delete s.holds[b.laneId];
       for (const w of Object.values(s.wakes ?? {})) if (w.lane === b.laneId || w.on.lane === b.laneId) delete s.wakes![w.id];
@@ -1029,6 +1039,10 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
     case "run.started":
       setRun("running");
       delete s.asks[lane];
+      // What started it is being read: out of the queue, as the page has it (client deliveredIn), even where its delivery is a
+      // separate event or none came (a log written by hand, a runner cut off between the two).
+      if (lane === MAIN_LANE) s.pendingInstructions = s.pendingInstructions.filter((q) => q !== b.causedBy);
+      else if (s.lanePending[lane]) s.lanePending[lane] = s.lanePending[lane]!.filter((q) => q !== b.causedBy);
       break;
     case "run.ended":
       // What it held was for this run's work. Not a run cut off by a lost connection, which carries on when it is back, nor
@@ -1047,6 +1061,7 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       break;
     }
     case "instruction.withdrawn":
+    case "instruction.refused":
       s.pendingInstructions = s.pendingInstructions.filter((q) => q !== b.seq);
       for (const l of Object.keys(s.lanePending)) s.lanePending[l] = s.lanePending[l]!.filter((q) => q !== b.seq);
       if (!s.withdrawn.includes(b.seq)) s.withdrawn.push(b.seq);
@@ -1138,7 +1153,7 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
 
     case "mesh.replied": {
       const a = s.mesh?.asks[b.id];
-      if (a && !a.reply) a.reply = { text: b.text, seq: ev.seq, ...(b.auto ? { auto: true } : {}) };
+      if (a && !a.reply) a.reply = { text: b.text, seq: ev.seq, ...(b.auto ? { auto: true } : {}), ...(b.short ? { short: true } : {}) };
       break;
     }
     case "mesh.unwaited": {

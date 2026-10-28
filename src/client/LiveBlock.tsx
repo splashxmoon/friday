@@ -75,12 +75,12 @@ type Theme = (typeof THEME)["dark"];
 const kitCss = (t: Theme) => `:root{--fg:${t.fg};--muted:${t.muted};--surface:${t.surface};--raised:${t.raised};--border:${t.border};--grid:${t.grid};--accent:${t.accent};--good:${t.good};--warn:${t.warn};--bad:${t.bad};${t.series.map((c, i) => `--series-${i + 1}:${c}`).join(";")};--radius:12px;--font:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
 *{box-sizing:border-box}html,body{margin:0;background:transparent;color:var(--fg);font:14px/1.55 var(--font);-webkit-font-smoothing:antialiased}body{padding:16px}
 h1,h2,h3,h4{margin:0 0 8px;font-weight:600;letter-spacing:-.01em;line-height:1.3}h1{font-size:20px}h2{font-size:16px}h3{font-size:14px}h4{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
-p{margin:0 0 10px}small,.muted{color:var(--muted)}a{color:var(--accent)}code{font:12.5px var(--mono)}hr{border:0;border-top:1px solid var(--border);margin:14px 0}
+p{margin:0 0 10px}small,.muted{color:var(--muted)}a{color:var(--accent)}code{font:13px var(--mono)}hr{border:0;border-top:1px solid var(--border);margin:14px 0}
 .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(min(170px,100%),1fr))}.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.stack{display:flex;flex-direction:column;gap:12px}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px}
 .stat .label{font-size:12px;color:var(--muted)}.stat .value{margin-top:2px;font-size:26px;font-weight:650;letter-spacing:-.02em;font-variant-numeric:tabular-nums}.stat .delta{font-size:12px;font-weight:500}.up{color:var(--good)}.down{color:var(--bad)}
 table{width:100%;border-collapse:collapse;font-size:13px}th{text-align:left;font-weight:500;color:var(--muted);padding:8px 10px;border-bottom:1px solid var(--border)}td{padding:8px 10px;border-bottom:1px solid var(--grid)}tr:last-child td{border-bottom:0}.num{text-align:right;font-variant-numeric:tabular-nums}
-.badge{display:inline-flex;align-items:center;gap:5px;padding:1px 8px;border-radius:99px;font-size:11.5px;font-weight:500;background:var(--surface);border:1px solid var(--border)}.badge.good{color:var(--good)}.badge.warn{color:var(--warn)}.badge.bad{color:var(--bad)}
+.badge{display:inline-flex;align-items:center;gap:5px;padding:1px 8px;border-radius:99px;font-size:12px;font-weight:500;background:var(--surface);border:1px solid var(--border)}.badge.good{color:var(--good)}.badge.warn{color:var(--warn)}.badge.bad{color:var(--bad)}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--series-1)}
 button{font:500 13px var(--font);padding:7px 13px;border-radius:9px;border:1px solid var(--border);background:var(--surface);color:var(--fg);cursor:pointer}button:hover{border-color:var(--muted)}button.primary{background:var(--fg);border-color:var(--fg);color:${t.inverse}}
 input,select,textarea{font:13px var(--font);padding:7px 10px;border-radius:9px;border:1px solid var(--border);background:transparent;color:var(--fg)}input[type=range]{padding:0;accent-color:var(--accent)}
@@ -373,6 +373,7 @@ export function LiveBlock({ code, language, isIncomplete }: CustomRendererProps)
     </>
   );
 }
+
 
 
 /** A picture in a message: shown at its size up to the column's width, and large on a press. */

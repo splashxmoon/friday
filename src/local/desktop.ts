@@ -39,6 +39,7 @@ const loginPath: Promise<void> =
 let friday: Started | null = null;
 let win: BrowserWindow | null = null;
 
+
 /**
  * The window's own buttons in the page's colours, as the product app draws them (desktop/main.ts): on Windows and Linux the
  * title bar is hidden and its buttons drawn over the page, in these colours, 40px tall to fit the page's header. macOS keeps its
@@ -80,7 +81,12 @@ function open(url: string) {
       ? { titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 16, y: 17 } }
       : { titleBarStyle: "hidden" as const, titleBarOverlay: OVERLAY[lastTheme()] }),
     // webviewTag: the Preview panel draws the app being built in a <webview>, locked down below.
-    webPreferences: { contextIsolation: true, sandbox: true, webviewTag: true, preload: path.join(here, "preload.cjs") },
+    webPreferences: {
+      contextIsolation: true,
+      sandbox: true,
+      webviewTag: true,
+      preload: path.join(here, "preload.cjs"),
+    },
   });
   // A preview's <webview> is somebody's dev server's page: its own cookie jar, nothing of Node's, and no permissions (location,
   // camera, external apps), whatever the page that made it asked for. As in the product app (desktop/main.ts).

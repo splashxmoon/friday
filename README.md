@@ -10,6 +10,15 @@
 </p>
 
 <p align="center">
+  <a href="#install">Install</a> ·
+  <a href="#your-agents-working-as-a-team">Agents as a team</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#automations">Automations</a> ·
+  <a href="#privacy">Privacy</a> ·
+  <a href="#faq">FAQ</a>
+</p>
+
+<p align="center">
   <a href="https://github.com/splashxmoon/friday/stargazers"><img src="https://img.shields.io/github/stars/splashxmoon/friday?style=flat&label=%E2%98%85&color=08C" alt="GitHub stars" /></a>
   <img src="https://img.shields.io/badge/license-MIT-08C?style=flat" alt="License: MIT" />
   <img src="https://img.shields.io/badge/macOS%20%7C%20Windows%20%7C%20Linux-4493F8?style=flat" alt="macOS, Windows and Linux" />
@@ -25,7 +34,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/hero.png" alt="Friday with four sessions and nine agents at work: in each session Claude Code and Codex take a part of the job, shown working side by side in the sidebar and under Right now" width="960" />
+  <img src="docs/assets/hero.png" alt="Friday's home screen: four sessions and nine agents at work, Claude Code and Codex side by side in the sidebar and under Right now" width="960" />
 </p>
 
 Works with the subscriptions you already have. If a coding tool is installed and signed in on your computer, Friday can drive it:
@@ -45,6 +54,7 @@ Works with the subscriptions you already have. If a coding tool is installed and
   <kbd><img src="https://www.google.com/s2/favicons?domain=cline.bot&sz=64" width="14" valign="middle" alt="" /> Cline</kbd>
   <kbd><img src="https://www.google.com/s2/favicons?domain=kilo.ai&sz=64" width="14" valign="middle" alt="" /> Kilo</kbd>
   <kbd><img src="https://www.google.com/s2/favicons?domain=ampcode.com&sz=64" width="14" valign="middle" alt="" /> Amp</kbd>
+  <kbd><img src="https://www.google.com/s2/favicons?domain=meta.ai&sz=64" width="14" valign="middle" alt="" /> Muse Code</kbd>
   <kbd>Any ACP agent</kbd>
 </p>
 
@@ -60,12 +70,12 @@ An agent you add to a session can work in its own copy of the repository, so thr
 
 <table>
 <tr>
-<td width="50%"><img src="docs/assets/task-board.png" alt="Claude Code's task board: one task done and checked, Gemini and Cursor on two more, the last waiting on them" /></td>
-<td width="50%"><img src="docs/assets/agents-talk.png" alt="Codex telling Cursor about a rename, and Gemini asking Claude Code a question and getting an answer" /></td>
+<td width="50%"><img src="docs/assets/task-board.png" alt="Claude Code's task board: the price maths moved and checked, Gemini on the tests, Cursor on the checkout page, the changelog waiting on them" /></td>
+<td width="50%"><img src="docs/assets/agents-talk.png" alt="Codex telling Cursor about a rename, and Gemini asking Claude Code whether a discount comes off before or after tax" /></td>
 </tr>
 <tr>
-<td width="50%" valign="top"><sub><b>A shared task board.</b> Claude Code split the work; Codex finished its part and Claude Code checked it; Gemini and Cursor are on theirs; the last task waits for all three.</sub></td>
-<td width="50%" valign="top"><sub><b>Agents talking.</b> Codex tells Cursor what it renamed before Cursor trips over it; Gemini asks Claude Code how a 25-hour day should count, and goes on with the answer.</sub></td>
+<td width="50%" valign="top"><sub><b>A shared task board.</b> Claude Code split the work; Codex moved the price maths into <code>totals.ts</code> and Claude Code checked it; Gemini is on the tests and Cursor on the checkout page; the changelog waits for all three.</sub></td>
+<td width="50%" valign="top"><sub><b>Agents talking.</b> Codex tells Cursor what it renamed before Cursor trips over it; Gemini asks Claude Code whether a discount comes off before or after tax, and goes on with the answer.</sub></td>
 </tr>
 </table>
 
@@ -145,14 +155,14 @@ npm start
 Friday finds the coding tools on your computer and whether each is signed in. Pick one per task, or let Auto choose by the job and by how much of each tool's usage is left.
 
 </td>
-<td width="50%"><img src="docs/assets/tools.png" alt="The coding tools Friday found on this computer, each signed in and ready" /></td>
+<td width="50%"><img src="docs/assets/tools.png" alt="Six coding tools Friday found on this computer, each signed in and ready" /></td>
 </tr>
 <tr>
 <td width="50%" valign="middle">
 
 ### Never stuck on a usage limit
 
-Each tool's remaining usage, always in view. When one runs out mid-task, the task moves to the agent best placed to finish it, with everything done so far, instead of starting over.
+Each tool's remaining usage, always in view. When one runs out mid-task, the task moves to the agent best placed to finish it, with everything done so far, instead of starting over. Friday never switches your accounts for you: it tells you which other one is signed in, and you choose.
 
 </td>
 <td width="50%"><img src="docs/assets/usage.png" alt="Each coding tool's remaining usage, at a glance" /></td>
@@ -165,7 +175,7 @@ Each tool's remaining usage, always in view. When one runs out mid-task, the tas
 Every run ends in a change set you read before you keep it. Leave notes on a line or a range and send them back to the agent; see which lines it wrote and which you did.
 
 </td>
-<td width="50%"><img src="docs/assets/notes.png" alt="A note on four changed lines, about to go back to the agent" /></td>
+<td width="50%"><img src="docs/assets/notes.png" alt="A note on two changed lines, about to go back to the agent" /></td>
 </tr>
 <tr>
 <td width="50%" valign="middle">
@@ -189,13 +199,31 @@ Point a session at a folder, choose the branch it works on, or have it start a n
 </tr>
 </table>
 
-Also in the box: Friday Code, Friday's own agent, on a model of yours (an API key from OpenAI, Anthropic, Google and others, or a model running on your computer with Ollama or LM Studio, added in Settings › Your models); a live feed of every message, command and file change; approvals when a tool asks before running something; your dev server previewed beside the session; skills and saved commands shared across your tools; and sessions your tools come back to by themselves after a restart.
+## Automations
+
+Hand your coding tools the jobs that come round again. An automation reads like a sentence: **when** (on a schedule, when its webhook is called, when an agent finishes or fails in a session, or only when you press Run now), **who** (a coding tool, or several that split the work on a board), **where** (a folder, worked on in its own copy so yours stays put), **what** it does, and **then** (open a pull request, tell you). Each run is a session of its own you can open, read and review like any other, and a daily cap keeps a busy trigger in check.
+
+<p align="center">
+  <img src="docs/assets/automations.png" alt="The Automations page: a webhook that triages new issues, a weekday flaky-test sweep with Claude Code leading Codex, and a nightly dependency bump with Codex" width="960" />
+</p>
+
+## And everything else you'd expect
+
+- **Friday Code**, Friday's own agent, on a model of yours: an API key from OpenAI, Anthropic, Google and others, or a model on your computer with Ollama or LM Studio, added in Settings › Your models.
+- **A live feed** of every message, command and file change, with approvals when a tool asks before running something, and **rewind** to take a turn back.
+- **Your dev server previewed** beside the session, and a terminal you can search.
+- **Open a session's folder** in your editor, Finder or terminal, and ⌘-click a file name to open it at the line.
+- **Keyboard first:** ⌘K for everything, ⌘⌥1–9 and Ctrl+Tab between sessions, ⌘⇧U for the next one waiting on you, ↑ for what you asked before.
+- **Themes:** a gallery of twelve, or make your own from a few colours and save or share it as a file.
+- **Skills and saved commands** shared across your tools, and a session saved as Markdown in one click.
+- **Sessions that pick up by themselves** after a restart, and notifications (with a dock badge) that open the session they're about.
+- **Agents that stay stopped:** put one on hold and nothing nudges or wakes it until you say so.
 
 ## Privacy
 
 Friday listens on `127.0.0.1` only, so nothing else on your network can reach it, and it answers only its own page: a request from any other site, or from a page being previewed, is refused. What it keeps is one folder on your computer, readable only by you.
 
-It sends nothing to us: no account, no analytics, no telemetry. It talks to GitHub for the pull requests, issues and skills you ask it about, and reads each coding tool's remaining usage from that tool's own provider, with the sign-in the tool already has. A model you add in Settings › Your models is called from your computer, and its key is kept there and sent only to that model's own server. The desktop app also asks GitHub for a newer release while it's open (when it starts, when you come back to it, and every ten minutes), downloads it from there, and installs it when you restart (`FRIDAY_NO_UPDATE_CHECK=1` turns that off).
+It sends nothing to us: no account, no analytics, no telemetry. It talks to GitHub for the pull requests, issues and skills you ask it about. Each tool's remaining usage comes from the tool itself wherever it can: Claude Code's from what it reports as it runs (its sign-in is never read), Codex's from its own app server, Copilot's through your GitHub CLI. Cursor keeps none on your computer, so Friday makes the request Cursor's own CLI makes, to Cursor's server and nowhere else. Friday never switches the account a tool is signed in with. A model you add in Settings › Your models is called from your computer, and its key is kept there and sent only to that model's own server. The desktop app also asks GitHub for a newer release while it's open (when it starts, when you come back to it, and every ten minutes), downloads it from there, and installs it when you restart (`FRIDAY_NO_UPDATE_CHECK=1` turns that off).
 
 ## Developing
 
@@ -221,13 +249,16 @@ Start a session in your repository with one of them, then add the other from the
 No. Friday drives the coding CLIs you already use, as they are. There's nothing to write: you pick the tools and give them the job.
 
 **Which coding agents does it support?**
-Claude Code, Codex, Cursor, GitHub Copilot, Gemini CLI, OpenCode, Devin CLI, Junie, Kiro, Factory Droid, Grok Build, Cline, Kilo Code, Amp, and any agent that speaks the Agent Client Protocol (ACP).
+Claude Code, Codex, Cursor, GitHub Copilot, Gemini CLI, OpenCode, Devin CLI, Junie, Kiro, Factory Droid, Grok Build, Cline, Kilo Code, Amp, Muse Code, and any agent that speaks the Agent Client Protocol (ACP).
 
 **Does it cost anything, or use my API keys?**
 Friday is free and MIT licensed. The work runs on each tool's own plan and sign-in, so there are no keys to paste and nothing extra to pay. If you'd like Friday Code, Friday's own agent, too, give it a key of yours or a model on your computer in Settings › Your models: then it runs on that.
 
 **What happens when one agent runs out of usage?**
 Its task goes to the agent best placed to finish it, with its notes, files and plan, so the work keeps going.
+
+**Can it run my agents while I'm not there?**
+Yes: an [automation](#automations) starts a coding tool on a schedule, from a webhook, or when another session finishes, and opens a pull request for you to review. Friday has to be running for it to start; you choose whether a run missed while the computer was off happens when it's back.
 
 **Does my code leave my computer?**
 Not through Friday. It runs on `127.0.0.1` with no account and no server of ours; your coding tools talk to their own providers as they always do.

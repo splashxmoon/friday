@@ -1,3 +1,4 @@
+import { ownPlan, refusal, whoseWork } from "../own-plan.js";
 import { slowly } from "../slow.js";
 import { closeSaying } from "../heartbeat.js";
 import { overlaps, pathKey, platformOf } from "../folder-key.js";
@@ -6,6 +7,7 @@ import { meshHead } from "../mesh-note.js";
 import { leadBrief, meshListing, newNotes, type AgentMesh } from "../agent-mesh.js";
 import { backNote } from "../limit-handoff.js";
 import { keepGoingNote } from "../keep-going.js";
+import { runnableQueue } from "../held.js";
 import { fitModels, routeTool, stickyPick, taskTier, type ToolWindow } from "../routing.js";
 import { missedLast, type Learned } from "../route-learning.js";
 import { repoKeyOf } from "../repo-key.js";
@@ -83,10 +85,11 @@ const STEER_ANSWER_MS = 15_000;
 /**
  * A message that can be read mid-turn: words to the agent, from a person, another agent or another session's. Not a Stop or
  * a cut-short (they end the turn), a yes to what it asked, Friday's carry-on, files to read, one of the tool's own `/`
- * commands, an edit of one still queued, or a hand-off, whose brief starts a turn of its own.
+ * commands, an edit of one still queued, a hand-off, whose brief starts a turn of its own, or one that asks for a turn of its own
+ * (ownTurn), whose answer is read from that turn (2026-10-27 audit).
  */
 function steerable(b: Extract<EventBody, { type: "instruction" }>): boolean {
-  return !b.interrupt && !b.approval && !b.keepGoing && !b.attachments?.length && !b.replaces && !b.handoff && !/^\/[\w:.-]+(\s|$)/.test(b.text.trim());
+  return !b.interrupt && !b.approval && !b.keepGoing && !b.ownTurn && !b.attachments?.length && !b.replaces && !b.handoff && !/^\/[\w:.-]+(\s|$)/.test(b.text.trim());
 }
 
 /**
@@ -141,6 +144,7 @@ const MAX_DELTA = 4_000;
  */
 const HELD_DIFF_S = 15 * 60;
 
+
 export interface RunnerParams {
   sid: string;
   me: Member;
@@ -169,6 +173,8 @@ export interface RunnerParams {
   /** Which of its accounts on that computer it runs as, and what the person calls it (EngineInfo.account). */
   account?: string;
   accountLabel?: string;
+  /** "1": its tool runs on an API key or a cloud provider, not its host's own plan (runner/api-key.ts, EngineInfo.apiKey). */
+  apiKey?: string;
   branch: string;
   lane: string;
   newLane: string;
@@ -282,7 +288,14 @@ export class EngineHub {
    * good and every instruction waited on an agent that was not there. Each attached engine names its node; one whose
    * node's lease has run out is marked disconnected the next time anybody opens the session or attaches.
    */
-  private readonly node = randomUUID();
+  readonly node = randomUUID();
+  /**
+   * Lanes a runner of this server is attaching to right now (written to the log, not yet held), and when each runner of this
+   * server last let go of one, by "sid|lane": what reap needs to tell a lane this server holds, or is about to, or let go of
+   * moments ago (LaneHost.markOffline gives it its grace), from one no runner holds at all.
+   */
+  private lanesAttaching = new Map<string, number>();
+  private droppedAt = new Map<string, number>();
   /** Set by the app: the project brain's briefing for a lane's first turn (brain.ts). */
   brief: ((sid: string, lane: string, task: string) => Promise<string>) | null = null;
   /** Set by the app: what runs in a workspace have shown about each model, for routing (route-learning.ts). */
@@ -320,9 +333,15 @@ export class EngineHub {
     const state = await this.store.state(sid);
     let events: SessionEvent[] | null = null;
     for (const [lane, e] of Object.entries(state.engines)) {
-      if (!e.online || !e.node || e.node === this.node) continue;
+      if (!e.online || !e.node) continue;
       const self = !!reattach && lane === reattach.lane && e.hostId === reattach.hostId;
-      if (!self && (await this.store.redis.exists(this.leaseKey(e.node)))) {
+      if (e.node === this.node) {
+        // This server's own: online only while one of its runners holds it, is attaching, or dropped it within the grace a short
+        // drop is given. Otherwise the log said connected while every live look at the runner said no (2026-10-27 QA: the
+        // status bar against the Tree, the branch picker and setup).
+        const key = `${sid}|${lane}`;
+        if (this.hosts.has(key) || Date.now() - (this.lanesAttaching.get(key) ?? 0) < 30_000 || Date.now() - (this.droppedAt.get(key) ?? 0) < offlineGraceMs() + 5_000) continue;
+      } else if (!self && (await this.store.redis.exists(this.leaseKey(e.node)))) {
         // Browsers reconnect seconds after a restart, while a dead server's lease is still running: look again once it can't be.
         if (recheck && !this.rechecks.has(sid)) {
           this.rechecks.add(sid);
@@ -564,9 +583,12 @@ export class EngineHub {
     const os = p.os || platformOf(p.cwd);
     const machine = p.machine || p.me.id;
     const root = p.root || p.real || p.cwd;
-    // Sharing the folder, by choice, or joining one shared: nobody is held back (EngineInfo.shared).
+    // Sharing the folder, by choice, or joining one shared: nobody is held back (EngineInfo.shared). A lane that shared it keeps
+    // sharing it when it comes back, whatever brought it back: a restart that didn't say so made it the folder's one writer, and
+    // the lanes beside it were turned away as they came back (Arun, 2026-10-26: "the coding tools not reconnecting").
+    let share = !!p.share || (!p.newLane && !!state.engines[lane]?.shared);
     const editing = async (skip?: string): Promise<[string, { hostName: string }] | undefined> =>
-      mode === "plan" || p.share
+      mode === "plan" || share
         ? undefined
         : (Object.entries(state.engines).find(([id, e]) => id !== skip && e.online && e.mode !== "plan" && !e.shared && (e.machine || e.hostId) === machine && overlaps(e.root ?? e.cwd, root, os)) ??
           (await this.writer(p.sid, state, machine, root, os, skip, skip)));
@@ -595,6 +617,9 @@ export class EngineHub {
       state = await this.store.state(p.sid);
     }
     if (lane !== MAIN_LANE && !state.lanes.some((l) => l.id === lane)) return reject(4004, "That lane isn't in this session.");
+    // Someone else's coding tool on their own plan is on it: it is theirs alone (own-plan.ts). Yours goes beside it, as an agent of its own.
+    const sitting = state.engines[lane];
+    if (ownPlan(sitting) && sitting.online && sitting.hostId !== p.me.id) return reject(4009, `${sitting.hostName}'s ${engineName(sitting.tool!)} is on that lane, on ${sitting.hostName}'s own plan. Add yours as a new agent beside it.`);
     if (!canDriveLane(state, p.me.id, lane)) return reject(4003, "You can't steer that lane, so you can't attach an agent to it.");
     // Someone else's lane stays theirs while it is online, and for a while after it drops: a network blip is not a handover.
     const held = laneHeld(state.engines[lane], p.me.id);
@@ -618,6 +643,8 @@ export class EngineHub {
     if (clash) return clashWith(clash);
 
     const key = `${p.sid}|${lane}`;
+    // Attaching from here until its runner is held, or it gives up: a while at most, whichever way it leaves.
+    this.lanesAttaching.set(key, Date.now());
     // Gone while all that was being decided: nothing is attached, nothing is announced, and whatever has the lane keeps it.
     if (ws.readyState !== WebSocket.OPEN) return;
     // The same host reconnecting (or attaching again) replaces its old runner, with the code that tells it not to come
@@ -629,7 +656,7 @@ export class EngineHub {
       hostName: p.me.name,
       cwd: p.cwd.slice(0, 400),
       ...(p.copyOf ? { copyOf: p.copyOf.slice(0, 400) } : {}),
-      ...(p.share ? { shared: true as const } : {}),
+      ...(share ? { shared: true as const } : {}),
       ...(p.root || p.real ? { root: (p.root || p.real)!.slice(0, 400) } : {}),
       ...(p.os ? { os: p.os.slice(0, 10) } : {}),
       ...(p.machine ? { machine: p.machine.slice(0, 60) } : {}),
@@ -637,6 +664,7 @@ export class EngineHub {
       ...(p.efforts && p.efforts.split(",").some(isEngineEffort) ? { efforts: [...new Set(p.efforts.split(",").filter(isEngineEffort))] } : {}),
       ...(p.model ? { model: p.model.slice(0, 60) } : {}),
       ...(p.account ? { account: { id: p.account.slice(0, 40), label: (p.accountLabel || p.account).slice(0, 40) } } : {}),
+      ...(p.apiKey === "1" ? { apiKey: true as const } : {}),
       mode,
       ...(handMode ? { handMode } : {}),
       ...(p.branch ? { branch: p.branch.slice(0, 100) } : {}),
@@ -660,7 +688,7 @@ export class EngineHub {
     const events = await this.store.events(p.sid);
     const imported = !!resumeId && events.some((e) => e.body.type === "session.imported" && e.body.sourceId === resumeId);
     const host = new LaneHost(p.sid, lane, r.seq, info, ws, this.store, this.bus, () => {
-      if (this.hosts.get(key) === host) this.hosts.delete(key);
+      if (this.hosts.get(key) === host) (this.hosts.delete(key), this.droppedAt.set(key, Date.now()));
     }, resumeId && from && !imported ? { id: resumeId, title: (p.resumeTitle || "an earlier session").slice(0, 120), tool: from } : null, this.brief ? (l, task) => this.brief!(p.sid, l, task) : null, this.learned);
     host.selfCheckpoint = (p.caps ?? "").split(",").includes("checkpoint");
     host.steers = (p.caps ?? "").split(",").includes("steer");
@@ -668,13 +696,15 @@ export class EngineHub {
     // What its first turn will be told besides the instruction, so its CLI can be started before that turn comes.
     const system = tool ? await host.systemNote(events) : undefined;
     this.hosts.set(key, host);
+    this.lanesAttaching.delete(key);
     this.open.add(host);
     void host.gone.then(() => this.open.delete(host));
     await host.start();
     const laneName = lane === MAIN_LANE ? "Main" : (state.lanes.find((l) => l.id === lane)?.name ?? lane);
     // And how hard it thinks, so the CLI kept warm for the first turn is started with the flag that turn will carry.
     const effort = effortReset ? undefined : laneEffort(state, lane, tool);
-    host.sendRaw({ kind: "attached", lane, laneName, ...(imported ? { imported: true } : {}), ...(system ? { system } : {}), ...(effort ? { effort } : {}) });
+    const attached: Record<string, unknown> = { kind: "attached", lane, laneName, ...(imported ? { imported: true } : {}), ...(system ? { system } : {}), ...(effort ? { effort } : {}) };
+    host.sendRaw(attached);
     void host.pump();
   }
 
@@ -691,6 +721,20 @@ export class EngineHub {
     const mine = [...this.hosts].filter(([k]) => k.startsWith(`${sid}|`)).map(([, h]) => h);
     for (const h of mine) h.sendRaw({ kind: "stop", reason: why });
     await Promise.all(mine.map((h) => h.close(why, 4004)));
+  }
+
+  /**
+   * Every session in `sids` reaped once the leases of servers before this one have run out: at start, so lanes no runner holds
+   * read offline everywhere (the sidebar, the Board), not only in a session someone opens (2026-10-27 QA). The timer, to clear.
+   */
+  reapAfterLeases(sids: () => Promise<string[]>, afterMs = (NODE_LEASE_S + 2) * 1000): ReturnType<typeof setTimeout> {
+    const t = setTimeout(() => {
+      void (async () => {
+        for (const sid of await sids()) await this.reap(sid, false).catch((e) => console.error("[engine] reap:", e));
+      })().catch((e) => console.error("[engine] reap:", e));
+    }, afterMs);
+    t.unref?.();
+    return t;
   }
 
   async shutdown(): Promise<void> {
@@ -879,9 +923,13 @@ class LaneHost {
   private async steer(ev: SessionEvent): Promise<void> {
     const state = await this.store.state(this.sid);
     if (!this.turn || !pendingFor(state, this.lane).includes(ev.seq)) return void this.pump();
+    // Somebody else's work never reaches a tool on its host's own plan mid-turn either: the queue says no to it (drain).
+    if (ownPlan(state.engines[this.lane]) && refusal(state.engines[this.lane], whoseWork(await this.store.events(this.sid), ev))) return void this.pump();
     const capped = this.turnCap !== undefined;
     if (!capped && this.othersMessage(ev) && othersCap(this.info.handMode, state.othersFull?.[this.lane] !== false) !== undefined) return void this.pump();
     const events = await this.store.events(this.sid);
+    // On hold, finishing the turn it was told to stop: another agent's message waits for the person, as in drain (held.ts).
+    if (!runnableQueue(events, this.lane, [ev.seq]).length) return void this.pump();
     const { prompt } = promptFor(events, [ev.seq], [], "");
     if (!(await this.append({ type: "instructions.delivered", seqs: [ev.seq] })).ok) return void this.pump();
     const id = randomUUID().slice(0, 8);
@@ -953,8 +1001,24 @@ class LaneHost {
       if (!this.info.tool) return;
       const run = runOf(state, this.lane);
       if (run.status === "paused") return;
-      const pending = pendingFor(state, this.lane);
+      // On hold as a person said (held.ts): the other agents' messages and Friday's wait in the queue for the next turn a person
+      // starts, and never start one themselves.
+      const pending = runnableQueue(events, this.lane, pendingFor(state, this.lane));
       const guard: AppendGuard = { expectEpoch: epoch };
+      // On its host's own plan, it takes its host's work alone (own-plan.ts), whoever or whatever queued it: a teammate, another
+      // agent working for one, a hand-off, the board. Anything else leaves the queue unrun, with why, before a turn starts.
+      if (ownPlan(mine) && pending.length) {
+        const theirs = pending.flatMap((seq) => {
+          const e = events.find((x) => x.seq === seq);
+          const who = e ? whoseWork(events, e) : null;
+          const why = refusal(mine, who, who ? state.members[who]?.name : undefined);
+          return why ? [{ type: "instruction.refused" as const, seq, why }] : [];
+        });
+        if (theirs.length) {
+          await this.store.appendAll(this.sid, FRIDAY, theirs, { ...guard, lane: this.lane });
+          continue;
+        }
+      }
       if (!pending.length) {
         if (run.status !== "running") return;
         // Its turn ended short of its task (its plan still open, a "next I'll…" left hanging, a board task unfinished): told to
@@ -1031,7 +1095,7 @@ class LaneHost {
       const [brief, routed, note] = await Promise.all([briefing, routing, this.systemNote(events)]);
       slowly(`a turn's brief for ${this.sid}`, building, { events: events.length });
       // The shield hides typed keys from the agent too: told once, wherever in what it gets (a catch-up included) one is.
-      const prompt = withShieldNote(`${brief}${catchUp}${turn.prompt}`);
+      let prompt = withShieldNote(`${brief}${catchUp}${turn.prompt}`);
       const model = routed?.model;
       // The lane's pinned effort, as the log stood when this turn was built: a change made while it runs waits for the next.
       const effort = laneEffort(state, this.lane, this.info.tool, routed?.effort);
@@ -1147,6 +1211,7 @@ class LaneHost {
     return this.withAgent(this.importedNote(events));
   }
 
+
   /**
    * Conversations this session continues that this CLI is not the one
    * continuing. Its own resumed session is left out: that history is already
@@ -1191,7 +1256,8 @@ class LaneHost {
     }
     return new Promise((resolve) => {
       this.turn = { id, resolve };
-      this.sendRaw({ kind: "turn", id, prompt, system, attachments, ...(approval ? { approval } : {}), ...(command ? { command } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(mode ? { mode } : {}), ...(checkpoint ? { checkpoint: true } : {}), ...(again ? { again: true } : {}) });
+      const msg: Record<string, unknown> = { kind: "turn", id, prompt, system, attachments, ...(approval ? { approval } : {}), ...(command ? { command } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(mode ? { mode } : {}), ...(checkpoint ? { checkpoint: true } : {}), ...(again ? { again: true } : {}) };
+      this.sendRaw(msg);
     });
   }
 
@@ -1362,7 +1428,8 @@ class LaneHost {
     try {
       const a = args && typeof args === "object" && !Array.isArray(args) ? (args as Record<string, unknown>) : {};
       const r = await mesh.call(this.sid, this.lane, typeof tool === "string" ? tool.slice(0, 80) : "", a, stop.signal);
-      this.sendRaw({ kind: "mesh.result", id, output: r.output, ...(r.isError ? { isError: true } : {}), ...(r.capture ? { capture: r.capture } : {}) });
+      const result: Record<string, unknown> = { kind: "mesh.result", id, output: r.output, ...(r.isError ? { isError: true } : {}), ...(r.capture ? { capture: r.capture } : {}) };
+      this.sendRaw(result);
     } finally {
       this.meshCalls.delete(id);
     }
@@ -1518,6 +1585,13 @@ class LaneHost {
 // ── helpers ─────────────────────────────────────────────────────────
 
 /** The instructions being delivered, as one message in the team's own words. */
+/** What a side thread hangs off, in a few words for the agent: whose message, and how it began. */
+function threadOn(root: SessionEvent | undefined): string {
+  if (!root || (root.body.type !== "agent.message" && root.body.type !== "instruction")) return "an earlier message";
+  const text = root.body.text.trim().replace(/\s+/g, " ");
+  return `${root.body.type === "agent.message" ? "your" : `${root.actor.name}'s`} message "${text.length > 240 ? `${text.slice(0, 240)}…` : text}"`;
+}
+
 export function promptFor(events: SessionEvent[], seqs: number[], updates: MeshPost[] = [], lead = "", back = ""): { prompt: string; attachments: Attachment[] } {
   const bySeq = new Map(events.map((e) => [e.seq, e]));
   const attachments: Attachment[] = [];
@@ -1548,7 +1622,9 @@ export function promptFor(events: SessionEvent[], seqs: number[], updates: MeshP
           ? `[Friday] ${peerHead(b.peer)}\n\n${b.text}`
           : b.mesh
             ? `${meshHead(b.mesh)}\n\n${b.text}`
-          : `${ev.actor.name}${via}: ${b.text}${files}`,
+          : b.thread
+            ? `${ev.actor.name}, in a side thread on ${threadOn(bySeq.get(b.thread.root))}: ${b.text}${files}\n\n(Answer here briefly, about this alone: it stays in the thread, beside the room's main work.)`
+            : `${ev.actor.name}${via}: ${b.text}${files}`,
     );
   }
   // An undo since this CLI last heard from the room. Its own memory still has
@@ -1648,7 +1724,9 @@ function cleanBody(raw: unknown): EventBody | null {
     const description = s(b.description, 200);
     const agentType = s(b.agentType, 60);
     const summary = s(b.summary, 4000);
-    return { type: "agent.task", id: s(b.id, 80), status, ...(description ? { description } : {}), ...(agentType ? { agentType } : {}), ...(typeof b.background === "boolean" ? { background: b.background } : {}), ...(summary ? { summary } : {}) };
+    const doing = s(b.doing, 120);
+    const steps = typeof b.steps === "number" && Number.isFinite(b.steps) && b.steps > 0 ? Math.min(100_000, Math.round(b.steps)) : 0;
+    return { type: "agent.task", id: s(b.id, 80), status, ...(description ? { description } : {}), ...(agentType ? { agentType } : {}), ...(typeof b.background === "boolean" ? { background: b.background } : {}), ...(summary ? { summary } : {}), ...(doing ? { doing } : {}), ...(steps ? { steps } : {}) };
   }
   if (b.type === "agent.diff") {
     let budget = 700_000;

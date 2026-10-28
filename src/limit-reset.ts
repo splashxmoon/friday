@@ -77,3 +77,20 @@ export function limitHit(error: string | undefined, now = Date.now(), tz?: strin
   }
   return { resetsAt: null };
 }
+
+/** An account's allowance spent: its 5-hour, weekly or session limit, said in the tool's own words. */
+const PLAN_LIMIT = /usage limit|session limit|weekly limit|(?:5|five)[- ]hour limit|hit your (?:usage )?limit|plan(?:'s)? limit|out of (?:usage|credits|extra usage)|credit balance is too low/i;
+/** A limit on how fast requests come, gone in a minute: a per-minute 429, "too many requests". */
+const RATE_ONLY = /per[- ](?:minute|second)|requests? per|tokens per|\b[rt]pm\b/i;
+
+/**
+ * Whether this run ended on its account's allowance, not on a passing rate limit: plan wording, or a reset far enough off to be
+ * the allowance's. What moving the work to another tool for hours should wait for (2026-10-27 audit: a per-minute 429 moved it
+ * for five hours); a passing one is worth trying again in a moment instead.
+ */
+export function planLimitHit(error: string | undefined, now = Date.now(), tz?: string): LimitHit | null {
+  const hit = limitHit(error, now, tz);
+  if (!hit || !error) return null;
+  if (PLAN_LIMIT.test(error) && !RATE_ONLY.test(error)) return hit;
+  return hit.resetsAt !== null && hit.resetsAt - now >= 15 * 60_000 ? hit : null;
+}

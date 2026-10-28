@@ -326,6 +326,9 @@ export async function createApp(o: AppOptions) {
   /** Automations hearing a session's events (set below, once the automations are). */
   let automationsHear: ((sid: string, ev: Pick<SessionEvent, "lane" | "body">) => void) | null = null;
   store.onAppended = (sid, ev) => {
+    // Every edition's: the open-source one runs automations too, and with this left out of it its runs stayed "Running" for good
+    // and "An agent finishes" never fired (2026-10-27 QA).
+    if (ev.body.type === "run.ended") automationsHear?.(sid, ev);
     // A plan naming a file another agent is on: said in the feed now, before either writes it (collisions.ts plannedOverlapsFor).
     if (ev.body.type === "agent.message" && ev.body.toolCalls.some((c) => c.name === "update_plan" || c.name === "todo" || c.name === "TodoWrite")) {
       void (async () => {
@@ -800,6 +803,10 @@ export async function createApp(o: AppOptions) {
     async () => false,
   );
   const hub = new EngineHub(store, bus, core);
+  // On someone's own computer, each of their sessions is looked over once the last run's leases are gone: a lane its runner left
+  // with that run reads offline in the sidebar and on the Board too, not only once the session is opened (EngineHub.reap). The
+  // hosted service does it as each session is opened.
+  const reapAtStart = o.local ? hub.reapAfterLeases(async () => (await store.mine(o.local!.user.id)).map((r) => r.sid)) : null;
   hub.mesh = mesh;
   /** Machines people have linked to this Friday, so a hosted one can reach their CLIs. */
   const links = new NoLinks();
@@ -897,7 +904,7 @@ export async function createApp(o: AppOptions) {
       await redis.set(automations.runOfKey(sid), JSON.stringify({ ws, id: a.id, run: run.id }), "EX", 14 * 24 * 3600);
       if (tool !== "friday") await store.append(sid, { id: owner.id, name: owner.name, kind: "human" }, { type: "engine.expected", tool, hostId: owner.id, hostName: owner.name });
       const team = tool === "friday" ? [] : a.who.team;
-      if (team.length) await core.handle(sid, owner, { type: "lead.set", lane: MAIN_LANE });
+      if (team.length) await core.handle(sid, owner, { type: "lead.set", lane: MAIN_LANE, auto: true });
       await core.handle(sid, owner, { type: "instruct", text: automationPrompt(a, event) });
       const invite = signInvite(o.secret, sid, "owner");
       await set({ status: "running", sid, invite, note: "" });
@@ -1243,6 +1250,7 @@ export async function createApp(o: AppOptions) {
 
 
 
+
     if (req.method === "POST" && url.pathname === "/api/sessions") {
       const body = await readJson(req);
       const goal = str(body.goal, 8000);
@@ -1541,11 +1549,35 @@ export async function createApp(o: AppOptions) {
         if (b.type === "instruction" && !b.handoff && b.text.trim()) turns.push({ role: "user", text: b.text.slice(0, 2000) });
         else if (b.type === "agent.message" && b.text.trim()) turns.push({ role: "assistant", text: b.text.slice(0, 2000) });
       }
+      // Its coding tools come with it, in the same folders, as far as they may go there (forkTools): a fork that came up on
+      // Friday Code with no model in the open-source edition queued every message for good (2026-10-27 QA).
+      const plan = forkTools(await store.state(sid), !!o.local);
+      if (typeof plan === "string") return json(res, 409, { error: plan });
+      if (plan.length && !computerHere(me.id)) return json(res, 409, { error: `This session's ${ENGINE_NAMES[plan[0]!.tool]} runs on your computer, which isn't connected, so the fork couldn't carry it on. Open Friday there, then fork again.` });
       const owner: Member = { id: me.id, name: me.name, role: "owner" };
       const fork = randomBytes(6).toString("base64url");
-      await store.create(fork, `Fork of ${title}`.slice(0, 120), owner, { webSearch: false, controlMode: "ask", mcp: true, model: "", agent: null }, ctx.workspace.id);
-      await store.append(fork, { id: owner.id, name: owner.name, kind: "human" }, { type: "session.imported", tool: "claude", sourceId: sid, title, turns: turns.slice(-40), total: turns.length, fork: true });
-      return json(res, 201, { sessionId: fork, title: `Fork of ${title}`.slice(0, 120), invites: { owner: signInvite(o.secret, fork, "owner") } });
+      const forkTitle = `Fork of ${title}`.slice(0, 120);
+      await store.create(fork, forkTitle, owner, { webSearch: false, controlMode: "ask", mcp: true, model: "", agent: null }, ctx.workspace.id);
+      const human = { id: owner.id, name: owner.name, kind: "human" as const };
+      await store.append(fork, human, { type: "session.imported", tool: plan[0]?.tool ?? "claude", sourceId: sid, title, turns: turns.slice(-40), total: turns.length, fork: true });
+      const left: string[] = [];
+      for (const t of plan) {
+        if (!t.lane) await store.append(fork, human, { type: "engine.expected", tool: t.tool, hostId: me.id, hostName: me.name });
+        // A repo gets a copy of its own, as a new session's does: two tools in one checkout lose each other's work.
+        const copy = !!t.cwd && (await stat(path.join(t.cwd, ".git")).then(() => true, () => !localHost()));
+        try {
+          await startTool(fork, me, { tool: t.tool, cwd: t.cwd, mode: t.mode, copy, project: forkTitle, ...(t.lane ? { newLane: t.lane } : {}) });
+        } catch (e) {
+          // Its main tool not starting leaves a fork nobody can work in: none is made, and why is said.
+          if (!t.lane) {
+            await store.bury(fork).catch(() => {});
+            await store.forget(me.id, fork).catch(() => {});
+            return json(res, 409, { error: `The fork couldn't start ${ENGINE_NAMES[t.tool]}${t.cwd ? ` in ${t.cwd}` : ""}: ${(e as Error).message}` });
+          }
+          left.push(`${t.lane} (${ENGINE_NAMES[t.tool]})`);
+        }
+      }
+      return json(res, 201, { sessionId: fork, title: forkTitle, invites: { owner: signInvite(o.secret, fork, "owner") }, ...(left.length ? { note: `Not carried over: ${left.join(", ")}. Add them from the fork.` } : {}) });
     }
 
     /**
@@ -1704,6 +1736,23 @@ export async function createApp(o: AppOptions) {
       return json(res, 405, { error: "Method not allowed" });
     }
 
+    /**
+     * A session's title, renamed from outside it (the sidebar): the same change, and the same say over it, as the header's rename
+     * over the session's socket (settings.update, the owner's), so the log has it and every view of the session takes it
+     * (2026-10-27 QA: the sidebar's rename was a name in that one list, and the header, the tab, ⌘K, Search and the server kept
+     * the old one). With the session's invite, as the other session routes.
+     */
+    const titleRoute = url.pathname.match(/^\/api\/sessions\/([\w-]+)\/title$/);
+    if (req.method === "POST" && titleRoute) {
+      const sid = titleRoute[1]!;
+      const me = await memberOnly(req, res, sid);
+      if (!me) return;
+      const title = str((await readJson(req)).title, 200).trim();
+      if (!title) return json(res, 400, { error: "Give the session a name." });
+      const r = await core.handle(sid, me, { type: "settings.update", title });
+      if (!r.ok) return json(res, 403, { error: r.error ?? "Couldn't rename it." });
+      return json(res, 200, { title: (await store.state(sid)).title });
+    }
     const planRoute = url.pathname.match(/^\/api\/sessions\/([\w-]+)\/plan$/);
     if (req.method === "GET" && planRoute) {
       const sid = planRoute[1]!;
@@ -1877,7 +1926,8 @@ export async function createApp(o: AppOptions) {
             const state = await store.state(sid).catch(() => null);
             const m = state?.members[me.id];
             if (!state || !m || m.removed) return null;
-            return { sid, title: state.title, role: m.role, invite: linkToken(sid, state, m.role), at };
+            const row: Record<string, unknown> = { sid, title: state.title, role: m.role, invite: linkToken(sid, state, m.role), at };
+            return row as { sid: string; title: string; role: typeof m.role; invite: string; at: number };
           }),
         )
       ).filter((s): s is NonNullable<typeof s> => !!s);
@@ -1992,7 +2042,7 @@ export async function createApp(o: AppOptions) {
       const me = await identity(req);
       if (!me) return json(res, 401, { error: "Not signed in." });
       const body = (await readJson(req)) as { sids?: unknown; summaries?: unknown };
-      const sids = Array.isArray(body.sids) ? body.sids.filter((v): v is string => typeof v === "string").slice(0, 60) : [];
+      const sids = listedSids(body.sids);
       // Removed on another device: this one drops them too.
       const hidden = await store.hidden(me.id);
       // And deleted, by its owner or with its team: a session that no longer exists leaves every list it was on.
@@ -2010,16 +2060,19 @@ export async function createApp(o: AppOptions) {
       // Only sessions this person is in, so what two of them share can be said
       // without telling anyone about a session they cannot see.
       const mine: SessionState[] = [];
-      // Read side by side: one after another was the sum of them, and with a line for each session that adds up.
-      const read = await Promise.all(
-        sids.map(async (sid) => {
+      // Read side by side: one after another was the sum of them, and with a line for each session that adds up. A few dozen at a
+      // time, with hundreds of them listed.
+      const read = await mapLimit(
+        sids,
+        READ_AT_ONCE,
+        async (sid) => {
           const state = await store.state(str(sid, 200)).catch(() => null);
           if (!state) return null;
           const m = state.members[me.id];
           if (!m || m.removed) return null;
           const line = body.summaries === true ? summaryOf((await cardsFor(state, me.id).catch(() => null))?.cards ?? []) : null;
           return { state, line };
-        }),
+        },
       );
       for (const r of read) {
         if (!r) continue;
@@ -2028,7 +2081,7 @@ export async function createApp(o: AppOptions) {
         // The browser knows this session and the log says they are in it: the server-side list learns it too.
         void store.remember(me.id, state.id).catch(() => {});
         found.push(...attentionIn(state, me.id));
-        const busy = workingIn(state);
+        let busy = workingIn(state);
         if (busy) working.push(busy);
         const said = previewOf(state);
         if (said) previews.push(said);
@@ -2051,12 +2104,14 @@ export async function createApp(o: AppOptions) {
       const me = await identity(req);
       if (!me) return json(res, 401, { error: "Not signed in." });
       const body = (await readJson(req)) as { sids?: unknown };
-      const sids = Array.isArray(body.sids) ? body.sids.filter((v): v is string => typeof v === "string").slice(0, 60) : [];
+      const sids = listedSids(body.sids);
       // Sessions are read side by side: the first look at a long list is the slow one, and it is the sum of them otherwise.
       const workspaceOf = new Map<string, string>();
       const weeks: ReturnType<typeof weekOf>[] = [];
-      const perSession = await Promise.all(
-        sids.map(async (sid): Promise<BoardCard[]> => {
+      const perSession = await mapLimit(
+        sids,
+        READ_AT_ONCE,
+        async (sid): Promise<BoardCard[]> => {
           const state = await store.state(str(sid, 200)).catch(() => null);
           if (!state) return [];
           const m = state.members[me.id];
@@ -2071,10 +2126,12 @@ export async function createApp(o: AppOptions) {
             .filter((id) => state.members[id] && !state.members[id]!.removed)
             .map((id) => ({ id, name: state.members[id]!.name, waiting: waiting.has(id) }));
           return people.length ? made.cards.map((c) => ({ ...c, people })) : made.cards;
-        }),
+        },
       );
-      // The week in three numbers: sessions that began, sessions that shipped something, runs.
+      // The week in three numbers: sessions that began, sessions that shipped something, runs. Over every session listed, up to
+      // LISTED_SESSIONS of the newest, so it counts what this week had, not the first sixty the list happened to send.
       const week = { sessions: weeks.filter((w) => w.created).length, shipped: weeks.filter((w) => w.shipped).length, runs: weeks.reduce((n, w) => n + w.runs, 0) };
+      const more = listedCount(body.sids) - sids.length;
       // What GitHub says about each pull request, at the same time; a card whose pull request nobody could ask about stays as the log left it.
       const cards = await Promise.all(
         perSession.flat().map(async (c) => {
@@ -2082,7 +2139,8 @@ export async function createApp(o: AppOptions) {
           return gh ? applyPrStatus(c, gh) : c;
         }),
       );
-      return json(res, 200, { cards: sortCards(cards), week });
+      // `more`: older sessions past what one look reads, said rather than left out silently.
+      return json(res, 200, { cards: sortCards(cards), week, ...(more > 0 ? { more } : {}) });
     }
 
 
@@ -2257,7 +2315,8 @@ export async function createApp(o: AppOptions) {
     if (o.local && req.method === "GET" && (url.pathname === "/api/workspace/tool-usage" || url.pathname === "/api/workspace/tool-activity")) {
       if (url.pathname === "/api/workspace/tool-activity") {
         const days = Math.min(371, Math.max(1, Number(url.searchParams.get("days")) || 371));
-        return json(res, 200, { days: await toolUsage.daily(LOCAL_WORKSPACE.id, days) });
+        // In the person's own days, by the zone their page is in (tool-usage.ts daily).
+        return json(res, 200, { days: await toolUsage.daily(LOCAL_WORKSPACE.id, days, url.searchParams.get("tz") ?? undefined) });
       }
       const days = Math.min(90, Math.max(1, Number(url.searchParams.get("days")) || 30));
       const [history, recent] = await Promise.all([toolUsage.history(LOCAL_WORKSPACE.id, days), toolUsage.recent(LOCAL_WORKSPACE.id)]);
@@ -2465,6 +2524,7 @@ export async function createApp(o: AppOptions) {
       (async () => {
         const actor = verifyActor(o.secret, url.searchParams.get("token"), sid);
         // A token minted before the account ended its sessions is no permission at all.
+        // On someone's own computer the one person there is who every runner acts as, as the open-source edition has it.
         const account = actor ? await localNamed() : null;
         if (!account) return closeSaying(ws, 4001, "This runner has no permission to act in that session. Start it from Friday again.");
         me.id = account.id;
@@ -2492,6 +2552,7 @@ export async function createApp(o: AppOptions) {
           model: q("model", 60),
           account: q("account", 40) || undefined,
           accountLabel: q("accountLabel", 40) || undefined,
+          ...(q("apiKey", 2) === "1" ? { apiKey: "1" } : {}),
           branch: q("branch", 100),
           lane: q("lane", 40),
           newLane: q("newLane", 40),
@@ -2847,8 +2908,10 @@ export async function createApp(o: AppOptions) {
   // so a session opens with its tool already there (reattach.ts; the hosted service does the same as a computer links).
   if (o.local) {
     const me = o.local.user;
+    // A session brought back its own way below, left alone here.
+    let ownWay = new Set<string>();
     void reattachAll(me, {
-      mine: (uid, n) => store.mine(uid, n),
+      mine: async (uid, n) => (await store.mine(uid, n)).filter((x) => !ownWay.has(x.sid)),
       state: (sid) => store.state(sid).catch(() => null),
       invite: linkToken,
       actorToken: (sid, uid) => signActor(o.secret, sid, uid),
@@ -2877,6 +2940,7 @@ export async function createApp(o: AppOptions) {
       clearInterval(shepherdLoop);
       clearInterval(resumeLoop);
       clearInterval(wakeLoop);
+      if (reapAtStart) clearTimeout(reapAtStart);
       clearInterval(boardLoop);
       stopMockFocus();
       for (const stop of stopBeats) stop();
@@ -2897,6 +2961,50 @@ export async function createApp(o: AppOptions) {
 }
 
 // ── helpers ─────────────────────────────────────────────────────────
+
+/**
+ * The coding tools a fork of `state` starts with: each lane's that has one, the main lane's first, in the folder it was given
+ * (not the copy it works in) and at the mode it had. Where there are none: none, Friday's own agent carrying the fork; or, in
+ * the open-source edition (`local`), which has no Friday agent, why it can't be forked (2026-10-27 QA: such a fork queued every
+ * message for good).
+ */
+export function forkTools(state: SessionState, local: boolean): { lane?: string; tool: EngineTool; cwd: string; mode: EngineMode }[] | string {
+  const lanes = [{ id: MAIN_LANE, name: "" }, ...state.lanes.map((l) => ({ id: l.id, name: laneName(state, l.id) }))];
+  const out = lanes.flatMap(({ id, name }) => {
+    const e = state.engines[id];
+    return e?.tool ? [{ ...(id === MAIN_LANE ? {} : { lane: name }), tool: e.tool, cwd: e.copyOf ?? e.cwd, mode: e.mode }] : [];
+  });
+  // With no tool on the main lane the first other one takes it: a fork is worked in from its main lane.
+  if (out.length && out[0]!.lane) delete out[0]!.lane;
+  if (!out.length && local) return "This session has no coding tool to carry on, and Friday's own agent isn't in this edition. Start a new session with Claude Code, Codex or another of your tools instead.";
+  return out;
+}
+
+/**
+ * Sessions one look at the Board or the sidebar's poll reads: the newest the browser lists, first. It was sixty, and a session
+ * older than the sixtieth never showed as Needs you, nor counted in the Board's week (2026-10-27 QA). Five hundred is years of
+ * someone's sessions; read a few dozen at a time (READ_AT_ONCE), and remembered by their last event, it stays a quick look.
+ */
+export const LISTED_SESSIONS = 500;
+export const READ_AT_ONCE = 32;
+const sidsOf = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+const listedSids = (v: unknown) => sidsOf(v).slice(0, LISTED_SESSIONS);
+const listedCount = (v: unknown) => sidsOf(v).length;
+
+/** `fn` over `items`, `n` at a time, the answers in their order: hundreds read side by side were hundreds of reads at once. */
+export async function mapLimit<T, R>(items: readonly T[], n: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(n, items.length) }, async () => {
+      while (next < items.length) {
+        const i = next++;
+        out[i] = await fn(items[i]!);
+      }
+    }),
+  );
+  return out;
+}
 
 const str = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 

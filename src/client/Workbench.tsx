@@ -34,9 +34,11 @@ import { ContextMenu, MenuButton, relTime } from "./ui.js";
  * "what has this thing done to my machine?", and answering it needs a
  * sentence, not four panels to cross-reference.
  */
-export type Tab = "agents" | "overview" | "tree" | "files" | "git" | "terminal" | "preview" | "usage" | "rules";
+export type Tab = "agents" | "overview" | "tree" | "files" | "git" | "terminal" | "preview" | "usage" | "rules"
 
-export const TAB_LABEL: Record<Tab, string> = { agents: "Agents", overview: "Tasks", tree: "Tree", files: "Diff", git: "Git", terminal: "Terminal", preview: "Preview", usage: "Usage", rules: "Rules" };
+export const TAB_LABEL: Record<Tab, string> = {
+  agents: "Agents", overview: "Tasks", tree: "Tree", files: "Diff", git: "Git", terminal: "Terminal", preview: "Preview", usage: "Usage", rules: "Rules",
+};
 /** The panels in the side panel's card, in the order people reach for them. */
 // Usage is the workspace's allowance and what each run cost on it: the hosted Friday's, so not offered in the local edition.
 const PANEL_ORDER: Tab[] = (["overview", "files", "git", "terminal", "preview", "tree", "agents", "usage", "rules"] as Tab[]).filter((t) => t !== "usage" || !isLocal());
@@ -55,7 +57,9 @@ const PANEL_SAYS: Record<Tab, string> = {
   usage: "Tokens, limits and what each run cost",
   rules: "Instructions every agent follows",
 };
-const TAB_ICON: Record<Tab, IconName> = { agents: "agent", overview: "list", tree: "folderOpen", files: "file", git: "gitBranch", terminal: "terminalSquare", preview: "play", usage: "chart", rules: "book" };
+const TAB_ICON: Record<Tab, IconName> = {
+  agents: "agent", overview: "list", tree: "folderOpen", files: "file", git: "gitBranch", terminal: "terminalSquare", preview: "play", usage: "chart", rules: "book",
+};
 
 /**
  * A panel's room, said as a size the stylesheet can read.
@@ -323,6 +327,9 @@ export function Workbench({
     if (next) onPick?.(next);
     else onPicker?.();
   };
+  // The panels this session offers, and every one a second panel can be.
+  let order: Tab[] = PANEL_ORDER;
+  let every = Object.keys(TAB_LABEL) as Tab[];
   // The second panel, unless it has been made the first (picked from the session's header).
   const second = split && split !== tab ? split : null;
   // Both are only drawn in the Tasks list, so they are only asked for while it is showing; the Preview tab asks for its own.
@@ -531,7 +538,7 @@ export function Workbench({
               at={splitMenu}
               onClose={() => setSplitMenu(null)}
               items={() => {
-                const all = Object.keys(TAB_LABEL) as Tab[];
+                const all = every;
                 return [
                   { heading: split ? "Second panel" : "Add a second panel" },
                   ...(split ? [{ label: "Just one panel", icon: "x" as const, onSelect: () => setSplit(null) }] : []),
@@ -643,7 +650,7 @@ export function Workbench({
                       width={280}
                       items={() => [
                         { heading: "Show here instead" },
-                        ...PANEL_ORDER.map((p) => ({ label: TAB_LABEL[p], icon: TAB_ICON[p], sub: PANEL_SAYS[p], checked: p === tab, onSelect: () => swapTab(p) })),
+                        ...order.map((p) => ({ label: TAB_LABEL[p], icon: TAB_ICON[p], sub: PANEL_SAYS[p], checked: p === tab, onSelect: () => swapTab(p) })),
                         onHistory && { label: "History", icon: "clock" as const, sub: "Wind the session back to any point", onSelect: onHistory },
                       ]}
                     >
@@ -672,7 +679,7 @@ export function Workbench({
                 width={280}
                 items={() => [
                   { heading: "Open in a new tab" },
-                  ...PANEL_ORDER.map((p) => ({ label: TAB_LABEL[p], icon: TAB_ICON[p], sub: tabs.includes(p) ? "Open already: goes to it" : PANEL_SAYS[p], checked: tabs.includes(p), onSelect: () => addTab(p) })),
+                  ...order.map((p) => ({ label: TAB_LABEL[p], icon: TAB_ICON[p], sub: PANEL_SAYS[p], checked: tabs.includes(p), onSelect: () => addTab(p) })),
                   onHistory && { label: "History", icon: "clock" as const, sub: "Wind the session back to any point", onSelect: onHistory },
                   onPicker && { label: "All panels", icon: "sidePanel" as const, sub: "The card of every panel", onSelect: onPicker },
                 ]}
@@ -691,7 +698,7 @@ export function Workbench({
       {picking && (
         <div className="bench-picker">
           <nav className="bench-picker-card" aria-label="Panels">
-            {PANEL_ORDER.map((t) => (
+            {order.map((t) => (
               <button key={t} type="button" className="bench-picker-item" onClick={() => onPick?.(t)}>
                 <span className="bench-picker-icon">
                   <Icon name={TAB_ICON[t]} size={16} />

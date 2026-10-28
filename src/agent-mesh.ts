@@ -1,3 +1,4 @@
+import { ownPlan } from "./own-plan.js";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 import type { Bus } from "./bus.js";
@@ -7,16 +8,17 @@ import { limitHit } from "./limit-reset.js";
 export interface Peers {
   list(sid: string, lane: string): Promise<string>;
   read(sid: string, lane: string, to: string): Promise<{ ok: true; text: string } | { ok: false; error: string }>;
-  send(sid: string, lane: string, req: { to: string; agent?: string; text: string }): Promise<{ ok: true; sid: string; title: string; lane: string; name: string; held: boolean; text: string } | { ok: false; error: string }>;
+  send(sid: string, lane: string, req: { to: string; agent?: string; text: string }): Promise<{ ok: true; sid: string; title: string; lane: string; name: string; held: boolean; text: string; /** That agent is on hold as a person said: the message waits for it. */ onHold?: boolean } | { ok: false; error: string }>;
 }
 import { limitedLanes, limitedTask, limitTargets, personBehind, type Limited } from "./limit-handoff.js";
 import { commandFailed, TEST_CMD } from "./receipt.js";
+import { heldByPerson } from "./held.js";
 import { nearLimit, type ToolWindow } from "./routing.js";
 import { KIND_WORDS, skillOf, strongAt, taskKind, type Skills, type TaskKind } from "./strengths.js";
 import { laneName } from "./session/core.js";
 import { boardBusy, canDriveLane, driverOf, laneOf, meshOf, pendingFor, readyTasks, runOf, unreadPosts, type BoardTask, type MeshAsk, type MeshPost, type SessionState } from "./session/projection.js";
 import type { SessionStore } from "./session/store.js";
-import { engineName, MAIN_LANE, type ActorRef, type BoardTaskDef, type EventBody, type MeshNote, type RepoCall, type SessionEvent } from "./types.js";
+import { engineName, MAIN_LANE, type ActorRef, type BoardTaskDef, type EngineMode, type EventBody, type MeshNote, type RepoCall, type SessionEvent } from "./types.js";
 export { meshHead } from "./mesh-note.js";
 
 /**
@@ -38,6 +40,8 @@ export { meshHead } from "./mesh-note.js";
 
 /** Past this many agent-to-agent steps in a chain (A woke B woke C…), that one message is refused. Talk itself never pauses. */
 export const MAX_HOPS = 4;
+/** How much a coding tool may do, least first: an agent never has another do more than it may itself. */
+export const MODE_RANK: Record<EngineMode, number> = { plan: 0, edits: 1, full: 2 };
 /** The most of a task's diff written into a review brief for a reviewer on another computer. */
 const REVIEW_DIFF = 14_000;
 /** Messages and handoffs either way between two agents within PAIR_WINDOW_MS before the next one is refused. */
@@ -61,6 +65,8 @@ export const STALL_MS = 15 * 60_000;
 export const OFFLINE_STALL_MS = 5 * 60_000;
 /** An agent still "working" that has done nothing for this long: its lead is told, once. Past the runner's own hung restart. */
 export const QUIET_RUN_MS = 25 * 60_000;
+/** A board task busy this long with no file changed: its lead is told, once (2026-10-28 audit: usage spent on nothing). */
+export const TASK_CAP_MS = 90 * 60_000;
 
 /** "4 min", "1 h 20 min", for how long ago or how long something has been going. */
 export const span = (ms: number): string => {
@@ -85,7 +91,10 @@ const FRIDAY: ActorRef = { id: "friday", name: "Friday", kind: "system" };
 const agentActor = (name: string): ActorRef => ({ id: "agent", name, kind: "agent" });
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 const clip = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
-const lanesOf = (s: SessionState) => [MAIN_LANE, ...s.lanes.map((l) => l.id)];
+const lanesOf = (s: SessionState) => {
+  let all = [MAIN_LANE, ...s.lanes.map((l) => l.id)];
+  return all;
+};
 
 /** An MCP tool as the `friday` server lists it (tools/list). */
 export interface MeshToolDef {
@@ -105,6 +114,7 @@ export interface MeshResult {
    * then answers the tool with the picture. `output` is what a runner that can't is left saying.
    */
   capture?: PreviewCapture;
+  /** The answer as MCP content blocks, when it is more than text (the browser's screenshot). */
 }
 
 /** What preview_screenshot asks the runner to capture: a page on its own machine, at this size. */
@@ -402,6 +412,11 @@ export function meshListing(screenshot: boolean): { tools: MeshToolDef[]; instru
 
 /** The person behind a lane's current run, and how many agent-to-agent steps led to it. */
 function behind(state: SessionState, events: SessionEvent[], lane: string): { person: { id: string; name: string } | null; hop: number } {
+  const found = behindRun(state, events, lane);
+  return found;
+}
+
+function behindRun(state: SessionState, events: SessionEvent[], lane: string): { person: { id: string; name: string } | null; hop: number } {
   const started = events.findLast((e) => e.body.type === "run.started" && (e.lane ?? MAIN_LANE) === lane);
   const causedBy = started?.body.type === "run.started" ? started.body.causedBy : -1;
   const cause = events.find((e) => e.seq === causedBy);
@@ -409,10 +424,18 @@ function behind(state: SessionState, events: SessionEvent[], lane: string): { pe
     const b = cause.body;
     if (cause.actor.kind === "human") return { person: { id: cause.actor.id, name: cause.actor.name }, hop: 0 };
     if (b.mesh) return { person: b.mesh.by, hop: b.mesh.hop };
-    if (b.peer) return { person: b.peer.by, hop: 1 };
+    // Counted across sessions and through Friday's own wakes and switches, not started again at each (2026-10-27 audit: the hop
+    // limit restarted at every wake, switch and cross-session message, so agents could keep each other going for good).
+    if (b.peer) return { person: b.peer.by, hop: b.peer.hop ?? 1 };
+    if (b.hop !== undefined) return { person: driverOf(state, lane), hop: b.hop };
     if (cause.actor.kind === "agent") return { person: driverOf(state, lane), hop: 1 };
   }
   return { person: driverOf(state, lane), hop: 0 };
+}
+
+/** How many agent-to-agent steps led to the run now on `lane`, or to the one before `before` (a wake set in it). */
+export function hopBehind(state: SessionState, events: SessionEvent[], lane: string, before = Infinity): number {
+  return behindRun(state, before === Infinity ? events : events.filter((e) => e.seq < before), lane).hop;
 }
 
 /** Messages and handoffs between two lanes, either way, since `since`. */
@@ -426,6 +449,16 @@ export function exchangesBetween(events: SessionEvent[], a: string, b: string, s
     if ((from === a && to === b) || (from === b && to === a)) n++;
   }
   return n;
+}
+
+/**
+ * Whom an ask answers to: the lane that asked, or, a task from a lead since taken off the team, the lead now, so its report and
+ * the batch it belongs to aren't left with nobody (2026-10-27 audit: a teammate removed with tasks out left them open for good).
+ * Null when nobody is there to hear it.
+ */
+export function askerOf(state: SessionState, ask: Pick<MeshAsk, "fromLane" | "task">): string | null {
+  if (lanesOf(state).includes(ask.fromLane) || ask.fromLane === MAIN_LANE) return ask.fromLane;
+  return ask.task && state.lead && lanesOf(state).includes(state.lead) ? state.lead : null;
 }
 
 /** Whether `from` is waiting, directly or along a chain of open asks, on an answer from `on`. */
@@ -448,7 +481,7 @@ export function answerFrom(events: SessionEvent[], lane: string, after: number, 
   return last?.body.type === "agent.message" ? last.body.text.trim() : "";
 }
 
-type Sent = { ok: true; id: string; to: string; toName: string; busy: boolean; offline: boolean } | { ok: false; error: string };
+type Sent = { ok: true; id: string; to: string; toName: string; busy: boolean; offline: boolean; /** On hold as a person said: it reads it once they let it go on. */ held: boolean } | { ok: false; error: string };
 type Waited = { reply: string } | { gone: true } | { timeout: true };
 
 export class AgentMesh {
@@ -559,13 +592,15 @@ export class AgentMesh {
           return {
             output: r.held
               ? `Sent to ${r.name} in "${r.title}". The person you work for can't steer that agent, so it waits there until someone who can lets it through. Carry on with your own work.`
-              : `Sent to ${r.name} in "${r.title}". It reads it at its next step, or starts on it now if it was idle. Carry on with your own work; don't wait for an answer.`,
+              : r.onHold
+                ? `Sent to ${r.name} in "${r.title}". ${r.name} is on hold until the person says, so it reads it then. Carry on with your own work; don't wait for an answer.`
+                : `Sent to ${r.name} in "${r.title}". It reads it at its next step, or starts on it now if it was idle. Carry on with your own work; don't wait for an answer.`,
           };
         }
         case "message_agent": {
           const r = await this.send(sid, lane, { to: str(args.to), text: str(args.text), kind: "tell" });
           if (!r.ok) return { output: r.error, isError: true };
-          return { output: `Sent to ${r.toName}. ${r.offline ? "It is offline, so it reads it when it is back." : r.busy ? "It is busy, so it reads it when its current work is done." : "It reads it now."} Carry on with your own work; don't wait for an answer.` };
+          return { output: `Sent to ${r.toName}. ${r.held ? `${r.toName} is on hold until the person says, so it reads it then.` : r.offline ? "It is offline, so it reads it when it is back." : r.busy ? "It is busy, so it reads it when its current work is done." : "It reads it now."} Carry on with your own work; don't wait for an answer.` };
         }
         case "message_team":
           return await this.messageTeam(sid, lane, str(args.to), str(args.text));
@@ -630,16 +665,56 @@ export class AgentMesh {
    * A wake goes off: the agent is told what happened and what it said it would do, and woken. Once: it is gone from the session
    * once fired, so a second cause (the time after the agent) finds nothing.
    */
+  /** Wakes this process has fired, by session and id (fireWake's claim). */
+  private wakesTaken = new Map<string, number>();
+
   async fireWake(sid: string, id: string, why: string): Promise<void> {
     if (!(await this.store.exists(sid))) return;
     const state = await this.store.state(sid);
     const w = state.wakes?.[id];
     if (!w || !lanesOf(state).includes(w.lane)) return;
+    const events = await this.store.events(sid);
+    // Put on hold by a person since it asked: Friday's own wake is spent, and the agent isn't told to carry on (held.ts). One it
+    // asked for itself is kept, and goes off once the hold lifts (dueWakes): spent on the hold, what it waited on was never told
+    // it (2026-10-27 audit).
+    const held = heldByPerson(events, w.lane);
+    if (held && !w.auto) return;
+    // Taken by one caller only: the time and the turn it waits on can both come at once, each reading it as still set, and it
+    // went off twice (2026-10-27 audit). Taken here in one step, nothing awaited between looking and taking, and in Redis for
+    // another server.
+    const claim = `${sid} ${id}`;
+    if (this.wakesTaken.has(claim)) return;
+    this.wakesTaken.set(claim, Date.now());
+    if (this.store.redis && !(await this.store.redis.set(`${this.store.prefix}{${sid}}:wake-fired:${id}`, "1", "PX", 86_400_000, "NX").catch(() => "OK"))) return;
     const done = await this.store.append(sid, FRIDAY, { type: "wake.fired", id, why: clip(why.split("\n")[0]!, 300) }, { lane: w.lane });
-    if (!done.ok) return;
+    if (!done.ok || held) return;
     const text = `[Friday] ${why}\n\n${w.auto ? `Your last turn ended waiting: "${w.then}"` : `You asked to be woken for this. What you said you'd do then: ${w.then}`}\n\nCarry on now: see where things stand and do the next step yourself. If you still have to wait, call wake_me_when and end your turn, rather than ending on "waiting" for a person to check back.`;
-    const sent = await this.store.append(sid, FRIDAY, { type: "instruction", text, interrupt: false }, { lane: w.lane });
+    // A wake starts a chain rather than lengthening one, as the board's hand-outs do (Arun, 2026-10-28: the hop limit stopped a
+    // night's work at its fourth wake); agents keeping each other going in circles are caught where they message.
+    const sent = await this.store.append(sid, FRIDAY, { type: "instruction", text, interrupt: false, hop: 1 }, { lane: w.lane });
     if (sent.ok) void this.bus.wake(sid, w.lane);
+  }
+
+  /**
+   * The wakes this agent asked for that went off while it was on hold and were kept (fireWake), now that it is not: each goes off
+   * for what it waited on. Looked at as its turn ends, so the person's word that lifted the hold is answered first.
+   */
+  private async dueWakes(sid: string, lane: string, now = Date.now()): Promise<void> {
+    const [state, events] = await Promise.all([this.store.state(sid), this.store.events(sid)]);
+    const mine = Object.values(state.wakes ?? {}).filter((w) => w.lane === lane && !w.auto);
+    if (!mine.length || heldByPerson(events, lane)) return;
+    for (const w of mine) {
+      const ended = w.on.lane ? events.find((e) => e.seq > w.seq && (e.lane ?? MAIN_LANE) === w.on.lane && e.body.type === "run.ended" && e.body.outcome !== "waiting" && !e.body.cut) : undefined;
+      const t = w.on.task ? state.board?.tasks.find((x) => x.id === w.on.task && (x.status === "done" || x.status === "blocked")) : undefined;
+      const why = ended
+        ? `${laneName(state, w.on.lane!)} finished its turn while you were on hold.`
+        : t
+          ? `The board task "${t.title}" is ${t.status === "done" ? "done" : "stuck"}.`
+          : w.on.at && w.on.at <= now
+            ? "The time you asked to be woken at came while you were on hold: time to check where it stands."
+            : "";
+      if (why) await this.fireWake(sid, w.id, why);
+    }
   }
 
   /** The agent on `lane` finished its turn: whoever waits on it is woken, with its last words. */
@@ -682,13 +757,19 @@ export class AgentMesh {
     const said = start ? answerFrom(events, lane, start.seq, end.seq) : "";
     const waitLine = waitingOn(said);
     if (!waitLine || said.trim().endsWith("?")) return;
+    // On hold as a person said: waiting for them is the point, and theirs to end (held.ts).
+    if (heldByPerson(events, lane)) return;
     // Waiting on a person is theirs to answer.
     const people = Object.values(state.members ?? {}).map((m) => (m as { name?: string }).name ?? "").filter(Boolean);
-    if (/\b(?:you|your)\b/i.test(waitLine) || people.some((p) => new RegExp(`\\b${escapeRe(p.split(/\s+/)[0]!)}\\b`, "i").test(waitLine))) return;
+    // By first name, or the whole name run together as a handle is ("arundass" for Arun Dass).
+    const calls = people.flatMap((p) => [p.split(/\s+/)[0]!, p.replace(/\s+/g, "")]).filter((p) => p.length > 1);
+    if (/\b(?:you|your)\b/i.test(waitLine) || calls.some((p) => new RegExp(`\\b${escapeRe(p)}\\b`, "i").test(waitLine))) return;
     // Reports wake it anyway: tasks it handed out, or the board it posted.
     if (Object.values(meshOf(state).asks).some((a) => a.task && a.fromLane === lane && !a.reply) || (state.board?.fromLane === lane && boardBusy(state))) return;
-    const lastHuman = events.findLast((e) => (e.lane ?? MAIN_LANE) === lane && e.body.type === "instruction" && e.actor.kind === "human")?.seq ?? 0;
-    const tries = events.filter((e) => e.seq > lastHuman && e.body.type === "wake.set" && e.body.auto && (e.lane ?? MAIN_LANE) === lane).length;
+    // Counted since its current task began (a person's word, a task handed to it, a board task), and within a day: counted from
+    // the person's last word, a teammate working a night's tasks spent its five wakes on the first (Arun, 2026-10-28).
+    const taskFrom = events.findLast((e) => (e.lane ?? MAIN_LANE) === lane && e.body.type === "instruction" && (e.actor.kind === "human" || e.body.mesh?.kind === "task" || !!e.body.mesh?.board))?.seq ?? 0;
+    const tries = events.filter((e) => e.seq > taskFrom && e.ts > now - 86_400_000 && e.body.type === "wake.set" && e.body.auto && (e.lane ?? MAIN_LANE) === lane).length;
     if (tries >= 5) return;
     const named = lanesOf(state).filter((l) => l !== lane && new RegExp(`\\b${escapeRe(laneName(state, l))}\\b`, "i").test(waitLine));
     const busy = named.filter((l) => runOf(state, l).status === "running" || pendingFor(state, l).length);
@@ -732,7 +813,7 @@ export class AgentMesh {
   }
 
   /** Who was told they changed a held file, by session, lane, path and hold: once each. */
-  private heldTold = new Set<string>();
+  private heldTold = new Map<string, number>();
 
   /**
    * An agent's changes (agent.diff) touched a file another agent holds, or its board task owns: it is told at once to stop and ask
@@ -747,7 +828,7 @@ export class AgentMesh {
     const hits = files.flatMap((f) => heldBy(state, lane, f.path).map((h) => ({ path: f.path, h })));
     const fresh = hits.filter(({ path, h }) => !this.heldTold.has(`${sid}|${lane}|${path}|${h.lane}|${h.seq}`));
     if (!fresh.length) return;
-    for (const { path, h } of fresh) this.heldTold.add(`${sid}|${lane}|${path}|${h.lane}|${h.seq}`);
+    for (const { path, h } of fresh) this.heldTold.set(`${sid}|${lane}|${path}|${h.lane}|${h.seq}`, Date.now());
     const rows = fresh.map(({ path, h }) => `- ${path}: ${h.name} holds it${h.why ? `, for ${h.why}` : ""}`);
     const text = `[Friday] You changed files another agent is holding while it changes them:\n${rows.join("\n")}\n\nStop changing them. Ask that agent (ask_agent) what you need, or wait until it lets go (wait_for_agent), and don't undo what it changed.`;
     const sent = await this.store.append(sid, FRIDAY, { type: "instruction", text, interrupt: false }, { lane });
@@ -782,7 +863,7 @@ export class AgentMesh {
     const not: string[] = [];
     for (const to of [...new Set(targets)]) {
       const r = await this.send(sid, lane, { to, text, kind: "tell", team });
-      if (r.ok) sent.push(`${r.toName}${r.offline ? " (offline: when it is back)" : r.busy ? " (busy: at its next step)" : ""}`);
+      if (r.ok) sent.push(`${r.toName}${r.held ? " (on hold until the person says: then)" : r.offline ? " (offline: when it is back)" : r.busy ? " (busy: at its next step)" : ""}`);
       else not.push(`${laneName(state, to)}: ${r.error}`);
     }
     if (!sent.length) return { output: `Sent to nobody.\n${not.map((n) => `- ${n}`).join("\n")}`, isError: true };
@@ -845,7 +926,7 @@ export class AgentMesh {
   }
 
   /** A message from the agent on `from` to another, as an instruction on that agent's lane. */
-  async send(sid: string, from: string, req: { to: string; text: string; kind: "tell" | "ask" | "task"; board?: string; review?: boolean; system?: boolean; /** The board's own messages name their lane exactly. */ toLane?: string; carriedFrom?: string; team?: string }): Promise<Sent> {
+  async send(sid: string, from: string, req: { to: string; text: string; kind: "tell" | "ask" | "task"; board?: string; review?: boolean; system?: boolean; /** The board's own messages name their lane exactly. */ toLane?: string; carriedFrom?: string; team?: string; /** Stops the turn under way, the next one carrying it, as a person's ⌘↵ does (a lead redirecting a teammate). */ interrupt?: boolean }): Promise<Sent> {
     const text = req.text.trim().slice(0, MAX_TEXT);
     if (!text) return { ok: false, error: "The message is empty." };
     const [state, events] = await Promise.all([this.store.state(sid), this.store.events(sid)]);
@@ -857,6 +938,9 @@ export class AgentMesh {
       const driver = driverOf(state, id);
       const engine = state.engines[id];
       if (laneOf(state, id)?.control.kind === "standing") return `${name} runs on its own triggers and takes no messages.`;
+      // A coding tool on someone's own plan takes their work alone (own-plan.ts): nobody else's agent may give it any.
+      if (ownPlan(engine) && engine.online !== false && engine.hostId !== person?.id)
+        return `${name} runs on ${engine.hostName}'s own ${engine.tool === "codex" ? "ChatGPT" : engine.tool === "claude" ? "Claude" : ""} plan, so it takes ${engine.hostName}'s work only: I can't message it. Carry on with your own work; don't wait for answers from it.`;
       if (driver && driver.id !== person?.id) return `${name} is ${driver.name}'s to steer, so I can't message it. Ask ${driver.name} in chat.`;
       if (person ? canDriveLane(state, person.id, id) || driver?.id === person.id : !engine) return null;
       if (person) return `${person.name} can't steer ${name}, so I can't message it.`;
@@ -874,11 +958,22 @@ export class AgentMesh {
     const refused = refusal(to);
     if (refused) return { ok: false, error: refused };
     const toName = laneName(state, to);
+    // Never further than the sender may go itself: a tool held to plan or edits telling one that may do everything what to do, or
+    // handing it a task, is it doing that work (2026-10-27 audit: an edits-mode teammate told a full-mode one what to change).
+    // Between two coding tools, whose modes are known; a question still goes, and the board's own hand-outs aren't an agent's.
+    const mine = state.engines[from]?.mode;
+    const theirs = state.engines[to]?.mode;
+    if (!req.system && req.kind !== "ask" && mine && theirs && MODE_RANK[theirs] > MODE_RANK[mine]) {
+      return { ok: false, error: `${toName} may do more than you may (${theirs}, you ${mine}), so it takes no messages or tasks from you. Ask it a question, or say what you'd have it do in your reply, for the people here.` };
+    }
     // Out of usage: a message would wake it only to fail at once, and an ask would come back as that error. Said with who can
     // take it now, so the sender sends it there instead (Edge Defense, 2026-10-24: one agent out of usage was handed the same
     // board task twice and a review in four minutes, each ending in seconds on its limit).
     const out = req.system ? undefined : limitedLanes(state, events).get(to);
-    if (out && runOf(state, to).status !== "running") {
+    // In a team the message waits in its queue instead, and goes once the limit lifts (the hub holds it, and the app starts it):
+    // turned away, it was lost in the night (Arun, 2026-10-28: "we need to ensure teams can work basically while you are away").
+    let queues = false;
+    if (out && runOf(state, to).status !== "running" && !queues) {
       const free = freeAgents(state, events, [from, to]);
       return { ok: false, error: `${toName} is ${outOfUsage(state, out, Date.now())}, so it can't take this until then.${free.length ? ` Free now: ${free.map((n) => `"${n}"`).join(", ")}.` : " No other agent is free right now; carry on yourself, or say what you need from the people here."}` };
     }
@@ -890,7 +985,7 @@ export class AgentMesh {
     }
     const leads = state.lead === from || state.lead === to;
     // The board handing out its own tasks isn't an agent chatting: no cap on how many it hands out.
-    const pair = req.system ? 0 : exchangesBetween(events, from, to, Date.now() - PAIR_WINDOW_MS);
+    let pair = req.system ? 0 : exchangesBetween(events, from, to, Date.now() - PAIR_WINDOW_MS);
     if (pair >= (leads ? LEAD_PAIR : MAX_PAIR)) {
       return { ok: false, error: `You and ${toName} have sent each other ${pair} messages in the last 20 minutes, so Friday didn't send this one. Settle it yourself, or say what you need from the people here.` };
     }
@@ -911,11 +1006,12 @@ export class AgentMesh {
     // and an agent answering its reviewer was turned away as "the 5th agent in a row" (Arun, 2026-10-24: C2 couldn't reply to
     // Codex's review of t1, nor tell Chat with me what t2 needed).
     const mesh: MeshNote = { id, kind: req.kind, fromLane: from, fromName: laneName(state, from), toName, hop: req.system ? 1 : hop + 1, by: person, ...(req.board ? { board: req.board } : {}), ...(req.review ? { review: true } : {}), ...(req.carriedFrom ? { carriedFrom: req.carriedFrom } : {}), ...(req.team ? { team: req.team } : {}) };
-    const sent = await this.store.append(sid, agentActor(mesh.fromName), { type: "instruction", text, interrupt: false, mesh }, { lane: to, expectDriver: driverOf(state, to)?.id ?? "" });
+    const sent = await this.store.append(sid, agentActor(mesh.fromName), { type: "instruction", text, interrupt: !!req.interrupt, mesh }, { lane: to, expectDriver: driverOf(state, to)?.id ?? "" });
     if (!sent.ok) return { ok: false, error: `${toName} changed hands just now, so the message wasn't sent. Try again.` };
     void this.bus.wake(sid, to);
     const engine = state.engines[to];
-    return { ok: true, id, to, toName, busy: runOf(state, to).status === "running", offline: !!engine?.tool && !engine.online };
+    // On hold as a person said: it waits in its queue and doesn't start a turn (held.ts runnableQueue), and the sender is told.
+    return { ok: true, id, to, toName, busy: runOf(state, to).status === "running", offline: !!engine?.tool && !engine.online, held: heldByPerson(events, to) };
   }
 
   /** Ask and wait for the answer, for as long as `wait` or the asker being stopped allow. */
@@ -980,15 +1076,24 @@ export class AgentMesh {
     return r.ok && a?.reply && a.reply.seq < r.seq ? a.reply.text : null;
   }
 
-  /** Log the answer to an ask, and, when the asker stopped waiting before it, send it as a message. */
-  async deliver(sid: string, ask: MeshAsk, text: string, auto: boolean, urgent = false): Promise<void> {
-    const body: EventBody = { type: "mesh.replied", id: ask.id, fromLane: ask.toLane, fromName: ask.toName, toLane: ask.fromLane, toName: ask.fromName, text: text.slice(0, MAX_TEXT), ...(auto ? { auto: true } : {}) };
-    const r = await this.store.append(sid, agentActor(ask.toName), body, { lane: ask.fromLane });
+  /**
+   * Log the answer to an ask, and, when the asker stopped waiting before it, send it as a message. `short`: the work stopped
+   * before it was done (a stop, an error, a usage limit, its agent gone), so a task's list doesn't count it finished (2026-10-28
+   * QA: a task stopped partway sat in Done).
+   */
+  async deliver(sid: string, ask: MeshAsk, text: string, auto: boolean, urgent = false, short = false): Promise<void> {
+    // A task from a lead since taken off the team reports to the lead now (askerOf); its answer is logged where that lead is.
+    const asker = askerOf(await this.store.state(sid), ask);
+    const body: EventBody = { type: "mesh.replied", id: ask.id, fromLane: ask.toLane, fromName: ask.toName, toLane: ask.fromLane, toName: ask.fromName, text: text.slice(0, MAX_TEXT), ...(auto ? { auto: true } : {}), ...(short ? { short: true } : {}) };
+    const r = await this.store.append(sid, agentActor(ask.toName), body, { lane: asker ?? ask.fromLane });
     if (!r.ok) return;
     if (ask.task) return this.reportToLead(sid, ask, urgent);
+    if (!asker) return;
     const a = meshOf(await this.store.state(sid)).asks[ask.id];
     if (a?.unwaitedSeq === undefined || a.unwaitedSeq > r.seq) return;
-    const mesh: MeshNote = { id: randomBytes(5).toString("hex"), kind: "reply", re: ask.id, ...(ask.task ? { ofTask: true } : {}), fromLane: ask.toLane, fromName: ask.toName, toName: ask.fromName, hop: ask.hop, by: ask.by };
+    // A report starts a chain rather than lengthening one, as the board's do (Arun, 2026-10-28: the hop limit stopped a night's work
+    // at its fourth report).
+    const mesh: MeshNote = { id: randomBytes(5).toString("hex"), kind: "reply", re: ask.id, ...(ask.task ? { ofTask: true } : {}), fromLane: ask.toLane, fromName: ask.toName, toName: ask.fromName, hop: 1, by: ask.by };
     await this.store.append(sid, agentActor(ask.toName), { type: "instruction", text: text.slice(0, MAX_TEXT), interrupt: false, mesh }, { lane: ask.fromLane });
     void this.bus.wake(sid, ask.fromLane);
   }
@@ -1001,8 +1106,9 @@ export class AgentMesh {
    */
   private async reportToLead(sid: string, ask: MeshAsk, urgent: boolean): Promise<void> {
     const [state, events] = await Promise.all([this.store.state(sid), this.store.events(sid)]);
-    const lead = ask.fromLane;
-    const mine = Object.values(meshOf(state).asks).filter((a) => a.task && a.fromLane === lead);
+    const lead = askerOf(state, ask);
+    if (!lead) return;
+    const mine = Object.values(meshOf(state).asks).filter((a) => a.task && askerOf(state, a) === lead);
     const open = mine.filter((a) => !a.reply);
     if (open.length && !urgent) return;
     // Since the lead last got a batch: every report it hasn't been handed.
@@ -1016,8 +1122,9 @@ export class AgentMesh {
       .filter(Boolean)
       .join("\n\n")
       .slice(0, MAX_TEXT * 2);
-    const mesh: MeshNote = { id: randomBytes(5).toString("hex"), kind: "reply", re: ask.id, ofTask: true, batch: open.length ? "early" : "done", fromLane: ask.toLane, fromName: ask.toName, toName: ask.fromName, hop: ask.hop, by: ask.by };
-    const sent = await this.store.append(sid, agentActor(open.length ? ask.toName : "The team"), { type: "instruction", text, interrupt: false, mesh }, { lane: lead });
+    const mesh: MeshNote = { id: randomBytes(5).toString("hex"), kind: "reply", re: ask.id, ofTask: true, batch: open.length ? "early" : "done", fromLane: ask.toLane, fromName: ask.toName, toName: laneName(state, lead), hop: 1, by: ask.by };
+    let more = "";
+    const sent = await this.store.append(sid, agentActor(open.length ? ask.toName : "The team"), { type: "instruction", text: more ? `${text}\n\n${more}` : text, interrupt: false, mesh }, { lane: lead });
     if (!sent.ok) return;
     // Handed together: the reports are read, and check_messages doesn't offer them again.
     await this.store.append(sid, FRIDAY, { type: "mesh.read", upTo: sent.seq }, { lane: lead });
@@ -1114,6 +1221,9 @@ export class AgentMesh {
     if (!tasks.length) return { output: "Give at least one task, each with a title and what to do.", isError: true };
     // Waiting on a task that isn't there would never start.
     for (const t of tasks) t.after = t.after.filter((a) => used.has(a) && a !== t.id);
+    // Nor would tasks waiting on each other, round in a circle: refused, naming it (2026-10-28 audit: such a board sat for good).
+    const cycle = cycleIn(tasks);
+    if (cycle) return { output: `Those tasks wait on each other in a circle (${cycle.join(" → ")}), so none of them could start. Post them again with the order fixed.`, isError: true };
     const fromName = laneName(state, lane);
     await this.store.append(sid, agentActor(fromName), { type: "board.posted", fromLane: lane, fromName, tasks, ...(check.trim() ? { check: check.trim().slice(0, 400) } : {}) }, { lane });
     this.live.add(sid);
@@ -1287,6 +1397,20 @@ export class AgentMesh {
    * is free like any idle one, and what is ready is handed out.
    */
   async onRunStopped(sid: string, lane: string, by: string, cancelled = false): Promise<void> {
+    return this.settlingIn(sid, () => this.runStopped(sid, lane, by, cancelled));
+  }
+
+  /** What is open in a session, settled one pass at a time: a Stop and a lane going each read what the other just answered. */
+  private settling = new Map<string, Promise<unknown>>();
+  private settlingIn<T>(sid: string, fn: () => Promise<T>): Promise<T> {
+    const run = (this.settling.get(sid) ?? Promise.resolve()).then(fn, fn);
+    const tail = run.catch(() => {});
+    this.settling.set(sid, tail);
+    void tail.then(() => void (this.settling.get(sid) === tail && this.settling.delete(sid)));
+    return run;
+  }
+
+  private async runStopped(sid: string, lane: string, by: string, cancelled: boolean): Promise<void> {
     const [state, events] = await Promise.all([this.store.state(sid), this.store.events(sid)]);
     const stop = events.findLast((e) => (e.lane ?? MAIN_LANE) === lane && (e.body.type === "run.pause" || e.body.type === "run.cancel"));
     if (!stop) return;
@@ -1300,7 +1424,7 @@ export class AgentMesh {
       if (got && got.seq > stop.seq) continue;
       const said = got ? answerFrom(events, lane, got.seq, stop.seq) : "";
       const what = `${by} ${cancelled ? "cancelled" : "stopped"} ${name}'s task before it ${got ? "finished" : "got to this"}. It is ready again: ask once more if you still need it.`;
-      await this.deliver(sid, ask, said ? `${said}\n\n(${what})` : what, true, true);
+      await this.deliver(sid, ask, said ? `${said}\n\n(${what})` : what, true, true, true);
     }
     const b = state.board;
     if (b && start)
@@ -1355,8 +1479,18 @@ export class AgentMesh {
         const last = events.findLast((e) => (e.lane ?? MAIN_LANE) === lane);
         const key = `${sid}|${t.id}|${last?.seq ?? 0}`;
         if (last && now - last.ts >= QUIET_RUN_MS && !this.quietTold.has(key)) {
-          this.quietTold.add(key);
+          this.quietTold.set(key, now);
           await this.tellLead(sid, `${name} took "${t.title}" ${span(now - (events.find((e) => e.body.type === "board.claimed" && e.body.id === t.id)?.ts ?? last.ts))} ago and hasn't done anything for ${span(now - last.ts)}. Check on it with message_agent, or if it's stuck, tell the person here so they can stop it and the task can go to someone else.`);
+        }
+        // Busy all along, but no file changed for TASK_CAP_MS: a turn spending usage on nothing. The lead hears it once (2026-10-28
+        // audit: a night's usage went on one task that never changed a file).
+        const took = events.findLast((e) => e.body.type === "board.claimed" && e.body.id === t.id);
+        const changed = events.findLast((e) => (e.lane ?? MAIN_LANE) === lane && e.body.type === "agent.diff" && e.seq > (took?.seq ?? 0));
+        const since = changed?.ts ?? took?.ts ?? now;
+        const capKey = `${sid}|${t.id}|cap|${changed?.seq ?? 0}`;
+        if (now - since >= TASK_CAP_MS && !this.quietTold.has(capKey)) {
+          this.quietTold.set(capKey, now);
+          await this.tellLead(sid, `${name} has been on "${t.title}" for ${span(now - (took?.ts ?? since))} without changing a file for ${span(now - since)}. Check on it (message_agent), split the task, or ${this.boardFix}, rather than let it spend more on it.`);
         }
         continue;
       }
@@ -1376,6 +1510,29 @@ export class AgentMesh {
     }
     await this.dispatch(sid);
     await this.afterBoardMove(sid);
+    await this.wedged(sid, now);
+  }
+
+  /**
+   * A board that can't move: work left on it, none of it running or in review, and nothing that can become ready (every open task
+   * waits on one that is stuck or dropped). The lead hears it, urgently, once for each way it is stuck (2026-10-28 audit: such a
+   * board sat until morning).
+   */
+  private async wedged(sid: string, now: number): Promise<void> {
+    const state = await this.store.state(sid);
+    const b = state.board;
+    if (!b || !boardBusy(state)) return;
+    if (b.tasks.some((t) => t.status === "claimed" || t.status === "review")) return;
+    if (readyTasks(state).length) return;
+    const stuck = b.tasks.filter((t) => t.status === "blocked" || t.status === "cancelled");
+    const waiting = b.tasks.filter((t) => t.status === "open");
+    if (!waiting.length) return;
+    const key = `${sid}|wedged|${b.seq}|${waiting.map((t) => t.id).join(",")}|${stuck.map((t) => t.id).join(",")}`;
+    if (this.quietTold.has(key)) return;
+    this.quietTold.set(key, now);
+    const on = (t: BoardTask) => t.after.filter((d) => stuck.some((x) => x.id === d));
+    await this.reportBoard(sid, true);
+    await this.tellLead(sid, `The board is stuck: ${waiting.map((t) => `"${t.id}" waits on ${on(t).map((d) => `"${d}"`).join(", ") || "tasks that can't finish"}`).join("; ")}, and ${stuck.map((t) => `"${t.id}" is ${t.status === "blocked" ? "stuck" : "dropped"}`).join(", ") || "nothing else can move"}. ${this.boardFix[0]!.toUpperCase()}${this.boardFix.slice(1)}.`);
   }
 
   private async reviewOrPass(sid: string, id: string): Promise<void> {
@@ -1634,12 +1791,30 @@ export class AgentMesh {
       .join("\n\n")
       .slice(0, MAX_TEXT * 2);
     const mesh: MeshNote = { id: randomBytes(5).toString("hex"), kind: "reply", ofTask: true, batch: busy ? "early" : "done", fromLane: b.fromLane, fromName: "The board", toName: b.fromName, hop: 1, by: null };
-    const sent = await this.store.append(sid, agentActor("The board"), { type: "instruction", text, interrupt: false, mesh }, { lane: b.fromLane });
+    let more = "";
+    const sent = await this.store.append(sid, agentActor("The board"), { type: "instruction", text: more ? `${text}\n\n${more}` : text, interrupt: false, mesh }, { lane: b.fromLane });
     if (sent.ok) void this.bus.wake(sid, b.fromLane);
   }
 
-  /** Board tasks whose quiet agent the lead was told about, at the agent's last event, so it is told once for each quiet spell. */
-  private quietTold = new Set<string>();
+  /**
+   * Board tasks whose quiet agent the lead was told about, at the agent's last event, so it is told once for each quiet spell; with
+   * when, so old ones are let go (pruneTold) rather than kept for as long as the server runs.
+   */
+  private quietTold = new Map<string, number>();
+  /** How the lead is told to put a board task right: the person's buttons, or its own tool where it has one. */
+  private boardFix = "ask the person to retry, reassign or cancel it";
+  /** Drops what this process remembers telling or firing that is past use: called now and then by the app. */
+  pruneTold(now = Date.now()): void {
+    for (const [k, at] of this.quietTold) if (now - at > 2 * 86_400_000) this.quietTold.delete(k);
+    for (const [k, at] of this.wakesTaken) if (now - at > 86_400_000) this.wakesTaken.delete(k);
+    for (const [k, at] of this.heldTold) if (now - at > 2 * 86_400_000) this.heldTold.delete(k);
+  }
+  /** A session gone or a lane leaving it for good: what this process remembers of it, let go. */
+  forget(sid: string, lane?: string): void {
+    const mine = (k: string) => (!lane && k.startsWith(`${sid} `)) || (k.startsWith(`${sid}|`) && (!lane || k.startsWith(`${sid}|${lane}|`)));
+    for (const k of this.heldTold.keys()) if (mine(k)) this.heldTold.delete(k);
+    if (!lane) for (const k of [...this.quietTold.keys(), ...this.wakesTaken.keys()]) if (mine(k)) (this.quietTold.delete(k), this.wakesTaken.delete(k));
+  }
 
   /** A word from Friday to the agent that posted the board, about how its work is going. */
   private async tellLead(sid: string, text: string): Promise<void> {
@@ -1800,6 +1975,8 @@ export class AgentMesh {
     // Whoever waited on this agent's turn is woken; and a turn that itself ended waiting gets its wake (wake_me_when).
     await this.wakeOnTurn(sid, lane).catch(said("[wake]"));
     await this.autoWake(sid, lane).catch(said("[wake]"));
+    // The wakes it asked for that came while it was on hold, now that it isn't.
+    await this.dueWakes(sid, lane).catch(said("[wake]"));
     // Out of usage mid-task: someone else carries it on, or it carries on itself when the limit lifts (limit-handoff.ts).
     await this.onLimit(sid, lane).catch(said("[limit]"));
     // An agent just became free: hand it what is ready.
@@ -1908,14 +2085,14 @@ ${task}`,
         }
       }
       if (!ask.task) {
-        await this.deliver(sid, ask, text, true);
+        await this.deliver(sid, ask, text, true, false, end.body.outcome === "error");
         continue;
       }
       // A task's report carries what the record shows it did, so the lead doesn't re-read files or re-run tests to find out;
       // one that failed or says it is blocked reaches the lead at once, rather than waiting for the rest of the batch.
       const facts = factsOf(state, events, lane, got, end);
       const urgent = end.body.outcome === "error" || BLOCKED.test(said);
-      await this.deliver(sid, ask, `${text}${facts ? `\n\n${facts}` : ""}`, true, urgent);
+      await this.deliver(sid, ask, `${text}${facts ? `\n\n${facts}` : ""}`, true, urgent, end.body.outcome === "error");
     }
   }
 }
@@ -2092,6 +2269,31 @@ export function awayDiff(state: SessionState, doer: string, reviewer: string): s
   }
   const more = files.length - shown;
   return `The change, as Friday logged it from the run (${files.length} file${files.length === 1 ? "" : "s"}${more ? `; ${more} more not shown, ask for them` : ""}):\n\n${out.trimEnd()}`;
+}
+
+/** Board tasks waiting on each other in a circle, by id, the first one again at the end; null when there is none. */
+export function cycleIn(tasks: readonly Pick<BoardTaskDef, "id" | "after">[]): string[] | null {
+  const after = new Map(tasks.map((t) => [t.id, t.after]));
+  const state = new Map<string, 1 | 2>();
+  const path: string[] = [];
+  const walk = (id: string): string[] | null => {
+    if (state.get(id) === 2) return null;
+    if (state.get(id) === 1) return [...path.slice(path.indexOf(id)), id];
+    state.set(id, 1);
+    path.push(id);
+    for (const d of after.get(id) ?? []) {
+      const c = walk(d);
+      if (c) return c;
+    }
+    path.pop();
+    state.set(id, 2);
+    return null;
+  };
+  for (const t of tasks) {
+    const c = walk(t.id);
+    if (c) return c;
+  }
+  return null;
 }
 
 export function whereWork(state: SessionState, doer: string, reviewer: string, name: string): string {

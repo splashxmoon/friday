@@ -57,18 +57,34 @@ const until = (sec: number) => {
 };
 
 import { useToolLimits, type Read } from "./toolLimits.js";
-/** One limit at a glance: a short name, how much of it is used, and when it starts over. `text`: said instead (credits left). */
-type Row = { label: string; used: number | null; resets: string; text?: string };
+/**
+ * One limit at a glance: a short name, how much of it is used, and when it starts over. `text`: said instead (credits left). `win`:
+ * which window it is, the five hours or the week, and `account` whose, so the ring finds its own by what it is rather than by a
+ * label that has an account's name in front of it with more than one account (2026-10-27 audit).
+ */
+type Row = { label: string; used: number | null; resets: string; text?: string; win?: "5h" | "week" | "out"; account?: string };
+
+/** Which window a limit is, by what its tool calls it or by its length. */
+const winOf = (kind: string | null | undefined, minutes: number | null | undefined): Row["win"] =>
+  kind === "five_hour" || minutes === 300 ? "5h" : kind === "seven_day" || minutes === 10_080 ? "week" : undefined;
 /** A tool at a glance: its limits, or the one short line that stands in for them. */
 type Glance = { plan?: string; rows: Row[]; empty?: string; link?: { label: string; href: string }; /** Why some limits are missing, said under what is there. */ note?: string };
 
 const SHORT: Record<string, string> = { five_hour: "5h", seven_day: "Weekly", seven_day_opus: "Weekly · Opus", seven_day_sonnet: "Weekly · Sonnet", overage: "Extra" };
 const shortWindow = (min: number) => (min >= 40_000 ? "Monthly" : min >= 10_080 ? "Weekly" : min >= 60 ? `${Math.round(min / 60)}h` : `${min}m`);
 
-/** A window whose reset has already passed has started over, whatever it said before. */
-function row(label: string, usedPct: number | null, resetsAt: number | null): Row {
-  if (resetsAt && resetsAt * 1000 <= Date.now()) return { label, used: 0, resets: "Reset" };
-  return { label, used: usedPct === null ? null : Math.max(0, Math.min(100, usedPct)), resets: resetsAt ? `Resets in ${until(resetsAt)}` : "" };
+/**
+ * One window as last read. One whose reset has passed since has started over, and how much of the new one is used was never read:
+ * it says when it started over, not a 0% nobody measured (Arun, 2026-10-27, of "5h · 0% used · Reset" with Claude in use). Claude
+ * Code gives a figure only as a limit nears; until then its "allowed" is said as it is.
+ */
+function row(label: string, usedPct: number | null, resetsAt: number | null, status?: string | null): Row {
+  // A day ago or more says which day too: a bare time read as today's (2026-10-27 audit).
+  if (resetsAt && resetsAt * 1000 <= Date.now()) return { label, used: null, resets: "", text: `Started over at ${new Date(resetsAt * 1000).toLocaleString([], Date.now() - resetsAt * 1000 >= 86_400_000 ? { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" } : { hour: "numeric", minute: "2-digit" })}` };
+  const resets = resetsAt ? `Resets in ${until(resetsAt)}` : "";
+  if (usedPct === null && status === "rejected") return { label, used: 100, resets, text: "Out of usage" };
+  if (usedPct === null && status === "allowed") return { label, used: null, resets, text: "Under the limit" };
+  return { label, used: usedPct === null ? null : Math.max(0, Math.min(100, usedPct)), resets };
 }
 
 /** What each tool's glance says, from one reading of this computer. */
@@ -82,9 +98,9 @@ export function glanceOf(limits: Read): Record<EngineTool, Glance> {
   const codex = got?.codex ?? null;
   // Every Codex window when the computer says them (Friday 0.1.33 on), else the one it always did.
   const codexRows = got?.codexWindows?.length
-    ? got.codexWindows.map((w) => row(w.windowMinutes ? shortWindow(w.windowMinutes) : "Limit", w.usedPercent, w.resetsAt))
+    ? got.codexWindows.map((w) => ({ ...row(w.windowMinutes ? shortWindow(w.windowMinutes) : "Limit", w.usedPercent, w.resetsAt), win: winOf(w.kind, w.windowMinutes) }))
     : codex
-      ? [row(shortWindow(codex.windowMinutes), codex.usedPercent, codex.resetsAt)]
+      ? [{ ...row(shortWindow(codex.windowMinutes), codex.usedPercent, codex.resetsAt), win: winOf(null, codex.windowMinutes) }]
       : [];
   const cursor = got?.cursor ?? null;
   // The other tools read on this computer (tool-limits.ts): their windows, the credits left where they sell credits, and the age
@@ -93,7 +109,7 @@ export function glanceOf(limits: Read): Record<EngineTool, Glance> {
     Object.entries(got?.tools ?? {}).map(([t, a]): [EngineTool, Glance] => {
       const url = TOOL_INFO[t as EngineTool].usage;
       const rows = [
-        ...a!.windows.map((w) => row(w.label ?? (w.windowMinutes ? shortWindow(w.windowMinutes) : "Limit"), w.usedPercent, w.resetsAt)),
+        ...a!.windows.map((w) => ({ ...row(w.label ?? (w.windowMinutes ? shortWindow(w.windowMinutes) : "Limit"), w.usedPercent, w.resetsAt), win: winOf(w.kind, w.windowMinutes) })),
         ...(a!.balanceUsd !== undefined ? [{ label: "Credits", used: null, resets: "", text: `$${a!.balanceUsd.toFixed(2)} left` }] : []),
       ];
       const ago = Math.round((Date.now() - a!.at) / 60_000);
@@ -116,13 +132,14 @@ export function glanceOf(limits: Read): Record<EngineTool, Glance> {
   const byAccount = (t: "claude" | "codex"): Row[] | null => {
     const all = got?.accounts?.[t];
     if (!all?.length) return null;
-    return all.flatMap((a): Row[] =>
-      a.out
-        ? [{ label: a.label, used: 100, resets: "", text: a.outUntil ? `Out until ${new Date(a.outUntil).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "Out of usage" }]
-        : a.windows.length
-          ? a.windows.map((w) => row(`${a.label} · ${SHORT[w.kind] ?? (w.windowMinutes ? shortWindow(w.windowMinutes) : (w.label ?? "Limit"))}`, w.usedPercent, w.resetsAt))
-          : [{ label: a.label, used: null, resets: "", text: a.why ?? "No reading yet" }],
-    );
+    return all.flatMap((a): Row[] => {
+      // Out until a time that has passed is back: a reading kept from then (this page's cache too) no longer says it is out
+      // (2026-10-27 audit: "Out until 3:00 PM" stood red after three).
+      const back = !!a.outUntil && a.outUntil <= Date.now();
+      if (a.out && !back) return [{ label: a.label, used: 100, resets: "", text: a.outUntil ? `Out until ${new Date(a.outUntil).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "Out of usage", win: "out", account: a.id }];
+      if (a.windows.length) return a.windows.map((w) => ({ ...row(`${a.label} · ${SHORT[w.kind] ?? (w.windowMinutes ? shortWindow(w.windowMinutes) : (w.label ?? "Limit"))}`, w.usedPercent, w.resetsAt, w.status), win: winOf(w.kind, w.windowMinutes), account: a.id }));
+      return [{ label: a.label, used: null, resets: "", text: a.out && back ? `Back since ${new Date(a.outUntil!).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : (a.why ?? "No reading yet"), account: a.id }];
+    });
   };
   const claudeAccounts = byAccount("claude");
   const codexAccounts = byAccount("codex");
@@ -131,12 +148,11 @@ export function glanceOf(limits: Read): Record<EngineTool, Glance> {
     ...others,
     claude: {
       ...(got?.claudePlan ? { plan: got.claudePlan } : {}),
-      rows: claudeAccounts ?? (got?.claudeWindows ?? []).map((w) => row(SHORT[w.kind ?? ""] ?? w.label ?? "Limit", w.utilization === null ? null : w.utilization * 100, w.resetsAt)),
+      rows: claudeAccounts ?? (got?.claudeWindows ?? []).map((w) => ({ ...row(SHORT[w.kind ?? ""] ?? w.label ?? "Limit", w.utilization === null ? null : w.utilization * 100, w.resetsAt, w.status), win: winOf(w.kind, null) })),
       empty: none || got?.claudeWhy || "No reading yet",
-      // The account couldn't be asked, so what shows is only what Claude Code said during its last run: say why the rest is missing.
-      ...(got?.claudeFrom !== "account" && got?.claudeWhy && got.claudeWindows?.length ? { note: got.claudeWhy } : {}),
-      // Its last answer, kept while it can't be asked (runner/limits.ts KEEP_MS): how old it is, and why it is that one.
-      ...(got?.claudeKept && got.claudeWindows?.length ? { note: `As of ${keptAgo(got.claudeWindows)}${got.claudeWhy ? ` · ${got.claudeWhy}` : ""}` } : {}),
+      // What Claude Code itself said of its limits, asked (`get_usage`) or as it last ran in Friday, and how long ago. Its sign-in
+      // is never read: runner/limits.ts.
+      ...(got?.claudeWindows?.length ? { note: got.claudeFrom === "account" ? `From Claude Code, ${keptAgo(got.claudeWindows)}` : `From Claude Code's last run in Friday, ${keptAgo(got.claudeWindows)}` } : {}),
     },
     codex: {
       ...(codex?.plan ? { plan: codex.plan } : {}),
@@ -171,8 +187,9 @@ function ToolGlance({ tool, g, bare = false }: { tool: EngineTool; g: Glance; /*
         </div>
       )}
       {g.rows.length ? (
-        g.rows.map((r) => (
-          <div key={r.label} className={`lg-row ${r.used === null ? "" : r.used >= 90 ? "low" : r.used >= 70 ? "mid" : ""}`}>
+        // By place as well as label: two accounts' rows, or two windows a tool names alike, shared a key (2026-10-27 audit).
+        g.rows.map((r, i) => (
+          <div key={`${i}:${r.label}`} className={`lg-row ${r.used === null ? "" : r.used >= 90 ? "low" : r.used >= 70 ? "mid" : ""}`}>
             {/* The same three lines in every row, whatever the numbers: what and how much, the bar, when it resets. On one
                 line, a wider "100% used" pushed the reset time under it in that row only. */}
             <div className="lg-line">
@@ -260,14 +277,37 @@ function PopBody({ identity, first, ws, ctx, solo, lane, live }: { identity: Ide
   );
 }
 
-/** A tool's 5-hour window as the glance reads it ("5h", from Claude Code's five_hour or a 300-minute Codex window), when it has one. */
-export function fiveHourOf(tool: EngineTool | undefined, limits: Read): { used: number; resets: string } | null {
+/**
+ * The rows of a tool's glance that are the lane's: with more than one account on the computer, those of the account it runs on
+ * (its lane's `account`, else the first, its default), each labelled with the account's name; with one, all of them.
+ */
+function rowsFor(tool: EngineTool, limits: Read, account?: string): Row[] {
+  const rows = glanceOf(limits)[tool]?.rows ?? [];
+  if (!rows.some((r) => r.account)) return rows;
+  const id = account && rows.some((r) => r.account === account) ? account : rows.find((r) => r.account)!.account;
+  return rows.filter((r) => r.account === id);
+}
+
+/**
+ * A tool's 5-hour window as the glance reads it (Claude Code's five_hour, a 300-minute Codex window), when it has one: found by
+ * which window it is, for the account the lane runs on. An account out of usage is full until it comes back.
+ */
+export function fiveHourOf(tool: EngineTool | undefined, limits: Read, account?: string): { used: number; resets: string } | null {
   if (!tool) return null;
-  const r = glanceOf(limits)[tool]?.rows.find((x) => x.label === "5h" && x.used !== null);
+  const rows = rowsFor(tool, limits, account);
+  const out = rows.find((x) => x.win === "out");
+  if (out) return { used: 100, resets: out.text ?? "" };
+  const r = rows.find((x) => x.win === "5h" && x.used !== null);
   return r ? { used: r.used!, resets: r.resets } : null;
 }
 
-export function ContextGauge({ events, model = "", identity, tool, lane, solo = false }: { events: SessionEvent[]; friday: boolean; model?: string; identity: Identity; tool?: EngineTool; /** The agent the message box is aimed at: the ring is its context, not the whole session's. */ lane?: string; /** Solo: the coding tools' glance, and no Friday tab. */ solo?: boolean }) {
+/** A tool's weekly window as the glance reads it, for the account the lane runs on, when it has a figure. */
+export function weekOf(tool: EngineTool | undefined, limits: Read, account?: string): Row | null {
+  if (!tool) return null;
+  return rowsFor(tool, limits, account).find((x) => x.win === "week" && x.used !== null) ?? null;
+}
+
+export function ContextGauge({ events, model = "", identity, tool, lane, solo = false, account }: { events: SessionEvent[]; friday: boolean; model?: string; identity: Identity; tool?: EngineTool; /** The agent the message box is aimed at: the ring is its context, not the whole session's. */ lane?: string; /** Solo: the coding tools' glance, and no Friday tab. */ solo?: boolean; /** Which of the tool's accounts on the computer the lane runs on, when it has more than one. */ account?: string }) {
   const WINDOW = windowFor(tool, model);
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
   // undefined while it is being read, null when it couldn't be.
@@ -280,9 +320,17 @@ export function ContextGauge({ events, model = "", identity, tool, lane, solo = 
   // A coding tool's ring is its 5-hour limit, the one a working day runs into; never a weekly or monthly one. A tool that has no
   // 5-hour window (Cursor and Copilot sell monthly allowances) shows its context instead, and says so.
   const limits = useToolLimits(identity);
-  const five = fiveHourOf(tool, limits);
-  const pct = five ? five.used / 100 : Math.min(1, tokens / WINDOW);
-  // A thin ring, nothing inside it: the tooltip and the card say whose limit it is.
+  const five = fiveHourOf(tool, limits, account);
+  // The week beside the five hours, as Orca's bar says both ("17% 5h · 43% wk"): the week is what a long day runs into next.
+  const week = weekOf(tool, limits, account);
+  // A coding tool's context is what it said of it (agent.usage), not Friday's own count; until it has said, there is no figure
+  // to show, and "0%" with "context 0 of 200k" beside a card saying "Not reported yet" disagreed with itself (2026-10-27 audit).
+  const ctxUsed = tool ? (live?.used ?? 0) : tokens;
+  const ctxWindow = tool ? (live?.window ?? WINDOW) : WINDOW;
+  const reported = !!five || (tool ? !!live : tokens > 0);
+  const pct = five ? five.used / 100 : Math.min(1, ctxUsed / ctxWindow);
+  // A thin ring and how full it is beside it, in figures (2026-10-27 design review: a bare ring was a shape to decode); the tooltip
+  // and the card say whose limit it is.
   const r = 9;
   const c = 2 * Math.PI * r;
   const tone = pct >= 0.9 ? "hot" : pct >= 0.7 ? "warm" : "";
@@ -293,8 +341,8 @@ export function ContextGauge({ events, model = "", identity, tool, lane, solo = 
       <button
         type="button"
         className={`ctx-gauge ${tool ? "has-mark " : ""}${tone || "ok"}`}
-        title={five ? `${who} · 5-hour limit ${Math.round(five.used)}% used${five.resets ? ` · ${five.resets}` : ""}` : `${who} · context ${compact(tokens)} of ${compact(WINDOW)}`}
-        aria-label={five ? `${who}: 5-hour limit ${Math.round(five.used)}% used` : `${who}: context ${Math.round(pct * 100)}% full`}
+        title={five ? `${who} · 5-hour limit ${Math.round(five.used)}% used${five.resets ? ` · ${five.resets}` : ""}${week ? ` · weekly ${Math.round(week.used!)}% used` : ""}` : reported ? `${who} · Context ${compact(ctxUsed)} of ${compact(ctxWindow)}` : `${who} · Context: not reported yet`}
+        aria-label={five ? `${who}: 5-hour limit ${Math.round(five.used)}% used` : reported ? `${who}: context ${Math.round(pct * 100)}% full` : `${who}: context not reported yet`}
         // Its own press isn't "outside" the card it opened: without this the card closed on mousedown and the click opened it again.
         onMouseDown={(e) => e.stopPropagation()}
         aria-expanded={!!at}
@@ -309,6 +357,15 @@ export function ContextGauge({ events, model = "", identity, tool, lane, solo = 
           <circle cx="11" cy="11" r={r} fill="none" stroke="currentColor" strokeOpacity=".22" strokeWidth="2.25" />
           <circle cx="11" cy="11" r={r} fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeDasharray={`${c * pct} ${c}`} transform="rotate(-90 11 11)" />
         </svg>
+        <span className="ctx-pct" aria-hidden="true">
+          {reported ? `${Math.round(pct * 100)}%` : "–"}{five && <em> 5h</em>}
+          {five && week && (
+            <>
+              <i> · </i>
+              {Math.round(week.used!)}%<em> wk</em>
+            </>
+          )}
+        </span>
       </button>
       {at && (
         <ContextMenu
@@ -381,6 +438,16 @@ function ToolContextView({ tool, lane, live }: { tool: EngineTool; lane: string;
   // The rows fold under the header and the bar, closed until asked for (Arun, 2026-10-24: "make this collapsable and have it be
   // closed on default"): how full it is reads at a glance, what fills it is a press away.
   const [open, setOpen] = useState(false);
+  // Nothing reported: one quiet line, without an empty bar or a caret that opens onto nothing.
+  if (!window && ctx !== undefined && !shown.length)
+    return (
+      <section className="ctx-tool none" aria-label={`${ENGINE_NAMES[tool]}'s context`}>
+        <div className="ctx-tool-head">
+          <span className="ctx-tool-title">Context</span>
+          <span className="ctx-tool-n">Not reported yet</span>
+        </div>
+      </section>
+    );
   return (
     <section className={`ctx-tool ${tone} ${open ? "open" : ""}`} aria-label={`${ENGINE_NAMES[tool]}'s context`}>
       <button type="button" className="ctx-tool-head" aria-expanded={open} onClick={() => setOpen(!open)}>
@@ -399,7 +466,8 @@ function ToolContextView({ tool, lane, live }: { tool: EngineTool; lane: string;
         </div>
       ) : (
         <div className="ctx-stack" aria-hidden="true">
-          <i className="ctx-seg messages" style={{ width: `${pct}%` }} />
+          {/* Nothing reported is an empty track, not a sliver of colour. */}
+          {pct > 0 && <i className="ctx-seg messages" style={{ width: `${pct}%` }} />}
         </div>
       )}
       {!open ? null : ctx === undefined ? (

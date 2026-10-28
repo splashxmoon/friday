@@ -35,6 +35,7 @@ test("Codex: what was said, and not the project's rules or the environment the C
       { type: "session_meta", payload: { id, cwd } },
       msg("user", "# AGENTS.md instructions for /work/shop\n\n<INSTRUCTIONS>Always use pnpm.</INSTRUCTIONS>"),
       msg("user", "<environment_context>\n  <cwd>/work/shop</cwd>\n</environment_context>"),
+      msg("user", '<external_codex_apps_open_page>{"page_id":null}</external_codex_apps_open_page>'),
       msg("user", "The cart total is wrong when a coupon and a gift card are both applied."),
       { type: "response_item", payload: { type: "reasoning", summary: [] } },
       { type: "response_item", payload: { type: "function_call", name: "shell", arguments: "{}" } },
@@ -49,7 +50,7 @@ test("Codex: what was said, and not the project's rules or the environment the C
     "the injected instructions and environment are not part of the conversation",
   );
   assert.match(t.turns[0]!.text, /coupon and a gift card/);
-  assert.doesNotMatch(JSON.stringify(t.turns), /pnpm|environment_context/);
+  assert.doesNotMatch(JSON.stringify(t.turns), /pnpm|environment_context|page_id/);
 });
 
 test("Codex: the older rollout shape, with the message at the top level, still reads", async () => {

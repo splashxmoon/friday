@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { limitHit } from "../src/limit-reset.js";
+import { limitHit, planLimitHit } from "../src/limit-reset.js";
 import type { EventBody, SessionEvent } from "../src/types.js";
 
 // 2026-10-11 10:00 in New York (14:00 UTC).
@@ -59,4 +59,19 @@ test("a date with no time is not split into a day and an hour", () => {
   // "Oct 14" used to read as Oct 1 at 4 o'clock, already past, so a year later.
   assert.equal(limitHit("Weekly limit reached - resets Oct 14", now, "UTC")?.resetsAt ?? null, null);
   assert.equal(limitHit("Weekly limit reached - resets Oct 14, 3pm", now, "UTC")?.resetsAt, Date.UTC(2026, 9, 14, 15, 0));
+});
+
+test("an account's allowance spent, told from a limit gone in a minute (2026-10-27 audit: a per-minute 429 switched a teammate for five hours)", () => {
+  for (const e of [
+    'API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"Number of request tokens has exceeded your per-minute rate limit"}}',
+    "stream error: too many requests, please retry",
+    "Error: Request failed (429)",
+    "Rate limit exceeded, retry in 37s",
+  ]) {
+    assert.ok(limitHit(e, NOW), `a limit: ${e}`);
+    assert.equal(planLimitHit(e, NOW), null, e);
+  }
+  for (const e of ["Claude AI usage limit reached|1960000000", "You've hit your usage limit. Try again in 2 hours.", "5-hour limit reached ∙ resets 3pm", "Weekly limit reached - resets Oct 14, 3pm"]) assert.ok(planLimitHit(e, NOW), e);
+  // Any limit with its reset hours off is the allowance's, whatever it calls itself.
+  assert.equal(planLimitHit("rate limit: try again in 3 hours", NOW)?.resetsAt, NOW + 3 * 3_600_000);
 });

@@ -651,6 +651,8 @@ const INJECTED = [
   /^<recommended_plugins>/i,
   /^<skill>/i,
   /^<user_info>/i,
+  // The Codex app's note of which page it had open, ahead of what was typed (Arun, 2026-10-26: a conversation titled {"page_id":null}).
+  /^<external_codex_apps_[\w]+>/i,
 ];
 
 /** The catch-up's last line (session/catchup.ts): what follows it is the message itself. */

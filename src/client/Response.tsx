@@ -220,7 +220,7 @@ function StepList({ steps, shown: picked, onShown }: { steps: Step[]; shown?: st
               <span className={s.state === "running" ? "rsp-verb rsp-shine" : "rsp-verb"}>{s.state === "waiting" ? askedVerb(s.verb) : s.verb}</span>
               {s.target && <code className="rsp-chip">{clip(s.target, 72)}</code>}
               {s.state === "failed" && <span className="rsp-step-flag">failed</span>}
-              {s.state === "waiting" && <span className="rsp-step-flag quiet">not run</span>}
+              {s.state === "waiting" && <span className="rsp-step-flag quiet" title="Asked for, but the turn ended before it ran: stopped, out of usage, or still waiting for a yes">didn't run</span>}
             </button>
             {(s.thought || s.onAsk) && (
               <button type="button" className="rsp-why" aria-expanded={why === s.id} title="Why did it do that?" onClick={() => setWhy(why === s.id ? null : s.id)}>
@@ -333,7 +333,9 @@ export function RunLog({
 
   const steps = groups.flatMap((g) => g.steps);
   const failed = steps.filter((s) => s.state === "failed").length;
-  const elapsed = startedAt ? span((live ? now : (endedAt ?? now)) - startedAt) : "";
+  // A finished run under a second says no time at all: "Worked for 0s" read as nothing done (2026-10-27 design review).
+  const took = startedAt ? (live ? now : (endedAt ?? now)) - startedAt : 0;
+  const elapsed = startedAt && (live || took >= 1000) ? span(took) : "";
   const current = live ? steps.findLast((s) => s.state === "running") : undefined;
   const summary = live
     ? [`Working${elapsed ? ` · ${elapsed}` : ""}`, steps.length ? `${steps.length} step${steps.length === 1 ? "" : "s"}` : "", tokens ? `${shortTokens(tokens)} tokens` : ""].filter(Boolean).join(" · ")
@@ -390,7 +392,7 @@ export function RunLog({
  * their places above (StepGroup). "N files changed" opens the changes; the files aren't listed here as well, where a run
  * of sixty filled the screen with chips that said less than the Diff panel does (Arun, 2026-10-18).
  */
-export function RunMeta({ files, live, onFile, startedAt, endedAt, tokens, compacted }: { files: FileChange[]; live: boolean; onFile?: () => void; startedAt?: number; endedAt?: number; tokens?: number; /** The conversation's size before Friday had it compacted for this run. */ compacted?: number }) {
+export function RunMeta({ files, live, onFile, startedAt, endedAt, tokens, compacted, waiting = false }: { files: FileChange[]; live: boolean; onFile?: () => void; startedAt?: number; endedAt?: number; tokens?: number; /** The conversation's size before Friday had it compacted for this run. */ compacted?: number; /** Its turn waits on a person (a question, a permission): not working. */ waiting?: boolean }) {
   // The clock only runs while there is something to time.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -399,8 +401,12 @@ export function RunMeta({ files, live, onFile, startedAt, endedAt, tokens, compa
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, [live]);
-  const elapsed = startedAt ? span((live ? now : (endedAt ?? now)) - startedAt) : "";
-  const time = live ? `Working${elapsed ? ` · ${elapsed}` : ""}` : elapsed ? `Worked for ${elapsed}` : "";
+  // A finished run under a second says no time at all: "Worked for 0s" read as nothing done (2026-10-27 design review).
+  const took = startedAt ? (live ? now : (endedAt ?? now)) - startedAt : 0;
+  const elapsed = startedAt && (live || took >= 1000) ? span(took) : "";
+  // Waiting on a person says so: "Working · 32m" under a turn stopped on a question contradicted the bar's "Waiting for you"
+  // (2026-10-27 audit).
+  const time = live ? `${waiting ? "Waiting for an answer" : "Working"}${elapsed ? ` · ${elapsed}` : ""}` : elapsed ? `Worked for ${elapsed}` : "";
   const changed = files.length ? `${files.length} file${files.length === 1 ? "" : "s"} changed` : "";
   const used = tokens ? `${shortTokens(tokens)} tokens` : "";
   const trimmed = compacted ? `conversation compacted from ${shortTokens(compacted)}` : "";
@@ -531,7 +537,7 @@ export function Timeline({
                   <span className={s.state === "running" ? "rsp-verb rsp-shine" : "rsp-verb"}>{s.state === "waiting" ? askedVerb(s.verb) : s.verb}</span>
                   {s.target && <code className="rsp-chip">{clip(s.target, 72)}</code>}
                   {s.state === "failed" && <span className="rsp-step-flag">failed</span>}
-                  {s.state === "waiting" && <span className="rsp-step-flag quiet">not run</span>}
+                  {s.state === "waiting" && <span className="rsp-step-flag quiet" title="Asked for, but the turn ended before it ran: stopped, out of usage, or still waiting for a yes">didn't run</span>}
                 </button>
                 {s.detail && shown === s.id && <div className="rsp-step-detail">{s.detail}</div>}
               </li>
@@ -556,7 +562,9 @@ export function Timeline({
 
 /** "Ran" for a step that never ran would be a lie: "Asked to run git status · not run" says what happened. */
 const BASE: Record<string, string> = { Ran: "run", Read: "read", Listed: "list", Searched: "search", "Searched the web": "search the web", Edited: "edit", Wrote: "write", Opened: "open", Noted: "note", Planned: "plan", Used: "use", "Handed off to": "hand off to" };
-const askedVerb = (verb: string) => (BASE[verb] ? `Asked to ${BASE[verb]}` : `Not run: ${verb}`);
+// A verb it has no plain form of is said as it is: the "didn't run" flag beside it says the rest, which "Not run: Bash … didn't
+// run" said twice (2026-10-27 audit).
+const askedVerb = (verb: string) => (BASE[verb] ? `Asked to ${BASE[verb]}` : verb);
 
 const clip = (t: string, n: number) => {
   const one = t.replace(/\s+/g, " ");
@@ -630,7 +638,7 @@ export interface HandoffTarget {
 export interface HandoffMore {
   agents: { id: string; name: string; icon: IconName; blurb: string; tint: string }[];
   /** `suggested`: the one routing would take the work to (routing.ts), with why, when this tool is out of usage or nearly. */
-  tools: { tool: EngineTool; here: boolean; hint: string; mark: ReactNode; tint: string; suggested?: boolean; why?: string }[];
+  tools: { tool: EngineTool; here: boolean; hint: string; mark: ReactNode; tint: string; suggested?: boolean; why?: string; /** Out of usage: listed last, and not pressable. */ out?: boolean }[];
   onAgent: (id: string) => void;
   onTool: (tool: EngineTool) => void;
 }
@@ -657,7 +665,23 @@ export function HandoffBar({ targets, active, onPick, more }: { targets: Handoff
   useEffect(() => {
     if (!open) return;
     const away = (e: MouseEvent) => !wrap.current?.contains(e.target as Node) && setOpen(false);
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    // The arrows move through its rows, as a menu's do, from the button into the list and round (2026-10-27 audit: ArrowDown
+    // did nothing); Escape gives the focus back to the button.
+    const esc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpen(false);
+        wrap.current?.querySelector<HTMLElement>(".ho-btn")?.focus();
+        return;
+      }
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
+      if (!wrap.current?.contains(document.activeElement)) return;
+      const rows = [...(wrap.current.querySelectorAll<HTMLButtonElement>(".ho-menu-row:not([disabled])") ?? [])];
+      if (!rows.length) return;
+      e.preventDefault();
+      const at = rows.indexOf(document.activeElement as HTMLButtonElement);
+      const next = e.key === "Home" ? 0 : e.key === "End" ? rows.length - 1 : at === -1 ? (e.key === "ArrowDown" ? 0 : rows.length - 1) : (at + (e.key === "ArrowDown" ? 1 : rows.length - 1)) % rows.length;
+      rows[next]!.focus();
+    };
     document.addEventListener("mousedown", away);
     document.addEventListener("keydown", esc);
     return () => {
@@ -667,8 +691,8 @@ export function HandoffBar({ targets, active, onPick, more }: { targets: Handoff
   }, [open]);
   const sel = targets.find((t) => t.id === active);
   const suggested = targets.find((t) => t.suggested) ?? more?.tools.find((t) => t.suggested);
-  const row = (key: string, tint: string | undefined, mark: React.ReactNode, name: string, sub: string | undefined, right: React.ReactNode, on: boolean, pick: () => void) => (
-    <button key={key} type="button" role="menuitem" className={`ho-menu-row${on ? " on" : ""}`} style={tint ? ({ "--tint": tint } as React.CSSProperties) : undefined} onClick={() => { setOpen(false); pick(); }}>
+  const row = (key: string, tint: string | undefined, mark: React.ReactNode, name: string, sub: string | undefined, right: React.ReactNode, on: boolean, pick: () => void, off = false) => (
+    <button key={key} type="button" role="menuitem" disabled={off} aria-disabled={off || undefined} className={`ho-menu-row${on ? " on" : ""}`} style={tint ? ({ "--tint": tint } as React.CSSProperties) : undefined} onClick={() => { setOpen(false); pick(); }}>
       <span className="ho-chip-mark">{mark}</span>
       <span className="ho-menu-text">
         <b>{name}</b>
@@ -701,13 +725,13 @@ export function HandoffBar({ targets, active, onPick, more }: { targets: Handoff
               </>,
               active === t.id, () => onPick(active === t.id ? null : t.id)),
           )}
-          {more && more.tools.length > 0 && <div className="ho-menu-h">Your own coding agent</div>}
+          {more && more.tools.length > 0 && <div className="ho-menu-h">Start another agent</div>}
           {[...(more?.tools ?? [])]
-            .sort((a, b) => Number(!!b.suggested) - Number(!!a.suggested))
+            .sort((a, b) => Number(!!a.out) - Number(!!b.out) || Number(!!b.suggested) - Number(!!a.suggested))
             .map((t) =>
               row(t.tool, t.tint, t.mark, ENGINE_NAMES[t.tool], t.suggested && t.why ? t.why : t.hint,
                 t.suggested ? <span className="ho-chip-tag">Suggested</span> : t.here ? <span className="ho-chip-meta">here</span> : null,
-                false, () => more!.onTool(t.tool)),
+                false, () => more!.onTool(t.tool), !!t.out),
             )}
           {more && more.agents.length > 0 && <div className="ho-menu-h">Saved agents</div>}
           {more?.agents.map((a) => row(a.id, a.tint, <Icon name={a.icon} size={14} />, a.name, a.blurb, null, false, () => more.onAgent(a.id)))}

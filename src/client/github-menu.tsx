@@ -35,10 +35,11 @@ async function remoteOf(sid: string, invite: string): Promise<Remote> {
 /** A new session of your own that starts from this one's conversation. The sidebar files it just below this one. */
 export async function forkSession(sid: string, invite: string, upTo?: number): Promise<string | null> {
   const r = await fetch(`/api/sessions/${encodeURIComponent(sid)}/fork?invite=${encodeURIComponent(invite)}${upTo ? `&upTo=${upTo}` : ""}`, { method: "POST" });
-  const d = (await r.json()) as { sessionId?: string; invites?: { owner?: string }; title?: string; error?: string };
+  const d = (await r.json()) as { sessionId?: string; invites?: { owner?: string }; title?: string; error?: string; note?: string };
   if (!d.sessionId || !d.invites?.owner) return d.error ?? "Couldn't fork this session. Try again in a moment.";
   window.dispatchEvent(new CustomEvent("friday:forked", { detail: { from: sid, sid: d.sessionId, invite: d.invites.owner, title: d.title ?? "Fork" } }));
-  return null;
+  // Made, with something left behind (an agent whose tool wouldn't start): said where an error would be, so it isn't missed.
+  return d.note ?? null;
 }
 
 /** The same menu as a button beside the message box, because a right-click is not something anybody finds. */

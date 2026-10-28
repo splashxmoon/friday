@@ -111,10 +111,12 @@ function parseRoute(search: string): Route {
   // No Connections page any more (Arun, 2026-10-22: "the coding tools already have the mcps connected on their own coding
   // tools"): an old link to it opens the start page.
   if (p.get("view") === "connections") return { kind: "home" };
-  if (p.get("view") === "agents") return { kind: "agents" };
+  // Saved agents, People and the Library are the paid edition's pages: in the open-source edition an old link to one opens what
+  // stands in for it there, not a blank page (2026-10-27 audit).
+  if (p.get("view") === "agents") return isLocal() ? { kind: "automations" } : { kind: "agents" };
   if (p.get("view") === "automations") return { kind: "automations" };
-  if (p.get("view") === "people") return { kind: "people" };
-  if (p.get("view") === "library") return { kind: "library" };
+  if (p.get("view") === "people") return isLocal() ? { kind: "home" } : { kind: "people" };
+  if (p.get("view") === "library") return isLocal() ? { kind: "home" } : { kind: "library" };
   if (p.get("view") === "board") return { kind: "board" };
   if (p.get("view") === "review") return { kind: "review" };
   if (p.get("view") === "settings") return { kind: "settings", section: settingsSection(p.get("section")) };
@@ -171,6 +173,25 @@ export function App() {
   const [workspace, setWorkspace] = useState<WorkspaceUsage | null>(null);
   const [route, setRoute] = useState<Route>(readRoute);
   const [recents, setRecents] = useState<RecentSession[]>(loadRecents);
+  // Setting this computer up again (Settings › About) happens on the start page, where the setup lives: from anywhere else it
+  // goes there first, and asks again once it has (2026-10-27 audit: the button did nothing from Settings).
+  useEffect(() => {
+    const setup = (e: Event) => {
+      if ((e as CustomEvent).detail === "again" || parseRoute(location.search).kind === "home") return;
+      history.pushState(null, "", routeUrl({ kind: "home" }));
+      setRoute({ kind: "home" });
+      setTimeout(() => dispatchEvent(new CustomEvent("friday:setup", { detail: "again" })), 300);
+    };
+    addEventListener("friday:setup", setup);
+    return () => removeEventListener("friday:setup", setup);
+  }, []);
+  // Another window or tab of Friday saved the list (a rename, a snooze, a session settled): take its copy, rather than writing this
+  // window's older one over it at the next change (2026-10-27 audit: renames and snoozes were lost between two windows).
+  useEffect(() => {
+    const heard = (e: StorageEvent) => e.key === "mpa.sessions" && setRecents(loadRecents());
+    addEventListener("storage", heard);
+    return () => removeEventListener("storage", heard);
+  }, []);
   // Sessions you are in on the server that this browser has never opened: another machine's, or one a schedule started.
   type Mine = { sessions: { sid: string; title: string; role: Role; invite: string; at: number }[] };
   const reloadMine = useCallback(
@@ -631,9 +652,12 @@ export function App() {
 
   const navigate = useCallback(
     (r: Route) => {
+      // The page you are on, asked for again (its sidebar button pressed while inside one of its own screens, say an
+      // automation's editor): it goes back to its own top (2026-10-27 audit: the button did nothing there).
+      if (r.kind !== "session" && parseRoute(location.search).kind === r.kind) dispatchEvent(new CustomEvent("friday:same-page", { detail: r.kind }));
       history.pushState(null, "", routeUrl(r));
       setRoute(r);
-      if (r.kind !== "session") document.title = r.kind === "connections" ? "Connections · Friday" : r.kind === "agents" ? "Saved agents · Friday" : r.kind === "automations" ? "Automations · Friday" : r.kind === "settings" ? "Settings · Friday" : r.kind === "usage" ? "Usage · Friday" : r.kind === "review" ? "Code Review · Friday" : "Friday";
+      if (r.kind !== "session") document.title = r.kind === "connections" ? "Connections · Friday" : r.kind === "agents" ? "Saved agents · Friday" : r.kind === "automations" ? "Automations · Friday" : r.kind === "settings" ? "Settings · Friday" : r.kind === "usage" ? "Usage · Friday" : r.kind === "review" ? "Code Review · Friday" : r.kind === "board" ? "Agent Board · Friday" : r.kind === "library" ? "Library · Friday" : r.kind === "people" ? "People · Friday" : "Friday";
       if (isNarrow(innerWidth)) setLayout({ sidebarCollapsed: true });
     },
     [setLayout],
@@ -779,6 +803,9 @@ export function App() {
     const onSearch = () => setSearch(true);
     addEventListener("friday:search", onSearch);
     const onShortcuts = () => setShortcuts(true);
+    // The sidebar's own fold button, in a browser (Sidebar.tsx).
+    const onFold = () => setLayout({ sidebarCollapsed: true });
+    addEventListener("friday:fold-sidebar", onFold);
     addEventListener("keydown", onKey);
     addEventListener("friday:palette", onPalette);
     addEventListener("friday:shortcuts", onShortcuts);
@@ -787,6 +814,7 @@ export function App() {
       removeEventListener("friday:palette", onPalette);
       removeEventListener("friday:search", onSearch);
       removeEventListener("friday:shortcuts", onShortcuts);
+      removeEventListener("friday:fold-sidebar", onFold);
     };
   }, [navigate, setLayout]);
 
@@ -834,7 +862,9 @@ export function App() {
   // Another session, opened from a card that names it (a message between sessions): only one in this person's list, which holds the way in.
   useEffect(() => {
     const on = (e: Event) => {
-      const r = loadRecents().find((x) => x.sid === (e as CustomEvent<{ sid: string }>).detail.sid);
+      const d = (e as CustomEvent<{ sid: string; invite?: string }>).detail;
+      // Or one the card carries the way into itself (a teammates' room not opened here yet).
+      const r = loadRecents().find((x) => x.sid === d.sid) ?? (d.invite ? { sid: d.sid, invite: d.invite } : null);
       if (r) navigate({ kind: "session", sid: r.sid, invite: r.invite });
     };
     window.addEventListener("friday:open-session", on);
@@ -969,6 +999,27 @@ export function App() {
   // session and only the second folded it). The sidebar is the same on every page now there is no rail, so there is no list
   // of chats to go to first.
   const togglePanel = () => setLayout({ sidebarCollapsed: !layout.sidebarCollapsed });
+  // A narrow window's sidebar floats over the page, as a drawer: the focus goes into it as it opens and back to its button as it
+  // closes, and Escape closes it (2026-10-27 audit: Escape did nothing, and Tab went on into the page behind the scrim).
+  useEffect(() => {
+    if (!panelOpen || !matchMedia("(max-width: 1000px)").matches) return;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const panel = () => document.querySelector<HTMLElement>(".sb-panel");
+    const t = setTimeout(() => {
+      const p = panel();
+      if (p && !p.contains(document.activeElement)) p.querySelector<HTMLElement>("button, a[href], [tabindex='0']")?.focus();
+    }, 0);
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || document.querySelector("[role='menu'], [role='dialog']")) return;
+      setLayout({ sidebarCollapsed: true });
+    };
+    addEventListener("keydown", esc);
+    return () => {
+      clearTimeout(t);
+      removeEventListener("keydown", esc);
+      if (opener?.isConnected && (document.activeElement === document.body || panel()?.contains(document.activeElement))) opener.focus();
+    };
+  }, [panelOpen]); // eslint-disable-line react-hooks/exhaustive-deps
   // These pages fill the window up to the top, like the new-session page; their own content starts below the band.
   // How wide the controls in the band are right now (people, agents, buttons). The title's half of the band stops short of
   // them, so a long title or a repo chip is clipped instead of drawn underneath them; the width changes with who is here.
@@ -1083,6 +1134,7 @@ export function App() {
         />
         {/* Only where the list floats over the page, so clicking off it puts it away. */}
         {panelOpen && <div className="sb-backdrop" onClick={() => setLayout({ sidebarCollapsed: true })} />}
+        {/* Folded, the sidebar leaves a rail in its place: places, a new session, what is going on (SideRail.tsx). */}
       </>
       <main id="main" className="main" tabIndex={-1}>
         {/* Someone new is set up first (this computer, its coding tools, GitHub), not toured: the tour waits behind it. */}
@@ -1224,8 +1276,8 @@ export function App() {
             search: () => setSearch(true),
             look: (l) => chooseTheme(l),
             team: planLimits(planNow(workspace)).team,
-            newAgent: () => (navigate({ kind: "agents" }), setAgentSel("new")),
-            invite: () => (askPage("invite"), navigate({ kind: "people" })),
+            ...(isLocal() ? {} : { newAgent: () => (navigate({ kind: "agents" }), setAgentSel("new")), invite: () => (askPage("invite"), navigate({ kind: "people" })) }),
+            local: isLocal(),
           }))}
           onClose={() => setPalette(false)}
         />

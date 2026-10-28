@@ -119,7 +119,7 @@ export function CodeBlock({
             {filename}
           </span>
         ) : null}
-        <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/55">
+        <span className="text-[11px] font-medium normal-case tracking-normal text-muted-foreground/55">
           {language}
         </span>
         <span
@@ -158,8 +158,8 @@ export function CodeBlock({
 
       <div
         ref={viewportRef}
-        role={streaming ? "log" : undefined}
-        aria-live={streaming ? "polite" : undefined}
+        // No live region of its own: it sits in the conversation's log, which already announces what arrives; a second one
+        // read the streaming code out fragment by fragment, over the reply (2026-10-27 audit).
         className="scrollbar-hide overflow-auto border-t border-foreground/[0.06] py-2"
         style={{ maxHeight }}
       >

@@ -1,3 +1,4 @@
+import { refusal } from "../own-plan.js";
 import { randomBytes } from "node:crypto";
 import { engineName, ENGINE_TOOLS, SESSION_LANES, hostOnlyYes, isEngineEffort, effortLevelsOf, liveMachine, MAIN_LANE, type EngineEffort, type EngineTool, type ActorRef, type AgentSnapshot, type Attachment, type ControlMode, type EventBody, type Lane, type LaneControl, type LaneTrigger, type LinkRole, type PolicyPatch, type Role, type Handoff, type RepoCall, type SessionOptionsPatch, type Thinking, EFFORT_LEVELS } from "../types.js";
 import { canDriveLane, driverOf, laneHeld, laneOf, meshOf, mergeOptions, pendingFor, roleOf, runOf, signoffStatus, type SessionState, effortResets } from "./projection.js";
@@ -12,7 +13,7 @@ import { feedbackText, fromWriter, unseen, type PrComment } from "../pr-feedback
 import { checksText, type CheckFailure } from "../pr-checks.js";
 
 export type Command =
-  | { type: "instruct"; text: string; lane?: string; /** From an app on the person's behalf (app.ts postMessage): its turn is capped (Security R3). */ via?: unknown; interrupt?: boolean; attachments?: Attachment[]; handoff?: { fromLane?: string; reason?: string; carried?: unknown }; approval?: { id?: unknown; approve?: unknown }; replaces?: unknown }
+  | { type: "instruct"; text: string; lane?: string; /** A reply in a side thread on this earlier message (its seq). */ thread?: unknown; /** From an app on the person's behalf (app.ts postMessage): its turn is capped (Security R3). */ via?: unknown; interrupt?: boolean; attachments?: Attachment[]; handoff?: { fromLane?: string; reason?: string; carried?: unknown }; approval?: { id?: unknown; approve?: unknown }; replaces?: unknown }
   | { type: "suggest"; text: string; lane?: string; attachments?: Attachment[]; at?: { call: string; step: string } }
   /** To the people here, not an agent: an aside no agent reads. */
   | { type: "say"; text: string; lane?: string }
@@ -53,7 +54,7 @@ export type Command =
   | { type: "mesh.pause"; on: boolean }
   /** A person's say over a task on the board, from the team's list: hand it to someone else, try it again, send it back, drop it. */
   | { type: "board.task"; id: string; action: "reassign" | "retry" | "sendback" | "cancel"; to?: string; note?: string }
-  | { type: "lead.set"; lane: string | null }
+  | { type: "lead.set"; lane: string | null; /** Friday's own pick, said as such (types.ts lead.set). */ auto?: boolean }
   /** A hub (hubs.ts): plan the work for several agents at once, approve the plan as changed, or call it off. */
   | { type: "hub.plan"; text: string }
   | { type: "hub.approve"; id: string; tasks?: { id: string; tool?: EngineTool }[] }
@@ -331,6 +332,12 @@ export class SessionCore {
           if (target.actor.id !== m.id && !owner && laneDriver?.id !== m.id) return deny("change someone else's message");
           replaces = seq;
         }
+        // A coding tool on its host's own plan takes its host's work alone (own-plan.ts): anyone else is told so, and what they can
+        // do instead, whatever their role or whether they hold the wheel. Saying no to what it asks runs nothing, so that stays open.
+        if (!(cmd.approval && cmd.approval.approve !== true)) {
+          const notTheirs = refusal(state.engines[lane], m.id, m.name);
+          if (notTheirs) return fail(notTheirs);
+        }
         // Somebody who may not steer this agent is told that, and pointed at the thing they may do. The driver check further down would
         // otherwise say "nobody is driving" to a viewer, as if it were something they could fix.
         if (laneDriver?.id !== m.id && !canDriveLane(state, m.id, lane)) {
@@ -353,9 +360,12 @@ export class SessionCore {
         const notYours = approval?.approve ? hostsYes(state, lane, m.id) : null;
         if (notYours) return fail(notYours);
         const answered = approval ? `answered:${sid}:${approval.id}` : "";
+        // A side thread's root: an earlier message in this session, by its seq.
+        const root = Number(cmd.thread);
+        const thread = Number.isInteger(root) && root > 0 ? { root } : undefined;
         if (answered && !(await claimOnce(answered))) return fail("That request was already answered.");
         const r = await append(
-          { type: "instruction", text, interrupt, ...withMentions(text), ...(cmd.via === "api" ? { via: "api" as const } : {}), ...(attachments.length ? { attachments } : {}), ...(handoff ? { handoff } : {}), ...(approval ? { approval } : {}), ...(replaces !== undefined ? { replaces } : {}) },
+          { type: "instruction", text, interrupt, ...withMentions(text), ...(cmd.via === "api" ? { via: "api" as const } : {}), ...(attachments.length ? { attachments } : {}), ...(handoff ? { handoff } : {}), ...(approval ? { approval } : {}), ...(replaces !== undefined ? { replaces } : {}), ...(thread ? { thread } : {}) },
           { expectDriver: m.id, bumpEpoch: interrupt && laneRun.status === "running" },
         );
         if (!r.ok && answered) await release(answered);
@@ -1237,7 +1247,7 @@ export class SessionCore {
         const lane = cmd.lane === null || cmd.lane === undefined ? null : String(cmd.lane);
         if (lane !== null && lane !== MAIN_LANE && !state.lanes.some((l) => l.id === lane)) return fail("That agent isn't in this session.");
         if ((state.lead ?? null) === lane) return ok(state.lastSeq);
-        const r = await append({ type: "lead.set", lane });
+        const r = await append({ type: "lead.set", lane, ...(cmd.auto === true ? { auto: true as const } : {}) });
         return r.ok ? ok(r.seq) : fail("Couldn't change which agent leads.");
       }
 

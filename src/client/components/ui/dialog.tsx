@@ -6,6 +6,7 @@ import { XIcon } from "lucide-react"
 import { Dialog as DialogPrimitive } from "radix-ui"
 
 import { Button } from "@/components/ui/button"
+import { surfaceOpen } from "@/ui"
 
 function Dialog({
   ...props
@@ -51,6 +52,7 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  onEscapeKeyDown,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
@@ -65,6 +67,12 @@ function DialogContent({
           className
         )}
         {...props}
+        // Escape with a menu or picker open inside the dialog (ui.tsx useDismiss) closes that one, not the dialog and what was
+        // typed in it (2026-10-27 audit: Escape in the New teammate dialog's tool picker closed the whole dialog).
+        onEscapeKeyDown={(e) => {
+          if (surfaceOpen()) e.preventDefault()
+          onEscapeKeyDown?.(e)
+        }}
       >
         {children}
         {showCloseButton && (

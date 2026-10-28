@@ -283,3 +283,60 @@ test("a loose change set said again takes the earlier card's place, per lane", (
   const after = group([ev(1, diff("a.ts")), ev(2, msg()), ev(3, { type: "run.ended", outcome: "done" }), ev(4, { type: "instruction", text: "x", interrupt: false }), ev(5, diff("z.ts"))], false);
   assert.equal(after.filter((i) => i.kind === "event" && i.ev.body.type === "agent.diff").length, 2);
 });
+
+test("a lane since taken away keeps its name from the log: never \"Agent\" in what was said while it was there", async () => {
+  const { agentNameFor, laneNamesFrom } = await import("../src/client/Activity.js");
+  const added = { seq: 1, ts: 1, actor: { id: "u", name: "Arun", kind: "human" }, lane: "main", body: { type: "lane.added", lane: { id: "lane-juno", name: "Juno", agent: null, control: "open", controlMode: "open", trigger: "manual" } } } as unknown as SessionEvent;
+  const renamed = { seq: 2, ts: 2, actor: { id: "u", name: "Arun", kind: "human" }, lane: "main", body: { type: "lane.renamed", laneId: "lane-pip", name: "Pip" } } as unknown as SessionEvent;
+  laneNamesFrom([added, renamed]);
+  const state = { engines: {}, lanes: [], options: {} } as unknown as Parameters<typeof agentNameFor>[0];
+  assert.equal(agentNameFor(state, "lane-juno"), "Juno");
+  assert.equal(agentNameFor(state, "lane-pip"), "Pip");
+  assert.equal(agentNameFor(state, "never-seen"), "Agent");
+});
+
+test("every kind of event is drawn in the feed or left out of it: one drawn as nothing would still cut a run in two", async () => {
+  const { readFileSync } = await import("node:fs");
+  const types = readFileSync(new URL("../src/types.ts", import.meta.url), "utf8");
+  const union = types.slice(types.indexOf("export type EventBody"));
+  const all = new Set([...union.slice(0, union.indexOf("\n\n")).matchAll(/\{ type: "([\w.]+)"/g)].map((m) => m[1]!));
+  const src = readFileSync(new URL("../src/client/Activity.tsx", import.meta.url), "utf8");
+  const between = (from: string, to: string) => {
+    const i = src.indexOf(from);
+    return src.slice(i, src.indexOf(to, i));
+  };
+  const drawn = new Set([...between("const EventItem = memo(function EventItem", "\n});").matchAll(/case "([\w.]+)"/g)].map((m) => m[1]!));
+  const left = new Set([...between("const HIDDEN = new Set<string>([", "]);").matchAll(/"([\w.]+)"/g), ...between("const QUIET = new Set<string>([", "]);").matchAll(/"([\w.]+)"/g)].map((m) => m[1]!));
+  assert.ok(all.size > 100, "the event kinds were read");
+  assert.deepEqual([...all].filter((t) => !drawn.has(t) && !left.has(t)), [], "drawn by EventItem, or in HIDDEN");
+  // A reaction on an answer doesn't split the run it falls in.
+  const r = (seq: number, body: EventBody) => ({ seq, ts: seq, actor: { id: "u", name: "Arun", kind: "human" }, body }) as SessionEvent;
+  const items = group([ev(1, { type: "agent.message", text: "One", toolCalls: [] }), r(2, { type: "message.reacted", seq: 1, reaction: "up" } as unknown as EventBody), ev(3, { type: "agent.message", text: "Two", toolCalls: [] })], false);
+  assert.equal(items.length, 1, "one block");
+});
+
+test("a message an agent has answered is never \"queued\": a run it started counts as reading it, delivery logged or not", async () => {
+  const { deliveredIn, stillPending, waitsOnPerson, isLongMessage } = await import("../src/client/Activity.js");
+  const asked = { seq: 5, ts: 5, actor: { id: "u", name: "Arun", kind: "human" }, lane: "main", body: { type: "instruction", text: "Fix it", interrupt: false } } as unknown as SessionEvent;
+  const started = { seq: 6, ts: 6, actor: { id: "a", name: "Claude Code", kind: "agent" }, lane: "main", body: { type: "run.started", causedBy: 5 } } as unknown as SessionEvent;
+  const read = deliveredIn([asked, started]);
+  assert.ok(read.has(5));
+  // The session's queue still has it (no delivery was logged), and the client doesn't take that for waiting.
+  const state = { pendingInstructions: [5, 7], lanePending: {}, run: { status: "running" }, laneRuns: {}, openQuestions: {}, approvals: {} } as unknown as Parameters<typeof stillPending>[0];
+  assert.deepEqual(stillPending(state, "main", read), [7]);
+  // A turn stopped on a question waits on the person: the feed, the queue and the box all say so.
+  assert.equal(waitsOnPerson(state, "main"), false);
+  assert.equal(waitsOnPerson({ ...state, openQuestions: { main: { to: "u" } } } as never, "main"), true);
+  assert.equal(waitsOnPerson({ ...state, run: { status: "waiting_for_human" } } as never, "main"), true);
+  // A long message folds to its first lines.
+  assert.equal(isLongMessage("short"), false);
+  assert.equal(isLongMessage("x".repeat(601)), true);
+  assert.equal(isLongMessage(Array.from({ length: 12 }, () => "line").join("\n")), true);
+});
+
+test("a commit is held while any run in the session goes, as the server holds it", async () => {
+  const { commitWaits } = await import("../src/client/Ship.js");
+  assert.equal(commitWaits({ run: { status: "idle" }, laneRuns: { a: { status: "idle" } } } as never), false);
+  assert.equal(commitWaits({ run: { status: "idle" }, laneRuns: { a: { status: "running" } } } as never), true);
+  assert.equal(commitWaits({ run: { status: "running" }, laneRuns: {} } as never), true);
+});

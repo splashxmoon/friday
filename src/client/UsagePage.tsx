@@ -204,7 +204,7 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
                 <h3 className="mt-0 mb-2 text-[13px] font-semibold text-[var(--ink)]">By agent</h3>
                 <div className={cn(surface, "overflow-x-auto")}>
                   <div className="min-w-[640px]" role="table" aria-label="Tokens by agent">
-                    <div className={cn(ROW, "border-b border-[var(--border)] py-2 text-[11.5px] font-medium text-[var(--text-muted)]")} role="row">
+                    <div className={cn(ROW, "border-b border-[var(--border)] py-2 text-[12px] font-medium text-[var(--text-muted)]")} role="row">
                       <span role="columnheader">Agent</span>
                       <span role="columnheader" className="text-right">Turns</span>
                       <span role="columnheader" className="text-right">Read fresh</span>
@@ -225,7 +225,7 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
                           <span role="cell" className="text-right">{x.turns ? shortTokens(x.cached) : "—"}</span>
                           <span role="cell" className="text-right">{x.turns ? shortTokens(x.output) : "—"}</span>
                           <span role="cell" className={cn("text-right", x.turns && "font-semibold text-[var(--ink)]")}>{x.turns ? shortTokens(sum(x)) : "—"}</span>
-                          <span role="cell" className="truncate text-[12.5px] text-[var(--text-muted)]">
+                          <span role="cell" className="truncate text-[13px] text-[var(--text-muted)]">
                             {solo && t === "friday" ? "—" : limitNow(t, limits)}
                           </span>
                         </div>
@@ -240,7 +240,7 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
                   Tokens saved
                   {data.recent.length > 0 && <span className="font-normal tabular-nums text-[var(--text-muted)]">{data.recent.length}</span>}
                 </h3>
-                <p className="mt-0 mb-3 max-w-[70ch] text-[12.5px] leading-relaxed text-[var(--text-muted)]">
+                <p className="mt-0 mb-3 max-w-[70ch] text-[13px] leading-relaxed text-[var(--text-muted)]">
                   When an agent joins or takes over, Friday hands it the work so far instead of starting from scratch. Saved is what that work cost, minus what was handed over. Cache re-reads don't count.
                 </p>
                 {data.recent.length === 0 ? (

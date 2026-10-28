@@ -47,3 +47,37 @@ test("on this computer, automations are made, listed, changed and removed, and o
   assert.equal(run.status, "failed");
   assert.match(run.note ?? "", /coding tools/);
 });
+
+test("on this computer, an automation's run is marked done when its session's run ends, and \"an agent finishes\" starts the one watching (2026-10-27 QA)", async (t) => {
+  // No computer to start a tool on: a run that starts waits for one, rather than starting a real coding tool here.
+  process.env.FRIDAY_LOCAL_RUNNER = "0";
+  const { createApp } = await import("../src/app.js");
+  const { localKV } = await import("../src/local/kv.js");
+  const { NO_MODELS } = await import("../src/local/no-models.js");
+  const home = await mkdtemp(path.join(tmpdir(), "friday-autos-end-"));
+  const kv = await localKV(home);
+  const app = await createApp({ port: 0, redisUrl: "", prefix: "friday:", secret: "s", driverGraceMs: 15_000, llm: NO_MODELS, dataDir: path.join(home, "uploads"), local: { redis: kv.redis, sub: kv.sub, user: { id: "local", name: "Me" } } });
+  t.after(async () => (await app.close(), await kv.close(), await rm(home, { recursive: true, force: true })));
+  const call = async <T,>(p: string, method = "GET", json?: unknown): Promise<T> => {
+    const r = await fetch(`${app.url}${p}`, { method, headers: { "Content-Type": "application/json", "x-friday-local": "1" }, ...(json === undefined ? {} : { body: JSON.stringify(json) }) });
+    const text = await r.text();
+    assert.ok(r.ok, `${method} ${p}: ${r.status} ${text}`);
+    return JSON.parse(text) as T;
+  };
+  type Run = { id: string; status: string };
+  const { sessionId } = await call<{ sessionId: string }>("/api/sessions", "POST", { title: "Nightly run" });
+  const { automation: nightly } = await call<{ automation: { id: string } }>("/api/automations", "POST", { name: "Nightly tests", does: "Run the tests.", who: { tool: "codex" } });
+  // The session is that automation's run, as running it makes one.
+  await kv.redis.lpush(`friday:automation-runs:local:${nightly.id}`, JSON.stringify({ id: "r1", at: Date.now(), trigger: "Run now", status: "running", sid: sessionId }));
+  await kv.redis.set(`friday:automation-run:${sessionId}`, JSON.stringify({ ws: "local", id: nightly.id, run: "r1" }));
+  const { automation: after } = await call<{ automation: { id: string } }>("/api/automations", "POST", { name: "Then review", does: "Review what it did.", when: { kind: "session", sessionId, on: "finished" }, who: { tool: "claude" } });
+
+  await app.store.append(sessionId, { id: "agent", name: "Codex", kind: "agent" }, { type: "run.ended", outcome: "done" });
+  const until = async (p: () => Promise<boolean>) => {
+    for (let i = 0; i < 200 && !(await p()); i++) await new Promise((r) => setTimeout(r, 10));
+  };
+  await until(async () => (await call<{ runs: Run[] }>(`/api/automations/${nightly.id}/runs`)).runs[0]?.status === "done");
+  assert.equal((await call<{ runs: Run[] }>(`/api/automations/${nightly.id}/runs`)).runs[0]?.status, "done", "Done, not Running for good");
+  await until(async () => (await call<{ runs: Run[] }>(`/api/automations/${after.id}/runs`)).runs.length > 0);
+  assert.equal((await call<{ runs: Run[] }>(`/api/automations/${after.id}/runs`)).runs.length, 1, "the one watching for an agent to finish started");
+});

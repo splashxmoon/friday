@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } 
 import { CircleDotIcon, ExternalLinkIcon, MessageSquareIcon, SearchIcon, XIcon } from "lucide-react";
 import { issueBrief, issueMatches, issueStanding, type GithubIssues, type InboxIssue, type LinearIssues } from "../issues.js";
 import { api } from "./api.js";
+import { isLocal } from "./edition.js";
 import { machineError } from "./GitHubConnect.js";
 import { hostApi } from "./local.js";
 import { md } from "./markdown.js";
@@ -41,7 +42,11 @@ export function useIssues(identity: Identity, enabled: boolean, n: number): Issu
     let live = true;
     setBusy(true);
     const gh = hostApi<GithubIssues>(identity, "/api/runner/issues").catch((e) => ({ available: false, reason: machineError(e), assigned: [], authored: [] }) as GithubIssues);
-    const li = api<LinearIssues>(identity, "/api/issues/linear").catch((e) => ({ available: false, reason: e instanceof Error ? e.message : String(e), issues: [] }) as LinearIssues);
+    // Linear is the paid edition's (its server has the route): the open-source edition doesn't ask, so it doesn't print "Not
+    // found" over the GitHub issues it does have (2026-10-27 audit).
+    const li = isLocal()
+      ? Promise.resolve({ available: false, reason: "", issues: [] } as unknown as LinearIssues)
+      : api<LinearIssues>(identity, "/api/issues/linear").catch((e) => ({ available: false, reason: e instanceof Error ? e.message : String(e), issues: [] }) as LinearIssues);
     void Promise.all([gh, li]).then(async ([github, linear]) => {
       if (!live) return;
       const keys = [...github.assigned, ...github.authored, ...linear.issues].map((i) => i.key);
@@ -195,7 +200,7 @@ function IssueRow({ issue: i, on, working, onPick }: { issue: InboxIssue; on: bo
         <Dot state={working ? "working" : i.stateType === "started" ? "needs" : "idle"} className="mt-[5px]" title={working ? "In a session" : i.state} />
         <span className="line-clamp-2 min-w-0 flex-1 text-[13px] leading-snug font-medium text-[var(--ink)]">{i.title}</span>
       </span>
-      <span className="flex min-w-0 items-center gap-1.5 pl-[21px] text-[11.5px] text-[var(--text-muted)]">
+      <span className="flex min-w-0 items-center gap-1.5 pl-[21px] text-[12px] text-[var(--text-muted)]">
         <SourceMark source={i.source} />
         <span className="truncate">
           {i.source === "github" && i.repo ? `${i.repo.split("/")[1]} #${i.number}` : i.ref}
@@ -205,7 +210,7 @@ function IssueRow({ issue: i, on, working, onPick }: { issue: InboxIssue; on: bo
       </span>
       {(standing || working || i.labels.length > 0) && (
         <span className="flex min-w-0 items-center gap-2 pl-[21px]">
-          <span className={cn("min-w-0 truncate text-[11.5px] font-medium", working ? "text-[var(--dass-live)]" : "text-[var(--text-muted)]")}>{working ? "Friday is on it" : standing}</span>
+          <span className={cn("min-w-0 truncate text-[12px] font-medium", working ? "text-[var(--dass-live)]" : "text-[var(--text-muted)]")}>{working ? "Friday is on it" : standing}</span>
           <Labels labels={i.labels} max={2} className="ml-auto justify-end" />
         </span>
       )}
@@ -224,12 +229,12 @@ function IssuePane({ issue: i, started, onWork }: { issue: InboxIssue; started?:
           </h2>
           <div className="flex shrink-0 items-center gap-1">
             {started ? (
-              <Button size="sm" className="h-8 text-[12.5px]" onClick={() => (location.href = started.link)}>
+              <Button size="sm" className="h-8 text-[13px]" onClick={() => (location.href = started.link)}>
                 Open the session
               </Button>
             ) : (
               <Tip label="A new session, its box filled with this issue; the agent proposes a plan first" keys="↵">
-                <Button size="sm" className="h-8 text-[12.5px]" onClick={onWork}>
+                <Button size="sm" className="h-8 text-[13px]" onClick={onWork}>
                   Start work
                 </Button>
               </Tip>
@@ -241,7 +246,7 @@ function IssuePane({ issue: i, started, onWork }: { issue: InboxIssue; started?:
             </Tip>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[12.5px] text-[var(--text-muted)]">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[13px] text-[var(--text-muted)]">
           <span className="inline-flex items-center gap-1.5">
             <SourceMark source={i.source} /> {i.ref}
           </span>
@@ -264,14 +269,14 @@ function IssuePane({ issue: i, started, onWork }: { issue: InboxIssue; started?:
           <Labels labels={i.labels} max={8} />
         </div>
         {started && (
-          <p className="m-0 rounded-lg border border-[var(--border)] bg-[var(--panel)] px-3 py-2 text-[12.5px] text-[var(--ink-2)]">
+          <p className="m-0 rounded-lg border border-[var(--border)] bg-[var(--panel)] px-3 py-2 text-[13px] text-[var(--ink-2)]">
             <span className="text-[var(--dass-live)]">Friday is on it</span> in “{started.title || "a session"}”.
           </p>
         )}
       </header>
       <section className="flex flex-col gap-3">
         <h3 className="m-0 text-[13px] font-semibold text-[var(--ink)]">What it says</h3>
-        {body ? <div className="md text-[13.5px]" dangerouslySetInnerHTML={{ __html: md(body) }} /> : <p className="m-0 text-[13px] text-[var(--text-muted)]">Just the title.</p>}
+        {body ? <div className="md text-[14px]" dangerouslySetInnerHTML={{ __html: md(body) }} /> : <p className="m-0 text-[13px] text-[var(--text-muted)]">Just the title.</p>}
       </section>
     </div>
   );

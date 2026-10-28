@@ -101,6 +101,16 @@ function AnswerCode({ code, language, incomplete }: { code: string; language: st
   );
 }
 
+/** Whether a picture or video named in an answer shows under its name, when a build turns it on (MediaChip). */
+const chips = { on: false };
+/**
+ * A picture or video named in the answer shows under its name, a block of its own, so the full stop the sentence ends with right
+ * after the name fell under the picture and opened the next line (". The research is in …", 2026-10-27 design review). Where
+ * they show, the one mark of punctuation straight after a picture's or video's name is left out: the picture closes the sentence.
+ */
+export const mediaText = (md: string): string => (chips.on ? md.replace(/(`[^`\n]+\.(?:png|jpe?g|gif|webp|avif|svg|mp4|mov|webm|m4v)`)[.,;:](?=\s|$)/gi, "$1") : md);
+
+
 type CodeProps = { node?: unknown; className?: string; children?: ReactNode; "data-block"?: string };
 
 function Code({ node: _node, className, children, ...rest }: CodeProps) {

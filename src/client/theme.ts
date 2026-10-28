@@ -284,7 +284,16 @@ export function applyTheme(theme: CustomTheme | null, keep = true): void {
     for (const [k, v] of Object.entries(theme.vars)) root.style.setProperty(k, v);
     root.classList.toggle("dark", theme.dark);
     root.classList.add("themed");
-  } else root.classList.remove("themed");
+  } else {
+    root.classList.remove("themed");
+    // Back to Friday's own look, light or dark as chosen (or as the computer is): a theme taken off left its own darkness on
+    // the page, white text on white where it had been dark (2026-10-27 audit).
+    let saved: string | null = null;
+    try {
+      saved = localStorage.getItem("mpa.theme");
+    } catch {}
+    root.classList.toggle("dark", saved === "dark" || saved === "light" ? saved === "dark" : !matchMedia("(prefers-color-scheme: light)").matches);
+  }
   if (keep) {
     try {
       if (theme) localStorage.setItem(THEME_KEY, JSON.stringify(theme));

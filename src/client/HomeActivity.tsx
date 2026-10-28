@@ -45,8 +45,17 @@ function useDays() {
   const [days, setDays] = useState<Day[] | null>(null);
   useEffect(() => {
     let live = true;
-    // The daily counts (tool-usage.ts): kept a year, where the detail behind the Usage page is kept a hundred days.
-    fetch("/api/workspace/tool-activity?days=371", { credentials: "same-origin" })
+    // The daily counts (tool-usage.ts): kept a year, where the detail behind the Usage page is kept a hundred days. In this
+    // computer's own days, which the grid ends on: told in UTC's, an evening west of it landed on tomorrow, past the grid's end
+    // (2026-10-27 QA).
+    const tz = (() => {
+      try {
+        return Intl.DateTimeFormat().resolvedOptions().timeZone ?? "";
+      } catch {
+        return "";
+      }
+    })();
+    fetch(`/api/workspace/tool-activity?days=371${tz ? `&tz=${encodeURIComponent(tz)}` : ""}`, { credentials: "same-origin" })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error("no"))))
       .then((b: { days: Day[] }) => live && setDays(b.days), () => live && setDays([]));
     return () => void (live = false);
@@ -60,7 +69,6 @@ export type Day = { day: string; turns: number };
 /** Days to cells: whole weeks, Sunday at the top, today in the last column; the level is a quarter of the busiest day. */
 export function heatmap(days: Day[], today = new Date()): { day: string; turns: number; level: 0 | 1 | 2 | 3 | 4 }[][] {
   const by = new Map(days.map((d) => [d.day, d.turns]));
-  const peak = Math.max(1, ...by.values());
   const end = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
   const start = new Date(end);
   start.setUTCDate(end.getUTCDate() - end.getUTCDay() - (WEEKS - 1) * 7);
@@ -68,9 +76,11 @@ export function heatmap(days: Day[], today = new Date()): { day: string; turns: 
   for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
     if (d.getUTCDay() === 0) cols.push([]);
     const key = d.toISOString().slice(0, 10);
-    const turns = by.get(key) ?? 0;
-    cols.at(-1)!.push({ day: key, turns, level: turns === 0 ? 0 : (Math.min(4, Math.ceil((turns / peak) * 4)) as 1 | 2 | 3 | 4) });
+    cols.at(-1)!.push({ day: key, turns: by.get(key) ?? 0, level: 0 });
   }
+  // Shaded against the busiest day in the grid, not one sent from past its end.
+  const peak = Math.max(1, ...cols.flat().map((c) => c.turns));
+  for (const c of cols.flat()) c.level = c.turns === 0 ? 0 : (Math.min(4, Math.ceil((c.turns / peak) * 4)) as 1 | 2 | 3 | 4);
   return cols;
 }
 
@@ -147,7 +157,9 @@ export function HomeActivity({ identity, recents, onOpen, onBoard }: { identity:
         </section>
       )}
 
-      {days !== null && (
+      {/* The year once there is one to show: a first morning's grid of empty squares and "0 turns" read as a broken chart. Counted
+          from the grid's own cells, not every day sent: a day past its end showed a grid of nothing (2026-10-27 QA). */}
+      {days !== null && total > 0 && (
         <section className="ha-heat" aria-label="Your agents' work over the last year">
           <div className="ha-head">
             <h2>Your year</h2>

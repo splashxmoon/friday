@@ -67,13 +67,14 @@ export function PageTabs<T extends string>({
 }) {
   return (
     <Tabs value={value} onValueChange={(v) => onChange(v as T)} className={cn("gap-0", className)}>
-      <TabsList aria-label={label} className="h-8 group-data-[orientation=horizontal]/tabs:h-8 gap-0.5 rounded-lg bg-[var(--hover)] p-[3px]">
+      {/* Never wider than its column: on a phone the last tab ran off the screen ("Only Run now", 2026-10-27 audit); it scrolls. */}
+      <TabsList aria-label={label} className="h-8 group-data-[orientation=horizontal]/tabs:h-8 max-w-full justify-start gap-0.5 overflow-x-auto rounded-lg bg-[var(--hover)] p-[3px] [scrollbar-width:none]">
         {options.map((o) => {
           const trigger = (
             <TabsTrigger
               key={o.value}
               value={o.value}
-              className="h-[26px] flex-none gap-1.5 rounded-md px-2.5 text-[12.5px] font-medium text-[var(--text-muted)] shadow-none transition-colors duration-[var(--dass-fast)] hover:text-[var(--ink)] aria-selected:border-transparent aria-selected:bg-[var(--bg)] aria-selected:text-[var(--ink)] aria-selected:shadow-[0_1px_3px_rgb(0_0_0/.12),0_0_0_1px_var(--border)] dark:aria-selected:border-transparent dark:aria-selected:bg-[var(--bg)]"
+              className="h-[26px] flex-none gap-1.5 rounded-md px-2.5 text-[13px] font-medium text-[var(--text-muted)] shadow-none transition-colors duration-[var(--dass-fast)] hover:text-[var(--ink)] aria-selected:border-transparent aria-selected:bg-[var(--bg)] aria-selected:text-[var(--ink)] aria-selected:shadow-[0_1px_3px_rgb(0_0_0/.12),0_0_0_1px_var(--border)] dark:aria-selected:border-transparent dark:aria-selected:bg-[var(--bg)]"
             >
               {o.label}
             </TabsTrigger>

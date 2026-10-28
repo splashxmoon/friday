@@ -50,6 +50,25 @@ export const KEEP_S = 100 * 86_400;
 export const DAILY_KEEP_S = 400 * 86_400;
 const RECENT = 40;
 const dayOf = (t = Date.now()) => new Date(t).toISOString().slice(0, 10);
+/** A day "YYYY-MM-DD" moved by `n` days, on the calendar. */
+const shiftDay = (day: string, n: number) => {
+  const [y, m, d] = day.split("-").map(Number);
+  return new Date(Date.UTC(y!, m! - 1, d! + n)).toISOString().slice(0, 10);
+};
+/** The day it is at a time in an IANA time zone, as "YYYY-MM-DD"; UTC for a zone this computer doesn't know, or none. */
+export function dayInZone(tz?: string): (t: number) => string {
+  let f: Intl.DateTimeFormat;
+  try {
+    f = new Intl.DateTimeFormat("en-US", { timeZone: tz && tz.length <= 64 ? tz : "UTC", year: "numeric", month: "2-digit", day: "2-digit" });
+  } catch {
+    return dayOf;
+  }
+  return (t) => {
+    const p = f.formatToParts(new Date(t));
+    const get = (k: string) => p.find((x) => x.type === k)?.value ?? "";
+    return `${get("year")}-${get("month")}-${get("day")}`;
+  };
+}
 const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.round(v) : 0);
 
 /** A token count as people read it: 950, 12.4k, 3.1M. */
@@ -119,6 +138,8 @@ export class ToolUsage {
         .hincrby(k, `${tool}:turns`, 1)
         .expire(k, KEEP_S)
         .hincrby(daily, tool, 1)
+        // And by the hour it came in (UTC), so the year can be told in the person's own days (daily).
+        .hincrby(daily, `h:${new Date().getUTCHours()}`, 1)
         .expire(daily, DAILY_KEEP_S)
         .exec();
     } catch {
@@ -162,18 +183,38 @@ export class ToolUsage {
   }
 
   /**
-   * Turns each day for the last `days` days, oldest first: the daily counts, which outlast the detail. A day from before the
-   * counts were kept is read from its detail, while that is still there.
+   * Turns each day for the last `days` days in the time zone `tz` (an IANA name; UTC when absent or unknown), oldest first, the
+   * last being today there: the daily counts, which outlast the detail. They are kept by UTC day with the hour each turn came
+   * in, and each hour is put on the day it was there (2026-10-27 QA: west of UTC, an evening's work landed on tomorrow and the
+   * home screen's year showed nothing). A turn counted before the hours were kept, or a day from before the counts were (read
+   * from its detail while that is still there), stays on its UTC day.
    */
-  async daily(ws: string, days = 371): Promise<{ day: string; turns: number }[]> {
-    const dates = Array.from({ length: days }, (_, i) => dayOf(Date.now() - (days - 1 - i) * 86_400_000));
+  async daily(ws: string, days = 371, tz?: string, now = Date.now()): Promise<{ day: string; turns: number }[]> {
+    const dayIn = dayInZone(tz);
+    const local = Array.from({ length: days }, (_, i) => shiftDay(dayIn(now), i - (days - 1)));
+    // The UTC days that hold those: a day either side of them.
+    const utc = Array.from({ length: days + 2 }, (_, i) => shiftDay(local[0]!, i - 1));
     const read = (k: string) => this.redis.hgetall(k).catch(() => ({}) as Record<string, string>);
-    const [counts, detail] = await Promise.all([Promise.all(dates.map((d) => read(this.dailyKey(ws, d)))), Promise.all(dates.map((d, i) => (i >= days - KEEP_S / 86_400 ? read(this.key(ws, d)) : ({} as Record<string, string>))))]);
-    return dates.map((day, i) => {
+    const counts = await Promise.all(utc.map((d) => read(this.dailyKey(ws, d))));
+    const kept = dayOf(now - KEEP_S * 1000);
+    const detail = await Promise.all(utc.map((d, i) => (!Object.keys(counts[i]!).length && d >= kept ? read(this.key(ws, d)) : ({} as Record<string, string>))));
+    const turns = new Map(local.map((d) => [d, 0]));
+    const add = (day: string, n: number) => turns.has(day) && n > 0 && turns.set(day, turns.get(day)! + n);
+    utc.forEach((day, i) => {
       const c = counts[i]!;
-      const turns = Object.keys(c).length ? USAGE_TOOLS.reduce((sum, t) => sum + (Number(c[t]) || 0), 0) : USAGE_TOOLS.reduce((sum, t) => sum + (Number(detail[i]![`${t}:turns`]) || 0), 0);
-      return { day, turns };
+      const total = Object.keys(c).length ? USAGE_TOOLS.reduce((sum, t) => sum + (Number(c[t]) || 0), 0) : USAGE_TOOLS.reduce((sum, t) => sum + (Number(detail[i]![`${t}:turns`]) || 0), 0);
+      let placed = 0;
+      for (let h = 0; h < 24; h++) {
+        const n = Number(c[`h:${h}`]) || 0;
+        if (!n) continue;
+        // The middle of the hour: in a zone a half or quarter hour off UTC, an hour spans two of its days, and this is the nearer.
+        const [y, m, d] = day.split("-").map(Number);
+        add(dayIn(Date.UTC(y!, m! - 1, d!, h, 30)), n);
+        placed += n;
+      }
+      add(day, total - placed);
     });
+    return local.map((day) => ({ day, turns: turns.get(day)! }));
   }
 
   /**

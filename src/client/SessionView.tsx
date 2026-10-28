@@ -33,6 +33,8 @@ import { joinPath, openIn, preferredEditor } from "./openIn.js";
 import { markdownFileName, sessionMarkdown } from "../session-markdown.js";
 import { Lanes } from "./Lanes.js";
 import { OverlapNotice } from "./Overlap.js";
+import { SubagentsTray } from "./Subagents.js";
+import { subTasksIn } from "./Tasks.js";
 import { RaceDialog } from "./Race.js";
 import type { Overlap } from "../collisions.js";
 import { Avatar, Icon, type IconName } from "./icons.js";
@@ -401,6 +403,7 @@ export function SessionView({
   // The agent in view, one choice for the page (agentFocus.ts): the agent the panels follow, and in a split the column in
   // use. Choosing one that no column shows (⌃4, the palette, ⌘J to another agent) goes back to one chat, on it.
   const focused = useFocusedAgent(sid);
+  let roomLane = "";
   useEffect(() => {
     if (focused !== ALL && focused !== activeLane) setActiveLane(focused);
     if (cols && !cols.includes(focused)) setColumns(sid, null);
@@ -609,6 +612,8 @@ export function SessionView({
 
   // Opening a session that never says hello (the server down, a proxy in the way) showed the skeleton for good: after a while it
   // says so, with the way to try again (Arun, 2026-10-24: UX gaps).
+  // The subagents every agent here has sent off, for the status bar's tray.
+  const subTasks = useMemo(() => subTasksIn(s.events), [s.events]);
   const loading = !s.state || !s.me;
   const [stalled, setStalled] = useState(false);
   useEffect(() => {
@@ -929,7 +934,7 @@ export function SessionView({
         >
           <Workbench
             open={bench}
-            {...(split ? { lane: activeLane } : focused !== ALL ? { lane: focused } : {})}
+            {...(split ? { lane: activeLane } : focused !== ALL ? { lane: focused } : roomLane ? { lane: roomLane } : {})}
             state={state}
             events={s.events}
             identity={identity}
@@ -964,12 +969,19 @@ export function SessionView({
           Outside the session's row, so a panel lying over the chat (which makes the chat inert) leaves them usable. */}
       {/* No "While you were away" card any more (Arun, 2026-10-19: "get rid of this"): the agent rail, the needs-you pill and
           the "New since you looked" line in the chat already say what changed, and the card stood over the work. */}
-      {!replaying && overlaps && overlaps.length > 0 && (
-        <div className="toast-stack">
-          {overlaps && overlaps.length > 0 && <OverlapNotice overlaps={overlaps} {...(onOpenSession ? { onOpen: onOpenSession } : {})} />}
-        </div>
-      )}
-      {focus && (
+      {/* Every agent's subagents in one place, an item in the status bar (Subagents.tsx). */}
+      {focus && !replaying && <SubagentsTray tasks={subTasks} slot={statusSlot} agentOf={(lane) => ({ name: agentNameFor(state, lane), ...(state.engines[lane]?.tool ? { tool: state.engines[lane]!.tool! } : {}) })} />}
+      {/* With a status bar along the foot (Focus), the notice is an item in it that opens upward, never a card over a panel's
+          own controls (2026-10-27 design review); the Classic layout keeps the toast. */}
+      {!replaying && overlaps && overlaps.length > 0 &&
+        (focus && statusSlot ? (
+          <OverlapNotice overlaps={overlaps} slot={statusSlot} {...(onOpenSession ? { onOpen: onOpenSession } : {})} />
+        ) : (
+          <div className="toast-stack">
+            <OverlapNotice overlaps={overlaps} {...(onOpenSession ? { onOpen: onOpenSession } : {})} />
+          </div>
+        ))}
+      {focus &&
         <StatusBar
           state={s.state}
           events={s.events}
@@ -979,7 +991,7 @@ export function SessionView({
           where={<Where state={s.state} sid={sid} invite={invite} send={send} />}
           environment={<EnvironmentButton state={s.state} me={s.me.id} sid={sid} invite={invite} identity={identity} onOpen={(tab) => (setTab(tab), setBench(true), setHistory(false))} />}
         />
-      )}
+      }
       {/* No toast across the foot of the session any more (Arun, 2026-10-23: "get rid of the toast thing that appears in the
           middle of the coding session at the bottom"): it stood over the conversation and the message box. Still said to a
           screen reader, which shows nothing. */}
@@ -1301,9 +1313,15 @@ function TopBar({
     split: { on: boolean; can: boolean; onToggle: () => void };
   };
 }) {
+  let shownTitle = state.title;
+  const named = shownTitle !== state.title;
+  let gear = true;
   const [settings, setSettings] = useState(false);
   const [editing, setEditing] = useState(false);
   const [meterOn, setMeterOn] = useState(() => localStorage.getItem("mpa.meter") === "1");
+  const [tabsEl, setTabsEl] = useState<HTMLElement | null>(null);
+  const tabsRef = useCallback((el: HTMLElement | null) => (agentsSlot?.(el), setTabsEl(el)), [agentsSlot]);
+  useCentredTabs(tabsEl);
   const owner = me.role === "owner";
   const agent = state.options.agent;
   const repo = repoOf(state);
@@ -1327,8 +1345,14 @@ function TopBar({
             onCancel={() => setEditing(false)}
           />
         ) : (
-          <h1 className={owner ? "editable" : ""} title={owner ? `${state.title} (click to rename)` : state.title} onClick={() => owner && setEditing(true)}>
-            {state.title}
+          // Renamed from the keyboard too, where a click renames it (2026-10-27 audit: it couldn't be reached by Tab).
+          <h1
+            className={owner && !named ? "editable" : ""}
+            title={owner && !named ? `${state.title} (click to rename)` : shownTitle}
+            onClick={() => owner && !named && setEditing(true)}
+            {...(owner && !named ? { tabIndex: 0, role: "button", "aria-label": `${state.title}: rename`, onKeyDown: (e: React.KeyboardEvent) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), setEditing(true)) } : {})}
+          >
+            {shownTitle}
           </h1>
         )}
         {/* Only when something needs a person. "Working" and "Idle" were a permanent
@@ -1367,7 +1391,7 @@ function TopBar({
         )}
         </div>
         )}
-        {agentsSlot && <div className="tb-agents" ref={agentsSlot} />}
+        {agentsSlot && <div className="tb-agents" ref={tabsRef} />}
       </div>
   );
   const right = (
@@ -1405,7 +1429,7 @@ function TopBar({
             links in a second button beside it (Arun, 2026-10-24: "get rid of the share button in the header and add the dropdown
             content in the people's dropdown"); on Solo it was the only way to them, so the People panel is there on Solo too. */}
         {/* The local edition's in its place: this session's settings, and the line about Friday Team (SessionMenu). */}
-        {isLocal() && <SessionMenu settings={owner ? <SettingsBody solo state={state} send={send} meter={{ on: meterOn, set: (v) => (setMeterOn(v), localStorage.setItem("mpa.meter", v ? "1" : "0")) }} /> : undefined} />}
+        {isLocal() && gear && <SessionMenu settings={owner ? <SettingsBody solo state={state} send={send} meter={{ on: meterOn, set: (v) => (setMeterOn(v), localStorage.setItem("mpa.meter", v ? "1" : "0")) }} /> : undefined} />}
         {/* One button for the side panel, where the panels are a card to pick from (Workbench), in place of a row of four and a
             "⋯" here (Arun, 2026-10-24: "using this svg icon make it be the side panel button and on the side panel open it will
             have a card with the options for tasks, diff, terminal, etc"). What they hold still shows: the diff's count, a dot while
@@ -1469,6 +1493,63 @@ function TopBar({
       {right}
     </header>
   );
+}
+
+/** Narrowest a title gets for the tabs, and the space either side of them. */
+const TITLE_MIN = 96;
+const TABS_GAP = 20;
+
+/**
+ * The agents' tabs in the middle of the session's header, however long its name: the name gives way, down to its first
+ * words, before the tabs leave the middle (Arun, 2026-10-28: "cap the lenght of the session title so theat the coding tool
+ * tab thing is centered in the header"). A window too narrow for that keeps them where they fall after the name.
+ */
+function useCentredTabs(slot: HTMLElement | null) {
+  useLayoutEffect(() => {
+    const row = slot?.parentElement;
+    if (!slot || !row) return;
+    let frame = 0;
+    const place = () => {
+      frame = 0;
+      const title = row.querySelector<HTMLElement>(":scope > .tb-title");
+      const name = title?.querySelector<HTMLElement>("h1, input");
+      const pane = slot.closest<HTMLElement>(".session-view") ?? document.querySelector<HTMLElement>(".session-view");
+      const bar = slot.firstElementChild as HTMLElement | null;
+      slot.style.left = slot.style.width = "";
+      name?.style.removeProperty("max-width");
+      if (!title || !name || !pane || !bar) return void row.classList.remove("tabs-centred");
+      // Measured as placed: with the tabs out of the row, the name starts at the row's start.
+      row.classList.add("tabs-centred");
+      const p = pane.getBoundingClientRect();
+      const r = row.getBoundingClientRect();
+      const t = title.getBoundingClientRect();
+      const mid = p.left + p.width / 2;
+      const half = Math.min(mid - (t.left + TITLE_MIN + TABS_GAP), r.right - TABS_GAP - mid);
+      if (half < 140) return void row.classList.remove("tabs-centred");
+      slot.style.left = `${mid - half - r.left}px`;
+      slot.style.width = `${half * 2}px`;
+      // What the tabs take now they're placed, and the name stops short of them, less what sits beside it (a status, faces).
+      const parts = [...bar.children].map((c) => c.getBoundingClientRect()).filter((b) => b.width > 0);
+      const start = parts.length ? Math.min(...parts.map((b) => b.left)) : mid;
+      const others = [...title.children].filter((c) => c !== name).map((c) => c.getBoundingClientRect().width).filter((w) => w > 0);
+      const beside = others.reduce((a, w) => a + w + (parseFloat(getComputedStyle(title).columnGap) || 0), 0);
+      name.style.setProperty("max-width", `${Math.max(TITLE_MIN - beside, start - TABS_GAP - t.left - beside)}px`, "important");
+    };
+    const soon = () => void (frame ||= requestAnimationFrame(place));
+    const sizes = new ResizeObserver(soon);
+    for (const el of [row, slot, document.querySelector(".session-view")]) if (el) sizes.observe(el);
+    // A new tab, an agent gone, or the name changed.
+    const changes = new MutationObserver(soon);
+    changes.observe(row, { childList: true, subtree: true, characterData: true });
+    place();
+    return () => {
+      cancelAnimationFrame(frame);
+      sizes.disconnect();
+      changes.disconnect();
+      row.classList.remove("tabs-centred");
+      slot.style.left = slot.style.width = "";
+    };
+  }, [slot]);
 }
 
 /** How long the newest run has taken and what it has cost so far. Opt-in, and only the run: a session total is a number nobody can act on. */

@@ -94,17 +94,37 @@ export const Conversation = ({ className, initial = "smooth", resize = "smooth",
     // The glide down: a quarter of what is left each frame, and it stops the moment the view lets go. Not the browser's
     // smooth scrolling, which runs on to where it was sent and so swallowed a wheel turned up while it was going.
     let frame = 0;
+    /** Whether a frame of the glide has been drawn since it was asked for. */
+    let drew = false;
     const glide = () => {
       frame = 0;
+      drew = true;
       if (!pinned || held) return;
       const gap = gapOf();
       if (gap <= 1) return;
       el.scrollTop += Math.ceil(gap / 4);
       frame = requestAnimationFrame(glide);
     };
+    // A glide only when the end is near and frames are being drawn: more than a screen to go is a jump (a glide of that read as
+    // the feed scrolling by itself), and a page not being drawn (a tab or pane in the background) runs no frames, so a glide
+    // there never moved and the view stayed short of the newest message under the box (2026-10-27 audit: a session opened
+    // 200 to 260px short of its end, its last message under the working line). If the frame doesn't come, the jump does.
+    let late: ReturnType<typeof setTimeout> | 0 = 0;
+    const jump = () => {
+      cancelAnimationFrame(frame);
+      frame = 0;
+      el.scrollTop = el.scrollHeight;
+    };
     const toEnd = (how: "smooth" | "instant") => {
-      if (how === "instant") el.scrollTop = el.scrollHeight;
-      else frame ||= requestAnimationFrame(glide);
+      if (how === "instant" || document.hidden || gapOf() > el.clientHeight) return jump();
+      if (frame) return;
+      drew = false;
+      frame = requestAnimationFrame(glide);
+      clearTimeout(late);
+      late = setTimeout(() => {
+        late = 0;
+        if (!drew && frame && pinned && !held) jump();
+      }, 250);
     };
     const onScroll = () => {
       const top = el.scrollTop;
@@ -138,7 +158,8 @@ export const Conversation = ({ className, initial = "smooth", resize = "smooth",
     const resized = new ResizeObserver(() => {
       if (place()) return;
       const gap = gapOf();
-      if (pinned && !held && gap > 1) toEnd(Date.now() - openedAt < 600 ? behaviour.current.initial : behaviour.current.resize);
+      // Opening lasts until the room has drawn what it folds, pins and loads late (a second and a half), each step a jump.
+      if (pinned && !held && gap > 1) toEnd(Date.now() - openedAt < 1500 ? behaviour.current.initial : behaviour.current.resize);
       setIsAtBottom(pinned || gap <= NEAR_BOTTOM_PX);
     });
     const press = () => (held = true);
@@ -173,6 +194,7 @@ export const Conversation = ({ className, initial = "smooth", resize = "smooth",
       window.removeEventListener("pointercancel", release);
       resized.disconnect();
       cancelAnimationFrame(frame);
+      clearTimeout(late);
     };
   }, []);
 

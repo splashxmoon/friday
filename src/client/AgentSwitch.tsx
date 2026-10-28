@@ -181,7 +181,7 @@ function Switch({ state, me, identity, sid, invite, lane, events = [], notify, o
       // agent or model: the host's runner replaces itself on the same folder and lane.
       await hostApi(identity, "/api/runner/start", {
         method: "POST",
-        body: JSON.stringify({ sid, invite, ...(tool ? { tool } : {}), cwd: engine.cwd, mode: engine.mode, lane, ...(model ? { model } : {}) }),
+        body: JSON.stringify({ sid, invite, ...(tool ? { tool } : {}), cwd: engine.cwd, mode: engine.mode, lane, ...(model ? { model } : {}), ...(engine.shared ? { share: true } : {}) }),
       });
       notify(`Now working with ${tool ? ENGINE_NAMES[tool] : "Friday Code"}${model ? ` · ${model}` : ""}`);
     } catch (e) {

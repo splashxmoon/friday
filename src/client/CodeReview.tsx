@@ -353,7 +353,7 @@ export function CodeReview({
                 {tabRepos.length > 1 && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="sm" aria-label="Which repo" className="h-8 max-w-[150px] border-[var(--border)] bg-[var(--bg)] px-2.5 text-[12.5px] shadow-none">
+                      <Button variant="outline" size="sm" aria-label="Which repo" className="h-8 max-w-[150px] border-[var(--border)] bg-[var(--bg)] px-2.5 text-[13px] shadow-none">
                         <FolderIcon />
                         <span className="truncate">{repo ? repo.split("/")[1] : "All repos"}</span>
                         <ChevronDownIcon className="opacity-60" />
@@ -373,7 +373,7 @@ export function CodeReview({
                 )}
               </div>
               {error && (
-                <p role="alert" className="m-0 border-b border-[var(--border)] px-3 py-2 text-[12.5px] text-[var(--red)]">
+                <p role="alert" className="m-0 border-b border-[var(--border)] px-3 py-2 text-[13px] text-[var(--red)]">
                   {error}
                 </p>
               )}
@@ -531,7 +531,7 @@ const TONE_TEXT: Record<DotState, string> = {
 /** Lines added and taken away: the one place green and red mean what they always mean in a diff. */
 function Diff({ add, del, className }: { add: number; del: number; className?: string }) {
   return (
-    <span className={cn("inline-flex shrink-0 gap-1.5 font-mono text-[11.5px] tabular-nums", className)}>
+    <span className={cn("inline-flex shrink-0 gap-1.5 font-mono text-[12px] tabular-nums", className)}>
       <span className="text-[var(--green)]">+{add}</span>
       <span className="text-[var(--red)]">−{del}</span>
     </span>
@@ -560,7 +560,7 @@ function QueueItem({ pr, kind, on, working, risk, onPick }: { pr: PullRequest; k
         <span className="line-clamp-2 min-w-0 flex-1 text-[13px] leading-snug font-medium text-[var(--ink)]">{pr.title}</span>
         <Diff add={pr.additions} del={pr.deletions} className="mt-px" />
       </span>
-      <span className="flex min-w-0 items-center gap-1.5 pl-[21px] text-[11.5px] text-[var(--text-muted)]">
+      <span className="flex min-w-0 items-center gap-1.5 pl-[21px] text-[12px] text-[var(--text-muted)]">
         {others && pr.avatar && <img className="size-3.5 rounded-full" src={pr.avatar} alt="" />}
         <span className="truncate">
           {pr.repo.split("/")[1]} #{pr.number}
@@ -569,7 +569,7 @@ function QueueItem({ pr, kind, on, working, risk, onPick }: { pr: PullRequest; k
         </span>
       </span>
       <span className="flex min-w-0 items-center gap-2 pl-[21px]">
-        <span className={cn("min-w-0 flex-1 truncate text-[11.5px] font-medium", TONE_TEXT[dotOf(st.tone, kind)])} title={`${sizeOf(pr)} change: ${pr.additions + pr.deletions} lines`}>
+        <span className={cn("min-w-0 flex-1 truncate text-[12px] font-medium", TONE_TEXT[dotOf(st.tone, kind)])} title={`${sizeOf(pr)} change: ${pr.additions + pr.deletions} lines`}>
           {st.text}
           {working?.shepherd && <span className="text-[var(--dass-live)]"> · Friday is on it</span>}
         </span>
@@ -616,7 +616,7 @@ function AutoReview({ tools }: { tools: EngineTool[] }) {
     <div className="flex flex-col gap-2.5 border-t border-[var(--border)] p-3">
       <div className="flex items-center gap-3">
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="flex items-center gap-1.5 text-[12.5px] font-semibold text-[var(--ink)]">
+          <span className="flex items-center gap-1.5 text-[13px] font-semibold text-[var(--ink)]">
             {auto.on && <Dot state="working" />}
             Auto-review
           </span>
@@ -643,10 +643,10 @@ function Load({ prs }: { prs: PullRequest[] }) {
     <div className="flex flex-wrap items-center gap-1.5 border-b border-[var(--border)] px-3 py-2" aria-label="Review requests per person">
       <span className="mr-1 text-[11px] font-medium tracking-[0.06em] text-[var(--text-muted)] uppercase">Review load</span>
       {load.slice(0, 6).map((l) => (
-        <Badge key={l.login} variant="outline" className="h-6 gap-1.5 rounded-full border-[var(--border)] pr-1 pl-1 text-[11.5px] font-medium text-[var(--ink-2)]" title={`${l.login}: asked to review ${l.count}`}>
+        <Badge key={l.login} variant="outline" className="h-6 gap-1.5 rounded-full border-[var(--border)] pr-1 pl-1 text-[12px] font-medium text-[var(--ink-2)]" title={`${l.login}: asked to review ${l.count}`}>
           {l.avatar ? <img className="size-4 rounded-full" src={l.avatar} alt="" /> : <UserIcon />}
           {l.login}
-          <Count n={l.count} className="h-4 min-w-4 px-1 text-[10.5px]" />
+          <Count n={l.count} className="h-4 min-w-4 px-1 text-[11px]" />
         </Badge>
       ))}
     </div>
@@ -730,7 +730,7 @@ function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: 
   // What happens next, said once, and the buttons that do it: quietest first, the one that moves it forward last.
   const next = nextStep(pr, kind);
   const quietBtn = (key: string, label: string, onClick: () => void, opts: { disabled?: boolean; title?: string } = {}) => (
-    <Button key={key} variant="ghost" size="sm" className="h-8 text-[12.5px] text-[var(--ink-2)]" disabled={opts.disabled} title={opts.title} onClick={onClick}>
+    <Button key={key} variant="ghost" size="sm" className="h-8 text-[13px] text-[var(--ink-2)]" disabled={opts.disabled} title={opts.title} onClick={onClick}>
       {label}
     </Button>
   );
@@ -740,7 +740,7 @@ function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: 
       quietBtn("s", "Review in a session", () => ctx.onWork(briefs.review(pr))),
       quietBtn("c", "Request changes", () => setAsking(true)),
       <Tip key="a" label="Approve on GitHub" keys="A">
-        <Button size="sm" className="h-8 text-[12.5px]" disabled={!!busy} onClick={approve}>
+        <Button size="sm" className="h-8 text-[13px]" disabled={!!busy} onClick={approve}>
           {busy === "approve" ? "Approving…" : "Approve"}
         </Button>
       </Tip>,
@@ -759,7 +759,7 @@ function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: 
         </DropdownMenuContent>
       </DropdownMenu>,
       <Tip key="s" label="Squash and merge" keys="M">
-        <Button size="sm" className="h-8 text-[12.5px]" disabled={!!busy} onClick={() => merge("squash")}>
+        <Button size="sm" className="h-8 text-[13px]" disabled={!!busy} onClick={() => merge("squash")}>
           {busy === "merge" ? "Merging…" : "Squash and merge"}
         </Button>
       </Tip>,
@@ -772,7 +772,7 @@ function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: 
     if (kind === "fix" && !session?.shepherd)
       buttons.push(
         <Tip key="t" label="A session fixes what's blocking it, then Friday keeps handing new red checks and review comments to the agent until it merges">
-          <Button size="sm" className="h-8 text-[12.5px]" onClick={() => ctx.onWork(briefs.through(pr), { shepherd: true })}>
+          <Button size="sm" className="h-8 text-[13px]" onClick={() => ctx.onWork(briefs.through(pr), { shepherd: true })}>
             See it through
           </Button>
         </Tip>,
@@ -780,7 +780,7 @@ function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: 
   }
   if (kind === "draft")
     buttons.push(
-      <Button key="d" size="sm" className="h-8 text-[12.5px]" disabled={!!busy} onClick={() => quiet(act("ready"))}>
+      <Button key="d" size="sm" className="h-8 text-[13px]" disabled={!!busy} onClick={() => quiet(act("ready"))}>
         {busy === "ready" ? "Marking…" : "Mark ready for review"}
       </Button>,
     );
@@ -799,7 +799,7 @@ function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: 
           </h2>
           <div className="flex shrink-0 items-center gap-1">
             {!merged && (
-              <Button variant="outline" size="sm" className="h-8 border-[var(--border)] bg-[var(--bg)] text-[12.5px] shadow-none" onClick={() => ctx.onWork(`${pr.url} `)}>
+              <Button variant="outline" size="sm" className="h-8 border-[var(--border)] bg-[var(--bg)] text-[13px] shadow-none" onClick={() => ctx.onWork(`${pr.url} `)}>
                 Open in a session
               </Button>
             )}
@@ -810,7 +810,7 @@ function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: 
             </Tip>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[12.5px] text-[var(--text-muted)]">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[13px] text-[var(--text-muted)]">
           <span>
             {pr.repo} #{pr.number}
           </span>
@@ -821,7 +821,7 @@ function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: 
             </span>
           )}
           {pr.branch && (
-            <span className="inline-flex min-w-0 items-center gap-1 font-mono text-[11.5px]" title={`${pr.branch} into ${pr.base || "its base"}`}>
+            <span className="inline-flex min-w-0 items-center gap-1 font-mono text-[12px]" title={`${pr.branch} into ${pr.base || "its base"}`}>
               <GitBranchIcon className="size-3.5 shrink-0" />
               <span className="truncate">
                 {pr.branch}
@@ -839,7 +839,7 @@ function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: 
                 variant="outline"
                 size="xs"
                 className={cn(
-                  "h-6 gap-1.5 rounded-md border-[var(--border)] bg-transparent px-2 text-[11.5px] font-medium text-[var(--ink-2)] shadow-none dark:bg-transparent",
+                  "h-6 gap-1.5 rounded-md border-[var(--border)] bg-transparent px-2 text-[12px] font-medium text-[var(--ink-2)] shadow-none dark:bg-transparent",
                   session.shepherd && "border-transparent bg-[color-mix(in_srgb,var(--dass-live)_14%,transparent)] text-[var(--dass-live)] hover:text-[var(--dass-live)] dark:bg-[color-mix(in_srgb,var(--dass-live)_14%,transparent)]",
                 )}
                 onClick={() => ctx.onOpen?.(session.sid)}
@@ -853,7 +853,7 @@ function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: 
               <Badge
                 key={r}
                 variant="outline"
-                className={cn("h-6 gap-1 rounded-md border-[var(--border)] px-2 text-[11.5px] font-medium text-[var(--ink-2)]", risk?.level === "high" && r === risk.top && "border-[color-mix(in_srgb,var(--red)_40%,var(--border))] text-[var(--red)]")}
+                className={cn("h-6 gap-1 rounded-md border-[var(--border)] px-2 text-[12px] font-medium text-[var(--ink-2)]", risk?.level === "high" && r === risk.top && "border-[color-mix(in_srgb,var(--red)_40%,var(--border))] text-[var(--red)]")}
                 title="Worth a careful look"
               >
                 <ShieldIcon /> {r}
@@ -865,7 +865,7 @@ function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: 
 
       <div
         className={cn(
-          "flex flex-col gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4",
+          "tray flex flex-col gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4",
           nextDot === "needs" && "border-[color-mix(in_srgb,var(--dass-needs)_40%,var(--border))]",
           nextDot === "bad" && "border-[color-mix(in_srgb,var(--red)_35%,var(--border))]",
         )}
@@ -882,7 +882,7 @@ function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: 
             <Textarea className="min-h-20 border-[var(--border)] bg-[var(--bg)] text-[13px] md:text-[13px]" rows={3} autoFocus value={changes} placeholder="What should change before this merges" onChange={(e) => setChanges(e.target.value)} />
             <div className="flex justify-end gap-1.5">
               {quietBtn("cancel", "Cancel", () => setAsking(false))}
-              <Button size="sm" className="h-8 text-[12.5px]" disabled={!changes.trim() || !!busy} onClick={() => quiet(act("request_changes", { body: changes }).then(() => setAsking(false)))}>
+              <Button size="sm" className="h-8 text-[13px]" disabled={!changes.trim() || !!busy} onClick={() => quiet(act("request_changes", { body: changes }).then(() => setAsking(false)))}>
                 Request changes
               </Button>
             </div>
@@ -891,7 +891,7 @@ function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: 
           buttons.length > 0 && <div className="flex flex-wrap items-center justify-end gap-1.5">{buttons}</div>
         )}
         {note && (
-          <p className={cn("m-0 pl-[21px] text-[12.5px]", note.bad ? "text-[var(--red)]" : "text-[var(--text-muted)]")} role={note.bad ? "alert" : "status"}>
+          <p className={cn("m-0 pl-[21px] text-[13px]", note.bad ? "text-[var(--red)]" : "text-[var(--text-muted)]")} role={note.bad ? "alert" : "status"}>
             {note.text}
           </p>
         )}
@@ -914,9 +914,9 @@ function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: 
           }
         >
           {tour && <ReviewTour pr={pr} files={files} onClose={() => setTour(false)} />}
-          <ul className="m-0 flex list-none flex-col divide-y divide-[var(--border)] rounded-xl border border-[var(--border)] p-0">
+          <ul className="tray m-0 flex list-none flex-col divide-y divide-[var(--border)] rounded-xl border border-[var(--border)] p-0">
             {files.slice(0, 20).map((f) => (
-              <li key={f.path} className="flex min-w-0 items-center gap-2.5 px-3 py-2 text-[12.5px]" title={f.path}>
+              <li key={f.path} className="flex min-w-0 items-center gap-2.5 px-3 py-2 text-[13px]" title={f.path}>
                 <FileIcon path={f.path} size={14} />
                 <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-[var(--ink)]">
                   {f.path.includes("/") && <span className="text-[var(--text-muted)]">{f.path.slice(0, f.path.lastIndexOf("/") + 1)}</span>}
@@ -932,7 +932,7 @@ function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: 
             ))}
           </ul>
           {(pr.changedFiles ?? files.length) > 20 && (
-            <Button variant="link" size="sm" className="h-auto self-start p-0 text-[12.5px]" onClick={() => openOutside(`${pr.url}/files`)}>
+            <Button variant="link" size="sm" className="h-auto self-start p-0 text-[13px]" onClick={() => openOutside(`${pr.url}/files`)}>
               {(pr.changedFiles ?? files.length) - 20} more on GitHub
             </Button>
           )}
@@ -980,7 +980,7 @@ function Checklist({ pr, mine, ctx, act }: { pr: PullRequest; mine: boolean; ctx
   const step = (k: "checks" | "review" | "merge", label: string) => (
     <li
       className={cn(
-        "flex min-w-0 items-center gap-2.5 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-[12.5px] font-medium text-[var(--ink)]",
+        "flex min-w-0 items-center gap-2.5 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-[13px] font-medium text-[var(--ink)]",
         s[k] === "bad" && "border-[color-mix(in_srgb,var(--red)_40%,var(--border))]",
         s[k] === "skip" && "text-[var(--text-muted)]",
       )}
@@ -1006,10 +1006,10 @@ function Checklist({ pr, mine, ctx, act }: { pr: PullRequest; mine: boolean; ctx
       <>
         <ul className="m-0 flex list-none flex-col gap-1 p-0">
           {failing.slice(0, 8).map((c) => (
-            <li key={c.name + c.url} className="flex items-center gap-2 text-[12.5px]">
+            <li key={c.name + c.url} className="flex items-center gap-2 text-[13px]">
               <Dot state={c.state === "failing" ? "bad" : "idle"} />
               {c.url ? (
-                <Button variant="link" size="sm" className="h-auto p-0 text-[12.5px] font-medium text-[var(--ink)]" onClick={() => openOutside(c.url)}>
+                <Button variant="link" size="sm" className="h-auto p-0 text-[13px] font-medium text-[var(--ink)]" onClick={() => openOutside(c.url)}>
                   {c.name}
                 </Button>
               ) : (
@@ -1040,7 +1040,7 @@ function Checklist({ pr, mine, ctx, act }: { pr: PullRequest; mine: boolean; ctx
       </ol>
       {checksDetail && <div className="flex flex-col gap-2.5 px-1">{checksDetail}</div>}
       {(pr.unresolved ?? 0) > 0 && (
-        <p className="m-0 px-1 text-[12.5px] text-[var(--text-muted)]">
+        <p className="m-0 px-1 text-[13px] text-[var(--text-muted)]">
           {pr.unresolved} unresolved comment thread{pr.unresolved === 1 ? "" : "s"}
         </p>
       )}
@@ -1069,7 +1069,7 @@ function AgentReview({ pr, ctx, mine, act }: { pr: PullRequest; ctx: Ctx; mine: 
       }),
     );
   const done = !!run && !run.running.length && run.results.length > 0;
-  const muted = "m-0 text-[12.5px] leading-relaxed text-[var(--text-muted)]";
+  const muted = "m-0 text-[13px] leading-relaxed text-[var(--text-muted)]";
 
   return (
     <Section
@@ -1096,7 +1096,7 @@ function AgentReview({ pr, ctx, mine, act }: { pr: PullRequest; ctx: Ctx; mine: 
               <Button
                 variant={run ? "outline" : "default"}
                 size="sm"
-                className={cn("ml-auto h-8 text-[12.5px]", run && "border-[var(--border)] bg-[var(--bg)] shadow-none")}
+                className={cn("ml-auto h-8 text-[13px]", run && "border-[var(--border)] bg-[var(--bg)] shadow-none")}
                 disabled={!picked.length || !!run?.running.length}
                 onClick={() => void runReview(ctx.identity, pr, picked)}
               >
@@ -1114,7 +1114,7 @@ function AgentReview({ pr, ctx, mine, act }: { pr: PullRequest; ctx: Ctx; mine: 
       ) : null}
       {run &&
         Object.entries(run.errors).map(([t, e]) => (
-          <p key={t} className="m-0 text-[12.5px] text-[var(--red)]">
+          <p key={t} className="m-0 text-[13px] text-[var(--red)]">
             {ENGINE_NAMES[t as EngineTool]}: {e}
           </p>
         ))}
@@ -1131,7 +1131,7 @@ function AgentReview({ pr, ctx, mine, act }: { pr: PullRequest; ctx: Ctx; mine: 
       )}
       {merged.length > 0 && (
         <>
-          <ul className="m-0 flex list-none flex-col divide-y divide-[var(--border)] rounded-xl border border-[var(--border)] p-0">
+          <ul className="tray m-0 flex list-none flex-col divide-y divide-[var(--border)] rounded-xl border border-[var(--border)] p-0">
             {merged.map((f, i) => (
               <li key={i} className="flex items-start gap-3 px-3 py-2.5">
                 <Badge
@@ -1148,7 +1148,7 @@ function AgentReview({ pr, ctx, mine, act }: { pr: PullRequest; ctx: Ctx; mine: 
                   <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-[13px] font-medium text-[var(--ink)]">
                     <span>{f.title}</span>
                     {f.path && (
-                      <Button variant="link" size="sm" className="h-auto p-0 font-mono text-[11.5px] font-normal text-[var(--text-muted)]" onClick={() => openOutside(`${pr.url}/files`)} title="Open the files on GitHub">
+                      <Button variant="link" size="sm" className="h-auto p-0 font-mono text-[12px] font-normal text-[var(--text-muted)]" onClick={() => openOutside(`${pr.url}/files`)} title="Open the files on GitHub">
                         {f.path}
                         {f.line ? `:${f.line}` : ""}
                       </Button>
@@ -1168,12 +1168,12 @@ function AgentReview({ pr, ctx, mine, act }: { pr: PullRequest; ctx: Ctx; mine: 
           </ul>
           <div className="flex flex-wrap justify-end gap-1.5">
             <Tip label="A pending review on GitHub that only you can see until you submit it there">
-              <Button variant="ghost" size="sm" className="h-8 text-[12.5px] text-[var(--ink-2)]" onClick={post}>
+              <Button variant="ghost" size="sm" className="h-8 text-[13px] text-[var(--ink-2)]" onClick={post}>
                 Post as draft review
               </Button>
             </Tip>
             {mine && (
-              <Button size="sm" className="h-8 text-[12.5px]" onClick={() => ctx.onWork(briefs.findings(pr, merged))}>
+              <Button size="sm" className="h-8 text-[13px]" onClick={() => ctx.onWork(briefs.findings(pr, merged))}>
                 Fix these in a session
               </Button>
             )}

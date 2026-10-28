@@ -34,7 +34,8 @@ test("Claude Code, Copilot and Gemini are started with the other folders as thei
 
   assert.deepEqual(ADAPTERS.cursor.args(spec({ dirs })), ADAPTERS.cursor.args(spec()), "Cursor has no such flag");
   const own = Object.values(ADAPTERS).filter((a) => a.dirs).map((a) => a.tool);
-  assert.deepEqual(own.sort(), ["claude", "codex", "copilot", "gemini"]);
+  // Muse Code takes them too, as the workspace roots of each turn (turn/start), not as a flag (test/muse-adapter.test.ts).
+  assert.deepEqual(own.sort(), ["claude", "codex", "copilot", "gemini", "muse"]);
   assert.ok(codexExec.dirs);
 });
 

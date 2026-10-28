@@ -123,6 +123,10 @@ export function Tooltips() {
       }
     };
     const focus = (e: FocusEvent) => {
+      // Focus given back to a control as a menu or dialog it opened closes is not someone moving to it: its tip went up and stayed
+      // over whatever that menu opened next (2026-10-27 audit: "Add files or photos" over the repo picker it had opened).
+      const from = e.relatedTarget as Element | null;
+      if (!from || from.closest?.('[role="menu"], [role="dialog"], [role="listbox"]')) return;
       const el = targetOf(e);
       if (!el || !(e.target as HTMLElement).matches(":focus-visible")) return;
       current = el;

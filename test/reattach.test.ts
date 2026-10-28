@@ -38,6 +38,9 @@ test("only this computer's offline lanes with a folder come back, main lane firs
     copyOf: "/Users/ada/app",
     ifOffline: true,
   });
+  // A lane sharing its folder with another by choice comes back sharing it.
+  assert.equal(reattachParams("s1", "inv", "l5", engine({ shared: true }), "tok").share, true);
+  assert.equal(reattachParams("s1", "inv", "l5", engine({}), "tok").share, undefined);
   // A lent folder with no tool behind it is nobody's to bring back.
   assert.deepEqual(lanesToReattach({ lanes: [], engines: { [MAIN_LANE]: engine({ tool: undefined }) } } as unknown as SessionState, "ada"), []);
 });

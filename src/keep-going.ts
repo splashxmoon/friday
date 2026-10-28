@@ -1,4 +1,5 @@
 import { announcesAction } from "./agent/announced.js";
+import { heldByPerson } from "./held.js";
 import { runOf, type SessionState } from "./session/projection.js";
 import { MAIN_LANE, type SessionEvent } from "./types.js";
 
@@ -62,6 +63,8 @@ export function keepGoingNote(state: SessionState, events: SessionEvent[], lane:
   // Plan mode stops after the plan on purpose, and so does a run whose plan the driver is to approve first.
   if (state.engines[lane]?.mode === "plan") return null;
   if (state.options.planFirst && !((state.planApproved[lane] ?? 0) > run.sinceSeq)) return null;
+  // Told to stop, or holding as told: the person's word, not Friday's, sends it on (held.ts).
+  if (heldByPerson(events, lane)) return null;
   const inRun = events.filter((e) => e.seq > run.sinceSeq && (e.lane ?? MAIN_LANE) === lane);
   if (inRun.filter((e) => e.body.type === "instruction" && e.body.keepGoing).length >= MAX_KEEP_GOING) return null;
   const said = inRun.findLast((e) => e.body.type === "agent.message" && !!e.body.text.trim());

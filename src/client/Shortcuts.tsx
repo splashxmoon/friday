@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import type { ToolCommand } from "../types.js";
 import { Icon, type IconName } from "./icons.js";
 
@@ -279,7 +279,12 @@ export function useShortcuts({
   lane = "main",
   tool,
   people = [],
+  agents = [],
+  onAgent,
 }: {
+  /** Agents "@" can name: offered before people, and picking one points the box at it. */
+  agents?: { id: string; name: string; mark: ReactNode; hint: string; /** How it stands, for its hint's colour. */ tone?: string }[];
+  onAgent?: (id: string) => void;
   /** The other people in the session: "@" offers them before files, and naming one tells them (mentions.ts). */
   people?: { id: string; name: string; online?: boolean }[];
   /** The lane the box writes to. */
@@ -345,7 +350,8 @@ export function useShortcuts({
     setValue(el, insert + el.value.slice(el.selectionStart), insert.length);
     setOpen(null);
   };
-  const items: { key: string; label: string; hint?: string; icon: IconName; pick: () => void }[] =
+  const named = (name: string, q: string) => !q || name.toLowerCase().split(/\s+/).some((w) => w.startsWith(q)) || name.toLowerCase().startsWith(q);
+  const items: { key: string; label: string; hint?: string; tone?: string; icon: IconName; mark?: ReactNode; pick: () => void }[] =
     open?.kind === "command" && commands && tool
       ? // A coding tool's lane: the team's own commands, then the tool's (Claude Code runs its own; Codex's and Cursor's prompt
         // files and skills are expanded as their terminals would). Friday's built-in asks are for Friday's agents.
@@ -374,8 +380,27 @@ export function useShortcuts({
             setOpen(null);
           },
         }))
-      : open?.kind === "person" && people.length
+      : open?.kind === "person" && (people.length || agents.length)
         ? [
+          ...agents
+            .filter((a) => named(a.name, open.query.toLowerCase()))
+            .slice(0, 13)
+            .map((a) => ({
+              key: `agent:${a.id}`,
+              label: a.name,
+              hint: a.hint,
+              ...(a.tone ? { tone: a.tone } : {}),
+              icon: "agent" as IconName,
+              mark: a.mark,
+              pick: () => {
+                const el = textarea.current;
+                if (!el) return;
+                const head = `${el.value.slice(0, open.start)}@${a.name} `;
+                setValue(el, head + el.value.slice(el.selectionStart), head.length);
+                setOpen(null);
+                onAgent?.(a.id);
+              },
+            })),
           ...people
             .filter((p) => !open.query || p.name.toLowerCase().split(/\s+/).some((w) => w.startsWith(open.query.toLowerCase())) || p.name.toLowerCase().startsWith(open.query.toLowerCase()))
             .slice(0, 6)
@@ -417,9 +442,20 @@ export function useShortcuts({
     const el = textarea.current;
     if (!el) return;
     const t = tokenAt(el.value, el.selectionStart);
-    setOpen(t && (t.kind === "command" ? commands : t.kind === "person" ? people.length > 0 : filesEnabled) ? t : null);
+    // "#" and "@" open their list even with nothing to offer, to say why (2026-10-27 audit: they showed nothing at all).
+    setOpen(t && (t.kind === "command" ? commands : true) ? t : null);
     setActive(0);
   };
+
+  /** Whether the list is on screen: its rows, or the line it says while it reads them. */
+  const visible =
+    !!open &&
+    (items.length > 0 ||
+      (open.kind === "file" && filesEnabled && files === null) ||
+      (open.kind === "command" && commands && !!tool) ||
+      // Nothing to offer, said once, while only the sign is typed: "#1" or "@home" in a sentence doesn't pop it up.
+      (open.kind === "file" && !open.query && (!filesEnabled || files !== null)) ||
+      (open.kind === "person" && !open.query));
 
   /** Returns true when the key was used by the list, so the composer should not act on it. */
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>): boolean => {
@@ -436,25 +472,42 @@ export function useShortcuts({
       setTimeout(sync, 0);
       return false;
     }
-    if (!items.length) return false;
+    // "Save your own command" is the list's last row, reached by the keys as any other is (2026-10-27 audit: it couldn't be, and
+    // Enter on it sent the "/" as a message).
+    const manage = visible && open.kind === "command" && !!onManage;
+    const rows = items.length + (manage ? 1 : 0);
+    if (!rows) return false;
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
-      setActive((i) => (i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length);
+      setActive((i) => (i + (e.key === "ArrowDown" ? 1 : rows - 1)) % rows);
       return true;
     }
     if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") {
+      const at = Math.min(active, rows - 1);
+      // Tab past the commands to the last row only by the arrows: a Tab with no commands is the box's own.
+      if (at >= items.length && e.key === "Tab") return false;
       e.preventDefault();
-      items[Math.min(active, items.length - 1)]!.pick();
+      if (at < items.length) items[at]!.pick();
+      else openManage();
       return true;
     }
     return false;
   };
 
+  /** Opens the place where commands are made, after the press or key that asked: never in the same event (see the row). */
+  const openManage = () => {
+    setOpen(null);
+    setTimeout(() => onManage?.(), 0);
+  };
+
   const popover =
-    open && (items.length > 0 || (open.kind === "file" && filesEnabled && files === null) || (open.kind === "command" && commands && !!tool)) ? (
-      <div className="shortcut-pop" role="listbox" aria-label={open.kind === "command" ? "Commands" : open.kind === "person" ? "People" : "Files"}>
-        <div className="shortcut-head">{open.kind === "command" ? (tool ? `${tool} commands` : "Commands") : open.kind === "person" ? "People here" : "Files in the folder"}</div>
+    open && visible ? (
+      <div className="shortcut-pop" role="listbox" aria-label={open.kind === "command" ? "Commands" : open.kind === "person" ? (agents.length && !people.length ? "Agents" : "People") : "Files"}>
+        <div className="shortcut-head">{open.kind === "command" ? (tool ? `${tool} commands` : "Commands") : open.kind === "person" ? (agents.length && !people.length ? "Send it to" : "People here") : "Files in the folder"}</div>
         {open.kind === "file" && filesEnabled && files === null && <div className="shortcut-empty">Reading the folder…</div>}
+        {open.kind === "file" && !filesEnabled && <div className="shortcut-empty">No folder to search right now: no computer of yours is connected to this chat.</div>}
+        {open.kind === "file" && filesEnabled && files !== null && !items.length && <div className="shortcut-empty">The folder has no files to name yet.</div>}
+        {open.kind === "person" && !items.length && <div className="shortcut-empty">Nobody else is here yet. Share the session to bring someone in.</div>}
         {open.kind === "command" && tool && own === null && <div className="shortcut-empty">Asking {tool} for its commands…</div>}
         {open.kind === "command" && tool && own !== null && !items.length && (
           <div className="shortcut-empty">
@@ -481,13 +534,20 @@ export function useShortcuts({
             }}
             onMouseEnter={() => setActive(i)}
           >
-            <Icon name={it.icon} size={13} />
+            {it.mark ?? <Icon name={it.icon} size={13} />}
             <span className="shortcut-label">{it.label}</span>
-            {it.hint && <span className="shortcut-hint">{it.hint}</span>}
+            {it.hint && (
+              <span className="shortcut-hint" data-tone={it.tone}>
+                {it.hint}
+              </span>
+            )}
           </button>
         ))}
         {open.kind === "command" && onManage && (
-          <button type="button" className="shortcut-manage" onMouseDown={(e) => (e.preventDefault(), setOpen(null), onManage())}>
+          // Opened on the click, not the press: opened on the press, the dialog's own outside-press listener, set up as it opened,
+          // heard that same press (on a row already gone with the list) and closed it at once, so it seemed to do nothing
+          // (2026-10-27 audit). The press still keeps the caret in the box.
+          <button type="button" className={`shortcut-manage ${active === items.length ? "on" : ""}`} role="option" aria-selected={active === items.length} onMouseDown={(e) => e.preventDefault()} onMouseEnter={() => setActive(items.length)} onClick={openManage}>
             <Icon name="plus" size={12} /> Save your own command
           </button>
         )}

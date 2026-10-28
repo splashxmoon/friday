@@ -43,6 +43,9 @@ export function reattachParams(sid: string, invite: string, lane: string, e: Lan
     ...(e.model ? { model: e.model } : {}),
     ...(e.account ? { account: e.account.id } : {}),
     ...(e.copyOf ? { copyOf: e.copyOf } : {}),
+    // A lane that shares its folder with another by choice comes back sharing it: without, the first lane back held the folder
+    // and turned the others away as "already editing that folder" (Arun, 2026-10-26: "the coding tools not reconnecting").
+    ...(e.shared ? { share: true } : {}),
     ifOffline: true,
   };
 }

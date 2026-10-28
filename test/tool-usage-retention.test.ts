@@ -25,8 +25,10 @@ test("the detail expires at 100 days; the daily counts are kept about a year and
   assert.ok(Math.abs((await r.ttl(detail)) - KEEP_S) < 60, "the detail lives a hundred days");
   assert.ok(Math.abs((await r.ttl(daily)) - DAILY_KEEP_S) < 60 && DAILY_KEEP_S >= 371 * 86_400, "the daily count lives past a year");
 
-  // Nothing but counts in it: no tokens, no titles, nothing said.
-  assert.deepEqual(await r.hgetall(daily), { claude: "1", codex: "1" });
+  // Nothing but counts in it: no tokens, no titles, nothing said. Each tool's, and the hour they came in (tool-usage.ts daily).
+  const { [`h:${new Date().getUTCHours()}`]: hour, ...tools } = await r.hgetall(daily);
+  assert.deepEqual(tools, { claude: "1", codex: "1" });
+  assert.equal(hour, "2");
 
   // The detail gone, as it is after a hundred days: the day still counts on the home screen's year.
   await r.del(detail);

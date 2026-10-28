@@ -1,7 +1,7 @@
 import { FileIcon } from "./fileIcons.js";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { driverOf, runOf, type SessionState } from "../session/projection.js";
+import { driverOf, type SessionState } from "../session/projection.js";
 import type { DiffFile, Member } from "../types.js";
 import { Icon } from "./icons.js";
 import { splitPath } from "./diff-lines.js";
@@ -23,10 +23,14 @@ import { commitPaths } from "../shepherd.js";
  * where there is a remote to push to.
  */
 
+/** Whether a commit has to wait: any run in the session going, as the server holds it (core.ts commit). */
+export const commitWaits = (state: Pick<SessionState, "run" | "laneRuns">): boolean => state.run.status === "running" || Object.values(state.laneRuns).some((r) => r.status === "running");
+
 export function ShipButton({ state, me, sid, invite, send, lane }: { state: SessionState; me: Member; sid: string; invite: string; send: Send; lane: string }) {
   const [open, setOpen] = useState(false);
   const may = me.role === "owner" || driverOf(state, lane)?.id === me.id;
-  const running = runOf(state, lane).status === "running";
+  // Any run in the session, as the server holds it: one lane's being idle didn't let a commit through (commitWaits).
+  const running = commitWaits(state);
   if (!state.diffs[lane]?.files.length) return null;
   return (
     <>

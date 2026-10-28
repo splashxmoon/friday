@@ -20,7 +20,7 @@ import { AgentModelPicker } from "./AgentModelPicker.js";
 import { canRoute, saveSmartRouting, smartRoutingOn, useRouteHint } from "./RouteWhy.js";
 import { keepAuto, reachForMessage } from "./smartReach.js";
 import type { Plan } from "../plan-types.js";
-import { ownModel, planLimits } from "./edition.js";
+import { isLocal, ownModel, planLimits } from "./edition.js";
 import { AlsoWorksIn, FolderCard, useResumeLink, type Picked } from "./Workspace.js";
 import { branchRef, FolderBranchPick, type FolderBranch } from "./Branches.js";
 import type { ResumeLink } from "./resume-link.js";
@@ -109,6 +109,8 @@ function useStarters(): typeof STARTERS {
   }, []);
 }
 
+/** The new-session box's last permission choice, on this computer. */
+const MODE_KEY = "friday.newSession.mode";
 const MODE_LABEL: Record<EngineMode, string> = { plan: "plan", edits: "manual", full: "auto" };
 /** How the choice is named on the button and in the list. */
 const MODE_NAME: Record<EngineMode, string> = { plan: "Plan", edits: "Manual", full: "Auto" };
@@ -249,8 +251,23 @@ export function Code({
    * with more reach than somebody chose. Auto is a switch inside the session,
    * by the person whose machine it is, once the task is in front of them.
    */
-  // Auto unless picked otherwise, for every coding tool and Friday Code alike (Arun, 2026-10-18).
-  const [mode, setMode] = useState<EngineMode>("full");
+  // Auto unless picked otherwise, for every coding tool and Friday Code alike (Arun, 2026-10-18); then whatever was picked last,
+  // on this computer: it went back to Auto at every visit to this page, without a word (2026-10-27 audit).
+  const [mode, setMode] = useState<EngineMode>(() => {
+    try {
+      const kept = localStorage.getItem(MODE_KEY);
+      return kept === "plan" || kept === "edits" || kept === "full" ? kept : "full";
+    } catch {
+      return "full";
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(MODE_KEY, mode);
+    } catch {
+      // A preference: losing it costs nothing.
+    }
+  }, [mode]);
   // Which of that CLI's own models it runs on; empty means its default.
   const [model, setModel] = useState("");
   // A model belongs to its CLI: another CLI starts on its own default, or on Auto when smart routing is on and it can route.
@@ -567,7 +584,7 @@ export function Code({
       const attach = async () => {
         if (!willAttach) return;
         try {
-          await hostApi(identity, "/api/runner/start", {
+          const begun = await hostApi<{ cwd?: string }>(identity, "/api/runner/start", {
             method: "POST",
             body: JSON.stringify({
               sid: r.sessionId,
@@ -597,6 +614,7 @@ export function Code({
               ...(picked?.resume && forkResume ? { resumeFork: true } : {}),
             }),
           });
+          void begun;
         } catch (e) {
           attached = false;
           setErr(`${engine ? ENGINE_NAMES[engine] : "Your folder"} didn't connect: ${(e as Error).message}`);
@@ -638,17 +656,24 @@ export function Code({
     }
   };
 
+  let placeholder = solo ? "Describe the change…" : "Describe the change. Teammates can join, watch the run and steer it live…";
+  // The branch controls, for a folder that is a repository.
+  let branchy = !!folder?.isRepo;
   return (
     <div className="home">
       {/* A quiet field of squares behind everything, fading out towards the edges. */}
-      <HomeField />
+      {
+        <HomeField />
+      }
       {/* Which coding tools are here, as one pill in the corner opposite "tokens saved": their marks and how many are ready,
           with the card that signs in, switches account or installs one behind it. */}
       <div className="home-tools">
         <Badge identity={identity} machine={machine} refresh={refresh} />
       </div>
       <Greeting name={identity.name} />
-      <HeroTitle />
+      {
+        <HeroTitle />
+      }
 
       <div className="composer-above">
         {/* Smart routing (routing.ts): Auto for whichever agent is chosen, when it can route. Above the box, on its own, so it is
@@ -708,7 +733,7 @@ export function Code({
             <FolderCard folder={folder} resume={picked?.resume} where={machine.mode === "linked" ? (machine.machine?.name ?? "your computer") : "this computer"} onClear={() => (setPicked(null), setBranch(""), setNewBranch(true), setPickBranch(""))}>
                 {/* Uncommitted changes no longer send the agent to a copy (Arun, 2026-10-24: copies only when asked): it works in the
                     folder with them, and the branch is chosen as for any folder. */}
-                {folder.isRepo && (
+                {branchy && (
                   <span className="ws-branch-set">
                     {/* Off, a base picked for the new branch becomes the branch worked on: not one git has checked out in another folder. */}
                     <Switch on={newBranch} onChange={(v) => (setNewBranch(v), setErr(""), !v && branches?.find((b) => b.name === pickBranch)?.elsewhere && setPickBranch(""))} label="New branch" />
@@ -862,7 +887,7 @@ export function Code({
             readOnly={busy}
             onPaste={pasteAttach(files, setFiles, setAttachNote)}
             rows={3}
-            placeholder={solo ? "Describe the change…" : "Describe the change. Teammates can join, watch the run and steer it live…"}
+            placeholder={placeholder}
             value={goal}
             onChange={(e) => {
               setGoal(e.target.value);
@@ -1038,7 +1063,14 @@ export function Code({
       {/* What happened while you were away, before what you might do next. */}
 
       {/* Your agents right now, and how the last weeks went: in place of suggested prompts, what someone opening Friday wants first. */}
-      <HomeActivity identity={identity} recents={recents} onOpen={onStart} {...(onOpenBoard ? { onBoard: onOpenBoard } : {})} />
+      <HomeActivity
+        identity={identity}
+        recents={
+          recents
+        }
+        onOpen={onStart}
+        {...(onOpenBoard ? { onBoard: onOpenBoard } : {})}
+      />
     </div>
   );
 }

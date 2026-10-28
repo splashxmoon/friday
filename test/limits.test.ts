@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { claudeWindowsFrom, codexFromSnapshot, copilotFrom, cursorFrom, noteClaudeEvent, readLimits } from "../src/runner/limits.js";
+import { codexFromSnapshot, copilotFrom, cursorFrom, noteClaudeEvent, readLimits } from "../src/runner/limits.js";
 
 test("Copilot's allowances, as its account endpoint lists them: only the ones its plan limits, with the month's reset", () => {
   const got = copilotFrom({
@@ -28,6 +28,8 @@ test("Codex's limits are read from its own session log, newest line first", asyn
   // No real sign-in is read, on any platform: neither Claude Code's usage endpoint, Codex's app server nor Cursor is asked from a test.
   process.env.CLAUDE_CONFIG_DIR = home;
   process.env.FRIDAY_CODEX_BIN = path.join(home, "no-codex");
+  // Nor is Claude Code asked for its usage (claude-usage.test.ts asks a stand-in).
+  process.env.FRIDAY_CLAUDE_BIN = path.join(home, "no-claude");
   process.env.APPDATA = home;
   process.env.XDG_CONFIG_HOME = home;
   delete process.env.CODEX_HOME;
@@ -73,70 +75,20 @@ test("the session and the week are kept side by side, and a later event cannot e
   assert.equal(l.claudeWindows.find((w) => w.kind === "five_hour")?.utilization, 0.8, "the earlier five-hour figure is still there, with the same reset");
 });
 
-test("Claude Code's usage endpoint becomes the session, the week and the per-model weeks, as fractions with their resets", () => {
-  const at = 1_800_000_000_000;
-  const w = claudeWindowsFrom(
-    {
-      seven_day_opus: null,
-      seven_day: { utilization: 37, resets_at: "2026-10-12T07:00:00.000Z" },
-      five_hour: { utilization: 1, resets_at: "2026-10-08T05:00:00+00:00" },
-      seven_day_sonnet: { utilization: 0, resets_at: null },
-      extra_usage: { is_enabled: false, utilization: null },
-    },
-    at,
-  );
-  assert.deepEqual(w.map((x) => x.kind), ["five_hour", "seven_day", "seven_day_sonnet"], "the session first, and nothing for a window with no figure");
-  assert.equal(w[0]!.utilization, 0.01, "1 is one percent, not all of it");
-  assert.equal(w[0]!.resetsAt, Date.parse("2026-10-08T05:00:00Z") / 1000);
-  assert.equal(w[1]!.utilization, 0.37);
-  assert.equal(w[2]!.resetsAt, null);
-  assert.deepEqual(claudeWindowsFrom("not an object"), []);
-});
-
-test("the endpoint's list of limits wins, and a week that counts one model is named for it", () => {
-  const w = claudeWindowsFrom({
-    five_hour: { utilization: 72, resets_at: "2026-10-08T05:20:00.420846+00:00" },
-    seven_day: null,
-    limits: [
-      { kind: "session", group: "session", percent: 72, severity: "normal", resets_at: "2026-10-08T05:20:00.112250+00:00", scope: null, is_active: true },
-      { kind: "weekly_scoped", group: "weekly", percent: 17, severity: "normal", resets_at: "2026-10-11T00:00:00.112500+00:00", scope: { model: { id: null, display_name: "Fable" }, surface: null }, is_active: false },
-    ],
-  });
-  assert.deepEqual(w.map((x) => [x.kind, x.label, x.utilization]), [["five_hour", undefined, 0.72], ["seven_day_fable", "Weekly · Fable", 0.17]]);
-  assert.equal(w[1]!.resetsAt, Math.round(Date.parse("2026-10-11T00:00:00.1125Z") / 1000));
-});
-
-test("every plan's answer is read: Pro and Max fill the per-window fields, Team sends a list, Free may have nothing", () => {
-  const reset = "2026-10-08T05:00:00+00:00";
-  const kinds = (body: unknown) => claudeWindowsFrom(body).map((w) => [w.kind, Math.round((w.utilization ?? -1) * 100)]);
-  // Pro: the session and the week.
-  assert.deepEqual(kinds({ five_hour: { utilization: 41, resets_at: reset }, seven_day: { utilization: 12, resets_at: reset }, seven_day_opus: null, seven_day_sonnet: null, extra_usage: { is_enabled: false, utilization: null } }), [
-    ["five_hour", 41],
-    ["seven_day", 12],
-  ]);
-  // Max: per-model weeks, and extra usage once it is switched on.
-  assert.deepEqual(kinds({ five_hour: { utilization: 5, resets_at: reset }, seven_day: { utilization: 30, resets_at: reset }, seven_day_opus: { utilization: 63, resets_at: reset }, seven_day_sonnet: { utilization: 8, resets_at: reset }, extra_usage: { is_enabled: true, utilization: 20 } }), [
-    ["five_hour", 5],
-    ["seven_day", 30],
-    ["seven_day_opus", 63],
-    ["seven_day_sonnet", 8],
-    ["overage", 20],
-  ]);
-  // Team, as a real account answered: the per-window fields null, everything in the list.
-  assert.deepEqual(kinds({ five_hour: null, seven_day: null, limits: [{ kind: "session", group: "session", percent: 72, resets_at: reset, scope: null }, { kind: "weekly_scoped", group: "weekly", percent: 17, resets_at: reset, scope: { model: { id: null, display_name: "Fable" }, surface: null } }] }), [
-    ["five_hour", 72],
-    ["seven_day_fable", 17],
-  ]);
-  // Both shapes for the same window: one row, the list's figure.
-  assert.deepEqual(kinds({ seven_day: { utilization: 10, resets_at: reset }, limits: [{ kind: "weekly", group: "weekly", percent: 11, resets_at: reset, scope: null }] }), [["seven_day", 11]]);
-  // A plan with no limits on Claude Code: nothing, rather than empty rows.
-  assert.deepEqual(kinds({ five_hour: null, seven_day: null, limits: [] }), []);
-});
-
-test("with no Claude sign-in on this machine, it says why and falls back to what the last run said", async () => {
+test("Claude Code's sign-in is never read: its limits are what it says as it runs, each account's apart", async () => {
+  // Anthropic's terms: developers may not "collect, store, or intermediate Claude.ai credentials or session tokens" (Arun,
+  // 2026-10-27: "i do not want my account banned"). Nothing here reads Claude Code's keychain item or its credentials file, or
+  // calls its usage page.
+  const src = await readFile(new URL("../src/runner/limits.ts", import.meta.url), "utf8");
+  for (const banned of ["oauth/usage", "Claude Code-credentials", ".credentials.json", "claudeAiOauth"]) assert.ok(!src.includes(banned), `no ${banned}`);
+  const before = await readLimits();
+  assert.equal(before.claudePlan, null, "no plan read from a sign-in");
+  // What a run as the Work account said is Work's, not the tool's own sign-in's.
+  noteClaudeEvent({ type: "rate_limit_event", rate_limit_info: { status: "allowed", rateLimitType: "five_hour", utilization: 0.33, resetsAt: 1793420076 } }, "work");
+  await new Promise((r) => setTimeout(r, 200));
   const l = await readLimits();
-  assert.notEqual(l.claudeFrom, "account");
-  assert.match(l.claudeWhy ?? "", /isn't signed in/);
+  assert.notEqual(l.claudeWindows.find((w) => w.kind === "five_hour")?.utilization, 0.33);
+  assert.equal(l.claudeFrom, "runs");
 });
 
 test("Codex's app server answers in camelCase, an older log in seconds from when it wrote it, and the free plan has one window", () => {

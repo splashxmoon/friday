@@ -7,13 +7,14 @@ import { createInterface } from "node:readline";
 import WebSocket from "ws";
 import { clock, closingSaid, keepAlive } from "../heartbeat.js";
 import { CLI_ID, ENGINE_NAMES, isEngineEffort, type Attachment, type EngineMode, type EngineTool, type ToolCommand, type DiffFile } from "../types.js";
-import { ADAPTERS, PLAN_REFUSES, askedItem, childEnv, claudeMcpServers, claudePictures, imageType, codexExec, findBin, launcher, loginStatusCached, loginStatusQuick, tooLongForArgv, withDirs, type Adapter, type AdapterOut, type Launch, type TurnSpec } from "./adapters.js";
+import { ADAPTERS, DECIDE_YOURSELF, PLAN_REFUSES, askedItem, childEnv, claudeMcpServers, claudePictures, imageType, codexExec, findBin, launcher, loginStatusCached, loginStatusQuick, tooLongForArgv, withDirs, type Adapter, type AdapterOut, type Launch, type TurnSpec } from "./adapters.js";
 import { folderVars } from "./environment.js";
 import { applyCopy, baseAfterCommit, checkpoint, diffSince, diffTrees, dropShadow, fetchBranch, repoInfo, sameTree, sessionBase, setSessionBase, shadowSnapshot, switchBranch, trackBranch, warmSnapshot, type RepoInfo, type Shadow } from "./git.js";
 import { hasCliTranscript, readCliTranscript } from "./imports.js";
 import { readRepo, type RepoRequest } from "./repo-read.js";
-import { readLimits } from "./limits.js";
+import { noteClaudeStarting, readLimits } from "./limits.js";
 import { accountEnv, DEFAULT_ACCOUNT, getAccount, hasAccounts, isOut, listAccounts, markOut, nextAccount, prepareAccountDir, type ToolAccount } from "./accounts.js";
+import { usesApiKey } from "./api-key.js";
 import { limitHit } from "../limit-reset.js";
 import { shellName } from "./background.js";
 import { Prespawn, spawnCli, WarmAcp, WarmClaude, type AcpHow, type CliProcess } from "./spawn-cli.js";
@@ -428,6 +429,8 @@ export class Runner {
   private resumeId: string | null = null;
   /** The account its tool runs as, for a tool with more than one (accounts.ts); null for the others. */
   private account: ToolAccount | null = null;
+  /** Its tool runs on an API key or a cloud provider, not on its host's own plan (api-key.ts). */
+  private apiKey = false;
   /** The picked conversation couldn't be found, so this lane's CLI carries on in a fresh one, which has none of its memory. */
   private lost = false;
   /** The standing instructions the CLI's conversation was last given, so a tool that takes them in its prompt is told again only when they change. */
@@ -548,6 +551,9 @@ export class Runner {
     const checks = async (tool: EngineTool): Promise<void> => {
       if (hasAccounts(tool)) this.account = await this.startAccount(tool, o.account);
       const acct = this.account && this.account.id !== DEFAULT_ACCOUNT ? this.account.id : undefined;
+      // On a key its owner pays for by use, or on a person's own plan: the server keeps a personal plan to its owner's work
+      // (api-key.ts, own-plan.ts). Read from the settings it starts with, never from a key or a token.
+      this.apiKey = await usesApiKey(tool, { ...childEnv(), ...accountEnv(tool, this.account?.id) }).catch(() => false);
       const bin = o.bin ?? (await startChecks.findBin(tool));
       if (!bin) throw new RunnerError(`Couldn't find ${this.label} on this machine. Install it and log in, then try again.`);
       // Say so now rather than after the team's first instruction fails. An
@@ -641,6 +647,7 @@ export class Runner {
       shell: shellName(),
       ...(o.model ? { model: o.model } : {}),
       ...(this.account ? { account: this.account.id, accountLabel: this.account.label } : {}),
+      ...(this.apiKey ? { apiKey: "1" } : {}),
       // The branch this will be on once attached, which is the one to show: the switch itself waits until the server has
       // accepted the folder. Except the session's branch from another machine, which may not be had (trackBranch): the lane
       // shows the branch the folder is on, and moves when the switch has happened (onAttached).
@@ -1418,6 +1425,7 @@ ${prompt}`;
       // A conversation picked up and resumed has never been told, and one that was told has not heard what changed since. A new
       // one always is: a turn the CLI gave no id for leaves the next to start another.
       withSystem: !bare && (!this.resumeId || m.system !== this.sentSystem),
+      ...(this.account && this.account.id !== DEFAULT_ACCOUNT ? { account: this.account.id } : {}),
       ...(systemFile ? { systemFile } : {}),
       ...(fork ? { fork } : {}),
       // The attached files as input of the tool's own, where it takes them (pictures to Codex, content blocks over ACP).
@@ -1456,6 +1464,8 @@ ${prompt}`;
       taken?.child.stdin!.end();
       return;
     }
+    // No asking Claude Code for its usage (limits.ts) while it is being started for this turn.
+    if (this.opts.tool === "claude") noteClaudeStarting();
     // Cursor, Amp or `codex exec` started as the last turn ended, when this turn starts exactly as it was started; else its own.
     const ahead = adapter.prespawn && !taken ? this.next.take(this.launch.command, [...this.launch.prefix, ...adapter.args({ ...spec, stdinPrompt: true })], this.spawnOptions(adapter.env?.(spec))) : null;
     const child = taken ? taken.child : ahead ? ahead : this.warm ? this.warm.start(this.launch.command, argv, this.spawnOptions(), claudePictures(spec)) : spawnCli(this.launch.command, argv, this.spawnOptions(adapter.env?.(spec)));
@@ -1614,21 +1624,11 @@ ${prompt}`;
         this.unrun = carried;
         return this.turn(m, files);
       }
-      // Out of usage on this account, with another account of the same tool here that isn't (accounts.ts): the same turn goes again
-      // as that one, on the same conversation, told to carry on rather than start over, and the room is told which account it is
-      // on now. Only once every account is out does the run end on its limit, and the hand-off to another tool (limit-handoff.ts)
-      // takes it from there.
-      if (this.account && OUT_OF_USAGE.test(raw) && !this.stopping && !this.stopped && (this.switches.get(m.id) ?? 0) < 4) {
-        const from = this.account;
-        const to = await this.switchAccount(raw);
-        if (to) {
-          this.switches.set(m.id, (this.switches.get(m.id) ?? 0) + 1);
-          this.asked = mine;
-          this.unrun = carried;
-          const prompt = `[Friday] Your ${from.label} account ran out of usage part-way through this, so you are now running on this tool's ${to.label} account. If you already did part of it, carry on from where you stopped rather than starting over.\n\n${m.prompt}`;
-          return this.turn({ ...m, prompt, command: undefined }, files);
-        }
-      }
+      // Out of usage on this account: the run ends on its limit, saying so, and when another account of this tool here has room
+      // (accounts.ts) that it is there to switch to. Never switched to by itself: going on as another sign-in is the person's own
+      // call, not Friday's, as the tool's maker keeps each plan to "ordinary, individual usage" (Arun, 2026-10-27: "i do not want
+      // my account banned"). The hand-off to another tool (limit-handoff.ts) takes it from there.
+      const other = this.account && OUT_OF_USAGE.test(raw) && !this.stopping && !this.stopped ? await this.otherAccount(raw) : null;
       // A model this account can't run (MODEL_UNPAID): the same turn goes again on the tool's everyday model, as will every turn
       // asked of that model after it, and the room is told. Once: a fallback refused too ends the run as it would have.
       const fallback = MODEL_FALLBACK[this.opts.tool];
@@ -1661,6 +1661,7 @@ ${prompt}`;
         return this.turn(m, files);
       }
       error = tooLong ? `What ${this.label} was handed this turn is too long for this computer to start it with. Send a shorter instruction, or several.` : adapter.explain(raw);
+      if (other) error = `${error} Your ${other.label} account is signed in here too: switch this agent to it from its account menu to carry on.`;
       // A failed resume would fail the same way every time; start fresh next turn. Remembered as lost (see `saveResume`), so a
       // reconnect for the same pick doesn't bring the dead id back, and the server is told, here and on each reconnect, so the
       // fresh conversation is sent the history it no longer has.
@@ -1711,8 +1712,6 @@ ${prompt}`;
   /** When this lane's tool last told the server its limits (see shareLimits). */
   private limitsAt = 0;
 
-  /** How many times each turn went on to another account: one per account at most, and a few in all. */
-  private readonly switches = new Map<string, number>();
   /**
    * The turn this runner was on when its connection dropped, kept running for the runner that reconnects to take on (adopt)
    * rather than stopped and started again: about 80 runs a week were cut by server restarts, each losing what it had going, a
@@ -1729,44 +1728,31 @@ ${prompt}`;
   private unpaid: string | null = null;
 
   /**
-   * The account a lane opens on: the one asked for, else the tool's own sign-in, unless that is out of usage and another isn't.
-   * An added one's folder is linked up again first, in case a link went (a folder moved, a skills folder made since).
+   * The account a lane opens on: the one asked for, else the tool's own sign-in, even when it is out of usage: which account to go
+   * on as is the person's pick, never Friday's (otherAccount). An added one's folder is linked up again first, in case a link went
+   * (a folder moved, a skills folder made since).
    */
   private async startAccount(tool: EngineTool, wanted: string | undefined): Promise<ToolAccount> {
     if (!hasAccounts(tool)) throw new RunnerError(`${ENGINE_NAMES[tool]} has one account on a computer.`);
     const all = await listAccounts(tool);
     let pick = wanted ? all.find((a) => a.id === wanted) : undefined;
     if (wanted && !pick) throw new RunnerError(`${ENGINE_NAMES[tool]} has no account called “${wanted}” on this computer. Pick another, or add it in Friday's tool settings.`);
-    pick ??= isOut(all[0]!) ? (all.find((a) => !isOut(a)) ?? all[0]!) : all[0]!;
+    pick ??= all[0]!;
     if (pick.id !== DEFAULT_ACCOUNT) await prepareAccountDir(tool, pick.id);
     return pick;
   }
 
   /**
-   * The account this lane's tool ran out on is marked out until its message says, and the next one that isn't out and is signed
-   * in takes over. Null when there is none: every account of the tool is out.
+   * This account out of usage: marked so until its limit lifts, and the next account of the tool here that is signed in and not
+   * out itself, if any, named for the person to switch to. Nothing is switched.
    */
-  private async switchAccount(raw: string): Promise<ToolAccount | null> {
+  private async otherAccount(raw: string): Promise<ToolAccount | null> {
     const tool = this.opts.tool;
     const from = this.account;
     if (!hasAccounts(tool) || !from) return null;
-    const until = limitHit(raw)?.resetsAt ?? null;
-    await markOut(tool, from.id, until).catch(() => {});
+    await markOut(tool, from.id, limitHit(raw)?.resetsAt ?? null).catch(() => {});
     const bin = this.bin;
-    const to = await nextAccount(tool, from.id, (id) =>
-      this.opts.bin || !bin ? Promise.resolve(null) : startChecks.loginStatusCached(tool, bin, id === DEFAULT_ACCOUNT ? undefined : id),
-    ).catch(() => null);
-    if (!to) return null;
-    if (to.id !== DEFAULT_ACCOUNT) await prepareAccountDir(tool, to.id).catch(() => {});
-    this.account = to;
-    // A reconnect opens on the account it is on now, not the one it ran out on.
-    this.opts.account = to.id;
-    // A kept process is signed in as the account it started with: the next one starts as this.
-    this.acp?.reset();
-    this.limitsAt = 0;
-    this.log(`${this.label}'s ${from.label} account is out of usage${until ? ` until ${new Date(until).toLocaleString()}` : ""}; carrying on as ${to.label}`);
-    this.send({ kind: "event", body: { type: "account.switched", from: { id: from.id, label: from.label }, to: { id: to.id, label: to.label }, ...(until ? { until } : {}) } });
-    return to;
+    return nextAccount(tool, from.id, (id) => (this.opts.bin || !bin ? Promise.resolve(null) : startChecks.loginStatusCached(tool, bin, id === DEFAULT_ACCOUNT ? undefined : id))).catch(() => null);
   }
 
   /**
@@ -1777,7 +1763,8 @@ ${prompt}`;
     const tool = this.opts.tool;
     if ((tool !== "claude" && tool !== "codex") || this.opts.bin || Date.now() - this.limitsAt < 5 * 60_000) return;
     this.limitsAt = Date.now();
-    void readLimits().then(
+    // As last said: asking Claude Code itself (limits.ts) waits for the card or a hand-off, not a lane that is starting it.
+    void readLimits({ askClaude: false }).then(
       (l) => {
         // The account it runs as, when it isn't the tool's own sign-in: its windows are the ones its turns spend.
         const acct = this.account && this.account.id !== DEFAULT_ACCOUNT ? l.accounts?.[tool]?.find((a) => a.id === this.account!.id) : undefined;
@@ -1856,7 +1843,7 @@ ${prompt}`;
         if (this.mode === "full") {
           const allow = out.tool !== "AskUserQuestion";
           if (out.reply) out.reply(allow);
-          else this.warm?.answer(out.requestId, allow, out.input, "Nobody is being asked in Auto. Decide for yourself, and say in your answer what you chose and why.");
+          else this.warm?.answer(out.requestId, allow, out.input, DECIDE_YOURSELF);
           break;
         }
         // Plan changes nothing, so a change is refused without asking anyone; its commands are still put to a person.
