@@ -139,7 +139,8 @@ test("asked of Claude Code when the limits are read: once per five minutes, in F
   assert.equal(l.claudeWhy, undefined);
   assert.deepEqual(l.claudeWindows.map((w) => [w.kind, w.utilization]), [["five_hour", 0.67], ["seven_day_fable", 0.43]]);
   const [first] = await starts();
-  assert.equal(first?.cwd, await realpath(path.join(home, "state", "claude-usage")), "its own empty folder under Friday's data, not the project");
+  // Both sides resolved: Windows can name the same temp folder in its short form (RUNNER~1) from inside the child.
+  assert.equal(first?.cwd && (await realpath(first.cwd)), await realpath(path.join(home, "state", "claude-usage")), "its own empty folder under Friday's data, not the project");
   for (const flag of ["-p", "--input-format", "--strict-mcp-config", "--no-session-persistence", "--settings", "--tools"]) assert.ok(first!.args.includes(flag), flag);
   assert.equal(first!.args[first!.args.indexOf("--tools") + 1], "", "no tools");
   assert.equal(first!.args[first!.args.indexOf("--settings") + 1], '{"disableAllHooks":true}', "no hooks");
