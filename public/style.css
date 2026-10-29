@@ -11548,8 +11548,10 @@ html.desktop [data-slot="dialog-content"] { top: calc(50% + 20px); max-height: c
 .tray.scroll-x-cue { --cue-bg: var(--tray); }
 /* The home's headline breaks in balanced lines, never a lone word on the last ("up?" at 420). */
 .hero-title, .hero-flip > span { text-wrap: balance; }
-/* A wheel past the end of a card's list stays in the card, not scrolling the page behind it (the tools card on home). */
-.mb-card, .mb-card *, .ws-scroll, .shortcut-pop, .popover { overscroll-behavior: contain; }
+/* A wheel past the end of a card's list stays in the card, not scrolling the page behind it (the tools card on home). The card
+   alone, not everything in it: its tool list clips with overflow: hidden, which makes it a scroll container that can't scroll,
+   and with contain there the wheel stopped at the list and the card never scrolled (Arun, 2026-10-29: "this wont scroll for me"). */
+.mb-card, .ws-scroll, .shortcut-pop, .popover { overscroll-behavior: contain; }
 /* The folder browser's line: the folder you are in, by name, then where it is. */
 .ws-crumb-path { font-family: var(--font) !important; }
 .ws-crumb-name { color: var(--ink); font-weight: 600; }
