@@ -485,7 +485,7 @@ html .tm-row[data-active="true"] { background: var(--sel-bg, var(--hover-strong)
 /* Where faces overlap, each sits on a collar of the ground: as wide as its ring when it has one, a hairline when it doesn't. */
 .tm-face-wrap { --pr-collar: calc(var(--pr-gap) + var(--pr-w)); }
 .tm-face-wrap:is([data-pr="idle"], [data-pr="asleep"], [data-pr="done"]) { --pr-collar: 1.5px; }
-.pr .tm-face-in > svg.tm-face-lead {
+.pr[data-pr] .tm-face-in > svg.tm-face-lead {
   position: absolute; z-index: 1; left: 50%; top: calc(var(--pr-size) * -.1 - 1px); width: clamp(8px, calc(var(--pr-size) * .4), 18px); height: auto; aspect-ratio: 5 / 3;
   transform: translateX(-50%); overflow: visible; fill: var(--amber); stroke: var(--pr-ground, var(--bg)); stroke-width: 2.4px; paint-order: stroke;
 }

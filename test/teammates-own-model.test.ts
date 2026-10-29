@@ -68,8 +68,9 @@ test("a teammate may run on its owner's own model only: never another person's, 
 test("on this computer: a teammate on your own model is made, run by Friday Code in its folder, reached by the team, and never switched for usage", async (t) => {
   const home = await mkdtemp(path.join(tmpdir(), "friday-team-own-"));
   // runner/own-models.ts keeps the models in ~/.friday/models.json: this test's, never the real one.
-  const realHome = process.env.HOME;
-  process.env.HOME = home;
+  // USERPROFILE too: Windows finds the home folder there, and another test's models were read from the CI machine's own.
+  const real = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+  Object.assign(process.env, { HOME: home, USERPROFILE: home });
   const fake = await fakeModel();
   const kv = await localKV(home);
   const app = await createApp({ port: 0, redisUrl: "", prefix: "friday:", secret: "s", driverGraceMs: 15_000, llm: NO_MODELS, dataDir: path.join(home, "uploads"), local: { redis: kv.redis, sub: kv.sub, user: { id: "local", name: "Me" } }, teammatesHome: home });
@@ -77,7 +78,7 @@ test("on this computer: a teammate on your own model is made, run by Friday Code
     await app.close();
     await kv.close();
     await fake.close();
-    process.env.HOME = realHome;
+    for (const [k, v] of Object.entries(real)) (v === undefined ? delete process.env[k] : (process.env[k] = v));
     await rm(home, { recursive: true, force: true });
   });
   type Team = { sid: string; teammates: TeammateView[]; rooms: { id: string; sid: string; lanes: Record<string, string> }[]; room?: string };

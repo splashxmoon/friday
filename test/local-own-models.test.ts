@@ -59,15 +59,16 @@ test("an OpenAI-format server's answer streams back with its tool calls; a key g
 test("on this computer, a session on your own model runs Friday Code on it, and any other waits for a coding tool", async (t) => {
   const home = await mkdtemp(path.join(tmpdir(), "friday-own-"));
   // runner/own-models.ts keeps them in ~/.friday/models.json: this test's, never the real one.
-  const realHome = process.env.HOME;
-  process.env.HOME = home;
+  // USERPROFILE too: Windows finds the home folder there, and another test's models were read from the CI machine's own.
+  const real = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+  Object.assign(process.env, { HOME: home, USERPROFILE: home });
   const REPLY = "Hello from your own model.";
   const fake = await fakeServer(REPLY);
   const friday = await startLocal({ home: path.join(home, "friday"), port: 0 });
   t.after(async () => {
     await friday.close();
     await fake.close();
-    process.env.HOME = realHome;
+    for (const [k, v] of Object.entries(real)) (v === undefined ? delete process.env[k] : (process.env[k] = v));
     await rm(home, { recursive: true, force: true });
   });
   const call = async <T,>(p: string, json?: unknown): Promise<T> => {

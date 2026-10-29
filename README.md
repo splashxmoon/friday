@@ -36,7 +36,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/hero.png" alt="Friday's home screen: four sessions and nine agents at work, Claude Code and Codex side by side in the sidebar and under Right now" width="960" />
+  <img src="docs/assets/hero.png" alt="Friday's home screen: five sessions and ten agents at work, Claude Code and Codex side by side in the sidebar and under Right now" width="960" />
 </p>
 
 Works with the subscriptions you already have. If a coding tool is installed and signed in on your computer, Friday can drive it:
@@ -85,6 +85,10 @@ An agent you add to a session can work in its own copy of the repository, so thr
 
 Pick **Work** in the sidebar for everything that isn't software: a week of posts, a thread from a video, a script, a newsletter, a research brief, a deck, a cover image. Claude Code and Codex work on it together in one folder, and the session's rail keeps what they make in view: **Progress**, the **Outputs** (documents open in a reader, pictures and videos play in place), the **Sources** they read, numbered, and the **Connectors** they can use. In the desktop app the agents browse in Friday's own browser panel while you watch, or in your own Chrome with Claude in Chrome.
 
+<p align="center">
+  <img src="docs/assets/work.png" alt="A Work session for a checkout launch: the cover image Claude Code made, Codex planning a week of posts, and the rail with progress at 3 of 5 and four outputs" width="960" />
+</p>
+
 ## Crew: AI teammates that keep going
 
 Pick **Crew** to keep AI teammates on your computer. Each has a name, a role, a memory and a folder of its own, and runs on one of your coding tools. Give the crew a goal and the lead plans it, hands out the parts on a board and tells you what got done; or `@` a teammate to give it a task yourself.
@@ -94,6 +98,10 @@ Pick **Crew** to keep AI teammates on your computer. Each has a name, a role, a 
 - **Usage limits handled:** a teammate whose tool runs out carries on with its backup tool, and switches back at the reset.
 - **Access you set** per teammate (Read only, Ask before changes, Full access), and Stop all or Pause whenever you like.
 - **Workflows:** a crew's automations drawn as steps, each run posting a board in a room.
+
+<p align="center">
+  <img src="docs/assets/crew.png" alt="The Crew room: Maya gives the crew a goal, Nova the lead plans it and posts a board, Kit has fixed the bugs and Nova is checking them, and Juno is writing the release notes" width="960" />
+</p>
 
 ## "So what's the catch?"
 

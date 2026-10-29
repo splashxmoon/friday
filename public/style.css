@@ -11574,12 +11574,12 @@ html.desktop [data-slot="dialog-content"] { top: calc(50% + 20px); max-height: c
    whatever the face's own colour, so "blue ring" means working everywhere.
    Its width follows the face (Arun, 2026-10-29: "the ring things should be slightly thicker too"): 1.75px at 16px, 2px at 24-32px,
    2.5px at 56px (--pr-w), with a clear gap between it and the face that grows a little with it (--pr-gap, 1.5px to 2.5px). */
-.pr {
+.pr[data-pr] {
   position: relative; display: inline-grid; place-items: center; flex: none; width: var(--pr-size); height: var(--pr-size); line-height: 0;
   --pr-w: clamp(1.75px, calc(1.5px + var(--pr-size) * .02), 2.5px);
   --pr-gap: clamp(1.5px, calc(var(--pr-size) * .045), 2.5px);
 }
-.pr > :not(.pr-ring, .pr-badge) { grid-area: 1 / 1; }
+.pr[data-pr] > :not(.pr-ring, .pr-badge) { grid-area: 1 / 1; }
 .pr-ring { position: absolute; inset: calc(-1 * (var(--pr-gap) + var(--pr-w))); border-radius: 50%; pointer-events: none; }
 .pr[data-pr="working"] > .pr-ring {
   background: conic-gradient(var(--live) 0 70%, transparent 70% 100%);
