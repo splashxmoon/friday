@@ -79,7 +79,8 @@ test("on this computer: a teammate on your own model is made, run by Friday Code
     await kv.close();
     await fake.close();
     for (const [k, v] of Object.entries(real)) (v === undefined ? delete process.env[k] : (process.env[k] = v));
-    await rm(home, { recursive: true, force: true });
+    // Windows may still hold a teammate's folder a moment after the app closes (EBUSY): a temp folder left behind is no failure.
+    await rm(home, { recursive: true, force: true, maxRetries: 10 }).catch(() => {});
   });
   type Team = { sid: string; teammates: TeammateView[]; rooms: { id: string; sid: string; lanes: Record<string, string> }[]; room?: string };
   const call = async <T = Team & { error?: string },>(p: string, method = "GET", json?: unknown): Promise<{ status: number; body: T }> => {

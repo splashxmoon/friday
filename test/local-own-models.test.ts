@@ -69,7 +69,8 @@ test("on this computer, a session on your own model runs Friday Code on it, and 
     await friday.close();
     await fake.close();
     for (const [k, v] of Object.entries(real)) (v === undefined ? delete process.env[k] : (process.env[k] = v));
-    await rm(home, { recursive: true, force: true });
+    // Windows may still hold a teammate's folder a moment after the app closes (EBUSY): a temp folder left behind is no failure.
+    await rm(home, { recursive: true, force: true, maxRetries: 10 }).catch(() => {});
   });
   const call = async <T,>(p: string, json?: unknown): Promise<T> => {
     const r = await fetch(`${friday.url}${p}`, { method: json === undefined ? "GET" : "POST", headers: { "Content-Type": "application/json", "x-friday-local": "1" }, ...(json === undefined ? {} : { body: JSON.stringify(json) }) });
