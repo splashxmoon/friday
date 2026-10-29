@@ -51,6 +51,11 @@ export function firstOpen(steps: { done: boolean }[]): number {
   return i === -1 ? steps.length - 1 : i;
 }
 
+/** The step showing has just come true: the same step, not done before and done now. A different step (Back, a chip) never is. */
+export function becameDone(was: { id: string; done: boolean }, now: { id: string; done: boolean }): boolean {
+  return was.id === now.id && !was.done && now.done;
+}
+
 export function Setup({ identity, hasHistory, onDone }: { identity: Identity; hasHistory: boolean; /** Pressed Start: the box is theirs. */ onDone: () => void }) {
   const k = keyFor(identity.id);
   const [open, setOpen] = useState(false);
@@ -120,18 +125,17 @@ export function Setup({ identity, hasHistory, onDone }: { identity: Identity; ha
     setAt(firstOpen(steps));
   }, [open, machine.mode]); // eslint-disable-line react-hooks/exhaustive-deps
   // The step showing comes true (the app connecting, a sign-in finishing): on to the next, a beat later so the tick is seen.
+  // Only that step coming true counts: going Back (or pressing a chip) to a step already done is not it becoming done, so it
+  // stays put (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL"; Back bounced forward again after 0.9 s).
   const showing = steps[Math.min(at, steps.length - 1)]!;
-  const wasDone = useRef(showing.done);
+  const wasDone = useRef({ id: showing.id, done: showing.done });
   useEffect(() => {
     const was = wasDone.current;
-    wasDone.current = showing.done;
-    if (!open || was || !showing.done || at >= steps.length - 1) return;
+    wasDone.current = { id: showing.id, done: showing.done };
+    if (!open || !becameDone(was, showing) || at >= steps.length - 1) return;
     const t = setTimeout(() => setAt((a) => (a === at ? a + 1 : a)), 900);
     return () => clearTimeout(t);
-  }, [showing.done, at, open, steps.length]);
-  useEffect(() => {
-    wasDone.current = showing.done;
-  }, [at]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [showing.id, showing.done, at, open, steps.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!open) return;
@@ -151,7 +155,7 @@ export function Setup({ identity, hasHistory, onDone }: { identity: Identity; ha
       <div className="setup-card">
         <header className="setup-head">
           <span className="tour-mark">
-            <FridayMark size={28} />
+            <FridayMark size={24} />
           </span>
           <div>
             <h2>Let's get you set up</h2>
@@ -180,7 +184,7 @@ export function Setup({ identity, hasHistory, onDone }: { identity: Identity; ha
         <section className={`setup-panel${showing.done ? " done" : ""}`} aria-live="polite" key={showing.id}>
           <div className="setup-panel-head">
             <span className="setup-panel-icon" aria-hidden>
-              <Icon name={showing.done ? "check" : showing.icon} size={18} />
+              <Icon name={showing.done ? "check" : showing.icon} size={16} />
             </span>
             <div>
               <h3>{showing.title}</h3>
@@ -208,7 +212,7 @@ export function Setup({ identity, hasHistory, onDone }: { identity: Identity; ha
             )}
             {showing.id === "tools" && connected && <MachineBadge inline identity={identity} machine={machine} refresh={refresh} />}
             {showing.id === "tools" && !connected && <p className="muted small setup-wait">Connect this computer first, and its coding tools show here.</p>}
-            {showing.id === "github" && connected && !gh.status?.connected && <GitHubConnect compact identity={identity} why="Pull requests, issues and Code Review, as you." />}
+            {showing.id === "github" && connected && !gh.status?.connected && <GitHubConnect bare identity={identity} />}
           </div>
         </section>
 
@@ -231,7 +235,7 @@ export function Setup({ identity, hasHistory, onDone }: { identity: Identity; ha
                 Skip for now
               </button>
             )}
-            <button type="button" className="tour-next" autoFocus onClick={next}>
+            <button type="button" className={`tour-next${showing.done ? "" : " quiet"}`} autoFocus onClick={next}>
               {last ? (doneCount === steps.length ? "Start" : "Start anyway") : "Next"}
             </button>
           </span>

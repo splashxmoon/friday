@@ -127,3 +127,41 @@ export function runEndAfter(events: SessionEvent[], lane: string, sha: string): 
   const end = events.find((e) => e.seq > start.seq && (e.lane ?? MAIN_LANE) === lane && e.body.type === "run.ended");
   return end?.body.type === "run.ended" ? end.body.after : undefined;
 }
+
+/**
+ * Whether another agent working in the same folder (`sharers`, its lanes) worked while the run that took checkpoint `sha` on
+ * `lane` did, or at any time since when the undo isn't bounded by where the run left the folder (`bounded` false). An undo
+ * compares the folder with the checkpoint and puts back every difference, so what the other agent made or changed in that
+ * time would go with it: a picture it finished while this run went on would be deleted as this run's (Arun, 2026-10-28:
+ * "iron everything and ensure we are good… any logic errors"). True too when it can't be told when the run was.
+ */
+export function sharedWorkDuring(events: SessionEvent[], lane: string, sha: string, sharers: Set<string>, bounded: boolean): boolean {
+  if (!sharers.size) return false;
+  const on = (e: SessionEvent) => e.lane ?? MAIN_LANE;
+  let from: number;
+  let to = Infinity;
+  const start = events.find((e) => on(e) === lane && tookCheckpoint(e, sha));
+  if (start) {
+    from = start.seq;
+    const end = events.find((e) => e.seq > start.seq && on(e) === lane && e.body.type === "run.ended");
+    if (bounded && end) to = end.seq;
+  } else {
+    // A redo: the undo it reverses is the moment, and bounded by where that undo left the folder, it touches only what it did.
+    const undone = events.findLast((e) => on(e) === lane && e.body.type === "folder.restored" && e.body.undo === sha);
+    if (!undone) return true;
+    from = undone.seq;
+    if (bounded) to = undone.seq;
+  }
+  const open = new Map<string, number>();
+  for (const e of events) {
+    const l = on(e);
+    if (!sharers.has(l)) continue;
+    if (e.body.type === "run.started") open.set(l, e.seq);
+    else if (e.body.type === "run.ended" && open.has(l)) {
+      if (open.get(l)! <= to && e.seq >= from) return true;
+      open.delete(l);
+    }
+  }
+  // A run of theirs still going (or never said to end) that began before the window closed.
+  return [...open.values()].some((s) => s <= to);
+}

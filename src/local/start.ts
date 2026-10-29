@@ -20,6 +20,8 @@ export interface Started {
   home: string;
   /** Another Friday was already running on this folder: this is its address, and nothing was started. */
   already?: boolean;
+  /** Whether the computer should be kept awake: the team works while the person is away (app.ts teammates). */
+  awake?: () => Promise<boolean>;
   close(): Promise<void>;
 }
 
@@ -96,6 +98,7 @@ export async function startLocal(o: { home?: string; port?: number } = {}): Prom
   return {
     url,
     home,
+    awake: () => app.teammates.awake(),
     close: () =>
       (closed ??= (async () => {
         rmSync(runningFile, { force: true });

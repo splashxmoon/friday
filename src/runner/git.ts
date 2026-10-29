@@ -659,7 +659,7 @@ export async function dropWorktree(dir: string, force: boolean | "committed" = t
   // Its kept snapshot index is named for the top as git spells it, so that is asked for while git can still answer.
   const top = await git(real, ["rev-parse", "--show-toplevel"]).then((s) => s.trim(), () => null);
   await git(real, ["worktree", "remove", "--force", real]).catch(() => rm(real, { recursive: true, force: true }));
-  if (top) await rm(keptIndex(top), { force: true }).catch(() => {});
+  if (top) for (const f of [keptIndex(top), `${keptIndex(top)}.exclude`]) await rm(f, { force: true }).catch(() => {});
   return true;
 }
 
@@ -941,6 +941,62 @@ function gitEnv(cwd: string, args: string[], env: Record<string, string>, { inpu
  */
 const keptIndex = (root: string) => path.join(homedir(), ".friday", "snapshot-index", createHash("sha1").update(root).digest("hex").slice(0, 16));
 
+/**
+ * Untracked files a snapshot leaves out: a picture, video or sound over a megabyte, anything over 25 MB, and, past
+ * SNAPSHOT_LIMITS.bytes of untracked files in all (weighFolder's limit), the largest until it is under. Hashed into the folder's
+ * git store with every checkpoint, and kept there for good by refs/friday/checkpoints, a folder's renders and frames grew it by
+ * their size with each run and held every run's start up while they were hashed (Arun, 2026-10-28: "iron everything and
+ * ensure we are good… any logic errors"). A tracked file is always in, as the person put it in git; an icon or a logo is too.
+ */
+export const CHECKPOINT_LIMITS = { media: 1024 * 1024, file: 25 * 1024 * 1024, bytes: SNAPSHOT_LIMITS.bytes };
+const MEDIA = /\.(png|jpe?g|gif|webp|avif|heic|heif|tiff?|bmp|psd|exr|mp4|mov|webm|m4v|mkv|avi|mp3|wav|m4a|ogg|flac|aac|aiff?)$/i;
+
+/** Which of these untracked files (path and size) a snapshot leaves out (CHECKPOINT_LIMITS). */
+export function leftOut(files: { path: string; size: number }[], limits = CHECKPOINT_LIMITS): Set<string> {
+  const out = new Set<string>();
+  const kept: { path: string; size: number }[] = [];
+  for (const f of files) {
+    if (f.size > limits.file || (MEDIA.test(f.path) && f.size > limits.media)) out.add(f.path);
+    else kept.push(f);
+  }
+  let total = kept.reduce((n, f) => n + f.size, 0);
+  for (const f of kept.sort((a, b) => b.size - a.size)) {
+    if (total <= limits.bytes) break;
+    out.add(f.path);
+    total -= f.size;
+  }
+  return out;
+}
+
+/** A path as a line of an ignore file that matches it alone, from the top; null for a name no ignore line can say (a newline). */
+export function ignoreLine(rel: string): string | null {
+  if (/[\r\n]/.test(rel)) return null;
+  return `/${rel.replace(/[\\*?[]/g, "\\$&").replace(/ +$/, (sp) => sp.replace(/ /g, "\\ "))}`;
+}
+
+/** The person's own ignore rules beyond the repository's (core.excludesFile), which a snapshot's own list stands in for. */
+async function globalExcludes(root: string): Promise<string> {
+  const set = (await git(root, ["config", "--path", "--get", "core.excludesFile"], [0, 1]).catch(() => "")).trim();
+  const file = set || path.join(process.env.XDG_CONFIG_HOME || path.join(homedir(), ".config"), "git", "ignore");
+  return readFile(file, "utf8").catch(() => "");
+}
+
+/**
+ * The ignore file a snapshot's `add` reads in place of the person's own (core.excludesFile): theirs, then the untracked files it
+ * leaves out (leftOut), each by its own path. Untracked as the snapshot index `env` sees them, so nothing tracked is left out.
+ */
+async function snapshotExcludes(root: string, env: Record<string, string>, file: string): Promise<void> {
+  const untracked = (await gitEnv(root, ["ls-files", "-z", "--others", "--exclude-standard"], env)).split("\0").filter(Boolean);
+  const sized: { path: string; size: number }[] = [];
+  for (let i = 0; i < untracked.length; i += 64) {
+    const batch = untracked.slice(i, i + 64);
+    sized.push(...(await Promise.all(batch.map((f) => lstat(path.join(root, f)).then((st) => ({ path: f, size: st.isFile() ? st.size : 0 }), () => ({ path: f, size: 0 }))))));
+  }
+  const lines = [...leftOut(sized)].map(ignoreLine).filter((l): l is string => !!l);
+  const own = await globalExcludes(root);
+  await writeFile(file, `${own}${own && !own.endsWith("\n") ? "\n" : ""}# Friday: left out of its checkpoints (big, or a picture, video or sound)\n${lines.join("\n")}\n`, "utf8");
+}
+
 /** Snapshots being built ahead of time (see warmSnapshot), by repository: one wanted meanwhile waits and starts from it. */
 const building = new Map<string, Promise<unknown>>();
 /** How long a snapshot waits for one being built ahead of it: longer than a big repository takes, shorter than never. */
@@ -973,6 +1029,8 @@ async function snapshotTree(root: string): Promise<{ tree: string; head: string 
   await mkdir(path.dirname(kept), { recursive: true });
   const index = `${kept}-${randomUUID().slice(0, 8)}`;
   const env = { GIT_INDEX_FILE: index };
+  /** The ignore file this snapshot's `add` reads (snapshotExcludes), kept beside the index for the next one's warm check. */
+  const excludes = `${index}.exclude`;
   try {
     const head = await git(root, ["rev-parse", "--verify", "-q", "HEAD"]).then((s) => s.trim() || null, () => null);
     // Nothing changed since the kept index was saved, at the same HEAD: its tree is the snapshot, with no file hashed.
@@ -986,7 +1044,8 @@ async function snapshotTree(root: string): Promise<{ tree: string; head: string 
         await rm(index, { force: true });
         if (head) await gitEnv(root, ["read-tree", head], env);
       }
-      await gitEnv(root, ["add", "-A", "--", "."], env);
+      await snapshotExcludes(root, env, excludes);
+      await gitEnv(root, ["-c", `core.excludesFile=${excludes}`, "add", "-A", "--", "."], env);
       return (await gitEnv(root, ["write-tree"], env)).trim();
     };
     // A kept index git can't work with is started over, never trusted.
@@ -995,10 +1054,12 @@ async function snapshotTree(root: string): Promise<{ tree: string; head: string 
       return build(false);
     });
     // Kept for next time. One that can't be saved (another process holding it) only costs the next snapshot its head start.
+    await rename(excludes, `${kept}.exclude`).catch(() => {});
     await rename(index, kept).then(() => keptHead.set(root, head), () => {});
     return { tree, head };
   } finally {
     await rm(index, { force: true }).catch(() => {});
+    await rm(excludes, { force: true }).catch(() => {});
   }
 }
 
@@ -1013,9 +1074,13 @@ async function warmTree(root: string, kept: string, index: string): Promise<stri
   await copyFile(kept, index);
   await utimes(index, st.atime, st.mtime);
   const env = { GIT_INDEX_FILE: index };
+  // What the kept one left out stays out (snapshotExcludes): without its list, any untracked file is something new.
+  const excludes = `${kept}.exclude`;
+  const listed = await access(excludes).then(() => ["-c", `core.excludesFile=${excludes}`], () => null);
+  if (!listed) return null;
   const [same, nothingNew] = await Promise.all([
     gitEnv(root, ["diff-files", "--quiet"], env).then(() => true, () => false),
-    gitEnv(root, ["ls-files", "-z", "--others", "--exclude-standard"], env).then((s) => s === "", () => false),
+    gitEnv(root, [...listed, "ls-files", "-z", "--others", "--exclude-standard"], env).then((s) => s === "", () => false),
   ]);
   return same && nothingNew ? (await gitEnv(root, ["write-tree"], env)).trim() || null : null;
 }
@@ -1045,6 +1110,16 @@ async function seedIndex(root: string, kept: string, index: string, head: string
   if (untracked.length) await gitEnv(root, ["update-index", "--force-remove", "-z", "--stdin"], env, { input: `${untracked.join("\0")}\0` });
   if (missing.length) await gitEnv(root, ["--literal-pathspecs", "reset", "-q", head, "--pathspec-from-file=-", "--pathspec-file-nul"], env, { input: `${missing.join("\0")}\0` });
   return true;
+}
+
+/** Which of `files` commit `sha` holds, by exact path. */
+async function inTree(root: string, sha: string, files: string[]): Promise<Set<string>> {
+  const out = new Set<string>();
+  for (let i = 0; i < files.length; i += 200) {
+    const listed = await git(root, ["--literal-pathspecs", "ls-tree", "-r", "-z", "--name-only", sha, "--", ...files.slice(i, i + 200)]).catch(() => "");
+    for (const f of listed.split("\0")) if (f) out.add(f);
+  }
+  return out;
 }
 
 /** Save the folder as it is now. Returns the checkpoint's id, or null outside a git repository. */
@@ -1106,12 +1181,18 @@ export async function restore(cwd: string, sha: string, until?: string): Promise
   try {
     await gitEnv(root, ["read-tree", target], { GIT_INDEX_FILE: index });
     const made = new Set(created);
-    const back = changed.filter((f) => !made.has(f));
+    // A file on disk that the checkpoint just taken doesn't hold (one a snapshot leaves out, CHECKPOINT_LIMITS) is never removed
+    // or written over: its bytes are nowhere else, and undoing this undo couldn't bring them back.
+    const saved = await inTree(root, undo!, [...added, ...changed.filter((f) => !made.has(f))]);
+    const onDisk = (f: string) => lstat(path.join(root, f)).then(() => true, () => false);
+    const back: string[] = [];
+    for (const f of changed) if (!made.has(f) && (saved.has(f) || !(await onDisk(f)))) back.push(f);
     // Written in batches so a thousand-file run doesn't overflow a command line.
     for (let i = 0; i < back.length; i += 200) {
       await gitEnv(root, ["checkout-index", "-f", "--", ...back.slice(i, i + 200)], { GIT_INDEX_FILE: index });
     }
-    for (const f of added) await rm(path.join(root, f), { force: true });
+    for (const f of added) if (saved.has(f)) await rm(path.join(root, f), { force: true });
+    else added.delete(f);
     const after = await checkpoint(root, "after undo");
     return { undo: undo!, after, restored: back.length, removed: added.size };
   } finally {

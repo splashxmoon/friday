@@ -196,3 +196,83 @@ export function rehypeAnswer() {
     walk(tree, true);
   };
 }
+
+/**
+ * Links to files, before the sanitiser and the link hardener see them. An agent writes `[working plan](working-plan.md)` or
+ * `[audit](file:///…/audit.pdf)`; the hardener refused both (a relative path has no base it trusts, file: is never allowed) and
+ * drew "working plan [blocked]" in a Crew room (Arun, 2026-10-29). A link to a file in the folders is the app's own file chip
+ * instead: its address is kept in a fragment both of them let through, and rehypeFileChips (after them) makes it the chip. A
+ * link that must stay refused (javascript:, data:, vbscript:) is its words alone, with no "[blocked]".
+ */
+export const FILE_LINK = "#friday-file:";
+const REFUSED = /^\s*(javascript|data|vbscript):/i;
+const SCHEME = /^[a-z][\w+.-]*:/i;
+
+/** The file a link points at, or null for a web address, a fragment, mail and the like. */
+export function fileLinkOf(href: string): string | null {
+  let h = href.trim();
+  if (!h || h.startsWith("#") || h.startsWith("//") || h.startsWith("?")) return null;
+  if (/^file:/i.test(h)) h = h.replace(/^file:\/\/(localhost)?/i, "").replace(/^file:/i, "");
+  else if (SCHEME.test(h) && !/^[A-Za-z]:[\\/]/.test(h)) return null;
+  h = h.replace(/[?#].*$/, "");
+  try {
+    h = decodeURIComponent(h);
+  } catch {
+    // Kept as written.
+  }
+  if (h.startsWith("./")) h = h.slice(2);
+  // A folder, or nothing left, is no file to open.
+  if (!h || h.endsWith("/") || h === "." || h === "..") return null;
+  return h;
+}
+
+/** Before the sanitiser: links to files carried in a fragment, refused ones made plain words. */
+export function rehypeFileLinks() {
+  return (tree: Node) => {
+    const walk = (n: Node) => {
+      const kids = n.children ?? [];
+      for (let i = 0; i < kids.length; i++) {
+        const c = kids[i]!;
+        if (c.type !== "element") continue;
+        if (c.tagName === "a") {
+          const href = typeof c.properties?.href === "string" ? c.properties.href : "";
+          if (REFUSED.test(href)) {
+            kids.splice(i, 1, ...(c.children ?? []));
+            i--;
+            continue;
+          }
+          const file = fileLinkOf(href);
+          if (file) c.properties = { ...c.properties, href: FILE_LINK + encodeURIComponent(file) };
+        }
+        walk(c);
+      }
+    };
+    walk(tree);
+  };
+}
+
+/** After the hardener: a link to a file is inline code naming it, with the link's words, which the answer draws as a file chip. */
+export function rehypeFileChips() {
+  return (tree: Node) => {
+    const walk = (n: Node) => {
+      for (const c of n.children ?? []) {
+        if (c.type !== "element") continue;
+        const href = c.tagName === "a" && typeof c.properties?.href === "string" ? c.properties.href : "";
+        if (href.startsWith(FILE_LINK)) {
+          let path = href.slice(FILE_LINK.length);
+          try {
+            path = decodeURIComponent(path);
+          } catch {
+            // As it is.
+          }
+          c.tagName = "code";
+          c.properties = { dataFileLink: textOf(c).trim() || path };
+          c.children = [{ type: "text", value: path }];
+          continue;
+        }
+        walk(c);
+      }
+    };
+    walk(tree);
+  };
+}

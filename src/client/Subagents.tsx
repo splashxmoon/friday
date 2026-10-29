@@ -233,6 +233,7 @@ export function SubagentsTray({ tasks, slot, agentOf }: { tasks: SubTask[]; slot
         type="button"
         className={`stb-item subs-item${open ? " on" : ""}${t.working ? " live" : ""}`}
         aria-expanded={open}
+        aria-label={label}
         title="Every agent's subagents"
         onClick={(e) => {
           // Right over the button, its right edge on the button's, kept on the screen (Arun, 2026-10-27: "make sure the sub agents
@@ -244,7 +245,9 @@ export function SubagentsTray({ tasks, slot, agentOf }: { tasks: SubTask[]; slot
         }}
       >
         {t.working ? <span className="ring-spin" aria-hidden="true" /> : <GitForkIcon className="size-3.5" aria-hidden="true" />}
-        {label}
+        {/* A phone's bar shows the count alone (style.css), so the run's state beside it keeps its word, not "W" (2026-10-28 QA). */}
+        <span className="subs-label">{label}</span>
+        <span className="subs-n" aria-hidden="true">{t.working || subs.length}</span>
       </button>
       {open && (
         <div className="subs-pop" style={pos} role="dialog" aria-label="Every agent's subagents">

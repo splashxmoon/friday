@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import path from "node:path";
 import type { Bus } from "./bus.js";
 import { resolveTarget, type Resolved } from "./handoff.js";
-import { limitHit } from "./limit-reset.js";
+import { limitHit, signedOut } from "./limit-reset.js";
 /** Other sessions an agent can reach (peers.ts on the hosted service; none on someone's own computer). */
 export interface Peers {
   list(sid: string, lane: string): Promise<string>;
@@ -19,6 +19,9 @@ import { laneName } from "./session/core.js";
 import { boardBusy, canDriveLane, driverOf, laneOf, meshOf, pendingFor, readyTasks, runOf, unreadPosts, type BoardTask, type MeshAsk, type MeshPost, type SessionState } from "./session/projection.js";
 import type { SessionStore } from "./session/store.js";
 import { engineName, MAIN_LANE, type ActorRef, type BoardTaskDef, type EngineMode, type EventBody, type MeshNote, type RepoCall, type SessionEvent } from "./types.js";
+import { BROWSER_TOOL, browserCall, browserDriver } from "./browser-driver.js";
+import { APP_INSTRUCTIONS, APP_TOOLS } from "./app-tools.js";
+import { loopBetween } from "./team-away.js";
 export { meshHead } from "./mesh-note.js";
 
 /**
@@ -93,6 +96,8 @@ const str = (v: unknown) => (typeof v === "string" ? v : "");
 const clip = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
 const lanesOf = (s: SessionState) => {
   let all = [MAIN_LANE, ...s.lanes.map((l) => l.id)];
+  // A team's main lane is its room, nobody's agent (teammates.ts): never messaged, never given a board task.
+  if (s.options.team) all = all.slice(1);
   return all;
 };
 
@@ -115,6 +120,7 @@ export interface MeshResult {
    */
   capture?: PreviewCapture;
   /** The answer as MCP content blocks, when it is more than text (the browser's screenshot). */
+  content?: unknown[];
 }
 
 /** What preview_screenshot asks the runner to capture: a page on its own machine, at this size. */
@@ -406,6 +412,76 @@ export function previewShot(args: Record<string, unknown>): MeshResult {
  * desktop app, and new enough to say so), so the others aren't offered a tool that only ever fails.
  */
 export function meshListing(screenshot: boolean): { tools: MeshToolDef[]; instructions: string } {
+  // The browser only where the desktop app draws it (local/desktop-browser.ts), said in the instructions too.
+  const l = meshListingOf(screenshot);
+  if (!browserDriver()) return l;
+  return { tools: [...l.tools, BROWSER_TOOL as MeshToolDef], instructions: `${l.instructions} The browser tool is Friday's own browser, in the session's Browser panel where the people here watch: use it to look things up, read and check pages and fill in what you were asked to.` };
+}
+
+/**
+ * In a crew, the team's roster tool: any agent can list the team and its rooms, add a teammate the person asked for,
+ * change one's role and make a room (Arun, 2026-10-27: on par with OpenBot, where you make teammates by asking; then "everything is
+ * full agentic"). Offered in every session (AgentMesh.teammateTool).
+ */
+export const TEAMMATE_TOOL: MeshToolDef = {
+  name: "manage_teammate",
+  description:
+    "The person's AI crew, from any session. list: every teammate, its role, tool and folders. create: add a teammate when the person asks for one, or agrees to one you suggest: a name, its role in a sentence or two, and, if they said, its coding tool (claude, codex, cursor…), or one of their own models (tool friday, with model), and the folders or repos it works in. update: change a teammate's role. rooms: the rooms, who is in each and what for. create_room: a room of some of the crew on one thing (a name, its members by name, and what it is for in role). Talk to a teammate with message_agent when you are in the Crew room or its room with it, or message_session to that room from anywhere else, naming it as agent. Removing a teammate or a room is the person's to do, from the sidebar.",
+  inputSchema: obj(
+    {
+      action: { type: "string", enum: ["list", "create", "update", "rooms", "create_room"] },
+      name: { type: "string", description: "The teammate's name (create, update), or the room's (create_room)." },
+      role: { type: "string", description: "What it is for and how it works, in its own words to itself (create, update); what the room is for (create_room)." },
+      tool: { type: "string", description: "Its coding tool (create): yours if left out. \"friday\" runs it on one of the person's own models instead (see model)." },
+      model: { type: "string", description: "With tool \"friday\" (create): which of the person's own models it runs on, by the name list shows." },
+      folders: { type: "array", items: { type: "string" }, description: "Full paths of folders or repos on this computer it works in (create)." },
+      members: { type: "array", items: { type: "string" }, description: "Teammates in the room, by name (create_room)." },
+    },
+    ["action"],
+  ),
+  annotations: { destructiveHint: false, openWorldHint: false },
+};
+
+/**
+ * In a team, the lead's hand on the others (Arun, 2026-10-27: the OpenBot gap "lead interrupt/status tools"): stop a teammate's
+ * turn where it is, leaving it on standby, or cut in with new orders that reach it now rather than after its turn. list_agents
+ * is the status board it reads first.
+ */
+export const STEER_TOOL: MeshToolDef = {
+  name: "steer_agent",
+  description:
+    "For the crew's lead only: steer a teammate that is mid-turn. Read list_agents first. stop: end its current turn now; it stays on standby, reachable, and takes your next message. redirect: cut in with new orders that reach it now, not after its turn (say what to drop, what to do instead, and why). Use it when a teammate works on the wrong thing, duplicates another, or must make way; for ordinary news use message_agent.",
+  inputSchema: obj(
+    {
+      action: { type: "string", enum: ["stop", "redirect"] },
+      to: { type: "string", description: "The teammate's name." },
+      text: { type: "string", description: "redirect: its new orders. stop: why, said to it as it stops." },
+    },
+    ["action", "to"],
+  ),
+  annotations: { destructiveHint: false, openWorldHint: false },
+};
+
+/**
+ * In a team, the lead's hand on its board (Arun, 2026-10-28: "run an audit on the teams stuff, really iron out bugs"): a task
+ * stuck, dropped or with the wrong teammate is put right by the lead, at night too, rather than waiting for the person's buttons.
+ */
+export const BOARD_TOOL: MeshToolDef = {
+  name: "manage_task",
+  description:
+    "For the crew's lead only: put a board task right. cancel: drop it (its teammate is told to stop on it). retry: put a stuck or dropped task back on the board. reassign: take it from whoever has it and give it to another teammate (to), or back to whoever is free. Read list_tasks first for the ids.",
+  inputSchema: obj(
+    {
+      action: { type: "string", enum: ["cancel", "retry", "reassign"] },
+      id: { type: "string", description: "The board task's id, from list_tasks." },
+      to: { type: "string", description: "reassign: the teammate to give it to, by name. Left out, whoever is free takes it." },
+    },
+    ["action", "id"],
+  ),
+  annotations: { destructiveHint: false, openWorldHint: false },
+};
+
+function meshListingOf(screenshot: boolean): { tools: MeshToolDef[]; instructions: string } {
   if (screenshot) return { tools: MESH_TOOLS, instructions: MESH_INSTRUCTIONS };
   return { tools: MESH_TOOLS.filter((t) => t.name !== "preview_screenshot"), instructions: MESH_INSTRUCTIONS.replace(/ preview_screenshot to see it yourself \([^)]*\),/, "") };
 }
@@ -413,6 +489,13 @@ export function meshListing(screenshot: boolean): { tools: MeshToolDef[]; instru
 /** The person behind a lane's current run, and how many agent-to-agent steps led to it. */
 function behind(state: SessionState, events: SessionEvent[], lane: string): { person: { id: string; name: string } | null; hop: number } {
   const found = behindRun(state, events, lane);
+  // A crew (teammates.ts) has its owner alone in it, its links kept off: whatever started a teammate's turn
+  // (Friday waking it with reports, keep-going, a wake), the work is the owner's. Nobody behind it refused every assign_task to a
+  // teammate on the owner's own plan (Arun, 2026-10-27: "assign_task refused … look into this too").
+  if (!found.person && state.options.team) {
+    const owner = Object.entries(state.members).find(([, m]) => m.role === "owner");
+    if (owner) return { person: { id: owner[0], name: owner[1].name }, hop: found.hop };
+  }
   return found;
 }
 
@@ -487,6 +570,128 @@ type Waited = { reply: string } | { gone: true } | { timeout: true };
 export class AgentMesh {
   /** Other sessions (peers.ts), for list_sessions, read_session and message_session: set by the app. */
   peers: Peers | null = null;
+  /**
+   * A teammate whose tool ran out of usage switches to its backup tool and carries on itself (teammates.ts):
+   * true when that is what happened, and the usual hand-on to another agent is skipped. Set by the app.
+   */
+  teamSwitch: ((sid: string, lane: string) => Promise<boolean>) | null = null;
+  /** manage_teammate (TEAMMATE_TOOL): where it is offered, and the call. Set by the app. */
+  teammateTool: { offered(sid: string): Promise<boolean>; call(sid: string, lane: string, args: Record<string, unknown>): Promise<MeshResult> } | null = null;
+  /**
+   * What the lead is told besides the reports when all the work it gave out is done, in a team: the goal again and how to land it
+   * (merge, test, one PR, the morning brief) while the person is away. Set by the app; null or "" adds nothing.
+   */
+  teamDone: ((sid: string, lead: string) => Promise<string | null>) | null = null;
+
+  /** manage_task: the lead cancels, retries or reassigns a board task (BOARD_TOOL). */
+  async manageTask(sid: string, lane: string, args: Record<string, unknown>): Promise<MeshResult> {
+    const state = await this.store.state(sid);
+    const b = state.board;
+    if (!b) return { output: "There's no task board here.", isError: true };
+    if (state.lead !== lane && b.fromLane !== lane) return { output: `Only the crew's lead puts the board right${state.lead ? ` (${laneName(state, state.lead)} leads)` : ""}. Tell it what you'd change.`, isError: true };
+    const action = str(args.action);
+    if (action !== "cancel" && action !== "retry" && action !== "reassign") return { output: "Say which: cancel, retry or reassign.", isError: true };
+    const id = str(args.id).trim();
+    const r = await this.control(sid, agentActor(laneName(state, lane)), { id, action, ...(str(args.to).trim() ? { to: str(args.to).trim() } : {}) });
+    if (!r.ok) return { output: r.error, isError: true };
+    return { output: action === "cancel" ? `Dropped "${id}".` : `"${id}" is back on the board${str(args.to).trim() ? `, for ${str(args.to).trim()}` : ""}.` };
+  }
+
+  /**
+   * A word from Friday to the lead of a team (or a room), urgent, about agents in `about`: the board's poster when there is a
+   * board, else the lead; nobody when the lead is one of them and there is no one else to tell.
+   */
+  private async tellLeadOf(sid: string, about: string[], text: string): Promise<void> {
+    const state = await this.store.state(sid);
+    const lead = state.lead && lanesOf(state).includes(state.lead) ? state.lead : null;
+    if (!lead) return;
+    const key = `${sid}|${about.slice().sort().join(",")}|${text.slice(0, 60)}`;
+    const at = this.loopTold.get(key);
+    if (at && Date.now() - at < 30 * 60_000) return;
+    this.loopTold.set(key, Date.now());
+    for (const [k, t] of this.loopTold) if (Date.now() - t > 6 * 3_600_000) this.loopTold.delete(k);
+    const mesh: MeshNote = { id: randomBytes(5).toString("hex"), kind: "tell", fromLane: lead, fromName: "Friday", toName: laneName(state, lead), hop: 1, by: null };
+    const sent = await this.store.append(sid, agentActor("Friday"), { type: "instruction", text, interrupt: false, mesh }, { lane: lead });
+    if (sent.ok) void this.bus.wake(sid, lead);
+  }
+  /** What tellLeadOf said lately, by session, agents and words: once a half hour each. */
+  private loopTold = new Map<string, number>();
+
+  /** The app's own features for the agents (app-tools.ts APP_TOOLS: search_sessions, start_session, manage_automation). Set by the app. */
+  appTools: { call(sid: string, lane: string, name: string, args: Record<string, unknown>): Promise<MeshResult> } | null = null;
+  /** The tools for `sid`: meshListing's, with the app's own (app-tools.ts) and manage_teammate where the app offers them. */
+  async listingFor(sid: string, screenshot: boolean): Promise<{ tools: MeshToolDef[]; instructions: string }> {
+    let l = meshListing(screenshot);
+    if (this.appTools) l = { tools: [...l.tools, ...APP_TOOLS], instructions: `${l.instructions}${APP_INSTRUCTIONS}` };
+    if (this.teammateTool && (await this.teammateTool.offered(sid).catch(() => false))) l = { ...l, tools: [...l.tools, TEAMMATE_TOOL] };
+    // A team's lead steers the others (steer_agent) and puts its board right (manage_task): offered in a team session, answered
+    // for its lead only.
+    if ((await this.store.state(sid).catch(() => null))?.options.team) l = { tools: [...l.tools, STEER_TOOL, BOARD_TOOL], instructions: `${l.instructions} If you lead the crew, steer_agent stops a teammate's turn or cuts in with new orders that reach it now, and manage_task cancels, retries or reassigns a board task.` };
+    return l;
+  }
+
+  /** Lanes of teammates on their way out of a session, by session: lane ids are never used again, so they are kept. */
+  private leaving = new Map<string, Set<string>>();
+  /**
+   * A teammate leaving a session (taken off the team, or out of a room), before its lane goes: what is open with it is settled
+   * (2026-10-27 audit: its asks and tasks stayed open for good, and the lead that gave it one never got its batch). What it was
+   * asked is answered as gone, a task's lead hearing it at once; what it asked others is taken back if still queued, and closed;
+   * a board task it had goes back on the board. Tasks it handed out as lead report to the lead after it (askerOf).
+   */
+  async onLaneRemoved(sid: string, lane: string, why: string): Promise<void> {
+    // Given no board work from now on: a Stop's hand-out of what is ready would otherwise pick it, free as it is.
+    (this.leaving.get(sid) ?? this.leaving.set(sid, new Set()).get(sid)!).add(lane);
+    return this.settlingIn(sid, async () => {
+      const state = await this.store.state(sid);
+      const open = Object.values(meshOf(state).asks).filter((a) => !a.reply);
+      for (const ask of open.filter((a) => a.toLane === lane)) await this.deliver(sid, ask, why, true, true, true);
+      for (const ask of open.filter((a) => a.fromLane === lane && !a.task)) {
+        if (pendingFor(state, ask.toLane).includes(ask.seq)) await this.store.append(sid, FRIDAY, { type: "instruction.withdrawn", seq: ask.seq }, { lane: ask.toLane });
+        await this.store.append(sid, FRIDAY, { type: "mesh.replied", id: ask.id, fromLane: ask.toLane, fromName: ask.toName, toLane: lane, toName: ask.fromName, text: why, auto: true }, { lane });
+      }
+      const b = state.board;
+      // Handed out by the board's own sweep once the lane is gone, not now, while it would still count as free.
+      for (const t of b?.tasks ?? []) if (t.status === "claimed" && t.lane === lane) await this.store.append(sid, FRIDAY, { type: "board.released", id: t.id, why }, { lane: b!.fromLane });
+      // A review it held goes to another agent (an empty reviewer), as one out of usage does (2026-10-28 audit: the task stayed in
+      // review with a reviewer that was gone).
+      for (const t of b?.tasks ?? []) if (t.status === "review" && t.reviewer?.lane === lane) await this.store.append(sid, FRIDAY, { type: "board.review", id: t.id, lane: "", name: "" }, { lane });
+      // Whoever waits on its turn is woken now, told it is gone: once its lane goes, the wake goes with it and they wait for good.
+      const name = laneName(state, lane);
+      for (const w of Object.values(state.wakes ?? {})) if (w.on.lane === lane && w.lane !== lane) await this.fireWake(sid, w.id, `${name} was removed, so its turn won't finish. ${why}`);
+    });
+  }
+
+  /** steer_agent: the lead stops a teammate's turn, or cuts in with new orders that reach it now. */
+  async steer(sid: string, lane: string, args: Record<string, unknown>): Promise<MeshResult> {
+    const state = await this.store.state(sid);
+    if (!state.options.team) return { output: "Steering is for a crew's lead.", isError: true };
+    if (state.lead !== lane) return { output: `Only the lead steers the others${state.lead ? `: that is ${laneName(state, state.lead)}. Ask it, or message_agent the teammate yourself` : ""}.`, isError: true };
+    const want = str(args.to).toLowerCase();
+    const to = lanesOf(state).find((l) => l !== lane && laneName(state, l).toLowerCase() === want) ?? lanesOf(state).find((l) => l !== lane && laneName(state, l).toLowerCase().includes(want));
+    if (!want || !to) return { output: `No teammate here is called "${str(args.to)}". list_agents shows who is.`, isError: true };
+    const name = laneName(state, to);
+    const me = agentActor(laneName(state, lane));
+    const running = runOf(state, to).status === "running";
+    const text = str(args.text).trim();
+    if (str(args.action) === "stop") {
+      if (!running) return { output: `${name} isn't mid-turn: it is ${runOf(state, to).status === "waiting_for_human" ? "waiting for a person" : "ready"}. Nothing to stop.` };
+      // A Stop, not a cancel: the turn ends and what is queued for it stays, the person's messages first among it. A cancel threw
+      // the queue away, and the lead's word about it, sent as a message, woke it again at once (2026-10-27 audit).
+      await this.store.append(sid, me, { type: "run.pause" }, { lane: to, bumpEpoch: true });
+      // Why, as a team update it reads with its next turn: words, not a message that starts one.
+      if (text) await this.store.append(sid, me, { type: "mesh.posted", id: randomBytes(5).toString("hex"), fromLane: lane, fromName: laneName(state, lane), text: clip(`I stopped ${name}'s turn: ${text}`, 1200) }, { lane });
+      return { output: `Stopped ${name}'s turn. It is on standby: what was queued for it goes next, and it takes your next message.` };
+    }
+    if (str(args.action) === "redirect") {
+      if (!text) return { output: "Say its new orders.", isError: true };
+      // Mid-turn, as a person's ⌘↵: the turn stops and the next one carries the orders. Handed into the turn being stopped, they
+      // went with it, and the teammate sat idle with its orders unread (2026-10-27 audit).
+      const sent = await this.send(sid, lane, { to: name, text: `New orders from the lead, in place of what you were doing: ${text}`, kind: "tell", interrupt: running });
+      if (!sent.ok) return { output: sent.error, isError: true };
+      return { output: sent.held ? `${name} is on hold until the person says, so your orders wait for it.` : running ? `${name} takes your orders now: its turn stops and the next one starts on them.` : `${name} wasn't mid-turn: it starts on your orders now.` };
+    }
+    return { output: "Say which: stop or redirect.", isError: true };
+  }
   constructor(
     private store: SessionStore,
     private bus: Bus,
@@ -556,6 +761,11 @@ export class AgentMesh {
           return await this.showPreview(sid, lane, args);
         case "preview_screenshot":
           return previewShot(args);
+        case "browser": return await browserCall(sid, args, signal, lane);
+        case "manage_teammate": return this.teammateTool ? await this.teammateTool.call(sid, lane, args) : { output: "There's no crew here.", isError: true };
+        case "search_sessions": case "start_session": case "manage_automation": return this.appTools ? await this.appTools.call(sid, lane, name, args) : { output: "That isn't available here.", isError: true };
+        case "steer_agent": return await this.steer(sid, lane, args);
+        case "manage_task": return await this.manageTask(sid, lane, args);
         case "assign_task":
           return await this.assign(sid, lane, str(args.to), str(args.task));
         case "post_tasks":
@@ -849,7 +1059,9 @@ export class AgentMesh {
       return !!t && (t === q || engineName(t).toLowerCase() === q || q === `${t}s` || q === `all ${t}`);
     });
     const names = q.split(/\s*(?:,|\band\b)\s*/).filter(Boolean);
-    const targets = /^(everyone|everybody|all|team|the team|all agents|\*)$/.test(q)
+    let everyone = /^(everyone|everybody|all|team|the team|all agents|\*)$/.test(q);
+    if (state.options.team && /^(crew|the crew)$/.test(q)) everyone = true; // The Team workflow is Crew (Arun, 2026-10-28: "rename team to something else").
+    const targets = everyone
       ? others
       : ofTool.length
         ? ofTool
@@ -973,6 +1185,7 @@ export class AgentMesh {
     // In a team the message waits in its queue instead, and goes once the limit lifts (the hub holds it, and the app starts it):
     // turned away, it was lost in the night (Arun, 2026-10-28: "we need to ensure teams can work basically while you are away").
     let queues = false;
+    queues = !!state.options.team;
     if (out && runOf(state, to).status !== "running" && !queues) {
       const free = freeAgents(state, events, [from, to]);
       return { ok: false, error: `${toName} is ${outOfUsage(state, out, Date.now())}, so it can't take this until then.${free.length ? ` Free now: ${free.map((n) => `"${n}"`).join(", ")}.` : " No other agent is free right now; carry on yourself, or say what you need from the people here."}` };
@@ -984,8 +1197,18 @@ export class AgentMesh {
       return { ok: false, error: `This would be the ${hop + 1}th agent in a row woken by another agent's message, so Friday didn't send it. Finish what you can, and say what you needed from ${toName}.` };
     }
     const leads = state.lead === from || state.lead === to;
+    // A team has no cap on how much its agents talk, only on two going round in circles: the same pair back and forth with no
+    // work done in between, or the same message again. That one pair is stopped, and the lead told (Arun, 2026-10-28).
+    if (state.options.team && !req.system) {
+      const loop = loopBetween(events, from, to, text);
+      if (loop) {
+        await this.tellLeadOf(sid, [from, to], `${laneName(state, from)} and ${toName} are going round in circles (${loop}), so Friday stopped the message. Settle it between them, or decide for them.`);
+        return { ok: false, error: `You and ${toName} have been going round in circles (${loop}), so Friday didn't send this one, and told the lead. Do the work itself now, or settle it in your reply.` };
+      }
+    }
     // The board handing out its own tasks isn't an agent chatting: no cap on how many it hands out.
     let pair = req.system ? 0 : exchangesBetween(events, from, to, Date.now() - PAIR_WINDOW_MS);
+    if (state.options.team) pair = 0;
     if (pair >= (leads ? LEAD_PAIR : MAX_PAIR)) {
       return { ok: false, error: `You and ${toName} have sent each other ${pair} messages in the last 20 minutes, so Friday didn't send this one. Settle it yourself, or say what you need from the people here.` };
     }
@@ -1006,6 +1229,8 @@ export class AgentMesh {
     // and an agent answering its reviewer was turned away as "the 5th agent in a row" (Arun, 2026-10-24: C2 couldn't reply to
     // Codex's review of t1, nor tell Chat with me what t2 needed).
     const mesh: MeshNote = { id, kind: req.kind, fromLane: from, fromName: laneName(state, from), toName, hop: req.system ? 1 : hop + 1, by: person, ...(req.board ? { board: req.board } : {}), ...(req.review ? { review: true } : {}), ...(req.carriedFrom ? { carriedFrom: req.carriedFrom } : {}), ...(req.team ? { team: req.team } : {}) };
+    // A board task's title alone, so the page shows it without the brief (Board task "t1": …).
+    if (req.board) mesh.title = state.board?.tasks.find((t) => t.id === req.board)?.title;
     const sent = await this.store.append(sid, agentActor(mesh.fromName), { type: "instruction", text, interrupt: !!req.interrupt, mesh }, { lane: to, expectDriver: driverOf(state, to)?.id ?? "" });
     if (!sent.ok) return { ok: false, error: `${toName} changed hands just now, so the message wasn't sent. Try again.` };
     void this.bus.wake(sid, to);
@@ -1124,7 +1349,10 @@ export class AgentMesh {
       .slice(0, MAX_TEXT * 2);
     const mesh: MeshNote = { id: randomBytes(5).toString("hex"), kind: "reply", re: ask.id, ofTask: true, batch: open.length ? "early" : "done", fromLane: ask.toLane, fromName: ask.toName, toName: laneName(state, lead), hop: 1, by: ask.by };
     let more = "";
-    const sent = await this.store.append(sid, agentActor(open.length ? ask.toName : "The team"), { type: "instruction", text: more ? `${text}\n\n${more}` : text, interrupt: false, mesh }, { lane: lead });
+    if (!open.length) more = (await this.teamDone?.(sid, lead).catch(() => null)) ?? "";
+    let together = "The team";
+    if (state.options.team) together = "The crew"; // Who the batched reports are from, in a crew (Arun, 2026-10-28: "rename team to something else").
+    const sent = await this.store.append(sid, agentActor(open.length ? ask.toName : together), { type: "instruction", text: more ? `${text}\n\n${more}` : text, interrupt: false, mesh }, { lane: lead });
     if (!sent.ok) return;
     // Handed together: the reports are read, and check_messages doesn't offer them again.
     await this.store.append(sid, FRIDAY, { type: "mesh.read", upTo: sent.seq }, { lane: lead });
@@ -1587,6 +1815,7 @@ export class AgentMesh {
     // Out of usage until its limit lifts: nothing goes to it, a review included.
     const limited = new Set(limitedLanes(state, evs).keys());
     for (const l of limited) skip.add(l);
+    for (const l of this.leaving.get(sid) ?? []) skip.add(l); // a teammate on its way out of the session (onLaneRemoved)
     /** Tasks a person handed to one agent, tried once this round (see `chosen` below). */
     const tried = new Set<string>();
     const skills = await this.skillsFor(state);
@@ -1792,6 +2021,7 @@ export class AgentMesh {
       .slice(0, MAX_TEXT * 2);
     const mesh: MeshNote = { id: randomBytes(5).toString("hex"), kind: "reply", ofTask: true, batch: busy ? "early" : "done", fromLane: b.fromLane, fromName: "The board", toName: b.fromName, hop: 1, by: null };
     let more = "";
+    if (!busy) more = (await this.teamDone?.(sid, b.fromLane).catch(() => null)) ?? "";
     const sent = await this.store.append(sid, agentActor("The board"), { type: "instruction", text: more ? `${text}\n\n${more}` : text, interrupt: false, mesh }, { lane: b.fromLane });
     if (sent.ok) void this.bus.wake(sid, b.fromLane);
   }
@@ -1803,6 +2033,7 @@ export class AgentMesh {
   private quietTold = new Map<string, number>();
   /** How the lead is told to put a board task right: the person's buttons, or its own tool where it has one. */
   private boardFix = "ask the person to retry, reassign or cancel it";
+  private readonly boardFixMine = (this.boardFix = "retry, reassign or cancel it with manage_task");
   /** Drops what this process remembers telling or firing that is past use: called now and then by the app. */
   pruneTold(now = Date.now()): void {
     for (const [k, at] of this.quietTold) if (now - at > 2 * 86_400_000) this.quietTold.delete(k);
@@ -1811,6 +2042,9 @@ export class AgentMesh {
   }
   /** A session gone or a lane leaving it for good: what this process remembers of it, let go. */
   forget(sid: string, lane?: string): void {
+    // Once its lane is gone it is in no list the board reads, so it needn't be skipped any more.
+    if (lane) this.leaving.get(sid)?.delete(lane);
+    else this.leaving.delete(sid);
     const mine = (k: string) => (!lane && k.startsWith(`${sid} `)) || (k.startsWith(`${sid}|`) && (!lane || k.startsWith(`${sid}|${lane}|`)));
     for (const k of this.heldTold.keys()) if (mine(k)) this.heldTold.delete(k);
     if (!lane) for (const k of [...this.quietTold.keys(), ...this.wakesTaken.keys()]) if (mine(k)) (this.quietTold.delete(k), this.wakesTaken.delete(k));
@@ -1970,6 +2204,8 @@ export class AgentMesh {
     // and its usage are all still in hand, so none of what follows a run's end is done for it yet.
     const end = (await this.store.events(sid)).findLast((e) => e.body.type === "run.ended" && (e.lane ?? MAIN_LANE) === lane);
     if (end?.body.type === "run.ended" && end.body.cut) return;
+    // A teammate that switched tools carries its own work on: its task, its board claim and its asks are still its own.
+    if (this.teamSwitch && (await this.teamSwitch(sid, lane).catch(() => false))) return void (await this.dispatch(sid).catch(said("[board] dispatch:")));
     await this.boardRunEnded(sid, lane).catch(said("[board]"));
     await this.answerAsks(sid, lane);
     // Whoever waited on this agent's turn is woken; and a turn that itself ended waiting gets its wake (wake_me_when).
@@ -1994,12 +2230,27 @@ export class AgentMesh {
     const end = events.findLast((e) => e.body.type === "run.ended" && (e.lane ?? MAIN_LANE) === lane);
     if (end?.body.type !== "run.ended" || end.body.outcome !== "error" || !state.engines[lane]?.tool) return;
     const hit = limitHit(end.body.error, end.ts);
-    if (!hit) return;
+    // Not signed in on its computer: handed on the same way, when another agent here can take it, since nothing brings it back
+    // by itself; the room says how to sign in (Arun, 2026-10-28: "iron everything and ensure we are good… any logic errors and fixes").
+    const out = !hit && signedOut(end.body.error);
+    if (!hit && !out) return;
     const after = events.filter((e) => e.seq > end.seq);
     if (after.some((e) => (e.body.type === "instruction" && e.body.handoff?.fromLane === lane) || (e.body.type === "resume.scheduled" && (e.lane ?? MAIN_LANE) === lane))) return;
     const start = events.findLast((e) => e.seq < end.seq && e.body.type === "run.started" && (e.lane ?? MAIN_LANE) === lane);
     if (!start || start.body.type !== "run.started") return;
     const cause = events.find((e) => e.seq === (start.body as { causedBy: number }).causedBy);
+    // A team's (its switch to the backup tool having found that out too, teamSwitch): whatever its turn was on (the lead's own work,
+    // a task or a message from a teammate), it carries on by itself when the limit lifts, unless it went to another agent
+    // meanwhile (a task carried on, the board handing it on). Nothing is left where it stopped (Arun, 2026-10-28: "we need to
+    // ensure teams can work basically while you are away").
+    if (state.options.team) {
+      if (!hit) return;
+      if (after.some((e) => e.body.type === "instruction" && e.body.mesh?.carriedFrom === lane)) return;
+      if (events.some((e) => e.seq > start.seq && e.seq < end.seq && (e.lane ?? MAIN_LANE) === lane && e.body.type === "board.claimed")) return;
+      const at = hit.resetsAt && hit.resetsAt > now && hit.resetsAt < now + 8 * 86_400_000 ? hit.resetsAt + 60_000 : now + 60 * 60_000;
+      await this.store.append(sid, FRIDAY, { type: "resume.scheduled", at }, { lane });
+      return;
+    }
     if (cause?.body.type === "instruction" && cause.body.mesh) return;
     const inRun = events.filter((e) => e.seq > start.seq && e.seq < end.seq && (e.lane ?? MAIN_LANE) === lane);
     if (inRun.some((e) => e.body.type === "board.claimed")) return;
@@ -2007,16 +2258,17 @@ export class AgentMesh {
     const task = limitedTask(events, lane, start.seq, end.seq);
     if (!task) return;
     const fromName = laneName(state, lane);
-    const back = hit.resetsAt ? ` (its limit lifts ${untilText(hit.resetsAt - now)})` : "";
+    const back = hit?.resetsAt ? ` (its limit lifts ${untilText(hit.resetsAt - now)})` : "";
+    const why = hit ? `ran out of usage partway through${back}` : "isn't signed in on the computer it runs on";
     if (this.handOff) {
       const targets = limitTargets(state, events, lane, now);
       for (const t of this.roomFirst(sid, targets.map((x) => x.id)).map((id) => targets.find((x) => x.id === id)!)) {
         const toName = laneName(state, t.id);
         const r = await this.handOff(sid, lane, {
           to: toName,
-          reason: `${fromName} ran out of usage partway through${back}, so Friday handed it to ${toName}: ${t.why}.`,
+          reason: `${fromName} ${why}, so Friday handed it to ${toName}: ${t.why}.`,
           carried: [],
-          task: `Carry on with this task, which ${fromName} was partway through when it ran out of usage. Don't start over: what it already did is in the record with this, so build on it, then finish the task.
+          task: `Carry on with this task, which ${fromName} ${hit ? "was partway through when it ran out of usage" : "couldn't do because it isn't signed in"}. Don't start over: what it already did is in the record with this, so build on it, then finish the task.
 
 The task:
 ${task}`,
@@ -2026,7 +2278,7 @@ ${task}`,
     }
     // Nobody to take it: carry on here when the limit lifts, as the person who asked for it.
     const person = personBehind(state, events, lane, start.seq);
-    if (!person || !hit.resetsAt || hit.resetsAt <= now || hit.resetsAt > now + 8 * 86_400_000) return;
+    if (!person || !hit?.resetsAt || hit.resetsAt <= now || hit.resetsAt > now + 8 * 86_400_000) return;
     await this.store.append(sid, { id: person.id, name: person.name, kind: "human" }, { type: "resume.scheduled", at: hit.resetsAt, auto: true }, { lane });
   }
 

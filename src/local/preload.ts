@@ -13,10 +13,23 @@ contextBridge.exposeInMainWorld("fridayDesktop", {
   /** Where the macOS window buttons sit (desktop.ts trafficLightPosition), so the page's header lines up with them. */
   trafficLightY: 17,
   /** Which theme the page shows, so Windows and Linux draw the window buttons in its colours. */
-  setTheme: (theme: "dark" | "light"): void => ipcRenderer.send("friday:theme", theme),
+  /** `choice` is what was picked, System included, so the app's own sheets follow it (desktop.ts nativeTheme). */
+  setTheme: (theme: "dark" | "light", choice?: "system" | "dark" | "light"): void => ipcRenderer.send("friday:theme", theme, choice),
   /** Open a folder, or a file at a line, in this computer's own editor, file manager or terminal (desktop-native.ts). */
   openTargets: (): Promise<{ id: string; label: string; editor: boolean }[]> => ipcRenderer.invoke("friday:open-targets"),
   openIn: (target: string, path: string, line?: number): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke("friday:open-in", { target, path, line }),
+  openFile: (file: string): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke("friday:open-file", file),
+  /** The agents' browser (desktop-browser.ts): which webview is which session's tab, and a tab opened when an agent needs one. */
+  browser: {
+    tab: (sid: string, tab: string, wcId: number): void => ipcRenderer.send("friday:browser-tab", sid, tab, wcId),
+    active: (sid: string, tab: string): void => ipcRenderer.send("friday:browser-active", sid, tab),
+    gone: (sid: string): void => ipcRenderer.send("friday:browser-gone", sid),
+    onOpen: (fn: (ask: { sid: string; url: string }) => void): (() => void) => {
+      const h = (_e: unknown, ask: { sid: string; url: string }) => fn(ask);
+      ipcRenderer.on("friday:browser-open", h);
+      return () => void ipcRenderer.off("friday:browser-open", h);
+    },
+  },
   /** How many things wait on you, on the dock icon; 0 clears it. */
   setBadge: (n: number): void => ipcRenderer.send("friday:badge", n),
   /** The system's folder picker, for where a coding agent works. */

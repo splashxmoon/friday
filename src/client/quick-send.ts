@@ -12,10 +12,22 @@ export interface QuickMessage {
   snapshot?: { data: string; mimeType: string; width: number; height: number };
 }
 
+/**
+ * A session's name from what was asked: on one line, cut at a word with an ellipsis when it is too long. Cut at 60 characters
+ * it read "…for a newsletter and w" in the sidebar, the header and the tab (Arun, 2026-10-28: "iron everything and ensure we
+ * are good… any logic errors and fixes").
+ */
+export function titleFrom(text: string, max = 60): string {
+  const line = text.replace(/\s+/g, " ").trim();
+  if (line.length <= max) return line;
+  const cut = line.slice(0, max - 1);
+  const word = cut.lastIndexOf(" ");
+  return `${(word > max / 2 ? cut.slice(0, word) : cut).replace(/[\s,;:.\-–—]+$/, "")}…`;
+}
+
 /** A session's name from the words: the first line, cut to fit. */
 export function quickTitle(text: string): string {
-  const line = text.replace(/\s+/g, " ").trim();
-  return (line.length > 60 ? `${line.slice(0, 59).trimEnd()}…` : line) || "Quick prompt";
+  return titleFrom(text) || "Quick prompt";
 }
 
 /** The message's words, with something to say about the picture when there were no words. */

@@ -129,17 +129,53 @@ export function pickable(files: File[], already: Attached[] = []): { keep: Attac
 
 /** Add to what's already attached, dropping duplicates and saying what it skipped. */
 export function attach(files: Attached[], incoming: File[], onChange: (f: Attached[]) => void, onNote: (msg: string) => void): number {
-  const { keep, skipped, reason, over } = pickable(incoming, files);
+  const { keep: picked, skipped, reason, over } = pickable(incoming, files);
   const merged = [...files];
+  // A file attached already is not attached again, and not counted as if it were ("Attached 1" for a file already there, 2026-10-28 QA).
+  const keep = picked.filter((k) => !files.some((m) => m.path === k.path && m.file.size === k.file.size));
   for (const k of keep) if (!merged.some((m) => m.path === k.path && m.file.size === k.file.size)) merged.push(k);
-  onChange(merged);
+  if (keep.length) onChange(merged);
   const tail = over ? ` ${over} more didn't fit — remove something to make room, or send them in a later message.` : "";
-  if (!keep.length && skipped) onNote(`Nothing to attach: skipped ${reason}.${tail}`);
+  const again = picked.length - keep.length;
+  if (!keep.length && again && !skipped && !over) onNote(again === 1 ? `${picked[0]!.path} is attached already.` : `Those ${again} are attached already.`);
+  else if (!keep.length && skipped) onNote(`Nothing to attach: skipped ${reason}.${tail}`);
   else if (!keep.length && over) onNote(`There is no room left for ${over} more file${over === 1 ? "" : "s"}. Remove something, or send them in a later message.`);
   else if (skipped) onNote(`Attached ${keep.length}, skipped ${reason}.${tail}`);
   else if (over) onNote(`Attached ${keep.length}.${tail}`);
   else onNote("");
   return keep.length;
+}
+
+/**
+ * What was dropped from the computer: its files, and the files inside any folder dropped (each with its path under that folder,
+ * as the folder picker gives them), so a drop attaches what + › Files or Folder would.
+ */
+export async function droppedFiles(dt: DataTransfer): Promise<File[]> {
+  type Entry = { isFile: boolean; isDirectory: boolean; name: string; fullPath: string; file?: (ok: (f: File) => void, no: (e: unknown) => void) => void; createReader?: () => { readEntries: (ok: (e: Entry[]) => void, no: (e: unknown) => void) => void } };
+  const entries = Array.from(dt.items ?? [])
+    .filter((i) => i.kind === "file")
+    .map((i) => (i as DataTransferItem & { webkitGetAsEntry?: () => Entry | null }).webkitGetAsEntry?.() ?? null);
+  if (!entries.length || entries.some((e) => !e)) return Array.from(dt.files);
+  const out: File[] = [];
+  const walk = async (e: Entry): Promise<void> => {
+    if (e.isFile && e.file) {
+      const f = await new Promise<File | null>((ok) => e.file!(ok, () => ok(null)));
+      if (!f) return;
+      const rel = e.fullPath.replace(/^\//, "");
+      if (rel.includes("/")) Object.defineProperty(f, "webkitRelativePath", { value: rel });
+      out.push(f);
+    } else if (e.isDirectory && e.createReader) {
+      const reader = e.createReader();
+      // A folder's entries come a batch at a time, until an empty one.
+      for (;;) {
+        const batch = await new Promise<Entry[]>((ok) => reader.readEntries(ok, () => ok([])));
+        if (!batch.length) break;
+        for (const b of batch) await walk(b);
+      }
+    }
+  };
+  for (const e of entries) await walk(e!);
+  return out;
 }
 
 /**
@@ -266,12 +302,15 @@ export function AttachButton({
   onChange: (f: Attached[]) => void;
   onNote: (msg: string) => void;
   /** Absent when there is no machine to look on. */
-  workspace?: { identity: Identity; tool: EngineTool; resume?: CliSession; onPick: (p: Picked | null) => void; onTool?: (t: EngineTool) => void; onNeedsMachine?: () => void };
+  workspace?: { identity: Identity; tool: EngineTool; resume?: CliSession; onPick: (p: Picked | null) => void; onTool?: (t: EngineTool) => void; onNeedsMachine?: () => void; /** Folders, not repositories (WorkspaceCard plain). */ plain?: boolean };
 }) {
   const filePicker = useRef<HTMLInputElement>(null);
   const folderPicker = useRef<HTMLInputElement>(null);
   const plus = useRef<HTMLSpanElement>(null);
   const [picking, setPicking] = useState<"sessions" | "repos" | null>(null);
+  // What opened the picker, when it wasn't the +: a "Choose one" link under the box hangs it from that link, not from the +, where
+  // it covered the link itself and the starters (QA, 2026-10-28; Arun: "TEST EVERYTHING… EVERY VISUAL").
+  const [from, setFrom] = useState<HTMLElement | null>(null);
 
   const take = (list: FileList | null) => attach(files, Array.from(list ?? []), onChange, onNote);
 
@@ -293,12 +332,12 @@ export function AttachButton({
       onNote(`Couldn't open that folder: ${(e as Error).message}`);
     }
   };
-  const openWorkspace = (which: "sessions" | "repos") => () => (workspace?.onNeedsMachine ? workspace.onNeedsMachine() : setPicking(which));
+  const openWorkspace = (which: "sessions" | "repos", at: HTMLElement | null = null) => () => (workspace?.onNeedsMachine ? workspace.onNeedsMachine() : (setFrom(at), setPicking(which)));
   // "Choose folder" under the box (Code.tsx) opens the same picker as the + menu's Folder, which nobody found behind the +.
-  const openRepos = useRef(openWorkspace("repos"));
-  openRepos.current = openWorkspace("repos");
+  const openRepos = useRef(openWorkspace);
+  openRepos.current = openWorkspace;
   useEffect(() => {
-    const on = () => openRepos.current();
+    const on = (e: Event) => openRepos.current("repos", ((e as CustomEvent<{ from?: HTMLElement }>).detail?.from as HTMLElement | undefined) ?? null)();
     window.addEventListener(PICK_FOLDER, on);
     return () => window.removeEventListener(PICK_FOLDER, on);
   }, []);
@@ -339,7 +378,8 @@ export function AttachButton({
           above
           items={() => [
             // One line each: the names say enough, and a second line under every item was more to read than to choose from.
-            { label: "Files", icon: "file", onSelect: () => filePicker.current?.click() },
+            // Named as the session's + names it, so the two menus read alike (2026-10-28 QA).
+            { label: "Attach files or photos", icon: "file", onSelect: () => filePicker.current?.click() },
             // In the desktop app a folder is this computer's, whole and in place. If
             // the computer isn't connected yet that is what gets sorted out first —
             // quietly uploading a trimmed copy instead is how a folder arrived
@@ -353,20 +393,21 @@ export function AttachButton({
                     ...(inPlace ? {} : { hint: "connect this computer first" }),
                     onSelect: () => (inPlace ? void pickInPlace() : workspace.onNeedsMachine?.()),
                   },
-                  { label: "Upload a copy", icon: "folder" as const, onSelect: () => folderPicker.current?.click() },
+                  { label: "Upload a copy", icon: "arrowUp" as const, onSelect: () => folderPicker.current?.click() },
                 ] as const)
               : // In a browser with a machine connected, a folder is that machine's too, found by browsing it: whole, in place,
                 // runnable. Uploading a copy stays one click away.
                 workspace && !workspace.onNeedsMachine
                 ? ([
                     { label: "Folder", icon: "folder" as const, sub: "On the connected computer", onSelect: openWorkspace("repos") },
-                    { label: "Upload a copy", icon: "folder" as const, onSelect: () => folderPicker.current?.click() },
+                    { label: "Upload a copy", icon: "arrowUp" as const, onSelect: () => folderPicker.current?.click() },
                   ] as const)
                 : ([{ label: "Folder", icon: "folder" as const, onSelect: () => folderPicker.current?.click() }] as const)),
-            ...(workspace
+            ...(workspace && !workspace.plain
               ? ([
                   { label: "Sessions", icon: "clock" as const, onSelect: openWorkspace("sessions") },
-                  { label: "Repos", icon: "folderOpen" as const, onSelect: openWorkspace("repos") },
+                  // Not where Folder already opens this same picker (a browser with the computer connected): two rows, one card.
+                  ...(!desktop?.pickFolder && !workspace.onNeedsMachine ? [] : [{ label: "Repos", icon: "folderOpen" as const, onSelect: openWorkspace("repos") }]),
                 ] as const)
               : []),
           ]}
@@ -376,9 +417,11 @@ export function AttachButton({
         <WorkspaceCard
           identity={workspace.identity}
           tool={workspace.tool}
-          trigger={plus.current}
+          trigger={from ?? plus.current}
+          prefer={from ? "below" : "above"}
           resume={workspace.resume}
           only={picking}
+          plain={!!workspace.plain}
           onPick={workspace.onPick}
           {...(workspace.onTool ? { onTool: workspace.onTool } : {})}
           onClose={() => setPicking(null)}
@@ -386,6 +429,17 @@ export function AttachButton({
       )}
     </>
   );
+}
+
+/** A picture's own small copy, for its chip. */
+function Thumb({ file }: { file: File }) {
+  const [url, setUrl] = useState("");
+  useEffect(() => {
+    const u = URL.createObjectURL(file);
+    setUrl(u);
+    return () => URL.revokeObjectURL(u);
+  }, [file]);
+  return url ? <img className="attach-thumb" src={url} alt="" width={16} height={16} /> : <Icon name="image" size={13} />;
 }
 
 /**
@@ -399,6 +453,16 @@ export function AttachButton({
 export function AttachedRow({ files, onChange }: { files: Attached[]; onChange: (f: Attached[]) => void }) {
   const [open, setOpen] = useState<string | null>(null);
   const [all, setAll] = useState(false);
+  const row = useRef<HTMLDivElement>(null);
+  // Where the focus goes once a chip is removed: the next chip's ×, or the box when none is left, never the page (2026-10-28 QA).
+  const refocus = useRef<{ at: number; form: HTMLElement | null } | null>(null);
+  useEffect(() => {
+    const r = refocus.current;
+    if (!r) return;
+    refocus.current = null;
+    const xs = [...(row.current?.querySelectorAll<HTMLButtonElement>(".attach-chip > button[aria-label^='Remove']") ?? [])];
+    (xs[Math.min(r.at, xs.length - 1)] ?? r.form?.querySelector<HTMLTextAreaElement>("textarea"))?.focus();
+  }, [files]);
   if (!files.length) return null;
 
   // Folders in the order they were attached, each keeping its own files.
@@ -409,29 +473,38 @@ export function AttachedRow({ files, onChange }: { files: Attached[]; onChange: 
     else loose.push(f);
   }
   const entries = [...folders];
-  const drop = (gone: Attached[]) => onChange(files.filter((x) => !gone.includes(x)));
+  const drop = (gone: Attached[], from?: HTMLElement) => {
+    const xs = [...(row.current?.querySelectorAll<HTMLButtonElement>(".attach-chip > button[aria-label^='Remove']") ?? [])];
+    refocus.current = { at: Math.max(0, xs.indexOf(from as HTMLButtonElement)), form: row.current?.closest("form") ?? null };
+    onChange(files.filter((x) => !gone.includes(x)));
+  };
   // Loose files still get the old treatment: a few chips, then a count.
   const shownLoose = all ? loose : loose.slice(0, 6);
 
   return (
-    <div className="attach-row">
+    <div className="attach-row" ref={row}>
       {entries.map(([name, inside]) => (
         <span key={name} className={`attach-chip folder ${open === name ? "on" : ""}`} title={`${name} · ${inside.length} file${inside.length === 1 ? "" : "s"}`}>
           <Icon name="folder" size={13} />
           <button type="button" className="attach-name as-button" onClick={() => setOpen(open === name ? null : name)} aria-expanded={open === name}>
-            {name}
+            <bdi>{name}</bdi>
             <span className="attach-count">{inside.length}</span>
           </button>
-          <button type="button" aria-label={`Remove the folder ${name}`} onClick={() => drop(inside)}>
+          <button type="button" aria-label={`Remove the folder ${name}`} onClick={(e) => drop(inside, e.currentTarget)}>
             <Icon name="x" size={11} />
           </button>
         </span>
       ))}
       {shownLoose.map((f) => (
         <span key={f.path} className="attach-chip" title={f.path}>
-          <Icon name="file" size={13} />
-          <span className="attach-name">{f.path}</span>
-          <button type="button" aria-label={`Remove ${f.path}`} onClick={() => drop([f])}>
+          {/* A picture shows itself, as in a session's box (2026-10-28 QA: the home's chips had none). */}
+          {f.file.type.startsWith("image/") ? <Thumb file={f.file} /> : <Icon name="file" size={13} />}
+          {/* Isolated from the chip's right-to-left cut (which keeps a long path's end in view): "11-fresh-home.png" read
+              "fresh-home.png-11" (Arun, 2026-10-28: "iron everything and ensure we are good… any logic errors and fixes"). */}
+          <span className="attach-name">
+            <bdi>{f.path}</bdi>
+          </span>
+          <button type="button" aria-label={`Remove ${f.path}`} onClick={(e) => drop([f], e.currentTarget)}>
             <Icon name="x" size={11} />
           </button>
         </span>
@@ -454,8 +527,8 @@ export function AttachedRow({ files, onChange }: { files: Attached[]; onChange: 
           <ul>
             {(folders.get(open) ?? []).map((f) => (
               <li key={f.path}>
-                <span className="attach-inside-path">{f.path.slice(open.length + 1)}</span>
-                <button type="button" aria-label={`Remove ${f.path}`} onClick={() => drop([f])}>
+                <span className="attach-inside-path"><bdi>{f.path.slice(open.length + 1)}</bdi></span>
+                <button type="button" aria-label={`Remove ${f.path}`} onClick={(e) => drop([f], e.currentTarget)}>
                   <Icon name="x" size={11} />
                 </button>
               </li>

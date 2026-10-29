@@ -1,4 +1,4 @@
-import { MAIN_LANE, type SessionEvent } from "./types.js";
+import { MAIN_LANE, type EngineTool, type SessionEvent } from "./types.js";
 
 /**
  * Finding a session by what was said in it, not only by its title.
@@ -25,6 +25,8 @@ export interface SearchHit {
   /** Where each searched term appears inside the snippet, in order, for marking. */
   marks: [number, number][];
   score: number;
+  /** The coding tool an agent's message came from, for its mark beside it. */
+  tool?: EngineTool;
 }
 
 export interface SearchFilters {
@@ -36,6 +38,8 @@ export interface SearchFilters {
   me?: string;
   /** An agent's name by its lane, as the session shows it: a coding tool's messages carry its host's name. */
   agentName?: (lane: string) => string;
+  /** The coding tool on a lane, if one is. */
+  agentTool?: (lane: string) => EngineTool | undefined;
 }
 
 /** The terms of a query: each "quoted phrase" whole, and every other word of two letters or more. */
@@ -58,6 +62,8 @@ const saidIn = (e: SessionEvent): Said | null => {
   const b = e.body;
   if (b.type === "instruction" || b.type === "suggestion") return { text: b.text, kind: "asked" };
   if (b.type === "agent.message") return { text: b.text, kind: "answer" };
+  // What an agent asked you, its choices too: "Monday" found nothing when the week's start was asked (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+  if (b.type === "agent.question") return { text: [b.question, b.detail, b.options?.join(" · ")].filter(Boolean).join(" "), kind: "answer" };
   if (b.type === "thread.opened") return { text: b.text, kind: "comment" };
   return null;
 };
@@ -66,8 +72,9 @@ const byOf = (e: SessionEvent, me?: string): SearchHit["by"] => (e.actor.kind ==
 
 /** The words around where the first of them is found, squeezed onto one line, about `width` characters long. */
 export function snippetOf(text: string, words: string[], width = 160): { snippet: string; marks: [number, number][] } {
-  // Read as words: a table's bars, headings' hashes, emphasis and code ticks are markup, not what was said.
-  const flat = text.replace(/```[\s\S]*?```/g, " ").replace(/[|*#`>_~]+/g, " ").replace(/-{3,}|={3,}/g, " ").replace(/\s+/g, " ").trim();
+  // Read as words: a table's bars, headings' hashes, emphasis and code ticks are markup, not what was said. A table's row reads
+  // as its cells with a dot between, its rows apart, not one run of words (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+  const flat = flatText(text);
   const low = flat.toLowerCase();
   let at = -1;
   let len = 0;
@@ -82,6 +89,38 @@ export function snippetOf(text: string, words: string[], width = 160): { snippet
   const tail = start + width < flat.length ? "…" : "";
   const snippet = `${lead}${body}${tail}`;
   return { snippet, marks: marksIn(snippet, words) };
+}
+
+/** A message as one line of words: code blocks out, a table's cells "a · b", its rows "; " apart, the markup gone. */
+export function flatText(text: string): string {
+  const lines = text.replace(/```[\s\S]*?```/g, " ").split("\n");
+  const out: string[] = [];
+  let inTable = false;
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (/^\|.*\|$/.test(line)) {
+      // The row under a table's heading (|---|:--:|) says nothing.
+      if (/^\|[\s:|-]+\|$/.test(line)) continue;
+      const cells = line.slice(1, -1).split("|").map((c) => c.trim()).filter(Boolean);
+      if (!cells.length) continue;
+      out.push(`${inTable ? "; " : out.length ? " — " : ""}${cells.join(" · ")}`);
+      inTable = true;
+      continue;
+    }
+    if (inTable) out.push(" — ");
+    inTable = false;
+    out.push(` ${line}`);
+  }
+  return out
+    .join("")
+    .replace(/[*#`>_~]+/g, " ")
+    .replace(/-{3,}|={3,}/g, " ")
+    .replace(/\s+([;·,.])/g, (_, p: string) => (p === "·" ? " ·" : p))
+    .replace(/(?:\s*—\s*)+/g, " — ")
+    .replace(/\s+/g, " ")
+    .replace(/^\s*—\s*|\s*—\s*$/g, "")
+    .trim();
 }
 
 /** Every place any of the words appears in a piece of text, without overlaps, in order. */
@@ -132,7 +171,8 @@ export function searchEvents(events: SessionEvent[], q: string, limit = 3, scan 
     const score = scoreOf(said.text, terms);
     if (!score) continue;
     const who = by === "agents" && f.agentName ? f.agentName(e.lane ?? MAIN_LANE) : e.actor.name;
-    hits.push({ seq: e.seq, at: e.ts, who, by, kind: said.kind, ...snippetOf(said.text, terms), score });
+    const tool = by === "agents" ? f.agentTool?.(e.lane ?? MAIN_LANE) : undefined;
+    hits.push({ seq: e.seq, at: e.ts, who, by, kind: said.kind, ...snippetOf(said.text, terms), score, ...(tool ? { tool } : {}) });
   }
   return hits.sort((a, b) => b.score - a.score || b.at - a.at).slice(0, limit);
 }

@@ -39,7 +39,7 @@ import { applyPrStatus, boardCards, sortCards, summaryOf, waitingOn, weekOf, typ
 import { AgentMesh } from "./agent-mesh.js";
 import { Hubs } from "./hubs.js";
 import type { Limits } from "./runner/limits.js";
-import type { MachineTool } from "./types.js";
+import type { MachineTool, SessionOptionsPatch } from "./types.js";
 import type { ToolOption, ToolWindow } from "./routing.js";
 import { runawayIn } from "./runaway.js";
 import { fromGh, fromGithubApi, rerequestReview, statusOf, type PrStatus } from "./github-status.js";
@@ -77,6 +77,30 @@ import { handOff } from "./hand-off-run.js";
 import { reattachAll } from "./reattach.js";
 import { Strengths } from "./strengths.js";
 import { attachmentsIn, MAX_FOLDER_ARCHIVE, uploadsMayRun, UploadedFolders } from "./uploaded.js";
+import { listWork, namedIn, pathParam, serveWork, shownFile, siteIcon, workPath } from "./work-files.js";
+import { FRAME_TTL_MS, frameDir, inFrame, signFrame, verifyFrame } from "./work-frame.js";
+import type { PeerNote } from "./types.js";
+import { ago as agoOf, LocalPeers, LOOK_AT as SESSIONS_LOOKED_AT, MODE_RANK, newId, placeOf as placeOfSession, scheduleOf } from "./app-tools.js";
+import { backupOf, checkInDue, checkInText, quietCheckIns, type CheckIn, cleanRoom, cleanTeammate, MEMORY_FILE, MEMORY_MAX, defaultFolder, makeFolder, MAX_ROOMS, MAX_TEAMMATES, projectsOf, roomKeep, runsOnName, teammateNote, TeammateStore, worktreeHolding, type Room, type Teammate, type TeammateView } from "./teammates.js";
+import { limitHit, planLimitHit } from "./limit-reset.js";
+import { heldByPerson, runnableQueue } from "./held.js";
+import { hopBehind } from "./agent-mesh.js";
+import { writeFile as writeFileAt } from "node:fs/promises";
+import { ownModelId } from "./own-model-id.js";
+import { handoffBrief } from "./handoff.js";
+import { ENGINE_MODEL_INFO } from "./types.js";
+import { hubOf } from "./agents-hub.js";
+import { distinctLook } from "./teammate-look.js";
+import { awayAnswer, awayNote, briefLine, briefWorthPosting, clockOf, endsOnQuestion, roomNews, runsIn, teamBrief as awayBrief, usageOf, type LaneRun, type Place } from "./team-away.js";
+import { boardBusy } from "./session/projection.js";
+import type { MateNote } from "./engine/hub.js";
+import type { MateRun, TeamAway } from "./teammates.js";
+import type { TeamBrief } from "./types.js";
+import { execFile as execFileCb } from "node:child_process";
+import { homedir as osHome } from "node:os";
+import { TeamWorkflows } from "./team-workflows.js";
+import type { Workflow } from "./team-workflow-model.js";
+import { localEdition } from "./local-edition.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // Resolved once: the traversal guard in serveStatic compares against this with
@@ -253,6 +277,8 @@ export interface AppOptions {
    * (localOnly); and the client is the local one (client-build.ts).
    */
   local?: { redis: Redis; sub: Redis; user: { id: string; name: string } };
+  /** Where teammates' own folders go when none is picked (teammates.ts defaultFolder): the home folder unless said, as tests do. */
+  teammatesHome?: string;
 }
 
 export type App = Awaited<ReturnType<typeof createApp>>;
@@ -325,7 +351,13 @@ export async function createApp(o: AppOptions) {
 
   /** Automations hearing a session's events (set below, once the automations are). */
   let automationsHear: ((sid: string, ev: Pick<SessionEvent, "lane" | "body">) => void) | null = null;
+  /** The teammates hearing their sessions' events (set below, with the teammates): away mode, its answers, retries. */
+  let teamHear: ((sid: string, ev: SessionEvent) => void) | null = null;
+  /** The team's workflows (team-workflows.ts), once the teammates are: their runs follow their boards. */
+  let workflows: TeamWorkflows | null = null;
   store.onAppended = (sid, ev) => {
+    teamHear?.(sid, ev as SessionEvent);
+    workflows?.hear(sid, ev as SessionEvent);
     // Every edition's: the open-source one runs automations too, and with this left out of it its runs stayed "Running" for good
     // and "An agent finishes" never fired (2026-10-27 QA).
     if (ev.body.type === "run.ended") automationsHear?.(sid, ev);
@@ -741,6 +773,9 @@ export async function createApp(o: AppOptions) {
       try {
         const due = (await store.state(sid)).resumes[lane];
         if (!due || String(due.seq) !== seq) continue;
+        // A teammate's: carried on as Friday, told why (teamResume).
+        if (teamResume && (await store.state(sid)).options.team) (await teamResume(sid, lane, due.seq)) && sent.push(sid);
+        if (teamResume && (await store.state(sid)).options.team) continue;
         const r = await core.handle(sid, { id: due.by, name: due.byName }, { type: "instruct", lane, text: "[session] The usage limit has reset. Carry on with the task where you left off; don't start over." });
         if (r.ok) sent.push(sid);
         else await store.append(sid, FRIDAY, { type: "resume.cancelled", why: r.error ?? "It couldn't be sent." }, { lane });
@@ -751,6 +786,8 @@ export async function createApp(o: AppOptions) {
     return sent;
   };
   const resumeLoop = setInterval(() => void tickResumes(), 30_000);
+  /** A teammate's resume (out of usage, a short rate limit, an error while away), carried on as Friday: true when sent. */
+  let teamResume: ((sid: string, lane: string, seq: number) => Promise<boolean>) | null = null;
   resumeLoop.unref();
   /** Agents whose wake's time has come (AgentMesh.fireWake): taking the entry out is the claim, so one server sends it. */
   const tickWakes = async (now = Date.now()): Promise<void> => {
@@ -871,6 +908,1328 @@ export async function createApp(o: AppOptions) {
     throw new Error("Your computer isn't connected.");
   };
   const computerHere = (ownerId: string) => !!links.tokenFor(ownerId) || !!localHost();
+  // ── Teammates (teammates.ts): persistent AI teammates on this computer, in the open-source edition ──────────
+  const teammates = o.local && localEdition() ? new TeammateStore(redis, o.prefix) : null;
+  /** What was started for them, in a dry run (FRIDAY_TEAMMATES_DRY): for tests. */
+  const teammateStarts: Record<string, unknown>[] = [];
+  /**
+   * For tests, in a dry run: tools whose start fails, the tools this computer has (null: as if it couldn't say), and how long a
+   * short rate limit is waited out (teamSwitch). Set through the app's `teammates` hooks.
+   */
+  const teammateDry: { failing: Set<string>; tools: EngineTool[] | null; retryMs?: number } = { failing: new Set(), tools: null };
+  /** Sessions and automation runs agents may start for the person in an hour, all agents together: teammates and rooms too. */
+  const AGENT_STARTS_PER_HOUR = 8;
+  /** Sessions an agent started: those don't start more (one level only), so sessions can't fan out into sessions. */
+  const agentStartedKey = `${o.prefix}agent-started`;
+  /**
+   * Marked as started by an agent: a key of its own that expires after a month, rather than one more member of a set that only
+   * grew (2026-10-28 audit). Read from both, for sessions marked before.
+   */
+  const markAgentStarted = (sid: string) => redis.set(`${agentStartedKey}:${sid}`, "1", "EX", 30 * 86_400);
+  const agentStarted = async (sid: string) => !!(await redis.exists(`${agentStartedKey}:${sid}`)) || !!(await redis.sismember(agentStartedKey, sid));
+  const startsLeft = async (owner: string): Promise<boolean> => {
+    const k = `${o.prefix}agent-starts:${owner}`;
+    const n = await redis.incr(k);
+    if (n === 1) await redis.expire(k, 3600);
+    return n <= AGENT_STARTS_PER_HOUR;
+  };
+  /** The team session, made the first time it is needed: private, links off, its main lane the room (nobody's agent on it). */
+  // Made once: two first looks at once each made a Team, and a read that failed made a new one every teammate's lane wasn't in.
+  let makingTeam: Promise<string> | null = null;
+  // The Team workflow is Crew (Arun, 2026-10-28: "rename team to something else"): a session made as "Team" before is renamed
+  // once, by Friday, so the lists and the agents' list_sessions say "Crew" as a new one does. Checked once a run.
+  let crewTitled = false;
+  const teamSession = async (owner: { id: string; name: string }, workspaceId: string): Promise<string> => {
+    const had = await teammates!.team();
+    // Kept unless its session is really gone from the store (not merely unread): then a new one, which the teammates re-join.
+    if (had && (await store.exists(had))) {
+      if (!crewTitled) {
+        crewTitled = true;
+        if ((await store.state(had)).title === "Team") await store.append(had, FRIDAY, { type: "session.updated", options: {}, title: "Crew" }).catch(() => (crewTitled = false));
+      }
+      return had;
+    }
+    makingTeam ??= (async () => {
+      const sid = randomBytes(6).toString("base64url");
+      await store.create(sid, "Crew", { id: owner.id, name: owner.name, role: "owner" }, { team: true, controlMode: "ask", mcp: true }, workspaceId);
+      await teammates!.setTeam(sid);
+      // Its log gone (not merely unread), the teammates are still on the team: each joins the new one with a lane of its own, the
+      // first leading, and starts there (2026-10-28 audit: they kept lanes of a session that was no more, and nothing reached them).
+      const list = had ? await teammates!.list() : [];
+      for (const [i, t] of list.entries()) {
+        const added = await core.handle(sid, owner, { type: "lane.add", name: t.name, engine: true, control: { kind: "people", people: [owner.id] } });
+        const ev = added.ok ? (await store.events(sid)).find((e) => e.seq === added.seq) : undefined;
+        const lane = ev?.body.type === "lane.added" ? ev.body.lane.id : "";
+        if (!lane) continue;
+        const moved = await teammates!.update(t.id, (cur) => ({ ...cur, lane }));
+        if (!moved) continue;
+        if (i === 0) await core.handle(sid, owner, { type: "lead.set", lane, auto: true });
+        if (moved.effort) await setEffort(sid, owner, lane, moved);
+        await startTeammate(sid, owner, moved).catch((e: Error) => console.error(`[teammates] ${t.name} didn't start: ${e.message}`));
+      }
+      return sid;
+    })().finally(() => (makingTeam = null));
+    return makingTeam;
+  };
+  /**
+   * A teammate's coding tool started (or brought back) on this computer, on its lane, in its own folder, as its own account. One on
+   * its own model has no tool to start: its folder is lent to its lane by a runner with nothing behind it, and Friday Code works
+   * there (agent/runtime.ts laneOwn), as it does in a folder lent to any session.
+   */
+  /**
+   * Each teammate's own copy (a git worktree) of a repo it shares with other teammates, by teammate id: kept at one place for good,
+   * on a branch of its own, so two teammates are never refused for one folder and never edit over each other; the lead merges
+   * their branches into one pull request (Arun, 2026-10-28: "Landing work: worktrees, one PR"). The lead (or else the first to
+   * join) works in the repo itself.
+   */
+  const copies = new Map<string, { repo: string; path: string; branch: string }>();
+  /** A teammate's MEMORY.md written one at a time, by it (update_memory) or the person: neither undoes the other (2026-10-28 audit). */
+  const memoryLock = <T,>(id: string, fn: () => Promise<T>): Promise<T> => teammates!.locked(`memory:${id}`, fn);
+  const git = (cwd: string, args: string[]) => new Promise<string>((resolve, reject) => execFileCb("git", ["-C", cwd, ...args], { timeout: 120_000 }, (e, out) => (e ? reject(e) : resolve(String(out)))));
+  const copyFor = async (sid: string, t: Teammate): Promise<{ repo: string; path: string; branch: string } | null> => {
+    const repo = projectsOf(t)[0];
+    if (!repo || t.tool === "friday") return null;
+    const list = await teammates!.list();
+    const sharers = list.filter((x) => projectsOf(x).some((d) => d.toLowerCase() === repo.toLowerCase()));
+    if (sharers.length < 2) return (copies.delete(t.id), null);
+    const lead = (await store.state(sid).catch(() => null))?.lead;
+    const home = sharers.find((x) => x.lane === lead) ?? sharers[0]!;
+    if (home.id === t.id) return (copies.delete(t.id), null);
+    const top = (await git(repo, ["rev-parse", "--show-toplevel"]).catch(() => "")).trim();
+    if (!top) return null;
+    const name = defaultFolder(t.name, "/").split("/").pop()!.toLowerCase().replace(/[^a-z0-9._-]+/g, "-") || "teammate";
+    const copy = { repo, path: path.join(o.teammatesHome ?? osHome(), "Friday", "worktrees", `${path.basename(top)}-${name}-${t.id.slice(0, 4)}`), branch: `friday/team-${name}` };
+    const there = (dir: string) => stat(path.join(dir, ".git")).then(() => true, () => false);
+    // Its branch already out in a worktree somewhere else: that is its copy (teammates.ts worktreeHolding). One whose folder has
+    // gone is let go of first, so the branch can be checked out again here.
+    const held = !(await there(copy.path)) ? worktreeHolding(await git(top, ["worktree", "list", "--porcelain"]).catch(() => ""), copy.branch) : null;
+    if (held && path.resolve(held) !== path.resolve(copy.path) && path.resolve(held) !== path.resolve(top)) {
+      if (await there(held)) copy.path = held;
+      else await git(top, ["worktree", "prune"]).catch(() => "");
+    }
+    if (!(await there(copy.path))) {
+      const has = (await git(top, ["branch", "--list", copy.branch]).catch(() => "")).trim();
+      const made = await git(top, has ? ["worktree", "add", "-q", copy.path, copy.branch] : ["worktree", "add", "-q", "-b", copy.branch, copy.path, "HEAD"]).then(() => true, (e: Error) => (console.error(`[teammates] ${t.name}'s copy of ${repo}: ${e.message}`), false));
+      if (!made) return null;
+    }
+    copies.set(t.id, copy);
+    return copy;
+  };
+  const startTeammate = async (sid: string, owner: { id: string; name: string }, t: Teammate, more: Record<string, unknown> = {}, at?: { lane: string; keepAs: string }) => {
+    const tool = t.tool === "friday" ? undefined : t.tool;
+    const copy = await copyFor((await teammates!.team()) ?? sid, t).catch(() => null);
+    const params = {
+      sid,
+      invite: signInvite(o.secret, sid, "owner"),
+      actorToken: signActor(o.secret, sid, owner.id),
+      ...(tool ? { tool } : {}),
+      // In the work it was given: its first folder or repo, where its branch, changes and tree are (Arun, 2026-10-27: "make sure
+      // they are working within the repo or folder too"); its own folder, for its notes, beside it. Without one, its own folder.
+      // A repo it shares with other teammates: its own copy of it (copyFor).
+      cwd: copy?.path ?? projectsOf(t)[0] ?? t.folder,
+      // As far as it may go: full, unless an agent made it, at no more than that agent may (Teammate.mode).
+      mode: t.mode ?? "full",
+      lane: at?.lane ?? t.lane,
+      // Its conversation, kept whatever port the app opens on and whichever project it is pointed at (Runner keepAs); in a room,
+      // the one it has there.
+      keepAs: at?.keepAs ?? t.id,
+      ...(projectsOf(t).length ? { dirs: [...projectsOf(t).slice(1), t.folder] } : {}),
+      // The model is its tool's to run; an own model is Friday Code's, asked for by the lane (laneOwn), never the runner's.
+      ...(tool && t.model ? { model: t.model } : {}),
+      // Always the account picked: never another one, whatever happens to this one (own-plan.ts).
+      ...(tool && t.account ? { account: t.account } : {}),
+      ...more,
+    };
+    // Tests say what would be started rather than start a real coding tool on the machine running them. A folder lent with no
+    // tool starts no coding tool, so it is started for real: its lane needs it to run.
+    if (process.env.FRIDAY_TEAMMATES_DRY === "1") {
+      if (params.tool && teammateDry.failing.has(params.tool)) throw new Error(`${ENGINE_NAMES[params.tool]} didn't start (dry run)`);
+      teammateStarts.push(params);
+      if (params.tool) return { lane: params.lane };
+    }
+    return (await callHost("start", params, hostCtx(owner))) as { lane: string };
+  };
+  /** The person's own models on this computer (Settings › Your models, runner/own-models.ts), as its runner lists them; null when it can't say. */
+  const ownModelsHere = (owner: { id: string; name: string }) =>
+    (callHost("models.own.list", {}, hostCtx(owner)) as Promise<{ models?: { id: string; name: string; baseUrl: string; local: boolean }[] }>).then((r) => r.models ?? [], () => null);
+  /**
+   * Why a teammate can't be put on `model`, or null: it has to be one of the team owner's own models (own-plan.ts: their own model
+   * runs their work only), and set up on this computer now. An agent picking one for a teammate is held to the same.
+   */
+  const ownModelRefused = async (owner: { id: string; name: string }, model: string): Promise<string | null> => {
+    if (ownModelParts(model)?.owner !== owner.id) return "That model isn't one of yours: a teammate runs only on your own models.";
+    const list = await ownModelsHere(owner);
+    if (!list) return "Couldn't read your models on this computer. Try again in a moment.";
+    return list.some((m) => m.id === ownModelParts(model)!.entry) ? null : "That model isn't set up on this computer. Add it in Settings › Your models first.";
+  };
+  /**
+   * What keeps a teammate on its own model from running now, said to the person, or "": the model gone from Settings, or a
+   * model server on this computer that doesn't answer. One on the internet counts as there once it is set up: asking it would
+   * spend the person's key for a status dot. Kept for twenty seconds, so a sidebar polling every few seconds asks seldom.
+   */
+  const ownHealth = new Map<string, { at: number; why: Promise<string> }>();
+  const ownModelProblem = (owner: { id: string; name: string }, model: string): Promise<string> => {
+    const had = ownHealth.get(model);
+    if (had && Date.now() - had.at < 20_000) return had.why;
+    const why = (async () => {
+      const parts = ownModelParts(model);
+      if (!parts || parts.owner !== owner.id) return "Its model isn't one of yours. Pick one of your own models for it.";
+      const list = await ownModelsHere(owner);
+      // This computer couldn't say: nothing to report, rather than a guess.
+      if (!list) return "";
+      const m = list.find((x) => x.id === parts.entry);
+      if (!m) return "Its model isn't in Settings › Your models any more. Pick another for it, or add it again.";
+      if (!m.local) return "";
+      const up = await fetch(`${m.baseUrl}/models`, { signal: AbortSignal.timeout(1500) }).then(() => true, () => false);
+      return up ? "" : `Nothing answers at ${m.baseUrl}. Is ${m.name}'s server running?`;
+    })();
+    ownHealth.set(model, { at: Date.now(), why });
+    return why;
+  };
+  /**
+   * A team session as the teammates' views read it: its state, how each agent in it stands, and its last words. Kept until the
+   * session has a new event (or half a minute passes, as a usage limit lifting changes how one stands), so a sidebar polling
+   * every few seconds from every window, and every turn's rooms brief, doesn't read whole logs again for nothing.
+   */
+  type Look = { state: SessionState; agents: ReturnType<typeof hubOf>["agents"]; said: { by: string; text: string; at: number } | null; news: number; checking: Set<string>; runs: LaneRun[]; held: Set<string>; events: SessionEvent[] };
+  const looks = new Map<string, { seq: number; at: number; look: Look }>();
+  const teamLook = async (sid: string): Promise<Look> => {
+    const state = await store.state(sid);
+    const had = looks.get(sid);
+    if (had && had.seq === state.lastSeq && Date.now() - had.at < 30_000) return { ...had.look, state };
+    const events = await store.events(sid);
+    // A check-in with nothing new is neither news nor the room's last words (teammate-checkins.ts quietCheckIns).
+    const { quiet, checking } = quietCheckIns(events);
+    const last = events.findLast((e) => e.body.type === "agent.message" && e.body.text.trim() && !quiet.has(e.seq));
+    // Read once here for everything a look gives: each lane's runs (usage, activity), and who is on hold (held.ts).
+    const lanes = [MAIN_LANE, ...state.lanes.map((l) => l.id)];
+    const look: Look = {
+      state,
+      agents: hubOf(state, events).agents,
+      said: last?.body.type === "agent.message" ? { by: last.actor.name, text: last.body.text.trim().slice(0, 400), at: last.ts } : null,
+      // What the room would show, not every run that ended (team-away.ts roomNews).
+      news: roomNews(events, state.lead, quiet),
+      checking,
+      runs: runsIn(events, new Set(lanes)),
+      held: new Set(lanes.filter((l) => heldByPerson(events, l))),
+      events,
+    };
+    looks.set(sid, { seq: state.lastSeq, at: Date.now(), look });
+    // Kept for the sessions looked at lately only: a removed room's look isn't kept for as long as the server runs.
+    if (looks.size > 64) for (const [k, v] of looks) if (Date.now() - v.at > 10 * 60_000) looks.delete(k);
+    return look;
+  };
+  /** Whether every lane at work in a team session is on a check-in. */
+  const teamOnlyCheckingIn = async (state: SessionState) => {
+    const { checking } = await teamLook(state.id);
+    const live = Object.entries(state.laneRuns).filter(([, r]) => r.status === "running");
+    return live.length > 0 && live.every(([lane]) => checking.has(lane));
+  };
+  /** Each teammate as the app shows it: its record, how it stands, what it is on, and what waits for it. */
+  const teammateViews = async (sid: string): Promise<TeammateView[]> => {
+    // How each stands across everywhere it is, the team and its rooms: busy in a room is busy (Arun, 2026-10-27: "the side bar
+    // is idle too", while they all worked in one). Working beats needing you beats limited beats idle beats offline.
+    const [list, rooms] = await Promise.all([teammates!.list(), teammates!.rooms()]);
+    const places = await Promise.all(
+      [{ sid, lanes: Object.fromEntries(list.map((t) => [t.id, t.lane])) as Record<string, string> }, ...rooms.map((r) => ({ sid: r.sid, lanes: r.lanes }))].map(async (p) => {
+        const { state, agents, runs, held } = await teamLook(p.sid).catch(() => ({ state: null, agents: [], runs: [] as LaneRun[], held: new Set<string>() }));
+        return { ...p, state, agents, runs, held };
+      }),
+    );
+    // Its usage today (since this computer's midnight) and over the week, across everywhere it works.
+    const midnight = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
+    const week = Date.now() - 7 * 86_400_000;
+    const usageFor = (id: string, from: number) => {
+      const sum = { turns: 0, minutes: 0, tokens: 0 };
+      for (const p of places) {
+        const lane = p.lanes[id];
+        if (!lane) continue;
+        const u = usageOf(p.runs.filter((r) => r.lane === lane), from);
+        sum.turns += u.turns;
+        sum.minutes += u.minutes;
+        sum.tokens += u.tokens;
+      }
+      return { turns: sum.turns, minutes: sum.minutes, ...(sum.tokens ? { tokens: sum.tokens } : {}) };
+    };
+    const RANK: Record<TeammateView["status"], number> = { working: 5, waiting: 4, stopped: 3, limited: 2, idle: 1, offline: 0 };
+    // One on its own model is online only while that model can run: set up in Settings, and its server answering when it is on
+    // this computer. The team's owner is the one person in its session.
+    const owner = Object.entries((await store.state(sid)).members).find(([, m]) => m.role === "owner");
+    const problems = new Map(await Promise.all(list.filter((t) => t.tool === "friday").map(async (t) => [t.id, owner ? await ownModelProblem({ id: owner[0], name: owner[1].name }, t.model ?? "") : ""] as const)));
+    return list.map((t) => {
+      let best: Pick<TeammateView, "status" | "line"> = { status: "offline", line: "" };
+      let queued = 0;
+      for (const p of places) {
+        const lane = p.lanes[t.id];
+        // A room whose session can't be read (gone from the store) counts for nothing.
+        if (!lane || !p.state) continue;
+        const a = p.agents.find((x) => x.lane === lane);
+        const engine = p.state.engines[lane];
+        const status: TeammateView["status"] = !engine?.online ? "offline" : a?.status === "working" ? "working" : a?.status === "waiting" ? "waiting" : a?.status === "limited" ? "limited" : a?.status === "failed" ? "stopped" : "idle";
+        queued += pendingFor(p.state, lane).length;
+        // Offline keeps why (its tool not running, the computer it is on), which the first place said (2026-10-28 QA: a bare "Offline").
+        const line = status === "offline" ? (a?.status === "offline" ? a.line : "Offline · their coding tool isn't running") : (a?.line ?? "");
+        if (RANK[status] > RANK[best.status] || (status === "offline" && !best.line)) best = { status, line };
+      }
+      const problem = problems.get(t.id);
+      const more = { mode: t.mode ?? ("full" as const), held: places.some((p) => !!p.lanes[t.id] && p.held.has(p.lanes[t.id]!)), usage: { today: usageFor(t.id, midnight), week: usageFor(t.id, week) } };
+      // Mid-turn it is working whatever a ping says; otherwise a model that can't run leaves it offline, and says why.
+      if (problem) return { ...t, ...(best.status === "working" ? best : { status: "offline" as const, line: problem }), queued, problem, ...more };
+      return { ...t, ...best, queued, ...more };
+    });
+  };
+  /** Each room as the app shows it: who is in it (their lanes there) and how many of them are working or need the person. */
+  const roomViews = async () =>
+    Promise.all(
+      (await teammates!.rooms()).map(async (r) => {
+        const { state, agents: all, said, news } = await teamLook(r.sid);
+        // Renamed from its own page (its title, settings.update): its title is its name. Read, never written here: a write in a
+        // read put back lanes or a room just changed or removed.
+        r.name = state.title || r.name;
+        const lanes = Object.values(r.lanes);
+        const agents = all.filter((a) => lanes.includes(a.lane) && state.engines[a.lane]?.online);
+        // Its last words and who said them, for the Team room's view of the rooms.
+        const last = said;
+        const doing = Object.fromEntries(agents.filter((a) => a.status === "working").map((a) => [a.lane, a.line ?? ""]));
+        return { id: r.id, name: r.name, sid: r.sid, invite: signInvite(o.secret, r.sid, "owner"), lanes: r.lanes, lead: state.lead ?? null, news, ...(r.purpose ? { purpose: r.purpose } : {}), working: agents.filter((a) => a.status === "working").length, waiting: agents.filter((a) => a.status === "waiting").length, last, doing };
+      }),
+    );
+  /**
+   * The Team room's own counts, as each room's are: its teammates at work there and those waiting on the person there (Arun,
+   * 2026-10-28: "really iron out bugs and feature problems and gaps"; its sidebar row said "None working" while the lead worked).
+   */
+  const teamRoomNow = async (sid: string) => {
+    const [{ agents, news }, list] = await Promise.all([teamLook(sid), teammates!.list()]);
+    const lanes = new Set(list.map((t) => t.lane));
+    const here = agents.filter((a) => lanes.has(a.lane));
+    const doing = Object.fromEntries(here.filter((a) => a.status === "working").map((a) => [a.lane, a.line ?? ""]));
+    return { news, working: Object.keys(doing).length, waiting: here.filter((a) => a.status === "waiting").length, doing };
+  };
+  /** Puts each switched teammate whose limit has lifted back on its own tool (a timer calls it; tests too). */
+  let runBack: () => Promise<void> = async () => {};
+  /** Asks each teammate its check-ins that are due at `now` (a timer calls it; tests call it with a time). */
+  let runCheckIns: (now?: Date) => Promise<void> = async () => {};
+  /** A teammate's effort on one of its lanes (its tool's level, or none for Auto): its record's, set as the lane's own. */
+  // A coding tool's alone: Friday Code on an own model takes no level (a teammate's record never has one there).
+  const setEffort = async (sid: string, owner: { id: string; name: string }, lane: string, t: Teammate) =>
+    t.tool === "friday" ? undefined : store.append(sid, { id: owner.id, name: owner.name, kind: "human" }, { type: "lane.effort", effort: t.effort ?? null, tool: t.tool }, { lane });
+  /** The rooms as the Team room's teammates are told them: each one's members, who is working on what, and its last words. */
+  const roomsBrief = async (list: Teammate[]): Promise<string> => {
+    const rooms = await teammates!.rooms();
+    if (!rooms.length) return "";
+    const lines = await Promise.all(
+      rooms.map(async (r) => {
+        const { state, agents, said } = await teamLook(r.sid);
+        const who = Object.entries(r.lanes).map(([id, lane]) => {
+          const name = list.find((t) => t.id === id)?.name ?? "someone";
+          const a = agents.find((x) => x.lane === lane);
+          return a?.status === "working" ? `${name} (working${a.line ? `: ${a.line}` : ""})` : a?.status === "waiting" ? `${name} (needs the person)` : name;
+        });
+        const last = said ? ` Last said, by ${said.by}: "${said.text.replace(/\s+/g, " ").slice(0, 220)}"` : "";
+        return `- "${state.title || r.name}" (session ${r.sid}): ${who.join(", ") || "nobody in it"}.${last}`;
+      }),
+    );
+    return [
+      "The crew's rooms right now, where some of you work apart on one thing. To read one in full use read_session with its session id; to tell or ask its teammates something, message_session.",
+      ...lines,
+    ].join("\n");
+  };
+  /**
+   * A teammate's work everywhere else, for its turn in a room (as roomsBrief is for the Team room): how it stands in the Team room
+   * and its other rooms, and its last words there, so it neither redoes nor contradicts what it does elsewhere (2026-10-28).
+   */
+  const elsewhereBrief = async (t: Teammate, here: string): Promise<string> => {
+    const team = await teammates!.team();
+    const rooms = await teammates!.rooms();
+    const places = [...(team && team !== here ? [{ sid: team, name: "the Crew room", lane: t.lane }] : []), ...rooms.filter((r) => r.sid !== here && r.lanes[t.id]).map((r) => ({ sid: r.sid, name: `the room "${r.name}"`, lane: r.lanes[t.id]! }))];
+    const lines = (
+      await Promise.all(
+        places.map(async (p) => {
+          const look = await teamLook(p.sid).catch(() => null);
+          const run = look?.runs.findLast((r) => r.lane === p.lane);
+          if (!look || !run) return "";
+          const a = look.agents.find((x) => x.lane === p.lane);
+          const how = a?.status === "working" ? `working${a.line ? ` (${a.line})` : ""}` : a?.status === "waiting" ? "waiting on the person" : "not working";
+          return `- In ${p.name} (session ${p.sid}) you are ${how}.${run.said ? ` Your last words there: "${run.said.replace(/\s+/g, " ").slice(0, 200)}"` : ""}`;
+        }),
+      )
+    ).filter(Boolean);
+    return lines.length ? ["[Friday] Your work elsewhere right now (each place keeps its own conversation; read_session reads one):", ...lines].join("\n") : "";
+  };
+  /**
+   * A folder for a new teammate no other teammate's record has (2026-10-28 audit: renamed, then a new one given the old name, two
+   * teammates shared one folder and one MEMORY.md; "O'Neil" and "ONeil" made the same folder): its name's, or that with -2, -3….
+   */
+  const freeFolder = (name: string, list: readonly Teammate[]): string => {
+    const taken = new Set(list.map((t) => t.folder.toLowerCase()));
+    const base = defaultFolder(name, o.teammatesHome);
+    for (let n = 1; n < 100; n++) {
+      const f = n === 1 ? base : `${base}-${n}`;
+      if (!taken.has(f.toLowerCase())) return f;
+    }
+    return `${base}-${randomBytes(3).toString("hex")}`;
+  };
+  /**
+   * A new teammate in the team: checked, its folder made, its lane added, started. The team's own route and the lead's
+   * manage_teammate tool both add one this way. The teammate, or what is wrong.
+   */
+  const addTeammate = async (sid: string, owner: { id: string; name: string }, body: Record<string, unknown>, more: Pick<Teammate, "mode" | "madeBy"> & { /** Asked once every check has passed, just before it is made: what stops it, or null. */ gate?: () => Promise<string | null> } = {}): Promise<Teammate | string> => {
+    let c: ReturnType<typeof cleanTeammate>;
+    try {
+      c = cleanTeammate(body, ENGINE_TOOLS, owner.id);
+    } catch (e) {
+      return (e as Error).message;
+    }
+    // On an own model: one the person has set up here, now.
+    const refused = c.tool === "friday" ? await ownModelRefused(owner, c.model ?? "") : null;
+    if (refused) return refused;
+    const gone = await missingDirOf(c.projects);
+    if (gone) return `There's no folder at ${gone} on this computer.`;
+    return teammates!.locked("team:add", async () => {
+      const list = await teammates!.list();
+      if (list.length >= MAX_TEAMMATES) return `A crew has up to ${MAX_TEAMMATES} teammates.`;
+      if (list.some((t) => t.name.toLowerCase() === c.name.toLowerCase())) return `You already have a teammate called ${c.name}.`;
+      // A folder picked that another teammate keeps its things in would give them one memory between them.
+      const shared = c.folder && list.find((t) => t.folder.toLowerCase() === c.folder!.toLowerCase());
+      if (shared) return `${shared.name} keeps its things in ${c.folder}. Pick another folder for ${c.name}, or leave it empty for one of its own.`;
+      const stop = await more.gate?.();
+      if (stop) return stop;
+      const folder = c.folder ?? freeFolder(c.name, list);
+      await makeFolder(folder);
+      const added = await core.handle(sid, owner, { type: "lane.add", name: c.name, engine: true, control: { kind: "people", people: [owner.id] } });
+      if (!added.ok) return added.error ?? "Couldn't add your teammate.";
+      const ev = (await store.events(sid)).find((e) => e.seq === added.seq);
+      const lane = ev?.body.type === "lane.added" ? ev.body.lane.id : "";
+      if (!lane) return "Couldn't add your teammate.";
+      // An agent's is told apart from the others by its face too, and waits for the person to keep it (madeBy). One made without
+      // a look gets a colour none of the team has, while one is free (teammate-look.ts distinctLook; 2026-10-28: Lead and QA,
+      // made in a row, came out the same pink).
+      const look = c.look ?? distinctLook(more.madeBy && list.some((x) => (x.look ?? x.name) === c.name) ? `${c.name}-${randomBytes(2).toString("hex")}` : c.name, list.map((x) => x.look ?? x.name));
+      const t: Teammate = { id: randomBytes(5).toString("hex"), ...c, ...(more.mode ? { mode: more.mode } : {}), ...(more.madeBy ? { madeBy: more.madeBy } : {}), look, folder, lane, created: Date.now() };
+      await teammates!.put(t);
+      if (t.effort) await setEffort(sid, owner, lane, t);
+      // The first teammate leads: what is said in the Team room goes to it, and it hands the rest on (agent-mesh.ts).
+      if (!list.length) await core.handle(sid, owner, { type: "lead.set", lane, auto: true });
+      await startTeammate(sid, owner, t).catch((e: Error) => console.error(`[teammates] ${t.name} didn't start: ${e.message}`));
+      return t;
+    });
+  };
+  /** The first of `dirs` not a folder on this computer, or null. */
+  const missingDirOf = async (dirs?: string[]) => (dirs ? (await Promise.all(dirs.map(async (d) => ((await stat(d).catch(() => null))?.isDirectory() ? null : d)))).find(Boolean) ?? null : null);
+  /** A teammate brought into a room: a lane there, steered by the person alone, its tool started on it with that room's conversation. */
+  const joinRoom = async (r: Room, owner: { id: string; name: string }, t: Teammate) => {
+    const added = await core.handle(r.sid, owner, { type: "lane.add", name: t.name, engine: true, control: { kind: "people", people: [owner.id] } });
+    if (!added.ok) throw new Error(added.error ?? `Couldn't bring ${t.name} into ${r.name}.`);
+    const ev = (await store.events(r.sid)).find((e) => e.seq === added.seq);
+    const lane = ev?.body.type === "lane.added" ? ev.body.lane.id : "";
+    if (!lane) throw new Error(`Couldn't bring ${t.name} into ${r.name}.`);
+    r.lanes[t.id] = lane;
+    if (t.effort) await setEffort(r.sid, owner, lane, t);
+    await startTeammate(r.sid, owner, t, {}, { lane, keepAs: roomKeep(t.id, r.id) }).catch((e: Error) => console.error(`[teammates] ${t.name} didn't start in ${r.name}: ${e.message}`));
+  };
+  /**
+   * A teammate leaving a session it is a lane of (taken off the team, or out of a room): what is open with it settled first (its
+   * asks and tasks, AgentMesh.onLaneRemoved), its turn there cancelled so a Stop's settling runs too, then its tool stopped and its
+   * lane gone (2026-10-27 audit: its asks and tasks were left open for good, the lead's batch never coming).
+   */
+  const laneGoes = async (sid: string, owner: { id: string; name: string }, lane: string, why: string) => {
+    await mesh.onLaneRemoved(sid, lane, why).catch((e) => closingOr("[teammates] settling", e));
+    if (runOf(await store.state(sid), lane).status === "running") await core.handle(sid, owner, { type: "run.cancel", lane });
+    await stopOnMachine(sid, owner, lane).catch(() => {});
+    await core.handle(sid, owner, { type: "lane.remove", laneId: lane });
+    // What it let go of goes to whoever is free now that it is gone (2026-10-28 audit: its review sat until the next sweep).
+    await mesh.dispatch(sid).catch((e) => closingOr("[teammates] board", e));
+  };
+  /** A teammate out of a room: its tool there stopped and its lane gone; its conversation there is kept should it come back. */
+  const leaveRoom = async (r: Room, owner: { id: string; name: string }, teammateId: string) => {
+    const lane = r.lanes[teammateId];
+    if (!lane) return;
+    const name = laneName(await store.state(r.sid), lane);
+    await laneGoes(r.sid, owner, lane, `${name} left the room "${r.name}", so it won't answer this. Ask someone else, or do it yourself.`);
+    delete r.lanes[teammateId];
+  };
+  /** A room's lead: who is said to when nobody is @-named, the first who joined unless the lead is still in it. */
+  const leadRoom = async (r: Room, owner: { id: string; name: string }, first?: string) => {
+    const lanes = Object.values(r.lanes);
+    const lead = (await store.state(r.sid)).lead;
+    // A new room's lead is the first one picked, by name, not whichever lane its record lists first (2026-10-27 audit: the
+    // test "the first in it leads" failed now and then).
+    if (first && lanes.includes(first)) {
+      if (lead !== first) await core.handle(r.sid, owner, { type: "lead.set", lane: first, auto: true });
+      return;
+    }
+    if (lanes[0] && !lanes.includes(lead ?? "")) await core.handle(r.sid, owner, { type: "lead.set", lane: lanes[0], auto: true });
+  };
+  /**
+   * A new room: some of the team, picked, in a session of their own (teammates.ts Room), from the page or an agent's ask. The room
+   * made, with what didn't work when someone didn't join (`failed`); or only what is wrong, with no room made.
+   */
+  const makeRoom = async (owner: { id: string; name: string }, workspaceId: string, body: Record<string, unknown>, gate?: () => Promise<string | null>): Promise<{ room: Room; failed: string } | string> => {
+    const list = await teammates!.list();
+    let c: ReturnType<typeof cleanRoom>;
+    try {
+      c = cleanRoom(body, list.map((t) => t.id));
+    } catch (e) {
+      return (e as Error).message;
+    }
+    if (!c.name || !c.members) return "Give the room a name and pick who is in it.";
+    // Counted and made under one lock: two made at once each found room for one more (2026-10-27 audit).
+    const r = await teammates!.locked("rooms:add", async () => {
+      if ((await teammates!.rooms()).length >= MAX_ROOMS) return `A crew keeps up to ${MAX_ROOMS} rooms. Take one away first.`;
+      const stop = await gate?.();
+      if (stop) return stop;
+      const made: Room = { id: randomBytes(5).toString("hex"), name: c.name!, sid: randomBytes(6).toString("base64url"), lanes: {}, ...(c.purpose ? { purpose: c.purpose } : {}), created: Date.now() };
+      // Kept from the start and after each teammate joins: a join that fails leaves a room to fix, not a session nobody lists
+      // with tools running in it.
+      await store.create(made.sid, made.name, { id: owner.id, name: owner.name, role: "owner" }, { team: true, controlMode: "ask", mcp: true }, workspaceId);
+      await teammates!.putRoom(made);
+      return made;
+    });
+    if (typeof r === "string") return r;
+    const failed = await teammates!.locked(`room:${r.id}`, async () => {
+      // Everyone picked is tried, one failing or not, and the room gets its lead whatever happened (2026-10-27 audit: the first
+      // to fail left the rest out and the room with no lead).
+      const failed: string[] = [];
+      try {
+        for (const id of c.members!) {
+          // As it is stored now, under the room's lock: one taken off the team meanwhile isn't brought in.
+          const mate = await teammates!.get(id);
+          if (!mate) continue;
+          try {
+            await joinRoom(r, owner, mate);
+          } catch (e) {
+            failed.push((e as Error).message);
+          } finally {
+            await teammates!.putRoom(r);
+          }
+        }
+      } finally {
+        const first = c.members!.map((id) => r.lanes[id]).find(Boolean);
+        await leadRoom(r, owner, first).catch((e) => closingOr("[teammates] room lead", e));
+      }
+      return failed.join(" ");
+    });
+    return { room: r, failed };
+  };
+  /**
+   * A teammate's tool started again everywhere it is, after a change: the team and each room it is in. A lane mid-run, or waiting
+   * on the person (a question, a command to approve), is started again as that run ends instead (restartLater), so the change
+   * doesn't cut its work off (2026-10-28 audit: editing a teammate's role restarted it mid-turn everywhere). Where it waits for
+   * that, by the room's name ("the Team room" for the team's).
+   */
+  const restartEverywhere = async (team: string, owner: { id: string; name: string }, was: Teammate, now: Teammate): Promise<string[]> => {
+    const later: string[] = [];
+    const busy = async (sid: string, lane: string) => {
+      const st = await store.state(sid).catch(() => null);
+      return !!st && (runOf(st, lane).status === "running" || runOf(st, lane).status === "waiting_for_human" || !!st.approvals[lane]);
+    };
+    if (await busy(team, was.lane)) (restartLater.set(`${team} ${was.lane}`, now.id), later.push("the Crew room"));
+    else {
+      await stopOnMachine(team, owner, was.lane).catch(() => {});
+      await startTeammate(team, owner, now).catch((e: Error) => console.error(`[teammates] ${now.name} didn't start: ${e.message}`));
+    }
+    for (const r of await teammates!.rooms()) {
+      const lane = r.lanes[now.id];
+      if (!lane) continue;
+      if (await busy(r.sid, lane)) {
+        restartLater.set(`${r.sid} ${lane}`, now.id);
+        later.push(r.name);
+        continue;
+      }
+      await stopOnMachine(r.sid, owner, lane).catch(() => {});
+      await startTeammate(r.sid, owner, now, {}, { lane, keepAs: roomKeep(now.id, r.id) }).catch((e: Error) => console.error(`[teammates] ${now.name} didn't start in ${r.name}: ${e.message}`));
+    }
+    return later;
+  };
+  /** The teammates' timers (switching back, check-ins), stopped as the app closes. */
+  const teamTimers: ReturnType<typeof setInterval>[] = [];
+  /** A teammate's turn tried again after a short rate limit (teamSwitch), waiting: cleared as the app closes. */
+  const retryTimers = new Set<ReturnType<typeof setTimeout>>();
+  /** Away mode and the team's own care of its work, set below with the teammates (the routes and the desktop app call them). */
+  let awake: () => Promise<boolean> = async () => false;
+  let runAway: (now?: number) => Promise<void> = async () => {};
+  let awayTicking = false;
+  let stopAll: (by: { id: string; name: string }) => Promise<string[]> = async () => [];
+  let setPaused: (on: boolean) => Promise<void> = async () => {};
+  let activityOf: (t: Teammate, days: number) => Promise<MateRun[]> = async () => [];
+  let sinceOf: (ts: number) => Promise<TeamBrief> = async (ts) => ({ since: ts, until: Date.now(), done: [], failed: [], waiting: [], assumptions: [], usage: [] });
+  let awayOn: (until: number) => Promise<void> = async () => {};
+  let awayOff: () => Promise<unknown> = async () => null;
+  let restartLater = new Map<string, string>();
+  if (teammates) {
+    // Out of usage, a teammate switches to its backup tool and carries on (Arun, 2026-10-27: "add a status for the teammate if
+    // its coding tool hit its usage limit then switched to another coding tool to continue the work… also add that too"). Not
+    // another account of the same tool: that is getting round its maker's limit (own-plan.ts), and switching accounts is the
+    // person's call. Back on its own tool once the limit lifts, at its next start.
+    /** Who a team session belongs to: its owner, the one person in it. */
+    const ownerIn = (state: SessionState) => {
+      const o = Object.entries(state.members).find(([, m]) => m.role === "owner");
+      return o ? { id: o[0], name: o[1].name } : null;
+    };
+    /** The teammate on a lane of a team session, and how its tool there keeps its conversation (the team's, or that room's). */
+    const placeOf = async (sid: string, lane: string): Promise<{ id: string; keepAs?: string } | null> => {
+      const team = await teammates.team();
+      if (sid === team) {
+        const t = (await teammates.list()).find((x) => x.lane === lane);
+        return t ? { id: t.id } : null;
+      }
+      const r = (await teammates.rooms()).find((x) => x.sid === sid);
+      const id = r && Object.entries(r.lanes).find(([, l]) => l === lane)?.[0];
+      return r && id ? { id, keepAs: roomKeep(id, r.id) } : null;
+    };
+    /**
+     * Busy on a lane: mid-run, or waiting on the person (a question, a command to approve). Restarting its tool then cut the
+     * question off (2026-10-27 audit).
+     */
+    const busyOn = (state: SessionState, lane: string) => runOf(state, lane).status === "running" || runOf(state, lane).status === "waiting_for_human" || !!state.approvals[lane];
+    /** Every lane a teammate has, the team's and each room's, with how to start it and whether it is busy there now. */
+    const lanesOfMate = async (t: Teammate) => {
+      const team = await teammates.team();
+      const out: { sid: string; lane: string; at?: { lane: string; keepAs: string }; busy: boolean }[] = [];
+      if (team) out.push({ sid: team, lane: t.lane, busy: busyOn(await store.state(team), t.lane) });
+      for (const r of await teammates.rooms()) {
+        const lane = r.lanes[t.id];
+        if (!lane) continue;
+        const state = await store.state(r.sid).catch(() => null);
+        if (!state?.lastSeq) continue;
+        out.push({ sid: r.sid, lane, at: { lane, keepAs: roomKeep(t.id, r.id) }, busy: busyOn(state, lane) });
+      }
+      return out;
+    };
+    /** Friday's own word to a teammate (the switch, a check-in, a retry): said as Friday, never as the person (Friday's notes). */
+    const FRIDAY_SAYS = { id: "friday", name: "Friday", kind: "system" as const };
+    /**
+     * Friday telling a teammate's tool something on its lane, and waking it: as Friday, not the person, so it neither lifts a
+     * person's hold, nor counts as the person steering it (autoWake's backoff, the board's sweep) (2026-10-27 audit).
+     */
+    const tellTeammate = async (sid: string, lane: string, text: string, more: { hop?: number; ownTurn?: true } = {}) => {
+      const sent = await store.append(sid, FRIDAY_SAYS, { type: "instruction", text, interrupt: false, ...more }, { lane });
+      if (sent.ok) void bus.wake(sid, lane);
+      return sent.ok;
+    };
+    /**
+     * Whether this computer has `tool` ready to run, as the runner says (its tools: installed, signed in); null when it can't say,
+     * which switches as before.
+     */
+    const toolReady = async (owner: { id: string; name: string }, tool: EngineTool): Promise<boolean | null> => {
+      if (process.env.FRIDAY_TEAMMATES_DRY === "1") return teammateDry.tools ? teammateDry.tools.includes(tool) : null;
+      const listed = await (callHost("tools", {}, hostCtx(owner)) as Promise<{ tools?: MachineTool[] }>).then((r) => r.tools ?? null, () => null);
+      const t = listed?.find((x) => x.tool === tool);
+      return listed ? !!t?.path && t.loggedIn !== false : null;
+    };
+    /** Short rate limits a lane rode out by waiting, by session and lane: when each retry was set, to give up after a few. */
+    const retried = new Map<string, number[]>();
+    const RETRIES = 3;
+    /** One lane of a teammate started again as `t` says; false when its tool didn't start. */
+    const restartLane = async (sid: string, by: { id: string; name: string }, t: Teammate, lane: string, at?: { lane: string; keepAs: string }) => {
+      await stopOnMachine(sid, by, lane).catch(() => {});
+      return startTeammate(sid, by, t, {}, at).then(
+        () => true,
+        (e: Error) => (console.error(`[teammates] ${t.name} didn't start on ${runsOnName(t)}: ${e.message}`), false),
+      );
+    };
+    // ── The team while the person is away, and its own care of its work (Arun, 2026-10-28: "we need to ensure teams can work
+    // basically while you are away") ───────────────────────────────────────────────────────────────────────────────────────
+    /** Every place the team works: the Team room and each room, with each teammate's lane there. */
+    const placesNow = async (): Promise<{ sid: string; room: Room | null; lanes: Record<string, string> }[]> => {
+      const [team, list, rooms] = await Promise.all([teammates.team(), teammates.list(), teammates.rooms()]);
+      return [...(team ? [{ sid: team, room: null, lanes: Object.fromEntries(list.map((t) => [t.id, t.lane])) as Record<string, string> }] : []), ...rooms.map((r) => ({ sid: r.sid, room: r, lanes: r.lanes }))];
+    };
+    /**
+     * A teammate's turn carried on later (a short rate limit, its usage limit, an error while away): a resume in the log and the
+     * store's list of them, so a restart in between doesn't lose it, carried on as Friday at its time (teamResume). One due within
+     * the minute is fired here at its time as well, not only by the half-minute loop.
+     */
+    const scheduleTeamResume = async (sid: string, lane: string, at: number) => {
+      const r = await store.append(sid, FRIDAY_SAYS, { type: "resume.scheduled", at }, { lane });
+      if (r.ok && at - Date.now() < 60_000) {
+        const timer = setTimeout(
+          () => {
+            retryTimers.delete(timer);
+            void tickResumes().catch((e) => closingOr("[teammates] resume", e));
+          },
+          Math.max(0, at - Date.now()) + 10,
+        );
+        timer.unref?.();
+        retryTimers.add(timer);
+      }
+      return r.ok;
+    };
+    /**
+     * A teammate's resume come due: told to carry on, as Friday and a turn of its own, with why (its limit lifted, a short rate
+     * limit waited out, an error tried again). Not when it ran or the person wrote on the lane since: what it was to carry on is
+     * in hand already (2026-10-28 audit: a retry fired over a turn the person had started).
+     */
+    teamResume = async (sid, lane, seq) => {
+      const [state, events] = await Promise.all([store.state(sid), store.events(sid)]);
+      if (lane !== MAIN_LANE && !state.lanes.some((l) => l.id === lane)) return false;
+      if (events.some((e) => e.seq > seq && (e.lane ?? MAIN_LANE) === lane && (e.body.type === "run.started" || (e.body.type === "instruction" && e.actor.kind === "human")))) {
+        await store.append(sid, FRIDAY_SAYS, { type: "resume.cancelled", why: "It carried on meanwhile." }, { lane });
+        return false;
+      }
+      const end = events.findLast((e) => e.seq < seq && (e.lane ?? MAIN_LANE) === lane && e.body.type === "run.ended");
+      const err = end?.body.type === "run.ended" ? end.body.error : undefined;
+      const text = limitHit(err, end?.ts)
+        ? planLimitHit(err, end?.ts)
+          ? "[Friday] Your usage limit has reset. Carry on with your task where you left off; don't start over."
+          : "[Friday] Your tool hit a short rate limit partway through, so Friday waited a moment. Carry on where you left off; don't start over."
+        : `[Friday] Your last turn stopped on an error${err ? ` (${err.split("\n")[0]!.slice(0, 200)})` : ""}, so Friday is trying it again. Carry on where you left off; don't start over. If the same thing fails again, work round it, or say in one line what blocks you.`;
+      return tellTeammate(sid, lane, text, { hop: 1, ownTurn: true });
+    };
+
+    /** The brief over [since, until] across every place the team works (team-away.ts teamBrief). */
+    const briefOf = async (since: number, until: number) => {
+      const list = await teammates.list();
+      const places: Place[] = [];
+      for (const p of await placesNow()) {
+        const events = await store.events(p.sid).catch(() => null);
+        if (events) places.push({ sid: p.sid, room: p.room?.name ?? null, events, lanes: p.lanes });
+      }
+      return awayBrief(places, list.map((t) => ({ id: t.id, name: t.name, lane: t.lane })), since, until);
+    };
+    /**
+     * The brief posted in the Team room (team.brief), which the page draws as the morning brief and notifies with. Only when it
+     * has something to say (Arun, 2026-10-28: "really iron out bugs and feature problems and gaps"; a brief came for a 0-minute
+     * absence, and "Nothing to report" ones).
+     */
+    const postBrief = async (since: number, until: number) => {
+      const team = await teammates.team();
+      if (!team) return;
+      const b = await briefOf(since, until);
+      if (!briefWorthPosting(b)) return;
+      await store.append(team, FRIDAY_SAYS, { type: "team.brief", ...b }, { lane: MAIN_LANE });
+      console.log(`[teammates] ${briefLine(b)}`);
+    };
+    /**
+     * Away mode over: at the time the person set, on "I'm back", or as they write in any team chat. Ended once, under a lock, and
+     * the brief of the whole stretch posted then.
+     */
+    const endAway = async () => {
+      const a = await teammates.locked("away", async () => {
+        const had = await teammates.away();
+        if (had) await teammates.setAway(null);
+        return had;
+      });
+      if (a) await postBrief(a.since, Date.now());
+      return a;
+    };
+    /**
+     * Away mode on: until when, from now. Old holds are lifted (an old "everyone stop" would keep the team idle all night), and
+     * what was queued meanwhile is started. Said only where a teammate was on hold, naming who (2026-10-28 away run: "Every hold
+     * on the team is lifted" in every room on every away, with nobody on hold).
+     */
+    const startAway = async (until: number) => {
+      const had = await teammates.away();
+      await teammates.setAway({ until, since: had?.since ?? Date.now() });
+      if (!had)
+        for (const p of await placesNow()) {
+          const events = await store.events(p.sid).catch(() => null);
+          const held = events ? Object.values(p.lanes).filter((l) => heldByPerson(events, l)) : [];
+          if (held.length) await store.append(p.sid, FRIDAY_SAYS, { type: "holds.lifted", lanes: held, why: "The person is away: the crew carries on by itself." }, { lane: MAIN_LANE }).catch(() => undefined);
+        }
+      await repump();
+    };
+
+    /**
+     * Every team lane with work queued that it may start, idle, its tool there and not out of usage: woken, so nothing is left
+     * stranded in a queue (a wake lost, a pause lifted, a limit that lifted in the night). The hub decides again what it may run.
+     */
+    const repump = async () => {
+      if (await teammates.paused()) return;
+      for (const p of await placesNow()) {
+        const [state, events] = await Promise.all([store.state(p.sid).catch(() => null), store.events(p.sid).catch(() => null)]);
+        if (!state || !events) continue;
+        for (const lane of Object.values(p.lanes)) {
+          const run = runOf(state, lane).status;
+          if (run === "running" || run === "waiting_for_human" || run === "paused" || !state.engines[lane]?.online) continue;
+          if (!runnableQueue(events, lane, pendingFor(state, lane)).length) continue;
+          void bus.wake(p.sid, lane);
+        }
+      }
+    };
+
+    /**
+     * Whether this computer should be kept awake (local/desktop.ts): away, and the team has work in hand: a lane running or
+     * something queued, a resume or wake due within two hours, or a board still being worked on.
+     */
+    const wantsAwake = async (): Promise<boolean> => {
+      if (!(await teammates.away()) || (await teammates.paused())) return false;
+      const soon = Date.now() + 2 * 3_600_000;
+      for (const p of await placesNow()) {
+        const state = await store.state(p.sid).catch(() => null);
+        if (!state) continue;
+        if (state.board && boardBusy(state)) return true;
+        // A resume is spent at its time (teamResume), not taken off: one more than five minutes past is behind it.
+        if (Object.values(state.resumes ?? {}).some((r) => r.at > Date.now() - 5 * 60_000 && r.at <= soon)) return true;
+        if (Object.values(state.wakes ?? {}).some((w) => (w.on.at ?? Infinity) <= soon)) return true;
+        for (const lane of Object.values(p.lanes)) if (runOf(state, lane).status === "running" || pendingFor(state, lane).length) return true;
+      }
+      return false;
+    };
+    awake = wantsAwake;
+
+    /**
+     * After a teammate's run ends, while the person is away: a turn that ended on a question is answered once, "decide it yourself"
+     * (team-away.ts awayAnswer); one that stopped on an error that isn't a usage limit is tried again after 2, 10 and 30 minutes.
+     * And a lane whose tool was changed while it worked starts again on it now (restartLater).
+     */
+    const ERROR_RETRIES = [2, 10, 30];
+    const afterTeamRun = async (sid: string, lane: string, end: SessionEvent) => {
+      if (end.body.type !== "run.ended") return;
+      const later = restartLater.get(`${sid} ${lane}`);
+      // Not while it waits on the person (its question, a command to approve): the restart would cut that off; the next end then.
+      if (later && end.body.outcome !== "waiting" && !(await store.state(sid)).approvals[lane]) {
+        restartLater.delete(`${sid} ${lane}`);
+        const t = await teammates.get(later);
+        const place = await placeOf(sid, lane);
+        const by = ownerIn(await store.state(sid));
+        if (t && by) await restartLane(sid, by, t, lane, place?.keepAs ? { lane, keepAs: place.keepAs } : undefined);
+      }
+      const a = await teammates.away();
+      if (!a || end.body.cut) return;
+      const [state, events] = await Promise.all([store.state(sid), store.events(sid)]);
+      if (end.body.outcome === "error") {
+        if (limitHit(end.body.error, end.ts)) return;
+        // Counted since its current task began: its turns on one task tried three times at most.
+        const from = events.findLast((e) => (e.lane ?? MAIN_LANE) === lane && e.body.type === "instruction" && (e.actor.kind === "human" || e.body.mesh?.kind === "task" || !!e.body.mesh?.board))?.seq ?? 0;
+        const tries = events.filter((e) => e.seq > from && (e.lane ?? MAIN_LANE) === lane && e.body.type === "resume.scheduled" && e.actor.id === FRIDAY_SAYS.id).length;
+        if (tries < ERROR_RETRIES.length) await scheduleTeamResume(sid, lane, Date.now() + ERROR_RETRIES[tries]! * 60_000 * (teammateDry.retryMs !== undefined ? teammateDry.retryMs / 60_000 : 1));
+        return;
+      }
+      const start = events.findLast((e) => e.seq < end.seq && (e.lane ?? MAIN_LANE) === lane && e.body.type === "run.started");
+      const said = events.findLast((e) => e.seq > (start?.seq ?? 0) && e.seq < end.seq && (e.lane ?? MAIN_LANE) === lane && e.body.type === "agent.message" && !!e.body.text.trim());
+      const asked = !!state.openQuestions[lane] || !!state.asks[lane] || (said?.body.type === "agent.message" && endsOnQuestion(said.body.text));
+      if (!asked) return;
+      // Once for each question: claimed by the turn's end, so a second process or a repeat call doesn't answer it again.
+      if (!(await redis.set(`${o.prefix}away-answered:${sid}:${lane}:${end.seq}`, "1", "EX", 86_400, "NX"))) return;
+      await tellTeammate(sid, lane, awayAnswer(a.until), { hop: 1 });
+    };
+
+    teamHear = (sid, ev) => {
+      const b = ev.body;
+      const person = b.type === "instruction" && ev.actor.kind === "human";
+      if (!person && b.type !== "run.ended" && b.type !== "lane.removed") return;
+      void (async () => {
+        const state = await store.state(sid).catch(() => null);
+        if (!state?.options.team) return;
+        // The person writing in any team chat is them back.
+        if (person) return void (await endAway());
+        if (b.type === "lane.removed") {
+          mesh.forget(sid, b.laneId);
+          noteMemory.delete(`${sid} ${b.laneId}`);
+          for (const k of retried.keys()) if (k === `${sid} ${b.laneId}`) retried.delete(k);
+          return;
+        }
+        await afterTeamRun(sid, ev.lane ?? MAIN_LANE, ev);
+      })().catch((e) => closingOr("[teammates] hearing", e));
+    };
+
+    /**
+     * The lead's hand-off when the work it gave out is done while the person is away: the goal again, and how to land it (merge
+     * the teammates' branches, run the full tests, open one pull request, write the brief). The brief so far is posted too.
+     */
+    mesh.teamDone = async (sid, lead) => {
+      if (!(await teammates.sessions()).includes(sid)) return null;
+      const a = await teammates.away();
+      const lt = (await teammates.list()).find((t) => t.lane === lead);
+      const repo = lt ? projectsOf(lt)[0] : undefined;
+      // The teammates' own copies of the lead's repo (copyFor): their branches are what it merges into one pull request.
+      const branches = [...copies.values()].filter((c) => !repo || c.repo.toLowerCase() === repo.toLowerCase());
+      if (!a && !branches.length) return null;
+      const [now, events] = await Promise.all([store.state(sid), store.events(sid)]);
+      const goal = events.findLast((e) => (e.lane ?? MAIN_LANE) === lead && e.body.type === "instruction" && e.actor.kind === "human" && !e.body.approval);
+      // The brief so far, once for each board (or goal) and only when all of it is done: a task blocked or sent back is still
+      // the lead's to sort out (2026-10-28 away run: two briefs in 12 s, the first as a task came back blocked). The brief at the
+      // end of the stretch then takes its place (the page shows the latest of a stretch).
+      const settled = !now.board || now.board.tasks.every((t) => t.status === "done" || t.status === "cancelled");
+      if (a && settled && (await redis.set(`${o.prefix}away-brief:${sid}:${a.since}:${now.board ? `b${now.board.seq}` : `g${goal?.seq ?? 0}`}`, "1", "EX", 86_400, "NX")))
+        void postBrief(a.since, Date.now()).catch((e) => closingOr("[teammates] brief", e));
+      const land = `${branches.length ? `merge your teammates' branches (${branches.map((c) => c.branch).join(", ")}) into one branch for this goal in ${branches[0]!.repo}, ` : ""}run the full tests and fix what fails, then open one pull request with gh pr create for the person to review. Don't merge it, push to the default branch or deploy.`;
+      if (!a) return `[Friday] Land the work: ${land}`;
+      return [
+        `[Friday] The person is away until ${clockOf(a.until)}.${goal?.body.type === "instruction" ? ` The goal they gave you: "${goal.body.text.trim().slice(0, 1500)}"` : ""}`,
+        `Land it now: ${land}`,
+        "Then end with the morning brief, in a few lines: what got done, the pull request, what you assumed, what is blocked, and what needs the person.",
+      ].join("\n\n");
+    };
+
+    /** Away mode's own clock, every 20 seconds: over at its time, approvals not left waiting all night, nothing stranded. */
+    const AWAY_APPROVAL_MS = 10 * 60_000;
+    runAway = async (now = Date.now()) => {
+      const a = await teammates.away();
+      if (a && now >= a.until) await endAway();
+      else if (a) {
+        // A teammate in plan or edits mode asking to run something while nobody can answer: told no, and to decide for itself,
+        // after ten minutes.
+        for (const p of await placesNow()) {
+          const [state, events] = await Promise.all([store.state(p.sid).catch(() => null), store.events(p.sid).catch(() => null)]);
+          if (!state || !events) continue;
+          for (const lane of Object.values(p.lanes)) {
+            const ask = state.approvals[lane];
+            const at = ask && events.find((e) => e.seq === ask.seq)?.ts;
+            if (!ask || !at || now - at < AWAY_APPROVAL_MS) continue;
+            // As Friday, not the person: the person answering is them back, and this isn't them (it would end away mode).
+            const r = await store.append(p.sid, FRIDAY_SAYS, { type: "instruction", text: `[Friday] The person is away until ${clockOf(a.until)} and can't approve that, so it was declined. Do what you can without it, decide the rest yourself (the safest reasonable option), record what you chose with write_note under a key starting "assumption", and carry on.`, interrupt: false, approval: { id: ask.id, approve: false }, hop: 1 }, { lane });
+            if (r.ok) void bus.wake(p.sid, lane);
+          }
+        }
+      }
+      await repump();
+      mesh.pruneTold(now);
+      for (const [k, at] of retried) if (!at.some((x) => now - x < 30 * 60_000)) retried.delete(k);
+    };
+    teamTimers.push(
+      setInterval(() => {
+        if (awayTicking) return;
+        awayTicking = true;
+        void runAway()
+          .catch((e) => closingOr("[teammates] away", e))
+          .finally(() => (awayTicking = false));
+      }, 20_000),
+    );
+
+    /** Every teammate's running turn stopped, in the Team room and every room, its queue kept (run.pause): who was stopped. */
+    stopAll = async (by: { id: string; name: string }) => {
+      const list = await teammates.list();
+      const stopped: string[] = [];
+      for (const p of await placesNow()) {
+        const state = await store.state(p.sid).catch(() => null);
+        if (!state) continue;
+        for (const [id, lane] of Object.entries(p.lanes)) {
+          if (runOf(state, lane).status !== "running") continue;
+          const r = await core.handle(p.sid, by, { type: "run.pause", lane });
+          const name = list.find((t) => t.id === id)?.name;
+          if (r.ok && name && !stopped.includes(name)) stopped.push(name);
+        }
+      }
+      return stopped;
+    };
+    /** The team paused or let go on: held, nothing of the agents' starts; let go, what waited is started. */
+    setPaused = async (on: boolean) => {
+      await teammates.setPaused(on);
+      if (!on) await repump();
+    };
+
+    /** A teammate's runs everywhere it works over the last `days`, newest first (GET /api/teammates/:id/activity). */
+    activityOf = async (t: Teammate, days: number): Promise<MateRun[]> => {
+      const from = Date.now() - days * 86_400_000;
+      const out: MateRun[] = [];
+      for (const p of await placesNow()) {
+        const lane = p.lanes[t.id];
+        if (!lane) continue;
+        const look = await teamLook(p.sid).catch(() => null);
+        for (const r of look?.runs ?? []) {
+          if (r.lane !== lane || (r.endedAt ?? Date.now()) < from) continue;
+          out.push({ sid: p.sid, room: p.room ? look!.state.title || p.room.name : null, lane, startedAt: r.startedAt, endedAt: r.endedAt, outcome: r.outcome, said: r.said.slice(0, 2000), files: r.files.slice(0, 50) });
+        }
+      }
+      return out.sort((a, b) => b.startedAt - a.startedAt).slice(0, 500);
+    };
+    sinceOf = (ts: number) => briefOf(ts, Date.now());
+    awayOn = startAway;
+    awayOff = endAway;
+    // The Team room's roster tool (agent-mesh.ts TEAMMATE_TOOL): the teammates there add the teammate the person asks for, or
+    // change one's role, each change a line in the room (Arun, 2026-10-27: "needs to be on par with Open Bot if not even better").
+    // From any session, not the Team room alone (Arun, 2026-10-27: "everything is full agentic and can be utilized by the coding
+    // tools"): a change is said as a line in the Team room, where the roster lives, and answered where it was asked.
+    mesh.teammateTool = {
+      offered: async () => true,
+      call: async (sid, lane, args) => {
+        const here = await store.state(sid);
+        const owner = ownerIn(here);
+        if (!owner) return { output: "This session has nobody to answer to.", isError: true };
+        const action = typeof args.action === "string" ? args.action.trim() : "";
+        // What an agent may change is what it may do itself, as start_session and manage_automation have it (2026-10-27 audit:
+        // a plan-mode agent made a full-mode teammate in a repo and then told it what to do): nothing from plan mode, nothing from
+        // a session another agent started (one level of fan-out only), and teammates and rooms started count towards the hour's.
+        const askerMode: EngineMode = here.engines[lane]?.mode ?? "edits";
+        if (action === "create" || action === "update" || action === "create_room") {
+          if (askerMode === "plan") return { output: "You're in plan mode: you can list the crew and its rooms, not add, change or make them. Say what you'd set up, and let the person do it.", isError: true };
+          if (await agentStarted(sid)) return { output: "This session was started by another agent, and doesn't change the crew. Tell the agent that started it what you'd set up.", isError: true };
+        }
+        // The Team room is made only for a change: looking at a team nobody has made yet doesn't make one.
+        const teamSid = action === "create" || action === "update" || action === "create_room" ? await teamSession(owner, here.workspaceId ?? LOCAL_WORKSPACE.id) : await teammates.team();
+        const inTeam = !!teamSid && teamSid === sid;
+        const list = await teammates.list();
+        const me = inTeam ? list.find((t) => t.lane === lane) : undefined;
+        const by = { id: "agent", name: me?.name ?? (laneName(here, lane) === "Main" ? "An agent" : laneName(here, lane)), kind: "agent" as const };
+        // The line goes in the Team room: on the asker's own lane there, or the room's own when it asked from elsewhere.
+        const told = { lane: inTeam ? lane : MAIN_LANE };
+        const arg = (k: string) => (typeof args[k] === "string" ? (args[k] as string).trim() : "");
+        const where = (t: Teammate) => [...projectsOf(t), t.folder].join(", ");
+        // Counted once what is asked has passed its own checks, as it is about to start: one turned away for its name or a folder
+        // that isn't there spent one of the hour's starts (2026-10-27 audit).
+        const startGate = async () => ((await startsLeft(owner.id)) ? null : `Agents have started ${AGENT_STARTS_PER_HOUR} sessions, runs or teammates for the person in the last hour. Say what you'd set up in your reply, and let them decide.`);
+        switch (arg("action")) {
+          case "list": {
+            // The person's own models, by name, for a teammate on one: and which there are to pick for a new one (create's model).
+            const mine = (await ownModelsHere(owner)) ?? [];
+            const ownNames = new Map(mine.map((m) => [ownModelId(owner.id, m.id), m.name]));
+            const models = mine.length ? `\n\nThe person's own models a teammate can run on (create with tool "friday" and model set to one's name): ${mine.map((m) => m.name).join(", ")}.` : "";
+            return {
+              output: (list.length
+                ? list.map((t) => `${t.name}${t.id === me?.id ? " (you)" : ""}: ${t.tool === "friday" ? `own model ${ownNames.get(t.model ?? "") ?? "(not set up here now)"}` : `${ENGINE_NAMES[t.tool]}${t.model ? ` (${t.model})` : ""}`}${t.mode && t.mode !== "full" ? `, ${t.mode} mode` : ""}, works in ${where(t)}.\n  ${t.role || "No role written yet."}`).join("\n")
+                : "There are no teammates yet.") + models,
+            };
+          }
+          case "create": {
+            const folders = Array.isArray(args.folders) ? args.folders.filter((f): f is string => typeof f === "string") : [];
+            const tool = arg("tool").toLowerCase() || me?.tool || here.engines[lane]?.tool || "claude";
+            // On one of the person's own models, named as they named it (or its id); none named, the one the asker runs on, or
+            // the person's only one. Theirs alone, and set up here now: addTeammate checks it as it does the page's.
+            let model = "";
+            if (tool === "friday") {
+              const mine = (await ownModelsHere(owner)) ?? [];
+              const want = arg("model").toLowerCase();
+              const m = want ? mine.find((x) => x.name.toLowerCase() === want || x.id === want || ownModelId(owner.id, x.id) === want) : me?.tool !== "friday" && mine.length === 1 ? mine[0] : undefined;
+              model = m ? ownModelId(owner.id, m.id) : !want && me?.tool === "friday" ? (me.model ?? "") : "";
+              if (!model) return { output: mine.length ? `Say which of the person's own models it runs on, by name: ${mine.map((x) => x.name).join(", ")}.` : "The person has no models of their own set up (Settings › Your models), so a teammate can't run on one. Pick a coding tool, or ask them to add a model.", isError: true };
+            }
+            // At no more than the agent that made it may go.
+            const madeBy = { lane, name: by.name };
+            const made = await addTeammate(teamSid!, owner, { name: arg("name"), role: arg("role"), tool, ...(model ? { model } : {}), projects: folders }, { ...(MODE_RANK[askerMode] < MODE_RANK.full ? { mode: askerMode } : {}), madeBy, gate: startGate });
+            if (typeof made === "string") return { output: made, isError: true };
+            await store.append(teamSid!, by, { type: "teammate.changed", name: made.name, lane: made.lane, added: true, role: made.role }, told);
+            // For the person to keep or remove, as news in the Team room; it works meanwhile (2026-10-28).
+            await store.append(teamSid!, FRIDAY_SAYS, { type: "teammate.proposed", id: made.id, name: made.name, lane: made.lane, madeBy }, { lane: MAIN_LANE });
+            return { output: `${made.name} joined the crew on ${made.tool === "friday" ? "the person's own model" : ENGINE_NAMES[made.tool]}${made.mode ? `, in ${made.mode} mode as you are` : ""}, working in ${where(made)}. It is starting now: brief it with ${inTeam ? "message_agent or assign_task" : `message_session, to "${teamSid}" and agent "${made.name}"`}.` };
+          }
+          case "update": {
+            const t = list.find((x) => x.name.toLowerCase() === arg("name").toLowerCase());
+            if (!t) return { output: `There's no teammate called ${arg("name") || "that"}. Call manage_teammate with action list to see the crew.`, isError: true };
+            // Another's standing role is the person's to change, or the Team room lead's: a teammate rewriting another's role
+            // rewrote what it does on every turn from then on (2026-10-27 audit).
+            const lead = teamSid ? (await store.state(teamSid)).lead : null;
+            if (t.id !== me?.id && !(inTeam && lead === lane)) {
+              const leadName = list.find((x) => x.lane === lead)?.name;
+              return { output: `${t.name}'s role is the person's to change${leadName ? `, or ${leadName}'s as the Crew room's lead` : ""}, not yours. Tell ${leadName ? `${leadName} or ` : ""}the person what you'd change it to, and why.`, isError: true };
+            }
+            if (MODE_RANK[t.mode ?? "full"] > MODE_RANK[askerMode]) return { output: `${t.name} may do more than you may (${t.mode ?? "full"}, you ${askerMode}), so its role is the person's to change.`, isError: true };
+            const role = arg("role").slice(0, 4000);
+            if (!role) return { output: "Give the new role.", isError: true };
+            const next = await teammates.update(t.id, (cur) => ({ ...cur, role }));
+            if (!next) return { output: `${t.name} isn't in the crew any more.`, isError: true };
+            await store.append(teamSid!, by, { type: "teammate.changed", name: next.name, lane: next.lane, added: false, role }, told);
+            return { output: `${next.name}'s role is changed. It reads it from its next turn.` };
+          }
+          case "rooms": {
+            const rooms = await teammates.rooms();
+            const name = (id: string) => list.find((t) => t.id === id)?.name ?? "someone gone";
+            return {
+              output: rooms.length
+                ? rooms.map((r) => `"${r.name}" [id ${r.sid}]: ${Object.keys(r.lanes).map(name).join(", ") || "nobody yet"}${r.purpose ? `. For: ${r.purpose}` : ""}`).join("\n")
+                : "There are no rooms yet: create_room makes one.",
+            };
+          }
+          case "create_room": {
+            const names = Array.isArray(args.members) ? args.members.filter((x): x is string => typeof x === "string").map((x) => x.trim().toLowerCase()) : [];
+            const ids = names.map((n) => list.find((t) => t.name.toLowerCase() === n)?.id).filter((x): x is string => !!x);
+            if (names.length && ids.length < names.length) return { output: `Not in the crew: ${names.filter((n) => !list.some((t) => t.name.toLowerCase() === n)).join(", ")}. Call manage_teammate with action list.`, isError: true };
+            // A room starts its members' tools again: none that may do more than the asker, and it counts towards the hour's starts.
+            const stronger = ids.map((id) => list.find((t) => t.id === id)!).filter((t) => MODE_RANK[t.mode ?? "full"] > MODE_RANK[askerMode]);
+            if (stronger.length) return { output: `${stronger.map((t) => t.name).join(", ")} may do more than you may (you ${askerMode}), so a room with ${stronger.length === 1 ? "it" : "them"} is the person's to make.`, isError: true };
+            const made = await makeRoom(owner, here.workspaceId ?? LOCAL_WORKSPACE.id, { name: arg("name"), purpose: arg("role"), members: ids }, startGate);
+            if (typeof made === "string") return { output: made, isError: true };
+            const r = made.room;
+            // A teammate that didn't join leaves the room made all the same: say so, with its id, so a retry doesn't make a second one.
+            if (made.failed) return { output: `Made the room "${r.name}" [id ${r.sid}], but not everyone joined: ${made.failed} Who is in it: ${Object.keys(r.lanes).map((id) => list.find((t) => t.id === id)?.name ?? "").filter(Boolean).join(", ") || "nobody yet"}. The person can add the rest from the room's menu.`, isError: true };
+            return { output: `Made the room "${r.name}" [id ${r.sid}] with ${ids.map((id) => list.find((t) => t.id === id)!.name).join(", ")}. Their tools are starting there; message_session it to brief them.` };
+          }
+          default:
+            return { output: "Say which: list, create, update, rooms or create_room.", isError: true };
+        }
+      },
+    };
+    mesh.teamSwitch = async (sid, lane) => {
+      const place = await placeOf(sid, lane);
+      if (!place) return false;
+      // On the person's own model there is no plan of a coding tool's to run out of, and no backup to carry on: a busy or
+      // unreachable model server is said in its chat as its run's end, and on its row (teammateViews), never a switch.
+      if ((await teammates.get(place.id))?.tool === "friday") return false;
+      const [events, state] = await Promise.all([store.events(sid), store.state(sid)]);
+      const end = events.findLast((e) => e.body.type === "run.ended" && (e.lane ?? MAIN_LANE) === lane);
+      if (end?.body.type !== "run.ended" || end.body.outcome !== "error") return false;
+      const by = ownerIn(state);
+      if (!by || !limitHit(end.body.error, end.ts)) return false;
+      // The account's allowance spent switches it; a limit gone in a minute (a per-minute 429, "too many requests") is waited out
+      // and the turn tried again, a few times, before the backup is the answer (2026-10-27 audit: a per-minute 429 put a teammate
+      // on its backup for five hours).
+      let hit = planLimitHit(end.body.error, end.ts);
+      if (!hit) {
+        const key = `${sid} ${lane}`;
+        const recent = (retried.get(key) ?? []).filter((at) => Date.now() - at < 30 * 60_000);
+        if (recent.length < RETRIES) {
+          retried.set(key, [...recent, Date.now()]);
+          // Kept as a resume (the log and the store's list of them), so a restart meanwhile doesn't lose it; at its time it goes
+          // only if nothing ran and nobody wrote on the lane since (teamResume) (2026-10-28 audit).
+          await scheduleTeamResume(sid, lane, Date.now() + (teammateDry.retryMs ?? 30_000) * 2 ** recent.length);
+          return true;
+        }
+        hit = { resetsAt: null };
+      }
+      // The tool this lane's run was on: the one that ran out.
+      const ran = state.engines[lane]?.tool;
+      const switched = await teammates.locked(`t:${place.id}`, async () => {
+        const t = await teammates.get(place.id);
+        // Put on its own model meanwhile: nothing to switch (see above).
+        if (!t || t.tool === "friday") return false;
+        let next: Teammate & { tool: EngineTool } = { ...t, tool: t.tool };
+        if (!t.switched) {
+          // Only its own tool running out switches it; a lane still on something else is left to the usual hand-on.
+          if (ran !== t.tool) return false;
+          const to = backupOf(t);
+          if (to === t.tool) return false;
+          // Never to a tool this computer doesn't have ready: the lane was left with no tool at all (2026-10-27 audit).
+          if ((await toolReady(by, to)) === false) return false;
+          const routes = ENGINE_MODEL_INFO[to].some((m) => m.id === "auto");
+          // No account on the backup: the one picked is the first tool's (accounts.ts), never lent to another.
+          next = {
+            ...t,
+            tool: to,
+            model: routes ? "auto" : undefined,
+            effort: t.effort && (EFFORT_LEVELS[to] ?? []).includes(t.effort) ? t.effort : undefined,
+            account: undefined,
+            switched: { from: t.tool, ...(t.model ? { fromModel: t.model } : {}), ...(t.account ? { fromAccount: t.account } : {}), ...(t.effort ? { fromEffort: t.effort } : {}), until: hit.resetsAt ?? null, at: Date.now() },
+          };
+          await teammates.put(next);
+        } else if (ran !== t.switched.from) {
+          // Its backup ran out too: nothing left to switch to, so no switching back and forth; the usual hand-on follows.
+          return false;
+        }
+        // This lane, now idle on its limit, onto the backup. A start that fails puts the record back and its own tool on the lane
+        // again, rather than leaving the lane with none (2026-10-27 audit), and the usual hand-on follows.
+        if (!(await restartLane(sid, by, next, lane, place.keepAs ? { lane, keepAs: place.keepAs } : undefined))) {
+          if (next.switched !== t.switched) {
+            await teammates.put(t);
+            await restartLane(sid, by, t, lane, place.keepAs ? { lane, keepAs: place.keepAs } : undefined);
+          }
+          return false;
+        }
+        // Its other lanes follow when idle; one mid-run carries on where it is, and switches when it too ends on the limit.
+        if (next.switched !== t.switched) for (const l of await lanesOfMate(next)) if (!(l.sid === sid && l.lane === lane) && !l.busy) await restartLane(l.sid, by, next, l.lane, l.at);
+        await store.append(sid, FRIDAY_SAYS, { type: "teammate.switched", name: t.name, lane, from: next.switched!.from, to: next.tool, until: next.switched!.until });
+        // It carries on: a new tool is a new conversation, so it is given the record of what it did. As the turn that ran out,
+        // agent steps and all, not a new start (behindRun).
+        const brief = handoffBrief(events, lane, end.seq);
+        const text = `[Friday] ${ENGINE_NAMES[next.switched!.from]} ran out of usage partway through your work, so you are on ${ENGINE_NAMES[next.tool]} now. Carry on where you left off and finish it.${brief ? `\n\n${brief}` : ""}`;
+        await tellTeammate(sid, lane, text, { hop: hopBehind(state, events, lane) });
+        return true;
+      });
+      return switched;
+    };
+    // Back on its own tool, account, model and effort once that limit lifts (or five hours on, when it never said), and only when
+    // none of its lanes is mid-run, so no turn is cut off: checked each minute, one pass at a time.
+    const backAt = (sw: NonNullable<Teammate["switched"]>) => sw.until ?? sw.at + 5 * 3_600_000;
+    let backing = false;
+    runBack = async () => {
+          const team = await teammates.team();
+          if (!team) return;
+          const by = ownerIn(await store.state(team));
+          if (!by) return;
+          for (const t of await teammates.list()) {
+            if (!t.switched || backAt(t.switched) > Date.now()) continue;
+            await teammates.locked(`t:${t.id}`, async () => {
+              const cur = await teammates.get(t.id);
+              if (!cur?.switched || backAt(cur.switched) > Date.now()) return;
+              // Put on its own model while on its backup: it went off the backup then (the edit cleared the switch).
+              const was = cur.tool;
+              if (was === "friday") return;
+              const lanes = await lanesOfMate(cur);
+              if (lanes.some((l) => l.busy)) return;
+              const sw = cur.switched;
+              const next: Teammate = { ...cur, tool: sw.from, model: sw.fromModel, account: sw.fromAccount, effort: sw.fromEffort, switched: undefined };
+              await teammates.put(next);
+              for (const l of lanes) {
+                // What it did on its backup since it switched, for its own tool, whose conversation never saw it (2026-10-27
+                // audit): kept with the line that says it is back, and told it with its next turn (hub.teammate), as the
+                // switch told the backup where it was. Waking it for that alone would be a turn spent on nothing.
+                const events = await store.events(l.sid).catch(() => []);
+                const brief = handoffBrief(events.filter((e) => e.ts >= sw.at), l.lane, Infinity);
+                await restartLane(l.sid, by, next, l.lane, l.at);
+                // Said in the Team room as before, and in a room only when it worked there meanwhile.
+                if (l.sid === team || brief) await store.append(l.sid, FRIDAY_SAYS, { type: "teammate.switched", name: cur.name, lane: l.lane, from: was, to: sw.from, until: null, back: true, ...(brief ? { brief } : {}) });
+                // Its backup ran out too, and its last turn there ended on that limit: the turn goes again now its own tool is back,
+                // with what it was given, unless a resume is set for it already or something waits in its queue (2026-10-28: both
+                // tools out in the night left the work where it stopped).
+                const st = await store.state(l.sid).catch(() => null);
+                const end = events.findLast((e) => (e.lane ?? MAIN_LANE) === l.lane && (e.body.type === "run.ended" || e.body.type === "run.started"));
+                if (st && end?.body.type === "run.ended" && end.body.outcome === "error" && limitHit(end.body.error, end.ts) && !pendingFor(st, l.lane).length) {
+                  // A resume set for its backup's reset is overtaken: it goes now.
+                  if ((st.resumes[l.lane]?.at ?? 0) > Date.now()) await store.append(l.sid, FRIDAY_SAYS, { type: "resume.cancelled", why: "Back on its own tool." }, { lane: l.lane });
+                  const start = events.findLast((e) => e.seq < end.seq && (e.lane ?? MAIN_LANE) === l.lane && e.body.type === "run.started");
+                  const given = events.filter((e) => e.seq > (start?.seq ?? end.seq) && e.seq < end.seq && (e.lane ?? MAIN_LANE) === l.lane && e.body.type === "instructions.delivered").flatMap((e) => (e.body.type === "instructions.delivered" ? e.body.seqs : []));
+                  const first = start?.body.type === "run.started" ? [start.body.causedBy] : [];
+                  const texts = [...new Set([...first, ...given])].flatMap((q) => ((x) => (x?.body.type === "instruction" ? [x.body.text.trim().slice(0, 1500)] : []))(events.find((e) => e.seq === q)));
+                  await tellTeammate(l.sid, l.lane, `[Friday] Your usage limit has lifted and you are back on ${ENGINE_NAMES[sw.from]}. The turn that ran out goes again: carry on where it stopped; don't start over.${texts.length ? `\n\nWhat it was given:\n${texts.join("\n\n")}` : ""}`, { hop: 1, ownTurn: true });
+                }
+              }
+            });
+          }
+    };
+    teamTimers.push(
+      setInterval(() => {
+        if (backing) return;
+        backing = true;
+        void runBack()
+          .catch((e) => closingOr("[teammates]", e))
+          .finally(() => (backing = false));
+      }, 60_000),
+    );
+    // Check-ins (teammates.ts CheckIn): each due one asked of its teammate in the Team room, once per slot.
+    runCheckIns = async (now = new Date()) => {
+        const team = await teammates.team();
+        if (!team) return;
+        // The team paused: nobody is asked, and the slots wait for it to go on.
+        if (await teammates.paused()) return;
+        const away = await teammates.away();
+        const teamEvents = await store.events(team);
+        for (const t of await teammates.list()) {
+          // On hold as the person said: not asked, and its slot not used, so it is asked once the hold lifts while still due
+          // (2026-10-27 audit: a check-in, said as the person, lifted their stop).
+          if (heldByPerson(teamEvents, t.lane)) continue;
+          // Away, a check-in with nothing to look at since the last one isn't asked: its slot is spent, and no usage on it
+          // (Arun, 2026-10-28: "Check-ins while away: skipped while nothing changed").
+          const lastAsk = away ? teamEvents.findLast((e) => (e.lane ?? MAIN_LANE) === t.lane && e.body.type === "instruction" && e.body.text.startsWith("[Check-in] ")) : undefined;
+          const quietSince = !!lastAsk && !teamEvents.some((e) => e.seq > lastAsk.seq && (e.lane ?? MAIN_LANE) !== t.lane && (e.body.type === "run.started" || (e.body.type === "instruction" && e.actor.kind === "human") || e.body.type === "agent.diff" || e.body.type === "board.posted"));
+          // What is due is read and its slot written under the teammate's lock, from the record as it is then: a check-in is
+          // asked once a slot however the clock ticks, and never of a teammate removed meanwhile.
+          let due: { c: CheckIn; slot: string }[] = [];
+          const next = await teammates.update(t.id, (cur) => {
+            due = (cur.checkins ?? []).flatMap((c) => ((slot) => (slot && slot !== c.last ? [{ c, slot }] : []))(checkInDue(c, now)));
+            return due.length ? { ...cur, checkins: cur.checkins!.map((c) => ({ ...c, ...((d) => (d ? { last: d.slot } : {}))(due.find((x) => x.c.id === c.id)) })) } : null;
+          });
+          if (!next || !due.length || quietSince) continue;
+          // As Friday, on the person's schedule, and a turn of its own: handed into a turn under way, its answer was never read as
+          // the check-in's (teammate-checkins.ts quietCheckIns).
+          for (const { c } of due) await tellTeammate(team, next.lane, checkInText(c), { ownTurn: true });
+        }
+    };
+    let checking = false;
+    teamTimers.push(
+      setInterval(() => {
+        // One round at a time: a slow one isn't run again over itself.
+        if (checking) return;
+        checking = true;
+        void runCheckIns(new Date())
+          .catch((e) => closingOr("[teammates] check-ins", e))
+          .finally(() => (checking = false));
+      }, 20_000),
+    );
+    for (const t of teamTimers) t.unref?.();
+    // Their notes: who each is, its role and the team, read fresh for every turn (EngineHub.withAgent).
+    // A teammate's memory (teammates.ts MEMORY_FILE), its first page, read fresh each turn: nothing when there is none yet.
+    const memoryOf = (t: Teammate) => readFile(path.join(t.folder, MEMORY_FILE), "utf8").then((m) => m.slice(0, MEMORY_MAX), () => "");
+    /**
+     * Back on its own tool, what it did on its backup meanwhile (runBack), with the first turn there since: its own tool's
+     * conversation never saw it. Nothing once a turn has started there.
+     */
+    const backBrief = async (sid: string, lane: string): Promise<string> => {
+      const events = await store.events(sid).catch(() => []);
+      const back = events.findLast((e) => e.body.type === "teammate.switched" && e.body.lane === lane);
+      if (back?.body.type !== "teammate.switched" || !back.body.back || !back.body.brief) return "";
+      if (events.some((e) => e.seq > back.seq && e.body.type === "run.started" && (e.lane ?? MAIN_LANE) === lane)) return "";
+      return `\nWhile ${ENGINE_NAMES[back.body.from]} stood in for ${ENGINE_NAMES[back.body.to]}, which had run out of usage, this is what you did on it (you are back on ${ENGINE_NAMES[back.body.to]}, whose conversation didn't see it):\n${back.body.brief}`;
+    };
+    /**
+     * Its memory as the note of each of its conversations (by "sid lane") first had it, kept until that conversation is compacted:
+     * the note stays the same turn after turn, so its tool keeps its cache, and what it added since leads the turn's prompt
+     * instead (2026-10-28 audit: the note changed every turn, and every turn re-read it all).
+     */
+    const noteMemory = new Map<string, { memory: string; at: number }>();
+    const memoryAsOf = async (sid: string, lane: string, t: Teammate): Promise<{ memory: string; now: string }> => {
+      const key = `${sid} ${lane}`;
+      const now = await memoryOf(t);
+      const had = noteMemory.get(key);
+      const compacted = had ? ((await store.events(sid)).findLast((e) => (e.lane ?? MAIN_LANE) === lane && e.body.type === "context.compacted")?.seq ?? 0) : 0;
+      if (had && compacted <= had.at) return { memory: had.memory, now };
+      noteMemory.set(key, { memory: now, at: (await store.state(sid)).lastSeq });
+      return { memory: now, now };
+    };
+    /** What leads a teammate's turn while the person is away (team-away.ts awayNote), every turn: short, and the rule that matters. */
+    const awayPart = async (): Promise<MateNote["preamble"]> => {
+      const a = await teammates.away();
+      return a ? [{ key: "away", text: awayNote(a.until), always: true }] : [];
+    };
+    /** The teammate on a lane of the team or one of its rooms, its note there, and what leads its turn: null for any other lane. */
+    const noteOn = async (sid: string, lane: string): Promise<({ t: Teammate } & MateNote) | null> => {
+      const list = await teammates.list();
+      const team = await teammates.team();
+      const memoryPart = (m: { memory: string; now: string }, t: Teammate) =>
+        m.now.trim() !== m.memory.trim() ? [{ key: "memory", text: `[Friday] Your memory (${path.join(t.folder, MEMORY_FILE)}) has changed since this conversation began. What it holds now:\n${m.now.trim() || "(empty)"}` }] : [{ key: "memory", text: "" }];
+      if (team === sid) {
+        const t = list.find((x) => x.lane === lane);
+        if (!t) return null;
+        const m = await memoryAsOf(sid, lane, t);
+        // In the Team room, what every room is doing now, so the team can follow and steer them (Arun, 2026-10-27: "allow the
+        // team room be able to get info from all of the other rooms that are currently running too"): with the turn, when it
+        // changes, not in the note.
+        const rooms = await roomsBrief(list);
+        return { t, note: teammateNote(t, list, undefined, m.memory, copies.get(t.id)), preamble: [{ key: "rooms", text: rooms ? `[Friday] ${rooms}` : "" }, ...memoryPart(m, t), { key: "back", text: (await backBrief(sid, lane)).trim() }, ...(await awayPart())] };
+      }
+      // In a room: who else is in it, besides who it is.
+      const r = (await teammates.rooms()).find((x) => x.sid === sid);
+      const id = r && Object.entries(r.lanes).find(([, l]) => l === lane)?.[0];
+      const t = id ? list.find((x) => x.id === id) : undefined;
+      if (!r || !t) return null;
+      const others = Object.keys(r.lanes).filter((x) => x !== t.id).flatMap((x) => list.find((y) => y.id === x)?.name ?? []);
+      const m = await memoryAsOf(sid, lane, t);
+      const note = teammateNote(t, list, { name: (await store.state(sid).catch(() => null))?.title || r.name, with: others, ...(r.purpose ? { purpose: r.purpose } : {}), ...(team ? { team } : {}) }, m.memory, copies.get(t.id));
+      return { t, note, preamble: [{ key: "elsewhere", text: await elsewhereBrief(t, sid) }, ...memoryPart(m, t), { key: "back", text: (await backBrief(sid, lane)).trim() }, ...(await awayPart())] };
+    };
+    hub.teammate = async (sid, lane) => {
+      const on = await noteOn(sid, lane);
+      return on ? { note: on.note, preamble: on.preamble } : null;
+    };
+    hub.teamPaused = async (sid) => (await teammates.sessions()).includes(sid) && (await teammates.paused());
+    /**
+     * A teammate's memory kept by Friday Code (teammates.ts teammateNote): its MEMORY.md, in its own folder, which its file tools
+     * may not reach when it works in a project. Added to, or written anew; a page at most, as the note reads.
+     */
+    const memoryTool = (t: Teammate): AgentTool => ({
+      name: "update_memory",
+      description: `Keep what you will want next time in your memory (${path.join(t.folder, MEMORY_FILE)}), read into your instructions with every turn: how the person likes things, where things are, what didn't work. add: one or a few short lines added at the end. replace: the whole memory written anew, under a page, to tidy it.`,
+      parameters: { type: "object", properties: { add: { type: "string", description: "Lines to add." }, replace: { type: "string", description: "The whole memory, written anew." } }, additionalProperties: false },
+      cancellable: false,
+      async run(args) {
+        const file = path.join(t.folder, MEMORY_FILE);
+        const add = typeof args.add === "string" ? args.add.trim() : "";
+        const replace = typeof args.replace === "string" ? args.replace.trim() : null;
+        if (!add && replace === null) return { output: "Say what to add, or the whole memory to replace it with.", isError: true };
+        // Read and written under its lock: two adds at once each read the file before the other wrote, and one was lost.
+        return memoryLock(t.id, async () => {
+          const had = await readFile(file, "utf8").catch(() => "");
+          const next = replace !== null ? replace : `${had.trimEnd()}${had.trim() ? "\n" : ""}${add}`;
+          if (next.length > MEMORY_MAX) return { output: `That makes your memory ${next.length} characters, over the ${MEMORY_MAX} read back to you. Tidy it with replace, keeping what matters.`, isError: true };
+          await makeFolder(t.folder);
+          await writeFileAt(file, `${next}\n`);
+          return { output: replace !== null ? "Your memory is rewritten." : "Added to your memory." };
+        });
+      },
+    });
+    // A teammate on one of the person's own models: its lane run by Friday Code on that model, with its note and its memory
+    // (Arun, 2026-10-27: "be able to run your own models and stuff for teammates as well"). The runtime holds the model to the
+    // session's owner, whose team it is.
+    runtime.laneOwn = async (sid, lane) => {
+      const on = await noteOn(sid, lane);
+      if (!on || on.t.tool !== "friday" || !on.t.model) return null;
+      // Friday Code builds its context afresh each step: the note and what leads a coding tool's turn, together.
+      return { model: on.t.model, note: [on.note, ...on.preamble.map((p) => p.text).filter(Boolean)].join("\n\n"), tools: [memoryTool(on.t)] };
+    };
+  }
+  // Team workflows (team-workflows.ts): the Team's automations, each run a board in its room that the board machinery works
+  // through (Arun, 2026-10-28: "make the automation for the teams platform different it can be like a workflow automation
+  // design like we did with the agent tab page a while ago"). Their schedules go off with the automations' tick.
+  if (teammates && o.local) {
+    const me = o.local.user;
+    workflows = new TeamWorkflows({ redis, prefix: o.prefix, teammates, store, teamSid: () => teamSession(me, LOCAL_WORKSPACE.id), dispatch: (sid) => mesh.dispatch(sid), log: closingOr });
+    // The lead, told with the reports that a workflow's board is through: which workflow it was, and how to land it.
+    const teamsOwn = mesh.teamDone;
+    mesh.teamDone = async (sid, lead) => {
+      const own = (await teamsOwn?.(sid, lead).catch(() => null)) ?? "";
+      const flow = (await workflows?.landing(sid, /pull request/.test(own)).catch(() => null)) ?? "";
+      return [own, flow].filter(Boolean).join("\n\n") || null;
+    };
+  }
   /**
    * One run of an automation: a session of its own, owned by the automation's owner, told what to do, with its coding tool
    * (and any team beside it) started on the owner's computer. A run its owner's computer isn't there for waits for it, or is
@@ -918,6 +2277,166 @@ export async function createApp(o: AppOptions) {
       return await set({ status: "failed", note: (e as Error).message.slice(0, 300), ended: Date.now() });
     }
   };
+  // ── The app, for the agents in it (app-tools.ts) ─────────────────────────────────────────────────────────────────────
+  // On this computer every coding tool, in any session, reaches the other sessions on this computer (Code, Work and the
+  // team's), searches what was said in them, starts new ones, and makes and runs automations (Arun, 2026-10-27: "make the app
+  // fully agentic"). It acts for the person at this computer: what it does is what they could do in the app.
+  if (o.local && localEdition()) {
+    const peers = new LocalPeers(store, bus, async () => (teammates ? await teammates.team() : null), async () => (teammates ? await teammates.gone() : new Set<string>()));
+    mesh.peers = peers;
+    /**
+     * Sessions one agent's run has started (by "sid:lane:run", with when, for pruning): a run that wants more than a few is a plan
+     * for the person to see first. Taken before the first await, so calls made at once can't all get past it.
+     */
+    const startedBy = new Map<string, { n: number; at: number }>();
+    const MAX_STARTS = 4;
+    // How many sessions and runs agents start in an hour (AGENT_STARTS_PER_HOUR), the sessions an agent started, which start no
+    // more, and how much a tool may do (MODE_RANK) are the team's tool's too, said with the teammates above.
+    const ownerOf = (s: SessionState) => ({ id: s.ownerId, name: s.members[s.ownerId]?.name ?? "" });
+    const findAutomation = (list: Automation[], name: string) => {
+      const low = name.trim().toLowerCase();
+      return list.find((a) => a.id === name.trim()) ?? list.find((a) => a.name.toLowerCase() === low) ?? (list.filter((a) => low && a.name.toLowerCase().includes(low)).length === 1 ? list.find((a) => a.name.toLowerCase().includes(low)) : undefined);
+    };
+    const automationLine = (a: Automation) => `- ${a.name} [id ${a.id}] · ${a.on ? "on" : "paused"} · ${describeWhen(a.when)} · ${describeWho(a.who)}${a.folder ? ` · in ${a.folder}` : ""}\n  Does: ${a.does.slice(0, 200)}${a.does.length > 200 ? "…" : ""}`;
+    mesh.appTools = {
+      call: async (sid, lane, name, args) => {
+        const here = await store.state(sid);
+        const me = ownerOf(here);
+        const arg = (k: string) => (typeof args[k] === "string" ? (args[k] as string).trim() : "");
+        const asker = laneName(here, lane);
+        const askerMode: EngineMode = here.engines[lane]?.mode ?? "edits";
+        const startedByAgent = await agentStarted(sid);
+        if (name === "search_sessions") {
+          const q = arg("query").slice(0, 120);
+          if (q.length < 3 || !wordsOf(q).length) return { output: "Give at least three letters to look for.", isError: true };
+          // As the search box is: each search reads every session's log, so a loop of them is held back.
+          const rate = `${o.prefix}tool-search:${me.id}`;
+          const tries = await redis.incr(rate);
+          if (tries === 1) await redis.expire(rate, 60);
+          if (tries > 30) return { output: "That's a lot of searching for one minute. Work from what you found, or read_session one of them.", isError: true };
+          const from = arg("from") === "people" ? "people" : arg("from") === "agents" ? "agents" : "any";
+          const days = Math.min(366, Math.max(0, Math.floor(Number(args.days) || 0)));
+          const since = days ? Date.now() - days * 86_400_000 : 0;
+          const team = teammates ? await teammates.team() : null;
+          const skip = await peers.skipped(me.id);
+          const rows = (await store.mine(me.id, SESSIONS_LOOKED_AT)).filter((r) => r.sid !== sid && !skip.has(r.sid));
+          const found = (
+            await Promise.all(
+              rows.map(async ({ sid: other, at }) => {
+                const s = await store.state(other).catch(() => null);
+                if (!s) return null;
+                const hits = searchEvents(await store.events(other).catch(() => []), q, 3, 4000, { from, kind: "any", since, me: me.id, agentName: (l) => laneName(s, l) });
+                const titleMatch = titleMatches(s.title, q);
+                if (!hits.length && !titleMatch) return null;
+                return { s, hits, titleMatch, at: Math.max(at, ...hits.map((h) => h.at)) };
+              }),
+            )
+          )
+            .filter((r): r is NonNullable<typeof r> => !!r)
+            .sort((a, b) => rankOf(b) - rankOf(a) || b.at - a.at)
+            .slice(0, 12);
+          if (!found.length) return { output: `Nothing in the other sessions matches "${q}".` };
+          return {
+            output: found
+              .map(({ s, hits }) => `"${s.title}" [id ${s.id}] · ${placeOfSession(s, team)}${hits.length ? `\n${hits.map((h) => `  - ${h.who} (${agoOf(h.at)}): ${h.snippet}`).join("\n")}` : " (its title)"}`)
+              .join("\n"),
+          };
+        }
+        if (name === "start_session") {
+          const title = arg("title").slice(0, 120);
+          const task = arg("task").slice(0, 8000);
+          if (!title || !task) return { output: "Give the new session a title and its task.", isError: true };
+          if (startedByAgent) return { output: "This session was started by another agent, and doesn't start sessions of its own. Do the work here, or tell the agent that started it what else is needed.", isError: true };
+          // Taken now, before any await: calls made at once each see the one before.
+          const now = Date.now();
+          for (const [k, v] of startedBy) if (now - v.at > 6 * 3600_000) startedBy.delete(k);
+          const key = `${sid}:${lane}:${runOf(here, lane).sinceSeq}`;
+          const n = startedBy.get(key)?.n ?? 0;
+          if (n >= MAX_STARTS) return { output: `This run has started ${n} sessions already. Say what else you'd start in your reply, and let the person decide.`, isError: true };
+          startedBy.set(key, { n: n + 1, at: now });
+          const giveBack = () => startedBy.set(key, { n, at: now });
+          const tool = (ENGINE_TOOLS as string[]).includes(arg("tool").toLowerCase()) ? (arg("tool").toLowerCase() as EngineTool) : (here.engines[lane]?.tool ?? "claude");
+          const folder = arg("folder");
+          if (folder && !(await stat(folder).then((x) => x.isDirectory(), () => false))) return (giveBack(), { output: `There's no folder at ${folder} on this computer.`, isError: true });
+          if (!(await startsLeft(me.id))) return (giveBack(), { output: `Agents have started ${AGENT_STARTS_PER_HOUR} sessions or runs for the person in the last hour. Say what else you'd start in your reply, and let them decide.`, isError: true });
+          // A repo gets a copy of its own (a git worktree), as an automation does: two tools in one checkout lose each other's work.
+          const repo = !!folder && (await stat(path.join(folder, ".git")).then(() => true, () => false));
+          const work = arg("kind") === "work";
+          const newSid = newId();
+          await store.create(newSid, title, { id: me.id, name: me.name, role: "owner" }, { controlMode: "ask", mcp: true, ...(work ? { work: true, webSearch: true } : {}) }, here.workspaceId ?? LOCAL_WORKSPACE.id);
+          await markAgentStarted(newSid);
+          await store.append(newSid, { id: me.id, name: me.name, kind: "human" }, { type: "engine.expected", tool, hostId: me.id, hostName: me.name });
+          // Its task is the asking agent's, said as that agent's (not as the person's): from the session and agent it came from.
+          const from: PeerNote = { fromSid: sid, fromTitle: here.title, fromLane: lane, fromName: asker, by: me };
+          await store.append(newSid, { id: "agent", name: asker, kind: "agent" }, { type: "instruction", text: `${task}\n\n(Started by ${asker} from "${here.title}". When you're done or stuck, tell it with message_session, to "${sid}" and agent "${asker}".)`, interrupt: false, peer: from });
+          void bus.wake(newSid, MAIN_LANE);
+          try {
+            await startTool(newSid, me, { tool, cwd: folder, mode: askerMode, copy: repo, project: title });
+          } catch (e) {
+            return { output: `Made "${title}" [id ${newSid}], but ${ENGINE_NAMES[tool]} didn't start there: ${(e as Error).message}`, isError: true };
+          }
+          return { output: `Started "${title}" [id ${newSid}], a ${work ? "Work" : "Code"} session, with ${ENGINE_NAMES[tool]} ${folder ? `in ${repo ? "a copy of " : ""}${folder}` : "in a new project folder"}, allowed what you are (${askerMode}). It's in the person's sidebar. read_session it to see how it goes.` };
+        }
+        if (name === "manage_automation") {
+          const ws = here.workspaceId ?? LOCAL_WORKSPACE.id;
+          const list = await automations.list(ws);
+          const action = arg("action");
+          if (action === "list") return { output: list.length ? `Automations on this computer:\n${list.map(automationLine).join("\n")}` : "There are no automations yet." };
+          // An automation runs a coding tool on its own: an agent only makes or runs one that may do no more than it may itself,
+          // and not from plan mode, nor from a session another agent started (sessions can't fan out that way either).
+          if (action !== "runs") {
+            if (askerMode === "plan") return { output: "You're in plan mode: you can list automations and their runs, not make, change or run them. Say what you'd set up, and let the person do it.", isError: true };
+            if (startedByAgent && (action === "create" || action === "run" || action === "resume")) return { output: "This session was started by another agent, and doesn't start automations. Tell the agent that started it what you'd set up.", isError: true };
+          }
+          if (action === "create") {
+            const schedule = scheduleOf(args.schedule);
+            const tool = (ENGINE_TOOLS as string[]).includes(arg("tool").toLowerCase()) ? arg("tool").toLowerCase() : (here.engines[lane]?.tool ?? "claude");
+            if (!arg("name") || !arg("does")) return { output: "Give the automation a name and what it does.", isError: true };
+            const made: Automation = {
+              id: newId(),
+              ownerId: me.id,
+              ownerName: me.name,
+              created: Date.now(),
+              ...cleanAutomation({ name: arg("name"), does: arg("does"), folder: arg("folder"), when: schedule ? { kind: "schedule", schedule } : { kind: "manual" }, who: { tool, mode: askerMode }, then: { pr: args.pr === true } }),
+            };
+            await automations.put(ws, made);
+            return { output: `Made the automation "${made.name}" [id ${made.id}]: ${describeWhen(made.when)}, ${describeWho(made.who)}. It shows on the Automations page; run it now with action run.` };
+          }
+          const a = findAutomation(list, arg("name"));
+          if (!a) return { output: `There's no automation called "${arg("name")}".${list.length ? ` There are: ${list.map((x) => `"${x.name}"`).join(", ")}.` : ""}`, isError: true };
+          if (a.ownerId !== me.id) return { output: `"${a.name}" is ${a.ownerName}'s: only they can change or run it.`, isError: true };
+          if (action !== "runs" && action !== "pause" && MODE_RANK[a.who.mode] > MODE_RANK[askerMode]) return { output: `"${a.name}" runs with more access than you have (${a.who.mode}, you ${askerMode}): only the person changes, resumes or runs it. You can pause it, or see its runs.`, isError: true };
+          if (action === "runs") {
+            const runs = await automations.runs(ws, a.id, 8);
+            return { output: runs.length ? runs.map((r) => `- ${new Date(r.at).toLocaleString()} · ${r.trigger} · ${r.status}${r.note ? ` (${r.note})` : ""}${r.sid ? ` · session id ${r.sid}` : ""}`).join("\n") : `"${a.name}" hasn't run yet.` };
+          }
+          if (action === "pause" || action === "resume") {
+            await automations.put(ws, { ...a, on: action === "resume" }, a);
+            return { output: `"${a.name}" is ${action === "resume" ? "on again" : "paused"}.` };
+          }
+          if (action === "update") {
+            const schedule = scheduleOf(args.schedule);
+            const input: Record<string, unknown> = {};
+            if (arg("does")) input.does = arg("does");
+            if (typeof args.folder === "string") input.folder = arg("folder");
+            if (schedule) input.when = { kind: "schedule", schedule };
+            if (arg("tool")) input.who = { ...a.who, tool: arg("tool").toLowerCase() };
+            if (typeof args.pr === "boolean") input.then = { ...a.then, pr: args.pr };
+            const next: Automation = { ...a, ...cleanAutomation(input, a) };
+            await automations.put(ws, next, a);
+            return { output: `Changed "${a.name}": ${describeWhen(next.when)}, ${describeWho(next.who)}.` };
+          }
+          if (action === "run") {
+            if (!(await startsLeft(me.id))) return { output: `Agents have started ${AGENT_STARTS_PER_HOUR} sessions or runs for the person in the last hour. Say what you'd run in your reply, and let them decide.`, isError: true };
+            const run = await runAutomation(ws, a, `Run now, by ${asker}`, "");
+            return { output: `"${a.name}" ${run.status === "running" ? `is running${run.sid ? ` in session id ${run.sid}` : ""}` : run.status}${run.note ? `: ${run.note}` : ""}.`, isError: run.status === "failed" };
+          }
+          return { output: "Say which: list, runs, create, update, pause, resume or run.", isError: true };
+        }
+        return { output: `Unknown tool ${name}.`, isError: true };
+      },
+    };
+  }
   /** Every 30 seconds: automations whose time has come, and runs waiting for a computer that has connected since. */
   const tickAutomations = async (now = new Date()): Promise<AutomationRun[]> => {
     const started: AutomationRun[] = [];
@@ -951,6 +2470,8 @@ export async function createApp(o: AppOptions) {
       if (!(await redis.zrem(automations.waitingKey(), entry))) continue;
       await go(ws!, a, run.trigger, Buffer.from(ev ?? "", "base64url").toString("utf8"), run);
     }
+    // The team's workflows on the same clock (team-workflows.ts).
+    await workflows?.tick(now).catch((e) => closingOr("[workflows]", e));
     return started;
   };
   const automationLoop = setInterval(() => void tickAutomations().catch((e) => console.error("[automations]", e)), 30_000);
@@ -1166,6 +2687,7 @@ export async function createApp(o: AppOptions) {
       ...info,
       // Names only, no credentials: enough to see whether a deployment's
       // connector apps are actually configured without signing in to check.
+      ...(teammates ? { teammates: true } : {}), // the app opens on them (client/Teammates.tsx)
     });
   }
 
@@ -1248,6 +2770,23 @@ export async function createApp(o: AppOptions) {
       return json(res, 202, { run: { id: run.id, status: run.status, ...(run.note ? { note: run.note } : {}) } });
     }
 
+    // A team workflow's webhook (team-workflows.ts): whatever is posted is what started the run. The key is the only credential.
+    const flowHook = url.pathname.match(/^\/api\/hooks\/workflow\/([\w-]{4,40})$/);
+    if (workflows && flowHook && req.method === "POST") {
+      const w = await workflows.get(flowHook[1]!);
+      const given = Buffer.from(url.searchParams.get("key") ?? "");
+      const want = Buffer.from(w?.trigger.kind === "webhook" ? w.trigger.secret : "");
+      if (!w || !want.length || given.length !== want.length || !timingSafeEqual(given, want)) return json(res, 404, { error: "Not found" });
+      if (!w.on) return json(res, 409, { error: "This workflow is off." });
+      let payload = "";
+      try {
+        payload = (await readBody(req, 200_000)).toString("utf8").slice(0, 8000).trim();
+      } catch {
+        return json(res, 413, { error: "That payload is too large." });
+      }
+      const run = await workflows.start(w, "webhook", payload || "(The webhook was called with nothing in it.)");
+      return json(res, 202, { run: { id: run.id, status: run.status, ...(run.note ? { note: run.note } : {}) } });
+    }
 
 
 
@@ -1275,6 +2814,9 @@ export async function createApp(o: AppOptions) {
         ...(typeof starts.review === "boolean" ? { review: starts.review } : {}),
         ...(typeof starts.planFirst === "boolean" ? { planFirst: starts.planFirst } : {}),
         controlMode: body.controlMode === "takeover" ? "takeover" : "ask",
+        // Only this computer's Friday (the open-source edition) makes a Work session: the hosted one and anyone else's ignore it (its tools
+        // run in auto mode with the person's browser), whatever the request says (Arun, 2026-10-28: "iron everything and ensure we are good… any logic errors").
+        ...(o.local && localEdition() && body.work === true ? { work: true, webSearch: true } : {}),
         mcp: body.mcp !== false,
         // The composer's choice if it made one, else the agent's own default.
         // "" is a choice — it means Friday's model — so absent and empty are
@@ -1301,6 +2843,8 @@ export async function createApp(o: AppOptions) {
         // The effort picked with it on the new-session screen, through the same check as any change of effort.
         if (isEngineEffort(body.effort) && EFFORT_LEVELS[body.engine as EngineTool]?.includes(body.effort)) await core.handle(sid, owner, { type: "lane.effort", effort: body.effort });
       }
+      // A Work session with two tools: the first leads, and hands the second its part (agent-mesh.ts assign_task), as an automation's team does.
+      if (o.local && localEdition() && body.work === true && body.team === true) await core.handle(sid, owner, { type: "lead.set", lane: MAIN_LANE, auto: true });
       // Private first: people start on their own and show somebody when there is
       // something to show, so a session is for its owner until they bring the
       // team in. The links stay on the session, switched off; nothing is lost
@@ -1551,20 +3095,26 @@ export async function createApp(o: AppOptions) {
       }
       // Its coding tools come with it, in the same folders, as far as they may go there (forkTools): a fork that came up on
       // Friday Code with no model in the open-source edition queued every message for good (2026-10-27 QA).
-      const plan = forkTools(await store.state(sid), !!o.local);
+      const source = await store.state(sid);
+      const plan = forkTools(source, !!o.local);
       if (typeof plan === "string") return json(res, 409, { error: plan });
       if (plan.length && !computerHere(me.id)) return json(res, 409, { error: `This session's ${ENGINE_NAMES[plan[0]!.tool]} runs on your computer, which isn't connected, so the fork couldn't carry it on. Open Friday there, then fork again.` });
       const owner: Member = { id: me.id, name: me.name, role: "owner" };
       const fork = randomBytes(6).toString("base64url");
       const forkTitle = `Fork of ${title}`.slice(0, 120);
-      await store.create(fork, forkTitle, owner, { webSearch: false, controlMode: "ask", mcp: true, model: "", agent: null }, ctx.workspace.id);
+      let mine = false;
+      mine = !!o.local && localEdition();
+      const kind = forkKind(source, mine);
+      await store.create(fork, forkTitle, owner, kind.options, ctx.workspace.id);
       const human = { id: owner.id, name: owner.name, kind: "human" as const };
+      // Its agents work as they did: the one that led hands the others their parts again.
+      if (kind.lead && plan.length > 1) await core.handle(fork, owner, { type: "lead.set", lane: MAIN_LANE, auto: true });
       await store.append(fork, human, { type: "session.imported", tool: plan[0]?.tool ?? "claude", sourceId: sid, title, turns: turns.slice(-40), total: turns.length, fork: true });
       const left: string[] = [];
       for (const t of plan) {
         if (!t.lane) await store.append(fork, human, { type: "engine.expected", tool: t.tool, hostId: me.id, hostName: me.name });
         // A repo gets a copy of its own, as a new session's does: two tools in one checkout lose each other's work.
-        const copy = !!t.cwd && (await stat(path.join(t.cwd, ".git")).then(() => true, () => !localHost()));
+        const copy = kind.copy && !!t.cwd && (await stat(path.join(t.cwd, ".git")).then(() => true, () => !localHost()));
         try {
           await startTool(fork, me, { tool: t.tool, cwd: t.cwd, mode: t.mode, copy, project: forkTitle, ...(t.lane ? { newLane: t.lane } : {}) });
         } catch (e) {
@@ -1927,6 +3477,7 @@ export async function createApp(o: AppOptions) {
             const m = state?.members[me.id];
             if (!state || !m || m.removed) return null;
             const row: Record<string, unknown> = { sid, title: state.title, role: m.role, invite: linkToken(sid, state, m.role), at };
+            if (state.options.work) row.work = true; // the sidebar's Work list (client/WorkMode.tsx)
             return row as { sid: string; title: string; role: typeof m.role; invite: string; at: number };
           }),
         )
@@ -1972,7 +3523,7 @@ export async function createApp(o: AppOptions) {
               const n = laneName(state, lane);
               return n === "Main" ? "Friday" : n;
             };
-            const hits = searchEvents(await store.events(sid).catch(() => []), q, 3, 4000, { from, kind, since, me: me.id, agentName });
+            const hits = searchEvents(await store.events(sid).catch(() => []), q, 3, 4000, { from, kind, since, me: me.id, agentName, agentTool: (lane) => state.engines[lane]?.tool });
             const titleMatch = titleMatches(state.title, q);
             if (!hits.length && !(titleMatch && titlesToo)) return null;
             const last = Math.max(at, ...hits.map((h) => h.at));
@@ -2082,6 +3633,8 @@ export async function createApp(o: AppOptions) {
         void store.remember(me.id, state.id).catch(() => {});
         found.push(...attentionIn(state, me.id));
         let busy = workingIn(state);
+        // A team whose only work is check-ins isn't working, so nothing says it finished: one with news says so as news (app.ts teamLook).
+        if (busy && state.options.team && teammates && (await teamOnlyCheckingIn(state))) busy = null;
         if (busy) working.push(busy);
         const said = previewOf(state);
         if (said) previews.push(said);
@@ -2230,6 +3783,351 @@ export async function createApp(o: AppOptions) {
      * Reading only — anything that changes the folder goes through an agent,
      * where the room can see it happen.
      */
+    // Team workflows (team-workflows.ts): the team's automations, drawn as a workflow, the local person's alone (Arun, 2026-10-28:
+    // "make the automation for the teams platform different…"). Run now runs one even while it is off, as an automation does.
+    if (workflows && (url.pathname === "/api/workflows" || url.pathname.startsWith("/api/workflows/"))) {
+      const ctx = await context(req);
+      if (!ctx) return json(res, 401, { error: "Sign in first." });
+      const flows = workflows;
+      const base = (o.appUrl || selfUrl).replace(/\/+$/, "");
+      const view = (w: Workflow) => flows.view(w, base);
+      try {
+        if (req.method === "GET" && url.pathname === "/api/workflows") return json(res, 200, { workflows: await Promise.all((await flows.list()).map(view)) });
+        if (req.method === "POST" && url.pathname === "/api/workflows") return json(res, 201, { workflow: await view(await flows.save((await readJson(req)) as Record<string, unknown>, null)) });
+        const one = url.pathname.match(/^\/api\/workflows\/([\w-]{4,40})(\/run|\/runs)?$/);
+        if (!one) return json(res, 404, { error: "Not found" });
+        const w = await flows.get(one[1]!);
+        if (!w) return json(res, 404, { error: "That workflow isn't there any more." });
+        if (req.method === "GET" && one[2] === "/runs") return json(res, 200, { runs: await flows.runs(w.id, 30) });
+        if (req.method === "POST" && one[2] === "/run") {
+          const b = (await readJson(req).catch(() => ({}))) as { input?: unknown };
+          const run = await flows.start(w, "Run now", typeof b.input === "string" ? b.input.slice(0, 8000) : "");
+          return json(res, 202, { run, ...(run.sid ? { invite: signInvite(o.secret, run.sid, "owner") } : {}) });
+        }
+        if (req.method === "PATCH" && !one[2]) return json(res, 200, { workflow: await view(await flows.save((await readJson(req)) as Record<string, unknown>, w)) });
+        if (req.method === "DELETE" && !one[2]) {
+          await flows.remove(w.id);
+          return json(res, 200, { ok: true });
+        }
+        return json(res, 404, { error: "Not found" });
+      } catch (e) {
+        return json(res, 400, { error: (e as Error).message });
+      }
+    }
+    // Teammates (teammates.ts): the person's own AI teammates on this computer. Theirs alone: the local person only.
+    if (teammates && (url.pathname === "/api/teammates" || url.pathname.startsWith("/api/teammates/"))) {
+      const ctx = await context(req);
+      if (!ctx) return json(res, 401, { error: "Sign in first." });
+      const owner = { id: ctx.me.id, name: ctx.me.name };
+      try {
+        const sid = await teamSession(owner, ctx.workspace.id);
+        // The team's sessions, for the page to leave out of its lists: a room taken away only while it could still be listed (the
+        // sessions looked at lately), not every one for ever (2026-10-28 audit).
+        const hidden = async () => {
+          const [all, gone, recent] = await Promise.all([teammates.sessions(), teammates.gone(), store.mine(owner.id, SESSIONS_LOOKED_AT * 4).catch(() => [])]);
+          const listed = new Set(recent.map((x) => x.sid));
+          return all.filter((x) => !gone.has(x) || listed.has(x));
+        };
+        const team = async (more: Record<string, unknown> = {}) => {
+          const away = await teammates.away();
+          return json(res, 200, { sid, invite: signInvite(o.secret, sid, "owner"), lead: (await store.state(sid)).lead ?? null, ...(await teamRoomNow(sid)), teammates: await teammateViews(sid), rooms: await roomViews(), hidden: await hidden(), away: away ? { until: away.until, since: away.since } : null, paused: await teammates.paused(), ran: (await workflows?.ended()) ?? [], ...more });
+        };
+        if (req.method === "GET" && url.pathname === "/api/teammates") return team();
+        // A folder it is given has to be on this computer: a typo would start it in nothing.
+        if (req.method === "POST" && url.pathname === "/api/teammates") {
+          const made = await addTeammate(sid, owner, await readJson(req));
+          return typeof made === "string" ? json(res, 400, { error: made }) : team();
+        }
+        // Away mode (team-away.ts): until when, set or cleared; clearing it, or writing in any team chat, ends it with the brief.
+        if (url.pathname === "/api/teammates/away") {
+          if (req.method === "GET") {
+            const a = await teammates.away();
+            return json(res, 200, { until: a?.until ?? null, since: a?.since ?? null } satisfies TeamAway);
+          }
+          if (req.method !== "POST") return json(res, 405, { error: "Not allowed" });
+          const b = (await readJson(req)) as { until?: unknown };
+          if (b.until === null) await awayOff();
+          else {
+            const until = Math.floor(Number(b.until));
+            if (!Number.isFinite(until) || until <= Date.now() || until > Date.now() + 7 * 86_400_000) return json(res, 400, { error: "Pick a time in the next week." });
+            await awayOn(until);
+          }
+          const a = await teammates.away();
+          return json(res, 200, { until: a?.until ?? null, since: a?.since ?? null } satisfies TeamAway);
+        }
+        // What the team did since a time, for the "Since you left" card: the brief's shape (types.ts TeamBrief).
+        if (req.method === "GET" && url.pathname === "/api/teammates/since") {
+          const ts = Number(url.searchParams.get("ts"));
+          const from = Number.isFinite(ts) && ts > 0 ? Math.max(ts, Date.now() - 30 * 86_400_000) : Date.now() - 86_400_000;
+          return json(res, 200, { type: "team.brief", ...(await sinceOf(from)) });
+        }
+        // Every teammate's running turn stopped everywhere, their queues kept.
+        if (req.method === "POST" && url.pathname === "/api/teammates/stop-all") return json(res, 200, { stopped: await stopAll(owner) });
+        // The whole team held, or let go on: queues, check-ins and wakes.
+        if (req.method === "POST" && url.pathname === "/api/teammates/pause") {
+          const b = (await readJson(req)) as { paused?: unknown };
+          await setPaused(b.paused === true);
+          return team();
+        }
+        // Holds lifted: every one, or a teammate's (its lanes everywhere), as the person's one click.
+        if (req.method === "POST" && url.pathname === "/api/teammates/lift") {
+          const b = (await readJson(req).catch(() => ({}))) as { id?: unknown };
+          const t = typeof b.id === "string" ? await teammates.get(b.id) : null;
+          if (typeof b.id === "string" && !t) return json(res, 404, { error: "That teammate isn't in your crew any more." });
+          const by = { id: owner.id, name: owner.name, kind: "human" as const };
+          for (const r of [{ sid, lanes: Object.fromEntries((await teammates.list()).map((x) => [x.id, x.lane])) as Record<string, string> }, ...(await teammates.rooms())]) {
+            const lanes = t ? (r.lanes[t.id] ? [r.lanes[t.id]!] : []) : null;
+            if (lanes && !lanes.length) continue;
+            await store.append(r.sid, by, { type: "holds.lifted", ...(lanes ? { lanes } : {}), why: "The person let them go on." }, { lane: MAIN_LANE });
+          }
+          await runAway();
+          return team();
+        }
+        // Rooms: some of the team, picked, in a session of their own (teammates.ts Room).
+        const roomPath = url.pathname.match(/^\/api\/teammates\/rooms(?:\/([\w-]{4,40}))?$/);
+        if (roomPath) {
+          const list = await teammates.list();
+          const byId = (id: string) => list.find((t) => t.id === id)!;
+          if (req.method === "POST" && !roomPath[1]) {
+            const r = await makeRoom(owner, ctx.workspace.id, await readJson(req));
+            // Made though someone didn't join: the room, to open and fix, with who didn't and why.
+            return typeof r === "string" ? json(res, 400, { error: r }) : team({ room: r.room.id, ...(r.failed ? { notJoined: r.failed } : {}) });
+          }
+          if (!roomPath[1] || (req.method !== "PATCH" && req.method !== "DELETE")) return json(res, 405, { error: "Not allowed" });
+          const body = req.method === "PATCH" ? await readJson(req) : {};
+          // One change to a room at a time, from what is stored now: two at once each added the same teammate.
+          const said = await teammates.locked(`room:${roomPath[1]}`, async (): Promise<string | null> => {
+            const r = await teammates.room(roomPath[1]!);
+            if (!r) return "That room isn't there any more.";
+            if (req.method === "DELETE") {
+              for (const id of Object.keys(r.lanes)) await leaveRoom(r, owner, id);
+              await teammates.removeRoom(r);
+              return null;
+            }
+            const c = cleanRoom(body, list.map((t) => t.id));
+            // Its name as shown: renamed from its own page, its title is (2026-10-28 audit: a rename back to the old name was lost).
+            if (c.name && c.name !== ((await store.state(r.sid).catch(() => null))?.title || r.name)) {
+              await core.handle(r.sid, owner, { type: "settings.update", title: c.name });
+              r.name = c.name;
+            }
+            if (c.purpose !== undefined) r.purpose = c.purpose || undefined;
+            try {
+              if (c.members) {
+                for (const id of Object.keys(r.lanes)) if (!c.members.includes(id)) await leaveRoom(r, owner, id);
+                // Read again here, under the room's lock: one taken off the team since the page asked isn't brought in (2026-10-28
+                // audit: a room's edit racing a teammate's removal gave the room a lane for nobody).
+                for (const id of c.members) {
+                  const mate = r.lanes[id] ? null : await teammates.get(id);
+                  if (mate) await joinRoom(r, owner, mate);
+                }
+              }
+            } catch (e) {
+              return (e as Error).message;
+            } finally {
+              await teammates.putRoom(r);
+            }
+            await leadRoom(r, owner);
+            return null;
+          });
+          return said ? json(res, said.startsWith("That room") ? 404 : 400, { error: said }) : team();
+        }
+        const one = url.pathname.match(/^\/api\/teammates\/([\w-]{4,40})(\/reconnect|\/stop|\/lead|\/memory|\/activity)?$/);
+        if (!one) return json(res, 404, { error: "Not found" });
+        const t = await teammates.get(one[1]!);
+        if (!t) return json(res, 404, { error: "That teammate isn't in your crew any more." });
+        // Its runs everywhere it works, newest first, for its Activity and Results.
+        if (req.method === "GET" && one[2] === "/activity") {
+          const days = Math.min(90, Math.max(1, Math.floor(Number(url.searchParams.get("days")) || 7)));
+          return json(res, 200, { runs: await activityOf(t, days) });
+        }
+        if (one[2] === "/memory") {
+          // Its memory, read or written by the person, in its own folder: with when it last changed, so a save over a change made
+          // since it was read (by the teammate itself, or another window) is refused rather than lost (2026-10-28 audit).
+          const file = path.join(t.folder, MEMORY_FILE);
+          const seen = async () => {
+            const st = await stat(file).catch((e: NodeJS.ErrnoException) => (e.code === "ENOENT" ? null : Promise.reject(e)));
+            return st ? st.mtimeMs : 0;
+          };
+          if (req.method === "GET") {
+            // Not there yet is an empty memory; anything else (no permission, a folder gone bad) is an error the page shows.
+            const text = await readFile(file, "utf8").catch((e: NodeJS.ErrnoException) => (e.code === "ENOENT" ? "" : Promise.reject(e)));
+            return json(res, 200, { text, file, mtime: await seen(), exists: (await seen()) > 0 });
+          }
+          if (req.method === "PUT") {
+            const b = (await readJson(req)) as { text?: unknown; mtime?: unknown };
+            const text = typeof b.text === "string" ? b.text.slice(0, 50_000) : "";
+            return memoryLock(t.id, async () => {
+              const now = await seen();
+              if (typeof b.mtime === "number" && Math.abs(now - b.mtime) > 1) return json(res, 409, { error: "Its memory changed since you opened it. Reload it to see what changed, then save again.", text: await readFile(file, "utf8").catch(() => ""), mtime: now });
+              await makeFolder(t.folder);
+              await writeFileAt(file, text);
+              return json(res, 200, { text, file, mtime: await seen() });
+            });
+          }
+          return json(res, 405, { error: "Not allowed" });
+        }
+        if (req.method === "POST" && one[2] === "/stop") {
+          // Its work stopped everywhere it is (the Team room and its rooms), as the chat's Stop does: its queue kept, so what others
+          // sent it is still there for its next turn (2026-10-28 audit: the sidebar's Stop cancelled, and the queue went with it).
+          const places = [{ sid, lane: t.lane }, ...(await teammates.rooms()).flatMap((room) => (room.lanes[t.id] ? [{ sid: room.sid, lane: room.lanes[t.id]! }] : []))];
+          for (const p of places) if (runOf(await store.state(p.sid), p.lane).status === "running") await core.handle(p.sid, owner, { type: "run.pause", lane: p.lane });
+          return team();
+        }
+        if (req.method === "POST" && one[2] === "/lead") {
+          // Leads the Team room: what is said there without an @name goes to it.
+          const r1 = await core.handle(sid, owner, { type: "lead.set", lane: t.lane });
+          return r1.ok ? team() : json(res, 400, { error: r1.error ?? "Couldn't make it the lead." });
+        }
+        if (req.method === "POST" && one[2] === "/reconnect") {
+          // One lane (the page bringing back one it found offline: only if it still is), or, asked for, all of them.
+          const b = (await readJson(req).catch(() => ({}))) as { sid?: string; lane?: string; quiet?: boolean };
+          if (b.sid && b.lane) {
+            const r = (await teammates.rooms()).find((x) => x.sid === b.sid);
+            const at = r && r.lanes[t.id] === b.lane ? { lane: b.lane, keepAs: roomKeep(t.id, r.id) } : b.sid === sid && b.lane === t.lane ? undefined : null;
+            if (at === null) return json(res, 400, { error: "That isn't one of its lanes." });
+            await startTeammate(b.sid, owner, t, b.quiet ? { ifOffline: true } : {}, at);
+            return team();
+          }
+          const later = await restartEverywhere(sid, owner, t, t);
+          return team(later.length ? { restartLater: later } : {});
+        }
+        if (req.method === "PATCH" && !one[2]) {
+          const body = await readJson(req);
+          // Under the teammate's lock, from what is stored now: a usage-limit switch or a check-in in between isn't undone.
+          /** Where it was busy, and starts again on the change as that run ends (restartEverywhere): said in the answer. */
+          const later: string[] = [];
+          const said = await teammates.locked(`t:${t.id}`, async (): Promise<string | null> => {
+            const t2 = await teammates.get(t.id);
+            if (!t2) return "That teammate isn't in your crew any more.";
+            const c = cleanTeammate({ ...t2, ...body }, ENGINE_TOOLS, owner.id);
+            // Put on one of the person's own models, or another of them: one set up here now (a model it already ran on is kept as it
+            // was, so an edit of its role isn't refused for a model taken out of Settings meanwhile).
+            const refused = c.tool === "friday" && (t2.tool !== "friday" || c.model !== t2.model) ? await ownModelRefused(owner, c.model ?? "") : null;
+            if (refused) return refused;
+            if (c.name.toLowerCase() !== t2.name.toLowerCase() && (await teammates.list()).some((x) => x.id !== t2.id && x.name.toLowerCase() === c.name.toLowerCase())) return `You already have a teammate called ${c.name}.`;
+            // On its backup since its tool ran out: back on its own tool, it is given back the model, account and effort it had there
+            // unless this edit says others (the dialog never sends the account). Its backup is checked against its own tool, not the
+            // backup it is on now, which the dialog sends back as it was.
+            const back = t2.switched && c.tool !== t2.tool && c.tool === t2.switched.from ? t2.switched : null;
+            const own = t2.switched && c.tool === t2.tool ? t2.switched.from : c.tool;
+            const backup = typeof body.backup === "string" && (ENGINE_TOOLS as string[]).includes(body.backup) && body.backup !== own ? (body.backup as EngineTool) : undefined;
+            // An account is its tool's: a new tool drops the old one's, unless the edit names one (2026-10-28 audit: Codex started
+            // as Claude's account). Back on its own tool, the account it had there.
+            const model = c.model ?? back?.fromModel, account = back ? (c.account ?? back.fromAccount) : c.tool !== t2.tool && !("account" in body) ? undefined : c.account, effort = c.effort ?? (back && !("effort" in body) ? back.fromEffort : undefined);
+            const next: Teammate = { ...t2, name: c.name, role: c.role, tool: c.tool, model, account, ...(c.mode ? { mode: c.mode === "full" ? undefined : c.mode } : {}), ...(c.look ? { look: c.look } : {}), ...(c.projects ? { projects: c.projects, project: undefined } : {}), ...("effort" in body || c.tool !== t2.tool ? { effort } : {}), ...("backup" in body ? { backup } : {}), ...(c.checkins ? { checkins: c.checkins.map((x) => ({ ...x, ...(t2.checkins?.find((y) => y.id === x.id)?.last ? { last: t2.checkins.find((y) => y.id === x.id)!.last } : {}) })) } : {}), ...(c.tool !== t2.tool ? { switched: undefined } : {}), ...(body.keep === true ? { madeBy: undefined } : {}) };
+            const missing = await missingDirOf(c.projects?.filter((d) => !projectsOf(t2).includes(d)));
+            if (missing) return `There's no folder at ${missing} on this computer.`;
+            if (next.name !== t2.name) {
+              const r = await core.handle(sid, owner, { type: "lane.rename", laneId: t2.lane, name: next.name });
+              if (!r.ok) return r.error ?? "Couldn't rename your teammate.";
+              // Its lane in every room it is in follows.
+              for (const room of await teammates.rooms()) if (room.lanes[t2.id]) await core.handle(room.sid, owner, { type: "lane.rename", laneId: room.lanes[t2.id]!, name: next.name });
+            }
+            await teammates.put(next);
+            // Its tool, model, account or project changed: started again so it takes them (a new tool is a new conversation).
+            if (next.tool !== t2.tool || next.model !== t2.model || next.account !== t2.account || next.mode !== t2.mode || projectsOf(next).join("\n") !== projectsOf(t2).join("\n")) later.push(...(await restartEverywhere(sid, owner, t2, next)));
+            // Its effort, on its lane everywhere it is, when that or its tool changed.
+            if (next.effort !== t2.effort || next.tool !== t2.tool) {
+              await setEffort(sid, owner, next.lane, next);
+              for (const r of await teammates.rooms()) if (r.lanes[next.id]) await setEffort(r.sid, owner, r.lanes[next.id]!, next);
+            }
+            // What it was given or lost, said where it works: the Team room and each room it is in.
+            const had = projectsOf(t2), has = projectsOf(next);
+            const added = has.filter((d) => !had.includes(d)), removed = had.filter((d) => !has.includes(d));
+            if (added.length || removed.length) {
+              const by = { id: owner.id, name: owner.name, kind: "human" as const };
+              await store.append(sid, by, { type: "teammate.folders", name: next.name, lane: next.lane, added, removed });
+              for (const r of await teammates.rooms()) if (r.lanes[next.id]) await store.append(r.sid, by, { type: "teammate.folders", name: next.name, lane: r.lanes[next.id]!, added, removed });
+            }
+            return null;
+          });
+          if (said) return json(res, 400, { error: said });
+          return team(later.length ? { restartLater: later } : {});
+        }
+        if (req.method === "DELETE" && !one[2]) {
+          // Under its lock, as an edit, a usage-limit switch or a check-in is: one of those finishing after couldn't write it back.
+          const led = await teammates.locked(`t:${t.id}`, async () => {
+            if (!(await teammates.get(t.id))) return null;
+            const led = (await store.state(sid)).lead === t.lane;
+            // The lead goes to whoever is left first, so the Team room still reaches someone: before it goes, so the tasks it
+            // handed out report to that one (askerOf).
+            const next = (await teammates.list()).find((x) => x.id !== t.id);
+            if (led && next) await core.handle(sid, owner, { type: "lead.set", lane: next.lane, auto: true });
+            await laneGoes(sid, owner, t.lane, `${t.name} was removed from the crew before it finished this. Ask someone else, or do it yourself.`);
+            await teammates.remove(t.id);
+            return led;
+          });
+          if (led === null) return team();
+          // Out of every room it was in, each under that room's lock and as it is stored then; a room it was the last one in is
+          // kept, empty, for the person to fill or take away.
+          for (const r of await teammates.rooms()) {
+            if (!r.lanes[t.id]) continue;
+            await teammates.locked(`room:${r.id}`, async () => {
+              const room = await teammates.room(r.id);
+              if (!room?.lanes[t.id]) return;
+              await leaveRoom(room, owner, t.id);
+              await teammates.putRoom(room);
+              await leadRoom(room, owner);
+            });
+          }
+          // Its folder is kept: what it made is the person's.
+          return team({ kept: t.folder });
+        }
+        return json(res, 405, { error: "Not allowed" });
+      } catch (e) {
+        return json(res, 400, { error: (e as Error).message });
+      }
+    }
+    // A page an agent made, shown working in the reader, reads its own pictures by a pass of its own (work-frame.ts), never the
+    // session's invite: asked for by a member, for the one folder the page needs; used by the page's frame, for media only.
+    const frameRoute = o.local && url.pathname.match(/^\/api\/sessions\/([\w-]+)\/work\/(frame-token|framed)$/);
+    if (req.method === "GET" && frameRoute) {
+      const sid = frameRoute[1]!;
+      const roots = async () => [...new Set(Object.values((await store.state(sid)).engines).map((e) => e.cwd).filter((c): c is string => !!c))];
+      if (frameRoute[2] === "frame-token") {
+        if (!(await memberOnly(req, res, sid))) return;
+        const root = Number(url.searchParams.get("root") ?? 0);
+        const dir = frameDir(pathParam(url.searchParams.get("dir"), 600));
+        if (!Number.isInteger(root) || !(await roots())[root]) return json(res, 404, { error: "That folder isn't one of this session's." });
+        if (dir === null) return json(res, 400, { error: "That isn't a folder in the session's folder." });
+        return json(res, 200, { token: signFrame(o.secret, { sid, root, dir }), ttl: FRAME_TTL_MS });
+      }
+      const pass = verifyFrame(o.secret, url.searchParams.get("t"), sid);
+      if (!pass) return json(res, 403, { error: "That pass has run out or isn't for this session." });
+      const rel = pathParam(url.searchParams.get("path"), 600);
+      if (!inFrame(pass.dir, rel)) return json(res, 403, { error: "That file isn't one the pass reads." });
+      const root = (await roots())[pass.root];
+      const file = root ? await workPath(root, rel) : null;
+      if (!file) return json(res, 404, { error: "That file isn't in this session's folders." });
+      return serveWork(req, res, file);
+    }
+    // A Work session's pieces (work-files.ts): listed, and each served as itself, from the folders its agents work in.
+    const workRoute = o.local && url.pathname.match(/^\/api\/sessions\/([\w-]+)\/work(\/file|\/icon)?$/);
+    if (req.method === "GET" && workRoute) {
+      const sid = workRoute[1]!;
+      if (!(await memberOnly(req, res, sid))) return;
+      // The icon of a site the agents read, from the site itself (work-files.ts siteIcon).
+      if (workRoute[2] === "/icon") {
+        const icon = await siteIcon(str(url.searchParams.get("host") ?? "", 200));
+        if (!icon) return json(res, 404, { error: "No icon." });
+        res.writeHead(200, { "Content-Type": icon.type, "Cache-Control": "private, max-age=86400", "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "sandbox; default-src 'none'; style-src 'unsafe-inline'" });
+        return void res.end(icon.body);
+      }
+      const roots = [...new Set(Object.values((await store.state(sid)).engines).map((e) => e.cwd).filter((c): c is string => !!c))];
+      if (!workRoute[2]) return json(res, 200, { roots, files: await listWork(roots) });
+      // A picture an agent shows in the chat, by where it is on this computer (client/LiveBlock.tsx): pictures and video only, in
+      // the session's folders or Friday's screenshots, or named in the session's log (Arun, 2026-10-28: "iron everything and
+      // ensure we are good… any logic errors"). Paths as sent, never trimmed: a name may start or end with a space.
+      const abs = pathParam(url.searchParams.get("abs"), 1000);
+      const root = roots[Number(url.searchParams.get("root") ?? 0)];
+      const rel = pathParam(url.searchParams.get("path"), 600);
+      const named = async (p: string) => namedIn((await store.events(sid)).map((e) => JSON.stringify(e.body)), p);
+      let file = abs ? await shownFile(abs, roots, named) : url.searchParams.has("root") ? (root ? await workPath(root, rel) : null) : null;
+      // A path an agent named from its own folder, without saying which of the session's folders: the first that has it.
+      for (const r of url.searchParams.has("root") || abs ? [] : roots) if (!file) file = await workPath(r, rel);
+      if (!file) return json(res, 404, { error: "That file isn't in this session's folders." });
+      return serveWork(req, res, file);
+    }
     const repoRoute = url.pathname.match(/^\/api\/sessions\/([\w-]+)\/repo$/);
     if (req.method === "GET" && repoRoute) {
       const sid = repoRoute[1]!;
@@ -2350,6 +4248,11 @@ export async function createApp(o: AppOptions) {
       return json(res, 200, { build: await buildId() });
     }
 
+    // Which Friday this server is, for Settings › About in a browser, where there is no desktop app to say it (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+    if (req.method === "GET" && url.pathname === "/api/version") {
+      appVersion ??= readFile(new URL("../package.json", import.meta.url), "utf8").then((t) => String((JSON.parse(t) as { version?: unknown }).version ?? ""), () => "");
+      return json(res, 200, { version: await appVersion });
+    }
     if (req.method === "GET" && url.pathname === "/api/me") {
       const me = await identity(req);
       // The desktop app asks this as it opens, signed in or not: its launch, its first one, and who the install is (analytics.ts).
@@ -2910,6 +4813,7 @@ export async function createApp(o: AppOptions) {
     const me = o.local.user;
     // A session brought back its own way below, left alone here.
     let ownWay = new Set<string>();
+    ownWay = new Set(teammates ? await teammates.sessions() : []);
     void reattachAll(me, {
       mine: async (uid, n) => (await store.mine(uid, n)).filter((x) => !ownWay.has(x.sid)),
       state: (sid) => store.state(sid).catch(() => null),
@@ -2918,6 +4822,24 @@ export async function createApp(o: AppOptions) {
       start: (params) => callHost("start", params, hostCtx(me)),
       log: (l) => console.log(`[friday] ${l}`),
     }).catch((e) => console.error("[friday] bringing coding tools back:", e));
+    // Every teammate, whenever it last worked: they are always there (teammates.ts). Each on its own account, in its own folder,
+    // its conversation kept by who it is; one already here is left as it is (ifOffline).
+    const team = teammates ? await teammates.team() : null;
+    if (teammates && team) {
+      void (async () => {
+        const rooms = await teammates.rooms();
+        const liveRooms = new Set((await Promise.all(rooms.map(async (r) => ((await store.exists(r.sid).catch(() => false)) ? r.sid : "")))).filter(Boolean));
+        for (const t of await teammates.list()) {
+          await startTeammate(team, me, t, { ifOffline: true })
+            .then(() => console.log(`[friday] ${t.name} is back`))
+            .catch((e: Error) => console.error(`[friday] ${t.name} didn't come back: ${e.message}`));
+          // And in each room it is in, with the conversation it has there.
+          // Not in a room whose session is gone from the store: nothing to come back to.
+          for (const r of rooms.filter((x) => x.lanes[t.id] && liveRooms.has(x.sid)))
+            await startTeammate(r.sid, me, t, { ifOffline: true }, { lane: r.lanes[t.id]!, keepAs: roomKeep(t.id, r.id) }).catch((e: Error) => console.error(`[friday] ${t.name} didn't come back in ${r.name}: ${e.message}`));
+        }
+      })();
+    }
   }
   // A mock dataset has people but nobody at a keyboard: let the ones shown as online walk around, so following and reading marks can be seen.
   const stopMockFocus = o.prefix.startsWith("mock") ? startMockFocus({ redis, prefix: o.prefix, store, bus }) : () => {};
@@ -2935,12 +4857,16 @@ export async function createApp(o: AppOptions) {
     resumes: { tick: tickResumes },
     boards: { tick: tickBoards },
     mesh,
+    teammates: { starts: teammateStarts, dry: teammateDry, checkIns: (now: Date) => runCheckIns(now), back: () => runBack(), away: (now?: number) => runAway(now), awake: () => awake(), note: async (sid: string, lane: string) => ((n) => (n ? [n.note, ...n.preamble.map((p) => p.text).filter(Boolean)].join("\n\n") : null))(await (hub.teammate?.(sid, lane) ?? Promise.resolve(null))) },
+    workflows: { tick: (now?: Date) => workflows?.tick(now) ?? Promise.resolve([]), engine: () => workflows },
     async close() {
       closing = true;
       clearInterval(shepherdLoop);
       clearInterval(resumeLoop);
       clearInterval(wakeLoop);
       if (reapAtStart) clearTimeout(reapAtStart);
+      for (const t of teamTimers) clearInterval(t);
+      for (const t of retryTimers) clearTimeout(t);
       clearInterval(boardLoop);
       stopMockFocus();
       for (const stop of stopBeats) stop();
@@ -2968,6 +4894,22 @@ export async function createApp(o: AppOptions) {
  * the open-source edition (`local`), which has no Friday agent, why it can't be forked (2026-10-27 QA: such a fork queued every
  * message for good).
  */
+/**
+ * What a fork of `state` is: the kind of session it came from, its agents leading as they did. A fork is a session of its own,
+ * never another team room (Arun, 2026-10-28: "iron everything and ensure we are good… any logic errors and fixes"). `mine` is
+ * a build with FRIDAY_MINE set or the open-source edition (localEdition).
+ */
+export function forkKind(state: SessionState, mine: boolean): { options: SessionOptionsPatch; lead: boolean; copy: boolean } {
+  const kind = { options: { webSearch: false, controlMode: "ask", mcp: true, model: "", agent: null } as SessionOptionsPatch, lead: false, copy: true };
+  // A Work session's fork is Work too (its rail, its note, listed under Work), its agents leading as they did in the one folder
+  // they share: Work's agents never work in copies. It came up as a Code session, under the Code tab.
+  if (mine && state.options.work) Object.assign(kind, { options: { ...kind.options, work: true, webSearch: true }, lead: !!state.lead, copy: false });
+  return kind;
+}
+
+/** This server's version, from its package.json, read once. */
+let appVersion: Promise<string> | undefined;
+
 export function forkTools(state: SessionState, local: boolean): { lane?: string; tool: EngineTool; cwd: string; mode: EngineMode }[] | string {
   const lanes = [{ id: MAIN_LANE, name: "" }, ...state.lanes.map((l) => ({ id: l.id, name: laneName(state, l.id) }))];
   const out = lanes.flatMap(({ id, name }) => {

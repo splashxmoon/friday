@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { SearchHit } from "../session-search.js";
 import { Icon, type IconName } from "./icons.js";
+import { EngineMark } from "./BrandMarks.js";
 import type { RecentSession } from "./storage.js";
 import { MenuButton, relTime, useDismiss } from "./ui.js";
 
@@ -295,7 +296,9 @@ export function SearchModal({ recents, onOpen, onClose }: { recents: RecentSessi
                       const hk = `h:${r.sid}:${h.seq}`;
                       return (
                         <button key={hk} data-key={hk} type="button" className={`srch-row srch-hit${on(hk)}`} onMouseEnter={hover(hk)} onClick={() => open(r, h.seq)}>
-                          <Icon name={KIND_ICON[h.kind]} size={13} />
+                          {/* An agent's own mark (Claude Code's, Codex's), not Friday's for every agent (Arun, 2026-10-28: "TEST EVERYTHING…
+                              EVERY INTERACTION, EVERY VISUAL"). */}
+                          {h.tool ? <EngineMark tool={h.tool} size={13} /> : <Icon name={KIND_ICON[h.kind]} size={13} />}
                           <span className="srch-snip">
                             <span className="srch-who">{h.by === "me" ? "You" : h.by === "agents" ? h.who : h.who.split(/\s+/)[0]}</span> <Marked text={h.snippet} marks={h.marks} />
                           </span>

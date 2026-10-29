@@ -4,7 +4,8 @@ import type { CliSession } from "../runner/imports.js";
 import type { FolderInfo } from "../runner/workspace.js";
 import { EFFORT_LEVELS, ENGINE_EFFORT_INFO, ENGINE_NAMES, ENGINE_TOOLS, type Attachment, type EngineEffort, type EngineMode, type EngineTool } from "../types.js";
 import { api } from "./api.js";
-import { AttachButton, AttachedRow, PICK_FOLDER, pasteAttach, uploadAll, type Attached } from "./Attach.js";
+import { titleFrom } from "./quick-send.js";
+import { AttachButton, AttachedRow, PICK_FOLDER, attach, droppedFiles, pasteAttach, uploadAll, type Attached } from "./Attach.js";
 import { Icon, type IconName } from "./icons.js";
 import { rememberAsk, walkAsks } from "./askHistory.js";
 import { NoMachine, connectThisComputer, hostApi, useMachine } from "./local.js";
@@ -12,7 +13,6 @@ import { HeroTitle } from "./HeroTitle.js";
 import { HomeActivity } from "./HomeActivity.js";
 import { MachineBadge } from "./MachineBadge.js";
 import type { Identity, RecentSession } from "./storage.js";
-import { HomeField } from "./HomeField.js";
 import { InBand, MenuButton, Switch, useDismiss } from "./ui.js";
 import { AccountPill } from "./Accounts.js";
 import { EngineMark } from "./BrandMarks.js";
@@ -25,6 +25,8 @@ import { AlsoWorksIn, FolderCard, useResumeLink, type Picked } from "./Workspace
 import { branchRef, FolderBranchPick, type FolderBranch } from "./Branches.js";
 import type { ResumeLink } from "./resume-link.js";
 import { issueBranch, parseIssueUrl, parsePrLink, withIssue, withPr, type Issue, type Pr } from "../github-issue.js";
+import { isTeamSid } from "./Teammates.js";
+import { leaveWorkNote, markWorkSession, startTeammate, teammateOf, useWorkMode, useWorkSessions, WORK_LINES, WORK_MODE_BLURB, WORK_PLACEHOLDER, WorkField, WorkStarters, workListed } from "./WorkMode.js";
 import { CircleDotIcon, GitPullRequestIcon } from "lucide-react";
 
 // The message box is this page's state, so every keystroke draws the page again. These take nothing that changes as you type,
@@ -270,6 +272,9 @@ export function Code({
   }, [mode]);
   // Which of that CLI's own models it runs on; empty means its default.
   const [model, setModel] = useState("");
+  // The model picked by hand before smart routing was turned on, put back when it is turned off: it went back to the tool's
+  // default and the pick was lost (Arun, 2026-10-28: "iron everything and ensure we are good… any logic errors and fixes").
+  const pickedModel = useRef("");
   // A model belongs to its CLI: another CLI starts on its own default, or on Auto when smart routing is on and it can route.
   useEffect(() => setModel(engine && smartRoutingOn() && canRoute(engine) ? "auto" : ""), [engine]);
   // How hard it thinks, for a tool that takes a level; Auto (null) is the tool's own default. Another tool starts on Auto.
@@ -344,6 +349,24 @@ export function Code({
   const [files, setFiles] = useState<Attached[]>([]);
   // What the picker left out. Worth saying, but not a failure.
   const [attachNote, setAttachNote] = useState("");
+  // A file dropped beside the box is attached as one dropped on it would be (the box's onDrop), not opened by the browser in
+  // place of Friday. A drop on something that takes drops itself (the folder card) is left to it.
+  const filesNow = useRef(files);
+  filesNow.current = files;
+  useEffect(() => {
+    const over = (e: DragEvent) => e.dataTransfer?.types.includes("Files") && e.preventDefault();
+    const drop = (e: DragEvent) => {
+      if (!e.dataTransfer?.types.includes("Files") || e.defaultPrevented) return;
+      e.preventDefault();
+      void droppedFiles(e.dataTransfer).then((got) => got.length && attach(filesNow.current, got, setFiles, setAttachNote));
+    };
+    addEventListener("dragover", over);
+    addEventListener("drop", drop);
+    return () => {
+      removeEventListener("dragover", over);
+      removeEventListener("drop", drop);
+    };
+  }, []);
   const [busy, setBusy] = useState(false);
   // Opened when someone reaches for their code before any machine is linked:
   // there is nothing to choose from until then, so ask for that instead.
@@ -375,6 +398,23 @@ export function Code({
     ENGINE_TOOLS.filter((t) => machine.tools.some((x) => x.tool === t && x.path && x.loggedIn !== false && !x.unavailable)),
   );
   const folder = picked?.folder ?? null;
+  // Work (WorkMode.tsx): content and knowledge work, with the other of Claude Code and Codex always brought in beside the first.
+  // Picked in the sidebar only, with no switch or "With Codex" above the box (Arun, 2026-10-26: "get rid of the tab to switch
+  // between code and work and with codex too").
+  const [workPick] = useWorkMode();
+  const work = isLocal() && workPick;
+  const team = true;
+  // No new branch for a Work session's folder; back to one when Code is picked again.
+  const wasWork = useRef(work);
+  useEffect(() => {
+    if (work) setNewBranch(false);
+    else if (wasWork.current) setNewBranch(true);
+    wasWork.current = work;
+  }, [work]);
+  const ready = ENGINE_TOOLS.filter((t) => machine.tools.some((x) => x.tool === t && x.path && x.loggedIn !== false && !x.unavailable));
+  const mate = work ? teammateOf(engine, ready) : null;
+  // "Right now" under the box lists the sessions of the kind being started, as the sidebar does.
+  const workSids = useWorkSessions(identity);
   // The folders beside it the coding tool may work in too, once changed here (see AlsoWorksIn); null keeps those kept for the folder.
   const [dirs, setDirs] = useState<string[] | null>(null);
   useEffect(() => setDirs(null), [folder?.path]);
@@ -553,10 +593,11 @@ export function Code({
         body: JSON.stringify({
           userId: identity.id,
           name: identity.name,
-          title: (issue ? `#${issue.number} ${issue.title}` : pr ? `PR #${pr.number} ${pr.title}` : goal.trim()).slice(0, 60),
+          title: titleFrom(issue ? `#${issue.number} ${issue.title}` : pr ? `PR #${pr.number} ${pr.title}` : goal),
           ...(issue ? { issue: { url: issue.url, repo: issue.repo, number: issue.number, title: issue.title } } : {}),
           ...(pr ? { pr: { url: pr.url, repo: pr.repo, number: pr.number, title: pr.title, head: pr.head } } : {}),
           kind: "code",
+          ...(work ? { work: true, ...(mate && team ? { team: true } : {}) } : {}),
           // The invite links start on, so there is something to copy from People the moment the session exists.
           // Everything the first step needs has to be in place before the
           // agent takes it. Sending the goal at creation woke the agent
@@ -574,6 +615,7 @@ export function Code({
         }),
       });
       const invite = r.invites.owner!;
+      if (work) markWorkSession(r.sessionId);
       // The machine joins first. With a CLI selected the CLI does the work;
       // with Friday Code the computer lends the folder and Friday works in
       // it — same bridge either way, so files, terminal, preview and diffs
@@ -589,6 +631,7 @@ export function Code({
             body: JSON.stringify({
               sid: r.sessionId,
               invite,
+              ...(work ? { work: true } : {}),
               ...(engine ? { tool: engine } : {}),
               // No folder: a new project folder for it, named from what was asked, which is the session's code from then on.
               ...(folder ? { cwd: folder.path } : { noFolder: true, project: goal.trim().slice(0, 400) }),
@@ -614,6 +657,17 @@ export function Code({
               ...(picked?.resume && forkResume ? { resumeFork: true } : {}),
             }),
           });
+          // In Work, the other tool joins the same folder; a failure leaves the session to the first, and says so in the session,
+          // where it is read: said here, "Sending the task…" replaced it at once and the page went.
+          const at = begun.cwd ?? folder?.path;
+          if (mate && team && at) {
+            setAttachNote(`Bringing in ${ENGINE_NAMES[mate]}…`);
+            await startTeammate(identity, { sid: r.sessionId, invite, tool: mate, cwd: at, mode }).catch((e: Error) => {
+              const said = `${ENGINE_NAMES[mate]} didn't join: ${e.message.replace(/\.$/, "")}.`;
+              setAttachNote(said);
+              leaveWorkNote(r.sessionId, said);
+            });
+          }
           void begun;
         } catch (e) {
           attached = false;
@@ -657,13 +711,70 @@ export function Code({
   };
 
   let placeholder = solo ? "Describe the change…" : "Describe the change. Teammates can join, watch the run and steer it live…";
+  if (work) placeholder = WORK_PLACEHOLDER;
   // The branch controls, for a folder that is a repository.
   let branchy = !!folder?.isRepo;
+  if (work) branchy = false;
+  // The line under the box when no folder is picked, in the words of the kind of session being started.
+  let noFolderLine = "code";
+  if (work) noFolderLine = "work";
+  // What each permission means, said for the kind of session being started.
+  let modeBlurb = MODE_BLURB;
+  if (work) modeBlurb = WORK_MODE_BLURB;
+  // The branch to work on, for a folder that is a repository: a line in the box (with the folder's own card only when a conversation
+  // is picked up again).
+  const branchLine = (
+    <>
+                {/* Uncommitted changes no longer send the agent to a copy (Arun, 2026-10-24: copies only when asked): it works in the
+                    folder with them, and the branch is chosen as for any folder. */}
+                {branchy && (
+                  <span className="ws-branch-set">
+                    {/* Off, a base picked for the new branch becomes the branch worked on: not one git has checked out in another folder. */}
+                    <Switch on={newBranch} onChange={(v) => (setNewBranch(v), setErr(""), !v && branches?.find((b) => b.name === pickBranch)?.elsewhere && setPickBranch(""))} label="New branch" />
+                    <span className={`ws-branch-toggle ${newBranch ? "on" : ""}`}>New branch</span>
+                    {newBranch ? (
+                      <>
+                        <input
+                          className="ws-branch-input"
+                          value={branch}
+                          placeholder={branchSuggestion}
+                          spellCheck={false}
+                          aria-label="Branch name"
+                          title="Leave it empty to use the suggested name"
+                          onChange={(e) => setBranch(e.target.value)}
+                        />
+                        {canPickBranch && (
+                          <>
+                            <span className="ws-branch-from">from</span>
+                            <FolderBranchPick branches={branches!} current={folder?.branch} value={pickBranch} onChange={(v) => (setPickBranch(v), setErr(""))} asBase />
+                          </>
+                        )}
+                      </>
+                    ) : canPickBranch ? (
+                      <span className="ws-branch-label" title="The branch the work happens on">
+                        Works on <FolderBranchPick branches={branches!} current={folder?.branch} value={pickBranch} onChange={(v) => (setPickBranch(v), setErr(""))} />
+                      </span>
+                    ) : (
+                      // Off means the work lands where the folder already
+                      // is, which is the thing worth saying rather than an
+                      // empty box nobody can type in.
+                      // And when the pull request or the conversation is on another branch, that the folder will be moved to it.
+                      <span className="ws-branch-label" title={lands && lands !== folder?.branch ? `The folder is switched to ${lands} before the agent starts` : "The work lands on the branch the folder is on"}>
+                        <Icon name="gitBranch" size={12} />
+                        {lands && lands !== folder?.branch ? (pr && !pr.fork ? "Works on the pull request's branch" : "Switches to") : "Works on"} <code>{lands || folder?.branch || "the current branch"}</code>
+                      </span>
+                    )}
+                  </span>
+                )}
+    </>
+  );
   return (
     <div className="home">
-      {/* A quiet field of squares behind everything, fading out towards the edges. */}
+      {/* Code's home is one flat ground (Arun, 2026-10-29: "so clean and beautiful really with a clear direction in design
+          language"; DIRECTION.md §9.5: the dot field goes). Work keeps its own field. */}
       {
-        <HomeField />
+        work ? <WorkField /> :
+        null
       }
       {/* Which coding tools are here, as one pill in the corner opposite "tokens saved": their marks and how many are ready,
           with the card that signs in, switches account or installs one behind it. */}
@@ -672,6 +783,7 @@ export function Code({
       </div>
       <Greeting name={identity.name} />
       {
+        work ? <HeroTitle lines={WORK_LINES} /> :
         <HeroTitle />
       }
 
@@ -695,7 +807,8 @@ export function Code({
                 onClick={() => {
                   const next = !on;
                   saveSmartRouting(next);
-                  if (engine) setModel(next ? "auto" : "");
+                  if (engine && next && model !== "auto") pickedModel.current = model;
+                  if (engine) setModel(next ? "auto" : pickedModel.current);
                   else ((choseModel.current = true), setFridayModelId(next ? "auto" : ""));
                 }}
               >
@@ -712,13 +825,19 @@ export function Code({
           e.preventDefault();
           void submit();
         }}
-        // A link or a block of text dropped on the box becomes the task: a failing CI log, a ticket, a thread. Files
-        // still go through the attach control, which knows what to do with them.
+        // A link or a block of text dropped on the box becomes the task: a failing CI log, a ticket, a thread. Files and folders
+        // dropped are attached, as + › Files or Folder would (the drop was ignored, and a browser then opened the file in place
+        // of Friday: 2026-10-28 QA; Arun: "TEST EVERYTHING… EVERY INTERACTION").
         onDragOver={(e) => {
-          if (e.dataTransfer.types.includes("text/uri-list") || e.dataTransfer.types.includes("text/plain")) e.preventDefault();
+          if (e.dataTransfer.types.includes("Files") || e.dataTransfer.types.includes("text/uri-list") || e.dataTransfer.types.includes("text/plain")) e.preventDefault();
         }}
         onDrop={(e) => {
-          if (e.dataTransfer.files.length) return;
+          if (e.dataTransfer.types.includes("Files")) {
+            e.preventDefault();
+            void droppedFiles(e.dataTransfer).then((got) => got.length && attach(filesNow.current, got, setFiles, setAttachNote));
+            input.current?.focus();
+            return;
+          }
           const dropped = (e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain")).trim();
           if (!dropped) return;
           e.preventDefault();
@@ -729,51 +848,14 @@ export function Code({
         <div className="composer-inner">
           <AttachedRow files={files} onChange={setFiles} />
           {/* The folder is part of the request, so it sits in the box with it: a card with where it is, that it stays on the computer, and the branch. */}
-          {hasMachine && folder && (
-            <FolderCard folder={folder} resume={picked?.resume} where={machine.mode === "linked" ? (machine.machine?.name ?? "your computer") : "this computer"} onClear={() => (setPicked(null), setBranch(""), setNewBranch(true), setPickBranch(""))}>
-                {/* Uncommitted changes no longer send the agent to a copy (Arun, 2026-10-24: copies only when asked): it works in the
-                    folder with them, and the branch is chosen as for any folder. */}
-                {branchy && (
-                  <span className="ws-branch-set">
-                    {/* Off, a base picked for the new branch becomes the branch worked on: not one git has checked out in another folder. */}
-                    <Switch on={newBranch} onChange={(v) => (setNewBranch(v), setErr(""), !v && branches?.find((b) => b.name === pickBranch)?.elsewhere && setPickBranch(""))} label="New branch" />
-                    <span className={`ws-branch-toggle ${newBranch ? "on" : ""}`}>New branch</span>
-                    {newBranch ? (
-                      <>
-                        <input
-                          className="ws-branch-input"
-                          value={branch}
-                          placeholder={branchSuggestion}
-                          spellCheck={false}
-                          aria-label="Branch name"
-                          title="Leave it empty to use the suggested name"
-                          onChange={(e) => setBranch(e.target.value)}
-                        />
-                        {canPickBranch && (
-                          <>
-                            <span className="ws-branch-from">from</span>
-                            <FolderBranchPick branches={branches!} current={folder.branch} value={pickBranch} onChange={(v) => (setPickBranch(v), setErr(""))} asBase />
-                          </>
-                        )}
-                      </>
-                    ) : canPickBranch ? (
-                      <span className="ws-branch-label" title="The branch the work happens on">
-                        Works on <FolderBranchPick branches={branches!} current={folder.branch} value={pickBranch} onChange={(v) => (setPickBranch(v), setErr(""))} />
-                      </span>
-                    ) : (
-                      // Off means the work lands where the folder already
-                      // is, which is the thing worth saying rather than an
-                      // empty box nobody can type in.
-                      // And when the pull request or the conversation is on another branch, that the folder will be moved to it.
-                      <span className="ws-branch-label" title={lands && lands !== folder.branch ? `The folder is switched to ${lands} before the agent starts` : "The work lands on the branch the folder is on"}>
-                        <Icon name="gitBranch" size={12} />
-                        {lands && lands !== folder.branch ? (pr && !pr.fork ? "Works on the pull request's branch" : "Switches to") : "Works on"} <code>{lands || folder.branch || "the current branch"}</code>
-                      </span>
-                    )}
-                  </span>
-                )}
+          {/* The folder is said by the footer's dropdown (DIRECTION.md §9.5); its branch, when it is a repository, is one quiet line
+              here, and a conversation picked up again keeps its card, which says so. */}
+          {hasMachine && folder && picked?.resume && (
+            <FolderCard folder={folder} resume={picked.resume} where={machine.mode === "linked" ? (machine.machine?.name ?? "your computer") : "this computer"} onClear={() => (setPicked(null), setBranch(""), setNewBranch(true), setPickBranch(""))}>
+              {branchLine}
             </FolderCard>
           )}
+          {hasMachine && folder && !picked?.resume && branchy && <div className="cw-branch">{branchLine}</div>}
           {hasMachine && folder && engine && <AlsoWorksIn identity={identity} folder={folder.path} value={dirs} onChange={setDirs} />}
           {/* A prompt link's repo that isn't on this computer yet: one press clones it, and the box is ready. */}
           {linkRepo && !pr && !issue && hasMachine && !picked && repoMissing === linkRepo && (
@@ -882,6 +964,7 @@ export function Code({
             ref={input}
             id="code-input"
             aria-label="Describe the change"
+            {...(work ? { "aria-label": "Describe what to make" } : {})} // Work's own words (Arun, 2026-10-28: "iron everything… focusing on UI and UX").
             autoFocus
             // Kept as it was sent while the session is being made: an edit now would not be what the agent is given.
             readOnly={busy}
@@ -920,8 +1003,41 @@ export function Code({
                 onTool: (t) => ((chose.current = true), setEngine(t)),
                 // In the app, it connects itself (the box says so); in a browser, straight to connecting this computer.
                 ...(hasMachine ? {} : { onNeedsMachine: () => (window.fridayDesktop?.link ? setLinking(true) : connectThisComputer()) }),
+                ...(work ? { plain: true } : {}), // In Work, folders: no repos, GitHub or clone (w1 #3).
               }}
             />
+            {/* Where it works, as a plain text dropdown in the box's footer beside who works and how (DIRECTION.md §9.5, as Synara
+                does): the picker of folders behind it, and the line that said "No folder picked: … Choose a folder" under the box
+                is its title now. Picked, the cross beside it takes it off again. */}
+            {hasMachine && (
+              <span className="cw-where">
+                <button
+                  type="button"
+                  className="cw-drop"
+                  aria-label={folder ? `Folder: ${folder.name}. Choose another` : "Choose a folder"}
+                  title={
+                    folder
+                      ? `${folder.path}\nThe folder stays on ${machine.mode === "linked" ? (machine.machine?.name ?? "your computer") : "this computer"}.`
+                      : noFolderLine === "work"
+                        ? "Your pieces are saved in a new folder. Choose one."
+                        : files.some((f) => f.folder)
+                          ? // A folder's copy attached is not a folder picked (2026-10-28 QA).
+                            `${toolName || "The agent"} starts in a new project folder, with your copy of “${files.find((f) => f.folder)!.folder}” attached to the message. Choose a folder to work in it instead.`
+                          : `No folder picked: ${toolName || "the agent"} starts in a new project folder. Choose one.`
+                  }
+                  onClick={(e) => window.dispatchEvent(new CustomEvent(PICK_FOLDER, { detail: { from: e.currentTarget } }))}
+                >
+                  <Icon name="folder" size={13} />
+                  <span className="cw-drop-text">{folder ? folder.name : noFolderLine === "work" ? "New folder" : "No folder"}</span>
+                  <Icon name="chevronDown" size={12} className="menu-pill-caret" />
+                </button>
+                {folder && (
+                  <button type="button" className="cw-clear" aria-label={picked?.resume ? "Remove this session and folder" : "Remove this folder"} title="Remove this folder" onClick={() => (setPicked(null), setBranch(""), setNewBranch(true), setPickBranch(""))}>
+                    <Icon name="x" size={12} />
+                  </button>
+                )}
+              </span>
+            )}
             {/* On Solo a saved agent rides on the coding tool: said here, and taken off with the cross. */}
             {solo && agentId && agents.some((a) => a.id === agentId) && (
               <button type="button" className="menu-pill agent-pill solo-agent" title="Its instructions go to your coding tool. Click to run without it." onClick={() => setAgentId("")}>
@@ -938,7 +1054,7 @@ export function Code({
               onEngine={(t) => ((chose.current = true), t ? setEngine(t) : (setEngine(""), setAgentId("")))}
               model={model}
               // Choosing a model in the picker decides routing too, and is remembered: Auto turns it on, any other model off.
-              onModel={(id) => (engine && canRoute(engine) && saveSmartRouting(id === "auto"), setModel(id))}
+              onModel={(id) => (engine && canRoute(engine) && saveSmartRouting(id === "auto"), id !== "auto" && (pickedModel.current = id), setModel(id))}
               fridayModelId={fridayModelId}
               onFridayModel={(id) => (saveSmartRouting(id === "auto"), (choseModel.current = true), setFridayModelId(id))}
               fridayName={agents.find((a) => a.id === agentId)?.name ?? "Friday Code"}
@@ -963,7 +1079,7 @@ export function Code({
                 ...(["plan", "edits", "full"] as EngineMode[]).map((m) => ({
                   label: MODE_NAME[m],
                   // Codex and Cursor cannot ask about one command at a time, so for them Manual asks once for the whole turn.
-                  sub: m === "edits" && (engine === "codex" || engine === "cursor") ? "Asks you before any turn that changes something." : MODE_BLURB[m],
+                  sub: m === "edits" && (engine === "codex" || engine === "cursor") ? "Asks you before any turn that changes something." : modeBlurb[m],
                   checked: mode === m,
                   onSelect: () => setMode(m),
                 })),
@@ -974,13 +1090,15 @@ export function Code({
               type="submit"
               disabled={!goal.trim() || busy || blocked}
               aria-label="Start the run"
-              title={blockedWhy || undefined}
+              // A new session starts from what it is asked to do, so files alone don't start one: said, rather than a grey arrow.
+              title={blockedWhy || (!goal.trim() && files.length ? "Say what to do with the files you attached" : undefined)}
             >
               {busy ? <span className="spinner" /> : <Icon name="arrowUp" size={17} />}
             </button>
           </div>
         </div>
       </form>
+      {work && <WorkStarters off={!!goal.trim() || busy} onPick={(t) => (setGoal(t), requestAnimationFrame(() => input.current?.focus()))} />}
 
       {(engine || folder || picked) && !(hasMachine && folder && !(engine && tool && (!tool.path || tool.loggedIn === false))) && (
         <div className="code-ws">
@@ -1018,16 +1136,7 @@ export function Code({
                   )}
                 </p>
               )}
-              {/* No folder: the tool starts in a new project folder, which nothing on the page said, and the folder picker was
-                  behind an unlabelled + (Arun, 2026-10-24: UX gaps). */}
-              {engine && !folder && !picked && tool?.path && tool.loggedIn !== false && (
-                <p className="muted small">
-                  No folder picked: {toolName} starts in a new project folder.{" "}
-                  <button type="button" className="link-btn" onClick={() => window.dispatchEvent(new Event(PICK_FOLDER))}>
-                    Choose a folder
-                  </button>
-                </p>
-              )}
+              {/* No folder: said by the folder in the box's footer, whose title has what this line said (DIRECTION.md §9.5). */}
               {/* The grant is on the summary now, as a pill beside the
                   folder: a whole line of amber prose under every session is
                   a line nobody reads by the third time. */}
@@ -1062,10 +1171,14 @@ export function Code({
 
       {/* What happened while you were away, before what you might do next. */}
 
+      {/* Where the toasts of what waits on you sit on a phone, in the page rather than over "Right now" (Attention.tsx). */}
+      <div id="wy-home" className="wy-home" />
+
       {/* Your agents right now, and how the last weeks went: in place of suggested prompts, what someone opening Friday wants first. */}
       <HomeActivity
         identity={identity}
         recents={
+          isLocal() ? (work && !workListed() ? [] : recents.filter((r) => workSids.has(r.sid) === work && !isTeamSid(r.sid))) : // never a Crew room, as the sidebar (Sidebar.tsx); in Work, nothing until the Work sessions are known (a Code task listed under Work's "Right now", the 2026-10-28 critique)
           recents
         }
         onOpen={onStart}

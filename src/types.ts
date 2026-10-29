@@ -133,6 +133,10 @@ export interface SessionOptions {
    * repository's pull requests carry the link either way.
    */
   prReplay?: boolean;
+  /** A Work session: content and knowledge work rather than code (engine/work.ts). */
+  work?: boolean;
+  /** The team: the private session the person's AI teammates live in, one lane each (teammates.ts). */
+  team?: boolean;
   thinking: Thinking;
   /**
    * Which model Friday's own agent runs. "" is the workspace default (Ling).
@@ -433,10 +437,12 @@ export const ENGINE_MODEL_INFO: Record<EngineTool, EngineModelInfo[]> = {
   // As Claude Code's own model menu lists them (October 2026): the four latest by alias, then the earlier versions it still runs.
   claude: [
     // Friday picks for each message (routing.ts): Haiku, Sonnet or Opus, from how hard it reads and how much of the limits is left.
-    { group: "Auto", id: "auto", label: "Auto", blurb: "Haiku, Sonnet or Opus, picked for each message" },
-    { group: "Latest", id: "opus", label: "Opus 5.5", blurb: "Complex reasoning and big changes." },
+    // "Smart", not "Auto": beside the Auto mode pill, "Claude Code · Auto" read as two of one thing (Arun, 2026-10-28: "iron
+    // everything and ensure we are good").
+    { group: "Smart routing", id: "auto", label: "Smart", blurb: "Haiku, Sonnet or Opus, picked for each message" },
+    { group: "Latest", id: "opus", label: "Opus 5.5", blurb: "Complex reasoning and big pieces of work." },
     { group: "Latest", id: "fable", label: "Fable 5.1", blurb: "Most capable. For the longest, hardest tasks." },
-    { group: "Latest", id: "sonnet", label: "Sonnet 5.5", blurb: "Everyday coding at a good pace." },
+    { group: "Latest", id: "sonnet", label: "Sonnet 5.5", blurb: "Everyday work at a good pace." },
     { group: "Latest", id: "haiku", label: "Haiku 5.5", blurb: "Fast and light, for simple tasks." },
     { group: "More models", id: "claude-haiku-4-5", label: "Haiku 4.5", blurb: "claude-haiku-4-5" },
     { group: "More models", id: "claude-sonnet-5", label: "Sonnet 5", blurb: "claude-sonnet-5" },
@@ -448,7 +454,7 @@ export const ENGINE_MODEL_INFO: Record<EngineTool, EngineModelInfo[]> = {
     { group: "More models", id: "claude-sonnet-4-6", label: "Sonnet 4.6", blurb: "claude-sonnet-4-6" },
   ],
   codex: [
-    { group: "Auto", id: "auto", label: "Auto", blurb: "Luna or Sol, picked for each message" },
+    { group: "Smart routing", id: "auto", label: "Smart", blurb: "Luna or Sol, picked for each message" },
     { group: "Models", id: "gpt-6.1-sol", label: "GPT-6.1 Sol", blurb: "Codex's recommended model: near-Astra work at lower cost." },
     { group: "Models", id: "gpt-6-astra", label: "GPT-6 Astra", blurb: "Most capable, for complex work across code, apps and research." },
     { group: "Models", id: "gpt-6-luna", label: "GPT-6 Luna", blurb: "Most efficient, for focused, high-volume tasks." },
@@ -657,9 +663,35 @@ export interface PeerNote {
  * so it queues and wakes the agent like any other, and the receiving agent is told who it is from (Arun, 2026-10-19: the coding
  * tools in a session talking to each other).
  */
+/**
+ * What the team did while the person was away, for the morning brief (team.brief) and the "Since you left" card (GET
+ * /api/teammates/since). Each line names the teammate by its Team room lane and name; `sid` is the session it happened in when
+ * that isn't the Team room (one of its rooms), and `seq` the message there to jump to.
+ */
+export interface TeamBrief {
+  since: number;
+  until: number;
+  /** Work finished: a board task done, or a turn that ended with a result. Its files changed, and a pull request it opened. */
+  done: { lane: string; name: string; title: string; files?: string[]; pr?: string; sid?: string; seq?: number }[];
+  /** Work that stopped short: a board task blocked or dropped, or a turn that ended on an error. */
+  failed: { lane: string; name: string; title: string; why: string; sid?: string; seq?: number }[];
+  /** What waits on the person: a question asked of them and not answered. */
+  waiting: { lane: string; name: string; text: string; seq: number; sid?: string }[];
+  /** What a teammate decided for itself while the person was away, and noted (write_note "assumption: …"). */
+  assumptions: { lane: string; name: string; text: string; seq: number; sid?: string }[];
+  /** Each teammate's turns, minutes working and tokens (where its tool said) over the stretch. */
+  usage: { lane: string; name: string; turns: number; minutes: number; tokens?: number }[];
+  /**
+   * A team workflow's run, when the brief is one's (team-workflows.ts): which, how it ended, and what it came to (Arun,
+   * 2026-10-28: "make the automation for the teams platform different…").
+   */
+  workflow?: { id: string; name: string; run: string; status: "done" | "failed"; result?: string };
+}
 
 export interface MeshNote {
   id: string;
+  /** A board task's title alone (the instruction's text leads with it), for the page to show without the brief. */
+  title?: string;
   /**
    * `ask`: the sender waits for the answer (mesh.replied). `reply`: an answer that came after the asker stopped waiting.
    * `task`: work the session's lead assigned; what the agent says at the end of it goes back to the lead as a `reply`.
@@ -801,7 +833,7 @@ export type EventBody =
   /** A teammate's redirect put aside without being sent: by its author, the person driving that agent, or an owner. */
   | { type: "suggestion.dismissed"; seq: number }
   /** An instruction taken back before the agent read it: it leaves the queue, and the feed says so. */
-  | { type: "instruction.withdrawn"; seq: number }
+  | { type: "instruction.withdrawn"; seq: number; /** Taken back to be changed and sent again (a teammate's Edit): the feed leaves it out. */ toEdit?: true }
   /** A queued message a coding tool won't take: it runs on its host's own plan, and this is somebody else's work (own-plan.ts). Out of the queue, with why. */
   | { type: "instruction.refused"; seq: number; why: string }
   /** The driver approved the plan a lane proposed; its editing and running tools come back. */
@@ -1139,6 +1171,28 @@ export type EventBody =
    * at the start of its next turn. Nobody is woken by one: it is the open line, not a knock on the door.
    */
   | { type: "mesh.posted"; id: string; fromLane: string; fromName: string; text: string }
+  /** A teammate given folders or repos to work in, or one taken away (teammates.ts): a line in each of its team's chats. */
+  | { type: "teammate.folders"; name: string; lane: string; added: string[]; removed: string[] }
+  /** A teammate's tool ran out of usage and it switched to its backup to carry on (teammates.ts). */
+  | { type: "teammate.switched"; name: string; lane: string; from: EngineTool; to: EngineTool; until: number | null; /** Back on its own tool, its limit lifted. */ back?: boolean; /** Back: what it did on its backup, told to its own tool with its next turn (hub.teammate). */ brief?: string }
+  /** A teammate added, or its role changed, by a teammate in the Team room (manage_teammate, agent-mesh.ts). */
+  | { type: "teammate.changed"; name: string; lane: string; added: boolean; role: string }
+  /**
+   * The morning brief (team-away.ts teamBrief), in the Team room: what the team did while the person was away, posted as they
+   * come back (or at the time they set), and when a board finishes while they are away (Arun, 2026-10-28: "we need to ensure
+   * teams can work basically while you are away").
+   */
+  | ({ type: "team.brief" } & TeamBrief)
+  /**
+   * A teammate an agent added (manage_teammate create), for the person to keep or remove: it works meanwhile. In the Team room,
+   * as news. `id` is its record's (DELETE /api/teammates/:id removes it); `lane` its Team room lane.
+   */
+  | { type: "teammate.proposed"; id: string; name: string; lane: string; madeBy: { lane: string; name: string } }
+  /**
+   * Every hold a person put on agents here lifted (held.ts), or only those on `lanes`: by a person's one-click lift, or by
+   * away mode turning on (old holds would keep the team idle all night).
+   */
+  | { type: "holds.lifted"; lanes?: string[]; why: string }
   /** The agent on this lane has read the team updates up to `upTo`: it checked (check_messages) or a turn carried them to it. */
   | { type: "mesh.read"; upTo: number }
   | { type: "peer.sent"; to: { sid: string; title: string; lane: string; name: string }; text: string; held: boolean }

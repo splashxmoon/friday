@@ -1,7 +1,7 @@
 import { shortTokens } from "../tool-usage.js";
 import { collisionsFor } from "../collisions.js";
 import { runawayText } from "../runaway.js";
-import { limitHit } from "../limit-reset.js";
+import { limitHit, signedOut } from "../limit-reset.js";
 import { cappedText, tokensUsed } from "../run-budget.js";
 import { reviewOrder } from "../code-review.js";
 import { hideSecrets } from "../secrets.js";
@@ -114,10 +114,12 @@ import { PatchSource, useFullFiles } from "./patchSource.js";
 import { originOf } from "../session/patches.js";
 import { quickConnect, startingOn, useStarting } from "./quickConnect.js";
 import { StartingLaneTab } from "./Lanes.js";
+import { tabListKeys, useRovingTabs } from "./roving.js";
 import { ToolResult, ToolResultOutput } from "@/components/agents/tool-result";
 import { cn } from "@/lib/utils";
 import { ownPlan } from "../own-plan.js";
 import { alwaysAllowEntry, can, canDriveLane, driverOf, laneOf, pendingFor, questionsTo, runOf, signoffStatus, type OpenQuestion, type SessionState, type Thread, givenName } from "../session/projection.js";
+import { isRawError, stoppedLine } from "../activity-line.js";
 import { ENGINE_MODEL_INFO, ENGINE_NAMES, ENGINE_TOOLS, liveMachine, MAIN_LANE, type Attachment, type DiffFile, type EngineMode, type EngineTool, type EventBody, type EventType, type Member, type PresenceMember, type SessionEvent, type Thinking, type ToolCall, effortNote, ENGINE_EFFORT_INFO, EFFORT_RESET_NOTE, effortLevelsOf, type EngineEffort } from "../types.js";
 import { fileUrl, uploadFile } from "./api.js";
 import { pickable, uploadAll } from "./Attach.js";
@@ -133,8 +135,18 @@ import { rememberAsk, walkAsks } from "./askHistory.js";
 import { hiddenNotes } from "../session-notes.js";
 import type { AgentStatus } from "../agents-hub.js";
 import { ALL, agentKey, focusAgent, jumpToNeeds, markSeen, nextKey, openedAt, useAgents, useFocusedAgent, useSeen } from "./agentFocus.js";
+import { QueuedActions, runTeamCommand, TeamBanner } from "./TeamControls.js";
+import { TEAM_COMMANDS } from "./team-commands.js";
+import { dayBreaks } from "./team-status.js";
+import { teamSid as teamSidNow } from "./Teammates.js";
+/** A phone-wide window: the team's box says less (Arun, 2026-10-28: the critique's "at 420px the placeholder is short"). */
+const narrowBox = () => typeof matchMedia === "function" && matchMedia("(max-width: 600px)").matches;
+import { BriefCard, HoldsLifted, ProposedMate } from "./TeamBrief.js";
+import { CheckInLine, HandoffLine, FoldersGiven, TeammateChanged, FridayLine, teamEmpty, mateOn, mergeSends, reconnectTeammate, useTeamVersion, isCheckIn, quietCheckIns, ToolSwitched, MentionBackdrop, MentionText, RoomsNow, namesSomeone, plumbing, teamReply, TeamRun, TeamWorking, TeammateBoxPicker, TeammateFolderCard, TeammateHeader, teammateAgents, teammateMark, teammatesNamed, TeamRecipients, ThreadChip, ThreadHost, foldTeamTalk, pieceOf, TalkGroup, teamEventKind, type TalkPiece, useSentTo, noteLaneRuns, forgetLaneRuns, useSendCopies, learnLanes, queueWhy, queueWhyAll, crewLeadName, RoomIntro, isAgentTalk , matesIn, teamKnown, teamSid} from "./Teammates.js";
+import { threadsOf } from "./team-threads.js";
+import { isLive, isPersonsWord, isWaiting, leadAnswers, queuedFor, roomRunKind, switchedAfter, turnsFor, type LeadInfo } from "./team-room.js";
 import { AGENT_DRAG, catchUpIndex, firstUnread, maxColumns, unreadByLane } from "./agentNav.js";
-import { followTarget } from "./follow-target.js";
+import { followTarget, openingTarget } from "./follow-target.js";
 import { carried, carriedFrom } from "./carried.js";
 import { reviewText, type LineComment } from "./review.js";
 import { savedCommands, useSavedCommands, useShortcuts } from "./Shortcuts.js";
@@ -154,7 +166,7 @@ import { AgentSwitch, EngineMark, switchesAgent } from "./AgentSwitch.js";
 import type { EffortChoice } from "./AgentModelPicker.js";
 import { isLocal, startTeam } from "./edition.js";
 import { isOwnModel } from "../own-model-id.js";
-import { agentLook, laneIdByName, laneLabel, reasonFor, suggestTarget, tintOfColor, tintOfEngine, wakesOnItsOwn, type Signals } from "./handoff-ui.js";
+import { agentLook, handoffTaskText, laneIdByName, laneLabel, reasonFor, suggestTarget, tintOfColor, tintOfEngine, wakesOnItsOwn, type Signals } from "./handoff-ui.js";
 import type { AgentView } from "../agents.js";
 import { RaceCard } from "./Race.js";
 import { askIosPreview, isLocalUrl, lookOf, openInPreview, pageAppears, servedUrlIn } from "./previewBus.js";
@@ -163,7 +175,9 @@ import { CLASS_LABEL, headlineClass, mayApprove } from "../command-class.js";
 import { checkpointsByMessage, isSetAside, rewindImpact, rewindsIn, type Rewind } from "../rewind.js";
 import { ContextMenu, MenuButton, useConfirm, type MenuItem, relTime } from "./ui.js";
 import { hostApi, installedOn } from "./local.js";
-import { reachFor, reachForHandoff, reachForMessage, REACH_NAME, revertTo, settle, type Reach } from "./smartReach.js";
+import { WORK_MODE_BLURB } from "./WorkMode.js";
+import { openOutside } from "./openOutside.js";
+import { modeOf, reachFor, reachForHandoff, reachForMessage, REACH_NAME, revertTo, settle, type Reach } from "./smartReach.js";
 import { splitTools } from "./engines.js";
 import { Lightbox } from "./Lightbox.js";
 import { loadRecents, type Identity } from "./storage.js";
@@ -234,6 +248,8 @@ interface RunItem {
   unchanged?: boolean;
   /** Files in its change set exactly as the card before it showed them: still waiting from earlier, not this run's doing. */
   earlier?: string[];
+  /** Drawn just above the note at this seq, which came before it in the log: the Stop of the turn whose cut-short draft it is. */
+  placeBefore?: number;
 }
 type Item = { kind: "event"; ev: SessionEvent } | RunItem;
 /** Housekeeping that arrived together, folded into one line until somebody wants it. */
@@ -475,8 +491,26 @@ export function group(events: SessionEvent[], streaming: boolean | ReadonlySet<s
   let prevType = "";
   /** Where each lane's loose change set stands in the feed, while nothing of that lane's has come after it. */
   const looseAt = new Map<string, number>();
+  /**
+   * A lane's block the team closed while its turn was under way, until that agent's next turn is handed to it: what that turn
+   * had written when it was stopped (an interrupted message, which the hub logs just after the stop) is its own, in its block.
+   */
+  const stoppedTurn = new Map<string, RunItem>();
+  /** A lane's Stop note, until its agent next says anything: a turn stopped before its first message is drawn above it. */
+  const stopNote = new Map<string, Item>();
+  /** Blocks drawn just above a note that came before them in the log (stopNote). */
+  const above = new Map<RunItem, Item>();
+  // A queued message changed is one message: the one it replaced, or the one taken back to be changed, isn't drawn beside it as
+  // "Taken back before the agent read it" (2026-10-28 QA; Arun: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+  const edited = new Set<number>();
+  for (const ev of events) {
+    const b = ev.body;
+    if (b.type === "instruction" && b.replaces !== undefined) edited.add(b.replaces);
+    else if (b.type === "instruction.withdrawn" && b.toEdit) edited.add(b.seq);
+  }
   for (const ev of events) {
     const t = ev.body.type;
+    if (t === "instruction" && edited.has(ev.seq)) continue;
     const lane = ev.lane ?? MAIN_LANE;
     // Auto's own picks are lines in the feed; what it would have picked elsewhere (`shadow`) is not (see HIDDEN).
     const shown = t === "model.routed" ? !(ev.body as Extract<EventBody, { type: "model.routed" }>).shadow : !HIDDEN.has(t);
@@ -486,10 +520,14 @@ export function group(events: SessionEvent[], streaming: boolean | ReadonlySet<s
       if (sha) checkpoints.set(lane, { sha, lane });
       else checkpoints.delete(lane);
       cutShort.delete(lane);
+      stoppedTurn.delete(lane);
+      stopNote.delete(lane);
       startedAt.set(lane, ev.ts);
       asks.set(lane, instructions.get((ev.body as Extract<EventBody, { type: "run.started" }>).causedBy));
     }
     // Taken by the runner itself, just before its tool heard the turn: said after the start, ahead of anything the tool did.
+    // The agent's next turn is handed to it: nothing after this is the stopped turn's.
+    if (t === "instructions.delivered") stoppedTurn.delete(lane);
     if (t === "run.checkpoint") checkpoints.set(lane, { sha: (ev.body as Extract<EventBody, { type: "run.checkpoint" }>).checkpoint, lane });
     if (t === "instruction") {
       const b = ev.body as Extract<EventBody, { type: "instruction" }>;
@@ -498,7 +536,13 @@ export function group(events: SessionEvent[], streaming: boolean | ReadonlySet<s
       // own "[session] Carry on" isn't either: what it carries on is the ask before it.
       const standIn = !!b.approval || b.text.startsWith("[session]");
       if (!standIn) lastAsk.set(lane, { who: ev.actor.name, text: b.text });
-      if (b.approval) carryAsked.set(lane, (lasts.get(lane) ?? runs.get(lane))?.asked ?? []);
+      // Only what this answer is about: carrying the whole list from the lane's last run listed every earlier turn's answers
+      // again under each new one (Arun, 2026-10-28: "iron everything and ensure we are good… any logic errors and fixes"). An
+      // answer given while its block is still open carries nothing: the run goes on in that block, with its asks.
+      if (b.approval) {
+        if (runs.get(lane)) carryAsked.delete(lane);
+        else carryAsked.set(lane, (lasts.get(lane) ?? cutShort.get(lane))?.asked.filter((a) => a.id === b.approval!.id) ?? []);
+      }
       instructions.set(ev.seq, standIn ? lastAsk.get(lane) : { who: ev.actor.name, text: b.text });
       // The driver's answer to a command that stopped to ask.
       const a = b.approval && askedById.get(b.approval.id);
@@ -512,6 +556,13 @@ export function group(events: SessionEvent[], streaming: boolean | ReadonlySet<s
     if (t === "session.updated" && !describesAChange(ev.body as Extract<EventBody, { type: "session.updated" }>)) continue;
     if (t === "agent.message") {
       let run = runs.get(lane);
+      // What a stopped turn had written, logged just after the stop: in that turn's block, above the stop's note.
+      const kept = !run && (ev.body as Extract<EventBody, { type: "agent.message" }>).interrupted ? stoppedTurn.get(lane) : undefined;
+      if (kept) {
+        kept.messages.push(ev as Ev<"agent.message">);
+        stopNote.delete(lane);
+        continue;
+      }
       if (!run) {
         // No start of its own: the same turn carrying on after the team cut its block short (a message queued mid-run, a
         // permission answer, a pause and Resume). It keeps that run's ask and the folder from before it, so its card still says
@@ -529,7 +580,22 @@ export function group(events: SessionEvent[], streaming: boolean | ReadonlySet<s
         runs.set(lane, run);
         lasts.delete(lane);
         looseAt.delete(lane);
+        const note = (ev.body as Extract<EventBody, { type: "agent.message" }>).interrupted ? stopNote.get(lane) : undefined;
+        if (note) {
+          above.set(run, note);
+          // The stopped turn's draft, and the stop closed it: shut here, so the next message to the agent doesn't close it again
+          // as merely cut short, which took its "stopped" away (Arun, 2026-10-28: "iron everything and ensure we are good"). What
+          // else that turn still logs (its last change set, more of its draft) is still its own.
+          if (note.kind === "event") (run.closedBy = note.ev.body.type), (run.closedSeq = note.ev.seq), (run.closedTs = note.ev.ts);
+          run.messages.push(ev as Ev<"agent.message">);
+          stopNote.delete(lane);
+          runs.delete(lane);
+          lasts.set(lane, run);
+          stoppedTurn.set(lane, run);
+          continue;
+        }
       }
+      stopNote.delete(lane);
       run.messages.push(ev as Ev<"agent.message">);
       continue;
     }
@@ -582,7 +648,12 @@ export function group(events: SessionEvent[], streaming: boolean | ReadonlySet<s
     if (t === "instruction" && (ev.body as Extract<EventBody, { type: "instruction" }>).approval && runs.get(lane)) continue;
     // Something the team did in this lane closes its block. Another lane's work carries on around it.
     const open = runs.get(lane);
-    if (open) (open.closedTs = ev.ts), (open.closedSeq = ev.seq), (open.closedBy = t), cutShort.set(lane, open);
+    if (open) (open.closedTs = ev.ts), (open.closedSeq = ev.seq), (open.closedBy = t), cutShort.set(lane, open), stoppedTurn.set(lane, open);
+    // A stop after something else closed the turn's block (the runaway guard's note, a message sent mid-run): that block was the
+    // turn stopped, and says so, rather than reading as still at work (Arun, 2026-10-28: "iron everything and ensure we are good").
+    const stopped = t === "run.pause" || t === "run.cancel";
+    const was = !open && stopped ? stoppedTurn.get(lane) : undefined;
+    if (was && !was.ended) (was.closedBy = t), (was.closedTs = ev.ts);
     runs.delete(lane);
     lasts.delete(lane);
     // A loose change set with nothing of its lane's since the one before: the folder as it stands now, in that card's place.
@@ -598,7 +669,17 @@ export function group(events: SessionEvent[], streaming: boolean | ReadonlySet<s
       }
       looseAt.set(lane, items.length);
     } else looseAt.delete(lane);
-    items.push({ kind: "event", ev });
+    const item: Item = { kind: "event", ev };
+    if (stopped) stopNote.set(lane, item);
+    items.push(item);
+  }
+  // A turn stopped before its first message said anything: what it had written goes above the stop's note, where it was cut.
+  for (const [run, note] of above) {
+    const from = items.indexOf(run);
+    const to = items.indexOf(note);
+    if (from <= to || to === -1) continue;
+    items.splice(to, 0, ...items.splice(from, 1));
+    if (note.kind === "event") run.placeBefore = note.ev.seq;
   }
   let n = 0;
   for (const lane of live) {
@@ -734,6 +815,8 @@ export function Activity({
   presence?: PresenceMember[];
 }) {
   const [filter, setFilter] = useState<FeedFilter>("all");
+  // Redrawn as the crew changes: the feed names and draws teammates from it (Teammates.tsx).
+  useTeamVersion();
   // With more than one lane running, the feed is unreadable as one column. Which agent is in view is the page's one
   // choice (agentFocus.ts): the rail, the box, the panels and the keys all read and set the same one. A column of a split
   // keeps to its own agent.
@@ -745,6 +828,8 @@ export function Activity({
   // The header shows All and as many agents as fit (at most SHOWN); the rest wait behind the "+N" button.
   const SHOWN = 6;
   let everyone = [MAIN_LANE, ...state.lanes.map((l) => l.id)];
+  // The team (teammates.ts): its main lane is the room itself, nobody's agent, so only the teammates have tabs.
+  if (state.options.team) everyone = state.lanes.map((l) => l.id);
   // A coding agent pressed in from this page: a tab from that moment, which starts until its runner attaches.
   const startingNow = useStarting(sid);
   const startingAhead = startingNow.filter((s) => !s.lane || !everyone.includes(s.lane));
@@ -790,7 +875,10 @@ export function Activity({
   const inSight = new Set(ranked.slice(0, shownN));
   const shownIds = everyone.filter((id) => inSight.has(id));
   let bar = true;
+  // The team has the sidebar's Team tab to move between teammates, and the header names who is in view: no tabs here.
+  if (state.options.team) bar = false;
   let allLabel = "All agents";
+  if (state.options.team) allLabel = "Crew room";
   const hiddenIds = everyone.filter((id) => !inSight.has(id));
   const pickLane = (id: string) => setLaneFilter(id);
   const ownerOf = (id: string) => {
@@ -821,6 +909,8 @@ export function Activity({
   });
   const widthsKey = cardWidths.join(",");
   const tabsEl = useRef<HTMLDivElement>(null);
+  // Filter by agent is a tab list: only the picked tab is a Tab stop, the arrows move between them (roving.ts).
+  useRovingTabs(tabsEl);
   /** The bar, in the header's slot when it has one, or where it always was. */
   const inHead = (bar: ReactNode) => (headSlot ? createPortal(bar, headSlot) : bar);
   const [tabsOver, setTabsOver] = useState(false);
@@ -842,14 +932,19 @@ export function Activity({
       const all = tabsEl.current?.firstElementChild as HTMLElement | null;
       // The bar, less its padding, the needs-you pill, All agents and the + card.
       const head = bar.classList.contains("in-head");
-      const room = bar.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - (pill ? pill.offsetWidth + 12 : 0) - (all?.offsetWidth ?? 130) - (head ? 4 + 30 + 4 : 6 + 52 + 10);
+      // In the header, the room the header has for the bar (SessionView.tsx useCentredTabs), not the bar's own width: that is
+      // only as wide as the tabs already shown.
+      const free = head ? Number(headSlot?.dataset.room) : NaN;
+      const room = (free > 0 ? free : bar.clientWidth) - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - (pill ? pill.offsetWidth + 12 : 0) - (all?.offsetWidth ?? 130) - (head ? 4 + 30 + 4 : 6 + 52 + 10);
       const n = tabsThatFit(widthsKey.split(",").map(Number), room, head ? 4 : 6, head ? 54 : 72, SHOWN);
       setFit((was) => (was === n ? was : n));
     };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(bar);
-    return () => ro.disconnect();
+    const roomChanged = new MutationObserver(measure);
+    if (headSlot) roomChanged.observe(headSlot, { attributes: true, attributeFilter: ["data-room"] });
+    return () => (ro.disconnect(), roomChanged.disconnect());
   }, [widthsKey, needs.some((a) => hiddenIds.includes(a.lane)), headSlot]);
   const [agentMenu, setAgentMenu] = useState<{ x: number; y: number } | null>(null);
   const [addMenu, setAddMenu] = useState<{ x: number; y: number } | null>(null);
@@ -858,11 +953,11 @@ export function Activity({
   const [askRemove, removeUI] = useConfirm();
   // Which agent the composer is writing to. Filtering the feed to one follows
   // through to the box, since that is almost always what you meant.
-  const [target, setTarget] = useState<string>(pin ?? (state.lead && laneFilter === ALL ? state.lead : MAIN_LANE));
+  const [target, setTarget] = useState<string>(() => pin ?? openingTarget(state, state.lead && laneFilter === ALL ? state.lead : MAIN_LANE));
   // With an agent leading, what a person writes on the overview goes to it: handing out the work is its job.
   const leadNow = state.lead ?? null;
   useEffect(() => {
-    if (!pin && leadNow && laneFilter === ALL) setTarget(leadNow);
+    if (!pin && leadNow && laneFilter === ALL) setTarget(openingTarget(state, leadNow));
   }, [leadNow]); // eslint-disable-line react-hooks/exhaustive-deps
   const [pinning, setPinning] = useState(false);
   // A person choosing an agent themselves outranks the box following the work (follow-target.ts), for a while.
@@ -873,6 +968,8 @@ export function Activity({
   }, []);
   useEffect(() => {
     if (laneFilter !== "all") pick(laneFilter);
+    // Back in a team's room, the box writes to its lead again, not to the teammate whose chat was open (teammates.ts).
+    else if (state.options.team && state.lead) setTarget(state.lead);
   }, [laneFilter, pick]);
   // The box follows the work as it moves: to the agent a handoff went to, the one that asked a question, the one waiting on
   // a yes. Only from what arrives after the room opened, never while words are in the box, and it says when it moves.
@@ -961,6 +1058,7 @@ export function Activity({
   const quiet = useMemo(() => hiddenNotes(events, me.id, !!solo), [events, me.id, solo]);
   // The names of lanes this log has had, for any since taken away (agentNameFor).
   laneNamesFrom(events);
+  learnLanes(events);
   const items = useMemo(() => foldNotes(group(quiet.size ? events.filter((e) => !quiet.has(e.seq)) : events, new Set(streamKey ? streamKey.split(",") : []))), [events, streamKey, quiet]);
   // A run block belongs to the lane that produced it.
   const laneOfItem = (it: FeedItem) => (it.kind === "event" ? it.ev.lane : it.kind === "notes" ? it.evs[0]?.lane : it.lane) ?? MAIN_LANE;
@@ -983,8 +1081,13 @@ export function Activity({
   const news = (e: SessionEvent) => e.actor.id !== me.id && ((e.body.type === "agent.message" && !!e.body.text.trim()) || ((e.body.type === "instruction" || e.body.type === "suggestion" || e.body.type === "chat") && e.actor.kind === "human"));
   const firstUnseen = seenAtOpen.current ? events.find((e) => e.seq > seenAtOpen.current! && e.seq <= lastAtOpen.current && news(e))?.seq : undefined;
   const seqOfItem = (it: FeedItem) => (it.kind === "run" ? it.key : it.kind === "notes" ? it.evs[0]!.seq : it.ev.seq);
+  // A turn that was stopped sits where it was stopped, above the Stop's note, though what it had written was logged just after it.
   const lastOfItem = (it: FeedItem) =>
-    it.kind === "run" ? Math.max(it.key, ...it.messages.map((m) => m.seq), ...it.diffs.map((d) => d.seq), it.ended?.seq ?? 0) : it.kind === "notes" ? it.evs.at(-1)!.seq : it.ev.seq;
+    it.kind === "run" && it.placeBefore !== undefined
+      ? it.placeBefore - 0.5
+      : it.kind === "run" && !it.ended && (it.closedBy === "run.pause" || it.closedBy === "run.cancel") && it.closedSeq !== undefined
+        ? it.closedSeq - 0.5
+        : it.kind === "run" ? Math.max(it.key, ...it.messages.map((m) => m.seq), ...it.diffs.map((d) => d.seq), it.ended?.seq ?? 0) : it.kind === "notes" ? it.evs.at(-1)!.seq : it.ev.seq;
   /** Each agent's latest run, which is drawn at work until it ends or is stopped (a stop that no run end followed kept a
    * "Working · 27m" spinner over the stop's own line; 2026-10-28 QA). */
   const lastRunKeys = new Map<string, number>();
@@ -998,6 +1101,9 @@ export function Activity({
   const ordering = laneFilter === "all" && !pin && state.lanes.length > 0;
   /** Whether a message to an agent goes with the run that takes it up, rather than keeping its own place in the log. */
   let goesWithRun = (_e: SessionEvent) => true;
+  // In a team, what the agents send each other keeps its place: it folds into a line of their talk, and gone with a teammate's
+  // run still under way (which the room doesn't show) it sat under newer messages until that ended (2026-10-27 audit).
+  if (state.options.team) goesWithRun = (e) => !isAgentTalk(e);
   const finishing = ordering
     ? finishingOrder(
         logOrder,
@@ -1006,26 +1112,108 @@ export function Activity({
             ? { kind: "run", lane: it.lane, ...(it.ended ? { ended: it.ended.seq } : {}), live: it.key === lastRunKeys.get(it.lane) && workingLanes.includes(it.lane) }
             : it.kind === "event" && (it.ev.body.type === "instruction" || it.ev.body.type === "suggestion") && goesWithRun(it.ev)
               ? { kind: "ask", lane: it.ev.lane ?? MAIN_LANE, seq: it.ev.seq }
-              : { kind: "other", seq: seqOfItem(it) },
+              : it.kind === "event" && it.ev.body.type === "engine.approval"
+                ? { kind: "after", lane: it.ev.lane ?? MAIN_LANE, seq: it.ev.seq }
+                : { kind: "other", seq: seqOfItem(it) },
         lastOfItem,
         new Set(workingLanes),
       )
     : logOrder;
   const shownOrder = useRef<string[]>([]);
+  // The lead's turns the Team room has shown as its answers, which stay shown (team-room.ts leadAnswers).
+  const leadShown = useRef(new Set<string>());
+  // How each teammate stands in this chat, for its faces and working line, rather than across every room (Teammates.tsx statusIn).
+  // Keyed on how each lane stands, not on laneRuns itself: the live state is changed in place, so a stop never reached the team's
+  // view and the room said "Kit is working" after Stop all (Arun, 2026-10-28: "really iron out bugs and feature problems and gaps").
+  const laneRunsKey = state.options.team ? Object.entries(state.laneRuns).map(([l, r]) => `${l}:${r.status}`).join(",") : "";
+  useEffect(() => void (state.options.team && noteLaneRuns(sid, state.laneRuns)), [sid, laneRunsKey, state.options.team]);
+  useEffect(() => () => forgetLaneRuns(sid), [sid]);
   const feedOrder = following || !ordering ? finishing.map(feedKey) : heldOrder(shownOrder.current, finishing.map(feedKey));
   shownOrder.current = feedOrder;
   const byKey = new Map(finishing.map((it) => [feedKey(it), it] as const));
   let visible = feedOrder.map((k) => byKey.get(k)!);
+  // Who is speaking over an agent's items: in a team its mascot and name already head every message.
   let tags = true;
+  if (state.options.team) tags = false;
   let emptyTitle = filter === "all" ? (replaying ? "Nothing in this recording" : "Nothing here yet") : "Nothing to show";
   let emptyText = filter === "all" ? (replaying ? "Nobody wrote to the agent before this was shared." : "Messages to the agent, its steps and handoffs appear here.") : "Try the All tab.";
+  // A team's room or a teammate's chat, before anything is said in it (Teammates.tsx teamEmpty).
+  if (state.options.team) [emptyTitle, emptyText] = teamEmpty(state.lanes.length, laneFilter === ALL ? null : laneFilter);
   // The queues docked over the box: every agent's, or in a team only the teammate's whose chat is open (the room shows none:
   // one teammate's waiting messages over every chat was the loudest thing on screen).
   let queuesShown = [MAIN_LANE, ...state.lanes.map((l) => l.id)];
   /** Whether the board's tasks show over the box here. */
   let boardHere = true;
+  // In a teammate's own chat only while one of the board's tasks is its own (2026-10-27 audit: the Team tasks pill showed in
+  // every teammate's chat).
+  if (state.options.team && laneFilter !== ALL) boardHere = (state.board?.tasks ?? []).some((t) => t.lane === laneFilter && t.status !== "done" && t.status !== "cancelled");
+  if (state.options.team) queuesShown = laneFilter === ALL ? [] : [laneFilter];
+  // The Team room and a room show each teammate's run as one message, what it is on or what it said last; the work itself is
+  // in its own chat (Arun, 2026-10-27: "the actual stuff runs in the individual agent chats").
+  // Cast, not annotated: where nothing sets it (the public edition) an annotated null narrows to never.
   let teamRun = null as ((it: RunItem) => ReactNode) | null;
   let teamGroup = null as ((it: FeedItem) => ReactNode) | null;
+  // A finished turn's last words take a side thread (team-threads.ts), shown beside the room.
+  // Under a turn still going too, on its latest words, or on the one of its messages a thread already hangs off (Arun, 2026-10-28:
+  // "really iron out bugs and feature problems and gaps"; a teammate at work had no "Reply in thread").
+  const threadOn = (it: RunItem) => { const said = it.messages.filter((m) => m.body.text.trim()); const root = (said.findLast((m) => threadsOf(events).byRoot.has(m.seq)) ?? said.at(-1))?.seq; return root ? <ThreadChip sid={sid} root={root} lane={it.lane} events={events} /> : undefined; };
+  // Its turn under way is the newest block of a lane whose agent is running; one waiting on the person "needs you", and a block cut
+  // short in a turn long since ended is neither (2026-10-27 audit). A usage limit its teammate switched tools on is the switch's line.
+  if (state.options.team && laneFilter === ALL) teamRun = (it) => <TeamRun thread={threadOn(it)} sid={sid} lane={it.lane} active={isLive(it, { lastKey: lastRunKeys.get(it.lane), status: runOf(state, it.lane).status })} doing={statusOf(it.lane)?.line ?? ""} said={it.messages.findLast((m) => m.body.text.trim())?.body.text ?? ""} outcome={it.ended?.body.outcome === "error" && limitHit(it.ended.body.error) ? (switchedAfter(events, it.lane, it.ended.seq) ? "switched" : "limited") : (it.ended?.body.outcome ?? (isWaiting(it, { lastKey: lastRunKeys.get(it.lane), status: runOf(state, it.lane).status }) ? "waiting" : null))} changed={new Set(it.diffs.flatMap((d) => d.body.files.map((f) => f.path))).size} stamp={it.messages[0] ? <Stamp ev={it.messages[0]} /> : null} />;
+  // The team reads as a group chat: tools connecting and lanes being made are left out (Teammates.tsx plumbing).
+  if (state.options.team) visible = visible.filter((it) => !(it.kind === "notes" ? it.evs.every((e) => plumbing(e.body.type)) : it.kind === "event" && plumbing(it.ev.body.type)));
+  // Check-ins with nothing new leave nothing in the chat: neither the ask nor the answer (Teammates.tsx quietCheckIns).
+  if (state.options.team) visible = ((q) => visible.filter((it) => !q.has(it.kind === "run" ? it.key : it.kind === "event" ? it.ev.seq : -1)))(quietCheckIns(events));
+  // One message to several teammates shown once, in the room (Teammates.tsx mergeSends).
+  if (state.options.team && laneFilter === ALL) visible = mergeSends(sid, visible, (it) => (it.kind === "event" ? it.ev : null));
+  // A side thread's replies and answers live in the thread, not the room's main flow (team-threads.ts).
+  if (state.options.team && laneFilter === ALL) visible = ((h) => visible.filter((it) => (it.kind === "run" ? !(it.messages.length > 0 && it.messages.every((m) => h.has(m.seq))) : it.kind === "event" ? !h.has(it.ev.seq) : true)))(threadsOf(events).hidden);
+  // The room shows results, the person's words and what needs them; the agents' talk folds to a line (Teammates.tsx foldTeamTalk).
+  // In the room a turn shows when it answers the person or is the lead's answer; a teammate's turn on work the lead gave it folds
+  // with the talk, its result going back to the lead (OpenBot: "a summary comes back to the lead, the full answer stays in its
+  // chat"). A turn under way is the working line over the box (team-room.ts roomRunKind).
+  if (state.options.team) {
+    const room = laneFilter === ALL;
+    // Whom each teammate's turn answers, from everything it was handed (team-room.ts turnsFor): a turn on the lead's work that is
+    // handed the person's message answers them too.
+    const turns = turnsFor(events);
+    const now = (lane: string) => ({ lastKey: lastRunKeys.get(lane), status: runOf(state, lane).status });
+    const switched = (it: RunItem) => !!it.ended && it.ended.body.outcome === "error" && !!limitHit(it.ended.body.error) && switchedAfter(events, it.lane, it.ended.seq);
+    // The lead's answers (team-room.ts leadAnswers): its last turn before the person next speaks, and each turn that ends a stretch
+    // of its work with something to say. Read over what the room shows: the hidden and the turn under way don't count.
+    const answers = leadAnswers(visible, (it): LeadInfo => {
+      if (it.kind === "event") return isPersonsWord(it.ev) ? { kind: "person" } : teamEventKind(it.ev, room) === "hide" ? { kind: "skip" } : { kind: "other" };
+      if (it.kind !== "run") return { kind: "skip" };
+      if (it.lane === state.lead && it.ended) return { kind: "lead", key: it.key, text: it.messages.findLast((m) => m.body.text.trim())?.body.text ?? "" };
+      return roomRunKind(it, { room, now: now(it.lane), turns, lead: state.lead, leadAnswers: new Set(), switched: switched(it) }) === "hide" ? { kind: "skip" } : { kind: "other" };
+    });
+    // One shown as the lead's answer stays shown while the room is open, whatever comes after it.
+    for (const k of answers) leadShown.current.add(`${sid}:${k}`);
+    for (const k of leadShown.current) if (k.startsWith(`${sid}:`)) answers.add(Number(k.slice(sid.length + 1)));
+    const runKind = (it: RunItem) => roomRunKind(it, { room, now: now(it.lane), turns, lead: state.lead, leadAnswers: answers, switched: switched(it) });
+    const keyOf = (it: FeedItem) => (it.kind === "run" ? it.key : it.kind === "event" ? it.ev.seq : it.evs[0]!.seq);
+    const folded = foldTeamTalk(visible, (it) => (it.kind === "run" ? runKind(it) : it.kind === "event" ? teamEventKind(it.ev, room) : "show"), keyOf);
+    visible = folded.items;
+    // The task board under way stays in view at the room's foot, the work coming in above it, as a session keeps its running
+    // turn last (Arun, 2026-10-27: "have the task board be like the thing that is in view and the other messages go above it").
+    // Once its tasks are all done it goes back to where it was posted.
+    if (room && (state.board?.tasks ?? []).some((t) => t.status !== "done" && t.status !== "cancelled")) {
+      const at = visible.findLastIndex((it) => it.kind === "event" && it.ev.body.type === "board.posted");
+      if (at >= 0 && at < visible.length - 1) visible = [...visible.slice(0, at), ...visible.slice(at + 1), visible[at]!];
+    }
+    const pieceOfItem = (it: FeedItem): TalkPiece => (it.kind === "run" ? { who: [{ lane: it.lane, name: agentNameFor(state, it.lane) }], text: it.messages.findLast((m) => m.body.text.trim())?.body.text ?? "", turn: true } : it.kind === "event" ? pieceOf(it.ev) : { who: [], text: "" });
+    teamGroup = (it) => {
+      const g = folded.groups.get(keyOf(it));
+      if (!g) return null;
+      return (
+        <TalkGroup pieces={g.map(pieceOfItem)}>
+          {g.map((x) => (
+            <div key={keyOf(x)}>{x.kind === "run" ? (teamRun?.(x) ?? <RunBlock item={x} ctx={ctx} folded active={false} latest={false} typing={null} />) : x.kind === "event" ? <EventItem ev={x.ev} ctx={ctx} /> : null}</div>
+          ))}
+        </TalkGroup>
+      );
+    };
+  }
   // A message to an agent with that agent's reply right under it: the reply names the agent, so a tag over the message too
   // said it twice.
   const answeredBelow = (i: number) => {
@@ -1036,6 +1224,8 @@ export function Activity({
   // One agent's catch-up takes the place of the session's line: two "new since" lines in one feed would disagree.
   const agentUnreadAt = catchUp.current && catchUp.current.lane === laneFilter ? catchUpIndex(visible.map((it) => ({ lane: laneOfItem(it), last: lastOfItem(it) })), catchUp.current.lane, catchUp.current.seq) : -1;
   let breaks: (string | null)[] = [];
+  // A long team chat's days, each with a divider (team-status.ts dayBreaks; Arun, 2026-10-28).
+  if (state.options.team) breaks = ((at) => dayBreaks(visible.map((it) => at.get(seqOfItem(it)))))(new Map(events.map((e) => [e.seq, e.ts] as const)));
   const unreadAt = agentUnreadAt !== -1 ? agentUnreadAt : firstUnseen === undefined ? -1 : visible.findIndex((it) => seqOfItem(it) >= firstUnseen);
   const lastCommitSeq = events.findLast((e) => e.body.type === "folder.committed" && !e.body.error)?.seq ?? 0;
   const lastApplySeq = events.findLast((e) => e.body.type === "folder.applied")?.seq ?? 0;
@@ -1158,6 +1348,20 @@ export function Activity({
     window.addEventListener("friday:reconnect-lane", on);
     return () => window.removeEventListener("friday:reconnect-lane", on);
   }, [pin]);
+  // Asked from outside the box (the Work rail's "Carry on"): sent the way the box sends it, my agent started first if it isn't
+  // running here, then switched to what the message calls for. Sent bare, it sat "Queued" behind an agent nobody started while
+  // everything said Ready (QA, 2026-10-28; Arun: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+  useEffect(() => {
+    if (pin) return;
+    const on = (e: Event) => {
+      const d = (e as CustomEvent<AskLane>).detail;
+      if (!d?.text) return;
+      d.handled = true;
+      void askLane(ctxRef.current, d.lane, d.text).then(d.reply);
+    };
+    window.addEventListener("friday:ask-lane", on);
+    return () => window.removeEventListener("friday:ask-lane", on);
+  }, [pin]);
 
   // Opening a session brings its coding tools back: an agent of mine that is offline is started again on its folder, if that
   // folder is on this computer, without waiting for a message to be sent first. Once per offline spell (its sinceSeq), quietly:
@@ -1261,14 +1465,16 @@ export function Activity({
       <div className={`feed-toolbar${headSlot ? " in-head" : ""}`}>
         {(
           <div className="lane-tabs-wrap">
-          <div className={`lane-tabs${tabsOver ? " over" : ""}`} ref={tabsEl} role="tablist" aria-label="Filter by agent">
+          <div className={`lane-tabs${tabsOver ? " over" : ""}`} ref={tabsEl} role="tablist" aria-label="Filter by agent" onKeyDown={tabListKeys}>
             {[...([["all", allLabel], ...shownIds.map((id) => [id, laneLabel(state, id)])] as [string, string][]).map(([id, name]) => {
               const look = id === "all" ? null : agentLook(state, id, 13);
               const st = id === "all" ? undefined : statusOf(id);
               const behind = id === "all" || laneFilter === id ? 0 : (unread[id] ?? 0);
               const key = everyone.indexOf(id) + 1;
               // In the header a tab shows only its name, so its tip leads with the name and then where it stands.
-              const said = `${headSlot && id !== "all" ? `${ownerOf(id).name}${st?.line ? ` · ${st.line}` : ""}` : (st?.line ?? name)}${st?.tokens ? ` · ${shortTokens(st.tokens)} tokens used` : ""}`;
+              let tokens = st?.tokens ? ` · ${shortTokens(st.tokens)} tokens used` : "";
+              if (state.options.work) tokens = ""; // no token counts in Work, the tab's tip included (Arun, 2026-10-28: "iron everything and ensure we are good")
+              const said = `${headSlot && id !== "all" ? `${ownerOf(id).name}${st?.line ? ` · ${st.line}` : ""}` : (st?.line ?? name)}${tokens}`;
               const tip = id === "all" ? `Every agent's work · ${agentKey(0)}` : `${said}${key && key < 10 ? ` · ${agentKey(key)}` : ""}`;
               const coming = id === "all" ? undefined : startingOn(startingNow, state, id);
               const who = id === "all" ? null : ownerOf(id);
@@ -1315,23 +1521,25 @@ export function Activity({
             }),
             // One list with the tabs above, so this tab and its lane's are one element.
             ...startingAhead.map((s) => <StartingLaneTab key={`starting-${s.tool}`} tool={s.tool} name={ENGINE_NAMES[s.tool]} />)]}
-            {/* Another agent, one press from the agents already here. */}
-            {onConnect && me.role !== "viewer" && (
-              <button
-                type="button"
-                className="lane-add"
-                aria-label="Add an agent"
-                title="Add an agent"
-                aria-expanded={!!addMenu}
-                onClick={(e) => {
-                  const r = e.currentTarget.getBoundingClientRect();
-                  setAddMenu(addMenu ? null : { x: r.left, y: r.bottom + 4 });
-                }}
-              >
-                <Icon name="plus" size={14} />
-              </button>
-            )}
           </div>
+          {/* Another agent, one press from the agents already here. Beside the tabs rather than the last of them: in the list it
+              was the part a narrow window cut off and faded under "More agents", and a button is no tab of a tab list (Arun,
+              2026-10-28: "iron everything and ensure we are good… any logic errors and fixes"). */}
+          {onConnect && me.role !== "viewer" && (
+            <button
+              type="button"
+              className="lane-add"
+              aria-label="Add an agent"
+              title="Add an agent"
+              aria-expanded={!!addMenu}
+              onClick={(e) => {
+                const r = e.currentTarget.getBoundingClientRect();
+                setAddMenu(addMenu ? null : { x: r.left, y: r.bottom + 4 });
+              }}
+            >
+              <Icon name="plus" size={14} />
+            </button>
+          )}
           {hiddenIds.length > 0 && (
             <button type="button" className="lane-all" title={`${hiddenIds.length} more agent${hiddenIds.length === 1 ? "" : "s"}`} aria-label="More agents" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setAgentMenu(agentMenu ? null : { x: r.right - 240, y: r.bottom + 4 }); }}>
               <Icon name="list" size={14} />
@@ -1477,6 +1685,10 @@ export function Activity({
       {/* A fresh view for each agent and each filter: it opens on the latest message, rather than gliding down to it. */}
       <Conversation key={`${laneFilter}|${filter}`} className="min-h-0 flex-1" initial="instant" onFollow={setFollowing} {...(agentUnreadAt !== -1 ? { openAt: "[data-catchup]" } : {})}>
         <ConversationContent className="mx-auto w-full max-w-[var(--read-w,860px)] gap-5 px-6 py-5">
+          {state.options.team && laneFilter !== ALL && <TeammateHeader lane={laneFilter} identity={ctx.identity} notify={ctx.notify} {...(state.engines[laneFilter]?.branch ? { branch: state.engines[laneFilter]!.branch! } : {})} />}
+          {state.options.team && <ThreadHost sid={sid} events={events} send={(c) => send(c as never)} />}
+          {state.options.team && laneFilter === ALL && <RoomIntro sid={sid} />}
+          {state.options.team && laneFilter === ALL && <RoomsNow sid={sid} identity={ctx.identity} empty={visible.length === 0} onOpen={(r) => dispatchEvent(new CustomEvent("friday:open-session", { detail: { sid: r.sid, invite: r.invite } }))} />}
           {visible.length === 0 ? (
             <ConversationEmptyState
               icon={<SparklesIcon className="size-6" />}
@@ -1493,7 +1705,8 @@ export function Activity({
               const seq = it.kind === "run" ? it.key : it.kind === "notes" ? it.evs[0]!.seq : it.ev.seq;
               return (
                 // data-seq anchors the catch-up panel's "jump to where you left off".
-                <div key={feedKey(it)} data-seq={seq} className={`${lane ? "feed-item agent-lane" : "feed-item"}${isSetAside(rewinds, seq, laneId) ? " set-aside" : ""}`} style={lane ? ({ "--tint": agentLook(state, lane.id).tint } as React.CSSProperties) : undefined}>
+                <div key={feedKey(it)} data-seq={seq} data-lane={laneId} className={`${lane ? "feed-item agent-lane" : "feed-item"}${isSetAside(rewinds, seq, laneId) ? " set-aside" : ""}`} style={lane ? ({ "--tint": agentLook(state, lane.id).tint } as React.CSSProperties) : undefined}>
+                  {breaks[i] && <div className="tm-daybreak" role="separator">{breaks[i]}</div>}
                   {/* Where the new part starts: what arrived after this person last looked, as a line that stays where it was when they opened the room. */}
                   {i === unreadAt && <div className="feed-unread" role="separator" aria-label="New since you looked" {...(i === agentUnreadAt ? { "data-catchup": "" } : {})}><span>New since you looked</span></div>}
                   {/* Who is speaking, once per stretch: the name over the first of an agent's items, not over every one. */}
@@ -1506,7 +1719,7 @@ export function Activity({
                     </span>
                   )}
                   {it.kind === "run" ? (
-                    teamGroup?.(it) ?? teamRun?.(it) ?? <RunBlock item={it} ctx={ctx} folded={!!it.ended && !(recentRunKeys.get(it.lane) ?? []).includes(it.key)} latest={it.key === lastRunKeys.get(it.lane)} active={!it.ended && it.key === lastRunKeys.get(it.lane) && it.closedBy !== "run.pause" && it.closedBy !== "run.cancel"} typing={it.streaming ? typingOf(streams[it.lane]) : null} />
+                    teamGroup?.(it) ?? teamRun?.(it) ?? <RunBlock item={it} ctx={ctx} folded={!!it.ended && !(recentRunKeys.get(it.lane) ?? []).includes(it.key)} latest={it.key === lastRunKeys.get(it.lane)} active={!it.ended && it.key === lastRunKeys.get(it.lane) && it.closedBy !== "run.pause" && it.closedBy !== "run.cancel" && runOf(state, it.lane).status !== "idle"} typing={it.streaming ? typingOf(streams[it.lane]) : null} />
                   ) : it.kind === "notes" ? (
                     <NotesLine evs={it.evs} ctx={ctx} />
                   ) : (
@@ -1567,6 +1780,8 @@ export function Activity({
       {!replaying && (
         <div className="composer-dock">
           <RaceCard state={state} me={me} events={events} identity={identity} sid={sid} invite={invite} send={send} />
+          {/* Away or paused, said over every team chat's box with the one press that ends it (TeamControls.tsx). */}
+          {state.options.team && <TeamBanner identity={identity} notify={ctx.notify} />}
           {/* One panel per agent that has something waiting: each has its own queue and its own driver. A column of a split
               shows its own agent's only: three columns each repeating every agent's queue and questions buried the chats. */}
           {queuesShown.filter((id) => !pin || id === pin).map((id) => (
@@ -1589,6 +1804,7 @@ export function Activity({
               !pin && events.length > 3 ? (
               <MenuButton
                 text="Jump"
+                {...(state.options.work ? { text: "Go to…" } : {})} // Work's words for it (Arun, 2026-10-28: "iron everything… focusing on UI and UX").
                 caret="chevronsUpDown"
                 label="Jump to a place in this session"
                 above
@@ -1596,7 +1812,8 @@ export function Activity({
                 items={() => {
                   // Each place says what is waiting there and how long ago, not just its name: the files, the command that
                   // failed, the words of your message. Only the ones this session has; then its start and its latest.
-                  const places = jumpPlaces(events, me.id);
+                  let places = jumpPlaces(events, me.id);
+                  if (state.options.work) places = jumpPlaces(events, me.id, true); // Work's words for them
                   const ago = (ts: number) => (relTime(ts) === "now" ? "just now" : `${relTime(ts)} ago`);
                   const start = events.find((e) => e.body.type === "instruction")?.seq;
                   const end = events.at(-1)?.seq;
@@ -1611,7 +1828,12 @@ export function Activity({
               ) : null;
             // The agent the box is aimed at, with its own model: pick Codex and the ring is Codex's.
             const eng = state.engines[target];
-            const gauge = <ContextGauge key={`${target}:${eng?.tool ?? ""}`} solo={!!solo} events={events} lane={target} friday={!eng?.tool} model={eng?.tool ? (eng.model ?? "") : (state.options.model ?? "")} identity={identity} {...(eng?.tool ? { tool: eng.tool } : {})} {...(eng?.account ? { account: eng.account.id } : {})} />;
+            let gauge: ReactNode = <ContextGauge key={`${target}:${eng?.tool ?? ""}`} solo={!!solo} events={events} lane={target} friday={!eng?.tool} model={eng?.tool ? (eng.model ?? "") : (state.options.model ?? "")} identity={identity} {...(eng?.tool ? { tool: eng.tool } : {})} {...(eng?.account ? { account: eng.account.id } : {})} />;
+            // A team's chats have no coding gauge or jump menu under the box: they are a conversation (teammates.ts).
+            if (state.options.team) return null;
+            // Nor Work's: a context ring is coding chrome, and hidden it still carried its "Context: not reported yet" (Arun,
+            // 2026-10-28: "iron everything and ensure we are good").
+            if (state.options.work) gauge = null;
             if (under) return createPortal(<>{jumpMenu}{gauge}</>, under);
             return (
               <div className="composer-under">
@@ -1629,14 +1851,17 @@ export function Activity({
 
 // ── small pieces ──────────────────────────────────────────────────────
 
-/** "3 session notes": the housekeeping between messages. Open to begin with, so nothing is hidden; a click folds it away. */
+/**
+ * "3 session notes ›": the housekeeping between messages, as one quiet line that opens to them (DIRECTION.md §5 and §9.6: system
+ * events are one collapsible line). Folded to begin with: the line says how many, and a press shows each.
+ */
 const NotesLine = memo(function NotesLine({ evs, ctx }: { evs: SessionEvent[]; ctx: Ctx }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   return (
     <div className="notes-line">
       <button type="button" className="notes-toggle" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-        <ChevronRightIcon className={`size-3.5 ${open ? "rotate-90" : ""}`} />
         {evs.length} session notes
+        <ChevronRightIcon className={`size-3.5 ${open ? "rotate-90" : ""}`} />
       </button>
       {open && (
         <div className="notes-list">
@@ -1703,12 +1928,14 @@ async function reconnectLane(ctx: Ctx, lane: string, quiet = false): Promise<voi
   if (!e || reconnecting.has(key)) return;
   reconnecting.add(key);
   try {
+    // A teammate (teammates.ts) is brought back by its own record: its kept conversation, its folders, its account.
+    if (ctx.state.options.team) return void (await reconnectTeammate(ctx.identity, ctx.sid, lane, quiet));
     await hostApi(ctx.identity, "/api/runner/start", {
       method: "POST",
       // Brought back by itself (quiet): only if this computer doesn't already have it on the way back. Every window showing the
       // session asked, and each start took the lane from the one before mid-turn (Edge Defense, 2026-10-25: Codex attached
       // three times in six seconds, its turn stopped each time).
-      body: JSON.stringify({ sid: ctx.sid, invite: ctx.invite, ...(e.tool ? { tool: e.tool } : {}), cwd: e.cwd, mode: e.mode, ...(e.handMode ? { handMode: e.handMode } : {}), lane, ...(e.model ? { model: e.model } : {}), ...(e.account ? { account: e.account.id } : {}), ...(e.copyOf ? { copyOf: e.copyOf } : {}), ...(e.shared ? { share: true } : {}), ...(quiet ? { ifOffline: true } : {}) }),
+      body: JSON.stringify({ sid: ctx.sid, invite: ctx.invite, ...(e.tool ? { tool: e.tool } : {}), cwd: e.cwd, mode: modeOf(e), ...(e.handMode ? { handMode: e.handMode } : {}), lane, ...(e.model ? { model: e.model } : {}), ...(e.account ? { account: e.account.id } : {}), ...(e.copyOf ? { copyOf: e.copyOf } : {}), ...(e.shared ? { share: true } : {}), ...(quiet ? { ifOffline: true } : {}) }),
     });
   } catch (err) {
     if (!quiet) ctx.notify(`Couldn't reconnect: ${(err as Error).message}`);
@@ -1717,20 +1944,45 @@ async function reconnectLane(ctx: Ctx, lane: string, quiet = false): Promise<voi
   }
 }
 
+/** A message for an agent from outside the composer, answered when it has gone (or hasn't): see "friday:ask-lane". */
+export interface AskLane {
+  lane: string;
+  text: string;
+  reply: (r: { ok: boolean; error?: string }) => void;
+  /** Set by the session that took it; nobody did, and the caller sends it itself. */
+  handled?: boolean;
+}
+
+/**
+ * Send to an agent as the composer does: my own agent that isn't running here is started first (offline, or, on this computer,
+ * said to be attached with no runner behind it: `ifOffline` leaves one that is really there alone), then switched to what the
+ * words call for, then given them.
+ */
+async function askLane(ctx: Ctx, lane: string, text: string): Promise<{ ok: boolean; error?: string }> {
+  const e = ctx.state.engines[lane];
+  if (e?.tool && e.hostId === ctx.me.id && e.cwd && !ctx.replaying && runOf(ctx.state, lane).status !== "running" && (!e.online || isLocal())) {
+    await reconnectLane(ctx, lane, e.online);
+  }
+  await smartSwitch(ctx, lane, reachFor(ctx.state, lane, text), true);
+  return ctx.send({ type: "instruct", text, ...(lane !== MAIN_LANE ? { lane } : {}) });
+}
+
 /**
  * Plan, Manual or Auto, picked for the work before the agent gets it (smartReach.ts). A restart on the same folder and lane,
  * as choosing a mode by hand is; the pill shows where it is. Nothing when it isn't on this computer, is mid-run (a restart
  * would cut the step short) or already fits; a switch that fails leaves it as it was and says so.
  */
 async function smartSwitch(ctx: Ctx, lane: string, want: Reach | null, settled = false): Promise<void> {
+  // A teammate always runs in full, and a restart in another mode would lose its kept conversation (teammates.ts).
+  if (ctx.state.options.team) return;
   const e = ctx.state.engines[lane];
   const key = `${ctx.sid}|${lane}`;
   if (!e?.online || e.hostId !== ctx.me.id || reconnecting.has(key)) return;
   if (runOf(ctx.state, lane).status === "running") return;
   const to = settled ? want : settle(ctx.state, lane, want);
-  if (!to || to.mode === e.mode) return;
+  if (!to || to.mode === modeOf(e)) return;
   // Said to be automatic, with the mode picked by hand: only my own turn runs in it, and it goes back when that run ends.
-  const hand = e.handMode ?? e.mode;
+  const hand = e.handMode ?? modeOf(e);
   reconnecting.add(key);
   try {
     await hostApi(ctx.identity, "/api/runner/start", {
@@ -2189,7 +2441,9 @@ function HumanMessage({ ev, ctx }: { ev: Ev<"instruction"> | Ev<"suggestion">; c
   const [whole, setWhole] = useState(false);
   const long = isLongMessage(b.text);
   let receipt = true;
+  if (state.options.team) receipt = false;
   let sentTo = "";
+  sentTo = useSentTo(ctx.sid, !!state.options.team, ev.lane ?? MAIN_LANE, ev.seq);
   // Whom a message still waiting for its turn waits for, where it is shown in the conversation rather than the queue: null, it is
   // in the queue over the box instead. Cast, not annotated: where nothing sets it (the public edition) an annotated null narrows
   // to never.
@@ -2198,13 +2452,26 @@ function HumanMessage({ ev, ctx }: { ev: Ev<"instruction"> | Ev<"suggestion">; c
   let copySeen = false;
   /** Why it waits, when the agent isn't only busy (its tool offline, out of usage). */
   let waitWhy = null as string | null;
+  // In the Team room, which shows no queues, a message waiting for a busy teammate stays where it was said, saying whom it waits
+  // for: each copy of a message to several is queued or picked up on its own lane, and a lane since taken out of the room
+  // counts for nothing (Teammates.tsx useSendCopies; 2026-10-27 audit).
+  const copies = useSendCopies(ctx.sid, !!state.options.team, ev.lane ?? MAIN_LANE, ev.seq);
+  if (copies) (queuedNames = queuedFor(copies, (l) => stillPending(state, l, delivered), (l) => agentNameFor(state, l))), (copySeen = copies.some((c) => delivered.has(c.seq)));
+  waitWhy = queuedNames?.length ? queueWhyAll((copies ?? []).filter((c) => stillPending(state, c.lane, delivered).includes(c.seq)).map((c) => c.lane)) : state.options.team ? queueWhy(ev.lane ?? MAIN_LANE) : null;
+  // A check-in asked of a teammate (teammates.ts) is a line, not a message from the person.
+  if (state.options.team && b.type === "instruction" && isCheckIn(b.text)) return <CheckInLine text={b.text} lane={ev.lane ?? MAIN_LANE} stamp={<Stamp ev={ev} />} />;
+  if (state.options.team && b.type === "instruction" && b.text.startsWith("[Friday] ")) return <FridayLine text={b.text} lane={ev.lane ?? MAIN_LANE} stamp={<Stamp ev={ev} />} />;
   let shown: ReactNode = b.text;
+  // In a team, each @Name in what was sent stays its teammate's pill (Arun, 2026-10-27: "make sure the tag is still there").
+  if (state.options.team) shown = <MentionText sid={ctx.sid} text={b.text} />;
   if (b.type === "instruction" && b.handoff) {
     const h = b.handoff;
     const status = pendingFor(state, ev.lane ?? MAIN_LANE).includes(ev.seq) ? "queued" : delivered.has(ev.seq) ? `${h.toName} picked this up` : "";
+    // Between teammates, one centred line that opens (Arun, 2026-10-29: "so clean and beautiful…"; DIRECTION.md §9.1).
+    if (state.options.team) return <HandoffLine from={h.fromName} to={h.toName} fromLane={laneIdByName(state, h.fromName)} toLane={laneIdByName(state, h.toName)} task={handoffTaskText(b.text)} reason={h.reason} carried={h.carried} status={status === "queued" ? "Waiting for its turn" : status} stamp={<Stamp ev={ev} />} />;
     return (
       <div className="rsp-ho-wrap">
-        <HandoffCard from={h.fromName} to={h.toName} fromLook={agentLook(state, laneIdByName(state, h.fromName))} toLook={agentLook(state, laneIdByName(state, h.toName))} reason={h.reason} carried={h.carried} task={b.text} by={ev.actor.kind === "human" ? (ev.actor.id === me.id ? "you" : ev.actor.name) : undefined} />
+        <HandoffCard from={h.fromName} to={h.toName} fromLook={agentLook(state, laneIdByName(state, h.fromName))} toLook={agentLook(state, laneIdByName(state, h.toName))} reason={h.reason} carried={h.carried} task={handoffTaskText(b.text)} by={ev.actor.kind === "human" ? (ev.actor.id === me.id ? "you" : ev.actor.name) : undefined} />
         <div className="rsp-ho-meta">
           <span>handoff</span>
           {status && <span>{status}</span>}
@@ -2217,6 +2484,8 @@ function HumanMessage({ ev, ctx }: { ev: Ev<"instruction"> | Ev<"suggestion">; c
   const isSuggestion = b.type === "suggestion";
   /** Whom it was said to, over it. */
   let toWhom = "to agent";
+  // In a team, by name: "You to agent" over a message to Kit (2026-10-27 audit).
+  if (state.options.team) toWhom = `to ${sentTo || agentNameFor(state, ev.lane ?? MAIN_LANE)}`;
   const atts = b.attachments ?? [];
   // Whose lane this was said to: its driver, its queue. The main lane's are only the main lane's.
   const said = ev.lane ?? MAIN_LANE;
@@ -2226,8 +2495,24 @@ function HumanMessage({ ev, ctx }: { ev: Ev<"instruction"> | Ev<"suggestion">; c
   const laneDriver = driverOf(state, said);
   const driving = laneDriver?.id === me.id;
   let footer: ReactNode = null;
-  const fork = () => void forkSession(ctx.sid, ctx.invite, ev.seq).then((e) => e && ctx.notify(e));
+  // Asked first, and the fork opened once made: one press beside Copy started a session with every agent in it, said nothing and
+  // stayed here (Arun, 2026-10-28: "iron everything and ensure we are good… any logic errors and fixes").
+  const tools = [...new Set(Object.values(state.engines).flatMap((e) => (e.tool ? [ENGINE_NAMES[e.tool]] : [])))];
+  const fork = () =>
+    ask({
+      title: "Fork a new session from here?",
+      body: `A new session of your own starts with this conversation up to this message${tools.length ? `, and ${tools.join(" and ")} ${tools.length === 1 ? "joins" : "join"} it in the same folder` : ""}. This one stays as it is.`,
+      action: "Fork",
+      // Nothing is lost by a fork: a fork's mark and an ordinary button, not a trash can and a red one (Arun, 2026-10-28: "iron
+      // everything and ensure we are good").
+      danger: false,
+      icon: "gitFork",
+      onConfirm: () => void forkSession(ctx.sid, ctx.invite, ev.seq).then((e) => e && ctx.notify(e)),
+    });
   let forks = true;
+  // A team's message is never the start of a new coding session: no Fork on it (Arun, 2026-10-28: the critique's "no 'Fork a new
+  // session' on team messages").
+  if (state.options.team) forks = false;
   can.current = () => ({ ...(forks ? { fork } : {}), again: () => prefillComposer(b.text), ...(mayRewind ? { rewind } : {}) });
 
   // Going back to before this message: its files, and the agent's memory of what followed. Only where there is a checkpoint to go to,
@@ -2274,6 +2559,8 @@ function HumanMessage({ ev, ctx }: { ev: Ev<"instruction"> | Ev<"suggestion">; c
         {status === "queued" && (
           <>
             <span className="pulse-dot" /> {queuedText ?? (state.engines[said]?.tool && !state.engines[said]!.online ? `Queued until ${ENGINE_NAMES[state.engines[said]!.tool!]} reconnects` : "Queued for the agent's next step")}
+            {/* Still waiting, in a team chat: change it or take it back before it is read (Arun, 2026-10-28: the critique's "queued messages get Edit and Cancel"). */}
+            {state.options.team && mine && <QueuedActions seqs={(copies ?? [{ lane: said, seq: ev.seq }]).filter((c) => stillPending(state, c.lane, delivered).includes(c.seq))} send={send} onEdit={() => prefillComposer(b.text)} />}
           </>
         )}
         {status === "seen" && receipt && (
@@ -2320,6 +2607,7 @@ function HumanMessage({ ev, ctx }: { ev: Ev<"instruction"> | Ev<"suggestion">; c
         )}
         <Stamp ev={ev} />
       </div>
+      {sentTo && <div className={cn("tm-sent-to", mine && "mine")}>To {sentTo}</div>}
       <AttachmentList atts={atts} ctx={ctx} align={mine ? "end" : "start"} />
       {b.text && (
         <MessageContent
@@ -2639,6 +2927,8 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   const lane = item.lane;
   const last = msgs.at(-1);
   const finalMsg = last && !last.body.toolCalls.length && last.body.text && !typing ? last : null;
+  // The tool's own "Not logged in · Please run /login" on a run that ended signed out: SignedOutNote says it once, plainly.
+  const loginLine = item.ended?.body.outcome === "error" && signedOut(item.ended.body.error) && finalMsg && /not logged in|please run \/login/i.test(finalMsg.body.text) ? finalMsg : null;
   // Second opinion (Asides): another model asked about this turn, from the answer's strip; the form opens under the answer.
   const [opinion, setOpinion] = useState(false);
   // Who wrote each line of the change by hand, read from the lane's log once the run has ended (attribution.ts).
@@ -2653,8 +2943,12 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   const via = reviewVia(ctx.state, ctx.me, lane);
   const tests = item.ended ? testsIn(msgs.flatMap((m) => m.body.toolCalls), (id) => (ctx.results.has(id) ? commandFailed(ctx.results.get(id)!.body) : null)) : null;
 
+  // A teammate speaks as its face (Teammates.tsx), not its tool's mark.
   let mate: React.ReactNode = null;
   let look = null as { className: string; style: React.CSSProperties } | null;
+  if (ctx.state.options.team) mate = teammateMark(lane, 18)?.mark ?? null;
+  // In a team a reply reads as a group chat (Teammates.tsx): its mascot, moving while it works, its name in its colour, bubbles.
+  if (ctx.state.options.team) [mate, look] = teamReply(lane, active, mate);
   // An older run: the facts that decide whether to open it, on one line. Before the steps, the receipt and the hand-off are
   // worked out, since none of them are shown: a long session is mostly folded runs.
   if (folded && !unfolded) {
@@ -2684,6 +2978,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   const explain = item.unchanged && explained.length ? ["This run changed nothing; these are the changes still waiting from earlier.", ...explained] : explained;
   const verdict =
     item.ended &&
+    !ctx.state.options.work && // A Work session has no tests to have run: "Done · unverified" said nothing (Arun, 2026-10-26).
     !active
       ? doneVerdict(changed.length, tests?.status ?? null)
       : null;
@@ -2722,7 +3017,9 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
     const t = tasks.find((x) => !claimed.has(x.key) && x.id === id) ?? tasks.find((x) => !claimed.has(x.key) && x.description === said);
     if (t) claimed.add(t.key);
     const result = ctx.results.get(id);
-    const type = t?.agentType ?? (typeof args.subagent_type === "string" ? args.subagent_type : undefined);
+    let type = t?.agentType ?? (typeof args.subagent_type === "string" ? args.subagent_type : undefined);
+    // Work says what a subagent was sent to do, not its tool's name for its kind ("Explore", "code-reviewer").
+    if (ctx.state.options.work) type = undefined;
     return {
       key: t?.key ?? id,
       description: t?.description || said || "Subagent",
@@ -2744,7 +3041,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   msgs.forEach((m, i) => {
     const b = m.body;
     const thought = reasoningText(b.reasoning);
-    const note = b.text && m !== finalMsg ? b.text : "";
+    const note = b.text && m !== finalMsg && m !== loginLine ? b.text : "";
     if (thought) {
       if (!work) {
         work = { kind: "work", id: `${m.seq}-work`, thought: "", secs: 0, steps: [] };
@@ -2804,7 +3101,10 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
     blocks.push({
       kind: "subs",
       key: `${item.key}-subs-rest`,
-      rows: unclaimed.map((t) => subagentRowOf(t)),
+      rows: unclaimed.map((t) => subagentRowOf(t)).map((r) => {
+        if (ctx.state.options.work) return { ...r, agentType: undefined };
+        return r;
+      }),
     });
 
   const ended = item.ended?.body;
@@ -2812,7 +3112,9 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   // Closed by something other than a pause (control handed over, a message queued, a permission card), the run went on in the
   // next block: calling this one "paused" said the agent had stopped while it was still working.
   // A turn that ended on a usage limit ran out of usage, said as the sidebar says it, not "stopped" (2026-10-27 audit).
-  const status = active ? "" : ended?.outcome === "error" ? (limitHit(ended.error) ? "ran out of usage" : "stopped") : ended?.outcome === "waiting" ? "waiting on a person" : item.ended ? "" : last?.body.interrupted ? "interrupted" : item.closedBy && item.closedBy !== "run.pause" ? "" : "stopped";
+  // Nor one that wasn't signed in: that is the computer's to fix, not the work stopping on an error (Arun, 2026-10-28: "iron
+  // everything and ensure we are good"); both are amber, as out of usage is everywhere else, never red.
+  const status = active ? "" : ended?.outcome === "error" ? (limitHit(ended.error) ? "ran out of usage" : signedOut(ended.error) ? "not signed in" : "stopped") : ended?.outcome === "waiting" ? "waiting on a person" : item.ended ? "" : last?.body.interrupted && item.closedBy !== "run.pause" && item.closedBy !== "run.cancel" && item.placeBefore === undefined ? "interrupted" : item.closedBy && item.closedBy !== "run.pause" ? "" : "stopped";
   // Anyone who could write to another agent can hand this one's work to it.
   const others = [MAIN_LANE, ...ctx.state.lanes.map((l) => l.id)].filter((id) => id !== lane && reviewVia(ctx.state, ctx.me, id) === "instruct");
   const carried = [
@@ -2826,8 +3128,11 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   // Out of usage: when it can carry on here, and who else could take it meanwhile (limit-reset.ts). Only the latest run's: an
   // older one's limit has long since been dealt with.
   const hit = ended?.outcome === "error" ? limitHit(ended.error) : null;
+  // Not signed in on its computer: one plain line and a way to sign in (SignedOutNote), not the tool's own words and then the runner's.
+  const out = ended?.outcome === "error" && !hit && signedOut(ended.error);
   // On another tool already, carried on (a teammate on its backup): no choice of what to do about the limit is left to make.
   let onBackup = false;
+  onBackup = !!ctx.state.options.team && !!mateOn(lane)?.switched;
   const limit = latest ? hit : null;
   // What the run left, and so who the work is for.
   const signals: Signals = { changed: changed.map((f) => f.path), tests: tests ? tests.status : null, failing: stillFailing.length, ...(limit ? { limited: true } : {}) };
@@ -2879,7 +3184,8 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   // row said "Joins on this code and takes it from here").
   const roomOf = (t: EngineTool) => {
     const f = fullest(t);
-    return f === null ? "Limits not reported" : f >= 100 ? "Out of usage for now" : `${Math.round(100 - f)}% of its limits left`;
+    // Not known: nothing, rather than "Limits not reported" under every row alike (QA, 2026-10-28).
+    return f === null ? "" : f >= 100 ? "Out of usage for now" : `${Math.round(100 - f)}% of its limits left`;
   };
   const laneTool = ctx.state.engines[lane]?.tool;
   const nearly = !!laneTool && latest && (fullest(laneTool) ?? 0) >= 90;
@@ -2945,11 +3251,15 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
           },
         }
       : undefined;
+  let onChanged = ctx.onOpen ? () => ctx.onOpen!("files") : undefined;
+  // In Work, what changed is a piece, read in the reader: the one it changed opens there; several are only said. "1 file changed"
+  // opened the Browser on nothing (Arun, 2026-10-28: "iron everything and ensure we are good").
+  if (ctx.state.options.work) onChanged = changed.length === 1 ? () => void dispatchEvent(new CustomEvent("friday:open-file", { detail: { path: changed[0]!.path }, cancelable: true })) : undefined;
   const runLog = blocks.some((x) => x.kind === "work") ? (
     <RunMeta
       files={changed}
       live={active}
-      onFile={ctx.onOpen ? () => ctx.onOpen!("files") : undefined}
+      onFile={onChanged}
       {...(item.startedTs ?? msgs[0]?.ts ? { startedAt: item.startedTs ?? msgs[0]!.ts } : {})}
       {...(item.ended ? { endedAt: item.ended.ts } : item.closedTs ? { endedAt: item.closedTs } : {})}
       tokens={tokensUsed(ctx.events, lane, item.key, item.ended?.seq ?? (active ? Infinity : (msgs.at(-1)?.seq ?? item.key)))}
@@ -3022,15 +3332,22 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   return (
     <div className={`rsp ${landed ? "landed" : ""}${look ? ` ${look.className}` : ""}`} style={look?.style}>
       {confirmUI}
+      {/* The tool's mark beside a reply is identity only, with no ring: the header's agent tab, the status bar and the reply's own
+          live line already say how it stands, and a reply waiting on you says "Needs you" in its head (Arun, 2026-10-29: "i dont
+          like the ring/circle thing around the claude icon in the chat... since it is already shown in the header"). */}
       <span className="rsp-avatar" aria-hidden>
-        {mate ?? (ctx.state.engines[lane]?.tool ? <EngineMark tool={ctx.state.engines[lane]!.tool!} size={15} /> : <Mascot mood={runMood({ active, outcome: item.ended?.body.outcome, failing: stillFailing.length })} size={26} still={!active} />)}
+        {mate ?? (ctx.state.engines[lane]?.tool ? (
+          <EngineMark tool={ctx.state.engines[lane]!.tool!} size={15} />
+        ) : <Mascot mood={runMood({ active, outcome: item.ended?.body.outcome, failing: stillFailing.length })} size={26} still={!active} />)}
       </span>
       <div className="rsp-main">
       <div className="rsp-head">
         <span className="rsp-who">{name}</span>
-        {/* Stopped to ask: it is waiting on a person, not thinking, and saying "Thinking" sent people looking for nothing. */}
-        {active && (!typing || typing === "waiting") && <Working label={waitsOnPerson(ctx.state, lane) ? "Needs you" : steps.some((s) => s.state === "running") ? "Working" : "Thinking"} />}
-        {status && <span className={cn("rsp-status", ended?.outcome === "error" && "err")}>{status}</span>}
+        {/* Stopped to ask: it is waiting on a person, not thinking, and saying "Thinking" sent people looking for nothing. While it
+            works the ring on its mark and the one live line under the reply say so; the head says only what needs you. A teammate's
+            reply keeps its own words (its face is not a tool's mark). */}
+        {active && (!typing || typing === "waiting") && (waitsOnPerson(ctx.state, lane) ? <span className="rsp-needs" role="status">Needs you</span> : mate ? <Working label={steps.some((s) => s.state === "running") ? "Working" : "Thinking"} /> : null)}
+        {status && <span className={cn("rsp-status", ended?.outcome === "error" && (limitHit(ended.error) || signedOut(ended.error) ? "limit" : "err"))}>{status}</span>}
         {msgs[0] && (
           <span className="rsp-time">
             <Stamp ev={msgs[0]} />
@@ -3059,7 +3376,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
           <Icon name={verdict.tone === "pass" ? "check" : verdict.tone === "fail" ? "x" : "help"} size={12} /> {verdict.text}
         </span>
       )}
-      {finalMsg && (
+      {finalMsg && finalMsg !== loginLine && (
         <StreamingResponse
           status="complete"
           contentClassName="rsp-answer"
@@ -3128,7 +3445,8 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
 
       {/* Why it stopped, before what to do about it: under the hand-off bar and the diff, it read as an afterthought. A usage
           limit is said by its note instead, with what to do; an older run's limit is history, said in a line, not in red. */}
-      {ended?.outcome === "error" && !hit && <div className="rsp-error">{withCode(ended.error ?? "")}</div>}
+      {ended?.outcome === "error" && !hit && !out && <div className="rsp-error">{withCode(ended.error ?? "")}</div>}
+      {out && <SignedOutNote ctx={ctx} lane={lane} latest={latest} />}
       {!active && limit && !onBackup && <LimitNote ctx={ctx} lane={lane} resetsAt={limit.resetsAt} canSteer={via === "instruct"} />}
       {!active && hit && !limit && (
         <div className="limit-note">
@@ -3152,6 +3470,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
       {!active && item.ended && !mate && (others.length > 0 || more) && (
         <>
           <HandoffBar
+            {...(ctx.state.options.work ? { label: "Hand to another agent" } : {})} // In Work, plain words (Arun, 2026-10-28: "iron everything… focusing on UI and UX").
             active={handTo}
             // Mine, offline: started again as it is picked, when its folder is on this computer; mine from another computer is left
             // to it, without an error for something nobody asked for. What is handed to it waits in its queue until it is back.
@@ -3209,6 +3528,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
       )}
       {item.ended &&
         didChange(item.diffs.at(-1)?.body.files) &&
+        !ctx.state.options.work && // A Work session's changes are its outputs, in the rail: no diff to review (Arun, 2026-10-26: "get rid of this for work").
         (
         <div className="change-set">
           <ReviewCard
@@ -3253,6 +3573,81 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
  * and called off as easily (resume.at, sent by the server at that time). Handing the work to another agent meanwhile is
  * the hand-off bar under it, which suggests one on another account.
  */
+/**
+ * A coding tool that stopped because it isn't signed in on its computer: one plain instruction, with Sign in where this is that
+ * computer, and where the work went if Friday handed it on (agent-mesh.ts onLimit). The run read the tool's "Please run /login"
+ * and then the runner's "Run `claude auth login` in a terminal there", two commands and no button (Arun, 2026-10-28: "iron
+ * everything and ensure we are good… any logic errors and fixes").
+ */
+function SignedOutNote({ ctx, lane, latest }: { ctx: Ctx; lane: string; latest: boolean }) {
+  const engine = ctx.state.engines[lane];
+  const tool = engine?.tool;
+  const who = tool ? ENGINE_NAMES[tool] : agentNameFor(ctx.state, lane);
+  const [busy, setBusy] = useState(false);
+  // What the press did, said in the note beside the button: a toast was gone before anyone read it, and a Terminal window opening
+  // with no word first surprised somebody who never uses one (QA, 2026-10-28; Arun: "TEST EVERYTHING… EVERY INTERACTION").
+  const [said, setSaid] = useState<{ url?: string; terminal?: boolean; command?: string } | null>(null);
+  const ended = ctx.events.findLast((e) => e.body.type === "run.ended" && (e.lane ?? MAIN_LANE) === lane)?.seq ?? 0;
+  const handed = ctx.events.findLast((e) => e.seq > ended && e.body.type === "instruction" && e.body.handoff?.fromLane === lane);
+  const mine = !!tool && engine!.hostId === ctx.me.id && !!ctx.onConnect;
+  const signIn = async () => {
+    if (!tool) return;
+    setBusy(true);
+    try {
+      const r = await hostApi<{ opened?: boolean; command: string; url?: string }>(ctx.identity, "/api/runner/login", { method: "POST", body: JSON.stringify({ tool }) });
+      // A page from the tool beats a terminal: the runner opens Terminal only when the tool prints no page (runner/local-api.ts).
+      setSaid(r.url ? { url: r.url } : r.opened ? { terminal: true } : { command: r.command });
+    } catch (e) {
+      ctx.notify((e as Error).message || `Couldn't start ${who}'s sign-in.`);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="limit-note" role="status">
+      <UnplugIcon className="size-4" />
+      <span>
+        {handed?.body.type === "instruction" && handed.body.handoff ? (
+          <>
+            {who} isn't signed in, so <b>{handed.body.handoff.toName}</b> carries the work on.{mine && latest ? ` Sign in to use ${who} again.` : ""}
+          </>
+        ) : mine ? (
+          `${who} isn't signed in on this computer. Sign in, then send your message again.`
+        ) : (
+          `${who} isn't signed in on ${engine ? `${engine.hostName.split(/\s+/)[0]}'s` : "its"} computer. Once it's signed in there, send the message again.`
+        )}
+        {mine && latest && (
+          <small className="limit-note-sub">
+            {said?.url ? (
+              <>
+                The sign-in page is open in your browser.{" "}
+                <button type="button" className="link-btn" onClick={() => openOutside(said.url!)}>
+                  Open it again
+                </button>
+              </>
+            ) : said?.terminal ? (
+              `A Terminal window opened with ${who}'s sign-in. Follow its steps there.`
+            ) : said?.command ? (
+              <>
+                Run <code>{said.command}</code> in Terminal on this computer to sign in.
+              </>
+            ) : (
+              `Sign in opens ${who}'s sign-in page in your browser, or a Terminal window if it has no page.`
+            )}
+          </small>
+        )}
+      </span>
+      {/* Still there once the work went on elsewhere: otherwise nothing in the session led back to signing it in (Arun, 2026-10-28:
+          "iron everything and ensure we are good"). */}
+      {mine && latest && (
+        <button type="button" className="btn small" disabled={busy} onClick={() => void signIn()}>
+          {busy ? "Opening…" : said ? "Sign in again" : "Sign in"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function LimitNote({ ctx, lane, resetsAt, canSteer }: { ctx: Ctx; lane: string; resetsAt: number | null; canSteer: boolean }) {
   const due = ctx.state.resumes?.[lane];
   const tool = ctx.state.engines[lane]?.tool;
@@ -3783,6 +4178,7 @@ export function DiffCard({
             {...(contendedPaths[f.path] ? { contended: contendedPaths[f.path] } : {})}
             risks={risks}
             lines={lines}
+            total={f}
             // The panel opens a short change set whole; the chat card keeps every file folded, a line each, until it is opened.
             defaultOpen={panel ? files.length <= 3 : false}
             maxHeight={panel ? 640 : 420}
@@ -4284,6 +4680,9 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
     case "lead.set": {
       let them = "agent";
       let does = "it hands the other agents their part of the work and puts it together";
+      if (state.options.team) them = "teammate";
+      // Teammates are "they" (Arun, 2026-10-28: the critique's copy notes).
+      if (state.options.team) does = "they hand the other teammates their part of the work and put it together";
       // A lead Friday picked as the agents changed (a room made or its members changed) rather than one somebody chose: said as
       // who leads, not as "You made Juno the lead" when nobody did (2026-10-27 audit). The log says which (lead.set auto), where
       // the timing of the event before it was a guess.
@@ -4304,6 +4703,20 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
       return <BoardCard ev={ev} state={state} stamp={<Stamp ev={ev} />} />;
     case "mesh.posted":
       return <AgentUpdateCard ev={ev} state={state} stamp={<Stamp ev={ev} />} />;
+    case "teammate.folders":
+      return <FoldersGiven ev={ev} stamp={<Stamp ev={ev} />} />;
+    case "teammate.changed":
+      return <TeammateChanged ev={ev} stamp={<Stamp ev={ev} />} />;
+    case "teammate.switched":
+      return <ToolSwitched ev={ev} stamp={<Stamp ev={ev} />} />;
+    case "team.brief":
+      // A brief of the same stretch posted later takes its place: the one so far, then the one as the person is back.
+      if (ctx.events.some((e) => e.seq > ev.seq && e.body.type === "team.brief" && e.body.since === b.since)) return null;
+      return <BriefCard ev={ev} sid={ctx.sid} stamp={<Stamp ev={ev} />} />;
+    case "teammate.proposed":
+      return <ProposedMate ev={ev} identity={ctx.identity} stamp={<Stamp ev={ev} />} />;
+    case "holds.lifted":
+      return <HoldsLifted ev={ev} stamp={<Stamp ev={ev} />} />;
     case "mesh.paused":
       if (b.on) return <MeshPauseCard ev={ev} state={state} me={me} send={ctx.send} notify={ctx.notify} stamp={<Stamp ev={ev} />} />;
       return (
@@ -4663,8 +5076,9 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
         </Notice>
       );
     case "run.pause":
+      // A person stopping a task is a stop marker, said quietly: amber is for what waits on you (DIRECTION.md §1.4).
       return (
-        <Notice ev={ev} icon={SquareIcon} tone="warn">
+        <Notice ev={ev} icon={SquareIcon}>
           {who} stopped {ev.lane && ev.lane !== MAIN_LANE ? `${agentNameFor(ctx.state, ev.lane)}'s` : "the agent's"} task
         </Notice>
       );
@@ -4683,7 +5097,16 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
     case "run.ended":
       return (
         <Notice ev={ev} icon={XIcon} tone="danger">
-          Agent stopped: {b.error}
+          {/* A tool's raw error (a stack trace) is said as what it means, the trace itself one click away (Arun, 2026-10-29:
+              "node:internal/modules/cjs/loader:1…"; activity-line.ts stoppedLine). */}
+          {b.error && isRawError(b.error) ? (
+            <details className="stop-detail">
+              <summary>{((said) => (said.startsWith("Stopped: ") ? `Agent stopped: ${said.slice(9)}` : "Agent stopped on an error"))(stoppedLine(b.error))}</summary>
+              <pre>{b.error}</pre>
+            </details>
+          ) : (
+            <>Agent stopped: {b.error}</>
+          )}
         </Notice>
       );
     case "model.routed": {
@@ -4739,14 +5162,19 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
       );
     case "engine.attached": {
       const e = b.engine;
+      // In Work, one quiet line: who is working and in which folder, by its name; no computer, account, branch or mode (the
+      // 2026-10-28 critique: "You connected your Claude Code on ArunsMacStudio · Main account · …/x on main · auto").
+      if (ctx.state.options.work && e.tool) return <Notice ev={ev} icon={LaptopIcon} tone="control">{ENGINE_NAMES[e.tool]} is working in <b>{e.cwd.split(/[\\/]/).filter(Boolean).pop() ?? "its folder"}</b>{e.resumedFrom ? `, carrying on “${e.resumedFrom.title}”` : ""}</Notice>;
       return (
         <Notice ev={ev} icon={LaptopIcon} tone="control">
           {who} {e.tool ? "connected" : "lent"} {ev.actor.id === me.id ? "your" : "their"} {e.tool ? ENGINE_NAMES[e.tool] : "folder to Friday Code"}
           {e.machine ? ` on ${e.machine}` : ""}
-          {e.model ? ` · ${e.model}` : ""}
+          {/* "auto" as a model is Smart routing's pick ("Smart" on the pill): beside the mode, "auto · … · manual" read as two
+              contradicting modes (2026-10-28 QA). The mode says it is one. */}
+          {e.model ? ` · ${e.model === "auto" ? "Smart model" : e.model}` : ""}
           {e.account ? ` · ${e.account.label} account` : ""} · <span className="mono">{shortPath(e.cwd)}</span>
           {e.branch ? ` on ${e.branch}` : ""}
-          {MODE_LABEL[e.mode] ? ` · ${MODE_LABEL[e.mode]}` : ""}
+          {MODE_LABEL[e.mode] ? ` · ${MODE_LABEL[e.mode]} mode` : ""}
           {e.resumedFrom && ` · continuing “${e.resumedFrom.title}”${e.resumedFrom.messages ? ` (${e.resumedFrom.messages} messages)` : ""}`}
           {b.effortReset ? ` · ${EFFORT_RESET_NOTE}` : ""}
         </Notice>
@@ -4834,6 +5262,8 @@ function LivePlan({ events, state, lane: only, team: withTeam = true, control }:
   // was the one from when the page opened, and a board posted while somebody watched never showed (2026-10-21).
   const all = useMemo(() => (withTeam ? teamTasks(state, jumpTo, control) : []), [state, state.lastSeq, withTeam]); // eslint-disable-line react-hooks/exhaustive-deps
   const team = all.some((t) => t.status !== "completed" && t.status !== "cancelled") ? all : [];
+  let tasksTitle = "Team tasks";
+  if (state.options.team) tasksTitle = "Crew tasks"; // The crew's board (Arun, 2026-10-28: "rename team to something else").
   // Stuck tasks, cleared in one go (Arun, 2026-10-21): handed out again to whoever is free (never to one that turned it down),
   // or dropped, so what waited on them goes ahead.
   const stuck = withTeam && control ? (state.board?.tasks ?? []).filter((t) => t.status === "blocked") : [];
@@ -4860,18 +5290,28 @@ function LivePlan({ events, state, lane: only, team: withTeam = true, control }:
           <DockTodo
             key="team"
             steps={team}
-            title="Team tasks"
+            title={tasksTitle}
             footer={stuckBar}
           />
         )}
-        {plans.map(([lane, steps]) => (
-          <DockTodo
-            key={lane}
-            steps={steps.map((t) => ({ id: t.id, title: t.title, status: t.status === "completed" ? "completed" : t.status === "active" ? "active" : t.status === "cancelled" ? "cancelled" : "pending" }))}
-            // With several agents, the first thing to know is whose plan it is.
-            title={many ? agentNameFor(state, lane) : "To-dos"}
-          />
-        ))}
+        {plans.map(([lane, steps]) => {
+          // A plan whose agent stopped with steps still open: no spinner on it anywhere, and said as it is, "Stopped at 3 of 5", with
+          // the amber ring the Work rail gives it (2026-10-29: a stopped plan's tray still turned as if it were working).
+          const live = runOf(state, lane).status === "running";
+          const done = steps.filter((t) => t.status === "completed" || t.status === "cancelled").length;
+          const stopped = !live && done < steps.length;
+          let title = many ? agentNameFor(state, lane) : "To-dos";
+          if (state.options.work && !many) title = "Progress"; // The rail's word for it, in Work (the 2026-10-28 critique).
+          return (
+            <DockTodo
+              key={lane}
+              steps={steps.map((t) => ({ id: t.id, title: t.title, status: t.status === "completed" ? "completed" : t.status === "active" && live ? "active" : t.status === "cancelled" ? "cancelled" : "pending" }))}
+              // With several agents, the first thing to know is whose plan it is.
+              title={stopped ? `${title} · stopped at ${done} of ${steps.length}` : title}
+              {...(stopped ? { icon: <span className="dock-plan-stopped" aria-hidden="true" /> } : {})}
+            />
+          );
+        })}
       </div>
     </div>
   );
@@ -5113,6 +5553,8 @@ const QUEUE_FOLDED = "friday.queue.folded";
 let queuedText = (text: string) => text;
 /** Who a queued message is from, as it is shown: Friday's own notes are Friday's, not the person whose turn queued them. */
 let queuedBy = (_text: string, name: string) => name;
+queuedText = (text) => (text.startsWith("[Friday] ") ? text.slice(9).split(/\n|(?<=\.)\s/)[0]! : text);
+queuedBy = (text, name) => (text.startsWith("[Friday] ") ? "Friday" : name);
 
 function QueuedInstructions({ ctx, events, lane = MAIN_LANE }: { ctx: Ctx; events: SessionEvent[]; lane?: string }) {
   const { state, me, send } = ctx;
@@ -5148,8 +5590,9 @@ function QueuedInstructions({ ctx, events, lane = MAIN_LANE }: { ctx: Ctx; event
   // A coding agent that went offline: nothing is delivered until its runner is back, and saying "when this step finishes" was a promise nobody kept.
   const away = state.engines[lane]?.tool && !state.engines[lane]!.online ? state.engines[lane]! : null;
   const many = pending.length > 1;
-  // Why the queue waits, when its agent isn't only busy: offline, or out of usage until a time (in Arun's build, a teammate's).
+  // Why the queue waits, when its agent isn't only busy: offline, or out of usage until a time (a teammate's, in a crew).
   let why = null as string | null;
+  why = state.options.team ? queueWhy(lane) : null;
   const who = lane === MAIN_LANE ? "the agent" : agentNameFor(state, lane);
   const status = runOf(state, lane).status;
   // An edit replaces the queued message in one write (core.ts `replaces`): it keeps its place in the queue, the log keeps both,
@@ -5186,6 +5629,10 @@ function QueuedInstructions({ ctx, events, lane = MAIN_LANE }: { ctx: Ctx; event
                 `Delivered once ${driving ? "you answer" : `${laneDriver?.name.split(/\s+/)[0] ?? "the driver"} answers`} the request above`
               : why
                 ? `Waits ${why}`
+              : state.openQuestions?.[lane] && pending.some((e) => e.seq > state.openQuestions[lane]!.seq)
+                ? // What waits is the answer to its question: it said "Delivered once the agent's question is answered", the
+                  // answer queued behind itself (2026-10-29 verify).
+                  `Your answer goes to ${who} once it can read it`
               : status === "waiting_for_human" || state.openQuestions?.[lane]
                 ? // Waiting on a person's answer, not working: it goes once they answer (2026-10-27 audit).
                   `Delivered once ${who}'s question is answered`
@@ -5227,6 +5674,8 @@ function QueuedInstructions({ ctx, events, lane = MAIN_LANE }: { ctx: Ctx; event
                   <textarea
                     className="qi-edit"
                     autoFocus
+                    // The caret at the end of the words, where an edit carries on (2026-10-28 QA: it opened at the start).
+                    onFocus={(e) => e.currentTarget.setSelectionRange(e.currentTarget.value.length, e.currentTarget.value.length)}
                     rows={Math.min(6, Math.max(2, draft.split("\n").length))}
                     value={draft}
                     maxLength={8000}
@@ -5433,7 +5882,9 @@ function Redirects({ ctx }: { ctx: Ctx }) {
  */
 function AgentQuestion({ ctx, q }: { ctx: Ctx; q: OpenQuestion }) {
   const { state, send } = ctx;
-  const [busy, setBusy] = useState(false);
+  // "sending" while it goes, "sent" once it is in the queue: "Sending…" stayed on the button for as long as the agent took to
+  // read the answer, which for an agent mid-step or offline was indefinitely (2026-10-29 verify).
+  const [busy, setBusy] = useState<false | "sending" | "sent">(false);
   // Options the agent gave are the options. Only a question that arrived as
   // one lump of prose gets cut up by the parser, and that is now the fallback
   // rather than the normal path.
@@ -5450,14 +5901,14 @@ function AgentQuestion({ ctx, q }: { ctx: Ctx; q: OpenQuestion }) {
       variant="questions"
       title={`${agentNameFor(state, q.lane)} needs a decision`}
       questions={[{ id: "answer", prompt: [parsed.prompt, q.detail].filter(Boolean).join("\n\n"), options: parsed.options.map((o) => recommended(o.label)) }]}
-      approveLabel={busy ? "Sending…" : "Answer"}
+      approveLabel={busy === "sending" ? "Sending…" : busy === "sent" ? "Sent" : "Answer"}
       onApprove={(payload) => {
         const text = (payload?.answers?.answer ?? "").replace(/ · recommended$/, "").trim();
         if (!text || busy) return;
-        setBusy(true);
+        setBusy("sending");
         // Free again if it didn't go (offline, say): left busy, the question could never be answered after reconnecting.
         // To the agent that asked: sent without its lane, a second agent's answer went to the main one.
-        void send({ type: "instruct", text, lane: q.lane }).then((r) => !r.ok && setBusy(false));
+        void send({ type: "instruct", text, lane: q.lane }).then((r) => setBusy(r.ok ? "sent" : false));
       }}
     />
   );
@@ -5666,8 +6117,10 @@ function ReachPill({ ctx, lane }: { ctx: Ctx; lane: string }) {
     if (!r.ok) notify(r.error ?? "Couldn't change that.");
   };
 
+  let othersSub = "Teammates, hand-offs and apps can change files, but not run anything you haven't allowed.";
+  if (state.options.work) othersSub = "Teammates, hand-offs and apps can save pieces, but nothing more you haven't allowed.";
   const set = async (m: EngineMode) => {
-    if (m === engine.mode || busy) return;
+    if (m === modeOf(engine) || busy) return;
     // Changing it restarts the agent on the same folder, which would cut a turn off in the middle.
     if (running) return notify("Let the run finish, or pause it, before changing what it may do.");
     setBusy(true);
@@ -5691,11 +6144,17 @@ function ReachPill({ ctx, lane }: { ctx: Ctx; lane: string }) {
       text={busy ? "…" : now.label}
       items={() => [
         { heading: "In your folder, it may" },
-        ...REACH.map((r) => ({ label: r.label, sub: r.id === "edits" && (engine.tool === "codex" || engine.tool === "cursor") ? "Asks before any turn that changes something." : r.hint, checked: r.id === engine.mode, onSelect: () => void set(r.id) })),
+        ...REACH.map((r) => {
+          let sub = r.id === "edits" && (engine.tool === "codex" || engine.tool === "cursor") ? "Asks before any turn that changes something." : r.hint;
+          // In Work, what each means for pieces, not files and commands (QA, 2026-10-28; the home page already said it so).
+          if (state.options.work) sub = WORK_MODE_BLURB[r.id];
+          return { label: r.label, sub, checked: r.id === now.id, onSelect: () => void set(r.id) };
+        }),
         // Whose messages may run it how far on this computer (Security R2, R3): anyone else's, an app's included, stops at Edits
         // unless the host opens it up.
         { heading: "Others' messages on your computer" },
-        { label: "Up to Edits", sub: "Teammates, hand-offs and apps can change files, but not run anything you haven't allowed.", checked: !othersFull, onSelect: () => void setOthers(false) },
+        // By the mode's own name, Manual, not "Edits" (QA, 2026-10-28); in Work, in its words.
+        { label: "Up to Manual", sub: othersSub, checked: !othersFull, onSelect: () => void setOthers(false) },
         { label: "As far as yours", sub: "Their messages run in the mode you picked, Auto included.", checked: othersFull, onSelect: () => void setOthers(true) },
       ]}
       above
@@ -5882,6 +6341,11 @@ export function laneNamesFrom(events: readonly SessionEvent[]): ReadonlyMap<stri
   return laneNamesSeen;
 }
 
+/** How many files the message box holds, for what sits inside it (its Send button). */
+function WithAttachments({ children }: { children: (n: number) => ReactNode }) {
+  return <>{children(usePromptInputAttachments().files.length)}</>;
+}
+
 /** Inside the message box: a brief sent here with "Use as context" lands in it as a file (contextDrop.ts). */
 function ContextDrops({ sid, notify }: { sid: string; notify: (m: string) => void }) {
   const files = usePromptInputAttachments();
@@ -5891,6 +6355,17 @@ function ContextDrops({ sid, notify }: { sid: string; notify: (m: string) => voi
 
 function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, events }: { ctx: Ctx; lane?: string; /** Fixed to this agent: no picker for another. */ locked?: boolean; onLane?: (lane: string) => void; onPin?: () => void; plan?: ReactNode; events: SessionEvent[] }) {
   const { state, me, send, sid, invite, notify } = ctx;
+  useTeamVersion(); // The box's @ list, pills and routing read the team (Teammates.tsx).
+  // A session opened with the keyboard nowhere (sent from the new-session page, whose box is gone) puts it in this box, so the next
+  // message can be typed at once: it fell to the page's body (2026-10-29 verify). Not on a touch screen, where it opens the keyboard.
+  useEffect(() => {
+    if (matchMedia("(pointer: coarse)").matches) return;
+    const t = setTimeout(() => {
+      const at = document.activeElement;
+      if (!at || at === document.body) document.getElementById("composer-input")?.focus();
+    }, 120);
+    return () => clearTimeout(t);
+  }, [sid]);
   const [interrupt, setInterrupt] = useState(false);
   // Writing to the people here instead of an agent: an aside, which no agent reads (chat events). Offered once anyone else is in.
   const [toPeople, setToPeople] = useState(false);
@@ -5961,13 +6436,26 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
   // A coding tool on this lane answers to its own `/` commands; Friday's built-in ones are for Friday's agents.
   const laneTool = state.engines[lane]?.tool;
   const people = Object.entries(state.members).filter(([id, m]) => id !== me.id && !m.removed).map(([id, m]) => ({ id, name: m.name, online: ctx.presence?.some((p) => p.id === id && p.online) }));
+  // The teammate the box writes to is being given a folder or repo (Teammates.tsx TeammateFolderCard).
+  const [giving, setGiving] = useState(false);
   let naming = false;
+  if (state.options.team) naming = namesSomeone(sid, typed);
+  const inView = useFocusedAgent(sid);
   // In a team the box has no To pill at all (Arun, 2026-10-27: "get rid of this button too"): an @name says who, and without
+  // one it goes to the lead, as the box's words say; in a teammate's own chat, to that teammate.
+  if (state.options.team) naming = true;
   // Picking a name from the @ list points the box at it, except where an @name in the words says who (a team).
   let pickPoints = true;
+  if (state.options.team) pickPoints = false;
   let toolPick = true;
+  // A teammate's tool is set in its own dialog, so the team's box has no picker for it.
+  if (state.options.team) toolPick = false;
   let agents: { id: string; name: string; mark: ReactNode; hint: string; tone?: string }[] = [];
+  // In a crew "@" names a teammate, and picking one points the box at it (Teammates.tsx).
+  if (state.options.team) agents = teammateAgents(sid);
   let teamSlash = {};
+  // "/" in a team chat offers the team's own commands (team-commands.ts), not its teammate's coding tool's (Arun, 2026-10-28).
+  if (state.options.team) teamSlash = { only: TEAM_COMMANDS, tool: undefined, onManage: undefined };
   const shortcuts = useShortcuts({ textarea, sid, invite, people, agents, ...(onLane && pickPoints ? { onAgent: (id: string) => id !== "*" && onLane(id) } : {}), commands: !toPeople, files: hasFolder && !toPeople, connections: state.options.mcp ? ctx.connections : [], saved: savedCommands(saved.commands), onManage: () => setManaging(true), lane, ...(laneTool ? { tool: ENGINE_NAMES[laneTool] } : {}), ...teamSlash });
   // Set while a Friday lane asked for from this menu is still being created.
   const wantFriday = useRef(false);
@@ -6033,7 +6521,18 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
   };
   // The send button is the pause button while the agent works and there is nothing to send.
   const mayStop = driving || me.role === "owner";
-  const stopMode = running && mayStop && !typed.trim();
+  // Another agent at work while the box is set to one that isn't: its Stop is still here, rather than only after setting "To"
+  // back to it (Arun, 2026-10-28: "iron everything and ensure we are good… any logic errors and fixes"). Not in a box fixed to
+  // one agent, and only an agent this person may stop.
+  const stopLanes = running
+    ? mayStop
+      ? [lane]
+      : []
+    : locked
+      ? []
+      : [MAIN_LANE, ...state.lanes.map((l) => l.id)].filter((id) => id !== lane && runOf(state, id).status === "running" && (driverOf(state, id)?.id === me.id || me.role === "owner"));
+  const stopMode = stopLanes.length > 0 && !typed.trim();
+  const stopName = stopLanes.length === 1 ? agentNameFor(state, stopLanes[0]!) : "the agents";
   // Paused: Resume is offered where Pause was. There was no way back but writing something or knowing the command menu.
   const paused = runOf(state, lane).status === "paused" && mayStop;
   const name = agentNameFor(state, lane);
@@ -6072,11 +6571,14 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
     { heading: "Send to" },
     ...targets.map((id) => {
       const d = driverOf(state, id);
+      // One that can't work now says so first: the list read "Yours" beside an agent out of usage or signed out (QA, 2026-10-28).
+      const run = runOf(state, id);
+      const stuck = run.status === "error" ? (limitHit(run.error) ? "Out of usage" : signedOut(run.error) ? "Not signed in" : "") : "";
       return {
         label: targetName(id),
         mark: <EngineMark tool={state.engines[id]?.tool ?? ""} size={15} />,
         checked: !toPeople && id === lane,
-        sub: d?.id === me.id ? "Yours" : d ? `${d.name.split(/\s+/)[0]} is driving` : "Free to take",
+        sub: stuck || (d?.id === me.id ? "Yours" : d ? `${d.name.split(/\s+/)[0]} is driving` : "Free to take"),
         onSelect: () => (setToPeople(false), onLane?.(id)),
       };
     }),
@@ -6116,13 +6618,17 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
   const liveHint = mode === "drive" && running && state.openQuestions[lane]?.to !== me.id && interrupt ? "Cuts the current step short" : "";
   // Friday Code on Solo is only Team's when it isn't running on somebody's own model.
   const fridayHere = !state.engines[lane]?.tool && !isOwnModel(state.options.model);
+  // A team's chats have no agent menu below the box: a teammate's tool is set in its details (2026-10-27 audit).
   let noPicker = false;
+  noPicker = !!state.options.team;
   // Friday Code with nothing to run on (no coding tool on the lane, no model of the person's own, and on Solo none of Friday's):
   // a message there would wait for ever, "Queued" with the bar on "Ready" (2026-10-27 audit, a fork landing on it). Send is
   // held, and says to pick a tool.
   const cantRun = !toPeople && ctx.solo && fridayHere && !noPicker && (mode === "drive" || mode === "claim");
   // How the box speaks of the agent it steers.
   let they = { picks: "It picks", its: "its", it: "it" };
+  // A team's agents are "they" (Arun, 2026-10-28: "really iron out bugs and feature problems and gaps").
+  if (state.options.team) they = { picks: "They pick", its: "their", it: "them" };
   const placeholder = toPeople
     ? "Say something to the people here. @name tells them…"
     : ctx.solo && fridayHere && !noPicker && (mode === "drive" || mode === "claim")
@@ -6137,6 +6643,10 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
         ? interrupt
           ? `Redirect ${name} now, cutting ${they.its} current step short…`
           : `Redirect ${name}. ${they.picks} this up at ${they.its} next step…`
+        : state.options.team
+        ? (inView !== ALL ? `Give ${name} a task…` : !matesIn(sid).length ? (!teamKnown() ? "Give the crew a goal…" : sid === teamSid() ? "No teammates yet. Add one with New teammate in the sidebar." : "No teammates here now. Add some from the room's settings.") : narrowBox() ? "Give the crew a goal…" : `Give the crew a goal (${(sid === teamSid() && crewLeadName()) || name} leads), or @ a teammate…`)
+        : state.options.work
+        ? `Ask ${name} to research, write or make something… @ for people`
         : // Only what works here (2026-10-27 audit: "# for files" with no computer connected, "@ for people" with nobody else).
           `Tell ${name} what to do… / for commands${hasFolder ? ", # for files" : ""}${people.length ? ", @ for people" : ""}`
       : mode === "suggest"
@@ -6146,10 +6656,16 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
         : "You're watching this session";
 
   let boxLabel = "Message the agent";
+  // Who the box writes to, for a screen reader: the teammate whose chat it is, or the team (Arun, 2026-10-28: the critique).
+  if (state.options.team) boxLabel = inView !== ALL ? `Message ${name}` : `Message the crew${sid === teamSidNow() ? "" : ` in ${state.title}`}`;
   /** Where ↑ has got to in your past asks; -1 while the box holds your own text. */
   const askAt = useRef(-1);
   const onSubmit = async (msg: PromptInputMessage) => {
+    // The box empties as it sends: what draws its @names under it goes with it (put back with the words if it fails).
+    if (state.options.team) setTyped("");
     let text = msg.text.trim();
+    // A team's own "/" command does what it says here, or becomes the words it stands for (team-commands.ts).
+    if (state.options.team && text.startsWith("/")) { const said = await runTeamCommand(text, { identity: ctx.identity, notify, sid }); if (said === null) return; text = said; }
     const now = interruptNext.current;
     interruptNext.current = false;
     // An aside goes to the people, whoever may steer: watchers can talk too.
@@ -6216,6 +6732,9 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
       if ((mode === "drive" || mode === "claim") && !running) await smartSwitch(ctx, lane, reachFor(state, lane, text), true);
       const handoff = carry ? { handoff: { fromLane: carry.fromLane, fromName: carry.fromName, toName, reason: `You switched from ${carry.fromName} to ${toName} here.`, carried: [] } } : {};
       let toLanes = [lane];
+      // In a crew "@Kit …" goes to Kit, and "@Kit and @Nova …" to both, wherever the box points (Teammates.tsx).
+      if (state.options.team) toLanes = teammatesNamed(sid, text, lane);
+      if (!toLanes.length) return putBack("Nobody is in this room yet. Add a teammate to it from its menu at the top.");
       for (const to of toLanes) {
         const r = await send({ ...(mode === "drive" || mode === "claim" ? { type: "instruct", text, interrupt: now && running && to === lane, attachments, lane: to, ...(to === lane ? handoff : {}) } : { type: "suggest", text, attachments, lane: to }), quiet: true });
         if (!r.ok) return putBack(r.error ?? "That didn't send. It's back in the box: try again.");
@@ -6232,18 +6751,23 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
 
   return (
     <div className={cn("composer", `mode-${mode === "claim" ? "drive" : mode}`, toPeople && "to-people")}>
+      {/* The one-row box is the rooms' (Arun: "ONLY REDESIGN FOR THE ROOM INPUT CHAT"); a teammate's own chat keeps the session's box (Arun, 2026-10-28). */}
+      {state.options.team && inView === ALL && <span className="team-box-mark" hidden />}
       <div className="composer-caption">
         {/* Which agent this goes to, chosen here rather than by taking control
             somewhere else first. */}
         {/* Only when there is a choice to make: one agent and nobody to add is
             a pill that opens onto a list of one. */}
         {/* On Solo with one agent the picker in the box is the only one: this pill was the same agent again, plus an upsell. */}
+        {state.options.team && <TeamRecipients sid={sid} text={typed} />}
+        {state.options.team && inView === ALL && !namesSomeone(sid, typed) && <TeamWorking sid={sid} />}
         {!locked && !naming && (targets.length > 1 || others > 0 || (!fridayIsHere && me.role === "owner" && !ctx.solo)) && <MenuButton className="target-pill" label="Who it goes to" text={toPeople ? "The people here" : targetName(lane)} items={targetItems} width={targetWidth} above />}
         {/* Who has the wheel of that agent is the other half of the same question, so it sits beside it: pick who to write to, and
             here is whether you may, and the one press to take or ask for it. */}
         <DrivePill ctx={ctx} lane={lane} />
         {caption && (toPeople ? <Icon name="users" size={13} /> : mode === "drive" ? <MessageSquareIcon className="size-3.5" /> : mode === "claim" ? <HandIcon className="size-3.5" /> : mode === "suggest" ? <HandIcon className="size-3.5" /> : <EyeIcon className="size-3.5" />)}
-        {caption}
+        {/* One line, shortened with "…" when the row is narrow: "Answer the agent" wrapped to three lines beside the To pill at 420. */}
+        {caption && <span className="composer-caption-text" title={caption}>{caption}</span>}
         {/* On the same line as who you are writing to, at the other end of
             it: both are about this next message, and the plan stops being a
             thing that hovers over the conversation. */}
@@ -6268,6 +6792,7 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
         {canUpload && <ContextDrops sid={sid} notify={notify} />}
         {/* The field is a card of its own, its controls on the tray under it, so what you type keeps one clean line. */}
         <PromptInputBody className="prompt-field relative block">
+          {state.options.team && <MentionBackdrop sid={sid} text={typed} textarea={textarea} />}
           <PromptInputTextarea
             id="composer-input"
             aria-label={toPeople ? "Message the people here" : boxLabel}
@@ -6314,6 +6839,11 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
                       <Icon name="folder" size={14} /> <span className="ml-2">{sending ? "Uploading a folder…" : "Upload a folder"}</span>
                     </PromptInputActionMenuItem>
                   )}
+                  {state.options.team && (
+                    <PromptInputActionMenuItem onSelect={() => setGiving(true)}>
+                      <Icon name="folder" size={14} /> <span className="ml-2">Give {agentNameFor(state, lane)} a folder or repo</span>
+                    </PromptInputActionMenuItem>
+                  )}
                   {onPin && (
                     <PromptInputActionMenuItem onSelect={onPin}>
                       <Icon name="link" size={14} /> <span className="ml-2">Pin a file or folder</span>
@@ -6322,6 +6852,7 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
                 </PromptInputActionMenuContent>
               </PromptInputActionMenu>
             )}
+            {giving && <TeammateFolderCard identity={ctx.identity} lane={lane} trigger={textarea.current} onClose={() => setGiving(false)} notify={notify} />}
             {canUpload && (
               <input
                 ref={folderInput}
@@ -6338,6 +6869,7 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
               />
             )}
             {/* Who it goes to and on which model, inside the box under a rule, as on the new-session screen: one box, not a box and a row. */}
+            {!toolPick && inView !== ALL && <TeammateBoxPicker identity={ctx.identity} lane={lane} notify={notify} />}
             {mode !== "view" && !toPeople && toolPick && (
               <AgentSwitch
                 state={state}
@@ -6377,19 +6909,30 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
               <PromptInputSubmit
                 type="button"
                 status="streaming"
-                aria-label="Stop the agent's task"
-                title={`Stop ${name}'s task: it stays free for your next message, and anything queued goes next`}
-                onClick={() => void send({ type: "run.pause", ...(lane !== MAIN_LANE ? { lane } : {}) })}
+                aria-label={stopLanes.length > 1 ? "Stop the agents' tasks" : stopLanes[0] === lane ? "Stop the agent's task" : `Stop ${stopName}'s task`}
+                title={stopLanes.length > 1 ? "Stop every agent's task: each stays free for your next message" : `Stop ${stopName}'s task: it stays free for your next message, and anything queued goes next`}
+                // The box keeps the keyboard: the Stop button turns into Send under the pointer, and the focus fell to the page's
+                // body with it (2026-10-29 verify).
+                onClick={() => (stopLanes.forEach((l) => void send({ type: "run.pause", ...(l !== MAIN_LANE ? { lane: l } : {}) })), requestAnimationFrame(() => document.getElementById("composer-input")?.focus()))}
               />
             ) : (
-              <PromptInputSubmit
-                status={busy ? "submitted" : undefined}
-                disabled={(mode === "view" && !toPeople) || busy || !typed.trim() || cantRun}
-                aria-label={mode === "suggest" ? "Suggest" : interrupt ? "Send now" : "Send"}
-                title={cantRun ? "Nothing to run this on yet: pick one of your coding tools in the agent menu" : !typed.trim() ? "Write something first" : mode === "suggest" ? "Suggest a redirect" : interrupt ? "Send now, cutting the current step short" : canInterrupt ? `Queue for the next step · ${sendNow} to send now` : "Send"}
-              >
-                {busy ? undefined : <ArrowUpIcon className="size-4" />}
-              </PromptInputSubmit>
+              // Files alone are a message (onSubmit sends them, and the server takes them): Send was off until something was typed
+              // beside them (2026-10-28 QA; Arun: "TEST EVERYTHING… EVERY INTERACTION"). Not for an aside, which can't carry files.
+              <WithAttachments>
+                {(n) => {
+                  const empty = !typed.trim() && (toPeople || !n);
+                  return (
+                    <PromptInputSubmit
+                      status={busy ? "submitted" : undefined}
+                      disabled={(mode === "view" && !toPeople) || busy || empty || cantRun}
+                      aria-label={mode === "suggest" ? "Suggest" : interrupt ? "Send now" : "Send"}
+                      title={cantRun ? "Nothing to run this on yet: pick one of your coding tools in the agent menu" : empty ? "Write something first" : mode === "suggest" ? "Suggest a redirect" : interrupt ? "Send now, cutting the current step short" : canInterrupt ? `Queue for the next step · ${sendNow} to send now` : "Send"}
+                    >
+                      {busy ? undefined : <ArrowUpIcon className="size-4" />}
+                    </PromptInputSubmit>
+                  );
+                }}
+              </WithAttachments>
             )}
           </div>
         </PromptInputFooter>

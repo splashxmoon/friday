@@ -1,9 +1,12 @@
 import { useAgents } from "./agentFocus.js";
 import type { HubAgent } from "../agents-hub.js";
 import { useEffect, useState, type ReactNode } from "react";
-import type { SessionState } from "../session/projection.js";
+import { runOf, type SessionState } from "../session/projection.js";
+import { carriedOn } from "../limit-reset.js";
 import { ENGINE_NAMES, MAIN_LANE, type SessionEvent } from "../types.js";
 import { Icon } from "./icons.js";
+import { EngineMark, FridayMark } from "./BrandMarks.js";
+import { PresenceRing, type Presence } from "./presence.js";
 import { sessionLayout, type SessionLayout } from "./prefs.js";
 
 /**
@@ -42,6 +45,13 @@ function waitingOn(state: SessionState, me?: string): string | null {
     const d = lane === MAIN_LANE ? state.driver : state.laneDrivers[lane];
     people.add(!me || !d || d.id === me ? "you" : d.name);
   }
+  // A question asked in its answer, which its run ended on (asks): Progress said "Needs a decision" and the bar "Ready" (Arun,
+  // 2026-10-28: "iron everything and ensure we are good… any logic errors and fixes"). Answered by whoever drives that agent.
+  for (const [lane, a] of Object.entries(state.asks ?? {})) {
+    if (!a.questions.length || runOf(state, lane).status === "running") continue;
+    const d = lane === MAIN_LANE ? state.driver : state.laneDrivers[lane];
+    people.add(!me || !d || d.id === me ? "you" : d.name);
+  }
   if (!people.size && state.run.status === "waiting_for_human") people.add("you");
   if (!people.size) return null;
   const names = [...people].sort((a, b) => Number(b === "you") - Number(a === "you"));
@@ -52,7 +62,8 @@ export function runLine(state: SessionState, events: SessionEvent[], now: number
   const run = state.run;
   const held = waitingOn(state, me);
   if (held) return { tone: "wait", text: `Waiting for ${held}` };
-  if (run.status === "error") return { tone: "err", text: "Stopped", ...(run.error ? { detail: run.error } : {}) };
+  // Out of usage with its task carried on by another agent (limit-reset.ts carriedOn): not stopped, and the bar goes by the others.
+  if (run.status === "error" && !carriedOn(state, MAIN_LANE)) return { tone: "err", text: "Stopped", ...(run.error ? { detail: run.error } : {}) };
   if (run.status === "paused") return { tone: "wait", text: "Paused" };
   // A coding tool on your computer that has gone away: "Ready" would promise a run that can't start.
   const engine = state.engines[MAIN_LANE];
@@ -75,12 +86,14 @@ export function runLine(state: SessionState, events: SessionEvent[], now: number
  * The bar's line with every agent counted. With several agents the main one's state was the bar's whole story: Codex failing, or
  * three agents at work while the main one sat idle, said "Ready". The waits were already everyone's; working and stopping now are too.
  */
-export function barLine(own: ReturnType<typeof runLine>, agents: HubAgent[]): ReturnType<typeof runLine> {
+export function barLine(own: ReturnType<typeof runLine>, agents: HubAgent[], carried: (lane: string) => boolean = () => false): ReturnType<typeof runLine> {
   if (agents.length < 2 || own.tone === "wait" || own.tone === "err") return own;
   const working = agents.filter((a) => a.status === "working");
   if (working.length > 1) return { tone: "busy", text: `${working.length} agents working`, ...(own.tone === "busy" && own.detail ? { detail: own.detail } : {}) };
   if (working.length === 1 && own.tone !== "busy") return { tone: "busy", text: `${working[0]!.name} working` };
-  const stopped = agents.find((a) => a.status === "failed" || a.status === "limited");
+  // Out of usage counts as stopped only while nobody has its work: once another agent took it on, that one's state is the news.
+  const others = (a: HubAgent) => agents.some((b) => b !== a && (b.status === "working" || b.status === "done"));
+  const stopped = agents.find((a) => (a.status === "failed" || a.status === "limited") && !carried(a.lane) && !(a.status === "limited" && others(a)));
   if (own.tone === "idle" && stopped) return { tone: "err", text: `${stopped.name} stopped`, detail: stopped.line };
   return own;
 }
@@ -98,9 +111,12 @@ export function useRunClock(state: SessionState): number {
   return now;
 }
 
+/** How the bar's line stands, on the mark: waiting on someone is amber, as "needs you" is everywhere; paused or away is dashed. */
+const BAR_PRESENCE: Record<ReturnType<typeof runLine>["tone"], Presence> = { idle: "idle", busy: "working", wait: "needs", err: "error" };
+
 export function StatusBar({ state, events, me, where, environment, slot, onChanges }: { state: SessionState; events: SessionEvent[]; /** Who is looking, so "waiting for you" is said only to the person it waits for. */ me: string; where: ReactNode; /** The Environment button (Environment.tsx), where Commands was: the palette is still ⌘⇧P. */ environment?: ReactNode; slot: (el: HTMLElement | null) => void; onChanges: () => void }) {
   const now = useRunClock(state);
-  const line = barLine(runLine(state, events, now, me), useAgents());
+  const line = barLine(runLine(state, events, now, me), useAgents(), (lane) => carriedOn(state, lane));
   let files = 0;
   let add = 0;
   let del = 0;
@@ -115,10 +131,15 @@ export function StatusBar({ state, events, me, where, environment, slot, onChang
     <footer className="status-bar session-bar" aria-label="Session status">
       <div className="stb-start">
         {/* The detail in the title too: a narrow bar cuts it short, and hovering still shows it whole. */}
-        <span className={`stb-run ${line.tone}`} title={line.detail || undefined}>
-          <i className="stb-dot" aria-hidden="true" />
+        {/* The state on the agent's own mark, as everywhere (presence.tsx; DIRECTION.md §9.6): the turning ring while it works, amber
+            while it waits on someone, red when it stopped. Ready is the plain mark alone, its word kept for a screen reader and the
+            tip; the other states keep their words beside it. */}
+        <span className={`stb-run ${line.tone}`} title={line.detail ? `${line.text} · ${line.detail}` : line.text}>
+          <PresenceRing state={line.tone === "wait" && !line.text.startsWith("Waiting for") ? "queued" : BAR_PRESENCE[line.tone]} size={14} square>
+            <span className="stb-mark">{state.engines[MAIN_LANE]?.tool ? <EngineMark tool={state.engines[MAIN_LANE]!.tool!} size={12} /> : <FridayMark size={12} />}</span>
+          </PresenceRing>
           {/* Only the state is announced: the clock beside it changes every second. */}
-          <span className="stb-run-text" role="status">
+          <span className={`stb-run-text${line.tone === "idle" ? " sr-only" : ""}`} role="status">
             {line.text}
           </span>
         </span>

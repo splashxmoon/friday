@@ -24,9 +24,9 @@ test("thinking alone, failures, and long mixed stretches", () => {
   assert.equal(stepsSummary([run("npm test", "running")]), "Running npm test");
   assert.equal(stepsSummary([read("a.ts"), run("npm test", "running")]), "Read a.ts");
   // A command still waiting on an approval was never run, so it isn't in the sentence.
-  assert.equal(stepsSummary([read("a.ts"), read("b.ts"), run("git status", "waiting")]), "Read 2 files · 1 didn't run");
-  assert.equal(stepsSummary([run("git status", "waiting")]), "A step didn't run");
-  assert.equal(stepsSummary([run("a", "waiting"), run("b", "waiting")]), "2 steps didn't run");
+  assert.equal(stepsSummary([read("a.ts"), read("b.ts"), run("git status", "waiting")]), "Read 2 files · stopped before 1 more");
+  assert.equal(stepsSummary([run("git status", "waiting")]), "Stopped before its next step");
+  assert.equal(stepsSummary([run("a", "waiting"), run("b", "waiting")]), "Stopped before 2 steps");
   assert.equal(
     stepsSummary([read("a.ts"), run("ls"), edit("b.ts"), { mark: "⌕", verb: "Searched", target: "x", state: "done" }, { mark: "↗", verb: "Opened", target: "github.com", state: "done" }]),
     "Read a.ts, ran a command, edited b.ts, 2 more",

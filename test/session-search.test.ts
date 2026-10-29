@@ -1,7 +1,7 @@
 // Finding a session by what was said in it (session-search.ts).
 import assert from "node:assert/strict";
 import test from "node:test";
-import { searchEvents, snippetOf, termsOf, titleMatches, wordsOf } from "../src/session-search.js";
+import { flatText, searchEvents, snippetOf, termsOf, titleMatches, wordsOf } from "../src/session-search.js";
 import type { SessionEvent } from "../src/types.js";
 
 const ev = (seq: number, body: SessionEvent["body"], name = "Maya Chen"): SessionEvent => ({ seq, ts: 1_000 + seq, actor: { id: "u", name, kind: "human" } as SessionEvent["actor"], body });
@@ -49,4 +49,14 @@ test("the snippet centres on the match and marks it", () => {
   assert.ok(snippet.startsWith("…") && snippet.endsWith("…"));
   assert.deepEqual(marks.map(([a, z]) => snippet.slice(a, z)), ["TOKEN", "logged"], "every word marked, in order");
   assert.deepEqual(wordsOf("  the  the Login "), ["the", "login"]);
+});
+
+// Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL": an agent's question was never found ("Monday" found
+// nothing), a table read as one run of words, and a Claude Code answer showed Friday's mark.
+test("an agent's question is found, with its tool; a table reads as cells and rows", () => {
+  const agent = { id: "lane", name: "Claude Code", kind: "agent" } as SessionEvent["actor"];
+  const q: SessionEvent = { seq: 7, ts: 2_000, actor: agent, body: { type: "agent.question", callId: "c", question: "Should the week start on Monday or Sunday?", options: ["Monday", "Sunday"], to: "u", toName: "Maya" } as never };
+  const hits = searchEvents([q], "monday", 3, Infinity, { agentTool: () => "claude" });
+  assert.deepEqual(hits.map((h) => [h.seq, h.by, h.tool]), [[7, "agents", "claude"]]);
+  assert.equal(flatText("Here:\n\n| Step | Who |\n|---|:-:|\n| Fix | Claude |\n| Test | Codex |\n\nThen **ship**."), "Here: — Step · Who; Fix · Claude; Test · Codex — Then ship.");
 });

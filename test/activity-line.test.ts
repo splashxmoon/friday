@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { describeCall, doingNow } from "../src/activity-line.js";
+import { describeCall, doingNow, isRawError, stoppedLine } from "../src/activity-line.js";
 import type { EventBody, SessionEvent } from "../src/types.js";
 
 const ev = (seq: number, body: EventBody, lane?: string): SessionEvent => ({ seq, ts: seq * 1000, actor: { id: "a", name: "A" } as SessionEvent["actor"], body, ...(lane ? { lane } : {}) });
@@ -49,4 +49,32 @@ test("a lane that is not in a run is doing nothing, and lanes do not borrow each
   assert.equal(doingNow(two, "rev")!.text, "Running lint");
   assert.equal(doingNow([...two, end(5, "rev")], "rev"), null);
   assert.equal(doingNow([...two, end(5, "rev")], "main")!.text, "Editing x.ts", "one lane ending does not end another");
+});
+
+test("subagents still out are what it is doing, not \"Using Task\" or thinking (Arun, 2026-10-28: \"iron everything\")", () => {
+  const two = [start(1), step(2, [tc("t1", "Task", { description: "Map the flow" }), tc("t2", "Task", { description: "Review the tests" })])];
+  assert.equal(doingNow(two, "main")!.text, "Waiting on 2 subagents");
+  const one = [start(1), step(2, [tc("t1", "Task", { description: "Map the flow" })])];
+  assert.equal(doingNow(one, "main")!.text, "Waiting on a subagent: Map the flow");
+  // Its own read came back meanwhile: still waiting on them, not "Thinking about what to do next".
+  const read = [...two, step(3, [tc("r", "read_file", { path: "a.json" })]), result(4, "r")];
+  assert.equal(doingNow(read, "main")!.text, "Waiting on 2 subagents");
+  // Its own step in flight is said as itself.
+  assert.equal(doingNow([...two, step(3, [tc("r", "read_file", { path: "a.json" })])], "main")!.text, "Reading a.json");
+  assert.equal(doingNow([...one, result(3, "t1"), step(4, [], "")], "main")!.text, "Thinking");
+});
+
+// A live line is a short status in words, never a tool's raw error (Arun, 2026-10-29: a teammate's needs-you line in the sidebar read
+// "node:internal/modules/cjs/loader:1…").
+test("a stopped run says what it means in words, and keeps an error that already is words", () => {
+  const crash = "node:internal/modules/cjs/loader:1228\n  throw err;\n  ^\n\nError: Cannot find module '/x/cli.js'\n    at Module._resolveFilename (node:internal/modules/cjs/loader:1225:15)";
+  assert.equal(isRawError(crash), true);
+  assert.equal(stoppedLine(crash), "Stopped: their tool failed to start");
+  assert.equal(stoppedLine("TypeError: Cannot read properties of undefined (reading 'map') at run (src/app.ts:12:5)"), "Stopped on an error");
+  assert.equal(stoppedLine("Error: 3 failing tests in cart.test.ts:40"), "Stopped: tests failed");
+  for (const plain of ["The folder disconnected.", "Claude Code didn't start (dry run)", "[Friday] Out of credits"]) {
+    assert.equal(isRawError(plain), false, plain);
+    assert.equal(stoppedLine(plain), plain);
+  }
+  assert.equal(stoppedLine(""), "Stopped on an error");
 });

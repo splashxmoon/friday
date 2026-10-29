@@ -21,6 +21,7 @@ import { extractDecisions, MIN_TOOL_CALLS, transcriptOf } from "../decision-log.
 import { BOUNCE_WINDOW_MS, bouncesBetween, carriedFor, MAX_BOUNCES, resolveTarget } from "../handoff.js";
 import { handOff } from "../hand-off-run.js";
 import { isOwnModel } from "../own-model-id.js";
+import { ownModelParts } from "../own-model-id.js";
 import { isAuto, routeFriday, taskTier } from "../routing.js";
 import type { Learned } from "../route-learning.js";
 import type { AgentMesh } from "../agent-mesh.js";
@@ -194,6 +195,13 @@ export class AgentRuntime {
   private maxSteps: number;
   /** Last time each lane was woken by a trigger, keyed `sid|lane`. */
   private lastFired = new Map<string, number>();
+  /**
+   * A lane that runs on a model of its own rather than the session's: a teammate on one of the person's own
+   * models (teammates.ts, Arun, 2026-10-27: "be able to run your own models and stuff for teammates as well"). Its model, what it
+   * is told with each run besides Friday's own prompt (who it is, its role, its memory), and tools of its own; null for any other
+   * lane. Asked once a run, so a changed role or model applies from its next. Set by the app.
+   */
+  laneOwn: ((sid: string, lane: string) => Promise<{ model: string; note: string; tools?: AgentTool[] } | null>) | null = null;
 
   constructor(
     private store: SessionStore,
@@ -644,6 +652,12 @@ export class AgentRuntime {
       if (state.engines[lane]?.tool) return;
       // A coding tool's lane whose runner is still starting: what is typed meanwhile waits for it, as it would while offline.
       if (laneDef?.engine && !state.engines[lane]) return;
+      // Its own model, only ever its owner's (as allowedModel has it for a session's): another person's is never run here.
+      if (laneRun === undefined) laneRun = lane !== MAIN_LANE && this.laneOwn ? await this.laneOwn(sid, lane).catch(() => null) : null;
+      if (laneRun && !(isOwnModel(laneRun.model) && ownModelParts(laneRun.model)?.owner === state.ownerId)) laneRun = null;
+      // In its own folder only: with its runner gone, another lane's lent folder would otherwise be borrowed (liveMachine), and its
+      // work land in a teammate's folder. What it is given waits for it to be back, as a coding tool's does.
+      if (laneRun && !state.engines[lane]?.online) return;
       // A lane on its own model works whatever the session's model is.
       if (this.opts.works && !laneRun && !this.opts.works(state)) return;
       // A lane with a trigger runs when woken; only a manual lane needs a queue.

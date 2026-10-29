@@ -15,6 +15,12 @@ export type OrderInfo =
   | { kind: "run"; lane: string; ended?: number; live: boolean }
   /** Something asked of an agent: it goes with the run that answers it. */
   | { kind: "ask"; lane: string; seq: number }
+  /**
+   * The run's own last word, shown under its block (a permission card): it goes with the run before it, after it. Left at its
+   * place in the log, it stood above the message that set the run going, which had moved down with the run (Arun, 2026-10-28:
+   * "iron everything and ensure we are good… any logic errors and fixes").
+   */
+  | { kind: "after"; lane: string; seq: number }
   /** Anything else, at its place in the log. */
   | { kind: "other"; seq: number };
 
@@ -36,6 +42,12 @@ export function finishingOrder<T>(items: T[], info: (t: T) => OrderInfo, last: (
     // The run of the same agent that came after it, which is the one that took it up.
     const next = infos.findIndex((y, j) => j > i && y.kind === "run" && y.lane === x.lane);
     place[i] = next !== -1 ? place[next]! : working.has(x.lane) ? Infinity : x.seq;
+  });
+  infos.forEach((x, i) => {
+    if (x.kind !== "after") return;
+    // The same agent's run before it: placed with it, and after it, since the sort keeps the log's order among equals.
+    const run = infos.findLastIndex((y, j) => j < i && y.kind === "run" && y.lane === x.lane);
+    place[i] = run !== -1 ? place[run]! : x.seq;
   });
   return items
     .map((it, i) => ({ it, i, at: place[i]! }))

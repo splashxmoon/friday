@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
+import { treeFiles } from "./treeFiles.js";
 import type { ToolCommand } from "../types.js";
 import { Icon, type IconName } from "./icons.js";
 
@@ -37,7 +38,7 @@ export const SHORTCUTS: { title: string; keys: [string[], string][] }[] = [
   {
     title: "Anywhere",
     keys: [
-      [["⌘", "K"], "Sessions, agents, files and everything the app can do"],
+      [["⌘", "K"], "Sessions, pages, settings and what the open session can do"],
       [["⌘", "⇧", "P"], "The same, as editors bind it"],
       [["⌘", "⇧", "F"], "Search sessions and everything said in them"],
       [["⌘", "B"], "Show or hide the sidebar"],
@@ -281,7 +282,10 @@ export function useShortcuts({
   people = [],
   agents = [],
   onAgent,
+  only,
 }: {
+  /** "/" offers these and nothing else: a team chat's own commands (team-commands.ts), not a coding tool's. */
+  only?: SlashCommand[];
   /** Agents "@" can name: offered before people, and picking one points the box at it. */
   agents?: { id: string; name: string; mark: ReactNode; hint: string; /** How it stands, for its hint's colour. */ tone?: string }[];
   onAgent?: (id: string) => void;
@@ -305,6 +309,8 @@ export function useShortcuts({
   const [open, setOpen] = useState<Open | null>(null);
   const [active, setActive] = useState(0);
   const [files, setFiles] = useState<string[] | null>(null);
+  /** Why the folder couldn't be listed, in the server's words ("This session has no folder yet"), said instead of "no files". */
+  const [filesWhy, setFilesWhy] = useState("");
   const fetched = useRef(0);
   /**
    * The tool's own commands. Asked of its machine (the server, then the runner, then back) only once "/" was typed, they took
@@ -339,9 +345,14 @@ export function useShortcuts({
     if (open?.kind !== "file" || !filesEnabled || Date.now() - fetched.current < 30_000) return;
     fetched.current = Date.now();
     fetch(`/api/sessions/${encodeURIComponent(sid)}/repo?op=tree&invite=${encodeURIComponent(invite)}`)
-      .then((r) => r.json() as Promise<{ output?: string }>)
-      .then((d) => setFiles((d.output ?? "").split("\n").slice(1).map((l) => l.trim()).filter((l) => l && !l.startsWith("["))))
-      .catch(() => setFiles([]));
+      .then((r) => r.json() as Promise<{ output?: string; error?: string }>)
+      .then((d) => {
+        // A reason was read as an empty folder (2026-10-28 QA: "The folder has no files to name yet." for a session with none).
+        const got = treeFiles(d);
+        setFilesWhy(got.why);
+        setFiles(got.files);
+      })
+      .catch(() => (setFilesWhy("The folder couldn't be read just now."), setFiles([])));
   }, [open?.kind, filesEnabled, sid, invite]);
 
   const write = (insert: string) => {
@@ -352,6 +363,9 @@ export function useShortcuts({
   };
   const named = (name: string, q: string) => !q || name.toLowerCase().split(/\s+/).some((w) => w.startsWith(q)) || name.toLowerCase().startsWith(q);
   const items: { key: string; label: string; hint?: string; tone?: string; icon: IconName; mark?: ReactNode; pick: () => void }[] =
+    open?.kind === "command" && commands && only
+      ? only.filter((c) => c.name.startsWith(open.query)).map((c) => ({ key: `team:${c.name}`, label: `/${c.name}`, hint: c.hint, icon: c.icon, pick: () => write(c.text) }))
+      :
     open?.kind === "command" && commands && tool
       ? // A coding tool's lane: the team's own commands, then the tool's (Claude Code runs its own; Codex's and Cursor's prompt
         // files and skills are expanded as their terminals would). Friday's built-in asks are for Friday's agents.
@@ -506,7 +520,9 @@ export function useShortcuts({
         <div className="shortcut-head">{open.kind === "command" ? (tool ? `${tool} commands` : "Commands") : open.kind === "person" ? (agents.length && !people.length ? "Send it to" : "People here") : "Files in the folder"}</div>
         {open.kind === "file" && filesEnabled && files === null && <div className="shortcut-empty">Reading the folder…</div>}
         {open.kind === "file" && !filesEnabled && <div className="shortcut-empty">No folder to search right now: no computer of yours is connected to this chat.</div>}
-        {open.kind === "file" && filesEnabled && files !== null && !items.length && <div className="shortcut-empty">The folder has no files to name yet.</div>}
+        {open.kind === "file" && filesEnabled && files !== null && !items.length && (
+          <div className="shortcut-empty">{filesWhy ? `${filesWhy.replace(/\.?$/, ".")}` : files.length ? `No file in the folder matches “${open.query}”.` : "The folder has no files to name yet."}</div>
+        )}
         {open.kind === "person" && !items.length && <div className="shortcut-empty">Nobody else is here yet. Share the session to bring someone in.</div>}
         {open.kind === "command" && tool && own === null && <div className="shortcut-empty">Asking {tool} for its commands…</div>}
         {open.kind === "command" && tool && own !== null && !items.length && (

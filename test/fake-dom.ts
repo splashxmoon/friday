@@ -63,6 +63,10 @@ class FakeNode {
   removeEventListener(type: string, fn: EventListenerOrEventListenerObject | null, opts?: boolean | EventListenerOptions) {
     this.listeners.removeEventListener(type, fn, opts);
   }
+  /** On this node only, no bubbling: enough for a Radix focus scope's own mount and unmount events (ui.tsx floating). */
+  dispatchEvent(e: Event): boolean {
+    return this.listeners.dispatchEvent(e);
+  }
 }
 
 class FakeText extends FakeNode {

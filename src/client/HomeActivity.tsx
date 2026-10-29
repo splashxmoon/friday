@@ -6,6 +6,9 @@ import { EngineMark, FridayMark } from "./BrandMarks.js";
 import { Icon } from "./icons.js";
 import type { Identity, RecentSession } from "./storage.js";
 import { relTime } from "./ui.js";
+import { PresenceRing } from "./presence.js";
+import { isWorkSid } from "./WorkMode.js";
+import { workRightNow } from "./work-outputs.js";
 
 /**
  * Under the box on the home screen: your agents right now, then your last thirteen weeks of work.
@@ -96,7 +99,9 @@ export function streaks(cells: { turns: number }[]): { longest: number; current:
 }
 
 export function HomeActivity({ identity, recents, onOpen, onBoard }: { identity: Identity; recents: RecentSession[]; onOpen: (sid: string, invite: string) => void; onBoard?: () => void }) {
-  const cards = useRightNow(identity, recents);
+  let cards = useRightNow(identity, recents);
+  // Work's home: one row a session, in plain words (work-outputs.ts workRightNow).
+  if (cards?.length && cards.every((c) => isWorkSid(c.sid))) cards = workRightNow(cards);
   const days = useDays();
   const now = (cards ?? []).filter((c) => c.column !== "idle").sort((a, b) => (ORDER[a.column] ?? 9) - (ORDER[b.column] ?? 9) || Number(b.you) - Number(a.you) || b.at - a.at);
   const cols = useMemo(() => heatmap(days ?? []), [days]);
@@ -128,10 +133,14 @@ export function HomeActivity({ identity, recents, onOpen, onBoard }: { identity:
             )}
           </div>
           <ul className="ha-list">
-            {now.slice(0, 5).map((c) => (
+            {/* Three quiet rows under the box (DIRECTION.md §9.5); the rest are on the Agent Board. */}
+            {now.slice(0, 3).map((c) => (
               <li key={c.id}>
                 <button type="button" className={`ha-row ${c.column}${c.you ? " you" : ""}`} onClick={() => onOpen(c.sid, invite(c.sid))}>
-                  <span className="ha-mark">{c.tool ? <EngineMark tool={c.tool} size={14} /> : c.agent === "Friday Code" ? <FridayMark size={14} /> : <Icon name="agent" size={14} />}</span>
+                  {/* The coding tool's mark wears the ring of how it stands, as everywhere (presence.tsx): no dot beside the word. */}
+                  <PresenceRing state={c.column === "needs" ? "needs" : c.column === "working" ? "working" : "idle"} size={24} square className="ha-pr">
+                    <span className="ha-mark">{c.tool ? <EngineMark tool={c.tool} size={13} /> : c.agent === "Friday Code" ? <FridayMark size={13} /> : <Icon name="agent" size={13} />}</span>
+                  </PresenceRing>
                   <span className="ha-text">
                     <span className="ha-title" title={c.title}>{c.title}</span>
                     {/* Its task under its title only when it says something the title doesn't. */}
@@ -145,7 +154,6 @@ export function HomeActivity({ identity, recents, onOpen, onBoard }: { identity:
                     })()}
                   </span>
                   <span className={`ha-state ${c.column}`}>
-                    <i aria-hidden />
                     {c.you && c.column === "needs" ? "Needs you" : WORDS[c.column] ?? c.status}
                   </span>
                   {c.at > 0 && <span className="ha-time">{relTime(c.at)}</span>}
@@ -153,7 +161,7 @@ export function HomeActivity({ identity, recents, onOpen, onBoard }: { identity:
               </li>
             ))}
           </ul>
-          {now.length > 5 && <p className="ha-more">{now.length - 5} more on the Agent Board</p>}
+          {now.length > 3 && <p className="ha-more">{now.length - 3} more on the Agent Board</p>}
         </section>
       )}
 

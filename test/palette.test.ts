@@ -24,7 +24,8 @@ test("a word, or the first letters of words, beats letters scattered through a t
   const set = labels(paletteGroups(actions, "set"));
   assert.equal(set[0], "Settings", "not every session that holds s…e…t");
   assert.ok(set.length > 1 && set.slice(1).every((l) => l.startsWith("Settings · ")), "then its sections, and nothing else");
-  assert.equal(labels(paletteGroups(actions, "cr"))[0], "Code Review", "first letters");
+  // A word starting so comes first (the palette has "Crew workflows"; Arun, 2026-10-28: "rename team to something else"), then first letters.
+  assert.equal(labels(paletteGroups(actions, "cr")).filter((l) => !/\bcr/i.test(l))[0], "Code Review", "first letters");
   assert.ok(!labels(paletteGroups(actions, "sessions")).some((l) => l.startsWith("RISKY")), "the group name 'Sessions' isn't what a row says");
   assert.ok(labels(paletteGroups(actions, "build")).includes("ASK clean the build folder"));
   assert.ok(labels(paletteGroups(actions, "rsktdy")).length > 0, "with nothing closer, the scattered kind still finds something");

@@ -1,9 +1,7 @@
 import { stepKind } from "../run-strip.js";
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { ThinkingOrb } from "thinking-orbs";
+import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Orb } from "@/components/aicss/Orb";
 import { currentTheme } from "./storage.js";
-import { useAwake } from "./awake.js";
 import { ENGINE_NAMES, type EngineTool, type ToolCall } from "../types.js";
 import { Icon, type IconName } from "./icons.js";
 import type { Look } from "./handoff-ui.js";
@@ -33,16 +31,6 @@ export function Working({ label }: { label: string }) {
   );
 }
 
-/**
- * Before "Working · 7s" under the reply while it runs: a dotted orb composing, at the library's 20px inline-text design.
- * Decoration only, drawn in Friday's own light or dark ink (not the system's); the library stills it for reduced motion.
- */
-function RunOrb() {
-  // A canvas drawn every frame: only while Friday is the window in use (awake.ts), a still mark otherwise.
-  const awake = useAwake();
-  if (!awake) return <span className="rsp-orb rsp-orb-still" aria-hidden="true" />;
-  return <ThinkingOrb className="rsp-orb" state="composing" size={20} theme={currentTheme()} aria-hidden="true" role="presentation" />;
-}
 
 // ── thinking ───────────────────────────────────────────────────────────
 
@@ -202,6 +190,18 @@ function RunStrip({ steps, onPick }: { steps: Step[]; onPick: (id: string) => vo
   );
 }
 
+/** A step's mark, drawn: the text glyphs it is named by came out in four sizes from as many fallback fonts, the search one a
+ * speck beside the edit one (Arun, 2026-10-28: "a look for like the little details and designs… for the whole app too"). */
+const MARK_ICONS: Record<string, IconName> = { "≡": "file", "⌕": "search", "›_": "terminal", "±": "pencil", "+": "plus", "↗": "globe", "✎": "memory", "☐": "list", "?": "help", "→": "handoff", "◇": "skills", "⇄": "plug" };
+function StepMark({ mark }: { mark: string }) {
+  const icon = MARK_ICONS[mark];
+  return (
+    <span className="rsp-mark" aria-hidden>
+      {icon ? <Icon name={icon} size={13} /> : mark}
+    </span>
+  );
+}
+
 function StepList({ steps, shown: picked, onShown }: { steps: Step[]; shown?: string | null; onShown?: (id: string | null) => void }) {
   const [own, setOwn] = useState<string | null>(null);
   const shown = picked !== undefined ? picked : own;
@@ -214,9 +214,7 @@ function StepList({ steps, shown: picked, onShown }: { steps: Step[]; shown?: st
         <li key={s.id} id={`step-${s.id}`} className={`rsp-step ${s.state}`}>
           <div className="rsp-step-line">
             <button type="button" className="rsp-step-row" disabled={!s.detail} aria-expanded={shown === s.id} onClick={() => setShown(shown === s.id ? null : s.id)}>
-              <span className="rsp-mark" aria-hidden>
-                {s.mark}
-              </span>
+              <StepMark mark={s.mark} />
               <span className={s.state === "running" ? "rsp-verb rsp-shine" : "rsp-verb"}>{s.state === "waiting" ? askedVerb(s.verb) : s.verb}</span>
               {s.target && <code className="rsp-chip">{clip(s.target, 72)}</code>}
               {s.state === "failed" && <span className="rsp-step-flag">failed</span>}
@@ -338,13 +336,12 @@ export function RunLog({
   const elapsed = startedAt && (live || took >= 1000) ? span(took) : "";
   const current = live ? steps.findLast((s) => s.state === "running") : undefined;
   const summary = live
-    ? [`Working${elapsed ? ` · ${elapsed}` : ""}`, steps.length ? `${steps.length} step${steps.length === 1 ? "" : "s"}` : "", tokens ? `${shortTokens(tokens)} tokens` : ""].filter(Boolean).join(" · ")
+    ? [`Working${elapsed ? ` · ${elapsed}` : ""}`, steps.length ? `${steps.length} step${steps.length === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ")
     : [
         elapsed ? `Worked for ${elapsed}` : steps.length ? "Worked" : "Thought",
         steps.length ? `${steps.length} step${steps.length === 1 ? "" : "s"}` : "",
         files.length ? `${files.length} file${files.length === 1 ? "" : "s"} changed` : "",
         failed ? `${failed} failed` : "",
-        tokens ? `${shortTokens(tokens)} tokens` : "",
       ]
         .filter(Boolean)
         .join(" · ");
@@ -353,7 +350,11 @@ export function RunLog({
     <div className={`rsp-timeline rsp-runlog ${live ? "live" : ""}`}>
       <button type="button" className="rsp-tl-head" aria-expanded={open} data-tip={open ? "Hide the steps" : "Show every step"} onClick={() => setOpen(!open)}>
         <span className={`rsp-caret side ${open ? "open" : ""}`} aria-hidden />
-        <span className={failed ? "rsp-tl-summary has-fail" : live ? "rsp-tl-summary rsp-shine" : "rsp-tl-summary"}>{summary}</span>
+        {/* What it cost, in a span of its own, so a session that doesn't count it can leave it out. */}
+        <span className={failed ? "rsp-tl-summary has-fail" : live ? "rsp-tl-summary rsp-shine" : "rsp-tl-summary"}>
+          {summary}
+          {tokens ? <span className="rsp-tokens"> · {shortTokens(tokens)} tokens</span> : null}
+        </span>
         {live && current && (
           <span className="rsp-tl-now">
             <span>{current.verb}</span>
@@ -416,9 +417,10 @@ export function RunMeta({ files, live, onFile, startedAt, endedAt, tokens, compa
     <div className="rsp-meta">
       <p className="rsp-meta-line">
         {[
-          time && (live ? <span key="t" className="rsp-meta-live"><RunOrb />{time}</span> : <span key="t">{time}</span>),
+          // The one live line: words with a faint shimmer, in the feed only (DIRECTION.md §7); waiting on a person, still.
+          time && (live ? <span key="t" className={`rsp-meta-live ${waiting ? "needs" : "rsp-shine"}`}>{time}</span> : <span key="t">{time}</span>),
           changed && (onFile ? <button key="f" type="button" className="rsp-meta-link" onClick={onFile}>{changed}</button> : <span key="f">{changed}</span>),
-          used && <span key="u">{used}</span>,
+          used && <span key="u" className="rsp-meta-tokens">{used}</span>,
           trimmed && <span key="c" title="Every step re-reads the conversation, so Friday had the tool summarise it first">{trimmed}</span>,
         ]
           .filter(Boolean)
@@ -440,15 +442,27 @@ export function StepGroup({ steps, thought, thoughtSecs = 0, live }: { steps: St
   // Drawn from the first time it opens, and kept so the fold can animate closed; a closed group draws none of its steps.
   const opened = useRef(false);
   if (open) opened.current = true;
-  const summary = stepsSummary(steps, thoughtSecs);
+  const sentence = stepsSummary(steps, thoughtSecs);
   const current = live ? steps.findLast((s) => s.state === "running") : undefined;
   // With nothing done yet the running step is the summary itself, so it isn't said twice.
   const alone = steps.every((s) => s.state === "running" || s.state === "waiting");
   const failed = steps.some((s) => s.state === "failed");
+  // A long stretch of work is counted, as Conductor does: "17 tool calls ›" (DIRECTION.md §9.6), with the sentence in its tip.
+  // A short one keeps its sentence ("Read README.md, ran a command"), which says more than "2 tool calls".
+  const done = steps.filter((s) => s.state !== "running" && s.state !== "waiting").length;
+  const summary = !live && done >= 4 ? [`${done} tool calls`, ...sentence.split(" · ").slice(1)].join(" · ") : sentence;
   return (
     <div className={`rsp-group ${live ? "live" : ""}`}>
-      <button type="button" className="rsp-group-head" aria-expanded={open} aria-controls={foldId} data-tip={open ? "Hide these steps" : "Show these steps"} onClick={() => setOpen(!open)}>
-        <span className={live ? "rsp-group-text rsp-shine" : failed ? "rsp-group-text has-fail" : "rsp-group-text"}>{summary}</span>
+      <button type="button" className="rsp-group-head" aria-expanded={open} aria-controls={foldId} data-tip={open ? "Hide these steps" : summary === sentence ? "Show these steps" : sentence} onClick={() => setOpen(!open)}>
+        {/* Only the failure in the state colour: the whole line in red read as the whole stretch having failed. */}
+        <span className={live ? "rsp-group-text rsp-shine" : failed ? "rsp-group-text has-fail" : "rsp-group-text"}>
+          {live ? summary : summary.split(" · ").map((part, i) => (
+            <Fragment key={i}>
+              {i ? " · " : ""}
+              <span className={/^\d+ failed$/.test(part) ? "rsp-group-fail" : undefined}>{part}</span>
+            </Fragment>
+          ))}
+        </span>
         {current && !alone && (
           <span className="rsp-tl-now">
             <span aria-hidden> · </span>
@@ -531,9 +545,7 @@ export function Timeline({
                   aria-expanded={shown === s.id}
                   onClick={() => setShown(shown === s.id ? null : s.id)}
                 >
-                  <span className="rsp-mark" aria-hidden>
-                    {s.mark}
-                  </span>
+                  <StepMark mark={s.mark} />
                   <span className={s.state === "running" ? "rsp-verb rsp-shine" : "rsp-verb"}>{s.state === "waiting" ? askedVerb(s.verb) : s.verb}</span>
                   {s.target && <code className="rsp-chip">{clip(s.target, 72)}</code>}
                   {s.state === "failed" && <span className="rsp-step-flag">failed</span>}
@@ -650,7 +662,7 @@ export interface HandoffMore {
  * is the whole decision. Beyond the ones already here, "More" brings in a saved agent or a coding agent of your
  * own (Claude Code, Codex, Cursor) and hands the work to it as soon as it is in.
  */
-export function HandoffBar({ targets, active, onPick, more }: { targets: HandoffTarget[]; active: string | null; onPick: (id: string | null) => void; more?: HandoffMore }) {
+export function HandoffBar({ targets, active, onPick, more, label = "Pass on" }: { targets: HandoffTarget[]; active: string | null; onPick: (id: string | null) => void; more?: HandoffMore; /** Its words, where a session says it its own way. */ label?: string }) {
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
   // Fixed to the window, placed from the button: the feed clips anything that hangs out of it.
@@ -668,7 +680,9 @@ export function HandoffBar({ targets, active, onPick, more }: { targets: Handoff
     // The arrows move through its rows, as a menu's do, from the button into the list and round (2026-10-27 audit: ArrowDown
     // did nothing); Escape gives the focus back to the button.
     const esc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      // Tab closes it and gives the focus back to its button, as the app's other menus do: it walked on past the open menu.
+      if (e.key === "Escape" || (e.key === "Tab" && wrap.current?.querySelector(".ho-menu")?.contains(document.activeElement))) {
+        if (e.key === "Tab") e.preventDefault();
         setOpen(false);
         wrap.current?.querySelector<HTMLElement>(".ho-btn")?.focus();
         return;
@@ -684,7 +698,14 @@ export function HandoffBar({ targets, active, onPick, more }: { targets: Handoff
     };
     document.addEventListener("mousedown", away);
     document.addEventListener("keydown", esc);
+    // Opened, the focus goes into it, on the agent already chosen or else the first: from the keyboard the arrows then work
+    // at once, and a screen reader is in the menu that just opened (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION").
+    const t = setTimeout(() => {
+      const menu = wrap.current?.querySelector(".ho-menu");
+      (menu?.querySelector<HTMLElement>(".ho-menu-row.on:not([disabled])") ?? menu?.querySelector<HTMLElement>(".ho-menu-row:not([disabled])"))?.focus();
+    }, 0);
     return () => {
+      clearTimeout(t);
       document.removeEventListener("mousedown", away);
       document.removeEventListener("keydown", esc);
     };
@@ -705,7 +726,7 @@ export function HandoffBar({ targets, active, onPick, more }: { targets: Handoff
     <div className="ho-bar" role="group" aria-label="Hand this work to another agent" ref={wrap}>
       <button type="button" className={`ho-btn${open || sel ? " on" : ""}`} aria-haspopup="menu" aria-expanded={open} data-tip="Give this work to another agent" onClick={toggle}>
         <Icon name="handoff" size={14} />
-        {sel ? <>Pass on to <b>{sel.name}</b></> : "Pass on"}
+        {sel ? <>{label === "Pass on" ? "Pass on to" : "Hand to"} <b>{sel.name}</b></> : label}
         {!sel && suggested && <span className="ho-dot" title={`Suggested: ${"name" in suggested ? suggested.name : ENGINE_NAMES[suggested.tool]}`} />}
         <Icon name="chevronDown" size={12} />
       </button>

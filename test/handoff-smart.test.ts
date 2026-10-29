@@ -96,3 +96,10 @@ test("work passed back and forth between two agents is counted, and stops at a l
   assert.equal(bouncesBetween(events, "main", "lane-review", Date.now() + 1000), 0, "only the recent ones");
   assert.ok(MAX_BOUNCES >= 3, "a round trip or two is normal; that is not a loop");
 });
+
+test("a hand-off's card shows the task, not the brief Friday wrapped it in (Arun, 2026-10-28: \"iron everything\")", async () => {
+  const { handoffTaskText } = await import("../src/client/handoff-ui.js");
+  const brief = "Carry on with this task, which Claude Code was partway through when it ran out of usage. Don't start over: what it already did is in the record with this, so build on it, then finish the task.\n\nThe task:\nArun: Please write a two-line intro";
+  assert.equal(handoffTaskText(brief), "Arun: Please write a two-line intro");
+  assert.equal(handoffTaskText("Review the diff for the login change"), "Review the diff for the login change", "a person's own words stay");
+});

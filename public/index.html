@@ -10,6 +10,10 @@
       if (t === "light" || (t !== "dark" && t !== "glass" && window.matchMedia && matchMedia("(prefers-color-scheme: light)").matches)) {
         document.documentElement.classList.remove("dark");
       }
+      // The accent and contrast chosen in Settings › Appearance (prefs.ts), before the first paint too.
+      var a = localStorage.getItem("mpa.accent");
+      if (a) document.documentElement.setAttribute("data-accent", a);
+      if (localStorage.getItem("mpa.contrast") === "more") document.documentElement.classList.add("contrast-more");
     } catch (e) {}
   </script>
   <script>
@@ -41,10 +45,11 @@
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <!-- Fetched beside the page rather than before it: as a plain stylesheet a slow font host held back the first paint for
+  <!-- Newsreader is the serif a Work document's headings are set in, inside the document only (DIRECTION.md §9.8, 2026-10-29).
+       Fetched beside the page rather than before it: as a plain stylesheet a slow font host held back the first paint for
        seconds, a blank window. The text shows in the fallback font until these arrive (display=swap). -->
-  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&family=Inter:wght@400;500;600;700&family=Work+Sans:wght@400;500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" />
-  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&family=Inter:wght@400;500;600;700&family=Work+Sans:wght@400;500;600;700&display=swap" /></noscript>
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&family=Inter:wght@400;500;600;700&family=Work+Sans:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400..600;1,6..72,400..500&display=swap" onload="this.onload=null;this.rel='stylesheet'" />
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&family=Inter:wght@400;500;600;700&family=Work+Sans:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400..600;1,6..72,400..500&display=swap" /></noscript>
   <!-- Tailwind + shadcn tokens (AI Elements), then any CSS the libraries bundle, then the app's own styles. -->
   <link rel="stylesheet" href="/tailwind.css" />
   <!-- Typeset maths in answers (KaTeX, the version the client bundles): fetched beside the page, like the fonts above, so it

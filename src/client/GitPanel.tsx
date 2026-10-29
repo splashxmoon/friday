@@ -42,6 +42,10 @@ export function GitPanel({ state, sid, invite, send, me, lane }: { state: Sessio
   const [busy, setBusy] = useState<string | null>(null);
   const [open, setOpen] = useState<Key | null>(null);
   const [patches, setPatches] = useState<Record<string, DiffFile[] | "loading" | "none">>({});
+  const openRef = useRef(open);
+  openRef.current = open;
+  const patchesRef = useRef(patches);
+  patchesRef.current = patches;
   const [shipping, setShipping] = useState(false);
   // The folders the agent also works in (multi-repo): the latest change set names them; the panel reads and acts in the one picked.
   const others = [...new Set((state.diffs[laneId]?.files ?? []).map((f) => f.repo).filter((r): r is string => !!r))];
@@ -51,7 +55,13 @@ export function GitPanel({ state, sid, invite, send, me, lane }: { state: Sessio
   }, [others.join("|")]); // eslint-disable-line react-hooks/exhaustive-deps
   const [ask, confirmUI] = useConfirm();
   const alive = useRef(true);
-  useEffect(() => () => void (alive.current = false), []);
+  // Set again on mounting: React's development double mount ran the clean-up once and left every read dropped.
+  useEffect(() => {
+    alive.current = true;
+    return () => void (alive.current = false);
+  }, []);
+  /** Bumped by each fresh look, so the row that is open reads its changes again (below). */
+  const [looked, setLooked] = useState(0);
 
   const url = (op: string, extra = "") => `/api/sessions/${encodeURIComponent(sid)}/repo?op=${op}&lane=${encodeURIComponent(laneId)}&invite=${encodeURIComponent(invite)}${dir ? `&dir=${encodeURIComponent(dir)}` : ""}${extra}`;
   const read = useCallback(
@@ -88,8 +98,11 @@ export function GitPanel({ state, sid, invite, send, me, lane }: { state: Sessio
       const c = await read<Compare & { missing?: true }>("compare", "&ref=main", true);
       if (alive.current) setCompare(c && !c.missing ? c : null);
     } else setCompare(null);
-    // What is open may have changed under it.
-    setPatches({});
+    // What is open may have changed under it: the rest are forgotten, and the open one keeps what it showed until it has
+    // been read again. Clearing it too left an open row on "Reading…" for good, nothing reading it again (2026-10-28 QA:
+    // "Reading…" stuck after the 15-second look, a stage or a refresh; Arun: "TEST EVERYTHING… EVERY INTERACTION").
+    setPatches((p) => Object.fromEntries(Object.entries(p).filter(([k, v]) => k === openRef.current && v !== "loading")));
+    setLooked((n) => n + 1);
   }, [live, read]);
 
   // On opening, after every run ends, and now and then while the panel is up: a terminal or an agent may have moved things.
@@ -117,20 +130,28 @@ export function GitPanel({ state, sid, invite, send, me, lane }: { state: Sessio
       onConfirm: () => void act("discard", { action: "discard", paths, untracked }),
     });
 
-  /** The file's hunks, or a commit's changes, fetched when its row opens. */
-  const toggle = async (key: Key) => {
-    if (open === key) return setOpen(null);
-    setOpen(key);
-    if (patches[key]) return;
-    setPatches((p) => ({ ...p, [key]: "loading" }));
-    const [kind, ...rest] = key.split(":");
+  /** The file's hunks, or a commit's changes, fetched when its row opens, and again after each fresh look while it is open. */
+  const toggle = (key: Key) => setOpen(open === key ? null : key);
+  const readFor = useRef({ open, looked });
+  useEffect(() => {
+    if (!open) return;
+    // Opened again with nothing newer to show: what it read is still right.
+    const was = readFor.current;
+    readFor.current = { open, looked };
+    const have = patchesRef.current[open];
+    if (have && have !== "loading" && was.looked === looked && was.open !== open) return;
+    if (!have) setPatches((p) => ({ ...p, [open]: "loading" }));
+    let stale = false;
+    const [kind, ...rest] = open.split(":");
     const ref = rest.join(":");
-    const got =
-      kind === "commit"
-        ? await read<{ files: DiffFile[] }>("show", `&ref=${encodeURIComponent(ref)}`)
-        : await read<{ files: DiffFile[] }>("gitdiff", `&staged=${kind === "staged" ? 1 : 0}&path=${encodeURIComponent(ref)}`);
-    if (alive.current) setPatches((p) => ({ ...p, [key]: got?.files?.length ? got.files : "none" }));
-  };
+    void (kind === "commit"
+      ? read<{ files: DiffFile[] }>("show", `&ref=${encodeURIComponent(ref)}`)
+      : read<{ files: DiffFile[] }>("gitdiff", `&staged=${kind === "staged" ? 1 : 0}&path=${encodeURIComponent(ref)}`)
+    ).then((got) => {
+      if (!stale && alive.current) setPatches((p) => ({ ...p, [open]: got?.files?.length ? got.files : "none" }));
+    });
+    return () => void (stale = true);
+  }, [open, looked, read]);
 
   const changed = status ? status.staged.length + status.unstaged.length + status.untracked.length + status.conflicted.length : 0;
   const branch = status?.branch ?? engine?.branch ?? "";
@@ -151,7 +172,7 @@ export function GitPanel({ state, sid, invite, send, me, lane }: { state: Sessio
     return (
       <li key={key} className={`gitp-file${on ? " on" : ""}`}>
         <div className="gitp-file-row">
-          <button type="button" className="gitp-file-main" aria-expanded={on} onClick={() => void toggle(key)}>
+          <button type="button" className="gitp-file-main" aria-expanded={on} onClick={() => toggle(key)}>
             <span className={`gitp-letter is-${entry?.status ?? "untracked"}`}>{entry ? LETTER[entry.status] : "?"}</span>
             <span className="gitp-path" title={entry?.from ? `${entry.from} → ${path}` : path}>
               {entry?.from ? <><span className="muted">{entry.from.split("/").pop()} → </span>{path}</> : path}
@@ -280,8 +301,8 @@ export function GitPanel({ state, sid, invite, send, me, lane }: { state: Sessio
             </button>
           )}
           {mayWork && (
-            <button type="button" className="btn primary small" disabled={!!busy || !changed} onClick={() => setShipping(true)}>
-              <Icon name="commit" size={13} /> Commit
+            <button type="button" className="btn primary small gitp-commit" aria-label="Commit" title="Commit" disabled={!!busy || !changed} onClick={() => setShipping(true)}>
+              <Icon name="commit" size={13} /> <span className="gitp-commit-word">Commit</span>
             </button>
           )}
         </span>
@@ -364,7 +385,7 @@ export function GitPanel({ state, sid, invite, send, me, lane }: { state: Sessio
               const got = patches[key];
               return (
                 <li key={c.sha} className={`gitp-file gitp-commit${on ? " on" : ""}`}>
-                  <button type="button" className="gitp-file-main" aria-expanded={on} onClick={() => void toggle(key)}>
+                  <button type="button" className="gitp-file-main" aria-expanded={on} onClick={() => toggle(key)}>
                     <span className={`gitp-dot${c.pushed === false ? " unpushed" : ""}`} title={c.pushed === false ? "Not pushed yet" : c.pushed ? "Pushed" : ""} />
                     <code className="gitp-sha">{c.sha.slice(0, 7)}</code>
                     <span className="gitp-path" title={c.subject}>

@@ -1,6 +1,26 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
+import { FocusScope } from "radix-ui/internal";
 import { Avatar, Icon, type IconName } from "./icons.js";
+
+/**
+ * Draws a floating surface (a menu, a picker, a card) on the page, in a layer that works over an open dialog too.
+ *
+ * A Radix dialog keeps the keyboard inside itself and turns off presses everywhere else, so a menu opened from one, drawn
+ * outside it, was dead: the board card's "…" menu did nothing, and typing in the teammate dialog's model search went into
+ * its Name field (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL"). A focus scope of its own sets the
+ * dialog's aside while this is open (Radix keeps a stack of them, and only the top one holds the keyboard); its mark
+ * (data-float) is what the dialog reads to stay open when it is pressed (components/ui/dialog.tsx), and what the stylesheet
+ * lets presses through to. Where focus goes in and back out stays with useDismiss.
+ */
+export function floating(node: ReactNode) {
+  return createPortal(
+    <FocusScope.Root asChild trapped={false} loop={false} onMountAutoFocus={(e) => e.preventDefault()} onUnmountAutoFocus={(e) => e.preventDefault()} data-float="">
+      {node}
+    </FocusScope.Root>,
+    document.body,
+  );
+}
 
 /**
  * Every floating surface currently open: menus, popovers, dialogs.
@@ -28,6 +48,70 @@ function claimSurface(self: Floating, trigger: HTMLElement | null): () => void {
   }
   openSurfaces.add(self);
   return () => openSurfaces.delete(self);
+}
+
+/**
+ * The last few things that had the keyboard, newest last: where focus goes back to when what opened a dialog or a menu is
+ * gone by the time it closes. A confirm opened from a menu's row was opened by that row, which left with the menu, so
+ * Cancel dropped the focus to the page and a keyboard user lost their place (Arun, 2026-10-28: "TEST EVERYTHING… EVERY
+ * INTERACTION, EVERY VISUAL").
+ */
+const focusTrail: HTMLElement[] = [];
+if (typeof document !== "undefined") {
+  document.addEventListener("focusin", (e) => {
+    const el = e.target;
+    if (!(el instanceof HTMLElement) || el === document.body) return;
+    const i = focusTrail.indexOf(el);
+    if (i >= 0) focusTrail.splice(i, 1);
+    focusTrail.push(el);
+    if (focusTrail.length > 12) focusTrail.shift();
+  });
+}
+
+/**
+ * Puts the keyboard back on `want`, or when that is gone, on the newest thing that had it and is still on the page outside
+ * `leaving` (what is closing). Only when focus has nowhere better to be: someone who clicked elsewhere keeps what they clicked.
+ */
+export function focusBack(want: Element | null | undefined, leaving?: Element | null): void {
+  const now = document.activeElement;
+  if (now && now !== document.body && !(leaving?.contains(now) ?? false) && now.isConnected) return;
+  const usable = (x: Element | null | undefined): x is HTMLElement => x instanceof HTMLElement && x.isConnected && !leaving?.contains(x) && x.getClientRects().length > 0 && !x.closest("[inert],[aria-hidden='true']");
+  const to = usable(want) ? want : [...focusTrail].reverse().find(usable);
+  to?.focus({ preventScroll: true });
+}
+
+/**
+ * What a Radix dialog or sheet (components/ui) needs to live with the menus and pickers opened from it: a press or a focus in
+ * one of them is not a press outside the dialog, and closing gives the keyboard back to what opened it, or to the newest thing
+ * that had it when that is gone (a dialog opened from a menu's row). Wraps the handlers the dialog was given.
+ */
+export function layerHandlers<E extends Event>(props: {
+  onInteractOutside?: ((e: E) => void) | undefined;
+  onFocusOutside?: ((e: E) => void) | undefined;
+  onOpenAutoFocus?: ((e: Event) => void) | undefined;
+  onCloseAutoFocus?: ((e: Event) => void) | undefined;
+}, opener: { current: Element | null }) {
+  const fromFloat = (e: Event) => !!(e.target as Element | null)?.closest?.("[data-float]");
+  return {
+    onInteractOutside: (e: E) => {
+      if (fromFloat(e)) e.preventDefault();
+      props.onInteractOutside?.(e);
+    },
+    onFocusOutside: (e: E) => {
+      if (fromFloat(e)) e.preventDefault();
+      props.onFocusOutside?.(e);
+    },
+    onOpenAutoFocus: (e: Event) => {
+      opener.current = document.activeElement;
+      props.onOpenAutoFocus?.(e);
+    },
+    onCloseAutoFocus: (e: Event) => {
+      props.onCloseAutoFocus?.(e);
+      if (e.defaultPrevented) return;
+      e.preventDefault();
+      focusBack(opener.current, e.target instanceof Element ? e.target : null);
+    },
+  };
 }
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -89,9 +173,9 @@ export function useDismiss(ref: RefObject<HTMLElement | null>, onClose: () => vo
     return () => {
       clearTimeout(timer);
       el.removeEventListener("keydown", keep);
-      // Only when focus has nowhere better to be: somebody who clicked elsewhere to close this keeps what they clicked.
-      const now = document.activeElement;
-      if (opener?.isConnected && (!now || now === document.body || el.contains(now))) opener.focus();
+      // Only when focus has nowhere better to be: somebody who clicked elsewhere to close this keeps what they clicked. An
+      // opener that has gone with a menu (a confirm asked from a menu's row) hands over to what had the keyboard before it.
+      focusBack(opener, el);
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -136,17 +220,24 @@ export function useDismiss(ref: RefObject<HTMLElement | null>, onClose: () => vo
 export function placeCard(
   anchor: DOMRect | undefined,
   wide: number,
-  opts: { want?: number; min?: number; gap?: number; prefer?: "above" | "below"; beside?: boolean } = {},
-): { left: number; width: number; maxHeight: number; top?: number; bottom?: number } {
-  const { want = 520, min = 200, gap = 6, prefer, beside } = opts;
+  opts: { want?: number; min?: number; gap?: number; prefer?: "above" | "below"; beside?: boolean; /** Line the card's right edge up with the anchor's, opening leftwards. */ end?: boolean; /** In a window too short for `want` on either side, the card may lie over its own trigger and use the window's height instead. */ cover?: boolean } = {},
+): { left: number; width: number; maxHeight: number; /** "auto" on the side it is not pinned by, so a stylesheet's own top or bottom can't stretch it (the status bar's branch card drew as a 2px sliver: top 100% and bottom both applied). */ top: number | "auto"; bottom: number | "auto" } {
+  const { want = 520, min = 200, gap = 6, prefer, beside, end, cover } = opts;
   const edge = 8;
+  // Measured in the window's pixels, placed in the page's: with Settings › Interface size above 100% the page is zoomed, and
+  // a card placed at the measured numbers landed that much further right and down, off the window's edge (Arun, 2026-10-28:
+  // "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+  const z = uiZoom();
+  const vw = innerWidth / z;
+  const vh = innerHeight / z;
   // Never wider than the window: a card wider than a narrow window has its right edge cut off, whatever left it is given.
-  const width = Math.min(wide, innerWidth - 2 * edge);
-  const top0 = anchor?.top ?? 60;
-  const bottom0 = anchor?.bottom ?? 60;
-  const left0 = anchor?.left ?? edge;
+  const width = Math.min(wide, vw - 2 * edge);
+  const top0 = (anchor?.top ?? 60) / z;
+  const bottom0 = (anchor?.bottom ?? 60) / z;
+  const left0 = end && anchor ? anchor.right / z - width : (anchor?.left ?? edge) / z;
+  const right0 = (anchor?.right ?? edge) / z;
 
-  const room = { below: innerHeight - bottom0 - gap - edge, above: top0 - gap - edge };
+  const room = { below: vh - bottom0 - gap - edge, above: top0 - gap - edge };
   // A preference is honoured while the side it asks for can hold the minimum;
   // past that it still flips, because a panel that opens where it was told
   // and is too short to use is worse than one that opens the other way.
@@ -157,7 +248,10 @@ export function placeCard(
         room.above < want && room.below > room.above
       : prefer === "below"
         ? room.below >= min || room.below >= room.above
-        : room.below >= Math.min(want, min) || room.below >= room.above;
+        : // Below while it holds the whole card; otherwise above when that does, and failing both the roomier side. A row's
+          // menu low in the sidebar opened down into 373px and scrolled, with 560px free above it (Arun, 2026-10-28: "TEST
+          // EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+          room.below >= want || (room.above < want && room.below >= room.above);
   const maxHeight = Math.max(min, Math.min(want, down ? room.below : room.above));
   // Beside: for a trigger in a narrow strip down the side of the window, where
   // opening over it or under it would cover the strip itself. The card starts
@@ -165,19 +259,35 @@ export function placeCard(
   if (beside && anchor) {
     // Clear of the strip itself: a trigger sits inside it with room to spare, so
     // its own edge is not the strip's, and a card starting there overlaps the rule.
-    const x = Math.max(edge, Math.min(anchor.right + gap + 10, innerWidth - width - edge));
+    const x = Math.max(edge, Math.min(right0 + gap + 10, vw - width - edge));
     // Heights are measured from the window's edge, so "level with the bottom of
     // the trigger" is that edge minus where the trigger ends.
-    if (down) return { left: x, top: Math.max(edge, top0), width, maxHeight: Math.max(min, Math.min(want, innerHeight - top0 - edge)) };
-    return { left: x, bottom: Math.max(edge, innerHeight - bottom0), width, maxHeight: Math.max(min, Math.min(want, bottom0 - edge)) };
+    if (down) return { left: x, top: Math.max(edge, top0), bottom: "auto", width, maxHeight: Math.max(min, Math.min(want, vh - top0 - edge)) };
+    return { left: x, top: "auto", bottom: Math.max(edge, vh - bottom0), width, maxHeight: Math.max(min, Math.min(want, bottom0 - edge)) };
   }
-  const left = Math.max(edge, Math.min(left0, innerWidth - width - edge));
+  const left = Math.max(edge, Math.min(left0, vw - width - edge));
+  // Too short a window for the card above or below (the new-session page at 1000×600 gave the model picker 282px either way,
+  // two and a half models: 2026-10-29 verify): it takes the window's height, as much over its trigger as it must, and no more.
+  if (cover && Math.max(room.above, room.below) < want) {
+    const h = Math.min(want, vh - 2 * edge);
+    const mid = (top0 + bottom0) / 2;
+    return { left, top: Math.max(edge, Math.min(mid - h / 2, vh - h - edge)), bottom: "auto", width, maxHeight: h };
+  }
   // Opening upwards is pinned by its bottom edge, not by a top computed from
   // maxHeight. maxHeight is a ceiling the card is usually well under, so a top
   // measured off it leaves the card floating that whole difference above the
   // thing it belongs to — which is what a short menu over a tall allowance did.
-  if (down) return { left, top: bottom0 + gap, width, maxHeight };
-  return { left, bottom: Math.max(edge, innerHeight - top0 + gap), width, maxHeight };
+  if (down) return { left, top: bottom0 + gap, bottom: "auto", width, maxHeight };
+  return { left, top: "auto", bottom: Math.max(edge, vh - top0 + gap), width, maxHeight };
+}
+
+/**
+ * How much Settings › Interface size scales the page (the `zoom` on <html>, prefs.ts): 1 at 100%. What the browser measures is in
+ * the window's pixels and what a style sets is in the page's, so anything placed from a measurement divides by this.
+ */
+export function uiZoom(): number {
+  const z = parseFloat(getComputedStyle(document.documentElement).zoom);
+  return Number.isFinite(z) && z > 0 ? z : 1;
 }
 
 /** The same ceiling the model picker uses, so the two read as one family. */
@@ -367,8 +477,12 @@ function MenuPopup({ anchor, items, onClose, above, beside, compact, end, trigge
   const underLen = (it: MenuItem) => (it && typeof it === "object" && "sub" in it && it.sub ? it.sub.length : below(it).length);
   const perLine = Math.max(24, Math.floor((width - 76) / 6.3));
   const estHeight = items.reduce((h, it) => h + ("node" in it ? (it.height ?? 64) : "who" in it ? 62 : "heading" in it ? 30 : underLen(it) ? 52 + 16 * (Math.ceil(underLen(it) / perLine) - 1) : 34), 12);
-  const place = placeCard(anchor, width, { want: Math.min(estHeight, cap ?? MENU_MAX), min: 180, gap: 4, ...(above ? { prefer: "above" as const } : {}), ...(beside ? { beside } : {}) });
-  return createPortal(
+  const place = placeCard(anchor, width, { want: Math.min(estHeight, cap ?? MENU_MAX), min: 180, gap: 4, ...(above ? { prefer: "above" as const } : {}), ...(beside ? { beside } : {}), ...(end ? { end } : {}) });
+  // A choice of several opens on the one chosen, as the model picker does; anything else on its first row (useDismiss).
+  useEffect(() => {
+    ref.current?.querySelector<HTMLElement>('[role="menuitemradio"][aria-checked="true"]:not([disabled])')?.focus();
+  }, []);
+  return floating(
     <div
       ref={ref}
       className={compact ? "menu compact" : "menu"}
@@ -376,7 +490,9 @@ function MenuPopup({ anchor, items, onClose, above, beside, compact, end, trigge
       // A menu opened from inside a card belongs to that card. It is drawn on the page, outside it, so without this a press on
       // one of its rows reads as a press outside the card, and the card closes before the row has been chosen.
       data-owned-floating=""
-      style={{ top: place.top, bottom: place.bottom, left: end ? Math.max(8, anchor.right - place.width) : place.left, width: place.width, maxHeight: cap ? Math.min(cap, place.maxHeight ?? cap) : place.maxHeight }}
+      // An exact width is kept, past the stylesheet's 380px cap: a field's menu as wide as the field (Arun, 2026-10-28: "TEST
+      // EVERYTHING… EVERY INTERACTION, EVERY VISUAL"; Your models' provider menu was 380px under a 418px field).
+      style={{ top: place.top, bottom: place.bottom, left: place.left, width: place.width, maxHeight: cap ? Math.min(cap, place.maxHeight ?? cap) : place.maxHeight, ...(fixed ? { maxWidth: "none" } : {}) }}
       // A portal is still inside the tree it was rendered from as far as React
       // events go, so a click on the gap between two items, or on a heading,
       // would otherwise reach the row underneath and open it. And a right-click
@@ -386,9 +502,12 @@ function MenuPopup({ anchor, items, onClose, above, beside, compact, end, trigge
         e.preventDefault();
         e.stopPropagation();
       }}
-      // Arrow keys walk the rows, as a menu does; Tab closes it and hands focus back to the button that opened it.
+      // Arrow keys walk the rows, as a menu does; Tab closes it and hands focus back to the button that opened it. Rows with a
+      // tick are menuitemradio, and only menuitem was walked: in the mode menu and every filter, arrows did nothing and Tab
+      // walked out of a menu left open (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
       onKeyDown={(e) => {
-        const rows = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not([disabled])')];
+        if (e.key === "Tab") return e.preventDefault(), onClose();
+        const rows = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]:not([disabled])')];
         if (!rows.length) return;
         const i = rows.indexOf(document.activeElement as HTMLButtonElement);
         const go = (n: number) => (e.preventDefault(), rows[(n + rows.length) % rows.length]!.focus());
@@ -396,7 +515,6 @@ function MenuPopup({ anchor, items, onClose, above, beside, compact, end, trigge
         else if (e.key === "ArrowUp") go(i - 1);
         else if (e.key === "Home") go(0);
         else if (e.key === "End") go(rows.length - 1);
-        else if (e.key === "Tab") (e.preventDefault(), onClose());
       }}
     >
       {items.map((it, i) =>
@@ -433,7 +551,7 @@ function MenuPopup({ anchor, items, onClose, above, beside, compact, end, trigge
               it.onSelect();
             }}
           >
-            {it.mark ? <span className="menu-mark">{it.mark}</span> : it.icon ? <Icon name={it.icon} size={14} /> : anyIcon ? <span className="menu-spacer" /> : null}
+            {it.mark ? <span className="menu-mark">{it.mark}</span> : it.icon ? <Icon name={it.icon} size={16} /> : anyIcon ? <span className="menu-spacer" /> : null}
             <span className="menu-label">
               {it.label}
               {(it.sub || below(it)) && <span className="menu-sub">{[it.sub, below(it)].filter(Boolean).join(" · ")}</span>}
@@ -447,7 +565,6 @@ function MenuPopup({ anchor, items, onClose, above, beside, compact, end, trigge
         ),
       )}
     </div>,
-    document.body,
   );
 }
 
@@ -478,24 +595,53 @@ export function InlineEdit({
     if (save && t && t !== value) onSave(t);
     else onCancel();
   };
+  // Near the limit it says how much room is left, so a name isn't cut short without a word (Arun, 2026-10-28: "TEST EVERYTHING…
+  // EVERY INTERACTION, EVERY VISUAL"; a pasted name was silently cut at 80).
+  const left = maxLength - v.length;
+  // Done, the keyboard goes back where it was: to what opened the field, or when that went with it, to what now stands in the
+  // field's place (the name it renamed). It fell to the page (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION").
+  const opener = useRef<Element | null | undefined>(undefined);
+  if (opener.current === undefined) opener.current = document.activeElement;
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const place = input.current?.parentElement ?? null;
+    return () => {
+      setTimeout(() => {
+        const now = document.activeElement;
+        if (now && now !== document.body && now.isConnected) return;
+        const back = opener.current instanceof HTMLElement && opener.current.isConnected ? opener.current : place?.isConnected ? focusablesIn(place)[0] ?? (place.closest<HTMLElement>("[tabindex], button, a[href]")) : null;
+        back?.focus({ preventScroll: true });
+      }, 0);
+    };
+  }, []);
   return (
-    <input
-      className={`inline-edit ${className}`}
-      aria-label={label}
-      placeholder={placeholder}
-      autoFocus
-      value={v}
-      maxLength={maxLength}
-      onChange={(e) => setV(e.target.value)}
-      onFocus={(e) => e.target.select()}
-      onClick={(e) => e.stopPropagation()}
-      onKeyDown={(e) => {
-        e.stopPropagation();
-        if (e.key === "Enter") finish(true);
-        else if (e.key === "Escape") finish(false);
-      }}
-      onBlur={() => finish(true)}
-    />
+    <>
+      <input
+        ref={input}
+        className={`inline-edit ${className}`}
+        aria-label={label}
+        placeholder={placeholder}
+        autoFocus
+        value={v}
+        maxLength={maxLength}
+        onChange={(e) => setV(e.target.value)}
+        onFocus={(e) => e.target.select()}
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          // The key is spent here: the Enter that saved a typed model name went on to press the pill that focus returned to,
+          // and opened the picker again (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+          if (e.key === "Enter") (e.preventDefault(), finish(true));
+          else if (e.key === "Escape") (e.preventDefault(), finish(false));
+        }}
+        onBlur={() => finish(true)}
+      />
+      {left <= 10 && (
+        <span className={`inline-edit-left${left === 0 ? " full" : ""}`} aria-live="polite" title={`Names are up to ${maxLength} characters`}>
+          {left === 0 ? `${maxLength} max` : left}
+        </span>
+      )}
+    </>
   );
 }
 
@@ -599,6 +745,50 @@ export function Hint({ text, children, className = "" }: { text: string; childre
   );
 }
 
+/**
+ * The control a person last pressed, for a note about what came of it to appear beside (ActionNote). Kept from the press, since
+ * the answer often arrives after the menu or dialog it was pressed in has gone.
+ */
+let lastActed: Element | null = null;
+if (typeof document !== "undefined") {
+  const mark = (e: Event) => {
+    const t = e.target instanceof Element ? e.target.closest('button, a, [role="button"], [role^="menuitem"], input, select, textarea') : null;
+    if (t) lastActed = t;
+  };
+  document.addEventListener("pointerdown", mark, true);
+  document.addEventListener("keydown", (e) => (e.key === "Enter" || e.key === " ") && mark(e), true);
+}
+
+/**
+ * What came of something just done, said beside the thing that was pressed: "That message has no checkpoint to go back to.",
+ * what Sign in will run. Said only to a screen reader before, so the press seemed to do nothing (Arun, 2026-10-28: "TEST
+ * EVERYTHING… EVERY INTERACTION, EVERY VISUAL"). It never takes a press (pointer-events: none) and goes when `text` does;
+ * with nothing on screen to stand beside, it sits under the top of the window. One pattern for every note of this kind.
+ */
+export function ActionNote({ text }: { text: string | null }) {
+  const [at, setAt] = useState<{ x: number; y: number; below: boolean } | null>(null);
+  useLayoutEffect(() => {
+    if (!text) return setAt(null);
+    const z = uiZoom();
+    const seen = (el: Element | null) => !!el && el.isConnected && el !== document.body && el.getClientRects().length > 0;
+    // What was pressed; gone with its dialog, what has the keyboard now, or failing that the newest thing that had it.
+    const el = seen(lastActed) ? lastActed : seen(document.activeElement) ? document.activeElement : ([...focusTrail].reverse().find(seen) ?? null);
+    const r = el?.getBoundingClientRect();
+    const half = 170;
+    const w = innerWidth / z;
+    if (!r) return setAt({ x: w / 2, y: 64, below: true });
+    const below = r.top / z < 90;
+    setAt({ x: Math.min(Math.max((r.left + r.width / 2) / z, half), w - half), y: below ? r.bottom / z + 8 : r.top / z - 8, below });
+  }, [text]);
+  if (!text || !at) return null;
+  return createPortal(
+    <span className={`hint-bubble act-note ${at.below ? "below" : "above"}`} style={{ left: at.x, top: at.y }} aria-hidden>
+      {text}
+    </span>,
+    document.body,
+  );
+}
+
 /** A day's bar in a usage chart, as a share of the busiest day: of the column less its label (14px) and the gap above it (6px). */
 export const barHeight = (share: number): string => `calc(${share.toFixed(4)} * (100% - 20px))`;
 
@@ -625,6 +815,9 @@ export interface Confirmation {
   action: string;
   /** Destructive by default; set false for a merely significant action. */
   danger?: boolean;
+  /** The mark beside the title, when the action is not a deletion: a stop, a hand-off. A trash can otherwise (danger), a question
+   *  mark (not), a pencil (a name to give) (Arun, 2026-10-28: "iron everything… focusing on UI and UX"). */
+  icon?: IconName;
   /**
    * A line of text to give, such as a new name: the field is filled with `value`, and what is typed goes to onConfirm. With
    * `match`, it is what must be typed (a team's name, to delete it): the button works only once it is, spaces around it aside.
@@ -675,12 +868,12 @@ export function ConfirmDialog({ confirmation, onClose }: { confirmation: Confirm
     }
   };
 
-  return createPortal(
+  return floating(
     <div className="overlay">
-      <div className={`modal confirm ${confirmation.danger === false ? "" : "danger"}`} ref={ref} data-owned-floating role="alertdialog" aria-label={confirmation.title}>
+      <div className={`modal confirm ${confirmation.danger === false ? "" : "danger"}`} ref={ref} data-owned-floating role="alertdialog" aria-modal="true" aria-label={confirmation.title}>
         <div className="confirm-head">
           <span className="confirm-icon">
-            <Icon name={confirmation.input && confirmation.input.match === undefined ? "pencil" : confirmation.danger === false ? "help" : "trash"} size={17} />
+            <Icon name={confirmation.icon ?? (confirmation.input && confirmation.input.match === undefined ? "pencil" : confirmation.danger === false ? "help" : "trash")} size={16} />
           </span>
           <h2>{confirmation.title}</h2>
         </div>
@@ -715,7 +908,6 @@ export function ConfirmDialog({ confirmation, onClose }: { confirmation: Confirm
         </div>
       </div>
     </div>,
-    document.body,
   );
 }
 

@@ -52,6 +52,10 @@ export const WIN_CSS = `
      this to fail. */
   button, a, input, textarea, select, [role="button"], [role="tab"],
   .popover, .menu-pop, .model-pop, .menu, .modal, .overlay { -webkit-app-region: no-drag; }
+  /* What covers the window, and a resize grip that runs up into the band: a click on Search's scrim closes it and a press on
+     the grip resizes the Work rail, where the band under them moved the window instead (Arun, 2026-10-28: "TEST EVERYTHING…
+     EVERY INTERACTION, EVERY VISUAL"). */
+  .quick-back, .lightbox, .gallery, .tour-block, .tt-thread-scrim, [role="separator"] { -webkit-app-region: no-drag; }
 `;
 
 export const MAC_CSS = `
@@ -94,6 +98,10 @@ export const MAC_CSS = `
      this to fail. */
   button, a, input, textarea, select, [role="button"], [role="tab"],
   .popover, .menu-pop, .model-pop, .menu, .modal, .overlay { -webkit-app-region: no-drag; }
+  /* What covers the window, and a resize grip that runs up into the band: a click on Search's scrim closes it and a press on
+     the grip resizes the Work rail, where the band under them moved the window instead (Arun, 2026-10-28: "TEST EVERYTHING…
+     EVERY INTERACTION, EVERY VISUAL"). */
+  .quick-back, .lightbox, .gallery, .tour-block, .tt-thread-scrim, [role="separator"] { -webkit-app-region: no-drag; }
 `;
 
 /**

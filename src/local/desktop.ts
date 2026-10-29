@@ -8,8 +8,10 @@ import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, session, shell } from "electron";
+import { powerSaveBlocker } from "electron";
 import { MAC_CSS, THEME_WATCH, WIN_CSS } from "../desktop-chrome.js";
 import { registerNative } from "../desktop-native.js";
+import { registerBrowser } from "./desktop-browser.js";
 import { registerTerminal, stopTerminals } from "../desktop-terminal.js";
 import { registerUpdates } from "../desktop-update.js";
 import { startLocal, type Started } from "./start.js";
@@ -39,6 +41,22 @@ const loginPath: Promise<void> =
 let friday: Started | null = null;
 let win: BrowserWindow | null = null;
 
+// ── Keeping the computer awake while the team works and the person is away ──────────────────────────────────────────────
+//
+// As the product app keeps it awake while an agent runs (desktop/main.ts syncAwake): here, while away mode is on and the team has
+// work in hand (a turn running or queued, a resume or wake due within two hours, a board being worked on), the Mac is kept from
+// sleeping when idle, and the app from App Nap (prevent-app-suspension). Closing the lid still sleeps it, which the away switch
+// says (Arun, 2026-10-28: "we need to ensure teams can work basically while you are away"). Asked every half minute.
+let blocker: number | null = null;
+async function syncAwake() {
+  const want = !!friday && !!(await friday.awake?.().catch(() => false));
+  if (want && blocker === null) blocker = powerSaveBlocker.start("prevent-app-suspension");
+  else if (!want && blocker !== null) {
+    powerSaveBlocker.stop(blocker);
+    blocker = null;
+  }
+}
+setInterval(() => void syncAwake(), 30_000).unref();
 
 /**
  * The window's own buttons in the page's colours, as the product app draws them (desktop/main.ts): on Windows and Linux the
@@ -89,7 +107,8 @@ function open(url: string) {
     },
   });
   // A preview's <webview> is somebody's dev server's page: its own cookie jar, nothing of Node's, and no permissions (location,
-  // camera, external apps), whatever the page that made it asked for. As in the product app (desktop/main.ts).
+  // camera, external apps), whatever the page that made it asked for (lockPreview, set when the app starts). As in the product
+  // app (desktop/main.ts).
   win.webContents.on("will-attach-webview", (_e, prefs) => {
     prefs.partition = "persist:preview";
     prefs.nodeIntegration = false;
@@ -97,9 +116,6 @@ function open(url: string) {
     prefs.sandbox = true;
     prefs.contextIsolation = true;
     delete prefs.preload;
-    const preview = session.fromPartition("persist:preview");
-    preview.setPermissionRequestHandler((_w, _p, cb) => cb(false));
-    preview.setPermissionCheckHandler(() => false);
   });
   win.once("ready-to-show", () => win?.show());
   // The product app's window chrome (desktop-chrome.ts): the header band that drags, with the window's buttons in it, and the
@@ -121,8 +137,37 @@ function open(url: string) {
     e.preventDefault();
     if (/^https?:/.test(u)) void shell.openExternal(u);
   });
+  // A page drawn from text in a frame with no origin of its own (a Work session's page an agent made, a live visual in the chat)
+  // never leaves for another address: will-navigate above hears the window's own page only, and a frame's script could carry
+  // what it read to anywhere in its address (Arun, 2026-10-28: "iron everything and ensure we are good… any logic errors").
+  win.webContents.on("will-frame-navigate", (e) => {
+    if (e.isMainFrame || /^about:/i.test(e.url)) return;
+    const f = e.frame;
+    if (f && (f.url === "about:srcdoc" || f.origin === "null")) e.preventDefault();
+  });
   win.on("closed", () => (win = null));
   void win.loadURL(url);
+}
+
+/**
+ * The Preview's cookie jar (persist:preview) granted nothing: no permission, device, or screen or window to capture. Set when the
+ * app starts, before any page uses it: set only as the first webview was drawn, a page of that jar loaded before then (in a
+ * window of its own) had Electron's default, which grants everything (Arun, 2026-10-28: "iron everything and
+ * ensure we are good… any logic errors").
+ */
+function lockPreview(): void {
+  const preview = session.fromPartition("persist:preview");
+  preview.setPermissionRequestHandler((_w, _p, cb) => cb(false));
+  preview.setPermissionCheckHandler(() => false);
+  preview.setDevicePermissionHandler(() => false);
+  // No streams is a refusal.
+  preview.setDisplayMediaRequestHandler((_r, cb) => {
+    try {
+      cb({});
+    } catch {
+      // The frame that asked has gone: nothing to refuse.
+    }
+  });
 }
 
 /** A request from Friday's own page in one of its windows, never a previewed site or a page it was sent to. */
@@ -141,10 +186,15 @@ else {
   registerTerminal(fromApp);
   // "Open in" your editor, file manager or terminal, and the dock's count of what waits on you (desktop-native.ts).
   registerNative(fromApp);
+  registerBrowser(() => win, fromApp, () => friday?.url ?? null); // the agents' browser tool, on the session's Browser panel (desktop-browser.ts)
   // The page's light or dark choice (preload.ts setTheme): the window buttons and background follow it where the OS draws them.
-  ipcMain.on("friday:theme", (e, theme: unknown) => {
+  ipcMain.on("friday:theme", (e, theme: unknown, choice: unknown) => {
     if (!win || e.sender !== win.webContents) return;
     const which = theme === "light" ? "light" : "dark";
+    // The app's own sheets (the folder picker, dialogs, menus) in the page's look: they followed the computer, light over a dark
+    // page. System stays the computer's, so the page goes on hearing when that changes (Arun, 2026-10-28: "TEST EVERYTHING…
+    // EVERY INTERACTION, EVERY VISUAL").
+    nativeTheme.themeSource = choice === "system" ? "system" : which;
     try {
       writeFileSync(themeFile(), which);
       win.setBackgroundColor(OVERLAY[which].color);
@@ -156,6 +206,7 @@ else {
   app.on("second-instance", () => friday && open(friday.url));
   app.whenReady().then(async () => {
     if (process.platform === "darwin") Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: "appMenu" }, { role: "editMenu" }, { role: "viewMenu" }, { role: "windowMenu" }]));
+    lockPreview();
     await loginPath;
     friday = await startLocal();
     open(friday.url);

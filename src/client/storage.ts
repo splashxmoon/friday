@@ -192,5 +192,8 @@ function forceRepaint(): void {
  * boot script settled on (which may be the OS's choice, not a saved one).
  */
 export function tellDesktopTheme(theme: Theme = currentTheme()): void {
-  window.fridayDesktop?.setTheme?.(theme);
+  // With the choice too, so the app's own sheets (the folder picker) follow it: dark sheets over a dark page, and the
+  // computer's own look when the choice is System (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+  const saved = get("mpa.theme");
+  window.fridayDesktop?.setTheme?.(theme, saved === "light" || saved === "dark" ? saved : "system");
 }

@@ -3,6 +3,7 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
 import { Tooltip as TooltipPrimitive } from "radix-ui"
+import { popperLayer } from "@/popper-layer"
 
 function TooltipProvider({
   delayDuration = 0,
@@ -32,22 +33,26 @@ function TooltipTrigger({
 function TooltipContent({
   className,
   sideOffset = 0,
+  // Never flush against the window's edge: the sidebar's Usage card opened at x=0 (Arun, 2026-10-28: "a look for like the little details and designs… for the whole app too").
+  collisionPadding = 8,
   children,
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Content>) {
   return (
-    <TooltipPrimitive.Portal>
+    <TooltipPrimitive.Portal container={popperLayer()}>
       <TooltipPrimitive.Content
         data-slot="tooltip-content"
         sideOffset={sideOffset}
+        collisionPadding={collisionPadding}
         className={cn(
-          "z-50 w-fit origin-(--radix-tooltip-content-transform-origin) animate-in rounded-md bg-foreground px-3 py-1.5 text-xs text-balance text-background fade-in-0 zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
+          // The floating material, as every menu and popover (2026-10-29 direction §5): --surface, a hairline, the one shadow; it opens
+          // with the shared 180ms rise (style.css, r5 block) rather than a zoom.
+          "z-50 w-fit rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-1.5 text-[12px] leading-4 font-medium text-balance text-[var(--ink)] shadow-[var(--shadow-pop)]",
           className
         )}
         {...props}
       >
         {children}
-        <TooltipPrimitive.Arrow className="z-50 size-2.5 translate-y-[calc(-50%_-_2px)] rotate-45 rounded-[2px] bg-foreground fill-foreground" />
       </TooltipPrimitive.Content>
     </TooltipPrimitive.Portal>
   )

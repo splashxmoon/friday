@@ -132,6 +132,8 @@ export interface SessionState {
   laneRuns: Record<string, { status: RunStatus; sinceSeq: number; error?: string }>;
   /** When each lane's last turn finished well, by seq: an idle agent that has done something, not one that never ran. */
   finished?: Record<string, number>;
+  /** Each lane whose last turn somebody stopped (run.pause), by seq, until its next turn starts: "stopped", not "done". */
+  stopped?: Record<string, number>;
   /** Agents to wake when what they wait on happens (wake.set), until it does (wake.fired) or they're called off. */
   wakes?: Record<string, { id: string; lane: string; on: { lane?: string; task?: string; at?: number }; then: string; seq: number; auto?: true }>;
   /** Files each lane's agent said it is about to change (files.held) and hasn't let go: until it releases them or its run ends. */
@@ -182,6 +184,11 @@ export interface SessionState {
    * heading for the same file are seen before either writes it. Cleared with the claims, when the folder is committed.
    */
   intents?: Record<string, { paths: string[]; seq: number }>;
+  /**
+   * Each lane's latest plan, counted: its steps and how many are finished (completed or cancelled), so a list of sessions can say
+   * "stopped at 3 of 5" as the Work rail does, not "done" over a plan left short (QA, 2026-10-28; Arun: "TEST EVERYTHING").
+   */
+  planDone?: Record<string, { done: number; of: number }>;
   /** The most recent instruction: the session's current intent, for people joining cold. */
   lastInstruction: { seq: number; text: string; by: string } | null;
   /**
@@ -560,6 +567,19 @@ export function upstreamOf(s: SessionState, lane: string): string[] {
     cur = up;
   }
   return [...out];
+}
+
+/** A plan tool call's steps, counted (todo / TodoWrite's `todos`, update_plan's `plan` or `steps`), or null when it lists none. */
+export function planStepsOf(args: string): { done: number; of: number } | null {
+  try {
+    const a = JSON.parse(args || "{}") as Record<string, unknown>;
+    const raw = [a.todos, a.plan, a.steps, a.items].find(Array.isArray) as unknown[] | undefined;
+    if (!raw?.length) return null;
+    const done = raw.filter((t) => ["completed", "done", "cancelled"].includes(String((t as { status?: unknown } | null)?.status ?? ""))).length;
+    return { done, of: raw.length };
+  } catch {
+    return null;
+  }
 }
 
 /** File paths written in a plan ("Edit src/cart.ts", "update `Sources/App/Cart.swift`"): what an agent says it will change. */
@@ -1022,6 +1042,7 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
     // A log with an old pause in it reads the same way: no agent is left paused with nothing able to wake it.
     case "run.pause":
       setRun("idle");
+      (s.stopped ??= {})[lane] = ev.seq;
       delete s.openQuestions[lane];
       if (s.approvals[lane]?.live) delete s.approvals[lane];
       break;
@@ -1038,6 +1059,7 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       break;
     case "run.started":
       setRun("running");
+      if (s.stopped?.[lane] !== undefined) delete s.stopped[lane];
       delete s.asks[lane];
       // What started it is being read: out of the queue, as the page has it (client deliveredIn), even where its delivery is a
       // separate event or none came (a log written by hand, a runner cut off between the two).
@@ -1190,6 +1212,8 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
         const plan = b.toolCalls.filter((c) => c.name === "update_plan" || c.name === "todo" || c.name === "TodoWrite");
         const paths = plan.length ? pathsIn(plan.map((c) => c.arguments).join("\n")) : [];
         if (paths.length) (s.intents ??= {})[lane] = { paths, seq: ev.seq };
+        const steps = plan.length ? planStepsOf(plan.at(-1)!.arguments) : null;
+        if (steps) (s.planDone ??= {})[lane] = steps;
       }
       {
         // Only a coding tool's: Friday's own agents ask with ask_human. Whatever it says next, its last words decide.

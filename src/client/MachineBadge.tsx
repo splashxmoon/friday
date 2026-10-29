@@ -15,6 +15,7 @@ import { EngineMark } from "./BrandMarks.js";
 import { openOutside } from "./openOutside.js";
 import { ENGINE_INFO, installStep, osOf, splitTools } from "./engines.js";
 import { Icon } from "./icons.js";
+import { useWorkMode } from "./WorkMode.js";
 import { NoMachine, hostApi, machineRefusal, type LocalTool, type MachineState } from "./local.js";
 import type { Identity } from "./storage.js";
 import { MenuButton, MoreTools, useDismiss } from "./ui.js";
@@ -38,6 +39,10 @@ type Acting = "out" | "switch" | "in";
 
 export function MachineBadge({ identity, machine, refresh, inline = false }: { identity: Identity; machine: MachineState; refresh: () => void; /** Always shown, compact, with no pill to open it: the new-session page's corner. */ inline?: boolean }) {
   const [open, setOpen] = useState(false);
+  // What stays here, said for the kind of work in front of you (w1 #4: "The code, the terminal and your coding tool" in Work).
+  let topLine = "The code, the terminal and your coding tool stay here. Nothing is uploaded.";
+  const [workOn] = useWorkMode();
+  if (workOn) topLine = "Your folders, your files and your coding tools stay on this computer. Nothing is uploaded.";
   const [step, setStep] = useState<Step>("idle");
   const [err, setErr] = useState("");
   const [signInUrl, setSignInUrl] = useState("");
@@ -68,19 +73,26 @@ export function MachineBadge({ identity, machine, refresh, inline = false }: { i
     if (!open || !here) return;
     void hostApi<{ line: string }>(identity, "/api/runner/acp.get").then((r) => setAcpLine(r.line), () => {});
   }, [open, here, identity]);
+  // What saving it came to, said in its form: a command nothing on this computer answers to was kept without a word, and the row
+  // went on saying "Not set up" (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+  const [acpNote, setAcpNote] = useState("");
   const setCommand = async (next: string) => {
     setErr("");
+    setAcpNote("");
     try {
-      await hostApi(identity, "/api/runner/acp.set", { method: "POST", body: JSON.stringify({ line: next }) });
+      const r = await hostApi<{ ok: boolean; found?: boolean }>(identity, "/api/runner/acp.set", { method: "POST", body: JSON.stringify({ line: next }) });
       setAcpLine(next.trim());
-      setInstalling("");
       refresh();
+      const cmd = next.trim().split(/\s+/)[0] ?? "";
+      if (next.trim() && r.found === false) setAcpNote(`Saved, but nothing called ${cmd} is on this computer yet. Install the agent, or check the command.`);
+      else setInstalling("");
     } catch (e) {
-      setErr(`Couldn't save that: ${(e as Error).message}`);
+      setAcpNote(`Couldn't save that: ${(e as Error).message}`);
     }
   };
-  // The installed ones up top, and the one whose install line is open stays where it was clicked.
-  const shown = splitTools(here ? (t) => tools.some((x) => x.tool === t) : null, installing);
+  // The installed ones up top. The one whose install line is open stays where it was clicked: one opened from the tools folded
+  // away stays among them, not moved up the list as its form opens (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+  const shown = splitTools(here ? (t) => tools.some((x) => x.tool === t) : null, moreTools ? "" : installing);
   const needsSignIn = tools.find((t) => t.loggedIn === false);
 
   // While something is being set up, keep asking — the runner arrives on its
@@ -262,7 +274,7 @@ export function MachineBadge({ identity, machine, refresh, inline = false }: { i
                 onSignIn={() => void signIn(tool)}
                 onSignOut={(thenIn) => void signOut(tool, thenIn)}
                 onCancel={() => cancelSignIn(tool)}
-                {...(tool === "acp" ? { acpLine, onSetCommand: setCommand } : {})}
+                {...(tool === "acp" ? { acpLine, acpNote, onSetCommand: setCommand } : {})}
               />
             ))}
             <li className="mb-more">
@@ -324,7 +336,7 @@ export function MachineBadge({ identity, machine, refresh, inline = false }: { i
         <div ref={card} className="mb-card surface" role="dialog" aria-label="Your computer">
           <header className="mb-top">
             <h3>Your computer</h3>
-            <p>The code, the terminal and your coding tool stay here. Nothing is uploaded.</p>
+            <p>{topLine}</p>
           </header>
 
           {!here ? (
@@ -386,8 +398,7 @@ export function MachineBadge({ identity, machine, refresh, inline = false }: { i
                     onSignIn={() => void signIn(tool)}
                     onSignOut={(thenIn) => void signOut(tool, thenIn)}
                     onCancel={() => cancelSignIn(tool)}
-                    {...(tool === "acp" ? { acpLine, onSetCommand: setCommand } : {})}
-                {...(tool === "acp" ? { acpLine, onSetCommand: setCommand } : {})}
+                    {...(tool === "acp" ? { acpLine, acpNote, onSetCommand: setCommand } : {})}
                   />
                 ))}
                 <li className="mb-more">
@@ -427,6 +438,7 @@ function ToolRow({
   onSignOut,
   onCancel,
   acpLine,
+  acpNote,
   onSetCommand,
   accounts,
 }: {
@@ -446,6 +458,8 @@ function ToolRow({
   onCancel: () => void;
   /** "Other ACP agent": what starts it, as a command line, and setting it. */
   acpLine?: string;
+  /** What the last save of it came to, when there is something to say. */
+  acpNote?: string;
   onSetCommand?: (line: string) => Promise<void>;
   /** Its accounts on the computer, for Claude Code and Codex (Accounts.tsx), under its row. */
   accounts?: ReactNode;
@@ -553,6 +567,11 @@ function ToolRow({
           <p>The command that starts it in ACP mode, as its docs or the ACP registry give it. Install the agent first.</p>
           <input className="mb-acp-input" value={line} onChange={(e) => setLine(e.target.value)} placeholder="qwen --acp" spellCheck={false} aria-label="Command that starts the agent" />
           <p className="mb-cmd-needs">For example: qwen --acp · goose acp · vibe-acp · auggie --acp</p>
+          {acpNote && (
+            <p className="mb-acp-note" role="status">
+              {acpNote}
+            </p>
+          )}
           <div className="mb-acp-actions">
             {acpLine && (
               <button type="button" className="btn ghost small" disabled={saving} onClick={() => (setLine(""), setSaving(true), void onSetCommand?.("").finally(() => setSaving(false)))}>

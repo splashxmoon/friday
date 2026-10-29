@@ -97,6 +97,7 @@ export function SettingsRow({
   return onSubmit ? (
     <form
       className={cls}
+      data-set-row=""
       onSubmit={(e) => {
         e.preventDefault();
         onSubmit(e);
@@ -105,7 +106,9 @@ export function SettingsRow({
       {body}
     </form>
   ) : (
-    <div className={cls}>{body}</div>
+    <div className={cls} data-set-row="">
+      {body}
+    </div>
   );
 }
 
@@ -146,13 +149,14 @@ export function Choice<T extends string>({
       disabled={disabled}
       aria-label={label}
       onValueChange={(v) => v && onChange(v as T)}
-      className={cn("h-8 gap-0.5 rounded-lg bg-[var(--hover)] p-[3px]", className)}
+      // A plain segmented control (2026-10-29 direction §9.2): a hairline track, nothing filled but the one chosen.
+      className={cn("h-8 gap-0.5 rounded-[8px] border border-[var(--border)] bg-transparent p-[2px]", className)}
     >
       {options.map(([v, text]) => (
         <ToggleGroupItem
           key={v}
           value={v}
-          className="h-[26px] min-w-0 rounded-md px-2.5 text-[13px] font-medium text-[var(--text-muted)] transition-colors duration-[var(--dass-fast)] hover:bg-transparent hover:text-[var(--ink)] data-[state=on]:bg-[var(--bg)] data-[state=on]:text-[var(--ink)] data-[state=on]:shadow-[0_1px_3px_rgb(0_0_0/.12),0_0_0_1px_var(--border)]"
+          className="h-[26px] min-w-0 rounded-[6px] px-2.5 text-[13px] font-medium text-[var(--text-muted)] transition-colors duration-[var(--dass-fast)] hover:bg-transparent hover:text-[var(--ink)] data-[state=on]:bg-[var(--hover-strong)] data-[state=on]:text-[var(--ink)] data-[state=on]:shadow-none"
         >
           {text}
         </ToggleGroupItem>
@@ -315,7 +319,7 @@ export function ActionMenu({ items, label, trigger, align = "end" }: { items: ()
                 <span className="truncate">{it.label}</span>
                 {it.sub && <span className="text-[12px] text-[var(--text-muted)]">{it.sub}</span>}
               </span>
-              {it.hint && <span className="ml-3 max-w-40 truncate font-mono text-[11px] text-[var(--text-muted)]">{it.hint}</span>}
+              {it.hint && <span className="ml-3 max-w-40 truncate font-mono text-[12px] text-[var(--text-muted)]">{it.hint}</span>}
             </DropdownMenuItem>
           ) : null,
         )}

@@ -59,6 +59,17 @@ test("a folder somebody else is editing takes only a reader", () => {
   assert.equal(settle(alone, "l2", { mode: "full", why: "x" })?.mode, "full");
 });
 
+test("a folder shared by choice holds nobody back, as the hub has it (a Work session's agents share one)", () => {
+  const engine = (cwd: string, m: "plan" | "edits" | "full", shared: boolean) => ({ cwd, mode: m, online: true, hostName: "Maya Chen", ...(shared ? { shared: true } : {}) });
+  const both = { engines: { main: engine("/w", "full", true), l2: engine("/w", "edits", true) } } as unknown as SessionState;
+  assert.equal(settle(both, "l2", { mode: "edits", why: "it changes files" })?.mode, "edits", "a shared lane isn't dropped into Plan");
+  assert.equal(reachFor({ engines: { main: { ...engine("/w", "edits", true), handMode: "edits" }, l2: engine("/w", "full", true) } } as unknown as SessionState, "main", "Please write a two-line intro"), null, "Manual stays Manual");
+  const besideShared = { engines: { main: engine("/w", "full", true), l2: engine("/w", "edits", false) } } as unknown as SessionState;
+  assert.equal(settle(besideShared, "l2", { mode: "full", why: "x" })?.mode, "full", "a shared lane beside it isn't holding the folder");
+  const mineShared = { engines: { main: engine("/w", "full", false), l2: engine("/w", "edits", true) } } as unknown as SessionState;
+  assert.equal(settle(mineShared, "l2", { mode: "full", why: "x" })?.mode, "full", "a lane that shares it isn't held");
+});
+
 test("each message is read against the mode picked by hand, so a question's Plan doesn't stick", () => {
   const at = (m: "plan" | "edits" | "full", hand?: "plan" | "edits" | "full") =>
     ({ engines: { main: { cwd: "/w", mode: m, online: true, hostName: "Ada", ...(hand ? { handMode: hand } : {}) } } }) as unknown as SessionState;
@@ -76,4 +87,12 @@ test("each message is read against the mode picked by hand, so a question's Plan
   assert.equal(pick(at("edits"), "run the tests"), "full");
   assert.equal(pick(at("plan"), "add a logout button"), null, "Plan by hand is the person's call");
   assert.match(reachFor(switched, "main", "fix it")!.why, /back to Auto, the mode you picked/);
+});
+
+// QA, 2026-10-28: a lane with no mode on record showed "Auto" and was switched to Manual by the first change asked of it.
+test("a lane with no mode on record is Auto, and a change keeps it there", () => {
+  const s = { engines: { main: { tool: "claude", cwd: "/w", online: true, hostId: "me", hostName: "Me" } } } as unknown as SessionState;
+  assert.equal(reachFor(s, "main", "Make the launch week calendar page"), null);
+  assert.equal(reachFor(s, "main", "Why is the header blue?")?.mode, "plan");
+  assert.equal(settle(s, "main", { mode: "edits", why: "it changes files" }), null);
 });

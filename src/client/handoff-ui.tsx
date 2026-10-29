@@ -3,6 +3,7 @@ import { engineName, ENGINE_TOOLS, MAIN_LANE, TOOL_INFO, type EngineTool } from 
 import { runOf, type SessionState } from "../session/projection.js";
 import { EngineMark } from "./AgentSwitch.js";
 import { AgentMark, Icon, type IconName } from "./icons.js";
+import { teammateMark } from "./Teammates.js";
 
 /**
  * What each kind of agent looks like, and who to offer work to.
@@ -40,6 +41,17 @@ function baseLabel(state: SessionState, id: string): string {
 }
 
 /** An agent's name; two of the same tool are "Claude Code" and "Claude Code 2", so a tab, a speaker line or a handoff can tell them apart. */
+/**
+ * What a hand-off's card shows as its task: the task itself, not the brief Friday wrapped it in for the agent taking it ("Carry
+ * on with this task, which … Don't start over: what it already did is in the record…\n\nThe task:\n…"), which read as internal
+ * prompt text under a "the task" label that "The task:" then said again (Arun, 2026-10-28: "iron everything and ensure we are
+ * good… any logic errors and fixes"). A task a person wrote is shown as they wrote it.
+ */
+export function handoffTaskText(text: string): string {
+  const task = /\n\s*The task:\s*\n([\s\S]+)$/.exec(text)?.[1]?.trim();
+  return task || text;
+}
+
 export function laneLabel(state: SessionState, id: string): string {
   const base = baseLabel(state, id);
   const same = [MAIN_LANE, ...state.lanes.map((l) => l.id)].filter((x) => baseLabel(state, x) === base);
@@ -56,6 +68,9 @@ export function laneIdByName(state: SessionState, name: string): string | null {
 
 export function agentLook(state: SessionState, lane: string | null, size = 14): Look {
   if (lane === null) return { kind: "agent", mark: <Icon name="agent" size={size} />, tint: AGENT_TINT.indigo!, label: "agent" };
+  // A teammate wears its face (Teammates.tsx) wherever an agent's mark shows.
+  const mate = state.options.team ? teammateMark(lane, size) : null;
+  if (mate) return mate.tool === "friday" ? { kind: "friday", mark: mate.mark, tint: FRIDAY_TINT, label: "Friday Code" } : { kind: mate.tool, mark: mate.mark, tint: TOOL_INFO[mate.tool].tint, label: engineName(mate.tool) };
   const engine = state.engines[lane];
   if (engine?.tool) return { kind: engine.tool, mark: <EngineMark tool={engine.tool} size={size} />, tint: TOOL_INFO[engine.tool].tint, label: engineName(engine.tool) };
   const def = lane === MAIN_LANE ? null : state.lanes.find((l) => l.id === lane);

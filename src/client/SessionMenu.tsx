@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "./icons.js";
 import { TeamTip } from "./TeamTip.js";
 import { useDismiss } from "./ui.js";
@@ -22,6 +22,13 @@ export function SessionMenu({ settings }: { settings?: ReactNode }) {
 function Panel({ settings, onClose }: { settings?: ReactNode; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   useDismiss(ref, onClose);
+  // Held to the window: hung from the gear by its right edge, a narrow window cut off the start of every row ("ession
+  // settings", 2026-10-28 QA at 420 wide; Arun: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const left = el?.getBoundingClientRect().left ?? 8;
+    if (el && left < 8) el.style.right = `${left - 8}px`;
+  }, []);
   return (
     <div className="popover people-pop" role="dialog" aria-label="Session settings" ref={ref}>
       <div className="pop-head">

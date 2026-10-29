@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { limitHit, planLimitHit } from "../src/limit-reset.js";
+import { clockUntil, limitHit, planLimitHit } from "../src/limit-reset.js";
 import type { EventBody, SessionEvent } from "../src/types.js";
 
 // 2026-10-11 10:00 in New York (14:00 UTC).
@@ -74,4 +74,13 @@ test("an account's allowance spent, told from a limit gone in a minute (2026-10-
   for (const e of ["Claude AI usage limit reached|1960000000", "You've hit your usage limit. Try again in 2 hours.", "5-hour limit reached ∙ resets 3pm", "Weekly limit reached - resets Oct 14, 3pm"]) assert.ok(planLimitHit(e, NOW), e);
   // Any limit with its reset hours off is the allowance's, whatever it calls itself.
   assert.equal(planLimitHit("rate limit: try again in 3 hours", NOW)?.resetsAt, NOW + 3 * 3_600_000);
+});
+
+test("when a limit lifts says its day once it isn't today (Arun, 2026-10-28: \"iron everything and ensure we are good\")", () => {
+  const at = (d: number, h: number, m = 0) => new Date(2026, 9, d, h, m).getTime();
+  const now = at(28, 16, 25);
+  const time = (t: number) => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  assert.equal(clockUntil(at(28, 18), now), time(at(28, 18)), "later today: the time alone");
+  assert.equal(clockUntil(at(29, 15), now), `${time(at(29, 15))} tomorrow`, "3 PM when it is 4:25 PM is tomorrow's");
+  assert.match(clockUntil(at(31, 9), now), new RegExp(`^\\S+ ${time(at(31, 9))}$`), "further off: its weekday");
 });

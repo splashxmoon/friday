@@ -33,7 +33,7 @@ export function TeamTip({ className = "" }: { className?: string }) {
       <button type="button" className="team-tip-go" onClick={() => startTeam()}>
         <Icon name="users" size={13} />
         <span>
-          Working with teammates in the same session is <b>Friday Team</b>.
+          Working with other people in the same session is <b>Friday Team</b>.
         </span>
       </button>
       <button type="button" className="icon-btn tiny team-tip-x" aria-label="Dismiss" title="Don't show this again" onClick={dismiss}>

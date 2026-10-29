@@ -98,6 +98,7 @@ export function heldByPerson(events: SessionEvent[], lane: string): boolean {
   let lifted: SessionEvent | undefined;
   for (let i = events.length - 1; i >= 0 && !(toMe && toAll && fromLead && toLead); i--) {
     const e = events[i]!;
+    if (e.body.type === "holds.lifted" && (!e.body.lanes || e.body.lanes.includes(lane))) lifted ??= e;
     if (e.body.type !== "instruction") continue;
     if (human(e) && onLane(e)) toMe ??= e;
     // The latest a person said to everyone, whatever it says: "everyone carry on" lifts "everyone stop".

@@ -340,3 +340,105 @@ test("a commit is held while any run in the session goes, as the server holds it
   assert.equal(commitWaits({ run: { status: "idle" }, laneRuns: { a: { status: "running" } } } as never), true);
   assert.equal(commitWaits({ run: { status: "running" }, laneRuns: {} } as never), true);
 });
+
+// Arun, 2026-10-28: "iron everything and ensure we are good… any logic errors and fixes".
+const human = (seq: number, body: EventBody): SessionEvent => ({ ...ev(seq, body), actor: { id: "u", name: "Ada", kind: "human" } }) as SessionEvent;
+const said = (text: string, interrupted = false): EventBody => ({ type: "agent.message", text, toolCalls: [], ...(interrupted ? { interrupted: true } : {}) });
+
+test("the runaway guard's pause ends the turn it paused: the block reads as stopped, not still at work", () => {
+  const items = group([human(1, { type: "instruction", text: "LOOP", interrupt: false }), ev(2, { type: "run.started", causedBy: 1 }), ev(3, said("Running the tests")), ev(4, { type: "run.guarded", command: "npm test", times: 3, kind: "stuck" }), ev(5, { type: "run.pause" })], false);
+  const run = items.find((i) => i.kind === "run") as Run;
+  assert.equal(run.closedBy, "run.pause", "closed by the stop, not left open behind the guard's note");
+});
+
+test("a stopped turn keeps what it had written, in its own block above the stop's note", () => {
+  const items = group([human(1, { type: "instruction", text: "SLOW", interrupt: false }), ev(2, { type: "run.started", causedBy: 1 }), ev(3, said("Working through it step by step.")), ev(4, { type: "run.pause" }), ev(5, said("Step 1. Step 2.", true))], false);
+  const runs = items.filter((i) => i.kind === "run") as Run[];
+  assert.equal(runs.length, 1, "no second block for the kept draft");
+  assert.deepEqual(runs[0]!.messages.map((m) => m.body.text), ["Working through it step by step.", "Step 1. Step 2."]);
+  const end = items.at(-1)!;
+  assert.equal(end.kind === "event" ? end.ev.body.type : "", "run.pause", "the stop's note is last");
+});
+
+test("redirected, then stopped before the new answer's first message: each draft goes where it was cut", () => {
+  const items = group(
+    [
+      human(1, { type: "instruction", text: "SLOW", interrupt: false }),
+      ev(2, { type: "run.started", causedBy: 1 }),
+      ev(3, said("Working through it.")),
+      human(4, { type: "instruction", text: "RICH instead", interrupt: true }),
+      ev(5, said("Step 1. Step 2.", true)),
+      ev(6, { type: "instructions.delivered", seqs: [4] }),
+      ev(7, { type: "run.pause" }),
+      ev(8, said("I re-ran the sweep against the", true)),
+    ],
+    false,
+  );
+  const order = items.map((i) => (i.kind === "run" ? `run:${i.messages.map((m) => m.body.text).join("|")}` : i.ev.body.type));
+  assert.deepEqual(order, ["instruction", "run:Working through it.|Step 1. Step 2.", "instruction", "run:I re-ran the sweep against the", "run.pause"]);
+});
+
+test("redirected mid-turn, then stopped: what it streamed stays under the redirect, above the stop, and stays stopped after the next send", () => {
+  // Arun, 2026-10-28: "iron everything and ensure we are good". The redirect was handed to the running turn (delivered, no
+  // interrupt); the Stop's draft then read "Worked for 29s" once the next message closed its block.
+  const items = group(
+    [
+      human(1, { type: "instruction", text: "SLOW", interrupt: false }),
+      ev(2, { type: "run.started", causedBy: 1 }),
+      ev(3, said("Working through it step by step.")),
+      human(4, { type: "instruction", text: "SLOW the other way", interrupt: false }),
+      ev(5, { type: "instructions.delivered", seqs: [4] }),
+      ev(6, { type: "run.pause" }),
+      ev(7, said("Step 1. Step 2. Step 3.", true)),
+      ev(8, diff("README.md")),
+      human(9, { type: "instruction", text: "Write the intro", interrupt: false }),
+    ],
+    false,
+  );
+  const order = items.map((i) => (i.kind === "run" ? `run:${i.messages.map((m) => m.body.text).join("|")}` : i.ev.body.type));
+  assert.deepEqual(order, ["instruction", "run:Working through it step by step.", "instruction", "run:Step 1. Step 2. Step 3.", "run.pause", "instruction"]);
+  const stopped = items.find((i) => i.kind === "run" && i.messages[0]!.seq === 7) as Run;
+  assert.equal(stopped.closedBy, "run.pause", "closed by the stop, not by the next message");
+  assert.equal(stopped.diffs.length, 1, "its last change set is its own");
+});
+
+test("a turn's list of commands it asked about holds only its own, not every earlier turn's answers", () => {
+  const ask = (seq: number, id: string): SessionEvent => ev(seq, { type: "engine.approval", id, scope: "commands", items: ["rm -rf build"] });
+  const answer = (seq: number, id: string, approve: boolean) => human(seq, { type: "instruction", text: approve ? "Yes" : "No", interrupt: false, approval: { id, approve } });
+  const items = group(
+    [
+      human(1, { type: "instruction", text: "ASK one", interrupt: false }),
+      ev(2, { type: "run.started", causedBy: 1 }),
+      ev(3, said("Reading")),
+      ask(4, "a"),
+      ev(5, { type: "run.ended", outcome: "waiting" }),
+      answer(6, "a", false),
+      ev(7, { type: "run.started", causedBy: 6 }),
+      ev(8, said("Didn't remove it")),
+      ev(9, { type: "run.ended", outcome: "done" }),
+      human(10, { type: "instruction", text: "ASK two", interrupt: false }),
+      ev(11, { type: "run.started", causedBy: 10 }),
+      ev(12, said("Reading")),
+      ask(13, "b"),
+      ev(14, { type: "run.ended", outcome: "waiting" }),
+      answer(15, "b", true),
+      ev(16, { type: "run.started", causedBy: 15 }),
+      ev(17, said("Removed it")),
+      ev(18, { type: "run.ended", outcome: "done" }),
+    ],
+    false,
+  );
+  const runs = items.filter((i) => i.kind === "run") as Run[];
+  assert.deepEqual(runs.map((r) => r.asked.map((a) => `${a.id}:${a.answer}`)), [["a:no"], ["a:no"], ["b:yes"], ["b:yes"]]);
+});
+
+// 2026-10-28 QA (Arun: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL"): editing a queued message left the old one in the feed as
+// "Taken back before the agent read it", and a teammate's Edit left one over the message sent after it.
+test("a queued message that was edited is drawn once, as it is now", () => {
+  const said = (text: string, extra: object = {}): EventBody => ({ type: "instruction", text, interrupt: false, ...extra }) as EventBody;
+  const shown = (events: SessionEvent[]) => group(events, false).flatMap((i) => (i.kind === "event" && i.ev.body.type === "instruction" ? [i.ev.body.text] : []));
+  assert.deepEqual(shown([ev(1, said("Version one")), ev(2, said("Version two", { replaces: 1 })), ev(3, { type: "instruction.withdrawn", seq: 1 })]), ["Version two"]);
+  assert.deepEqual(shown([ev(1, said("Draft")), ev(2, { type: "instruction.withdrawn", seq: 1, toEdit: true }), ev(3, said("Draft, changed"))]), ["Draft, changed"]);
+  // Taken back for good is still said.
+  assert.deepEqual(shown([ev(1, said("Never mind")), ev(2, { type: "instruction.withdrawn", seq: 1 })]), ["Never mind"]);
+});

@@ -3,12 +3,14 @@ import remarkMath from "remark-math";
 import type { Pluggable } from "unified";
 import { defaultRehypePlugins, defaultRemarkPlugins, parseMarkdownIntoBlocks, useIsCodeFenceIncomplete, type Components } from "streamdown";
 import { AgentCodeLine, useAgentCodeTokens, type AgentCodeLanguage } from "@/components/agents/agent-code";
-import { pathOf, rehypeAnswer } from "./answer-format.js";
+import { pathOf, rehypeAnswer, rehypeFileChips, rehypeFileLinks } from "./answer-format.js";
 import { languageFor } from "./DiffView.js";
 import { FileIcon } from "./fileIcons.js";
 import { Icon } from "./icons.js";
 import { IS_MAC } from "./Shortcuts.js";
 import { LiveBlock, LiveImage } from "./LiveBlock.js";
+import { localPicture } from "./LiveBlock.js";
+import { chipLabel, titlesChanged, titlesNow } from "./work-outputs.js";
 
 /**
  * The parts an agent's answer is drawn with in the chat: a file it names is a chip that opens the file, a code block has its
@@ -50,16 +52,23 @@ function useCopy(text: string) {
  */
 function FileChip({ text, path, line }: { text: string; path: string; line?: number }) {
   const [copied, copy] = useCopy(path);
-  const open = (e: { metaKey: boolean; ctrlKey: boolean }) => {
+  useSyncExternalStore(titlesChanged, titlesNow, titlesNow); // its title as the rail learns it, not as it was when first drawn
+  const open = (e: { metaKey: boolean; ctrlKey: boolean; currentTarget: EventTarget }) => {
     const outside = e.metaKey || e.ctrlKey;
+    // Whose message it is in: a path is in that agent's folder (a Crew teammate's own, another agent's copy), not the session's.
+    const said = (e.currentTarget as HTMLElement).closest?.<HTMLElement>("[data-lane]")?.dataset.lane;
+    const lane = said && said !== "main" ? said : undefined;
     // The session view takes the event and says so; nobody taking it means there is no file view here.
-    const taken = !window.dispatchEvent(new CustomEvent("friday:open-file", { detail: { path, line, outside }, cancelable: true }));
+    const taken = !window.dispatchEvent(new CustomEvent("friday:open-file", { detail: { path, line, outside, ...(lane ? { lane } : {}) }, cancelable: true }));
     if (!taken) copy();
   };
   return (
     <button type="button" className="file-chip" onClick={open} title={copied ? "Path copied" : `Open ${path}${line ? ` at line ${line}` : ""}${window.fridayDesktop?.openIn ? ` · ${IS_MAC ? "⌘" : "Ctrl"}-click for your editor` : ""}`} aria-label={`Open ${text}`}>
       <FileIcon path={path} size={14} />
       <code>{text}</code>
+      {/* The piece by its title, in the page's own type, where the session shows titles in place of paths (the 2026-10-28 critique). */}
+      {/* No space after it on its line: inside the button it was a gap before the full stop that followed ("playbook ."). */}
+      <span className="file-chip-title">{chipLabel(text, path)}</span>
     </button>
   );
 }
@@ -110,15 +119,46 @@ const chips = { on: false };
  */
 export const mediaText = (md: string): string => (chips.on ? md.replace(/(`[^`\n]+\.(?:png|jpe?g|gif|webp|avif|svg|mp4|mov|webm|m4v)`)[.,;:](?=\s|$)/gi, "$1") : md);
 
+/** A picture or video an agent names in its answer: the name, and the thing itself under it, from this computer. */
+const MEDIA = /\.(png|jpe?g|gif|webp|avif|svg|mp4|mov|webm|m4v)$/i;
+chips.on = true;
+function MediaChip({ text, path }: { text: string; path: string }) {
+  const src = localPicture(path);
+  const video = /\.(mp4|mov|webm|m4v)$/i.test(path);
+  // A video still being written is asked for again twice before it is said to be missing (LiveImage does the same for pictures).
+  const [tries, setTries] = useState(0);
+  const [gone, setGone] = useState(false);
+  const at = src && tries ? `${src}&try=${tries}` : src;
+  return (
+    <span className="chat-media">
+      {/* Its name, not its whole path: a long folder path broke across two lines over the picture. The path is in the tooltip. */}
+      <FileChip text={text.split("/").pop() || text} path={path} />
+      {at && !gone && <span className="chat-media-view">{video ? <video key={tries} src={`${at}#t=0.1`} controls preload="metadata" playsInline onError={() => (tries < 2 ? void window.setTimeout(() => setTries((n) => n + 1), 1500 * (tries + 1)) : setGone(true))} /> : <LiveImage src={src!} alt={text} />}</span>}
+      {gone && (
+        <span className="chat-media-gone">
+          This video isn't on this computer, or isn't finished yet.{" "}
+          <button type="button" className="link-btn" onClick={() => (setGone(false), setTries((n) => n + 1))}>
+            Try again
+          </button>
+        </span>
+      )}
+    </span>
+  );
+}
 
-type CodeProps = { node?: unknown; className?: string; children?: ReactNode; "data-block"?: string };
+type CodeProps = { node?: unknown; className?: string; children?: ReactNode; "data-block"?: string; /** A link to a file, by its words (rehypeFileChips). */ "data-file-link"?: string };
 
 function Code({ node: _node, className, children, ...rest }: CodeProps) {
   const incomplete = useIsCodeFenceIncomplete();
   // The renderer marks a fenced block's code with data-block; without it this is code inside a sentence.
   if (!("data-block" in rest)) {
     const text = textOf(children);
+    // A link to a file: its chip, with the link's words (answer-format.ts rehypeFileLinks).
+    const linked = rest["data-file-link"];
+    if (linked !== undefined && MEDIA.test(text)) return <MediaChip text={linked} path={text} />;
+    if (linked !== undefined) return <FileChip text={linked} path={text} />;
     const file = pathOf(text);
+    if (file && MEDIA.test(file.path)) return <MediaChip text={text} path={file.path} />;
     if (file) return <FileChip text={text} {...file} />;
     return (
       <code className={className} data-streamdown="inline-code">
@@ -128,12 +168,13 @@ function Code({ node: _node, className, children, ...rest }: CodeProps) {
   }
   const language = className?.match(/language-(\S+)/)?.[1] ?? "";
   const code = textOf(children);
+  if (MEDIA.test(code.trim()) && !/\s/.test(code.trim())) return <MediaChip text={code.trim()} path={code.trim()} />;
   if (LIVE.has(language.toLowerCase())) return <LiveBlock code={code} language={language} isIncomplete={incomplete} />;
   return <AnswerCode code={code} language={language} incomplete={incomplete} />;
 }
 
 // Re-drawn only when what it shows changes: the tree node is new on every parse of its block, its content isn't.
-const AnswerCodeTag = memo(Code, (a, b) => a.className === b.className && textOf(a.children) === textOf(b.children) && "data-block" in a === "data-block" in b);
+const AnswerCodeTag = memo(Code, (a, b) => a.className === b.className && textOf(a.children) === textOf(b.children) && "data-block" in a === "data-block" in b && a["data-file-link"] === b["data-file-link"]);
 
 /**
  * KaTeX, loaded the first time an answer has maths in it rather than with the feed: 340 KB of script that most sessions never
@@ -187,7 +228,11 @@ if (typeof window !== "undefined") {
  * what it reads (code.language-math), and what it makes is markup of its own, never the agent's.
  */
 const REMARK: Pluggable[] = [...Object.values(defaultRemarkPlugins), [remarkMath, { singleDollarTextMath: false }]];
-const REHYPE: Pluggable[] = [...Object.values(defaultRehypePlugins), [rehypeKatexOnDemand, { throwOnError: false, strict: false }], rehypeAnswer];
+// Links to files are carried past the sanitiser and the hardener and made chips after them; whatever the hardener still refuses is
+// its words alone, never "[blocked]" (answer-format.ts rehypeFileLinks; Arun, 2026-10-29).
+const { raw, sanitize, harden, ...otherRehype } = defaultRehypePlugins as Record<string, Pluggable>;
+const hardened: Pluggable = Array.isArray(harden) ? [harden[0], { ...(harden[1] as object), linkBlockPolicy: "text-only" }] : harden!;
+const REHYPE: Pluggable[] = [raw!, rehypeFileLinks, sanitize!, hardened, ...Object.values(otherRehype), [rehypeKatexOnDemand, { throwOnError: false, strict: false }], rehypeFileChips, rehypeAnswer];
 const COMPONENTS = { img: LiveImage, code: AnswerCodeTag } as Components;
 
 /**

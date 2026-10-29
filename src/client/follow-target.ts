@@ -1,5 +1,22 @@
 import { MAIN_LANE, type SessionEvent } from "../types.js";
-import type { SessionState } from "../session/projection.js";
+import { runOf, type SessionState } from "../session/projection.js";
+import { limitHit, signedOut } from "../limit-reset.js";
+
+/**
+ * The agent the box writes to when a room opens: `want` (the lead, or the main agent), unless that one can't work now (out of
+ * usage, or not signed in) and another here can, which it then is. After a usage limit was handed to Codex, the box still opened
+ * on "To Claude Code", the agent that was out (Arun, 2026-10-28: "iron everything and ensure we are good… any logic errors").
+ */
+export function openingTarget(state: SessionState, want: string): string {
+  const stuck = (lane: string) => {
+    const run = runOf(state, lane);
+    return run.status === "error" && (!!limitHit(run.error) || signedOut(run.error));
+  };
+  if (!stuck(want)) return want;
+  const lanes = [MAIN_LANE, ...state.lanes.filter((l) => l.control.kind !== "standing").map((l) => l.id)];
+  const usable = (l: string) => l !== want && !stuck(l) && (!state.engines[l]?.tool || state.engines[l]!.online);
+  return lanes.find((l) => usable(l) && runOf(state, l).status === "running") ?? lanes.find(usable) ?? want;
+}
 
 /**
  * Which agent the message box should be writing to, as the work moves.

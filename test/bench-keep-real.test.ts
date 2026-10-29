@@ -171,7 +171,7 @@ test("the real Preview keeps its tabs and pages through the Diff, a swap, anothe
   openInPreview("http://localhost:5173/about", "s1"); // pressed in the conversation
   await settle();
   // A second tab, on another page.
-  await click(walk(s.el).find((n) => n.getAttribute("aria-label") === "New tab"));
+  await click(walk(s.el).find((n) => n.getAttribute("aria-label") === "Open a new tab"));
   const bar = () => tags(s.el, "input").find((n) => n.className.includes("browser-url"))!;
   await act(async () => (propsOf(bar()).onChange as (e: unknown) => void)({ target: { value: "localhost:5173/settings" } }));
   await act(async () => (propsOf(bar().parentElement!).onSubmit as (e: unknown) => void)({ preventDefault() {} }));

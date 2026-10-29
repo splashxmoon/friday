@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils";
 
 /**
  * A page's head, shared by every Dass page. A page (h1): its title for screen readers only and its controls on the right. A
- * section (h2, Settings): a 26px title, a muted line under it, and its actions on the right.
+ * section (h2, Settings): a 20px title (the direction's page step), a muted line under it, and its actions on the right.
  */
 export function PageHeader({
   title,
@@ -39,10 +39,10 @@ export function PageHeader({
     <header className={cn("mb-6 flex flex-wrap items-end justify-between gap-x-6 gap-y-3", className)}>
       <div className="min-w-0">
         {eyebrow && <div className="mb-1 text-[12px] font-medium text-[var(--text-muted)]">{eyebrow}</div>}
-        <H ref={titleRef} tabIndex={titleRef ? -1 : undefined} className="m-0 text-[26px] leading-[1.15] font-semibold tracking-[-0.025em] text-[var(--ink)] outline-none">
+        <H ref={titleRef} tabIndex={titleRef ? -1 : undefined} className="m-0 text-[20px] leading-[28px] font-semibold tracking-[-0.01em] text-[var(--ink)] outline-none">
           {title}
         </H>
-        {subtitle && <p className="mt-1.5 mb-0 max-w-[64ch] text-[14px] leading-relaxed text-[var(--text-muted)]">{subtitle}</p>}
+        {subtitle && <p className="mt-1 mb-0 max-w-[64ch] text-[13px] leading-[18px] text-[var(--text-muted)]">{subtitle}</p>}
       </div>
       {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
     </header>

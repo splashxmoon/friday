@@ -1,4 +1,4 @@
-import { CloudDownloadIcon, CornerLeftUpIcon, FolderGit2Icon, FolderIcon, FolderOpenIcon, HistoryIcon, LockIcon, SearchIcon } from "lucide-react";
+import { CloudDownloadIcon, CornerLeftUpIcon, FolderGit2Icon, FolderIcon, FolderOpenIcon, FolderSearchIcon, HistoryIcon, LockIcon, SearchIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { CliSession, CliSessionList } from "../runner/imports.js";
@@ -92,10 +92,12 @@ declare global {
       /** Open a folder, or a file at a line, in this computer's editor, file manager or terminal (from the app after 0.1.74 / 0.1.4). */
       openTargets?(): Promise<{ id: string; label: string; editor: boolean }[]>;
       openIn?(target: string, path: string, line?: number): Promise<{ ok: boolean; error?: string }>;
+      openFile?(file: string): Promise<{ ok: boolean; error?: string }>;
+      browser?: { tab(sid: string, tab: string, wcId: number): void; active(sid: string, tab: string): void; gone(sid: string): void; onOpen(fn: (ask: { sid: string; url: string }) => void): () => void };
       /** The dock's count of what waits on you; 0 clears it. */
       setBadge?(n: number): void;
       /** Tell the app which theme is showing, so the window buttons match it. */
-      setTheme?(theme: "dark" | "light"): void;
+      setTheme?(theme: "dark" | "light", choice?: "system" | "dark" | "light"): void;
       /** Real shells on this computer, drawn by the terminal panel. */
       terminal?: {
         start(opts: { id: string; cols: number; rows: number; cwd?: string }): Promise<{ ok: boolean; shell?: string; cwd?: string; resumed?: boolean; replay?: string; error?: string }>;
@@ -259,23 +261,30 @@ export function WorkspaceCard({
   tool,
   trigger,
   resume,
-  only,
+  only: onlyAsked,
   onPick,
   onTool,
   onClose,
+  plain = false,
+  prefer = "above",
 }: {
   identity: Identity;
   tool: EngineTool;
   trigger: HTMLElement | null;
+  /** Which side of the trigger it opens on, where there is room: under a link below the box, below (QA, 2026-10-28). */
+  prefer?: "above" | "below";
   resume?: CliSession;
   /** Show one half of the card: what you can continue, or where code lives. */
   only?: "sessions" | "repos";
+  /** Folders, not repositories: no sessions to continue, no GitHub, no clone, no branches. */
+  plain?: boolean;
   onPick: (p: Picked | null) => void;
   /** A session of another agent was picked: the composer should switch to that agent to continue it. */
   onTool?: (tool: EngineTool) => void;
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const only = plain ? "repos" : onlyAsked;
   useDismiss(ref, onClose, trigger);
   // Which agent's past sessions are listed. Starts on the agent the composer has.
   const [view, setView] = useState<EngineTool>(tool);
@@ -294,7 +303,7 @@ export function WorkspaceCard({
 
   // Above the trigger, like the composer's other cards (Arun, 2026-10-20): with Home's box now near the top, "below where
   // there is room" had it dropping down over the page. Below only when there is no room above.
-  const place = placeCard(trigger?.getBoundingClientRect(), 460, { want: 520, min: 240, prefer: "above" });
+  const place = placeCard(trigger?.getBoundingClientRect(), 460, { want: 520, min: 240, prefer });
 
   const choose = (folder: FolderInfo, session?: CliSession) => {
     saveRecentFolder(folder.path);
@@ -356,7 +365,7 @@ export function WorkspaceCard({
   };
 
   const query = q.trim();
-  const repo = parseRepo(query);
+  const repo = plain ? null : parseRepo(query);
   const looksLikePath = /^(~|\/|[A-Za-z]:[\\/]|\.\.?[\\/])/.test(query);
   const match = (s: string) => s.toLowerCase().includes(query.toLowerCase());
 
@@ -368,6 +377,30 @@ export function WorkspaceCard({
   const shownRepos = repos.slice(0, query ? 40 : 8);
   const moreRepos = repos.length - shownRepos.length;
 
+  // Folders: a path being typed lists the folders it could be, as a path field does ("~/Desk" offers Desktop), not only the
+  // recent ones, which said "Nothing matches" (Arun, 2026-10-28: "iron everything and ensure we are good").
+  const [typed, setTyped] = useState<{ q: string; entries: FolderInfo[] } | null>(null);
+  useEffect(() => {
+    if (!plain || !looksLikePath) return void setTyped(null);
+    const cut = query.search(/[\\/][^\\/]*$/);
+    const parent = cut >= 0 ? query.slice(0, cut + 1) : query;
+    const part = cut >= 0 ? query.slice(cut + 1).toLowerCase() : "";
+    let live = true;
+    const t = setTimeout(
+      () =>
+        void hostApi<{ entries: FolderInfo[] }>(identity, `/api/runner/browse?path=${encodeURIComponent(parent)}`).then(
+          (d) => live && setTyped({ q: query, entries: d.entries.filter((f) => !f.name.startsWith(".") && f.name.toLowerCase().startsWith(part)).slice(0, 8) }),
+          () => live && setTyped({ q: query, entries: [] }),
+        ),
+      180,
+    );
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [plain, looksLikePath, query, identity]);
+  const typedRows = typed && typed.q === query ? typed.entries : [];
+
   // Enter picks the obvious thing: clone what was pasted, use a typed path, or take the first row.
   const enter = () => {
     if (repo && !recent.length) return void clone(query);
@@ -378,7 +411,7 @@ export function WorkspaceCard({
   };
 
   const body = browsing ? (
-    <Browser identity={identity} path={browsing} onOpen={setBrowsing} onUse={(f) => choose(f)} onBack={() => setBrowsing(null)} />
+    <Browser identity={identity} path={browsing} filter={q.trim().startsWith("/") || q.trim().startsWith("~") ? "" : q.trim()} onOpen={(p) => (setQ(""), setBrowsing(p))} onUse={(f) => choose(f)} onBack={() => setBrowsing(null)} />
   ) : (
     <div className="ws-scroll">
       {err && <p className="ws-note error">{err}</p>}
@@ -390,7 +423,11 @@ export function WorkspaceCard({
           onClick={() => void clone(query)}
         />
       )}
-      {looksLikePath && <Row icon={<FolderIcon className="size-4" />} title={`Use ${query}`} sub="type a full path" onClick={() => void byPath(query)} />}
+      {/* The folder's name first and its path under it: "Use /private/tmp/claude-501/-Users-…" cut off the name (2026-10-28 QA). */}
+      {looksLikePath && <Row icon={<FolderIcon className="size-4" />} title={`Use ${query.split(/[\\/]/).filter(Boolean).pop() ?? query}`} sub={shortPath(query)} onClick={() => void byPath(query)} />}
+      {typedRows.map((f) => (
+        <Row key={f.path} icon={busy === f.path ? <span className="spinner" /> : <FolderIcon className="size-4" />} title={f.name} sub={shortPath(f.path)} onClick={() => choose(f)} />
+      ))}
 
       {only !== "repos" && (
         <ScrollTabs className="ws-tabs" label="Whose sessions" active={view}>
@@ -428,22 +465,23 @@ export function WorkspaceCard({
         </Section>
       )}
 
-      {only !== "sessions" && (
+      {only !== "sessions" && !(plain && looksLikePath && recent.length === 0) && (
         <>
-      <Section label="Your repos" loading={data.recent === null}>
+      <Section label={plain ? "Recent folders" : "Your repos"} loading={data.recent === null}>
         {recent.slice(0, 8).map((f) => (
           <Row
             key={f.path}
-            icon={busy === f.path ? <span className="spinner" /> : f.isRepo ? <FolderGit2Icon className="size-4" /> : <FolderIcon className="size-4" />}
+            icon={busy === f.path ? <span className="spinner" /> : f.isRepo && !plain ? <FolderGit2Icon className="size-4" /> : <FolderIcon className="size-4" />}
             title={f.name}
-            sub={f.branch ? `${f.branch} · ${shortPath(f.path)}` : shortPath(f.path)}
+            sub={f.branch && !plain ? `${f.branch} · ${shortPath(f.path)}` : shortPath(f.path)}
             onClick={() => choose(f)}
           />
         ))}
-        {data.recent?.length === 0 && <p className="ws-empty">No git repos found in your usual code folders.</p>}
-        {data.recent !== null && recent.length === 0 && data.recent.length > 0 && <p className="ws-empty">Nothing matches “{query}”.</p>}
+        {data.recent?.length === 0 && <p className="ws-empty">{plain ? "No folders yet. Browse to one, or type its path." : "No git repos found in your usual code folders."}</p>}
+        {data.recent !== null && recent.length === 0 && data.recent.length > 0 && !(plain && looksLikePath) && <p className="ws-empty">Nothing matches “{query}”.</p>}
       </Section>
 
+      {!plain && (
       <Section label="GitHub" loading={data.github === null}>
         {shownRepos.map((r) => (
           <Row
@@ -474,19 +512,11 @@ export function WorkspaceCard({
             because you know the name of the one you want. */}
         {moreRepos > 0 && <p className="ws-empty">{moreRepos} more — type to narrow.</p>}
 
-        {/* Nowhere to get repos from: this is the pointer, not an empty list.
-            A GitHub connection works with no machine linked at all, which is
-            the case somebody on a fresh laptop is actually in. */}
-        {data.github && !data.github.available && repos.length === 0 && (
-          <div className="ws-gh-cta">
-            <span>Connect GitHub to pick a repo without cloning it first.</span>
-            <a className="btn primary small" href="/?view=connections" onClick={onClose}>
-              Connect GitHub
-            </a>
-          </div>
-        )}
+        {/* Nowhere to get repos from: the GitHubConnect card above is the one pointer. A second "Connect GitHub" under it, to the
+            same place in other words, read as two ways to do two things (2026-10-28 QA; Arun: "TEST EVERYTHING… EVERY VISUAL"). */}
         {data.github?.available && repos.length === 0 && <p className="ws-empty">{query ? `No repo matches “${query}”.` : "No repos on this account."}</p>}
       </Section>
+      )}
         </>
       )}
     </div>
@@ -498,7 +528,7 @@ export function WorkspaceCard({
       data-owned-floating
       className={`ws-card ${drag ? "drag" : ""}`}
       role="dialog"
-      aria-label="Choose where the agent works"
+      aria-label={plain ? "Choose a folder" : "Choose where the agent works"}
       style={place}
       onDragOver={(e) => {
         e.preventDefault();
@@ -519,32 +549,37 @@ export function WorkspaceCard({
               enter();
             }
           }}
-          placeholder="Search your repos, paste a GitHub URL, or type a path"
+          placeholder={browsing ? "Find a folder in here, or type a path" : plain ? "Find a folder, or type its path" : "Search your repos, paste a GitHub URL, or type a path"}
           spellCheck={false}
-          aria-label="Search repos"
+          aria-label={plain ? "Find a folder" : "Search repos"}
         />
       </div>
       {body}
       <div className="ws-foot">
+        {/* Two ways to look for a folder, each saying which: in this card, or (in the desktop app) in the system's own window,
+            "Browse…" beside "Choose folder…" having read as two names for one thing (Arun, 2026-10-28: "TEST EVERYTHING… EVERY
+            INTERACTION, EVERY VISUAL"). */}
         {browsing ? (
           <button type="button" className="btn ghost small" onClick={() => setBrowsing(null)}>
             Back to search
           </button>
         ) : (
-          <button type="button" className="btn ghost small" onClick={() => setBrowsing("~")}>
-            <FolderOpenIcon className="size-3.5" /> Browse…
+          // The search starts empty in the folders: a query left from the search filtered nothing there and read as stale (2026-10-28 QA).
+          <button type="button" className="btn ghost small" onClick={() => (setQ(""), setBrowsing("~"))} title="Go through the folders on this computer, here">
+            <FolderSearchIcon className="size-3.5" /> {desktop ? "Browse here…" : "Browse…"}
           </button>
         )}
         {desktop && (
           <button
             type="button"
             className="btn ghost small"
+            title={`Pick a folder in ${systemPicker(desktop.platform)}`}
             onClick={async () => {
               const p = await desktop.pickFolder();
               if (p) await byPath(p);
             }}
           >
-            Choose folder…
+            <FolderOpenIcon className="size-3.5" /> {desktop.platform === "darwin" ? "Choose in Finder…" : desktop.platform === "win32" ? "Choose in Explorer…" : "Choose folder…"}
           </button>
         )}
         <span className="ws-drop-hint">or drop a folder here</span>
@@ -552,6 +587,11 @@ export function WorkspaceCard({
     </div>,
     document.body,
   );
+}
+
+/** The system's own folder window, by name, for the desktop app's "Choose in …" button. */
+function systemPicker(platform: string | undefined): string {
+  return platform === "darwin" ? "the Finder" : platform === "win32" ? "File Explorer" : "the system's folder window";
 }
 
 function Section({ label, children, loading }: { label: string; children?: ReactNode; loading?: boolean }) {
@@ -579,7 +619,7 @@ function Row({ icon, title, sub, trailing, active, onClick }: { icon: ReactNode;
   );
 }
 
-function Browser({ identity, path, onOpen, onUse, onBack }: { identity: Identity; path: string; onOpen: (p: string) => void; onUse: (f: FolderInfo) => void; onBack: () => void }) {
+function Browser({ identity, path, filter = "", onOpen, onUse, onBack }: { identity: Identity; path: string; /** What is typed in the card's search: the folders here whose names have it. */ filter?: string; onOpen: (p: string) => void; onUse: (f: FolderInfo) => void; onBack: () => void }) {
   const [dir, setDir] = useState<{ path: string; parent: string | null; isRepo: boolean; entries: FolderInfo[] } | null>(null);
   const [err, setErr] = useState("");
   useEffect(() => {
@@ -604,21 +644,25 @@ function Browser({ identity, path, onOpen, onUse, onBack }: { identity: Identity
     );
   if (!dir) return <p className="ws-empty">Opening…</p>;
   const name = dir.path.split(/[\\/]/).filter(Boolean).pop() ?? dir.path;
+  const shown = filter ? dir.entries.filter((f) => f.name.toLowerCase().includes(filter.toLowerCase())) : dir.entries;
   return (
     <>
       <div className="ws-crumb">
         <button type="button" className="icon-btn tiny" disabled={!dir.parent} title="Up one folder" aria-label="Up one folder" onClick={() => dir.parent && onOpen(dir.parent)}>
           <CornerLeftUpIcon className="size-3.5" />
         </button>
-        <span className="ws-path" title={dir.path}>
-          {shortPath(dir.path)}
+        {/* The folder you are in by name, where it is after it: the whole path cut at its end hid the one part that changes as you
+            go up and down (2026-10-28 QA). */}
+        <span className="ws-path ws-crumb-path" title={dir.path}>
+          <b className="ws-crumb-name">{name}</b>
+          {dir.parent && <span> in {shortPath(dir.parent)}</span>}
         </span>
         <button type="button" className="btn primary small" onClick={() => onUse({ path: dir.path, name, isRepo: dir.isRepo })}>
           Use this folder
         </button>
       </div>
       <div className="ws-scroll">
-        {dir.entries.map((f) => (
+        {shown.map((f) => (
           <Row
             key={f.path}
             icon={f.isRepo ? <FolderGit2Icon className="size-4" /> : <FolderIcon className="size-4" />}
@@ -627,7 +671,7 @@ function Browser({ identity, path, onOpen, onUse, onBack }: { identity: Identity
             onClick={() => (f.isRepo ? onUse(f) : onOpen(f.path))}
           />
         ))}
-        {dir.entries.length === 0 && <p className="ws-empty">No folders in here.</p>}
+        {dir.entries.length === 0 ? <p className="ws-empty">No folders in here.</p> : shown.length === 0 && <p className="ws-empty">No folder here has “{filter}” in its name.</p>}
       </div>
     </>
   );

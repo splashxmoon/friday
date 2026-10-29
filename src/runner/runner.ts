@@ -23,9 +23,11 @@ import { skillsNote } from "./shared-skills.js";
 import { parseContextReport, type ToolContext } from "./context-report.js";
 import { projectMcpServers, type AcpMcpServer } from "./mcp-servers.js";
 import { nodeForScripts } from "./adapters.js";
+import { AUTO_MODE, autoModeRefused } from "./adapters.js";
 import { acpEntry, ensureCursorEntry, openFridayMcp, type FridayMcp, type MeshAnswer } from "./friday-mcp.js";
 import { canScreenshot, screenshot } from "./screenshot.js";
 import { firstWordMs, hungMs, isHung, neverStarted, quietMs, treeCpu } from "./hung.js";
+import { localEdition } from "../local-edition.js";
 
 /**
  * The runner: a small process on the host's machine that attaches their own
@@ -40,6 +42,8 @@ import { firstWordMs, hungMs, isHung, neverStarted, quietMs, treeCpu } from "./h
 export interface RunnerOptions {
   /** Friday server origin, e.g. http://localhost:3000 */
   server: string;
+  /** A teammate's id: its conversation is kept under it, not under the server, session, lane and folder (resumeKey). */
+  keepAs?: string;
   session: string;
   invite: string;
   userId: string;
@@ -317,6 +321,13 @@ export function refusedFlag(error: string, flags: string[]): string | null {
   return flags.find(named) ?? null;
 }
 
+/**
+ * Whether the server's message makes this a Work session's turn: only from the open-source edition's own server (localEdition), whatever another server says.
+ * A signed product runner never starts a tool in auto mode, with the person's browser and the network, because a session said so
+ * (Arun, 2026-10-28: "iron everything and ensure we are good… any logic errors").
+ */
+export const workAsked = (m: unknown): boolean => !!(m as { work?: boolean } | null)?.work && localEdition();
+
 /** How long a CLI that has given its final answer gets to exit by itself. */
 const FINISH_GRACE_MS = 10_000;
 
@@ -440,6 +451,8 @@ export class Runner {
   private skillsAt = 0;
   /** The next turn carries on from a copy of the conversation: the conversation itself is busy elsewhere (see `turn`). */
   private forkNext = false;
+  /** A Work session, as the server said when the lane attached and with each turn: the tools start with everything they have. */
+  private work = false;
   /** This tool turned its effort flag away as unknown (an older version): its turns run without one from then on. */
   private noEffort = false;
   /** Flags of its own this tool's version refused as unknown (see Adapter.optional): left off from then on. */
@@ -695,6 +708,7 @@ export class Runner {
           imported = !!m.imported;
           system = m.system;
           effort = m.effort;
+          this.work = workAsked(m);
           // Begun here, before anything else can run, so no turn starts ahead of it.
           if (o.include) this.included = o.include().catch(() => {});
           // A runner that couldn't set the folder up leaves the lane, rather than taking turns in a state nobody asked for.
@@ -1013,6 +1027,7 @@ export class Runner {
       ...(this.acpMcp.length || (this.friday && acpTool) ? { acpMcp: [...this.acpMcp, ...(this.friday && acpTool ? [acpEntry(this.friday.spec)] : [])] } : {}),
       ...(this.friday ? { friday: this.friday.spec } : {}),
       ...(this.skipFlags.size ? { skip: [...this.skipFlags] } : {}),
+      ...(this.work ? { work: true } : {}),
     };
   }
 
@@ -1335,6 +1350,7 @@ export class Runner {
     // From here on a stop is this turn's, even one that comes while it is still getting ready (see below). Not when it is the
     // same instruction going again on a copy: a Stop that came in between was meant for it, and is kept rather than run over.
     if (!retry) this.stopping = false;
+    this.work = workAsked(m);
     await this.shadowReady;
     await this.included;
     // A lent folder has no CLI to hand a turn to. The server doesn't send one —
@@ -1656,6 +1672,14 @@ ${prompt}`;
       if (refused) {
         this.log(`${this.label} here doesn't take ${refused}, so its turns run without it`);
         this.skipFlags.add(refused);
+        this.asked = mine;
+        this.unrun = carried;
+        return this.turn(m, files);
+      }
+      // Claude Code without auto mode turning a Work turn's away: the same turn goes again as Auto runs everywhere else (AUTO_MODE).
+      if (argv[argv.indexOf("--permission-mode") + 1] === "auto" && !this.skipFlags.has(AUTO_MODE) && autoModeRefused(raw)) {
+        this.log(`${this.label} here doesn't take auto mode, so its turns in Auto run with edits allowed and Auto's tools`);
+        this.skipFlags.add(AUTO_MODE);
         this.asked = mine;
         this.unrun = carried;
         return this.turn(m, files);
@@ -2065,6 +2089,9 @@ ${prompt}`;
   // The CLI's conversation id survives a runner restart, so reconnecting
   // continues the same conversation instead of starting over.
   private get resumeKey(): string {
+    // A teammate's is who it is and its tool: the same conversation whatever port the app opens on and whichever project it
+    // is pointed at (teammates.ts). A new tool is a new conversation.
+    if (this.opts.keepAs) return ["teammate", this.opts.keepAs, this.opts.tool].join("|");
     return [this.opts.server, this.opts.session, this.lane, this.opts.tool, this.opts.cwd].join("|");
   }
 

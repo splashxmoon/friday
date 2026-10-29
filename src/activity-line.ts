@@ -27,6 +27,9 @@ const parse = (raw: string): Record<string, unknown> => {
 const short = (p: string) => p.split("/").filter(Boolean).slice(-2).join("/");
 
 /** A tool call, in the present tense. */
+/** The names coding tools give the call that sends a subagent off (client/Subagents.tsx SUBAGENT_CALL). */
+const SUBAGENT = /^(task|agent|spawn_agent|subagent)$/i;
+
 export function describeCall(call: Pick<ToolCall, "name" | "arguments">): string {
   const a = parse(call.arguments);
   const s = (k: string) => (typeof a[k] === "string" ? (a[k] as string) : "");
@@ -80,6 +83,7 @@ export function describeCall(call: Pick<ToolCall, "name" | "arguments">): string
         const [, service, tool] = call.name.split("__");
         return `Using ${service ?? "a connection"}${tool ? `: ${tool.replace(/[_-]+/g, " ")}` : ""}`;
       }
+      if (SUBAGENT.test(call.name)) return s("description") ? `Sending off a subagent: ${clip(s("description"), 40)}` : "Sending off a subagent";
       return `Using ${call.name.replace(/[_-]+/g, " ")}`;
   }
 }
@@ -121,7 +125,39 @@ export function doingNow(events: SessionEvent[], lane: string): Doing | null {
   const answered = new Set(mine.filter((e) => e.body.type === "tool.result").map((e) => (e.body as { callId: string }).callId));
   const inFlight = calls.filter((c) => !answered.has(c.id));
   const pick = inFlight.at(-1);
+  // Subagents still out, sent off in this step or an earlier one: said as that, rather than "Using Task" or, once its own reads came
+  // back, "Thinking about what to do next" (Arun, 2026-10-28: "iron everything and ensure we are good… any logic errors and fixes").
+  const out = mine.flatMap((e) => (e.body.type === "agent.message" ? e.body.toolCalls.filter((c) => SUBAGENT.test(c.name) && !answered.has(c.id)) : []));
+  if (out.length && (!pick || SUBAGENT.test(pick.name))) {
+    const what = (parse(out[0]!.arguments).description as string | undefined) ?? "";
+    return { text: out.length > 1 ? `Waiting on ${out.length} subagents` : what ? `Waiting on a subagent: ${clip(what, 40)}` : "Waiting on a subagent", ts: last.ts, steps };
+  }
   if (pick) return { text: describeCall(pick), ts: last.ts, steps };
   // Everything it asked for has come back: it is deciding what next.
   return { text: "Thinking about what to do next", ts: mine.at(-1)!.ts, steps };
+}
+
+/**
+ * Whether text is raw tool output rather than words: a stack frame, a Node internal, a file:line:col, an exception's name, an
+ * error code, escape codes, JSON or markup, or more than a couple of lines. A live line in the sidebar, a header or a board card is a
+ * status in plain words, never this (Arun, 2026-10-29: a teammate's needs-you line in the sidebar read
+ * "node:internal/modules/cjs/loader:1…").
+ */
+export function isRawError(text: string): boolean {
+  const t = text.trim();
+  if (t.split("\n").filter((l) => l.trim()).length > 2) return true;
+  return /node:internal|\x1b\[|^\s*at\s|\bat\s+\S+\s+\(|\(\S+:\d+:\d+\)|\S+\.(?:[cm]?[jt]sx?|py|rb|go|rs|java):\d+|\b[A-Z][A-Za-z]*(?:Error|Exception)\b|\bTraceback\b|\b(?:E[A-Z]{3,}|MODULE_NOT_FOUND|ERR_[A-Z_]+)\b|^\s*(?:[{<]|\[(?!Friday\]))|npm ERR!|^panic:|\berrno\b/m.test(t);
+}
+
+/**
+ * What a stopped run says where a status goes: its error when that is already a short line of words ("The folder disconnected."),
+ * else what it means ("Stopped: their tool failed to start"). The error itself stays one click away, in the session's feed.
+ */
+export function stoppedLine(error: string | undefined | null): string {
+  const e = (error ?? "").trim();
+  if (!e) return "Stopped on an error";
+  if (!isRawError(e) && e.length <= 100) return e;
+  if (/cannot find module|MODULE_NOT_FOUND|modules\/cjs|ENOENT|EACCES|\bspawn\b|command not found|didn't start|failed to start|exited (?:with )?code|exit code/i.test(e)) return "Stopped: their tool failed to start";
+  if (/\btests? (?:failed|failing)\b|\b\d+ failing\b|\bfailed tests?\b/i.test(e)) return "Stopped: tests failed";
+  return "Stopped on an error";
 }

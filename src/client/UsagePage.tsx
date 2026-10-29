@@ -3,7 +3,7 @@ import type { Limits } from "../runner/limits.js";
 import { shortTokens, USAGE_TOOLS, type CarriedEntry, type Tokens, type UsageDay, type UsageTool } from "../tool-usage.js";
 import { EngineMark } from "./BrandMarks.js";
 import { FridayMark } from "./icons.js";
-import { hostApi } from "./local.js";
+import { hostApi, useMachine } from "./local.js";
 import { useToolLimits } from "./toolLimits.js";
 import type { Identity } from "./storage.js";
 import { ENGINE_NAMES, toolList } from "../types.js";
@@ -53,6 +53,10 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
   const read = useToolLimits(identity);
   const limits = read && read !== "none" ? read : null;
   const [hover, setHover] = useState<number | null>(null);
+  // The coding tools on this computer: the table lists those and any that did work in the range, not all sixteen Friday knows,
+  // most of them dashes (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+  const { state: machine } = useMachine(identity);
+  const installed = new Set<string>(machine.tools.filter((t) => t.path).map((t) => t.tool));
 
   useEffect(() => {
     let live = true;
@@ -119,6 +123,7 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
 
           {failed ? (
             <EmptyState
+              small
               icon={<CircleAlertIcon />}
               tone="bad"
               title="Couldn't read the usage"
@@ -156,7 +161,7 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
               <div>
                 <h3 className="mt-0 mb-2 text-[13px] font-semibold text-[var(--ink)]">Each day, by agent</h3>
                 {total === 0 ? (
-                  <EmptyState icon={<ChartColumnIcon />} title="Nothing counted in this range" className="py-8">
+                  <EmptyState small icon={<ChartColumnIcon />} title="Nothing counted in this range" className="py-8">
                     {solo ? "" : "Friday's own agent is counted from its next step; "}
                     {toolList("and")} {solo ? "are counted " : ""}from their next turn on a computer running Friday 0.1.32 or later.
                   </EmptyState>
@@ -202,7 +207,8 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
 
               <div>
                 <h3 className="mt-0 mb-2 text-[13px] font-semibold text-[var(--ink)]">By agent</h3>
-                <div className={cn(surface, "overflow-x-auto")}>
+                {/* scroll-x-cue: a narrow window scrolls the table sideways, and a shade at the cut edge says so (style.css). */}
+                <div className={cn(surface, "scroll-x-cue overflow-x-auto")}>
                   <div className="min-w-[640px]" role="table" aria-label="Tokens by agent">
                     <div className={cn(ROW, "border-b border-[var(--border)] py-2 text-[12px] font-medium text-[var(--text-muted)]")} role="row">
                       <span role="columnheader">Agent</span>
@@ -213,7 +219,7 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
                       <span role="columnheader" className="text-right">Total</span>
                       <span role="columnheader">Its limit now</span>
                     </div>
-                    {USAGE_TOOLS.filter((t) => !solo || t !== "friday" || totals.by.friday.turns > 0).map((t) => {
+                    {USAGE_TOOLS.filter((t) => totals.by[t].turns > 0 || (t === "friday" ? !solo : installed.has(t) || !installed.size)).map((t) => {
                       const x = totals.by[t];
                       return (
                         <div key={t} className={cn(ROW, "border-b border-[var(--border)] py-2.5 text-[13px] tabular-nums text-[var(--ink-2)] last:border-b-0", !x.turns && "text-[var(--text-muted)]")} role="row">
@@ -244,7 +250,7 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
                   When an agent joins or takes over, Friday hands it the work so far instead of starting from scratch. Saved is what that work cost, minus what was handed over. Cache re-reads don't count.
                 </p>
                 {data.recent.length === 0 ? (
-                  <EmptyState icon={<ArrowRightLeftIcon />} title="No hand-offs in this range yet" className="py-8">
+                  <EmptyState small icon={<ArrowRightLeftIcon />} title="No hand-offs in this range yet" className="py-8">
                     The first time one agent picks up from another, what it saved shows here.
                   </EmptyState>
                 ) : (
@@ -281,7 +287,9 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
 }
 
 /** The by-agent table's columns: the agent, five figures, and its limit now. */
-const ROW = "grid grid-cols-[minmax(150px,1.5fr)_repeat(5,minmax(64px,1fr))_minmax(130px,1.4fr)] items-center gap-3 px-4";
+// The limit column stands a little apart from Total: a right-aligned number met left-aligned words 12px away, as one phrase
+// ("494k Not known yet") (Arun, 2026-10-28: "a look for like the little details and designs… for the whole app too").
+const ROW = "grid grid-cols-[minmax(150px,1.5fr)_repeat(5,minmax(64px,1fr))_minmax(130px,1.4fr)] items-center gap-3 px-4 [&>:last-child]:pl-4";
 
 /** A tool's own limit as it stands, from the computer it runs on: the fullest of its windows. */
 function limitNow(tool: UsageTool, limits: Limits | null): string {

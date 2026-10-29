@@ -131,7 +131,7 @@ export function IssuesInbox({ data, controls, onWork, query, setQuery, search }:
           ) : (
             groups.map((g) => (
               <div key={g.title} className="flex flex-col gap-px">
-                <h2 className="m-0 flex items-center gap-1.5 px-2.5 pt-2.5 pb-1 text-[11px] font-medium tracking-[0.06em] text-[var(--text-muted)] uppercase">
+                <h2 className="m-0 flex items-center gap-1.5 px-2.5 pt-2.5 pb-1 text-[12px] font-medium tracking-[0.06em] text-[var(--text-muted)] uppercase">
                   {g.title} <span className="tabular-nums">{g.items.length}</span>
                 </h2>
                 {g.items.map((i) => (
@@ -172,12 +172,12 @@ function Labels({ labels, max = 4, className }: { labels: InboxIssue["labels"]; 
   return (
     <span className={cn("flex min-w-0 flex-wrap items-center gap-1", className)}>
       {labels.slice(0, max).map((l) => (
-        <span key={l.name} className="inline-flex max-w-[140px] items-center gap-1 truncate rounded-full border border-[var(--border)] px-1.5 py-px text-[11px] text-[var(--ink-2)]" title={l.name}>
+        <span key={l.name} className="inline-flex max-w-[140px] items-center gap-1 truncate rounded-full border border-[var(--border)] px-1.5 py-px text-[12px] text-[var(--ink-2)]" title={l.name}>
           <span className="size-2 shrink-0 rounded-full" style={{ background: l.color ?? "var(--text-muted)" }} />
           <span className="truncate">{l.name}</span>
         </span>
       ))}
-      {labels.length > max && <span className="text-[11px] text-[var(--text-muted)]">+{labels.length - max}</span>}
+      {labels.length > max && <span className="text-[12px] text-[var(--text-muted)]">+{labels.length - max}</span>}
     </span>
   );
 }

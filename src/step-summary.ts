@@ -22,7 +22,9 @@ export function stepsSummary(all: StepLike[], thoughtSecs = 0): string {
   const running = all.filter((s) => s.state === "running");
   const steps = all.filter((s) => s.state !== "waiting" && s.state !== "running");
   if (!steps.length && running.length) return `${doingVerb(running[0]!.verb)}${running[0]!.target ? ` ${running[0]!.target}` : ""}`;
-  if (!steps.length) return `${n(notRun, "A step", "steps")} didn't run`;
+  // Said as what happened, quietly: "2 steps didn't run" read as an alarm with no next step (the 2026-10-28 critique's #20; QA,
+  // 2026-10-28: still there).
+  if (!steps.length) return notRun === 1 ? "Stopped before its next step" : `Stopped before ${notRun} steps`;
   // Each kind collects what it touched, in the order the kinds first turned up.
   const kinds = new Map<string, string[]>();
   for (const s of steps) {
@@ -46,5 +48,5 @@ export function stepsSummary(all: StepLike[], thoughtSecs = 0): string {
   const shown = parts.length > 3 ? [...parts.slice(0, 3), `${parts.length - 3} more`] : parts;
   const line = shown.map((p, i) => (i === 0 ? p : p.charAt(0).toLowerCase() + p.slice(1))).join(", ");
   const failed = steps.filter((s) => s.state === "failed").length;
-  return [line, failed ? `${failed} failed` : "", notRun ? `${notRun} didn't run` : ""].filter(Boolean).join(" · ");
+  return [line, failed ? `${failed} failed` : "", notRun ? `stopped before ${notRun} more` : ""].filter(Boolean).join(" · ");
 }

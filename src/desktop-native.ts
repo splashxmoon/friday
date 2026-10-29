@@ -106,6 +106,13 @@ export function registerNative(fromApp: (e: IpcMainInvokeEvent | IpcMainEvent) =
     if (typeof req?.path !== "string" || !req.path) return { ok: false, error: "No folder to open." };
     return openIn(target, req.path, typeof req.line === "number" ? req.line : undefined);
   });
+  // A Work session's piece (client/WorkPanels.tsx) in the app this computer opens it with: a deck in Keynote, a video in QuickTime.
+  ipcMain.handle("friday:open-file", async (e, file: unknown) => {
+    if (!fromApp(e)) return { ok: false, error: "Not from Friday." };
+    if (typeof file !== "string" || !path.isAbsolute(file) || !existsSync(file) || statSync(file).isDirectory()) return { ok: false, error: "That file isn't on this computer." };
+    const err = await shell.openPath(file);
+    return err ? { ok: false, error: err } : { ok: true };
+  });
   // How many things wait on the person, on the dock icon (macOS) or the launcher's badge (Linux, where it has one); none clears it.
   ipcMain.on("friday:badge", (e, n: unknown) => {
     if (!fromApp(e)) return;

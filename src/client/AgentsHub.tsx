@@ -2,6 +2,8 @@ import { shortTokens } from "../tool-usage.js";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { LimitRing } from "./LimitRing.js";
 import { hubOf, type AgentStatus, type HubAgent, type HubCheck } from "../agents-hub.js";
+import { teamHubAgents } from "./Teammates.js";
+import { ACCESS } from "./team-status.js";
 import { canDriveLane, type SessionState } from "../session/projection.js";
 import { ENGINE_MODEL_INFO, MAIN_LANE, type EngineMode, type Member, type SessionEvent } from "../types.js";
 import { fixFailuresText } from "./Activity.js";
@@ -35,6 +37,8 @@ const STATUS: Record<AgentStatus, { icon: IconName | null; word: string }> = {
 const MODE: Record<EngineMode, string> = { plan: "Plan", edits: "Manual", full: "Auto" };
 /** How a mode is named on a card in a session. */
 let modeNames = (_state: SessionState): Record<EngineMode, string> => MODE;
+// A team's say how far each may go, as the rest of the team's pages do (Arun, 2026-10-28: "really iron out bugs…").
+modeNames = (state) => (state.options.team ? { plan: ACCESS.plan.label, edits: ACCESS.edits.label, full: ACCESS.full.label } : MODE);
 const CHECK_LABEL = { tests: "Tests", typecheck: "Typecheck", lint: "Lint", build: "Build" } as const;
 
 /** "0:42", "12:05", "1:02:10": a run's time on a clock, which a ticking number reads best as. */
@@ -68,8 +72,15 @@ export function AgentsHub({
   onOpenDiff: (path?: string) => void;
 }) {
   const own = useMemo(() => hubOf(state, events, me.id), [state, events, me.id]);
-  // The agents as the panel shows them: in Arun's build, a team's as its sidebar has them.
+  // The agents as the panel shows them: a crew's as its sidebar has them.
   let hub = own;
+  // In a team, each teammate as the sidebar has it (offline, on its backup tool), and no Friday Code card: a team's agents are
+  // its teammates (teamHubAgents; 2026-10-27 audit: the panel said "Ready for a task" of a teammate the sidebar said was
+  // offline, and counted Friday Code as an agent).
+  if (state.options.team) hub = { ...own, agents: teamHubAgents(state, own.agents) };
+  // A team's agents are its teammates, added from the sidebar's New teammate: no "Add another agent" here (Arun, 2026-10-28:
+  // the critique's "the Agents panel in team sessions is team-aware").
+  if (state.options.team) addAgent = undefined;
   const limits = useToolLimits(identity);
   const glance = useMemo(() => glanceOf(limits), [limits]);
   const working = hub.agents.some((a) => a.status === "working");
@@ -259,7 +270,8 @@ function AgentCard({ a, state, me, send, now, limit, mayDrive }: { a: HubAgent; 
       aria-label={`${a.name}: ${s.word}. ${a.line}`}
       onClick={focus}
       onKeyDown={(e) => {
-        if (e.key === "Enter" && e.target === e.currentTarget) focus();
+        // Enter or Space, as on a button (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION").
+        if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) (e.preventDefault(), focus());
       }}
     >
       {confirmUI}

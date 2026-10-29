@@ -71,6 +71,13 @@ export interface SubTask {
 export function subTasksIn(events: SessionEvent[]): SubTask[] {
   const all = new Map<string, SubTask>();
   for (const e of events) {
+    // Stopping a turn stops what it sent off, unless it was sent to work on in the background: a subagent no tool reports on again
+    // read "2 subagents working" after Stop (2026-10-28 QA; Arun: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+    if (e.body.type === "run.pause" || e.body.type === "run.cancel") {
+      const lane = e.lane ?? MAIN_LANE;
+      for (const [k, t] of all) if (t.lane === lane && t.status === "running" && !t.background) all.set(k, { ...t, status: "stopped", end: e.ts });
+      continue;
+    }
     if (e.body.type !== "agent.task") continue;
     const b = e.body;
     const lane = e.lane ?? MAIN_LANE;

@@ -587,19 +587,8 @@
 }
 
 .ring[data-variant="C2"] .ringDot {
-  animation: orb-ring-pulse 2s ease-in-out infinite both;
 }
 
-@keyframes orb-ring-pulse {
-  0%, 100% {
-    opacity: 0.18;
-    transform: translate(var(--orb-rx), var(--orb-ry)) scale(0.7);
-  }
-  50% {
-    opacity: 1;
-    transform: translate(var(--orb-rx), var(--orb-ry)) scale(1.15);
-  }
-}
 
 .ring[data-variant="C3"] .ringDot {
   animation: orb-ring-comet 1.8s ease-in-out infinite both;

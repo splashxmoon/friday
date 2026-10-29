@@ -20,6 +20,8 @@ import { TreePanel } from "./Tree.js";
 import { GitPanel } from "./GitPanel.js";
 import type { Identity } from "./storage.js";
 import { ContextMenu, MenuButton, relTime } from "./ui.js";
+import { sourcesIn } from "./WorkPanels.js";
+import { isWorkSid } from "./WorkMode.js";
 
 /**
  * The workbench: everything a coding run produced, behind one set of tabs.
@@ -34,17 +36,16 @@ import { ContextMenu, MenuButton, relTime } from "./ui.js";
  * "what has this thing done to my machine?", and answering it needs a
  * sentence, not four panels to cross-reference.
  */
-export type Tab = "agents" | "overview" | "tree" | "files" | "git" | "terminal" | "preview" | "usage" | "rules"
+export type Tab = "agents" | "overview" | "tree" | "files" | "git" | "terminal" | "preview" | "usage" | "rules";
 
 export const TAB_LABEL: Record<Tab, string> = {
   agents: "Agents", overview: "Tasks", tree: "Tree", files: "Diff", git: "Git", terminal: "Terminal", preview: "Preview", usage: "Usage", rules: "Rules",
+  ...(isLocal() ? { preview: "Browser" } : {}), // the agents browse in it too (local/desktop-browser.ts)
 };
 /** The panels in the side panel's card, in the order people reach for them. */
 // Usage is the workspace's allowance and what each run cost on it: the hosted Friday's, so not offered in the local edition.
 const PANEL_ORDER: Tab[] = (["overview", "files", "git", "terminal", "preview", "tree", "agents", "usage", "rules"] as Tab[]).filter((t) => t !== "usage" || !isLocal());
 /** What each panel holds, under its name in the card. */
-/** The most panels open as tabs at once. */
-const MAX_TABS = 6;
 
 const PANEL_SAYS: Record<Tab, string> = {
   overview: "What's running and what finished",
@@ -56,9 +57,11 @@ const PANEL_SAYS: Record<Tab, string> = {
   agents: "Who is here and what each is doing",
   usage: "Tokens, limits and what each run cost",
   rules: "Instructions every agent follows",
+  ...(isLocal() ? { preview: "Your pages and the web, where the agents browse too" } : {}),
 };
 const TAB_ICON: Record<Tab, IconName> = {
   agents: "agent", overview: "list", tree: "folderOpen", files: "file", git: "gitBranch", terminal: "terminalSquare", preview: "play", usage: "chart", rules: "book",
+  ...(isLocal() ? { preview: "webBrowser" as IconName } : {}),
 };
 
 /**
@@ -73,6 +76,55 @@ const TAB_ICON: Record<Tab, IconName> = {
  * and menus opened from a panel are placed against the window.
  */
 export const sizeOf = (width: number): "xs" | "sm" | "md" | "lg" => (width < 380 ? "xs" : width < 520 ? "sm" : width < 760 ? "md" : "lg");
+
+/**
+ * The open panels' tab row, when it holds more than it shows: the one showing is scrolled into view (it was left at the row's
+ * start cut to "ee" or "gents"), a vertical wheel moves along it, and its edges fade where tabs go on past them (2026-10-28 QA;
+ * Arun: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+ */
+function useTabRow(tab: string, count: number) {
+  const [row, setRow] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!row) return;
+    const edges = () => {
+      // Too many to name them all: the ones not showing keep only their icon (named on hover), rather than names cut to "D" or
+      // "Br." (2026-10-28 QA). Measured from each name's whole width, so it holds steady as it switches.
+      const tabs = [...row.querySelectorAll<HTMLElement>(".bench-tab")];
+      const named = tabs.reduce((n, t) => {
+        const name = t.querySelector<HTMLElement>(".bench-tab-name");
+        return n + t.offsetWidth + (name ? name.scrollWidth - name.clientWidth : 0) + 2;
+      }, row.querySelector<HTMLElement>(".bench-add")?.offsetWidth ?? 0);
+      row.toggleAttribute("data-compact", named > row.clientWidth + 1);
+      const over = row.scrollWidth > row.clientWidth + 1;
+      row.toggleAttribute("data-more-before", over && row.scrollLeft > 1);
+      row.toggleAttribute("data-more-after", over && row.scrollLeft + row.clientWidth < row.scrollWidth - 1);
+    };
+    const wheel = (e: WheelEvent) => {
+      if (row.scrollWidth <= row.clientWidth + 1 || Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return;
+      e.preventDefault();
+      row.scrollLeft += e.deltaY;
+    };
+    const sizes = new ResizeObserver(edges);
+    sizes.observe(row);
+    for (const c of row.children) sizes.observe(c);
+    row.addEventListener("scroll", edges, { passive: true });
+    row.addEventListener("wheel", wheel, { passive: false });
+    edges();
+    return () => {
+      sizes.disconnect();
+      row.removeEventListener("scroll", edges);
+      row.removeEventListener("wheel", wheel);
+    };
+  }, [row, count]);
+  useLayoutEffect(() => {
+    const on = row?.querySelector<HTMLElement>(".bench-tab.on");
+    if (!row || !on) return;
+    const a = on.getBoundingClientRect().left - row.getBoundingClientRect().left + row.scrollLeft;
+    if (a < row.scrollLeft) row.scrollLeft = a;
+    else if (a + on.offsetWidth > row.scrollLeft + row.clientWidth) row.scrollLeft = a + on.offsetWidth - row.clientWidth;
+  }, [row, tab, count]);
+  return setRow;
+}
 
 function SizedBody({ children, className = "" }: { children: ReactNode; className?: string }) {
   const el = useRef<HTMLDivElement>(null);
@@ -292,8 +344,9 @@ export function Workbench({
     }
   });
   const keepTabs = (next: Tab[]) => {
-    // Six at most: past that the oldest, never the one showing, makes room.
-    const trimmed = next.length > MAX_TABS ? next.filter((t, i) => t === tab || i >= next.length - MAX_TABS) : next;
+    // Every panel may be open at once: there are eight or nine, and the row shrinks the others to their icons and then scrolls.
+    // A cap of six closed the oldest without a word, so Git and Terminal vanished when a seventh was added (2026-10-29 verify).
+    const trimmed = [...new Set(next)];
     setOpenTabs(trimmed);
     try {
       localStorage.setItem(tabsKey, JSON.stringify(trimmed));
@@ -330,6 +383,38 @@ export function Workbench({
   // The panels this session offers, and every one a second panel can be.
   let order: Tab[] = PANEL_ORDER;
   let every = Object.keys(TAB_LABEL) as Tab[];
+  let closeLabel = "Close workbench";
+  // A Work session keeps what it made in its rail (WorkRail.tsx), not here, and isn't offered the panels about code (there is no
+  // diff of a post): the side panel is its Browser, and the agents' own.
+  const work = !!state.options.work;
+  if (work) closeLabel = "Close the browser";
+  order = work ? ["preview"] : PANEL_ORDER;
+  every = order;
+  // Its one panel is the Browser (Arun, 2026-10-27: "get rid of the plus buttons and logic for the side panel stuff it should only
+  // be browser"): whatever else was open goes, and anything asking for another panel gets the Browser.
+  useEffect(() => {
+    if (!work) return;
+    if (openTabs.length !== 1 || openTabs[0] !== "preview") keepTabs(["preview"]);
+    // Not as the panel Code sessions open on next: Work's Browser is its own, never everyone's default (Arun, 2026-10-28: "iron
+    // everything and ensure we are good… any logic errors").
+    if (tab !== "preview") {
+      let was: string | null = null;
+      try {
+        was = localStorage.getItem("mpa.bench");
+      } catch {
+        // A preference.
+      }
+      onPick?.("preview");
+      try {
+        if (was === null) localStorage.removeItem("mpa.bench");
+        else localStorage.setItem("mpa.bench", was);
+      } catch {
+        // As above.
+      }
+    }
+    if (split) setSplit(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [work, tab, openTabs.join(), split]);
   // The second panel, unless it has been made the first (picked from the session's header).
   const second = split && split !== tab ? split : null;
   // Both are only drawn in the Tasks list, so they are only asked for while it is showing; the Preview tab asks for its own.
@@ -411,6 +496,7 @@ export function Workbench({
       off();
     };
   }, [open, over]);
+  const tabRow = useTabRow(tab, tabs.length);
   // Closed from over the chat (Back to chat, Escape), the focus goes back to whatever opened the panel. Noted before the
   // chat goes inert below, since the opener can be in the chat (a diff card, a file chip).
   const opener = useRef<HTMLElement | null>(null);
@@ -583,7 +669,7 @@ export function Workbench({
           </button>}
           {/* Over the chat, "Back to chat" leading the header is the one way back; a second control for it would be noise. */}
           {!cover && (
-            <button className="icon-btn tiny" title="Close" aria-label="Close workbench" onClick={onClose}>
+            <button className="icon-btn tiny" title={closeLabel === "Close workbench" ? "Close" : closeLabel} aria-label={closeLabel} onClick={onClose}>
               <Icon name="x" size={15} />
             </button>
           )}
@@ -638,7 +724,7 @@ export function Workbench({
               Panels
             </span>
           ) : onPicker ? (
-            <div className="bench-tabrow" role="tablist" aria-label="Open panels">
+            <div className="bench-tabrow" role="tablist" aria-label="Open panels" ref={tabRow}>
               {tabs.map((t) => (
                 <span key={t} className={`bench-tab${t === tab ? " on" : ""}`}>
                   {t === tab ? (
@@ -659,9 +745,9 @@ export function Workbench({
                       <Icon name="chevronDown" size={12} className="bench-here-caret" />
                     </MenuButton>
                   ) : (
-                    <button type="button" role="tab" aria-selected={false} className="bench-tab-btn" title={PANEL_SAYS[t]} onClick={() => onPick?.(t)} onAuxClick={(e) => e.button === 1 && closeTab(t)}>
+                    <button type="button" role="tab" aria-selected={false} className="bench-tab-btn" title={`${TAB_LABEL[t]} · ${PANEL_SAYS[t]}`} onClick={() => onPick?.(t)} onAuxClick={(e) => e.button === 1 && closeTab(t)}>
                       <Icon name={TAB_ICON[t]} size={13} />
-                      {TAB_LABEL[t]}
+                      <span className="bench-tab-name">{TAB_LABEL[t]}</span>
                     </button>
                   )}
                   {tabs.length > 1 && (
@@ -807,6 +893,7 @@ export function Workbench({
     // An uploaded folder has no path on anybody's machine, so the session
     // is what names it. Passing the prose "12 files uploaded to this
     // session" as a cwd is what used to happen, and it previewed nothing.
+    if (which === "preview" && work) return <PreviewPanel headSlot={which === tab ? headSlot : which === second ? secondSlot : null} shown={on} identity={identity} cwd={null} sid={sid} invite={invite} send={send} onClose={onClose} bare asNote={me.role === "viewer" || !canDrive} work suggest={sourcesIn(events, state).flatMap((x) => (x.url ? [{ url: x.url, title: x.title ?? "" }] : []))} />;
     if (which === "preview") return <PreviewPanel headSlot={which === tab ? headSlot : which === second ? secondSlot : null} shown={on} identity={identity} cwd={facts.uploaded ? null : (facts.repo?.path ?? null)} iosElsewhere={iosElsewhere} sid={sid} invite={invite} send={send} onClose={onClose} bare onOutput={() => onTab("overview")} asNote={me.role === "viewer" || !canDrive} />;
     return (
       <TerminalPanel
@@ -1038,7 +1125,9 @@ export function useTab(sid = ""): [Tab, (t: Tab) => void] {
     (t: Tab) => {
       setTab(t);
       try {
-        localStorage.setItem("mpa.bench", t);
+        let everyone = true;
+        everyone = !isWorkSid(sid); // a Work session's Browser is its own, not the panel Code sessions open on
+        if (everyone) localStorage.setItem("mpa.bench", t);
         if (sid) localStorage.setItem(`mpa.bench.${sid}`, t);
       } catch {
         // A preference, not state: losing it costs nothing.

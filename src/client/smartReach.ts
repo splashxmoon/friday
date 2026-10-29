@@ -87,8 +87,11 @@ const norm = (p: string) => p.replace(/[\\/]+$/, "").toLowerCase();
 /** Who else is editing this lane's folder, by name, if anyone: a second writer is refused there, so only Plan can join it. */
 export function folderHeldBy(state: SessionState, lane: string): string | null {
   const mine = state.engines[lane];
-  if (!mine?.cwd) return null;
-  const other = Object.entries(state.engines).find(([id, e]) => id !== lane && e.online && e.mode !== "plan" && norm(e.cwd) === norm(mine.cwd));
+  // A folder shared by choice holds nobody back, as the hub has it (EngineHub.attach, EngineInfo.shared): a lane that shares it
+  // isn't held, and a lane beside it that shares it isn't holding. Agents that share one folder by design had every message
+  // dropped into Plan (Arun, 2026-10-28: "iron everything and ensure we are good… any logic errors and fixes").
+  if (!mine?.cwd || mine.shared) return null;
+  const other = Object.entries(state.engines).find(([id, e]) => id !== lane && e.online && e.mode !== "plan" && !e.shared && norm(e.cwd) === norm(mine.cwd));
   return other ? `${other[1].hostName.split(" ")[0]}'s ${other[0] === MAIN_LANE ? "main agent" : "agent"}` : null;
 }
 
@@ -97,7 +100,7 @@ export function folderHeldBy(state: SessionState, lane: string): string | null {
  * 2026-10-18), and a change is what Auto is for. Plan, for a question or "don't change anything", still applies.
  */
 export function keepAuto(want: Reach | null, hand: EngineMode | undefined): Reach | null {
-  return want?.mode === "edits" && hand === "full" ? null : want;
+  return want?.mode === "edits" && (hand ?? "full") === "full" ? null : want;
 }
 
 /** The reach to switch to, once a folder somebody else is editing is taken into account. */
@@ -120,16 +123,23 @@ export function reachFor(state: SessionState, lane: string, text: string): Reach
   if (!e) return null;
   const r = reachFrom(state, lane, e, text);
   // Already where it should be: nothing to switch.
-  return r && r.mode !== e.mode ? r : null;
+  return r && r.mode !== modeOf(e) ? r : null;
 }
 
+/**
+ * The mode a lane runs in: Auto when its record doesn't say, as the mode pill shows it. A lane with no mode on record showed
+ * "Auto" and was then switched to Manual by the first message that asked for a change (QA, 2026-10-28: "The mode pill showed
+ * Auto before the send, and the agent then ran in Manual"; Arun: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+ */
+export const modeOf = (e: { mode?: EngineMode | undefined }): EngineMode => e.mode ?? "full";
+
 function reachFrom(state: SessionState, lane: string, e: { mode: EngineMode; handMode?: EngineMode }, text: string): Reach | null {
-  const hand = e.handMode ?? e.mode;
+  const hand = e.handMode ?? modeOf(e);
   const back: Reach = { mode: hand, why: `back to ${REACH_NAME[hand]}, the mode you picked` };
   let want = reachForMessage(text);
   // A change in Auto is Auto's to do; in Plan picked by hand it is still the person's call, so it stays a reader.
   if (want?.mode === "edits") want = hand === "full" ? back : hand === "plan" ? null : want;
-  if (!want) return e.mode === hand ? null : back;
+  if (!want) return modeOf(e) === hand ? null : back;
   if (want.mode === "plan") return want;
   const holder = folderHeldBy(state, lane);
   return holder ? { mode: "plan", why: `${holder} is editing this folder` } : want;

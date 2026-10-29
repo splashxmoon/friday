@@ -68,7 +68,7 @@ export function useGithub(identity: Identity, enabled = true) {
  * `empty`: drawn as a page's empty state (a mark, a heading, a line and the buttons, centred), for a page that has nothing to
  * show until GitHub is connected. The same states and buttons as the card.
  */
-export function GitHubConnect({ identity, onChange, compact, why, empty }: { identity: Identity; onChange?: () => void; compact?: boolean; why?: string; empty?: boolean }) {
+export function GitHubConnect({ identity, onChange, compact, why, empty, bare }: { identity: Identity; onChange?: () => void; compact?: boolean; why?: string; empty?: boolean; /** Only the buttons (and a pending code or an error): for a place that already heads it "Connect GitHub" itself, like Setup's step (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL"; it showed the heading twice). */ bare?: boolean }) {
   const { status, error, read, setStatus, setError } = useGithub(identity);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -199,6 +199,16 @@ export function GitHubConnect({ identity, onChange, compact, why, empty }: { ide
       <span className="muted small">{copied ? "Copied" : "Press to copy"}</span>
     </div>
   );
+  if (bare)
+    return (
+      <div className="gh-connect bare">
+        {pending && <div className="gh-sub">Enter this code on the page that opened, then approve. This finishes by itself.</div>}
+        {code}
+        {failed}
+        <div className="gh-actions">{actions}</div>
+        {dialog}
+      </div>
+    );
   if (empty)
     return (
       <section className="int-empty gh-empty">

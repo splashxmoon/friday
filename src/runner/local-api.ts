@@ -165,17 +165,23 @@ const FILLER = new Set(
   "a an the and or of for to in on with from me my us our i we you your it this that some something very really just please can could would will help make build create write add start new let lets let's want need get do code app quick simple small basic".split(" "),
 );
 
-/** A folder name from what was asked: its first few words that name something, lowercase, with dashes. */
+/**
+ * A folder name from what was asked: its first few words that name something, lowercase, with dashes. Words in any script
+ * ("café menu", "東京 旅行"), not only a–z: a title in another language named every folder "project" (Arun, 2026-10-28: "iron
+ * everything and ensure we are good… any logic errors"). Counted in characters, so a long one is never cut mid-character.
+ */
 export function projectName(ask: string): string {
   const words = ask
+    .normalize("NFC")
     .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, " ")
+    .replace(/[^\p{L}\p{M}\p{N}\s-]/gu, " ")
     .split(/\s+/)
-    .filter((w) => w && !FILLER.has(w));
+    .filter((w) => w && !/^-+$/.test(w) && !FILLER.has(w));
+  const len = (w: string) => Array.from(w).length;
   let name = "";
   for (const w of words.slice(0, 4)) {
-    if (name && name.length + w.length + 1 > 40) break;
-    name = name ? `${name}-${w}` : w.slice(0, 40);
+    if (name && len(name) + len(w) + 1 > 40) break;
+    name = name ? `${name}-${w}` : Array.from(w).slice(0, 40).join("");
   }
   return name || "project";
 }
@@ -606,6 +612,7 @@ export async function callHost(method: string, params: Record<string, unknown> =
         ...(["claude", "codex", "cursor"].includes(String(params.resumeTool)) ? { resumeTool: params.resumeTool as EngineTool } : {}),
         // An explicit binary, for people whose CLI lives somewhere unusual.
         bin: str(params.bin, 600) || undefined,
+        ...(str(params.keepAs, 40) ? { keepAs: str(params.keepAs, 40) } : {}), // a teammate's conversation, kept by who it is
         log: ctx.log ? (l) => ctx.log!(`[${sid}] ${l}`) : undefined,
       });
       await runner.start().catch(async (e) => {
@@ -640,6 +647,7 @@ export async function callHost(method: string, params: Record<string, unknown> =
         lane: runner.lane,
         laneName: runner.laneName,
         ...(raceBranch ? { cwd, branch: raceBranch } : {}),
+        ...(params.work === true ? { cwd } : {}), // where a Work session's teammate joins it (client/WorkMode.tsx)
         // Whether it is on the session's branch as pushed, so the person is told what came along rather than what was hoped.
         ...(runner.opts.followBranch ? { followed: runner.followed } : {}),
       };

@@ -276,7 +276,7 @@ export function ToolResult({
               </ActionSwapRollText>
             </span>
           ) : null}
-          <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground/55">
+          <span className="min-w-0 truncate font-mono text-[12px] text-muted-foreground/55">
             <ActionSwapRollText value={toolKey}>
               {tool}
             </ActionSwapRollText>
@@ -284,7 +284,7 @@ export function ToolResult({
         </span>
         <span
           className={cn(
-            "inline-flex shrink-0 items-center gap-1 text-[11px] font-medium",
+            "inline-flex shrink-0 items-center gap-1 text-[12px] font-medium",
             getStatusClass(status),
           )}
         >
@@ -336,7 +336,7 @@ export function ToolResult({
                   <RotateCcw className="size-3.5" />
                 </ToolResultAction>
               ) : null}
-              <span className="ml-auto text-[11px] text-muted-foreground/55">
+              <span className="ml-auto text-[12px] text-muted-foreground/55">
                 <ActionSwapRollText value={status}>
                   {statusLabel}
                 </ActionSwapRollText>

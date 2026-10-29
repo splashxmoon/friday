@@ -6,6 +6,42 @@
  * here on the client, which knows the clock the person reads, so "3pm" without a zone is their 3pm.
  */
 
+import { MAIN_LANE } from "./types.js";
+
+/**
+ * When a limit lifts, as a person reads it: "3:00 PM" today, "3:00 PM tomorrow", or "Tue 3:00 PM". A bare time read as today's:
+ * "Out of usage until 3:00 PM" at 4:25 PM meant tomorrow, beside a card that said "about 23 hours" (Arun, 2026-10-28: "iron
+ * everything and ensure we are good… any logic errors and fixes").
+ */
+export function clockUntil(at: number, now = Date.now()): string {
+  const t = new Date(at);
+  const time = t.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const day = (d: Date) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+  const days = Math.round((day(t) - day(new Date(now))) / 86_400_000);
+  return days === 0 ? time : days === 1 ? `${time} tomorrow` : `${t.toLocaleDateString([], { weekday: "short" })} ${time}`;
+}
+
+/**
+ * A coding tool that stopped because it isn't signed in on the computer it runs on, from how its run ended: the tool's own words
+ * ("Not logged in · Please run /login") or the runner's explanation of them (runner/adapters.ts explain). Not a limit.
+ */
+export function signedOut(error: string | undefined): boolean {
+  return !!error && /isn't (signed|logged) in on the computer it runs on|login has expired|not logged in|please run \/login|not authenticated/i.test(error);
+}
+
+type RunLike = { status: string; sinceSeq: number; error?: string };
+/**
+ * A lane that ran out of usage (or isn't signed in) whose task another agent here carried on (the hand-off out of usage makes by itself): one at work
+ * since, or one that finished a turn after it stopped. The session reads as stopped no longer: the status bar and the sidebar
+ * said "Claude Code stopped" in red after Codex had finished the work (Arun, 2026-10-28: "iron everything and ensure we are good").
+ */
+export function carriedOn(state: { run: RunLike; laneRuns: Record<string, RunLike>; finished?: Record<string, number>; lanes: { id: string }[] }, lane: string): boolean {
+  const runOf = (id: string) => (id === MAIN_LANE ? state.run : state.laneRuns[id]);
+  const run = runOf(lane);
+  if (run?.status !== "error" || !(limitHit(run.error) || signedOut(run.error))) return false;
+  return [MAIN_LANE, ...state.lanes.map((l) => l.id)].some((id) => id !== lane && (runOf(id)?.status === "running" || (state.finished?.[id] ?? 0) > run.sinceSeq));
+}
+
 export const LIMIT = /usage limit|session limit|weekly limit|5-hour limit|rate limit|quota|too many requests|hit your limit|\b429\b/i;
 
 export interface LimitHit {

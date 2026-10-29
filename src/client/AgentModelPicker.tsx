@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactElement } from "react";
-import { createPortal } from "react-dom";
 import { isOwnModel } from "../own-model-id.js";
 import { ownName, useOwnModels } from "./ownModelStore.js";
 import { ENGINE_NAMES, ENGINE_TOOLS, type EngineEffort, type EngineTool, type Thinking } from "../types.js";
@@ -9,7 +8,7 @@ import { ModelNameInput, useEngineModelInfo } from "./EngineModelPill.js";
 import { Icon } from "./icons.js";
 import type { Identity } from "./storage.js";
 import { planLimits, startTeam } from "./edition.js";
-import { placeCard, useDismiss } from "./ui.js";
+import { floating, placeCard, uiZoom, useDismiss } from "./ui.js";
 import { splitTools } from "./engines.js";
 import { TierMeter, costMark, type RouteHint } from "./RouteWhy.js";
 import { forValue } from "../routing.js";
@@ -139,11 +138,15 @@ export function AgentModelPicker({
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label="Who does the work, and which model"
+        title={[agentName, modelText, reasoning, effortText].filter(Boolean).join(" · ")}
         onClick={() => setOpen((v) => !v)}
       >
         <span className="menu-pill-mark">
           <EngineMark tool={engine} size={14} />
         </span>
+        {/* One line that ends in "…" when it can't fit, so a long typed model name can't push the pill off a narrow composer
+            (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL"). */}
+        <span className="amp-pill-text">
         {agentName}
         {(modelText || reasoning || effortText) && (
           <>
@@ -161,6 +164,7 @@ export function AgentModelPicker({
             {effortText}
           </>
         )}
+        </span>
         <Icon name="chevronDown" size={13} className="menu-pill-caret" />
       </button>
       {open && <PickerPanel />}
@@ -186,10 +190,30 @@ export function AgentModelPicker({
       const t = setTimeout(() => (list.current?.querySelector<HTMLElement>('[data-row][aria-checked="true"]') ?? list.current?.querySelector<HTMLElement>("[data-row]"))?.focus(), 30);
       return () => clearTimeout(t);
     }, []);
+    // Another tool's list starts at its top: it kept the last one's scroll, and Codex opened on its last rows, Default out of view.
+    useEffect(() => {
+      if (list.current) list.current.scrollTop = 0;
+    }, [engine]);
+    // Placed again when the window changes size, so it stays on its pill and on screen (it kept its first place, cut off and
+    // away from the pill) (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+    const [, resized] = useState(0);
+    useEffect(() => {
+      const again = () => resized((n) => n + 1);
+      addEventListener("resize", again);
+      return () => removeEventListener("resize", again);
+    }, []);
     const r = btn.current?.getBoundingClientRect();
     if (!r) return null;
     // Upward: this hangs off the composer, near the bottom of the window. One size whichever tool is chosen.
-    const place = placeCard(r, 560, { want: 440, min: 240, prefer: "above" });
+    const place = placeCard(r, 560, { want: 440, min: 240, prefer: "above", cover: true });
+    // Opened from a dialog (a teammate's Runs on), it keeps inside the dialog's edges: it hung about 45px past its right (Arun,
+    // 2026-10-29: the verification's "the teammate dialog's model picker pokes past the dialog's right edge").
+    const box = btn.current?.closest('[data-slot="dialog-content"]')?.getBoundingClientRect();
+    if (box) {
+      const z = uiZoom();
+      place.width = Math.min(place.width, box.width / z - 16);
+      place.left = Math.min(Math.max(place.left, box.left / z + 8), box.right / z - 8 - place.width);
+    }
     const choose = (id: string) => {
       (engine ? onModel : onFridayModel)(id);
       setOpen(false);
@@ -307,11 +331,12 @@ export function AgentModelPicker({
           {on && <Icon name="check" size={14} className="amp-check" />}
         </button>
       );
-    const group = (label: string | null, rows: (ReactElement | false)[]) => {
+    // Each group its own key: two unnamed ones (Default, and a model you typed) shared "top", and React kept a stale Default row.
+    const group = (label: string | null, rows: (ReactElement | false)[], key = label ?? "top") => {
       const shown = rows.filter(Boolean);
       if (!shown.length) return null;
       return (
-        <div className="amp-group" key={label ?? "top"}>
+        <div className="amp-group" key={key}>
           {label && <div className="amp-group-label">{label}</div>}
           {shown}
         </div>
@@ -322,17 +347,34 @@ export function AgentModelPicker({
     const friday = toolRow("friday", fridayName, <EngineMark tool="" size={18} />, locked ? { disabled: false, hint: "Team" } : solo ? { disabled: false, hint: "Your model" } : null, !engine, pickFriday);
     const modelCount = engine ? cliModels.length + 1 : own.length + (solo ? 0 : fridaySide.catalogSize);
 
+    /**
+     * The levels are one stop for Tab, and the arrows move the choice along them, as a radio group's do: six separate stops
+     * stood between the tools and the search (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL"). Locked
+     * levels are passed over.
+     */
+    const segKeys = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+      const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
+      if (!step && e.key !== "Home" && e.key !== "End") return;
+      e.preventDefault();
+      e.stopPropagation();
+      const all = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]:not([data-locked="true"])')];
+      if (!all.length) return;
+      const at = all.indexOf(document.activeElement as HTMLButtonElement);
+      const to = e.key === "Home" ? 0 : e.key === "End" ? all.length - 1 : (Math.max(0, at) + step + all.length) % all.length;
+      all[to]!.focus();
+      all[to]!.click();
+    };
     // How hard it works: Friday Code's reasoning, or a coding tool's effort, as one switch over the models.
     const power =
       efforts ? (
         <div className="amp-power" role="radiogroup" aria-label={`${ENGINE_NAMES[engine as EngineTool]} effort`}>
           <span className="amp-power-label" title="Higher effort thinks longer and uses more of the tool's plan.">Effort</span>
-          <div className="amp-seg">
-            <button type="button" role="radio" aria-checked={efforts.now === null} data-on={efforts.now === null} title="The tool's own default." onClick={() => efforts.set(null)}>
+          <div className="amp-seg" onKeyDown={segKeys}>
+            <button type="button" role="radio" aria-checked={efforts.now === null} tabIndex={efforts.now === null ? 0 : -1} data-on={efforts.now === null} title="The tool's own default." onClick={() => efforts.set(null)}>
               Auto
             </button>
             {efforts.options.map((o) => (
-              <button key={o.value} type="button" role="radio" aria-checked={efforts.now === o.value} data-on={efforts.now === o.value} data-locked={!!o.locked} title={o.title} onClick={() => (o.locked ? efforts.onLocked?.(o.title) : efforts.set(o.value))}>
+              <button key={o.value} type="button" role="radio" aria-checked={efforts.now === o.value} tabIndex={efforts.now === o.value ? 0 : -1} data-on={efforts.now === o.value} data-locked={!!o.locked} title={o.title} onClick={() => (o.locked ? efforts.onLocked?.(o.title) : efforts.set(o.value))}>
                 {o.label}
               </button>
             ))}
@@ -340,7 +382,7 @@ export function AgentModelPicker({
         </div>
       ) : null; // A tool with no levels to pick has no row: the models start higher, in the same size of card.
 
-    return createPortal(
+    return floating(
       <div ref={pop} className="amp" style={{ ...place, height: place.maxHeight }} role="dialog" aria-label="Agent and model">
         {/* Which tool: the ones this computer has first, Friday Code with them (after them on Solo), the rest folded away. */}
         <div className="amp-tools" role="group" aria-label={machineName ? `Tools on ${machineName}` : "Tools"}>
@@ -413,7 +455,7 @@ export function AgentModelPicker({
                   flush();
                   return out;
                 })()}
-                {model && !cliKnown && group(null, [modelRow(model, model, "A model you typed", true, cliMark!)])}
+                {model && !cliKnown && group(null, [modelRow(model, model, "A model you typed", true, cliMark!)], "typed")}
                 {typing ? (
                   <ModelNameInput tool={engine} current={model} className="model-pop-input" onDone={(v) => (v ? choose(v) : setTyping(false))} />
                 ) : (
@@ -447,7 +489,6 @@ export function AgentModelPicker({
           </div>
         </div>
       </div>,
-      document.body,
     );
   }
 }

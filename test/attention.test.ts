@@ -106,6 +106,11 @@ test("a stopped run is yours only if you can restart it", () => {
   assert.equal(attentionFor(session({ run: limited }), ME), null);
   const claude = { status: "error" as const, sinceSeq: 32, error: "Claude AI usage limit reached|1760000000" };
   assert.equal(attentionFor(session({ run: claude }), ME), null);
+  // A tool's raw error is said in words where it is listed, and kept as the detail (Arun, 2026-10-29).
+  const crashed = attentionFor(session({ run: { status: "error" as const, sinceSeq: 33, error: "node:internal/modules/cjs/loader:1228\n  throw err;\nError: Cannot find module 'x'" } }), ME)!;
+  assert.equal(crashed.text, "Stopped: their tool failed to start");
+  assert.match(crashed.detail ?? "", /cjs\/loader/);
+  assert.equal(attentionFor(session({ run: stopped }), ME)!.detail, undefined);
 });
 
 /**

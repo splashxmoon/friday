@@ -1,9 +1,10 @@
 import { roleOf, type SessionState } from "./session/projection.js";
 import type { PrStatus } from "./github-status.js";
-import { doingNow } from "./activity-line.js";
+import { doingNow, stoppedLine } from "./activity-line.js";
 import { ENGINE_NAMES, MAIN_LANE, type EngineTool, type SessionEvent } from "./types.js";
 import { commandFailed, receiptOf } from "./receipt.js";
 import { riskOf, type Risk, type RiskFacts } from "./review-risk.js";
+import { carriedOn } from "./limit-reset.js";
 
 /**
  * Every agent that is working for you, as cards on a board.
@@ -186,15 +187,25 @@ export function boardCards(state: SessionState, events: SessionEvent[], meId: st
     const driverIsMe = driver?.id === meId;
     const asks = state.pendingRequests.filter((r) => r.lane === lane);
 
+    // Finished with its plan short ("stopped at 3 of 5"): Carry on waits on you, as the sidebar and the Work rail say it (attention.ts
+    // crewOf). Home's "Right now" called it "Ready" (Arun, 2026-10-29: "Yes, fix them", the redesign's leftovers).
+    const plan = state.planDone?.[lane];
+    const short = !!plan && plan.done < plan.of && !!state.finished?.[lane] && state.stopped?.[lane] === undefined;
+
     let column: BoardColumn = "idle";
     let status = "Idle";
     let detail = "";
     let you = false;
 
-    if (run.status === "error") {
+    // Out of usage or not signed in, and another agent here carried its task on: nothing waits on anybody, as the sidebar and the
+    // status bar already say. Home's "Right now" read "Needs you" over work Codex had finished (Arun, 2026-10-28: "iron everything
+    // and ensure we are good").
+    if (run.status === "error" && carriedOn(state, lane)) {
+      status = "Carried on by another agent";
+    } else if (run.status === "error") {
       column = "needs";
       status = "Stopped";
-      detail = clip(run.error || "The run stopped.", 120);
+      detail = clip(run.error ? stoppedLine(run.error) : "The run stopped.", 120);
       you = driverIsMe;
     } else if (approval) {
       column = "needs";
@@ -231,6 +242,11 @@ export function boardCards(state: SessionState, events: SessionEvent[], meId: st
       status = "Working";
       // Which kind of working: reading, editing, running the tests. A column of "Working" cards says nothing about which is stuck.
       detail = doingNow(events, lane)?.text ?? "";
+    } else if (short) {
+      column = "needs";
+      status = "Stopped early";
+      detail = `Stopped at ${plan!.done} of ${plan!.of} · Carry on to finish it`;
+      you = driver ? driverIsMe : roleOf(state, meId) === "owner";
     } else if (pr) {
       column = "review";
       status = "Review pending";

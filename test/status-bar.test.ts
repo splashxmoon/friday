@@ -1,7 +1,7 @@
 // What the Focus layout's status bar says about the run (StatusBar.tsx).
 import assert from "node:assert/strict";
 import test from "node:test";
-import { clock, runLine } from "../src/client/StatusBar.js";
+import { barLine, clock, runLine } from "../src/client/StatusBar.js";
 import { project } from "../src/session/projection.js";
 import type { SessionEvent } from "../src/types.js";
 
@@ -141,4 +141,29 @@ test("only the controls a tip helps get one: no words, words cut off, or a short
   assert.equal(worthATip("Commit on branch", "Commit these changes on the branch", false), false, "says it already");
   assert.equal(worthATip("friday/claude-f55e8…", "friday/claude-f55e8201", true), true, "cut off");
   assert.equal(worthATip("Commands", "Commands · Ctrl+Shift+P", false), true, "a shortcut");
+});
+
+// Arun, 2026-10-28: "iron everything and ensure we are good… any logic errors and fixes".
+test("a question asked in an agent's answer is waiting for you, not Ready", () => {
+  const state = project("s", []);
+  const asked = { ...state, asks: { main: { seq: 5, questions: [{ question: "Monday or Sunday?", options: [] }] } } } as never;
+  assert.equal(runLine(asked, [], 0).text, "Waiting for you");
+});
+
+test("out of usage or signed out, with its work carried on by another agent, the bar isn't Stopped", async () => {
+  const { carriedOn } = await import("../src/limit-reset.js");
+  const at = (seq: number, body: SessionEvent["body"], lane?: string): SessionEvent => ({ seq, ts: seq, actor: { id: "a", name: "A", kind: "agent" }, body, ...(lane ? { lane } : {}) }) as SessionEvent;
+  const lane = { type: "lane.added", lane: { id: "codex", name: "Codex", agent: null, control: { kind: "open" }, controlMode: "ask", trigger: { kind: "manual" } } } as SessionEvent["body"];
+  const base = [at(1, lane), at(2, { type: "run.started", causedBy: 0 }), at(3, { type: "run.ended", outcome: "error", error: "5-hour limit reached ∙ resets 3pm" })];
+  const alone = project("s", base);
+  assert.equal(runLine(alone, [], 0).text, "Stopped", "nobody has its work yet");
+  const carried = project("s", [...base, at(4, { type: "run.started", causedBy: 0 }, "codex"), at(5, { type: "run.ended", outcome: "done" }, "codex")]);
+  assert.ok(carriedOn(carried, "main"));
+  assert.equal(runLine(carried, [], 0).text, "Ready", "Codex finished it");
+  const out = project("s", [base[0]!, base[1]!, at(3, { type: "run.ended", outcome: "error", error: "Claude Code isn't signed in on the computer it runs on." }), at(4, { type: "run.started", causedBy: 0 }, "codex")]);
+  assert.ok(carriedOn(out, "main"), "signed out, Codex on it");
+  const agent = (lane: string, status: string, name: string) => ({ lane, name, status, line: "" }) as never;
+  assert.equal(barLine({ tone: "idle", text: "Ready" }, [agent("main", "limited", "Claude Code"), agent("codex", "done", "Codex")]).text, "Ready");
+  assert.equal(barLine({ tone: "idle", text: "Ready" }, [agent("main", "failed", "Claude Code"), agent("codex", "done", "Codex")], (l) => l === "main").text, "Ready");
+  assert.equal(barLine({ tone: "idle", text: "Ready" }, [agent("main", "failed", "Claude Code"), agent("codex", "done", "Codex")]).text, "Claude Code stopped");
 });

@@ -107,7 +107,11 @@ export function OverlapNotice({ overlaps, onOpen, slot }: { overlaps: Overlap[];
           }}
         >
           <span className="overlap-dot" />
-          {label}
+          {/* On a phone's bar only the count stays (its words are in the label): the run's state beside it had shrunk to a sliver. */}
+          <span>
+            {live.length === 1 ? "1 file" : `${live.length} files`}
+            <span className="overlap-words"> also being changed</span>
+          </span>
         </button>
         {open && (
           <div className="overlap-pop" style={pos}>

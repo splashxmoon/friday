@@ -247,6 +247,37 @@ export function SettingsPage({
     () => sectionsMatching(sections, query),
     [query, sections.length], // eslint-disable-line react-hooks/exhaustive-deps
   );
+  // The setting the words name, in the section showing: scrolled to and marked for a moment, not only its section found in the
+  // list (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+  useEffect(() => {
+    const el = page.current;
+    if (!el) return;
+    const clear = () => el.querySelectorAll(".set-row-hit").forEach((x) => x.classList.remove("set-row-hit"));
+    clear();
+    const words = query.split(/\s+/).filter((w) => w.length > 1);
+    if (!words.length) return;
+    let found = false;
+    const look = () => {
+      if (found) return;
+      const rows = [...el.querySelectorAll<HTMLElement>("[data-set-row]")];
+      let best: HTMLElement | null = null;
+      let most = 0;
+      for (const row of rows) {
+        const text = (row.textContent ?? "").toLowerCase();
+        const n = words.filter((w) => text.includes(w)).length;
+        if (n > most) [best, most] = [row, n];
+      }
+      clear();
+      if (!best) return;
+      found = true;
+      best.classList.add("set-row-hit");
+      best.scrollIntoView({ block: "center" });
+    };
+    // A beat after typing stops, and again once a section that reads its settings has them.
+    const t = setTimeout(look, 250);
+    const again = setTimeout(look, 900);
+    return () => (clearTimeout(t), clearTimeout(again));
+  }, [query, current.id]);
 
   return (
     <div className="page settings-page px-6!" ref={page}>

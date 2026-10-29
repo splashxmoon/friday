@@ -309,11 +309,19 @@ export function PromptInputAttachment({
             <span className="pi-att-kind">{isImage ? "Image" : (/\.([a-z0-9]{1,5})$/i.exec(filename)?.[1]?.toUpperCase() ?? "File")}</span>
           </div>
           <button
-            aria-label="Remove attachment"
+            aria-label={`Remove ${attachmentLabel}`}
             className="pi-att-x"
             onClick={(e) => {
               e.stopPropagation();
+              // The focus moves to the next file's ×, or back to the box, not to the page (2026-10-28 QA: it fell to <body>).
+              const form = e.currentTarget.closest("form");
+              const xs = [...(form?.querySelectorAll<HTMLButtonElement>(".pi-att-x") ?? [])];
+              const at = xs.indexOf(e.currentTarget);
               attachments.remove(data.id);
+              requestAnimationFrame(() => {
+                const left = [...(form?.querySelectorAll<HTMLButtonElement>(".pi-att-x") ?? [])];
+                (left[Math.min(at, left.length - 1)] ?? form?.querySelector<HTMLTextAreaElement>("textarea"))?.focus();
+              });
             }}
             type="button"
           >
@@ -1188,7 +1196,7 @@ export const PromptInputSpeechButton = ({
     <PromptInputButton
       className={cn(
         "relative transition-all duration-200",
-        isListening && "animate-pulse bg-accent text-accent-foreground",
+        isListening && "bg-accent text-accent-foreground",
         className
       )}
       disabled={!recognition}

@@ -1,8 +1,8 @@
 import { seesByName } from "../own-vision.js";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { isOwnModel } from "../own-model-id.js";
 import { api } from "./api.js";
-import { VendorMark } from "./BrandMarks.js";
+import { EngineMark, VendorMark } from "./BrandMarks.js";
 import { machineError } from "./GitHubConnect.js";
 import { Icon } from "./icons.js";
 import { NoMachine, hostApi, useMachine } from "./local.js";
@@ -39,26 +39,48 @@ const presetOf = (id?: string) => PRESETS.find((p) => p.id === id);
 const LOGO: Record<string, string> = { openai: "OpenAI", anthropic: "Anthropic", google: "Google", deepseek: "DeepSeek" };
 const LOCAL_IDS = new Set(["ollama", "lmstudio"]);
 
-/** A provider's mark: its logo where the app has one, else its initial in a quiet badge. */
+/**
+ * A provider's mark: its logo where the app has one, else its initial; each in the same small tile, so a list of them reads as
+ * one column rather than logos mixed with letter badges (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+ */
 function ProviderMark({ id, size = 15 }: { id?: string; size?: number }) {
   const p = presetOf(id);
-  if (id && LOGO[id]) return <VendorMark vendor={LOGO[id]} size={size} />;
-  if (id === "custom" || !p) return <Icon name="globe" size={size - 1} />;
+  const inner = Math.round(size * 0.75);
   return (
     <span className="own-mono" style={{ width: size + 3, height: size + 3 }} aria-hidden>
-      {p.name[0]}
+      {id && LOGO[id] ? <VendorMark vendor={LOGO[id]} size={inner} /> : id === "xai" ? <EngineMark tool="grok" size={inner} /> : id === "custom" || !p ? <Icon name="globe" size={inner} /> : p.name[0]}
     </span>
   );
 }
 
-/** One of the app's menus dressed as a field: what is chosen, its mark, and a caret. */
+/** What to show in an empty Model box: a model's name the provider has, where its line names some, never its description. */
+export function modelExample(hint: string): string {
+  const first = hint.split(",")[0]!.trim();
+  return /^[\w.:/-]+$/.test(first) && /[-\d]/.test(first) ? first : "The model's name, or List models";
+}
+
+/** One of the app's menus dressed as a field: what is chosen, its mark, and a caret. Its menu is as wide as it is (it was 300px
+ * under a 417px field) (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL"). */
 function Field({ label, mark, text, items, width = 300, placeholder }: { label: string; mark?: ReactNode; text: string; items: () => MenuItem[]; width?: number; placeholder?: boolean }) {
+  const box = useRef<HTMLSpanElement>(null);
+  const [w, setW] = useState(width);
+  useLayoutEffect(() => {
+    const el = box.current?.firstElementChild as HTMLElement | null;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const fit = () => setW(Math.max(width, Math.round(el.getBoundingClientRect().width)));
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [width]);
   return (
-    <MenuButton label={label} className="own-select" width={width} maxHeight={440} items={items}>
-      {mark && <span className="own-select-mark">{mark}</span>}
-      <span className={`own-select-text ${placeholder ? "muted" : ""}`}>{text}</span>
-      <Icon name="chevronDown" size={13} className="own-select-caret" />
-    </MenuButton>
+    <span ref={box} className="own-select-wrap">
+      <MenuButton label={label} className="own-select" width={w} maxHeight={440} items={items}>
+        {mark && <span className="own-select-mark">{mark}</span>}
+        <span className={`own-select-text ${placeholder ? "muted" : ""}`}>{text}</span>
+        <Icon name="chevronDown" size={13} className="own-select-caret" />
+      </MenuButton>
+    </span>
   );
 }
 
@@ -221,6 +243,10 @@ export function OwnModelsSection({ identity, workspace }: { identity: Identity; 
 
 function ModelForm({ identity, draft, onChange, onDone }: { identity: Identity; draft: Draft; onChange: (d: Draft | null) => void; onDone: () => Promise<void> }) {
   const [found, setFound] = useState<string[]>([]);
+  // A long list of models narrowed by typing, in the list itself (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+  const [filter, setFilter] = useState("");
+  // The filter takes the focus once as the list opens (the menu itself puts it on the model ticked, a moment before).
+  const filterFocused = useRef(false);
   const [busy, setBusy] = useState<"" | "list" | "save">("");
   const [error, setError] = useState("");
   // The address is the preset's until somebody needs another: shown as a line, opened to a field on request.
@@ -303,7 +329,8 @@ function ModelForm({ identity, draft, onChange, onDone }: { identity: Identity; 
                 onSelect: () => {
                   setFound([]);
                   setEditAddress(false);
-                  set({ provider: p.id, baseUrl: p.baseUrl || draft.baseUrl, model: "" });
+                  // Another server starts with no address, not the provider's it was on (it kept OpenAI's) (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+                  set({ provider: p.id, baseUrl: p.id === "custom" ? (draft.provider === "custom" ? draft.baseUrl : "") : p.baseUrl, model: "" });
                 },
               });
               return [
@@ -328,7 +355,7 @@ function ModelForm({ identity, draft, onChange, onDone }: { identity: Identity; 
         <label>
           <span>Model</span>
           <span className="own-model-pick">
-            <input className="set-input" value={draft.model} placeholder={preset.hint} spellCheck={false} onChange={(e) => set({ model: e.target.value })} />
+            <input className="set-input" value={draft.model} placeholder={modelExample(preset.hint)} spellCheck={false} onChange={(e) => set({ model: e.target.value })} />
             {found.length ? (
               <MenuButton
                 label="Pick a model"
@@ -336,7 +363,36 @@ function ModelForm({ identity, draft, onChange, onDone }: { identity: Identity; 
                 end
                 width={300}
                 maxHeight={420}
-                items={() => found.map((m) => ({ label: m, checked: m === draft.model, onSelect: () => set({ model: m }) }))}
+                onOpenChange={(o) => !o && (setFilter(""), (filterFocused.current = false))}
+                items={() => {
+                  const shown = filter.trim() ? found.filter((m) => m.toLowerCase().includes(filter.trim().toLowerCase())) : found;
+                  return [
+                    found.length > 10 && {
+                      node: (
+                        <input
+                          className="set-input own-pick-filter"
+                          ref={(el) => {
+                            if (!el || filterFocused.current) return;
+                            filterFocused.current = true;
+                            setTimeout(() => el.focus({ preventScroll: true }), 0);
+                          }}
+                          value={filter}
+                          placeholder={`Filter ${found.length} models`}
+                          aria-label="Filter models"
+                          spellCheck={false}
+                          onChange={(e) => setFilter(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "ArrowDown") (e.preventDefault(), e.currentTarget.closest(".menu")?.querySelector<HTMLElement>('[role^="menuitem"]')?.focus());
+                          }}
+                        />
+                      ),
+                      height: 46,
+                    },
+                    // In their order, the one in use ticked (the menu opens on it).
+                    ...shown.map((m) => ({ label: m, checked: m === draft.model, onSelect: () => set({ model: m }) })),
+                    !shown.length && { heading: `No model has “${filter.trim()}” in its name` },
+                  ];
+                }}
               >
                 {found.length} models <Icon name="chevronDown" size={12} />
               </MenuButton>

@@ -5,8 +5,13 @@ export function patchLines(patch: string): FileDiffLine[] {
   const out: FileDiffLine[] = [];
   let oldN = 0;
   let newN = 0;
-  let inHunk = false;
+  // A patch with no hunk header at all (only its + and − lines, as some tools give a new file) is one hunk from line 1, rather
+  // than nothing: its card was empty under a header counting its lines (2026-10-28 QA).
+  const bare = !/^@@ /m.test(patch) && /^[+-](?![+-]{2} )/m.test(patch);
+  let inHunk = bare;
+  if (bare) oldN = newN = 1;
   patch.split("\n").forEach((l, i) => {
+    if (bare && (/^(diff |index |new file|deleted file|\+\+\+ |--- )/.test(l) || (l === "" && i === patch.split("\n").length - 1))) return;
     const h = l.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/);
     if (h) {
       inHunk = true;

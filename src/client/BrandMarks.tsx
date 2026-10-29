@@ -9,6 +9,9 @@
  * background, so it is drawn in `currentColor` instead. A white mark is
  * invisible in the light theme, and being unreadable is a worse outcome than
  * being monochrome.
+ *
+ * Kept in their colours on purpose: Claude's orange, Gemini's gradient and the rest say which tool it is at a glance (Arun,
+ * 2026-10-29: "can we bring back some for the coding tool icons like their actual icons like claude should be that orange").
  */
 
 import { BotIcon, FactoryIcon, InfinityIcon } from "lucide-react";

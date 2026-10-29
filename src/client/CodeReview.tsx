@@ -395,7 +395,7 @@ export function CodeReview({
                           )}
                         </QuickHeader>
                       ) : g.title && (
-                        <h2 className="m-0 flex items-center gap-1.5 px-2.5 pt-2.5 pb-1 text-[11px] font-medium tracking-[0.06em] text-[var(--text-muted)] uppercase">
+                        <h2 className="m-0 flex items-center gap-1.5 px-2.5 pt-2.5 pb-1 text-[12px] font-medium tracking-[0.06em] text-[var(--text-muted)] uppercase">
                           {g.title} <span className="tabular-nums">{g.items.length}</span>
                         </h2>
                       )}
@@ -641,7 +641,7 @@ function Load({ prs }: { prs: PullRequest[] }) {
   if (!load.length) return null;
   return (
     <div className="flex flex-wrap items-center gap-1.5 border-b border-[var(--border)] px-3 py-2" aria-label="Review requests per person">
-      <span className="mr-1 text-[11px] font-medium tracking-[0.06em] text-[var(--text-muted)] uppercase">Review load</span>
+      <span className="mr-1 text-[12px] font-medium tracking-[0.06em] text-[var(--text-muted)] uppercase">Review load</span>
       {load.slice(0, 6).map((l) => (
         <Badge key={l.login} variant="outline" className="h-6 gap-1.5 rounded-full border-[var(--border)] pr-1 pl-1 text-[12px] font-medium text-[var(--ink-2)]" title={`${l.login}: asked to review ${l.count}`}>
           {l.avatar ? <img className="size-4 rounded-full" src={l.avatar} alt="" /> : <UserIcon />}
@@ -923,7 +923,7 @@ function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: 
                   {f.path.slice(f.path.lastIndexOf("/") + 1)}
                 </span>
                 {risky.has(f.path) && (
-                  <Badge variant="outline" className="h-5 gap-1 rounded-md border-[var(--border)] px-1.5 text-[11px] font-medium text-[var(--ink-2)]">
+                  <Badge variant="outline" className="h-5 gap-1 rounded-md border-[var(--border)] px-1.5 text-[12px] font-medium text-[var(--ink-2)]">
                     <ShieldIcon /> Worth a look
                   </Badge>
                 )}
@@ -1137,7 +1137,7 @@ function AgentReview({ pr, ctx, mine, act }: { pr: PullRequest; ctx: Ctx; mine: 
                 <Badge
                   variant="outline"
                   className={cn(
-                    "mt-px h-5 w-[58px] shrink-0 rounded-md border-[var(--border)] px-1.5 text-[11px] font-medium text-[var(--text-muted)]",
+                    "mt-px h-5 w-[58px] shrink-0 rounded-md border-[var(--border)] px-1.5 text-[12px] font-medium text-[var(--text-muted)]",
                     f.severity === "high" && "border-transparent bg-[color-mix(in_srgb,var(--red)_14%,transparent)] text-[var(--red)]",
                     f.severity === "medium" && "text-[var(--ink)]",
                   )}

@@ -112,3 +112,19 @@ test("each agent says how many tokens it has used here, cache reads left out", (
   const events = [...session(), ev({ type: "agent.usage", input: 12_000, output: 3_000, cached: 900_000 } as EventBody), ev({ type: "agent.usage", input: 1_000, output: 500 } as EventBody)];
   assert.equal(hubOf(project("s", events), events, "ada").agents[0]!.tokens, 16_500);
 });
+
+test("an agent not signed in says so plainly, and once another agent carried its task on it isn't stopped", () => {
+  // Arun, 2026-10-28: "iron everything and ensure we are good": Progress read a red "Stopped" over work Codex had done.
+  const events = session();
+  events.push(ev({ type: "run.ended", outcome: "error", error: "Claude Code isn't signed in on the computer it runs on, or its login has expired. Run `claude auth login` in a terminal there." } as EventBody));
+  let [a] = hubOf(project("s", events), events, "ada").agents;
+  assert.deepEqual([a!.status, a!.line], ["failed", "Not signed in on its computer"], "no terminal command");
+  const codex = { id: "engine:codex", name: "Ada's Codex", kind: "agent" as const };
+  events.push(ev({ type: "lane.added", lane: { id: "l1", name: "Codex", agent: null, control: { kind: "open" }, controlMode: "ask", trigger: { kind: "manual" }, engine: true } } as EventBody, human));
+  events.push(ev({ type: "engine.attached", engine: { tool: "codex", hostId: "ada", hostName: "Ada Lovelace", cwd: "/w" } } as EventBody, codex, "l1"));
+  events.push(ev({ type: "instruction", text: "Carry on", interrupt: false } as EventBody, human, "l1"));
+  events.push(ev({ type: "run.started", causedBy: seq } as EventBody, codex, "l1"));
+  events.push(ev({ type: "run.ended", outcome: "done" } as EventBody, codex, "l1"));
+  [a] = hubOf(project("s", events), events, "ada").agents;
+  assert.equal(a!.status, "ready", "carried on: not stopped");
+});

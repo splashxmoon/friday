@@ -12,9 +12,13 @@ import { MAIN_LANE, type SessionEvent } from "./types.js";
  * the fast way back to any of them after an hour of scrolling.
  */
 
+// Cut by what a reader sees as one character, never inside an emoji: "newsletter \ud83d…" was half of one (QA, 2026-10-28; Arun:
+// "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+const graphemes = (t: string): string[] => (typeof Intl !== "undefined" && "Segmenter" in Intl ? Array.from(new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(t), (g) => g.segment) : Array.from(t));
 const clip = (s: string, n: number) => {
   const t = s.replace(/\s+/g, " ").trim();
-  return t.length > n ? `${t.slice(0, n - 1)}…` : t;
+  const g = graphemes(t);
+  return g.length > n ? `${g.slice(0, n - 1).join("")}…` : t;
 };
 const lower = (s: string) => (s ? s[0]!.toLowerCase() + s.slice(1) : s);
 const ago = (ms: number) => {
@@ -114,7 +118,7 @@ export interface JumpPlace {
  * The places, said: not "Last diff" but which files and how much, not "Last failure" but which command. In the order they
  * matter: what is waiting on someone, what broke, what changed, how the last run ended, what you last said.
  */
-export function jumpPlaces(events: SessionEvent[], meId: string): JumpPlace[] {
+export function jumpPlaces(events: SessionEvent[], meId: string, work = false): JumpPlace[] {
   const calls = new Map<string, string>();
   let diff: SessionEvent | undefined, question: SessionEvent | undefined, failure: { e: SessionEvent; command: string } | undefined, mine: SessionEvent | undefined, run: SessionEvent | undefined;
   for (const e of events) {
@@ -136,12 +140,16 @@ export function jumpPlaces(events: SessionEvent[], meId: string): JumpPlace[] {
   }
   const out: JumpPlace[] = [];
   if (question?.body.type === "agent.question") out.push({ key: "q", label: "Last question", seq: question.seq, detail: clip(question.body.question, 60), ts: question.ts });
-  if (failure) out.push({ key: "f", label: "Last failure", seq: failure.e.seq, detail: failure.command ? clip(failure.command, 60) : "A command failed", ts: failure.e.ts });
+  // In Work, a session's words, not a coder's: no commands, diffs or line counts (QA, 2026-10-28: "Last failure · npm test",
+  // "Last diff · Nothing changed").
+  if (failure) out.push(work ? { key: "f", label: "Last step that didn't work", seq: failure.e.seq, detail: "One of the agent's steps failed", ts: failure.e.ts } : { key: "f", label: "Last failure", seq: failure.e.seq, detail: failure.command ? clip(failure.command, 60) : "A command failed", ts: failure.e.ts });
   if (diff?.body.type === "agent.diff") {
     const files = diff.body.files;
     const adds = files.reduce((n, f) => n + f.additions, 0);
     const dels = files.reduce((n, f) => n + f.deletions, 0);
-    out.push({ key: "d", label: "Last diff", seq: diff.seq, detail: files.length ? `${files.length} file${files.length === 1 ? "" : "s"} · +${adds} −${dels}` : "Nothing changed", ts: diff.ts });
+    if (work) {
+      if (files.length) out.push({ key: "d", label: "Last change", seq: diff.seq, detail: `${files.length} piece${files.length === 1 ? "" : "s"} saved`, ts: diff.ts });
+    } else out.push({ key: "d", label: "Last diff", seq: diff.seq, detail: files.length ? `${files.length} file${files.length === 1 ? "" : "s"} · +${adds} −${dels}` : "Nothing changed", ts: diff.ts });
   }
   if (run?.body.type === "run.ended") {
     const word = run.body.outcome === "done" ? "Done" : run.body.outcome === "error" ? "Stopped on an error" : "Waiting on you";

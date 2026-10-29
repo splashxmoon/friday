@@ -3,6 +3,7 @@
 // First, so every page loads already knowing it is the local edition (local-edition.ts).
 import "./local-edition.js";
 import { createRoot } from "react-dom/client";
+import { freeScrollInPopups } from "./scroll-free.js";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { App } from "./App.js";
 import { tellDesktopTheme } from "./storage.js";
@@ -19,6 +20,9 @@ applyFonts(readFonts(), false);
 
 // A new build of the page while it is open: load it instead of going white.
 watchChunkErrors();
+
+// Pickers and menus over a dialog scroll (scroll-free.ts).
+freeScrollInPopups();
 
 createRoot(document.getElementById("root")!, {
   onUncaughtError: (error, info) => {

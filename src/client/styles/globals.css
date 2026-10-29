@@ -47,64 +47,25 @@
 /* Light is the bare :root; dark is the class <html> carries by default. The
    app's own tokens in style.css mirror this split, and style.css loads last,
    so where a name appears in both it is the app's value that wins. */
-:root {
-  --radius: 0.75rem;
-  --background: #ffffff;
-  --foreground: #18181b;
-  --card: #fafafb;
-  --card-foreground: #18181b;
-  --popover: #ffffff;
-  --popover-foreground: #18181b;
-  --primary: #17171a;
-  --primary-foreground: #ffffff;
-  --secondary: #f1f1f4;
-  --secondary-foreground: #18181b;
-  --muted: #efeff2;
-  --muted-foreground: #67676f;
-  --surface-accent: #f1f1f4;
-  --surface-accent-foreground: #18181b;
-  --destructive: #c0392e;
-  --border: #e4e4e9;
-  --input: #d0d0d7;
-  --ring: #a5a5b0;
-  --sidebar: #f4f4f5;
-  --sidebar-foreground: #18181b;
-  --sidebar-border: #e4e4e9;
-  --sidebar-primary: hsl(240 5.9% 10%);
-  --sidebar-primary-foreground: hsl(0 0% 98%);
-  --sidebar-accent: hsl(240 4.8% 95.9%);
-  --sidebar-accent-foreground: hsl(240 5.9% 10%);
-  --sidebar-ring: hsl(217.2 91.2% 59.8%);
-}
-
+/* shadcn's names for the app's own tokens (public/style.css, which loads after this and holds the values, light and dark and a
+   colour theme alike): one palette, read by the library's components and the app's own rules the same (2026-10-29 direction). */
+:root,
 .dark {
   --radius: 0.75rem;
-  --background: #161618;
-  --foreground: #ededed;
-  --card: #1c1c1f;
-  --card-foreground: #ededed;
-  --popover: #1c1c1f;
-  --popover-foreground: #ededed;
-  --primary: #f1f1f3;
-  --primary-foreground: #131315;
-  --secondary: #232327;
-  --secondary-foreground: #ededed;
-  --muted: #232327;
-  --muted-foreground: #a0a0a0;
-  --surface-accent: #232327;
-  --surface-accent-foreground: #ededed;
-  --destructive: #ff7b72;
-  --border: #27272b;
-  --input: #35353b;
-  --ring: #5a5a63;
-  --sidebar: #0c0c0e;
-  --sidebar-foreground: #ededed;
-  --sidebar-border: #27272b;
-  --sidebar-primary: hsl(224.3 76.3% 48%);
-  --sidebar-primary-foreground: hsl(0 0% 100%);
-  --sidebar-accent: hsl(240 3.7% 15.9%);
-  --sidebar-accent-foreground: hsl(240 4.8% 95.9%);
-  --sidebar-ring: hsl(217.2 91.2% 59.8%);
+  --background: var(--bg);
+  --foreground: var(--ink);
+  --card-foreground: var(--ink);
+  --popover: var(--card);
+  --popover-foreground: var(--ink);
+  --primary: var(--accent);
+  --primary-foreground: var(--on-accent);
+  --secondary: var(--hover);
+  --secondary-foreground: var(--ink);
+  --surface-accent: var(--hover);
+  --surface-accent-foreground: var(--ink);
+  --destructive: var(--red);
+  --input: var(--border-strong);
+  --ring: var(--border-focus);
 }
 
 @layer base {
@@ -120,12 +81,13 @@
    follow the app's tokens (style.css), so light and dark carry through without a second palette. */
 :root,
 .dark {
-  --dass-live: #1d4ed8; /* 5.7:1 on the light sidebar's grey; #2563eb was 4.4:1 (2026-10-27 audit) */
-  --dass-ok: #16a34a;
-  --dass-needs: var(--amber, #f2b453);
-  --dass-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --dass-fast: 120ms;
-  --dass-med: 200ms;
+  /* The direction's state colours (style.css --live, --ready, --needs) under the names the older rules use. */
+  --dass-live: var(--live);
+  --dass-ok: var(--green);
+  --dass-needs: var(--amber);
+  --dass-ease: var(--ease-out);
+  --dass-fast: var(--t-hover);
+  --dass-med: var(--t-open);
   --sidebar-foreground: var(--ink-2);
   --sidebar-primary: var(--ink);
   --sidebar-primary-foreground: var(--bg);
@@ -136,17 +98,15 @@
 }
 
 @layer components {
-  /* The rail: one column of places, each a 40px tile; the one you're in is lifted, with a bar at the rail's edge. */
+  /* The sidebar's icon buttons: 8px corners, --ink-3 at rest and --ink under the pointer; the place you're in is a fill, never an
+     outline or a bar at the edge (2026-10-29 direction §5, §6). */
   .dass-rail-btn {
-    @apply relative grid size-10 place-items-center rounded-xl text-[var(--text-muted)] outline-none transition-colors;
+    @apply relative grid size-10 place-items-center rounded-[8px] text-[var(--text-muted)] outline-none transition-colors;
     transition-duration: var(--dass-fast);
   }
   .dass-rail-btn:hover { @apply bg-sidebar-accent text-sidebar-accent-foreground; }
   .dass-rail-btn:focus-visible { box-shadow: var(--dass-ring); outline: none; }
-  .dass-rail-btn[data-active="true"] { @apply bg-sidebar-accent text-sidebar-accent-foreground; box-shadow: inset 0 0 0 1px var(--border); }
-  .dass-rail-btn[data-active="true"]::before {
-    content: ""; position: absolute; left: -10px; top: 10px; bottom: 10px; width: 3px; border-radius: 0 3px 3px 0; background: var(--ink);
-  }
+  .dass-rail-btn[data-active="true"] { background: var(--hover-strong); color: var(--ink); box-shadow: none; }
   .dass-rail-badge {
     @apply absolute -top-0.5 -right-0.5 grid h-4 min-w-4 place-items-center rounded-full px-1 text-[11px] font-semibold leading-none;
     background: color-mix(in srgb, var(--dass-needs) 16%, var(--sidebar)); color: var(--dass-needs); box-shadow: 0 0 0 2px var(--sidebar);
@@ -186,8 +146,11 @@
   .dass-dot[data-state="needs"] { background-color: var(--dass-needs); }
   .dass-dot[data-state="bad"] { background-color: var(--red); }
   .dass-dot[data-state="done"] { background-color: var(--dass-ok); }
+  /* Finished while you were elsewhere, not opened since (unread.ts): its name a step heavier and its dot lit, as a mail list marks new mail. */
+  .dass-row[data-unread] .dass-row-title { font-weight: 600; }
+  .dass-row[data-unread] .dass-dot[data-state="idle"] { background-color: var(--dass-ok); opacity: 1; }
 
-  .dass-kbd { @apply ml-auto rounded-md border border-sidebar-border px-1.5 py-px font-sans text-[11px] text-[var(--text-muted)]; }
+  .dass-kbd { @apply ml-auto rounded-md border border-sidebar-border px-1.5 py-px font-sans text-[12px] text-[var(--text-muted)]; }
   /* In a tooltip (dark in light mode, light in dark) the chip takes the tooltip's own ink, as the app's other tips do, rather
      than the sidebar's muted grey that vanished on it (Arun, 2026-10-20). */
   /* A page's row of controls (PageToolbar): every one 32px, so tabs, search and buttons line up on every page alike. */
@@ -198,7 +161,7 @@
   [data-slot="tooltip-content"] .dass-kbd {
     display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; vertical-align: 1px;
     border-color: color-mix(in srgb, currentColor 22%, transparent); background: color-mix(in srgb, currentColor 10%, transparent);
-    color: color-mix(in srgb, currentColor 85%, transparent); font-size: 11px; font-weight: 500; line-height: 1; font-variant-numeric: tabular-nums;
+    color: color-mix(in srgb, currentColor 85%, transparent); font-size: 12px; font-weight: 500; line-height: 1; font-variant-numeric: tabular-nums;
   }
 }
 
@@ -222,5 +185,9 @@
   }
 }
 
-/* Working and ready, lighter on dark so they read as clearly as on white. */
-.dark { --dass-live: #60a5fa; --dass-ok: #22c55e; }
+
+/* The new session's turning headline keeps two lines' room where it can wrap, so a line that wraps and one that doesn't never
+   move the box under it (Arun, 2026-10-28: "iron everything and ensure we are good… any logic errors and fixes"). */
+@media (max-width: 640px) {
+  .hero-title { min-height: 2lh; display: flex; align-items: flex-end; justify-content: center; }
+}

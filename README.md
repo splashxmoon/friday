@@ -12,6 +12,8 @@
 <p align="center">
   <a href="#install">Install</a> ·
   <a href="#your-agents-working-as-a-team">Agents as a team</a> ·
+  <a href="#work-more-than-code">Work</a> ·
+  <a href="#crew-ai-teammates-that-keep-going">Crew</a> ·
   <a href="#features">Features</a> ·
   <a href="#automations">Automations</a> ·
   <a href="#privacy">Privacy</a> ·
@@ -78,6 +80,20 @@ An agent you add to a session can work in its own copy of the repository, so thr
 <td width="50%" valign="top"><sub><b>Agents talking.</b> Codex tells Cursor what it renamed before Cursor trips over it; Gemini asks Claude Code whether a discount comes off before or after tax, and goes on with the answer.</sub></td>
 </tr>
 </table>
+
+## Work: more than code
+
+Pick **Work** in the sidebar for everything that isn't software: a week of posts, a thread from a video, a script, a newsletter, a research brief, a deck, a cover image. Claude Code and Codex work on it together in one folder, and the session's rail keeps what they make in view: **Progress**, the **Outputs** (documents open in a reader, pictures and videos play in place), the **Sources** they read, numbered, and the **Connectors** they can use. In the desktop app the agents browse in Friday's own browser panel while you watch, or in your own Chrome with Claude in Chrome.
+
+## Crew: AI teammates that keep going
+
+Pick **Crew** to keep AI teammates on your computer. Each has a name, a role, a memory and a folder of its own, and runs on one of your coding tools. Give the crew a goal and the lead plans it, hands out the parts on a board and tells you what got done; or `@` a teammate to give it a task yourself.
+
+- **Rooms** for a project, with the teammates you pick, and side threads on any message.
+- **Away until a time:** teammates decide for themselves and note what they assumed, and a brief is waiting when you're back. The desktop app keeps your computer awake while there's work in hand, so leave it on power.
+- **Usage limits handled:** a teammate whose tool runs out carries on with its backup tool, and switches back at the reset.
+- **Access you set** per teammate (Read only, Ask before changes, Full access), and Stop all or Pause whenever you like.
+- **Workflows:** a crew's automations drawn as steps, each run posting a board in a room.
 
 ## "So what's the catch?"
 

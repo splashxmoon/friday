@@ -1,6 +1,6 @@
-import { describeCall, doingNow } from "./activity-line.js";
+import { describeCall, doingNow, stoppedLine } from "./activity-line.js";
 import { laneLabel, latestPlan } from "./left-off.js";
-import { limitHit } from "./limit-reset.js";
+import { carriedOn, clockUntil, limitHit, signedOut } from "./limit-reset.js";
 import { limitedLanes } from "./limited.js";
 import { commandFailed, TEST_CMD } from "./receipt.js";
 import { canDriveLane, driverOf, givenName, runOf, type SessionState } from "./session/projection.js";
@@ -183,8 +183,11 @@ export function hubOf(state: SessionState, events: SessionEvent[], meId = ""): {
     if (run === "running") return { ...rest, status: "working", line: doingNow(events, lane)?.text ?? "Working" };
     // Out of usage, its own or its account's (limited.ts), with when it comes back; once that has passed, ready again.
     const out = limited.get(lane);
-    if (out) return { ...rest, status: "limited", line: `Out of usage${out.until ? ` until ${new Date(out.until).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}${out.via ? ` · same account as ${laneLabel(state, out.via)}` : ""}` };
-    if (r?.outcome === "error") return limitHit(r.error) ? { ...rest, status: "ready", line: "Usage back · ready for a task" } : { ...rest, status: "failed", line: clip(r.error || "Stopped on an error", 60) };
+    if (out) return { ...rest, status: "limited", line: `Out of usage${out.until ? ` until ${clockUntil(out.until)}` : ""}${out.via ? ` · same account as ${laneLabel(state, out.via)}` : ""}` };
+    // Not signed in on its computer: said so, not its tool's words; and once another agent here carried its task on, nothing is
+    // stopped (Arun, 2026-10-28: "iron everything and ensure we are good": Progress read a red "Stopped" over work Codex had done).
+    if (r?.outcome === "error" && signedOut(r.error)) return carriedOn(state, lane) ? { ...rest, status: "ready", line: "Not signed in · its work carried on" } : { ...rest, status: "failed", line: "Not signed in on its computer" };
+    if (r?.outcome === "error") return limitHit(r.error) ? { ...rest, status: "ready", line: "Usage back · ready for a task" } : { ...rest, status: "failed", line: clip(stoppedLine(r.error), 60) };
     if (r?.outcome === "done") return { ...rest, status: "done", line: clip(r.answer || "Done", 60) };
     return { ...rest, status: "ready", line: "Ready for a task" };
   });

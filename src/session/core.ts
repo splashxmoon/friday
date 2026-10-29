@@ -6,7 +6,8 @@ import type { AppendGuard, AppendResult, SessionStore } from "./store.js";
 type CrewDef = never;
 import { prBodyFor } from "../pr-body.js";
 import { mentionsIn } from "../mentions.js";
-import { checkpointBefore, runEndAfter } from "../rewind.js";
+import { checkpointBefore, runEndAfter, sharedWorkDuring } from "../rewind.js";
+import { overlaps, platformOf } from "../folder-key.js";
 import { notesPrompt, threadPrompt } from "../threads.js";
 import { CLASS_LABEL, cleanClasses, headlineClass, mayApprove } from "../command-class.js";
 import { feedbackText, fromWriter, unseen, type PrComment } from "../pr-feedback.js";
@@ -47,7 +48,7 @@ export type Command =
   | { type: "resume.cancel"; lane?: string }
   | { type: "pin.remove"; path: string }
   | { type: "run.interrupt"; lane?: string }
-  | { type: "instruction.withdraw"; seq: number; lane?: string }
+  | { type: "instruction.withdraw"; seq: number; lane?: string; toEdit?: unknown }
   /** Let a message from another session through to this lane's agent, or turn it away (peers.ts). */
   | { type: "peer.settle"; id: string; deliver: boolean; lane?: string }
   /** Stop the agents here messaging each other, or let them again (agent-mesh.ts). */
@@ -620,7 +621,19 @@ export class SessionCore {
           else rewoundTo = at;
         }
         // Only what that run changed, when its end was saved: what the person did since, in other files, is left alone.
-        const until = runEndAfter(await this.store.events(sid), lane, cmd.sha);
+        const events = await this.store.events(sid);
+        const until = runEndAfter(events, lane, cmd.sha);
+        // Another agent in the same folder that worked in that time: its pieces would be undone as this run's, so the undo is
+        // refused rather than risk them (Arun, 2026-10-28: "iron everything and ensure we are good… any logic errors").
+        const me = state.engines[lane];
+        const mine = me?.root ?? me?.cwd;
+        const sharers = new Set(
+          Object.entries(state.engines)
+            .filter(([id, e]) => id !== lane && !!mine && !!(e.root ?? e.cwd) && (me!.shared || e.shared) && (e.machine || e.hostId) === (me!.machine || me!.hostId) && overlaps(e.root ?? e.cwd, mine, e.os || me!.os || platformOf(mine)))
+            .map(([id]) => id),
+        );
+        if (sharedWorkDuring(events, lane, cmd.sha, sharers, !!until && rewoundTo === undefined && !whole))
+          return fail("Another agent was working in this folder at the same time, and an undo here would take its work with it too. Undo it by hand, or ask an agent to put back just these changes.");
         const r = await folderAt({ op: "restore", ref: cmd.sha, ...(until && rewoundTo === undefined && !whole ? { until } : {}) });
         const done = parseJson<{ undo?: string; after?: string | null; restored?: number; removed?: number; error?: string }>(r.output);
         if (!done?.undo) return fail(done?.error ?? (r.output || "Couldn't undo that."));
@@ -1092,7 +1105,7 @@ export class SessionCore {
         const target = (await this.store.events(sid)).find((e) => e.seq === seq);
         if (!target || target.body.type !== "instruction") return fail("That isn't a message.");
         if (target.actor.id !== m.id && !owner && laneDriver?.id !== m.id) return deny("take back someone else's message");
-        const r = await append({ type: "instruction.withdrawn", seq });
+        const r = await append({ type: "instruction.withdrawn", seq, ...(cmd.toEdit === true ? { toEdit: true as const } : {}) });
         return r.ok ? ok(r.seq) : fail("Could not take it back.");
       }
 
@@ -1295,6 +1308,7 @@ export class SessionCore {
         if (cmd.role !== "editor" && cmd.role !== "viewer") return fail("Unknown link.");
         const cur = state.links[cmd.role];
         const enabled = typeof cmd.enabled === "boolean" ? cmd.enabled : cur.enabled;
+        if (state.options.team && enabled) return fail("Your crew is yours alone: nobody else joins it, so its links stay off.");
         const version = cmd.rotate ? cur.version + 1 : cur.version;
         if (enabled === cur.enabled && version === cur.version) return fail("Nothing to change.");
         const r = await append({ type: "link.updated", role: cmd.role, enabled, version });

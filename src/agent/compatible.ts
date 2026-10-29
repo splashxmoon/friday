@@ -123,11 +123,29 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 async function errorText(res: Response): Promise<string> {
-  const body = await res.text().catch(() => "");
+  return errorWords(res.status, res.statusText, await res.text().catch(() => ""));
+}
+
+/**
+ * A refusal in the server's own words, short: a JSON error's message, or an HTML error page's title, never the page itself. A
+ * server answering a whole "<!DOCTYPE html>…" page showed it as red text in Your models › Test (Arun, 2026-10-28: "TEST
+ * EVERYTHING… EVERY INTERACTION, EVERY VISUAL"); the model list already left HTML out (runner/own-models.ts).
+ */
+export function errorWords(status: number, statusText: string, body: string): string {
+  const plain = (t: string) => t.replace(/\s+/g, " ").trim().slice(0, 300);
+  const fallback = `${status}${statusText ? ` ${statusText}` : ""}`;
   try {
-    const j = JSON.parse(body);
-    return j.error?.message ?? body;
+    const j = JSON.parse(body) as { error?: { message?: unknown } | string; message?: unknown; detail?: unknown };
+    const said = typeof j.error === "object" && j.error ? j.error.message : (j.error ?? j.message ?? j.detail);
+    return said ? plain(String(said)) : plain(body) || fallback;
   } catch {
-    return body || res.statusText;
+    if (/^\s*</.test(body)) {
+      const title = /<title[^>]*>([^<]*)<\/title>/i.exec(body)?.[1] ?? /<h1[^>]*>([^<]*)<\/h1>/i.exec(body)?.[1] ?? "";
+      const t = plain(title.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#39;|&apos;/g, "'").replace(/&quot;/g, '"'));
+      // A page titled only "Error response" says no more than its status does.
+      if (!t || /^(an? )?error( response| occurred)?$/i.test(t)) return fallback;
+      return t.startsWith(String(status)) ? t : `${fallback}: ${t}`;
+    }
+    return plain(body) || fallback;
   }
 }

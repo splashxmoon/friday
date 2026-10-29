@@ -279,7 +279,8 @@ test("the kept snapshot index is in the person's own home, not the shared temp f
     run("commit", "-qm", "init");
     const w = await addWorktree(r, "lane");
     assert.ok(await checkpoint(w.path, "x"));
-    assert.equal((await kept()).length, 1, "kept under the home folder");
+    // The index, and the list of what it left out beside it (CHECKPOINT_LIMITS).
+    assert.deepEqual((await kept()).map((f) => f.replace(/^[0-9a-f]+/, "")).sort(), ["", ".exclude"], "kept under the home folder");
     assert.ok(await dropWorktree(w.path));
     assert.deepEqual(await kept(), [], "and gone with the worktree");
   } finally {

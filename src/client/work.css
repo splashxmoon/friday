@@ -1,0 +1,749 @@
+/* Work sessions (WorkMode.tsx, WorkPanels.tsx): the open-source edition only.
+   Redesigned 2026-10-29 into "a quiet room with living faces" (Arun, 2026-10-29: "so clean and beautiful really with a clear
+   direction in design language"; DIRECTION.md §9.7, §9.8): one flat ground, hairlines between the rail's parts rather than boxes
+   round them, state on the agents' marks, colour only for state. An output opens as a typeset canvas: its headings set in a serif,
+   which lives inside a document only. */
+:root { --font-doc: "Newsreader", "Iowan Old Style", "Charter", Georgia, serif; }
+
+/* Code or Work, in the sidebar. */
+.work-seg { display: inline-flex; padding: 2px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--card); }
+.work-seg button { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 12px; border: 0; border-radius: 999px; background: transparent; color: var(--text-muted); font: inherit; font-size: 13px; cursor: pointer; }
+.work-seg button:hover { color: var(--ink); }
+.work-seg button.on { background: var(--muted); color: var(--ink); font-weight: 550; }
+
+/* The panels. */
+.work-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; flex: 1; padding: 32px 24px; text-align: center; color: var(--text-muted); font-size: 13px; }
+.work-empty b { color: var(--ink); font-weight: 500; font-size: 14px; }
+.work-empty span { max-width: 300px; line-height: 1.5; }
+
+/* A sheet's find field (WorkPanels.tsx Sheet): an input, 8px, its hairline firming on focus. */
+.docs-find { display: flex; align-items: center; gap: 7px; flex: 1; min-width: 0; height: 30px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: transparent; color: var(--text-muted); transition: border-color var(--t-hover) var(--ease-out); }
+.docs-find:focus-within { border-color: var(--border-focus); color: var(--ink-2); }
+.docs-find input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: 13px; }
+.docs-find input::placeholder { color: var(--text-muted); }
+.docs-none { padding: 24px 8px; color: var(--text-muted); font-size: 13px; text-align: center; }
+
+
+
+
+.work-doc { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+/* The reader's head: back, what it is, and its few actions, over one hairline. */
+.work-doc-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.work-doc-title { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.work-doc-title b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-weight: 500; font-size: 13px; line-height: 18px; }
+.work-doc-title span { color: var(--text-muted); font-size: 12px; line-height: 16px; font-variant-numeric: tabular-nums; }
+.work-doc-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.work-doc-text { margin: 0; white-space: pre-wrap; font: 400 15px/1.75 var(--font); color: var(--ink-2); }
+
+/* A piece, set as a document to read (DIRECTION.md §9.8, Dia's typeset page): a column of reading width on the reader's own
+   ground, its title and section heads in a serif (Newsreader, inside a document only), the first paragraph set a step larger in
+   the darkest ink, the rest in the second; quiet furniture: hairline rules, tables as type, not boxes. */
+.work-prose { max-width: 680px; margin: 0 auto; padding: 44px 40px 96px; color: var(--ink-2); font-size: 15px; line-height: 1.75; overflow-wrap: anywhere; font-variant-numeric: proportional-nums; }
+.work-prose ::selection { background: color-mix(in srgb, var(--live) 28%, transparent); }
+.work-prose.wide { max-width: none; }
+.work-prose > div > :first-child, .work-prose > :first-child { margin-top: 0 !important; }
+.work-prose h1, .work-prose-title { margin: 0 0 20px !important; color: var(--ink); font-family: var(--font-doc) !important; font-size: 40px !important; line-height: 1.1; font-weight: 500 !important; letter-spacing: -0.015em; text-wrap: balance; font-optical-sizing: auto; }
+/* The lede: the first paragraph under the title, a step larger, in the darkest ink. */
+.work-prose :is(h1, .work-prose-title) + p, .work-prose-title + div > p:first-child { color: var(--ink); font-size: 17px; line-height: 1.6; }
+.work-prose h2 { margin: 48px 0 14px !important; padding-top: 28px; border-top: 1px solid var(--border); color: var(--ink); font-family: var(--font-doc) !important; font-size: 26px !important; line-height: 1.25; font-weight: 500 !important; letter-spacing: -0.01em; text-wrap: balance; }
+.work-prose h1 + h2, .work-prose-title + div > h2:first-child { margin-top: 8px !important; padding-top: 0; border-top: 0; }
+.work-prose h3 { margin: 32px 0 8px !important; color: var(--ink); font-size: 16px !important; line-height: 1.4; font-weight: 600 !important; letter-spacing: -0.01em; }
+.work-prose h4, .work-prose h5, .work-prose h6 { margin: 24px 0 6px !important; color: var(--ink-2); font-size: 13px !important; font-weight: 600 !important; text-transform: none; letter-spacing: 0; }
+.work-prose p { margin: 0 0 16px !important; }
+.work-prose strong { color: var(--ink); font-weight: 600; }
+.work-prose ul, .work-prose ol { margin: 0 0 16px !important; padding-left: 22px !important; }
+.work-prose ul { list-style: disc; }
+.work-prose ol { list-style: decimal; }
+.work-prose li { margin: 3px 0 !important; padding: 0 0 0 4px !important; }
+.work-prose li::marker { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.work-prose li > ul, .work-prose li > ol { margin: 4px 0 0 !important; }
+.work-prose a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--border-hover); text-underline-offset: 3px; text-decoration-thickness: 1px; cursor: pointer; transition: text-decoration-color var(--t-hover) var(--ease-out); }
+.work-prose a:hover { color: var(--ink); text-decoration-color: currentColor; }
+.work-prose a.local { display: inline-flex; align-items: baseline; gap: 4px; text-decoration: none; padding: 0 6px 1px 5px; border-radius: var(--r-sm); background: var(--hover); font-size: .93em; }
+.work-prose a.local svg { align-self: center; color: var(--text-muted); }
+.work-prose a.local:hover { background: var(--hover-strong); color: var(--ink); }
+.work-prose :not(pre) > code { padding: 1px 5px; border-radius: var(--r-sm); background: var(--hover); color: var(--ink); font: .86em var(--mono); }
+.work-prose pre { margin: 0 0 18px; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--card); overflow-x: auto; font: 12.5px/1.6 var(--mono); }
+.work-prose blockquote { margin: 4px 0 20px !important; padding: 2px 0 2px 20px !important; border-left: 1px solid var(--border-strong) !important; color: var(--ink-2); font-family: var(--font-doc); font-size: 18px; line-height: 1.55; font-style: italic !important; }
+.work-prose hr { margin: 40px 0 !important; border: 0; border-top: 1px solid var(--border); }
+.work-prose img { display: block; max-width: 100%; height: auto; margin: 8px 0 20px; border-radius: var(--r-md); box-shadow: 0 0 0 1px var(--border); }
+/* Tables as type: a firmer rule under the head, a hairline under each row, no box, numbers in tabular figures. Wider than the
+   column, they scroll sideways, the cut edge shaded (as .scroll-x-cue does), and each column keeps its words whole. */
+.work-prose table { width: 100%; border-collapse: collapse; font-size: 14px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+.work-prose th { padding: 8px 20px 8px 0; border-bottom: 1px solid var(--border-strong); background: transparent; color: var(--text-muted); font-size: 12px; font-weight: 500; line-height: 16px; text-align: left; white-space: nowrap; }
+.work-prose td { padding: 10px 20px 10px 0; border-bottom: 1px solid var(--border); color: var(--ink-2); vertical-align: top; }
+.work-prose :is(th, td):last-child { padding-right: 0; }
+.work-prose [data-streamdown="table-wrapper"] { margin: 8px 0 24px !important; padding: 0 !important; gap: 0 !important; border: 0 !important; background: transparent !important; }
+.work-prose [data-streamdown="table-wrapper"] > div { border: 0 !important; border-radius: 0 !important; overflow-x: auto;
+  --cue-bg: var(--bg);
+  background: linear-gradient(90deg, var(--cue-bg) 30%, transparent) left center / 40px 100% no-repeat local, linear-gradient(270deg, var(--cue-bg) 30%, transparent) right center / 40px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, color-mix(in srgb, var(--ink) 18%, transparent), transparent) left center / 12px 100% no-repeat scroll, radial-gradient(farthest-side at 100% 50%, color-mix(in srgb, var(--ink) 18%, transparent), transparent) right center / 12px 100% no-repeat scroll !important; }
+/* A table in a piece is read whole, as the page around it scrolls: no box of its own capped at 300px (QA, 2026-10-28: rows 2–3 hid
+   in a nested scroller). Sideways it still scrolls when wider than the column. A name in Chinese or Japanese keeps together. */
+.work-prose [data-streamdown="table-wrapper"] > div { max-height: none !important; overflow-y: hidden !important; }
+.work-prose td, .work-prose th { word-break: keep-all; }
+.work-prose :is(th, td)[align="center"], .work-prose :is(th, td)[style*="center"] { text-align: center !important; }
+.work-prose :is(th, td)[align="right"], .work-prose :is(th, td)[style*="right"] { text-align: right !important; }
+.work-prose [data-streamdown="table-wrapper"] tr:last-child td { border-bottom: 0; }
+/* Streamdown lays its blocks out with a gap of its own; the prose spacing above is the one that counts. */
+.work-prose > div { display: block !important; }
+.work-prose > div > * + * { margin-top: 0; }
+.bench-body[data-size="xs"] .work-prose, .bench-body[data-size="sm"] .work-prose { padding: 24px 20px 56px; font-size: 15px; }
+/* A phone's width: the canvas nearer its edges, its serif a step smaller. */
+@media (max-width: 720px) {
+  .work-prose { padding: 28px 20px 64px; }
+  .work-prose h1, .work-prose-title { font-size: 32px !important; }
+  .work-prose h2 { margin-top: 36px !important; padding-top: 24px; font-size: 22px !important; }
+  .wr .wr-hubpage { padding: 24px 20px 56px; }
+  .wr .wr-hubhero h1 { font-size: 32px; }
+}
+.work-doc-frame { flex: 1; width: 100%; border: 0; background: #fff; }
+
+/* A collection's sounds, a row each; a numbered run of pictures, one card with its count. */
+.work-tile-count { position: absolute; right: 8px; bottom: 8px; padding: 2px 8px; border-radius: 999px; background: rgb(0 0 0 / .62); color: #fff; font-size: 12px; font-weight: 600; backdrop-filter: blur(4px); }
+.media-sounds { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.media-sounds li { display: grid; grid-template-columns: 16px minmax(0, 1fr) minmax(160px, 260px); align-items: center; gap: 10px; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--r-md); background: transparent; color: var(--ink-2); font-size: 13px; }
+.media-sounds li > svg { color: var(--text-muted); }
+.media-sounds li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.media-sounds audio { width: 100%; height: 30px; }
+.bench-body[data-size="xs"] .media-sounds li { grid-template-columns: 16px minmax(0, 1fr); }
+.bench-body[data-size="xs"] .media-sounds audio { grid-column: 1 / -1; }
+
+/* The picture viewer: a set's pictures, or a folder's, one at a time over everything, on the app's own ground in either theme
+   (it was a black sheet in the light theme too), with a hairline round the picture and quiet round controls. */
+.gallery { position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; background: var(--bg); color: var(--ink); animation: gallery-in var(--t-open) var(--ease-out); }
+@keyframes gallery-in { from { opacity: 0; } }
+.gallery-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 52px; padding: 0 12px 0 20px; }
+.gallery-head b { color: var(--ink); font-weight: 500; font-size: 13px; line-height: 18px; }
+.gallery-head em { margin-left: 10px; color: var(--text-muted); font-style: normal; font-size: 12px; font-variant-numeric: tabular-nums; }
+.gallery-head .icon-btn { color: var(--ink-2); }
+.gallery-stage { position: relative; flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 0 64px; }
+.gallery-stage img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: var(--r-md); box-shadow: 0 0 0 1px var(--border); }
+.gallery-nav { position: absolute; top: 50%; transform: translateY(-50%); display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid var(--border-strong); border-radius: 50%; background: var(--card); color: var(--ink); cursor: pointer; transition: background-color var(--t-hover) var(--ease-out); }
+.gallery-nav:hover:not(:disabled) { background: var(--hover); }
+.gallery-nav:disabled { opacity: .35; cursor: default; }
+.gallery-nav.prev { left: 14px; }
+.gallery-nav.next { right: 14px; }
+.gallery-strip { display: flex; gap: 6px; padding: 12px 16px 16px; overflow-x: auto; justify-content: safe center; }
+.gallery-strip button { flex: none; width: 56px; height: 42px; padding: 0; border: 0; border-radius: var(--r-sm); overflow: hidden; background: var(--hover); cursor: pointer; opacity: .55; transition: opacity var(--t-hover) var(--ease-out); }
+.gallery-strip button:hover { opacity: .85; }
+.gallery-strip button.on { opacity: 1; box-shadow: 0 0 0 2px var(--bg), 0 0 0 3.5px var(--ink); }
+.gallery-strip img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+
+/* The side panel's tabs share the header rather than scroll out of it: each shrinks to its icon and a cut name, the one showing kept whole. */
+.bench-tabrow { overflow-x: hidden; }
+.bench-tab { flex: 0 1 auto; min-width: 34px; }
+.bench-tab.on { flex: none; }
+.bench-tab-btn { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.bench-tab-btn svg { flex: none; }
+
+/* The sidebar's Code or Work, under search: the whole width, the side showing raised. */
+/* Code, Work, Crew: a plain three-item segmented control (2026-10-29 direction §9.2): a hairline round it, nothing filled but the
+   one you're in. */
+.work-seg.sb-work { display: flex; width: 100%; padding: 2px; border: 1px solid var(--border); border-radius: var(--r-md); background: transparent; }
+.work-seg.sb-work button { flex: 1; justify-content: center; height: 28px; border-radius: 6px; font-size: 13px; font-weight: 500; transition: background-color var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out); }
+.work-seg.sb-work button.on { background: var(--hover-strong); color: var(--ink); box-shadow: none; }
+
+/* A picture or video an agent names in the chat, shown under its name. */
+.chat-media { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 6px; max-width: 100%; vertical-align: top; }
+.chat-media-view { display: block; max-width: min(100%, 520px); }
+.chat-media-view video { display: block; max-width: 100%; max-height: 420px; border-radius: var(--r-lg); box-shadow: 0 0 0 1px var(--border); background: #000; }
+.chat-media-view .live-img { max-height: 420px; border-radius: var(--r-lg); box-shadow: 0 0 0 1px var(--border); }
+.chat-media-gone { display: inline-block; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--r-md); color: var(--text-muted); font-size: 12px; }
+
+/* ── The rail beside a Work session's chat (WorkRail.tsx): Progress, Outputs, Collections, Sources, Connectors, on the chat's own
+   ground, told apart by a hairline and space rather than a box each (DIRECTION.md §9.8). ── */
+.wr {
+  flex: none; display: flex; flex-direction: column; width: 336px; min-height: 0; border-left: 1px solid var(--border); background: var(--bg); }
+.wr.wide { width: clamp(440px, 52%, 900px); background: var(--bg); }
+.wr-shut { width: 48px; align-items: center; gap: 4px; padding: 0 0 10px; }
+.wr-shut .wr-head { box-sizing: border-box; justify-content: center; width: 100%; padding: 0; margin-bottom: 6px; border-bottom: 1px solid var(--border); }
+.wr-icon { position: relative; display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: var(--r-md); background: transparent; color: var(--text-muted); cursor: pointer; transition: background-color var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out); }
+.wr-icon:hover { background: var(--hover); color: var(--ink); }
+.wr-shut .wr-icon { width: 34px; height: 34px; }
+.wr-head { flex: none; display: flex; align-items: center; gap: 2px; height: 44px; padding: 0 10px 0 16px; border-bottom: 1px solid transparent; }
+.wr-head b { flex: 1; color: var(--ink); font-size: 13px; font-weight: 600; }
+.wr-scroll { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; padding: 0 16px 24px; }
+
+/* A part: its head (title, how many, a chevron) and its rows, a hairline above the next. No card round it, no fill. */
+.wr-part { flex: none; }
+.wr-part + .wr-part { border-top: 1px solid var(--border); }
+.wr-part-head { display: flex; align-items: center; gap: 8px; width: calc(100% + 16px); min-height: 44px; margin: 0 -8px; padding: 12px 8px; box-sizing: border-box; border: 0; border-radius: var(--r-md); background: transparent; color: var(--ink); font: 600 13px/18px var(--font); cursor: pointer; text-align: left; transition: background-color var(--t-hover) var(--ease-out); }
+.wr-part-head > svg { flex: none; color: var(--text-muted); transition: transform var(--t-open) var(--ease-out), color var(--t-hover) var(--ease-out); }
+.wr-part-head:hover > svg { color: var(--ink); }
+.wr-part.shut .wr-part-head > svg { transform: rotate(-90deg); }
+.wr-part-title { flex: 1; min-width: 0; }
+
+.wr-part-head:hover { background: var(--hover); }
+.wr-part-body { padding: 0 0 16px; }
+.wr-count { color: var(--text-muted); font-weight: 500; font-variant-numeric: tabular-nums; }
+.wr-quiet { margin: 0; color: var(--text-muted); font-size: 13px; line-height: 1.5; }
+.wr-sub { margin: 16px 0 4px; color: var(--text-muted); font-size: 12px; font-weight: 500; line-height: 16px; letter-spacing: 0; text-transform: none; }
+.wr-more, .wr-all { display: inline-flex; align-items: center; gap: 5px; margin-top: 4px; padding: 4px 8px; border: 0; border-radius: var(--r-md); background: transparent; color: var(--ink-2); font: 500 12px/16px var(--font); cursor: pointer; transition: background-color var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out); }
+.wr-more:hover, .wr-all:hover { background: var(--hover); color: var(--ink); }
+.wr-all { align-self: flex-start; margin-left: -8px; }
+.wr-chip { flex: none; height: 26px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 999px; background: transparent; color: var(--ink-2); font: 500 12px/1 var(--font); cursor: pointer; transition: background-color var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out); }
+.wr-chip:hover { background: var(--hover); color: var(--ink); }
+
+/* Each agent's row: its mark wearing how it stands (presence.tsx: a turning ring while it works, amber with "?" while it waits on
+   you), its name and state word in the row's own ink, elapsed time, and its one live line. */
+.wr-agents { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.wr-agent { display: grid; grid-template-columns: 24px minmax(0, 1fr); align-items: start; gap: 12px; padding: 6px 0; }
+.wr-agent .wr-agent-mark { --pr-ground: var(--bg); margin-top: 1px; }
+.wr-agent-disc { display: grid; place-items: center; width: 100%; height: 100%; border-radius: 50%; background: var(--hover-strong); color: var(--ink-2); }
+.wr-agent-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wr-agent-top { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
+.wr-agent-top b { color: var(--ink); font-size: 13px; font-weight: 500; line-height: 18px; white-space: nowrap; }
+.wr-agent-top em { color: var(--text-muted); font-size: 12px; font-style: normal; font-variant-numeric: tabular-nums; }
+.wr-agent-clock { margin-left: auto; color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.wr-agent-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-size: 12px; line-height: 16px; }
+
+/* The latest plan, as steps to tick off, a hairline down through them: done is a check in --ready, the step under way a small
+   turning --live ring (still for less motion), the rest an open dashed circle with its number. */
+.wr-plan { margin-top: 10px; padding-top: 14px; border-top: 1px solid var(--border); }
+.wr-plan-by { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; color: var(--text-muted); font-size: 12px; line-height: 16px; }
+.wr-plan-by b { margin-left: auto; color: var(--ink-2); font-weight: 500; font-variant-numeric: tabular-nums; }
+.wr-plan ol { list-style: none; margin: 0; padding: 0; }
+.wr-plan li { position: relative; display: grid; grid-template-columns: 18px minmax(0, 1fr); column-gap: 10px; padding-bottom: 12px; color: var(--ink-2); font-size: 13px; line-height: 18px; }
+.wr-plan li:last-child { padding-bottom: 0; }
+.wr-plan li::before { content: ""; position: absolute; left: 8.5px; top: 21px; bottom: 3px; width: 1px; background: var(--border-strong); }
+.wr-plan li:last-child::before { display: none; }
+.wr-step { box-sizing: border-box; display: grid; place-items: center; width: 18px; height: 18px; border: 1.5px dashed color-mix(in srgb, var(--text-muted) 75%, transparent); border-radius: 50%; background: transparent; color: var(--text-muted); font: 500 9.5px/1 var(--font); font-variant-numeric: tabular-nums; }
+.wr-plan li.st-completed { color: var(--text-muted); }
+.wr-plan li.st-completed .wr-step { border: 0; color: var(--green); }
+.wr-plan li.st-active { color: var(--ink); font-weight: 500; }
+.wr-plan li.st-active .wr-step { border: 0; }
+.wr-plan li.st-active .wr-step > i { width: 14px; height: 14px; border-radius: 50%; background: conic-gradient(var(--live) 0 70%, transparent 70% 100%); -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 1.5px), #000 calc(100% - 1.5px)); mask: radial-gradient(farthest-side, transparent calc(100% - 1.5px), #000 calc(100% - 1.5px)); animation: pr-turn 2.4s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .wr-plan li.st-active .wr-step > i { animation: none; background: var(--live); } }
+html.reduce-motion .wr-plan li.st-active .wr-step > i { animation: none; background: var(--live); }
+.wr-plan li.st-cancelled { color: var(--text-muted); text-decoration: line-through; text-decoration-color: var(--border-strong); }
+
+/* Outputs: the newest pieces as rows, each with its picture or a monochrome mark for its kind; collections as rows with a cover. */
+.wr-outputs { display: flex; flex-direction: column; gap: 2px; }
+.wr-outputs > .wr-sub { margin-top: 6px; margin-bottom: 0; }
+.wr-hub { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 12px; align-items: start; width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--card); color: inherit; font: inherit; text-align: left; cursor: pointer; transition: border-color var(--t-hover) var(--ease-out), background-color var(--t-hover) var(--ease-out); }
+.wr-hub:hover { border-color: var(--border-strong); }
+.wr-hub-cover { position: relative; display: grid; gap: 2px; width: 56px; height: 56px; border-radius: var(--r-md); overflow: hidden; background: var(--hover); }
+.wr-hub-cover img { width: 100%; height: 100%; object-fit: cover; display: block; min-height: 0; }
+.wr-hub-cover.n2 { grid-template-columns: 1fr 1fr; }
+.wr-hub-cover.n3 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.wr-hub-cover.n3 img:first-child { grid-row: span 2; }
+.wr-hub-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.wr-hub-text > b { color: var(--ink); font-size: 13px; font-weight: 500; line-height: 18px; }
+.wr-hub-about { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--ink-2); font-size: 12px; line-height: 16px; }
+.wr-hub-meta { color: var(--text-muted); font-size: 12px; line-height: 16px; font-variant-numeric: tabular-nums; }
+.wr-hub.big { grid-template-columns: 1fr; gap: 0; padding: 0; overflow: hidden; }
+.wr-hub.big .wr-hub-cover { width: 100%; height: 132px; border-radius: 0; border-bottom: 1px solid var(--border); }
+.wr-hub.big .wr-hub-text { padding: 12px 14px 14px; }
+.wr-hub.big .wr-hub-text > b { font-size: 14px; }
+
+.wr-files { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.wr-file { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 12px; width: calc(100% + 16px); margin: 0 -8px; padding: 6px 8px; border: 0; border-radius: var(--r-md); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out); }
+.wr-file:hover { background: var(--hover); }
+.wr-file-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wr-file-main b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-size: 13px; font-weight: 500; line-height: 18px; }
+.wr-file-main span { color: var(--text-muted); font-size: 12px; line-height: 16px; font-variant-numeric: tabular-nums; }
+.wr-thumb { position: relative; display: grid; place-items: center; width: 32px; height: 32px; border-radius: var(--r-md); overflow: hidden; background: var(--hover-strong); color: var(--ink-2); object-fit: cover; }
+.wr-thumb.pic { background: var(--hover); color: #fff; box-shadow: inset 0 0 0 1px var(--border); }
+.wr-thumb.pic video { width: 100%; height: 100%; object-fit: cover; }
+.wr-thumb.pic > svg { position: absolute; }
+
+/* Sources, each numbered, by its site's own icon. */
+.wr-sources { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.wr-source { display: grid; grid-template-columns: 24px minmax(0, 1fr); align-items: center; gap: 10px; width: calc(100% + 16px); margin: 0 -8px; padding: 6px 8px; border: 0; border-radius: var(--r-md); background: transparent; color: inherit; font: inherit; text-align: left; transition: background-color var(--t-hover) var(--ease-out); }
+button.wr-source { cursor: pointer; }
+button.wr-source:hover { background: var(--hover); }
+.wr-source-ico { display: grid; place-items: center; width: 24px; height: 24px; border-radius: var(--r-sm); background: var(--hover-strong); color: var(--ink-2); font: 600 12px/1 var(--font); }
+.wr-source-ico { position: relative; overflow: visible; }
+.wr-source-ico img { width: 16px; height: 16px; border-radius: 3px; object-fit: contain; }
+.wr-source-ico.search i { position: absolute; right: -3px; bottom: -3px; display: grid; place-items: center; width: 13px; height: 13px; border: 1.5px solid var(--bg); border-radius: 50%; background: var(--ink); color: var(--bg); }
+.wr-source-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wr-source-main b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-size: 13px; font-weight: 500; line-height: 18px; }
+.wr-source-main span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 12px; line-height: 16px; }
+
+/* Connectors: what the agents can reach, a row each with on or off in words; no rules between rows, the space says it. */
+.wr-conn ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.wr-conn li { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 7px 0; }
+.wr-conn-ico { display: grid; place-items: center; width: 24px; height: 24px; border-radius: var(--r-sm); background: var(--hover-strong); color: var(--ink-2); }
+.wr-conn-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wr-conn-main b { color: var(--ink); font-size: 13px; font-weight: 500; line-height: 18px; }
+.wr-conn-main span { color: var(--text-muted); font-size: 12px; line-height: 16px; }
+.wr-on { width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: var(--ink-4); }
+.wr-conn li.on .wr-on { background: var(--green); }
+
+/* The reader: a piece, a page working, a video, a hub's home, or every output. */
+.wr.wide .work-doc { flex: 1; min-height: 0; }
+.wr.wide .work-doc-head { height: 44px; padding: 0 10px 0 8px; }
+.work-page-frame { flex: 1; width: 100%; min-height: 0; border: 0; background: #fff; }
+/* Its one row and column are the player's own size, so a video's max-height has something to be 100% of: a portrait video ran
+   past the player, under the status bar, its controls off the screen (2026-10-27 audit). */
+.wr-player { flex: 1; min-height: 0; display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); place-items: center; padding: 24px; background: var(--bg); }
+.wr-player video { max-width: 100%; max-height: 100%; min-height: 0; object-fit: contain; border-radius: var(--r-lg); background: #000; box-shadow: 0 0 0 1px var(--border); }
+.wr-player audio { width: min(520px, 100%); }
+
+/* A collection's page: its cover pictures, its name in the document serif, what it is, then its writing as a list and its sheets
+   and media as cards. */
+.wr-hubpage { max-width: 760px; margin: 0 auto; padding: 32px 32px 72px; }
+.wr-hubhero { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding-bottom: 28px; border-bottom: 1px solid var(--border); }
+.wr-hubhero-pics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; width: 100%; height: 160px; margin-bottom: 12px; border-radius: var(--r-lg); overflow: hidden; }
+.wr-hubhero-pics.n1 { grid-template-columns: 1fr; } .wr-hubhero-pics.n2 { grid-template-columns: 1fr 1fr; } .wr-hubhero-pics.n3 { grid-template-columns: 2fr 1fr 1fr; }
+.wr-hubhero-pics img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.wr-hubhero h1 { margin: 0; color: var(--ink); font-family: var(--font-doc); font-size: 40px; line-height: 1.1; font-weight: 500; letter-spacing: -0.015em; text-wrap: balance; }
+.wr-hubhero p { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; margin: 0; max-width: 640px; color: var(--ink-2); font-size: 15px; line-height: 1.65; }
+.wr-hubhero-meta { color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.wr-hubhero .btn { margin-top: 4px; }
+.wr-hubsec { margin-top: 32px; }
+.wr-hubsec h4 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 8px; color: var(--ink); font-size: 16px; line-height: 22px; font-weight: 600; letter-spacing: -0.01em; }
+.wr-hubsec h4 em { color: var(--text-muted); font-style: normal; font-weight: 400; font-size: 13px; font-variant-numeric: tabular-nums; }
+.wr-hubmedia + .wr-hubmedia { margin-top: 14px; }
+.wr-hubmedia-dir { display: inline-flex; align-items: center; gap: 5px; margin-bottom: 8px; color: var(--text-muted); font-size: 12px; }
+
+/* Every output, as a gallery: a find field, its kinds as filter pills (the one picked filled, never the white primary), cards. */
+.wa-bar { flex: none; display: flex; flex-direction: column; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.wa-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.wa-chips button { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--ink-2); font: 500 12px/1 var(--font); cursor: pointer; transition: background-color var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out), border-color var(--t-hover) var(--ease-out); }
+.wa-chips button em { color: var(--text-muted); font-style: normal; font-variant-numeric: tabular-nums; }
+.wa-chips button:hover { background: var(--hover); color: var(--ink); }
+.wa-chips button.on { border-color: transparent; background: var(--hover-strong); color: var(--ink); }
+.wa-chips button.on em { color: var(--text-muted); }
+.wa-scroll { padding: 16px; }
+.wa-hubs { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin-bottom: 18px; }
+.wa-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 12px; align-items: start; }
+
+/* An output as a card (a work product): its preview drawn for what it is, monochrome; a piece of writing's title in the serif. */
+.wa-card { display: flex; flex-direction: column; min-width: 0; padding: 0; border: 1px solid var(--border); border-radius: var(--r-lg); overflow: hidden; background: var(--card); color: inherit; font: inherit; text-align: left; cursor: pointer; transition: border-color var(--t-hover) var(--ease-out); }
+.wa-card:hover { border-color: var(--border-strong); }
+.wa-pic { position: relative; display: block; width: 100%; height: 0; padding-top: 72%; overflow: hidden; background: var(--hover); }
+.wa-pic > img, .wa-pic > video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.wa-pic.drawn { background: var(--hover); }
+.wa-pic.mosaic > img { position: absolute; width: calc(50% - 1px); height: calc(50% - 1px); inset: auto; object-fit: cover; }
+.wa-pic.mosaic > img:nth-of-type(1) { top: 0; left: 0; } .wa-pic.mosaic > img:nth-of-type(2) { top: 0; right: 0; } .wa-pic.mosaic > img:nth-of-type(3) { bottom: 0; left: 0; } .wa-pic.mosaic > img:nth-of-type(4) { bottom: 0; right: 0; }
+.wa-play { position: absolute; left: 50%; top: 50%; display: grid; place-items: center; width: 36px; height: 36px; margin: -18px 0 0 -18px; border-radius: 50%; background: rgb(0 0 0 / .55); color: #fff; backdrop-filter: blur(4px); }
+.wa-paper, .wa-page, .wa-sheet, .wa-wave { position: absolute; inset: 14px 14px 0; display: flex; flex-direction: column; gap: 6px; padding: 14px 14px 0; border: 1px solid var(--border-strong); border-bottom: 0; border-radius: var(--r-md) var(--r-md) 0 0; background: var(--bg); overflow: hidden; }
+.wa-paper b, .wa-page b { color: var(--ink); font-size: 12px; font-weight: 600; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.wa-paper b { flex: none; font-family: var(--font-doc); font-size: 16px; font-weight: 500; line-height: 1.15; letter-spacing: -0.01em; -webkit-line-clamp: 3; }
+.wa-paper span, .wa-page span { color: var(--text-muted); font-size: 9.5px; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }
+.wa-page { padding-top: 0; }
+.wa-page-bar { display: flex; gap: 4px; margin: 0 -12px 4px; padding: 7px 9px; border-bottom: 1px solid var(--border); }
+.wa-page-bar i { width: 6px; height: 6px; border-radius: 50%; background: var(--border-strong); }
+.wa-sheet { gap: 0; padding: 0; }
+.wa-sheet-row { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; border-bottom: 1px solid var(--border); }
+.wa-sheet-row i { height: 18px; padding: 0 6px; border-right: 1px solid var(--border); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--ink-2); font: 600 9px/18px var(--font); font-style: normal; }
+.wa-sheet-row.head i { background: var(--hover-strong); color: var(--ink); }
+.wa-wave { flex-direction: row; align-items: center; gap: 3px; padding: 12px; border-radius: var(--r-md); inset: 14px; border-bottom: 1px solid var(--border-strong); }
+.wa-wave i { flex: 1; border-radius: 2px; background: color-mix(in srgb, var(--ink) 30%, transparent); }
+.wa-foot { display: flex; flex-direction: column; gap: 4px; padding: 9px 11px 11px; border-top: 1px solid var(--border); min-width: 0; }
+.wa-foot b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-size: 13px; font-weight: 500; line-height: 18px; }
+.wa-foot em { display: flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; color: var(--text-muted); font-size: 12px; font-style: normal; font-variant-numeric: tabular-nums; }
+.wa-kind { flex: none; color: var(--ink-2); font-weight: 500; font-size: 12px; }
+
+/* ── A Work session's bar along the foot (WorkBar): what they're doing, who, what they made and read, the folder. ── */
+.wb-item { display: inline-flex; align-items: center; gap: 6px; height: 26px; min-width: 0; padding: 0 8px; border: 0; border-radius: var(--r-md); background: transparent; color: var(--text-muted); font: 500 12px/1 var(--font); white-space: nowrap; cursor: pointer; transition: color .15s ease, background-color .15s ease; }
+.wb-item:hover { color: var(--ink); background: var(--hover); }
+.wb-item em { font-style: normal; opacity: .75; }
+.wb-quiet { color: var(--faint); }
+.wb-team { gap: 8px; margin-left: -2px; color: var(--ink-2); }
+.wb-marks { display: inline-flex; gap: 6px; }
+.work-bar .wb-mark { --pr-ground: var(--bg); }
+.wb-mark-disc { display: grid; place-items: center; width: 100%; height: 100%; border-radius: 50%; background: var(--hover-strong); color: var(--ink-2); }
+.wb-names { overflow: hidden; text-overflow: ellipsis; }
+.wb-folder { max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+.wb-rail { width: 28px; padding: 0; justify-content: center; }
+.wb-rail.on { color: var(--ink); }
+@container (max-width: 560px) { .work-bar .wb-names, .work-bar .wb-folder { display: none; } }
+
+/* A Work session's header keeps no settings or side panel button (Arun, 2026-10-26: "get rid of the settings buttons and the side
+   chat button at the header"): the rail is its side, the Browser opens from it, and the settings were Friday's own agent's. */
+html.work-session :is(#band-slot, .topbar) :is(.side-panel-btn, [aria-label="Session settings"]) { display: none; }
+
+/* On a Mac the rail runs up to the top of the window, as the docked side panel does (style.css, .bench-docked): its head on the
+   line of the window's lights and the header, the line under it on the page's top edge; the header's buttons end before it. */
+html.desktop-mac[data-band="session"].rail-docked .main { overflow: visible; }
+html.desktop-mac[data-band="session"].rail-docked .sv-body > .wr { position: relative; z-index: 6; margin-top: -41px; border-top-left-radius: 12px; }
+html.desktop-mac[data-band="session"].rail-docked .sv-body > .wr :is(.wr-head, .work-doc-head) { box-sizing: border-box; height: 41px; min-height: 41px; padding-top: 4px; border-bottom: 1px solid var(--border); -webkit-app-region: drag; }
+html.desktop-mac[data-band="session"].rail-docked .sv-body > .wr :is(.wr-head, .work-doc-head) :is(button, a) { -webkit-app-region: no-drag; }
+/* The resize grip runs 4px into the head, which comes after it and so drags over it there: that strip is the grip's (Arun,
+   2026-10-28: "TEST EVERYTHING… EVERY INTERACTION"). */
+html.desktop-mac[data-band="session"].rail-docked .sv-body > .wr :is(.wr-head, .work-doc-head) { position: relative; }
+html.desktop-mac[data-band="session"].rail-docked .sv-body > .wr :is(.wr-head, .work-doc-head)::before { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 4px; -webkit-app-region: no-drag; }
+html.desktop-mac[data-band="session"].rail-docked .sv-body > .wr .wr-scroll { padding-top: 12px; }
+html.desktop-mac[data-band="session"].rail-docked.rail-docked #band-slot { right: calc(var(--rail-edge, 0px) + 10px); }
+html.desktop-mac[data-band="session"].rail-docked.rail-docked #band-left { right: calc(var(--rail-edge, 0px) + var(--slot-w, 0px) + 22px); }
+
+/* Its width, dragged by its left edge. */
+.wr { position: relative; }
+.wr-grip { position: absolute; top: 0; bottom: 0; left: -4px; z-index: 8; width: 8px; cursor: col-resize; touch-action: none; }
+.wr-grip::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; border-radius: 2px; background: transparent; transition: background-color .15s ease; }
+.wr-grip:hover::after, body.resizing .wr-grip::after { background: var(--border-focus); }
+.wr-shut .wr-grip { display: none; }
+
+/* A collection's writing: a list, a line a piece, its number in the margin, hairlines between; no box round it (navigation). */
+.wr-doclist { list-style: none; margin: 0; padding: 0; }
+.wr-doclist li + li { border-top: 1px solid var(--border); }
+.wr-doc { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: start; gap: 12px; width: calc(100% + 16px); margin: 0 -8px; padding: 12px 8px; border: 0; border-radius: var(--r-md); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out); }
+.wr-doc:hover { background: var(--hover); }
+.wr-doc-n { padding-top: 0; color: var(--text-muted); font: 500 12px/18px var(--font); font-variant-numeric: tabular-nums; text-align: right; }
+.wr-doc-n.none { display: grid; justify-items: end; padding-top: 2px; color: var(--text-muted); }
+.wr-doc-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.wr-doc-title { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.wr-doc-title b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-size: 14px; font-weight: 500; line-height: 18px; }
+.wr-doc-about { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 13px; line-height: 18px; }
+.wr-doc-dir { display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; margin-top: 2px; color: var(--text-muted); font-size: 12px; }
+.wr-doc-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; padding-top: 1px; color: var(--text-muted); font-size: 12px; line-height: 18px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.wr-doc-meta span + span { line-height: 1.2; }
+
+/* A table as a sheet (WorkPanels.tsx Sheet): its name in the document serif over a card of rows (a work product), the head and
+   the first two columns kept in view on the card's own surface, tags and files as neutral chips. */
+.work-doc-scroll.sheet-host { display: flex; flex-direction: column; overflow: hidden; }
+.sheet { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.sheet-top { flex: none; display: flex; align-items: flex-end; gap: 12px; padding: 28px 24px 14px; }
+.sheet-title { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.sheet-title b { color: var(--ink); font-family: var(--font-doc); font-size: 32px; line-height: 1.1; font-weight: 500; letter-spacing: -0.015em; }
+.sheet-title span { color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.sheet-find { flex: 0 1 220px; height: 30px; margin-bottom: 4px; }
+/* A narrow reader: the find field under the name, the card nearer the edges. */
+@media (max-width: 720px) {
+  .sheet-top { flex-wrap: wrap; padding: 24px 16px 12px; }
+  .sheet-title { flex-basis: 100%; }
+  .sheet-title b { font-size: 28px; }
+  .sheet-find { flex: 1 1 100%; }
+  .sheet-scroll { margin: 0 16px 16px; }
+}
+.sheet-scroll { flex: 1; min-height: 0; overflow: auto; margin: 0 24px 24px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--card); }
+.sheet table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; line-height: 1.5; }
+.sheet th { position: sticky; top: 0; z-index: 2; padding: 9px 14px; border-bottom: 1px solid var(--border-strong); background: var(--card); color: var(--text-muted); font-size: 12px; font-weight: 500; text-align: left; white-space: nowrap; }
+.sheet td { min-width: 90px; max-width: 280px; padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--ink-2); vertical-align: top; overflow-wrap: normal; word-break: normal; }
+.sheet td.long { min-width: 240px; max-width: 380px; }
+.sheet tr:last-child td { border-bottom: 0; }
+.sheet tbody tr:hover td { background: var(--hover); }
+.sheet .sheet-n { position: sticky; left: 0; z-index: 1; box-sizing: border-box; min-width: 46px; width: 46px; padding-left: 10px; padding-right: 10px; color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; background: var(--card); }
+.sheet th.sheet-n { z-index: 3; background: var(--card); }
+.sheet .sheet-key { position: sticky; left: 46px; z-index: 1; color: var(--ink); font-weight: 500; white-space: nowrap; background: var(--card); box-shadow: 1px 0 0 var(--border); }
+.sheet th.sheet-key { z-index: 3; color: var(--text-muted); background: var(--card); }
+.sheet tbody tr:hover .sheet-n, .sheet tbody tr:hover .sheet-key { background: var(--hover); }
+.sheet-none { color: var(--ink-4); }
+.sheet-tag { display: inline-block; padding: 1px 8px; border-radius: var(--r-sm); background: var(--hover-strong); color: var(--ink-2); font-size: 12px; font-weight: 500; white-space: nowrap; }
+.sheet-file { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 2px 8px; border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: transparent; color: var(--ink); font: 500 12px/1.4 var(--font); white-space: nowrap; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out); }
+.sheet-file:hover { background: var(--hover); }
+.sheet-file svg { flex: none; color: var(--text-muted); }
+.sheet-path { font: 12.5px var(--mono); color: var(--text-muted); white-space: nowrap; }
+.sheet-link { color: var(--ink); text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; }
+/* Numbers to the right, digit for digit; a sheet wider than the reader fades at its right edge while there is more (QA, 2026-10-28). */
+.sheet th.num, .sheet td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.sheet-scroll.more { -webkit-mask-image: linear-gradient(to left, transparent 0, #000 44px); mask-image: linear-gradient(to left, transparent 0, #000 44px); }
+
+/* Tables inside a piece of writing break between words, never inside one, and scroll sideways when they must. */
+.work-prose th, .work-prose td { overflow-wrap: normal; word-break: normal; min-width: 110px; }
+.work-prose td:first-child, .work-prose th:first-child { min-width: 0; }
+
+/* The rail put away: a column of its parts' tiles, each with what it holds under it. */
+.wr-shut { width: 60px; gap: 2px; }
+.wr-tab { display: flex; flex-direction: column; align-items: center; gap: 5px; width: 54px; padding: 8px 0 6px; border: 0; border-radius: var(--r-md); background: transparent; color: var(--text-muted); cursor: pointer; }
+.wr-tab:hover { background: var(--hover); }
+.wr-tab em { max-width: 44px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font: 500 12px/1 var(--font); font-style: normal; font-variant-numeric: tabular-nums; }
+.wr-conn-when { color: var(--text-muted); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* A Work session's side panel is its Browser alone: no other panels to open, switch to, split or close down to, no iOS side, no
+   local servers (Arun, 2026-10-27: "get rid of the plus buttons and logic for the side panel stuff it should only be browser"). */
+html.work-session .bench-panel :is(.bench-add, .split-btn, .bench-tab-x, .bench-here-caret, .preview-kind, .bw-kinds, .bw-servers, .bw-servers-n, .preview-foot) { display: none !important; }
+html.work-session .bench-panel .bench-here-btn { pointer-events: none; }
+/* Nor its developer tools: pointing at the page, the page to the agent, the project's own page, its server (Arun, 2026-10-27:
+   "get rid of the point and server buttons and stuff too for work"). */
+html.work-session .bench-panel .browser-bar :is([aria-label="Point at something in the page"], [aria-label="Leave a note on something in the page"], [aria-label="Send a screenshot to the agent"], [aria-label="Back to the project"], [aria-label="Stop the preview's server"]) { display: none !important; }
+
+/* The Browser's start page (WorkRail BrowserStart): the sites the agents read as plain rows to press (navigation, so no cards),
+   a line on what this browser is. */
+.bs { display: flex; flex-direction: column; gap: 16px; width: min(560px, 100%); margin: 0 auto; padding: 32px 20px; box-sizing: border-box; }
+.bs-sites .wr-sub { margin: 0 0 6px 8px; }
+.bs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 2px 8px; }
+.bs-site { display: grid; grid-template-columns: 24px minmax(0, 1fr); align-items: center; gap: 10px; padding: 8px; border: 0; border-radius: var(--r-md); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out); }
+.bs-site:hover { background: var(--hover); }
+.bs-site > span:last-child { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.bs-site b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-size: 13px; font-weight: 500; line-height: 18px; }
+.bs-site em { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 12px; line-height: 16px; font-style: normal; }
+.bs-note { margin: 0 8px; color: var(--text-muted); font-size: 12px; line-height: 1.5; text-align: left; text-wrap: pretty; }
+/* The rail's head buttons the size of the header's Browser button beside them (.panel-tab.icon): 30 by 28, its icon at 17. */
+.wr-head .wr-icon { width: 30px; height: 28px; border-radius: var(--r-sm); }
+.wr-head .wr-icon > svg { opacity: .75; }
+.wr-head .wr-icon:hover > svg { opacity: 1; }
+
+/* The gallery's search: a field of its own weight, how many match beside it, cleared in one press or with Escape. */
+.wa-find { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 6px 0 12px; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: transparent; color: var(--text-muted); transition: border-color var(--t-hover) var(--ease-out); }
+.wa-find:hover { border-color: var(--border-hover); }
+.wa-find:focus-within { border-color: var(--border-focus); color: var(--ink-2); }
+.wa-find > svg { flex: none; }
+.wa-find input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; color: var(--ink); font: 13px var(--font); }
+.wa-find input::placeholder { color: var(--text-muted); }
+.wa-find-n { flex: none; padding: 0 6px; color: var(--text-muted); font: 500 12px/1 var(--font); font-variant-numeric: tabular-nums; }
+.wa-find-x { flex: none; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text-muted); cursor: pointer; }
+.wa-find-x:hover { background: var(--hover); color: var(--ink); }
+
+/* Work's new-session page (html.work-home, WorkMode WorkField) leaves out "Your year": Work isn't counted in coding turns. */
+html.work-home .ha-heat { display: none; }
+/* A folder's place in the page's own type, not a terminal's (QA, 2026-10-28: the picked folder's path was monospace). */
+html.work-home .fcard-p { font: 12px/1.35 var(--font); }
+
+/* A notice (a file somebody else is changing too) floats over the chat, never over the rail (2026-10-27 design review: it sat on
+   Progress and stayed there). */
+html.rail-docked .toast-stack { right: calc(var(--rail-edge, 0px) + 16px); }
+/* With the rail on screen, open or folded, it already says how many outputs and sources there are and how far the plan is: the
+   bar along the foot and the to-dos chip over the box don't say it a second time. With the side panel in its place, they do. */
+html.rail-docked .work-bar .wb-count, html.rail-docked .dock-plan { display: none; }
+
+/* A video in the chat keeps its box from the start (16:9, on the hover grey, the video fitted inside), so nothing jumps when its
+   first frame arrives; it had loaded as a 300x150 black box, then grown. */
+.chat-media-view video { width: min(100%, 520px); height: auto; aspect-ratio: 16 / 9; object-fit: contain; background: var(--hover); }
+.chat-media .file-chip, .chat-media > :first-child { max-width: 100%; white-space: nowrap; }
+/* A picture or video named in a reply is a block of its own: its name, the thing under it, then the sentence carries on below
+   (it sat mid-line with the text flowing round it). */
+.chat-media { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; width: fit-content; max-width: 100%; margin: 8px 0 10px; }
+
+/* A place with an agent at work, or one waiting on you, while you look at another: a small dot after its name, still (Arun,
+   2026-10-27: "get rid of the pulsing dot animation") (WorkMode.tsx SidebarWorkSwitch). */
+.sb-work-hint { position: relative; flex: none; width: 6px; height: 6px; margin-left: 1px; border-radius: 999px; background: var(--amber); }
+
+/* The sidebar folded (SideRail.tsx): a slim glass strip flush with the window's left edge, its foot and the header above it, the page moved over to make room for
+   it (Arun, 2026-10-27: "make sure this is flush with the left side", "flush with the bottom and top too to the header"). */
+.side-rail { position: fixed; z-index: 40; top: var(--band, 0px); bottom: 0; left: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; width: 52px; padding: 8px 0; border: 0; border-right: 1px solid var(--tray-edge, var(--border)); border-radius: 0; background: var(--sidebar); }
+.shell:not(.with-panel):has(> .side-rail) .main { margin-left: 60px; }
+/* style.css sets the folded page's left margin to 0 with !important, at every width: the rail then covered the page's left edge
+   from 561px to about 720px (2026-10-27 audit: "nch week", the box's + cut off). Flush with the rail's edge, and without the
+   browser's 44px gutter for the old floating button, which the rail replaces. */
+html .shell:not(.with-panel):has(> .side-rail) > .main { margin-left: 52px !important; padding-left: 0 !important; }
+.shell:has(> .side-rail) > .nav-open { display: none; }
+:root:has(.side-rail) { --rail-w: 60px; }
+.side-rail .rail-places { display: flex; flex-direction: column; gap: 2px; padding: 0; border-radius: 0; background: none; }
+.side-rail .rail-list { display: flex; flex: 1 1 auto; flex-direction: column; align-items: center; gap: 4px; min-height: 0; overflow-y: auto; scrollbar-width: none; }
+/* More of the list below than fits (a short window): its foot fades, so a face cut off reads as "scroll for more" (QA, 2026-10-28:
+   the third teammate at 1000x600 was hidden with no sign). Only while it can scroll further; none when it all fits. */
+@supports (animation-timeline: scroll()) {
+  .side-rail .rail-list { animation: rail-more linear both; animation-timeline: scroll(self); }
+  @keyframes rail-more { from { -webkit-mask-image: linear-gradient(#000 calc(100% - 28px), transparent); mask-image: linear-gradient(#000 calc(100% - 28px), transparent); } 97% { -webkit-mask-image: linear-gradient(#000 calc(100% - 28px), transparent); mask-image: linear-gradient(#000 calc(100% - 28px), transparent); } to { -webkit-mask-image: none; mask-image: none; } }
+}
+.rail-item { position: relative; display: grid; place-items: center; flex: none; width: 36px; height: 36px; padding: 0; border: 0; border-radius: var(--r-md); background: transparent; color: var(--text-muted); cursor: pointer; transition: background-color 120ms ease, color 120ms ease; }
+.rail-item:hover { background: var(--hover); color: var(--ink); }
+.rail-item[data-active="true"] { background: var(--hover-strong); color: var(--ink); box-shadow: none; }
+.rail-item:focus-visible { outline: 2px solid var(--focus-ring, var(--ink)); outline-offset: 1px; }
+.rail-places .rail-item { width: 34px; height: 34px; border-radius: var(--r-md); }
+.rail-hint { position: absolute; top: 6px; right: 6px; margin: 0; }
+/* A divider that reads at a glance, between places and the list, and between the rooms and the teammates (Arun, 2026-10-27:
+   "add visible dividing line between the teammates and room"). */
+.rail-sep { flex: none; width: 28px; height: 1.5px; margin: 6px 0; border-radius: 1px; background: color-mix(in srgb, var(--ink) 24%, transparent); }
+.rail-session { font-size: 13px; font-weight: 600; color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--border-strong, var(--border)); }
+/* The rail stays monochrome: a session's state is said in its tip, and only what needs you gets the amber count. */
+.rail-item .pr { pointer-events: none; }
+.rail-foot { display: flex; flex: none; flex-direction: column; align-items: center; gap: 2px; padding-top: 6px; border-top: 1px solid var(--border); }
+@media (max-width: 560px) { .side-rail { display: none; } html .shell:not(.with-panel):has(> .side-rail) > .main { margin-left: 0 !important; } }
+/* A narrow browser window shows the list's button in a strip of its own above the page (style.css, max-width 1000px); with the
+   rail there it was a second button for the same thing, and the strip 44px of nothing: the rail's own button is enough. */
+@media (min-width: 561px) and (max-width: 1000px) {
+  html:not(.desktop) .shell:has(> .side-rail) > .win-nav { display: none; }
+  html:not(.desktop) .shell:has(> .side-rail) > .main { margin-top: 0 !important; }
+  /* Opened, the list floats over the page beside the rail, which stays: the page behind it doesn't move (Arun, 2026-10-28: "TEST
+     EVERYTHING… EVERY INTERACTION, EVERY VISUAL"; it dropped 44px and lost the rail). */
+  html .shell.with-panel:has(> .side-rail) > .main { margin-left: 52px !important; }
+  .shell:has(> .side-rail) > .sb-panel { left: 52px; width: min(var(--panel-w), calc(100vw - 52px - 24px)); }
+  .shell:has(> .side-rail) > .sb-backdrop { left: 52px; }
+}
+/* The rail's tooltips: a name, and under it a line on how it stands. */
+.side-rail-tip { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; max-width: 260px; padding: 7px 10px !important; text-align: left; text-wrap: pretty; }
+.side-rail-tip > b { font-size: 12.5px; font-weight: 600; }
+.side-rail-tip > span { opacity: 0.75; font-size: 12px; line-height: 1.35; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+/* The rail's sessions panel (SideRail SessionsFly): beside the rail, a tray of the sessions by name, grouped, each a row. */
+.rail-fly-wrap { position: relative; }
+html:not(.dark) .rail-count { color: #fff; } /* white on the light theme's darker amber: 6.5:1, where the dark ink was 3.7:1 */
+.rail-count { position: absolute; top: 3px; right: 2px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 999px; background: var(--dass-needs, var(--amber)); color: #1a1205; font-size: 10px; font-weight: 600; line-height: 15px; text-align: center; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 2px var(--sidebar); }
+/* The fly-out: the floating material (style.css), its groups a label and rows with no box, each row the sidebar's own: the
+   session's mark wearing its state, the name in ui ink and the live line in --ink-2 (2026-10-29 direction §5, §8; r5). */
+.rail-fly { position: fixed; z-index: 75; display: flex; flex-direction: column; gap: 4px; width: 300px; max-height: min(520px, calc(100vh - 16px)); padding: 6px; overflow-y: auto; border-radius: var(--r-lg); animation: r5-rise var(--t-open) var(--ease-out); }
+.rail-fly-head { padding: 6px 8px 2px; color: var(--ink); font-size: 13px; line-height: 18px; font-weight: 600; }
+.rail-fly-none { margin: 0; padding: 6px 8px; color: var(--text-muted); font-size: 12px; }
+.rail-fly-group { display: flex; flex-direction: column; gap: 0; padding: 0; }
+.rail-fly-group h4 { margin: 0; padding: 8px 8px 4px; color: var(--text-muted); font-size: 12px; line-height: 16px; font-weight: 500; }
+.rail-fly-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 5px 8px; border: 0; border-radius: var(--r-md); background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out); }
+.rail-fly-row:hover { background: var(--hover); }
+.rail-fly-mark { display: grid; flex: none; place-items: center; width: 24px; height: 24px; }
+.rail-fly-mark .pr { --pr-ground: var(--card); }
+.rail-fly-text { display: flex; flex-direction: column; gap: 0; min-width: 0; }
+.rail-fly-text > b { overflow: hidden; font-size: 13px; line-height: 18px; font-weight: 500; white-space: nowrap; text-overflow: ellipsis; }
+.rail-fly-text > span { overflow: hidden; color: var(--text-muted); font-size: 12px; line-height: 16px; white-space: nowrap; text-overflow: ellipsis; }
+.rail-fly-text > span:is([data-state="working"], [data-state="needs"]) { color: var(--ink-2); }
+/* The chosen place, session and teammate on the rail and in its panel: a fill, never an outline (style.css --sel-*). */
+html .rail-item[data-active="true"], html .rail-fly-row[data-active="true"] { background: var(--sel-bg, var(--hover-strong)) !important; box-shadow: none !important; color: var(--ink); }
+@media (prefers-reduced-motion: reduce) { .rail-fly { animation: none; } }
+/* In the desktop app the rail starts under the window's header (40px, its traffic lights and buttons), whether or not the page
+   has set --band yet: its edge ran up beside the traffic lights (Arun, 2026-10-27: "fix the line over extending into the
+   header"). */
+html.desktop .side-rail { top: calc(var(--band-top, 0px) + max(var(--band, 0px), 40px)); } /* until the page's own top is measured (SideRail) */
+/* Its top on the header's line, that line carried across it (Arun, 2026-10-27: "sit flush with the header horinztonal line"). */
+.side-rail { border-top: 1px solid var(--border); }
+/* Solid, not glass: the page's dotted backdrop showed through it (Arun, 2026-10-27: "make the side more opaque"). */
+.side-rail { background: color-mix(in srgb, var(--ink) 3%, var(--sidebar, var(--bg))) !important; backdrop-filter: none; }
+
+/* A phone's width has no room for the chat and the overview side by side: opened, the overview covers the chat, its head's fold
+   button the way back, rather than leaving the chat a 120px column a letter or two a line (2026-10-27 audit, 420px). */
+@media (max-width: 720px) {
+  .sv-body > .wr:not(.wr-shut) { position: absolute; top: 0; right: 0; bottom: 0; z-index: 25; width: 100% !important; box-shadow: none; }
+}
+
+/* What a press that reaches outside the app said went wrong (a folder that couldn't be shown, a file that couldn't be opened),
+   said in place of the button's own words for a few seconds (Arun, 2026-10-28: "iron everything and ensure we are good… UI and UX"). */
+.tried-fail, .btn.tried-fail, .work-bar .wb-item.tried-fail { color: var(--red); }
+.btn.tried-fail { border-color: color-mix(in srgb, var(--red) 40%, var(--border)); }
+.btn.tried-fail > span { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@container (max-width: 560px) { .work-bar .tried-fail .wb-folder { display: inline; } }
+.work-bar .tried-fail .wb-folder { max-width: 320px; }
+.wr-failed { color: var(--red); }
+.wr-conn .wr-failed { padding: 6px 12px 0; font-size: 12.5px; }
+/* A file named in the chat that couldn't be opened: said at the top of the overview, until dismissed or the next one. */
+.wr-note { flex: none; display: flex; align-items: flex-start; gap: 8px; margin: 4px 0 8px; padding: 9px 6px 9px 12px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--card); color: var(--ink-2); font-size: 13px; line-height: 18px; }
+.wr-note > svg { flex: none; margin-top: 2px; color: var(--text-muted); }
+.wr-note > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.wr-note .wr-icon { width: 22px; height: 22px; margin: -2px 0; }
+/* A document that changed and then couldn't be read again: the last of it stays, said to be the last. */
+.work-doc-stale { margin: 16px auto 0; max-width: 600px; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--r-md); background: transparent; color: var(--ink-2); font-size: 12px; line-height: 16px; }
+/* A page waiting for its pass to the folder's pictures: the frame's own white, without a flash of it drawn half-linked. */
+.work-page-wait { background: var(--card); }
+.work-empty .btn { margin-top: 6px; }
+.chat-media-gone .link-btn { font-size: inherit; }
+
+/* ── The 2026-10-28 presentation pass (Arun, 2026-10-28: "iron everything… focusing on UI and UX"; "look for like the little
+   details and designs too"): Work reads as a content product, not a coding tool. ── */
+
+/* Code chrome a writer has no use for, in a Work session only: the failing-command chip, what a turn cost in tokens, the context
+   ring in the bar, a live block's code toggle (its Copy and Download stay). */
+html.work-session :is(.rsp-text-btn.danger, .rsp-tokens, .rsp-meta-tokens, .work-bar .ctx-gauge, .live-acts > .live-btn) { display: none !important; }
+html.work-session .rsp-meta-line > span[aria-hidden]:has(+ .rsp-meta-tokens), html.work-session .rsp-meta-line > .rsp-meta-tokens:first-child + span[aria-hidden] { display: none; }
+/* The chat's file chips: the piece's title in the page's own type, on one line (AnswerParts FileChip). */
+.file-chip-title { display: none; }
+html.work-session .file-chip { white-space: nowrap; max-width: 100%; overflow: hidden; }
+/* The hand-off card in the page's type, its labels as words, and no "handoff" tag under it (QA, 2026-10-28). */
+html.work-session .rsp-ho-label { font: 500 12px/1.4 var(--font); color: var(--text-muted); }
+html.work-session .rsp-ho-label::first-letter { text-transform: uppercase; }
+html.work-session .rsp-ho-meta > span:first-child { display: none; }
+html.work-session .file-chip > code { display: none; }
+html.work-session .file-chip-title { display: inline; min-width: 0; overflow: hidden; text-overflow: ellipsis; font: 500 .94em/1.35 var(--font); }
+/* A live block's wait, said over its shimmer (LiveBlock). */
+.live-stage > .live-wait-soft { z-index: 1; gap: 6px; font-size: 12px; pointer-events: none; }
+
+/* In the rail, the lists sit in the part itself (style.css's tray rule gave .wr-part-body a box), and a collection is a row with
+   its cover, not a card. */
+html .wr-part-body { margin: 0 !important; padding: 0 0 16px; border-radius: 0; background: transparent; }
+.wr-part:not(.shut) .wr-part-head { margin-bottom: 0; }
+.wr-part-body .wr-hub { width: calc(100% + 16px); margin: 0 -8px; padding: 8px; border-color: transparent; border-radius: var(--r-md); background: transparent; }
+.wr-part-body .wr-hub:hover { border-color: transparent; background: var(--hover); }
+
+/* Fresh: a still dot before what a piece is, never a pulsing "live" tag over its title or preview. */
+.wr-fresh { display: inline-block; flex: none; width: 6px; height: 6px; margin: 0 6px 1px 0; border-radius: 50%; background: var(--green); vertical-align: middle; }
+.wr-file-main > span { display: flex; align-items: center; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.wa-foot em .wr-fresh { margin-right: 0; }
+.wr-hub-meta .wr-fresh { margin-right: 5px; }
+.wa-where { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 12px; }
+
+/* A collection with no pictures: its name's first word set as its cover, in the document serif, and how much is in it. */
+.wr-hub-cover.type { display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-end; gap: 1px; padding: 6px; box-sizing: border-box; background: var(--hover-strong); }
+.wr-hub-cover.type b { max-width: 100%; overflow: hidden; text-overflow: clip; white-space: nowrap; color: var(--ink); font-family: var(--font-doc); font-size: 14px; font-weight: 500; line-height: 1.05; letter-spacing: -0.01em; }
+.wr-hub-cover.type em { color: var(--text-muted); font-size: 10px; line-height: 12px; font-style: normal; font-weight: 500; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.wr-hub.big .wr-hub-cover.type { padding: 16px; gap: 4px; }
+.wr-hub.big .wr-hub-cover.type b { font-size: 30px; }
+.wr-hub.big .wr-hub-cover.type em { font-size: 12px; }
+
+/* Progress: the plan's agent stopped short wears the amber ring on its mark (WorkRail PRESENCE), its words in the row's own ink;
+   the steps it left are open dashed circles, and Carry on asks for them. */
+.wr-plan li.st-left { color: var(--text-muted); font-weight: 400; }
+.wr-carry { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 12px; font-weight: 400; font-variant-numeric: tabular-nums; }
+.wr-carry .wr-chip { color: var(--ink); }
+.wr-carry .wr-chip:disabled { opacity: .7; cursor: default; }
+
+/* Sources, as a cited answer lists them: each page numbered, by its title, its site under it; a search's pages under it. */
+.wr-sources { counter-reset: none; }
+.wr-sources li.under { padding-left: 14px; }
+.wr-source { grid-template-columns: 24px minmax(0, 1fr); }
+button.wr-source:not(.search) { grid-template-columns: 16px 24px minmax(0, 1fr); gap: 8px; }
+.wr-source-n { color: var(--text-muted); font: 500 12px/1 var(--font); font-variant-numeric: tabular-nums; text-align: right; }
+.wr-source-ico.search { background: transparent; color: var(--text-muted); }
+.wr-source.search b { font-weight: 500; color: var(--ink-2); }
+
+/* Connectors: on or off in words beside the dot. */
+.wr-state { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 12px; }
+.wr-state .wr-on { margin-right: 0; }
+.wr-conn li.on .wr-state .wr-on { box-shadow: none; }
+.wr-conn-ico .wr-source-ico { width: 24px; height: 24px; background: transparent; }
+
+/* The folded rail: a column of its parts' tiles, each its icon, its count and its name under it (10px: "Collections" whole in a
+   56px strip); on a phone's width no strip at all (the bar's Overview opens it). */
+.wr-tab { gap: 3px; padding: 8px 0 7px; border-radius: var(--r-md); transition: background-color var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out); }
+.wr-tab:hover { color: var(--ink); }
+.wr-tab-label { max-width: 54px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font: 500 10px/1.1 var(--font); letter-spacing: -0.01em; }
+@media (max-width: 720px) { .sv-body > .wr.wr-shut { display: none; } }
+.wr-grip:focus-visible { outline: none; }
+.wr-grip:focus-visible::after { background: var(--border-focus); }
+
+/* The bar along the foot: on a narrow window its status, its agents and Overview; the rest is in the rail. */
+@container (max-width: 560px) { .work-bar :is(.wb-count, .wb-folder-btn, .stb-slot, .stb-sep) { display: none; } }
+
+/* The reader's head: the title on one line, what it is under it on one line; on a narrow width its buttons are icons. */
+.work-doc-title b, .work-doc-title > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.work-doc-head > a.icon-btn { display: grid; place-items: center; color: var(--text-muted); }
+.work-doc-head > a.icon-btn:hover { color: var(--ink); }
+@media (max-width: 720px) {
+  .work-doc-head .btn.small > span { display: none; }
+  .work-doc-head .btn.small { padding: 0 8px; }
+}
+/* A link to a piece that isn't in the folder, said where it is. */
+.work-prose .doc-link.missing { color: var(--ink-2); text-decoration: underline dotted var(--border-strong); text-underline-offset: 3px; cursor: help; }
+.work-prose .doc-link.missing em { color: var(--text-muted); font-style: normal; font-size: .88em; }
+/* A picture in a piece holds its room until it arrives. */
+.work-prose img.doc-img.waiting { min-height: 180px; width: 100%; background: var(--muted); }
+/* A picture not shown (from the web, until asked; or missing), and a link to a heading the piece hasn't: said in place (QA, 2026-10-28). */
+.work-prose .doc-img-off { display: flex; align-items: center; gap: 8px; margin: 8px 0 16px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-lg); color: var(--ink-2); font-size: 13px; line-height: 1.45; }
+.work-prose .doc-img-off > svg { flex: none; color: var(--text-muted); }
+.work-prose .doc-img-off > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.work-prose .doc-img-off em { color: var(--text-muted); font-style: normal; }
+.work-prose .doc-link-note { color: var(--text-muted); font-size: .9em; font-style: normal; }
+/* A sheet's card is as tall as its rows, not the whole reader. */
+.sheet-scroll { flex: 0 1 auto; }
+/* A code block with no language in a piece: one quiet frame, no empty band over it. */
+.work-prose [data-streamdown="code-block"] { margin: 0 0 18px !important; border: 1px solid var(--border) !important; border-radius: var(--r-lg) !important; background: var(--card) !important; box-shadow: none !important; }
+.work-prose [data-streamdown="code-block"] pre { margin: 0 !important; border: 0 !important; background: transparent !important; }
+.work-prose [data-streamdown="code-block-header"]:not(:has(*:not(:empty))) { display: none !important; }
+
+/* The picture viewer: room under the picture, and its head's actions. */
+.gallery-stage { padding: 4px 72px 24px; }
+.gallery-title { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.gallery-title b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gallery-head .gallery-title em { margin-left: 0; font-size: 12px; }
+.gallery-acts { display: flex; align-items: center; gap: 6px; flex: none; }
+.gallery-act { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--r-md); background: transparent; color: var(--ink-2); font: 500 13px/1 var(--font); text-decoration: none; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out); }
+.gallery-act:hover { background: var(--hover); color: var(--ink); }
+.gallery-act.tried-fail { color: var(--red); }
+@media (max-width: 720px) { .gallery-act > span { display: none; } .gallery-stage { padding: 8px 12px 16px; } .gallery-nav.prev { left: 6px; } .gallery-nav.next { right: 6px; } }
+
+
+/* Work home: as Code's, one flat ground (the drifting threads behind it are gone), and under the box a row of text pills, no icons
+   (DIRECTION.md §9.7), on the box's left edge as the folder line under them is; each fills the box with the start of a task. */
+.work-starters { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 6px; width: 100%; max-width: var(--composer-w, 656px); margin: 12px auto 0; }
+.work-starter { display: inline-flex; align-items: center; height: 28px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: 999px; background: transparent; color: var(--ink-2); font: 500 13px/1 var(--font); cursor: pointer; transition: border-color var(--t-hover) var(--ease-out), background-color var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out); }
+.work-starter:hover { background: var(--hover); color: var(--ink); }
+/* One ring, the app's own (style.css :focus-visible box-shadow): an outline here drew a second one round it (QA, 2026-10-28). */
+.work-starter:focus-visible { outline: none; }
+.work-starters.off { visibility: hidden; }
+/* The agent switcher over the chat on a narrower window sits on a row of its own, not floating on the transcript. */
+@media (max-width: 1000px) {
+  html.work-session .feed-toolbar { position: relative; z-index: 3; background: var(--bg); box-shadow: 0 1px 0 var(--border); }
+}
+/* The Browser's address in the page's own type: it is an address to read, not code. */
+html.work-session .bench-panel .browser-url { font-family: var(--font); font-size: 13px; }
+.work-prose [data-streamdown="code-block-body"] { margin: 0 !important; border: 0 !important; border-radius: 0 !important; background: transparent !important; box-shadow: none !important; padding: 12px 14px !important; }
+/* A piece in a right-to-left language reads from the right, its own way, in a card or a row (QA, 2026-10-28). */
+:is(.wa-card, .wr-doc) [dir="auto"] { text-align: start; }
+
+/* The note a new Work session carries over from its home (WorkMode WorkNote: "Codex didn't start…"): in the chat's column, a
+   quiet card with a hairline, its line in the row's ink and the why under it in meta, Got it a ghost button (DIRECTION.md §5;
+   Arun, 2026-10-29: "Make everything is redesigned like panel contents, etc"). */
+.banners:has(> .work-note) { box-sizing: border-box; width: min(100%, 760px); margin: 0 auto; padding: 12px 20px 0; }
+.banner.work-note { align-items: center; gap: 12px; padding: 10px 10px 10px 14px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--card); }
+.banner.work-note > svg { flex: none; color: var(--text-muted); }
+.banner.work-note strong { display: block; color: var(--ink); font-size: 13px; font-weight: 500; line-height: 18px; }
+.banner.work-note p { margin: 2px 0 0; color: var(--text-muted); font-size: 12px; line-height: 16px; }

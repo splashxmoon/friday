@@ -9,6 +9,7 @@ import { MenuButton, type MenuItem } from "./ui.js";
 import type { TodoStep } from "@/components/aicss/TodoList";
 import { MAIN_LANE, type Member, type MeshNote, type SessionEvent } from "../types.js";
 import type { Send } from "./useSession.js";
+import { mateOn, TeamTalk } from "./Teammates.js";
 
 /**
  * The agents in a session talking to each other (agent-mesh.ts), as the people watching read it: who wrote to whom, what, and
@@ -93,6 +94,8 @@ export function AgentTalkCard({ ev, state, me, send, notify, delivered, stamp, t
                 ? { word: `Read by ${m.toName}`, how: "read" }
                 : null;
   const moving = queued || (!!ask && !ask.reply);
+  // A team (teammates.ts) reads it as a group chat (Teammates.tsx TeamTalk).
+  if (state.options.team) return <TeamTalk fromLane={m.fromLane} toLane={lane} fromName={m.fromName} toName={m.toName} kind={m.kind} report={!!m.ofTask} review={!!(m.board && m.review)} carried={!!m.carriedFrom} {...(team ? { team } : {})} text={ev.body.text} why={why} {...(ask?.reply ? { answer: { text: ask.reply.text, auto: !!ask.reply.auto } } : {})} status={status} stamp={stamp} fromMark={from.mark} toMark={to.mark} />;
   return (
     <div className={cn("tk-card", moving && "waiting")}>
       <div className="tk-head">
@@ -153,6 +156,8 @@ export function AgentUpdateCard({ ev, state, stamp }: { ev: SessionEvent; state:
   const readers = others.filter((l) => (read[l] ?? 0) >= ev.seq).map((l) => laneLabel(state, l));
   const status = !others.length ? "" : readers.length === others.length ? (others.length === 1 ? `Read by ${readers[0]}` : "Read by every agent") : readers.length ? `Read by ${readers.join(", ")}` : "Not read yet";
   const look = agentLook(state, b.fromLane, 13);
+  // A team (teammates.ts) reads it as a group chat: one teammate's word to the rest.
+  if (state.options.team) return <TeamTalk fromLane={b.fromLane} toLane="" fromName={b.fromName} toName="everyone" kind="tell" team={others} text={b.text} status={status ? { word: status, how: readers.length === others.length ? "done" : "wait" } : null} stamp={stamp} fromMark={look.mark} />;
   return (
     <div className="tk-card">
       <div className="tk-head">
@@ -193,6 +198,7 @@ export function BoardCard({ ev, state, stamp }: { ev: SessionEvent; state: Sessi
   // Who has it by its name now, not the name its lane had when it took it (a teammate's lane read "Main"); and "is on it" only
   // while that agent is at work: a task held by an agent that was stopped spun on as if it were being done (2026-10-27 audit).
   let nameOf = (lane: string): string | undefined => state.lanes.find((l) => l.id === lane)?.name;
+  nameOf = (lane) => mateOn(lane)?.name ?? state.lanes.find((l) => l.id === lane)?.name;
   // A lane since taken away is told by the name it had, never by its id ("blocked · lyXFP7w", 2026-10-28 audit).
   const who = (t: (typeof tasks)[number]) => {
     const lane = "lane" in t ? t.lane : undefined;
@@ -318,6 +324,7 @@ export type TaskAction = "reassign" | "retry" | "sendback" | "cancel";
 export function teamTasks(state: SessionState, jump: (seq: number) => void, control?: (id: string, action: TaskAction, to?: string) => void): TodoStep[] {
   const mesh = meshOf(state);
   let boardName = (_lane: string): string | undefined => undefined;
+  boardName = (lane) => mateOn(lane)?.name;
   const who = (lane: string | undefined, name: string | undefined) => {
     if (!lane && !name) return undefined;
     const look = lane ? agentLook(state, lane, 12) : null;

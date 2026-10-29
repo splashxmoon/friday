@@ -22,6 +22,15 @@ test("the folder is named from what was asked, not from how it was asked", () =>
   assert.ok(projectName("supercalifragilisticexpialidocious ".repeat(5)).length <= 40);
 });
 
+test("a title in another language names its folder in its own words, never cut mid-character", () => {
+  assert.equal(projectName("Café menu for spring"), "café-menu-spring");
+  assert.equal(projectName("東京 旅行"), "東京-旅行");
+  assert.notEqual(projectName("Привет мир"), "project");
+  const long = projectName("𝒜".repeat(60));
+  assert.equal(Array.from(long).length, 40);
+  assert.ok(!/[\uD800-\uDBFF]$/.test(long), "no half of a character at the end");
+});
+
 test("it is a new git repository, and a name already taken is never reused", async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), "friday-projects-"));
   t.after(() => rm(root, { recursive: true, force: true }));

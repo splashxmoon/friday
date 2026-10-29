@@ -31,3 +31,44 @@ test("a session with only its main agent is that agent", () => {
   const s = project("s", log([[{ type: "session.created", title: "t", ownerId: "u", ownerName: "Ada" } as EventBody]]));
   assert.equal(crewOf(s)?.agents.length, 1);
 });
+
+test("an agent out of usage whose work another agent carried on isn't a red 'stopped' (Arun, 2026-10-28: \"iron everything\")", () => {
+  const rows: [EventBody, string?][] = [
+    [{ type: "session.created", title: "t", ownerId: "u", ownerName: "Ada" } as EventBody],
+    [lane("lx", "Codex")], [engine("codex"), "lx"],
+    [lane("lc", "Claude Code")], [engine("claude"), "lc"],
+    [{ type: "run.started", causedBy: 1 } as EventBody, "lc"],
+    [{ type: "run.ended", outcome: "error", error: "5-hour limit reached ∙ resets 3pm" } as EventBody, "lc"],
+  ];
+  assert.equal(crewOf(project("s", log(rows)))!.agents.find((a) => a.lane === "lc")!.state, "failed", "nobody has its work");
+  const carried = crewOf(project("s", log([...rows, [{ type: "run.started", causedBy: 1 } as EventBody, "lx"], [{ type: "run.ended", outcome: "done" } as EventBody, "lx"]])))!;
+  assert.deepEqual(carried.agents.filter((a) => a.lane !== "main").map((a) => [a.name, a.state]), [["Codex", "done"], ["Claude Code", "idle"]]);
+});
+
+test("an agent that finished with its plan short says where it stopped, not done (QA, 2026-10-28: \"Claude Code · done\" over 3 of 5)", () => {
+  const todo = (statuses: string[]) => ({ type: "agent.message", text: "plan", toolCalls: [{ id: "t", name: "TodoWrite", arguments: JSON.stringify({ todos: statuses.map((status, i) => ({ content: `step ${i}`, status })) }) }] }) as EventBody;
+  const rows: [EventBody, string?][] = [
+    [{ type: "session.created", title: "t", ownerId: "u", ownerName: "Ada" } as EventBody],
+    [lane("lc", "Claude Code")], [engine("claude"), "lc"],
+    [{ type: "run.started", causedBy: 1 } as EventBody, "lc"],
+    [todo(["completed", "completed", "completed", "in_progress", "pending"]), "lc"],
+    [{ type: "run.ended", outcome: "done" } as EventBody, "lc"],
+  ];
+  const a = crewOf(project("s", log(rows)))!.agents.find((x) => x.lane === "lc")!;
+  assert.deepEqual([a.state, a.plan], ["short", "3 of 5"]);
+  const all = crewOf(project("s", log([...rows.slice(0, 4), [todo(["completed", "completed", "cancelled"]), "lc"], rows[5]!])))!.agents.find((x) => x.lane === "lc")!;
+  assert.deepEqual([all.state, all.plan], ["done", undefined]);
+});
+
+test("an agent somebody stopped reads stopped, not done, until its next turn (2026-10-28 QA: \"Claude Code · done\" after Stop)", () => {
+  const rows: [EventBody, string?][] = [
+    [{ type: "session.created", title: "t", ownerId: "u", ownerName: "Ada" } as EventBody],
+    [lane("lc", "Claude Code")], [engine("claude"), "lc"],
+    [{ type: "run.started", causedBy: 1 } as EventBody, "lc"],
+    [{ type: "run.pause" } as EventBody, "lc"],
+    [{ type: "run.ended", outcome: "done" } as EventBody, "lc"],
+  ];
+  assert.equal(crewOf(project("s", log(rows)))!.agents[0]!.state, "stopped");
+  rows.push([{ type: "run.started", causedBy: 1 } as EventBody, "lc"], [{ type: "run.ended", outcome: "done" } as EventBody, "lc"]);
+  assert.equal(crewOf(project("s", log(rows)))!.agents[0]!.state, "done");
+});

@@ -125,6 +125,8 @@ export function vscodeTheme(json: unknown): CustomTheme | null {
     "--border": border,
     "--border-strong": mix(fg, 24, bg),
     "--border-hover": mix(fg, 30, bg),
+    // Text boxes' edge (shadcn's --input): left at Friday's own, it all but vanished on Dracula's cards (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+    "--input": mix(fg, 26, bg),
     "--code-bg": c("editor.background") ?? bg,
     "--ink": fg,
     "--ink-2": mix(fg, 82, bg),
@@ -181,9 +183,11 @@ export function themeFromPalette(p: Palette, id?: string): CustomTheme {
 }
 
 /** Friday's own two looks as palettes: where the theme maker starts when you haven't picked a theme to change. */
+// Friday's own two looks, as style.css draws them (2026-10-29 direction §2): the start of a theme you make, and the pictures
+// Settings › Appearance shows of them.
 export const FRIDAY_PALETTES: Record<"dark" | "light", Palette> = {
-  dark: { name: "My theme", dark: true, bg: "#161618", sidebar: "#0c0c0e", ink: "#ededf0", accent: "#f1f1f3", green: "#3fb67b", red: "#ff7b72", amber: "#f2b453" },
-  light: { name: "My theme", dark: false, bg: "#ffffff", sidebar: "#f4f4f5", ink: "#18181b", accent: "#17171a", green: "#126c34", red: "#b0331f", amber: "#b45309" },
+  dark: { name: "My theme", dark: true, bg: "#191919", sidebar: "#141414", ink: "#ededed", accent: "#ededed", green: "#3fb67b", red: "#ef5b5b", amber: "#f2b453" },
+  light: { name: "My theme", dark: false, bg: "#fafaf9", sidebar: "#f3f3f1", ink: "#1a1a1a", accent: "#1a1a1a", green: "#16803c", red: "#c62828", amber: "#b45309" },
 };
 
 /** The themes people ask for by name, in their published colours, editor colours included. */

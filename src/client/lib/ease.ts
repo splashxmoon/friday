@@ -1,15 +1,23 @@
-export const EASE_OUT = [0.16, 1, 0.3, 1] as const;
-export const EASE_IN_OUT = [0.77, 0, 0.175, 1] as const;
-export const EASE_DRAWER = [0.32, 0.72, 0, 1] as const;
+/**
+ * One curve for everything that moves, as style.css --ease-out: 120ms hovers, 180ms opening and closing, 240ms layout moves, and
+ * nothing that bounces (Arun, 2026-10-29: "so clean and beautiful really with a clear direction in design language"; DIRECTION.md §7).
+ */
+export const EASE_OUT = [0.2, 0.8, 0.2, 1] as const;
+export const EASE_IN_OUT = EASE_OUT;
+export const EASE_DRAWER = EASE_OUT;
+/** The three timings, in seconds for Framer Motion. */
+export const T_HOVER = 0.12;
+export const T_OPEN = 0.18;
+export const T_MOVE = 0.24;
 
 /** CSS string form of EASE_OUT for inline style transitions. */
-export const EASE_OUT_CSS = "cubic-bezier(0.16, 1, 0.3, 1)";
+export const EASE_OUT_CSS = "cubic-bezier(0.2, 0.8, 0.2, 1)";
 
 /** Press feedback on buttons and other tappable surfaces. */
 export const SPRING_PRESS = {
   type: "spring",
   stiffness: 500,
-  damping: 30,
+  damping: 35,
   mass: 0.6,
 } as const;
 
@@ -17,7 +25,7 @@ export const SPRING_PRESS = {
 export const SPRING_SWAP = {
   type: "spring",
   stiffness: 460,
-  damping: 30,
+  damping: 32,
   mass: 0.55,
 } as const;
 

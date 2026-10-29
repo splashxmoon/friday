@@ -25,7 +25,7 @@
   position: relative;
   display: grid; grid-template-columns: 32px 32px 18px 1fr; align-items: stretch;
 }
-.diffRow .ln, .diffRow .sign { user-select: none; color: var(--faint); font-size: 11px; }
+.diffRow .ln, .diffRow .sign { user-select: none; color: var(--faint); font-size: 12px; }
 .diffRow .ln { text-align: right; padding: 0 7px; }
 .diffRow .sign { text-align: center; }
 .diffRow code { white-space: pre; padding: 0 12px 0 8px; color: var(--text-muted); }

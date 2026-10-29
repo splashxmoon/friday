@@ -1,4 +1,8 @@
 import { isLocal, ownModel, planLimits, type SessionPlan } from "./edition.js";
+import { openInPreview } from "./previewBus.js";
+import { pictureSession } from "./LiveBlock.js";
+import { WorkBar, WorkRail } from "./WorkRail.js";
+import { isWorkSid, markWorkSession, useWorkMode, WorkNote } from "./WorkMode.js";
 import { SessionMenu } from "./SessionMenu.js";
 import { EmptyState } from "@/components/dass/EmptyState";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
@@ -44,11 +48,13 @@ import { md } from "./markdown.js";
 /** This session's workspace, Solo or Team (Team.tsx): the hosted Friday's question. Every session in the local edition is Solo. */
 const sessionWorkspace: { useSessionPlan: (sid: string, invite?: string, member?: string) => SessionPlan | null } = { useSessionPlan: () => null };
 import type { Identity, RecentSession, RepoUse } from "./storage.js";
-import { InlineEdit, MenuButton, Segmented, SessionSkeleton, ShownText, Switch, inBand, isTyping, useConfirm, useDismiss, type MenuItem } from "./ui.js";
+import { ActionNote, InlineEdit, MenuButton, Segmented, SessionSkeleton, ShownText, Switch, inBand, isTyping, useConfirm, useDismiss, type MenuItem } from "./ui.js";
 import { useSession, type Send } from "./useSession.js";
 import type { Focus } from "../focus.js";
 import { CLASS_LABEL, COMMAND_CLASSES, type CommandClass } from "../command-class.js";
 import { FocusContext, herePublisher } from "./focusStore.js";
+import { RoomMenu, TeamFaces, teamTitle } from "./Teammates.js";
+import { TeamHeaderControls } from "./TeamControls.js";
 import { ALL, AgentsContext, agentKey, focusAgent, focusedAgent, jumpToNeeds, nextKey, openedAt, setColumns, syncAddress, useAgents, useColumns, useFocusedAgent, useSeen } from "./agentFocus.js";
 import { AGENT_DRAG, closeColumn, dropAgent, evenWidths, fitColumns, maxColumns, pickInColumn, resizeAt, unreadByLane } from "./agentNav.js";
 import { agentLook, laneLabel } from "./handoff-ui.js";
@@ -187,17 +193,37 @@ export function SessionView({
   // "Open in the tree" on a diff: the tree shows the file whole, around the lines that changed.
   // A file named in an answer opens here too, at its line; taking the event tells the chip it was opened, not copied.
   const [openFile, setOpenFile] = useState<{ path: string; line?: number; at: number } | null>(null);
+  // Whose folder the file is in, when the event says (a Crew room's Results: each teammate works in a folder of its own, and the
+  // room's own had nothing, "(no files)"; QA, 2026-10-28). The panels follow it until they close.
+  const [fileLane, setFileLane] = useState<string | null>(null);
+  useEffect(() => void (!bench && setFileLane(null)), [bench]);
   useEffect(() => {
     const on = (e: Event) => {
-      const { path, line, outside } = (e as CustomEvent<{ path: string; line?: number; outside?: boolean }>).detail;
+      const { path, line, outside, lane } = (e as CustomEvent<{ path: string; line?: number; outside?: boolean; lane?: string }>).detail;
       e.preventDefault();
+      // A Work session's files are its pieces: one named in the chat opens as a document in the rail, not as code (WorkRail).
+      // The Browser makes way, or the rail it opens in is hidden behind it until the Browser is closed.
+      if (stateRef.current?.options.work && !outside) return void (setBench(false), dispatchEvent(new CustomEvent("friday:work-open", { detail: { path } })));
       // ⌘-click: in your own editor, at the line, when the session's folder is on this computer (desktop-native.ts).
       const dir = (stateRef.current?.engines[MAIN_LANE] ?? Object.values(stateRef.current?.engines ?? {})[0])?.cwd;
       if (outside && dir && window.fridayDesktop?.openIn) {
         void preferredEditor().then((ed) => (ed ? openIn(ed, joinPath(dir, path), line) : "No editor found on this computer.")).then((err) => err && console.warn("[open in]", err));
         return;
       }
-      setOpenFile({ path, ...(line ? { line } : {}), at: Date.now() });
+      // A whole path inside one of the agents' folders (a link an agent wrote to its file) opens there, by its place in it: in a
+      // Crew room, each teammate's folder is its own (Arun, 2026-10-29: links to files drawn as "[blocked]").
+      let at = path;
+      let where = lane;
+      for (const [id, eng] of Object.entries(stateRef.current?.engines ?? {})) {
+        const root = (eng.cwd ?? "").replace(/\/+$/, "");
+        if (root && at.startsWith(`${root}/`)) {
+          at = at.slice(root.length + 1);
+          where ??= id;
+          break;
+        }
+      }
+      setOpenFile({ path: at, ...(line ? { line } : {}), at: Date.now() });
+      setFileLane(where ?? null);
       setTab("tree");
       setBench(true);
       setHistory(false);
@@ -360,7 +386,9 @@ export function SessionView({
   }, [title, attention]);
   // A wait here answered or asked (in this chat, from a toast, on another device): the Waiting on you toasts are read
   // again now, rather than at their next look a quarter of a minute later, so one answered in the chat goes at once.
-  const waits = s.state ? `${Object.values(s.state.approvals).map((a) => a.id).join()}|${Object.values(s.state.openQuestions).map((q) => q.seq).join()}|${Object.values(s.state.asks).map((a) => a.seq).join()}|${s.state.pendingRequests.length}` : "";
+  // Each agent starting or stopping too: the sidebar went on saying "working" for up to 15 seconds after a Stop (Arun, 2026-10-28:
+  // "iron everything and ensure we are good… any logic errors and fixes").
+  const waits = s.state ? `${Object.values(s.state.approvals).map((a) => a.id).join()}|${Object.values(s.state.openQuestions).map((q) => q.seq).join()}|${Object.values(s.state.asks).map((a) => a.seq).join()}|${s.state.pendingRequests.length}|${s.state.run.status}|${Object.values(s.state.laneRuns).map((r) => r.status).join()}` : "";
   const lastWaits = useRef(waits);
   useEffect(() => {
     if (waits === lastWaits.current) return;
@@ -403,7 +431,9 @@ export function SessionView({
   // The agent in view, one choice for the page (agentFocus.ts): the agent the panels follow, and in a split the column in
   // use. Choosing one that no column shows (⌃4, the palette, ⌘J to another agent) goes back to one chat, on it.
   const focused = useFocusedAgent(sid);
+  // A team's room has no folder of its own (teammates.ts): its panels show the lead's, the teammate it writes to.
   let roomLane = "";
+  if (s.state?.options.team) roomLane = s.state.lead ?? s.state.lanes[0]?.id ?? "";
   useEffect(() => {
     if (focused !== ALL && focused !== activeLane) setActiveLane(focused);
     if (cols && !cols.includes(focused)) setColumns(sid, null);
@@ -588,13 +618,16 @@ export function SessionView({
       hubAgents.forEach((a, i) => act(`agent-${a.lane}`, `Go to ${a.name}`, "agent", () => focusAgent(sid, a.lane), i < 9 ? agentKey(i + 1) : undefined));
     }
     if (hubAgents.some((a) => a.needsYou)) act("needs", "Next thing waiting on you", "bell", () => void jumpToNeeds(sid, hubAgents), nextKey());
+    // In Work, its panels are the Browser alone: no Diff, Git, Terminal, Tree or Tasks to open (w1 #5: "Open Diff" opened the Browser).
+    if (st.options.work) list.splice(0, list.length, ...list.filter((a) => !/^s-open-(?!preview$)|^s-file$|^s-history$/.test(a.id)).map((a) => (a.id === "s-open-preview" ? { ...a, label: "Open the browser", icon: "webBrowser" as IconName } : a)));
     onActions(list);
     return () => onActions([]);
   }, [s.state?.driver?.id, s.state?.run.status, s.me?.id, s.me?.role, invites, sid, hubAgents.map((a) => `${a.lane}:${a.name}:${a.needsYou}`).join("|")]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!s.toast) return;
-    const t = setTimeout(s.clearToast, 3500);
+    // Long enough to read: a longer note stays longer.
+    const t = setTimeout(s.clearToast, Math.min(9000, 3000 + s.toast.length * 45));
     return () => clearTimeout(t);
   }, [s.toast]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -609,6 +642,28 @@ export function SessionView({
     setBench(true);
     setHistory(false);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // The pictures agents show here come from this session's files, whatever the page's address says (LiveBlock localPicture).
+  Object.assign(pictureSession, { sid, invite });
+  // An agent's browser tool wants a page in this session's Browser panel (local/desktop-browser.ts): the panel opens on it.
+  useEffect(
+    () =>
+      window.fridayDesktop?.browser?.onOpen((ask) => {
+        if (ask.sid !== sid) return;
+        onOpen("preview");
+        // An empty tab first, else a new one, never one somebody is reading (Preview's "auto").
+        openInPreview(ask.url, sid, "auto");
+      }),
+    [sid, onOpen],
+  );
+  // The sidebar lists Code or Work sessions; opening one of the other kind turns it over, so the session you are in is always
+  // in the list, marked (2026-10-27 design review: a Code session opened while the switch said Work was nowhere in it).
+  const [workMode, setWorkMode] = useWorkMode();
+  const isWork = s.state ? !!s.state.options.work : null;
+  useEffect(() => {
+    if (isWork === null) return;
+    if (isWork) markWorkSession(sid);
+    if (isWork !== workMode) setWorkMode(isWork);
+  }, [sid, isWork]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Opening a session that never says hello (the server down, a proxy in the way) showed the skeleton for good: after a while it
   // says so, with the way to try again (Arun, 2026-10-24: UX gaps).
@@ -636,6 +691,9 @@ export function SessionView({
   );
 
   // Its history went before it was kept anywhere that lasts (Redis evicted it, 2026-10-19): said plainly, with the way to tidy up.
+  // What is still there, in the session's own terms (w3 P2-6).
+  let goneBody = "The server lost it before Friday kept a lasting copy of every session. Your code changes are still in your folder and on their branches, and a Claude Code or Codex conversation can be carried on in a new session.";
+  if (isWorkSid(sid)) goneBody = "The server lost it before Friday kept a lasting copy of every session. Everything the agents saved is still in its folder on your computer, and a new session can carry the work on from there.";
   if (s.conn === "rejected" && s.rejectReason === SESSION_GONE)
     return (
       <div className="grid h-full place-items-center">
@@ -650,7 +708,7 @@ export function SessionView({
             )
           }
         >
-          The server lost it before Friday kept a lasting copy of every session. Your code changes are still in your folder and on their branches, and a Claude Code or Codex conversation can be carried on in a new session.
+          {goneBody}
         </EmptyState>
       </div>
     );
@@ -852,6 +910,7 @@ export function SessionView({
           {/* No "While you were away" card (Arun, 2026-10-21: "get rid of this too"): the feed's "New since you looked" line marks where you left off. */}
           {!replaying && <Banners state={state} me={me} send={send} />}
           {!replaying && <HandoverBanner state={state} me={me} />}
+          {!replaying && state.options.work && <WorkNote sid={sid} />}
           {(() => {
             const column = (lane: string, at: number) => (
               <div key={lane} className={`split-col${activeLane === lane ? " on" : ""}${dropOn?.at === at ? " drop-on" : ""}`} data-col={at}>
@@ -929,12 +988,13 @@ export function SessionView({
             return <Activity {...activityProps} headSlot={headTabs ? agentsSlot : null} />;
           })()}
         </div>
+        {state.options.work && <WorkRail state={state} events={s.events} sid={sid} invite={invite} away={bench} send={send} onBrowser={() => onOpen("preview")} onBrowse={(url) => (onOpen("preview"), openInPreview(url, sid, "auto"))} />}
         <BenchOrHistory
           bench={bench}
         >
           <Workbench
             open={bench}
-            {...(split ? { lane: activeLane } : focused !== ALL ? { lane: focused } : roomLane ? { lane: roomLane } : {})}
+            {...(fileLane && bench ? { lane: fileLane } : split ? { lane: activeLane } : focused !== ALL ? { lane: focused } : roomLane ? { lane: roomLane } : {})}
             state={state}
             events={s.events}
             identity={identity}
@@ -954,7 +1014,7 @@ export function SessionView({
                 // A preference; losing it costs nothing.
               }
             }}
-            onClose={() => (setBench(false), setPicking(false))}
+            onClose={() => (setBench(false), setPicking(false), setFileLane(null))}
             picking={picking}
             onPick={pickPanel}
             onPicker={() => setPicking(true)}
@@ -982,6 +1042,11 @@ export function SessionView({
           </div>
         ))}
       {focus &&
+        // A team's chats have no coding status bar: what each teammate is on is in its header and the sidebar (teammates.ts).
+        !s.state.options.team &&
+        (s.state.options.work ? (
+          <WorkBar state={s.state} events={s.events} me={s.me.id} sid={sid} invite={invite} slot={setStatusSlot} onRail={() => setBench(false)} />
+        ) : (
         <StatusBar
           state={s.state}
           events={s.events}
@@ -991,6 +1056,8 @@ export function SessionView({
           where={<Where state={s.state} sid={sid} invite={invite} send={send} />}
           environment={<EnvironmentButton state={s.state} me={s.me.id} sid={sid} invite={invite} identity={identity} onOpen={(tab) => (setTab(tab), setBench(true), setHistory(false))} />}
         />
+        )
+        )
       }
       {/* No toast across the foot of the session any more (Arun, 2026-10-23: "get rid of the toast thing that appears in the
           middle of the coding session at the bottom"): it stood over the conversation and the message box. Still said to a
@@ -998,6 +1065,8 @@ export function SessionView({
       <div className="sr-only" role="status" aria-live="polite">
         {s.toast}
       </div>
+      {/* And shown, small, beside what was pressed: a failed Rewind or a Sign in said nothing anyone could see (ui.tsx ActionNote). */}
+      <ActionNote text={s.toast} />
     </div>
     </FocusContext.Provider>
     </AgentsContext.Provider>
@@ -1314,8 +1383,12 @@ function TopBar({
   };
 }) {
   let shownTitle = state.title;
+  // The team (Teammates.tsx) is titled for who is in view: the Team room, or the teammate whose chat it is.
+  shownTitle = teamTitle(state, useFocusedAgent(state.id));
   const named = shownTitle !== state.title;
   let gear = true;
+  // A team's chat has no session settings to show (Arun, 2026-10-27: "get rid of this too"): its teammates' are in their dialogs.
+  if (state.options.team) gear = false;
   const [settings, setSettings] = useState(false);
   const [editing, setEditing] = useState(false);
   const [meterOn, setMeterOn] = useState(() => localStorage.getItem("mpa.meter") === "1");
@@ -1340,6 +1413,8 @@ function TopBar({
             maxLength={120}
             onSave={(t) => {
               send({ type: "settings.update", title: t });
+              // A room's sidebar row reads its new name at once, not at the next look.
+              if (state.options.team) setTimeout(() => dispatchEvent(new Event("friday:teammates")), 400);
               setEditing(false);
             }}
             onCancel={() => setEditing(false)}
@@ -1355,6 +1430,7 @@ function TopBar({
             {shownTitle}
           </h1>
         )}
+        {state.options.team && !editing && <TeamFaces sid={state.id} lead={state.lead ?? null} />}
         {/* Only when something needs a person. "Working" and "Idle" were a permanent
             tag saying the ordinary thing was happening, and "Stopped" was a red
             mark by the title for a run that had said so in the conversation. */}
@@ -1430,6 +1506,11 @@ function TopBar({
             content in the people's dropdown"); on Solo it was the only way to them, so the People panel is there on Solo too. */}
         {/* The local edition's in its place: this session's settings, and the line about Friday Team (SessionMenu). */}
         {isLocal() && gear && <SessionMenu settings={owner ? <SettingsBody solo state={state} send={send} meter={{ on: meterOn, set: (v) => (setMeterOn(v), localStorage.setItem("mpa.meter", v ? "1" : "0")) }} /> : undefined} />}
+        {/* A room's settings with the header's other buttons, where a Code session has its gear, rather than an "…" beside its name (Arun, 2026-10-27: "place the edit room button somewhere better"). */}
+        {/* The team's own: its threads, its board, Stop all while anyone works, and Away / Pause (TeamControls.tsx; Arun, 2026-10-28). */}
+        {state.options.team && <TeamHeaderControls identity={identity} state={state} events={events} send={send} notify={notify} />}
+        {state.options.team && <RoomMenu identity={identity} sid={state.id} notify={notify} />}
+        {state.options.work && <button type="button" className={`panel-tab icon work-browser-btn ${view.bench && view.tab === "preview" ? "on" : ""}`} aria-pressed={view.bench && view.tab === "preview"} aria-label={view.bench && view.tab === "preview" ? "Close the browser" : "Open the browser"} title={view.bench && view.tab === "preview" ? "Close the browser" : "Browser: the pages the agents open, and any you want"} onClick={() => view.onTab("preview")}><Icon name="webBrowser" size={17} /></button>}
         {/* One button for the side panel, where the panels are a card to pick from (Workbench), in place of a row of four and a
             "⋯" here (Arun, 2026-10-24: "using this svg icon make it be the side panel button and on the side panel open it will
             have a card with the options for tasks, diff, terminal, etc"). What they hold still shows: the diff's count, a dot while
@@ -1524,10 +1605,22 @@ function useCentredTabs(slot: HTMLElement | null) {
       const r = row.getBoundingClientRect();
       const t = title.getBoundingClientRect();
       const mid = p.left + p.width / 2;
-      const half = Math.min(mid - (t.left + TITLE_MIN + TABS_GAP), r.right - TABS_GAP - mid);
-      if (half < 140) return void row.classList.remove("tabs-centred");
-      slot.style.left = `${mid - half - r.left}px`;
-      slot.style.width = `${half * 2}px`;
+      // The room the tabs may take: from past the name's least to the row's end. Centred on the pane while they fit either side
+      // of its middle; when one side is short (the Work rail docked beside the pane), they slide toward the free side rather
+      // than being cut to twice the shorter half (2026-10-29: "All age…" / "Claude …" with about 190px free at 1440).
+      const lo = t.left + TITLE_MIN + TABS_GAP;
+      const hi = r.right - TABS_GAP;
+      if (hi - lo < 280) return void (row.classList.remove("tabs-centred"), delete slot.dataset.room);
+      // The whole room, for the tab bar to count its tabs against (Activity.tsx): sized to the tabs it shows, the slot alone
+      // never had room for one it had folded away, so Claude Code stayed under "+1" with half the header free (Arun,
+      // 2026-10-29: "why cant i see the claude coding tab in the header? there is enough space for it").
+      const room = String(Math.floor(hi - lo));
+      if (slot.dataset.room !== room) slot.dataset.room = room;
+      const need = Math.ceil(Math.max(bar.getBoundingClientRect().width, bar.scrollWidth));
+      const w = Math.min(need, hi - lo);
+      const left = Math.max(lo, Math.min(mid - w / 2, hi - w));
+      slot.style.left = `${left - r.left}px`;
+      slot.style.width = `${w}px`;
       // What the tabs take now they're placed, and the name stops short of them, less what sits beside it (a status, faces).
       const parts = [...bar.children].map((c) => c.getBoundingClientRect()).filter((b) => b.width > 0);
       const start = parts.length ? Math.min(...parts.map((b) => b.left)) : mid;
@@ -1548,6 +1641,7 @@ function useCentredTabs(slot: HTMLElement | null) {
       changes.disconnect();
       row.classList.remove("tabs-centred");
       slot.style.left = slot.style.width = "";
+      delete slot.dataset.room;
     };
   }, [slot]);
 }
@@ -1738,7 +1832,7 @@ function SettingsBody({ state, send, meter, solo = false }: { state: SessionStat
       <div className="set-row">
         <div>
           <div className="set-label">Show time and usage</div>
-          <div className="muted small">Time and tokens for the current run, in the header.</div>
+          <div className="muted small">Time and tokens for the current run, in every session's header.</div>
         </div>
         <Switch on={meter.on} label="Show time and usage" onChange={meter.set} />
       </div>

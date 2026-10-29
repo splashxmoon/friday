@@ -1,4 +1,5 @@
 import "./awake.js";
+import { leaving, leavingByHistory } from "./leave-guard.js";
 import { AgentImport } from "./AgentImport.js";
 import { askPage } from "./intent.js";
 import { Tooltips } from "./Tooltips.js";
@@ -7,6 +8,10 @@ import { BuildWatch } from "./BuildWatch.js";
 import type { Role } from "../types.js";
 import { lazy, Suspense, type ComponentProps, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { isNarrow } from "./narrow.js";
+import { SideRail } from "./SideRail.js";
+import { TeamHome, useTeamTab } from "./Teammates.js";
+import { usePlaceFollows, usePlaceLeaves, useWorkSessions } from "./WorkMode.js";
+import { useAutomationsView, useWorkflowNotices } from "./team-workflow-view.js";
 import type { AgentView, PersonListing } from "../agents.js";
 import type { CollectionView, SkillView } from "../skills.js";
 import type { McpPublic } from "../mcp-types.js";
@@ -44,12 +49,14 @@ function SessionView(p: ComponentProps<typeof LazySessionView>) {
 // Only for someone opening a recording link, who has no account and needs nothing else here.
 const Board = lazy(() => pages.board().then((m) => ({ default: m.Board })));
 const AutomationsPage = lazy(() => pages.automations().then((m) => ({ default: m.AutomationsPage })));
+const TeamWorkflowsPage = lazy(() => import("./TeamWorkflows.js").then((m) => ({ default: m.TeamWorkflowsPage })));
 const CodeReview = lazy(() => pages.review().then((m) => ({ default: m.CodeReview })));
 import { WindowNav } from "./WindowNav.js";
 import { askToShowDiff } from "./focusDiff.js";
 import { AgentForm } from "./AgentDialogs.js";
 import { SettingsPage, settingsSection } from "./Settings.js";
 import { chooseTheme } from "./prefs.js";
+import { applyTheme, readTheme } from "./theme.js";
 const UsagePage = lazy(() => pages.usage().then((m) => ({ default: m.UsagePage })));
 import { isLocal, ownModel, planLimits, planNow } from "./edition.js";
 import type { SkillTemplate } from "../skill-catalog.js";
@@ -78,6 +85,7 @@ import {
 } from "./storage.js";
 import { inBand, isTyping, PageSkeleton, SessionSkeleton, useConfirm, useDismiss, type MenuItem } from "./ui.js";
 import { WaitingOnYou, askToNotify, useAttention } from "./Attention.js";
+import { clearUnread, markUnread, workingChanges } from "./unread.js";
 
 /**
  * The desktop app linking this computer to the hosted Friday, and why signing out of it didn't work (desktop-link.ts). The local
@@ -229,6 +237,13 @@ export function App() {
   const [mac, setMac] = useState(false);
   const [projects, setProjects] = useState<Project[]>(loadProjects);
   const [layout, setLayoutState] = useState<Layout>(loadLayout);
+  /** A window narrow enough that the list floats over the page (narrow.ts), kept as the window is resized. */
+  const [narrowNow, setNarrowNow] = useState(() => isNarrow(innerWidth));
+  useEffect(() => {
+    const on = () => setNarrowNow(isNarrow(innerWidth));
+    addEventListener("resize", on);
+    return () => removeEventListener("resize", on);
+  }, []);
   const [connections, setConnections] = useState<McpPublic[]>([]);
   // Where you are the thing that is missing, across every session you know of.
   // On Solo the sessions list says what each one is doing (which tool, and what it is at), not the last thing you typed.
@@ -239,6 +254,29 @@ export function App() {
   useEffect(() => {
     if (attention.items.length) askToNotify();
   }, [attention.items.length]);
+  // A session's place in the list is when something last happened in it (its agents starting or finishing), not when it was last
+  // looked at; and one that finished while you were elsewhere is marked until you open it (unread.ts). Opening a session moved it
+  // to the top, so the list followed what you read (Arun, 2026-10-28: "iron everything and ensure we are good… any logic errors").
+  const wasWorking = useRef<Set<string> | null>(null);
+  const workingKey = [...attention.working.keys()].sort().join(",");
+  useEffect(() => {
+    const is = new Set(attention.working.keys());
+    const was = wasWorking.current;
+    wasWorking.current = is;
+    if (!was) return;
+    const { finished, started } = workingChanges(was, is);
+    const here = route.kind === "session" ? route.sid : "";
+    markUnread(finished.filter((sid) => sid !== here));
+    const moved = new Set([...finished, ...started]);
+    if (!moved.size) return;
+    const at = Date.now();
+    setRecents((prev) => {
+      if (!prev.some((r) => moved.has(r.sid))) return prev;
+      const next = prev.map((r) => (moved.has(r.sid) ? { ...r, openedAt: at } : r));
+      saveRecents(next);
+      return next;
+    });
+  }, [workingKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const [agents, setAgents] = useState<AgentView[]>([]);
   const [skills, setSkills] = useState<SkillView[]>([]);
   const [collections, setCollections] = useState<CollectionView[]>([]);
@@ -295,12 +333,29 @@ export function App() {
     const t = setTimeout(() => setNotice(""), 6000);
     return () => clearTimeout(t);
   }, [notice]);
+  // A line any part of the app can say here, in place of the browser's own alert, which froze the page until answered (Arun,
+  // 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL"; a fork that couldn't be made raised one).
+  useEffect(() => {
+    const on = (e: Event) => {
+      const text = String((e as CustomEvent<string>).detail ?? "");
+      if (!text) return;
+      setNotice("");
+      setTimeout(() => setNotice(text), 0);
+    };
+    addEventListener("friday:notice", on);
+    return () => removeEventListener("friday:notice", on);
+  }, []);
 
   /** The list as it was saved, while a narrow window has it folded for now (below); null once the person chooses. */
   const keptOpen = useRef<boolean | null>(null);
   const setLayout = useCallback((patch: Partial<Layout>) => {
-    if ("sidebarCollapsed" in patch) keptOpen.current = null;
     setLayoutState((l) => {
+      // Opening or closing the floating list in a narrow window is for now: the wide window keeps the list as it was left there
+      // (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL"; closing it at 1000px folded it at 1500 too).
+      if ("sidebarCollapsed" in patch) {
+        if (!isNarrow(innerWidth)) keptOpen.current = null;
+        else if (keptOpen.current === null) keptOpen.current = l.sidebarCollapsed;
+      }
       const next = { ...l, ...patch };
       saveLayout(keptOpen.current === null ? next : { ...next, sidebarCollapsed: keptOpen.current });
       return next;
@@ -309,14 +364,24 @@ export function App() {
   // A narrow or zoomed window opens on the page, with the chat list folded: open, it floats over everything and the
   // page behind it can't be used until it is closed (Testing F-20). The list button and ⌘B bring it back. Not saved, so
   // the same person in a wide window gets the list as they left it.
+  // The same when the window is made narrow with the list open (QA round 2, verify-report: resizing from 1500 to 1000 left the
+  // whole list floating over the page with nothing behind it).
   useEffect(() => {
-    if (!isNarrow(innerWidth)) return;
+    if (!narrowNow) return;
     setLayoutState((l) => {
       if (l.sidebarCollapsed) return l;
       keptOpen.current = l.sidebarCollapsed;
       return { ...l, sidebarCollapsed: true };
     });
-  }, []);
+  }, [narrowNow]);
+  // Wide again, the list is as it was left in a wide window: folded for the narrow one, it stayed folded at 1500 (QA, 2026-10-28;
+  // Arun: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+  useEffect(() => {
+    if (narrowNow || keptOpen.current === null) return;
+    const was = keptOpen.current;
+    keptOpen.current = null;
+    setLayoutState((l) => (l.sidebarCollapsed === was ? l : { ...l, sidebarCollapsed: was }));
+  }, [narrowNow]);
 
   // What each loader last brought back, so an answer that changed nothing doesn't redraw the whole app (these run every
   // thirty seconds and on every return to the window, and each new array redrew every page and the open session).
@@ -388,6 +453,7 @@ export function App() {
     let watch: MutationObserver | undefined;
     let layout: MutationObserver | undefined;
     let unlisten: (() => void) | undefined;
+    let offFull: (() => void) | undefined;
     const later: number[] = [];
     const arm = () => {
       if (armed) return;
@@ -401,6 +467,14 @@ export function App() {
         // An app that moved its window buttons lower says so, and the toolbar and header move down with them.
         if (d?.trafficLightY) root.classList.add("lights-low");
         setMac(true);
+        // In full screen macOS hides the traffic lights, so the back and forward buttons and the header beside them move into
+        // the room kept for them (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL"). Read from the page, so
+        // it holds for every build of the app: a full-screen window fills the whole screen, menu bar included, which a
+        // maximised one never does.
+        const full = () => root.classList.toggle("win-full", window.outerWidth >= screen.width - 1 && window.outerHeight >= screen.height - 1);
+        full();
+        window.addEventListener("resize", full);
+        offFull = () => window.removeEventListener("resize", full);
       }
       // The window's drag rectangles go stale: Chromium recomputes them when a region's own style changes, not reliably when a
       // box that opted out goes away. Every dialog and menu opts out, and a full-screen overlay covers the band while it is open;
@@ -482,9 +556,10 @@ export function App() {
       watch?.disconnect();
       layout?.disconnect();
       unlisten?.();
+      offFull?.();
       clearTimeout(timer);
       cancelAnimationFrame(frame);
-      root.classList.remove("desktop", "desktop-mac", "lights-low", "drag-nudge", "drag-debug");
+      root.classList.remove("desktop", "desktop-mac", "lights-low", "win-full", "drag-nudge", "drag-debug");
       document.getElementById("drag-debug")?.remove();
     };
   }, []);
@@ -645,13 +720,16 @@ export function App() {
   }, [route.kind, reloadConnections, reloadAgents, reloadSkills]);
 
   useEffect(() => {
-    const onPop = () => setRoute(readRoute());
+    // Unsaved work on screen asks first, Back included (leave-guard.ts).
+    const onPop = () => void (!leavingByHistory() && setRoute(readRoute()));
     addEventListener("popstate", onPop);
     return () => removeEventListener("popstate", onPop);
   }, []);
 
   const navigate = useCallback(
     (r: Route) => {
+      // Unsaved work on screen (a workflow's builder) asks before it is left, then comes back here (leave-guard.ts).
+      if (leaving(() => navigateRef.current(r))) return;
       // The page you are on, asked for again (its sidebar button pressed while inside one of its own screens, say an
       // automation's editor): it goes back to its own top (2026-10-27 audit: the button did nothing there).
       if (r.kind !== "session" && parseRoute(location.search).kind === r.kind) dispatchEvent(new CustomEvent("friday:same-page", { detail: r.kind }));
@@ -662,6 +740,8 @@ export function App() {
     },
     [setLayout],
   );
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
 
   // ── Solo ⇄ Team, in place (workspaceSwitch.ts) ──
   // The pages are drawn afresh after a switch (keyed on this), so whatever each read for itself is read again in the new
@@ -757,8 +837,10 @@ export function App() {
       // ⌘⌥1–9: the sidebar's sessions, in the order it shows them (⌘1–4 are a session's panels). By the key, not the character:
       // ⌥ turns 1 into ¡ on a Mac.
       if (mod && e.altKey && !e.shiftKey && /^Digit[1-9]$/.test(e.code)) {
-        const rows = [...document.querySelectorAll<HTMLElement>(".dass-row[data-sid]")].filter((el) => el.offsetParent !== null);
-        if (go(rows[Number(e.code.slice(5)) - 1]?.dataset.sid)) e.preventDefault();
+        // Each session once: one waiting on you shows in Needs you and again in its group, and ⌘⌥1 and ⌘⌥2 both opened it (Arun,
+        // 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+        const sids = [...new Set([...document.querySelectorAll<HTMLElement>(".dass-row[data-sid]")].filter((el) => el.offsetParent !== null).map((el) => el.dataset.sid!))];
+        if (go(sids[Number(e.code.slice(5)) - 1])) e.preventDefault();
         return;
       }
       // Ctrl+Tab: back to the session you were in before this one, as an editor flips between its last two files; ⇧ goes on
@@ -819,6 +901,8 @@ export function App() {
   }, [navigate, setLayout]);
 
   // ── sidebar data ──
+  /** A session started from a project's "New session here", for the project it goes in once it is first seen. */
+  const fileInto = useRef<{ sid: string; projectId: string } | null>(null);
   const remember = useCallback(
     (entry: RecentSession) => {
       setRecents((prev) => {
@@ -827,7 +911,9 @@ export function App() {
           {
             ...old,
             ...entry,
-            projectId: entry.projectId ?? old?.projectId,
+            // Looking at a session doesn't move it in the list: what happens in it does (above). A new one is placed as it opens.
+            openedAt: old?.openedAt ?? entry.openedAt,
+            projectId: entry.projectId ?? old?.projectId ?? (fileInto.current?.sid === entry.sid ? fileInto.current.projectId : undefined),
             // A name given in the sidebar is kept until the session's own title changes: renamed in the session, that is the
             // newest name and the list shows it (Arun, 2026-10-24: "if i update the session title in the coding session it
             // auto updates for the side bar too"). It had gone on showing the sidebar's name over it.
@@ -843,7 +929,7 @@ export function App() {
     },
     [],
   );
-  // A fork is filed straight under the chat it came from (the list is newest first, so one tick older), and not opened.
+  // A fork is filed straight under the chat it came from (the list is newest first, so one tick older); forkSession opens it.
   useEffect(() => {
     const on = (e: Event) => {
       const f = (e as CustomEvent<{ from: string; sid: string; invite: string; title: string }>).detail;
@@ -869,6 +955,13 @@ export function App() {
     };
     window.addEventListener("friday:open-session", on);
     return () => window.removeEventListener("friday:open-session", on);
+  }, [navigate]);
+  // The last teammate removed from the Team room: the Team tab's first run, not an empty room (Arun, 2026-10-28: "really iron
+  // out bugs and feature problems and gaps").
+  useEffect(() => {
+    const home = () => navigate({ kind: "home" });
+    addEventListener("friday:team-home", home);
+    return () => removeEventListener("friday:team-home", home);
   }, [navigate]);
   const updateRecent = (sid: string, patch: Partial<RecentSession>) =>
     setRecents((prev) => {
@@ -936,12 +1029,20 @@ export function App() {
   };
 
   const activeSid = route.kind === "session" ? route.sid : null;
+  useEffect(() => void (activeSid && clearUnread(activeSid)), [activeSid]);
   // The session somebody was last working in: where the Team library's "Use as context" puts a brief.
   const lastSession = useRef<{ sid: string; invite: string } | null>(null);
   if (route.kind === "session") lastSession.current = { sid: route.sid, invite: route.invite };
   // The chat list belongs to Chat. It sits beside the rail for a chat or the
   // new-chat page and is gone everywhere else, where there is nothing to list;
   // folding it away is a preference of its own, kept for when you come back.
+  const [teamTabOn] = useTeamTab();
+  const [autoView, setAutoView] = useAutomationsView();
+  useWorkflowNotices();
+  // Which sessions are which, read from the server here whatever shows: with the sidebar folded nothing else asked (2026-10-28).
+  useWorkSessions(identity);
+  usePlaceFollows(activeSid);
+  usePlaceLeaves(activeSid, () => navigate({ kind: "home" }));
   const inChat = route.kind === "home" || route.kind === "session";
   const inAgents = route.kind === "agents";
   // "new" is the builder with nothing yet; with no agents at all it is the only page there is.
@@ -1005,9 +1106,11 @@ export function App() {
     if (!panelOpen || !matchMedia("(max-width: 1000px)").matches) return;
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const panel = () => document.querySelector<HTMLElement>(".sb-panel");
+    // Onto the session open, else New session: the first button was Search, whose tip then sat over the Code, Work and Crew tabs
+    // and took the first Escape (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
     const t = setTimeout(() => {
       const p = panel();
-      if (p && !p.contains(document.activeElement)) p.querySelector<HTMLElement>("button, a[href], [tabindex='0']")?.focus();
+      if (p && !p.contains(document.activeElement)) (p.querySelector<HTMLElement>(".dass-row[data-sid][aria-current='page']") ?? p.querySelector<HTMLElement>(".sb-new") ?? p.querySelector<HTMLElement>("button, a[href], [tabindex='0']"))?.focus();
     }, 0);
     const esc = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented || document.querySelector("[role='menu'], [role='dialog']")) return;
@@ -1100,6 +1203,7 @@ export function App() {
           agentMenu={agentMenu}
           activeSid={activeSid}
           view={route.kind}
+          draftProject={route.kind === "home" ? route.projectId : undefined}
           onNew={(projectId) => navigate({ kind: "home", projectId })}
           onOpen={(r) => navigate({ kind: "session", sid: r.sid, invite: r.invite })}
           onOpenAutomations={() => navigate({ kind: "automations" })}
@@ -1134,7 +1238,9 @@ export function App() {
         />
         {/* Only where the list floats over the page, so clicking off it puts it away. */}
         {panelOpen && <div className="sb-backdrop" onClick={() => setLayout({ sidebarCollapsed: true })} />}
-        {/* Folded, the sidebar leaves a rail in its place: places, a new session, what is going on (SideRail.tsx). */}
+        {/* Folded, the sidebar leaves a rail in its place: places, a new session, what is going on. In a narrow window the list
+            floats over the page beside it, so the rail stays and the page doesn't move (Arun, 2026-10-28). */}
+        {(!panelOpen || narrowNow) && identity.id && <SideRail attention={attention} recents={recents} activeSid={activeSid} view={route.kind} onOpen={(r) => navigate({ kind: "session", sid: r.sid, invite: r.invite })} onNew={() => navigate({ kind: "home" })} onShow={togglePanel} shown={panelOpen} onPage={(p) => (p === "settings" ? navigate({ kind: "settings", section: lastSettings.current }) : navigate({ kind: p }))} />}
       </>
       <main id="main" className="main" tabIndex={-1}>
         {/* Someone new is set up first (this computer, its coding tools, GitHub), not toured: the tour waits behind it. */}
@@ -1144,6 +1250,7 @@ export function App() {
         {/* Keyed on the workspace switches: every page is drawn again in the new workspace, and reads its own lists again. */}
         <Suspense key={switches} fallback={route.kind === "session" ? <SessionSkeleton /> : <PageSkeleton />}>
         {!identity.id ? null : route.kind === "home" ? (
+          teamTabOn ? <TeamHome identity={identity} onOpen={(r) => navigate({ kind: "session", sid: r.sid, invite: r.invite })} /> :
           <Code
             // Not keyed on the preset: the composer clears it once read, and a key that changed then remounted it empty.
             // Nor on the workspace's defaults: rebuilt when they arrived, it lost the picked folder. Code takes them as they come.
@@ -1156,7 +1263,12 @@ export function App() {
             onPresetUsed={() => setPreset(null)}
             initialAgentId={route.agentId}
             {...(route.resume ? { resumeLink: route.resume } : {})}
-            onStart={(sid, invite) => navigate({ kind: "session", sid, invite })}
+            onStart={(sid, invite) => {
+              // Started from a project's "New session here": filed in it as it opens (Arun, 2026-10-28: "TEST EVERYTHING… EVERY
+              // INTERACTION, EVERY VISUAL"; it went to Recent).
+              if (route.projectId && projects.some((x) => x.id === route.projectId)) fileInto.current = { sid, projectId: route.projectId };
+              navigate({ kind: "session", sid, invite });
+            }}
             recents={recents}
             onOpenBoard={() => navigate({ kind: "board" })}
           />
@@ -1185,7 +1297,10 @@ export function App() {
             onDocChange={(d) => setLayout({ ...(d.open !== undefined ? { docOpen: d.open } : {}), ...(d.width !== undefined ? { docWidth: d.width } : {}) })}
           />
         ) : route.kind === "automations" ? (
+          // With the Team tab on, the team's own: its workflows (TeamWorkflows.tsx), with a way across to these.
+          teamTabOn && autoView === "workflows" ? <TeamWorkflowsPage identity={identity} onCoding={() => setAutoView("coding")} /> :
           <AutomationsPage
+            onTeamWorkflows={teamTabOn ? () => setAutoView("workflows") : undefined}
             identity={identity}
             agents={agents}
             recents={recents}
@@ -1274,7 +1389,8 @@ export function App() {
             toggleSidebar: () => setLayout({ sidebarCollapsed: !layoutRef.current.sidebarCollapsed }),
             showShortcuts: () => setShortcuts(true),
             search: () => setSearch(true),
-            look: (l) => chooseTheme(l),
+            // Friday's own light or dark, as Settings' and the sidebar's do: a colour theme on comes off, or Nord stayed (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+            look: (l) => (readTheme() && applyTheme(null), chooseTheme(l)),
             team: planLimits(planNow(workspace)).team,
             ...(isLocal() ? {} : { newAgent: () => (navigate({ kind: "agents" }), setAgentSel("new")), invite: () => (askPage("invite"), navigate({ kind: "people" })) }),
             local: isLocal(),

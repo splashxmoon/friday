@@ -15,6 +15,13 @@ export type ThemeChoice = "system" | "light" | "dark";
 export type TextSize = "90" | "100" | "110" | "120";
 /** How a Solo session is laid out: Focus (the status bar along the foot, a wider column) or Classic (as it was before). */
 export type SessionLayout = "focus" | "classic";
+/** The colour of the one primary button and of what is chosen in a picker (Settings › Appearance, after Synara's token set;
+    Arun, 2026-10-29: "so clean and beautiful really with a clear direction in design language"). "ink" is Friday's own: the
+    white pill in dark, the black one in light. None of them is a state colour: blue is working, green done, amber waiting. */
+export type Accent = "ink" | "violet" | "indigo" | "teal" | "rose";
+export const ACCENTS: readonly Accent[] = ["ink", "violet", "indigo", "teal", "rose"];
+/** Standard, or more: firmer hairlines and a step more ink in the greys, for a bright room or tired eyes. */
+export type Contrast = "standard" | "more";
 
 const KEYS = {
   theme: "mpa.theme",
@@ -25,6 +32,8 @@ const KEYS = {
   folders: "mpa.folders",
   layout: "mpa.layout",
   sessionLayout: "mpa.sessionLayout",
+  accent: "mpa.accent",
+  contrast: "mpa.contrast",
 } as const;
 
 /** What an import may write: these keys and nothing else, whatever the file says. */
@@ -98,6 +107,20 @@ export function chooseSessionLayout(l: SessionLayout): void {
   dispatchEvent(new Event("friday:layout"));
 }
 
+export const accent = (): Accent => {
+  const v = read(KEYS.accent);
+  return (ACCENTS as readonly string[]).includes(v ?? "") ? (v as Accent) : "ink";
+};
+export function chooseAccent(a: Accent): void {
+  write(KEYS.accent, a === "ink" ? null : a);
+  applyPrefs();
+}
+export const contrast = (): Contrast => (read(KEYS.contrast) === "more" ? "more" : "standard");
+export function chooseContrast(c: Contrast): void {
+  write(KEYS.contrast, c === "more" ? "more" : null);
+  applyPrefs();
+}
+
 /** On unless switched off: a notification you never asked for is worse than one you can mute. */
 export const notificationsOn = () => read(KEYS.notify) !== "0";
 export const chooseNotifications = (on: boolean) => write(KEYS.notify, on ? null : "0");
@@ -115,6 +138,30 @@ export function applyPrefs(): void {
   // the window's foot at any size but 100% and the status bar was cut off (2026-10-27 audit). style.css divides by it.
   root.style.setProperty("--ui-zoom", textSize() === "100" ? "" : `${Number(textSize()) / 100}`);
   root.classList.toggle("reduce-motion", reduceMotion());
+  // The accent and contrast are style.css's (:root[data-accent], html.contrast-more); a colour theme's own accent still wins.
+  if (accent() === "ink") delete root.dataset.accent;
+  else root.dataset.accent = accent();
+  root.classList.toggle("contrast-more", contrast() === "more");
+  followSystemTheme();
+}
+
+/**
+ * System follows the computer while the app is open, not only when it loads: the page stayed light after the computer went
+ * dark (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL"). A colour theme of one's own keeps its look.
+ */
+let following = false;
+function followSystemTheme(): void {
+  if (following || typeof matchMedia !== "function") return;
+  following = true;
+  const light = matchMedia("(prefers-color-scheme: light)");
+  const sync = () => {
+    if (themeChoice() !== "system" || readTheme()) return;
+    if (document.documentElement.classList.contains("dark") === light.matches) chooseTheme("system");
+  };
+  light.addEventListener("change", sync);
+  // And on coming back to the window, for a change the page wasn't told of while it was in the background.
+  addEventListener("focus", sync);
+  document.addEventListener("visibilitychange", sync);
 }
 
 export interface PrefsFile {
@@ -162,7 +209,7 @@ export function importPrefs(text: string): number {
 /** Back to how it looked on first launch. Leaves recent folders and the account alone. */
 export function resetPrefs(): void {
   // All of it, as its note says: the sound, the colour theme and the fonts too, which it used to leave behind (2026-10-27 audit).
-  for (const k of [KEYS.theme, KEYS.textSize, KEYS.reduceMotion, KEYS.notify, KEYS.chime, KEYS.layout, KEYS.sessionLayout]) write(k, null);
+  for (const k of [KEYS.theme, KEYS.textSize, KEYS.reduceMotion, KEYS.notify, KEYS.chime, KEYS.layout, KEYS.sessionLayout, KEYS.accent, KEYS.contrast]) write(k, null);
   applyTheme(null);
   applyFonts({});
   applyPrefs();

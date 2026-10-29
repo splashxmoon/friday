@@ -99,6 +99,7 @@ export function DiffView({
   marked,
   by,
   note,
+  total,
 }: {
   path: string;
   /** Said after the path when there is something to say about the change itself ("cut short"). */
@@ -121,6 +122,9 @@ export function DiffView({
   by?: (line: DiffLine) => string | null;
   /** A word on the change itself for the header ("2 lines by hand (Ada)"). */
   note?: string;
+  /** The file's own count of lines added and taken out, when the change set has one: its header says what the change set's
+   *  totals add up from, a patch cut short included (2026-10-28 QA: "2 files +13 −1" over files reading +3 −2 and +0 −0). */
+  total?: { additions: number; deletions: number };
   copyText?: string;
   /** Reviewed already: shown ticked, and folded away when it becomes so. */
   viewed?: boolean;
@@ -168,8 +172,8 @@ export function DiffView({
     if (viewed && !wasViewed.current) setOpen(false);
     wasViewed.current = !!viewed;
   }, [viewed]);
-  const added = lines.filter((l) => l.type === "added").length;
-  const removed = lines.filter((l) => l.type === "removed").length;
+  const added = total?.additions ?? lines.filter((l) => l.type === "added").length;
+  const removed = total?.deletions ?? lines.filter((l) => l.type === "removed").length;
   // Syntax colours, so a diff reads as code and not as a wall of one colour.
   // Tokenised once for the whole file; each row takes its own line's tokens.
   const language = languageFor(path);

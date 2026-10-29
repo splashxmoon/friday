@@ -215,6 +215,8 @@ class ClaudeTurn extends KeptTurn {
   pid: number | undefined = undefined;
   /** Messages sent to it while it runs (WarmClaude.steer) that it hasn't read yet: until it has, its turn isn't over. */
   steering: string[] = [];
+  /** Asked to stop (Ctrl-C's interrupt): a message sent mid-turn that it hasn't read by its result is not to be started on. */
+  stopping = false;
   /** How a kill reaches whatever is running this turn. */
   onKill: (signal: NodeJS.Signals | number) => boolean = () => false;
 
@@ -335,6 +337,7 @@ export class WarmClaude {
     t.onKill = (signal) => {
       if (signal === "SIGINT") {
         // Claude Code's own way of stopping a turn: what Ctrl-C does at its prompt, and the process stays for the next.
+        t.stopping = true;
         proc.stdin!.write(`${JSON.stringify({ type: "control_request", request_id: randomUUID(), request: { subtype: "interrupt" } })}\n`);
         return true;
       }
@@ -434,7 +437,18 @@ export class WarmClaude {
       }
       // Its result while a message sent mid-turn is still unread: it reads that next and answers it in a turn of its own,
       // whose result ends this one. Ended here, that answer went to nobody.
-      if (t.steering.length && l.includes('"result"') && parse(l)?.type === "result") return;
+      if (t.steering.length && l.includes('"result"') && parse(l)?.type === "result") {
+        if (!t.stopping) return;
+        // Stopped with a message sent mid-turn still unread (a redirect, then Stop): Claude Code would read it next and start on
+        // it, a turn after the Stop that nobody waits for, whose first words took the place of what the stopped turn had written.
+        // The turn ends at this result, and the process goes with the unread message; the next turn carries on with --resume
+        // (Arun, 2026-10-28: "iron everything and ensure we are good").
+        t.line(l);
+        this.turn = null;
+        t.end(0, null);
+        this.drop();
+        return;
+      }
       t.line(l);
       // Held for its background tasks, and they are done: it carries on by itself, and is ended if it then says nothing.
       if (t.held && !background.size) {

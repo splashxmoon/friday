@@ -2,6 +2,7 @@ import { useContext, useEffect, useState } from "react";
 import type { ToolContext } from "../runner/context-report.js";
 import { PatchSource } from "./patchSource.js";
 import { ENGINE_MODEL_INFO, ENGINE_NAMES, ENGINE_TOOLS, MAIN_LANE, TOOL_INFO, type EngineTool, type SessionEvent } from "../types.js";
+import { clockUntil } from "../limit-reset.js";
 import type { Limits } from "../runner/limits.js";
 import { EngineMark } from "./BrandMarks.js";
 import { Icon } from "./icons.js";
@@ -136,7 +137,7 @@ export function glanceOf(limits: Read): Record<EngineTool, Glance> {
       // Out until a time that has passed is back: a reading kept from then (this page's cache too) no longer says it is out
       // (2026-10-27 audit: "Out until 3:00 PM" stood red after three).
       const back = !!a.outUntil && a.outUntil <= Date.now();
-      if (a.out && !back) return [{ label: a.label, used: 100, resets: "", text: a.outUntil ? `Out until ${new Date(a.outUntil).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "Out of usage", win: "out", account: a.id }];
+      if (a.out && !back) return [{ label: a.label, used: 100, resets: "", text: a.outUntil ? `Out until ${clockUntil(a.outUntil)}` : "Out of usage", win: "out", account: a.id }];
       if (a.windows.length) return a.windows.map((w) => ({ ...row(`${a.label} · ${SHORT[w.kind] ?? (w.windowMinutes ? shortWindow(w.windowMinutes) : (w.label ?? "Limit"))}`, w.usedPercent, w.resetsAt, w.status), win: winOf(w.kind, w.windowMinutes), account: a.id }));
       return [{ label: a.label, used: null, resets: "", text: a.out && back ? `Back since ${new Date(a.outUntil!).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : (a.why ?? "No reading yet"), account: a.id }];
     });
@@ -149,7 +150,9 @@ export function glanceOf(limits: Read): Record<EngineTool, Glance> {
     claude: {
       ...(got?.claudePlan ? { plan: got.claudePlan } : {}),
       rows: claudeAccounts ?? (got?.claudeWindows ?? []).map((w) => ({ ...row(SHORT[w.kind ?? ""] ?? w.label ?? "Limit", w.utilization === null ? null : w.utilization * 100, w.resetsAt, w.status), win: winOf(w.kind, null) })),
-      empty: none || got?.claudeWhy || "No reading yet",
+      // A slow answer is not a fault to report: "didn't answer in time" beside the context's own "Asking…" read as the card
+      // contradicting itself (2026-10-29 verify). Said as what happens next, here, so an older computer's words are covered too.
+      empty: none || (got?.claudeWhy && /didn't answer in time/.test(got.claudeWhy) ? "Its limits show here after its next turn." : got?.claudeWhy) || "No reading yet",
       // What Claude Code itself said of its limits, asked (`get_usage`) or as it last ran in Friday, and how long ago. Its sign-in
       // is never read: runner/limits.ts.
       ...(got?.claudeWindows?.length ? { note: got.claudeFrom === "account" ? `From Claude Code, ${keptAgo(got.claudeWindows)}` : `From Claude Code's last run in Friday, ${keptAgo(got.claudeWindows)}` } : {}),
@@ -455,7 +458,7 @@ function ToolContextView({ tool, lane, live }: { tool: EngineTool; lane: string;
         <span className="ctx-tool-title">Context{ctx?.model ? <span className="ctx-tool-model"> · {ctx.model}</span> : null}</span>
         <span className="ctx-tool-n">
           {ctx?.at && Date.now() - ctx.at > 2 * 60_000 && <span className="ctx-tool-asof">as of {Math.round((Date.now() - ctx.at) / 60_000)} min ago · </span>}
-          {window ? `${compact(used)} / ${compact(window)} · ${Math.round(pct)}%` : ctx === undefined ? "" : "Not reported yet"}
+          {window ? `${compact(used)} / ${compact(window)} · ${Math.round(pct)}%` : ctx === undefined ? "Asking…" : "Not reported yet"}
         </span>
       </button>
       {shown.length ? (
@@ -464,7 +467,8 @@ function ToolContextView({ tool, lane, live }: { tool: EngineTool; lane: string;
             <i key={c.name} className={`ctx-seg ${hueOf(c.name)}`} style={{ width: `${(c.tokens / total) * 100}%` }} title={`${c.name}: ${compact(c.tokens)}`} />
           ))}
         </div>
-      ) : (
+      ) : !window ? null : (
+        // Nothing known yet draws no track: an empty grey bar beside nothing read as broken (2026-10-28 QA).
         <div className="ctx-stack" aria-hidden="true">
           {/* Nothing reported is an empty track, not a sliver of colour. */}
           {pct > 0 && <i className="ctx-seg messages" style={{ width: `${pct}%` }} />}

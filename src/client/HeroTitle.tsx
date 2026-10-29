@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { reduceMotion } from "./prefs.js";
 
 /**
  * The question at the top of a new session, asked a different way each time.
@@ -41,10 +42,12 @@ export function HeroTitle({ lines = LINES }: { /** Lines of its own, for a page 
   const [at, setAt] = useState(() => Math.floor(Math.random() * lines.length));
 
   useEffect(() => {
-    // Nobody needs a headline moving while they are trying to type under it.
-    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    // Nor while writing in the box under it.
-    const t = setInterval(() => !document.activeElement?.matches("textarea, input") && setAt((i) => (i + 1) % lines.length), HOLD_MS);
+    // Nobody needs a headline moving while they are trying to type under it: not with less motion asked for, here in Settings
+    // as well as by the OS (prefs reduceMotion), read at each turn so a change there counts at once; not while writing in the box
+    // under it; and not with the pointer on that box or one of its menus open, where a turn that rewrapped the headline moved
+    // the box under the pointer (Arun, 2026-10-28: "iron everything and ensure we are good… any logic errors and fixes").
+    const busy = () => reduceMotion() || !!document.activeElement?.matches("textarea, input") || !!document.querySelector(".hero-title ~ :is(form, .composer-above):hover, [role=menu], [role=listbox], [role=dialog]");
+    const t = setInterval(() => !busy() && setAt((i) => (i + 1) % lines.length), HOLD_MS);
     return () => clearInterval(t);
   }, [lines.length]);
 

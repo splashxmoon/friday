@@ -5,7 +5,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { createApp, forkTools } from "../src/app.js";
+import { createApp, forkKind, forkTools } from "../src/app.js";
 import { localKV } from "../src/local/kv.js";
 import { NO_MODELS } from "../src/local/no-models.js";
 import type { SessionState } from "../src/session/projection.js";
@@ -47,4 +47,17 @@ test("forking where the tool can't start says why, and makes no fork nobody can 
   assert.equal(away.status, 409);
   assert.match(((await away.json()) as { error: string }).error, /Claude Code runs on your computer, which isn't connected/);
   assert.equal((await app.store.mine("local")).length, before, "no fork made");
+});
+
+test("a fork is the kind of session it came from: a Code fork is Code, and only the open-source edition makes a Work one", () => {
+  const of = (options: Record<string, unknown>, lead?: string) => ({ options, ...(lead ? { lead } : {}) }) as unknown as SessionState;
+  assert.deepEqual(forkKind(of({}), true), { options: { webSearch: false, controlMode: "ask", mcp: true, model: "", agent: null }, lead: false, copy: true });
+  assert.equal(forkKind(of({ work: true }, "main"), false).options.work, undefined, "nowhere else is a fork Work");
+  // Arun, 2026-10-28: "iron everything and ensure we are good… any logic errors and fixes".
+  const work = forkKind(of({ work: true, webSearch: true }, "main"), true);
+  assert.equal(work.options.work, true, "a Work session's fork is Work");
+  assert.equal(work.options.webSearch, true);
+  assert.equal(work.lead, true, "its agents lead as they did");
+  assert.equal(work.copy, false, "in the same folder: Work's agents never work in copies");
+  assert.equal(forkKind(of({ team: true }), true).options.team, undefined, "a Crew room's fork is a session of its own");
 });

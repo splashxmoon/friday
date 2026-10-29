@@ -1,4 +1,5 @@
-import { limitHit } from "./limit-reset.js";
+import { stoppedLine } from "./activity-line.js";
+import { carriedOn, limitHit } from "./limit-reset.js";
 import { laneName } from "./session/core.js";
 import { driverOf, questionsTo, requestsTo, roleOf, runOf, type SessionState } from "./session/projection.js";
 import { MAIN_LANE, type EngineTool } from "./types.js";
@@ -34,6 +35,8 @@ export interface Attention {
   approval?: string;
   /** What the approval is for: a command to run says "Run it", anything else "Let it", as the card in the session does. */
   command?: boolean;
+  /** A stopped run's own error, when `text` says it in plain words instead: shown on hover, and in full in the session. */
+  detail?: string;
 }
 
 /**
@@ -95,7 +98,12 @@ export function attentionIn(state: SessionState, meId: string): Attention[] {
     // Arun's screen (2026-10-25: "can you get rid of this for me").
     // Nor a turn the server's restart cut off (engine/hub.ts): it picks up again by itself when the tool reconnects, so
     // there's nothing to do. In the desktop app that's every time the app is quit or updated mid-turn.
-    if (run.status === "error" && driver?.id === meId && !limitHit(run.error) && !/^The server restarted in the middle of /.test(run.error ?? "")) out.push(of("stopped", run.error || "The run stopped.", run.sinceSeq, lane));
+    // Nor one not signed in whose task another agent carried on (agent-mesh.ts onLimit): the work isn't waiting on anybody.
+    if (run.status === "error" && driver?.id === meId && !limitHit(run.error) && !carriedOn(state, lane) && !/^The server restarted in the middle of /.test(run.error ?? "")) {
+      // Said in plain words where it is listed; the tool's own error stays in `detail` and in the session's feed (stoppedLine).
+      const said = run.error ? stoppedLine(run.error) : "The run stopped.";
+      out.push({ ...of("stopped", said, run.sinceSeq, lane), ...(run.error && said !== run.error.trim() ? { detail: run.error } : {}) });
+    }
   }
 
   // A message from another session waiting for someone who can steer its agent to let it through: it sat there unseen.
@@ -168,10 +176,11 @@ export function workingIn(state: SessionState): Working | null {
  * the most recent message maybe we add the agent status and stuff with their icons"): each agent's name, the coding tool it runs
  * on and its state in a word, read off the state the attention poll has already read, so it costs nothing extra.
  */
-export type CrewState = "needs" | "working" | "failed" | "offline" | "done" | "idle";
+export type CrewState = "needs" | "working" | "failed" | "offline" | "done" | "short" | "stopped" | "idle";
 export interface Crew {
   sid: string;
-  agents: { lane: string; name: string; tool?: EngineTool; state: CrewState }[];
+  /** `plan`: "3 of 5", where it stopped with its plan short ("short"). */
+  agents: { lane: string; name: string; tool?: EngineTool; state: CrewState; plan?: string }[];
 }
 /** The most agents a row shows. */
 const CREW_MAX = 6;
@@ -185,8 +194,11 @@ export function crewOf(state: SessionState): Crew | null {
     const engine = state.engines[lane];
     const run = runOf(state, lane);
     const ran = !!state.finished?.[lane];
-    const st: CrewState = state.openQuestions[lane] || state.approvals?.[lane] || run.status === "waiting_for_human" ? "needs" : run.status === "running" ? "working" : run.status === "error" ? "failed" : engine?.tool && !engine.online ? "offline" : ran ? "done" : "idle";
-    return { lane, name: laneName(state, lane), ...(engine?.tool ? { tool: engine.tool } : {}), state: st };
+    // Finished with its plan short: "stopped at 3 of 5", as the Work rail says it, never "done" (QA, 2026-10-28).
+    const plan = state.planDone?.[lane];
+    const short = !!plan && plan.done < plan.of;
+    const st: CrewState = state.openQuestions[lane] || state.approvals?.[lane] || run.status === "waiting_for_human" ? "needs" : run.status === "running" ? "working" : run.status === "error" && !carriedOn(state, lane) ? "failed" : run.status === "error" ? "idle" : engine?.tool && !engine.online ? "offline" : state.stopped?.[lane] !== undefined ? "stopped" : ran && short ? "short" : ran ? "done" : "idle";
+    return { lane, name: laneName(state, lane), ...(engine?.tool ? { tool: engine.tool } : {}), state: st, ...(st === "short" ? { plan: `${plan!.done} of ${plan!.of}` } : {}) };
   });
   return agents.length ? { sid: state.id, agents: agents.slice(0, CREW_MAX) } : null;
 }

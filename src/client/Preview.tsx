@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { BrowserStart } from "./WorkRail.js";
 import type { PreviewInfo } from "../runner/preview.js";
 import { Icon } from "./icons.js";
 import { api, uploadFile } from "./api.js";
@@ -11,6 +12,7 @@ import { isLocalUrl, takeIosAsk, takePendingPreview, throughFriday, type Preview
 import type { Identity } from "./storage.js";
 import { MenuButton, type MenuItem } from "./ui.js";
 import { IosPreview } from "./IosPreview.js";
+import { tabListKeys } from "./roving.js";
 
 /** A server on this machine, as the Local servers menu lists it. */
 export interface LocalServer {
@@ -116,6 +118,19 @@ interface Tab {
   seen?: string;
   /** The page didn't come: nothing answered at that address. */
   down?: boolean;
+  /**
+   * Where this tab has been and where Back left, for Back and Forward where the page's own history can't be read: the web
+   * build's iframe. They were always disabled there (QA, 2026-10-28; Arun: "TEST EVERYTHING… EVERY INTERACTION").
+   */
+  past?: string[];
+  ahead?: string[];
+}
+
+/** A tab sent to an address: where it was goes on its Back list, and Forward starts again. */
+function moved(tab: Tab, url: string, follows: string): Tab {
+  const from = tab.url || follows;
+  const past = from && from !== url ? [...(tab.past ?? []), from].slice(-50) : tab.past;
+  return { id: tab.id, url, ...(past?.length ? { past } : {}) };
 }
 
 /** The title of the page Friday sends back when a previewed server doesn't answer (see /api/preview in app.ts). */
@@ -182,6 +197,21 @@ function hostOf(url: string): string {
   }
 }
 
+/**
+ * Friday's own address, which this panel never opens (the desktop app refuses it: a page there would be Friday's own origin,
+ * trusted with its whole API). Typed in the bar it is said so, where it used to be dropped without a word.
+ */
+export function ownAddress(url: string, here: string): boolean {
+  try {
+    const u = new URL(url);
+    const h = new URL(here);
+    const port = (x: URL) => x.port || (x.protocol === "https:" ? "443" : "80");
+    return isLocalUrl(u.href) && isLocalUrl(h.href) && port(u) === port(h);
+  } catch {
+    return false;
+  }
+}
+
 let seq = 0;
 const nextId = () => `p${(seq += 1)}`;
 
@@ -213,6 +243,17 @@ function label(url: string): string {
   }
 }
 
+/** A Work tab by its site, the way a browser names a tab before its title is known: news.ycombinator.com, never "item" (w2 #18). */
+function siteLabel(url: string): string {
+  if (!url) return "New tab";
+  try {
+    const u = new URL(url);
+    return u.port ? `${u.hostname}:${u.port}` : u.hostname.replace(/^www\./, "");
+  } catch {
+    return url.slice(0, 24);
+  }
+}
+
 /**
  * Whether the preview can open the dev server itself rather than through Friday.
  *
@@ -239,7 +280,13 @@ export function PreviewPanel({
   shown: onScreen = true,
   headSlot,
   iosElsewhere,
+  work = false,
+  suggest = [],
 }: {
+  /** A Work session's: a browser for the web, not a preview of a project (WorkRail BrowserStart). */
+  work?: boolean;
+  /** The pages the agents read, for an empty tab's start page. */
+  suggest?: { url: string; title: string }[];
   /** Other folders the agents are working in, where the iOS side looks when `cwd` has no Xcode project (ios-folders.ts). */
   iosElsewhere?: string[];
   /** A place in the workbench's header beside the panel's name: the Web / iOS switch goes there rather than above the page. */
@@ -275,6 +322,8 @@ export function PreviewPanel({
   const [src, setSrc] = useState("");
   const [busy, setBusy] = useState("");
   const [err, setErr] = useState("");
+  /** Friday's own address, typed in the bar and not opened (ownAddress): said under the bar until the next address. */
+  const [refused, setRefused] = useState("");
   const frame = useRef<HTMLIFrameElement | null>(null);
   /** Every tab's iframe, so a page saying nothing answered is matched to its own tab. */
   const frames = useRef(new Map<string, HTMLIFrameElement>());
@@ -352,6 +401,9 @@ export function PreviewPanel({
 
   const look = useCallback(async () => {
     if (!cwd && !here) return;
+    // A Work session's is a browser for the web, with no project to run: nothing to ask about, and each open asked twice and was
+    // refused twice (Arun, 2026-10-28: "iron everything and ensure we are good").
+    if (work) return;
     try {
       const [s, o] = await Promise.all([ask<{ preview: PreviewInfo | null }>("status"), ask<Options>("options")]);
       setInfo(same(s.preview));
@@ -456,6 +508,9 @@ export function PreviewPanel({
   const [typed, setTyped] = useState("");
   const views = useRef(new Map<string, WebviewEl>());
   const active = tabs[Math.min(at, tabs.length - 1)];
+  // The tab showing, which an agent's browser works in when it hasn't one of its own yet; and none once the panel goes.
+  useEffect(() => void (sid && active && window.fridayDesktop?.browser?.active(sid, active.id)), [sid, active?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => void (sid && window.fridayDesktop?.browser?.gone(sid)), [sid]);
   const desktopView = typeof window !== "undefined" && !!window.fridayDesktop;
 
   // The first tab follows the project until somebody sends it somewhere else.
@@ -465,6 +520,7 @@ export function PreviewPanel({
   }, [src]);
 
   useEffect(() => setTyped(""), [at, active?.url]);
+  useEffect(() => setRefused(""), [at]);
 
   useEffect(() => {
     if (!sid) return;
@@ -480,7 +536,7 @@ export function PreviewPanel({
   const view = () => (active ? views.current.get(active.id) : undefined);
 
   const setUrl = (url: string) =>
-    setTabs((t) => t.map((tab, i) => (i === Math.min(at, t.length - 1) ? { id: tab.id, url } : tab)));
+    setTabs((t) => t.map((tab, i) => (i === Math.min(at, t.length - 1) ? moved(tab, url, src) : tab)));
   const patch = (id: string, p: Partial<Tab>) => setTabs((ts) => ts.map((t) => (t.id === id ? { ...t, ...p } : t)));
 
   /**
@@ -496,6 +552,7 @@ export function PreviewPanel({
     el.addEventListener("page-title-updated", (e: ViewEvent) => e.title === NOTHING_ANSWERED && patch(id, { down: true }));
     // -3 is a load given up for another one, which is not the page failing.
     el.addEventListener("did-fail-load", (e: ViewEvent) => e.isMainFrame && e.errorCode !== -3 && patch(id, { seen: e.validatedURL, down: true }));
+    el.addEventListener("dom-ready", () => sid && window.fridayDesktop?.browser?.tab(sid, id, (el as WebviewEl & { getWebContentsId(): number }).getWebContentsId())); // which webview is this session's tab, for the agents' browser tool (local/desktop-browser.ts)
   };
 
   // A preview on its own site can't be read from here, so its "Nothing answered" page says so (nothingAnswered above).
@@ -527,7 +584,7 @@ export function PreviewPanel({
     const same = tabs.findIndex((t) => !!t.url && (port(t.seen ?? t.url) === want || port(t.url) === want));
     if (same >= 0) {
       setAt(same);
-      return setTabs((ts) => ts.map((t, i) => (i === same ? { id: t.id, url } : t)));
+      return setTabs((ts) => ts.map((t, i) => (i === same ? moved(t, url, src) : t)));
     }
     if (!active?.url) return setUrl(url);
     openTab(url);
@@ -538,10 +595,18 @@ export function PreviewPanel({
     if (!t) return;
     // A bare host, a path on the project, or a whole address: all three are
     // things people type into a bar like this.
+    // In Work, words that aren't an address are a search (Arun, 2026-10-27: "redesign the browser page").
+    if (work && !/^[a-z][\w+.-]*:\/\//i.test(t) && (/\s/.test(t) || !/\.[a-z]{2,}|^localhost|:\d/i.test(t))) return go(`https://duckduckgo.com/?q=${encodeURIComponent(t)}`, target);
+    // In Work, a site is https unless it is this computer, an address or a port (w2 #5: example.com loaded as http).
+    if (work && !/^[a-z][\w+.-]*:\/\//i.test(t) && !t.startsWith("/") && !/^(localhost|127\.|\d{1,3}(\.\d{1,3}){3}|\[)|:\d+(\/|$)|\.(local|localhost|test)(\/|:|$)/i.test(t)) return go(`https://${t}`, target);
     const guess = /^[a-z][\w+.-]*:\/\//i.test(t) ? t : t.startsWith("/") && src ? new URL(t, src).toString() : `http://${t}`;
     try {
       const url = new URL(guess).toString();
       setTyped("");
+      // Friday's own address is never opened here: said so, rather than the bar showing it over the page it stayed on (2026-10-28
+      // QA in the desktop app; Arun: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+      if (ownAddress(url, location.href)) return setRefused(hostOf(url));
+      setRefused("");
       // An address on the machine doing the work that this page can't reach itself (a hosted Friday showing a linked machine, a
       // folder running here) goes through Friday: a coding tool's "it's up at localhost:3000" has to open all the same.
       if (isLocalUrl(url) && !direct) {
@@ -653,12 +718,26 @@ export function PreviewPanel({
       setPointing(false);
     }
   };
-  const back = () => view()?.goBack?.();
-  const forward = () => view()?.goForward?.();
+  // The desktop's webview has the page's own history; an iframe's can't be read, so the tab's own list of addresses stands in.
+  const step = (dir: "past" | "ahead") => {
+    if (!active) return;
+    const list = active[dir] ?? [];
+    const to = list.at(-1);
+    if (to === undefined) return;
+    const other = dir === "past" ? "ahead" : "past";
+    const here = active.url || src;
+    const back = list.slice(0, -1);
+    const fore = here ? [...(active[other] ?? []), here] : (active[other] ?? []);
+    setTabs((ts) => ts.map((t) => (t.id === active.id ? { id: t.id, url: to, [dir]: back, [other]: fore } : t)));
+  };
+  const back = () => (desktopView ? view()?.goBack?.() : step("past"));
+  const forward = () => (desktopView ? view()?.goForward?.() : step("ahead"));
 
   const openTab = (url = "") => {
     setTabs((t) => [...t, { id: nextId(), url }]);
     setAt(tabs.length);
+    // A new empty tab in Work puts the keyboard in its address bar, as a browser's does (w2 #18).
+    if (work && !url) requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".bench-panel .browser-url")?.focus());
   };
   const closeTab = (id: string) => {
     views.current.delete(id);
@@ -797,11 +876,14 @@ export function PreviewPanel({
                 whether or not the project's server is up: somebody who wants
                 another page, or a different address, shouldn't have to wait
                 for it. The server's own state is shown inside the empty tab. */}
-            <div className="bw-tabs" role="tablist" aria-label="Pages">
+            <div className="bw-tabs" role="tablist" aria-label="Pages" onKeyDown={tabListKeys}>
               {tabs.map((t, i) => (
                 <span key={t.id} className={`bw-tab ${i === at ? "on" : ""}`}>
-                  <button type="button" role="tab" aria-selected={i === at} className="bw-tab-name" title={addressOf(t.seen ?? t.url) || "New tab"} onClick={() => setAt(i)}>
-                    {label(addressOf(t.seen ?? t.url))}
+                  <button type="button" role="tab" aria-selected={i === at} tabIndex={i === at ? 0 : -1} className="bw-tab-name" title={addressOf(t.seen ?? t.url) || "New tab"} onClick={() => setAt(i)}>
+                    {
+                      work ? siteLabel(addressOf(t.seen ?? t.url)) :
+                      label(addressOf(t.seen ?? t.url))
+                    }
                   </button>
                   {tabs.length > 1 && (
                     <button type="button" className="bw-tab-x" aria-label={`Close ${label(addressOf(t.seen ?? t.url))}`} onClick={() => closeTab(t.id)}>
@@ -810,7 +892,7 @@ export function PreviewPanel({
                   )}
                 </span>
               ))}
-              <button type="button" className="icon-btn tiny" title="New tab" aria-label="New tab" onClick={() => openTab()}>
+              <button type="button" className="icon-btn tiny" title="Open a new tab" aria-label="Open a new tab" onClick={() => openTab()}>
                 <Icon name="plus" size={13} />
               </button>
               {iosHere && <span className="bw-kinds" ref={setKindSlot} />}
@@ -823,10 +905,10 @@ export function PreviewPanel({
                 go(typed);
               }}
             >
-              <button type="button" className="icon-btn tiny" title="Back" aria-label="Back" onClick={back} disabled={!desktopView}>
+              <button type="button" className="icon-btn tiny" title="Back" aria-label="Back" onClick={back} disabled={!desktopView && !active?.past?.length}>
                 <Icon name="navBack" size={15} />
               </button>
-              <button type="button" className="icon-btn tiny" title="Forward" aria-label="Forward" onClick={forward} disabled={!desktopView}>
+              <button type="button" className="icon-btn tiny" title="Forward" aria-label="Forward" onClick={forward} disabled={!desktopView && !active?.ahead?.length}>
                 <Icon name="navForward" size={15} />
               </button>
               <button type="button" className="icon-btn tiny" title="Reload" aria-label="Reload" onClick={reload}>
@@ -841,6 +923,7 @@ export function PreviewPanel({
                 spellCheck={false}
                 aria-label="Address"
                 placeholder="localhost:3000, or a URL"
+                {...(work ? { placeholder: "Search or type a URL" } : {})}
                 onChange={(e) => setTyped(e.target.value)}
                 onFocus={(e) => e.currentTarget.select()}
               />
@@ -906,6 +989,26 @@ export function PreviewPanel({
               </form>
             )}
             {pointNote && <p className="bw-note muted small">{pointNote}</p>}
+            {refused && (
+              <p className="bw-note muted small" role="status">
+                {refused} is Friday itself, so it doesn't open in this browser: Friday's own pages are in its sidebar.
+              </p>
+            )}
+            {/* A site of somebody else's, in the web build's frame: many refuse to be shown inside another page, and the browser then
+                shows only a broken-page icon with no word on why (QA, 2026-10-28). Whether it refused can't be read from here, so it
+                is said once, with the way out. */}
+            {!desktopView && active && (() => {
+              const page = addressOf(active.seen ?? (active.url || src));
+              if (!/^https?:\/\//i.test(page) || isLocalUrl(page) || page.startsWith(location.origin)) return null;
+              return (
+                <p className="bw-note muted small">
+                  If {hostOf(page)} stays blank, it doesn't allow being shown inside another page.{" "}
+                  <button type="button" className="link-btn" onClick={openShown}>
+                    Open it in your browser
+                  </button>
+                </p>
+              );
+            })()}
 
             {/* Every tab stays mounted: a page reloaded each time you glance at
                 another one is not a tab, it is a bookmark. */}
@@ -971,6 +1074,7 @@ export function PreviewPanel({
 
             {!(active?.url || src) &&
               (
+              work ? <BrowserStart onGo={(to) => go(to)} suggest={suggest} {...(sid ? { sid } : {})} {...(invite ? { invite } : {})} /> :
               info ? (
                 <div className="preview-note">
                   <p className="muted small">

@@ -549,7 +549,9 @@ export function askClaudeUsage(account?: string): Promise<void> {
       backOff(windows ? undefined : "This Claude Code is too old to say its usage: update it to see it here.");
       return windows ? keepClaudeUsage(account, { available: true, plan: askedOf.get(key)?.plan ?? null, windows, scoped: null }, at) : undefined;
     }
-    backOff(p.failed);
+    // Said as what it means here, with what happens next: "Claude Code didn't answer in time." alone, under an empty bar, read
+    // as a fault in the session (2026-10-28 QA; Arun: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+    backOff(`${p.failed.replace(/\.$/, "")} when asked for its limits. They show here after its next turn.`);
   });
   entry.read = turn.catch(() => backOff());
   probing = entry.read;

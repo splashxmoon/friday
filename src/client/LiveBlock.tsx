@@ -17,7 +17,7 @@ import { Lightbox } from "./Lightbox.js";
 
 export type LiveKind = "html" | "svg" | "mermaid";
 const KINDS: Record<LiveKind, { label: string; icon: "browser" | "image" | "diagram" }> = {
-  html: { label: "Live view", icon: "browser" },
+  html: { label: "Live page", icon: "browser" }, // As the Work rail says it (QA, 2026-10-28: "Live view" here, "Live page" there).
   svg: { label: "Drawing", icon: "image" },
   mermaid: { label: "Diagram", icon: "diagram" },
 };
@@ -229,6 +229,8 @@ function LiveFrame({ kind, code, tall, exporter }: { kind: LiveKind; code: strin
     <div ref={stage} className={`live-stage ${ready ? "ready" : ""}`} style={{ height: tall ? "100%" : Math.min(h, 900) }}>
       {/* The shimmer is for a first drawing only: one drawn before waits at its own size and fades in. */}
       {!ready && known === undefined && <div className="live-loading" aria-hidden />}
+      {/* What is on its way, said over the shimmer: an unlabelled grey slab sat there for seconds (the 2026-10-28 critique). */}
+      {!ready && known === undefined && <div className="live-wait live-wait-soft" role="status"><Icon name={KINDS[kind].icon} size={13} /> {kind === "mermaid" ? "Drawing the diagram…" : kind === "svg" ? "Drawing it…" : "Loading the page…"}</div>}
       {near && (
         <iframe
           ref={frame}
@@ -312,7 +314,8 @@ export function LiveBlock({ code, language, isIncomplete }: CustomRendererProps)
     addEventListener("keydown", esc);
     return () => removeEventListener("keydown", esc);
   }, [big]);
-  const head = (
+  /** The block's header: in the chat, or (`inBig`) on the full-screen view, where its last button is the way out. */
+  const head = (inBig: boolean) => (
     <div className="live-head">
       <span className="live-kind">
         <Icon name={meta.icon} size={13} />
@@ -330,9 +333,19 @@ export function LiveBlock({ code, language, isIncomplete }: CustomRendererProps)
           <button type="button" className="icon-btn tiny" title={kind === "html" ? "Download it as a page" : "Download it as an SVG"} aria-label="Download" onClick={() => void download()}>
             <Icon name="download" size={13} />
           </button>
-          <button type="button" className="icon-btn tiny" title={big ? "Leave full screen (Esc)" : "Full screen"} aria-label={big ? "Leave full screen" : "Full screen"} onClick={() => setBig((v) => !v)}>
-            <Icon name={big ? "shrink" : "expand"} size={13} />
-          </button>
+          {/* Full screen, the way out is a button that says so, as the Code toggle beside it does: a lone 13px shrink icon in a
+              corner read as no way out but Esc (2026-10-28 QA; Arun: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL"). */}
+          {inBig ? (
+            <button type="button" className="live-btn live-close" title="Leave full screen (Esc)" onClick={() => setBig(false)}>
+              <Icon name="x" size={13} />
+              Close
+              <kbd>Esc</kbd>
+            </button>
+          ) : (
+            <button type="button" className="icon-btn tiny" title="Full screen" aria-label="Full screen" onClick={() => setBig(true)}>
+              <Icon name="expand" size={13} />
+            </button>
+          )}
         </span>
       )}
     </div>
@@ -344,7 +357,7 @@ export function LiveBlock({ code, language, isIncomplete }: CustomRendererProps)
   if (isIncomplete) {
     return (
       <div className="live-block drawing">
-        {head}
+        {head(false)}
         <div className="live-stage" style={{ height: startHeight(kind) }}>
           <div className="live-loading" aria-hidden />
           <div className="live-wait" role="status">
@@ -357,14 +370,14 @@ export function LiveBlock({ code, language, isIncomplete }: CustomRendererProps)
   return (
     <>
       <div className="live-block">
-        {head}
+        {head(false)}
         {showCode ? <pre className="live-code"><code>{code}</code></pre> : <LiveFrame kind={kind} code={code} exporter={exporter} />}
       </div>
       {big &&
         createPortal(
           <div className="overlay live-overlay" onClick={(e) => e.target === e.currentTarget && setBig(false)}>
             <div ref={bigEl} className="live-block big" role="dialog" aria-label={meta.label}>
-              {head}
+              {head(true)}
               <LiveFrame kind={kind} code={code} tall />
             </div>
           </div>,
@@ -375,14 +388,55 @@ export function LiveBlock({ code, language, isIncomplete }: CustomRendererProps)
 }
 
 
+/** A picture's address on this computer, as the session serves it; null for one on the web (or Friday's own). */
+/** The session the chat being drawn is, for a page whose address doesn't say (SessionView sets it). */
+export const pictureSession: { sid: string; invite: string } = { sid: "", invite: "" };
+
+export function localPicture(src: string): string | null {
+  const q = new URLSearchParams(location.search);
+  const sid = q.get("session") || pictureSession.sid;
+  const invite = q.get("invite") || pictureSession.invite;
+  if (!sid || !invite || /^(https?:|data:|blob:)/i.test(src) || src.startsWith("/api/")) return null;
+  const at = `/api/sessions/${encodeURIComponent(sid)}/work/file?invite=${encodeURIComponent(invite)}`;
+  const file = src.replace(/^file:\/\//i, "");
+  if (file.startsWith("/") || /^[a-z]:[\\/]/i.test(file) || file.startsWith("~/")) return `${at}&abs=${encodeURIComponent(decodeURI(file))}`;
+  return `${at}&path=${encodeURIComponent(decodeURI(file.replace(/^\.\//, "")))}`;
+}
 
 /** A picture in a message: shown at its size up to the column's width, and large on a press. */
 export function LiveImage(props: React.ImgHTMLAttributes<HTMLImageElement>) {
   const [big, setBig] = useState(false);
   const { node: _node, ...rest } = props as typeof props & { node?: unknown };
+  let enlarge = () => setBig(true);
+  // A picture an agent shows by where it is on this computer (/Users/…/shot.png, file://…, or a path in its folder): from there,
+  // through the session (work-files.ts shownFile). The session is the page's own (?session=…&invite=…).
+  const src = typeof rest.src === "string" ? localPicture(rest.src) : null;
+  // A picture still being written fails to load once or twice before it is whole: asked again twice, a moment apart, before it
+  // is said to be missing, and then with a way to ask again (Arun, 2026-10-28: "iron everything and ensure we are good").
+  const [tries, setTries] = useState(0);
+  const [gone, setGone] = useState(false);
+  const own = src ?? (typeof rest.src === "string" && rest.src.startsWith("/api/") ? rest.src : null);
+  if (own) (rest as { src?: string }).src = tries ? `${own}${own.includes("?") ? "&" : "?"}try=${tries}` : own;
+  if (gone)
+    return (
+      <span className="chat-media-gone">
+        {props.alt || "A picture"} isn't on this computer, or isn't finished yet.{" "}
+        {own && (
+          <button type="button" className="link-btn" onClick={() => (setGone(false), setTries((n) => n + 1))}>
+            Try again
+          </button>
+        )}
+      </span>
+    );
+  (rest as { onError?: () => void }).onError = () => (own && tries < 2 ? void window.setTimeout(() => setTries((n) => n + 1), 1500 * (tries + 1)) : setGone(true));
+  // In a Work session a picture from its folder opens in the rail's one picture viewer, with its title, Copy, Download and Show in
+  // folder, among the others beside it (WorkRail, friday:work-open), not a second viewer of its own with a path for a caption
+  // (Arun, 2026-10-28: "iron everything… focusing on UI and UX"; the critique's "make one viewer").
+  const named = typeof props.src === "string" ? props.src.replace(/^file:\/\//i, "") : "";
+  if (src && named && !/^(\/|~|[a-z]:[\\/])/i.test(named) && document.documentElement.classList.contains("work-session")) enlarge = () => dispatchEvent(new CustomEvent("friday:work-open", { detail: { path: named } }));
   return (
     <>
-      <img {...rest} className="live-img" loading="lazy" onClick={() => setBig(true)} />
+      <img {...rest} className="live-img" loading="lazy" onClick={() => enlarge()} />
       {big && props.src && <Lightbox src={props.src} alt={props.alt ?? ""} onClose={() => setBig(false)} />}
     </>
   );

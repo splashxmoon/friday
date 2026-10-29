@@ -52,3 +52,15 @@ test("while reading further up, what was shown stays as it was and anything new 
   assert.deepEqual(heldOrder(["a", "b", "c"], ["b", "a", "c", "d"]), ["a", "b", "c", "d"]);
   assert.deepEqual(heldOrder(["a", "b", "c"], ["c", "a"]), ["a", "c"]);
 });
+
+test("a permission card goes with the run that asked, under it, not above the message that set it going", () => {
+  const items: Item[] = [
+    { name: "ask claude", info: { kind: "ask", lane: "main", seq: 8 } },
+    { name: "claude run", info: { kind: "run", lane: "main", live: true } },
+    { name: "claude asks", info: { kind: "after", lane: "main", seq: 15 } },
+    { name: "codex note", info: { kind: "other", seq: 16 } },
+  ];
+  assert.deepEqual(order(items, ["main"]), ["codex note", "ask claude", "claude run", "claude asks"]);
+  // One with no run before it keeps its place.
+  assert.deepEqual(order([{ name: "lone", info: { kind: "after", lane: "x", seq: 3 } }, { name: "note", info: { kind: "other", seq: 4 } }], []), ["lone", "note"]);
+});

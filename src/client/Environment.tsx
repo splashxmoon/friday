@@ -5,6 +5,7 @@ import type { EnvironmentInfo, ToolVersion } from "../runner/environment.js";
 import { MAIN_LANE } from "../types.js";
 import { Icon } from "./icons.js";
 import { connectThisComputer, hostApi } from "./local.js";
+import { isLocal } from "./edition.js";
 import { openSettings } from "./openSettings.js";
 import { localServers, useBackgroundTasks, useLocalServers, usePreviewInfo } from "./Preview.js";
 import { openInPreview } from "./previewBus.js";
@@ -227,10 +228,13 @@ function Panel({ anchor, close, state, me, sid, invite, identity, lane, onOpen }
         )}
         {!engine && (
           <li className="env-c-empty">
-            {state.upload ? "This session works on a folder uploaded to Friday. Connect a computer to run a dev server or your own tools." : "No computer is connected yet. Connect one and the agents work on it."}{" "}
-            <button type="button" className="link-btn" onClick={() => (window.fridayDesktop ? openSettings("computer") : connectThisComputer())}>
-              {window.fridayDesktop ? "Open Computer & coding tools" : "Connect this computer"}
-            </button>
+            {state.upload ? "This session works on a folder uploaded to Friday. Connect a computer to run a dev server or your own tools." : isLocal() && !window.fridayDesktop ? "No agent has started on this computer yet." : "No computer is connected yet. Connect one and the agents work on it."}{" "}
+            {/* Nothing answers "Connect this computer" in the local edition's browser (2026-10-28 QA). */}
+            {(window.fridayDesktop || !isLocal()) && (
+              <button type="button" className="link-btn" onClick={() => (window.fridayDesktop ? openSettings("computer") : connectThisComputer())}>
+                {window.fridayDesktop ? "Open Computer & coding tools" : "Connect this computer"}
+              </button>
+            )}
           </li>
         )}
         {/* What is running here, a line each: a server opens in Preview, and anything running can be stopped. */}

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { teamAttention, teamDoneTitle, useTeam, useTeamTab } from "./Teammates.js";
+import { isWorkSid, useWorkMode } from "./WorkMode.js";
 import { shortPaths } from "./shortPaths.js";
 import { createPortal } from "react-dom";
 import type { Attention, Crew, Preview, SessionPr, Working } from "../attention.js";
@@ -78,6 +80,8 @@ export function useAttention(identity: Identity, recents: RecentSession[], withS
   const wasWorking = useRef(new Map<string, Working>());
 
   let more: string[] = [];
+  // Every crew session too (Teammates.tsx), opened here or not: a room's teammate asking is said.
+  more = useTeam(identity)?.hidden ?? [];
   const sids = [...new Set([...recents.map((r) => r.sid), ...more])].join(",");
 
   const waitingNow = useRef(0);
@@ -127,6 +131,8 @@ export function useAttention(identity: Identity, recents: RecentSession[], withS
         if (told.current.has(key)) continue;
         told.current.add(key);
         let said = it;
+        // A teammate asking: titled by who and where, not the team session's own title.
+        said = teamAttention(it);
         notify(said);
         if (chimeOn()) chime();
       }
@@ -134,6 +140,7 @@ export function useAttention(identity: Identity, recents: RecentSession[], withS
       for (const [sid, w] of wasWorking.current) {
         if (nowWorking.has(sid) || got.items.some((it) => it.sid === sid)) continue;
         let title = recents.find((r) => r.sid === sid)?.title ?? "A session";
+        title = teamDoneTitle(sid, title);
         notifyDone(title, w.what, sid);
       }
       wasWorking.current = new Map((got.working ?? []).map((w) => [w.sid, w]));
@@ -255,7 +262,8 @@ const KIND: Record<Attention["kind"], { icon: IconName; lead: (it: Attention) =>
   ask: { icon: "message", lead: (it) => `${it.agent ?? "The agent"} asks: ` },
   control: { icon: "hand", lead: () => "" },
   handover: { icon: "hand", lead: () => "" },
-  stopped: { icon: "stop", lead: (it) => `${it.agent ?? "The agent"} stopped: ` },
+  // "Kit stopped: their tool failed to start", not "stopped: Stopped: …" (attention.ts says a raw error in words, as stoppedLine).
+  stopped: { icon: "stop", lead: (it) => (/^Stopped on an error\b/.test(it.text) ? `${it.agent ?? "The agent"} stopped on an error` : `${it.agent ?? "The agent"} stopped: `) },
   mention: { icon: "message", lead: () => "" },
 };
 
@@ -298,6 +306,22 @@ export function WaitingOnYou({ identity, items, recents, onOpen, viewing }: { id
     mo.observe(document.body, { childList: true, subtree: true });
     return () => mo.disconnect();
   }, [viewing]);
+  // On a phone's home, the toasts take their place in the page, above "Right now" (Code.tsx #wy-home), rather than float over the
+  // list a person opened the home to read (Arun, 2026-10-28: "iron everything and ensure we are good").
+  const [homeSlot, setHomeSlot] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    if (viewing) return setHomeSlot(null);
+    const narrow = matchMedia("(max-width: 640px)");
+    const find = () => setHomeSlot(narrow.matches ? document.getElementById("wy-home") : null);
+    find();
+    const mo = new MutationObserver(find);
+    mo.observe(document.body, { childList: true, subtree: true });
+    narrow.addEventListener("change", find);
+    return () => {
+      mo.disconnect();
+      narrow.removeEventListener("change", find);
+    };
+  }, [viewing]);
   // What the last answer did, for a screen reader; the cards themselves come and go.
   const [said, setSaid] = useState("");
   const box = useRef<HTMLElement | null>(null);
@@ -311,7 +335,8 @@ export function WaitingOnYou({ identity, items, recents, onOpen, viewing }: { id
     sizer.current?.disconnect();
     sizer.current = null;
     const root = document.documentElement;
-    if (!el) {
+    // In the page's own flow (homeSlot) it covers nothing, and the page needs no room kept for it.
+    if (!el || el.classList.contains("in-home")) {
       root.style.removeProperty("--wy-h");
       return;
     }
@@ -332,7 +357,14 @@ export function WaitingOnYou({ identity, items, recents, onOpen, viewing }: { id
   }, [open]);
   // Everything still waiting elsewhere, which the header's pill counts as the sidebar does; dismissing a toast hides that toast,
   // not the wait (2026-10-27 audit: the pill went for good once its item was dismissed, while the sidebar still said "Needs you 1").
-  const counted = items.filter((it) => it.sid !== viewing && !done.has(keyOf(it)) && recents.some((r) => r.sid === it.sid));
+  let here = (_sid: string) => true;
+  // In Work, Work's waits; in Code, Code's: the other place's are its dot on the sidebar's switch. "1 waiting on you" in Work was a
+  // Code session's question (QA, 2026-10-28; Arun: "TEST EVERYTHING… EVERY INTERACTION"). Crew keeps them all.
+  const [workOn] = useWorkMode();
+  const [crewOn] = useTeamTab();
+  const inWork = viewing ? isWorkSid(viewing) : workOn;
+  if (!crewOn) here = (sid) => isWorkSid(sid) === inWork;
+  const counted = items.filter((it) => it.sid !== viewing && here(it.sid) && !done.has(keyOf(it)) && recents.some((r) => r.sid === it.sid));
   const inHeader = !!viewing && !!slot;
   // The toasts in the corner leave out what was dismissed; the list the pill opens, asked for, has them all.
   const shown = inHeader ? counted : counted.filter((it) => !dismissed.has(keyOf(it)));
@@ -344,8 +376,49 @@ export function WaitingOnYou({ identity, items, recents, onOpen, viewing }: { id
     if (fresh.length === 1) setSaid(`${WHY[fresh[0]!.kind]}: ${fresh[0]!.title}`);
     else if (fresh.length > 1) setSaid(`${fresh.length} more waiting on you`);
     seen.current = new Set(shown.map(keyOf));
+    if (fresh.length) (setRest(false), (since.current = Date.now()));
   }, [shownKeys]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Out of the way once seen. The toasts in the corner sat over whatever was under them for as long as the wait lasted (forty
+  // minutes over Settings' Interface size, a workflow's "Remove step"), and a press meant for that opened the session instead
+  // (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL"). Now they show in full when something arrives, and
+  // after a few seconds untouched, or at a press anywhere else, fold away: into the sidebar's Needs you when it is on screen,
+  // else into a small pill in the corner that opens them again.
+  const [rest, setRest] = useState(false);
+  const since = useRef(Date.now());
+  const held = useRef(false);
+  const floats = !inHeader && !homeSlot && shown.length > 0;
+  useEffect(() => {
+    if (!floats || rest) return;
+    since.current = Date.now();
+    const t = setInterval(() => !held.current && Date.now() - since.current > 8000 && setRest(true), 1000);
+    const away = (e: PointerEvent) => !box.current?.contains(e.target as Node) && setRest(true);
+    document.addEventListener("pointerdown", away, true);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("pointerdown", away, true);
+    };
+  }, [floats, rest]);
+  const hold = (on: boolean) => {
+    held.current = on;
+    since.current = Date.now();
+  };
   if (!shown.length) return live;
+  if (floats && rest) {
+    // The sidebar already lists every wait under Needs you: when that is on screen, nothing more floats.
+    const needs = document.querySelector('[data-sidebar="group-label"] .dass-dot[data-state="needs"]')?.getBoundingClientRect();
+    if (needs && needs.width > 0 && needs.right > 0 && needs.left < innerWidth && needs.top >= 0 && needs.bottom <= innerHeight) return live;
+    return (
+      <>
+        {live}
+        <section className="wy-toasts at-rest" aria-label="Needs you">
+          <button type="button" className="wy-pill" aria-label={`${shown.length} waiting on you: show`} title="Show what is waiting on you" onClick={() => setRest(false)}>
+            <Icon name="hand" size={13} />
+            {shown.length} waiting on you
+          </button>
+        </section>
+      </>
+    );
+  }
   const answer = async (it: Attention, approve: boolean) => {
     const r = recents.find((x) => x.sid === it.sid);
     if (!r || !it.approval || busy) return;
@@ -391,7 +464,15 @@ export function WaitingOnYou({ identity, items, recents, onOpen, viewing }: { id
       </>
     );
   const list = (
-    <section ref={setBox} className={`wy-toasts${inHeader ? " in-session" : ""}`} aria-label="Needs you">
+    <section
+      ref={setBox}
+      className={`wy-toasts${inHeader ? " in-session" : homeSlot ? " in-home" : ""}`}
+      aria-label="Needs you"
+      onPointerEnter={() => hold(true)}
+      onPointerLeave={() => hold(false)}
+      onFocus={() => hold(true)}
+      onBlur={(e) => !e.currentTarget.contains(e.relatedTarget as Node) && hold(false)}
+    >
       {shown.length > SHOWN && (
         <div className="wy-more">
           {shown.length - SHOWN} more waiting on you
@@ -423,13 +504,13 @@ export function WaitingOnYou({ identity, items, recents, onOpen, viewing }: { id
                 title={`${WHY[it.kind]} · open ${it.title}`}
               >
                 <span className="wy-icon" aria-hidden>
-                  <Icon name={kind.icon} size={13} />
+                  <Icon name={kind.icon} size={16} />
                 </span>
                 <span className="wy-body">
                   <span className="wy-title">{it.title}</span>
                   <span className="wy-what">
                     {kind.lead(it)}
-                    {withCode(shortPaths(it.text))}
+                    {it.kind === "stopped" ? (/^Stopped on an error\b/.test(it.text) ? "" : it.text.replace(/^Stopped: /, "")) : withCode(shortPaths(it.text))}
                   </span>
                 </span>
               </button>
@@ -462,7 +543,7 @@ export function WaitingOnYou({ identity, items, recents, onOpen, viewing }: { id
     <>
       {live}
       {pill}
-      {list}
+      {homeSlot ? createPortal(list, homeSlot) : list}
     </>
   );
 }

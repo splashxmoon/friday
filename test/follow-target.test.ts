@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { followTarget, PICKED_HOLD_MS } from "../src/client/follow-target.js";
+import { followTarget, openingTarget, PICKED_HOLD_MS } from "../src/client/follow-target.js";
 import { project } from "../src/session/projection.js";
 import { MAIN_LANE, type EventBody, type SessionEvent } from "../src/types.js";
 
@@ -103,4 +103,19 @@ test("a coding tool ending its answer with a question for you moves the box to i
   assert.equal(f?.lane, "kiro");
   const plain = ev(kiroBot, { type: "agent.message", text: "Done: the baseline is recorded.", toolCalls: [] }, "kiro");
   assert.equal(look(events, [plain]), null, "a plain answer isn't a question");
+});
+
+test("a room opens writing to an agent that can work: not one out of usage or signed out, when another here can (Arun, 2026-10-28)", () => {
+  const lane = (id: string, name: string) => ({ type: "lane.added", lane: { id, name, agent: null, control: { kind: "open" }, controlMode: "ask", trigger: { kind: "manual" } } }) as EventBody;
+  const tool: SessionEvent["actor"] = { id: "engine", name: "Claude Code", kind: "agent" };
+  seq = 0;
+  const base = [ev(ada, { type: "session.created", title: "W", ownerId: "ada", ownerName: "Ada" } as EventBody), ev(ada, lane("codex", "Codex")), ev(ada, { type: "instruction", text: "LIMIT", interrupt: false }), ev(tool, { type: "run.started", causedBy: 3 })];
+  const limited = project("s", [...base, ev(tool, { type: "run.ended", outcome: "error", error: "5-hour limit reached ∙ resets 3pm" })]);
+  assert.equal(openingTarget(limited, MAIN_LANE), "codex", "out of usage: Codex instead");
+  const out = project("s", [...base, ev(tool, { type: "run.ended", outcome: "error", error: "Claude Code isn't signed in on the computer it runs on." })]);
+  assert.equal(openingTarget(out, MAIN_LANE), "codex", "signed out: Codex instead");
+  const fine = project("s", [...base, ev(tool, { type: "run.ended", outcome: "done" })]);
+  assert.equal(openingTarget(fine, MAIN_LANE), MAIN_LANE, "otherwise the one wanted");
+  const broke = project("s", [...base, ev(tool, { type: "run.ended", outcome: "error", error: "Something else broke" })]);
+  assert.equal(openingTarget(broke, MAIN_LANE), MAIN_LANE, "an ordinary error stays: it may be tried again");
 });

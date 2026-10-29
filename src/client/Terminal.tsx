@@ -20,6 +20,7 @@ import { relTime } from "./ui.js";
 import { commandFailed } from "../receipt.js";
 import { openSettings } from "./openSettings.js";
 import { connectThisComputer } from "./local.js";
+import { isLocal } from "./edition.js";
 
 /**
  * Every command this session has run, in order.
@@ -230,16 +231,22 @@ export function TerminalPanel({
 
   const body = !shell ? (
     <>
-      <p className="muted small term-note">
-        {window.fridayDesktop
-          ? "A live terminal opens here once this computer is connected in Settings › Computer & coding tools."
-          : "A live terminal opens in the desktop app, or here through a computer you've connected in Settings › Computer & coding tools."}{" "}
-        {/* The way to it, not only where it is (Arun, 2026-10-24: UX gaps). */}
-        <button type="button" className="link-btn" onClick={() => (window.fridayDesktop ? openSettings("computer") : connectThisComputer())}>
-          {window.fridayDesktop ? "Open it" : "Connect this computer"}
-        </button>
-        . What has been run here is below.
-      </p>
+      {/* The local edition in a browser has no way to a shell but the desktop app: "Connect this computer" answered nothing there,
+          so it says where the terminal is instead (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL"). */}
+      {!window.fridayDesktop && isLocal() ? (
+        <p className="muted small term-note">A live terminal opens here in Friday’s desktop app. What has been run here is below.</p>
+      ) : (
+        <p className="muted small term-note">
+          {window.fridayDesktop
+            ? "A live terminal opens here once this computer is connected in Settings › Computer & coding tools."
+            : "A live terminal opens in the desktop app, or here through a computer you've connected in Settings › Computer & coding tools."}{" "}
+          {/* The way to it, not only where it is (Arun, 2026-10-24: UX gaps). */}
+          <button type="button" className="link-btn" onClick={() => (window.fridayDesktop ? openSettings("computer") : connectThisComputer())}>
+            {window.fridayDesktop ? "Open it" : "Connect this computer"}
+          </button>
+          . What has been run here is below.
+        </p>
+      )}
       {commands}
     </>
   ) : (

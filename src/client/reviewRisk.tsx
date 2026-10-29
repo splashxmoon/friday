@@ -23,7 +23,7 @@ export function RiskChip({ risk, className }: { risk: Risk; className?: string }
   return (
     <Badge
       variant="outline"
-      className={cn("h-5 max-w-[190px] min-w-0 shrink rounded-md px-1.5 text-[11px] font-medium", LEVEL_TEXT[risk.level], className)}
+      className={cn("h-5 max-w-[190px] min-w-0 shrink rounded-md px-1.5 text-[12px] font-medium", LEVEL_TEXT[risk.level], className)}
       title={`${risk.level === "high" ? "High risk" : risk.level === "medium" ? "Some risk" : "Low risk"}: ${why}`}
       aria-label={`${risk.level} risk: ${risk.top}`}
       data-risk={risk.level}
@@ -36,10 +36,11 @@ export function RiskChip({ risk, className }: { risk: Risk; className?: string }
 /** The heading over the low-risk changes, with what clears them together beside it. */
 export function QuickHeader({ n, children }: { n: number; children?: ReactNode }) {
   return (
-    <div className="flex h-7 items-center gap-1.5 px-2 pt-1 text-[11px] font-medium tracking-[0.06em] text-[var(--text-muted)] uppercase" title="Small changes with nothing sensitive, failing or found by the reviewer">
+    // In sentence case, as every other heading in the app is (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+    <div className="flex h-7 items-center gap-1.5 px-2 pt-1 text-[12px] font-medium text-[var(--text-muted)]" title="Small changes with nothing sensitive, failing or found by the reviewer">
       <span>Quick to review</span>
       <span className="tabular-nums">{n}</span>
-      {children && <span className="ml-auto flex items-center normal-case tracking-normal">{children}</span>}
+      {children && <span className="ml-auto flex items-center">{children}</span>}
     </div>
   );
 }

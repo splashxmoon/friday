@@ -6,7 +6,7 @@ import { XIcon } from "lucide-react"
 import { Dialog as DialogPrimitive } from "radix-ui"
 
 import { Button } from "@/components/ui/button"
-import { surfaceOpen } from "@/ui"
+import { layerHandlers, surfaceOpen } from "@/ui"
 
 function Dialog({
   ...props
@@ -53,10 +53,30 @@ function DialogContent({
   children,
   showCloseButton = true,
   onEscapeKeyDown,
+  onInteractOutside,
+  onFocusOutside,
+  onOpenAutoFocus,
+  onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
 }) {
+  // Menus and pickers opened from the dialog work in it, and closing it gives the keyboard back to what opened it (ui.tsx
+  // layerHandlers) (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+  const opener = React.useRef<Element | null>(null)
+  const layer = layerHandlers({ onInteractOutside, onFocusOutside, onOpenAutoFocus, onCloseAutoFocus }, opener)
+  // Going to Settings from inside a dialog ("Your own key or local model…", "add one in Settings") closes the dialog, or the
+  // page it asked for opened behind it, out of reach until the dialog was closed by hand.
+  const closer = React.useRef<HTMLButtonElement>(null)
+  React.useEffect(() => {
+    const away = () => closer.current?.click()
+    addEventListener("friday:settings", away)
+    addEventListener("friday:usage", away)
+    return () => {
+      removeEventListener("friday:settings", away)
+      removeEventListener("friday:usage", away)
+    }
+  }, [])
   return (
     <DialogPortal data-slot="dialog-portal">
       <DialogOverlay />
@@ -67,6 +87,7 @@ function DialogContent({
           className
         )}
         {...props}
+        {...layer}
         // Escape with a menu or picker open inside the dialog (ui.tsx useDismiss) closes that one, not the dialog and what was
         // typed in it (2026-10-27 audit: Escape in the New teammate dialog's tool picker closed the whole dialog).
         onEscapeKeyDown={(e) => {
@@ -75,10 +96,11 @@ function DialogContent({
         }}
       >
         {children}
+        <DialogPrimitive.Close ref={closer} hidden tabIndex={-1} aria-hidden />
         {showCloseButton && (
           <DialogPrimitive.Close
             data-slot="dialog-close"
-            className="absolute top-4 right-4 rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
+            className="absolute top-3 right-3 grid size-7 place-items-center rounded-[8px] text-[var(--text-muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--ink)] disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
           >
             <XIcon />
             <span className="sr-only">Close</span>

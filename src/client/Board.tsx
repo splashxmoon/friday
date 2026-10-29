@@ -4,6 +4,8 @@ import type { BoardCard, BoardColumn } from "../board.js";
 import { api } from "./api.js";
 import { EngineMark, FridayMark } from "./BrandMarks.js";
 import { Avatar, Icon } from "./icons.js";
+import { teamCards, teamFace } from "./Teammates.js";
+import { PresenceRing, type Presence } from "./presence.js";
 import { openOutside } from "./openOutside.js";
 import type { Identity, Project, RecentSession } from "./storage.js";
 import { ConfirmDialog, isTyping, relTime, type Confirmation } from "./ui.js";
@@ -103,12 +105,19 @@ type Week = { sessions: number; shipped: number; runs: number };
 /** Each column's state, as a dot: teal is alive, amber waits on you, the rest are quiet. */
 const DOT: Record<BoardColumn, DotState> = { needs: "needs", working: "working", review: "idle", ready: "done", idle: "idle" };
 
+/** A column's state as the shared presence ring draws it on the card's face or mark (presence.tsx). */
+const PRESENCE: Record<BoardColumn, Presence> = { needs: "needs", working: "working", review: "idle", ready: "idle", idle: "idle" };
+
+/** The card's face (a teammate) or its coding tool's mark, wearing the ring of how it stands: the one state signal on a card. */
 function Mark({ card }: { card: BoardCard }) {
   let face = null as React.ReactNode;
-  if (face) return <span className="grid size-5 shrink-0 place-items-center">{face}</span>;
+  face = teamFace(card);
+  if (face) return <span className="board-mark">{face}</span>;
   return (
-    <span className="grid size-5 shrink-0 place-items-center text-[var(--ink-2)]">
-      {card.tool ? <EngineMark tool={card.tool} size={14} /> : card.agent === "Friday Code" ? <FridayMark size={14} /> : <Icon name="agent" size={14} />}
+    <span className="board-mark">
+      <PresenceRing state={PRESENCE[card.column]} size={24} square>
+        <span className="sb-mark-disc">{card.tool ? <EngineMark tool={card.tool} size={13} /> : card.agent === "Friday Code" ? <FridayMark size={13} /> : <Icon name="agent" size={13} />}</span>
+      </PresenceRing>
     </span>
   );
 }
@@ -132,33 +141,37 @@ function Card({ card, onOpen, solo, focused, onFocus }: { card: BoardCard; onOpe
     // State first: the dot and what it is doing, then which piece of work, then who and where.
     <article
       className={cn(
-        "board-card group/card relative flex cursor-pointer flex-col gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--raised)] px-3 pt-2.5 pb-2.5 shadow-[var(--shadow-xs),var(--edge)] transition-[border-color,box-shadow] duration-[var(--dass-fast)] ease-[var(--dass-ease)] hover:border-[var(--border-strong)] hover:shadow-[var(--shadow-md),var(--edge)]",
+        // A work product's card: --surface, a hairline, 12px, no shadow; the pointer firms the hairline (2026-10-29 direction §5).
+        "board-card group/card relative flex cursor-pointer flex-col gap-1 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 pt-2.5 pb-2.5 transition-[border-color] duration-[var(--dass-fast)] ease-[var(--dass-ease)] hover:border-[var(--border-strong)]",
         "has-[[data-open]:focus-visible]:border-[var(--border-focus)] has-[[data-open]:focus-visible]:shadow-[var(--dass-ring)]",
         needsYou && "border-[color-mix(in_srgb,var(--dass-needs)_45%,var(--border))] hover:border-[color-mix(in_srgb,var(--dass-needs)_70%,var(--border))]",
       )}
       data-card={card.id}
       onClick={() => onOpen(card.sid)}
     >
-      <div className="flex min-w-0 items-center gap-2 text-[12px] font-medium">
-        <Dot state={DOT[card.column]} />
-        <span className={cn("min-w-0 flex-1 truncate", card.column === "needs" ? "text-[var(--dass-needs)]" : card.column === "working" ? "text-[var(--dass-live)]" : "text-[var(--ink-2)]")}>
-          {needsYou ? "Needs you" : card.status}
-        </span>
-        {card.at > 0 && <span className="shrink-0 text-[11px] font-normal text-[var(--text-muted)] tabular-nums">{relTime(card.at)}</span>}
-      </div>
-      <button
-        ref={el}
-        type="button"
-        data-open
-        className="block w-full min-w-0 truncate text-left text-[14px] leading-snug font-medium text-[var(--ink)] outline-none after:absolute after:inset-0 after:rounded-lg after:content-[''] focus-visible:shadow-none!"
-        onFocus={onFocus}
-        onClick={(e) => (e.stopPropagation(), onOpen(card.sid))}
-        aria-label={`${card.title}, ${agent}: ${card.status}${card.you ? ", waiting on you" : ""}`}
-      >
-        {card.title}
-      </button>
-      <div className="flex min-w-0 items-center gap-1.5 text-[12px] text-[var(--text-muted)]" title={`${agent}${card.branch ? ` · ${card.branch}` : ""}`}>
+      {/* The face or mark with its ring, the title and how long: the column already says where it stands, so the card doesn't
+          say "Working" again (2026-10-29 direction §8, §9.4). */}
+      <div className="flex min-w-0 items-center gap-2">
         <Mark card={card} />
+        <button
+          ref={el}
+          type="button"
+          data-open
+          className="block min-w-0 flex-1 truncate text-left text-[13px] leading-[18px] font-medium text-[var(--ink)] outline-none after:absolute after:inset-0 after:rounded-lg after:content-[''] focus-visible:shadow-none!"
+          onFocus={onFocus}
+          onClick={(e) => (e.stopPropagation(), onOpen(card.sid))}
+          title={card.task && card.task !== card.title ? card.task : undefined}
+          aria-label={`${card.title}, ${agent}: ${card.status}${card.you ? ", waiting on you" : ""}`}
+        >
+          {card.title}
+        </button>
+        {card.at > 0 && <span className="shrink-0 text-[12px] text-[var(--text-muted)] tabular-nums">{relTime(card.at)}</span>}
+      </div>
+      {/* One live line: the question when it waits on you, in ink; otherwise what it is doing, in --ink-2. */}
+      <p className={cn("m-0 line-clamp-2 pl-8 text-[13px] leading-[18px]", needsYou ? "text-[var(--ink)]" : "text-[var(--ink-2)]")} title={card.detail ? card.detail : undefined}>
+        {card.detail ? shortPaths(card.detail) : card.status}
+      </p>
+      <div className="flex min-w-0 items-center gap-1.5 pl-8 text-[12px] text-[var(--text-muted)]" title={`${agent}${card.branch ? ` · ${card.branch}` : ""}`}>
         <span className="shrink-0">{agent}</span>
         {card.branch && (
           <>
@@ -167,17 +180,11 @@ function Card({ card, onOpen, solo, focused, onFocus }: { card: BoardCard; onOpe
           </>
         )}
       </div>
-      {card.task && card.task !== card.title && !card.title.startsWith(card.task.slice(0, 40)) && <p className="m-0 line-clamp-2 text-[13px] leading-snug text-[var(--ink-2)]">{card.task}</p>}
-      {card.detail && (
-        <p className="m-0 truncate text-[12px] text-[var(--text-muted)]" title={card.detail}>
-          {shortPaths(card.detail)}
-        </p>
-      )}
       {risk || (card.files > 0 && card.column !== "ready") || (!solo && card.people && card.people.length > 0) || card.branch || card.pr ? (
-        <div className="flex min-h-6 min-w-0 items-center gap-1.5">
+        <div className="flex min-h-6 min-w-0 items-center gap-1.5 pl-8">
           {risk && <RiskChip risk={risk} />}
           {card.files > 0 && card.column !== "ready" && (
-            <Badge variant="outline" className="h-5 rounded-md border-[var(--border)] px-1.5 text-[11px] font-medium text-[var(--ink-2)]">
+            <Badge variant="outline" className="h-5 rounded-md border-[var(--border)] px-1.5 text-[12px] font-medium text-[var(--ink-2)]">
               {card.files} file{card.files === 1 ? "" : "s"}
             </Badge>
           )}
@@ -193,7 +200,7 @@ function Card({ card, onOpen, solo, focused, onFocus }: { card: BoardCard; onOpe
                   <Avatar name={p.name} id={p.id} size={18} />
                 </span>
               ))}
-              {card.people.length > 3 && <span className="pl-2.5 text-[11px] text-[var(--text-muted)]">+{card.people.length - 3}</span>}
+              {card.people.length > 3 && <span className="pl-2.5 text-[12px] text-[var(--text-muted)]">+{card.people.length - 3}</span>}
             </span>
           )}
           {/* Quick actions, without opening the session: shown on hover and focus. */}
@@ -274,6 +281,8 @@ export function Board({ identity, recents, projects, onOpen, onNew, solo = false
   const board = useBoard(identity, recents);
   let { cards } = board;
   const { week, failed, fails, at, hidden, trying, retry } = board;
+  // A team's cards are its teammates', named and faced as the sidebar has them, never a raw error (Teammates.tsx teamCards).
+  cards = teamCards(cards);
   // A retry that works takes the Try again button away; the focus goes to the board's heading, not to the page.
   const heading = useRef<HTMLHeadingElement>(null);
   const retried = useRef(false);
@@ -329,19 +338,28 @@ export function Board({ identity, recents, projects, onOpen, onNew, solo = false
   }, []);
 
   const projectOf = useMemo(() => new Map(recents.map((r) => [r.sid, r.projectId ?? ""])), [recents]);
-  const shown = useMemo(() => {
+  // What the search and the project leave; "Needs you" narrows it further. The tabs' counts are of this, so they follow the
+  // search, and All counts the idle ones too, which it shows under the lanes (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+  const found = useMemo(() => {
     const q = query.trim().toLowerCase();
     return (cards ?? []).filter((c) => {
       if (project && projectOf.get(c.sid) !== project) return false;
-      if (onlyYou && !(c.column === "needs" && c.you)) return false;
       return !q || [c.title, c.agent, c.branch, c.task, c.status].some((t) => t.toLowerCase().includes(q));
     });
-  }, [cards, query, project, onlyYou, projectOf]);
+  }, [cards, query, project, projectOf]);
+  const shown = useMemo(() => (onlyYou ? found.filter((c) => c.column === "needs" && c.you) : found), [found, onlyYou]);
+  // A column key pressed on a column with nothing in it: the lane is marked a moment, and its emptiness said.
+  const [ping, setPing] = useState<{ col: number; at: number } | null>(null);
+  useEffect(() => {
+    if (!ping) return;
+    const t = setTimeout(() => setPing(null), 1400);
+    return () => clearTimeout(t);
+  }, [ping]);
 
   const by = (col: BoardColumn) => order(col, shown.filter((c) => c.column === col));
   const grid = COLUMNS.map((c) => by(c.id));
-  const waitingOnYou = (cards ?? []).filter((c) => c.column === "needs" && c.you).length;
-  const active = (cards ?? []).filter((c) => c.column !== "idle").length;
+  const waitingOnYou = found.filter((c) => c.column === "needs" && c.you).length;
+  const active = found.length;
   const idle = by("idle");
   const usedProjects = projects.filter((p) => recents.some((r) => r.projectId === p.id));
 
@@ -365,7 +383,9 @@ export function Board({ identity, recents, projects, onOpen, onNew, solo = false
         return true;
       };
       if (e.key === "/") search.current?.focus();
-      else if (/^[1-4]$/.test(e.key)) go(Number(e.key) - 1, 0);
+      else if (/^[1-4]$/.test(e.key)) {
+        if (!go(Number(e.key) - 1, 0)) setPing({ col: Number(e.key) - 1, at: Date.now() });
+      }
       else if (c === -1 && ["ArrowDown", "ArrowRight", "j", "l"].includes(e.key)) g.some((_, i) => go(i, 0));
       else if (e.key === "ArrowDown" || e.key === "j") go(c, r + 1);
       else if (e.key === "ArrowUp" || e.key === "k") go(c, r - 1);
@@ -464,19 +484,25 @@ export function Board({ identity, recents, projects, onOpen, onNew, solo = false
           <>
             {/* A filter that matches nothing is said once, across the board, with the way back; not four boxes that each say it. */}
             {cards !== null && shown.length === 0 && cards.length > 0 && filtered && (
-              <div className="flex items-center gap-3 rounded-xl border border-dashed border-[var(--border-strong)] px-4 py-3 text-[13px] text-[var(--ink-2)]" role="status">
+              <div className="flex items-center gap-3 border-b border-[var(--border)] px-1 pb-3 text-[13px] text-[var(--ink-2)]" role="status">
                 Nothing on the board matches{query ? ` “${query.trim()}”` : " these filters"}.
                 <Button variant="outline" size="sm" className="ml-auto h-7" onClick={() => (setQuery(""), setFilter({ project: "", onlyYou: false }))}>
                   Clear filters
                 </Button>
               </div>
             )}
+            <span className="sr-only" role="status">
+              {ping ? `${COLUMNS[ping.col]!.title}: ${onlyYou && ping.col > 0 ? "not shown while Needs you is picked" : "nothing here"}` : ""}
+            </span>
             <div className="mt-1 grid grid-cols-1 items-start gap-3 @min-[480px]:grid-cols-2 @min-[720px]:grid-cols-4">
               {COLUMNS.map((col, i) => {
                 const list = grid[i]!;
+                // "Needs you" picked: only its lane, the board's width, not three more saying "Nothing here matches" (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+                if (onlyYou && col.id !== "needs") return null;
+                const wide = onlyYou && col.id === "needs";
                 return (
                   // A lane: a quiet well the cards sit in, its head saying what is in it, how many, and its key.
-                  <section key={col.id} className="board-lane group/lane flex min-w-0 flex-col gap-1.5 rounded-xl bg-[var(--card)] p-1.5 shadow-[inset_0_0_0_1px_var(--border)]" aria-label={`${col.title}, ${list.length}`}>
+                  <section key={col.id} data-ping={ping?.col === i ? ping.at : undefined} className={cn("board-lane group/lane flex min-w-0 flex-col gap-1.5 rounded-xl bg-[var(--card)] p-1.5 shadow-[inset_0_0_0_1px_var(--border)]", wide && "col-span-full")} aria-label={`${col.title}, ${list.length}`}>
                     <Tip label={col.hint} keys={String(i + 1)}>
                       <div className="flex h-8 items-center gap-2 px-2">
                         <Dot state={DOT[col.id]} />
@@ -487,7 +513,7 @@ export function Board({ identity, recents, projects, onOpen, onNew, solo = false
                         </kbd>
                       </div>
                     </Tip>
-                    <div className="flex flex-col gap-1.5">
+                    <div className={wide ? "grid grid-cols-1 gap-1.5 @min-[480px]:grid-cols-2 @min-[720px]:grid-cols-4" : "flex flex-col gap-1.5"}>
                       {list.filter((c) => !isQuick(c)).map((c) => (
                         <Card key={c.id} card={c} onOpen={onOpen} solo={solo} focused={focus === c.id} onFocus={() => setFocus(c.id)} />
                       ))}
@@ -519,9 +545,9 @@ export function Board({ identity, recents, projects, onOpen, onNew, solo = false
                             <Skeleton className="h-[84px] rounded-lg bg-[var(--hover)]" />
                           </>
                         ) : filtered && !shown.length ? null : (
-                          <div className="grid h-[72px] place-items-center rounded-lg border border-dashed border-[var(--border-strong)] px-3 text-center text-[13px] text-[var(--text-muted)] opacity-80">
-                            {filtered ? "Nothing here matches" : col.empty}
-                          </div>
+                          // An empty column is its heading and its 0 (2026-10-29 direction §9.4): no box saying so; said to a
+                          // screen reader only.
+                          <p className="sr-only">{filtered ? "Nothing here matches" : col.empty}</p>
                         ))}
                     </div>
                   </section>
@@ -530,6 +556,7 @@ export function Board({ identity, recents, projects, onOpen, onNew, solo = false
             </div>
 
             {/* Sessions with nothing running: folded under a hairline, so the four lanes stay the board. */}
+            {!onlyYou && (
             <Collapsible open={idleOpen} onOpenChange={setIdleOpen} className="mt-2 border-t border-[var(--border)] pt-3">
               <CollapsibleTrigger asChild>
                 <Button variant="ghost" size="sm" className="h-8 gap-2 px-2 text-[13px] font-semibold text-[var(--ink)] hover:bg-[var(--hover)]">
@@ -549,6 +576,7 @@ export function Board({ identity, recents, projects, onOpen, onNew, solo = false
                 </div>
               </CollapsibleContent>
             </Collapsible>
+            )}
           </>
         )}
 

@@ -27,7 +27,7 @@ export function Count({ n, needs, className }: { n: number | string; needs?: boo
   return (
     <span
       className={cn(
-        "inline-grid h-[18px] min-w-[18px] place-items-center rounded-full px-1.5 text-[11px] font-medium tabular-nums text-[color:var(--text-muted)]",
+        "inline-grid h-[18px] min-w-[18px] place-items-center rounded-full px-1.5 text-[12px] font-medium tabular-nums text-[color:var(--text-muted)]",
         // Waiting on you: a soft amber tint with the number in amber, in light and dark alike (Arun, 2026-10-20).
         needs ? "bg-[color-mix(in_srgb,var(--dass-needs)_16%,transparent)] font-semibold text-[color:var(--dass-needs)]" : "bg-[color-mix(in_srgb,var(--ink)_7%,transparent)]",
         className,

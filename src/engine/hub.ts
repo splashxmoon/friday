@@ -8,6 +8,7 @@ import { leadBrief, meshListing, newNotes, type AgentMesh } from "../agent-mesh.
 import { backNote } from "../limit-handoff.js";
 import { keepGoingNote } from "../keep-going.js";
 import { runnableQueue } from "../held.js";
+import { limitHit } from "../limit-reset.js";
 import { fitModels, routeTool, stickyPick, taskTier, type ToolWindow } from "../routing.js";
 import { missedLast, type Learned } from "../route-learning.js";
 import { repoKeyOf } from "../repo-key.js";
@@ -21,9 +22,11 @@ import { accessCommand, type SessionCore } from "../session/core.js";
 import { handoffBrief } from "../handoff.js";
 import { startCheckpoint } from "../rewind.js";
 import { shellSeconds } from "../runner/repo-read.js";
+import { BROWSER_NOTE, WORK_NOTE } from "./work.js";
 import { envNamesOnly } from "../runner/git.js";
 import type { AppendGuard, SessionStore } from "../session/store.js";
 import { hideSecretsIn, withShieldNote } from "../secrets.js";
+import { localEdition } from "../local-edition.js";
 import {
   CLI_ID,
   engineName,
@@ -144,6 +147,14 @@ const MAX_DELTA = 4_000;
  */
 const HELD_DIFF_S = 15 * 60;
 
+/**
+ * A teammate's note (teammates.ts teammateNote), which stays the same turn after turn, and what leads its turn's prompt when it
+ * changes: its rooms, its memory since the conversation began, what it did on its backup, being away (`always`: every turn).
+ */
+export interface MateNote {
+  note: string;
+  preamble: { key: string; text: string; always?: true }[];
+}
 
 export interface RunnerParams {
   sid: string;
@@ -298,6 +309,10 @@ export class EngineHub {
   private droppedAt = new Map<string, number>();
   /** Set by the app: the project brain's briefing for a lane's first turn (brain.ts). */
   brief: ((sid: string, lane: string, task: string) => Promise<string>) | null = null;
+  /** A teammate's own note for its tool (teammates.ts teammateNote), and what its turn is told first, when the lane is one; null otherwise. */
+  teammate: ((sid: string, lane: string) => Promise<MateNote | null>) | null = null;
+  /** Set by the app: whether a team's queues are held (the person paused the team), for a lane of a team session. */
+  teamPaused: ((sid: string) => Promise<boolean>) | null = null;
   /** Set by the app: what runs in a workspace have shown about each model, for routing (route-learning.ts). */
   learned: ((workspaceId: string) => Promise<Learned>) | null = null;
   /** Set by the app: the agents' messages to each other, which a runner's `friday` MCP server calls (agent-mesh.ts). */
@@ -587,6 +602,9 @@ export class EngineHub {
     // sharing it when it comes back, whatever brought it back: a restart that didn't say so made it the folder's one writer, and
     // the lanes beside it were turned away as they came back (Arun, 2026-10-26: "the coding tools not reconnecting").
     let share = !!p.share || (!p.newLane && !!state.engines[lane]?.shared);
+    // A Work session's agents make its pieces together in one folder: every lane shares it (engine/work.ts). Only where Arun's
+    // own build runs: a Work flag on a session anywhere else is nothing (Arun, 2026-10-28: "iron everything and ensure we are good").
+    if (state.options.work && localEdition()) share = true;
     const editing = async (skip?: string): Promise<[string, { hostName: string }] | undefined> =>
       mode === "plan" || share
         ? undefined
@@ -693,6 +711,8 @@ export class EngineHub {
     host.selfCheckpoint = (p.caps ?? "").split(",").includes("checkpoint");
     host.steers = (p.caps ?? "").split(",").includes("steer");
     host.mesh = this.mesh;
+    host.teammate = this.teammate ? () => this.teammate!(p.sid, lane) : null;
+    host.teamPaused = this.teamPaused ? () => this.teamPaused!(p.sid) : null;
     // What its first turn will be told besides the instruction, so its CLI can be started before that turn comes.
     const system = tool ? await host.systemNote(events) : undefined;
     this.hosts.set(key, host);
@@ -704,6 +724,7 @@ export class EngineHub {
     // And how hard it thinks, so the CLI kept warm for the first turn is started with the flag that turn will carry.
     const effort = effortReset ? undefined : laneEffort(state, lane, tool);
     const attached: Record<string, unknown> = { kind: "attached", lane, laneName, ...(imported ? { imported: true } : {}), ...(system ? { system } : {}), ...(effort ? { effort } : {}) };
+    if (host.work) attached.work = true;
     host.sendRaw(attached);
     void host.pump();
   }
@@ -750,6 +771,19 @@ class LaneHost {
   private rerun = false;
   private closed = false;
   private turn: { id: string; resolve: (r: TurnEnd) => void } | null = null;
+  /**
+   * The answer the tool has written so far in this turn and not yet said as a message of its own (its streamed text): kept when
+   * the turn is stopped, as an interrupted message, so a Stop doesn't take away what was already on screen. Stopping a run left
+   * only its first line, and a draft cut short is often the very thing that was asked for (Arun, 2026-10-28: "iron everything
+   * and ensure we are good… any logic errors and fixes").
+   */
+  private draft = "";
+  /**
+   * The turn under way was told to stop (a Stop, a redirect that couldn't wait): what the tool says after that is not the
+   * finished form of its draft, so a message then doesn't take the draft's place (Arun, 2026-10-28: "iron everything and ensure
+   * we are good"). A redirect then Stop lost every line the stopped turn had streamed to the words of the turn after it.
+   */
+  private stopSent = false;
   /** The instructions the turn under way was given: put back in the queue if the machine drops before it ends. */
   private inFlight: number[] | null = null;
   /** Its turn's instructions were put back: the run is left going for the runner that comes back, not ended with an error. */
@@ -783,6 +817,44 @@ class LaneHost {
   private checkpointFor: string | null = null;
   private unsub: (() => Promise<void>) | null = null;
   private readonly actor: ActorRef;
+  /** This lane's teammate note, when it is a teammate (EngineHub.teammate). */
+  teammate: (() => Promise<MateNote | null>) | null = null;
+  /** Whether the person paused the team this lane is in (EngineHub.teamPaused). */
+  teamPaused: (() => Promise<boolean>) | null = null;
+  /**
+   * What this lane's tool was last told before a turn's prompt (MateNote.preamble), by part: a part goes again only when it has
+   * changed, so a teammate's system note stays the same turn after turn (its tool keeps its cache) and what changes reaches it
+   * once (Arun, 2026-10-28: "run an audit on the teams stuff, really iron out bugs"). Forgotten at a compaction, whose summary
+   * may have dropped it.
+   */
+  private toldBefore = new Map<string, string>();
+  private matePreamble: MateNote["preamble"] = [];
+  /** The preamble parts that changed since this lane's tool was last told them, as text to lead its turn's prompt with. */
+  private preambleNow(): string {
+    const out: string[] = [];
+    for (const p of this.matePreamble) {
+      if (!p.always && this.toldBefore.get(p.key) === p.text) continue;
+      this.toldBefore.set(p.key, p.text);
+      if (p.text) out.push(p.text);
+    }
+    return out.length ? `${out.join("\n\n")}\n\n` : "";
+  }
+  /**
+   * Whether this team lane's queue waits rather than starting a turn, when what is queued is all the agents' and Friday's: the
+   * person paused the team, or its tool is out of usage until its limit lifts (a message then woke it only to fail at once). The
+   * app's re-pump starts it once that is over (Arun, 2026-10-28: "we need to ensure teams can work basically while you are away").
+   */
+  private async teamWaits(events: SessionEvent[], pending: number[]): Promise<boolean> {
+    if (pending.some((q) => events.find((e) => e.seq === q)?.actor.kind === "human")) return false;
+    if (await this.teamPaused?.().catch(() => false)) return true;
+    // Out of usage until a time it said: waits for it. One that said no time is tried (its resume comes in an hour), and a tool
+    // started on the lane since (its backup, or its own once the limit lifted) isn't the one that ran out.
+    const end = events.findLast((e) => (e.lane ?? MAIN_LANE) === this.lane && e.body.type === "run.ended");
+    if (end?.body.type !== "run.ended" || end.body.outcome !== "error") return false;
+    const until = limitHit(end.body.error, end.ts)?.resetsAt;
+    if (!until || until <= Date.now()) return false;
+    return !events.some((e) => e.seq > end.seq && (e.lane ?? MAIN_LANE) === this.lane && e.body.type === "engine.attached");
+  }
   /** Open once the conversation this lane continues is in the log, or isn't coming (see the constructor). */
   private importGate: Promise<void> = Promise.resolve();
   private openGate = () => {};
@@ -901,7 +973,7 @@ class LaneHost {
     else if (b.type === "run.cancel") why = `${ev.actor.name} cancelled the run`;
     else if (b.type === "run.interrupt") why = `${ev.actor.name} delivered queued instructions now`;
     else if (b.type === "instruction" && b.interrupt) why = `${ev.actor.name} interrupted with a new instruction`;
-    if (why && this.turn) this.sendRaw({ kind: "stop", reason: why });
+    if (why && this.turn) (this.stopSent = true), this.sendRaw({ kind: "stop", reason: why });
     // An answer to something the tool is waiting on right now goes to it there and then, and is not a new turn.
     if (b.type === "instruction" && b.approval && this.live.delete(b.approval.id)) return void this.answerLive(ev.seq, b.approval);
     if (b.type === "instruction" && b.approval && this.answered.has(b.approval.id)) {
@@ -1005,6 +1077,9 @@ class LaneHost {
       // starts, and never start one themselves.
       const pending = runnableQueue(events, this.lane, pendingFor(state, this.lane));
       const guard: AppendGuard = { expectEpoch: epoch };
+      // A team's queue held by the person's pause, or for a tool out of usage: it waits, and the app's re-pump starts it after.
+      // No hourly budget: agents bouncing the same thing back and forth are stopped where they message (agent-mesh loopBetween).
+      if (pending.length && run.status !== "running" && state.options.team && (await this.teamWaits(events, pending))) return;
       // On its host's own plan, it takes its host's work alone (own-plan.ts), whoever or whatever queued it: a teammate, another
       // agent working for one, a hand-off, the board. Anything else leaves the queue unrun, with why, before a turn starts.
       if (ownPlan(mine) && pending.length) {
@@ -1143,6 +1218,7 @@ class LaneHost {
       if (long) {
         this.inFlight = pending;
         await this.append({ type: "context.compacted", tool: this.info.tool!, ...long }).catch((e) => console.error("[engine] compact:", e));
+        this.toldBefore.clear();
         const c = await this.runTurn("/compact", [], note, undefined, "/compact", model, undefined, cap, false);
         this.inFlight = null;
         if (this.closed || (c.outcome === "error" && this.requeued)) return;
@@ -1153,12 +1229,25 @@ class LaneHost {
         // Stopped meanwhile: the log says what's next, as after any turn.
         if (c.outcome === "stopped" || runOf(await this.store.state(this.sid), this.lane).status !== "running") continue;
       }
+      // A teammate's preamble, after any compaction (which forgets what it was told): what changed since its last turn.
+      if (state.options.team && !command) prompt = withShieldNote(`${brief}${catchUp}${this.preambleNow()}${turn.prompt}`);
       this.inFlight = pending;
       this.turnCap = cap;
       // Every instruction of it handed back after a dropped connection: the turn its runner may still have running, to take on
       // where it got to rather than start again (runner adopt).
       const again = pending.every((q) => events.some((e) => e.body.type === "instructions.requeued" && e.body.seqs.includes(q)));
-      const end = await this.runTurn(prompt, [...(attachments ?? [])], note, approval && { ...approval, ...asked }, command, model, effort, cap, this.owesCheckpoint, again);
+      let end = await this.runTurn(prompt, [...(attachments ?? [])], note, approval && { ...approval, ...asked }, command, model, effort, cap, this.owesCheckpoint, again);
+      // A coding tool that lost its earlier conversation (a resume that failed) starts a fresh one at once and does the same turn
+      // there, told where the session stands, rather than stopping until a person writes again: the runner has already dropped
+      // the dead id (Arun, 2026-10-29: "Agent stopped: Codex couldn't find its earlier conversation, so the next instruction
+      // starts a fresh one."; "Yes, everywhere"). Once: a second failure stops as any other error does. Its note is made again: a
+      // conversation brought in from elsewhere is now told in it (resume.lost), since the tool no longer has it.
+      if (end.outcome === "error" && !this.requeued && !this.closed && /couldn't find its earlier conversation/.test(end.error ?? "") && runOf(await this.store.state(this.sid), this.lane).status === "running") {
+        console.log(`[engine] ${this.actor.name} lost its conversation; carrying the turn on in a fresh one`);
+        const fresh = buildCatchUp(state, events, pending, this.lane);
+        const told = await this.systemNote(await this.store.events(this.sid));
+        end = await this.runTurn(withShieldNote(`${fresh}${prompt}`), [...(attachments ?? [])], told, approval && { ...approval, ...asked }, command, model, effort, cap, this.owesCheckpoint, false);
+      }
       this.inFlight = null;
       if (end.outcome === "error" && this.requeued) return;
       if (end.outcome === "error") {
@@ -1211,6 +1300,8 @@ class LaneHost {
     return this.withAgent(this.importedNote(events));
   }
 
+  /** A Work session (SessionOptions.work), as its options said when the note was last made: sent with each turn to the runner. */
+  work = false;
 
   /**
    * Conversations this session continues that this CLI is not the one
@@ -1243,6 +1334,15 @@ class LaneHost {
   private async withAgent(system: string): Promise<string> {
     const state = await this.store.state(this.sid);
     const agent = this.lane === MAIN_LANE ? state.options.agent : state.lanes.find((l) => l.id === this.lane)?.agent;
+    // Only in the open-source edition: anywhere else a session's Work flag starts nothing (no auto mode, no browser, no network).
+    this.work = !!state.options.work && localEdition();
+    if (this.work) system = [system, "", WORK_NOTE].join("\n");
+    if (process.env.FRIDAY_MINE === "1") system = [system, "", BROWSER_NOTE].join("\n");
+    // A teammate: who it is, its role, its folder and how the team works (teammates.ts), the same turn after turn; what changes
+    // (its rooms, its memory since, being away) leads the turn's prompt instead (preambleNow).
+    const mate = state.options.team ? await this.teammate?.().catch(() => null) : null;
+    this.matePreamble = mate?.preamble ?? [];
+    if (mate) system = [system, "", mate.note].join("\n");
     if (!agent?.instructions?.trim()) return system;
     return [system, "", `You are working as the agent "${agent.name}". Follow its instructions for everything you do in this session:`, agent.instructions.trim()].join("\n");
   }
@@ -1256,7 +1356,10 @@ class LaneHost {
     }
     return new Promise((resolve) => {
       this.turn = { id, resolve };
+      this.draft = "";
+      this.stopSent = false;
       const msg: Record<string, unknown> = { kind: "turn", id, prompt, system, attachments, ...(approval ? { approval } : {}), ...(command ? { command } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(mode ? { mode } : {}), ...(checkpoint ? { checkpoint: true } : {}), ...(again ? { again: true } : {}) };
+      if (this.work) msg.work = true;
       this.sendRaw(msg);
     });
   }
@@ -1381,9 +1484,17 @@ class LaneHost {
       return;
     }
     if (m.kind === "delta" && this.turn && typeof m.text === "string") {
+      if (m.channel !== "reasoning") this.draft = (this.draft + m.text).slice(-MAX_TEXT);
       void this.bus.publish(this.sid, { kind: "delta", text: m.text.slice(0, MAX_DELTA), channel: m.channel === "reasoning" ? "reasoning" : "text", ...(this.lane !== MAIN_LANE ? { lane: this.lane } : {}) }).catch(() => {});
     } else if (m.kind === "event" && (this.turn || !this.info.tool || (m.body as { type?: unknown } | undefined)?.type === "agent.diff")) {
       const body = cleanBody(m.body);
+      if (body?.type === "agent.message") {
+        // Its draft said whole, as a tool says each block once it is written; after a stop, words that aren't that draft come
+        // after it, and the draft stays, said as cut short, ahead of them.
+        const cut = this.stopSent && this.turn ? this.draft.trim() : "";
+        this.draft = "";
+        if (cut && !body.text.includes(cut)) void this.record({ type: "agent.message", text: cut, toolCalls: [], interrupted: true }).catch((e) => console.error("[engine] draft:", e));
+      }
       if ((body?.type === "engine.approval" || body?.type === "agent.usage" || body?.type === "effort.skipped" || body?.type === "account.switched") && this.info.tool) body.tool = this.info.tool;
       // The lane runs as that account from here: a reconnect says so again, and until then this is what attaches say.
       if (body?.type === "account.switched") this.info = { ...this.info, account: body.to };
@@ -1410,7 +1521,16 @@ class LaneHost {
       // Nothing waits on them now: a yes that comes later starts a turn with permission, as for any other ask.
       this.live.clear();
       const outcome = m.outcome === "stopped" || m.outcome === "error" ? m.outcome : "done";
-      t.resolve({ outcome, ...(typeof m.error === "string" ? { error: m.error } : {}) });
+      const end = { outcome, ...(typeof m.error === "string" ? { error: m.error } : {}) } as TurnEnd;
+      // Stopped partway through its answer: what it had written stays, said as cut short, ahead of anything the next turn says.
+      // Or ended by an error partway through it (an API that gave up mid-answer, a limit hit while writing): a tool says a block
+      // whole only once it is written, so what was streamed of it would otherwise go (Arun, 2026-10-28: "iron everything").
+      const draft = outcome === "stopped" || outcome === "error" ? this.draft.trim() : "";
+      this.draft = "";
+      if (!draft) return t.resolve(end);
+      void this.record({ type: "agent.message", text: draft, toolCalls: [], interrupted: true })
+        .catch((e) => console.error("[engine] draft:", e))
+        .finally(() => t.resolve(end));
     }
   }
 
@@ -1422,6 +1542,8 @@ class LaneHost {
     const mesh = this.mesh;
     if (!mesh) return this.sendRaw({ kind: "mesh.result", id, output: "Agents can't reach each other from here.", isError: true });
     // A runner that can take preview_screenshot's picture says so as it lists them (runner/screenshot.ts).
+    // A crew's room's tools have the roster tool too (agent-mesh.ts listingFor).
+    if (tool === "__list") return this.sendRaw({ kind: "mesh.result", id, ...(await mesh.listingFor(this.sid, !!args && typeof args === "object" && (args as { screenshot?: unknown }).screenshot === true)) });
     if (tool === "__list") return this.sendRaw({ kind: "mesh.result", id, ...meshListing(!!args && typeof args === "object" && (args as { screenshot?: unknown }).screenshot === true) });
     const stop = new AbortController();
     this.meshCalls.set(id, stop);
@@ -1429,6 +1551,7 @@ class LaneHost {
       const a = args && typeof args === "object" && !Array.isArray(args) ? (args as Record<string, unknown>) : {};
       const r = await mesh.call(this.sid, this.lane, typeof tool === "string" ? tool.slice(0, 80) : "", a, stop.signal);
       const result: Record<string, unknown> = { kind: "mesh.result", id, output: r.output, ...(r.isError ? { isError: true } : {}), ...(r.capture ? { capture: r.capture } : {}) };
+      if (r.content) result.content = r.content;
       this.sendRaw(result);
     } finally {
       this.meshCalls.delete(id);

@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { SECTIONS } from "./Settings.js";
 import { Avatar, Icon, type IconName } from "./icons.js";
 import type { RecentSession } from "./storage.js";
 import { shortcut } from "./Shortcuts.js";
 import { useDismiss } from "./ui.js";
+import { openWorkflows } from "./team-workflow-view.js";
+import { choosePlace } from "./WorkMode.js";
 
 export interface Action {
   id: string;
@@ -97,8 +99,9 @@ export function Palette({ actions, onClose, onNew }: { actions: Action[]; onClos
             aria-activedescendant={chosen ? optionId(chosen) : undefined}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "ArrowDown") (e.preventDefault(), setAt((i) => Math.min(i + 1, flat.length - 1)));
-              if (e.key === "ArrowUp") (e.preventDefault(), setAt((i) => Math.max(i - 1, 0)));
+              // Round from the last to the first and back, as every menu here goes (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+              if (e.key === "ArrowDown" && flat.length) (e.preventDefault(), setAt((i) => (Math.min(i, flat.length - 1) + 1) % flat.length));
+              if (e.key === "ArrowUp" && flat.length) (e.preventDefault(), setAt((i) => (Math.min(i, flat.length - 1) - 1 + flat.length) % flat.length));
               if (e.key === "Escape") onClose();
               if (e.key === "Enter" && chosen) (e.preventDefault(), run(chosen));
             }}
@@ -131,7 +134,7 @@ export function Palette({ actions, onClose, onNew }: { actions: Action[]; onClos
                     onClick={() => run(a)}
                   >
                     {a.who ? <Avatar name={a.who.name} id={a.who.id} size={18} /> : <Icon name={a.icon ?? "chevronRight"} size={15} />}
-                    <span className="srch-title">{a.label}</span>
+                    <span className="srch-title">{marked(a.label, q)}</span>
                     {a.hint && <kbd className="pal-key">{a.hint}</kbd>}
                   </div>
                 ))}
@@ -165,6 +168,43 @@ export function paletteOrder(session: Action[], base: Action[]): Action[] {
   const recents = base.filter((a) => a.group === "Sessions");
   const rest = base.filter((a) => a.group !== "Session" && a.group !== "Sessions");
   return [...first, ...recents, ...session, ...rest];
+}
+
+/**
+ * Where the typed letters are in a row's name: the words together where they are, else each letter in order, as the matching
+ * finds them. Shown marked, as the search window marks what it found (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
+ */
+export function matchSpans(label: string, q: string): [number, number][] {
+  const needle = q.trim().toLowerCase();
+  if (!needle) return [];
+  const hay = label.toLowerCase();
+  const at = hay.indexOf(needle);
+  if (at >= 0) return [[at, at + needle.length]];
+  const out: [number, number][] = [];
+  let i = 0;
+  for (const ch of needle.replace(/\s+/g, "")) {
+    const found = hay.indexOf(ch, i);
+    if (found < 0) return [];
+    const last = out[out.length - 1];
+    if (last && last[1] === found) last[1] = found + 1;
+    else out.push([found, found + 1]);
+    i = found + 1;
+  }
+  return out;
+}
+
+function marked(label: string, q: string): ReactNode {
+  const spans = matchSpans(label, q);
+  if (!spans.length) return label;
+  const parts: ReactNode[] = [];
+  let from = 0;
+  spans.forEach(([a, z], i) => {
+    if (a > from) parts.push(label.slice(from, a));
+    parts.push(<mark key={i}>{label.slice(a, z)}</mark>);
+    from = z;
+  });
+  if (from < label.length) parts.push(label.slice(from));
+  return parts;
 }
 
 /** The first letter of each word: "Code Review" is "cr". */
@@ -221,6 +261,11 @@ export function baseActions(p: {
     { id: "board", label: "Agent Board", icon: "board", group: "Go to", run: () => p.goto("board") },
     { id: "review", label: "Code Review", icon: "gitPullRequest", group: "Go to", run: () => p.goto("review") },
     { id: "automations", label: "Automations", icon: "zap", group: "Go to", run: () => p.goto("automations") },
+    { id: "workflows", label: "Crew workflows", icon: "zap", group: "Go to", run: openWorkflows },
+    // The sidebar's Code, Work and Crew from the keyboard (Arun, 2026-10-28: "iron everything and ensure we are good").
+    { id: "place-code", label: "Switch to Code", icon: "code", group: "Go to", run: () => choosePlace("code") },
+    { id: "place-work", label: "Switch to Work", icon: "pencil", group: "Go to", run: () => choosePlace("work") },
+    { id: "place-team", label: "Switch to Crew", icon: "users", group: "Go to", run: () => choosePlace("team") },
     ...(p.local ? [] : [{ id: "agents", label: "Saved agents", icon: "agent" as const, group: "Go to", run: () => p.goto("agents") }]),
     { id: "usage", label: "Usage", icon: "usage", group: "Go to", run: () => p.goto("usage") },
     ...(p.team === false

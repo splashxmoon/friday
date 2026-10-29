@@ -132,6 +132,13 @@ export interface TurnSpec {
    * their own). Absolute paths, each a folder on this computer.
    */
   dirs?: string[];
+  /**
+   * A Work session: content and knowledge work, not code (Arun, 2026-10-26: "basic work stuff not coding ... it can handle
+   * browsering, videos, etc everything that codex and claude co work can do"). Each tool starts with everything it has on its
+   * own: Claude Code with Claude in Chrome and, in Auto, its own auto mode (so its connectors and skills run unasked, past its
+   * safety checks); Codex with live web search and the network, beside its computer use and image generation.
+   */
+  work?: boolean;
 }
 
 /**
@@ -416,9 +423,25 @@ function blockText(content: unknown): string {
   return content.map((c) => (c && typeof c === "object" && c.type === "text" ? str(c.text) : "")).join("");
 }
 
+const withChrome = (t: TurnSpec) => (!!t.work || process.env.FRIDAY_MINE === "1") && offered(t, "--chrome");
+
+/**
+ * Claude Code's auto mode, as TurnSpec.skip names it once refused: a version from before it, or an account it isn't open to,
+ * turns `--permission-mode auto` away, and from then on the lane's Work turns in Auto run as Auto does everywhere else (edits
+ * allowed and Auto's tools by --allowedTools), rather than every one failing (Arun, 2026-10-28: "iron everything and ensure we
+ * are good… any logic errors").
+ */
+export const AUTO_MODE = "--permission-mode=auto";
+
+/** Whether Claude Code's failure is it turning auto mode away: its value refused for the flag, or the mode said to be unavailable. */
+export const autoModeRefused = (error: string): boolean =>
+  /permission[- ]mode[^\n]*\bauto\b[^\n]*(invalid|not (?:a )?valid|allowed choices|not allowed)/i.test(error) ||
+  /\bauto mode\b[^\n]*(not (?:available|enabled|supported|allowed)|unavailable|isn't available|requires|disabled)/i.test(error);
 
 /** Claude Code's own permission mode for a turn: Plan's, or edits allowed and the rest by --allowedTools. */
 function claudeMode(t: TurnSpec): string {
+  // A Work session in Auto runs in Claude Code's auto mode: every tool and connector it has, its own classifier in place of asking.
+  if (t.work && t.mode === "full" && offered(t, AUTO_MODE)) return "auto";
   return t.mode === "plan" ? "plan" : "acceptEdits";
 }
 
@@ -429,6 +452,7 @@ export const claude: Adapter = {
   login: ["auth", "login"],
   logout: ["auth", "logout"],
   status: { args: ["auth", "status", "--json"] },
+  optional: ["--chrome"],
   args: (t) => [
     "-p",
     "--output-format",
@@ -441,6 +465,10 @@ export const claude: Adapter = {
     ...(t.effort ? ["--effort", t.effort] : []),
     "--permission-mode",
     claudeMode(t),
+    // Claude in Chrome, the person's own browser with their sign-ins, when its extension is there: in a Work session, and in
+    // every session of a build with FRIDAY_MINE set (local/start.ts); in Auto its tools run unasked, as the web's do.
+    ...(withChrome(t) ? ["--chrome"] : []),
+    ...(withChrome(t) && t.mode === "full" && claudeMode(t) !== "auto" ? ["--allowedTools", "mcp__claude-in-chrome"] : []),
     // Folders beside its own, one flag each: the flag takes several, and a value of its own never swallows the next flag.
     ...(t.dirs ?? []).flatMap((d) => ["--add-dir", d]),
     // What needs a yes is asked as a control_request on stdout, and the turn waits for the answer on stdin.
@@ -479,6 +507,12 @@ export const claude: Adapter = {
      * task at most every few seconds while it works, so its card and the status bar can follow it without the log filling up.
      */
     const subs = new Map<string, { id: string; steps: number; at: number }>();
+    /**
+     * Calls that sent a subagent off and haven't been matched to their task yet, oldest first: a task_started that doesn't name
+     * its call is the next of these, so its steps still reach its row, which otherwise said "Starting…" until it came back
+     * (Arun, 2026-10-28: "iron everything and ensure we are good… any logic errors and fixes").
+     */
+    const unmatched: string[] = [];
     /** What each command was, so a test that failed inside a chain is reported as failing. */
     const commands = new Map<string, string>();
     return (line) => {
@@ -491,7 +525,11 @@ export const claude: Adapter = {
           if (m.task_id && (m.subtype === "task_started" || m.subtype === "task_updated" || m.subtype === "task_notification")) {
             const id = str(m.task_id);
             if (m.subtype === "task_started") {
-              if (m.tool_use_id && m.task_type !== "local_bash") subs.set(str(m.tool_use_id), { id, steps: 0, at: 0 });
+              const named = str(m.tool_use_id);
+              const at = named ? unmatched.indexOf(named) : -1;
+              if (at >= 0) unmatched.splice(at, 1);
+              const callId = named || (m.task_type !== "local_bash" && !m.is_backgrounded ? (unmatched.shift() ?? "") : "");
+              if (callId && m.task_type !== "local_bash") subs.set(callId, { id, steps: 0, at: 0 });
               const agentType = str(m.subagent_type) || (m.task_type === "local_bash" ? "command" : "");
               return task({ kind: "task", id, status: "running", description: str(m.description) || firstLine(str(m.prompt)), ...(agentType ? { agentType } : {}), background: !!m.is_backgrounded });
             }
@@ -543,6 +581,7 @@ export const claude: Adapter = {
               const t = claudeTool(str(b.name), b.input && typeof b.input === "object" ? b.input : {});
               names.set(str(b.id), t.name);
               if (t.name === "shell") commands.set(str(b.id), str(t.args.command));
+              if (/^(task|agent)$/i.test(str(b.name)) && b.input?.run_in_background !== true) unmatched.push(str(b.id));
               return call(str(b.id), t.name, t.args);
             });
           if (!text && !toolCalls.length && !reasoning) return [];
@@ -848,6 +887,8 @@ function appPolicy(t: TurnSpec): { sandboxPolicy: Record<string, unknown>; appro
   // dangerFullAccess there confines nothing to the folder: whenever it writes, approvalPolicy is "never", so Codex never asks and
   // the grantRoot check in `approval` (in `codex`) never runs. Neither its shell commands nor its file changes are held to the folder.
   const sandboxPolicy: Record<string, unknown> = !writes ? { type: "readOnly", networkAccess: true } : process.platform === "win32" ? { type: "dangerFullAccess" } : { type: "workspaceWrite", networkAccess: t.mode === "full", writableRoots: t.dirs ?? [] };
+  // A Work session reaches the web whenever it may write, in Edits as in Auto.
+  if (t.work && sandboxPolicy.type === "workspaceWrite") sandboxPolicy.networkAccess = true;
   // Auto asks too, and Friday answers yes itself (see `approval` in `codex`): Codex stays in its sandbox until something needs
   // more, then goes beyond it as it would for a person who always approves. With "never" a command that needed more (a global
   // install, a cache outside the folder) just failed in Auto, with nobody to ask (Arun, 2026-10-18).
@@ -856,6 +897,8 @@ function appPolicy(t: TurnSpec): { sandboxPolicy: Record<string, unknown>; appro
 
 /** Settings the session adds to Codex's own, as `-c` overrides ahead of the subcommand. */
 function codexExtras(t: TurnSpec): string[] {
+  // A Work session: live web search, and the network in its sandbox whenever it may write.
+  if (t.work) return ["-c", 'web_search="live"', "-c", "sandbox_workspace_write.network_access=true"];
   void t;
   return [];
 }

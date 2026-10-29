@@ -155,6 +155,7 @@ export function AutomationsPage({
   recents,
   onOpen,
   onSavedAgents,
+  onTeamWorkflows,
 }: {
   identity: Identity;
   agents: AgentView[];
@@ -162,6 +163,8 @@ export function AutomationsPage({
   onOpen: (sid: string, invite: string) => void;
   /** The saved agents' own page: what "Who" can pick from. */
   onSavedAgents: () => void;
+  /** With the Team tab on, the way back to the team's workflows (TeamWorkflows.tsx). */
+  onTeamWorkflows?: () => void;
 }) {
   const [list, setList] = useState<View[] | null>(null);
   const [failed, setFailed] = useState("");
@@ -262,6 +265,13 @@ export function AutomationsPage({
                   </Button>
                 </Tip>
               )}
+              {onTeamWorkflows && (
+                <Tip label="The crew's workflows: teammates in steps, each run a board in a room">
+                  <Button variant="outline" size="sm" className="h-8 border-[var(--border)] bg-[var(--bg)] px-3 text-[13px] shadow-none" onClick={onTeamWorkflows}>
+                    Crew workflows
+                  </Button>
+                </Tip>
+              )}
               <Button size="sm" className="h-8 px-3 text-[13px]" onClick={() => start({})}>
                 <PlusIcon /> New automation
               </Button>
@@ -291,10 +301,11 @@ export function AutomationsPage({
         )}
 
         <section className="mt-8" aria-labelledby="auto-templates">
-          <h2 id="auto-templates" className="mb-3 text-[13px] font-medium text-[var(--ink-2)]">
+          <h2 id="auto-templates" className="auto-label">
             {list?.length ? "Add another from a template" : "Start with one of these"}
           </h2>
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3">
+          {/* Templates are rows, not a grid of cards (DIRECTION.md §9.9): what it does, when it runs in meta, and "Use" on hover. */}
+          <div className="auto-tpls">
             {templates().map((t) => {
               const made = t.make();
               return (
@@ -302,13 +313,13 @@ export function AutomationsPage({
                   <span className="auto-tile">
                     <t.icon className="size-4" />
                   </span>
-                  <span className="mt-3 text-[14px] font-medium">{t.title}</span>
-                  <span className="mt-1 text-[13px] leading-snug text-[var(--text-muted)]">{t.blurb}</span>
-                  <span className="mt-auto flex items-center justify-between pt-4">
-                    <WhenChip when={made.when ?? { kind: "manual" }} />
-                    <span className="auto-use">
-                      Use <ArrowRightIcon className="size-3.5" />
-                    </span>
+                  <span className="auto-tpl-text">
+                    <span className="auto-tpl-title">{t.title}</span>
+                    <span className="auto-tpl-blurb">{t.blurb}</span>
+                  </span>
+                  <WhenChip when={made.when ?? { kind: "manual" }} />
+                  <span className="auto-use">
+                    Use <ArrowRightIcon className="size-3.5" />
                   </span>
                 </button>
               );
@@ -317,8 +328,10 @@ export function AutomationsPage({
               <span className="auto-tile">
                 <PlusIcon className="size-4" />
               </span>
-              <span className="mt-3 text-[14px] font-medium">Start from scratch</span>
-              <span className="mt-1 text-[13px] leading-snug text-[var(--text-muted)]">Your own trigger, tool and instructions.</span>
+              <span className="auto-tpl-text">
+                <span className="auto-tpl-title">Start from scratch</span>
+                <span className="auto-tpl-blurb">Your own trigger, tool and instructions.</span>
+              </span>
             </button>
           </div>
         </section>
@@ -368,7 +381,7 @@ function Intro({ onStart }: { onStart: () => void }) {
             <span className="auto-tile">
               <st.icon className="size-3.5" />
             </span>
-            <span className="w-12 shrink-0 text-[12px] font-medium tracking-wide text-[var(--text-muted)] uppercase">{st.label}</span>
+            <span className="w-12 shrink-0 text-[12px] font-medium text-[var(--text-muted)]">{st.label}</span>
             <span className="truncate text-[13px]">{st.text}</span>
           </li>
         ))}
@@ -520,6 +533,13 @@ function Editor({
       document.querySelector<HTMLElement>(".automations-page textarea")?.focus();
       return;
     }
+    // On these days with none ticked was saved as Monday to Friday without a word (2026-10-28 QA; Arun: "TEST EVERYTHING… EVERY
+    // INTERACTION, EVERY VISUAL"): it asks for the days instead.
+    if (sched?.every === "weekly" && !sched.days.length) {
+      setError("Pick the days it runs on, or choose Every day.");
+      document.querySelector<HTMLElement>('.automations-page [role="group"][aria-label="Days"] button')?.focus();
+      return;
+    }
     setSaving(true);
     setError("");
     try {
@@ -535,6 +555,10 @@ function Editor({
     }
   };
   const hookUrl = d.when.kind === "webhook" ? d.when.url : undefined;
+  // Saved and not changed since: Save has nothing to do, and says so by being off (2026-10-28 QA: it looked ready on an
+  // automation just opened).
+  const unchanged = !!id && JSON.stringify(d) === JSON.stringify(initial);
+  const NAME_MAX = 80;
 
   return (
     <div className="page conns-page automations-page px-6! max-[640px]:px-4!">
@@ -550,22 +574,32 @@ function Editor({
               </Button>
             )}
             {mine && (
-              <Button size="sm" className="h-8 px-3 text-[13px]" disabled={saving} onClick={() => void save()}>
-                {saving ? "Saving…" : id ? "Save" : "Create automation"}
+              <Button size="sm" className="h-8 px-3 text-[13px]" disabled={saving || unchanged} title={unchanged ? "Nothing changed since it was saved" : undefined} onClick={() => void save()}>
+                {saving ? "Saving…" : id ? (unchanged ? "Saved" : "Save") : "Create automation"}
               </Button>
             )}
           </div>
         </div>
         <h1 className="sr-only">{id ? d.name : "New automation"}</h1>
+        {/* How much of the 80 a name has left, once it nears them: a long name was cut at 80 without a word (2026-10-28 QA). */}
+        <div className="relative">
+        {mine && d.name.length >= NAME_MAX - 16 && (
+          <span className={`pointer-events-none absolute top-[11px] right-3 text-[12px] tabular-nums ${d.name.length >= NAME_MAX ? "text-[var(--amber)]" : "text-[var(--text-muted)]"}`} aria-live="polite">
+            {NAME_MAX - d.name.length} left
+          </span>
+        )}
         <Input
           value={d.name}
           onChange={(e) => set({ name: e.target.value })}
           placeholder="Name it, like “Fix failing CI”"
           aria-label="Name"
-          maxLength={80}
+          maxLength={NAME_MAX}
           disabled={!mine}
-          className="mb-3 h-10 border-transparent bg-transparent px-0 text-[18px] font-semibold shadow-none focus-visible:border-transparent focus-visible:ring-0 md:text-[18px]"
+          // A name box that shows it is one, alike in both themes: its outline at rest, not only under the pointer (Arun,
+          // 2026-10-28: "make sure the box outline is visible", of the workflow name; "a look for like the little details").
+          className={`mb-3 h-10 border-[var(--border-strong)] bg-transparent px-3 text-[18px] font-semibold shadow-none hover:border-[color-mix(in_srgb,var(--ink)_28%,transparent)] focus-visible:ring-0 md:text-[18px] dark:bg-transparent disabled:hover:border-[var(--border-strong)] ${mine && d.name.length >= NAME_MAX - 16 ? "pr-[72px]" : ""}`}
         />
+        </div>
         {error && (
           <p role="alert" className="mb-3 text-[13px] text-[var(--red)]">
             {error}
@@ -693,7 +727,8 @@ function Editor({
                 </SelectTrigger>
                 <SelectContent>
                   {tools.map((t) => (
-                    <SelectItem key={t} value={t}>
+                    // The open-source edition runs on this computer only: a tool it doesn't have can't be picked (2026-10-28 QA).
+                    <SelectItem key={t} value={t} disabled={isLocal() && installed.length > 0 && !installed.includes(t) && t !== d.who.tool}>
                       <EngineMark tool={t} size={14} /> {ENGINE_NAMES[t]}
                       {installed.length > 0 && !installed.includes(t) ? " (not on this computer)" : ""}
                     </SelectItem>

@@ -160,3 +160,23 @@ test("back from its limit, an agent hears what was handed on while it was out, s
   assert.match(note, /Don't redo it[\s\S]*- Codex took over "Fix the cart total\." and has finished a turn on it since\./);
   assert.equal(backNote(s, e, "lx", NOW + 3 * 3_600_000), "", "and nothing for one that wasn't out");
 });
+
+/** Arun, 2026-10-28: "iron everything and ensure we are good… any logic errors and fixes". */
+test("a tool that isn't signed in hands its task on as one out of usage does, and with nobody to take it schedules nothing", async () => {
+  const run = (engines: Record<string, LaneEngine>) => {
+    const [state, events] = session(engines);
+    events[9] = { ...events[9]!, body: { type: "run.ended", outcome: "error", error: "Claude Code isn't signed in on the computer it runs on, or its login has expired." } } as SessionEvent;
+    const appended: EventBody[] = [];
+    const handed: { to: string; reason: string; task: string }[] = [];
+    const store = { state: async () => state, events: async () => events, append: async (_s: string, _a: ActorRef, body: EventBody) => (appended.push(body), { ok: true, seq: 99 }) };
+    const mesh = new AgentMesh(store as never, null as never, async (_sid: string, _lane: string, h: { to: string; reason: string; task: string }) => (handed.push(h), { ok: true as const, toName: h.to }));
+    return { mesh, appended, handed };
+  };
+  const two = run({ lc: engine({}), lx: engine({ tool: "codex" }) });
+  await two.mesh.onLimit("s", "lc", NOW);
+  assert.equal(two.handed.length, 1, "handed on");
+  assert.match(two.handed[0]!.reason, /isn't signed in/);
+  assert.match(two.handed[0]!.task, /Fix the cart total/);
+  const lone = run({ lc: engine({}) });
+  (await lone.mesh.onLimit("s", "lc", NOW), assert.equal(lone.appended.length, 0, "no resume: nothing brings a sign-in back by itself"));
+});
