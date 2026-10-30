@@ -2569,6 +2569,17 @@ const HOST_SESSION_VARS = new Set([
   "BAGGAGE",
 ]);
 
+/**
+ * A person's own shell's variables: this process's, less the ones a host Claude Code session set, which a coding tool started in
+ * the shell would take as its own. Claude Code reading an inherited CLAUDE_CODE_CHILD_SESSION stopped saving its transcript, so
+ * the conversation carried on in the terminal view was lost to Friday (Arun's screenshot, 2026-10-30).
+ */
+export function shellEnv(base: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(base)) if (v !== undefined && !HOST_SESSION_VARS.has(k) && !k.startsWith("CLAUDE_CODE_SDK_")) env[k] = v;
+  return env;
+}
+
 export function childEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const hosted = !!(base.CLAUDECODE || base.CLAUDE_CODE_ENTRYPOINT || base.CLAUDE_CODE_DESKTOP_APP_VERSION);
   const env: NodeJS.ProcessEnv = { ...base, PATH: childPath() };

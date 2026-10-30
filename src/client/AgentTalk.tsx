@@ -240,7 +240,7 @@ export function BoardCard({ ev, state, stamp }: { ev: SessionEvent; state: Sessi
       </div>
       <ul className="board-tasks">
         {tasks.map((t) => (
-          <li key={t.id} className={cn("board-task", `is-${t.status}`)}>
+          <li key={t.id} className={cn("board-task", `is-${t.status}`)} data-task={t.id}>
             <TaskMark state={mark(t)} />
             <span className="board-title">{t.title}</span>
             <span className="board-who">{word(t)}</span>

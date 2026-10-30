@@ -15,6 +15,7 @@ import { BrowserWindow, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent } fr
 import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { shellEnv } from "./runner/adapters.js";
 
 interface Shell {
   pty: IPty;
@@ -114,7 +115,8 @@ export function registerTerminal(fromApp: (e: Electron.IpcMainInvokeEvent | Elec
         cols,
         rows,
         cwd,
-        env: { ...process.env, TERM: "xterm-256color" } as Record<string, string>,
+        // Without a host Claude Code session's markers (shellEnv): a tool started here is the person's own, as in their terminal.
+        env: { ...shellEnv(), TERM: "xterm-256color" },
         // Electron's process has no console of its own, and the old winpty
         // backend wants one — it fails with "AttachConsole failed" and the
         // terminal comes up blank. ConPTY is Windows' own and needs none.

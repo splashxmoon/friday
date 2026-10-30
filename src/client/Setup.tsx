@@ -8,6 +8,7 @@ import { RELEASES, connectThisComputer, useMachine } from "./local.js";
 import { MachineBadge } from "./MachineBadge.js";
 import { openOutside } from "./openOutside.js";
 import type { Identity } from "./storage.js";
+import { askTeamDemo, demoBlurb, DemoMarks, useDemoTeam } from "./TeamDemo.js";
 
 /**
  * Getting set up, for someone new (Arun, 2026-10-25: "instead of the tour on load we should have a modal or something where it
@@ -93,6 +94,8 @@ export function Setup({ identity, hasHistory, onDone }: { identity: Identity; ha
     return () => window.removeEventListener("friday:setup", on);
   }, []);
   const gh = useGithub(identity, open && connected);
+  // Once a tool is ready, the last step's first button is the team demo: the person's own agents, working together (TeamDemo.tsx).
+  const demoTeam = useDemoTeam(machine);
   const desktop = typeof window !== "undefined" && !!window.fridayDesktop?.link;
   const finish = (started: boolean) => {
     write(k);
@@ -167,6 +170,13 @@ export function Setup({ identity, hasHistory, onDone }: { identity: Identity; ha
   const last = i === steps.length - 1;
   const next = () => (last ? finish(true) : setAt(i + 1));
   const howMany = steps.length === 2 ? "Two things" : "Three things";
+  const demo = last && demoTeam.length >= 2;
+  const seeTeam = () => {
+    write(k);
+    write(TOUR_KEY(identity.id));
+    setOpen(false);
+    askTeamDemo();
+  };
 
   return createPortal(
     <div className="overlay setup-overlay" role="dialog" aria-modal="true" aria-label="Get set up">
@@ -234,6 +244,17 @@ export function Setup({ identity, hasHistory, onDone }: { identity: Identity; ha
           </div>
         </section>
 
+        {/* What the demo is, over the footer whose first button starts it. */}
+        {demo && (
+          <div className="setup-demo">
+            <DemoMarks team={demoTeam} />
+            <div>
+              <h3>Then see your agents work as a team</h3>
+              <p>{demoBlurb(demoTeam)}</p>
+            </div>
+          </div>
+        )}
+
         <footer className="setup-foot">
           {/* No tour in the open-source edition (Arun, 2026-10-26: "get rid of the tour on the open source version"). */}
           {i === 0 && isLocal() ? (
@@ -253,9 +274,20 @@ export function Setup({ identity, hasHistory, onDone }: { identity: Identity; ha
                 Skip for now
               </button>
             )}
-            <button type="button" className={`tour-next${showing.done ? "" : " quiet"}`} autoFocus onClick={next}>
-              {last ? (doneCount === steps.length ? "Start" : "Start anyway") : "Next"}
-            </button>
+            {demo ? (
+              <>
+                <button type="button" className="tour-skip" onClick={next}>
+                  Start on my own
+                </button>
+                <button type="button" className="tour-next" autoFocus onClick={seeTeam}>
+                  See your agents work as a team
+                </button>
+              </>
+            ) : (
+              <button type="button" className={`tour-next${showing.done ? "" : " quiet"}`} autoFocus onClick={next}>
+                {last ? (doneCount === steps.length ? "Start" : "Start anyway") : "Next"}
+              </button>
+            )}
           </span>
         </footer>
       </div>

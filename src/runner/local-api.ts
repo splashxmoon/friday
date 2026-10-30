@@ -1,9 +1,10 @@
 import { readLimits } from "./limits.js";
 import { findApp, forgetLoginStatus, loginStatusQuick } from "./adapters.js";
-import { mkdir, rm, rmdir, stat } from "node:fs/promises";
-import { homedir, hostname } from "node:os";
+import { mkdir, mkdtemp, rm, rmdir, stat, writeFile } from "node:fs/promises";
+import { homedir, hostname, tmpdir } from "node:os";
 import path from "node:path";
 import { ENGINE_NAMES, ENGINE_TOOLS, TOOL_INFO, toolList, type EngineMode, type EngineTool } from "../types.js";
+import { DEMO_FILES } from "../team-demo.js";
 import { ADAPTERS, childEnv, findBin, isClaudeAppBundled, launcher, loginStatus, readCustomAcp, runCli, saveCustomAcp } from "./adapters.js";
 import { discoverAgentFiles, parseModelList } from "./agent-files.js";
 import { addWorktree, branchesOf, dropSpares, dropWorktree, primeSpares, remoteBranchesOf, repoInfo, startRepo, worktreeState } from "./git.js";
@@ -213,6 +214,22 @@ export async function projectFolder(ask: string, who: { name: string }, root = p
     return dir;
   }
   throw new Error(`Couldn't make a new folder for this in ${root}.`);
+}
+
+/**
+ * The team demo's project (team-demo.ts), written to a new folder under the system's temp folder and made a git repository,
+ * so its diffs show: never one of the person's own folders, and gone with the temp folder (Arun, 2026-10-30: "a first run that
+ * shows the team").
+ */
+export async function demoFolder(who: { name: string }, root = tmpdir()): Promise<string> {
+  const dir = await mkdtemp(path.join(root, "friday-team-demo-"));
+  for (const [rel, text] of Object.entries(DEMO_FILES)) {
+    const file = path.join(dir, ...rel.split("/"));
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(file, text);
+  }
+  await startRepo(dir, who);
+  return dir;
 }
 
 /** A sign-in's key, so two accounts of one tool can't take each other's code. */
@@ -548,13 +565,18 @@ export async function callHost(method: string, params: Record<string, unknown> =
        * through to somebody's home.
        */
       const noFolder = params.noFolder === true && !str(params.cwd, 600);
-      if (!noFolder && !str(params.cwd, 600)) throw new Error("Which folder should it work in?");
+      // The team demo's first agent: the sample project, in a folder made for it (demoFolder). The others join it by its path.
+      const demo = params.demo === true && !str(params.cwd, 600);
+      if (!noFolder && !demo && !str(params.cwd, 600)) throw new Error("Which folder should it work in?");
       // With what was asked (`project`), a session's first agent gets a project folder of its own to build in; without, an
       // agent joining from elsewhere gets somewhere to stand.
       const project = noFolder ? str(params.project, 400) : "";
       // Only somewhere to stand, not anybody's code: no spare copies, no setup run.
       const scratch = noFolder && !project;
-      let cwd = project ? await projectFolder(project, ctx.user) : noFolder ? await scratchFolder(sid, str(params.lane, 40) || str(params.newLane, 40)) : at(params.cwd);
+      let cwd = demo ? await demoFolder(ctx.user) : project ? await projectFolder(project, ctx.user) : noFolder ? await scratchFolder(sid, str(params.lane, 40) || str(params.newLane, 40)) : at(params.cwd);
+      // A teammate's own folder on this computer, started from another computer's Friday (local/computers.ts): made if it isn't
+      // there yet, as that Friday makes one on its own computer. Under ~/Friday only: nothing else is made from afar.
+      if (params.makeDir === true && cwd.startsWith(path.join(homedir(), "Friday") + path.sep) && !(await isDir(cwd))) await mkdir(cwd, { recursive: true });
       if (!(await isDir(cwd))) throw new Error(`There's no folder at ${cwd}.`);
       // A racing agent works in a checkout of its own, cut from the folder as it is now.
       let raceBranch = "";
@@ -650,7 +672,8 @@ export async function callHost(method: string, params: Record<string, unknown> =
         if (end.code === 4004) void clearAfter(sid, cwd, { copy: !!made || !!copyOf, scratch });
       });
       // A spare copy of the folder, made in the background now the lane is there, for whoever brings a second tool to it.
-      if (!params.worktree && !scratch) void primeSpares(cwd);
+      // Not for the team demo's folder: its agents share it, and nobody brings a copy of a sample to it.
+      if (!params.worktree && !scratch && !demo) void primeSpares(cwd);
       // The folder's setup command, when it is set to run whenever an agent starts here (Environment): left running, in Tasks.
       if (!scratch) {
         const { setup, autoSetup } = folderSetup(cwd);
@@ -660,7 +683,7 @@ export async function callHost(method: string, params: Record<string, unknown> =
         lane: runner.lane,
         laneName: runner.laneName,
         ...(raceBranch ? { cwd, branch: raceBranch } : {}),
-        ...(params.work === true ? { cwd } : {}), // where a Work session's teammate joins it (client/WorkMode.tsx)
+        ...(params.work === true || demo ? { cwd } : {}), // where a Work session's teammate, or the team demo's, joins it (client/WorkMode.tsx, TeamDemo.tsx)
         // Whether it is on the session's branch as pushed, so the person is told what came along rather than what was hoped.
         ...(runner.opts.followBranch ? { followed: runner.followed } : {}),
       };

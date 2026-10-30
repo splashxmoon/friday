@@ -342,7 +342,8 @@ export type EngineMode = "plan" | "edits" | "full";
 export interface RepoCall {
   /** `commands`: the `/` commands the lane's own coding tool answers to (see ToolCommand). */
   /** `apply`: a separate copy's work, brought into the folder it was copied from. */
-  op: "tree" | "read" | "search" | "write" | "edit" | "shell" | "checkpoint" | "restore" | "commit" | "publish" | "remote" | "branches" | "switch" | "prcomments" | "prstatus" | "prchecks" | "preview" | "ios" | "environment" | "context" | "bgstart" | "bgread" | "bgstop" | "diff" | "commands" | "apply" | "status" | "log" | "show" | "gitdiff" | "stage" | "unstage" | "discard" | "hunk" | "pull" | "compare";
+  /** `terminal`: the line that carries the lane's conversation on in the person's own terminal (terminal-line.ts); with `query` "closed", that it is back. */
+  op: "tree" | "read" | "search" | "write" | "edit" | "shell" | "checkpoint" | "restore" | "commit" | "publish" | "remote" | "branches" | "switch" | "prcomments" | "prstatus" | "prchecks" | "preview" | "ios" | "environment" | "context" | "bgstart" | "bgread" | "bgstop" | "diff" | "commands" | "apply" | "status" | "log" | "show" | "gitdiff" | "stage" | "unstage" | "discard" | "hunk" | "pull" | "compare" | "terminal";
   /** For `stage`, `unstage` and `discard`: the files. */
   paths?: string[];
   /** For `hunk`: one hunk as a unified diff with its file header, applied to the index (`cached`) or taken back (`reverse`). */
@@ -811,6 +812,11 @@ export interface ActorRef {
   id: string;
   name: string;
   kind: "human" | "agent" | "system";
+  /**
+   * A person's command sent by an agent outside Friday on their behalf (Claude Code, Codex, Cursor over Friday's MCP server,
+   * outside-agents.ts), by that agent's name, so the session shows who started what. Only the server sets it.
+   */
+  via?: string;
 }
 
 export interface ToolCall {
@@ -905,6 +911,11 @@ export type EventBody =
    * `tool`, and `running` (said while a turn was under way), are for the timeline's line.
    */
   | { type: "lane.effort"; effort: EngineEffort | null; tool?: EngineTool; running?: boolean }
+  /**
+   * The lane's coding tool opened in its host's own terminal, on the lane's conversation (`open`), or back (terminal-line.ts).
+   * While it is open the lane takes no turns: what is sent to it waits, and runs once it is back, where the terminal left it.
+   */
+  | { type: "lane.terminal"; open: boolean }
   /**
    * Whether anyone else's message may run this lane's coding tool in Full on its host's computer (Security R2). Off, the
    * default: a teammate's, a hand-off's or an app's turn runs no further than Edits. Only the host turns it on.

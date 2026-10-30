@@ -131,6 +131,8 @@ export type CommandResult = { ok: true; seq: number; /** The lane a lane.add mad
 export interface CommandActor {
   id: string;
   name: string;
+  /** An agent outside Friday acting for this person over Friday's MCP server (outside-agents.ts), by its name: said on what it writes. */
+  via?: string;
 }
 
 /** Looks up an agent the user is allowed to use and freezes its current configuration. */
@@ -290,7 +292,7 @@ export class SessionCore {
     const tuningOnly = cmd.type === "settings.update" && Object.keys(cmd).every((k) => SHARED_SETTINGS.has(k) || (cmd as Record<string, unknown>)[k] === undefined);
     if (OWNER_ONLY.has(cmd.type) && !owner && !(tuningOnly && allowed("control"))) return deny(OWNER_VERBS[cmd.type] ?? "do that (owner only)");
 
-    const actor: ActorRef = { id: m.id, name: m.name, kind: "human" };
+    const actor: ActorRef = { id: m.id, name: m.name, kind: "human", ...(m.via ? { via: m.via } : {}) };
     // Every append in a command lands on the lane the command targets, so the
     // Lua guard reads that lane's driver and epoch rather than the main one's.
     const lane = "lane" in cmd && typeof cmd.lane === "string" && cmd.lane ? cmd.lane : MAIN_LANE;

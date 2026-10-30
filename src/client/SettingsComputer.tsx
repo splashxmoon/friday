@@ -3,6 +3,8 @@ import { GitHubConnect } from "./GitHubConnect.js";
 import { MachineBadge } from "./MachineBadge.js";
 import { pickedMachine, useMachine } from "./local.js";
 import { KeepAwakeRow } from "./KeepAwake.js";
+import { PhoneSettings } from "./PhoneSettings.js";
+import { ComputersSettings } from "./Computers.js";
 import { isLocal } from "./edition.js";
 import type { Identity } from "./storage.js";
 
@@ -22,6 +24,10 @@ export function ComputerSection({ identity }: { identity: Identity }) {
       </div>
       {/* Where new sessions start: this computer, or a machine of yours that stays on, so agents keep running when this one shuts. */}
       <KeepAwakeRow />
+      {/* Your phone, on this computer's network or Tailscale (PhoneSettings.tsx): the open-source edition's way to answer from it. */}
+      {isLocal() && machine.mode === "local" && <PhoneSettings />}
+      {/* Your other computers, linked to this one's Friday, and this one used from another's (Computers.tsx). */}
+      {isLocal() && <ComputersSettings />}
       {/* GitHub belongs to the computer too: the login its clones, pushes and pull requests use. */}
       {(machine.mode === "local" || machine.mode === "linked") && (
         <div className="set-card set-github">

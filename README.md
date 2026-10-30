@@ -231,6 +231,30 @@ Hand your coding tools the jobs that come round again. An automation reads like 
   <img src="docs/assets/automations.png" alt="The Automations page: a webhook that triages new issues, a weekday flaky-test sweep with Claude Code leading Codex, and a nightly dependency bump with Codex" width="960" />
 </p>
 
+## Let other agents use Friday
+
+Friday is also a place your other agents hand work to. Claude Code, Codex, Cursor, or anything else that speaks MCP, on the same computer, can start Friday sessions, tell their agents what to do, wait for them, read what they did and answer what they ask. Each session shows which agent started it and what it said.
+
+Open **Settings › Let other agents use Friday** for the line for each agent, with Copy, and Add for Claude Code and Codex, which runs that agent's own `mcp add` in a Terminal window. For Claude Code it looks like this:
+
+```sh
+claude mcp add friday --scope user -- node ~/.friday/outside-mcp.mjs
+```
+
+or, from a clone or with npx, `claude mcp add friday --scope user -- npx -y github:splashxmoon/friday mcp`. Friday has to be open for the tools to work. Then ask your agent to hand something to Friday.
+
+| Tool | What it does |
+| --- | --- |
+| `list_sessions` | Your sessions, latest first, with their agents and anything waiting on you |
+| `start_session` | A new Code or Work session with a task, in a folder or repo (its own copy, unless asked), on a coding tool you name or the one Friday picks (`auto`) |
+| `send_message` | Tell an agent in a session something, or leave a note for the people in it |
+| `read_session` | Each agent's status, what is waiting on you, and the latest messages |
+| `wait_for_idle` | Wait until the agents are done or one needs you, with a timeout |
+| `answer` | Yes or no to a permission request, or an answer to a question |
+| `list_teammates`, `ask_teammate` | Your Crew, and a question for one of them |
+
+Only agents on this computer, running as you, can use it. Friday still listens on `127.0.0.1` only; each call carries a key kept in Friday's own folder (`outside-token`, readable by you alone), which the script reads when it calls, so the key never goes into the agent's own settings. A web page can't use it either: Friday turns away any request a page sends.
+
 ## And everything else you'd expect
 
 - **Friday Code**, Friday's own agent, on a model of yours: an API key from OpenAI, Anthropic, Google and others, or a model on your computer with Ollama or LM Studio, added in Settings › Your models.

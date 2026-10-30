@@ -9,6 +9,7 @@ import { AttachButton, AttachedRow, PICK_FOLDER, attach, droppedFiles, pasteAtta
 import { Icon, type IconName } from "./icons.js";
 import { rememberAsk, walkAsks } from "./askHistory.js";
 import { NoMachine, connectThisComputer, hostApi, useMachine } from "./local.js";
+import { ComputerPill } from "./Computers.js";
 import { HeroTitle } from "./HeroTitle.js";
 import { HomeActivity } from "./HomeActivity.js";
 import { MachineBadge } from "./MachineBadge.js";
@@ -28,6 +29,7 @@ import { issueBranch, parseIssueUrl, parsePrLink, withIssue, withPr, type Issue,
 import { isTeamSid } from "./Teammates.js";
 import { leaveWorkNote, markWorkSession, startTeammate, teammateOf, useWorkMode, useWorkSessions, WORK_LINES, WORK_MODE_BLURB, WORK_PLACEHOLDER, WorkField, WorkStarters, workListed } from "./WorkMode.js";
 import { CircleDotIcon, GitPullRequestIcon } from "lucide-react";
+import { isTeamDemo, runTeamDemo, TeamDemoOffer, useDemoTeam } from "./TeamDemo.js";
 
 // The message box is this page's state, so every keystroke draws the page again. These take nothing that changes as you type,
 // so they are left as they were. The template shelf is not among them: it is given what is in the box.
@@ -525,6 +527,36 @@ export function Code({
     }
     onStart(sid, invite);
   };
+
+  // The team demo (TeamDemo.tsx): asked for from setup's last step, the offer under the box, or Settings › About. Started here,
+  // where the computer's tools are known, each step said under the box as it goes, and opened once the lead has its job.
+  const demoTeam = useDemoTeam(machine);
+  // Asked for while the computer is still being looked at (just opened from Settings): started once it has said what it has.
+  const demoWaits = useRef(false);
+  useEffect(() => {
+    if (machine.mode !== "checking" && demoWaits.current) (demoWaits.current = false), startDemo();
+  }, [machine.mode]); // eslint-disable-line react-hooks/exhaustive-deps
+  const startDemo = () => {
+    if (busy) return;
+    if (machine.mode === "checking") return void (demoWaits.current = true);
+    if (demoTeam.length < 2) return void (setErr("Sign in to a coding tool first: the demo runs your own agents."), window.dispatchEvent(new Event("friday:setup")));
+    setBusy(true);
+    setErr("");
+    runTeamDemo(identity, demoTeam, setAttachNote).then(
+      (r) => started(r.sid, r.invite),
+      (e: Error) => (setErr(e.message), setAttachNote(""), setBusy(false)),
+    );
+  };
+  // The listener is added once; it calls the start of the render it is heard in.
+  const startDemoNow = useRef(startDemo);
+  startDemoNow.current = startDemo;
+  useEffect(() => {
+    const go = () => startDemoNow.current();
+    addEventListener("friday:team-demo", go);
+    return () => removeEventListener("friday:team-demo", go);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Offered under the box while nobody has a session of their own yet: the demo's own don't count, so it is there again after.
+  const firstRun = !recents.some((r) => !isTeamDemo(r.sid, r.title) && !isTeamSid(r.sid));
 
   // What each coding agent's row says about the computer it would run on. Nothing is ruled out before a machine has told us what it has.
   const toolState = (t: EngineTool) => {
@@ -1024,6 +1056,8 @@ export function Code({
             {/* Where it works, as a plain text dropdown in the box's footer beside who works and how (DIRECTION.md §9.5, as Synara
                 does): the picker of folders behind it, and the line that said "No folder picked: … Choose a folder" under the box
                 is its title now. Picked, the cross beside it takes it off again. */}
+            {/* Which computer it runs on, once you have another linked (Computers.tsx): its folders and tools are the ones offered. */}
+            {isLocal() && <ComputerPill onPick={() => (setPicked(null), setBranch(""), setNewBranch(true), setPickBranch(""))} />}
             {hasMachine && (
               <span className="cw-where">
                 <button
@@ -1181,6 +1215,9 @@ export function Code({
       {resumeNote && <p className="muted small attach-note" role="status">{resumeNote}</p>}
       {attachNote && (busy || !(hasMachine && folder)) && <p className="muted small attach-note">{attachNote}</p>}
       {(err || (nudged && blockedWhy)) && <p role="alert" className="error">{err || blockedWhy}</p>}
+
+      {/* The first thing to try once a coding tool works: the person's own agents working as a team on a sample (TeamDemo.tsx). */}
+      {!work && hasMachine && firstRun && !busy && !goal.trim() && <TeamDemoOffer team={demoTeam} busy={busy} onGo={startDemo} />}
 
       {/* The sample runs Friday's own agent: Team's, or on Solo the person's own model. */}
 

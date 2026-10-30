@@ -165,6 +165,8 @@ import { webSourcesIn, webUrl } from "../web-sources.js";
 import { Mascot, runMood } from "./Mascot.js";
 import { AgentSwitch, EngineMark, switchesAgent } from "./AgentSwitch.js";
 import type { EffortChoice } from "./AgentModelPicker.js";
+import { friday, handBack, hasShells, InTerminalNote, LaneTui, openLaneTerminal, preferFriday, TERMINAL_TOOLS, useTuiView, warmLaneTerminal } from "./Terminal.js";
+import { FridayTui } from "./Tui.js";
 import { isLocal, startTeam } from "./edition.js";
 import { isOwnModel } from "../own-model-id.js";
 import { agentLook, handoffTaskText, laneIdByName, laneLabel, reasonFor, suggestTarget, tintOfColor, tintOfEngine, wakesOnItsOwn, type Signals } from "./handoff-ui.js";
@@ -390,6 +392,8 @@ function describesAChange(b: Extract<EventBody, { type: "session.updated" }>): b
  * eye expects something.
  */
 const HIDDEN = new Set<string>([
+  // The terminal view switched on and off: how an agent is looked at, not something that happened (Arun, 2026-10-30).
+  "lane.terminal",
   // A second opinion on a turn is drawn under that turn (Asides), question and answer together.
   "aside.asked",
   "aside.answered",
@@ -1432,10 +1436,70 @@ export function Activity({
   // Where an older change set's patches are fetched from, as its card is opened (patchSource.ts). The same value while the
   // session is: a new one on every render had React look through the whole feed for its readers on every live event.
   const patchSource = useMemo(() => ({ sid: ctx.sid, invite: ctx.invite }), [ctx.sid, ctx.invite]);
+  // One agent as a terminal (Arun, 2026-10-30: "LIKE HERDR DOES IT… A TOGGLE… SWTICHING FROM GUI TO TUI", "a custom TUI for like
+  // all of the coding tools"): Friday's own TUI for any agent in view (Tui.tsx), and from there, for Claude Code and Codex on
+  // this person's computer, the tool's own screen on the same conversation (Terminal.tsx LaneTui), its turns held meanwhile.
+  // Code sessions only: a Crew room or a Work session reads as it is.
+  const tuiHere = !replaying && !state.options.team && !state.options.work;
+  const tuiLane = laneFilter !== ALL && tuiHere ? laneFilter : null;
+  const tuiTool = tuiLane ? state.engines[tuiLane]?.tool : undefined;
+  const nativeCan = !!tuiLane && !!tuiTool && state.engines[tuiLane]?.hostId === me.id && TERMINAL_TOOLS.has(tuiTool) && hasShells();
+  const nativeOn = nativeCan && !!state.terminals?.[tuiLane!];
+  const [tuiView, setTuiView] = useTuiView();
+  // All agents too, as one terminal: every agent's lines, tagged with whose they are (Arun, 2026-10-30: "also do it for the all
+  // agents tab too").
+  const ftuiAll = tuiView && laneFilter === ALL && tuiHere && everyone.length > 0;
+  // A coding tool's own screen is the terminal view, always; Friday's TUI only for an agent sent to it (← friday), a tool with no
+  // screen to resume in, and All agents (Arun, 2026-10-30: "always load on native coding tool terminal the friday TUI will be
+  // only visible if selected"). While its screen opens, or if it can't, the view says so rather than showing Friday's.
+  const wantsNative = !!tuiLane && tuiView && nativeCan && !friday(sid, tuiLane);
+  // Why its screen didn't open, as of which attach of its runner: once it attaches again (a restart, a reconnect), it is tried
+  // again by itself rather than waiting on Try again.
+  const [nativeErrs, setNativeErr] = useState<Record<string, { msg: string; seq: number }>>({});
+  const nativeErr: Record<string, string> = {};
+  for (const [l, e] of Object.entries(nativeErrs)) if (e.seq === (state.engines[l]?.sinceSeq ?? -1)) nativeErr[l] = e.msg;
+  const laneOnline = !!tuiLane && !!state.engines[tuiLane]?.online;
+  const nativeWaiting = wantsNative && !nativeOn;
+  const ftuiOn = (!!tuiLane && tuiView && !nativeOn && !wantsNative) || ftuiAll;
+  const tuiOn = nativeOn || ftuiOn || nativeWaiting;
+  const toNative = async () => {
+    preferFriday(sid, tuiLane!, false);
+    const r = await openLaneTerminal(sid, invite, tuiLane!);
+    if ("error" in r) ctx.notify(r.error);
+  };
+  // The terminal view is the tool's own wherever it can be (Arun, 2026-10-30: "make sure the terminal view is using native
+  // view"): Claude Code or Codex on this computer opens on its conversation, its turns held, as the view comes to it. Friday's
+  // TUI is for the rest, for one that couldn't open (said once), and for an agent its person sent back to it ("← friday").
+  // Every other agent here that opens in its own screen, started ahead in the background, so its tab is instant (warmLaneTerminal):
+  // only the main chat does it, one at a time, and never one sent back to Friday's view.
+  const warmable = !secondary && tuiView && tuiHere && hasShells() ? everyone.filter((l) => l !== tuiLane && state.engines[l]?.hostId === me.id && state.engines[l]?.online && TERMINAL_TOOLS.has(state.engines[l]?.tool ?? "") && !state.terminals?.[l] && !friday(sid, l)) : [];
+  const warmKey = warmable.join(",");
+  useEffect(() => {
+    if (!warmKey) return;
+    let gone = false;
+    void (async () => {
+      for (const lane of warmKey.split(",")) {
+        if (gone) return;
+        const r = await warmLaneTerminal(sid, invite, lane);
+        if (r) preferFriday(sid, lane, "briefly");
+      }
+    })();
+    return () => void (gone = true);
+  }, [warmKey, sid]); // eslint-disable-line react-hooks/exhaustive-deps
+  const autoNative = nativeWaiting && laneOnline && !nativeErr[tuiLane!];
+  const [retry, setRetry] = useState(0);
+  useEffect(() => {
+    if (!autoNative) return;
+    const lane = tuiLane!;
+    // Its shell started with the request, not after the view has heard back: the tool is already starting as its screen draws.
+    const seq = state.engines[lane]?.sinceSeq ?? -1;
+    void warmLaneTerminal(sid, invite, lane).then((r) => r && setNativeErr((e) => ({ ...e, [lane]: { msg: r.error, seq } })));
+  }, [autoNative, sid, tuiLane, retry]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <PatchSource.Provider value={patchSource}>
     <section
-      className={`activity-main${pin ? " is-column" : ""}`}
+      className={`activity-main${pin ? " is-column" : ""}${tuiOn ? " is-tui" : ""}`}
       aria-label={pin ? `${laneLabel(state, pin)} chat` : "Activity"}
       {...(pin && onFocusLane ? { onPointerDownCapture: () => onFocusLane(pin), onFocusCapture: () => onFocusLane(pin) } : {})}
       // "It's up at http://localhost:5174/" opens in the Preview browser beside
@@ -1710,6 +1774,46 @@ export function Activity({
       {/* Opens at the bottom at once: scrolling smoothly down through the whole history, every time a session opened, was a
           wait dressed up as an animation. New words still glide in (resize). */}
       {/* A fresh view for each agent and each filter: it opens on the latest message, rather than gliding down to it. */}
+      {nativeOn ? (
+        // One per agent: kept across a switch, it ran the last agent's line in the next one's screen (Arun, 2026-10-30: "it properly
+        // switches the native terminals based on the coding tool lane").
+        <LaneTui key={`${sid}|${tuiLane}`} sid={sid} invite={invite} lane={tuiLane!} tool={tuiTool!} title={laneLabel(state, tuiLane!)} onBack={() => (preferFriday(sid, tuiLane!, true), void handBack(sid, invite, tuiLane!).then(() => setTuiView(true)))} />
+      ) : nativeWaiting ? (
+        <div className="lane-tui lane-tui-wait" role="status">
+          {nativeErr[tuiLane!] ? (
+            <>
+              <p className="small">
+                {laneLabel(state, tuiLane!)}'s screen couldn't open: {nativeErr[tuiLane!]}
+              </p>
+              <span className="lane-tui-wait-acts">
+                <button type="button" className="btn small" onClick={() => (setNativeErr(({ [tuiLane!]: _gone, ...rest }) => rest), setRetry((n) => n + 1))}>
+                  Try again
+                </button>
+                <button type="button" className="link-btn small" onClick={() => (preferFriday(sid, tuiLane!, true), setRetry((n) => n + 1))}>
+                  Use Friday's view
+                </button>
+              </span>
+            </>
+          ) : (
+            <p className="muted small">{laneOnline ? `Opening ${laneLabel(state, tuiLane!)}…` : `Waiting for ${laneLabel(state, tuiLane!)} to reconnect…`}</p>
+          )}
+        </div>
+      ) : ftuiOn ? (
+        <FridayTui
+          key={ftuiAll ? `${sid}|all` : `${sid}|${tuiLane}`}
+          sid={sid}
+          lanes={ftuiAll ? everyone : [tuiLane!]}
+          to={ftuiAll ? (everyone.includes(target) ? target : everyone[0]!) : tuiLane!}
+          {...(ftuiAll ? { onTo: (l: string) => pick(l) } : {})}
+          state={state}
+          events={events}
+          me={me}
+          send={send}
+          notify={ctx.notify}
+          onChat={() => setTuiView(false)}
+          {...(nativeCan && !ftuiAll ? { onNative: () => void toNative() } : {})}
+        />
+      ) : (
       <Conversation key={`${laneFilter}|${filter}`} className="min-h-0 flex-1" initial="instant" onFollow={setFollowing} {...(agentUnreadAt !== -1 ? { openAt: "[data-catchup]" } : {})}>
         <ConversationContent className="mx-auto w-full max-w-[var(--read-w,860px)] gap-5 px-6 py-5">
           {state.options.team && laneFilter !== ALL && <TeammateHeader lane={laneFilter} identity={ctx.identity} notify={ctx.notify} {...(state.engines[laneFilter]?.branch ? { branch: state.engines[laneFilter]!.branch! } : {})} />}
@@ -1801,10 +1905,11 @@ export function Activity({
         </ConversationContent>
         <ConversationScrollButton />
       </Conversation>
+      )}
       {/* Nothing to write into while you are looking at the past: a composer
           under a session wound back to Tuesday would send to today, which is
           not what anybody reading it would expect. */}
-      {!replaying && (
+      {!replaying && !tuiOn && (
         <div className="composer-dock">
           <RaceCard state={state} me={me} events={events} identity={identity} sid={sid} invite={invite} send={send} />
           {/* Away or paused, said over every team chat's box with the one press that ends it (TeamControls.tsx). */}
@@ -2646,7 +2751,7 @@ function HumanMessage({ ev, ctx }: { ev: Ev<"instruction"> | Ev<"suggestion">; c
       {menu.menu}
       <div className={cn("msg-meta", mine && "justify-end mine")}>
         {!mine && <Avatar name={ev.actor.name} id={ev.actor.id} size={22} />}
-        <span className="who">{mine ? "You" : ev.actor.name}</span>
+        <Who actor={ev.actor} mine={mine} />
         <span>{isSuggestion ? "suggested a redirect" : toWhom}</span>
         {b.type === "instruction" && b.interrupt && (
           <span className="tag warn">
@@ -2679,6 +2784,22 @@ function HumanMessage({ ev, ctx }: { ev: Ev<"instruction"> | Ev<"suggestion">; c
   );
 }
 
+/**
+ * Who said it: you, or them by name; or the agent outside Friday that sent it for someone (outside-agents.ts), by its name, so a
+ * session Claude Code started says Claude Code started it (Arun, 2026-10-30).
+ */
+function Who({ actor, mine }: { actor: SessionEvent["actor"]; mine: boolean }) {
+  if (!actor.via) return <span className="who">{mine ? "You" : actor.name}</span>;
+  return (
+    <>
+      <span className="who">{mine ? actor.via : `${actor.via} for ${actor.name}`}</span>
+      <span className="tag" title={`Sent by ${actor.via} through Friday's MCP server, on ${mine ? "your" : `${actor.name}'s`} behalf`}>
+        outside agent
+      </span>
+    </>
+  );
+}
+
 /** A message long enough to fold to its first lines: over 600 characters, or more than 10 lines. */
 export const isLongMessage = (text: string): boolean => text.length > 600 || text.split("\n").length > 10;
 
@@ -2696,7 +2817,7 @@ function ChatMessage({ ev, ctx }: { ev: Ev<"chat">; ctx: Ctx }) {
       {menu.menu}
       <div className={cn("msg-meta", mine && "justify-end mine")}>
         {!mine && <Avatar name={ev.actor.name} id={ev.actor.id} size={22} />}
-        <span className="who">{mine ? "You" : ev.actor.name}</span>
+        <Who actor={ev.actor} mine={mine} />
         <span>to the people here</span>
         {forMe && <span className="tag chat-you">mentioned you</span>}
         <Stamp ev={ev} />
@@ -3418,6 +3539,15 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
         ),
       )}
 
+      {/* While it works with no step yet to show (thinking), one live line under the reply says so: with no ring on its mark, the
+          reply was its name over nothing until its first step (Arun, 2026-10-30: "there needs to be a visual thing in the chat to
+          show that the claude is working"). Once it has steps, their own live line ("Working · 9s") says it. A teammate says it in
+          its head instead. */}
+      {active && !mate && !runLog && (!typing || typing === "waiting") && !waitsOnPerson(ctx.state, lane) && (
+        <div className="rsp-live">
+          <Working label={blocks.length ? "Working" : "Thinking"} />
+        </div>
+      )}
       {typing && typing !== "waiting" && <LiveStream sid={ctx.sid} lane={lane} />}
       {verdict && finalMsg && (
         <span className={`rsp-verdict ${verdict.tone}`} title={tests?.command ?? "No test command ran in this run"}>
@@ -4945,6 +5075,10 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
           {effortNote(who, b.tool, b.effort, b.running)}
         </Notice>
       );
+    // Not said in the chat: switching the terminal view on and off is how it is looked at, not something that happened (Arun,
+    // 2026-10-30: "get rid of these logs in chat too"). The note over the box says while it is out.
+    case "lane.terminal":
+      return null;
     case "effort.skipped":
       return (
         <Notice ev={ev} icon={CircleHelpIcon} tone="warn">
@@ -6822,6 +6956,8 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
 
   return (
     <div className={cn("composer", `mode-${mode === "claim" ? "drive" : mode}`, toPeople && "to-people")}>
+      {/* Out in a terminal (Terminal.tsx laneTerminal): what is sent waits, and this says so before it is typed, not after. */}
+      {state.terminals?.[lane] && <InTerminalNote sid={sid} invite={invite} lane={lane} tool={state.engines[lane]?.tool} mine={state.engines[lane]?.hostId === me.id} />}
       {/* The one-row box is the rooms' (Arun: "ONLY REDESIGN FOR THE ROOM INPUT CHAT"); a teammate's own chat keeps the session's box (Arun, 2026-10-28). */}
       {state.options.team && inView === ALL && <span className="team-box-mark" hidden />}
       <div className="composer-caption">

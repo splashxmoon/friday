@@ -19,11 +19,13 @@ export const REATTACH_WINDOW_MS = 7 * 86_400_000;
 export const REATTACH_MAX = 8;
 
 /** This computer's lanes in a session that are offline and have somewhere to come back to, main lane first. */
-export function lanesToReattach(state: SessionState, hostId: string): { lane: string; engine: LaneEngine }[] {
+export function lanesToReattach(state: SessionState, hostId: string, machine?: string): { lane: string; engine: LaneEngine }[] {
   const out: { lane: string; engine: LaneEngine }[] = [];
   for (const lane of [MAIN_LANE, ...state.lanes.map((l) => l.id)]) {
     const e = state.engines[lane];
     if (!e?.tool || e.online || e.hostId !== hostId || !e.cwd) continue;
+    // Another of this person's computers held it (local/computers.ts): it comes back there, by its own runner, not here.
+    if (machine && e.machine && e.machine !== machine) continue;
     out.push({ lane, engine: e });
   }
   return out;
@@ -71,6 +73,8 @@ export async function reattachAll(
     actorToken: (sid: string, userId: string) => string;
     start: (params: Record<string, unknown>) => Promise<unknown>;
     alive?: () => boolean;
+    /** This computer's name, as its runners give it: only lanes held here are brought back here. */
+    machine?: string;
     log: (line: string) => void;
   },
   now = Date.now(),
@@ -83,7 +87,7 @@ export async function reattachAll(
     const m = state?.members[owner.id];
     if (!state || !m || m.removed) continue;
     const invite = deps.invite(sid, state, m.role);
-    for (const { lane, engine } of lanesToReattach(state, owner.id)) {
+    for (const { lane, engine } of lanesToReattach(state, owner.id, deps.machine)) {
       if (want.length >= REATTACH_MAX) break;
       want.push({ sid, lane, params: reattachParams(sid, invite, lane, engine, deps.actorToken(sid, owner.id)) });
     }

@@ -1,0 +1,78 @@
+/* The team demo (TeamDemo.tsx, team-demo.ts): its offer on the home and in setup, and the guide beside its session (Arun,
+   2026-10-30: "a first run that shows the team"). The quiet room (DIRECTION.md): one flat ground, hairlines rather than boxes,
+   type over widgets; the tools' marks in the dashed circle they wear at rest, the one ring that turns a working agent's. The only
+   thing that floats is the ring round the element a moment points at, and it never takes a click. */
+
+/* The tools' marks, side by side, a little overlapped like a header's face stack. */
+.tdm-marks { display: inline-flex; align-items: center; flex: none; }
+.tdm-marks .tdm-mark + .tdm-mark { margin-left: -3px; }
+.tdm-mark-in { display: grid; place-items: center; width: 100%; height: 100%; border-radius: 50%; background: var(--card); }
+
+/* The home's offer: a row under the box, the width of the box, with a hairline and no fill. */
+.tdo { display: flex; align-items: center; gap: 12px; width: min(var(--composer-w, 656px), 100%); margin: 12px auto 0; padding: 12px 12px 12px 14px; border: 1px solid var(--border); border-radius: var(--r-lg); animation: tg-in var(--t-open) var(--ease-out); }
+.tdo-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.tdo-title { color: var(--ink); font-size: 13px; font-weight: 500; line-height: 18px; }
+.tdo-blurb { color: var(--text-muted); font-size: 12px; line-height: 17px; }
+.tdo-go { flex: none; }
+
+/* Setup's last step: what the demo is, over the footer whose first button starts it. */
+.setup-demo { display: flex; align-items: flex-start; gap: 12px; margin: 0 20px; padding: 14px 0 2px; border-top: 1px solid var(--border); }
+.setup-demo .tdm-marks { margin-top: 1px; }
+.setup-demo h3 { margin: 0 0 2px; color: var(--ink); font-size: 13px; font-weight: 500; line-height: 18px; }
+.setup-demo p { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 17px; }
+
+/* The guide: a column beside the chat, a hairline to its left, on the same ground. */
+.tg { flex: none; display: flex; flex-direction: column; gap: 14px; width: 264px; min-height: 0; padding: 18px 16px 16px; border-left: 1px solid var(--border); overflow-y: auto; animation: tg-in var(--t-open) var(--ease-out); }
+.tg-head { display: flex; align-items: flex-start; gap: 8px; }
+.tg-head > div { flex: 1; min-width: 0; }
+.tg-head h2 { margin: 0 0 4px; color: var(--ink); font-size: 13px; font-weight: 600; line-height: 18px; }
+.tg-head p { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 17px; }
+.tg-head .icon-btn { margin: -4px -6px 0 0; }
+
+.tg-list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.tg-row + .tg-row { border-top: 1px solid var(--border); }
+.tg-moment { display: flex; align-items: flex-start; gap: 10px; width: 100%; margin: 0; padding: 9px 6px; border: 0; border-radius: var(--r-md); background: transparent; color: inherit; font: inherit; text-align: left; }
+button.tg-moment { cursor: pointer; transition: background-color var(--t-hover) var(--ease-out); }
+button.tg-moment:hover, .tg-row.lit button.tg-moment { background: var(--hover); }
+button.tg-moment:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
+.tg-words { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tg-line { color: var(--ink); font-size: 13px; font-weight: 500; line-height: 18px; }
+.tg-detail { display: -webkit-box; overflow: hidden; color: var(--text-muted); font-size: 12px; line-height: 17px; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.tg-moment.waiting .tg-line { color: var(--ink-4); font-weight: 400; }
+.tg-row.on { animation: tg-in var(--t-open) var(--ease-out); }
+
+/* A moment's mark: who it is about, with the ring of how they stand; a waiting one a dashed circle, the last a tick. */
+.tg-mark, .tg-dot, .tg-tick { flex: none; margin-top: 0; }
+.tg-dot { width: 18px; height: 18px; border: 1px dashed var(--border-strong); border-radius: 50%; }
+.tg-tick { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: color-mix(in srgb, var(--ready) 16%, transparent); color: var(--ready); }
+
+/* After the board is done: one line about keeping a crew, under a hairline. */
+.tg-crew { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding-top: 14px; border-top: 1px solid var(--border); animation: tg-in var(--t-open) var(--ease-out); }
+.tg-crew p { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 17px; }
+.tg-crew b { color: var(--ink); font-weight: 500; }
+
+/* Too narrow for a column: one line over the top of the chat, the latest moment and how many so far. */
+.tg.narrow { position: absolute; top: 8px; left: 50%; z-index: 4; width: min(560px, calc(100% - 24px)); padding: 0; border: 0; overflow: visible; transform: translateX(-50%); }
+.tg-bar { display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 6px 0 10px; border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--card); box-shadow: var(--shadow-pop); }
+.tg-bar-line { flex: 1; min-width: 0; overflow: hidden; padding: 0; border: 0; background: transparent; color: var(--ink); font: inherit; font-size: 13px; font-weight: 500; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.tg-bar-line:disabled { color: var(--ink-4); font-weight: 400; cursor: default; }
+.tg-count { flex: none; color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.tg-bar-crew { flex: none; height: 26px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: transparent; color: var(--ink); font: inherit; font-size: 12px; cursor: pointer; }
+.tg-bar-crew:hover { background: var(--hover); }
+
+/* The ring round what a moment points at, and the moment's words on a tag at its corner. Floating, so the one shadow. */
+.tg-spot { position: fixed; z-index: 60; border-radius: var(--r-lg); box-shadow: 0 0 0 1.5px var(--live), 0 0 0 5px color-mix(in srgb, var(--live) 16%, transparent); pointer-events: none; animation: tg-spot-in var(--t-open) var(--ease-out); }
+.tg-spot-tag { position: absolute; bottom: calc(100% + 8px); left: 0; max-width: 320px; padding: 5px 10px; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--card); box-shadow: var(--shadow-pop); color: var(--ink); font-size: 12px; font-weight: 500; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tg-spot-tag.below { top: calc(100% + 8px); bottom: auto; }
+
+@keyframes tg-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes tg-spot-in { from { opacity: 0; } to { opacity: 1; } }
+.tg.narrow { animation: none; }
+@media (prefers-reduced-motion: reduce) { .tdo, .tg, .tg-row.on, .tg-crew, .tg-spot { animation: none; transition: none; } }
+:root.reduce-motion .tdo, :root.reduce-motion .tg, :root.reduce-motion .tg-row.on, :root.reduce-motion .tg-crew, :root.reduce-motion .tg-spot { animation: none; transition: none; }
+
+/* Narrow screens: the home's offer stacks its button under the words. */
+@media (max-width: 560px) {
+  .tdo { flex-wrap: wrap; }
+  .tdo-go { margin-left: 34px; }
+}

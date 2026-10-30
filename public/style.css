@@ -4483,6 +4483,11 @@ button[aria-label="Pause the agent"] svg, button[aria-label="Resume the agent"] 
 .rsp [data-streamdown="table"] th:first-child { z-index: 2; }
 .rsp [data-streamdown="table"] td:first-child { min-width: 12ch; }
 .rsp [data-streamdown="table"] .num { text-align: right; white-space: nowrap; }
+/* A numbered first column is as wide as its numbers, not a first column's twelve characters: "#" took a fifth of the table and
+   squeezed the rest (Arun, 2026-10-30: "fix this UI table design too"). */
+.rsp [data-streamdown="table"] td.num:first-child { width: 1%; min-width: 0; }
+/* A file or a bit of code in a cell stays one piece: broken anywhere, it read "lib/ fetc h- json .ts" down the cell. */
+.rsp [data-streamdown="table"] td :is(.file-chip, .file-chip *, [data-streamdown="inline-code"]) { white-space: nowrap; overflow-wrap: normal; word-break: normal; }
 .rsp [data-streamdown="table"] td[data-status] { white-space: nowrap; }
 .rsp [data-streamdown="table"] td[data-status]::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 7px; border-radius: 50%; vertical-align: .08em; background: var(--green); }
 .rsp [data-streamdown="table"] td[data-status="bad"]::before { background: var(--red); }
@@ -10983,6 +10988,19 @@ html .shell.with-panel .main { border-top-left-radius: 0 !important; }
 .ws-branch-from { flex: none; color: var(--text-muted); }
 .branch-head { margin: 6px 7px 2px; font-size: 12px; font-weight: 600; letter-spacing: .02em; color: var(--faint); }
 /* ── The open-source edition's one line about Friday Team (TeamTip.tsx): in the sidebar's foot, and under a session's settings ── */
+/* Settings › Your phone (PhoneSettings.tsx): the switch, the code to scan beside its letters, and the phones paired, as rows. */
+.phone-set { display: flex; flex-direction: column; gap: 12px; }
+.phone-pair { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.phone-code { display: flex; align-items: center; gap: 20px; padding: 12px; border: 1px solid var(--border); border-radius: var(--r-md, 10px); }
+.phone-qr { flex: none; border-radius: 6px; }
+.phone-code-text { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.phone-code-text b { color: var(--ink); font-weight: 600; }
+.phone-code-actions { display: flex; align-items: center; gap: 12px; margin: 6px 0 2px; }
+.phone-note { margin: 0; }
+.phone-devices { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--border); }
+.phone-devices li { display: flex; align-items: center; gap: 10px; min-height: 40px; border-bottom: 1px solid var(--border); }
+.phone-device-name { flex: 1; min-width: 0; color: var(--ink); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.phone-error { margin: 0; color: var(--red); }
 /* Home, with no coding tool ready: one line above the box and the way to set one up (Code.tsx). */
 .home-setup { display: flex; align-items: center; gap: 12px; width: min(var(--composer-w, 656px), 100%); margin: 0 auto 12px; padding: 10px 12px 10px 14px; border: 1px solid color-mix(in srgb, var(--amber) 40%, var(--border)); border-radius: var(--r-md, 10px); background: color-mix(in srgb, var(--amber) 6%, transparent); color: var(--ink-2); font-size: 13px; line-height: 1.45; }
 .home-setup > span { flex: 1; min-width: 0; }
@@ -11960,3 +11978,143 @@ body:has(.wf-inspector) .wy-toasts.at-rest { right: calc(16px + 340px + 12px); }
 .subs-state { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 520px) { .subs-head .subs-bar { display: none; } }
 .stop-detail > summary::after { display: inline-block; white-space: nowrap; }
+
+/* The lane's own coding tool in a terminal (Terminal.tsx laneTerminal): its tab, the line over its screen, the note over the box. */
+.term-side-tool .term-side-name { font-weight: 550; }
+.term-tool { display: flex; flex-direction: column; min-height: 0; }
+.term-tool-bar { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+.term-tool-bar .muted { flex: 1; min-width: 0; }
+.term-tool .term-shell { flex: 1; min-height: 0; }
+.in-terminal-note { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); color: var(--text-muted); }
+.in-terminal-note > span { flex: 1; min-width: 0; color: var(--text-muted); }
+.in-terminal-note > .link-btn { flex: none; color: var(--ink-2); }
+/* Chat or Terminal for one agent, in the session's header (Terminal.tsx ViewToggle), and the agent's own screen in the chat's place. */
+.view-toggle { display: inline-grid; flex: none; place-items: center; width: 24px; height: 24px; margin-left: 4px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--faint); cursor: pointer; }
+.view-toggle:hover { background: var(--card-2); color: var(--ink-2); }
+.view-toggle.on { color: var(--ink); background: var(--card-2); }
+.activity-main.is-tui { display: flex; flex-direction: column; }
+.lane-tui { display: flex; flex: 1; flex-direction: column; min-height: 0; margin: 0 12px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); overflow: hidden; }
+.lane-tui-head { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.lane-tui-name { flex: none; color: var(--ink-2); font-weight: 550; white-space: nowrap; }
+.lane-tui-where { color: var(--text-muted); font-family: var(--font-mono, ui-monospace, monospace); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.lane-tui-note { margin-left: auto; color: var(--faint); white-space: nowrap; }
+.lane-tui .term-shell { flex: 1; min-height: 0; }
+.lane-tui-err { padding: 12px; }
+/* The live line under a reply while its agent works and says nothing (Activity.tsx RunBlock). */
+.rsp-live { margin-top: 6px; }
+.rsp-live .rsp-working { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+/* Friday's own terminal view of an agent, for any coding tool (Tui.tsx): a screen, a status line over it, a prompt under it. */
+.ftui { --ftui-bg: color-mix(in srgb, var(--bg) 82%, black); --ftui-fg: var(--ink); --ftui-dim: var(--faint); display: flex; flex: 1; flex-direction: column; min-height: 0; margin: 0 12px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--ftui-bg); color: var(--ftui-fg); font: 13px/1.55 var(--mono); overflow: hidden; }
+:root:not(.dark) .ftui { --ftui-bg: color-mix(in srgb, var(--bg) 60%, white); }
+.ftui-bar { display: flex; align-items: center; gap: 12px; min-height: 28px; padding: 3px 12px; border-bottom: 1px solid var(--border); font-size: 12px; white-space: nowrap; }
+.ftui-chip { padding: 0 7px; border-radius: 4px; background: var(--ftui-tint); color: #111; font-weight: 600; }
+.ftui-where { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ftui-state { color: var(--ftui-dim); }
+.ftui-state.on { color: var(--live); }
+.ftui-grow { flex: 1; }
+.ftui-link { padding: 1px 6px; border: 0; border-radius: 4px; background: none; color: var(--ftui-dim); font: inherit; cursor: pointer; }
+.ftui-link:hover { background: var(--card-2); color: var(--ink); }
+.ftui-dim { color: var(--ftui-dim); }
+.ftui-screen { flex: 1; min-height: 0; padding: 12px 16px 8px; overflow: auto; overflow-wrap: anywhere; white-space: pre-wrap; }
+.ftui-banner { margin: 0; color: var(--ftui-tint); font: 12px/1.15 var(--mono); opacity: 0.9; }
+.ftui-hello { margin: 4px 0 14px; }
+.ftui-you { margin: 12px 0 8px; padding: 4px 8px; border-radius: 4px; background: var(--card-2); }
+.ftui-prompt { color: var(--ftui-tint); font-weight: 700; }
+.ftui-say, .ftui-step { margin: 6px 0; }
+.ftui-dot { font-size: 10px; vertical-align: 1px; }
+.ftui-dot.say { color: var(--ftui-fg); }
+.ftui-dot.ok { color: var(--green); }
+.ftui-dot.bad { color: var(--red); }
+.ftui-dot.run { color: var(--live); animation: ftui-blink 1s steps(2) infinite; }
+.ftui-target { color: var(--ftui-dim); }
+.ftui-out { padding-left: 14px; color: var(--ftui-dim); }
+.ftui-out.bad { color: var(--red); }
+.ftui-diff { margin: 2px 0 2px 14px; border-radius: 4px; overflow: hidden; }
+.ftui-diff .minus { padding: 0 6px; background: color-mix(in srgb, var(--red) 18%, transparent); }
+.ftui-diff .plus { padding: 0 6px; background: color-mix(in srgb, var(--green) 18%, transparent); }
+.ftui-end { margin: 6px 0 4px; color: var(--ftui-dim); }
+.ftui-end.bad { color: var(--red); }
+.ftui-sys { margin: 4px 0; }
+.ftui-spin { margin: 8px 0; color: var(--ftui-tint); }
+.ftui-spinner { display: inline-block; width: 1ch; }
+.ftui-caret { margin-left: 1px; color: var(--ftui-tint); animation: ftui-blink 1s steps(2) infinite; }
+.ftui-menu { margin: 10px 0; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--amber) 55%, transparent); border-radius: 6px; }
+.ftui-menu-title { color: var(--amber); font-weight: 600; }
+.ftui-menu-detail { margin: 4px 0 6px; color: var(--ftui-fg); font: inherit; white-space: pre-wrap; }
+.ftui-opt { display: block; width: 100%; padding: 1px 4px; border: 0; border-radius: 4px; background: none; color: var(--ftui-dim); font: inherit; text-align: left; cursor: pointer; }
+.ftui-opt.on { color: var(--ftui-fg); background: var(--card-2); }
+.ftui-input { display: flex; align-items: flex-start; gap: 8px; margin: 0 10px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--ftui-bg); }
+.ftui-input:focus-within { border-color: color-mix(in srgb, var(--ftui-tint) 60%, var(--border)); }
+.ftui-input textarea { flex: 1; min-height: 20px; padding: 0; border: 0; outline: none; resize: none; background: none; color: var(--ftui-fg); font: inherit; }
+.ftui-keys { padding: 5px 14px 7px; font-size: 11px; }
+@keyframes ftui-blink { 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) { .ftui-dot.run, .ftui-caret { animation: none; } }
+
+/* ── the sidebar, roomier (Sidebar.tsx, Arun 2026-10-30: "a lot space for the side bar… ease of use") ── */
+/* Its edge, dragged to size it; the frame follows --panel-w, without its easing while it moves. */
+.sb-resize { position: absolute; top: 0; right: -3px; bottom: 0; z-index: 60; width: 8px; cursor: col-resize; }
+.sb-resize::after { content: ""; position: absolute; top: 14px; bottom: 14px; left: 3px; width: 2px; border-radius: 2px; background: transparent; transition: background-color .12s; }
+.sb-resize:hover::after, .sb-resize:focus-visible::after, body.resizing-panel .sb-resize::after { background: var(--border-strong); }
+.sb-resize:focus-visible { outline: none; }
+body.resizing-panel .shell, body.resizing-panel .main, body.resizing-panel .sb-panel .dass-panel { transition: none !important; }
+body.resizing-panel { cursor: col-resize; user-select: none; }
+/* A folder's tile, and how its sessions stand on its own row. */
+.sb-tile { display: inline-grid; flex: none; place-items: center; width: 16px; height: 16px; border-radius: 4px; color: #141414; font: 700 10px/1 var(--font); }
+.sb-gstate { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 500; white-space: nowrap; }
+.sb-gstate.needs { padding: 0 6px; border-radius: 6px; background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--amber); line-height: 18px; }
+.sb-gstate.live { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.sb-gspin { width: 10px; height: 10px; border: 1.5px solid color-mix(in srgb, var(--live) 25%, transparent); border-top-color: var(--live); border-radius: 50%; animation: sb-spin 2.4s linear infinite; }
+@keyframes sb-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .sb-gspin { animation: none; border-color: var(--live); } }
+/* All agents in one terminal (Tui.tsx): whose each line is, in its tool's colour, and who the prompt writes to. */
+.ftui-tag { display: inline-block; min-width: 10ch; margin-right: 8px; font-weight: 600; }
+.ftui-screen.many .ftui-you .ftui-tag { min-width: 10ch; }
+.ftui-to { flex: none; font-weight: 600; }
+/* The terminal switch where a Code session's gear was: the header's own button size. */
+.view-toggle.in-head { width: 32px; height: 32px; margin: 0; border-radius: 8px; color: var(--text-muted); }
+.view-toggle.in-head:hover { color: var(--ink); }
+.view-toggle.in-head.on { color: var(--ink); background: var(--hover-strong, var(--card-2)); }
+/* The terminal view is the chat's whole place: flush with its left, right and foot, square, a line above it only (Arun,
+   2026-10-30: "make the terminal view flush with the right and left side and the bottom… not rounded"). */
+.lane-tui, .ftui { margin: 0; border: 0; border-top: 1px solid var(--border); border-radius: 0; }
+/* A scrollbar always there, not only under the pointer (Arun: "add a scroll bar to the terminal view"). */
+.lane-tui [data-scrollable="1"] .xterm .xterm-scrollable-element > .scrollbar.vertical,
+.lane-tui [data-scrollable="1"] .xterm .xterm-scrollable-element > .scrollbar.invisible { opacity: 1 !important; visibility: visible !important; width: 10px !important; }
+/* Nothing to scroll back to (a screen drawn in place): no bar at all. */
+.lane-tui [data-scrollable="0"] .xterm .xterm-scrollable-element > .scrollbar { display: none !important; }
+.lane-tui .xterm .xterm-scrollable-element > .scrollbar > .slider { width: 6px !important; left: 2px !important; border-radius: 3px; background: color-mix(in srgb, var(--ink) 22%, transparent) !important; }
+.lane-tui .xterm .xterm-scrollable-element > .scrollbar > .slider:hover, .lane-tui .xterm .xterm-scrollable-element > .scrollbar > .slider.active { background: color-mix(in srgb, var(--ink) 38%, transparent) !important; }
+.ftui-screen { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--ink) 22%, transparent) transparent; }
+.ftui-screen::-webkit-scrollbar { width: 10px; }
+.ftui-screen::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 6px; background: color-mix(in srgb, var(--ink) 22%, transparent) padding-box; }
+/* The folded sidebar's sessions button while something works and nothing waits (SideRail.tsx). */
+.rail-dot.live { background: var(--live); }
+
+/* Your computers (Computers.tsx): Settings' card, and the box's "runs on" pill. */
+.computers-link { display: flex; flex-direction: column; gap: 8px; padding: 10px 0 12px; border-top: 1px solid var(--border); }
+.computers-steps { margin: 0; padding-left: 18px; color: var(--text-muted); }
+.computers-link-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.computers-link-text { flex: 1; min-width: 0; overflow: hidden; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--card-2); font: 12px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.computers-list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--border); }
+.computers-list li { display: flex; align-items: center; gap: 10px; min-height: 40px; border-bottom: 1px solid var(--border); }
+.computers-list li:last-child { border-bottom: 0; }
+.computers-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+.computers-dot.on { background: var(--green); }
+.computers-name { color: var(--ink); font-size: 13px; white-space: nowrap; }
+.computers-tools { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.computers-join { border-top: 1px solid var(--border); }
+.computers-status { display: inline-flex; align-items: center; gap: 7px; }
+.computers-paste { display: flex; gap: 8px; padding: 0 0 12px; }
+.computers-paste .input { flex: 1; min-width: 0; height: 30px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg); color: var(--ink); font: 13px var(--font); }
+.computers-paste .input:focus { border-color: var(--border-focus, var(--ink-2)); outline: none; }
+.cw-computer { max-width: 180px; }
+/* A coding tool's screen opening, or why it couldn't (Activity.tsx): in the screen's own place, not Friday's view instead. */
+.lane-tui-wait { align-items: center; justify-content: center; gap: 10px; text-align: center; }
+.lane-tui-wait p { max-width: 520px; margin: 0; padding: 0 24px; }
+.lane-tui-wait-acts { display: inline-flex; align-items: center; gap: 12px; }
+/* The sidebar's foot line level with a session's status bar line (Arun, 2026-10-30: "line up the side bar horizontal line with
+   the coding session footer horizontal line"): the line is the icon row's own, and the row is the status bar's height at the
+   very foot, whatever sits above it (the tip, the usage notice). */
+.dass-panel .dass-foot { border-top: 0 !important; padding-bottom: 0 !important; }
+.dass-panel .sb-dock { box-sizing: border-box; height: var(--dass-foot); margin: 0 -14px !important; padding: 0 14px; border-top: 1px solid var(--border) !important; }

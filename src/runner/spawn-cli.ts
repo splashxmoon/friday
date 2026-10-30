@@ -320,6 +320,14 @@ export class WarmClaude {
     return this.known ?? Promise.resolve(null);
   }
 
+  /**
+   * Let the kept process go while no turn runs on it, to be started again by the next turn: its conversation is being carried
+   * on elsewhere (the person's terminal, terminal-line.ts), and what it holds would be out of date.
+   */
+  release(): void {
+    if (!this.turn) this.drop();
+  }
+
   /** End the kept process, and a turn running on it, for good. */
   close(): void {
     this.shut = true;
@@ -836,6 +844,11 @@ export class Prespawn {
     // Not its stdin first: ended, it would read an empty prompt and start a turn before the kill lands.
     k.child.kill("SIGTERM");
     return null;
+  }
+
+  /** End what is kept, not for good: the next turn starts its own, and may keep one again. */
+  release(): void {
+    this.drop();
   }
 
   /** End what is kept, for good. */

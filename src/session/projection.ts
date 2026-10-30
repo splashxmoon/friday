@@ -230,6 +230,11 @@ export interface SessionState {
    */
   efforts?: Record<string, EngineEffort>;
   /**
+   * Lanes whose coding tool is open in their host's terminal (`lane.terminal`): who opened it and when. Such a lane takes no
+   * turns until it is back. May be missing from a state cached before it.
+   */
+  terminals?: Record<string, { by: string; at: number }>;
+  /**
    * How far others' messages may go on each lane (`lane.othersFull`): false where its host held them to Edits, absent or true
    * as far as the host's own, Auto included. Auto is Auto for everyone's messages unless the host says otherwise (Arun,
    * 2026-10-23: "auto mode should auto approve everything"); it used to be held to Edits unless the host opened it up.
@@ -889,6 +894,10 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       if (b.effort) (s.efforts ??= {})[lane] = b.effort;
       else if (s.efforts) delete s.efforts[lane];
       break;
+    case "lane.terminal":
+      if (b.open) (s.terminals ??= {})[lane] = { by: ev.actor.id, at: ev.ts };
+      else if (s.terminals) delete s.terminals[lane];
+      break;
     case "lead.set":
       s.lead = b.lane;
       // A board whose poster has gone is the new lead's: its reports and the right to post the next go to it (2026-10-28 audit).
@@ -959,6 +968,7 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       if (s.board?.fromLane === b.laneId && s.lead && s.lead !== b.laneId) s.board = { ...s.board, fromLane: s.lead, fromName: s.lanes.find((l) => l.id === s.lead)?.name ?? s.board.fromName };
       if (s.lead === b.laneId) s.lead = null;
       if (s.holds) delete s.holds[b.laneId];
+      if (s.terminals) delete s.terminals[b.laneId];
       for (const w of Object.values(s.wakes ?? {})) if (w.lane === b.laneId || w.on.lane === b.laneId) delete s.wakes![w.id];
       if (s.efforts) delete s.efforts[b.laneId];
       if (s.othersFull) delete s.othersFull[b.laneId];
@@ -997,6 +1007,8 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       if (b.reason === "released") {
         delete s.engines[lane];
         if (s.efforts) delete s.efforts[lane];
+        // Handed back to Friday Code: nothing of the tool's is open anywhere for this lane any more.
+        if (s.terminals) delete s.terminals[lane];
         if (s.othersFull) delete s.othersFull[lane];
       } else if (s.engines[lane]) s.engines[lane] = { ...s.engines[lane]!, online: false, sinceSeq: ev.seq, offlineAt: ev.ts };
       break;

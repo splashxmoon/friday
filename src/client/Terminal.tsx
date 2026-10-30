@@ -9,9 +9,10 @@ const shells: { api: () => NonNullable<Window["fridayDesktop"]>["terminal"] | un
   onDrop: () => () => {},
 };
 import "@xterm/xterm/css/xterm.css";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ToolResult, ToolResultOutput } from "@/components/agents/tool-result";
-import { MAIN_LANE, type SessionEvent } from "../types.js";
+import { engineName, MAIN_LANE, type EngineTool, type SessionEvent } from "../types.js";
+import { EngineMark } from "./BrandMarks.js";
 import type { Send } from "./useSession.js";
 import { Icon } from "./icons.js";
 import { joinPath, openIn, preferredEditor } from "./openIn.js";
@@ -204,6 +205,7 @@ export function TerminalPanel({
   const [out, setOut] = useState<Record<string, string>>({});
   const [copiedOut, setCopiedOut] = useState(false);
   const active = terms[Math.min(at, terms.length - 1)];
+
 
   // Two ways to look: a shell to type in, and what has been run, with what it
   // printed. Pointing at a command from the Tasks list lands on the second.
@@ -405,7 +407,8 @@ function forgetScreen(id: string): void {
  * xterm arrives on its own chunk, because the browser build has no shell to
  * draw and shouldn't carry the code for one.
  */
-function LocalShell({ id, cwd, onOutput, onOpenFile }: { id: string; cwd?: string; onOutput: (text: string) => void; onOpenFile?: (path: string, line?: number) => void }) {
+/** `run`: a line typed into a new shell once it starts (a coding tool on its conversation, laneTerminal); not into one it finds still running. */
+function LocalShell({ id, cwd, run, onOutput, onOpenFile }: { id: string; cwd?: string; run?: string; onOutput: (text: string) => void; onOpenFile?: (path: string, line?: number) => void }) {
   const host = useRef<HTMLDivElement>(null);
   const [err, setErr] = useState("");
   const termRef = useRef<import("@xterm/xterm").Terminal | null>(null);
@@ -435,6 +438,10 @@ function LocalShell({ id, cwd, onOutput, onOpenFile }: { id: string; cwd?: strin
         fontSize: 13,
         cursorBlink: true,
         scrollback: 10_000,
+        // A wheel step moves three lines, and ⌥ with it a page's worth: one line a step felt stuck in a long output and in a tool
+        // that draws its own screen (Arun, 2026-10-30: "scrolling in native terminal feels slow").
+        scrollSensitivity: 3,
+        fastScrollSensitivity: 12,
         theme: themeFrom(el),
       });
       const fit = new FitAddon();
@@ -443,6 +450,11 @@ function LocalShell({ id, cwd, onOutput, onOpenFile }: { id: string; cwd?: strin
       fit.fit();
       termRef.current = term;
       stop.push(() => ((termRef.current = null), term.dispose()));
+      // Whether there is anything to scroll back to: a tool drawing its whole screen in place (Claude Code's own, the alternate
+      // screen) has none, and a scrollbar there was a thumb the screen's height, read as a stray line (Arun's screenshot).
+      const scrollable = () => (el.dataset.scrollable = term.buffer?.active?.type === "normal" && term.buffer.active.length > term.rows ? "1" : "0");
+      scrollable();
+      for (const d of [term.buffer?.onBufferChange?.(scrollable), term.onWriteParsed?.(scrollable), term.onResize?.(scrollable)]) if (d) stop.push(() => d.dispose());
       // ⌘F (Ctrl+Shift+F off a Mac, where Ctrl+F is the shell's own) finds in the output rather than going to the shell.
       term.attachCustomKeyEventHandler((e) => {
         const mac = /Mac/.test(navigator.platform);
@@ -566,6 +578,7 @@ function LocalShell({ id, cwd, onOutput, onOpenFile }: { id: string; cwd?: strin
       }
       for (const d of early) term.write(d);
       drawn = true;
+      if (run && !r.resumed) api.write(id, `${run}\r`);
       term.focus();
     })();
 
@@ -573,7 +586,7 @@ function LocalShell({ id, cwd, onOutput, onOpenFile }: { id: string; cwd?: strin
       dead = true;
       for (const f of stop) f();
     };
-  }, [id, cwd]);
+  }, [id, cwd, run]);
 
   return (
     <div className="term-shell">
@@ -812,4 +825,184 @@ function themeFrom(el: HTMLElement): { background: string; foreground: string; c
   const [r = 0, g = 0, b = 0] = (theme.background.match(/\d+(\.\d+)?/g) ?? []).map(Number);
   if ((r * 299 + g * 587 + b * 114) / 1000 > 160) return { ...theme, ...LIGHT_ANSI };
   return theme;
+}
+
+// ── The lane's own coding tool in a terminal (runner/terminal-line.ts) ──────────
+
+/** The tools whose own screen can carry on a lane's conversation (terminal-line.ts TERMINAL_TOOLS). */
+export const TERMINAL_TOOLS = new Set<string>(["claude", "codex"]);
+
+/** One screen per lane, the same across reloads, so the desktop app's shell is found again rather than started twice. */
+export const toolShellId = (sid: string, lane: string) => `tool-${sid}-${lane}`;
+
+/** Whether this window can draw a real shell: the desktop app's own, or (in the hosted Friday) one on a connected computer. */
+export const hasShells = () => !!shells.api();
+
+/** The line each lane's screen was opened with, kept for the screen to start with, however it comes to be drawn. */
+const opened = new Map<string, { line: string; cwd: string }>();
+
+/** Takes the lane to a terminal: its turns held, and the line that carries its conversation on (POST /api/sessions/:sid/terminal). */
+export async function openLaneTerminal(sid: string, invite: string, lane: string): Promise<{ line: string; cwd: string } | { error: string }> {
+  try {
+    // Given up on after half a minute: a view waiting on an answer that never comes said "Opening…" for ever.
+    const r = await fetch(`/api/sessions/${sid}/terminal?invite=${encodeURIComponent(invite)}`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lane, open: true }), signal: AbortSignal.timeout(30_000) });
+    const b = (await r.json().catch(() => ({}))) as { line?: string; cwd?: string; error?: string };
+    if (!r.ok || !b.line) return { error: b.error ?? "That agent's computer didn't answer. Try again." };
+    const got = { line: b.line, cwd: b.cwd ?? "" };
+    opened.set(`${sid}|${lane}`, got);
+    return got;
+  } catch {
+    return { error: "Couldn't reach Friday. Try again." };
+  }
+}
+
+/**
+ * A lane's own screen started ahead, before anyone looks at it (Arun, 2026-10-30: "fast loading of the native terminal… should
+ * be already auto loaded for instant feedback"): taken to the terminal, its shell started and its tool typed into it, so that
+ * by the time its tab is opened the tool is up and the view only draws what it already said. Nothing twice: a lane on its
+ * way, or with its screen running already, is left as it is.
+ */
+/** Screens on their way, by `sid|lane`: a second ask for one waits on the first and hears how it went, rather than nothing. */
+const warming = new Map<string, Promise<{ error: string } | null>>();
+export function warmLaneTerminal(sid: string, invite: string, lane: string): Promise<{ error: string } | null> {
+  const key = `${sid}|${lane}`;
+  const api = shells.api();
+  if (!api) return Promise.resolve({ error: "This window has no terminal: open Friday's desktop app." });
+  const going = warming.get(key);
+  if (going) return going;
+  const run = (async () => {
+    try {
+      // Always asked, never taken from what an earlier open left: handed back since, the lane would run its screen without its
+      // turns held, and the view would wait for an open the server never heard of (Arun's screenshot: "Opening Claude Code…").
+      const r = await openLaneTerminal(sid, invite, lane);
+      if ("error" in r) return r;
+      const id = toolShellId(sid, lane);
+      const s = await api.start({ id, cols: 120, rows: 36, ...(r.cwd ? { cwd: r.cwd } : {}) });
+      if (s.ok && !s.resumed) api.write(id, `${r.line}\r`);
+      return s.ok ? null : { error: s.error ?? "Couldn't start a shell." };
+    } catch (e) {
+      return { error: (e as Error).message || "Couldn't open it." };
+    } finally {
+      warming.delete(key);
+    }
+  })();
+  warming.set(key, run);
+  return run;
+}
+
+/** Back to Friday: the tool's screen closed, and the lane takes its turns again, from where the terminal left its conversation. */
+export async function handBack(sid: string, invite: string, lane: string): Promise<void> {
+  opened.delete(`${sid}|${lane}`);
+  shells.api()?.kill(toolShellId(sid, lane));
+  forgetScreen(toolShellId(sid, lane));
+  await fetch(`/api/sessions/${sid}/terminal?invite=${encodeURIComponent(invite)}`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lane, open: false }) }).catch(() => {});
+}
+
+/** Over the chat's box while the lane is out in a terminal: why nothing it is sent runs yet, and the one press that gives it back. */
+export function InTerminalNote({ sid, invite, lane, tool, mine }: { sid: string; invite: string; lane: string; tool: EngineTool | undefined; mine: boolean }) {
+  const [busy, setBusy] = useState(false);
+  const name = engineName(tool);
+  return (
+    <div className="in-terminal-note" role="status">
+      <Icon name="terminalSquare" size={14} />
+      <span className="small">{mine ? `${name} is open in your terminal. What you send here waits until you hand it back.` : `${name} is open in its host's terminal. What's sent here waits until they hand it back.`}</span>
+      {mine && (
+        <button type="button" className="link-btn small" disabled={busy} onClick={() => (setBusy(true), void handBack(sid, invite, lane).finally(() => setBusy(false)))}>
+          Hand back to Friday
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Chat or terminal: one switch for every agent, in every session, until it is switched back (Arun, 2026-10-30: "make sure the
+ * terminal view toggle works as a on off switch for all of the coding tabs"). Shared by every chat on screen (split columns
+ * included) and kept in this browser.
+ */
+const TUI_KEY = "friday.tui";
+let tuiOn = (() => {
+  try {
+    return localStorage.getItem(TUI_KEY) === "1";
+  } catch {
+    return false;
+  }
+})();
+const tuiWatchers = new Set<() => void>();
+export const tuiIsOn = () => tuiOn;
+/**
+ * Agents shown in Friday's own TUI rather than their tool's, by `sid|lane`: sent back to it by their person (for good), or their
+ * tool's screen couldn't open just now (its computer reconnecting), for half a minute before it is tried again.
+ */
+const fridayView = new Map<string, number>();
+export const friday = (sid: string, lane: string) => {
+  const until = fridayView.get(`${sid}|${lane}`);
+  return until !== undefined && until > Date.now();
+};
+/** The view switched on: every agent goes to its tool's own screen again, whatever was chosen before (Arun, 2026-10-30: "switching
+ * between GUI coding tool lane to terminal it should always load on native"). */
+export const nativeAgain = () => fridayView.clear();
+export const preferFriday = (sid: string, lane: string, on: boolean | "briefly") =>
+  void (on ? fridayView.set(`${sid}|${lane}`, on === "briefly" ? Date.now() + 30_000 : Infinity) : fridayView.delete(`${sid}|${lane}`));
+export function setTuiOn(on: boolean): void {
+  if (on) nativeAgain();
+  tuiOn = on;
+  try {
+    on ? localStorage.setItem(TUI_KEY, "1") : localStorage.removeItem(TUI_KEY);
+  } catch {
+    // Private browsing: kept for as long as the page is open.
+  }
+  tuiWatchers.forEach((f) => f());
+}
+export function useTuiView(): [boolean, (on: boolean) => void] {
+  const on = useSyncExternalStore(
+    (f) => (tuiWatchers.add(f), () => void tuiWatchers.delete(f)),
+    () => tuiOn,
+  );
+  return [on, setTuiOn];
+}
+
+/**
+ * Chat or terminal for every agent: one small mark beside the agent tabs, lit while the terminal view is on (Arun, 2026-10-30:
+ * "DESIGN THIS VERY SUBTLE AND SHOULDNT TAKE UP SO MUCH SPACE").
+ */
+export function ViewToggle({ on, name, onToggle, size = 14, className = "" }: { on: boolean; name: string; onToggle: () => void; size?: number; className?: string }) {
+  return (
+    <button type="button" className={`view-toggle${on ? " on" : ""}${className ? ` ${className}` : ""}`} aria-pressed={on} aria-label={on ? "Terminal view on: back to chat" : `Terminal view, for ${name} and every agent`} data-tip={on ? "Terminal view on · back to chat" : "Terminal view"} onClick={onToggle}>
+      <Icon name="terminalSquare" size={size} />
+    </button>
+  );
+}
+
+/** The agent's coding tool in its own screen, in place of the chat: a real shell in the agent's folder, its tool on the conversation. */
+export function LaneTui({ sid, invite, lane, tool, title, onBack }: { sid: string; invite: string; lane: string; tool: EngineTool; /** The agent's own name, when it isn't its tool's ("Reviewer"). */ title?: string; /** Back to Friday's own view of it, handed back. */ onBack: () => void }) {
+  const key = `${sid}|${lane}`;
+  // Its own agent's line only: kept from another agent, it started that agent's tool in this one's screen.
+  const [had, setRun] = useState(() => ({ key, run: opened.get(key) ?? null }));
+  const run = had.key === key ? had.run : (opened.get(key) ?? null);
+  const [err, setErr] = useState("");
+  // Drawn without having been opened here (a reload, another window): asked again, which holds nothing twice and starts no
+  // second tool, since a screen still running is found again by its id.
+  useEffect(() => {
+    if (run) return;
+    let gone = false;
+    void openLaneTerminal(sid, invite, lane).then((r) => !gone && ("error" in r ? setErr(r.error) : setRun({ key, run: r })));
+    return () => void (gone = true);
+  }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
+  const name = engineName(tool);
+  const where = run?.cwd.replace(/^\/(Users|home)\/[^/]+/, "~") ?? "";
+  return (
+    <div className="lane-tui">
+      <div className="lane-tui-head">
+        <EngineMark tool={tool} size={14} />
+        <span className="lane-tui-name">{title && title !== name ? `${title} · ${name}` : name}</span>
+        {where && <span className="lane-tui-where" title={run!.cwd}>{where}</span>}
+        <span className="lane-tui-note">Friday holds its turns while you're here</span>
+        <button type="button" className="ftui-link" onClick={onBack} title="Hand it back to Friday, in Friday's terminal view">
+          ← friday
+        </button>
+      </div>
+      {err ? <p className="error small lane-tui-err">{err}</p> : run ? <LocalShell id={toolShellId(sid, lane)} cwd={run.cwd} run={run.line} onOutput={() => {}} /> : <p className="muted small lane-tui-err">Opening {name}…</p>}
+    </div>
+  );
 }

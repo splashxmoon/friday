@@ -11,6 +11,8 @@ import { ADAPTERS, DECIDE_YOURSELF, PLAN_REFUSES, askedItem, childEnv, claudeMcp
 import { folderVars } from "./environment.js";
 import { applyCopy, baseAfterCommit, checkpoint, diffSince, diffTrees, dropShadow, fetchBranch, repoInfo, sameTree, sessionBase, setSessionBase, shadowSnapshot, switchBranch, trackBranch, warmSnapshot, type RepoInfo, type Shadow } from "./git.js";
 import { hasCliTranscript, readCliTranscript } from "./imports.js";
+import { isTerminalTool, shellLine, terminalArgs } from "./terminal-line.js";
+import { dialOptions, getBytes } from "./dial.js";
 import { readRepo, type RepoRequest } from "./repo-read.js";
 import { noteClaudeStarting, readLimits } from "./limits.js";
 import { accountEnv, DEFAULT_ACCOUNT, getAccount, hasAccounts, isOut, listAccounts, markOut, nextAccount, prepareAccountDir, type ToolAccount } from "./accounts.js";
@@ -674,7 +676,8 @@ export class Runner {
     // Stopped while it was still finding its CLI or reading the folder: it never connects.
     if (this.stopped) throw new RunnerError("Runner stopped by its host", 1000);
     // A connection that hangs half-way through opening is given up on, so whatever reconnects gets to try again.
-    const ws = new WebSocket(`${o.server.replace(/^http/, "ws")}/runner?${qs}`, { handshakeTimeout: 15_000 });
+    // Another computer's Friday is dialled with this computer's token and only to the certificate it pinned (dial.ts).
+    const ws = new WebSocket(`${o.server.replace(/^http/, "ws")}/runner?${qs}`, { handshakeTimeout: 15_000, ...dialOptions(o.server) });
     this.ws = ws;
 
     let imported = false;
@@ -1251,6 +1254,14 @@ export class Runner {
       void this.toolContext().then(
         (context) => this.send({ kind: "repo.result", id: m.id, output: JSON.stringify({ context }) }),
         () => this.send({ kind: "repo.result", id: m.id, output: JSON.stringify({ context: null }) }),
+      );
+      return;
+    }
+    // The lane's conversation, carried on in the person's terminal: the line to type, or that they are back (terminal-line.ts).
+    if (m.kind === "repo" && m.op === "terminal") {
+      void this.terminal(m.query === "closed").then(
+        (out) => this.send({ kind: "repo.result", id: m.id, output: JSON.stringify(out) }),
+        (e: Error) => this.send({ kind: "repo.result", id: m.id, output: JSON.stringify({ error: e.message }) }),
       );
       return;
     }
@@ -2074,10 +2085,10 @@ ${prompt}`;
     const out: string[] = [];
     for (const a of atts) {
       try {
-        const res = await fetch(`${this.opts.server}/api/sessions/${encodeURIComponent(this.opts.session)}/files/${encodeURIComponent(a.id)}?invite=${encodeURIComponent(this.opts.invite)}`);
-        if (!res.ok) continue;
+        const res = await getBytes(`${this.opts.server}/api/sessions/${encodeURIComponent(this.opts.session)}/files/${encodeURIComponent(a.id)}?invite=${encodeURIComponent(this.opts.invite)}`);
+        if (res.status !== 200) continue;
         const p = path.join(dir, `${a.id}-${a.name.replace(/[/\\]/g, "_")}`);
-        await writeFile(p, Buffer.from(await res.arrayBuffer()));
+        await writeFile(p, res.body);
         out.push(p);
       } catch {
         // A file that can't be fetched is mentioned by name in the instruction anyway.
@@ -2099,6 +2110,43 @@ ${prompt}`;
   private get picked(): string | undefined {
     const o = this.opts;
     return o.resumeId && (!o.resumeTool || o.resumeTool === o.tool) ? o.resumeId : undefined;
+  }
+
+  /** A conversation this lane started in the person's terminal (Claude Code's, with an id chosen here), not yet known to have a word in it. */
+  private termMinted: string | null = null;
+
+  /**
+   * Opening: the line that runs this lane's tool, as its account, on its conversation, in its folder (terminal-line.ts). What
+   * this runner keeps of the tool is let go first, since the conversation is about to move on without it; the session holds
+   * this lane's turns meanwhile (hub.ts). Closing: let go again, and a conversation started there that was never spoken in is
+   * forgotten, so the next turn doesn't look for it.
+   */
+  private async terminal(closed: boolean): Promise<{ tool: string; cwd: string; line: string } | { ok: true } | { error: string }> {
+    this.warm?.release();
+    this.acp?.reset();
+    this.next.release();
+    const tool = this.opts.tool;
+    if (closed) {
+      const id = this.termMinted;
+      this.termMinted = null;
+      if (id && this.resumeId === id && !this.account && tool && !(await hasCliTranscript(tool, id).catch(() => true))) {
+        this.resumeId = null;
+        await this.saveResume();
+      }
+      return { ok: true };
+    }
+    if (!isTerminalTool(tool) || !this.launch.command) return { error: `${this.label} can't be opened in a terminal yet. Claude Code and Codex can.` };
+    if (this.child) return { error: `${this.label} is in the middle of a turn. Stop it first.` };
+    const how = terminalArgs(tool, this.resumeId, randomUUID);
+    if (!how) return { error: `${this.label} starts its conversation with its first message here. Send it one, then open the terminal.` };
+    if (how.minted) {
+      this.resumeId = how.minted;
+      this.termMinted = how.minted;
+      await this.saveResume();
+    }
+    // Its launcher's variables and its account's: never the folder's own (Environment), which a terminal would show on screen.
+    const env = { ...this.launch.env, ...accountEnv(tool, this.account?.id) };
+    return { tool, cwd: this.opts.cwd, line: shellLine(env, [this.launch.command, ...this.launch.prefix, ...how.args]) };
   }
 
   private async loadResume(): Promise<void> {

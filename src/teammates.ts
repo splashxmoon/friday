@@ -66,6 +66,12 @@ export interface Teammate {
   /** Its lane in the team session. */
   lane: string;
   /**
+   * Which of your other computers it runs on, by its id there (local/computers.ts), when not this one: its tool, its folder
+   * (~/Friday/teammates/<Name> on that computer) and the folders it works in are that computer's (Arun, 2026-10-30: "multi
+   * machine for coding and crew").
+   */
+  machine?: string;
+  /**
    * How far its tool may go: absent is full. One an agent made runs at no more than that agent may itself (2026-10-27 audit: a
    * plan-mode agent made a full-mode teammate in a repo, then told it what to do).
    */
@@ -205,7 +211,7 @@ export function defaultFolder(name: string, home = homedir()): string {
  * A teammate's details as sent by the page, checked; throws with what is wrong. `owner`: who the team is, the only person whose
  * own models a teammate may run on (own-plan.ts: a person's own model runs their work only); without it none may be picked.
  */
-export function cleanTeammate(body: Record<string, unknown>, tools: readonly string[] = ENGINE_TOOLS, owner?: string): Pick<Teammate, "name" | "role" | "tool"> & Partial<Pick<Teammate, "model" | "account" | "folder" | "projects" | "look" | "effort" | "backup" | "checkins" | "mode">> {
+export function cleanTeammate(body: Record<string, unknown>, tools: readonly string[] = ENGINE_TOOLS, owner?: string): Pick<Teammate, "name" | "role" | "tool"> & Partial<Pick<Teammate, "model" | "account" | "folder" | "projects" | "look" | "effort" | "backup" | "checkins" | "mode" | "machine">> {
   const s = (v: unknown, n: number) => (typeof v === "string" ? v.trim().slice(0, n) : "");
   // Letters, digits, spaces and . _ - ' only: a name is how it is @-named, and "C++" or "Nova!" never could be.
   const name = s(body.name, 40).replace(/[^\p{L}\p{N} ._'-]+/gu, "").replace(/\s+/g, " ").trim();
@@ -217,13 +223,15 @@ export function cleanTeammate(body: Record<string, unknown>, tools: readonly str
   // models and stuff for teammates as well"). A coding tool's model is its own name, never an own model's id.
   const model = s(body.model, 200);
   if (own && !(isOwnModel(model) && !!owner && ownModelParts(model)?.owner === owner)) throw new Error("Pick one of your own models for it to run on (Settings › Your models).");
+  // On another computer of yours: its id there, or "" for this one. Its paths are that computer's, kept as written (~ is its home).
+  const machine = "machine" in body ? (typeof body.machine === "string" && /^[0-9a-f]{16}$/.test(body.machine) ? body.machine : "") : null;
   const folder = s(body.folder, 600);
   if (folder && !path.isAbsolute(folder.replace(/^~(?=$|\/)/, homedir()))) throw new Error("Its folder has to be a full path, like ~/Friday/teammates/Nova.");
   // A list (`projects`), or the one (`project`) as the page sent it before; absent, none was said.
-  const home = (p: string) => p.replace(/^~(?=$|\/)/, homedir());
+  const home = (p: string) => (machine ? p : p.replace(/^~(?=$|\/)/, homedir()));
   const said = Array.isArray(body.projects) ? body.projects : "project" in body ? [body.project] : null;
   const projects = said ? [...new Set(said.map((p) => home(s(p, 600))).filter(Boolean))] : null;
-  if (projects?.some((p) => !path.isAbsolute(p))) throw new Error("A folder it works in has to be a full path, like ~/code/site.");
+  if (projects?.some((p) => !path.isAbsolute(p.replace(/^~(?=$|\/)/, "/")))) throw new Error("A folder it works in has to be a full path, like ~/code/site.");
   if (projects && projects.length > MAX_PROJECTS) throw new Error(`A teammate works in up to ${MAX_PROJECTS} folders besides its own.`);
   return {
     name,
@@ -242,6 +250,8 @@ export function cleanTeammate(body: Record<string, unknown>, tools: readonly str
     ...(body.mode === "plan" || body.mode === "edits" || body.mode === "full" ? { mode: body.mode } : {}),
     ...(folder ? { folder: folder.replace(/^~(?=$|\/)/, homedir()) } : {}),
     ...(projects ? { projects } : {}),
+    // Said: that computer, or back on this one (undefined, which is dropped as it is kept).
+    ...(machine !== null ? { machine: machine || undefined } : {}),
   };
 }
 

@@ -3,6 +3,7 @@ import { openInPreview } from "./previewBus.js";
 import { pictureSession } from "./LiveBlock.js";
 import { WorkBar, WorkRail } from "./WorkRail.js";
 import { isWorkSid, markWorkSession, useWorkMode, WorkNote } from "./WorkMode.js";
+import { isTeamDemo, TeamGuide } from "./TeamDemo.js";
 import { SessionMenu } from "./SessionMenu.js";
 import { EmptyState } from "@/components/dass/EmptyState";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
@@ -58,6 +59,7 @@ import { TeamHeaderControls } from "./TeamControls.js";
 import { ALL, AgentsContext, agentKey, agentsStore, focusAgent, focusedAgent, jumpToNeeds, nextKey, openedAt, setColumns, syncAddress, useAgents, useColumns, useFocusedAgent, useSeen } from "./agentFocus.js";
 import { AGENT_DRAG, closeColumn, dropAgent, evenWidths, fitColumns, maxColumns, pickInColumn, resizeAt, unreadByLane } from "./agentNav.js";
 import { agentLook, laneLabel } from "./handoff-ui.js";
+import { handBack, setTuiOn, tuiIsOn, useTuiView, ViewToggle } from "./Terminal.js";
 import { hubOf } from "../agents-hub.js";
 import { clearDiffRequest, readDiffRequest, showDiffSoon } from "./focusDiff.js";
 import { HandoverDialog } from "./Handover.js";
@@ -615,6 +617,11 @@ export function SessionView({
     act("md-copy", "Copy this session as Markdown", "copy", () => void exportMarkdown("copy"));
     act("md-save", "Save this session as Markdown", "download", () => void exportMarkdown("save"));
     act("ask", "Write to the agent", "message", () => document.getElementById("composer-input")?.focus(), "/");
+    // The header's two, by name: its terminal switch, and the settings its gear used to open.
+    if (isLocal() && !st.options.work && !st.options.team) {
+      act("tui", tuiIsOn() ? "Back to chat view" : "Terminal view", "terminalSquare", () => setTuiOn(!tuiIsOn()));
+      act("settings", "Session settings", "settings", () => dispatchEvent(new Event("friday:session-settings")));
+    }
     act("file", "Open a file…", "file", () => (setTab("files"), setBench(true), setTimeout(() => dispatchEvent(new CustomEvent("friday:quick-open")), 60)), shortcut("⌘P"));
     // Every agent by name, and what is waiting: the palette is where a keyboard goes when it doesn't know the number.
     if (hubAgents.length > 1) {
@@ -992,6 +999,8 @@ export function SessionView({
             return <Activity {...activityProps} headSlot={headTabs ? agentsSlot : null} />;
           })()}
         </div>
+        {/* The team demo's guide, beside its chat: each moment pointed out as it happens (TeamDemo.tsx). */}
+        {!replaying && !state.options.work && !state.options.team && isTeamDemo(sid, state.title) && <TeamGuide sid={sid} state={state} events={s.events} />}
         {state.options.work && <WorkRail state={state} events={s.events} sid={sid} invite={invite} away={bench} send={send} onBrowser={() => onOpen("preview")} onBrowse={(url) => (onOpen("preview"), openInPreview(url, sid, "auto"))} />}
         <BenchOrHistory
           bench={bench}
@@ -1509,7 +1518,12 @@ function TopBar({
             links in a second button beside it (Arun, 2026-10-24: "get rid of the share button in the header and add the dropdown
             content in the people's dropdown"); on Solo it was the only way to them, so the People panel is there on Solo too. */}
         {/* The local edition's in its place: this session's settings, and the line about Friday Team (SessionMenu). */}
-        {isLocal() && gear && <SessionMenu settings={owner ? <SettingsBody solo state={state} send={send} meter={{ on: meterOn, set: (v) => (setMeterOn(v), localStorage.setItem("mpa.meter", v ? "1" : "0")) }} /> : undefined} />}
+        {isLocal() && gear && (
+          <SessionMenu button={!!state.options.work} settings={owner ? <SettingsBody solo state={state} send={send} meter={{ on: meterOn, set: (v) => (setMeterOn(v), localStorage.setItem("mpa.meter", v ? "1" : "0")) }} /> : undefined}>
+            {/* A Code session's terminal switch, where its gear was: every agent as a terminal, or back to chat (Terminal.tsx). */}
+            {!state.options.work && <HeaderTuiSwitch sid={sid} invite={invite} state={state} me={me} />}
+          </SessionMenu>
+        )}
         {/* A room's settings with the header's other buttons, where a Code session has its gear, rather than an "…" beside its name (Arun, 2026-10-27: "place the edit room button somewhere better"). */}
         {/* The team's own: its threads, its board, Stop all while anyone works, and Away / Pause (TeamControls.tsx; Arun, 2026-10-28). */}
         {state.options.team && <TeamHeaderControls identity={identity} state={state} events={events} send={send} notify={notify} />}
@@ -2203,5 +2217,27 @@ function SplitRail({ sid, state, events, me, shown, active, room, head = false }
         </button>
       )}
     </div>
+  );
+}
+
+/** The terminal view's switch in a Code session's header: on, every agent there (and in every session) shows as a terminal. */
+function HeaderTuiSwitch({ sid, invite, state, me }: { sid: string; invite: string; state: SessionState; me: { id: string } }) {
+  const [on, setOn] = useTuiView();
+  const lane = useFocusedAgent(sid);
+  const native = lane !== ALL && !!state.terminals?.[lane] && state.engines[lane]?.hostId === me.id;
+  return (
+    <ViewToggle
+      className="in-head"
+      size={18}
+      on={on || native}
+      name={lane === ALL ? "every agent" : laneLabel(state, lane)}
+      onToggle={() => {
+        if (!on && !native) return setOn(true);
+        // Off: back to chat, and every agent of yours open in its own screen here handed back to Friday.
+        const mine = Object.keys(state.terminals ?? {}).filter((l) => state.engines[l]?.hostId === me.id);
+        setOn(false);
+        for (const l of mine) void handBack(sid, invite, l);
+      }}
+    />
   );
 }

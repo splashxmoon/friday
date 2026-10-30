@@ -30,6 +30,7 @@ import { EngineMark } from "./BrandMarks.js";
 import { installedOn } from "./local.js";
 import { WorkspaceCard } from "./Workspace.js";
 import { ContextMenu, useConfirm, type MenuItem } from "./ui.js";
+import { useComputers } from "./Computers.js";
 import type { Identity, RecentSession } from "./storage.js";
 import type { Attention } from "../attention.js";
 import { distinctLook, teamColour as mascotColour } from "./teammate-block.js";
@@ -2255,6 +2256,10 @@ export function TeammateDialog({ identity, editing, onClose, inline }: { identit
   const [checkins, setCheckins] = useState<CheckIn[]>(editing?.checkins ?? []);
   // How far its tool may go (Arun, 2026-10-28: the critique's "Access, visible"): absent on an older record is full.
   const [mode, setMode] = useState<EngineMode>(editing?.mode ?? "full");
+  // Which computer it runs on: this one, or another of yours linked now (Computers.tsx; Arun, 2026-10-30: "multi machine for
+  // coding and crew").
+  const computers = useComputers();
+  const [machine, setMachine] = useState(editing?.machine ?? "");
   const [saved, setSaved] = useState(false);
   const [later, setLater] = useState("");
   const putCheckIn = (i: number, c: Partial<CheckIn>) => (setCheckErr(""), setCheckins((all) => all.map((x, j) => (j === i ? { ...x, ...c } : x))));
@@ -2344,7 +2349,7 @@ export function TeammateDialog({ identity, editing, onClose, inline }: { identit
     try {
       // What is still in the field counts too: typed, and saved without pressing Enter.
       const all = project.trim() && !projects.includes(project.trim()) ? [...projects, project.trim()] : projects;
-      const body = { name, role, tool, model, effort: effort ?? "", backup, checkins, look, mode, projects: all, ...(editing ? {} : folder.trim() ? { folder } : {}) };
+      const body = { name, role, tool, model, effort: effort ?? "", backup, checkins, look, mode, projects: all, machine, ...(editing ? {} : folder.trim() ? { folder } : {}) };
       const r = await api<{ restartLater?: string[] }>(identity, editing ? `/api/teammates/${editing.id}` : "/api/teammates", { method: editing ? "PATCH" : "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json" } });
       await refreshTeam(identity);
       // Busy somewhere: the change waits for that run's end there, and says so rather than cutting it short.
@@ -2505,6 +2510,23 @@ export function TeammateDialog({ identity, editing, onClose, inline }: { identit
               </p>
             )}
           </div>
+          {(computers.length > 0 || !!machine) && (
+            <label className="tm-row-field tm-runs-on">
+              <span className="tm-row-label">Runs on</span>
+              <span className="tm-row-input">
+                <select className="tm-select" value={machine} onChange={(e) => setMachine(e.target.value)}>
+                  <option value="">This computer</option>
+                  {computers.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.label}
+                    </option>
+                  ))}
+                  {machine && !computers.some((c) => c.id === machine) && <option value={machine}>Your other computer (not connected now)</option>}
+                </select>
+                <small>{machine ? `Its coding tool, its own folder (~/Friday/teammates/${name.trim() || "Name"}) and the folders it works in are on that computer.` : "Its coding tool and its folders are on this computer."}</small>
+              </span>
+            </label>
+          )}
           <fieldset className="tm-where tm-access">
             <legend>Access</legend>
             <div className="tm-access-opts" role="radiogroup" aria-label="Access">

@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
@@ -6,6 +7,9 @@ import path from "node:path";
 import { createApp } from "../app.js";
 import { localKV } from "./kv.js";
 import { NO_MODELS } from "./no-models.js";
+import { outsideToken, writeOutsideShim } from "./outside-mcp.js";
+import { PhoneAccess } from "./phone.js";
+import { JoinHub } from "./join.js";
 
 /**
  * Starting Friday on this computer, for the command (main.ts) and the desktop app (desktop.ts) alike.
@@ -54,6 +58,19 @@ async function runningOn(home: string): Promise<string | null> {
   }
 }
 
+/** What the phone calls this computer: its own name, as the system has it ("Maya's MacBook Pro"), else its host name. */
+function computerName(): string {
+  try {
+    if (process.platform === "darwin") {
+      const n = execFileSync("scutil", ["--get", "ComputerName"], { encoding: "utf8", timeout: 2000 }).trim();
+      if (n) return n.slice(0, 60);
+    }
+  } catch {
+    // The host name, then.
+  }
+  return os.hostname().replace(/\.local$/, "").slice(0, 60) || "This computer";
+}
+
 export async function startLocal(o: { home?: string; port?: number } = {}): Promise<Started> {
   // The local client, built from its own entry (client-build.ts), whatever the environment says.
   process.env.FRIDAY_EDITION = "local";
@@ -74,8 +91,15 @@ export async function startLocal(o: { home?: string; port?: number } = {}): Prom
     }
   })();
 
+  // Agents outside Friday reach it through a script beside the data, with a token only this person can read (outside-mcp.ts).
+  const outside = { token: outsideToken(home), shim: writeOutsideShim(home) };
+
   const port = await freePort(o.port ?? Number(process.env.PORT ?? 4321));
   const url = `http://127.0.0.1:${port}`;
+  // Your phone (phone.ts): its own listener, off until turned on in Settings, handing what it may ask to this server.
+  const phone = new PhoneAccess({ kv: kv.redis, home, appPort: port, computer: computerName() });
+  // This computer used from another one's Friday (join.ts): a link it holds there, once paired from Settings › Your computers.
+  const join = new JoinHub({ kv: kv.redis, name: computerName(), log: (l) => console.log(`[computers] ${l}`) });
   const app = await createApp({
     port,
     // Friday at 127.0.0.1, where the runner it starts connects back too; previews at localhost, which a browser counts as another
@@ -89,8 +113,11 @@ export async function startLocal(o: { home?: string; port?: number } = {}): Prom
     driverGraceMs: 15_000,
     llm: NO_MODELS,
     dataDir: path.join(home, "uploads"),
-    local: { redis: kv.redis, sub: kv.sub, user: { id: "local", name } },
+    local: { redis: kv.redis, sub: kv.sub, user: { id: "local", name }, phone, outside, join },
   });
+  // Turned on before, so on again: the phone stays connected through a restart.
+  void phone.resume();
+  void join.resume();
   const runningFile = path.join(home, "running.json");
   writeFileSync(runningFile, JSON.stringify({ url, pid: process.pid }), { mode: 0o600 });
 
@@ -102,6 +129,8 @@ export async function startLocal(o: { home?: string; port?: number } = {}): Prom
     close: () =>
       (closed ??= (async () => {
         rmSync(runningFile, { force: true });
+        await phone.stop().catch(() => {});
+        join.stop();
         await app.close().catch(() => {});
         await kv.close();
       })()),

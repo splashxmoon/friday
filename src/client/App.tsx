@@ -193,6 +193,17 @@ export function App() {
     addEventListener("friday:setup", setup);
     return () => removeEventListener("friday:setup", setup);
   }, []);
+  // The team demo starts on the start page too (Code.tsx), where the computer's tools are: from Settings it goes there first.
+  useEffect(() => {
+    const demo = (e: Event) => {
+      if ((e as CustomEvent).detail === "again" || parseRoute(location.search).kind === "home") return;
+      history.pushState(null, "", routeUrl({ kind: "home" }));
+      setRoute({ kind: "home" });
+      setTimeout(() => dispatchEvent(new CustomEvent("friday:team-demo", { detail: "again" })), 300);
+    };
+    addEventListener("friday:team-demo", demo);
+    return () => removeEventListener("friday:team-demo", demo);
+  }, []);
   // Another window or tab of Friday saved the list (a rename, a snooze, a session settled): take its copy, rather than writing this
   // window's older one over it at the next change (2026-10-27 audit: renames and snoozes were lost between two windows).
   useEffect(() => {

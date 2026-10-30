@@ -14,6 +14,9 @@ const XTERM = `export class Terminal {
   registerLinkProvider() { return { dispose() {} }; }
   write(d) { this.written += d; }
   onData(f) { this.typed = f; return { dispose() {} }; }
+  get buffer() { return { active: { type: "normal", length: 0 }, onBufferChange() { return { dispose() {} }; } }; }
+  onWriteParsed() { return { dispose() {} }; }
+  onResize() { return { dispose() {} }; }
 }`;
 register(
   "data:text/javascript," +

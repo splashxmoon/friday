@@ -9,10 +9,17 @@
  *   npx github:splashxmoon/friday   start it and open it in your browser
  *   PORT=4321 FRIDAY_HOME=…         where it listens, and where it keeps things
  *   --no-open                       don't open the browser
+ *   … mcp                           Friday's MCP server on stdin and stdout, for an agent outside Friday (Claude Code, Codex,
+ *                                   Cursor) to hand it work: `claude mcp add friday -- npx -y github:splashxmoon/friday mcp`
  */
 import { spawn } from "node:child_process";
-import { startLocal } from "./start.js";
 
+// Not a Friday to start: the server an outside agent runs, which only talks to the Friday already running (outside-mcp.ts).
+if (process.argv[2] === "mcp") {
+  await (await import("./outside-mcp.js")).serveOutsideMcp();
+  await new Promise(() => {});
+}
+const { startLocal } = await import("./start.js");
 const friday = await startLocal();
 console.log(friday.already ? `Friday is already running at ${friday.url}` : `Friday is running at ${friday.url}`);
 if (!friday.already) console.log(`Kept in ${friday.home}. Stop with Ctrl+C.`);

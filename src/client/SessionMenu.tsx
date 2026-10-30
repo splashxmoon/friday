@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "./icons.js";
 import { TeamTip } from "./TeamTip.js";
 import { useDismiss } from "./ui.js";
@@ -7,13 +7,25 @@ import { useDismiss } from "./ui.js";
  * The open-source edition's button in the session's header, where the hosted Friday has People: this session's settings, and
  * the line about Friday Team for working on it with others (TeamTip).
  */
-export function SessionMenu({ settings }: { settings?: ReactNode }) {
+/**
+ * `button: false`: no gear of its own, its place in the header taken by the terminal switch (Arun, 2026-10-30: "replace the
+ * settings button in the header of the coding sessions with the terminal button"); opened from ⌘K's "Session settings".
+ */
+export function SessionMenu({ settings, button = true, children }: { settings?: ReactNode; button?: boolean; children?: ReactNode }) {
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    const show = () => setOpen(true);
+    addEventListener("friday:session-settings", show);
+    return () => removeEventListener("friday:session-settings", show);
+  }, []);
   return (
     <div className="pop-anchor">
-      <button type="button" className={`icon-btn ${open ? "is-active" : ""}`} title="Session settings" aria-label="Session settings" onMouseDown={(e) => e.stopPropagation()} onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-        <Icon name="settings" size={18} />
-      </button>
+      {children}
+      {button && (
+        <button type="button" className={`icon-btn ${open ? "is-active" : ""}`} title="Session settings" aria-label="Session settings" onMouseDown={(e) => e.stopPropagation()} onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+          <Icon name="settings" size={18} />
+        </button>
+      )}
       {open && <Panel settings={settings} onClose={() => setOpen(false)} />}
     </div>
   );

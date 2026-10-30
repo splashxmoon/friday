@@ -22,6 +22,7 @@ import {
   ShortcutsTab,
 } from "./SettingsPrefs.js";
 import { ComputerSection } from "./SettingsComputer.js";
+import { OutsideAgentsSection } from "./SettingsOutside.js";
 import type { WorkspaceUsage } from "./workspace-types.js";
 import { isLocal, planLimits, planNow, startTeam } from "./edition.js";
 
@@ -98,6 +99,15 @@ export const SECTIONS: SectionDef[] = [
     blurb:
       "Your own API keys, and models running on this computer, for Friday's agent.",
     keywords: "own model api key byok bring your own ollama lm studio local openai anthropic gemini groq deepseek mistral friday code",
+  },
+  // Only on this computer's Friday: the hosted one has its own MCP server, for apps with a token (public-mcp.ts).
+  {
+    id: "outside-agents",
+    label: "Let other agents use Friday",
+    group: "This computer",
+    icon: "agent",
+    blurb: "Claude Code, Codex, Cursor and other agents on this computer handing work to Friday.",
+    keywords: "mcp server outside agents claude code codex cursor hand off delegate start session tools api",
   },
   {
     id: "data",
@@ -233,8 +243,11 @@ export function SettingsPage({
           "usage",
           "models",
           ...(workspace?.personal !== false ? ["members"] : []),
+          ...(isLocal() ? [] : ["outside-agents"]),
         ]
-      : [],
+      : isLocal()
+        ? []
+        : ["outside-agents"],
   );
   const sections = SECTIONS.filter((s) => !hidden.has(s.id));
   const current = sections.find((s) => s.id === section) ?? sections[0]!;
@@ -365,6 +378,7 @@ export function SettingsPage({
             {current.id === "shortcuts" && <ShortcutsTab />}
             {current.id === "computer" && <ComputerSection identity={identity} />}
             {current.id === "own-models" && <OwnModelsSection identity={identity} workspace={workspace} />}
+            {current.id === "outside-agents" && <OutsideAgentsSection identity={identity} />}
             {current.id === "data" && <DataTab />}
             {current.id === "about" && <AboutTab onReplayTour={() => window.dispatchEvent(new Event("friday:tour"))} />}
           </div>

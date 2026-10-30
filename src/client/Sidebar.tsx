@@ -22,6 +22,7 @@ import { applyTheme, readTheme } from "./theme.js";
 import { currentLook, loadFolded, loadSectionOrder, saveFolded, saveSectionOrder } from "./storage.js";
 import type { Identity, Project, RecentSession } from "./storage.js";
 import { buckets, snoozePresets, snoozeWord } from "./sidebar-buckets.js";
+import { teamColour } from "../teammate-look.js";
 import { ContextMenu, InlineEdit, MenuButton, relTime, useConfirm, type MenuItem } from "./ui.js";
 import type { WorkspaceUsage } from "./workspace-types.js";
 import { isLocal, planLimits, planNow } from "./edition.js";
@@ -150,9 +151,102 @@ export function activates(e: { key: string; target: unknown; currentTarget: unkn
   return true;
 }
 
+/**
+ * The sidebar's width, the person's own: dragged at its edge, between enough for a session's name and half a laptop's screen,
+ * double-clicked back to where it starts (Arun, 2026-10-30: "redesign this so we can have a lot space for the side bar").
+ * Everything laid out beside it follows --panel-w.
+ */
+const PANEL_KEY = "friday.panelWidth";
+const PANEL_MIN = 240;
+const PANEL_MAX = 480;
+const PANEL_START = 300;
+const clampPanel = (w: number) => Math.round(Math.min(PANEL_MAX, Math.max(PANEL_MIN, w)));
+function setPanelWidth(w: number, keep = true): void {
+  document.documentElement.style.setProperty("--panel-w", `${clampPanel(w)}px`);
+  if (!keep) return;
+  try {
+    localStorage.setItem(PANEL_KEY, String(clampPanel(w)));
+  } catch {
+    // Private browsing: this window keeps it.
+  }
+}
+if (typeof document !== "undefined") {
+  let kept = PANEL_START;
+  try {
+    kept = Number(localStorage.getItem(PANEL_KEY)) || PANEL_START;
+  } catch {
+    // As it starts.
+  }
+  setPanelWidth(kept, false);
+}
+
+function PanelResize() {
+  return (
+    <div
+      className="sb-resize"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize the sidebar"
+      aria-valuemin={PANEL_MIN}
+      aria-valuemax={PANEL_MAX}
+      tabIndex={0}
+      title="Drag to resize · double-click to reset"
+      onDoubleClick={() => setPanelWidth(PANEL_START)}
+      onKeyDown={(e) => {
+        if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+        e.preventDefault();
+        const now = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--panel-w")) || PANEL_START;
+        setPanelWidth(now + (e.key === "ArrowRight" ? 16 : -16));
+      }}
+      onPointerDown={(e) => {
+        e.preventDefault();
+        const left = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect().left;
+        let x = e.clientX;
+        let frame = 0;
+        document.body.classList.add("resizing", "resizing-x", "resizing-panel");
+        const move = (ev: PointerEvent) => {
+          x = ev.clientX;
+          frame ||= requestAnimationFrame(() => {
+            frame = 0;
+            setPanelWidth(x - left, false);
+          });
+        };
+        const up = () => {
+          if (frame) cancelAnimationFrame(frame);
+          setPanelWidth(x - left);
+          document.body.classList.remove("resizing", "resizing-x", "resizing-panel");
+          removeEventListener("pointermove", move);
+          removeEventListener("pointerup", up);
+          removeEventListener("pointercancel", up);
+        };
+        addEventListener("pointermove", move);
+        addEventListener("pointerup", up);
+        addEventListener("pointercancel", up);
+      }}
+    />
+  );
+}
+
+/** A folder's mark, as herdr's: its first letter on a tile in one of the muted hues, the same one each time. */
+function RepoTile({ name }: { name: string }) {
+  return (
+    <span className="sb-tile" style={{ background: teamColour(name) }} aria-hidden>
+      {(name.replace(/^[^A-Za-z0-9]+/, "")[0] ?? "?").toUpperCase()}
+    </span>
+  );
+}
+
+/** How a group stands, said on its own line even folded: what needs you first, else how many are working. */
+function GroupState({ needs, working }: { needs: number; working: number }) {
+  if (needs) return <span className="sb-gstate needs">{needs > 1 ? `${needs} need you` : "Needs you"}</span>;
+  if (working) return <span className="sb-gstate live" title={`${working} working`}><span className="sb-gspin" aria-hidden />{working > 1 ? working : ""}</span>;
+  return null;
+}
+
 export function Sidebar(p: SidebarProps) {
   return (
     <aside className={`sb-panel ${p.panelOpen ? "open" : ""}`} aria-label="Sidebar" aria-hidden={!p.panelOpen} inert={!p.panelOpen}>
+      {p.panelOpen && <PanelResize />}
       {/* shadcn's menu pieces read their sidebar's state; held open here, since the app decides when the column shows. */}
       <SidebarProvider open onOpenChange={() => {}} className="contents" style={{}}>
         <div className="sb-panel-inner dass-panel flex flex-col gap-2">
@@ -252,16 +346,7 @@ function Head({ p }: { p: SidebarProps }) {
             its place"): which team you're in is what this corner should say. */}
         <div className="panel-title brand flex min-w-0 flex-1 items-center gap-2">
         </div>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button type="button" className="dass-rail-btn sidebar-search size-8" aria-label="Search" onClick={() => window.dispatchEvent(new Event("friday:search"))}>
-              <SearchIcon className="size-4" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            Search <span className="dass-kbd ml-2">{shortcut("⌘⇧F")}</span>
-          </TooltipContent>
-        </Tooltip>
+        {/* No Search button (Arun, 2026-10-30: "get rid of the search icon in the side bar too"): ⌘⇧F and ⌘K find everything. */}
         {/* In a browser there is no window bar with the sidebar's button: one here folds it, as ⌘B does (2026-10-27 audit: the
             keyboard was the only way). The desktop app's window bar has its own. */}
         {!window.fridayDesktop && (
@@ -424,7 +509,7 @@ deleteBody = (r) =>
 
 // ── a group of the list: a label that folds it, an action, and its rows ─────────────────────
 
-function Group({ label, open, onToggle, count, action, drag, children, className = "" }: { label: ReactNode; open: boolean; onToggle: () => void; count?: number; action?: ReactNode; drag?: Partial<React.HTMLAttributes<HTMLDivElement>>; children: ReactNode; className?: string }) {
+function Group({ label, open, onToggle, count, status, action, drag, children, className = "" }: { label: ReactNode; open: boolean; onToggle: () => void; count?: number; /** How it stands, at the row's end, folded or not. */ status?: ReactNode; action?: ReactNode; drag?: Partial<React.HTMLAttributes<HTMLDivElement>>; children: ReactNode; className?: string }) {
   return (
     <SidebarGroup className={`sb-tray p-0 ${className}`}>
       <Collapsible open={open} onOpenChange={onToggle}>
@@ -434,6 +519,7 @@ function Group({ label, open, onToggle, count, action, drag, children, className
               <ChevronRightIcon className={`size-3 transition-transform duration-200 ${open ? "rotate-90" : ""}`} />
               <span className="flex min-w-0 items-center gap-1.5 truncate">{label}</span>
               {!!count && <span className="ml-1 font-normal normal-case tracking-normal">{count}</span>}
+              {status && <span className="ml-auto flex items-center pl-2">{status}</span>}
             </CollapsibleTrigger>
           </SidebarGroupLabel>
           {action}
@@ -781,6 +867,7 @@ function SessionsList({ p }: { p: SidebarProps }) {
     return [...by.values()];
   })();
   const filed = new Set(repoGroups.flatMap((g) => g.chats.map((c) => c.sid)));
+  const needsSids = new Set(p.attention.items.map((i) => i.sid));
   const unfiled = loose.filter((r) => !filed.has(r.sid));
 
   const blocks = new Map<string, ReactNode>();
@@ -886,13 +973,14 @@ function SessionsList({ p }: { p: SidebarProps }) {
       <Group
         label={
           <>
-            <FolderGit2Icon className="size-3" />
+            <RepoTile name={g.name} />
             <span className="truncate normal-case tracking-normal">{g.name}</span>
           </>
         }
         open={isOpen(id)}
         onToggle={() => toggle(id)}
         count={g.chats.length}
+        status={<GroupState needs={g.chats.filter((c) => needsSids.has(c.sid)).length} working={g.chats.filter((c) => p.attention.working.has(c.sid)).length} />}
         drag={dragSection(id)}
       >
         {byDay(g.chats, now).map((x) => (typeof x === "string" ? <div key={`day:${x}`} className="sb-day">{x}</div> : row(x)))}
@@ -902,7 +990,7 @@ function SessionsList({ p }: { p: SidebarProps }) {
   blocks.set(
     "recent",
     <div className={`rounded-lg ${drop === "__recent" ? "bg-sidebar-accent ring-1 ring-sidebar-ring" : ""}`} hidden={unfiled.length === 0 && repoGroups.length > 0 && !drop && !dragging} {...dropZone(null)}>
-      <Group label="Recent" open={isOpen("recent")} onToggle={() => toggle("recent")} count={unfiled.length || undefined} drag={dragSection("recent")}>
+      <Group label="Recent" open={isOpen("recent")} onToggle={() => toggle("recent")} count={unfiled.length || undefined} status={<GroupState needs={unfiled.filter((c) => needsSids.has(c.sid)).length} working={unfiled.filter((c) => p.attention.working.has(c.sid)).length} />} drag={dragSection("recent")}>
         {unfiled.length === 0 && repoGroups.length === 0 ? <p className="px-2 py-1 text-xs text-[var(--text-muted)]">Sessions you start or join appear here.</p> : byDay(unfiled, now).map((x) => (typeof x === "string" ? <div key={`day:${x}`} className="sb-day">{x}</div> : row(x)))}
       </Group>
     </div>,

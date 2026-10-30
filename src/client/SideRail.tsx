@@ -116,12 +116,8 @@ export function SideRail({ attention, recents, activeSid, view, onOpen, onNew, o
       </div>
       {/* What the sidebar's foot has, so folding it loses nothing (2026-10-27 audit: folded, there was no way to Search,
           Settings or the pages but to unfold it first). */}
+      {/* No Search here (Arun, 2026-10-30: "get rid of the search icon in the side bar too"): ⌘⇧F and ⌘K find everything. */}
       <div className="rail-foot">
-        <RailTip label="Search" sub={/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘⇧F" : "Ctrl+Shift+F"}>
-          <button type="button" className="rail-item" onClick={() => dispatchEvent(new Event("friday:search"))} aria-label="Search">
-            <Icon name="search" size={18} />
-          </button>
-        </RailTip>
         {FOOT.map(([p, label, icon, sub]) => (
           // With the Team tab on, Automations is the team's workflows (TeamWorkflows.tsx; Arun, 2026-10-28).
           <Fragment key={p}>
@@ -205,6 +201,7 @@ function SessionsFly({ live, needs, work, activeSid, onOpen, lineOf, stateOf, to
     ["Working", live.filter((r) => stateOf(r.sid) === "working")],
     ["Recent", live.filter((r) => stateOf(r.sid) === "idle").slice(0, 12)],
   ];
+  const working = live.filter((r) => stateOf(r.sid) === "working").length;
   return (
     <div className="rail-fly-wrap" onMouseEnter={hold} onMouseLeave={leave}>
       <button
@@ -220,9 +217,11 @@ function SessionsFly({ live, needs, work, activeSid, onOpen, lineOf, stateOf, to
           place();
           setOpen(true);
           requestAnimationFrame(() => btn.current?.parentElement?.querySelector<HTMLElement>(".rail-fly-row")?.focus());
-        }} aria-label={`${work ? "Work" : "Code"} sessions${waiting.length ? `, ${waiting.length} waiting on you` : ""}`} onClick={() => (place(), over.current ? setOpen(true) : setOpen((o) => !o))}>
+        }} aria-label={`${work ? "Work" : "Code"} sessions${waiting.length ? `, ${waiting.length} waiting on you` : working ? `, ${working} working` : ""}`} onClick={() => (place(), over.current ? setOpen(true) : setOpen((o) => !o))}>
         <Icon name="list" size={18} />
         {waiting.length > 0 && <span className="rail-count">{waiting.length}</span>}
+        {/* Something working and nothing waiting: a blue dot, so the folded sidebar still says so (Arun, 2026-10-30). */}
+        {!waiting.length && working > 0 && <span className="rail-dot live" aria-hidden />}
       </button>
       {open && (
         <div

@@ -88,7 +88,7 @@ const envNames = (text: string) => [...envVars(text).values()].map((n) => `${n}=
 
 export type RepoOp = RepoCall["op"];
 /** What each op needs the host to have allowed. Anything above it is refused. */
-const NEEDS: Record<RepoOp, EngineMode> = { tree: "plan", read: "plan", search: "plan", write: "edits", edit: "edits", shell: "full", checkpoint: "edits", restore: "edits", commit: "edits", publish: "full", remote: "plan", branches: "plan", switch: "edits", prcomments: "plan", prstatus: "plan", prchecks: "plan", preview: "full", ios: "full", environment: "plan", context: "plan", bgstart: "full", bgread: "plan", bgstop: "plan", diff: "plan", commands: "plan", apply: "edits", status: "plan", log: "plan", show: "plan", gitdiff: "plan", compare: "plan", stage: "edits", unstage: "edits", hunk: "edits", discard: "edits", pull: "edits" };
+const NEEDS: Record<RepoOp, EngineMode> = { tree: "plan", read: "plan", search: "plan", write: "edits", edit: "edits", shell: "full", checkpoint: "edits", restore: "edits", commit: "edits", publish: "full", remote: "plan", branches: "plan", switch: "edits", prcomments: "plan", prstatus: "plan", prchecks: "plan", preview: "full", ios: "full", environment: "plan", context: "plan", bgstart: "full", bgread: "plan", bgstop: "plan", diff: "plan", commands: "plan", terminal: "plan", apply: "edits", status: "plan", log: "plan", show: "plan", gitdiff: "plan", compare: "plan", stage: "edits", unstage: "edits", hunk: "edits", discard: "edits", pull: "edits" };
 const RANK: Record<EngineMode, number> = { plan: 0, edits: 1, full: 2 };
 
 export interface RepoRequest extends RepoCall {
@@ -121,6 +121,8 @@ export async function readRepo(root: string, req: RepoRequest): Promise<string> 
   }
   // A folder lent without a coding tool has none of a tool's own commands (a runner with one answers this itself).
   if (req.op === "commands") return JSON.stringify({ commands: [] });
+  // A folder lent with no coding tool of its own has no conversation to carry on (the runner's own answers it otherwise).
+  if (req.op === "terminal") return JSON.stringify({ error: "There's no coding tool here to open in a terminal." });
   if (req.op === "tree") return tree(base, req.path ?? "");
   if (req.op === "read") return read(base, req.path ?? "", req.offset ?? 0, !!req.raw, !!req.person);
   if (req.op === "search") return search(base, req.query ?? "", req.path ?? "");

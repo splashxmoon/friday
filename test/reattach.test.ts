@@ -50,3 +50,12 @@ test("sessions untouched for a week wait to be opened", () => {
   assert.ok(recentEnough(now - REATTACH_WINDOW_MS + 1, now));
   assert.ok(!recentEnough(now - REATTACH_WINDOW_MS - 1, now));
 });
+
+test("only the lanes this computer held come back here: another computer's come back there, by its own runner", async () => {
+  const { lanesToReattach } = await import("../src/reattach.js");
+  const engine = (machine: string) => ({ hostId: "local", hostName: "Maya", tool: "claude", cwd: "/x", online: false, mode: "full", machine }) as never;
+  const state = { lanes: [{ id: "l2", name: "Mini" }], engines: { main: engine("maya-mbp"), l2: engine("maya-mini") } } as never;
+  assert.deepEqual(lanesToReattach(state, "local", "maya-mbp").map((x) => x.lane), ["main"]);
+  // Without a name for this computer (the hosted service's links), as before: every lane of the host's.
+  assert.deepEqual(lanesToReattach(state, "local").map((x) => x.lane), ["main", "l2"]);
+});

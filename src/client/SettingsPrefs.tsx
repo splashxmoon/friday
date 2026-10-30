@@ -42,6 +42,7 @@ import { Switch } from "@/components/ui/switch";
 import { Choice, dangerOutline, Note, SettingsGroup, SettingsRow as Row, StateBadge } from "@/components/dass";
 import { sendFeedback } from "./feedback.js";
 import { UsageSharingSetting } from "./UsageSharing.js";
+import { askTeamDemo } from "./TeamDemo.js";
 
 /**
  * The settings that are about this device rather than the account: how it
@@ -791,6 +792,11 @@ export function AboutTab({ onReplayTour }: { onReplayTour?: () => void }) {
               Replay the tour
             </Button>
           )}
+        </Row>
+        <Row label="Team demo" hint="Your agents split a small job on a shared board, message each other and check each other's work, on a sample project in a folder of its own.">
+          <Button variant="outline" size="sm" onClick={askTeamDemo}>
+            Run the team demo again
+          </Button>
         </Row>
         <Row label="Release notes" hint="What changed in each version.">
           <Button variant="outline" size="sm" onClick={() => openOutside(RELEASES)}>

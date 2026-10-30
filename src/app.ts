@@ -69,11 +69,13 @@ import { rankOf, searchEvents, titleMatches, wordsOf } from "./session-search.js
 import { pointBridge } from "./client/point.js";
 import type { Attachment, Thinking } from "./types.js";
 import { laneName, SessionCore, type Command } from "./session/core.js";
+import { demoPrompt } from "./team-demo.js";
 import { buildDigest } from "./session/digest.js";
 import { can, canDriveLane, driverOf, pendingFor, project, roleOf, runOf, type SessionState } from "./session/projection.js";
 import { SessionStore, WorkspaceClosing } from "./session/store.js";
 import type { ImportedTurn, Member, PresenceMember, RepoCall, SessionEvent } from "./types.js";
 import { NoLinks } from "./local/no-links.js";
+import { LocalLinks } from "./local/computers.js";
 import { handOff } from "./hand-off-run.js";
 import { reattachAll } from "./reattach.js";
 import { Strengths } from "./strengths.js";
@@ -98,10 +100,14 @@ import type { MateNote } from "./engine/hub.js";
 import type { MateRun, TeamAway } from "./teammates.js";
 import type { TeamBrief } from "./types.js";
 import { execFile as execFileCb } from "node:child_process";
-import { homedir as osHome } from "node:os";
+import { homedir as osHome, hostname } from "node:os";
 import { TeamWorkflows } from "./team-workflows.js";
 import type { Workflow } from "./team-workflow-model.js";
 import { localEdition } from "./local-edition.js";
+import { OutsideAgents } from "./outside-agents.js";
+import { outsideCommand, outsideSetup } from "./local/outside-mcp.js";
+import { openInTerminal } from "./runner/terminal.js";
+import { rankTools, taskTier } from "./routing.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // Resolved once: the traversal guard in serveStatic compares against this with
@@ -277,7 +283,26 @@ export interface AppOptions {
    * (local/kv.ts); everyone is `user`, with no sign-in; the server listens on this computer only and answers only its own pages
    * (localOnly); and the client is the local one (client-build.ts).
    */
-  local?: { redis: Redis; sub: Redis; user: { id: string; name: string } };
+  local?: {
+    redis: Redis;
+    sub: Redis;
+    user: { id: string; name: string };
+    /** Your phone, connected to this computer (local/phone.ts): Settings › Your phone turns it on and pairs one. */
+    phone?: {
+      state(): Promise<unknown>;
+      setOn(on: boolean): Promise<unknown>;
+      pairCode(kind?: "phone" | "computer"): Promise<unknown>;
+      forget(id: string): Promise<unknown>;
+    };
+    /** This computer used from another one's Friday (local/join.ts): the link it was given, and whether it holds now. */
+    join?: {
+      state(): Promise<unknown>;
+      join(link: string): Promise<unknown>;
+      leave(): Promise<unknown>;
+    };
+    /** Agents outside Friday, over its MCP server (outside-agents.ts): this install's token, and the script they start (local/outside-mcp.ts). */
+    outside?: { token: string; shim: string };
+  };
   /** Where teammates' own folders go when none is picked (teammates.ts defaultFolder): the home folder unless said, as tests do. */
   teammatesHome?: string;
 }
@@ -857,13 +882,18 @@ export async function createApp(o: AppOptions) {
     async () => false,
   );
   const hub = new EngineHub(store, bus, core);
+  // On your own computer there is one Friday: lanes a previous run of it held are gone with it (EngineHub.sole).
+  if (o.local) hub.sole = true;
   // On someone's own computer, each of their sessions is looked over once the last run's leases are gone: a lane its runner left
   // with that run reads offline in the sidebar and on the Board too, not only once the session is opened (EngineHub.reap). The
   // hosted service does it as each session is opened.
   const reapAtStart = o.local ? hub.reapAfterLeases(async () => (await store.mine(o.local!.user.id)).map((r) => r.sid)) : null;
   hub.mesh = mesh;
   /** Machines people have linked to this Friday, so a hosted one can reach their CLIs. */
-  const links = new NoLinks();
+  // Your other computers, linked to this one's Friday (local/computers.ts); NoLinks where there is no person here to own them.
+  const links = o.local ? new LocalLinks(o.local.user) : new NoLinks();
+  /** The local edition's other computers, when this is it (the hosted registry is something else). */
+  const localLinks = (links as unknown) instanceof LocalLinks ? (links as unknown as LocalLinks) : null;
   /** Runners this server started for its own machine's user (desktop app, local dev). */
   const localRunners = new Map<string, Runner>();
   /** Whether this server may run things on the machine it is on: the desktop app, or local development. */
@@ -1057,6 +1087,15 @@ export async function createApp(o: AppOptions) {
       ...(tool && t.account ? { account: t.account } : {}),
       ...more,
     };
+    // On another computer of yours (local/computers.ts): started there, in its own folder there (made if it isn't) or the first
+    // folder it was given there, with no copy of this computer's (copyFor is of folders here).
+    if (t.machine && localLinks) {
+      const { dirs: _here, ...rest } = params as typeof params & { dirs?: string[] };
+      const there = { ...rest, cwd: projectsOf(t)[0] ?? `~/Friday/teammates/${t.name}`, makeDir: true, ...(projectsOf(t).length ? { dirs: [...projectsOf(t).slice(1), `~/Friday/teammates/${t.name}`] } : {}) };
+      if (process.env.FRIDAY_TEAMMATES_DRY === "1") return (teammateStarts.push(there), { lane: there.lane });
+      if (!localLinks.connected(t.machine)) throw new Error(`${t.name}'s computer isn't connected: it starts once that computer links again.`);
+      return (await localLinks.call(t.machine, "start", there, 10 * 60_000)) as { lane: string };
+    }
     // Tests say what would be started rather than start a real coding tool on the machine running them. A folder lent with no
     // tool starts no coding tool, so it is started for real: its lane needs it to run.
     if (process.env.FRIDAY_TEAMMATES_DRY === "1") {
@@ -1300,7 +1339,8 @@ export async function createApp(o: AppOptions) {
     // On an own model: one the person has set up here, now.
     const refused = c.tool === "friday" ? await ownModelRefused(owner, c.model ?? "") : null;
     if (refused) return refused;
-    const gone = await missingDirOf(c.projects);
+    // Folders on another computer of yours are that computer's to have: not looked for here.
+    const gone = c.machine ? null : await missingDirOf(c.projects);
     if (gone) return `There's no folder at ${gone} on this computer.`;
     return teammates!.locked("team:add", async () => {
       const list = await teammates!.list();
@@ -2294,6 +2334,41 @@ export async function createApp(o: AppOptions) {
       return await set({ status: "failed", note: (e as Error).message.slice(0, 300), ended: Date.now() });
     }
   };
+  // ── Agents outside Friday (outside-agents.ts): Claude Code, Codex, Cursor on this computer, over Friday's MCP server ──────
+  // They act for the person at this computer, as its in-Friday agents do (below), and what they write says it came from them.
+  const outsideAgents = o.local?.outside
+    ? new OutsideAgents({
+        store,
+        handle: (sid, actor, cmd) => core.handle(sid, actor, cmd),
+        me: async () => {
+          const me = await localNamed();
+          return { id: me.id, name: me.name };
+        },
+        workspaceId: LOCAL_WORKSPACE.id,
+        skipped: async (owner) => {
+          const [hidden, gone] = await Promise.all([store.hidden(owner).catch(() => new Set<string>()), teammates ? teammates.gone().catch(() => new Set<string>()) : new Set<string>()]);
+          return new Set([...hidden, ...gone]);
+        },
+        teamSid: async () => (teammates ? await teammates.team() : null),
+        startTool: (sid, owner, p) => startTool(sid, owner, p),
+        // Auto: the tool Friday's own routing ranks first for the task (routing.ts), of those ready on this computer.
+        pickTool: async (owner, task) => {
+          const tier = taskTier(task);
+          return rankTools(tier.tier, await toolOptionsFor(owner).catch(() => []), tier.why).find((r) => !r.out)?.tool ?? null;
+        },
+        folder: async (p) => ({ dir: path.isAbsolute(p) && (await stat(p).then((x) => x.isDirectory(), () => false)), repo: await stat(path.join(p, ".git")).then(() => true, () => false) }),
+        work: localEdition(),
+        ...(teammates
+          ? {
+              crew: async () => {
+                const sid = await teammates.team();
+                if (!sid || !(await store.exists(sid))) return null;
+                return { sid, mates: (await teammateViews(sid)).map((t) => ({ name: t.name, role: t.role, tool: t.tool, status: t.status, line: t.line, lane: t.lane })) };
+              },
+            }
+          : {}),
+      })
+    : null;
   // ── The app, for the agents in it (app-tools.ts) ─────────────────────────────────────────────────────────────────────
   // On this computer every coding tool, in any session, reaches the other sessions on this computer (Code, Work and the
   // team's), searches what was said in them, starts new ones, and makes and runs automations (Arun, 2026-10-27: "make the app
@@ -2749,6 +2824,56 @@ export async function createApp(o: AppOptions) {
     }
     // OAuth 2.0, its metadata, and the token API with its description: before everything else that might take these paths.
 
+    // An agent outside Friday (outside-agents.ts), through the script it started (local/outside-mcp.ts): this computer only, never
+    // a page (a browser always says where a page's request comes from, and the script never does), and only with this install's
+    // token, which only the person's own account can read. So another account on the computer, or a site the person has open,
+    // can't drive Friday this way. Answered as runner/friday-mcp.ts answers: the headers at once and a space every 20 seconds
+    // while a wait goes on, so the script's fetch never gives up on a quiet response; a call the agent gives up on stops waiting.
+    if (url.pathname === "/api/outside/call") {
+      const token = o.local?.outside?.token;
+      if (!outsideAgents || !token || req.method !== "POST") return json(res, 404, { error: "Not found" });
+      if (req.headers.origin !== undefined || !isLoopback(req)) return json(res, 403, { error: "Only an agent on this computer may call this." });
+      const given = Buffer.from(String(req.headers.authorization ?? "").replace(/^Bearer\s+/i, ""));
+      const want = Buffer.from(token);
+      if (given.length !== want.length || !timingSafeEqual(given, want)) return json(res, 401, { error: "Friday's token didn't match. Add Friday to this agent again from Settings, Let other agents use Friday." });
+      let body: Record<string, unknown>;
+      try {
+        body = await readJson(req);
+      } catch {
+        return json(res, 400, { error: "That body is not JSON." });
+      }
+      res.writeHead(200, { "content-type": "application/json" });
+      res.flushHeaders();
+      const beat = setInterval(() => res.write(" "), 20_000);
+      const stop = new AbortController();
+      res.on("close", () => {
+        if (!res.writableEnded) stop.abort();
+      });
+      try {
+        const args = body.arguments && typeof body.arguments === "object" && !Array.isArray(body.arguments) ? (body.arguments as Record<string, unknown>) : {};
+        const r = await outsideAgents.call(str(body.name, 60), args, str(body.agent, 80), stop.signal);
+        res.end(JSON.stringify(r));
+      } catch (e) {
+        res.end(JSON.stringify({ output: `Friday couldn't do that: ${(e as Error).message}`, isError: true }));
+      } finally {
+        clearInterval(beat);
+      }
+      return;
+    }
+    // Settings › Let other agents use Friday: the line for each agent, and Add, which runs that agent's own `mcp add` in a
+    // Terminal window of the person's own, as Run in Terminal does for a tool's install (local-api.ts install). The line is made
+    // here from the agent's name, never taken from the page. Friday's own page only (localOnly, above).
+    if (url.pathname === "/api/outside/setup" && o.local?.outside) {
+      const lines = outsideSetup(outsideCommand(o.local.outside.shim));
+      if (req.method === "GET") return json(res, 200, { ...lines, shim: o.local.outside.shim });
+      if (req.method === "POST") {
+        if (req.headers.origin === undefined && req.headers["x-friday-local"] !== "1") return json(res, 403, { error: "From Friday's own page only." });
+        const tool = str((await readJson(req)).tool, 20);
+        if (tool !== "claude" && tool !== "codex") return json(res, 400, { error: "Add works for Claude Code and Codex. Copy Cursor's lines into its file." });
+        return json(res, 200, await openInTerminal(lines[tool].argv));
+      }
+    }
+
     // A previewed page asking for "/_next/static/…" or "/src/main.tsx" from the root of the address it thinks it is on lands
     // here, outside its ticket's prefix, and used to get Friday's own files or nothing: a blank page. Its referrer says which
     // preview asked, so it is sent back inside; a module loaded that way then asks for its own imports from inside too.
@@ -2809,6 +2934,11 @@ export async function createApp(o: AppOptions) {
 
     if (req.method === "POST" && url.pathname === "/api/sessions") {
       const body = await readJson(req);
+      // From your phone: nothing allowed in advance and no taking over, whatever it sends (Security review of the phone listener, 1).
+      if (o.local && req.headers["x-friday-via"] === "phone") {
+        delete body.allow;
+        delete body.controlMode;
+      }
       const goal = str(body.goal, 8000);
       const title = str(body.title, 120) || deriveTitle(goal) || "Untitled session";
       // The owner is whoever is signed in. It used to be whatever the body
@@ -3019,6 +3149,10 @@ export async function createApp(o: AppOptions) {
 
 
 
+    // Your other computers as the places a session or a teammate can run (local/computers.ts), as the hosted Friday lists linked
+    // machines: this computer's own runner is the page's own, so it isn't listed.
+    if (o.local && localLinks && req.method === "GET" && url.pathname === "/api/machines")
+      return json(res, 200, { machines: localLinks.list().map((c) => ({ id: c.id, label: c.label, connected: true, tools: c.tools, since: c.since, machine: { name: c.label, platform: c.platform } })) });
 
 
     /**
@@ -3217,6 +3351,28 @@ export async function createApp(o: AppOptions) {
       // Started from Code Review's "See it through": the pull request goes to Friday's loop as the agent starts on it. Refused
       // quietly (no pull request, no folder) leaves the session as an ordinary one.
       if (r.ok && body.shepherd === true) await core.handle(sid, { id: user.id, name: user.name }, { type: "pr.shepherd", on: true }).catch(() => null);
+      return r.ok ? json(res, 201, { seq: r.seq }) : json(res, 400, { error: r.error ?? "Could not send that." });
+    }
+
+    /**
+     * The team demo's first message (team-demo.ts), once its agents are in: the first agent is made the lead, and asked to split
+     * the sample project's job on the board, naming the others as the session does. Two agents at least, or there is no team
+     * to show (Arun, 2026-10-30: "a first run that shows the team").
+     */
+    const demoRoute = url.pathname.match(/^\/api\/sessions\/([\w-]+)\/team-demo$/);
+    if (demoRoute && req.method === "POST") {
+      const sid = demoRoute[1]!;
+      const inv = verifyInvite(o.secret, url.searchParams.get("invite"));
+      if (!inv || inv.sid !== sid) return json(res, 403, { error: "Invalid invite for this session" });
+      const user = await identity(req);
+      if (!user) return json(res, 401, { error: "Missing user identity" });
+      const state = await store.state(sid);
+      const lanes = [MAIN_LANE, ...state.lanes.map((l) => l.id)].filter((l) => state.engines[l]?.tool);
+      if (lanes.length < 2) return json(res, 400, { error: "Only one agent joined, so there's no team to show yet." });
+      const who = { id: user.id, name: user.name };
+      const lead = await core.handle(sid, who, { type: "lead.set", lane: MAIN_LANE });
+      if (!lead.ok) return json(res, 400, { error: lead.error ?? "Couldn't make the first agent the lead." });
+      const r = await core.handle(sid, who, { type: "instruct", text: demoPrompt(lanes.map((l) => laneName(state, l))) });
       return r.ok ? json(res, 201, { seq: r.seq }) : json(res, 400, { error: r.error ?? "Could not send that." });
     }
 
@@ -4031,8 +4187,9 @@ export async function createApp(o: AppOptions) {
             // An account is its tool's: a new tool drops the old one's, unless the edit names one (2026-10-28 audit: Codex started
             // as Claude's account). Back on its own tool, the account it had there.
             const model = c.model ?? back?.fromModel, account = back ? (c.account ?? back.fromAccount) : c.tool !== t2.tool && !("account" in body) ? undefined : c.account, effort = c.effort ?? (back && !("effort" in body) ? back.fromEffort : undefined);
-            const next: Teammate = { ...t2, name: c.name, role: c.role, tool: c.tool, model, account, ...(c.mode ? { mode: c.mode === "full" ? undefined : c.mode } : {}), ...(c.look ? { look: c.look } : {}), ...(c.projects ? { projects: c.projects, project: undefined } : {}), ...("effort" in body || c.tool !== t2.tool ? { effort } : {}), ...("backup" in body ? { backup } : {}), ...(c.checkins ? { checkins: c.checkins.map((x) => ({ ...x, ...(t2.checkins?.find((y) => y.id === x.id)?.last ? { last: t2.checkins.find((y) => y.id === x.id)!.last } : {}) })) } : {}), ...(c.tool !== t2.tool ? { switched: undefined } : {}), ...(body.keep === true ? { madeBy: undefined } : {}) };
-            const missing = await missingDirOf(c.projects?.filter((d) => !projectsOf(t2).includes(d)));
+            const next: Teammate = { ...t2, ...("machine" in c ? { machine: c.machine } : {}), name: c.name, role: c.role, tool: c.tool, model, account, ...(c.mode ? { mode: c.mode === "full" ? undefined : c.mode } : {}), ...(c.look ? { look: c.look } : {}), ...(c.projects ? { projects: c.projects, project: undefined } : {}), ...("effort" in body || c.tool !== t2.tool ? { effort } : {}), ...("backup" in body ? { backup } : {}), ...(c.checkins ? { checkins: c.checkins.map((x) => ({ ...x, ...(t2.checkins?.find((y) => y.id === x.id)?.last ? { last: t2.checkins.find((y) => y.id === x.id)!.last } : {}) })) } : {}), ...(c.tool !== t2.tool ? { switched: undefined } : {}), ...(body.keep === true ? { madeBy: undefined } : {}) };
+            // Folders on another computer of yours are that computer's to have: not looked for here.
+            const missing = next.machine ? null : await missingDirOf(c.projects?.filter((d) => !projectsOf(t2).includes(d)));
             if (missing) return `There's no folder at ${missing} on this computer.`;
             if (next.name !== t2.name) {
               const r = await core.handle(sid, owner, { type: "lane.rename", laneId: t2.lane, name: next.name });
@@ -4042,7 +4199,7 @@ export async function createApp(o: AppOptions) {
             }
             await teammates.put(next);
             // Its tool, model, account or project changed: started again so it takes them (a new tool is a new conversation).
-            if (next.tool !== t2.tool || next.model !== t2.model || next.account !== t2.account || next.mode !== t2.mode || projectsOf(next).join("\n") !== projectsOf(t2).join("\n")) later.push(...(await restartEverywhere(sid, owner, t2, next)));
+            if (next.tool !== t2.tool || next.model !== t2.model || next.account !== t2.account || next.mode !== t2.mode || next.machine !== t2.machine || projectsOf(next).join("\n") !== projectsOf(t2).join("\n")) later.push(...(await restartEverywhere(sid, owner, t2, next)));
             // Its effort, on its lane everywhere it is, when that or its tool changed.
             if (next.effort !== t2.effort || next.tool !== t2.tool) {
               await setEffort(sid, owner, next.lane, next);
@@ -4144,6 +4301,55 @@ export async function createApp(o: AppOptions) {
       for (const r of url.searchParams.has("root") || abs ? [] : roots) if (!file) file = await workPath(r, rel);
       if (!file) return json(res, 404, { error: "That file isn't in this session's folders." });
       return serveWork(req, res, file);
+    }
+    // A lane's coding tool opened in its host's own terminal, on the lane's conversation, and back (runner/terminal-line.ts; Arun,
+    // 2026-10-30: "utilize the users terminal and have their claude code, codex or whatever already there… kinda like herdr").
+    // Only the host: it is their computer's terminal and their tool's account. A turn under way is stopped first, and the lane
+    // takes no turns while it is open (hub.ts): what is sent to it waits, and runs once it is back.
+    const termRoute = url.pathname.match(/^\/api\/sessions\/([\w-]+)\/terminal$/);
+    if (req.method === "POST" && termRoute) {
+      const sid = termRoute[1]!;
+      const me = await memberOnly(req, res, sid);
+      if (!me) return;
+      const b = await readJson(req).catch(() => ({}) as Record<string, unknown>);
+      const lane = str(typeof b.lane === "string" ? b.lane : "", 40);
+      const open = b.open === true;
+      const by = { id: me.id, name: me.name, kind: "human" as const };
+      let state = await store.state(sid);
+      const engine = state.engines[lane];
+      if (!engine?.tool) return json(res, 404, { error: "That agent has no coding tool to open." });
+      if (engine.hostId !== me.id) return json(res, 403, { error: `Only ${engine.hostName} can open their own computer's terminal.` });
+      if (!open) {
+        if (state.terminals?.[lane]) await store.append(sid, by, { type: "lane.terminal", open: false }, { lane });
+        await hub.readRepo(sid, { op: "terminal", query: "closed" }, lane).catch(() => null);
+        return json(res, 200, { ok: true });
+      }
+      if (!engine.online) return json(res, 409, { error: `${engine.hostName}'s computer isn't connected to this agent right now.` });
+      // Stopped, and waited for: the tool can't be on its conversation in two places.
+      if (runOf(state, lane).status === "running") {
+        await core.handle(sid, by, { type: "run.pause", lane });
+        for (let i = 0; i < 40 && runOf((state = await store.state(sid)), lane).status === "running"; i++) await new Promise((r) => setTimeout(r, 250));
+      }
+      if (!state.terminals?.[lane]) await store.append(sid, by, { type: "lane.terminal", open: true }, { lane });
+      // The runner may still be letting its stopped turn go: asked again a moment later.
+      let got: { tool?: string; cwd?: string; line?: string; error?: string } = { error: "That agent's computer didn't answer." };
+      for (let i = 0; i < 8; i++) {
+        const r = await hub.readRepo(sid, { op: "terminal" }, lane).catch(() => null);
+        if (r) {
+          try {
+            got = JSON.parse(r.output) as typeof got;
+          } catch {
+            got = { error: r.output };
+          }
+        }
+        if (!/middle of a turn/.test(got.error ?? "")) break;
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      if (got.error || !got.line) {
+        await store.append(sid, by, { type: "lane.terminal", open: false }, { lane });
+        return json(res, 409, { error: got.error ?? "That agent's computer didn't answer." });
+      }
+      return json(res, 200, { tool: got.tool, cwd: got.cwd, line: got.line });
     }
     const repoRoute = url.pathname.match(/^\/api\/sessions\/([\w-]+)\/repo$/);
     if (req.method === "GET" && repoRoute) {
@@ -4280,6 +4486,49 @@ export async function createApp(o: AppOptions) {
 
 
 
+    // Your phone (local/phone.ts), from this computer's own page only: whether it may connect, a code to pair one, and the phones paired.
+    const phone = o.local?.phone;
+    if (phone && (url.pathname === "/api/phone" || url.pathname.startsWith("/api/phone/"))) {
+      if (req.method === "GET" && url.pathname === "/api/phone") return json(res, 200, await phone.state());
+      if (req.method === "POST" && url.pathname === "/api/phone") return json(res, 200, await phone.setOn((await readJson(req)).on === true));
+      if (req.method === "POST" && url.pathname === "/api/phone/code") return json(res, 200, await phone.pairCode());
+      const gone = /^\/api\/phone\/devices\/([0-9a-f]{16})$/.exec(url.pathname);
+      if (req.method === "DELETE" && gone) {
+        localLinks?.forget(gone[1]!);
+        return json(res, 200, await phone.forget(gone[1]!));
+      }
+      return json(res, 404, { error: "Not found" });
+    }
+    // Your other computers (local/computers.ts), from this computer's own page only: the ones paired and whether each is linked
+    // now, a code to add one, and taking one away; and this computer used from another's Friday (local/join.ts).
+    if (o.local && localLinks && (url.pathname === "/api/computers" || url.pathname.startsWith("/api/computers/"))) {
+      const join = o.local.join;
+      const mine = async () => {
+        const st = (phone ? await phone.state() : { devices: [] }) as { devices: { id: string; name: string; kind?: string; at: number; seen: number }[]; error?: string };
+        const live = new Map(localLinks.list().map((c) => [c.id, c]));
+        return {
+          computers: st.devices.filter((d) => d.kind === "computer").map((d) => ({ id: d.id, name: d.name, at: d.at, seen: d.seen, connected: live.has(d.id), tools: live.get(d.id)?.tools ?? [], platform: live.get(d.id)?.platform ?? "" })),
+          joined: join ? await join.state() : null,
+          ...(st.error ? { error: st.error } : {}),
+        };
+      };
+      if (req.method === "GET" && url.pathname === "/api/computers") return json(res, 200, await mine());
+      if (req.method === "POST" && url.pathname === "/api/computers/code") return json(res, 200, phone ? await phone.pairCode("computer") : { error: "Friday here can't take other computers." });
+      if (url.pathname === "/api/computers/join" && join) {
+        if (req.method === "POST") {
+          const b = (await readJson(req)) as { link?: unknown };
+          return json(res, 200, await join.join(typeof b.link === "string" ? b.link.slice(0, 2000) : ""));
+        }
+        if (req.method === "DELETE") return json(res, 200, await join.leave());
+      }
+      const gone = /^\/api\/computers\/([0-9a-f]{16})$/.exec(url.pathname);
+      if (req.method === "DELETE" && gone && phone) {
+        localLinks.forget(gone[1]!);
+        await phone.forget(gone[1]!);
+        return json(res, 200, await mine());
+      }
+      return json(res, 404, { error: "Not found" });
+    }
     // The open-source edition's anonymous usage counts (usage.ts): whether they are on, the notice shown, and the switch.
     if (usage && url.pathname === "/api/usage-sharing") {
       if (req.method === "GET") return json(res, 200, await usage.state());
@@ -4443,6 +4692,8 @@ export async function createApp(o: AppOptions) {
 
 
 
+  // A paired computer's link, handed over by the device listener (local/phone.ts → local/computers.ts).
+  linkWss.on("connection", (ws, req) => (localLinks ? localLinks.accept(ws, req) : ws.close(4003, "No other computer links here.")));
 
   ops.gauge("runners", () => runnerWss.clients.size);
   ops.gauge("links", () => linkWss.clients.size);
@@ -4558,6 +4809,8 @@ export async function createApp(o: AppOptions) {
   }
 
   wss.on("connection", (ws, req) => {
+    // Through the phone listener, which marks what it passes on and lets no phone set the mark itself (local/phone.ts).
+    const viaPhone = !!o.local && req.headers["x-friday-via"] === "phone";
     const url = new URL(req.url ?? "/", "http://localhost");
     const sid = url.searchParams.get("session") ?? "";
     const inv = verifyInvite(o.secret, url.searchParams.get("invite"));
@@ -4785,6 +5038,9 @@ export async function createApp(o: AppOptions) {
          */
         const rid = msg.rid ?? msg.id;
         const { rid: _rid, ...cmd } = msg;
+        // From your phone (local/phone.ts): what a phone does, and nothing that runs a command, writes a file, changes the
+        // session's settings or its links. Its token is a device that can be lost (Security review of the phone listener, 1).
+        if (viaPhone && !PHONE_COMMANDS.has(String(cmd.type))) return send({ kind: "result", id: rid, ok: false, error: "That can't be done from your phone." });
         const r = await core.handle(sid, { id: me.id, name: me.name }, cmd as Command);
         send({ kind: "result", id: rid, ...r });
         if (r.ok && (msg.type === "member.role" || msg.type === "member.remove")) await broadcastPresence(sid);
@@ -4842,12 +5098,16 @@ export async function createApp(o: AppOptions) {
     // A session brought back its own way below, left alone here.
     let ownWay = new Set<string>();
     ownWay = new Set(teammates ? await teammates.sessions() : []);
+    // First, what the last run of this app held, said gone (EngineHub.sole): its lanes still read online, so nothing below, and
+    // nothing on the page, would have brought them back.
+    for (const sid of new Set([...(await store.mine(me.id, 60).catch(() => [])).map((x) => x.sid), ...ownWay])) await hub.reap(sid, false).catch((e) => console.error("[engine] reap:", e));
     void reattachAll(me, {
       mine: async (uid, n) => (await store.mine(uid, n)).filter((x) => !ownWay.has(x.sid)),
       state: (sid) => store.state(sid).catch(() => null),
       invite: linkToken,
       actorToken: (sid, uid) => signActor(o.secret, sid, uid),
       start: (params) => callHost("start", params, hostCtx(me)),
+      machine: process.env.FRIDAY_MACHINE_NAME || hostname().replace(/\.local$/i, ""),
       log: (l) => console.log(`[friday] ${l}`),
     }).catch((e) => console.error("[friday] bringing coding tools back:", e));
     // Every teammate, whenever it last worked: they are always there (teammates.ts). Each on its own account, in its own folder,
@@ -4868,6 +5128,23 @@ export async function createApp(o: AppOptions) {
         }
       })();
     }
+  }
+  // One of your other computers linked (local/computers.ts): the teammates that run on it come back there, in the team and in each
+  // room they are in, as the ones on this computer did when Friday opened.
+  if (o.local && localLinks && teammates) {
+    const me = o.local.user;
+    localLinks.onLinked = (machine) =>
+      void (async () => {
+        const team = await teammates.team();
+        if (!team) return;
+        const rooms = await teammates.rooms();
+        for (const t of (await teammates.list()).filter((x) => x.machine === machine)) {
+          await startTeammate(team, me, t, { ifOffline: true })
+            .then(() => console.log(`[computers] ${t.name} is back on its computer`))
+            .catch((e: Error) => console.error(`[computers] ${t.name} didn't come back: ${e.message}`));
+          for (const r of rooms.filter((x) => x.lanes[t.id])) await startTeammate(r.sid, me, t, { ifOffline: true }, { lane: r.lanes[t.id]!, keepAs: roomKeep(t.id, r.id) }).catch(() => {});
+        }
+      })();
   }
   // A mock dataset has people but nobody at a keyboard: let the ones shown as online walk around, so following and reading marks can be seen.
   const stopMockFocus = o.prefix.startsWith("mock") ? startMockFocus({ redis, prefix: o.prefix, store, bus }) : () => {};
@@ -4944,6 +5221,9 @@ export function forkKind(state: SessionState, mine: boolean): { options: Session
 }
 
 /** This server's version, from its package.json, read once. */
+/** What a session's socket takes from your phone (local/phone.ts): talking, answering, and starting, stopping or steering a run. */
+const PHONE_COMMANDS = new Set(["instruct", "suggest", "say", "react", "approval.answer", "plan.approve", "run.pause", "run.resume", "run.cancel", "run.interrupt", "instruction.withdraw", "control.request", "control.claim", "control.yield", "control.deny", "resume.at", "resume.cancel", "thread.reply", "thread.send"]);
+
 let appVersion: Promise<string> | undefined;
 /** This Friday's version, as its package.json says. */
 const ourVersion = () => (appVersion ??= readFile(new URL("../package.json", import.meta.url), "utf8").then((t) => String((JSON.parse(t) as { version?: unknown }).version ?? ""), () => ""));

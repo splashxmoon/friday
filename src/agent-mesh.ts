@@ -1491,7 +1491,15 @@ export class AgentMesh {
     if (!t || !(own || forLead)) return { output: t ? `Task "${t.id}" isn't yours to finish: ${boardLine(t)}.` : `There's no task "${id}" on the board.`, isError: true };
     const doer = forLead && t.lane ? t.lane : lane;
     const since = events.findLast((e) => e.body.type === "board.claimed" && e.body.id === t.id) ?? events.at(-1)!;
-    const facts = factsOf(state, events, doer, since, events.at(-1)!);
+    let facts = factsOf(state, events, doer, since, events.at(-1)!);
+    // A coding tool reports what it changed when its turn ends (runner.ts reportDiff), so one finishing its task mid-turn read
+    // "no files changed", and its work went through as "Nothing changed to check" with no second agent's look (the team demo,
+    // Arun, 2026-10-30: "a first run that shows the team"). Its folder is asked instead.
+    if (/\bno files changed\b/.test(facts) && this.repo && state.engines[doer]?.tool && runOf(state, doer).status === "running") {
+      const out = await this.repo(sid, doer, { op: "shell", command: "git status --porcelain --untracked-files=all", timeoutSec: 30 } as RepoCall).catch(() => null);
+      const files = shellLines(out).map((l) => l.replace(/^\S+\s+/, ""));
+      if (files.length) facts = facts.replace("no files changed", `${files.length} file${files.length === 1 ? "" : "s"} changed in its folder: ${files.slice(0, 8).join(", ")}${files.length > 8 ? `, and ${files.length - 8} more` : ""}`);
+    }
     const name = forLead ? (t.name ?? laneName(state, doer)) : laneName(state, lane);
     // Turned down, not stuck (Arun, 2026-10-21: most of a board's "Stuck" was one agent saying "not mine, releasing" over and
     // over, as the board kept handing it work its lead had told it to stay off). It goes back on the board for someone else,

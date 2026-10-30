@@ -331,6 +331,14 @@ export class EngineHub {
     this.leaseTimer.unref?.();
   }
 
+  /**
+   * The only server there is (the open-source edition, on your own computer): another server's lanes are a previous run of this
+   * app, gone however recently its lease was renewed, since that lease is kept in Friday's own data and outlives a restart. Read
+   * as alive, they stayed "online" with no runner after a restart, so neither the boot's reattach nor the page's quiet reconnect
+   * brought them back (Arun, 2026-10-30: "fix the app not connecting to computer after restart").
+   */
+  sole = false;
+
   private leaseKey(node: string): string {
     return `${this.store.prefix}node:${node}`;
   }
@@ -357,7 +365,7 @@ export class EngineHub {
         // status bar against the Tree, the branch picker and setup).
         const key = `${sid}|${lane}`;
         if (this.hosts.has(key) || Date.now() - (this.lanesAttaching.get(key) ?? 0) < 30_000 || Date.now() - (this.droppedAt.get(key) ?? 0) < offlineGraceMs() + 5_000) continue;
-      } else if (!self && (await this.store.redis.exists(this.leaseKey(e.node)))) {
+      } else if (!self && !this.sole && (await this.store.redis.exists(this.leaseKey(e.node)))) {
         // Browsers reconnect seconds after a restart, while a dead server's lease is still running: look again once it can't be.
         if (recheck && !this.rechecks.has(sid)) {
           this.rechecks.add(sid);
@@ -971,6 +979,7 @@ class LaneHost {
     // mid-turn, so an interrupt stops the turn and the next one carries it.
     let why = "";
     if (b.type === "run.pause") why = `${ev.actor.name} stopped this task`;
+    else if (b.type === "lane.terminal" && b.open) why = `${ev.actor.name} opened this agent in their terminal`;
     else if (b.type === "run.cancel") why = `${ev.actor.name} cancelled the run`;
     else if (b.type === "run.interrupt") why = `${ev.actor.name} delivered queued instructions now`;
     else if (b.type === "instruction" && b.interrupt) why = `${ev.actor.name} interrupted with a new instruction`;
@@ -984,7 +993,7 @@ class LaneHost {
     // A message for this agent while its turn runs, given to it at its next step rather than after the turn: another agent's
     // question waited minutes for the asker's answer otherwise, and askers gave up waiting on nearly half of them.
     if (b.type === "instruction" && this.turn && this.steers && steerable(b)) return void this.steer(ev).catch((e) => console.error("[engine] steer:", e));
-    if (b.type === "instruction" || b.type === "run.resume" || b.type === "instructions.requeued") void this.pump();
+    if (b.type === "instruction" || b.type === "run.resume" || b.type === "instructions.requeued" || (b.type === "lane.terminal" && !b.open)) void this.pump();
   }
 
   /**
@@ -1074,6 +1083,9 @@ class LaneHost {
       if (!this.info.tool) return;
       const run = runOf(state, this.lane);
       if (run.status === "paused") return;
+      // Open in its host's terminal (lane.terminal): the conversation is theirs there, and two writers would split it. What is
+      // queued waits, and runs once it is back.
+      if (state.terminals?.[this.lane]) return;
       // On hold as a person said (held.ts): the other agents' messages and Friday's wait in the queue for the next turn a person
       // starts, and never start one themselves.
       const pending = runnableQueue(events, this.lane, pendingFor(state, this.lane));
