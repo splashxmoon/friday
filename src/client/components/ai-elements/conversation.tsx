@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ArrowDownIcon } from "lucide-react";
 import type { ComponentProps, RefObject } from "react";
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 // Keeping the conversation at its newest line, in place of use-stick-to-bottom. That library ran a spring animation that
 // read the scroll box's size every frame (hundreds of reads each time a side panel opened) and, on every wheel tick,
@@ -198,8 +198,11 @@ export const Conversation = ({ className, initial = "smooth", resize = "smooth",
     };
   }, []);
 
+  // The same value until the view starts or stops following: a new one on every render, and the conversation renders on every
+  // live event, had React look through the whole feed for its readers each time.
+  const stick = useMemo(() => ({ scrollRef, contentRef, isAtBottom, scrollToBottom: () => follow.current() }), [isAtBottom]);
   return (
-    <Stick.Provider value={{ scrollRef, contentRef, isAtBottom, scrollToBottom: () => follow.current() }}>
+    <Stick.Provider value={stick}>
       <div className={cn("relative flex-1 overflow-y-hidden", className)} role="log" {...props}>
         {children}
       </div>
@@ -212,7 +215,7 @@ export type ConversationContentProps = ComponentProps<"div"> & { scrollClassName
 export const ConversationContent = ({ className, scrollClassName, ...props }: ConversationContentProps) => {
   const { scrollRef, contentRef } = useStick();
   return (
-    <div ref={scrollRef} className={scrollClassName} style={{ height: "100%", width: "100%", overflow: "auto", scrollbarGutter: "stable both-edges" }}>
+    <div ref={scrollRef} className={scrollClassName} data-scroll-root="" style={{ height: "100%", width: "100%", overflow: "auto", scrollbarGutter: "stable both-edges" }}>
       <div ref={contentRef} className={cn("flex flex-col gap-8 p-4", className)} {...props} />
     </div>
   );

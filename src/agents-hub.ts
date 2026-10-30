@@ -97,6 +97,35 @@ function summaryOf(kind: HubCheck["kind"], ok: boolean, output: string): string 
   return ok ? (kind === "typecheck" ? "0 errors" : "ok") : "failed";
 }
 
+/**
+ * What one message says for the hub, read once: an event never changes, and the hub is worked out again on every live event,
+ * over the whole log (Arun, 2026-10-30: "the app feel laggy when running a lot of tasks and agents").
+ */
+type Read = { answer: string; calls: { id: string; text: string; command: string }[]; plans: boolean };
+const readMessages = new WeakMap<SessionEvent, Read>();
+function readMessage(e: SessionEvent): Read {
+  const had = readMessages.get(e);
+  if (had) return had;
+  const b = e.body as Extract<SessionEvent["body"], { type: "agent.message" }>;
+  const calls = b.toolCalls
+    .filter((c) => c.name !== "update_plan")
+    .map((c) => {
+      let command = "";
+      if (c.name === "run_command" || c.name === "shell") {
+        try {
+          command = String((JSON.parse(c.arguments || "{}") as { command?: unknown }).command ?? "").trim();
+        } catch {
+          // Arguments that aren't JSON name no command.
+        }
+      }
+      return { id: c.id, text: past(describeCall(c)), command };
+    });
+  const plans = b.toolCalls.some((c) => c.name === "update_plan" || c.name === "todo");
+  const read = { answer: b.text.trim() ? (b.text.trim().split("\n").find((l) => l.trim()) ?? "") : "", calls, plans };
+  readMessages.set(e, read);
+  return read;
+}
+
 /** `meId`: who is looking, so their own tools read as just "Claude Code" and somebody else's as "Maya's Claude Code". */
 export function hubOf(state: SessionState, events: SessionEvent[], meId = ""): { agents: HubAgent[]; files: HubFile[]; checks: HubCheck[]; recent: HubStep[] } {
   const lanes = [MAIN_LANE, ...state.lanes.map((l) => l.id)];
@@ -106,6 +135,8 @@ export function hubOf(state: SessionState, events: SessionEvent[], meId = ""): {
   const steps: HubStep[] = [];
   const checks = new Map<HubCheck["kind"], HubCheck>();
   const spent = new Map<string, number>();
+  // Each lane's last message with a plan in it, for latestPlan: it looked for it from the end of the log, for each lane.
+  const plans = new Map<string, SessionEvent>();
   for (const e of events) {
     const lane = e.lane ?? MAIN_LANE;
     if (e.body.type === "agent.usage") spent.set(lane, (spent.get(lane) ?? 0) + e.body.input + e.body.output);
@@ -116,20 +147,13 @@ export function hubOf(state: SessionState, events: SessionEvent[], meId = ""): {
     if (b.type === "run.started") Object.assign(r, { started: e.ts, ended: null, outcome: null, error: "", answer: "" });
     else if (b.type === "run.ended") Object.assign(r, { ended: e.ts, outcome: b.outcome, error: b.error ?? "" });
     else if (b.type === "agent.message") {
-      if (b.text.trim()) r.answer = b.text.trim().split("\n").find((l) => l.trim()) ?? "";
-      for (const c of b.toolCalls) {
-        if (c.name === "update_plan") continue;
-        const step = { lane, text: past(describeCall(c)), ts: e.ts, failed: false };
+      const read = readMessage(e);
+      if (read.answer) r.answer = read.answer;
+      if (read.plans) plans.set(lane, e);
+      for (const c of read.calls) {
+        const step = { lane, text: c.text, ts: e.ts, failed: false };
         steps.push(step);
-        let command = "";
-        if (c.name === "run_command" || c.name === "shell") {
-          try {
-            command = String((JSON.parse(c.arguments || "{}") as { command?: unknown }).command ?? "").trim();
-          } catch {
-            // Arguments that aren't JSON name no command.
-          }
-        }
-        calls.set(c.id, { command, step });
+        calls.set(c.id, { command: c.command, step });
       }
     } else if (b.type === "tool.result") {
       const call = calls.get(b.callId);
@@ -147,7 +171,8 @@ export function hubOf(state: SessionState, events: SessionEvent[], meId = ""): {
     const r = runs.get(lane);
     const run = runOf(state, lane).status;
     const ask = state.approvals[lane];
-    const plan = latestPlan(events, lane);
+    const planned = plans.get(lane);
+    const plan = planned ? latestPlan([planned], lane) : [];
     const base = {
       lane,
       name: engine?.tool ? (engine.hostId === meId ? (givenName(state, lane) ?? engineName(engine.tool)) : `${engine.hostName.split(/\s+/)[0]}'s ${givenName(state, lane) ?? engineName(engine.tool)}`) : laneLabel(state, lane),

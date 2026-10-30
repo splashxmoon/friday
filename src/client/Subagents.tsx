@@ -5,6 +5,7 @@ import type { EngineTool } from "../types.js";
 import { EngineMark } from "./BrandMarks.js";
 import { TaskMark, type TaskMarkState } from "./TaskMark.js";
 import { duration, type SubTask } from "./Tasks.js";
+import { Shine } from "./shine.js";
 
 /**
  * The subagents a coding tool sent off during a run (Claude Code's Task/Agent, Codex's spawned agents, Cursor's tasks), as one
@@ -137,7 +138,7 @@ function SubRow({ r, now, open, onToggle, onJump }: { r: SubagentRow; now: numbe
           {meta && <span className="sub-time">{meta}</span>}
         </div>
         {r.state === "working" || (r.state === "blocked" && !r.summary) ? (
-          ((l) => l && <span className={`sub-doing${l.tone ? ` ${l.tone}` : ""}`}>{l.text}</span>)(subagentLine(r, now))
+          ((l) => l && <Shine on={r.state === "working" && !l.tone} className={`sub-doing${l.tone ? ` ${l.tone}` : ""}`}>{l.text}</Shine>)(subagentLine(r, now))
         ) : r.summary ? (
           <>
             <p className={`sub-summary${open ? " open" : ""}`}>{r.summary}</p>

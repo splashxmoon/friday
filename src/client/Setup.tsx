@@ -33,6 +33,20 @@ const write = (k: string) => {
     localStorage.setItem(k, "done");
   } catch {}
 };
+/** Put off, with no coding tool ready, until Friday next opens. */
+const SKIPPED = "friday.setup.skipped";
+const skipped = () => {
+  try {
+    return sessionStorage.getItem(SKIPPED) === "1";
+  } catch {
+    return true;
+  }
+};
+const skip = () => {
+  try {
+    sessionStorage.setItem(SKIPPED, "1");
+  } catch {}
+};
 
 type StepId = "computer" | "tools" | "github";
 interface Step {
@@ -59,26 +73,30 @@ export function becameDone(was: { id: string; done: boolean }, now: { id: string
 export function Setup({ identity, hasHistory, onDone }: { identity: Identity; hasHistory: boolean; /** Pressed Start: the box is theirs. */ onDone: () => void }) {
   const k = keyFor(identity.id);
   const [open, setOpen] = useState(false);
-  // Someone new, once; and anyone who asks for it from Settings.
+  const { state: machine, refresh } = useMachine(identity);
+  const connected = machine.mode === "local" || machine.mode === "linked";
+  const tools = machine.tools.filter((t) => t.path);
+  const signedIn = tools.filter((t) => t.loggedIn !== false);
+  // Someone new; and, until a coding tool is ready, someone who hasn't started a session yet, each time Friday opens ("Skip for
+  // now" puts it off until the next): once and never again left a fresh install that skipped it with nothing that works and
+  // nothing saying so (Arun, 2026-10-30: the first few minutes after install are where people quit). Anyone who asks, from Settings.
+  const unready = connected && signedIn.length === 0;
   useEffect(() => {
-    if (!identity.id || read(k)) return;
-    if (hasHistory) return write(k);
+    if (!identity.id || hasHistory) return void (identity.id && hasHistory && write(k));
+    if (read(k) && (!unready || skipped())) return;
     const t = setTimeout(() => setOpen(true), 600);
     return () => clearTimeout(t);
-  }, [identity.id, hasHistory, k]);
+  }, [identity.id, hasHistory, k, unready]);
   useEffect(() => {
     const on = () => setOpen(true);
     window.addEventListener("friday:setup", on);
     return () => window.removeEventListener("friday:setup", on);
   }, []);
-  const { state: machine, refresh } = useMachine(identity);
-  const connected = machine.mode === "local" || machine.mode === "linked";
   const gh = useGithub(identity, open && connected);
-  const tools = machine.tools.filter((t) => t.path);
-  const signedIn = tools.filter((t) => t.loggedIn !== false);
   const desktop = typeof window !== "undefined" && !!window.fridayDesktop?.link;
   const finish = (started: boolean) => {
     write(k);
+    if (!signedIn.length) skip();
     // The tour doesn't come for someone who has just been through this; it stays a press away in Settings · About.
     write(TOUR_KEY(identity.id));
     setOpen(false);

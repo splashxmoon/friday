@@ -468,13 +468,17 @@ export function App() {
         if (d?.trafficLightY) root.classList.add("lights-low");
         setMac(true);
         // In full screen macOS hides the traffic lights, so the back and forward buttons and the header beside them move into
-        // the room kept for them (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL"). Read from the page, so
-        // it holds for every build of the app: a full-screen window fills the whole screen, menu bar included, which a
-        // maximised one never does.
-        const full = () => root.classList.toggle("win-full", window.outerWidth >= screen.width - 1 && window.outerHeight >= screen.height - 1);
-        full();
-        window.addEventListener("resize", full);
-        offFull = () => window.removeEventListener("resize", full);
+        // the room kept for them (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL"). The window says when
+        // (preload onFullScreen): guessed from its size, a window that filled the screen, or had just left full screen, kept the
+        // guess and its back and forward buttons sat under the traffic lights (Arun, 2026-10-29). An app built before it said
+        // so still guesses: a full-screen window fills the whole screen, menu bar included.
+        if (d?.onFullScreen) offFull = d.onFullScreen((on) => root.classList.toggle("win-full", on));
+        else {
+          const full = () => root.classList.toggle("win-full", window.outerWidth >= screen.width - 1 && window.outerHeight >= screen.height - 1);
+          full();
+          window.addEventListener("resize", full);
+          offFull = () => window.removeEventListener("resize", full);
+        }
       }
       // The window's drag rectangles go stale: Chromium recomputes them when a region's own style changes, not reliably when a
       // box that opted out goes away. Every dialog and menu opts out, and a full-screen overlay covers the band while it is open;

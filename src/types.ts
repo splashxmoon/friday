@@ -202,7 +202,8 @@ export interface ToolInfo {
   docs: string;
   /**
    * The vendor's own install line. `npm` is a package, installed the same way everywhere (and needing Node.js); otherwise one
-   * line for Windows (PowerShell) and one for macOS and Linux. Friday never installs anything itself: it shows the line.
+   * line for Windows (PowerShell) and one for macOS and Linux. Friday shows the line, and runs it only when the person presses
+   * Run in Terminal, in a Terminal window of their own where they see it run (runner/local-api.ts install).
    */
   install: { npm?: string; windows?: string; unix?: string };
   /** Its mark's colour where a mark is tinted (a hand-off's two ends). */
@@ -218,12 +219,12 @@ export interface ToolInfo {
  * what the server accepts, and which past sessions can be continued — so taking one out switches it off everywhere at once.
  */
 export const TOOL_INFO: Record<EngineTool, ToolInfo> = {
-  claude: { name: "Claude Code", blurb: "Anthropic's coding agent", docs: "https://docs.claude.com/en/docs/claude-code/overview", install: { npm: "@anthropic-ai/claude-code" }, tint: "#d97757", usage: "https://claude.ai/settings/usage" },
+  claude: { name: "Claude Code", blurb: "Anthropic's coding agent", docs: "https://docs.claude.com/en/docs/claude-code/overview", install: { windows: "irm https://claude.ai/install.ps1 | iex", unix: "curl -fsSL https://claude.ai/install.sh | bash" }, tint: "#d97757", usage: "https://claude.ai/settings/usage" },
   codex: { name: "Codex", blurb: "OpenAI's coding agent", docs: "https://github.com/openai/codex", install: { npm: "@openai/codex" }, tint: "#7c7c86", usage: "https://chatgpt.com/codex/settings/usage" },
   cursor: {
     name: "Cursor",
     blurb: "Cursor's coding agent",
-    docs: "https://cursor.com/cli",
+    docs: "https://cursor.com/docs/cli/installation",
     install: { windows: "irm 'https://cursor.com/install?win32=true' | iex", unix: "curl https://cursor.com/install -fsS | bash" },
     tint: "#8f8f9a",
     usage: "https://cursor.com/dashboard?tab=usage",
@@ -232,7 +233,7 @@ export const TOOL_INFO: Record<EngineTool, ToolInfo> = {
   opencode: {
     name: "OpenCode",
     blurb: "The open-source coding agent",
-    docs: "https://opencode.ai/docs/cli/",
+    docs: "https://opencode.ai/docs/",
     install: { npm: "opencode-ai" },
     tint: "#9aa0a6",
     note: "Runs on ChatGPT, GitHub Copilot or OpenCode Zen. Claude plans can't be used in it.",
@@ -265,12 +266,12 @@ export const TOOL_INFO: Record<EngineTool, ToolInfo> = {
   droid: {
     name: "Factory Droid",
     blurb: "Factory's coding agent",
-    docs: "https://docs.factory.ai/cli/getting-started/overview",
+    docs: "https://docs.factory.com/docs/droid-cli/quickstart",
     install: { windows: "irm https://app.factory.ai/cli/windows | iex", unix: "curl -fsSL https://app.factory.ai/cli | sh" },
     tint: "#f97316",
     usage: "https://app.factory.ai/settings/billing",
   },
-  grok: { name: "Grok Build", blurb: "xAI's coding agent", docs: "https://docs.x.ai/build/cli", install: { windows: "irm https://x.ai/cli/install.ps1 | iex", unix: "curl -fsSL https://x.ai/cli/install.sh | bash" }, tint: "#a1a1aa", usage: "https://grok.com/settings" },
+  grok: { name: "Grok Build", blurb: "xAI's coding agent", docs: "https://docs.x.ai/build/overview", install: { windows: "irm https://x.ai/cli/install.ps1 | iex", unix: "curl -fsSL https://x.ai/cli/install.sh | bash" }, tint: "#a1a1aa", usage: "https://grok.com/settings" },
   cline: { name: "Cline", blurb: "The open-source coding agent from Cline", docs: "https://docs.cline.bot/cli/cli-reference", install: { npm: "cline" }, tint: "#e5e5e5" },
   kilo: { name: "Kilo", blurb: "Kilo Code's coding agent", docs: "https://kilo.ai/docs/cli", install: { npm: "@kilocode/cli" }, tint: "#f8f675", note: "Runs on ChatGPT, SuperGrok or Kilo credits. Claude plans can't be used in it." },
   amp: {
@@ -286,8 +287,8 @@ export const TOOL_INFO: Record<EngineTool, ToolInfo> = {
   muse: {
     name: "Muse Code",
     blurb: "Meta's coding agent",
-    docs: "https://github.com/meta-models/muse-code-sdk",
-    install: { unix: "curl -fsSL https://dev.meta.ai/install.sh | bash" },
+    docs: "https://dev.meta.ai/docs/muse-code",
+    install: { windows: "irm https://dev.meta.ai/install.ps1 | iex", unix: "curl -fsSL https://dev.meta.ai/install.sh | sh" },
     tint: "#0866ff",
     note: "macOS and Linux; on Windows, inside WSL.",
   },

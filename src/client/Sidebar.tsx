@@ -37,6 +37,8 @@ import { byDay } from "./sidebar-days.js";
 import { byState, PresenceRing, useFlip, type Presence } from "./presence.js";
 import { api } from "./api.js";
 import { useUnread } from "./unread.js";
+import { sendFeedback } from "./feedback.js";
+import { noticeDue, UsageNotice, useUsageSharing } from "./UsageSharing.js";
 
 /** `fresh`: a project just made, whose name box was never confirmed: Escape takes it away again. */
 type Renaming = { kind: "session" | "project"; id: string; fresh?: boolean } | null;
@@ -351,13 +353,15 @@ function Foot({ p }: { p: SidebarProps }) {
     return () => mo.disconnect();
   }, []);
   const nextLook = look === "light" ? "dark" : "light";
+  const usageNoticeUp = noticeDue(useUsageSharing());
   const w = p.workspace;
   // The local edition has no plan: it is yours, on this computer.
   const plan = w?.limits?.name ?? (isLocal() ? "Local" : "Free");
   return (
     // Its line runs the sidebar's full width, edge to edge, level with the page's footer line beside it.
     <div className="dass-foot -mx-[10px] mt-auto flex shrink-0 flex-col justify-center gap-1 border-t border-sidebar-border px-[14px]">
-      {isLocal() && <TeamTip className="in-foot" />}
+      {/* The usage notice, once, takes the tip's place in the foot until it is answered. */}
+      {isLocal() && (usageNoticeUp ? <UsageNotice /> : <TeamTip className="in-foot" />)}
       {/* One card at the foot (Arun, 2026-10-26: "integrate the profile thing, light and dark mode and settings button into the
           card where the agent board, code review and usage buttons are"): the places on top, who you are and the app's own
           controls under them. */}
@@ -387,6 +391,17 @@ function Foot({ p }: { p: SidebarProps }) {
           </TooltipTrigger>
           <TooltipContent side="top">Switch to {nextLook}</TooltipContent>
         </Tooltip>
+        {/* The open-source edition's way to say what went wrong or what's missing: a GitHub issue, started for them (feedback.ts). */}
+        {isLocal() && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button type="button" className="dass-rail-btn size-8" aria-label="Send feedback" onClick={() => void sendFeedback()}>
+                <Icon name="megaphone" size={19} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">Send feedback</TooltipContent>
+          </Tooltip>
+        )}
         <Tooltip>
           <TooltipTrigger asChild>
             <button type="button" className="dass-rail-btn size-8" data-active={p.view === "settings"} aria-label="Settings" onClick={p.onOpenSettings}>

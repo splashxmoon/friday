@@ -11,6 +11,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, session, shell 
 import { powerSaveBlocker } from "electron";
 import { MAC_CSS, THEME_WATCH, WIN_CSS } from "../desktop-chrome.js";
 import { registerNative } from "../desktop-native.js";
+import { feedbackUrl, osName } from "../feedback.js";
 import { registerBrowser } from "./desktop-browser.js";
 import { registerTerminal, stopTerminals } from "../desktop-terminal.js";
 import { registerUpdates } from "../desktop-update.js";
@@ -118,6 +119,12 @@ function open(url: string) {
     delete prefs.preload;
   });
   win.once("ready-to-show", () => win?.show());
+  // Whether the window is in full screen, where macOS hides its buttons (preload.ts onFullScreen): the page guessed it from its
+  // size, and a window that filled the screen or had just left full screen kept the guess, its back and forward buttons under
+  // the traffic lights (Arun, 2026-10-29).
+  const sayFull = () => win?.webContents.send("friday:full-screen", win.isFullScreen());
+  win.on("enter-full-screen", sayFull);
+  win.on("leave-full-screen", sayFull);
   // The product app's window chrome (desktop-chrome.ts): the header band that drags, with the window's buttons in it, and the
   // page laid out below it; and the page's light or dark choice reported back for the window's buttons.
   win.webContents.on("did-finish-load", () => {
@@ -176,6 +183,8 @@ const fromApp = (e: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent): boolea
 
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
+  // Whether the window is in full screen, asked once by the page as it starts (preload.ts onFullScreen); open() says when it changes.
+  ipcMain.handle("friday:is-full-screen", (e) => e.sender === win?.webContents && !!win?.isFullScreen());
   // Choosing where a coding agent works, in the system's own folder picker: all the page gets back is the path chosen.
   ipcMain.handle("friday:pick-folder", async (e) => {
     if (!win || !fromApp(e)) return null;
@@ -205,7 +214,9 @@ else {
   });
   app.on("second-instance", () => friday && open(friday.url));
   app.whenReady().then(async () => {
-    if (process.platform === "darwin") Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: "appMenu" }, { role: "editMenu" }, { role: "viewMenu" }, { role: "windowMenu" }]));
+    // Help › Send feedback: a GitHub issue started with this version and system (feedback.ts), in the person's own browser.
+    const help = { role: "help" as const, submenu: [{ label: "Send Feedback…", click: () => void shell.openExternal(feedbackUrl({ version: app.getVersion(), os: osName(process.platform), app: true })) }] };
+    if (process.platform === "darwin") Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: "appMenu" }, { role: "editMenu" }, { role: "viewMenu" }, { role: "windowMenu" }, help]));
     lockPreview();
     await loginPath;
     friday = await startLocal();

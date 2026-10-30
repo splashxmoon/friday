@@ -50,7 +50,8 @@ import { GitMergeIcon,
 } from "lucide-react";
 import { createPortal } from "react-dom";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { attributionOf, byHand, handWord, type Attribution } from "../attribution.js";
+import { attributionFor, byHand, handWord, type Attribution } from "../attribution.js";
+import { useNear } from "./feed-near.js";
 import { GoalPill } from "./GoalPill.js";
 import { useFocus } from "./focusStore.js";
 import { AgentTalkCard, AgentUpdateCard, BoardCard, MeshPauseCard, MeshPauseText, teamTasks, type TaskAction } from "./AgentTalk.js";
@@ -201,15 +202,39 @@ type Ev<T extends EventType> = SessionEvent & { body: Extract<EventBody, { type:
 type Stream = { text: string; reasoning: string };
 /** How far a working run's agent has got with its words: nothing yet, thinking aloud, or writing the answer. */
 type Typing = "waiting" | "thinking" | "answering";
+/**
+ * The chosen agent's tab brought into view, once, as it is chosen: one function for good, so React calls it only when the tab
+ * it is on changes. A new one each render was called on every live event, each a scroll that laid the whole page out again
+ * (Arun, 2026-10-30: "the app feel laggy when running a lot of tasks and agents").
+ */
+const tabIntoView = (el: HTMLElement | null) => el?.scrollIntoView({ block: "nearest", inline: "nearest" });
 const typingOf = (s: Stream | undefined): Typing => (s?.text ? "answering" : s?.reasoning ? "thinking" : "waiting");
 
-/** How wide a line of text is in the app's font: what an agent tab's card is measured by before it is drawn. */
+/**
+ * How wide a line of text is in the app's font: what an agent tab's card is measured by before it is drawn. Every tab asks on
+ * every live event, so the font is read from the page once and each width kept: reading the body's style each time made the
+ * browser work out the whole page's styles again first (Arun, 2026-10-30: "the app feel laggy when running a lot of tasks and agents").
+ */
 let measurer: CanvasRenderingContext2D | null | undefined;
+let family = "";
+const widths = new Map<string, number>();
 function textWidth(text: string, font: string): number {
-  if (measurer === undefined) measurer = typeof document === "undefined" ? null : document.createElement("canvas").getContext("2d");
+  if (measurer === undefined) {
+    measurer = typeof document === "undefined" ? null : document.createElement("canvas").getContext("2d");
+    // Measured before the app's font arrived is measured in another: measured again once it has.
+    if (measurer) document.fonts?.addEventListener?.("loadingdone", () => widths.clear());
+  }
   if (!measurer) return text.length * 7;
-  measurer.font = `${font} ${getComputedStyle(document.body).fontFamily}`;
-  return measurer.measureText(text).width;
+  family ||= getComputedStyle(document.body).fontFamily;
+  const key = `${font}|${text}`;
+  let w = widths.get(key);
+  if (w === undefined) {
+    measurer.font = `${font} ${family}`;
+    w = measurer.measureText(text).width;
+    if (widths.size > 2000) widths.clear();
+    widths.set(key, w);
+  }
+  return w;
 }
 
 /** An item's key in the feed, the same across renders, so a turn that moves keeps its element. */
@@ -1404,9 +1429,11 @@ export function Activity({
     }
   }, [revert, pin]);
 
+  // Where an older change set's patches are fetched from, as its card is opened (patchSource.ts). The same value while the
+  // session is: a new one on every render had React look through the whole feed for its readers on every live event.
+  const patchSource = useMemo(() => ({ sid: ctx.sid, invite: ctx.invite }), [ctx.sid, ctx.invite]);
   return (
-    // Where an older change set's patches are fetched from, as its card is opened (patchSource.ts).
-    <PatchSource.Provider value={{ sid: ctx.sid, invite: ctx.invite }}>
+    <PatchSource.Provider value={patchSource}>
     <section
       className={`activity-main${pin ? " is-column" : ""}`}
       aria-label={pin ? `${laneLabel(state, pin)} chat` : "Activity"}
@@ -1481,7 +1508,7 @@ export function Activity({
               // Keyed by its tool while it starts, so the tab drawn before its lane existed is the same one, and its mark eases in once.
               if (coming) return <StartingLaneTab key={`starting-${coming.tool}`} tool={coming.tool} name={name} on={laneFilter === id} onClick={() => pickLane(id)} />;
               return (
-                <button key={id} type="button" role="tab" aria-selected={laneFilter === id} ref={laneFilter === id ? (el) => el?.scrollIntoView({ block: "nearest", inline: "nearest" }) : undefined} className={`lane-tab${laneFilter === id ? " on" : ""}${st?.needsYou ? " needs" : ""}`} data-state={id === "all" ? undefined : tabState(st?.status, st?.needsYou)} data-owned={who?.owner ? "" : undefined} data-tip={id === "all" || maxColumns(innerWidth) < 2 ? tip : `${tip} · drag onto the chat to open beside`} draggable={id !== "all"} onDragStart={id === "all" ? undefined : (e) => {
+                <button key={id} type="button" role="tab" aria-selected={laneFilter === id} ref={laneFilter === id ? tabIntoView : undefined} className={`lane-tab${laneFilter === id ? " on" : ""}${st?.needsYou ? " needs" : ""}`} data-state={id === "all" ? undefined : tabState(st?.status, st?.needsYou)} data-owned={who?.owner ? "" : undefined} data-tip={id === "all" || maxColumns(innerWidth) < 2 ? tip : `${tip} · drag onto the chat to open beside`} draggable={id !== "all"} onDragStart={id === "all" ? undefined : (e) => {
                     // Dragged onto the chat, it opens in a column beside the agent in view (SessionView).
                     e.dataTransfer.setData(AGENT_DRAG, id);
                     e.dataTransfer.effectAllowed = "copy";
@@ -1705,7 +1732,7 @@ export function Activity({
               const seq = it.kind === "run" ? it.key : it.kind === "notes" ? it.evs[0]!.seq : it.ev.seq;
               return (
                 // data-seq anchors the catch-up panel's "jump to where you left off".
-                <div key={feedKey(it)} data-seq={seq} data-lane={laneId} className={`${lane ? "feed-item agent-lane" : "feed-item"}${isSetAside(rewinds, seq, laneId) ? " set-aside" : ""}`} style={lane ? ({ "--tint": agentLook(state, lane.id).tint } as React.CSSProperties) : undefined}>
+                <FeedRow key={feedKey(it)} settled={it.kind !== "run" || !!it.ended} data-seq={seq} data-lane={laneId} className={`${lane ? "feed-item agent-lane" : "feed-item"}${isSetAside(rewinds, seq, laneId) ? " set-aside" : ""}`} style={lane ? ({ "--tint": agentLook(state, lane.id).tint } as React.CSSProperties) : undefined}>
                   {breaks[i] && <div className="tm-daybreak" role="separator">{breaks[i]}</div>}
                   {/* Where the new part starts: what arrived after this person last looked, as a line that stays where it was when they opened the room. */}
                   {i === unreadAt && <div className="feed-unread" role="separator" aria-label="New since you looked" {...(i === agentUnreadAt ? { "data-catchup": "" } : {})}><span>New since you looked</span></div>}
@@ -1725,7 +1752,7 @@ export function Activity({
                   ) : (
                     teamGroup?.(it) ?? <EventItem ev={it.ev} ctx={ctx} />
                   )}
-                </div>
+                </FeedRow>
               );
             })
           )}
@@ -1850,6 +1877,27 @@ export function Activity({
 }
 
 // ── small pieces ──────────────────────────────────────────────────────
+
+/**
+ * One row of the feed: drawn again with the rest while it is near the view, and, once its turn is over, left as it last was
+ * while it is far from it (feed-near.ts). A turn still going always draws, wherever it is.
+ */
+function FeedRow({ settled, children, ...div }: React.HTMLAttributes<HTMLDivElement> & { settled: boolean; "data-seq": number; "data-lane": string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const near = useNear(ref);
+  return (
+    <div ref={ref} {...div}>
+      <Held keep={settled && !near}>{children}</Held>
+    </div>
+  );
+}
+/** Its children as they were while `keep` stays true; drawn afresh the moment it is false. */
+const Held = memo(
+  function Held({ children }: { keep: boolean; children: React.ReactNode }) {
+    return <>{children}</>;
+  },
+  (was, now) => was.keep && now.keep,
+);
 
 /**
  * "3 session notes ›": the housekeeping between messages, as one quiet line that opens to them (DIRECTION.md §5 and §9.6: system
@@ -2932,7 +2980,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   // Second opinion (Asides): another model asked about this turn, from the answer's strip; the form opens under the answer.
   const [opinion, setOpinion] = useState(false);
   // Who wrote each line of the change by hand, read from the lane's log once the run has ended (attribution.ts).
-  const attribution = useMemo(() => (item.ended ? attributionOf(ctx.events, lane) : undefined), [ctx.events.length, item.ended, lane]); // eslint-disable-line react-hooks/exhaustive-deps
+  const attribution = useMemo(() => (item.ended ? attributionFor(ctx.events, lane) : undefined), [ctx.events.length, item.ended, lane]); // eslint-disable-line react-hooks/exhaustive-deps
   // Asked of one of Friday's own models: the hosted Friday's, so none in the open-source edition.
   let opinionBtn: React.ReactNode = null;
   // What the run left that has a home of its own.
@@ -3590,6 +3638,15 @@ function SignedOutNote({ ctx, lane, latest }: { ctx: Ctx; lane: string; latest: 
   const ended = ctx.events.findLast((e) => e.body.type === "run.ended" && (e.lane ?? MAIN_LANE) === lane)?.seq ?? 0;
   const handed = ctx.events.findLast((e) => e.seq > ended && e.body.type === "instruction" && e.body.handoff?.fromLane === lane);
   const mine = !!tool && engine!.hostId === ctx.me.id && !!ctx.onConnect;
+  // The message it stopped on, sent again once signed in: "send your message again" was a thing to work out how to do.
+  const asked = ctx.events.findLast((e) => e.seq < ended && e.body.type === "instruction" && (e.lane ?? MAIN_LANE) === lane);
+  const again = asked?.body.type === "instruction" && asked.body.text.trim() ? asked.body.text : "";
+  const [sent, setSent] = useState(false);
+  const tryAgain = async () => {
+    setSent(true);
+    const r = await ctx.send({ type: "instruct", text: again, ...(lane !== MAIN_LANE ? { lane } : {}) });
+    if (!r.ok) (setSent(false), ctx.notify(r.error ?? "Couldn't send that again. Try once more."));
+  };
   const signIn = async () => {
     if (!tool) return;
     setBusy(true);
@@ -3642,6 +3699,11 @@ function SignedOutNote({ ctx, lane, latest }: { ctx: Ctx; lane: string; latest: 
       {mine && latest && (
         <button type="button" className="btn small" disabled={busy} onClick={() => void signIn()}>
           {busy ? "Opening…" : said ? "Sign in again" : "Sign in"}
+        </button>
+      )}
+      {mine && latest && said && again && !handed && (
+        <button type="button" className="btn small primary" disabled={sent} onClick={() => void tryAgain()}>
+          {sent ? "Sent" : "Try again"}
         </button>
       )}
     </div>
@@ -5094,7 +5156,15 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
           {who} cancelled the run
         </Notice>
       );
-    case "run.ended":
+    case "run.ended": {
+      // Stopped before it ran because its tool isn't signed in (a first message on a fresh install, most often): the way to sign
+      // in, where it stopped, as a finished turn has it, rather than red words saying to run a command in a terminal (Arun,
+      // 2026-10-30: the first few minutes after install are where people quit).
+      const lane = ev.lane ?? MAIN_LANE;
+      if (b.outcome === "error" && signedOut(b.error)) {
+        const latest = ctx.events.findLast((e) => e.body.type === "run.ended" && (e.lane ?? MAIN_LANE) === lane)?.seq === ev.seq;
+        return <SignedOutNote ctx={ctx} lane={lane} latest={latest} />;
+      }
       return (
         <Notice ev={ev} icon={XIcon} tone="danger">
           {/* A tool's raw error (a stack trace) is said as what it means, the trace itself one click away (Arun, 2026-10-29:
@@ -5109,6 +5179,7 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
           )}
         </Notice>
       );
+    }
     case "model.routed": {
       // An Auto lane's coding tool: the model picked for this message, against the tool's other models as they were weighed.
       if (b.tool) {

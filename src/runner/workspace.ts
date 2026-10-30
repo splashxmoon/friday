@@ -191,6 +191,17 @@ async function scan(home: string, budgetMs: number, onDir: (dir: string, names: 
 
 /** Git repos under the usual code folders, most recently touched first. */
 export async function recentRepos(limit = 24, home = homedir(), budgetMs = 1500): Promise<FolderInfo[]> {
+  // First, the folders Claude Code and Codex last worked in, most recent first: on a new install, the projects someone is in
+  // are offered on the first screen, not whichever repositories a walk of the home folder came on (Arun, 2026-10-30: the
+  // first minutes after install are where people quit; T3 Code starts by bringing in the projects your tools have used). Read
+  // from their own session files (imports.ts), never the tools started; given what is left of the time, and none if it runs out.
+  const { listCliSessions } = await import("./imports.js");
+  const worked = await soon(
+    listCliSessions({ tools: ["claude", "codex"], limit: 40, ...(home !== homedir() ? { home } : {}) }).then((r) => [...new Set(r.sessions.map((x) => x.cwd))].filter((d) => d && d !== home)),
+    Math.min(800, budgetMs),
+    [] as string[],
+  );
+  const first = (await Promise.all(worked.slice(0, 12).map((d) => soon(describe(d), 600, null)))).filter((f): f is FolderInfo => !!f);
   const repos: string[] = [];
   await scan(home, budgetMs, (dir, names) => {
     if (dir !== home && names.has(".git")) {
@@ -200,11 +211,10 @@ export async function recentRepos(limit = 24, home = homedir(), budgetMs = 1500)
     return true;
   });
   // Reading HEAD and config costs a few file reads each, so only for what's shown.
-  const found = await Promise.all(repos.slice(0, 60).map((d) => soon(describe(d), 600, null)));
-  return found
-    .filter((f): f is FolderInfo => !!f)
-    .sort((a, b) => (b.mtime ?? 0) - (a.mtime ?? 0))
-    .slice(0, limit);
+  const had = new Set(first.map((f) => f.path));
+  const found = await Promise.all(repos.filter((d) => !had.has(d)).slice(0, 60).map((d) => soon(describe(d), 600, null)));
+  const rest = found.filter((f): f is FolderInfo => !!f).sort((a, b) => (b.mtime ?? 0) - (a.mtime ?? 0));
+  return [...first, ...rest].slice(0, limit);
 }
 
 let repoCache: { at: number; value: FolderInfo[]; home: string } | null = null;

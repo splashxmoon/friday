@@ -76,6 +76,20 @@ export function attributionOf(events: SessionEvent[], lane = MAIN_LANE): Attribu
   return out;
 }
 
+/**
+ * attributionOf once for each log and lane: every finished turn in the feed asks for its lane's, and each asking read the whole
+ * log, so a long session read it hundreds of times on every live event (Arun, 2026-10-30: "the app feel laggy when running a
+ * lot of tasks and agents").
+ */
+const shared = new WeakMap<SessionEvent[], Map<string, Attribution>>();
+export function attributionFor(events: SessionEvent[], lane = MAIN_LANE): Attribution {
+  let lanes = shared.get(events);
+  if (!lanes) shared.set(events, (lanes = new Map()));
+  let a = lanes.get(lane);
+  if (!a) lanes.set(lane, (a = attributionOf(events, lane)));
+  return a;
+}
+
 /** Whether an added line of this file was written by hand. */
 export function byHand(attr: Attribution, path: string, text: string): boolean {
   return attr.get(path)?.human.has(text) ?? false;

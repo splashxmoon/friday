@@ -12,6 +12,13 @@ contextBridge.exposeInMainWorld("fridayDesktop", {
   platform: process.platform,
   /** Where the macOS window buttons sit (desktop.ts trafficLightPosition), so the page's header lines up with them. */
   trafficLightY: 17,
+  /** Told when the window enters or leaves full screen, where macOS hides those buttons (desktop.ts). */
+  onFullScreen: (fn: (full: boolean) => void): (() => void) => {
+    const h = (_e: unknown, full: boolean) => fn(full);
+    ipcRenderer.on("friday:full-screen", h);
+    void ipcRenderer.invoke("friday:is-full-screen").then((full: boolean) => fn(full), () => {});
+    return () => void ipcRenderer.off("friday:full-screen", h);
+  },
   /** Which theme the page shows, so Windows and Linux draw the window buttons in its colours. */
   /** `choice` is what was picked, System included, so the app's own sheets follow it (desktop.ts nativeTheme). */
   setTheme: (theme: "dark" | "light", choice?: "system" | "dark" | "light"): void => ipcRenderer.send("friday:theme", theme, choice),

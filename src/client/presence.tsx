@@ -3,7 +3,7 @@
  * working everywhere in the app (Arun, 2026-10-29: "so clean and beautiful really with a clear direction in design language";
  * design-ref/DIRECTION.md §8). It replaces the separate blue dot beside a face and the blue status words.
  *
- * - working: a --live arc, about 70% of a circle, turning once every 2.4s at a constant speed;
+ * - working: a --live comet, a bright head with its tail fading behind it, turning once every 2.4s at a constant speed;
  * - needs: a static --needs ring and a small "?" badge at the bottom right;
  * - queued: a static dashed --ink-3 ring;
  * - done: a --ready check badge (shown for 8s after a run ends, then idle);

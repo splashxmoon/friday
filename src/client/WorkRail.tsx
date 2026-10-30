@@ -165,13 +165,34 @@ interface Steps {
   at: number;
 }
 
+const PLAN_CALL = /^(todo|TodoWrite|update_plan|todo_write)$/;
+/**
+ * Where in the log the messages with a plan in them are, kept from one look to the next: the rail and its bar look on every
+ * live event, and looking from the end, in a session with no plan, read the whole log each time (Arun, 2026-10-30: "the app
+ * feel laggy when running a lot of tasks and agents"). Only what was added since is read; a log that changed otherwise (its
+ * older part loaded in front, a reconnect) is read again whole.
+ */
+let planned: { events: SessionEvent[]; at: number[] } | null = null;
+function planIndexes(events: SessionEvent[]): number[] {
+  const had = planned;
+  const kept = !!had && had.events.length <= events.length && (had.events.length === 0 || events[had.events.length - 1] === had.events[had.events.length - 1]);
+  const at = kept ? [...had!.at] : [];
+  for (let i = kept ? had!.events.length : 0; i < events.length; i++) {
+    const b = events[i]!.body;
+    if (b.type === "agent.message" && b.toolCalls.some((c) => PLAN_CALL.test(c.name))) at.push(i);
+  }
+  planned = { events, at };
+  return at;
+}
+
 /** The latest plan any agent laid out (Claude Code's todo list, Codex's update_plan), and whose. */
 function latestPlan(events: SessionEvent[], state: SessionState, agents: HubAgent[]): Steps | null {
-  for (let i = events.length - 1; i >= 0; i--) {
-    const e = events[i]!;
+  const at = planIndexes(events);
+  for (let k = at.length - 1; k >= 0; k--) {
+    const e = events[at[k]!]!;
     if (e.body.type !== "agent.message") continue;
     for (const c of [...e.body.toolCalls].reverse()) {
-      if (!/^(todo|TodoWrite|update_plan|todo_write)$/.test(c.name)) continue;
+      if (!PLAN_CALL.test(c.name)) continue;
       let args: Record<string, unknown> = {};
       try {
         args = JSON.parse(c.arguments || "{}") as Record<string, unknown>;
@@ -355,7 +376,25 @@ export function WorkRail({ state, events, sid, invite, away, onBrowser, onBrowse
     return () => (removeEventListener("resize", fit), cancelAnimationFrame(frame));
   }, []);
   const roomFor = (el: HTMLElement) => (el.parentElement?.clientWidth ?? innerWidth) - 480;
+  // The room beside the chat, as last measured: drawing reads this, not the page, since the rail draws on every live event and
+  // each reading of a width made the browser lay the page out there and then (Arun, 2026-10-30: "the app feel laggy when
+  // running a lot of tasks and agents"). Measured again whenever the room changes size.
+  const [room, setRoom] = useState<number | null>(null);
+  const watched = useRef<{ el: HTMLElement; ro: ResizeObserver } | null>(null);
+  useLayoutEffect(() => {
+    const parent = aside.current?.parentElement ?? null;
+    if (watched.current?.el === parent) return;
+    watched.current?.ro.disconnect();
+    watched.current = null;
+    if (!parent) return void setRoom(null);
+    const ro = new ResizeObserver(() => setRoom(parent.clientWidth - 480));
+    ro.observe(parent);
+    watched.current = { el: parent, ro };
+    setRoom(parent.clientWidth - 480);
+  });
+  useEffect(() => () => watched.current?.ro.disconnect(), []);
   const width = (el: HTMLElement | null, w: number) => Math.round(Math.max(which === "reader" ? 420 : 280, Math.min(w, el ? roomFor(el) : w)));
+  const railWidth = Math.round(Math.max(which === "reader" ? 420 : 280, Math.min(widths[which], room ?? widths[which])));
   const drag = (e: ReactPointerEvent) => {
     const el = aside.current;
     if (!el) return;
@@ -498,7 +537,7 @@ export function WorkRail({ state, events, sid, invite, away, onBrowser, onBrowse
     );
 
   return (
-    <aside className={`wr${view ? " wide" : ""}`} aria-label="Session overview" ref={aside} onFocus={noteFocus} style={{ width: width(aside.current, widths[which]) }}>
+    <aside className={`wr${view ? " wide" : ""}`} aria-label="Session overview" ref={aside} onFocus={noteFocus} style={{ width: railWidth }}>
       {/* Reachable from the keyboard too: ← and → widen and narrow it, Home puts it back (w2 #16). */}
       <div
         className="wr-grip"
@@ -506,10 +545,10 @@ export function WorkRail({ state, events, sid, invite, away, onBrowser, onBrowse
         tabIndex={0}
         aria-orientation="vertical"
         aria-label={view ? "Resize the reader" : "Resize the overview"}
-        aria-valuenow={width(aside.current, widths[which])}
+        aria-valuenow={railWidth}
         aria-valuemin={which === "reader" ? 420 : 280}
         // The widest it may go here, so a screen reader can say where in its range it is (Arun, 2026-10-28: "TEST EVERYTHING…").
-        aria-valuemax={Math.round(Math.max(which === "reader" ? 420 : 280, aside.current ? roomFor(aside.current) : innerWidth - 480))}
+        aria-valuemax={Math.round(Math.max(which === "reader" ? 420 : 280, room ?? innerWidth - 480))}
         onPointerDown={drag}
         onDoubleClick={() => setWidths((w) => ({ ...w, [which]: which === "reader" ? 640 : 336 }))}
         onKeyDown={(e) => {

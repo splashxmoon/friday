@@ -1,6 +1,6 @@
 {
   "name": "friday-work",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Your coding agents (Claude Code, Codex, Cursor and more) side by side, on your own computer. No account, nothing hosted.",
   "license": "MIT",
   "homepage": "https://www.tryfridaywork.com",

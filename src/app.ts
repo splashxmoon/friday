@@ -15,6 +15,7 @@ import http from "node:http";
 import path from "node:path";
 import { EngineHub } from "./engine/hub.js";
 import { callHost } from "./runner/local-api.js";
+import { usageCounts } from "./usage.js";
 import { readRepo as readFolder } from "./runner/repo-read.js";
 import { readFailed } from "./project-rules.js";
 import { parseRepo } from "./runner/repo.js";
@@ -355,7 +356,23 @@ export async function createApp(o: AppOptions) {
   let teamHear: ((sid: string, ev: SessionEvent) => void) | null = null;
   /** The team's workflows (team-workflows.ts), once the teammates are: their runs follow their boards. */
   let workflows: TeamWorkflows | null = null;
+  // Anonymous usage counts, in the open-source edition only (usage.ts): nothing goes until the app has said so, nor ever with
+  // FRIDAY_NO_TELEMETRY or DO_NOT_TRACK set, or the switch in Settings off.
+  const usage = o.local
+    ? usageCounts({
+        store: redis,
+        key: `${o.prefix}usage`,
+        version: ourVersion,
+        desktop: !!process.versions.electron,
+        tools: async () =>
+          localHost()
+            ? ((((await callHost("tools", {}, hostCtx({ id: o.local!.user.id, name: "" }))) as { tools?: MachineTool[] }).tools ?? []).filter((t) => !!t.path).map((t) => ({ tool: t.tool, ready: t.loggedIn === true })))
+            : [],
+      })
+    : null;
   store.onAppended = (sid, ev) => {
+    if (usage && ev.body.type === "session.created") void usage.sessionStarted(ev.body.options?.team ? "crew" : ev.body.options?.work ? "work" : "code").catch(() => {});
+    if (usage && ev.body.type === "run.ended" && ev.body.outcome === "done" && ev.actor.kind === "agent") void usage.once("first_turn").catch(() => {});
     teamHear?.(sid, ev as SessionEvent);
     workflows?.hear(sid, ev as SessionEvent);
     // Every edition's: the open-source one runs automations too, and with this left out of it its runs stayed "Running" for good
@@ -4250,8 +4267,7 @@ export async function createApp(o: AppOptions) {
 
     // Which Friday this server is, for Settings › About in a browser, where there is no desktop app to say it (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
     if (req.method === "GET" && url.pathname === "/api/version") {
-      appVersion ??= readFile(new URL("../package.json", import.meta.url), "utf8").then((t) => String((JSON.parse(t) as { version?: unknown }).version ?? ""), () => "");
-      return json(res, 200, { version: await appVersion });
+      return json(res, 200, { version: await ourVersion() });
     }
     if (req.method === "GET" && url.pathname === "/api/me") {
       const me = await identity(req);
@@ -4264,6 +4280,18 @@ export async function createApp(o: AppOptions) {
 
 
 
+    // The open-source edition's anonymous usage counts (usage.ts): whether they are on, the notice shown, and the switch.
+    if (usage && url.pathname === "/api/usage-sharing") {
+      if (req.method === "GET") return json(res, 200, await usage.state());
+      if (req.method === "POST") {
+        const b = (await readJson(req)) as { on?: unknown; told?: unknown };
+        const now = await usage.set({ ...(typeof b.on === "boolean" ? { on: b.on } : {}), ...(b.told === true ? { told: true } : {}) });
+        // Told and on: today's count goes now rather than at the next hour.
+        void usage.tick().catch(() => {});
+        return json(res, 200, now);
+      }
+      return json(res, 405, { error: "Method not allowed." });
+    }
     // The open-source edition's name for the person at this computer, kept with everything else here.
     if (o.local && req.method === "PATCH" && url.pathname === "/api/me") {
       const name = String((await readJson(req)).name ?? "").replace(/\s+/g, " ").trim().slice(0, 60);
@@ -4844,6 +4872,12 @@ export async function createApp(o: AppOptions) {
   // A mock dataset has people but nobody at a keyboard: let the ones shown as online walk around, so following and reading marks can be seen.
   const stopMockFocus = o.prefix.startsWith("mock") ? startMockFocus({ redis, prefix: o.prefix, store, bus }) : () => {};
 
+  // Today's count a minute after starting (the tools found by then), then each hour: a day that rolls over while it runs counts too.
+  const usageFirst = setTimeout(() => void usage?.tick().catch(() => {}), 60_000);
+  usageFirst.unref?.();
+  const usageLoop = setInterval(() => void usage?.tick().catch(() => {}), 60 * 60_000);
+  usageLoop.unref?.();
+
   return {
     url: `http://localhost:${port}`,
     store,
@@ -4861,6 +4895,8 @@ export async function createApp(o: AppOptions) {
     workflows: { tick: (now?: Date) => workflows?.tick(now) ?? Promise.resolve([]), engine: () => workflows },
     async close() {
       closing = true;
+      clearTimeout(usageFirst);
+      clearInterval(usageLoop);
       clearInterval(shepherdLoop);
       clearInterval(resumeLoop);
       clearInterval(wakeLoop);
@@ -4909,6 +4945,8 @@ export function forkKind(state: SessionState, mine: boolean): { options: Session
 
 /** This server's version, from its package.json, read once. */
 let appVersion: Promise<string> | undefined;
+/** This Friday's version, as its package.json says. */
+const ourVersion = () => (appVersion ??= readFile(new URL("../package.json", import.meta.url), "utf8").then((t) => String((JSON.parse(t) as { version?: unknown }).version ?? ""), () => ""));
 
 export function forkTools(state: SessionState, local: boolean): { lane?: string; tool: EngineTool; cwd: string; mode: EngineMode }[] | string {
   const lanes = [{ id: MAIN_LANE, name: "" }, ...state.lanes.map((l) => ({ id: l.id, name: laneName(state, l.id) }))];

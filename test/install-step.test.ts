@@ -9,9 +9,13 @@ test("the install line is the one for the system it will be run on, with the she
   assert.equal(installStep("cursor", "linux").shell, "Shell");
 });
 
+test("Claude Code installs with Anthropic's own installer, which needs no Node.js", () => {
+  assert.deepEqual(installStep("claude", "mac"), { shell: "Terminal", command: "curl -fsSL https://claude.ai/install.sh | bash" });
+  assert.deepEqual(installStep("claude", "windows"), { shell: "PowerShell", command: "irm https://claude.ai/install.ps1 | iex" });
+});
+
 test("agents that install through npm say what they need, and the line is the same everywhere", () => {
   for (const os of ["windows", "mac", "linux"] as const) {
-    assert.equal(installStep("claude", os).command, "npm install -g @anthropic-ai/claude-code");
     assert.equal(installStep("codex", os).command, "npm install -g @openai/codex");
     assert.match(installStep("codex", os).needs!, /Node\.js/);
   }

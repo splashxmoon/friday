@@ -105,7 +105,7 @@ Pick **Crew** to keep AI teammates on your computer. Each has a name, a role, a 
 
 ## "So what's the catch?"
 
-There isn't one. Friday on your own computer is free and MIT licensed. It has no account, no server of ours, and no model of its own: the work runs on your coding tools, on their own plans, and nothing comes back to us.
+There isn't one. Friday on your own computer is free and MIT licensed. It has no account, no server of ours, and no model of its own: the work runs on your coding tools, on their own plans. The only thing that comes back to us is a few anonymous usage counts, listed under [Privacy](#privacy), and you can turn them off.
 
 What we sell is [Friday Team](https://www.tryfridaywork.com), the hosted version, for when several people work in the same session: steering one agent together, reviewing each other's changes, and sharing what the agents did.
 
@@ -247,7 +247,17 @@ Hand your coding tools the jobs that come round again. An automation reads like 
 
 Friday listens on `127.0.0.1` only, so nothing else on your network can reach it, and it answers only its own page: a request from any other site, or from a page being previewed, is refused. What it keeps is one folder on your computer, readable only by you.
 
-It sends nothing to us: no account, no analytics, no telemetry. It talks to GitHub for the pull requests, issues and skills you ask it about. Each tool's remaining usage comes from the tool itself wherever it can: Claude Code's from what it reports as it runs (its sign-in is never read), Codex's from its own app server, Copilot's through your GitHub CLI. Cursor keeps none on your computer, so Friday makes the request Cursor's own CLI makes, to Cursor's server and nowhere else. Friday never switches the account a tool is signed in with. A model you add in Settings › Your models is called from your computer, and its key is kept there and sent only to that model's own server. The desktop app also asks GitHub for a newer release while it's open (when it starts, when you come back to it, and every ten minutes), downloads it from there, and installs it when you restart (`FRIDAY_NO_UPDATE_CHECK=1` turns that off).
+It has no account, and your code, prompts and files never come to us. What it does send is a few anonymous usage counts, so we can see whether people get Friday working and keep using it. Every one of them goes to [PostHog](https://posthog.com) over HTTPS, with IP-based location and person profiles turned off; a send that fails is dropped. The code is all in [`src/usage.ts`](src/usage.ts).
+
+- A random id made on your computer for this install, tied to nothing else.
+- Friday's version, your system (macOS, Windows or Linux) and its architecture, and whether it's the desktop app.
+- Once a day you open it: that you did, the names of the coding tools it found, and how many are signed in.
+- Each session started, and whether it's a Code, Work or Crew one.
+- Once each: the first time a coding tool is ready, and the first time an agent finishes a turn.
+
+Never: prompts, code, file names or paths, repository names, email addresses, accounts or sign-ins, or anything a tool writes. Friday tells you about the counts the first time it opens, and sends nothing before that. To turn them off, use Settings › Data & backup › Share anonymous usage, or set `FRIDAY_NO_TELEMETRY=1` or `DO_NOT_TRACK=1` where Friday runs.
+
+It talks to GitHub for the pull requests, issues and skills you ask it about. Each tool's remaining usage comes from the tool itself wherever it can: Claude Code's from what it reports as it runs (its sign-in is never read), Codex's from its own app server, Copilot's through your GitHub CLI. Cursor keeps none on your computer, so Friday makes the request Cursor's own CLI makes, to Cursor's server and nowhere else. Friday never switches the account a tool is signed in with. A model you add in Settings › Your models is called from your computer, and its key is kept there and sent only to that model's own server. The desktop app also asks GitHub for a newer release while it's open (when it starts, when you come back to it, and every ten minutes), downloads it from there, and installs it when you restart (`FRIDAY_NO_UPDATE_CHECK=1` turns that off).
 
 ## Developing
 
@@ -285,7 +295,7 @@ Its task goes to the agent best placed to finish it, with its notes, files and p
 Yes: an [automation](#automations) starts a coding tool on a schedule, from a webhook, or when another session finishes, and opens a pull request for you to review. Friday has to be running for it to start; you choose whether a run missed while the computer was off happens when it's back.
 
 **Does my code leave my computer?**
-Not through Friday. It runs on `127.0.0.1` with no account and no server of ours; your coding tools talk to their own providers as they always do.
+Not through Friday. It runs on `127.0.0.1` with no account and no server of ours; your coding tools talk to their own providers as they always do. The only things Friday sends us are the anonymous usage counts under [Privacy](#privacy), which never include code, and you can turn them off.
 
 ---
 

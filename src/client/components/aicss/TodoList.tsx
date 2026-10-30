@@ -1,6 +1,7 @@
 "use client";
 
 import styles from "./TodoList.module.css";
+import { Shine } from "../../shine.js";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 export type TodoStatus = "pending" | "active" | "completed" | "cancelled";
@@ -158,7 +159,7 @@ export function TodoList({ steps, title = "To-dos", defaultCollapsed = false, ic
                   {t.who || t.note ? (
                     // Who has it and where it stands on a line of their own under the title, so the title keeps the row.
                     <span className={styles.todoText}>
-                      <span className={styles.todoLabel} data-label={t.title}>{t.title}</span>
+                      <Shine on={active} className={styles.todoLabel}>{t.title}</Shine>
                       <span className={styles.todoMeta}>
                         {t.who && <span className={styles.todoWho}>{t.who}</span>}
                         {t.who && t.note && <span className={styles.todoSep} aria-hidden="true">·</span>}
@@ -166,7 +167,7 @@ export function TodoList({ steps, title = "To-dos", defaultCollapsed = false, ic
                       </span>
                     </span>
                   ) : (
-                    <span className={styles.todoLabel} data-label={t.title}>{t.title}</span>
+                    <Shine on={active} className={styles.todoLabel}>{t.title}</Shine>
                   )}
                   {t.actions && (
                     <span className={styles.todoActions} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>

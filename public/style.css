@@ -2801,27 +2801,10 @@ svg.lucide { stroke-width: 1.5; } /* DIRECTION.md §6: Lucide at 1.5 (2026-10-29
 .bui-agent-thinking-text { font-size: 13px; }
 .bui-agent-thinking-timer { font-family: var(--mono); font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums; }
 
-/* The label's highlight travels rather than the label pulsing: a pulse reads
-   as a warning, a sweep reads as work in progress. */
-.bui-agent-thinking-label {
-  color: transparent;
-  background-image: linear-gradient(
-    100deg,
-    color-mix(in oklab, var(--bui-agent-thinking-tone) 45%, transparent) 30%,
-    var(--bui-agent-thinking-tone) 50%,
-    color-mix(in oklab, var(--bui-agent-thinking-tone) 45%, transparent) 70%
-  );
-  background-position: 200% center;
-  background-size: 300% 100%;
-  background-clip: text;
-  -webkit-background-clip: text;
-  animation: bui-thinking-shimmer 2.6s linear infinite;
-  will-change: background-position;
-}
-@keyframes bui-thinking-shimmer {
-  from { background-position: 200% center; }
-  to { background-position: -100% center; }
-}
+/* The label's highlight travels rather than the label pulsing: a pulse reads as a warning, a sweep reads as work in progress.
+   Drawn by the compositor (shine.tsx): the tone's words, faint, with the tone itself passing over them. */
+.bui-agent-thinking-label { --shine-base: color-mix(in oklab, var(--bui-agent-thinking-tone) 45%, transparent); --shine-ink: var(--bui-agent-thinking-tone); }
+
 @keyframes bui-agent-thinking-star {
   0%, 100% { transform: scale(.4); opacity: 0; }
   40% { transform: scale(1); opacity: 1; }
@@ -3113,14 +3096,6 @@ svg.lucide { stroke-width: 1.5; } /* DIRECTION.md §6: Lucide at 1.5 (2026-10-29
 }
 :root:not(.dark) .ring-spin { background: conic-gradient(from 0deg, transparent 0 18%, color-mix(in srgb, var(--ink) 35%, transparent) 45%, var(--ink) 100%); }
 @media (prefers-reduced-motion: reduce) { .ring-spin { animation: none; } }
-.rsp-shine {
-  color: transparent; -webkit-text-fill-color: transparent;
-  background: linear-gradient(90deg, var(--text-muted) 0%, var(--text-muted) 30%, var(--ink) 45%, var(--ink) 55%, var(--text-muted) 70%, var(--text-muted) 100%);
-  background-size: 300% 100%; -webkit-background-clip: text; background-clip: text;
-  animation: rsp-shine 2.25s cubic-bezier(.25,.1,.25,1) infinite;
-}
-@keyframes rsp-shine { 0%, 18% { background-position: 100% 0; } 82%, 100% { background-position: 0% 0; } }
-@media (prefers-reduced-motion: reduce) { .rsp-shine { animation: none; color: var(--text-muted); -webkit-text-fill-color: var(--text-muted); background: none; } }
 
 /* A caret drawn from two borders, so it takes the text colour and needs no icon. */
 .rsp-caret { display: inline-block; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: translateY(-2px) rotate(45deg); transition: transform .16s cubic-bezier(.22,1,.36,1); opacity: .7; flex: none; }
@@ -10223,9 +10198,8 @@ html .shell.with-panel .main { border-color: var(--border) !important; }
 .sub-doing.bad { color: var(--red); }
 /* Gone quiet a long while: said plainly, not shimmering as if all were well (2026-10-27 audit). */
 .sub[data-state="working"] .sub-doing.warn { animation: none; background: none; color: var(--amber, #d4a72c); }
-.sub[data-state="working"] .sub-doing { background: linear-gradient(90deg, var(--text-muted) 0 40%, var(--ink) 50%, var(--text-muted) 60% 100%) 0 0 / 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: sub-shimmer 2.2s linear infinite; }
-@keyframes sub-shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
-@media (prefers-reduced-motion: reduce) { .sub[data-state="working"] .sub-doing { animation: none; color: var(--text-muted); background: none; } }
+/* A working subagent's line has the light passing over it (shine.tsx), in the ink's light. */
+.sub-doing.shine { --shine-ink: var(--ink); }
 .sub-summary { margin: 0; color: var(--ink-2); font-size: 13px; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .sub-summary.open { display: block; -webkit-line-clamp: unset; white-space: pre-wrap; }
 .sub-more { align-self: flex-start; display: inline-flex; align-items: center; gap: 3px; padding: 0; border: 0; background: none; color: var(--text-muted); font-size: 12px; cursor: pointer; }
@@ -10307,7 +10281,7 @@ html:not(.desktop) .shell:not(.with-panel) #main { padding-left: 44px; }
 .feed-toolbar .lane-tab:is([data-state="needs"], [data-state="waiting"]) .lane-tab-sub { color: var(--ink); }
 /* The ring on an agent's tab: the same presence ring a teammate's face wears (presence.tsx; 2026-10-29 direction §8), so a blue
    ring turning means working everywhere. 2px, 1.5px off a plain disc, as the face rings are at 24px (Arun, 2026-10-29: "the ring
-   things should be slightly thicker too"): working, a --live arc of 70% turning every 2.4s; needs you, amber; stopped, red;
+   things should be slightly thicker too"): working, a --live comet turning every 2.4s; needs you, amber; stopped, red;
    offline, dashed; ready or done, none. */
 .feed-toolbar .lane-tab-mark { position: relative; flex: none; width: 24px; height: 24px; margin: 0 2px; border-radius: 50%; background: var(--hover-strong) !important; box-shadow: none !important; }
 .feed-toolbar .lane-tab-mark .agent-mark svg, .feed-toolbar .lane-tab-mark > svg { width: 13px; height: 13px; }
@@ -10316,7 +10290,7 @@ html:not(.desktop) .shell:not(.with-panel) #main { padding-left: 44px; }
 .feed-toolbar .lane-tab[data-state="failed"] .lane-tab-mark::after { box-shadow: inset 0 0 0 2px var(--red); }
 .feed-toolbar .lane-tab[data-state="offline"] .lane-tab-mark::after { border: 2px dashed var(--text-muted); }
 .feed-toolbar .lane-tab[data-state="working"] .lane-tab-mark::after {
-  background: conic-gradient(var(--live) 0 70%, transparent 70% 100%);
+  background: conic-gradient(from 0deg, transparent 0 6%, color-mix(in srgb, var(--live) 14%, transparent) 30%, color-mix(in srgb, var(--live) 55%, transparent) 70%, var(--live) 96%, transparent 96.5%);
   -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px)); mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px));
   animation: pr-turn 2.4s linear infinite;
 }
@@ -11006,6 +10980,25 @@ html .shell.with-panel .main { border-top-left-radius: 0 !important; }
 .ws-branch-from { flex: none; color: var(--text-muted); }
 .branch-head { margin: 6px 7px 2px; font-size: 12px; font-weight: 600; letter-spacing: .02em; color: var(--faint); }
 /* ── The open-source edition's one line about Friday Team (TeamTip.tsx): in the sidebar's foot, and under a session's settings ── */
+/* Home, with no coding tool ready: one line above the box and the way to set one up (Code.tsx). */
+.home-setup { display: flex; align-items: center; gap: 12px; width: min(var(--composer-w, 656px), 100%); margin: 0 auto 12px; padding: 10px 12px 10px 14px; border: 1px solid color-mix(in srgb, var(--amber) 40%, var(--border)); border-radius: var(--r-md, 10px); background: color-mix(in srgb, var(--amber) 6%, transparent); color: var(--ink-2); font-size: 13px; line-height: 1.45; }
+.home-setup > span { flex: 1; min-width: 0; }
+.home-setup b { color: var(--ink); font-weight: 600; }
+.home-setup .btn { flex: none; }
+/* The usage notice (UsageSharing.tsx), once, in the sidebar's foot where the Friday Team tip sits: what is counted, and the switch. */
+.usage-notice { display: flex; flex-direction: column; gap: 8px; margin: 0 0 4px; padding: 10px 10px 8px; border: 1px solid var(--border); border-radius: var(--r-md, 10px); background: var(--card, var(--bg)); color: var(--text-muted); font-size: 12px; line-height: 1.45; }
+.usage-notice p { margin: 0; }
+.usage-notice b { display: block; margin-bottom: 2px; color: var(--ink); font-weight: 600; }
+.usage-notice-link { padding: 0; border: 0; background: none; color: var(--ink-2); font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.usage-notice-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.usage-notice-actions button { height: 26px; padding: 0 10px; border-radius: 7px; font: inherit; font-weight: 500; cursor: pointer; }
+.usage-notice-off { border: 1px solid var(--border-strong, var(--border)); background: transparent; color: var(--ink-2); }
+.usage-notice-off:hover { background: var(--hover); color: var(--ink); }
+.usage-notice-ok { border: 1px solid var(--ink); background: var(--ink); color: var(--bg); }
+.usage-notice-ok:hover { opacity: .9; }
+.usage-notice :is(button):focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.usage-what { display: inline-flex; align-items: center; gap: 4px; margin-right: 10px; padding: 0; border: 0; background: none; color: var(--text-muted); font: inherit; font-size: 12px; cursor: pointer; }
+.usage-what:hover { color: var(--ink); }
 .team-tip { display: flex; align-items: center; gap: 7px; margin: 0; padding: 6px 4px 6px 8px; border-radius: 8px; font-size: 12px; line-height: 1.35; color: var(--text-muted); }
 .team-tip-go { display: flex; align-items: center; gap: 7px; flex: 1 1 auto; min-width: 0; margin: -6px -4px -6px -8px; padding: 6px 4px 6px 8px; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background-color .12s, color .12s; }
 .team-tip-go:hover { background: var(--hover); color: var(--ink); }
@@ -11583,8 +11576,10 @@ html.desktop [data-slot="dialog-content"] { top: calc(50% + 20px); max-height: c
 }
 .pr[data-pr] > :not(.pr-ring, .pr-badge) { grid-area: 1 / 1; }
 .pr-ring { position: absolute; inset: calc(-1 * (var(--pr-gap) + var(--pr-w))); border-radius: 50%; pointer-events: none; }
+/* Working: a comet, its head in --live and its tail fading behind it, turning every 2.4s (Arun, 2026-10-30: "rework the
+   circle animation"; the hard-edged 70% arc before). One gradient, turned by transform, so the compositor draws it alone. */
 .pr[data-pr="working"] > .pr-ring {
-  background: conic-gradient(var(--live) 0 70%, transparent 70% 100%);
+  background: conic-gradient(from 0deg, transparent 0 6%, color-mix(in srgb, var(--live) 14%, transparent) 30%, color-mix(in srgb, var(--live) 55%, transparent) 70%, var(--live) 96%, transparent 96.5%);
   -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - var(--pr-w)), #000 calc(100% - var(--pr-w) + .5px)); mask: radial-gradient(farthest-side, transparent calc(100% - var(--pr-w)), #000 calc(100% - var(--pr-w) + .5px));
   animation: pr-turn 2.4s linear infinite;
 }
@@ -11723,13 +11718,25 @@ html.reduce-motion :is([data-slot$="-content"], [data-slot$="-overlay"], .quick,
 .rsp-meta-line { color: var(--ink-3); font-size: 12px; line-height: 16px; font-variant-numeric: tabular-nums; }
 .rsp-meta-live { gap: 0; }
 .rsp-meta-live.needs { color: var(--needs); }
-.rsp-shine {
-  background: linear-gradient(90deg, var(--ink-3) 0%, var(--ink-3) 35%, var(--ink-2) 50%, var(--ink-3) 65%, var(--ink-3) 100%);
-  background-size: 300% 100%; -webkit-background-clip: text; background-clip: text;
-  animation: rsp-shine 2.8s linear infinite;
+/* The light passing over live words (shine.tsx): the words in --shine-base, and a window over a copy of them in --shine-ink,
+   sliding across while the copy slides back, both by transform, so the compositor draws it without the page. */
+.shine { position: relative; color: var(--shine-base, var(--ink-3)); }
+:where(span.shine) { display: inline-block; max-width: 100%; vertical-align: bottom; }
+.shine-win {
+  position: absolute; inset: 0; overflow: hidden; white-space: inherit; text-overflow: inherit; pointer-events: none; user-select: none;
+  -webkit-mask: linear-gradient(90deg, transparent 0%, #000 40%, #000 60%, transparent 100%); mask: linear-gradient(90deg, transparent 0%, #000 40%, #000 60%, transparent 100%);
+  animation: shine-win 2.8s linear infinite;
 }
-@media (prefers-reduced-motion: reduce) { .rsp-shine { animation: none; color: var(--ink-2); -webkit-text-fill-color: var(--ink-2); background: none; } }
-html.reduce-motion .rsp-shine { animation: none; color: var(--ink-2); -webkit-text-fill-color: var(--ink-2); background: none; }
+.shine-copy {
+  display: block; width: 100%; height: 100%; color: var(--shine-ink, var(--ink-2)); -webkit-text-fill-color: currentColor;
+  white-space: inherit; overflow: hidden; text-overflow: inherit;
+  animation: shine-copy 2.8s linear infinite;
+}
+@keyframes shine-win { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+@keyframes shine-copy { from { transform: translateX(100%); } to { transform: translateX(-100%); } }
+@media (prefers-reduced-motion: reduce) { .shine-win { display: none; } .shine { color: var(--shine-ink, var(--ink-2)); } }
+html.reduce-motion .shine-win { display: none; }
+html.reduce-motion .shine { color: var(--shine-ink, var(--ink-2)); }
 /* An older run folded to its line: the mark, the name, what it came to, quiet. */
 .rsp-folded { gap: 10px; min-height: 32px; padding: 4px 8px; border-radius: var(--r-md); color: var(--ink-3); font-size: 13px; }
 .rsp-folded .rsp-avatar svg { width: 18px; height: 18px; }

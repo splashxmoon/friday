@@ -167,9 +167,34 @@ export function useSeen(sid: string): Record<string, number> {
   );
 }
 
-/** Every agent in the session as the hub sees it, worked out once by the session view: one status everywhere. */
-export const AgentsContext = createContext<HubAgent[]>([]);
-export const useAgents = () => useContext(AgentsContext);
+/**
+ * Every agent in the session as the hub sees it, worked out once by the session view: one status everywhere.
+ *
+ * Handed down as a store the session view fills rather than as the context's value: the list is new on every live event, and a
+ * context whose value changes has React look through everything under it for its readers, the whole feed included, where a
+ * store tells only its readers (Arun, 2026-10-30: "the app feel laggy when running a lot of tasks and agents").
+ */
+export interface AgentsStore {
+  get: () => HubAgent[];
+  sub: (f: () => void) => () => void;
+}
+/** The session view's: `put` while it draws, so what it draws reads the new list at once; `tell` after, for the rest. */
+export function agentsStore(): AgentsStore & { put: (a: HubAgent[]) => void; tell: () => void } {
+  let now: HubAgent[] = [];
+  const subs = new Set<() => void>();
+  return {
+    get: () => now,
+    sub: (f) => (subs.add(f), () => void subs.delete(f)),
+    put: (a) => void (now = a),
+    tell: () => subs.forEach((f) => f()),
+  };
+}
+const NO_AGENTS: HubAgent[] = [];
+export const AgentsContext = createContext<AgentsStore>({ get: () => NO_AGENTS, sub: () => () => {} });
+export function useAgents(): HubAgent[] {
+  const store = useContext(AgentsContext);
+  return useSyncExternalStore(store.sub, store.get);
+}
 
 /**
  * The next thing waiting on this person, after the agent in view: that agent becomes the one in view, and its card is

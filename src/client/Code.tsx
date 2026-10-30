@@ -343,7 +343,9 @@ export function Code({
     if (chose.current) return;
     // A tool known to be signed in first; one whose check hasn't answered yet only if none is (sign-ins now arrive one by one).
     const has = (ok: (x: (typeof machine.tools)[number]) => boolean) => ENGINE_TOOLS.find((t) => machine.tools.some((x) => x.tool === t && x.path && ok(x)));
-    const ready = has((x) => x.loggedIn === true) ?? has((x) => x.loggedIn !== false);
+    // None ready: one that is installed, signed in or not, so a first message ends on that tool's way to sign in; Claude Code
+    // when nothing is installed at all.
+    const ready = has((x) => x.loggedIn === true) ?? has((x) => x.loggedIn !== false) ?? has(() => true);
     setEngine(solo ? (ready ?? "claude") : "");
   }, [solo, machine.tools]);
   const [files, setFiles] = useState<Attached[]>([]);
@@ -786,6 +788,19 @@ export function Code({
         work ? <HeroTitle lines={WORK_LINES} /> :
         <HeroTitle />
       }
+      {/* No coding tool ready on this computer: said here, with the way to set one up, before a message is written that can only
+          stop on "isn't signed in" (Arun, 2026-10-30: the first few minutes after install are where people quit). */}
+      {(machine.mode === "local" || machine.mode === "linked") && !machine.tools.some((t) => t.path && t.loggedIn !== false && !t.unavailable) && (
+        <div className="home-setup" role="status">
+          <span>
+            <b>No coding tool is ready yet.</b> Friday runs Claude Code, Codex and the others on their own plans: install or sign in to
+            one to start.
+          </span>
+          <button type="button" className="btn small" onClick={() => window.dispatchEvent(new Event("friday:setup"))}>
+            Set up
+          </button>
+        </div>
+      )}
 
       <div className="composer-above">
         {/* Smart routing (routing.ts): Auto for whichever agent is chosen, when it can route. Above the box, on its own, so it is

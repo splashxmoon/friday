@@ -14,7 +14,7 @@ import { reviewTarget } from "./tool-commands.js";
 import { ampConfig, claudeConfig, codexConfig, type FridayMcp } from "./friday-mcp.js";
 import { readFileSync, statSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 
 /**
  * Adapters for the coding CLIs people already have: Claude Code, Codex and
@@ -239,6 +239,12 @@ export interface Adapter {
   dirs?: boolean;
   /** Which JSON-RPC it speaks when kept between turns (see AcpHow.dialect): ACP unless said. */
   dialect?: "codex";
+  /**
+   * A protocol of its own, spoken by one process a turn and never kept between turns: the kept process (WarmAcp) answers
+   * `initialize` itself, in ACP or Codex's dialect, and this tool's parser, waiting for that answer, never opened the
+   * conversation (Muse Code: every turn sat at "working" until it was stopped; Arun, 2026-10-29: "check if muse works").
+   */
+  perTurn?: true;
   /** The modes it can be held to, when not all three: a tool that can't ask before it acts can't honour Manual or Plan. */
   modes?: EngineMode[];
   /**
@@ -2169,6 +2175,20 @@ export const amp: Adapter = {
  * Manual and Plan with `promptUnmatched`, so it asks (`approval/request`, acknowledged, then answered by `approval/decide`):
  * Manual lets a change to a file through and puts a command to a person, Plan refuses any change and asks about the rest.
  */
+/**
+ * A UUIDv7, its first 48 bits the time in milliseconds: Muse 1.4 refuses any other kind of command id ("invalid session/start
+ * commandId: expected UUIDv7"), so every turn failed before it began (Arun, 2026-10-29: "check if muse works"). Its own session
+ * ids are made the same way, so Friday's are too.
+ */
+export function uuidv7(now = Date.now()): string {
+  const b = randomBytes(16);
+  for (let i = 0; i < 6; i++) b[i] = Math.floor(now / 2 ** (8 * (5 - i))) & 0xff;
+  b[6] = (b[6]! & 0x0f) | 0x70;
+  b[8] = (b[8]! & 0x3f) | 0x80;
+  const h = b.toString("hex");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
 /** Muse's tools as the session's cards are named, by the words in their names. */
 function museCard(tool: string, raw: Record<string, unknown>): { name: string; args: Record<string, unknown> } {
   const where = str(raw.path) || str(raw.file_path) || str(raw.filePath) || str(raw.file);
@@ -2197,6 +2217,10 @@ export const muse: Adapter = {
   logout: ["logout"],
   dirs: true,
   interactive: true,
+  perTurn: true,
+  // Its allowance, which needs the account and no model turn: "not logged in: run `muse login` first" when signed out, a JSON
+  // object when signed in (with META_API_KEY set too, which Muse puts before the account).
+  status: { args: ["usage", "--json"], signedIn: /^\s*\{/ },
   unavailable: () => (process.platform === "win32" ? "Muse Code doesn't run on Windows itself: install it inside WSL." : null),
   // Its own sandbox off only where Friday lets it act unasked; the workspace trusted, since Friday opened it there.
   args: (t) => ["serve", "--trust-workspace", ...(t.mode === "full" ? ["--disable-sandbox"] : [])],
@@ -2210,7 +2234,7 @@ export const muse: Adapter = {
     const ask = (method: string, params: Record<string, unknown>, then: (r: { result?: any; error?: { code?: number; message?: string } }) => AdapterOut[]) => {
       const id = acpIds++;
       waiting.set(id, then);
-      wire.write(rpc({ id, method, params: { ...params, commandId: randomUUID() } }));
+      wire.write(rpc({ id, method, params: { ...params, commandId: uuidv7() } }));
     };
     let sid = "";
     let turnId = "";
@@ -2288,7 +2312,7 @@ export const muse: Adapter = {
       return [{ kind: "session", id: sid }, ...startTurn()];
     };
     const startFresh = (): AdapterOut[] => {
-      sid = randomUUID();
+      sid = uuidv7();
       ask(
         "session/start",
         {
@@ -2608,15 +2632,20 @@ export async function loginStatus(tool: EngineTool, bin: string, account?: strin
  * `copilot <anything else>` starts a session. Only whether that list has anyone in it is read, never a token. The file starts
  * with `//` comment lines (1.0.95), which JSON.parse refuses. The key has been spelled both ways in versions people have
  * reported; null when neither is there.
+ *
+ * No config at all is a Copilot never signed in on this computer, unless a token is set for it: that read "can't tell", which
+ * the app takes as ready, so a fresh install offered Copilot as Ready and its first turn stopped on "isn't signed in" (Arun,
+ * 2026-10-30: the first few minutes after install are where people quit).
  */
-export async function copilotSignedIn(home = process.env.COPILOT_HOME || path.join(homedir(), ".copilot")): Promise<boolean | null> {
+export async function copilotSignedIn(home = process.env.COPILOT_HOME || path.join(homedir(), ".copilot"), env: NodeJS.ProcessEnv = process.env): Promise<boolean | null> {
   try {
     const text = (await readFile(path.join(home, "config.json"), "utf8")).replace(/^\s*\/\/.*$/gm, "");
     const j = JSON.parse(text) as Record<string, unknown>;
     const users = j.loggedInUsers ?? j.logged_in_users;
     return Array.isArray(users) ? users.length > 0 : null;
-  } catch {
-    return null;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") return null;
+    return env.COPILOT_GITHUB_TOKEN || env.GH_TOKEN || env.GITHUB_TOKEN ? null : false;
   }
 }
 

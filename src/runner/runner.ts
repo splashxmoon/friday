@@ -586,7 +586,7 @@ export class Runner {
       this.bin = bin;
       this.launch = launch.l;
       if (tool === "claude" && !o.bin) this.warm = new WarmClaude();
-      else if (ADAPTERS[tool].interactive) this.acp = new WarmAcp();
+      else if (ADAPTERS[tool].interactive && !ADAPTERS[tool].perTurn) this.acp = new WarmAcp();
     };
     const repo = o.repo !== undefined ? Promise.resolve(o.repo) : startChecks.repoInfo(o.cwd);
     [, this.repo] = await Promise.all([tool ? checks(tool) : null, repo]);

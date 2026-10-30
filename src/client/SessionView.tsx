@@ -55,7 +55,7 @@ import { CLASS_LABEL, COMMAND_CLASSES, type CommandClass } from "../command-clas
 import { FocusContext, herePublisher } from "./focusStore.js";
 import { RoomMenu, TeamFaces, teamTitle } from "./Teammates.js";
 import { TeamHeaderControls } from "./TeamControls.js";
-import { ALL, AgentsContext, agentKey, focusAgent, focusedAgent, jumpToNeeds, nextKey, openedAt, setColumns, syncAddress, useAgents, useColumns, useFocusedAgent, useSeen } from "./agentFocus.js";
+import { ALL, AgentsContext, agentKey, agentsStore, focusAgent, focusedAgent, jumpToNeeds, nextKey, openedAt, setColumns, syncAddress, useAgents, useColumns, useFocusedAgent, useSeen } from "./agentFocus.js";
 import { AGENT_DRAG, closeColumn, dropAgent, evenWidths, fitColumns, maxColumns, pickInColumn, resizeAt, unreadByLane } from "./agentNav.js";
 import { agentLook, laneLabel } from "./handoff-ui.js";
 import { hubOf } from "../agents-hub.js";
@@ -428,6 +428,10 @@ export function SessionView({
   // places can say different things about the same agent.
   const shownState = replayState ?? s.state;
   const hubAgents = useMemo(() => (shownState ? hubOf(shownState, shownEvents, s.me?.id ?? "").agents : []), [shownState, shownEvents, s.me?.id]);
+  // What reads the agents below gets them from this store (agentFocus.ts AgentsStore): the same one for good, filled here.
+  const agentsHere = useMemo(agentsStore, []);
+  agentsHere.put(hubAgents);
+  useLayoutEffect(() => agentsHere.tell(), [agentsHere, hubAgents]);
   // The agent in view, one choice for the page (agentFocus.ts): the agent the panels follow, and in a split the column in
   // use. Choosing one that no column shows (⌃4, the palette, ⌘J to another agent) goes back to one chat, on it.
   const focused = useFocusedAgent(sid);
@@ -789,7 +793,7 @@ export function SessionView({
   };
 
   return (
-    <AgentsContext.Provider value={hubAgents}>
+    <AgentsContext.Provider value={agentsHere}>
     <FocusContext.Provider value={focusValue}>
     <div className={`session-view${focus ? " focus" : ""}`}>
       <TopBar

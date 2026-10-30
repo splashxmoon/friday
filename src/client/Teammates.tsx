@@ -51,6 +51,7 @@ import { prefillComposer } from "./RunReview.js";
 import { notificationsOn } from "./prefs.js";
 import { TeammatePage } from "./TeammatePage.js";
 import "./teammates.css";
+import { Shine } from "./shine.js";
 
 /** A team's size (teammates.ts MAX_TEAMMATES). */
 const MAX = 12;
@@ -1055,7 +1056,7 @@ export function TeamWorking({ sid }: { sid: string }) {
               <button type="button" className="tm-wait-row" onClick={() => focusAgent(sid, lane)} title={`Open ${m.name}'s chat`}>
                 <Face seed={m.look ?? m.name} size={16} status="working" />
                 <b className="tm-wait-name">{m.name}</b>
-                <span className="tm-wait-line">{line}</span>
+                <Shine className="tm-wait-line">{line}</Shine>
                 {since !== null && <span className="tm-wait-time">{elapsed(since, now)}</span>}
               </button>
             </li>
@@ -1158,7 +1159,7 @@ export function TeamRun({ sid, lane, active, doing, said, outcome, changed, stam
         {active && (
           // One live line, in --ink-2 with the feed's shimmer: the ring on the face above says it works (DIRECTION.md §8).
           <div className="tt-status is-work">
-            <span className="tm-live-text">{doing || "Working"}</span>
+            <Shine className="tm-live-text">{doing || "Working"}</Shine>
           </div>
         )}
         <div className="tt-foot">

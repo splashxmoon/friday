@@ -6,6 +6,7 @@ import { ENGINE_NAMES, type EngineTool, type ToolCall } from "../types.js";
 import { Icon, type IconName } from "./icons.js";
 import type { Look } from "./handoff-ui.js";
 import { shortTokens } from "../tool-usage.js";
+import { Shine } from "./shine.js";
 import { stepsSummary } from "../step-summary.js";
 
 /**
@@ -26,7 +27,7 @@ export function Working({ label }: { label: string }) {
   return (
     <span className="rsp-working" role="status">
       <Orb variant="S3" size={14} label={label} />
-      <span className="rsp-shine">{label}</span>
+      <Shine>{label}</Shine>
     </span>
   );
 }
@@ -52,7 +53,7 @@ export function Thinking({ text, live, seconds }: { text: string; live: boolean;
     <div className={`rsp-think ${live ? "live" : ""}`}>
       <button type="button" className="rsp-think-head" aria-expanded={expanded} onClick={live ? undefined : () => setOpen(!open)} disabled={live}>
         {live ? (
-          <span className="rsp-shine">Thinking…</span>
+          <Shine>Thinking…</Shine>
         ) : (
           <span className="rsp-think-label">
             <span className="rsp-think-verb">Thought</span>
@@ -215,7 +216,7 @@ function StepList({ steps, shown: picked, onShown }: { steps: Step[]; shown?: st
           <div className="rsp-step-line">
             <button type="button" className="rsp-step-row" disabled={!s.detail} aria-expanded={shown === s.id} onClick={() => setShown(shown === s.id ? null : s.id)}>
               <StepMark mark={s.mark} />
-              <span className={s.state === "running" ? "rsp-verb rsp-shine" : "rsp-verb"}>{s.state === "waiting" ? askedVerb(s.verb) : s.verb}</span>
+              <Shine on={s.state === "running"} className="rsp-verb">{s.state === "waiting" ? askedVerb(s.verb) : s.verb}</Shine>
               {s.target && <code className="rsp-chip">{clip(s.target, 72)}</code>}
               {s.state === "failed" && <span className="rsp-step-flag">failed</span>}
               {s.state === "waiting" && <span className="rsp-step-flag quiet" title="Asked for, but the turn ended before it ran: stopped, out of usage, or still waiting for a yes">didn't run</span>}
@@ -351,10 +352,10 @@ export function RunLog({
       <button type="button" className="rsp-tl-head" aria-expanded={open} data-tip={open ? "Hide the steps" : "Show every step"} onClick={() => setOpen(!open)}>
         <span className={`rsp-caret side ${open ? "open" : ""}`} aria-hidden />
         {/* What it cost, in a span of its own, so a session that doesn't count it can leave it out. */}
-        <span className={failed ? "rsp-tl-summary has-fail" : live ? "rsp-tl-summary rsp-shine" : "rsp-tl-summary"}>
+        <Shine on={live && !failed} className={failed ? "rsp-tl-summary has-fail" : "rsp-tl-summary"}>
           {summary}
           {tokens ? <span className="rsp-tokens"> · {shortTokens(tokens)} tokens</span> : null}
-        </span>
+        </Shine>
         {live && current && (
           <span className="rsp-tl-now">
             <span>{current.verb}</span>
@@ -418,7 +419,7 @@ export function RunMeta({ files, live, onFile, startedAt, endedAt, tokens, compa
       <p className="rsp-meta-line">
         {[
           // The one live line: words with a faint shimmer, in the feed only (DIRECTION.md §7); waiting on a person, still.
-          time && (live ? <span key="t" className={`rsp-meta-live ${waiting ? "needs" : "rsp-shine"}`}>{time}</span> : <span key="t">{time}</span>),
+          time && (live ? <Shine key="t" on={!waiting} className={`rsp-meta-live${waiting ? " needs" : ""}`}>{time}</Shine> : <span key="t">{time}</span>),
           changed && (onFile ? <button key="f" type="button" className="rsp-meta-link" onClick={onFile}>{changed}</button> : <span key="f">{changed}</span>),
           used && <span key="u" className="rsp-meta-tokens">{used}</span>,
           trimmed && <span key="c" title="Every step re-reads the conversation, so Friday had the tool summarise it first">{trimmed}</span>,
@@ -455,14 +456,14 @@ export function StepGroup({ steps, thought, thoughtSecs = 0, live }: { steps: St
     <div className={`rsp-group ${live ? "live" : ""}`}>
       <button type="button" className="rsp-group-head" aria-expanded={open} aria-controls={foldId} data-tip={open ? "Hide these steps" : summary === sentence ? "Show these steps" : sentence} onClick={() => setOpen(!open)}>
         {/* Only the failure in the state colour: the whole line in red read as the whole stretch having failed. */}
-        <span className={live ? "rsp-group-text rsp-shine" : failed ? "rsp-group-text has-fail" : "rsp-group-text"}>
+        <Shine on={live} className={failed && !live ? "rsp-group-text has-fail" : "rsp-group-text"}>
           {live ? summary : summary.split(" · ").map((part, i) => (
             <Fragment key={i}>
               {i ? " · " : ""}
               <span className={/^\d+ failed$/.test(part) ? "rsp-group-fail" : undefined}>{part}</span>
             </Fragment>
           ))}
-        </span>
+        </Shine>
         {current && !alone && (
           <span className="rsp-tl-now">
             <span aria-hidden> · </span>
@@ -527,7 +528,7 @@ export function Timeline({
         <span className={failed ? "rsp-tl-summary has-fail" : "rsp-tl-summary"}>{summary}</span>
         {!open && current && (
           <span className="rsp-tl-now">
-            <span className="rsp-shine">{current.verb}</span>
+            <Shine>{current.verb}</Shine>
             {current.target && <code className="rsp-chip">{clip(current.target, 48)}</code>}
           </span>
         )}
@@ -546,7 +547,7 @@ export function Timeline({
                   onClick={() => setShown(shown === s.id ? null : s.id)}
                 >
                   <StepMark mark={s.mark} />
-                  <span className={s.state === "running" ? "rsp-verb rsp-shine" : "rsp-verb"}>{s.state === "waiting" ? askedVerb(s.verb) : s.verb}</span>
+                  <Shine on={s.state === "running"} className="rsp-verb">{s.state === "waiting" ? askedVerb(s.verb) : s.verb}</Shine>
                   {s.target && <code className="rsp-chip">{clip(s.target, 72)}</code>}
                   {s.state === "failed" && <span className="rsp-step-flag">failed</span>}
                   {s.state === "waiting" && <span className="rsp-step-flag quiet" title="Asked for, but the turn ended before it ran: stopped, out of usage, or still waiting for a yes">didn't run</span>}

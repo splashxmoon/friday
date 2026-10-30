@@ -46,6 +46,8 @@ declare global {
       /** "darwin", "win32", "linux" — which window furniture the page has to live with. */
       platform?: string;
       trafficLightY?: number;
+      /** Whether the window is in full screen, as the window says it (an app built before it said nothing). */
+      onFullScreen?(fn: (full: boolean) => void): () => void;
       pickFolder(): Promise<string | null>;
       pathForFile(file: File): string;
       /** Link this computer to the Friday the window is showing; the app runs the runner. */

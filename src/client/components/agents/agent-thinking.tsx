@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import { cn } from "@/lib/utils";
+import { Shine } from "../../shine.js";
 
 /**
  * Agent Thinking — the agent "thinking" state that sits above a chat composer
@@ -263,12 +264,13 @@ export function AgentThinking({
       {(variant === "wave" || variant === "spin") && <DotsIndicator variant={variant} />}
       {variant === "stars" && <StarsIndicator />}
       {variant === "infinity" && <InfinityIndicator />}
-      <span
+      <Shine
+        on={!!shimmer}
         aria-label={label}
         className={cn("bui-agent-thinking-text", shimmer && "bui-agent-thinking-label")}
       >
         {label}
-      </span>
+      </Shine>
       {showTimer && <ElapsedTimer />}
     </div>
   );

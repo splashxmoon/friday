@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { ADAPTERS, muse, type AdapterOut, type TurnSpec } from "../src/runner/adapters.js";
+import { ADAPTERS, muse, uuidv7, type AdapterOut, type TurnSpec } from "../src/runner/adapters.js";
 
 /**
  * Muse Code over its session protocol (runner/adapters.ts muse), checked against real `muse serve` sessions recorded by T3 Code
@@ -133,4 +133,26 @@ test("Grok Build is held to Friday's mode on its command line, whatever its own 
   assert.deepEqual(grok.args({ mode: "edits" } as TurnSpec), ["--permission-mode", "default", "agent", "stdio"]);
   assert.deepEqual(grok.args({ mode: "plan", model: "grok-code-2" } as TurnSpec), ["--permission-mode", "default", "agent", "-m", "grok-code-2", "stdio"]);
   assert.deepEqual(grok.args({ mode: "full" } as TurnSpec), ["agent", "--always-approve", "stdio"]);
+});
+
+// Muse 1.4 (Arun, 2026-10-29: "check if muse works"): every turn sat at "working" until it was stopped.
+const V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+test("Muse's command and session ids are UUIDv7, the only kind Muse 1.4 takes, time first", { skip: !recorded }, () => {
+  const { writes } = replay("simple", { mode: "full" });
+  const asked = writes.filter((w) => w.method && w.id !== undefined && w.id !== 0);
+  assert.ok(asked.length >= 2);
+  for (const w of asked) assert.match(w.params.commandId, V7, `${w.method}'s commandId`);
+  assert.match(writes.find((w) => w.method === "session/start")!.params.sessionId, V7);
+  const at = Date.UTC(2026, 9, 29, 22, 0, 0);
+  assert.equal(parseInt(uuidv7(at).replace(/-/g, "").slice(0, 12), 16), at, "its first 48 bits are the time");
+  assert.notEqual(uuidv7(at), uuidv7(at));
+});
+
+test("Muse runs one process a turn, never the kept ACP process, and says whether it is signed in by its allowance", () => {
+  assert.equal(muse.perTurn, true, "the kept process answers initialize itself, and Muse's parser waited for that answer forever");
+  const status = muse.status as { args: string[]; signedIn?: RegExp };
+  assert.deepEqual(status.args, ["usage", "--json"]);
+  assert.ok(status.signedIn!.test('{"plan":"free"}'));
+  assert.ok(!status.signedIn!.test("muse usage: not logged in: run `muse login` first"));
 });

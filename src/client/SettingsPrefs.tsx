@@ -40,6 +40,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Choice, dangerOutline, Note, SettingsGroup, SettingsRow as Row, StateBadge } from "@/components/dass";
+import { sendFeedback } from "./feedback.js";
+import { UsageSharingSetting } from "./UsageSharing.js";
 
 /**
  * The settings that are about this device rather than the account: how it
@@ -655,8 +657,8 @@ export function DataTab() {
       </SettingsGroup>
       <Note>{note?.ok ? note.text : ""}</Note>
       <Note ok={false}>{note && !note.ok ? note.text : ""}</Note>
-      {/* The open-source edition has no analytics to share, so nothing to turn off: it was a switch showing On for nothing. */}
-      {!isLocal() && <ShareAnalytics />}
+      {/* The hosted edition's analytics by account; the open-source edition's anonymous counts by install (UsageSharing.tsx). */}
+      {isLocal() ? <UsageSharingSetting /> : <ShareAnalytics />}
       {/* Reset can be taken back, so it asks nothing first: one press, and Undo on the line that says it happened. */}
       <SettingsGroup title="Start over">
         <Row
@@ -795,6 +797,13 @@ export function AboutTab({ onReplayTour }: { onReplayTour?: () => void }) {
             Release notes <ExternalLinkIcon />
           </Button>
         </Row>
+        {isLocal() && (
+          <Row label="Send feedback" hint="Something broken, or something you'd like: a GitHub issue, with this version and system filled in.">
+            <Button variant="outline" size="sm" onClick={() => void sendFeedback()}>
+              Send feedback <ExternalLinkIcon />
+            </Button>
+          </Row>
+        )}
       </SettingsGroup>
     </section>
   );

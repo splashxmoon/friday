@@ -271,6 +271,7 @@ export function MachineBadge({ identity, machine, refresh, inline = false }: { i
                 {...(signInUrl && signInTool === tool ? { loginUrl: signInUrl } : {})}
                 installing={installing === tool}
                 onInstall={() => setInstalling(installing === tool ? "" : tool)}
+                onRunInstall={() => hostApi<{ opened: boolean; command: string }>(identity, "/api/runner/install", { method: "POST", body: JSON.stringify({ tool }) })}
                 onSignIn={() => void signIn(tool)}
                 onSignOut={(thenIn) => void signOut(tool, thenIn)}
                 onCancel={() => cancelSignIn(tool)}
@@ -434,6 +435,7 @@ function ToolRow({
   loginUrl,
   installing,
   onInstall,
+  onRunInstall,
   onSignIn,
   onSignOut,
   onCancel,
@@ -453,6 +455,8 @@ function ToolRow({
   loginUrl?: string;
   installing: boolean;
   onInstall: () => void;
+  /** Run its install line in a Terminal window here (runner install), and what that came to. */
+  onRunInstall?: () => Promise<{ opened: boolean; command: string }>;
   onSignIn: () => void;
   onSignOut: (thenIn: boolean) => void;
   onCancel: () => void;
@@ -465,6 +469,8 @@ function ToolRow({
   accounts?: ReactNode;
 }) {
   const [copied, setCopied] = useState(false);
+  // Run in Terminal: running, then what happened, said under the line.
+  const [ran, setRan] = useState<"" | "running" | "opened" | "failed">("");
   const [line, setLine] = useState(acpLine ?? "");
   const [saving, setSaving] = useState(false);
   useEffect(() => setLine(acpLine ?? ""), [acpLine]);
@@ -495,7 +501,8 @@ function ToolRow({
                   ? found?.source === "claude-app"
                     ? "Signed in · Claude app"
                     : "Signed in"
-                  : "Ready";
+                  : // Found, its sign-in not something the tool lets us check: said as found, not promised as ready.
+                    "Installed";
   return (
     <li className={`mb-tool ${state} ${acting ? "acting" : ""} ${justIn ? "just-in" : ""}`}>
       <span className="mb-tool-line">
@@ -609,11 +616,30 @@ function ToolRow({
               >
                 <Icon name={copied ? "check" : "copy"} size={13} /> {copied ? "Copied" : "Copy"}
               </button>
+              {onRunInstall && (
+                <button
+                  type="button"
+                  className="mb-cmd-copy mb-cmd-run"
+                  disabled={ran === "running"}
+                  aria-label={`Run the ${name} install command in Terminal`}
+                  onClick={() => {
+                    setRan("running");
+                    onRunInstall().then(
+                      (r) => setRan(r.opened ? "opened" : "failed"),
+                      () => setRan("failed"),
+                    );
+                  }}
+                >
+                  <Icon name="terminal" size={13} /> Run in Terminal
+                </button>
+              )}
             </div>
             <pre className="mb-cmd-code">
               <code>{install}</code>
             </pre>
           </div>
+          {ran === "opened" && <p className="mb-cmd-needs">A Terminal window is installing {name}. When it's done, this card notices on its own.</p>}
+          {ran === "failed" && <p className="mb-cmd-needs">Couldn't open a Terminal window here. Copy the line and run it yourself.</p>}
           {step.needs && <p className="mb-cmd-needs">{step.needs}</p>}
           <a className="mb-install-docs" href={info.docs} target="_blank" rel="noreferrer">
             {name} documentation

@@ -214,7 +214,7 @@
 .wr-plan li.st-completed .wr-step { border: 0; color: var(--green); }
 .wr-plan li.st-active { color: var(--ink); font-weight: 500; }
 .wr-plan li.st-active .wr-step { border: 0; }
-.wr-plan li.st-active .wr-step > i { width: 14px; height: 14px; border-radius: 50%; background: conic-gradient(var(--live) 0 70%, transparent 70% 100%); -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 1.5px), #000 calc(100% - 1.5px)); mask: radial-gradient(farthest-side, transparent calc(100% - 1.5px), #000 calc(100% - 1.5px)); animation: pr-turn 2.4s linear infinite; }
+.wr-plan li.st-active .wr-step > i { width: 14px; height: 14px; border-radius: 50%; background: conic-gradient(from 0deg, transparent 0 6%, color-mix(in srgb, var(--live) 14%, transparent) 30%, color-mix(in srgb, var(--live) 55%, transparent) 70%, var(--live) 96%, transparent 96.5%); -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 1.5px), #000 calc(100% - 1.5px)); mask: radial-gradient(farthest-side, transparent calc(100% - 1.5px), #000 calc(100% - 1.5px)); animation: pr-turn 2.4s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .wr-plan li.st-active .wr-step > i { animation: none; background: var(--live); } }
 html.reduce-motion .wr-plan li.st-active .wr-step > i { animation: none; background: var(--live); }
 .wr-plan li.st-cancelled { color: var(--text-muted); text-decoration: line-through; text-decoration-color: var(--border-strong); }

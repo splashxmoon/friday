@@ -922,15 +922,9 @@ html .tm-row[data-active="true"] { background: var(--sel-bg, var(--hover-strong)
 .tm-wait-name { flex: none; color: var(--ink); font-weight: 500; }
 .tm-wait-line { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--ink-2); text-overflow: ellipsis; white-space: nowrap; }
 .tm-wait-time { flex: none; color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-/* The live line's shimmer: a faint lighter band passing left to right every 2.8s (DIRECTION.md §7). Still for reduced motion. */
-.tm-wait-line, .tt-status.is-work .tm-live-text {
-  background: linear-gradient(90deg, var(--ink-2) 0 38%, var(--ink) 50%, var(--ink-2) 62% 100%) 0 0 / 260% 100% no-repeat;
-  -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-fill-color: transparent;
-  animation: tm-shimmer 2.8s linear infinite;
-}
-@keyframes tm-shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
-@media (prefers-reduced-motion: reduce) { .tm-wait-line, .tt-status.is-work .tm-live-text { animation: none; background: none; color: var(--ink-2); -webkit-text-fill-color: currentColor; } }
-html.reduce-motion :is(.tm-wait-line, .tt-status.is-work .tm-live-text) { animation: none; background: none; color: var(--ink-2); -webkit-text-fill-color: currentColor; }
+/* The live line's shimmer: a faint lighter band passing left to right every 2.8s (DIRECTION.md §7), drawn by the compositor
+   (shine.tsx). Still for reduced motion. */
+.tm-wait-line.shine, .tm-live-text.shine { --shine-ink: var(--ink); }
 /* The Crew tasks chip on the tray: at its top right, words and a count with no box of its own, lit under the pointer, so the
    rows under it run the tray's whole width. Its list still opens above it, floating (DIRECTION.md §5). */
 .composer-caption:has(> .tm-wait) > .dock-plan { position: absolute !important; inset: 4px 6px auto auto !important; margin: 0 !important; }

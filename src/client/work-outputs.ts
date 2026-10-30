@@ -379,9 +379,9 @@ export function pagesIn(output: string): { url: string; title?: string }[] {
 }
 
 /** What an event's tool calls reached, read once (as sentBy): a search and its words, or a page and its address. */
-const reachedBy = once((e): { id: string; kind: "search" | "page"; text: string; url?: string; at: number }[] => {
+const reachedBy = once((e): { id: string; kind: "search" | "page"; text: string; url?: string; key?: string; at: number }[] => {
   if (e.body.type !== "agent.message") return [];
-  const out: { id: string; kind: "search" | "page"; text: string; url?: string; at: number }[] = [];
+  const out: { id: string; kind: "search" | "page"; text: string; url?: string; key?: string; at: number }[] = [];
   for (const c of e.body.toolCalls) {
     let args: Record<string, unknown> = {};
     try {
@@ -396,21 +396,35 @@ const reachedBy = once((e): { id: string; kind: "search" | "page"; text: string;
     const web = (!c.name.startsWith("mcp__") || /web|search_engine|browser|fetch|chrome|navigate/i.test(c.name)) && !/^tool_?search$/i.test(c.name) && !/^select:/i.test(query);
     if (!web) continue;
     if (/search/i.test(c.name) && query) out.push({ id: c.id, kind: "search", text: query, at: e.ts });
-    else if (url) out.push({ id: c.id, kind: "page", text: shortUrl(url), url, at: e.ts });
+    else if (url) out.push({ id: c.id, kind: "page", text: shortUrl(url), url, key: pageKey(url), at: e.ts });
   }
   return out;
 });
 
-/** The web the agents read this session, in the order they read it: each search, then the pages it turned up, numbered. */
+/** What one tool's answer says of the web, read once (as sentBy): the page's title, and the pages a search turned up. */
+const titleOf = once((e): string | undefined => (e.body.type === "tool.result" ? titleIn(e.body.output) : undefined));
+const pagesOf = once((e) => (e.body.type === "tool.result" ? pagesIn(e.body.output).map((p) => ({ ...p, key: pageKey(p.url) })) : []));
+
+/** The last answer, for the same log: the rail, its bar and the browser panel each ask on every live event. */
+let lastSources: { events: SessionEvent[]; lanes: SessionState["lanes"]; out: Source[] } | null = null;
+
+/**
+ * The web the agents read this session, in the order they read it: each search, then the pages it turned up, numbered.
+ *
+ * Read on every live event, over the whole log: each call and each answer is read once and kept (once), so a long session
+ * costs a pass of lookups rather than every search's output parsed again (Arun, 2026-10-30: "the app feel laggy when
+ * running a lot of tasks and agents"; 10,000 steps had it at a quarter of the page's time).
+ */
 export function sourcesIn(events: SessionEvent[], state: SessionState): Source[] {
+  if (lastSources && lastSources.events === events && lastSources.lanes === state.lanes) return lastSources.out;
   // What each call gave back, for a search's pages and a page's title.
-  const results = new Map<string, string>();
-  for (const e of events) if (e.body.type === "tool.result" && !e.body.isError) results.set(e.body.callId, e.body.output);
+  const results = new Map<string, SessionEvent>();
+  for (const e of events) if (e.body.type === "tool.result" && !e.body.isError) results.set(e.body.callId, e);
+  const names = new Map(state.lanes.map((l) => [l.id, l.name]));
   const pages = new Map<string, Source>();
   const searches = new Set<string>();
   const out: Source[] = [];
-  const page = (url: string, at: number, by: string, title?: string, of?: string) => {
-    const key = pageKey(url);
+  const page = (url: string, key: string, at: number, by: string, title?: string, of?: string) => {
     const had = pages.get(key);
     if (had) {
       if (!had.title && title) had.title = title;
@@ -423,11 +437,11 @@ export function sourcesIn(events: SessionEvent[], state: SessionState): Source[]
   for (const e of events) {
     const reached = reachedBy(e);
     if (!reached.length) continue;
-    const by = state.lanes.find((l) => l.id === e.lane)?.name ?? e.actor.name;
+    const by = (e.lane ? names.get(e.lane) : undefined) ?? e.actor.name;
     for (const r of reached) {
-      const said = results.get(r.id) ?? "";
+      const said = results.get(r.id);
       if (r.kind === "page") {
-        page(r.url!, r.at, by, said ? titleIn(said) : undefined);
+        page(r.url!, r.key!, r.at, by, said ? titleOf(said) : undefined);
         continue;
       }
       const key = r.text.trim().toLowerCase();
@@ -435,9 +449,10 @@ export function sourcesIn(events: SessionEvent[], state: SessionState): Source[]
         searches.add(key);
         out.push({ kind: "search", text: r.text, at: r.at, by });
       }
-      for (const p of said ? pagesIn(said) : []) page(p.url, r.at, by, p.title, r.text);
+      for (const p of said ? pagesOf(said) : []) page(p.url, p.key, r.at, by, p.title, r.text);
     }
   }
+  lastSources = { events, lanes: state.lanes, out };
   return out;
 }
 

@@ -3,7 +3,7 @@ import { findApp, forgetLoginStatus, loginStatusQuick } from "./adapters.js";
 import { mkdir, rm, rmdir, stat } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
 import path from "node:path";
-import { ENGINE_NAMES, ENGINE_TOOLS, toolList, type EngineMode, type EngineTool } from "../types.js";
+import { ENGINE_NAMES, ENGINE_TOOLS, TOOL_INFO, toolList, type EngineMode, type EngineTool } from "../types.js";
 import { ADAPTERS, childEnv, findBin, isClaudeAppBundled, launcher, loginStatus, readCustomAcp, runCli, saveCustomAcp } from "./adapters.js";
 import { discoverAgentFiles, parseModelList } from "./agent-files.js";
 import { addWorktree, branchesOf, dropSpares, dropWorktree, primeSpares, remoteBranchesOf, repoInfo, startRepo, worktreeState } from "./git.js";
@@ -428,6 +428,19 @@ export async function callHost(method: string, params: Record<string, unknown> =
       // running until "login.code" hands it what they pasted.
       if (started.url) return { url: started.url, command: started.command, opened: true, needsCode: true };
       return openInTerminal(argv, env);
+    }
+    // A coding tool's install line, run in a Terminal window of the person's own when they press Run in Terminal beside it:
+    // the line is the tool's own, looked up here by the tool's name, never one the page sends (Arun, 2026-10-30: the first
+    // minutes after install are where people quit, and a line to copy into a terminal is one of the places).
+    case "install": {
+      const tool = str(params.tool, 20) as EngineTool;
+      if (!ENGINE_TOOLS.includes(tool)) throw new Error("Unknown coding agent.");
+      const i = TOOL_INFO[tool].install;
+      const win = process.platform === "win32";
+      if (i.npm) return openInTerminal(["npm", "install", "-g", i.npm]);
+      const line = win ? i.windows : i.unix;
+      if (!line) throw new Error(`${ENGINE_NAMES[tool]} has no install line for this system. Its documentation says how.`);
+      return openInTerminal(win ? ["powershell", "-NoProfile", "-Command", line] : ["bash", "-lc", line]);
     }
     // The code from that page. The CLI judges it; this only carries it.
     case "login.code": {
