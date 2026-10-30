@@ -22,7 +22,7 @@ import { parseRepo } from "./runner/repo.js";
 import { Runner } from "./runner/runner.js";
 import { recentReposCached } from "./runner/workspace.js";
 import { overlapsAcross, plannedOverlapsFor } from "./collisions.js";
-import { EFFORT_LEVELS, ENGINE_NAMES, ENGINE_TOOLS, isEngineEffort, MAIN_LANE, toolList, type EngineMode, type EngineTool, type IssueRef, type Role, SESSION_GONE } from "./types.js";
+import { EFFORT_LEVELS, ENGINE_NAMES, engineName, ENGINE_TOOLS, isEngineEffort, MAIN_LANE, toolList, type EngineMode, type EngineTool, type IssueRef, type Role, SESSION_GONE } from "./types.js";
 import { fileURLToPath } from "node:url";
 import { Redis } from "ioredis";
 import { ops } from "./ops.js";
@@ -4304,8 +4304,9 @@ export async function createApp(o: AppOptions) {
     }
     // A lane's coding tool opened in its host's own terminal, on the lane's conversation, and back (runner/terminal-line.ts; Arun,
     // 2026-10-30: "utilize the users terminal and have their claude code, codex or whatever already there… kinda like herdr").
-    // Only the host: it is their computer's terminal and their tool's account. A turn under way is stopped first, and the lane
-    // takes no turns while it is open (hub.ts): what is sent to it waits, and runs once it is back.
+    // Only the host: it is their computer's terminal and their tool's account. A turn under way is never stopped for it: the
+    // screen opens once the turn ends (Arun, 2026-10-30: "dont make the thing stop when witching from GUI to TUI"), and the lane
+    // takes no turns while it is open (hub.ts): what is sent to it waits until the screen is handed back (Terminal.tsx).
     const termRoute = url.pathname.match(/^\/api\/sessions\/([\w-]+)\/terminal$/);
     if (req.method === "POST" && termRoute) {
       const sid = termRoute[1]!;
@@ -4315,7 +4316,7 @@ export async function createApp(o: AppOptions) {
       const lane = str(typeof b.lane === "string" ? b.lane : "", 40);
       const open = b.open === true;
       const by = { id: me.id, name: me.name, kind: "human" as const };
-      let state = await store.state(sid);
+      const state = await store.state(sid);
       const engine = state.engines[lane];
       if (!engine?.tool) return json(res, 404, { error: "That agent has no coding tool to open." });
       if (engine.hostId !== me.id) return json(res, 403, { error: `Only ${engine.hostName} can open their own computer's terminal.` });
@@ -4325,11 +4326,9 @@ export async function createApp(o: AppOptions) {
         return json(res, 200, { ok: true });
       }
       if (!engine.online) return json(res, 409, { error: `${engine.hostName}'s computer isn't connected to this agent right now.` });
-      // Stopped, and waited for: the tool can't be on its conversation in two places.
-      if (runOf(state, lane).status === "running") {
-        await core.handle(sid, by, { type: "run.pause", lane });
-        for (let i = 0; i < 40 && runOf((state = await store.state(sid)), lane).status === "running"; i++) await new Promise((r) => setTimeout(r, 250));
-      }
+      // At work: left to finish, and the screen asked for again once it has (the tool can't be on its conversation in two places).
+      const status = runOf(state, lane).status;
+      if (status === "running" || status === "waiting_for_human") return json(res, 409, { busy: true, error: `${engineName(engine.tool)} is in the middle of a turn: its screen opens when it ends.` });
       if (!state.terminals?.[lane]) await store.append(sid, by, { type: "lane.terminal", open: true }, { lane });
       // The runner may still be letting its stopped turn go: asked again a moment later.
       let got: { tool?: string; cwd?: string; line?: string; error?: string } = { error: "That agent's computer didn't answer." };
@@ -4347,7 +4346,7 @@ export async function createApp(o: AppOptions) {
       }
       if (got.error || !got.line) {
         await store.append(sid, by, { type: "lane.terminal", open: false }, { lane });
-        return json(res, 409, { error: got.error ?? "That agent's computer didn't answer." });
+        return json(res, 409, { error: got.error ?? "That agent's computer didn't answer.", ...(/middle of a turn/.test(got.error ?? "") ? { busy: true } : {}) });
       }
       return json(res, 200, { tool: got.tool, cwd: got.cwd, line: got.line });
     }

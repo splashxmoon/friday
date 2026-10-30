@@ -427,6 +427,7 @@ function LocalShell({ id, cwd, run, onOutput, onOpenFile }: { id: string; cwd?: 
     const api = shells.api();
     const el = host.current;
     if (!api || !el) return;
+    hear();
     let dead = false;
     const stop: (() => void)[] = [];
 
@@ -525,7 +526,7 @@ function LocalShell({ id, cwd, run, onOutput, onOpenFile }: { id: string; cwd?: 
         storeScreen(id);
       }, 1200);
       stop.push(() => (clearInterval(beat), storeScreen(id)));
-      term.onData((d) => api.write(id, d));
+      term.onData((d) => (typedAt.set(id, Date.now()), api.write(id, d)));
 
       // The shell's idea of the window has to follow the panel's, which moves
       // whenever the workbench is resized or a tab changes what is beside it.
@@ -841,12 +842,58 @@ export const hasShells = () => !!shells.api();
 /** The line each lane's screen was opened with, kept for the screen to start with, however it comes to be drawn. */
 const opened = new Map<string, { line: string; cwd: string }>();
 
-/** Takes the lane to a terminal: its turns held, and the line that carries its conversation on (POST /api/sessions/:sid/terminal). */
-export async function openLaneTerminal(sid: string, invite: string, lane: string): Promise<{ line: string; cwd: string } | { error: string }> {
+/**
+ * When each tool's screen last printed, and when its person last typed in it: a tool at work in its own screen is never taken
+ * from it (Arun, 2026-10-30: "dont make the thing stop when witching from GUI to TUI or TUI to GUI"). Claude Code and Codex
+ * print all the while they work (their spinners) and nothing while they wait for you.
+ */
+const printedAt = new Map<string, number>();
+const typedAt = new Map<string, number>();
+let hearing = false;
+function hear(): void {
+  const api = shells.api();
+  if (hearing || !api) return;
+  hearing = true;
+  api.onData((which) => printedAt.set(which, Date.now()));
+}
+/** Nothing printed for a few seconds, and nothing typed for `typedFor`: the tool is waiting, not working. */
+const screenQuiet = (sid: string, lane: string, typedFor: number) => {
+  const id = toolShellId(sid, lane);
+  return Date.now() - (printedAt.get(id) ?? 0) > 3_000 && Date.now() - (typedAt.get(id) ?? 0) > typedFor;
+};
+
+/**
+ * A lane's screen handed back to Friday once its tool has finished what it is doing there, never in the middle of it: on the
+ * way back to chat, sent back to Friday's view, or because something for it is waiting to run. `unless`: what calls it off
+ * meanwhile (the terminal view switched on again).
+ */
+const leaving = new Map<string, ReturnType<typeof setInterval>>();
+export const handingBack = (sid: string, lane: string) => leaving.has(`${sid}|${lane}`);
+export function handBackWhenDone(sid: string, invite: string, lane: string, o: { typedFor?: number; unless?: () => boolean } = {}): void {
+  const key = `${sid}|${lane}`;
+  if (leaving.has(key)) return;
+  hear();
+  const stop = () => (clearInterval(leaving.get(key)), leaving.delete(key));
+  const go = () => {
+    if (o.unless?.()) return void stop();
+    if (!screenQuiet(sid, lane, o.typedFor ?? 0)) return;
+    stop();
+    void handBack(sid, invite, lane);
+  };
+  leaving.set(key, setInterval(go, 1_000));
+  go();
+}
+
+/**
+ * Takes the lane to a terminal: its turns held, and the line that carries its conversation on (POST /api/sessions/:sid/terminal).
+ * `busy`: its agent is in the middle of a turn, left to finish; asked again once it has.
+ */
+export async function openLaneTerminal(sid: string, invite: string, lane: string): Promise<{ line: string; cwd: string } | { error: string; busy?: boolean }> {
   try {
     // Given up on after half a minute: a view waiting on an answer that never comes said "Opening…" for ever.
     const r = await fetch(`/api/sessions/${sid}/terminal?invite=${encodeURIComponent(invite)}`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lane, open: true }), signal: AbortSignal.timeout(30_000) });
-    const b = (await r.json().catch(() => ({}))) as { line?: string; cwd?: string; error?: string };
+    const b = (await r.json().catch(() => ({}))) as { line?: string; cwd?: string; error?: string; busy?: boolean };
+    if (b.busy) return { error: b.error ?? "It's in the middle of a turn.", busy: true };
     if (!r.ok || !b.line) return { error: b.error ?? "That agent's computer didn't answer. Try again." };
     const got = { line: b.line, cwd: b.cwd ?? "" };
     opened.set(`${sid}|${lane}`, got);
@@ -863,11 +910,12 @@ export async function openLaneTerminal(sid: string, invite: string, lane: string
  * way, or with its screen running already, is left as it is.
  */
 /** Screens on their way, by `sid|lane`: a second ask for one waits on the first and hears how it went, rather than nothing. */
-const warming = new Map<string, Promise<{ error: string } | null>>();
-export function warmLaneTerminal(sid: string, invite: string, lane: string): Promise<{ error: string } | null> {
+const warming = new Map<string, Promise<{ error: string; busy?: boolean } | null>>();
+export function warmLaneTerminal(sid: string, invite: string, lane: string): Promise<{ error: string; busy?: boolean } | null> {
   const key = `${sid}|${lane}`;
   const api = shells.api();
   if (!api) return Promise.resolve({ error: "This window has no terminal: open Friday's desktop app." });
+  hear();
   const going = warming.get(key);
   if (going) return going;
   const run = (async () => {
@@ -892,6 +940,8 @@ export function warmLaneTerminal(sid: string, invite: string, lane: string): Pro
 
 /** Back to Friday: the tool's screen closed, and the lane takes its turns again, from where the terminal left its conversation. */
 export async function handBack(sid: string, invite: string, lane: string): Promise<void> {
+  clearInterval(leaving.get(`${sid}|${lane}`));
+  leaving.delete(`${sid}|${lane}`);
   opened.delete(`${sid}|${lane}`);
   shells.api()?.kill(toolShellId(sid, lane));
   forgetScreen(toolShellId(sid, lane));
@@ -905,10 +955,10 @@ export function InTerminalNote({ sid, invite, lane, tool, mine }: { sid: string;
   return (
     <div className="in-terminal-note" role="status">
       <Icon name="terminalSquare" size={14} />
-      <span className="small">{mine ? `${name} is open in your terminal. What you send here waits until you hand it back.` : `${name} is open in its host's terminal. What's sent here waits until they hand it back.`}</span>
+      <span className="small">{mine && handingBack(sid, lane) ? `${name} is finishing in your terminal. Friday takes it back as soon as it's done.` : mine ? `${name} is open in your terminal. What you send here waits until you hand it back.` : `${name} is open in its host's terminal. What's sent here waits until they hand it back.`}</span>
       {mine && (
         <button type="button" className="link-btn small" disabled={busy} onClick={() => (setBusy(true), void handBack(sid, invite, lane).finally(() => setBusy(false)))}>
-          Hand back to Friday
+          {handingBack(sid, lane) ? "Hand back now" : "Hand back to Friday"}
         </button>
       )}
     </div>
@@ -997,7 +1047,7 @@ export function LaneTui({ sid, invite, lane, tool, title, onBack }: { sid: strin
         <EngineMark tool={tool} size={14} />
         <span className="lane-tui-name">{title && title !== name ? `${title} · ${name}` : name}</span>
         {where && <span className="lane-tui-where" title={run!.cwd}>{where}</span>}
-        <span className="lane-tui-note">Friday holds its turns while you're here</span>
+        <span className="lane-tui-note">What's sent to it runs once it's waiting</span>
         <button type="button" className="ftui-link" onClick={onBack} title="Hand it back to Friday, in Friday's terminal view">
           ← friday
         </button>

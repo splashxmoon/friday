@@ -165,7 +165,8 @@ import { webSourcesIn, webUrl } from "../web-sources.js";
 import { Mascot, runMood } from "./Mascot.js";
 import { AgentSwitch, EngineMark, switchesAgent } from "./AgentSwitch.js";
 import type { EffortChoice } from "./AgentModelPicker.js";
-import { friday, handBack, hasShells, InTerminalNote, LaneTui, openLaneTerminal, preferFriday, TERMINAL_TOOLS, useTuiView, warmLaneTerminal } from "./Terminal.js";
+import { friday, handBackWhenDone, handingBack, hasShells, InTerminalNote, LaneTui, openLaneTerminal, preferFriday, TERMINAL_TOOLS, useTuiView, warmLaneTerminal } from "./Terminal.js";
+import { runnableQueue } from "../held.js";
 import { FridayTui } from "./Tui.js";
 import { isLocal, startTeam } from "./edition.js";
 import { isOwnModel } from "../own-model-id.js";
@@ -1444,10 +1445,13 @@ export function Activity({
   const tuiLane = laneFilter !== ALL && tuiHere ? laneFilter : null;
   const tuiTool = tuiLane ? state.engines[tuiLane]?.tool : undefined;
   const nativeCan = !!tuiLane && !!tuiTool && state.engines[tuiLane]?.hostId === me.id && TERMINAL_TOOLS.has(tuiTool) && hasShells();
-  const nativeOn = nativeCan && !!state.terminals?.[tuiLane!];
   const [tuiView, setTuiView] = useTuiView();
-  // All agents too, as one terminal: every agent's lines, tagged with whose they are (Arun, 2026-10-30: "also do it for the all
-  // agents tab too").
+  // Sent back to Friday's view (← friday) while its tool finishes in its screen: Friday's view at once, the screen handed back after.
+  // Back to chat while its tool works there: chat at once, the screen handed back once the tool is done.
+  const nativeOn = nativeCan && !!state.terminals?.[tuiLane!] && !friday(sid, tuiLane!) && (tuiView || !handingBack(sid, tuiLane!));
+  const [, redraw] = useState(0);
+  const toFriday = (l: string) => (preferFriday(sid, l, true), handBackWhenDone(sid, invite, l), redraw((n) => n + 1));
+  // All agents too: every agent's own screen side by side (Arun, 2026-10-30: "also do it for the all agents tab too").
   const ftuiAll = tuiView && laneFilter === ALL && tuiHere && everyone.length > 0;
   // A coding tool's own screen is the terminal view, always; Friday's TUI only for an agent sent to it (← friday), a tool with no
   // screen to resume in, and All agents (Arun, 2026-10-30: "always load on native coding tool terminal the friday TUI will be
@@ -1459,21 +1463,38 @@ export function Activity({
   const nativeErr: Record<string, string> = {};
   for (const [l, e] of Object.entries(nativeErrs)) if (e.seq === (state.engines[l]?.sinceSeq ?? -1)) nativeErr[l] = e.msg;
   const laneOnline = !!tuiLane && !!state.engines[tuiLane]?.online;
-  const nativeWaiting = wantsNative && !nativeOn;
-  const ftuiOn = (!!tuiLane && tuiView && !nativeOn && !wantsNative) || ftuiAll;
+  // At work, or with work about to start: switching views never stops it (Arun, 2026-10-30: "dont make the thing stop when
+  // witching from GUI to TUI or TUI to GUI"). Its turn goes on in Friday's view, and its own screen opens once it is done.
+  const atWork = (l: string) => {
+    const st = runOf(state, l).status;
+    return st === "running" || st === "waiting_for_human" || (st !== "paused" && runnableQueue(events, l, pendingFor(state, l)).length > 0);
+  };
+  const tuiBusy = !!tuiLane && !nativeOn && atWork(tuiLane);
+  const nativeWaiting = wantsNative && !nativeOn && !tuiBusy;
+  const ftuiOn = (!!tuiLane && tuiView && !nativeOn && (!wantsNative || tuiBusy)) || ftuiAll;
   const tuiOn = nativeOn || ftuiOn || nativeWaiting;
   const toNative = async () => {
     preferFriday(sid, tuiLane!, false);
     const r = await openLaneTerminal(sid, invite, tuiLane!);
-    if ("error" in r) ctx.notify(r.error);
+    if ("error" in r && !r.busy) ctx.notify(r.error);
   };
+  // Something for an agent open in its own screen (another agent's message, a nudge): the screen goes back to Friday as soon as
+  // its tool is waiting and its person isn't typing, the turn runs, and the screen opens again after it. The terminal view never
+  // holds the team's work up.
+  const takeBack = !secondary && hasShells() ? Object.keys(state.terminals ?? {}).filter((l) => state.engines[l]?.hostId === me.id && runOf(state, l).status !== "paused" && runnableQueue(events, l, pendingFor(state, l)).length > 0) : [];
+  const takeBackKey = takeBack.join(",");
+  useEffect(() => {
+    for (const l of takeBackKey ? takeBackKey.split(",") : []) handBackWhenDone(sid, invite, l, { typedFor: 15_000 });
+  }, [takeBackKey, sid]); // eslint-disable-line react-hooks/exhaustive-deps
   // The terminal view is the tool's own wherever it can be (Arun, 2026-10-30: "make sure the terminal view is using native
   // view"): Claude Code or Codex on this computer opens on its conversation, its turns held, as the view comes to it. Friday's
   // TUI is for the rest, for one that couldn't open (said once), and for an agent its person sent back to it ("← friday").
   // Every other agent here that opens in its own screen, started ahead in the background, so its tab is instant (warmLaneTerminal):
   // only the main chat does it, one at a time, and never one sent back to Friday's view.
-  const warmable = !secondary && tuiView && tuiHere && hasShells() ? everyone.filter((l) => l !== tuiLane && state.engines[l]?.hostId === me.id && state.engines[l]?.online && TERMINAL_TOOLS.has(state.engines[l]?.tool ?? "") && !state.terminals?.[l] && !friday(sid, l)) : [];
+  // An agent at work is left to it, and started ahead once it is done.
+  const warmable = !secondary && tuiView && tuiHere && hasShells() ? everyone.filter((l) => l !== tuiLane && state.engines[l]?.hostId === me.id && state.engines[l]?.online && TERMINAL_TOOLS.has(state.engines[l]?.tool ?? "") && !state.terminals?.[l] && !friday(sid, l) && !atWork(l)) : [];
   const warmKey = warmable.join(",");
+  const [rewarm, setRewarm] = useState(0);
   useEffect(() => {
     if (!warmKey) return;
     let gone = false;
@@ -1481,19 +1502,27 @@ export function Activity({
       for (const lane of warmKey.split(",")) {
         if (gone) return;
         const r = await warmLaneTerminal(sid, invite, lane);
-        if (r) preferFriday(sid, lane, "briefly");
+        // Still finishing (its runner letting the turn go): asked again in a moment.
+        if (r?.busy) setTimeout(() => !gone && setRewarm((n) => n + 1), 2_000);
+        else if (r) (preferFriday(sid, lane, "briefly"), redraw((n) => n + 1));
       }
     })();
     return () => void (gone = true);
-  }, [warmKey, sid]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [warmKey, sid, rewarm]); // eslint-disable-line react-hooks/exhaustive-deps
   const autoNative = nativeWaiting && laneOnline && !nativeErr[tuiLane!];
   const [retry, setRetry] = useState(0);
   useEffect(() => {
     if (!autoNative) return;
     const lane = tuiLane!;
+    let gone = false;
     // Its shell started with the request, not after the view has heard back: the tool is already starting as its screen draws.
     const seq = state.engines[lane]?.sinceSeq ?? -1;
-    void warmLaneTerminal(sid, invite, lane).then((r) => r && setNativeErr((e) => ({ ...e, [lane]: { msg: r.error, seq } })));
+    void warmLaneTerminal(sid, invite, lane).then((r) => {
+      if (gone || !r) return;
+      if (r.busy) setTimeout(() => !gone && setRetry((n) => n + 1), 2_000);
+      else setNativeErr((e) => ({ ...e, [lane]: { msg: r.error, seq } }));
+    });
+    return () => void (gone = true);
   }, [autoNative, sid, tuiLane, retry]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
@@ -1777,7 +1806,7 @@ export function Activity({
       {nativeOn ? (
         // One per agent: kept across a switch, it ran the last agent's line in the next one's screen (Arun, 2026-10-30: "it properly
         // switches the native terminals based on the coding tool lane").
-        <LaneTui key={`${sid}|${tuiLane}`} sid={sid} invite={invite} lane={tuiLane!} tool={tuiTool!} title={laneLabel(state, tuiLane!)} onBack={() => (preferFriday(sid, tuiLane!, true), void handBack(sid, invite, tuiLane!).then(() => setTuiView(true)))} />
+        <LaneTui key={`${sid}|${tuiLane}`} sid={sid} invite={invite} lane={tuiLane!} tool={tuiTool!} title={laneLabel(state, tuiLane!)} onBack={() => toFriday(tuiLane!)} />
       ) : nativeWaiting ? (
         <div className="lane-tui lane-tui-wait" role="status">
           {nativeErr[tuiLane!] ? (
@@ -1798,20 +1827,51 @@ export function Activity({
             <p className="muted small">{laneOnline ? `Opening ${laneLabel(state, tuiLane!)}…` : `Waiting for ${laneLabel(state, tuiLane!)} to reconnect…`}</p>
           )}
         </div>
+      ) : ftuiAll ? (
+        // All agents: each one's own screen side by side, its tool's where it has one and Friday's for the rest (Arun, 2026-10-30:
+        // "make sure terminal view works for the all agents tab"). One terminal for everyone had every agent held and nothing
+        // sent there ran.
+        <div className="tui-grid" style={{ "--tui-cols": everyone.length > 4 ? 3 : everyone.length > 1 ? 2 : 1 } as React.CSSProperties}>
+          {everyone.map((l) => {
+            const tool = state.engines[l]?.tool;
+            const native = !!tool && TERMINAL_TOOLS.has(tool) && state.engines[l]?.hostId === me.id && hasShells() && !friday(sid, l);
+            if (native && state.terminals?.[l]) return <LaneTui key={`${sid}|${l}`} sid={sid} invite={invite} lane={l} tool={tool} title={laneLabel(state, l)} onBack={() => toFriday(l)} />;
+            if (native && !atWork(l) && state.engines[l]?.online)
+              return (
+                <div key={`${sid}|${l}`} className="lane-tui lane-tui-wait" role="status">
+                  <p className="muted small">Opening {laneLabel(state, l)}…</p>
+                </div>
+              );
+            return (
+              <FridayTui
+                key={`${sid}|${l}`}
+                sid={sid}
+                lanes={[l]}
+                to={l}
+                state={state}
+                events={events}
+                me={me}
+                send={send}
+                notify={ctx.notify}
+                onChat={() => setTuiView(false)}
+                {...(native ? { onNative: () => (preferFriday(sid, l, false), redraw((n) => n + 1)) } : {})}
+              />
+            );
+          })}
+        </div>
       ) : ftuiOn ? (
         <FridayTui
-          key={ftuiAll ? `${sid}|all` : `${sid}|${tuiLane}`}
+          key={`${sid}|${tuiLane}`}
           sid={sid}
-          lanes={ftuiAll ? everyone : [tuiLane!]}
-          to={ftuiAll ? (everyone.includes(target) ? target : everyone[0]!) : tuiLane!}
-          {...(ftuiAll ? { onTo: (l: string) => pick(l) } : {})}
+          lanes={[tuiLane!]}
+          to={tuiLane!}
           state={state}
           events={events}
           me={me}
           send={send}
           notify={ctx.notify}
           onChat={() => setTuiView(false)}
-          {...(nativeCan && !ftuiAll ? { onNative: () => void toNative() } : {})}
+          {...(nativeCan ? { onNative: () => void toNative() } : {})}
         />
       ) : (
       <Conversation key={`${laneFilter}|${filter}`} className="min-h-0 flex-1" initial="instant" onFollow={setFollowing} {...(agentUnreadAt !== -1 ? { openAt: "[data-catchup]" } : {})}>

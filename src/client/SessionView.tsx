@@ -59,7 +59,7 @@ import { TeamHeaderControls } from "./TeamControls.js";
 import { ALL, AgentsContext, agentKey, agentsStore, focusAgent, focusedAgent, jumpToNeeds, nextKey, openedAt, setColumns, syncAddress, useAgents, useColumns, useFocusedAgent, useSeen } from "./agentFocus.js";
 import { AGENT_DRAG, closeColumn, dropAgent, evenWidths, fitColumns, maxColumns, pickInColumn, resizeAt, unreadByLane } from "./agentNav.js";
 import { agentLook, laneLabel } from "./handoff-ui.js";
-import { handBack, setTuiOn, tuiIsOn, useTuiView, ViewToggle } from "./Terminal.js";
+import { handBackWhenDone, handingBack, setTuiOn, tuiIsOn, useTuiView, ViewToggle } from "./Terminal.js";
 import { hubOf } from "../agents-hub.js";
 import { clearDiffRequest, readDiffRequest, showDiffSoon } from "./focusDiff.js";
 import { HandoverDialog } from "./Handover.js";
@@ -2224,7 +2224,8 @@ function SplitRail({ sid, state, events, me, shown, active, room, head = false }
 function HeaderTuiSwitch({ sid, invite, state, me }: { sid: string; invite: string; state: SessionState; me: { id: string } }) {
   const [on, setOn] = useTuiView();
   const lane = useFocusedAgent(sid);
-  const native = lane !== ALL && !!state.terminals?.[lane] && state.engines[lane]?.hostId === me.id;
+  // Open in its own screen and not on its way back: lit, though the view is off.
+  const native = lane !== ALL && !!state.terminals?.[lane] && state.engines[lane]?.hostId === me.id && !handingBack(sid, lane);
   return (
     <ViewToggle
       className="in-head"
@@ -2233,10 +2234,12 @@ function HeaderTuiSwitch({ sid, invite, state, me }: { sid: string; invite: stri
       name={lane === ALL ? "every agent" : laneLabel(state, lane)}
       onToggle={() => {
         if (!on && !native) return setOn(true);
-        // Off: back to chat, and every agent of yours open in its own screen here handed back to Friday.
+        // Off: back to chat, and every agent of yours open in its own screen handed back to Friday once its tool is done with what
+        // it is doing there, never in the middle of it (Arun, 2026-10-30: "dont make the thing stop when witching from GUI to
+        // TUI or TUI to GUI"). Switched on again before then, they stay.
         const mine = Object.keys(state.terminals ?? {}).filter((l) => state.engines[l]?.hostId === me.id);
         setOn(false);
-        for (const l of mine) void handBack(sid, invite, l);
+        for (const l of mine) handBackWhenDone(sid, invite, l, { unless: tuiIsOn });
       }}
     />
   );

@@ -101,8 +101,10 @@ test("names, titles and statuses as an outside agent reads them", () => {
   assert.equal(outsideName(""), "An outside agent");
   assert.equal(titleOf("Fix the flaky checkout test in the payments package and make sure it passes on CI every time\nmore"), "Fix the flaky checkout test in the payments package and…");
   const lines = outsideSetup(outsideCommand("/Users/a b/.friday/outside-mcp.mjs", "/usr/local/bin/node", false));
-  assert.equal(lines.claude.line, "claude mcp add friday --scope user -- /usr/local/bin/node '/Users/a b/.friday/outside-mcp.mjs'");
-  assert.equal(lines.codex.line, "codex mcp add friday -- /usr/local/bin/node '/Users/a b/.friday/outside-mcp.mjs'");
+  // Quoted for the shell it is pasted into: PowerShell or cmd on Windows, a POSIX shell elsewhere.
+  const shim = process.platform === "win32" ? '"/Users/a b/.friday/outside-mcp.mjs"' : "'/Users/a b/.friday/outside-mcp.mjs'";
+  assert.equal(lines.claude.line, `claude mcp add friday --scope user -- /usr/local/bin/node ${shim}`);
+  assert.equal(lines.codex.line, `codex mcp add friday -- /usr/local/bin/node ${shim}`);
   assert.match(lines.codex.toml, /^\[mcp_servers\.friday\]\ncommand = "\/usr\/local\/bin\/node"\nargs = \["\/Users\/a b\/\.friday\/outside-mcp\.mjs"\]\ntool_timeout_sec = 660$/);
   assert.deepEqual(JSON.parse(lines.cursor.json), { mcpServers: { friday: { command: "/usr/local/bin/node", args: ["/Users/a b/.friday/outside-mcp.mjs"] } } });
   // The desktop app is a Node only when told so.
@@ -143,7 +145,7 @@ test("only an agent on this computer with this install's token gets in: not a pa
   const setup = (await (await fetch(`${friday.url}/api/outside/setup`, { headers: { "x-friday-local": "1" } })).json()) as { claude: { line: string }; codex: { toml: string }; shim: string };
   assert.equal(setup.shim, path.join(home, "outside-mcp.mjs"));
   assert.ok(setup.claude.line.startsWith("claude mcp add friday --scope user -- "), setup.claude.line);
-  assert.ok(setup.claude.line.endsWith(path.join(home, "outside-mcp.mjs")));
+  assert.ok(setup.claude.line.replace(/["']$/, "").endsWith(path.join(home, "outside-mcp.mjs")), setup.claude.line);
   const add = await fetch(`${friday.url}/api/outside/setup`, { method: "POST", headers: { "content-type": "application/json", "x-friday-local": "1" }, body: JSON.stringify({ tool: "cursor" }) });
   assert.equal(add.status, 400, "Cursor has no mcp add: its file only");
 });

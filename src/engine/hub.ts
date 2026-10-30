@@ -979,7 +979,6 @@ class LaneHost {
     // mid-turn, so an interrupt stops the turn and the next one carries it.
     let why = "";
     if (b.type === "run.pause") why = `${ev.actor.name} stopped this task`;
-    else if (b.type === "lane.terminal" && b.open) why = `${ev.actor.name} opened this agent in their terminal`;
     else if (b.type === "run.cancel") why = `${ev.actor.name} cancelled the run`;
     else if (b.type === "run.interrupt") why = `${ev.actor.name} delivered queued instructions now`;
     else if (b.type === "instruction" && b.interrupt) why = `${ev.actor.name} interrupted with a new instruction`;

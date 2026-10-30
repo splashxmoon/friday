@@ -20,7 +20,7 @@ const write = (dir: string, files: Record<string, string>) => {
     writeFileSync(path.join(dir, rel), text);
   }
 };
-const run = (dir: string, args: string[]) => execFileSync("npm", ["run", "--silent", ...args], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+const run = (dir: string, args: string[]) => execFileSync("npm", ["run", "--silent", ...args], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], shell: process.platform === "win32" });
 
 test("the sample project's tests pass as it ships, its receipt prints, and the README's jobs are still to do", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "friday-demo-files-"));
