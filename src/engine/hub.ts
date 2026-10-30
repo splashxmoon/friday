@@ -45,6 +45,7 @@ import {
   type EventBody,
   type Member,
   type RepoCall,
+  type RouteTier,
   type SessionEvent,
   type ToolCall,
 } from "../types.js";
@@ -1165,7 +1166,7 @@ class LaneHost {
         : undefined;
       const asked = ask?.body.type === "engine.approval" ? { scope: ask.body.scope, items: ask.body.items } : {};
       // An Auto lane runs each message on the model picked for it; any other only logs what Auto would have picked.
-      const routing = this.info.model === "auto" ? this.autoRoute(turn.prompt, attachments?.length ?? 0, state, events) : (this.shadowRoute(turn.prompt, attachments?.length ?? 0, state), undefined);
+      const routing = this.info.model === "auto" ? this.autoRoute(turn.prompt, attachments?.length ?? 0, state, events) : (this.shadowRoute(turn.prompt, attachments?.length ?? 0, state, events), undefined);
       const building = performance.now();
       const [brief, routed, note] = await Promise.all([briefing, routing, this.systemNote(events)]);
       slowly(`a turn's brief for ${this.sid}`, building, { events: events.length });
@@ -1378,10 +1379,20 @@ class LaneHost {
    * The model Auto would run this turn on (routing.ts), logged beside the one that runs, when that changes. Nothing changes for
    * the turn: a coding tool's lane keeps the model it was started with, and these are how the rules get checked first.
    */
-  private shadowRoute(text: string, attachments: number, state: SessionState): void {
+  /**
+   * How hard this lane's work last read, for a reply that only carries it on ("yes, do it", "continue"): it is as hard as that
+   * work, not as short as its words. A small model was put on a refactor's "go ahead" (Arun, 2026-10-30: "improve smart routing").
+   */
+  private previousTier(events: SessionEvent[]): { tier: RouteTier; why: string } | null {
+    const last = events.findLast((e) => (e.lane ?? MAIN_LANE) === this.lane && e.body.type === "model.routed")?.body;
+    if (last?.type !== "model.routed" || !last.tier) return null;
+    return { tier: last.tier, why: (last.why.split(" · ")[0] ?? "").replace(/^(carrying on: )+/, "") || "the work under way" };
+  }
+
+  private shadowRoute(text: string, attachments: number, state: SessionState, events: SessionEvent[]): void {
     const tool = this.info.tool;
     if (!tool) return;
-    const t = taskTier(text, { planFirst: state.options.planFirst, attachments, linked: !!(state.options.issue || state.options.pr) });
+    const t = taskTier(text, { planFirst: state.options.planFirst, attachments, linked: !!(state.options.issue || state.options.pr), previous: this.previousTier(events) });
     const pick = routeTool(tool, t.tier, t.why, this.toolWindows);
     if (!pick || `${pick.model}|${t.tier}` === this.shadowed) return;
     this.shadowed = `${pick.model}|${t.tier}`;
@@ -1399,7 +1410,7 @@ class LaneHost {
   private async autoRoute(text: string, attachments: number, state: SessionState, events: SessionEvent[]): Promise<{ model: string; effort?: string } | undefined> {
     const tool = this.info.tool;
     if (!tool) return undefined;
-    const t = taskTier(text, { planFirst: state.options.planFirst, attachments, linked: !!(state.options.issue || state.options.pr) });
+    const t = taskTier(text, { planFirst: state.options.planFirst, attachments, linked: !!(state.options.issue || state.options.pr), previous: this.previousTier(events) });
     const learned = state.workspaceId && this.learner ? await this.learner(state.workspaceId).catch(() => ({})) : {};
     // How much the conversation holds now: what the lane's last turn read, fresh and from its cache.
     const usage = events.findLast((e) => (e.lane ?? MAIN_LANE) === this.lane && e.body.type === "agent.usage")?.body;

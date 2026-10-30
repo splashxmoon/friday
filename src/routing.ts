@@ -23,40 +23,83 @@ export const isAuto = (id: string | undefined | null): boolean => id === AUTO_MO
 /** Friday Pro: the frontier model Auto reaches for. The hosted Friday's; the open-source edition has no Friday models. */
 export let FRONTIER_MODEL = "";
 
-const HEAVY: [RegExp, string][] = [
-  [/\b(refactor|re-?architect|architecture|redesign|rewrite|restructure)/i, "a refactor"],
-  [/\bmigrat(e|ion|ing)\b/i, "a migration"],
-  [/\b(race condition|deadlock|memory leak|flaky|intermittent|concurren)/i, "a hard bug"],
-  [/\b(root cause|investigate|why\b|debug)/i, "finding a cause"],
-  [/\b(performance|optimi[sz]e|slow|latency)\b/i, "performance"],
-  [/\b(security|vulnerab|auth(entication|orization)?)\b/i, "security"],
-  [/\b(across (the|all|every)|whole (codebase|repo|app)|end[- ]to[- ]end|every (file|module|page))/i, "the whole codebase"],
-  [/\b(design|plan out|architect)\b/i, "design"],
+/**
+ * What makes work hard, each with how strongly it says so: 3 is hard on its own (a migration, a race, the whole codebase), 2 needs
+ * one more sign, 1 only leans. Words that also mean small things are matched only where they mean the big one: "across the page"
+ * is layout, "across the codebase" is scope; "slow" is a speed only with what is slow; "design" is the system's, not a button's
+ * (Arun, 2026-10-30: "improve smart routing too needs to be better i think it is flawed at times"; a probe of 35 everyday
+ * prompts found 14 read wrong, short feature requests sent to the smallest model and a migration or an audit to the middle one).
+ */
+const CODE_SCOPE = "(?:the |all |every |our )?(?:code ?base|codebase|repo(?:sitory)?|project|services?|modules?|packages?|files|endpoints|queries|components|routes|apis?|monorepo)";
+const HEAVY: [RegExp, number, string][] = [
+  [/\b(refactor|re-?architect|rearchitect|rewrite|restructure|overhaul)/i, 3, "a refactor"],
+  [/\bredesign\b/i, 2, "a redesign"],
+  // Moving a system is hard; "a migration" as a file for one column, or a guide, is everyday.
+  [/\bmigrat(e|ing) (the|our|from|to|all|everything|every|this|it|away)\b|\b(upgrade|move) .{0,40}\bfrom \S+ (\d+ )?to\b/i, 3, "a migration"],
+  [/\bmigrations?\b/i, 1, "a migration"],
+  [/\b(split|break up|carve up) (the|our|this) (monolith|app|codebase|service|backend)\b|\bmonolith\b|\bmicro-?services\b/i, 3, "a refactor"],
+  [/\b(race condition|deadlock|memory leaks?|leak(s|ing)? memory|concurren(t|cy)|thread[- ]safe|heisenbug)/i, 3, "a hard bug"],
+  [/\b(flaky|intermittent(ly)?|sometimes fails?|randomly fails?|fails? randomly|fails? sometimes|pass(es)? locally but fails?)\b/i, 2, "a hard bug"],
+  [/\b(root cause|investigate|track (it|this|that) down|get to the bottom)\b/i, 2, "finding a cause"],
+  // Debugging as something to do, not a log level or a build ("set the debug log level").
+  [/\bdebug(ging)?\b(?!\s+(log|logs|logging|mode|flag|level|build|output|print|statements?|info|panel|toolbar|menu))/i, 1, "finding a cause"],
+  [/\bwhy\b/i, 1, "finding a cause"],
+  // Profiling as something done to code, not a person's profile ("while the profile saves").
+  [/\b(profiling|profiler|profile (it|this|that|them|the (app|code|build|startup|server|queries|query|render(ing)?|page load|endpoint|tests?))|bottlenecks?|hot ?paths?|flame ?graphs?)\b/i, 3, "performance"],
+  [/\b(optimi[sz](e|ation)|latency|memory usage|cpu usage)\b|\b(slow|sluggish|laggy)\b.{0,40}\b(load|query|queries|build|start(up)?|render|page|app|requests?|api|tests?|repos?|on large|when)\b/i, 2, "performance"],
+  [/\b(vulnerab\w*|security (audit|review|hole|issue|fix)|penetration|xss|csrf|sql injection|injection attack|privilege escalation)\b/i, 3, "security"],
+  [/\b(auth(entication|orization)?|permissions?|access control|oauth|sso)\b/i, 1, "security"],
+  [new RegExp(`\\b(across ${CODE_SCOPE}|(whole|entire) (code ?base|codebase|repo(sitory)?|app|project|system)|every (file|module|service|endpoint|query|component|route|package|test)s?\\b|all (the )?(files|modules|services|endpoints|queries|components|routes|packages)\\b)`, "i"), 3, "the whole codebase"],
+  [/\bend[- ]to[- ]end\b(?! test)/i, 2, "the whole codebase"],
+  [/\b(system design|design (the|a|an|our) (system|architecture|schema|data model|api|protocol)|architecture|plan out the (architecture|system|migration))\b/i, 2, "design"],
+  [/\b(from scratch|ground up|(full|whole|complete) (implementation|engine|system|rewrite|app)|(sync|search|rendering|query|rules|layout|billing|payment|auth) engine|state machine|parser|compiler|interpreter|scheduler|crdts?|conflict resolution|distributed|consensus|offline[- ]first|offline sync|real[- ]?time (sync|collaboration)|multi[- ]?tenan(t|cy)|sharding|replication)\b/i, 2, "a large build"],
 ];
-const LIGHT = /\b(typo|rename|bump|format|lint|wording|reword|spelling|comment|readme|changelog|one[- ]?liner|tiny|small change|quick fix)\b/i;
+/** A small change: a typo, a rename, a bump, a tweak to how one thing looks. */
+const LIGHT = /\b(typo|rename|bump|format(ting)?|lint|wording|reword|spelling|comments?|readme|changelog|one[- ]?liner|tiny|small change|quick fix|colou?r|padding|margin|font[- ]?size|bold|italic|underline|rounded|border|spacing|align|cent(er|re)|placeholder|label text|button text|copy change|change the (copy|text|wording|label|title))\b/i;
 const PATH = /(?:^|\s)[\w.-]+\/[\w./-]+\.\w{1,5}\b/g;
+/** A reply that carries on with what is under way ("yes, do it", "continue", "looks good, go ahead"): it is as hard as the task. */
+const FOLLOW = /^\W*(y(es|ep|eah|up)?|ok(ay)?|sure|go( ahead| for it)?|do it|proceed|continue|carry on|keep going|next|lgtm|sounds good|looks good|perfect|great|nice|thanks?( you)?|ty|approved?|ship it|that'?s (fine|good|right)|please|pls)([\s,.!]+(y(es|ep)?|ok(ay)?|sure|go( ahead)?|do it|proceed|continue|please|pls|thanks?|and (do it|continue|go ahead)|with (it|that|the plan)|now))*\W*$/i;
+/** The words of a message that are the person's own: a pasted log, stack trace or code block is not a longer brief. */
+const prose = (text: string) =>
+  text
+    .replace(/```[\s\S]*?```/g, " ")
+    .split("\n")
+    .filter((l) => !/^\s+at\s|^\s*(Error|TypeError|ReferenceError|SyntaxError|Traceback|File "|\[\d{2}:\d{2}|\d{4}-\d{2}-\d{2}[T ]\d{2}:)/.test(l))
+    .join(" ");
+/** Parts the task is made of, when it lists them: three or more is more than one change. */
+const partsOf = (text: string) => Math.max((text.match(/^\s*([-*•]|\d+[.)])\s+/gm) ?? []).length, prose(text).split(/,|;|\band\b/).filter((x) => x.trim().split(/\s+/).length >= 2).length - 1);
 
 /**
  * How hard a task reads, and the words of why. Points for what makes work hard (a refactor, a race, the whole codebase, a long
- * brief, a correction after a miss), points off for what makes it small (a typo, a rename, a short note about one file).
+ * brief, a list of parts, a correction after a miss), points off for what makes it small (a typo, a rename, a tweak to one
+ * thing's look). A short request with nothing either way is everyday work, not light: "add pagination to the users endpoint" is
+ * eight words. A reply that only carries on ("yes, do it") is as hard as what it carries on (`previous`, the lane's last tier).
  */
-export function taskTier(text: string, o: { planFirst?: boolean; attachments?: number; linked?: boolean } = {}): { tier: RouteTier; why: string } {
-  const words = text.trim().split(/\s+/).filter(Boolean).length;
+export function taskTier(text: string, o: { planFirst?: boolean; attachments?: number; linked?: boolean; previous?: { tier: RouteTier; why: string } | null } = {}): { tier: RouteTier; why: string } {
+  if (o.previous && FOLLOW.test(text.trim())) return { tier: o.previous.tier, why: `carrying on: ${o.previous.why}` };
+  const own = prose(text);
+  const words = own.trim().split(/\s+/).filter(Boolean).length;
   let score = 0;
   const reasons: string[] = [];
-  const heavy = HEAVY.filter(([re]) => re.test(text)).map(([, why]) => why);
-  if (heavy.length) {
-    score += Math.min(4, heavy.length * 2);
-    reasons.push(...heavy.slice(0, 2));
+  const hits = HEAVY.filter(([re]) => re.test(text));
+  const heavy = hits.reduce((n, [, w]) => n + w, 0);
+  if (hits.length) {
+    score += Math.min(5, heavy);
+    reasons.push(...[...new Set(hits.sort((a, b) => b[1] - a[1]).map(([, , why]) => why))].slice(0, 2));
   }
   if (CORRECTION.test(text)) {
     score += 2;
     reasons.push("a second try");
   }
-  if (words > 400) {
+  if (words > 300) {
     score += 2;
     reasons.push("a long brief");
   } else if (words > 120) score += 1;
+  const parts = partsOf(text);
+  if (parts >= 3 && words >= 20) {
+    score += 1;
+    reasons.push(`${parts} parts`);
+  }
   const paths = new Set(text.match(PATH) ?? []).size;
   if (paths >= 3) {
     score += 1;
@@ -65,12 +108,13 @@ export function taskTier(text: string, o: { planFirst?: boolean; attachments?: n
   if (o.planFirst) score += 1;
   if (o.attachments) score += 1;
   if (o.linked) score += 1;
-  if (LIGHT.test(text) && words < 40 && !heavy.length) {
+  // Small: what it asks for is small, it is short, and nothing hard is in it.
+  if (LIGHT.test(text) && words < 30 && heavy <= 1) {
     score -= 3;
     reasons.push("a small change");
-  } else if (words < 12 && !heavy.length) score -= 1;
+  }
   const tier: RouteTier = score >= 3 ? "heavy" : score <= -1 ? "light" : "standard";
-  return { tier, why: reasons.length ? reasons.slice(0, 2).join(", ") : tier === "light" ? "a short task" : "an everyday task" };
+  return { tier, why: reasons.length ? [...new Set(reasons)].slice(0, 2).join(", ") : tier === "light" ? "a short task" : "an everyday task" };
 }
 
 // ── how likely, and at what cost ────────────────────────────────────
