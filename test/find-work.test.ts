@@ -15,8 +15,8 @@ test("a file named from an agent's folder is found at its top or further in, and
   await writeFile(path.join(a, "renders", "final", "skit-1-v3.mp4"), "x");
   await writeFile(path.join(b, "skit-2.mp4"), "y");
   await writeFile(path.join(base, "outside.mp4"), "z");
-  assert.match((await findWork([a, b], "skit-1-v3.mp4")) ?? "", /renders\/final\/skit-1-v3\.mp4$/, "further in");
-  assert.match((await findWork([a, b], "skit-2.mp4")) ?? "", /b\/skit-2\.mp4$/, "at the top of another folder");
+  assert.match((await findWork([a, b], "skit-1-v3.mp4")) ?? "", /renders[\\/]final[\\/]skit-1-v3\.mp4$/, "further in");
+  assert.match((await findWork([a, b], "skit-2.mp4")) ?? "", /b[\\/]skit-2\.mp4$/, "at the top of another folder");
   assert.match((await findWork([a, b], "final/skit-1-v3.mp4")) ?? "", /skit-1-v3\.mp4$/, "by the end of its path");
   assert.match((await findWork([a, b], "a/renders/final/skit-1-v3.mp4")) ?? "", /skit-1-v3\.mp4$/, "named from the folder above its own");
   assert.equal(await findWork([a, b], "xa/renders/final/skit-1-v3.mp4"), null, "a folder's name matches whole");
