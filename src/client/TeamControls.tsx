@@ -13,7 +13,8 @@
  *
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { EllipsisIcon, InfinityIcon, ListChecksIcon, FileCodeIcon, FileTextIcon, GitPullRequestIcon, ImageIcon, PackageIcon, CirclePauseIcon, KanbanSquareIcon, MessagesSquareIcon, MoonIcon, PlayIcon, SquareIcon, SunIcon, WorkflowIcon } from "lucide-react";
+import { Icon } from "./icons.js";
+import { EllipsisIcon, InfinityIcon, PanelRightIcon, ListChecksIcon, FileCodeIcon, FileTextIcon, GitPullRequestIcon, ImageIcon, PackageIcon, CirclePauseIcon, KanbanSquareIcon, MessagesSquareIcon, MoonIcon, PlayIcon, SquareIcon, SunIcon, WorkflowIcon } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
@@ -73,8 +74,8 @@ export function useStopAll(identity: Identity, notify: (m: string) => void): [()
   return [run, confirmUI];
 }
 
-/** The team's controls in a team chat's header: Threads, Board, Stop all and the Away / Pause switch. */
-export function TeamHeaderControls({ identity, state, events, send, notify }: { identity: Identity; state: SessionState; events: SessionEvent[]; send: Send; notify: (m: string) => void }) {
+/** The team's controls in a team chat's header: the room's ⋯ (the board, threads, Stop all, Away / Pause and the rest). */
+export function TeamHeaderControls({ identity, state, events, send, notify, panel }: { identity: Identity; state: SessionState; events: SessionEvent[]; send: Send; notify: (m: string) => void; /** The side panel, opened from the room's menu: its button and the ⋯ are one (Arun, 2026-11-01: "can we combine these two?"). */ panel?: { on: boolean; toggle: () => void } }) {
   const t = useTeamNow();
   const working = useWorking();
   const [stop, stopUI] = useStopAll(identity, notify);
@@ -106,40 +107,9 @@ export function TeamHeaderControls({ identity, state, events, send, notify }: { 
   return (
     <>
       {stopUI}
-      <ThreadsButton sid={state.id} events={events} />
-      {tasks.length ? (
-        <button type="button" className="panel-tab icon tm-hd-btn" aria-label={`Board, ${open} open of ${tasks.length}`} title={`Board: ${open} open of ${tasks.length}`} onClick={() => setBoard(true)}>
-          <KanbanSquareIcon className="size-[17px]" />
-          {open > 0 && <span className="tm-hd-n">{open}</span>}
-        </button>
-      ) : (
-        // Empty, a card under its button says so: a whole dialog, its own close box and all, for one sentence was too much (QA,
-        // 2026-10-28; Arun: "TEST EVERYTHING… EVERY VISUAL"). /board still opens the dialog.
-        <Popover>
-          <PopoverTrigger asChild>
-            <button type="button" className="panel-tab icon tm-hd-btn" aria-label="Board" title="Board: the tasks the lead hands out">
-              <KanbanSquareIcon className="size-[17px]" />
-            </button>
-          </PopoverTrigger>
-          <PopoverContent align="end" className="tm-pop tm-board-empty">
-            <div className="tm-pop-head">
-              <b>Board</b>
-              <span>Nothing on it yet</span>
-            </div>
-            <p className="tm-board-empty-text">Give the lead a goal: they split the work into tasks here and hand them out.</p>
-          </PopoverContent>
-        </Popover>
-      )}
-      {busy && (
-        // A quiet ghost that turns red only under the pointer: the faces beside the title already say how many work (Arun,
-        // 2026-10-29: "so clean and beautiful…"; DIRECTION.md §9.1). It was a red pill with a count.
-        <button type="button" className="tm-stop-all" onClick={stop} aria-label={`Stop all: ${working.length} working`} title={`Stop every teammate's turn, keeping their queues (${isMac ? "⌘" : "Ctrl+"}.)`}>
-          <SquareIcon className="size-3" />
-          <span className="tm-stop-all-label">Stop all</span>
-        </button>
-      )}
-      {/* Everything else, one press away (Arun, 2026-10-31: "there is too many buttons here, we need to simplify this"). */}
-      <RoomMore identity={identity} sid={state.id} events={events} notify={notify} />
+      {/* One ⋯ for the room: the board, its threads, Stop all and the rest (Arun, 2026-11-01: "i want to be simplier and easy to
+          digest as a user for crew"). The faces by the title and the line over the box say who works; ⌘. still stops them all. */}
+      <RoomMore identity={identity} sid={state.id} events={events} notify={notify} board={tasks.length ? { open, all: tasks.length, show: () => setBoard(true) } : null} stop={busy ? { n: working.length, run: stop } : null} {...(panel ? { panel } : {})} />
       {board && <TeamBoard state={state} events={events} send={send} onClose={() => setBoard(false)} />}
     </>
   );
@@ -259,10 +229,11 @@ function ResultsButton({ sid, events, embedded }: { sid: string; events: Session
  * its own, Away and Pause) or its own place (Skills, Workflows). While the room runs on its own, or you are away, or the crew is
  * paused, the ⋯ itself says so with its mark.
  */
-function RoomMore({ identity, sid, events, notify }: { identity: Identity; sid: string; events: SessionEvent[]; notify: (m: string) => void }) {
+function RoomMore({ identity, sid, events, notify, board, stop, panel }: { panel?: { on: boolean; toggle: () => void }; identity: Identity; sid: string; events: SessionEvent[]; notify: (m: string) => void; /** The room's board, when it has tasks. */ board: { open: number; all: number; show: () => void } | null; /** Stop all, while anyone works. */ stop: { n: number; run: () => void } | null }) {
   const t = useTeamNow();
   const [open, setOpen] = useState(false);
-  const [page, setPage] = useState<null | "results" | "run" | "away">(null);
+  const [page, setPage] = useState<null | "results" | "run" | "away" | "threads">(null);
+  const threads = useThreads(sid, events);
   const [skills, setSkills] = useState(false);
   const results = useResults(sid, events);
   const waiting = skillsWaiting(useSkills());
@@ -288,8 +259,11 @@ function RoomMore({ identity, sid, events, notify }: { identity: Identity; sid: 
     <>
       <Popover open={open} onOpenChange={(o) => (setOpen(o), o || setPage(null))}>
         <PopoverTrigger asChild>
-          <button type="button" className="panel-tab icon tm-hd-btn tm-more-btn" data-on={on} aria-label={say ? `More: ${say}` : "More: results, run on its own, away, skills, workflows"} title={say ? `${say[0]!.toUpperCase()}${say.slice(1)}` : "More"}>
-            {paused ? <CirclePauseIcon className="size-4" /> : away ? <MoonIcon className="size-4" /> : run ? <InfinityIcon className="size-4" /> : <EllipsisIcon className="size-4" />}
+          <button type="button" className="panel-tab icon tm-hd-btn tm-more-btn" data-on={on} aria-label={say ? `More: ${say}` : "More: board, threads, results, run on its own, away, skills, workflows"} title={say ? `${say[0]!.toUpperCase()}${say.slice(1)}` : "More"}>
+            {/* The side panel's mark, the room's one button (Arun, 2026-11-01: "swap out the three dot icon with the icon to the
+                right"); while the room runs on its own, or you are away, or the crew is paused, a dot on it says so. */}
+            <Icon name="sidePanel" size={18} />
+            {on && <i className="panel-tab-dot" />}
           </button>
         </PopoverTrigger>
         <PopoverContent align="end" className={page ? "tm-pop tm-away-pop" : "tm-pop tm-more-pop"}>
@@ -299,11 +273,16 @@ function RoomMore({ identity, sid, events, notify }: { identity: Identity; sid: 
                 ← Back
               </button>
               {page === "results" && <ResultsButton sid={sid} events={events} embedded={done} />}
+              {page === "threads" && <ThreadsList sid={sid} list={threads} onOpen={done} />}
               {page === "run" && <SelfRunSwitch identity={identity} sid={sid} notify={notify} embedded={done} />}
               {page === "away" && <AwaySwitch identity={identity} notify={notify} embedded={done} />}
             </>
           ) : (
             <ul className="tm-more-list">
+              {panel && <Row icon={<PanelRightIcon className="size-4" />} name={panel.on ? "Close the side panel" : "Side panel"} detail={panel.on ? undefined : "Changes, terminal, preview and more"} onClick={() => (done(), panel.toggle())} />}
+              {stop && <Row icon={<SquareIcon className="size-3.5" />} name="Stop all" detail={`${stop.n} working · their queues are kept · ${isMac ? "⌘" : "Ctrl+"}.`} onClick={() => (done(), stop.run())} />}
+              {board && <Row icon={<KanbanSquareIcon className="size-4" />} name="Board" detail={`${board.open} open of ${board.all}`} n={board.open} onClick={() => (done(), board.show())} />}
+              {threads.length > 0 && <Row icon={<MessagesSquareIcon className="size-4" />} name="Threads" detail={`${threads.length} in this room`} n={threads.filter((x) => x.state === "answering").length} onClick={() => setPage("threads")} />}
               {results.handed.length + results.count > 0 && <Row icon={<PackageIcon className="size-4" />} name="Results" detail="What the crew made here" n={results.handed.length + results.count} onClick={() => setPage("results")} />}
               <Row icon={<InfinityIcon className="size-4" />} name="Run on its own" detail={run ? `On · ${run.goal}` : "Work toward a goal by itself"} onClick={() => setPage("run")} />
               <Row icon={paused ? <CirclePauseIcon className="size-4" /> : <MoonIcon className="size-4" />} name="Away and pause" detail={away ? `Away until ${untilOf(away.until!)}${paused ? " · paused" : ""}` : paused ? "The crew is paused" : "The crew carries on without you"} onClick={() => setPage("away")} />
@@ -318,11 +297,10 @@ function RoomMore({ identity, sid, events, notify }: { identity: Identity; sid: 
   );
 }
 
-/** The room's side threads in one list, open first: each a press from the thread (team-threads.ts). */
-function ThreadsButton({ sid, events }: { sid: string; events: SessionEvent[] }) {
-  const [open, setOpen] = useState(false);
+/** The room's side threads, waiting on a teammate first, then by the newest reply (team-threads.ts). */
+function useThreads(sid: string, events: SessionEvent[]) {
   const threads = threadsOf(events);
-  const list = useMemo(() => {
+  return useMemo(() => {
     const out: { root: number; lane: string; text: string; replies: number; last: number; state: string | undefined }[] = [];
     for (const [root, replies] of threads.byRoot) {
       const first = events.find((e) => e.seq === root);
@@ -330,45 +308,39 @@ function ThreadsButton({ sid, events }: { sid: string; events: SessionEvent[] })
       const text = first.body.type === "agent.message" || first.body.type === "instruction" ? first.body.text : "";
       out.push({ root, lane: first.lane ?? "main", text: plainLine(text), replies: replies.length, last: replies.at(-1)?.ts ?? first.ts, state: threads.state.get(root) });
     }
-    // Waiting on a teammate first, then by the newest reply.
     return out.sort((a, b) => Number(b.state === "answering") - Number(a.state === "answering") || b.last - a.last);
-  }, [threads, events]);
-  if (!list.length) return null;
+  }, [threads, events, sid]); // eslint-disable-line react-hooks/exhaustive-deps
+}
+
+/** The room's threads as a page of its ⋯ menu, each a press from the thread. */
+function ThreadsList({ sid, list, onOpen }: { sid: string; list: ReturnType<typeof useThreads>; onOpen: () => void }) {
   const waiting = list.filter((x) => x.state === "answering").length;
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <button type="button" className="panel-tab icon tm-hd-btn tm-hd-threads" aria-label={`Threads: ${list.length}${waiting ? `, ${waiting} waiting for an answer` : ""}`} title="Threads in this room">
-          <MessagesSquareIcon className="size-[17px]" />
-          <span className={waiting ? "tm-hd-n live" : "tm-hd-n"}>{list.length}</span>
-        </button>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="tm-pop tm-threads-pop">
-        <div className="tm-pop-head">
-          <b>Threads</b>
-          <span>{waiting ? `${waiting} waiting for an answer` : `${list.length} in this room`}</span>
-        </div>
-        <ul className="tm-threads-list">
-          {list.map((x) => {
-            const m = mateOn(x.lane);
-            const said = threadSaid(x.state as never, m?.name ?? "It", x.lane, sid);
-            return (
-              <li key={x.root}>
-                <button type="button" onClick={() => (openThread({ sid, root: x.root, lane: x.lane }), setOpen(false))}>
-                  {m ? <Face seed={m.look ?? m.name} size={22} /> : <span className="tm-dot" />}
-                  <span className="tm-text">
-                    <span className="tm-threads-text">{x.text || "A message"}</span>
-                    <span className={`tm-sub${x.state === "answering" ? " s-working" : x.state === "failed" || x.state === "stopped" ? " s-limited" : ""}`}>
-                      {x.replies} {x.replies === 1 ? "reply" : "replies"} · {said ?? `answered ${agoShort(x.last)}`}
-                    </span>
+    <>
+      <div className="tm-pop-head">
+        <b>Threads</b>
+        <span>{waiting ? `${waiting} waiting for an answer` : `${list.length} in this room`}</span>
+      </div>
+      <ul className="tm-threads-list">
+        {list.map((x) => {
+          const m = mateOn(x.lane);
+          const said = threadSaid(x.state as never, m?.name ?? "It", x.lane, sid);
+          return (
+            <li key={x.root}>
+              <button type="button" onClick={() => (openThread({ sid, root: x.root, lane: x.lane }), onOpen())}>
+                {m ? <Face seed={m.look ?? m.name} size={22} /> : <span className="tm-dot" />}
+                <span className="tm-text">
+                  <span className="tm-threads-text">{x.text || "A message"}</span>
+                  <span className={`tm-sub${x.state === "answering" ? " s-working" : x.state === "failed" || x.state === "stopped" ? " s-limited" : ""}`}>
+                    {x.replies} {x.replies === 1 ? "reply" : "replies"} · {said ?? `answered ${agoShort(x.last)}`}
                   </span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      </PopoverContent>
-    </Popover>
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </>
   );
 }
 

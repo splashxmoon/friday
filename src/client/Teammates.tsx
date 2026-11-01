@@ -42,7 +42,7 @@ import { MessageResponse } from "@/components/ai-elements/message";
 import { ANSWER, mediaText } from "./AnswerParts.js";
 import { EVERYONE, mentionsIn, namedIn, namesEveryone } from "./teammate-mentions.js";
 import { threadsOf, type ThreadState } from "./team-threads.js";
-import { isFridayNote, plainLine } from "./team-room.js";
+import { gist, isFridayNote, plainLine, withoutFridayNotes } from "./team-room.js";
 import { RailTip } from "./rail-tip.js";
 import { Avatar } from "./icons.js";
 import { createPortal } from "react-dom";
@@ -873,98 +873,18 @@ export function RoomIntro({ sid }: { sid: string }) {
   );
 }
 
-export function RoomsNow({ sid, onOpen, identity, empty }: { sid: string; onOpen: (r: RecentSession) => void; identity?: Identity; /** Nothing said in the room yet: a first goal is suggested. */ empty?: boolean }) {
+/**
+ * At the top of the Crew room: since the person last had it open, what each teammate did, failed and asks (TeamBrief.tsx), and a
+ * first goal before anything is said. The grids of teammates and rooms that stood here are gone: the sidebar lists both, and the
+ * room is a chat (Arun, 2026-11-01: "i want to be simplier and easy to digest as a user for crew").
+ */
+export function RoomsNow({ sid, identity, empty }: { sid: string; onOpen?: (r: RecentSession) => void; identity?: Identity; /** Nothing said in the room yet: a first goal is suggested. */ empty?: boolean }) {
   const t = useTeamNow();
   if (!t || t.sid !== sid || !ownOf(t).length) return null;
-  const rooms = t.rooms ?? [];
-  const busy = [...rooms].sort((a, b) => b.waiting - a.waiting || b.working - a.working || (b.last?.at ?? 0) - (a.last?.at ?? 0));
-  // Who needs you first, then who is working, then the rest: the team at a glance (OpenBot's home list).
-  const rank = { waiting: 0, stopped: 1, working: 2, limited: 3, idle: 4, offline: 5 } as const;
-  const mates = [...ownOf(t)].sort((a, b) => rank[a.status] - rank[b.status] || a.created - b.created);
-  // Since the person last had the room open, what each teammate did, failed and asks (TeamBrief.tsx), in place of the grid; the
-  // grid when nothing happened, or the server can't say (Arun, 2026-10-28: the critique's "Since you left").
-  const grid = (
-    <section className="tm-rooms-now" aria-label="Teammates now">
-      <div className="tm-rooms-head">
-        <span>Teammates</span>
-        {/* The team at a glance: counted across every room, and said so (2026-10-27 audit). */}
-        <span className="tm-count">{ownOf(t).filter((m) => m.status === "working").length ? `${ownOf(t).filter((m) => m.status === "working").length} working across the crew` : "all quiet"}</span>
-      </div>
-      <div className="tm-rooms-grid tm-mates-grid">
-        {mates.map((m) => {
-          const inRooms = rooms.filter((r) => r.lanes[m.id]);
-          // Where it is at work, when that is a room: its card says so rather than seeming busy here (2026-10-27 audit).
-          const workingIn = rooms.filter((r) => !!r.doing && (r.lanes[m.id] ?? "") in r.doing);
-          return (
-            <div key={m.id} className="tm-room-card tm-mate-card" data-state={mateStatus(m).state}>
-              <button type="button" className="tm-mate-open" onClick={() => focusAgent(t.sid, m.lane)} aria-label={`Open ${m.name}'s chat`}>
-                <Face seed={m.look ?? m.name} size={30} status={m.status} />
-                <span className="tm-text">
-                  <span className="tm-name">{m.name}</span>
-                  <span className={`tm-sub s-${mateStatus(m).state}`}>{statusLine(m)}</span>
-                </span>
-                {m.queued > 0 && <span className="tm-queued" title={queuedTitle(m)} aria-label={queuedTitle(m)}>{m.queued}</span>}
-              </button>
-              <span className="tm-mate-foot">
-                {/* Where the status above it is: the room it works in, else the Team room itself when it is busy, so the two agree
-                    (2026-10-27 audit: "Using Bash" over "In Launch week", the Bash being the Team room's). */}
-                <span className="tm-mate-where">{workingIn.length ? `Working in ${workingIn.map((r) => r.name).join(", ")}` : m.status === "working" || m.status === "waiting" ? "Here, in the Crew room" : inRooms.length ? `Also in ${inRooms.map((r) => r.name).join(", ")}` : `${toolName(m.tool)} · ${modelLabel(m.tool, m.model)}`}</span>
-                {identity && (m.status === "working" || m.status === "waiting") && (
-                  <button type="button" className="tt-open" onClick={() => void api(identity, `/api/teammates/${m.id}/stop`, { method: "POST" }).then(() => refreshTeam(identity))}>
-                    Stop
-                  </button>
-                )}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-    </section>
-  );
   return (
     <>
-    <SinceYouLeft sid={sid} {...(identity ? { identity } : {})} fallback={grid} />
-    {empty && <FirstGoal t={t} />}
-    {rooms.length > 0 && (
-    <section className="tm-rooms-now" aria-label="Rooms now">
-      <div className="tm-rooms-head">
-        <span>Rooms</span>
-        <span className="tm-count">{rooms.filter((r) => r.working).length ? `${rooms.filter((r) => r.working).length} working` : "all quiet"}</span>
-      </div>
-      <div className="tm-rooms-grid">
-        {busy.map((r) => {
-          const who = Object.entries(r.lanes).flatMap(([id, lane]) => t.teammates.filter((m) => m.id === id).map((m) => ({ m, lane })));
-          const on = who.filter(({ lane }) => r.doing && lane in r.doing);
-          return (
-            <button key={r.id} type="button" className="tm-room-card" onClick={() => openRoom(r, onOpen)} data-state={r.waiting ? "waiting" : r.working ? "working" : "idle"}>
-              <span className="tm-room-card-top">
-                <span className="tm-working-faces">
-                  {who.slice(0, 4).map(({ m, lane }) => (
-                    <Face key={m.id} seed={m.look ?? m.name} size={18} {...(r.doing && lane in r.doing ? { status: "working" as const } : {})} />
-                  ))}
-                </span>
-                <b>{r.name}</b>
-                <span className="tm-room-card-state">{r.waiting ? `${r.waiting} need${r.waiting === 1 ? "s" : ""} you` : r.working ? `${r.working} working` : "Idle"}</span>
-              </span>
-              {on.length > 0 && (
-                <span className="tm-room-card-line">
-                  {on
-                    .slice(0, 2)
-                    .map(({ m, lane }) => `${m.name}: ${r.doing![lane] || "working"}`)
-                    .join(" · ")}
-                </span>
-              )}
-              {r.last && (
-                <span className="tm-room-card-said">
-                  <b>{r.last.by}</b> {plainLine(r.last.text)}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-    </section>
-    )}
+      <SinceYouLeft sid={sid} {...(identity ? { identity } : {})} fallback={null} />
+      {empty && <FirstGoal t={t} />}
     </>
   );
 }
@@ -1056,10 +976,9 @@ export function CheckInLine({ text, lane, stamp }: { text: string; lane: string;
 }
 
 /**
- * Over the room's box, "Waiting for replies": each teammate at work here as one live line, its 16px face with the turning ring,
- * its name, what it is doing now and for how long, a press opening its chat (Arun, 2026-10-29: "so clean and beautiful really
- * with a clear direction in design language"; DIRECTION.md §8 and §9.1, after OpenBot's working subagents). It replaces the one
- * "Nova, Kit and Juno are working" line; the Crew tasks pill shares its tray (teammates.css .tm-wait).
+ * Over the room's box, one line of who is at work here and on what: "Nova is writing the release notes · 2m", each a press from
+ * its chat (Arun, 2026-11-01, after OpenBot: "i want to be simplier and easy to digest as a user for crew"). It was a "Waiting for
+ * replies" head over a row per teammate.
  */
 export function TeamWorking({ sid }: { sid: string }) {
   useTeamNow();
@@ -1068,27 +987,26 @@ export function TeamWorking({ sid }: { sid: string }) {
   const busy = matesIn(sid).filter(({ lane, m }) => statusIn(sid, lane, m) === "working");
   if (!busy.length) return null;
   return (
-    <div className="tm-wait" role="group" aria-label="Waiting for replies">
-      <span className="tm-wait-head">Waiting for replies</span>
-      <ul className="tm-wait-list" aria-live="polite">
-        {busy.map(({ lane, m }) => {
-          const since = workingSinceOf(m);
-          const line = mateStatus(m, { sid, lane }).line;
-          return (
-            <li key={m.id}>
-              <button type="button" className="tm-wait-row" onClick={() => focusAgent(sid, lane)} title={`Open ${m.name}'s chat`}>
-                <Face seed={m.look ?? m.name} size={16} status="working" />
-                <b className="tm-wait-name">{m.name}</b>
-                <Shine className="tm-wait-line">{line}</Shine>
-                {since !== null && <span className="tm-wait-time">{elapsed(since, now)}</span>}
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+    <div className="tm-wait" role="status" aria-live="polite">
+      {busy.map(({ lane, m }, i) => {
+        const since = workingSinceOf(m);
+        const line = mateStatus(m, { sid, lane }).line;
+        return (
+          <button key={m.id} type="button" className="tm-wait-one" onClick={() => focusAgent(sid, lane)} title={`${m.name}: ${line}. Open ${m.name}'s chat`}>
+            {i > 0 && <span className="tm-wait-sep" aria-hidden="true">·</span>}
+            <Face seed={m.look ?? m.name} size={14} />
+            <b>{m.name}</b>
+            <Shine className="tm-wait-line">{lower(line)}</Shine>
+            {busy.length === 1 && since !== null && <span className="tm-wait-time">{elapsed(since, now)}</span>}
+          </button>
+        );
+      })}
     </div>
   );
 }
+
+/** "Writing the notes" read after a name: "Nova writing the notes" → "Nova is writing the notes"; a line that isn't a doing stays. */
+const lower = (line: string) => (/^[A-Z][a-z]+ing\b/.test(line) ? `is ${line[0]!.toLowerCase()}${line.slice(1)}` : line);
 
 /**
  * A hand-off between teammates in a crew chat, as one centred line between hairlines: "Nova gave Write the launch thread to
@@ -1186,20 +1104,20 @@ export function TeamRun({ sid, lane, active, doing, said, outcome, changed, stam
             <Shine className="tm-live-text">{doing || "Working"}</Shine>
           </div>
         )}
+        {/* Under a post, what it changed and its chat; a thread with replies says so. Copy, Save as a skill and an empty "Reply in
+            thread" show under the pointer only (Arun, 2026-11-01: "simplier and easy to digest"; teammates.css .tt-quiet). */}
         <div className="tt-foot">
           {changed > 0 && !active && (
             <span className="tt-chip">
-              Changed {changed} file{changed === 1 ? "" : "s"}
+              {changed} file{changed === 1 ? "" : "s"} changed
             </span>
           )}
-          {/* One set of actions on a teammate's message, always in view: reply in its thread, copy it, open their chat (Arun,
-              2026-10-28: the critique's "one set: Reply in thread (visible, not hover-only), Copy, Open chat"). */}
+          <button type="button" className="tt-open" onClick={() => focusAgent(sid, lane)}>
+            {active ? `Watch ${name} work` : `Open ${name}'s chat`}
+          </button>
           {thread}
           {said && !active && <CopyText text={said} />}
           {said && !active && !["error", "cancelled", "limited", "switched", "waiting"].includes(outcome ?? "") && <SaveAsSkill sid={sid} lane={lane} />}
-          <button type="button" className="tt-open" onClick={() => focusAgent(sid, lane)}>
-            {active ? `Watch ${name} work` : `Open ${name}'s chat`} →
-          </button>
         </div>
       </div>
     </div>
@@ -1231,11 +1149,11 @@ function CopyText({ text }: { text: string }) {
  * show in the room too (Arun, 2026-10-27: "allow for the team room chat to be dynamic too for like visuals"). A long one is cut
  * to a few lines with the rest a press away; one that shows a picture or a video is never cut.
  */
-function Bubble({ text, tone }: { text: string; tone?: string }) {
-  const [open, setOpen] = useState(false);
+function Bubble({ text, tone, whole }: { text: string; tone?: string; /** Never cut: it was opened from its gist. */ whole?: boolean }) {
+  const [open, setOpen] = useState(!!whole);
   // A picture, a video or a table is shown whole: cut, it said nothing.
   const media = /\.(png|jpe?g|gif|webp|avif|svg|mp4|mov|webm|m4v)\b/i.test(text) || /^\s*\|.*\|\s*$/m.test(text);
-  const long = !media && (text.length > 420 || text.split("\n").length > 6);
+  const long = !whole && !media && (text.length > 420 || text.split("\n").length > 6);
   return (
     <div className={long && !open ? "tt-bubble clamped" : "tt-bubble"} style={tone ? ({ "--c": tone } as CSSProperties) : undefined}>
       <div className="tt-rich">
@@ -1247,6 +1165,35 @@ function Bubble({ text, tone }: { text: string; tone?: string }) {
         </button>
       )}
     </div>
+  );
+}
+
+/**
+ * What one teammate sends another, in the room: its first sentence, with "Read all" opening the whole of it (Arun, 2026-11-01, a
+ * task brief of a dozen lines: "there is a lot of reading and stuff"). Friday's own notes to the agent are never shown; a short
+ * message is shown as it is.
+ */
+function Gist({ text, tone }: { text: string; tone?: string }) {
+  const [open, setOpen] = useState(false);
+  const own = withoutFridayNotes(text);
+  const g = gist(own);
+  if (!g.more) return <Bubble text={own} {...(tone ? { tone } : {})} />;
+  if (open)
+    return (
+      <>
+        <Bubble text={own} whole {...(tone ? { tone } : {})} />
+        <button type="button" className="tt-more" onClick={() => setOpen(false)}>
+          Show less
+        </button>
+      </>
+    );
+  return (
+    <p className="tt-gist">
+      {g.line}{" "}
+      <button type="button" className="tt-more" onClick={() => setOpen(true)}>
+        Read all
+      </button>
+    </p>
   );
 }
 
@@ -1304,7 +1251,7 @@ export function TeamTalk(p: {
           <span className="tt-stamp">{p.stamp}</span>
         </div>
         {p.why && <p className="tt-why">{p.why}</p>}
-        <Bubble text={boardTitle(p.text)} {...(tone ? { tone } : {})} />
+        <Gist text={boardTitle(p.text)} {...(tone ? { tone } : {})} />
         {p.answer && (
           <div className="tt-reply">
             <span className="tt-av small">
@@ -1315,7 +1262,7 @@ export function TeamTalk(p: {
                 <span className="tt-from">{p.toName}</span>
                 <span className="tt-verb">{p.answer.auto ? "answered at the end of its turn" : "answered"}</span>
               </div>
-              <Bubble text={p.answer.text} />
+              <Gist text={p.answer.text} />
             </div>
           </div>
         )}

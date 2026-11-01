@@ -912,24 +912,18 @@ html .tm-row[data-active="true"] { background: var(--sel-bg, var(--hover-strong)
    Built on the foundation's tokens (style.css: --surface, --line, the ink ladder, --live and the presence rings): flat grounds,
    hairlines in place of boxes, colour only on faces and on what needs you. */
 
-/* "Waiting for replies" (TeamWorking): one tray on the room's box, the same width, its top corners round. A row per teammate at
-   work: 16px face with the turning ring, name, the live line in --ink-2 (a faint shimmer, the feed's only one) and elapsed time.
-   The Crew tasks chip sits on the tray's first line, at its right. */
-.composer:has(> .team-box-mark) .composer-caption:has(> .tm-wait) {
-  align-items: flex-start; gap: 8px; min-height: 0; margin: 0; padding: 6px 6px 4px 12px;
-  border: 1px solid var(--border-strong); border-bottom: 0; border-radius: var(--r-lg) var(--r-lg) 0 0; background: var(--card);
-}
-.composer:has(> .team-box-mark):has(.composer-caption > .tm-wait) .prompt [data-slot="input-group"] { border-top-left-radius: 0 !important; border-top-right-radius: 0 !important; }
-.tm-wait { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; }
-.tm-wait-head { display: flex; align-items: center; height: 26px; color: var(--text-muted); font-size: 12px; line-height: 16px; }
-.tm-wait-list { display: flex; flex-direction: column; margin: 0 0 2px -6px; padding: 0; list-style: none; }
-.tm-wait-row { display: flex; align-items: center; gap: 8px; width: 100%; height: 28px; padding: 0 6px; border: 0; border-radius: var(--r-md); background: none; color: var(--ink); font: inherit; font-size: 13px; line-height: 18px; text-align: left; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out); }
-.tm-wait-row:hover { background: var(--hover); }
-.tm-wait-row:focus-visible { outline: 2px solid var(--focus-ring, var(--ink)); outline-offset: -2px; }
-.tm-wait-row > .pr { margin: 0 3px; }
-.tm-wait-name { flex: none; color: var(--ink); font-weight: 500; }
-.tm-wait-line { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--ink-2); text-overflow: ellipsis; white-space: nowrap; }
-.tm-wait-time { flex: none; color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+/* Who is at work (TeamWorking): plain words over the box, no tray of their own. */
+.composer:has(> .team-box-mark) .composer-caption:has(> .tm-wait) { align-items: center; gap: 8px; min-height: 0; margin: 0; padding: 0 6px 4px; border: 0; background: none; }
+/* Who is at work here, in one line over the box (TeamWorking). */
+.tm-wait { display: flex; flex: 1 1 auto; align-items: center; min-width: 0; height: 26px; overflow: hidden; white-space: nowrap; }
+.tm-wait-one { display: inline-flex; flex: 0 1 auto; align-items: center; gap: 6px; min-width: 0; height: 24px; padding: 0 4px; border: 0; border-radius: var(--r-md); background: none; color: var(--text-muted); font: inherit; font-size: 12.5px; cursor: pointer; }
+.tm-wait-one:first-child { margin-left: -4px; }
+.tm-wait-one:hover { color: var(--ink-2); }
+.tm-wait-one:focus-visible { outline: 2px solid var(--focus-ring, var(--ink)); outline-offset: -2px; }
+.tm-wait-one > b { flex: none; color: var(--ink-2); font-weight: 500; }
+.tm-wait-sep { margin-right: 2px; color: var(--faint, var(--text-muted)); }
+.tm-wait-line { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tm-wait-time { flex: none; font-variant-numeric: tabular-nums; }
 /* The live line's shimmer: a faint lighter band passing left to right every 2.8s (DIRECTION.md §7), drawn by the compositor
    (shine.tsx). Still for reduced motion. */
 .tm-wait-line.shine, .tm-live-text.shine { --shine-ink: var(--ink); }
@@ -940,7 +934,6 @@ html .tm-row[data-active="true"] { background: var(--sel-bg, var(--hover-strong)
 .composer-caption:has(> .tm-wait) .dock-todo > section > button { height: 26px; padding: 0 8px 0 6px; border-radius: var(--r-md); }
 .composer-caption:has(> .tm-wait) .dock-todo > section > button:hover { background: var(--hover); }
 .composer-caption:has(> .tm-wait) .dock-todo > section > [role="region"] > div { border-color: var(--border-strong); border-radius: var(--r-lg); box-shadow: var(--shadow-pop); }
-.composer-caption:has(> .tm-wait) .tm-wait-row { padding-right: 8px; }
 
 /* A hand-off between teammates (HandoffLine): a centred line between hairlines, faces at 16px, the names in --ink-2 and the rest
    meta. Opened, why and what came with it sit under it, centred and quiet. */
@@ -975,3 +968,25 @@ html .tm-row[data-active="true"] { background: var(--sel-bg, var(--hover-strong)
 .tm-more-back { margin: 4px 6px 0; padding: 4px 6px; border: 0; border-radius: 6px; background: none; color: var(--text-muted); font: inherit; font-size: 12px; cursor: pointer; }
 .tm-more-back:hover { background: var(--hover); color: var(--ink); }
 .tm-more-btn[data-on="run"] { color: var(--ink); background: color-mix(in srgb, var(--ink) 10%, transparent); }
+
+/* A room as a group chat (Arun, 2026-11-01, after OpenBot's channels: "i want to be simplier and easy to digest as a user for
+   crew"): each post is a face, a name with its time beside it, and the words as plain text, no bubble; under it a quiet line of
+   what it changed and its chat, the rest under the pointer. */
+.tt-msg { grid-template-columns: 32px minmax(0, 1fr); gap: 12px; }
+.tt-av { width: 32px; height: 32px; margin-top: 1px; }
+.tt-body { gap: 2px; }
+.tt-meta { gap: 8px; }
+.tt-from { font-weight: 600; }
+.tt-stamp { margin-left: 0; }
+.tt-bubble { padding: 0; border-radius: 0; background: none; box-shadow: none; }
+.tt-rich { font-size: 14.5px; line-height: 1.6; }
+.tt-foot { margin-top: 2px; }
+.tt-foot:empty { display: none; }
+.tt-foot > :is(.tt-copy, .sk-save, .tt-open, .tt-thread:not(.has)) { opacity: 0; transition: opacity var(--t-hover, 120ms) var(--ease-out, ease-out); }
+.tt-msg:hover .tt-foot > *, .tt-foot > :focus-visible, .tt-msg:focus-within .tt-foot > * { opacity: 1; }
+@media (hover: none) { .tt-foot > :is(.tt-copy, .sk-save, .tt-open, .tt-thread:not(.has)) { opacity: 1; } }
+/* A teammate's message to another as its first sentence (Gist), "Read all" after it on the line. */
+.tt-gist { margin: 0; color: var(--ink); font-size: 14.5px; line-height: 1.6; overflow-wrap: anywhere; }
+.tt-gist > .tt-more { margin: 0 0 0 2px; }
+.tt-body > .tt-more { align-self: flex-start; }
+

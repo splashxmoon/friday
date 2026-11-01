@@ -213,3 +213,22 @@ export function plainLine(md: string): string {
       .trim()
   );
 }
+
+/** Friday's own notes to an agent, put after what a teammate wrote ("[Friday] It is big enough to split: …"): for the agent only. */
+export const withoutFridayNotes = (text: string) => text.split(/\n\s*\n/).filter((p) => !p.trimStart().startsWith("[Friday]")).join("\n\n").trim();
+
+/**
+ * What a teammate's long message to another comes to, in a line: its first sentence, plain, at most `max` characters, and whether
+ * there is more to read (Arun, 2026-11-01, a task brief of a dozen lines in the room: "there is a lot of reading"). A short one is
+ * itself, with nothing more.
+ */
+export function gist(text: string, max = 160): { line: string; more: boolean } {
+  const own = withoutFridayNotes(text);
+  const plain = plainLine(own).replace(/\s+/g, " ").trim();
+  if (plain.length <= max && !own.includes("\n")) return { line: plain, more: false };
+  // The first sentence: up to a full stop, question or exclamation mark followed by a space, not one inside a name ("v5.mp4").
+  const first = /^(.+?[.!?])(?=\s+[A-Z(“"'])/.exec(plain)?.[1] ?? plain;
+  const line = first.length > max ? `${first.slice(0, max).replace(/\s+\S*$/, "")}…` : first;
+  return { line, more: line.length < plain.length };
+}
+

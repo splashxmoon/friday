@@ -40,9 +40,21 @@ test("finished work with its changes is ready; work still running, or none chang
 });
 
 test("proven work comes first, then the rest, then what has a pull request open; newest first in each", () => {
-  const i = (sid: string, more: Partial<ReadyItem>): ReadyItem => ({ sid, where: sid, lane: MAIN_LANE, who: "Ada", files: 1, additions: 1, deletions: 0, seq: 1, waiting: false, ...more });
+  const i = (sid: string, more: Partial<ReadyItem>): ReadyItem => ({ sid, where: sid, lane: MAIN_LANE, who: "Ada", files: 1, additions: sid.charCodeAt(0), deletions: 0, seq: 1, waiting: false, ...more });
   const at: Record<string, number> = { a: 1, b: 2, c: 3, d: 4 };
   const ranked = rankReady([i("a", {}), i("b", { checks: { ok: true, command: "npm test" } }), i("c", { pr: { url: "u", merged: false } }), i("d", { review: { ok: true, by: "Lux", note: "" } })], (x) => at[x.sid]!);
   assert.deepEqual(ranked.map((x) => x.sid), ["d", "b", "a", "c"]);
+  // One teammate's same changes, seen from two rooms it works in: once.
+  const twice = rankReady([i("e", { who: "Nova", files: 580, additions: 497 }), i("f", { who: "Nova", files: 580, additions: 497 })], (x) => at[x.sid] ?? 0);
+  assert.equal(twice.length, 1, "the same changes from two rooms show once");
   assert.equal(proofLine(i("x", { checks: { ok: true, command: "npm test" }, review: { ok: false, by: "Lux", note: "" } })), "tests passed · Lux asked for changes");
+});
+
+test("in a room with a board, a teammate's changes count only with a task done or being checked", () => {
+  const diff = { base: "b0", seq: 3, files: [file("src/a.ts", 5, 0)] };
+  const base = { id: "r2", title: "Crew", lanes: [{ id: "l1", name: "Nova" }], engines: {}, diffs: { l1: diff }, laneRuns: {}, members: {} } as unknown as Parameters<typeof readyIn>[0];
+  const open = { ...base, board: { seq: 1, tasks: [{ id: "t1", title: "Cut the trailer", lane: "l1", status: "open" }] } } as typeof base;
+  const done = { ...base, board: { seq: 1, tasks: [{ id: "t1", title: "Cut the trailer", lane: "l1", status: "done" }] } } as typeof base;
+  assert.equal(readyIn(open).length, 0, "changes with no finished task are work in progress");
+  assert.equal(readyIn(done)[0]?.task, "Cut the trailer");
 });

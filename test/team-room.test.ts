@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { group } from "../src/client/Activity.js";
-import { blockFor, isFridayNote, isLive, isPersonsWord, isWaiting, leadAnswers, queuedFor, roomRunKind, switchedAfter, turnsFor, type LeadInfo, type RunLike } from "../src/client/team-room.js";
+import { blockFor, gist, isFridayNote, isLive, isPersonsWord, isWaiting, leadAnswers, queuedFor, roomRunKind, switchedAfter, turnsFor, type LeadInfo, type RunLike, withoutFridayNotes } from "../src/client/team-room.js";
 import type { SessionEvent } from "../src/types.js";
 
 let seq = 0;
@@ -236,3 +236,14 @@ test("in a team, the Agents panel leaves out Friday Code; a teammate out of usag
   // The time first, then who covers (team-status.ts sayMate; Arun, 2026-10-28: the critique's "Out until 12:38 · Codex covers").
   assert.equal(statusLine(nova), "Out until 10:42 PM · Codex covers");
 });
+
+test("a long brief between teammates comes to its first sentence, Friday's notes left out", () => {
+  const brief = "Arun wants a different voice for the Claude character in v5 (currently Qwen3 `serena`). In Sage/marketing/skits/voices-v5/: re-render only the 25 NN-ai.wav rows with 2 other Qwen3 CustomVoice speakers that sound clearly unlike ryan.\n\n[Friday] It is big enough to split: start your own sub-agents on its parts at once.";
+  const g = gist(brief);
+  assert.equal(g.line, "Arun wants a different voice for the Claude character in v5 (currently Qwen3 serena).");
+  assert.equal(g.more, true);
+  assert.equal(withoutFridayNotes(brief).includes("[Friday]"), false);
+  assert.deepEqual(gist("Can you review the Safari fix?"), { line: "Can you review the Safari fix?", more: false });
+  assert.ok(gist("x".repeat(400)).line.length <= 161, "a sentence too long is cut");
+});
+

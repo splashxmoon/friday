@@ -33,6 +33,7 @@ import { isTeamDemo, runTeamDemo, TeamDemoOffer, useDemoTeam } from "./TeamDemo.
 import { DailyBriefCard, openBrief } from "./DailyBrief.js";
 import { GoalsCard } from "./Goals.js";
 import { ReadyCard } from "./ReadyCard.js";
+import { GettingStarted, markOwnFolder } from "./GettingStarted.js";
 
 // The message box is this page's state, so every keystroke draws the page again. These take nothing that changes as you type,
 // so they are left as they were. The template shelf is not among them: it is given what is in the box.
@@ -664,6 +665,7 @@ export function Code({
       let attached = true;
       const attach = async () => {
         if (!willAttach) return;
+        if (folder) markOwnFolder();
         try {
           const begun = await hostApi<{ cwd?: string }>(identity, "/api/runner/start", {
             method: "POST",
@@ -843,7 +845,8 @@ export function Code({
         {/* Smart routing (routing.ts): Auto for whichever agent is chosen, when it can route. Above the box, on its own, so it is
             seen before writing rather than found among the controls under it. Off until someone turns it on; then it stays on,
             on this computer, until they turn it off here or pick a model of their own. */}
-        {(engine ? canRoute(engine) : planLimits(plan).fridayAgent !== "none") &&
+        {/* Not on a first visit: one more thing to read before the first task, and a word nobody new knows yet (2026-11-01). */}
+        {!firstRun && (engine ? canRoute(engine) : planLimits(plan).fridayAgent !== "none") &&
           (() => {
             const on = engine ? model === "auto" : fridayModelId === "auto";
             return (
@@ -1082,7 +1085,8 @@ export function Code({
                   onClick={(e) => window.dispatchEvent(new CustomEvent(PICK_FOLDER, { detail: { from: e.currentTarget } }))}
                 >
                   <Icon name="folder" size={13} />
-                  <span className="cw-drop-text">{folder ? folder.name : noFolderLine === "work" ? "New folder" : "No folder"}</span>
+                  {/* "New folder" in Code too: Friday makes one, and "No folder" read as something missing (2026-11-01, the first run). */}
+                  <span className="cw-drop-text">{folder ? folder.name : "New folder"}</span>
                   <Icon name="chevronDown" size={12} className="menu-pill-caret" />
                 </button>
                 {folder && (
@@ -1160,7 +1164,9 @@ export function Code({
             <p className="muted small">Looking for your computer…</p>
           ) : hasMachine ? (
             <>
-              {engine && tool?.path && tool.loggedIn === false && (
+              {/* Not while no tool at all is ready: the card over the box says so already, with Set up (a second, red line under the
+                  box said the same thing again; 2026-11-01, the first-run pass). */}
+              {engine && tool?.path && tool.loggedIn === false && machine.tools.some((t) => t.path && t.loggedIn !== false && !t.unavailable) && (
                 <p role="alert" className="error small">
                   {toolName} is signed out on this computer.{" "}
                   <button type="button" className="link-btn" disabled={signing?.busy} onClick={() => void signIn()}>
@@ -1222,10 +1228,13 @@ export function Code({
       {(err || (nudged && blockedWhy)) && <p role="alert" className="error">{err || blockedWhy}</p>}
 
       {/* The first thing to try once a coding tool works: the person's own agents working as a team on a sample (TeamDemo.tsx). */}
-      {!work && hasMachine && firstRun && !busy && !goal.trim() && <TeamDemoOffer team={demoTeam} busy={busy} onGo={startDemo} />}
+      {/* On someone's own computer the demo is a step of Getting started, below: offered twice, it was two cards saying one thing. */}
+      {!work && !isLocal() && hasMachine && firstRun && !busy && !goal.trim() && <TeamDemoOffer team={demoTeam} busy={busy} onGo={startDemo} />}
 
       {/* The sample runs Friday's own agent: Team's, or on Solo the person's own model. */}
 
+      {/* Someone new on their own computer: the four things that show what Friday is for, one press each (GettingStarted.tsx). */}
+      {isLocal() && !work && <GettingStarted recents={recents} onPickFolder={() => setTimeout(() => document.querySelector<HTMLButtonElement>(".cw-drop")?.click(), 0)} />}
       {/* The morning brief or evening wrap-up across everything, then what happened in each session while you were away. */}
       <DailyBriefCard />
       {/* Every goal you set, at risk first (goals.ts). */}

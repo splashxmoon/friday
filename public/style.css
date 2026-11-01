@@ -7381,8 +7381,18 @@ button.ao-row { gap: 12px; }
 .gh-actions { flex: none; display: flex; align-items: center; gap: 6px; }
 .gh-error { margin: 4px 0 0; }
 .gh-note { flex: none; }
-.ws-gh-cta .gh-connect { width: 100%; padding: 6px 0; }
-.ws-gh-cta .gh-mark { width: 28px; height: 28px; }
+/* In the folder picker: the mark and what it gives on one line, Connect GitHub across the card under them, signing in with gh a
+   quiet word beside it (Arun, 2026-11-01: "design better"). */
+.ws-gh-cta .gh-connect { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 12px; width: 100%; margin-top: 2px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--card-2, var(--hover)); }
+.ws-gh-cta .gh-mark { width: 32px; height: 32px; }
+.ws-gh-cta .gh-mark svg { width: 17px; height: 17px; }
+.ws-gh-cta .gh-body { gap: 1px; }
+.ws-gh-cta .gh-title { font-size: 13.5px; font-weight: 500; }
+.ws-gh-cta .gh-sub { font-size: 12.5px; line-height: 1.4; }
+.ws-gh-cta .gh-actions { grid-column: 1 / -1; display: flex; flex-direction: row-reverse; justify-content: space-between; gap: 8px; }
+.ws-gh-cta .gh-actions .btn.primary { flex: 1; justify-content: center; height: 32px; border-radius: 999px; font-size: 13px; font-weight: 500; }
+.ws-gh-cta .gh-actions .gh-cli { flex: none; height: 32px; padding: 0 10px; color: var(--text-muted); font-size: 12.5px; }
+.ws-gh-cta .gh-actions .gh-cli:hover { color: var(--ink); }
 .set-github { padding: 0 18px; }
 @media (max-width: 560px) {
   .gh-connect { flex-wrap: wrap; }
@@ -12176,3 +12186,87 @@ body.resizing-panel { cursor: col-resize; user-select: none; }
 .goal-due { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .goal-due > span { white-space: nowrap; }
 .goal-due input { height: 30px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg); color: var(--ink); font: inherit; font-size: 13px; color-scheme: light dark; }
+
+/* The open-source welcome (Setup.tsx, isLocal): Friday in a line, the coding tools to start with, GitHub as an optional row, one
+   way on (Arun, 2026-11-01: "this is the first impression of our app"). Centred head, each tool a quiet row of its own. */
+.setup-card.welcome { position: relative; width: min(480px, 100%); gap: 20px; padding: 32px 28px 20px; border-radius: 20px; }
+.setup-card.welcome .setup-x { position: absolute; top: 14px; right: 14px; }
+.wl-head { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
+.wl-mark { display: grid; place-items: center; width: 52px; height: 52px; margin-bottom: 8px; border: 1px solid var(--border); border-radius: 16px; background: var(--card-2, var(--hover)); color: var(--ink); }
+.wl-head h2 { margin: 0; color: var(--ink); font-size: 21px; font-weight: 600; line-height: 28px; letter-spacing: -0.015em; }
+.wl-head p { max-width: 340px; margin: 0; color: var(--text-muted); font-size: 14px; line-height: 20px; text-wrap: balance; }
+.wl-tools { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.wl-label { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 0 2px; font-size: 13px; }
+.wl-label b { color: var(--ink); font-weight: 500; }
+.wl-label span { color: var(--text-muted); font-size: 12.5px; }
+.wl-label span[data-ready] { color: color-mix(in srgb, var(--green) 85%, var(--ink)); }
+.wl-list { max-height: min(300px, 40dvh); margin: 0 -4px; padding: 0 4px; overflow-y: auto; overscroll-behavior: contain; }
+/* Each tool its own row: its mark in a tile, its name over where it stands, its one button at the right. */
+.mb-welcome .mb-tools { gap: 6px; border: 0; border-radius: 0; background: none; overflow: visible; }
+.mb-welcome .mb-tool { min-height: 52px; padding: 9px 10px 9px 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); transition: border-color var(--t-hover) var(--ease-out), background-color var(--t-hover) var(--ease-out); }
+.mb-welcome .mb-tool + .mb-tool, .mb-welcome .mb-more { border-top: 1px solid var(--border); }
+.mb-welcome .mb-more { border: 0; }
+.mb-welcome .mb-tool:hover { border-color: var(--border-strong); }
+.mb-welcome .mb-tool.out { box-shadow: none; }
+.mb-welcome .mb-tool.in { border-color: color-mix(in srgb, var(--green) 35%, var(--border)); }
+.mb-welcome .mb-tool-line { gap: 12px; }
+.mb-welcome .mb-tool-mark { width: 32px; height: 32px; border-radius: 9px; background: var(--card-2, var(--hover)); }
+.mb-welcome .mb-tool-mark svg, .mb-welcome .mb-tool-mark img { width: 17px; height: 17px; }
+.mb-welcome .mb-tool.missing .mb-tool-mark { opacity: 1; filter: grayscale(.35); }
+.mb-welcome .mb-tool-id { gap: 1px; }
+.mb-welcome .mb-tool-name { color: var(--ink); font-size: 14px; font-weight: 500; }
+.mb-welcome .mb-tool-state { color: var(--text-muted); font-size: 12.5px; }
+.mb-welcome .mb-tool.in .mb-tool-state { color: color-mix(in srgb, var(--green) 85%, var(--ink)); }
+.mb-welcome .mb-tool.out .mb-tool-state { color: var(--amber); }
+.mb-welcome .btn.small.mb-tool-go { height: 30px; padding: 0 14px; border-radius: 999px; font-size: 13px; font-weight: 500; }
+.mb-welcome .mb-more .more-tools { justify-content: center; padding: 8px 12px 2px; color: var(--text-muted); font-size: 12.5px; }
+.mb-welcome .mb-more .more-tools:hover { color: var(--ink); background: none; }
+/* GitHub: a row like the tools', quieter, its connecting under it when asked for. */
+.wl-gh { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; padding: 10px 10px; border: 1px dashed var(--border-strong); border-radius: 12px; }
+.wl-gh-mark { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: var(--card-2, var(--hover)); color: var(--ink-2); }
+.wl-gh-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+.wl-gh-text b { color: var(--ink); font-size: 14px; font-weight: 500; }
+.wl-gh-text span { color: var(--text-muted); font-size: 12.5px; }
+.wl-gh .btn.small { height: 30px; padding: 0 14px; border-radius: 999px; font-size: 13px; }
+.wl-gh-body { grid-column: 1 / -1; padding-top: 8px; }
+.wl-demo { margin: 0; padding: 14px 2px 0; }
+.setup-card.welcome .setup-foot { padding-top: 4px; }
+.setup-card.welcome .tour-next { height: 36px; padding: 0 18px; font-size: 13.5px; }
+@media (max-width: 520px) { .setup-card.welcome { padding: 28px 18px 16px; } }
+
+/* One spinner everywhere: the agents' working ring (the Presence block above), a faint --live track with its bright head turning
+   round it (Arun, 2026-11-01: "use the same circle ring spinner thing that we used for the agents", "USE THIS EXACT SPINNER FOR
+   EVERYTHING"). Every small loader keeps its size and takes this look: the agent card's, the task board's, the generic spinner,
+   search, the sidebar's and the rest. */
+:is(.spinner, .ring-spin, .hub-spin, .sr-spin, .ao-spin, .srch-spin, .sb-gspin, .ag-group.building .ag-group-head::after) {
+  --spin-w: 2px;
+  border: 0 !important; border-radius: 50%;
+  background:
+    conic-gradient(from 0deg, transparent 0 6%, color-mix(in srgb, var(--live) 14%, transparent) 30%, color-mix(in srgb, var(--live) 55%, transparent) 70%, var(--live) 96%, transparent 96.5%),
+    color-mix(in srgb, var(--live) 18%, transparent) !important;
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - var(--spin-w)), #000 calc(100% - var(--spin-w) + .5px)) !important;
+  mask: radial-gradient(farthest-side, transparent calc(100% - var(--spin-w)), #000 calc(100% - var(--spin-w) + .5px)) !important;
+  animation: pr-turn 1s linear infinite !important;
+}
+:is(.spinner.tiny, .sr-spin, .sb-gspin, .ag-group.building .ag-group-head::after) { --spin-w: 1.75px; }
+.hub-spin { width: 13px; height: 13px; }
+/* The faces' ring carries the same faint track under its head, so the two read as one. */
+.pr[data-pr="working"] > .pr-ring {
+  background:
+    conic-gradient(from 0deg, transparent 0 6%, color-mix(in srgb, var(--live) 14%, transparent) 30%, color-mix(in srgb, var(--live) 55%, transparent) 70%, var(--live) 96%, transparent 96.5%),
+    color-mix(in srgb, var(--live) 18%, transparent);
+}
+@media (prefers-reduced-motion: reduce) { :is(.spinner, .ring-spin, .hub-spin, .sr-spin, .ao-spin, .srch-spin, .sb-gspin, .ag-group.building .ag-group-head::after) { animation: none !important; } }
+/* The same spinner on every agent's mark: the header's agent tabs, the agent menu, and the faces, turning at the card's speed
+   (Arun, 2026-11-01: "I WANT TO UPDATE THIS TO THAT SPINNER", the header tab's ring). */
+.feed-toolbar .lane-tab[data-state="working"] .lane-tab-mark::after,
+.menu-agent-mark[data-state="working"]::after,
+.pr[data-pr="working"] > .pr-ring {
+  border: 0 !important;
+  background:
+    conic-gradient(from 0deg, transparent 0 6%, color-mix(in srgb, var(--live) 14%, transparent) 30%, color-mix(in srgb, var(--live) 55%, transparent) 70%, var(--live) 96%, transparent 96.5%),
+    color-mix(in srgb, var(--live) 18%, transparent) !important;
+  animation: pr-turn 1s linear infinite !important;
+}
+.menu-agent-mark[data-state="working"]::before { display: none; }
+@media (prefers-reduced-motion: reduce) { .feed-toolbar .lane-tab[data-state="working"] .lane-tab-mark::after, .menu-agent-mark[data-state="working"]::after, .pr[data-pr="working"] > .pr-ring { animation: none !important; } }

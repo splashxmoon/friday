@@ -1530,14 +1530,15 @@ function TopBar({
         )}
         {/* A room's settings with the header's other buttons, where a Code session has its gear, rather than an "…" beside its name (Arun, 2026-10-27: "place the edit room button somewhere better"). */}
         {/* The team's own: its threads, its board, Stop all while anyone works, and Away / Pause (TeamControls.tsx; Arun, 2026-10-28). */}
-        {state.options.team && <TeamHeaderControls identity={identity} state={state} events={events} send={send} notify={notify} />}
+        {state.options.team && <TeamHeaderControls identity={identity} state={state} events={events} send={send} notify={notify} panel={{ on: view.bench || view.history.open, toggle: view.onPanel }} />}
         {state.options.team && <RoomMenu identity={identity} sid={state.id} notify={notify} />}
         {state.options.work && <button type="button" className={`panel-tab icon work-browser-btn ${view.bench && view.tab === "preview" ? "on" : ""}`} aria-pressed={view.bench && view.tab === "preview"} aria-label={view.bench && view.tab === "preview" ? "Close the browser" : "Open the browser"} title={view.bench && view.tab === "preview" ? "Close the browser" : "Browser: the pages the agents open, and any you want"} onClick={() => view.onTab("preview")}><Icon name="webBrowser" size={17} /></button>}
         {/* One button for the side panel, where the panels are a card to pick from (Workbench), in place of a row of four and a
             "⋯" here (Arun, 2026-10-24: "using this svg icon make it be the side panel button and on the side panel open it will
             have a card with the options for tasks, diff, terminal, etc"). What they hold still shows: the diff's count, a dot while
             the agent works. */}
-        {(() => {
+        {/* Not in a crew's chat: its one button opens the panel from the room's menu (TeamControls.tsx RoomMore). */}
+        {!state.options.team && (() => {
           const on = view.bench || view.history.open;
           return (
             <button

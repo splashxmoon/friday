@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { FridayMark } from "./BrandMarks.js";
+import { FridayMark, GitHubMark } from "./BrandMarks.js";
 import { isLocal } from "./edition.js";
 import { GitHubConnect, useGithub } from "./GitHubConnect.js";
 import { Icon, type IconName } from "./icons.js";
 import { RELEASES, connectThisComputer, useMachine } from "./local.js";
 import { MachineBadge } from "./MachineBadge.js";
 import { openOutside } from "./openOutside.js";
-import type { Identity } from "./storage.js";
-import { askTeamDemo, demoBlurb, DemoMarks, useDemoTeam } from "./TeamDemo.js";
+import type { Identity, RecentSession } from "./storage.js";
+import { isTeamSid, useTeamNow } from "./Teammates.js";
+import { askTeamDemo, demoBlurb, DemoMarks, isTeamDemo, useDemoTeam } from "./TeamDemo.js";
 
 /**
  * Getting set up, for someone new (Arun, 2026-10-25: "instead of the tour on load we should have a modal or something where it
@@ -71,8 +72,16 @@ export function becameDone(was: { id: string; done: boolean }, now: { id: string
   return was.id === now.id && !was.done && now.done;
 }
 
-export function Setup({ identity, hasHistory, onDone }: { identity: Identity; hasHistory: boolean; /** Pressed Start: the box is theirs. */ onDone: () => void }) {
+export function Setup({ identity, recents, onDone }: { identity: Identity; recents: RecentSession[]; /** Pressed Start: the box is theirs. */ onDone: () => void }) {
   const k = keyFor(identity.id);
+  // Someone with sessions of their own is not new. The Crew room and the team demo are Friday's, not theirs: the Crew room is made
+  // as Friday starts, so counting it marked every fresh install as set up before the welcome could show (2026-11-01). Which
+  // sessions are the Crew's is known once the crew is: until then (a moment), nothing is decided.
+  const t = useTeamNow();
+  const [teamLate, setTeamLate] = useState(false);
+  useEffect(() => void setTimeout(() => setTeamLate(true), 4000), []);
+  const known = !isLocal() || !!t || teamLate;
+  const hasHistory = recents.some((r) => !isTeamSid(r.sid) && !isTeamDemo(r.sid, r.title));
   const [open, setOpen] = useState(false);
   const { state: machine, refresh } = useMachine(identity);
   const connected = machine.mode === "local" || machine.mode === "linked";
@@ -83,17 +92,19 @@ export function Setup({ identity, hasHistory, onDone }: { identity: Identity; ha
   // nothing saying so (Arun, 2026-10-30: the first few minutes after install are where people quit). Anyone who asks, from Settings.
   const unready = connected && signedIn.length === 0;
   useEffect(() => {
+    if (!known) return;
     if (!identity.id || hasHistory) return void (identity.id && hasHistory && write(k));
     if (read(k) && (!unready || skipped())) return;
     const t = setTimeout(() => setOpen(true), 600);
     return () => clearTimeout(t);
-  }, [identity.id, hasHistory, k, unready]);
+  }, [identity.id, hasHistory, k, unready, known]);
   useEffect(() => {
     const on = () => setOpen(true);
     window.addEventListener("friday:setup", on);
     return () => window.removeEventListener("friday:setup", on);
   }, []);
   const gh = useGithub(identity, open && connected);
+  const [ghOpen, setGhOpen] = useState(false);
   // Once a tool is ready, the last step's first button is the team demo: the person's own agents, working together (TeamDemo.tsx).
   const demoTeam = useDemoTeam(machine);
   const desktop = typeof window !== "undefined" && !!window.fridayDesktop?.link;
@@ -177,6 +188,92 @@ export function Setup({ identity, hasHistory, onDone }: { identity: Identity; ha
     setOpen(false);
     askTeamDemo();
   };
+
+  // On someone's own computer: a welcome, not a form (Arun, 2026-11-01: "design this way better, needs to be more polished since
+  // this is the first impression of our app"). What Friday is in a line, the coding tools to start with (the well-known ones
+  // always, ready first, each a press from signed in or installed), GitHub as an optional row rather than a step, and one way on.
+  if (isLocal()) {
+    const ready = signedIn[0];
+    const toSign = tools.find((t) => t.loggedIn === false);
+    const status = machine.mode === "checking" ? "Looking…" : ready ? `${signedIn.length === 1 ? ready.name : `${signedIn.length} tools`} ready` : toSign ? "Sign in to one to start" : "Install one to start";
+    return createPortal(
+      <div className="overlay setup-overlay" role="dialog" aria-modal="true" aria-label="Welcome to Friday">
+        <div className="setup-card welcome">
+          <button type="button" className="icon-btn tiny setup-x" aria-label="Set up later" title="Set up later" onClick={() => finish(false)}>
+            <Icon name="x" size={14} />
+          </button>
+          <header className="wl-head">
+            <span className="wl-mark" aria-hidden>
+              <FridayMark size={26} />
+            </span>
+            <h2>Welcome to Friday</h2>
+            <p>Your coding agents, working together on this computer, on the plans you already pay for.</p>
+          </header>
+
+          <section className="wl-tools" aria-live="polite">
+            <div className="wl-label">
+              <b>Start with a coding tool</b>
+              <span data-ready={ready ? "true" : undefined}>{status}</span>
+            </div>
+            <div className="wl-list">{connected ? <MachineBadge inline welcome identity={identity} machine={machine} refresh={refresh} /> : <p className="muted small setup-wait">Looking for your coding tools…</p>}</div>
+          </section>
+
+          <section className="wl-gh">
+            <span className="wl-gh-mark" aria-hidden>
+              <GitHubMark size={16} />
+            </span>
+            <span className="wl-gh-text">
+              <b>GitHub</b>
+              <span>{gh.status?.connected ? `Connected as @${gh.status.login ?? "you"}` : "Optional. For pull requests and issues."}</span>
+            </span>
+            {!gh.status?.connected && (
+              <button type="button" className="btn small" aria-expanded={ghOpen} onClick={() => setGhOpen(!ghOpen)}>
+                {ghOpen ? "Hide" : "Connect"}
+              </button>
+            )}
+            {ghOpen && !gh.status?.connected && (
+              <div className="wl-gh-body">
+                <GitHubConnect bare identity={identity} />
+              </div>
+            )}
+          </section>
+
+          {ready && demoTeam.length >= 2 && (
+            <div className="setup-demo wl-demo">
+              <DemoMarks team={demoTeam} />
+              <div>
+                <h3>See your agents work as a team</h3>
+                <p>{demoBlurb(demoTeam)}</p>
+              </div>
+            </div>
+          )}
+
+          <footer className="setup-foot">
+            <button type="button" className="tour-skip" onClick={() => finish(false)}>
+              Set up later
+            </button>
+            <span className="tour-nav">
+              {ready && demoTeam.length >= 2 ? (
+                <>
+                  <button type="button" className="tour-skip" onClick={() => finish(true)}>
+                    Start on my own
+                  </button>
+                  <button type="button" className="tour-next" autoFocus onClick={seeTeam}>
+                    Watch the team demo
+                  </button>
+                </>
+              ) : (
+                <button type="button" className={`tour-next${ready ? "" : " quiet"}`} autoFocus onClick={() => finish(true)}>
+                  {ready ? `Start with ${ready.name}` : "Look around first"}
+                </button>
+              )}
+            </span>
+          </footer>
+        </div>
+      </div>,
+      document.body,
+    );
+  }
 
   return createPortal(
     <div className="overlay setup-overlay" role="dialog" aria-modal="true" aria-label="Get set up">

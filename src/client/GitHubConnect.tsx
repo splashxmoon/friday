@@ -176,8 +176,8 @@ export function GitHubConnect({ identity, onChange, compact, why, empty, bare }:
   ) : (
     <>
       {status?.ghInstalled && (
-        <button type="button" className={`btn ghost ${empty ? "" : "small"}`} onClick={() => void useCli()} title="Sign in with the GitHub CLI in a terminal instead">
-          Use gh
+        <button type="button" className={`btn ghost ${empty ? "" : "small"} gh-cli`} onClick={() => void useCli()} title="Sign in with the GitHub CLI in a terminal instead">
+          {compact ? "Sign in with gh instead" : "Use gh"}
         </button>
       )}
       {error && !status ? (
@@ -229,14 +229,19 @@ export function GitHubConnect({ identity, onChange, compact, why, empty, bare }:
         <GitHubMark />
       </span>
       <div className="gh-body">
-        <div className="gh-title">{pending ? "Approve Friday on GitHub" : "Connect GitHub"}</div>
+        <div className="gh-title">{pending ? "Approve Friday on GitHub" : compact ? "Your GitHub repos" : "Connect GitHub"}</div>
         {pending ? (
           <>
             <div className="gh-sub">Enter this code on the page that opened, then approve. This finishes by itself.</div>
             {code}
           </>
         ) : (
-          <div className="gh-sub">{why ?? "See your pull requests, open your repos and push from Friday."} The login stays on this computer, where git keeps its own.</div>
+          // Compact (the folder picker): what it gives, in a line; where the login lives is the button's to say on hover (Arun,
+          // 2026-11-01: "design better": four lines of small print squeezed beside two buttons).
+          <div className="gh-sub" {...(compact ? { title: "The login stays on this computer, where git keeps its own." } : {})}>
+            {why ?? "See your pull requests, open your repos and push from Friday."}
+            {compact ? "" : " The login stays on this computer, where git keeps its own."}
+          </div>
         )}
         {failed}
       </div>

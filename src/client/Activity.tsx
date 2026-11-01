@@ -1140,12 +1140,16 @@ export function Activity({
   // In a team, what the agents send each other keeps its place: it folds into a line of their talk, and gone with a teammate's
   // run still under way (which the room doesn't show) it sat under newer messages until that ended (2026-10-27 audit).
   if (state.options.team) goesWithRun = (e) => !isAgentTalk(e);
+  // Where a finished turn sits: when it ended, or in a team's room when it last spoke, so what a teammate says to another during
+  // its turn ("Kit, can you take the Safari test?" and the task it hands Kit) reads after its words, not above the request it
+  // answers (2026-11-01: with the agents' talk shown in the room, the task came first).
+  const spokeAt = (it: RunItem) => (state.options.team && laneFilter === ALL ? (it.messages.at(-1)?.seq ?? it.ended!.seq) : it.ended!.seq);
   const finishing = ordering
     ? finishingOrder(
         logOrder,
         (it): OrderInfo =>
           it.kind === "run"
-            ? { kind: "run", lane: it.lane, ...(it.ended ? { ended: it.ended.seq } : {}), live: it.key === lastRunKeys.get(it.lane) && workingLanes.includes(it.lane) }
+            ? { kind: "run", lane: it.lane, ...(it.ended ? { ended: spokeAt(it) } : {}), live: it.key === lastRunKeys.get(it.lane) && workingLanes.includes(it.lane) }
             : it.kind === "event" && (it.ev.body.type === "instruction" || it.ev.body.type === "suggestion") && goesWithRun(it.ev)
               ? { kind: "ask", lane: it.ev.lane ?? MAIN_LANE, seq: it.ev.seq }
               : it.kind === "event" && it.ev.body.type === "engine.approval"
@@ -1183,6 +1187,8 @@ export function Activity({
   // In a teammate's own chat only while one of the board's tasks is its own (2026-10-27 audit: the Team tasks pill showed in
   // every teammate's chat).
   if (state.options.team && laneFilter !== ALL) boardHere = (state.board?.tasks ?? []).some((t) => t.lane === laneFilter && t.status !== "done" && t.status !== "cancelled");
+  // In a room, none: the one line over the box says who is on what, and the board is in the room's ⋯ (Arun, 2026-11-01).
+  if (state.options.team && laneFilter === ALL) boardHere = false;
   if (state.options.team) queuesShown = laneFilter === ALL ? [] : [laneFilter];
   // The Team room and a room show each teammate's run as one message, what it is on or what it said last; the work itself is
   // in its own chat (Arun, 2026-10-27: "the actual stuff runs in the individual agent chats").
@@ -1228,15 +1234,13 @@ export function Activity({
     for (const k of leadShown.current) if (k.startsWith(`${sid}:`)) answers.add(Number(k.slice(sid.length + 1)));
     const runKind = (it: RunItem) => roomRunKind(it, { room, now: now(it.lane), turns, lead: state.lead, leadAnswers: answers, switched: switched(it) });
     const keyOf = (it: FeedItem) => (it.kind === "run" ? it.key : it.kind === "event" ? it.ev.seq : it.evs[0]!.seq);
-    const folded = foldTeamTalk(visible, (it) => (it.kind === "run" ? runKind(it) : it.kind === "event" ? teamEventKind(it.ev, room) : "show"), keyOf);
+    // A room reads as a group chat: what the teammates say to each other and hand back is said in it, each as its own post, rather
+    // than folded to a line to open (Arun, 2026-11-01, after OpenBot's channels: "i want to be simplier and easy to digest as a
+    // user for crew"). A teammate's own chat still folds it. The board stays where it was posted: pinned to the foot it was one
+    // more thing on screen.
+    const kindIn = (k: "show" | "talk" | "hide") => (room && k === "talk" ? "show" : k);
+    const folded = foldTeamTalk(visible, (it) => kindIn(it.kind === "run" ? runKind(it) : it.kind === "event" ? teamEventKind(it.ev, room) : "show"), keyOf);
     visible = folded.items;
-    // The task board under way stays in view at the room's foot, the work coming in above it, as a session keeps its running
-    // turn last (Arun, 2026-10-27: "have the task board be like the thing that is in view and the other messages go above it").
-    // Once its tasks are all done it goes back to where it was posted.
-    if (room && (state.board?.tasks ?? []).some((t) => t.status !== "done" && t.status !== "cancelled")) {
-      const at = visible.findLastIndex((it) => it.kind === "event" && it.ev.body.type === "board.posted");
-      if (at >= 0 && at < visible.length - 1) visible = [...visible.slice(0, at), ...visible.slice(at + 1), visible[at]!];
-    }
     const pieceOfItem = (it: FeedItem): TalkPiece => (it.kind === "run" ? { who: [{ lane: it.lane, name: agentNameFor(state, it.lane) }], text: it.messages.findLast((m) => m.body.text.trim())?.body.text ?? "", turn: true } : it.kind === "event" ? pieceOf(it.ev) : { who: [], text: "" });
     teamGroup = (it) => {
       const g = folded.groups.get(keyOf(it));

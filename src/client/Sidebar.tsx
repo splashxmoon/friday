@@ -458,7 +458,8 @@ function Foot({ p }: { p: SidebarProps }) {
     // Its line runs the sidebar's full width, edge to edge, level with the page's footer line beside it.
     <div className="dass-foot -mx-[10px] mt-auto flex shrink-0 flex-col justify-center gap-1 border-t border-sidebar-border px-[14px]">
       {/* The usage notice, once, takes the tip's place in the foot until it is answered. */}
-      {isLocal() && (usageNoticeUp ? <UsageNotice /> : <TeamTip className="in-foot" />)}
+      {/* The word about Friday Team once someone has used Friday a while, not in their first minutes (2026-11-01, the first run). */}
+      {isLocal() && (usageNoticeUp ? <UsageNotice /> : p.recents.filter((r) => !isTeamSid(r.sid)).length >= 3 ? <TeamTip className="in-foot" /> : null)}
       {/* One card at the foot (Arun, 2026-10-26: "integrate the profile thing, light and dark mode and settings button into the
           card where the agent board, code review and usage buttons are"): the places on top, who you are and the app's own
           controls under them. */}

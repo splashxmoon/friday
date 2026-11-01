@@ -1274,7 +1274,7 @@ export function App() {
       </>
       <main id="main" className="main" tabIndex={-1}>
         {/* Someone new is set up first (this computer, its coding tools, GitHub), not toured: the tour waits behind it. */}
-        {identity.id && route.kind === "home" && <Setup identity={identity} hasHistory={recents.length > 0} onDone={() => requestAnimationFrame(() => document.querySelector<HTMLElement>(".composer textarea, textarea")?.focus())} />}
+        {identity.id && route.kind === "home" && <Setup identity={identity} recents={recents} onDone={() => requestAnimationFrame(() => document.querySelector<HTMLElement>(".composer textarea, textarea")?.focus())} />}
 
         {/* A page opened before its code has arrived shows its shape, not a blank. */}
         {/* Keyed on the workspace switches: every page is drawn again in the new workspace, and reads its own lists again. */}

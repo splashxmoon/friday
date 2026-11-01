@@ -151,10 +151,11 @@ export function BriefView({ brief: b, max = 12 }: { brief: DailyBrief; max?: num
                         {/\/pull\/(\d+)/.exec(d.pr.url)?.[1] ? `#${/\/pull\/(\d+)/.exec(d.pr.url)![1]}` : "PR"} {d.pr.state}
                       </a>
                     )}
+                    {/* "Checked", with the command under the pointer: the command itself, in a code face, was most of the line. */}
                     {d.proof && (
-                      <span className="tm-brief-file db-proof" title="Its check passed">
+                      <span className="db-meta db-proof" title={`Its check passed: ${d.proof}`}>
                         <ShieldCheckIcon className="size-3" />
-                        {d.proof}
+                        Checked
                       </span>
                     )}
                     {!!d.files && <span className="db-meta">{d.files} file{d.files === 1 ? "" : "s"}</span>}

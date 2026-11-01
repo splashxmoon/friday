@@ -13,7 +13,7 @@ const link: { useAutoLink: () => "idle" | "trying" | "ok" | "failed"; useAutoLin
 };
 import { EngineMark } from "./BrandMarks.js";
 import { openOutside } from "./openOutside.js";
-import { ENGINE_INFO, installStep, osOf, splitTools } from "./engines.js";
+import { ENGINE_INFO, FIRST_TOOLS, installStep, osOf, splitTools } from "./engines.js";
 import { Icon } from "./icons.js";
 import { useWorkMode } from "./WorkMode.js";
 import { NoMachine, hostApi, machineRefusal, type LocalTool, type MachineState } from "./local.js";
@@ -37,7 +37,7 @@ type Step = "idle" | "linking" | "signing";
 /** What is happening to one tool's sign-in. */
 type Acting = "out" | "switch" | "in";
 
-export function MachineBadge({ identity, machine, refresh, inline = false }: { identity: Identity; machine: MachineState; refresh: () => void; /** Always shown, compact, with no pill to open it: the new-session page's corner. */ inline?: boolean }) {
+export function MachineBadge({ identity, machine, refresh, inline = false, welcome = false }: { identity: Identity; machine: MachineState; refresh: () => void; /** Always shown, compact, with no pill to open it: the new-session page's corner. */ inline?: boolean; /** In the welcome (Setup.tsx): the well-known tools always listed, ready ones first, and no line about where it runs. */ welcome?: boolean }) {
   const [open, setOpen] = useState(false);
   // What stays here, said for the kind of work in front of you (w1 #4: "The code, the terminal and your coding tool" in Work).
   let topLine = "The code, the terminal and your coding tool stay here. Nothing is uploaded.";
@@ -92,7 +92,14 @@ export function MachineBadge({ identity, machine, refresh, inline = false }: { i
   };
   // The installed ones up top. The one whose install line is open stays where it was clicked: one opened from the tools folded
   // away stays among them, not moved up the list as its form opens (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
-  const shown = splitTools(here ? (t) => tools.some((x) => x.tool === t) : null, moreTools ? "" : installing);
+  let shown = splitTools(here ? (t) => tools.some((x) => x.tool === t) : null, moreTools ? "" : installing);
+  // A new person picks from the tools people know, whether or not they have them yet, the ready ones first (Arun, 2026-11-01:
+  // "this is the first impression of our app"): Claude Code under "14 more" told someone without it nothing.
+  if (welcome) {
+    const rank = (t: EngineTool) => { const f = tools.find((x) => x.tool === t); return !f ? 2 : f.loggedIn === false ? 1 : 0; };
+    const first = ENGINE_TOOLS.filter((t) => shown.here.includes(t) || FIRST_TOOLS.includes(t)).sort((a, b) => rank(a) - rank(b));
+    shown = { here: first, away: ENGINE_TOOLS.filter((t) => !first.includes(t)) };
+  }
   const needsSignIn = tools.find((t) => t.loggedIn === false);
 
   // While something is being set up, keep asking — the runner arrives on its
@@ -247,8 +254,8 @@ export function MachineBadge({ identity, machine, refresh, inline = false }: { i
 
   if (inline)
     return (
-      <section className={`mb-inline ${look.tone}`} aria-label="Coding tools on this computer">
-        <div className="mb-where">
+      <section className={`mb-inline ${look.tone}${welcome ? " mb-welcome" : ""}`} aria-label="Coding tools on this computer">
+        {!(welcome && here) && <div className="mb-where">
           {machine.mode === "checking" || step !== "idle" || connecting ? <span className="spinner" /> : <span className={`mb-dot ${look.tone}`} aria-hidden />}
           <span className="mb-where-text">{machine.mode === "checking" ? "Looking for your computer…" : here ? "Connected" : look.text}</span>
           {here && machine.home && (
@@ -256,7 +263,7 @@ export function MachineBadge({ identity, machine, refresh, inline = false }: { i
               {machine.home}
             </code>
           )}
-        </div>
+        </div>}
         {here ? (
           <ul className="mb-tools">
             {[...shown.here, ...(moreTools ? shown.away : [])].map((tool) => (

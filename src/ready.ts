@@ -8,7 +8,9 @@ import { ENGINE_NAMES, MAIN_LANE, type EngineTool } from "./types.js";
  * than a hunt through rooms. Read from each session's folded state alone, never its whole log: a list asked for on every home
  * screen can't read megabytes of every session.
  *
- * Finished means: its agent isn't working, and its folder holds changes that aren't in a merged pull request yet.
+ * Finished means: its agent isn't working, and its folder holds changes that aren't in a merged pull request yet. In a session
+ * with a board (a Crew room), only a lane with a task done or being checked: a teammate's folder with changes and no finished
+ * task is work in progress, not work to ship (Arun, 2026-11-01, a list of twelve "Nova's changes": "i dont like this").
  */
 export interface ReadyItem {
   sid: string;
@@ -45,6 +47,7 @@ export function readyIn(state: SessionState): ReadyItem[] {
     const tool = state.engines[lane]?.tool;
     // The newest board task of this lane that is done or being checked: what this work was.
     const task = [...(state.board?.tasks ?? [])].reverse().find((t) => t.lane === lane && (t.status === "done" || t.status === "review"));
+    if (!task && state.board?.tasks.length) continue;
     const checks = task?.checks && !task.checks.running && !task.checks.skipped && task.checks.ok !== undefined ? { ok: task.checks.ok, command: task.checks.command } : undefined;
     out.push({
       sid: state.id,
@@ -68,11 +71,18 @@ export function readyIn(state: SessionState): ReadyItem[] {
 
 /**
  * Most worth a look first: proven and unshipped (tests passed or reviewed, no pull request yet), then the rest unshipped, then
- * those with a pull request open; newest first in each.
+ * those with a pull request open; newest first in each. The same teammate's same changes seen from two rooms (one folder, two
+ * rooms it works in) show once.
  */
 export function rankReady(items: ReadyItem[], at: (i: ReadyItem) => number): ReadyItem[] {
   const tier = (i: ReadyItem) => (i.pr ? 2 : i.checks?.ok || i.review?.ok ? 0 : 1);
-  return [...items].sort((a, b) => tier(a) - tier(b) || at(b) - at(a));
+  const seen = new Set<string>();
+  return [...items]
+    .sort((a, b) => tier(a) - tier(b) || at(b) - at(a))
+    .filter((i) => {
+      const key = `${i.who}|${i.task ?? ""}|${i.files}|${i.additions}|${i.deletions}`;
+      return !seen.has(key) && !!seen.add(key);
+    });
 }
 
 /** The line under an item: what proves it, in words. */

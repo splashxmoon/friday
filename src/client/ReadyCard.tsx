@@ -10,14 +10,16 @@ import "./daily-brief.css";
 /**
  * Ready to ship, on the home screen (ready.ts; Arun, 2026-11-01, the impress map): every agent's finished work across your
  * sessions, proven first, each with what proves it and how big it is. "Review & ship" opens that agent's chat, where its
- * changes are committed and its pull request opened; "Send back" tells it what to change without leaving home. Nothing shows
- * when nothing is waiting to ship.
+ * changes are committed and its pull request opened; "Send back" tells it what to change without leaving home. Three at a time,
+ * the rest behind "Show all" (Arun, 2026-11-01: twelve rows of loud buttons, "i dont like this"). Nothing shows when nothing
+ * is waiting to ship.
  */
 export function ReadyCard({ identity }: { identity: Identity }) {
   const [data, setData] = useState<{ items: ReadyItem[]; invites: Record<string, string> } | null>(null);
   const [back, setBack] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [said, setSaid] = useState<string | null>(null);
+  const [all, setAll] = useState(false);
   useEffect(() => {
     let gone = false;
     const read = () => void api<{ items: ReadyItem[]; invites: Record<string, string> }>(identity, "/api/ready").then((r) => !gone && setData(r), () => {});
@@ -47,6 +49,7 @@ export function ReadyCard({ identity }: { identity: Identity }) {
     }
   };
   const proven = data.items.filter((i) => !i.pr && (i.checks?.ok || i.review?.ok)).length;
+  const shown = all ? data.items : data.items.slice(0, 3);
   return (
     <section className="db-card ready-card" aria-label="Ready to ship">
       <div className="ha-head">
@@ -55,20 +58,16 @@ export function ReadyCard({ identity }: { identity: Identity }) {
       </div>
       {said && <p className="ready-said" role="status">{said}</p>}
       <ul className="db-body ready-list">
-        {data.items.map((i) => (
+        {shown.map((i) => (
           <li key={key(i)}>
             <div className="ready-row" data-proof={i.checks?.ok || i.review?.ok ? "ok" : i.checks || (i.review && !i.review.ok) ? "bad" : "none"}>
               <span className="ready-mark" aria-hidden="true">{i.tool ? <EngineMark tool={i.tool} size={16} /> : null}</span>
               <span className="ready-main">
                 <span className="ready-name">{i.task ?? `${i.who}'s changes`}</span>
                 <span className="ready-meta">
-                  {i.who} · {i.where} · {proofLine(i)}
-                  {i.pr ? " · pull request open" : ""}
+                  {i.who} · {proofLine(i)}
+                  {i.pr ? " · pull request open" : ""} · <b className="ready-add">+{i.additions}</b> <b className="ready-del">−{i.deletions}</b>
                 </span>
-              </span>
-              <span className="ready-size" title={`${i.files} file${i.files === 1 ? "" : "s"} changed`}>
-                <b className="ready-add">+{i.additions}</b> <b className="ready-del">−{i.deletions}</b>
-                <span>{i.files} file{i.files === 1 ? "" : "s"}</span>
               </span>
               <span className="ready-acts">
                 {i.pr ? (
@@ -76,11 +75,11 @@ export function ReadyCard({ identity }: { identity: Identity }) {
                     Open PR
                   </a>
                 ) : (
-                  <button type="button" className="ready-btn ready-go" onClick={() => open(i)}>
-                    Review &amp; ship
+                  <button type="button" className="ready-btn" onClick={() => open(i)}>
+                    Review
                   </button>
                 )}
-                <button type="button" className="ready-btn" onClick={() => (setBack(back === key(i) ? null : key(i)), setNote(""), setSaid(null))} aria-expanded={back === key(i)}>
+                <button type="button" className="ready-btn ready-quiet" onClick={() => (setBack(back === key(i) ? null : key(i)), setNote(""), setSaid(null))} aria-expanded={back === key(i)}>
                   Send back
                 </button>
               </span>
@@ -99,6 +98,11 @@ export function ReadyCard({ identity }: { identity: Identity }) {
           </li>
         ))}
       </ul>
+      {data.items.length > 3 && (
+        <button type="button" className="ready-more" onClick={() => setAll(!all)}>
+          {all ? "Show fewer" : `Show all ${data.items.length}`}
+        </button>
+      )}
     </section>
   );
 }

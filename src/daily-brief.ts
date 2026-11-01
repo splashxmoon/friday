@@ -366,7 +366,7 @@ export function collectBrief(i: BriefInput): DailyBrief | null {
         const lastOnLane = events.findLast((e) => (e.lane ?? MAIN_LANE) === lane);
         const quiet = until - (lastOnLane?.ts ?? lastRun.startedAt);
         if (quiet >= STALL_MS && until - lastRun.startedAt >= STALL_MS) risk.push({ kind: "stalled", who, text: `has been quiet for ${span(quiet)} mid-turn in ${state.title}`, where: whereOf(state, { lane }), ...(mate ? { mate } : {}) });
-        else plan.push({ who, text: clip(firstLine(lastRun.cause) || "its current turn", 120), source: "running", where: whereOf(state, { lane }), ...(mate ? { mate } : {}) });
+        else plan.push({ who, text: clip(firstLine(lastRun.cause).replace(BOARD_TASK, "") || "its current turn", 120), source: "running", where: whereOf(state, { lane }), ...(mate ? { mate } : {}) });
       }
       // Queued for it: the first of what it will do next.
       const queued = queuedOn(state, lane).filter((q) => !state.withdrawn.includes(q));
@@ -427,8 +427,11 @@ export function collectBrief(i: BriefInput): DailyBrief | null {
       done.push({ who: d.name, text: d.title, where: where(d.sid, d.seq, d.lane), mate: { name: d.name, ...(look(d.name) ? { look: look(d.name) } : {}) }, ...(d.files?.length ? { files: d.files.length } : {}), ...(d.pr ? { pr: { url: d.pr, state: i.prs?.[d.pr] === "merged" ? "merged" : "opened" } } : {}), ...(proof ? { proof } : {}) });
     }
     for (const f of tb.failed) {
+      // Stopped by a person: their own doing, not a risk to tell them about (Arun, 2026-11-01, a brief of six "Arun Dass stopped
+      // Kit on it. Kit is free again; reassign or retry it.": "design better too").
+      if (/\bstopped \S+ on it\b/.test(f.why)) continue;
       const hit = limitHit(f.why, until, i.tz);
-      risk.push({ kind: hit ? "limit" : /block/i.test(f.why) || f.seq === undefined ? "blocked" : "error", who: f.name, text: hit ? `hit its usage limit on “${f.title}”` : `didn't finish “${f.title}”: ${clip(f.why, 140)}`, where: where(f.sid, f.seq, f.lane), mate: { name: f.name, ...(look(f.name) ? { look: look(f.name) } : {}) } });
+      risk.push({ kind: hit ? "limit" : /block/i.test(f.why) || f.seq === undefined ? "blocked" : "error", who: f.name, text: hit ? `hit its usage limit on “${f.title}”` : `didn't finish “${f.title}”: ${clip(f.why, 90)}`, where: where(f.sid, f.seq, f.lane), mate: { name: f.name, ...(look(f.name) ? { look: look(f.name) } : {}) } });
     }
     // Rooms that went quiet: work left on the board, nobody on it, nothing said for a while.
     for (const p of i.crew.places) {
@@ -470,6 +473,12 @@ export function collectBrief(i: BriefInput): DailyBrief | null {
   // A window filling up is worth saying beside the day's work, not a brief of its own.
   if (!done.length && !risk.some((r) => r.kind !== "usage") && !decisions.length && !real.length) return null;
   const order: Record<BriefPlan["source"], number> = { goal: -1, running: 0, board: 1, queued: 2, wake: 3, left: 4, checkin: 5 };
+  // One line for one thing: a teammate on a board task was said twice, once as its turn and once as its task (Arun, 2026-11-01).
+  const said = new Set<string>();
+  const lines = plan.filter((p) => {
+    const key = `${p.who}|${p.text.toLowerCase()}`;
+    return !said.has(key) && !!said.add(key);
+  });
   const brief: DailyBrief = {
     id: `${i.kind}:${until}`,
     kind: i.kind,
@@ -479,7 +488,7 @@ export function collectBrief(i: BriefInput): DailyBrief | null {
     headline: "",
     done: done.sort((a, b) => Number(!!b.pr) - Number(!!a.pr)).slice(0, MAX_LINES),
     risk: risk.slice(0, MAX_LINES),
-    plan: plan.sort((a, b) => order[a.source] - order[b.source]).slice(0, MAX_LINES),
+    plan: lines.sort((a, b) => order[a.source] - order[b.source]).slice(0, MAX_LINES),
     decisions: { count: decisions.length, top },
     usage,
   };
@@ -496,6 +505,9 @@ function windowLabel(w: { kind: string; label?: string }): string {
   if (k === "month" || k === "monthly") return "monthly";
   return k.replace(/_/g, " ");
 }
+
+/** A board task's handle at the head of a turn's cause (agent-mesh.ts: `Board task "t1": …`), left out of the plan's line. */
+const BOARD_TASK = /^Board task "[^"]*":\s*/;
 
 const span = (ms: number) => {
   const m = Math.round(ms / 60_000);
