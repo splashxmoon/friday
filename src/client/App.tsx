@@ -11,7 +11,7 @@ import { isNarrow } from "./narrow.js";
 import { SideRail } from "./SideRail.js";
 import { TeamHome, useTeamTab } from "./Teammates.js";
 import { usePlaceFollows, usePlaceLeaves, useWorkSessions } from "./WorkMode.js";
-import { useAutomationsView, useWorkflowNotices } from "./team-workflow-view.js";
+import { openWorkflows, useAutomationsView, useWorkflowNotices } from "./team-workflow-view.js";
 import type { AgentView, PersonListing } from "../agents.js";
 import type { CollectionView, SkillView } from "../skills.js";
 import type { McpPublic } from "../mcp-types.js";
@@ -34,6 +34,7 @@ const pages = {
   automations: () => import("./Automations.js"),
   board: () => import("./Board.js"),
   review: () => import("./CodeReview.js"),
+  needs: () => import("./NeedsYou.js"),
   usage: () => import("./UsagePage.js"),
 };
 /** A page's code by its rail name (Agents is the studio), asked for ahead of opening it: by the warm-up below, and as the pointer or focus reaches its button in the rail. */
@@ -51,6 +52,7 @@ const Board = lazy(() => pages.board().then((m) => ({ default: m.Board })));
 const AutomationsPage = lazy(() => pages.automations().then((m) => ({ default: m.AutomationsPage })));
 const TeamWorkflowsPage = lazy(() => import("./TeamWorkflows.js").then((m) => ({ default: m.TeamWorkflowsPage })));
 const CodeReview = lazy(() => pages.review().then((m) => ({ default: m.CodeReview })));
+const NeedsYouPage = lazy(() => pages.needs().then((m) => ({ default: m.NeedsYou })));
 import { WindowNav } from "./WindowNav.js";
 import { askToShowDiff } from "./focusDiff.js";
 import { AgentForm } from "./AgentDialogs.js";
@@ -85,6 +87,7 @@ import {
 } from "./storage.js";
 import { inBand, isTyping, PageSkeleton, SessionSkeleton, useConfirm, useDismiss, type MenuItem } from "./ui.js";
 import { WaitingOnYou, askToNotify, useAttention } from "./Attention.js";
+import { DailyBriefHost } from "./DailyBrief.js";
 import { clearUnread, markUnread, workingChanges } from "./unread.js";
 
 /**
@@ -106,6 +109,8 @@ type Route =
   | { kind: "library" }
   | { kind: "board" }
   | { kind: "review" }
+  /** Everything waiting on you, ranked, with Friday's suggested answers (NeedsYou.tsx). */
+  | { kind: "needs" }
   | { kind: "settings"; section: string }
   | { kind: "usage" };
 
@@ -127,6 +132,7 @@ function parseRoute(search: string): Route {
   if (p.get("view") === "library") return isLocal() ? { kind: "home" } : { kind: "library" };
   if (p.get("view") === "board") return { kind: "board" };
   if (p.get("view") === "review") return { kind: "review" };
+  if (p.get("view") === "needs") return { kind: "needs" };
   if (p.get("view") === "settings") return { kind: "settings", section: settingsSection(p.get("section")) };
   if (p.get("view") === "usage") return { kind: "usage" };
   if (p.get("view") === "quick") return { kind: "quick" };
@@ -161,6 +167,7 @@ function routeUrl(r: Route): string {
   if (r.kind === "library") return "/?view=library";
   if (r.kind === "board") return "/?view=board";
   if (r.kind === "review") return "/?view=review";
+  if (r.kind === "needs") return "/?view=needs";
   if (r.kind === "settings") return `/?view=settings&section=${encodeURIComponent(r.section)}`;
   if (r.kind === "usage") return "/?view=usage";
   if (r.kind === "quick") return "/?view=quick";
@@ -750,7 +757,7 @@ export function App() {
       if (r.kind !== "session" && parseRoute(location.search).kind === r.kind) dispatchEvent(new CustomEvent("friday:same-page", { detail: r.kind }));
       history.pushState(null, "", routeUrl(r));
       setRoute(r);
-      if (r.kind !== "session") document.title = r.kind === "connections" ? "Connections · Friday" : r.kind === "agents" ? "Saved agents · Friday" : r.kind === "automations" ? "Automations · Friday" : r.kind === "settings" ? "Settings · Friday" : r.kind === "usage" ? "Usage · Friday" : r.kind === "review" ? "Code Review · Friday" : r.kind === "board" ? "Agent Board · Friday" : r.kind === "library" ? "Library · Friday" : r.kind === "people" ? "People · Friday" : "Friday";
+      if (r.kind !== "session") document.title = r.kind === "connections" ? "Connections · Friday" : r.kind === "agents" ? "Saved agents · Friday" : r.kind === "automations" ? "Automations · Friday" : r.kind === "settings" ? "Settings · Friday" : r.kind === "usage" ? "Usage · Friday" : r.kind === "review" ? "Code Review · Friday" : r.kind === "needs" ? "Needs you · Friday" : r.kind === "board" ? "Agent Board · Friday" : r.kind === "library" ? "Library · Friday" : r.kind === "people" ? "People · Friday" : (r.kind as string) === "crew" ? "Crew · Friday" : "Friday";
       if (isNarrow(innerWidth)) setLayout({ sidebarCollapsed: true });
     },
     [setLayout],
@@ -865,6 +872,12 @@ export function App() {
         const fallback = moveRef.current.recents.filter((r) => r.sid !== here).sort((a, b) => b.openedAt - a.openedAt).map((r) => r.sid);
         const order = [...seen, ...fallback.filter((x) => !seen.includes(x))];
         if (go(e.shiftKey ? order[order.length - 1] : order[0])) e.preventDefault();
+        return;
+      }
+      // ⌘⇧Y: everything waiting on you, in one queue (NeedsYou.tsx).
+      if (mod && e.shiftKey && !e.altKey && k === "y") {
+        e.preventDefault();
+        navigate({ kind: "needs" });
         return;
       }
       // ⌘⇧U: the next session that waits on you, after this one, round to the first (as cmux binds it).
@@ -1155,7 +1168,8 @@ export function App() {
 
   // Every full page sits under the window's band the same way, so they are all the same height: Usage and Settings were
   // left out, and stood 40px taller than the pages beside them.
-  const fullBleed = route.kind === "agents" || route.kind === "automations" || route.kind === "connections" || route.kind === "people" || route.kind === "library" || route.kind === "board" || route.kind === "review" || route.kind === "usage" || route.kind === "settings";
+  let crewWorkflows = false;
+  const fullBleed = crewWorkflows || route.kind === "agents" || route.kind === "automations" || route.kind === "connections" || route.kind === "people" || route.kind === "library" || route.kind === "board" || route.kind === "review" || route.kind === "needs" || route.kind === "usage" || route.kind === "settings";
   useLayoutEffect(() => {
     if (!fullBleed || !inBand()) return;
     document.documentElement.dataset.band = "page";
@@ -1231,6 +1245,7 @@ export function App() {
           onOpenLibrary={() => navigate({ kind: "library" })}
           onOpenBoard={() => navigate({ kind: "board" })}
           onOpenReview={() => navigate({ kind: "review" })}
+          onOpenNeeds={() => navigate({ kind: "needs" })}
           reviewsWaiting={reviewPrs?.available ? reviewPrs.review.length : 0}
           onOpenSettings={() => (askPage("settings-search"), navigate({ kind: "settings", section: route.kind === "settings" ? route.section : lastSettings.current }))}
           onOpenUsage={() => navigate({ kind: "usage" })}
@@ -1315,7 +1330,7 @@ export function App() {
           // With the Team tab on, the team's own: its workflows (TeamWorkflows.tsx), with a way across to these.
           teamTabOn && autoView === "workflows" ? <TeamWorkflowsPage identity={identity} onCoding={() => setAutoView("coding")} /> :
           <AutomationsPage
-            onTeamWorkflows={teamTabOn ? () => setAutoView("workflows") : undefined}
+            onTeamWorkflows={teamTabOn ? () => setAutoView("workflows") : !isLocal() ? openWorkflows : undefined}
             identity={identity}
             agents={agents}
             recents={recents}
@@ -1344,6 +1359,8 @@ export function App() {
               if (r) navigate({ kind: "session", sid, invite: r.invite });
             }}
           />
+        ) : route.kind === "needs" ? (
+          <NeedsYouPage identity={identity} recents={recents} onReview={() => navigate({ kind: "review" })} />
         ) : route.kind === "settings" ? (
           <SettingsPage
             identity={identity}
@@ -1358,7 +1375,10 @@ export function App() {
         </Suspense>
       </main>
         {/* After the page in the source, so Tab reaches the page first; they still sit fixed in the bottom-right corner. */}
-        {identity.id && <WaitingOnYou identity={identity} items={attention.items} recents={recents} viewing={route.kind === "session" ? route.sid : undefined} onOpen={(r) => navigate({ kind: "session", sid: r.sid, invite: r.invite })} />}
+        {/* Not over the queue itself, which lists the same waits with their answers. */}
+        {identity.id && route.kind !== "needs" && <WaitingOnYou identity={identity} items={attention.items} recents={recents} viewing={route.kind === "session" ? route.sid : undefined} onOpen={(r) => navigate({ kind: "session", sid: r.sid, invite: r.invite })} />}
+        {/* The daily brief: its notification, /brief's panel, and the brief after a long gap (DailyBrief.tsx). */}
+        {identity.id && <DailyBriefHost identity={identity} />}
       {editing && selAgent && (
         <AgentForm
           identity={identity}

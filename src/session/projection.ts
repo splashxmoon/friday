@@ -277,6 +277,8 @@ export interface BoardState {
   tasks: BoardTask[];
   /** What proves a task works, for tasks without their own. */
   check?: string;
+  /** Whose work it is, when Friday posted it for a person (board.posted `by`). */
+  by?: { id: string; name: string };
 }
 
 /** Tasks whose every dependency is done and that nobody has: the ones an agent can take now. */
@@ -866,7 +868,7 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       if (s.hub?.id === b.id) s.hub.status = "merging";
       break;
     case "goal.set":
-      s.goal = { text: b.text, ...(b.check ? { check: b.check } : {}), lane: ev.lane ?? MAIN_LANE, by: { id: ev.actor.id, name: ev.actor.name }, seq: ev.seq, checks: 0, nudges: 0 };
+      s.goal = { text: b.text, ...(b.check ? { check: b.check } : {}), ...(b.due ? { due: b.due } : {}), lane: ev.lane ?? MAIN_LANE, by: { id: ev.actor.id, name: ev.actor.name }, seq: ev.seq, checks: 0, nudges: 0 };
       break;
     case "goal.checked": {
       const g = s.goal;
@@ -904,7 +906,7 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       if (s.board && b.lane && s.board.fromLane !== MAIN_LANE && !s.lanes.some((l) => l.id === s.board!.fromLane)) s.board = { ...s.board, fromLane: b.lane, fromName: s.lanes.find((l) => l.id === b.lane)?.name ?? s.board.fromName };
       break;
     case "board.posted":
-      s.board = { fromLane: b.fromLane, fromName: b.fromName, seq: ev.seq, tasks: b.tasks.map((t) => ({ ...t, status: "open", rounds: 0 })), ...(b.check ? { check: b.check } : {}) };
+      s.board = { fromLane: b.fromLane, fromName: b.fromName, seq: ev.seq, tasks: b.tasks.map((t) => ({ ...t, status: "open", rounds: 0 })), ...(b.check ? { check: b.check } : {}), ...(b.by ? { by: b.by } : {}) };
       break;
     case "board.checking":
     case "board.checked":

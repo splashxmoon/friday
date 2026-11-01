@@ -79,6 +79,7 @@ export function AgentModelPicker({
   route,
   effort,
   ownOnly,
+  own: ownGiven,
 }: {
   engine: EngineTool | "";
   onEngine: (t: EngineTool | "") => void;
@@ -106,6 +107,8 @@ export function AgentModelPicker({
    * haven't: a teammate's picker (Teammates.tsx), where Friday's own models never run.
    */
   ownOnly?: boolean;
+  /** The own models to offer, read from the computer the agent runs on, when that isn't this browser's (a teammate's). */
+  own?: { choice: string; name: string; model: string; local?: boolean }[];
 }) {
   const [open, setOpen] = useState(false);
   const btn = useRef<HTMLButtonElement>(null);
@@ -117,7 +120,8 @@ export function AgentModelPicker({
   const [PickerPanel] = useState(() => () => panel.current());
   const cliModels = useEngineModelInfo(engine || "claude", identity);
   // Models this person set up on their computer (Settings › Your models): any plan, and on Solo what Friday Code runs on.
-  const own = fridaySide.useOwnModels(identity);
+  const ownHere = fridaySide.useOwnModels(identity);
+  const own = ownGiven ?? ownHere;
 
   const agentName = engine ? ENGINE_NAMES[engine] : fridayName;
   const cliKnown = cliModels.find((m) => m.id === model);
@@ -258,7 +262,7 @@ export function AgentModelPicker({
       const room = fit && !fit.out ? fit.room : undefined;
       // A row already called "Your model" says how many are set up, not its own name again.
       const word = key === "friday" ? (locked ? "Team" : solo ? (label === "Your model" ? (own.length ? `${own.length} set up` : "None set up") : "Your model") : "Friday's models") : state?.disabled || state?.absent ? "Not installed" : state?.ready === false ? "Not set up" : ready ? "Ready" : (state?.hint ?? "");
-      const tip = [label, state?.hint, fit?.out ?? (fit && fit.success !== null ? `${Math.round(fit.success * 100)}% likely for this task` : ""), typeof room === "number" ? `${Math.round(room * 100)}% of its limits left` : ""].filter(Boolean).join(" · ");
+      const tip = [label, state?.hint, fit?.out ?? (fit && fit.success !== null ? `${Math.round(fit.success * 100)}% likely for this task` : ""), typeof room === "number" ? `${Math.round(room * 100)}% of its limits left` : "", route?.forecasts[key as EngineTool] ?? ""].filter(Boolean).join(" · ");
       return (
         <button
           key={key}
@@ -408,6 +412,8 @@ export function AgentModelPicker({
               <span className="amp-route" title={route.why}>
                 <TierMeter tier={route.tier} />
               </span>
+              {/* How long it should take on this tool, and how much of its window (forecast.ts). */}
+              {engine && route.forecasts[engine as EngineTool] && <span className="amp-forecast">{route.forecasts[engine as EngineTool]}</span>}
             </div>
           )}
           {power}

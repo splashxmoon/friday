@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Choice, EmptyState, PageHeader, SectionHeader, StatTile, surface } from "@/components/dass";
 import { LimitsHub } from "./LimitsHub.js";
+import { RoutingLearned } from "./RoutingLearned.js";
 
 /**
  * Every agent a workspace runs, in tokens: Friday's own and the coding tools people bring (Claude Code, Codex, Cursor), side by
@@ -31,7 +32,12 @@ const RANGES: ["7" | "30" | "90", string][] = [
 ];
 type Range = (typeof RANGES)[number][0];
 
-const sum = (t: Tokens) => t.input + t.cached + t.output;
+/**
+ * Tokens used: read fresh and written. What a tool reads back from its cache isn't counted here: it reads the whole conversation
+ * again at every step, so on a long task it is nearly all of the figure (Arun, 2026-10-31: "2177.5M" over 30 days, 97% of it
+ * cache) and says nothing about the work. It is shown on its own, with the share it makes of what was read.
+ */
+const sum = (t: Tokens) => t.input + t.output;
 
 function Mark({ tool }: { tool: UsageTool }) {
   return tool === "friday" ? <FridayMark size={16} /> : <EngineMark tool={tool} size={16} />;
@@ -94,6 +100,8 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
   const used = USAGE_TOOLS.filter((t) => totals.by[t].turns > 0);
   const total = used.reduce((n, t) => n + sum(totals.by[t]), 0);
   const turns = used.reduce((n, t) => n + totals.by[t].turns, 0);
+  const cached = used.reduce((n, t) => n + totals.by[t].cached, 0);
+  const fresh = used.reduce((n, t) => n + totals.by[t].input, 0);
   const saved = Math.max(0, totals.carried.spent - totals.carried.sent);
   const dayTotal = (d: UsageDay) => USAGE_TOOLS.reduce((n, t) => n + (d.tools[t] ? sum(d.tools[t]!) : 0), 0);
   const peak = Math.max(1, ...days.map(dayTotal));
@@ -112,6 +120,8 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
           <SectionHeader title="Limits" description="Read from the coding tools on this computer, every two minutes." />
           <LimitsHub read={read} />
         </section>
+
+        <RoutingLearned identity={identity} />
 
         <section aria-label="Activity" className="flex flex-col gap-6">
           <SectionHeader
@@ -145,7 +155,7 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
           ) : (
             <>
               <div className="grid grid-cols-3 gap-3 max-md:grid-cols-1">
-                <StatTile label="Tokens used" value={shortTokens(total)} sub={`${turns} turn${turns === 1 ? "" : "s"} across ${used.length} agent${used.length === 1 ? "" : "s"}`} />
+                <StatTile label="Tokens used" value={shortTokens(total)} sub={`Read fresh and written, in ${turns} turn${turns === 1 ? "" : "s"} across ${used.length} agent${used.length === 1 ? "" : "s"}`} />
                 <StatTile
                   label="Tokens saved · estimate"
                   value={saved ? `≈${shortTokens(saved)}` : "—"}
@@ -153,8 +163,8 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
                 />
                 <StatTile
                   label="Read from a cache"
-                  value={total ? `${Math.round((used.reduce((n, t) => n + totals.by[t].cached, 0) / total) * 100)}%` : "—"}
-                  sub="Cheaper and faster than reading it fresh"
+                  value={cached + fresh ? `${Math.round((cached / (cached + fresh)) * 100)}%` : "—"}
+                  sub={cached ? `${shortTokens(cached)} read back, cheaper and faster than reading it fresh` : "Cheaper and faster than reading it fresh"}
                 />
               </div>
 
@@ -216,7 +226,7 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
                       <span role="columnheader" className="text-right">Read fresh</span>
                       <span role="columnheader" className="text-right">From cache</span>
                       <span role="columnheader" className="text-right">Written</span>
-                      <span role="columnheader" className="text-right">Total</span>
+                      <span role="columnheader" className="text-right" title="Read fresh and written: what is read from the cache isn't counted">Used</span>
                       <span role="columnheader">Its limit now</span>
                     </div>
                     {USAGE_TOOLS.filter((t) => totals.by[t].turns > 0 || (t === "friday" ? !solo : installed.has(t) || !installed.size)).map((t) => {

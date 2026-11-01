@@ -6,7 +6,7 @@
  *
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { AlertTriangleIcon, CheckIcon, FileIcon, GitPullRequestIcon, LightbulbIcon, MessageCircleQuestionIcon, UserPlusIcon, XIcon } from "lucide-react";
+import { AlertTriangleIcon, CheckIcon, CirclePauseIcon, FileIcon, GitPullRequestIcon, LightbulbIcon, MessageCircleQuestionIcon, UserPlusIcon, XIcon } from "lucide-react";
 import type { SessionEvent } from "../types.js";
 import { api } from "./api.js";
 import { focusAgent } from "./agentFocus.js";
@@ -15,6 +15,7 @@ import type { Identity } from "./storage.js";
 import { briefEmpty, plainError, readSince, type Brief } from "./team-api.js";
 import { plainLine } from "./team-room.js";
 import { timeOf } from "./team-status.js";
+import { ProofToggle } from "./ProofCard.js";
 import { base, Face, mateOn, refreshTeam, useTeamNow, type Team } from "./Teammates.js";
 
 /** When the person last had the Team room open, by session, on this computer: "since you left" starts there. */
@@ -66,12 +67,14 @@ function jump(t: Team | null, sid: string, seq: number | undefined, lane: string
 
 /** A brief's lines gathered by teammate, in the order they first appear: who did what, at a glance. */
 function byMate(b: Brief) {
-  const out = new Map<string, { lane: string; name: string; done: Brief["done"]; failed: Brief["failed"]; waiting: Brief["waiting"]; assumptions: Brief["assumptions"]; usage?: Brief["usage"][number] }>();
-  const of = (lane: string, name: string) => out.get(lane) ?? out.set(lane, { lane, name, done: [], failed: [], waiting: [], assumptions: [] }).get(lane)!;
+  const out = new Map<string, { lane: string; name: string; done: Brief["done"]; failed: Brief["failed"]; waiting: Brief["waiting"]; assumptions: Brief["assumptions"]; stops: NonNullable<Brief["stops"]>; usage?: Brief["usage"][number] }>();
+  const of = (lane: string, name: string) => out.get(lane) ?? out.set(lane, { lane, name, done: [], failed: [], waiting: [], assumptions: [], stops: [] }).get(lane)!;
   for (const x of b.waiting) of(x.lane, x.name).waiting.push(x);
   for (const x of b.failed) of(x.lane, x.name).failed.push(x);
   for (const x of b.done) of(x.lane, x.name).done.push(x);
   for (const x of b.assumptions) of(x.lane, x.name).assumptions.push(x);
+  // Stopped for its budget or hours (team-budget.ts); a run stopped by its budget has no lane, and is said under the crew.
+  for (const x of b.stops ?? []) if (x.lane) of(x.lane, x.name).stops.push(x);
   for (const u of b.usage) if (out.has(u.lane)) out.get(u.lane)!.usage = u;
   return [...out.values()];
 }
@@ -137,32 +140,43 @@ export function BriefBody({ brief, sid, compact }: { brief: Brief; sid: string; 
                         {where(x.sid)}
                       </>,
                       () => jump(t, x.sid ?? sid, x.seq, x.lane, sid),
-                      (x.files?.length || x.pr) && (
-                        <span className="tm-brief-files">
-                          {x.pr && (
-                            <a className="tm-brief-file pr" href={x.pr} target="_blank" rel="noreferrer">
-                              <GitPullRequestIcon className="size-3" />
-                              {/\/pull\/(\d+)/.exec(x.pr)?.[1] ? `PR #${/\/pull\/(\d+)/.exec(x.pr)![1]}` : "Pull request"}
-                            </a>
-                          )}
-                          {(x.files ?? []).slice(0, 4).map((f) => (
-                            <span key={f} className="tm-brief-file" title={f}>
-                              <FileIcon className="size-3" />
-                              {base(f)}
-                            </span>
-                          ))}
-                          {(x.files?.length ?? 0) > 4 && <span className="tm-brief-more">+{x.files!.length - 4}</span>}
-                        </span>
-                      ),
+                      <>
+                        {(x.files?.length || x.pr) ? (
+                          <span className="tm-brief-files">
+                            {x.pr && (
+                              <a className="tm-brief-file pr" href={x.pr} target="_blank" rel="noreferrer">
+                                <GitPullRequestIcon className="size-3" />
+                                {/\/pull\/(\d+)/.exec(x.pr)?.[1] ? `PR #${/\/pull\/(\d+)/.exec(x.pr)![1]}` : "Pull request"}
+                              </a>
+                            )}
+                            {(x.files ?? []).slice(0, 4).map((f) => (
+                              <span key={f} className="tm-brief-file" title={f}>
+                                <FileIcon className="size-3" />
+                                {base(f)}
+                              </span>
+                            ))}
+                            {(x.files?.length ?? 0) > 4 && <span className="tm-brief-more">+{x.files!.length - 4}</span>}
+                          </span>
+                        ) : null}
+                        {/* What shows it worked, a press away (ProofCard.tsx): the checks, the files, the picture, its own review. */}
+                        {x.proof && <ProofToggle proof={x.proof} />}
+                      </>,
                     ),
                   )}
                   {g.assumptions.map((x) => line(`a${x.seq}`, <LightbulbIcon className="size-3.5" />, "assumed", <>Assumed: {plainLine(x.text)}{where(x.sid)}</>, () => jump(t, x.sid ?? sid, x.seq, x.lane, sid)))}
+                  {g.stops.map((x) => line(`s${x.seq}`, <CirclePauseIcon className="size-3.5" />, "stopped", <>{plainLine(x.text)}{where(x.sid)}</>, () => jump(t, x.sid ?? sid, x.seq, x.lane ?? g.lane, sid)))}
                 </ul>
               </div>
             </li>
           );
         })}
       </ul>
+      {(brief.stops ?? []).filter((x) => !x.lane).map((x) => (
+        <p key={x.seq} className="tm-brief-usage">
+          Run on its own: {plainLine(x.text)}
+          {where(x.sid)}
+        </p>
+      ))}
       {turns > 0 && (
         <p className="tm-brief-usage">
           {turns} turn{turns === 1 ? "" : "s"} across the crew{mins >= 1 ? `, ${minutes(mins)} at work` : ""}
@@ -362,6 +376,22 @@ const keep = (id: string) => {
     // A mark: losing it asks again, nothing more.
   }
 };
+
+/** A room set to run on its own, or back (team.selfrun): one quiet line, with the goal or why it stopped. */
+export function SelfRunLine({ ev, stamp }: { ev: SessionEvent; stamp: ReactNode }) {
+  if (ev.body.type !== "team.selfrun") return null;
+  const b = ev.body;
+  const who = ev.actor.kind === "human" ? ev.actor.name : null;
+  return (
+    <div className="tt-event">
+      <span className="tt-event-face" />
+      <span className="tt-event-text">
+        {b.on ? `${who ? `${who} set the room` : "The room is set"} to run on its own toward: ${b.goal ?? ""}` : `The room stopped running on its own${who ? `: ${who} turned it off.` : b.why ? `. ${b.why}` : "."}`}
+      </span>
+      <span className="tt-stamp">{stamp}</span>
+    </div>
+  );
+}
 
 /** Holds lifted (holds.lifted): one quiet line. */
 export function HoldsLifted({ ev, stamp }: { ev: SessionEvent; stamp: ReactNode }) {

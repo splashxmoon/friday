@@ -340,10 +340,32 @@ const FINISH_GRACE_MS = 10_000;
  */
 let turnsRunning = 0;
 export const BUSY_LINE = "[friday] busy ";
+/**
+ * Held awake by the server between turns (holdAwake): its keeper away, or a room of theirs running on its own, so the computer
+ * doesn't sleep in the quiet between one turn and the next. Until a time, renewed while it lasts; it lapses by itself when the
+ * server stops saying so.
+ */
+let awakeUntil = 0;
+let awakeTimer: ReturnType<typeof setTimeout> | null = null;
+let saidBusy = false;
+function sayBusy(): void {
+  const now = turnsRunning > 0 || awakeUntil > Date.now();
+  if (now !== saidBusy) {
+    saidBusy = now;
+    process.stdout.write(`${BUSY_LINE}${now ? 1 : 0}\n`);
+  }
+}
 function busy(d: 1 | -1): void {
-  const was = turnsRunning > 0;
   turnsRunning = Math.max(0, turnsRunning + d);
-  if (turnsRunning > 0 !== was) process.stdout.write(`${BUSY_LINE}${turnsRunning > 0 ? 1 : 0}\n`);
+  sayBusy();
+}
+/** Kept busy for `ms` from now (0 lets it go), however many turns run meanwhile: the server's keep-awake (hosted-crew.ts). */
+export function holdAwake(ms: number): void {
+  awakeUntil = ms > 0 ? Date.now() + Math.min(ms, 10 * 60_000) : 0;
+  if (awakeTimer) clearTimeout(awakeTimer);
+  awakeTimer = ms > 0 ? setTimeout(sayBusy, Math.min(ms, 10 * 60_000) + 50) : null;
+  awakeTimer?.unref?.();
+  sayBusy();
 }
 
 /**
@@ -822,7 +844,14 @@ export class Runner {
       // checks the ask and says what to capture.
       const call = async (name: string, args: Record<string, unknown>, signal: AbortSignal): Promise<MeshAnswer> => {
         const r = await this.meshAsk(name, args, signal);
-        return r.capture && canScreenshot() ? screenshot(r.capture, signal) : r;
+        if (!r.capture || !canScreenshot()) return r;
+        const shot = await screenshot(r.capture, signal);
+        if (name !== "post_proof") return shot;
+        // A proof's picture is kept by Friday with the proof (team-proof.ts), and the agent sees it as preview_screenshot's.
+        const img = shot.content?.find((c): c is { type: "image"; data: string; mimeType: string } => (c as { type?: string }).type === "image");
+        if (!img) return { output: `${r.output} Its picture couldn't be taken: ${shot.output ?? "no image"}` };
+        await this.meshAsk("__proof_shot", { data: img.data, mimeType: img.mimeType, width: r.capture.width, height: r.capture.height }, signal);
+        return { content: [img, { type: "text", text: r.output ?? "Proof kept." }] };
       };
       this.friday = await openFridayMcp({ tools: () => this.meshAsk("__list", canScreenshot() ? { screenshot: true } : {}), call }, await nodeForScripts());
       if (this.opts.tool === "cursor") await ensureCursorEntry(this.friday.spec).catch(() => {});
@@ -1403,6 +1432,7 @@ export class Runner {
     if (files.length && !asTyped) prompt += `\n\nFiles attached to the session, saved on this machine:\n${files.map((f) => `- ${f}`).join("\n")}`;
     // Pictures, said to be looked at: a tool handed them as images sees them already, and one that isn't (Cursor, Amp, an ACP
     // tool that takes none) opens them itself, as it would a screenshot named to it at its own prompt.
+    if (files.some((f) => /\.(mp4|mov|m4v|webm|mkv|avi|mp3|wav|m4a|aac|ogg|flac)$/i.test(f)) && !asTyped) prompt += `\nThe videos and sounds among them are files to work with where they are (cut, transcribe, caption or edit them with the tools on this computer); copy one into your folder to keep it.`;
     if (files.some((f) => imageType(f)) && !asTyped) prompt += `\nThe pictures among them (screenshots or images) are part of the request: look at each one, opening it with your file-reading tool if it isn't already shown to you.`;
     // Said with why it was stopped, and left to the new instruction: a cancel meant it, and isn't a reminder to do it anyway.
     // Kept until the turn has really gone: a turn tried again (the old way, or on a copy) rebuilds its prompt and would drop it.

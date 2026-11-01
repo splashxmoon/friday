@@ -67,5 +67,6 @@ test("a board task it took and never finished keeps it going, and the nudge says
   );
   const note = keepGoingNote(s, e, MAIN_LANE) ?? "";
   assert.match(note, /the board task "Build the API" isn't finished/);
-  assert.match(note, /check_messages.*post_update/, "with other agents here, it checks in and posts as it goes");
+  assert.match(note, /When you finish, post_update one line/, "with other agents here, it posts once when it finishes");
+  assert.doesNotMatch(note, /check_messages/, "no polling for messages: they reach it while it works");
 });

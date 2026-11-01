@@ -88,6 +88,11 @@ export interface WorkflowRunStep {
   status: BoardStatus;
   /** What it came to (its report), once it has. */
   report?: string;
+  /**
+   * Asked of its teammate's keeper, where the run's owner can't give it the work (the hosted service's: someone else's teammate on
+   * its own plan, own-plan.ts): whom, and whether they took it on.
+   */
+  asked?: { keeper: string; status: "open" | "taken" | "declined" };
 }
 
 export interface WorkflowRun {

@@ -240,7 +240,7 @@ export function baseActions(p: {
   recents: RecentSession[];
   open: (r: RecentSession) => void;
   newSession: () => void;
-  goto: (where: "connections" | "agents" | "automations" | "people" | "board" | "review" | "usage" | "settings") => void;
+  goto: (where: "connections" | "agents" | "automations" | "people" | "board" | "review" | "needs" | "usage" | "settings") => void;
   toggleSidebar: () => void;
   showShortcuts: () => void;
   search?: () => void;
@@ -260,6 +260,7 @@ export function baseActions(p: {
     ...(p.invite && p.team !== false ? [{ id: "invite", label: "Invite someone by email", icon: "mail" as const, group: "Create", run: p.invite }] : []),
     { id: "board", label: "Agent Board", icon: "board", group: "Go to", run: () => p.goto("board") },
     { id: "review", label: "Code Review", icon: "gitPullRequest", group: "Go to", run: () => p.goto("review") },
+    { id: "needs", label: "Needs you", icon: "hand", group: "Go to", run: () => p.goto("needs") },
     { id: "automations", label: "Automations", icon: "zap", group: "Go to", run: () => p.goto("automations") },
     { id: "workflows", label: "Crew workflows", icon: "zap", group: "Go to", run: openWorkflows },
     // The sidebar's Code, Work and Crew from the keyboard (Arun, 2026-10-28: "iron everything and ensure we are good").

@@ -5,6 +5,7 @@
  *
  */
 import { useEffect, useRef, useState } from "react";
+import { isLocal } from "./edition.js";
 import { notificationsOn } from "./prefs.js";
 import { setTeamTab, useTeamNow, type Team } from "./Teammates.js";
 
@@ -39,8 +40,16 @@ export function useAutomationsView(): [AutomationsView, (v: AutomationsView) => 
   return [v, setAutomationsView];
 }
 
-/** The team's workflows, from anywhere (the Team room's header, ⌘K): the Team tab on, and the Automations page showing them. */
+/**
+ * The team's workflows, from anywhere (the Team room's header, ⌘K): the Team tab on, and the Automations page showing them. On the
+ * hosted service, the Crew's Workflows (/?view=crew&tab=workflows), with the Crew in the sidebar.
+ */
 export function openWorkflows(): void {
+  if (!isLocal()) {
+    if (new URLSearchParams(location.search).get("tab") === "workflows") return;
+    history.pushState(null, "", "/?view=crew&tab=workflows");
+    return void dispatchEvent(new PopStateEvent("popstate"));
+  }
   setAutomationsView("workflows");
   setTeamTab(true);
   if (new URLSearchParams(location.search).get("view") === "automations") return void dispatchEvent(new CustomEvent("friday:same-page", { detail: "automations" }));

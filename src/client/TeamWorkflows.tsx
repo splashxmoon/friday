@@ -58,6 +58,7 @@ import {
   type Workflow,
   type WorkflowCheck,
   type WorkflowRun,
+  type WorkflowRunStep,
   type WorkflowStep,
   type WorkflowTemplate,
   type WorkflowTrigger,
@@ -68,7 +69,8 @@ import { api } from "./api.js";
 import type { Identity } from "./storage.js";
 import { TaskMark, type TaskMarkState } from "./TaskMark.js";
 import { relTime, useConfirm } from "./ui.js";
-import { base, Face, mateOn, mateStatus, useTeam, type Team } from "./Teammates.js";
+import { base, Face, mateStatus, useTeam, type Team } from "./Teammates.js";
+import { isLocal } from "./edition.js";
 import { timeOf } from "./team-status.js";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/dass";
@@ -80,10 +82,17 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Dot, PageTabs, Tip, type DotState } from "@/components/dass/page-bits";
+import { StepSkill } from "./CrewSkills.js";
 import "./workflows.css";
 
 type Draft = Omit<Workflow, "id" | "created" | "updated">;
 const JSON_BODY = { "Content-Type": "application/json" };
+
+/**
+ * A workflow someone else in the workspace made, as the hosted service sends it (hosted-workflows.ts: the same /api/workflows, each
+ * workflow with its `owner` and whether it is `mine`): theirs to change and run, yours to look at.
+ */
+const theirs = (w: WorkflowView | null | undefined): { id: string; name: string } | null => ((w as { mine?: boolean } | null)?.mine === false ? ((w as { owner?: { id: string; name: string } }).owner ?? { id: "", name: "someone else" }) : null);
 
 const TZ = (() => {
   try {
@@ -126,23 +135,34 @@ function whenIn(ts: number, tz: string): string {
   return `${there.d} ${there.clock} (${local.d === there.d ? "" : `${local.d} `}${local.clock} your time)`;
 }
 
-/** The team's names for what a workflow says: a teammate by id (or the lead), a room by id. */
-function useNames(team: Team | null) {
+/**
+ * The team's names for what a workflow says: a teammate by id (or the lead), a room by id. `pick`: the teammates a step or a
+ * trigger may name, where not all of them (the hosted service's: your own, and any on a key its keeper shares).
+ */
+function useNames(team: Team | null, pick?: (id: string) => boolean) {
   return useMemo(() => {
     const mates = team?.teammates ?? [];
     const rooms = team?.rooms ?? [];
     const leadLane = (room: string) => (room === TEAM_ROOM ? (team?.lead ?? null) : (rooms.find((r) => r.id === room)?.lead ?? null));
+    const onLane = (lane: string): TeammateView | null => mates.find((m) => m.lane === lane) ?? ((id) => mates.find((m) => m.id === id) ?? null)(rooms.map((r) => Object.entries(r.lanes).find(([, l]) => l === lane)?.[0]).find(Boolean));
     return {
       mates,
       rooms,
+      /** The teammates a trigger, or a template's steps, name: your own, on the hosted service (a step may name anyone's: asked of its keeper). */
+      pickable: pick ? mates.filter((m) => pick(m.id)) : mates,
+      /** Whose a teammate is, on the hosted service, when it isn't yours: its keeper's name. */
+      keeperOf: (id: string): string | null => (pick && !pick(id) ? ((mates.find((m) => m.id === id) as { keeper?: { name: string } } | undefined)?.keeper?.name ?? "someone else") : null),
+      /** Whether a teammate may be named here: null where any may. */
+      pick: pick ?? null,
       mate: (id: string): TeammateView | null => mates.find((m) => m.id === id) ?? null,
       /** Who "the lead" is in a room now. */
-      lead: (room: string): TeammateView | null => ((l) => (l ? mateOn(l) : null))(leadLane(room)),
-      room: (id: string) => (id === TEAM_ROOM ? "Crew room" : (rooms.find((r) => r.id === id)?.name ?? "")),
+      lead: (room: string): TeammateView | null => ((l) => (l ? onLane(l) : null))(leadLane(room)),
+      // On the hosted service the Crew room is your own Crew, with your teammates (each person has one).
+      room: (id: string) => (id === TEAM_ROOM ? (pick ? "your Crew" : "Crew room") : (rooms.find((r) => r.id === id)?.name ?? "")),
       /** Who may be picked for a step in a room: everyone in the Team room, a room's members in a room. */
       inRoom: (room: string, id: string) => room === TEAM_ROOM || !!rooms.find((r) => r.id === room)?.lanes[id],
     };
-  }, [team]);
+  }, [team, pick]);
 }
 type Names = ReturnType<typeof useNames>;
 
@@ -171,9 +191,35 @@ function triggerLong(t: WorkflowTrigger, n: Names): string {
 
 // ── the page ─────────────────────────────────────────────────────────
 
+/**
+ * The crew as the page needs it: the open-source edition's (useTeam), or on the hosted service the same /api/teammates read here,
+ * while the hosted app's own team store doesn't read it yet.
+ */
+function useCrewTeam(identity: Identity): Team | null {
+  const shared = useTeam(identity);
+  const [read, setRead] = useState<Team | null>(null);
+  const need = !isLocal() && !shared;
+  useEffect(() => {
+    if (!need) return;
+    const get = () => void api<Team>(identity, "/api/teammates").then(setRead, () => {});
+    get();
+    const t = setInterval(() => document.visibilityState === "visible" && get(), 5000);
+    return () => clearInterval(t);
+  }, [identity, need]);
+  return shared ?? read;
+}
+
 export function TeamWorkflowsPage({ identity, onCoding }: { identity: Identity; /** Across to the coding tools' own automations. */ onCoding: () => void }) {
-  const team = useTeam(identity);
-  const names = useNames(team);
+  const team = useCrewTeam(identity);
+  // On the hosted service a step or a trigger names your own teammates, or one on a key its keeper shares: anyone else's on its
+  // own plan takes its keeper's work only (own-plan.ts). The open-source edition's teammates are all the person's.
+  const pick = useMemo(() => {
+    const mates = (team?.teammates ?? []) as (TeammateView & { mine?: boolean; onKey?: boolean })[];
+    if (!mates.some((m) => m.mine !== undefined)) return undefined;
+    const can = new Set(mates.filter((m) => m.mine || m.onKey).map((m) => m.id));
+    return (id: string) => can.has(id);
+  }, [team]);
+  const names = useNames(team, pick);
   const [list, setList] = useState<WorkflowView[] | null>(null);
   const [failed, setFailed] = useState("");
   const [editing, setEditing] = useState<{ id: string | null; draft: Draft; fresh?: boolean } | null>(null);
@@ -221,7 +267,7 @@ export function TeamWorkflowsPage({ identity, onCoding }: { identity: Identity; 
     void load();
   };
   const startFrom = (t: WorkflowTemplate | null) =>
-    setEditing({ id: null, fresh: true, draft: t ? { ...blank(), ...fromTemplate(t, names.mates.map((m) => ({ id: m.id, name: m.name, role: m.role }))) } : blank() });
+    setEditing({ id: null, fresh: true, draft: t ? { ...blank(), ...fromTemplate(t, names.pickable.map((m) => ({ id: m.id, name: m.name, role: m.role }))) } : blank() });
 
   if (editing) {
     const view = editing.id ? (list?.find((w) => w.id === editing.id) ?? null) : null;
@@ -237,7 +283,7 @@ export function TeamWorkflowsPage({ identity, onCoding }: { identity: Identity; 
           initial={editing.draft}
           view={view}
           fresh={!!editing.fresh}
-          others={(list ?? []).filter((w) => w.id !== editing.id)}
+          others={(list ?? []).filter((w) => w.id !== editing.id && !theirs(w))}
           ask={ask}
           onBack={() => (setEditing(null), void load())}
           onSaved={(v) => (setList((l) => [v, ...(l ?? []).filter((x) => x.id !== v.id)]), setEditing({ id: v.id, draft: draftOf(v) }))}
@@ -379,6 +425,7 @@ function WorkflowCard({ w, names, busy, onEdit, onRun, onToggle }: { w: Workflow
   const last = w.runs[0];
   const live = last && (last.status === "running" || last.status === "waiting") ? last : null;
   const Icon = TRIGGER_ICON[w.trigger.kind];
+  const owner = theirs(w);
   return (
     // The whole card opens it, as a card does; its own controls keep their presses (QA, 2026-10-28: only the title opened it).
     // Its chain as faces (24px, ringed while their step runs), the schedule as meta, and the switch the one control; a run
@@ -389,12 +436,14 @@ function WorkflowCard({ w, names, busy, onEdit, onRun, onToggle }: { w: Workflow
         <button type="button" className="wf-card-open" onClick={onEdit} aria-label={`Edit ${w.name}`}>
           <span className="wf-card-name">{w.name}</span>
         </button>
-        <Tip label="Run it now">
-          <Button variant="ghost" size="icon-sm" className="wf-card-ctl wf-card-run" aria-label={`Run ${w.name} now`} disabled={busy} onClick={onRun}>
-            <PlayIcon />
-          </Button>
-        </Tip>
-        <Switch className="wf-card-ctl" checked={w.on} onCheckedChange={onToggle} aria-label={w.on ? `Turn ${w.name} off` : `Turn ${w.name} on`} />
+        {!owner && (
+          <Tip label="Run it now">
+            <Button variant="ghost" size="icon-sm" className="wf-card-ctl wf-card-run" aria-label={`Run ${w.name} now`} disabled={busy} onClick={onRun}>
+              <PlayIcon />
+            </Button>
+          </Tip>
+        )}
+        <Switch className="wf-card-ctl" checked={w.on} disabled={!!owner} onCheckedChange={onToggle} aria-label={owner ? `${w.name} is ${owner.name}'s, ${w.on ? "on" : "off"}` : w.on ? `Turn ${w.name} off` : `Turn ${w.name} on`} />
       </div>
       {live ? (
         <span className="wf-card-live" role="status">
@@ -404,7 +453,8 @@ function WorkflowCard({ w, names, busy, onEdit, onRun, onToggle }: { w: Workflow
         <span className="wf-card-when">
           <Icon className="size-3.5" aria-hidden="true" />
           <span className="truncate">{triggerShort(w.trigger, names)}</span>
-          <span className="wf-card-room">· {names.room(w.room) || "a room that's gone"}</span>
+          <span className="wf-card-room">· {owner && w.room === TEAM_ROOM ? `${owner.name}'s Crew` : names.room(w.room) || "a room that's gone"}</span>
+          {owner && w.room !== TEAM_ROOM && <span className="wf-card-room">· {owner.name}'s</span>}
         </span>
       )}
       <span className="wf-card-steps">
@@ -431,7 +481,7 @@ function WorkflowCard({ w, names, busy, onEdit, onRun, onToggle }: { w: Workflow
 
 /** A template as a row (DIRECTION.md §9.9): its name, what it does, who does it and when, and "Use" there on hover or focus. */
 function TemplateTile({ t, names, onUse }: { t: WorkflowTemplate; names: Names; onUse: () => void }) {
-  const made = useMemo(() => fromTemplate(t, names.mates.map((m) => ({ id: m.id, name: m.name, role: m.role }))), [t, names]);
+  const made = useMemo(() => fromTemplate(t, names.pickable.map((m) => ({ id: m.id, name: m.name, role: m.role }))), [t, names]);
   return (
     <li>
       <button type="button" className="wf-tpl-row" onClick={onUse}>
@@ -489,11 +539,23 @@ function Builder({
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
   const [side, setSide] = useState(fresh && !initial.steps.length);
-  const dirty = !id || !sameDraft(d, saved);
+  /** Someone else's (the hosted service's): looked at here, changed and run by them. */
+  const owner = theirs(view);
+  const dirty = !owner && (!id || !sameDraft(d, saved));
   const steps = useMemo(() => packSteps(d.steps), [d.steps]);
   const checks = useMemo(
-    () => workflowChecks({ ...d, id: id ?? "" }, { mates: names.mates, rooms: names.rooms.map((r) => ({ id: r.id, name: r.name, members: Object.keys(r.lanes) })), workflows: others.map((w) => ({ id: w.id, name: w.name })) }),
-    [d, id, names, others],
+    () => [
+      ...workflowChecks({ ...d, id: id ?? "" }, { mates: names.mates, rooms: names.rooms.map((r) => ({ id: r.id, name: r.name, members: Object.keys(r.lanes) })), workflows: others.map((w) => ({ id: w.id, name: w.name })) }),
+      // On the hosted service, someone else's teammate on its own plan takes its keeper's work only (own-plan.ts).
+      ...(names.pick && !owner
+        ? packSteps(d.steps).flatMap((s, i): WorkflowCheck[] => {
+            const m = s.mate && s.mate !== LEAD && !names.pick!(s.mate) ? names.mate(s.mate) : null;
+            const k = m ? names.keeperOf(m.id) : null;
+            return m ? [{ level: "warn", text: `${m.name} is ${k}'s, on their own plan: step ${i + 1} is asked of ${k}, and the run waits for them to take it on`, on: s.id }] : [];
+          })
+        : []),
+    ].sort((a, b) => (a.level === b.level ? 0 : a.level === "fix" ? -1 : 1)),
+    [d, id, names, others, owner],
   );
   const fixes = checks.filter((c) => c.level === "fix");
   const live = view?.runs[0]?.status === "running" || view?.runs[0]?.status === "waiting" ? view.runs[0] : null;
@@ -564,7 +626,7 @@ function Builder({
   // What leaving would lose, asked the same way by the Back arrow and by every other way out: the sidebar, a toast, the palette,
   // the browser's Back, Code or Work, closing the window (leave-guard.ts; QA, 2026-10-28: only the arrow asked, and a new
   // workflow went without a word).
-  const unsaved = id ? dirty : !!(d.steps.length || d.name.trim());
+  const unsaved = owner ? false : id ? dirty : !!(d.steps.length || d.name.trim());
   const askLeave = (go: () => void) =>
     id
       ? ask({ title: "Leave without saving?", body: "Your changes to this workflow are lost.", action: "Leave", onConfirm: go })
@@ -586,11 +648,13 @@ function Builder({
   // ⌘S saves.
   const saveRef = useRef(save);
   saveRef.current = save;
+  const ownerRef = useRef(owner);
+  ownerRef.current = owner;
   useEffect(() => {
     const key = (e: globalThis.KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
-        void saveRef.current();
+        if (!ownerRef.current) void saveRef.current();
       }
     };
     addEventListener("keydown", key);
@@ -598,7 +662,7 @@ function Builder({
   }, []);
 
   const useTemplate = (t: WorkflowTemplate) => {
-    const apply = () => (setD((x) => ({ ...x, ...fromTemplate(t, names.mates.map((m) => ({ id: m.id, name: m.name, role: m.role }))), name: x.name.trim() && id ? x.name : t.name })), setSel(null));
+    const apply = () => (setD((x) => ({ ...x, ...fromTemplate(t, names.pickable.map((m) => ({ id: m.id, name: m.name, role: m.role }))), name: x.name.trim() && id ? x.name : t.name })), setSel(null));
     if (d.steps.length) ask({ title: `Replace the steps with “${t.name}”?`, body: "Its steps, trigger and outcomes take the place of these. Nothing is saved until you save.", action: "Replace", danger: false, onConfirm: apply });
     else apply();
   };
@@ -614,7 +678,7 @@ function Builder({
         <h1 className="sr-only">{id ? d.name : "New workflow"}</h1>
         <Input value={d.name} onChange={(e) => set({ name: e.target.value })} placeholder="Name it, like “Weekly changelog”" aria-label="Name" maxLength={80} className="wf-name" />
         <label className="wf-on">
-          <Switch checked={d.on} onCheckedChange={(on) => set({ on })} aria-label={d.on ? "On: its trigger starts it" : "Off: only Run now starts it"} />
+          <Switch checked={d.on} disabled={!!owner} onCheckedChange={(on) => set({ on })} aria-label={d.on ? "On: its trigger starts it" : "Off: only Run now starts it"} />
           <span>{d.on ? "On" : "Off"}</span>
         </label>
         <div className="wf-head-tools">
@@ -625,19 +689,29 @@ function Builder({
           </Tip>
           <ReadyChip checks={checks} onPick={(c) => goTo(c.on)} />
           {id && <RunsButton identity={identity} id={id} runs={view?.runs ?? []} team={team} />}
-          {id && (
+          {owner ? (
+            // Someone else's: theirs to change and run, said where the buttons would be.
+            <span className="wf-owner" title={`Only ${owner.name} changes or runs it`}>
+              {owner.name}'s
+            </span>
+          ) : null}
+          {id && !owner && (
             <Tip label="Delete this workflow">
               <Button variant="ghost" size="icon-sm" aria-label="Delete this workflow" className="text-[var(--text-muted)]" onClick={remove}>
                 <Trash2Icon />
               </Button>
             </Tip>
           )}
-          <Button variant="outline" size="sm" className="h-8 border-[var(--border)] bg-[var(--bg)] px-3 text-[13px] shadow-none" disabled={running || saving} onClick={() => void runNow()} title={fixes.length ? fixes[0]!.text : dirty ? "Saves it, then runs it" : "Run it now"}>
-            <PlayIcon /> {running ? "Starting…" : "Run now"}
-          </Button>
-          <Button size="sm" className="h-8 px-3 text-[13px]" disabled={saving || (!dirty && !!id)} onClick={() => void save()}>
-            {saving ? "Saving…" : id ? (dirty ? "Save" : "Saved") : "Create"}
-          </Button>
+          {!owner && (
+            <>
+              <Button variant="outline" size="sm" className="h-8 border-[var(--border)] bg-[var(--bg)] px-3 text-[13px] shadow-none" disabled={running || saving} onClick={() => void runNow()} title={fixes.length ? fixes[0]!.text : dirty ? "Saves it, then runs it" : "Run it now"}>
+                <PlayIcon /> {running ? "Starting…" : "Run now"}
+              </Button>
+              <Button size="sm" className="h-8 px-3 text-[13px]" disabled={saving || (!dirty && !!id)} onClick={() => void save()}>
+                {saving ? "Saving…" : id ? (dirty ? "Save" : "Saved") : "Create"}
+              </Button>
+            </>
+          )}
         </div>
       </header>
       {side && <TemplatePanel names={names} onUse={useTemplate} onClose={() => setSide(false)} />}
@@ -683,7 +757,11 @@ function LiveLine({ run }: { run: WorkflowRun }) {
   return (
     // One live line, no dot: the faces of the steps under way wear the ring (DIRECTION.md §8).
     <p className="wf-live" role="status">
-      <span className={run.status === "running" ? "tm-live-text" : undefined}>{run.status === "waiting" ? (run.note ?? "Waiting for the room's board") : `Running in the ${run.roomName.replace(/^the /, "")} · ${done} of ${run.steps.length} step${run.steps.length === 1 ? "" : "s"} done`}</span>
+      <span className={run.status === "running" ? "tm-live-text" : undefined}>
+        {run.status === "waiting" ? (run.note ?? "Waiting for the room's board") : `Running in the ${run.roomName.replace(/^the /, "")} · ${done} of ${run.steps.length} step${run.steps.length === 1 ? "" : "s"} done`}
+        {/* A step asked of another keeper waits on them (the hosted service's): said here, as its card does. */}
+        {run.status === "running" && ((k) => (k ? ` · waiting on ${k}` : ""))(run.steps.find((x) => x.asked?.status === "open" && x.status === "open")?.asked?.keeper)}
+      </span>
     </p>
   );
 }
@@ -704,7 +782,7 @@ function TemplatePanel({ names, onUse, onClose }: { names: Names; onUse: (t: Wor
             <button type="button" className="wf-side-tpl" onClick={() => onUse(t)}>
               <span className="wf-side-tpl-name">{t.name}</span>
               <span className="wf-side-tpl-blurb">{t.blurb}</span>
-              <StepFaces steps={fromTemplate(t, names.mates.map((m) => ({ id: m.id, name: m.name, role: m.role }))).steps} room={TEAM_ROOM} names={names} size={18} />
+              <StepFaces steps={fromTemplate(t, names.pickable.map((m) => ({ id: m.id, name: m.name, role: m.role }))).steps} room={TEAM_ROOM} names={names} size={18} />
             </button>
           </li>
         ))}
@@ -795,7 +873,7 @@ function RunsButton({ identity, id, runs: recent, team }: { identity: Identity; 
                     {r.status === "running" && (
                       <span className="wf-run-steps">
                         {r.steps.map((s) => (
-                          <span key={s.task} title={`${s.title}: ${STEP_WORD[s.status]}`}>
+                          <span key={s.task} title={`${s.title}: ${s.asked?.status === "open" && s.status === "open" ? `waiting on ${s.asked.keeper}` : STEP_WORD[s.status]}`}>
                             <TaskMark state={stepMark(s.status)} />
                           </span>
                         ))}
@@ -993,12 +1071,12 @@ function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd }: {
   );
 }
 
-function ColumnAndGap({ i, last, col, steps, node, stacked, onAdd, full, names, room, runStep }: { i: number; last: boolean; col: WorkflowStep[]; steps: WorkflowStep[]; node: (id: string, children: ReactNode) => ReactNode; stacked: boolean; onAdd: (col: number, alongside: boolean) => void; full: boolean; names: Names; room: string; runStep: (id: string) => { status: BoardStatus } | null }) {
+function ColumnAndGap({ i, last, col, steps, node, stacked, onAdd, full, names, room, runStep }: { i: number; last: boolean; col: WorkflowStep[]; steps: WorkflowStep[]; node: (id: string, children: ReactNode) => ReactNode; stacked: boolean; onAdd: (col: number, alongside: boolean) => void; full: boolean; names: Names; room: string; runStep: (id: string) => Pick<WorkflowRunStep, "status" | "asked"> | null }) {
   return (
     <>
       <div className={cn("wf-col", col.length > 1 && "side-by-side")} role="group" aria-label={col.length > 1 ? `Steps ${steps.indexOf(col[0]!) + 1} to ${steps.indexOf(col.at(-1)!) + 1}, side by side` : `Step ${steps.indexOf(col[0]!) + 1}`}>
         {stacked && col.length > 1 && <span className="wf-col-label">Side by side</span>}
-        {col.map((s) => node(s.id, <StepBody s={s} n={steps.indexOf(s) + 1} names={names} room={room} at={runStep(s.id)?.status ?? null} />))}
+        {col.map((s) => node(s.id, <StepBody s={s} n={steps.indexOf(s) + 1} names={names} room={room} at={runStep(s.id)?.status ?? null} asked={runStep(s.id)?.asked ?? null} />))}
         <button type="button" className="wf-alongside" disabled={full} onClick={() => onAdd(i, true)}>
           <PlusIcon className="size-3.5" /> {stacked ? "Add a step alongside" : "Alongside"}
         </button>
@@ -1030,7 +1108,7 @@ function Gap({ label, onAdd, stacked, disabled, first }: { label: string; onAdd:
 }
 
 /** A card on the canvas: focusable, pressed or Enter to open its settings. */
-function NodeCard({ id, children, sel, flagged, onPick, runStep }: { id: string; children: ReactNode; sel: Sel; flagged: Set<string>; onPick: (s: Sel) => void; runStep: (id: string) => { status: BoardStatus } | null }) {
+function NodeCard({ id, children, sel, flagged, onPick, runStep }: { id: string; children: ReactNode; sel: Sel; flagged: Set<string>; onPick: (s: Sel) => void; runStep: (id: string) => Pick<WorkflowRunStep, "status" | "asked"> | null }) {
   const kind = id === "trigger" || id === "outcomes" ? id : "step";
   const run = kind === "step" ? runStep(id) : null;
   const open = () => onPick(sel === id ? null : id);
@@ -1082,7 +1160,7 @@ function TriggerBody({ d, names }: { d: Draft; names: Names }) {
             </span>
           )}
           <span className="wf-row">
-            <UsersIcon className="size-3.5" /> In the {names.room(d.room) || "room that's gone"}
+            <UsersIcon className="size-3.5" /> In {d.room === TEAM_ROOM && names.pick ? "your Crew" : `the ${names.room(d.room) || "room that's gone"}`}
           </span>
           <span className="wf-row">
             <HistoryIcon className="size-3.5" /> Up to {d.limits.perDay} a day · {d.limits.skipIfRunning ? "skips while one runs" : "waits for the room"}
@@ -1121,13 +1199,15 @@ function OutcomesBody({ d, others }: { d: Draft; others: { id: string; name: str
 }
 
 /** A step's card: its number, its teammate's face and how it stands (mateStatus), what it does, and what it owns. */
-function StepBody({ s, n, names, room, at }: { s: WorkflowStep; n: number; names: Names; room: string; /** How this step stands in the run going now. */ at: BoardStatus | null }) {
+function StepBody({ s, n, names, room, at, asked }: { s: WorkflowStep; n: number; names: Names; room: string; /** How this step stands in the run going now. */ at: BoardStatus | null; /** Asked of its teammate's keeper in that run (the hosted service's). */ asked: WorkflowRunStep["asked"] | null }) {
   const lead = s.mate === LEAD;
   const m = lead ? names.lead(room) : names.mate(s.mate);
   // On this step in the run going now, the face and its line say so, as the card's "Working" does: the face read "Idle" beside it,
   // being the teammate's standing in the Crew room (QA, 2026-10-28).
   const onIt = at === "claimed" || at === "review";
-  const says = m ? (onIt ? { state: "working", line: at === "review" ? "Being checked" : "On this step" } : mateStatus(m)) : null;
+  // Asked of its keeper: waiting on them, or turned down, said in their name.
+  const waits = asked && at === "open" && asked.status === "open" ? { state: "waiting", line: `Waiting on ${asked.keeper} to take it on` } : asked?.status === "declined" ? { state: "idle", line: `${asked.keeper} didn't take it on` } : null;
+  const says = m ? (onIt ? { state: "working", line: at === "review" ? "Being checked" : "On this step" } : (waits ?? mateStatus(m))) : null;
   return (
     <>
       <div className="wf-node-head">
@@ -1270,9 +1350,10 @@ function StepForm({ s, n, steps, d, names, setStep, moveStep, removeStep }: { s:
             {names.mates.map((m) => (
               <SelectItem key={m.id} value={m.id} disabled={!names.inRoom(d.room, m.id)}>
                 <Face seed={m.look ?? m.name} size={16} /> {m.name}
+                {names.inRoom(d.room, m.id) && names.keeperOf(m.id) ? <span className="wf-pick-role">· {names.keeperOf(m.id)}'s, asked of them</span> : null}
                 {/* The role ends at a word, and in the closed box with an ellipsis where it runs out of room: cut at 40 letters, it
                     stopped mid-word and was clipped bare (Arun, 2026-10-28: "look for like the little details and designs"). */}
-                {!names.inRoom(d.room, m.id) ? " (not in this room)" : m.role ? <span className="wf-pick-role">· {roleLine(m.role)}</span> : ""}
+                {!names.inRoom(d.room, m.id) ? " (not in this room)" : m.role && !names.keeperOf(m.id) ? <span className="wf-pick-role">· {roleLine(m.role)}</span> : ""}
               </SelectItem>
             ))}
           </SelectContent>
@@ -1280,6 +1361,8 @@ function StepForm({ s, n, steps, d, names, setStep, moveStep, removeStep }: { s:
       </Field>
       <Field label="What it does" hint={n > 1 && s.col > 0 ? "Gets what the steps before it found." : "Gets what started the run."}>
         <Textarea value={s.does} onChange={(e) => setStep(s.id, { does: e.target.value })} placeholder="Read what merged this week and list the changes, grouped as new, improved and fixed." className="min-h-[132px] text-[13px] leading-relaxed md:text-[13px]" maxLength={4000} />
+        {/* A crew skill for the step: its line leads what it does, and the teammate fetches the steps (CrewSkills.tsx). */}
+        <StepSkill does={s.does} onChange={(does) => setStep(s.id, { does })} />
       </Field>
       <Field label="Files or folders it owns" hint="No other step edits these while it runs.">
         {s.owns.length > 0 && (
@@ -1342,7 +1425,7 @@ function TriggerForm({ d, names, hookUrl, set }: { d: Draft; names: Names; hookU
           : k === "webhook"
             ? { kind: "webhook", secret: "" }
             : k === "teammate"
-              ? { kind: "teammate", mate: names.mates[0]?.id ?? "", on: "turn" }
+              ? { kind: "teammate", mate: names.pickable[0]?.id ?? "", on: "turn" }
               : k === "board"
                 ? { kind: "board", room: names.rooms.find((r) => r.id !== d.room)?.id ?? TEAM_ROOM }
                 : { kind: "manual" },
@@ -1416,7 +1499,7 @@ function TriggerForm({ d, names, hookUrl, set }: { d: Draft; names: Names; hookU
                 <SelectValue placeholder="Pick a teammate" />
               </SelectTrigger>
               <SelectContent>
-                {names.mates.map((m) => (
+                {names.pickable.map((m) => (
                   <SelectItem key={m.id} value={m.id}>
                     <Face seed={m.look ?? m.name} size={16} /> {m.name}
                   </SelectItem>
@@ -1465,7 +1548,7 @@ function RoomSelect({ value, names, onChange, label }: { value: string; names: N
         <SelectValue placeholder="Pick a room" />
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value={TEAM_ROOM}>Crew room · everyone</SelectItem>
+        <SelectItem value={TEAM_ROOM}>{names.pick ? ((n) => `Your Crew · your ${n === 1 ? "teammate" : `${n} teammates`}`)(names.mates.filter((m) => (m as { mine?: boolean }).mine).length) : "Crew room · everyone"}</SelectItem>
         {names.rooms.map((r) => (
           <SelectItem key={r.id} value={r.id}>
             {r.name} · {Object.keys(r.lanes).length} teammate{Object.keys(r.lanes).length === 1 ? "" : "s"}

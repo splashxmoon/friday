@@ -769,7 +769,7 @@ export const messageSession: AgentTool = {
  * pause or a stop: a message sent is sent, and an ask stops waiting by itself when its run is paused or stopped.
  */
 // Not check_messages: Friday Code reads what came in between its own steps already, and the team's updates are in what it reads.
-export const meshTools: AgentTool[] = MESH_TOOLS.filter((t) => ["list_agents", "message_agent", "message_team", "ask_agent", "reply_to_agent", "post_update", "wait_for_agent", "assign_task", "post_tasks", "list_tasks", "claim_task", "finish_task", "claim_files", "release_files", "wake_me_when"].includes(t.name)).map((t) => ({
+export const meshTools: AgentTool[] = MESH_TOOLS.filter((t) => ["list_agents", "message_agent", "message_team", "ask_agent", "reply_to_agent", "post_update", "wait_for_agent", "assign_task", "post_tasks", "list_tasks", "claim_task", "post_proof", "finish_task", "claim_files", "release_files", "wake_me_when"].includes(t.name)).map((t) => ({
   name: t.name,
   description: t.description,
   parameters: t.inputSchema,

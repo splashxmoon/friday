@@ -5,7 +5,7 @@
  * (board.task reassign, the same as the task's own menu); its menu also tries again, sends back or drops it.
  *
  */
-import { useState, type DragEvent } from "react";
+import { useMemo, useState, type DragEvent } from "react";
 import { EllipsisIcon } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { meshOf, pendingFor, runOf, type BoardTask, type SessionState } from "../session/projection.js";
@@ -15,6 +15,9 @@ import { boardTitle, plainError } from "./team-api.js";
 import { plainLine } from "./team-room.js";
 import { focusAgent } from "./agentFocus.js";
 import { Face, mateOn, matesIn, mateStatus } from "./Teammates.js";
+import type { SessionEvent } from "../types.js";
+import { taskProof, type Proof } from "../team-proof.js";
+import { ProofButton } from "./ProofCard.js";
 
 type Col = "todo" | "doing" | "needs" | "done";
 const COLS: { id: Col; title: string; empty: string }[] = [
@@ -60,9 +63,14 @@ export function assignedTasks(state: SessionState): Task[] {
   });
 }
 
-export function TeamBoard({ state, send, onClose }: { state: SessionState; send: Send; onClose: () => void }) {
+export function TeamBoard({ state, events = [], send, onClose }: { state: SessionState; events?: SessionEvent[]; send: Send; onClose: () => void }) {
   const board = state.board;
   const tasks: Task[] = [...(board?.tasks ?? []), ...assignedTasks(state)].filter((t) => colOf(t));
+  // Each handed-in task's proof (team-proof.ts): what the person checks it by, on its card.
+  const proofs = useMemo(() => new Map((board?.tasks ?? []).filter((t) => t.status === "review" || t.status === "done" || t.status === "blocked").flatMap((t) => {
+    const p = taskProof(events, t.id, state.id);
+    return p ? [[t.id, p] as const] : [];
+  })), [board, events, state.id]);
   const mates = matesIn(state.id);
   const [menu, setMenu] = useState<{ t: Task; x: number; y: number } | null>(null);
   const [drag, setDrag] = useState<string | null>(null);
@@ -164,7 +172,7 @@ export function TeamBoard({ state, send, onClose }: { state: SessionState; send:
                     return (
                       <div key={c.id} className="tm-kb-cell" role="gridcell" data-col={c.id} aria-label={`${m?.name ?? "Nobody"}, ${c.title}: ${here.length}`}>
                         {here.map((t) => (
-                          <Card key={t.id} t={t} state={state} dragging={drag === t.id} onDrag={(on) => setDrag(on ? t.id : null)} onMenu={(x, y) => setMenu({ t, x, y })} onOpen={() => t.lane && (focusAgent(state.id, t.lane), onClose())} />
+                          <Card key={t.id} t={t} state={state} proof={proofs.get(t.id)} dragging={drag === t.id} onDrag={(on) => setDrag(on ? t.id : null)} onMenu={(x, y) => setMenu({ t, x, y })} onOpen={() => t.lane && (focusAgent(state.id, t.lane), onClose())} />
                         ))}
                       </div>
                     );
@@ -181,7 +189,7 @@ export function TeamBoard({ state, send, onClose }: { state: SessionState; send:
 }
 
 /** One task: its title, what it waits on or how it went, and its result a press away. */
-function Card({ t, state, dragging, onDrag, onMenu, onOpen }: { t: Task; state: SessionState; dragging: boolean; onDrag: (on: boolean) => void; onMenu: (x: number, y: number) => void; onOpen: () => void }) {
+function Card({ t, state, proof, dragging, onDrag, onMenu, onOpen }: { t: Task; state: SessionState; proof?: Proof; dragging: boolean; onDrag: (on: boolean) => void; onMenu: (x: number, y: number) => void; onOpen: () => void }) {
   const waits = t.status === "open" ? t.after.filter((d) => state.board?.tasks.find((x) => x.id === d)?.status !== "done") : [];
   const line =
     t.status === "blocked"
@@ -189,7 +197,8 @@ function Card({ t, state, dragging, onDrag, onMenu, onOpen }: { t: Task; state: 
       : t.status === "review"
         ? `${t.reviewer?.name ?? "A teammate"} is checking it`
         : t.status === "done"
-          ? plainLine(t.report ?? "") // Its words, not its markdown ("**Notes**", backticks; QA, 2026-10-28).
+          ? // Its words, not its markdown ("**Notes**", backticks; QA, 2026-10-28), nor Friday's record under them: its proof says that.
+            plainLine((t.report ?? "").split("\n\n[Friday, from the record]")[0]!)
           : t.status === "claimed"
             ? // No "On it" under every card in Doing: the column says it, and the row's head carries the teammate's live line
               // beside its ringed face (Arun, 2026-10-29: "so clean and beautiful…"; DIRECTION.md §9.4).
@@ -228,8 +237,10 @@ function Card({ t, state, dragging, onDrag, onMenu, onOpen }: { t: Task; state: 
       </span>
       {t.assigned && <span className="tm-kb-from">Handed out by the lead</span>}
       {line && <span className="tm-kb-line">{line}</span>}
+      {/* Its proof, a press away: the checks, the files, the picture and its own review (ProofCard.tsx). */}
+      {proof && t.status !== "claimed" && <ProofButton proof={proof} />}
       <span className="tm-kb-foot">
-        {t.checks && !t.checks.running && t.checks.ok !== undefined && <span className={t.checks.ok ? "tm-kb-check ok" : "tm-kb-check bad"}>{t.checks.ok ? "Checks pass" : "Checks failed"}</span>}
+        {!proof && t.checks && !t.checks.running && t.checks.ok !== undefined && <span className={t.checks.ok ? "tm-kb-check ok" : "tm-kb-check bad"}>{t.checks.ok ? "Checks pass" : "Checks failed"}</span>}
         {t.rounds > 0 && <span className="tm-kb-check">Round {t.rounds + 1}</span>}
         {t.lane && (
           <button type="button" className="tm-kb-link" onClick={onOpen}>

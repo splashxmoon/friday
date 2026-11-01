@@ -30,6 +30,9 @@ import { isTeamSid } from "./Teammates.js";
 import { leaveWorkNote, markWorkSession, startTeammate, teammateOf, useWorkMode, useWorkSessions, WORK_LINES, WORK_MODE_BLURB, WORK_PLACEHOLDER, WorkField, WorkStarters, workListed } from "./WorkMode.js";
 import { CircleDotIcon, GitPullRequestIcon } from "lucide-react";
 import { isTeamDemo, runTeamDemo, TeamDemoOffer, useDemoTeam } from "./TeamDemo.js";
+import { DailyBriefCard, openBrief } from "./DailyBrief.js";
+import { GoalsCard } from "./Goals.js";
+import { ReadyCard } from "./ReadyCard.js";
 
 // The message box is this page's state, so every keystroke draws the page again. These take nothing that changes as you type,
 // so they are left as they were. The template shelf is not among them: it is given what is in the box.
@@ -572,6 +575,8 @@ export function Code({
   /** Where ↑ has got to in your past asks (askHistory.ts); -1 while the box holds your own text. */
   const askAt = useRef(-1);
   const submit = async () => {
+    // "/brief": the daily brief, not a task (DailyBrief.tsx).
+    if (goal.trim().toLowerCase() === "/brief") return void (setGoal(""), openBrief());
     if (blocked && goal.trim()) return setNudged(true);
     if (!goal.trim() || busy || blocked) return;
     rememberAsk(goal);
@@ -1221,6 +1226,12 @@ export function Code({
 
       {/* The sample runs Friday's own agent: Team's, or on Solo the person's own model. */}
 
+      {/* The morning brief or evening wrap-up across everything, then what happened in each session while you were away. */}
+      <DailyBriefCard />
+      {/* Every goal you set, at risk first (goals.ts). */}
+      {/* Every agent's finished work, proven first, one press from shipped (ready.ts). */}
+      <ReadyCard identity={identity} />
+      <GoalsCard identity={identity} />
       {/* What happened while you were away, before what you might do next. */}
 
       {/* Where the toasts of what waits on you sit on a phone, in the page rather than over "Right now" (Attention.tsx). */}

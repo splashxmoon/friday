@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { engineName, ENGINE_TOOLS, SESSION_LANES, hostOnlyYes, isEngineEffort, effortLevelsOf, liveMachine, MAIN_LANE, type EngineEffort, type EngineTool, type ActorRef, type AgentSnapshot, type Attachment, type ControlMode, type EventBody, type Lane, type LaneControl, type LaneTrigger, type LinkRole, type PolicyPatch, type Role, type Handoff, type RepoCall, type SessionOptionsPatch, type Thinking, EFFORT_LEVELS } from "../types.js";
 import { canDriveLane, driverOf, laneHeld, laneOf, meshOf, mergeOptions, pendingFor, roleOf, runOf, signoffStatus, type SessionState, effortResets } from "./projection.js";
 import type { AppendGuard, AppendResult, SessionStore } from "./store.js";
-type CrewDef = never;
+type PipelineDef = never;
 import { prBodyFor } from "../pr-body.js";
 import { mentionsIn } from "../mentions.js";
 import { checkpointBefore, runEndAfter, sharedWorkDuring } from "../rewind.js";
@@ -66,7 +66,7 @@ export type Command =
   /** Several notes to one agent as one instruction (Arun, 2026-10-25: notes gather, then go together): each is marked sent. */
   | { type: "threads.send"; ids: string[]; lane?: string }
   /** Goal mode: when this agent's work is done, in words, with a command whose success proves it when there is one. */
-  | { type: "goal.set"; text: string; check?: string; lane?: string }
+  | { type: "goal.set"; text: string; check?: string; lane?: string; due?: number }
   | { type: "goal.clear" }
   | { type: "handover.save"; text: string }
   | { type: "react"; seq: number; up: boolean | null; reason?: string }
@@ -103,6 +103,7 @@ export type Command =
   | { type: "lane.othersFull"; lane?: string; on: boolean }
   | { type: "lane.rename"; laneId: string; name: string }
   /** Add a saved pipeline's lanes, wired to each other, in one go. */
+  /** A saved pipeline (pipelines.ts) added; named "crew" on the wire, as sessions have logged it since before the rename. */
   | { type: "crew.apply"; crewId: string }
   | { type: "member.role"; userId: string; role: Role }
   | { type: "member.remove"; userId: string }
@@ -138,8 +139,8 @@ export interface CommandActor {
 /** Looks up an agent the user is allowed to use and freezes its current configuration. */
 /** `workspaceId` scopes the lookup: an agent belongs to a workspace, not to a deployment. */
 export type AgentResolver = (userId: string, agentId: string, workspaceId: string) => Promise<AgentSnapshot | null>;
-/** A crew this person is allowed to use, in this session's workspace. */
-export type CrewResolver = (userId: string, crewId: string, workspaceId: string) => Promise<CrewDef | null>;
+/** A pipeline (pipelines.ts) this person is allowed to use, in this session's workspace. */
+export type PipelineResolver = (userId: string, crewId: string, workspaceId: string) => Promise<PipelineDef | null>;
 
 /**
  * The model this workspace may actually run, given the one asked for.
@@ -205,7 +206,7 @@ export class SessionCore {
     private store: SessionStore,
     private wake: (sid: string, lane?: string) => void,
     private resolveAgent: AgentResolver = async () => null,
-    private resolveCrew: CrewResolver = async () => null,
+    private resolveCrew: PipelineResolver = async () => null,
     private allowModel: ModelPolicy = async (_w, m) => m,
     private folder: FolderAccess | null = null,
     /** Where this Friday lives, so a pull request can link back to its session. */
@@ -476,7 +477,10 @@ export class SessionCore {
         // Whoever may steer that agent sets the bar for its work.
         if (!canDriveLane(state, m.id, lane) && driverOf(state, lane)?.id !== m.id) return deny("set a goal for an agent you can't steer");
         const check = String(cmd.check ?? "").trim().slice(0, 400);
-        const r = await this.store.append(sid, actor, { type: "goal.set", text, ...(check ? { check } : {}) }, { lane });
+        // By when, if said: a time to come, within a year.
+        const due = Number(cmd.due);
+        if (cmd.due !== undefined && !(Number.isFinite(due) && due > Date.now() && due < Date.now() + 366 * 86_400_000)) return fail("Pick a time to come for the goal.");
+        const r = await this.store.append(sid, actor, { type: "goal.set", text, ...(check ? { check } : {}), ...(cmd.due !== undefined ? { due: Math.floor(due) } : {}) }, { lane });
         return r.ok ? ok(r.seq) : fail("Could not record the goal.");
       }
 

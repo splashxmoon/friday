@@ -14,6 +14,7 @@ export type ControlMode = "ask" | "takeover";
 
 /** What non-owners may do. Owners can always do everything. */
 import type { CommandClass } from "./command-class.js";
+import type { Proof } from "./team-proof.js";
 export type Permission = "suggest" | "control" | "upload" | "invite";
 export type RolePolicy = Record<Permission, boolean>;
 export interface SessionPolicy {
@@ -674,7 +675,7 @@ export interface TeamBrief {
   since: number;
   until: number;
   /** Work finished: a board task done, or a turn that ended with a result. Its files changed, and a pull request it opened. */
-  done: { lane: string; name: string; title: string; files?: string[]; pr?: string; sid?: string; seq?: number }[];
+  done: { lane: string; name: string; title: string; files?: string[]; pr?: string; sid?: string; seq?: number; /** What shows it worked (team-proof.ts). */ proof?: Proof }[];
   /** Work that stopped short: a board task blocked or dropped, or a turn that ended on an error. */
   failed: { lane: string; name: string; title: string; why: string; sid?: string; seq?: number }[];
   /** What waits on the person: a question asked of them and not answered. */
@@ -688,6 +689,8 @@ export interface TeamBrief {
    * 2026-10-28: "make the automation for the teams platform different…").
    */
   workflow?: { id: string; name: string; run: string; status: "done" | "failed"; result?: string };
+  /** A teammate stopped for its budget or hours, or a run on its own stopped by its budget (team-budget.ts budgetStops). */
+  stops?: { lane?: string; name: string; text: string; seq: number; sid?: string }[];
 }
 
 export interface MeshNote {
@@ -889,7 +892,7 @@ export type EventBody =
    * lead, when there is one). Agents claim ready tasks themselves, idle ones are handed them, a finished task unlocks what waits
    * on it and is checked by another agent before it counts (Arun, 2026-10-19: "a shared task board… and peer review").
    */
-  | { type: "board.posted"; fromLane: string; fromName: string; tasks: BoardTaskDef[]; /** What proves a task works, run in its agent's folder when it is done (each task's own `check` first). */ check?: string }
+  | { type: "board.posted"; fromLane: string; fromName: string; tasks: BoardTaskDef[]; /** What proves a task works, run in its agent's folder when it is done (each task's own `check` first). */ check?: string; /** Whose work it is, when Friday posts it for a person (a hosted crew workflow's owner): its hand-outs carry them (own-plan.ts). */ by?: { id: string; name: string } }
   | { type: "board.claimed"; id: string; lane: string; name: string; /** Why this agent, when the board picked it: "best at tests here", "the others are nearly out of usage". */ why?: string }
   | { type: "board.finished"; id: string; lane: string; name: string; status: "done" | "blocked"; report: string }
   | { type: "board.review"; id: string; lane: string; name: string }
@@ -903,6 +906,12 @@ export type EventBody =
   /** A person's say over a task from the team's list: taken back to be handed to someone else, opened again, or dropped. */
   | { type: "board.released"; id: string; why: string; /** Who it should go to next, when a person picked. */ to?: string; /** The agent that turned it down: not offered to it again. */ declined?: string }
   | { type: "board.cancelled"; id: string }
+  /**
+   * Proof of work (team-proof.ts): a teammate's own review of what it did, checked and is unsure of, with the page it touched
+   * (post_proof), for the board task `id` or its run; and the picture of that page its runner took (`proof`: that post's seq).
+   */
+  | { type: "proof.posted"; id?: string; done: string; checked: string; unsure: string; page?: string }
+  | { type: "proof.shot"; proof: number; url: string; file: string; width?: number; height?: number }
   /** An agent given a name of its own ("Reviewer" for the second Claude Code); the main lane's too. */
   | { type: "lane.renamed"; laneId: string; name: string }
   /**
@@ -1200,11 +1209,17 @@ export type EventBody =
    * as news. `id` is its record's (DELETE /api/teammates/:id removes it); `lane` its Team room lane.
    */
   | { type: "teammate.proposed"; id: string; name: string; lane: string; madeBy: { lane: string; name: string } }
+  /** A crew skill a teammate proposed (team-skills.ts save_skill), for the person to keep or drop; `id` its record's, `revises` the kept skill's it would change. */
+  | { type: "skill.proposed"; id: string; name: string; when: string; madeBy: { lane: string; name: string }; revises?: string }
   /**
    * Every hold a person put on agents here lifted (held.ts), or only those on `lanes`: by a person's one-click lift, or by
    * away mode turning on (old holds would keep the team idle all night).
    */
   | { type: "holds.lifted"; lanes?: string[]; why: string }
+  /** A room turned to run on its own toward `goal` (team-selfrun.ts), or back (`on: false`): by a person, the goal reached, or stalled. */
+  | { type: "team.selfrun"; on: boolean; goal?: string; /** Its end time (team-budget.ts RunBudget.until), which is when the goal is due. */ due?: number; why?: string; /** Stopped by its budget or end time (team-budget.ts). */ budget?: true }
+  /** A teammate (on `lane`) stopped taking new turns for its budget or hours (team-budget.ts), said once where its work waits: its queue is kept. */
+  | { type: "team.budget"; name: string; lane: string; why: "quiet" | "hours" | "tokens" | "usd" | "plan"; until: number | null; text: string }
   /** The agent on this lane has read the team updates up to `upTo`: it checked (check_messages) or a turn carried them to it. */
   | { type: "mesh.read"; upTo: number }
   | { type: "peer.sent"; to: { sid: string; title: string; lane: string; name: string }; text: string; held: boolean }
@@ -1214,7 +1229,7 @@ export type EventBody =
   | { type: "peer.settled"; id: string; delivered: boolean }
   // A hub (hubs.ts): one plan, several agents at once in their own copies, the results brought together and shipped as one.
   /** Goal mode (goal.ts): when the work is done, in the person's words, read against every finished turn on that agent. */
-  | { type: "goal.set"; text: string; check?: string }
+  | { type: "goal.set"; text: string; check?: string; /** When it should be done by (ms): goals.ts reads the pace against it. */ due?: number }
   | { type: "goal.checked"; runSeq: number; met: boolean; why: string; /** The agent was told to carry on. */ nudge?: true }
   | { type: "goal.cleared" }
   | { type: "hub.planned"; id: string; goal: string; tasks: HubTask[]; width: number; tools: EngineTool[]; by: string }

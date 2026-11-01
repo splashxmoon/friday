@@ -104,8 +104,9 @@ export function usageReport(events: SessionEvent[], nameOf: (lane: string) => st
       const task = cause && cause.body.type === "instruction" ? cause.body.text.replace(/\s+/g, " ").trim().slice(0, 140) : "";
       open.set(lane, { seq: e.seq, lane, agent: nameOf(lane), by, ts: e.ts, seconds: 0, tokens: 0, counted: false, outcome: "running", task });
     } else if (b.type === "agent.message" || b.type === "agent.usage") {
-      // Friday's steps carry their tokens; a coding tool reports a turn's at its end.
-      const t = b.type === "agent.usage" ? b.input + b.cached + b.output : b.tokens;
+      // Friday's steps carry their tokens; a coding tool reports a turn's at its end: read fresh and written, not what it read back
+      // from its cache, which is the whole conversation again at every step (UsagePage.tsx says why).
+      const t = b.type === "agent.usage" ? b.input + b.output : b.tokens;
       const r = open.get(lane);
       if (r && t !== undefined) {
         r.tokens += t;

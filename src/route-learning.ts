@@ -4,8 +4,11 @@ import { BENCH_ASOF, benchFor } from "./model-bench.js";
 /** Friday Pro's model id: the hosted Friday's; the open-source edition has no Friday models, so nothing is learnt for them. */
 let FRIDAY_PRO = "\u0000none";
 import { commandFailed, receiptOf, type Receipt } from "./receipt.js";
+import { repoNameOf } from "./repo-key.js";
 import { tookCheckpoint } from "./rewind.js";
-import { MAIN_LANE, type DiffFile, type EventBody, type SessionEvent, type ToolCall } from "./types.js";
+import type { RunRecord } from "./forecast.js";
+import { KIND_WORDS, type TaskKind } from "./strengths.js";
+import { ENGINE_MODEL_INFO, engineName, MAIN_LANE, type DiffFile, type EngineTool, type EventBody, type SessionEvent, type ToolCall } from "./types.js";
 
 /**
  * What routing learns from how runs end here (routing.ts).
@@ -27,19 +30,25 @@ import { MAIN_LANE, type DiffFile, type EventBody, type SessionEvent, type ToolC
  */
 
 /** Outcomes per `${tool}:${model}:${tier}`, and per `${tool}:${model}:${tier}@${repo}`: runs, and the grades of those runs added up. */
-export type Learned = Record<string, { n: number; ok: number }>;
+export type Learned = Record<string, { n: number; ok: number; /** Dollars spent over those runs, when measured (forecast.ts). */ c?: number; /** Milliseconds taken over those runs, when measured. */ ms?: number }>;
+
+/** Older than this, a run says little about how the tools work now: forecasts and learning from records leave it out. */
+export const KEEP_MS = 60 * 86_400_000;
 
 /** How many runs the level above is worth: the benchmark to a workspace, the workspace to one of its repos. */
 export const PRIOR_RUNS = 10;
 
-/** A success rate from its benchmark estimate, the runs seen in the workspace, and the runs seen on the repo. */
-export function learnedSuccess(prior: number, seen?: { n: number; ok: number }, local?: { n: number; ok: number }): number {
+/**
+ * A success rate from its benchmark estimate and the runs seen at each level below it, most general first: the workspace, the
+ * repo, the repo's runs of this kind of task. Each shrinks toward the one above.
+ */
+export function learnedSuccess(prior: number, ...levels: ({ n: number; ok: number } | undefined)[]): number {
   const shrink = (p: number, s?: { n: number; ok: number }) => (!s?.n ? p : (PRIOR_RUNS * p + Math.max(0, Math.min(s.n, s.ok))) / (PRIOR_RUNS + s.n));
-  return shrink(shrink(prior, seen), local);
+  return levels.reduce((p, s) => shrink(p, s), prior);
 }
 
 /** What each coding tool runs with no model picked: Claude Code's default is Opus on every plan, Codex's its recommended model. */
-const TOOL_DEFAULT: Record<string, string> = { claude: "opus", codex: "gpt-6.1-sol" };
+export const TOOL_DEFAULT: Record<string, string> = { claude: "opus", codex: "gpt-6.1-sol" };
 
 type Routed = Extract<EventBody, { type: "model.routed" }>;
 
@@ -56,7 +65,7 @@ export function ranOn(b: Routed): { tool: string; model: string } | null {
 }
 
 /** An error that says nothing about how well the model works: the account, or the connection to the machine it ran on. */
-const NOT_THE_MODEL = /allowance|team pro|on team|plan|sign(ed)? in|log(ged)? in|logged out|authenticat|credits|quota|rate limit|disconnected|lost its connection|reconnects/i;
+export const NOT_THE_MODEL = /allowance|team pro|on team|plan|sign(ed)? in|log(ged)? in|logged out|authenticat|credits|quota|rate limit|disconnected|lost its connection|reconnects/i;
 
 /** A message that says the last run missed: the same thing asked again, with the words of someone who saw it fail. */
 export const CORRECTION = /\b(still (fails|failing|broken|wrong|doesn'?t)|doesn'?t work|not working|that'?s (wrong|not it)|try again|didn'?t (fix|work)|same error)\b/i;
@@ -124,32 +133,26 @@ function undone(events: SessionEvent[], ev: Pick<SessionEvent, "seq" | "lane" | 
   return ended?.body.type === "run.ended" && ended.body.outcome === "done" ? ended : null;
 }
 
-/**
- * What an event teaches routing, if anything: a run's end and its grade; or a revision of a run's grade, from an undo, a second
- * review's findings, a correction in the next message, or a reaction to what the run said. Null when there is nothing to learn.
- */
-export function lessonOf(events: SessionEvent[], ev: Pick<SessionEvent, "seq" | "lane" | "body" | "actor">, repo?: string): Lesson | null {
+/** A run's end, and the grade an event gives it: a new run's (no `replace`), or how it revises the grade the run already has. */
+type Judged = { end: Pick<SessionEvent, "seq" | "lane" | "body">; grade: number; replace?: Lesson["replace"] };
+
+function judged(events: SessionEvent[], ev: Pick<SessionEvent, "seq" | "lane" | "body" | "actor">): Judged | null {
   const b = ev.body;
-  const withRepo = (l: Lesson): Lesson => (repo ? { ...l, repo } : l);
   if (b.type === "run.ended") {
     if (b.outcome === "error" && NOT_THE_MODEL.test(b.error ?? "")) return null;
     // Stopped to ask a person: neither right nor wrong yet.
     if (b.outcome === "waiting") return null;
-    const r = runOf(events, ev);
-    if (!r) return null;
-    return withRepo({ key: r.key, run: r.run, grade: b.outcome === "error" ? 0 : gradeOf(events, r.lane, ev.seq) });
+    return { end: ev, grade: b.outcome === "error" ? 0 : gradeOf(events, ev.lane ?? MAIN_LANE, ev.seq) };
   }
   if (b.type === "folder.restored") {
     const ended = undone(events, ev);
-    const r = ended && runOf(events, ended);
-    return r ? withRepo({ key: r.key, run: r.run, grade: 0, replace: "set" }) : null;
+    return ended ? { end: ended, grade: 0, replace: "set" } : null;
   }
   if (b.type === "review.done") {
     const ended = events.find((e) => e.seq === b.runSeq && e.body.type === "run.ended");
-    const r = ended && runOf(events, ended);
-    if (!r) return null;
+    if (!ended) return null;
     const worst = b.findings.some((f) => f.severity === "high") ? 0.5 : b.findings.some((f) => f.severity === "medium") ? 0.75 : null;
-    return worst === null ? null : withRepo({ key: r.key, run: r.run, grade: worst, replace: "mul" });
+    return worst === null ? null : { end: ended, grade: worst, replace: "mul" };
   }
   if (b.type === "message.reacted") {
     if (b.up === null) return null;
@@ -157,8 +160,7 @@ export function lessonOf(events: SessionEvent[], ev: Pick<SessionEvent, "seq" | 
     if (!said) return null;
     const lane = said.lane ?? MAIN_LANE;
     const ended = events.find((e) => e.seq > said.seq && onLane(e, lane) && e.body.type === "run.ended");
-    const r = ended && runOf(events, ended);
-    return r ? withRepo({ key: r.key, run: r.run, grade: b.up ? 1 : 0.5, replace: b.up ? "max" : "min" }) : null;
+    return ended ? { end: ended, grade: b.up ? 1 : 0.5, replace: b.up ? "max" : "min" } : null;
   }
   if (b.type === "instruction") {
     // A person, in their own words, saying the last run missed; not a hand-off, a message from another session, or an answer.
@@ -166,10 +168,35 @@ export function lessonOf(events: SessionEvent[], ev: Pick<SessionEvent, "seq" | 
     const lane = ev.lane ?? MAIN_LANE;
     const prev = events.findLast((e) => e.seq < ev.seq && onLane(e, lane) && (e.body.type === "run.ended" || (e.body.type === "instruction" && e.actor.kind === "human")));
     if (!prev || prev.body.type !== "run.ended" || prev.body.outcome !== "done") return null;
-    const r = runOf(events, prev);
-    return r ? withRepo({ key: r.key, run: r.run, grade: 0.25, replace: "min" }) : null;
+    return { end: prev, grade: 0.25, replace: "min" };
   }
   return null;
+}
+
+/**
+ * What an event teaches routing, if anything: a run's end and its grade; or a revision of a run's grade, from an undo, a second
+ * review's findings, a correction in the next message, or a reaction to what the run said. Null when there is nothing to learn.
+ */
+export function lessonOf(events: SessionEvent[], ev: Pick<SessionEvent, "seq" | "lane" | "body" | "actor">, repo?: string): Lesson | null {
+  const j = judged(events, ev);
+  const r = j && runOf(events, j.end);
+  if (!j || !r) return null;
+  return { key: r.key, run: r.run, grade: j.grade, ...(j.replace ? { replace: j.replace } : {}), ...(repo ? { repo } : {}) };
+}
+
+/**
+ * A later word on a run's record (forecast.ts RunLog): everything lessonOf revises, and the board's check of a task, which
+ * passing raises to 1 and sending back lowers to 0.5. The run as `${lane}:${seq of its end}`; null for a run's own end.
+ */
+export function revisionOf(events: SessionEvent[], ev: Pick<SessionEvent, "seq" | "lane" | "body" | "actor">): { run: string; grade: number; replace: NonNullable<Lesson["replace"]> } | null {
+  if (ev.body.type === "board.reviewed") {
+    const lane = ev.body.lane;
+    const ended = events.findLast((e) => e.seq < ev.seq && onLane(e, lane) && e.body.type === "run.ended" && e.body.outcome === "done");
+    return ended ? { run: `${lane}:${ended.seq}`, grade: ev.body.ok ? 1 : 0.5, replace: ev.body.ok ? "max" : "min" } : null;
+  }
+  const j = judged(events, ev);
+  if (!j?.replace) return null;
+  return { run: `${j.end.lane ?? MAIN_LANE}:${j.end.seq}`, grade: j.grade, replace: j.replace };
 }
 
 /**
@@ -222,6 +249,11 @@ export class RouteStats {
     await this.redis.set(runKey, String(next), "EX", 86_400);
   }
 
+  /** Everything learnt for the workspace, forgotten (a person's reset of all routing learned, RunLog.reset "*"). */
+  async clear(workspaceId: string): Promise<void> {
+    await this.redis.del(this.key(workspaceId));
+  }
+
   async get(workspaceId: string): Promise<Learned> {
     const h = await this.redis.hgetall(this.key(workspaceId)).catch(() => ({}) as Record<string, string>);
     const out: Learned = {};
@@ -234,4 +266,118 @@ export class RouteStats {
     }
     return out;
   }
+}
+
+// ── learning from run records (forecast.ts) ─────────────────────────
+
+/** Whether a reset (RunLog.reset) has put this record out of what is learnt: everything, or its repo and kind of task. */
+const resetOut = (r: RunRecord, resets: Record<string, number>) => r.at <= (resets["*"] ?? 0) || r.at <= (resets[scopeOf(r)] ?? 0);
+/** A learned preference's scope: a repo and a kind of task. */
+export const scopeOf = (r: Pick<RunRecord, "repo" | "kind">) => `${r.repo ?? ""}|${r.kind ?? "other"}`;
+
+/** The records learning stands on: under the current benchmark table, recent, and not reset since. */
+export function learnable(records: RunRecord[], resets: Record<string, number>, now = Date.now()): RunRecord[] {
+  return records.filter((r) => r.asof === BENCH_ASOF && now - r.at < KEEP_MS && !!r.model && !resetOut(r, resets));
+}
+
+/**
+ * What routing learns from run records, as fitModels reads it: per model and tier, for the workspace and the repo (`all`, where
+ * nothing else keeps those: the open-source edition), and always for the repo's runs of each kind of task
+ * (`${tool}:${model}:${tier}#${kind}@${repo}`), with the dollars and time those runs took.
+ */
+export function learnedFrom(records: RunRecord[], resets: Record<string, number>, levels: "all" | "kind", now = Date.now()): Learned {
+  const out: Learned = {};
+  const add = (key: string, r: RunRecord) => {
+    const l = (out[key] ??= { n: 0, ok: 0, c: 0, ms: 0 });
+    l.n += 1;
+    l.ok += r.grade;
+    l.c! += r.cost;
+    l.ms! += r.ms;
+  };
+  for (const r of learnable(records, resets, now)) {
+    const key = `${r.tool}:${r.model}:${r.tier}`;
+    if (levels === "all") {
+      add(key, r);
+      if (r.repo) add(`${key}@${r.repo}`, r);
+    }
+    if (r.repo && r.kind) add(`${key}#${r.kind}@${r.repo}`, r);
+  }
+  return out;
+}
+
+/** One thing routing has learnt, said in a line, with the scope a reset forgets. */
+export interface LearnedItem {
+  scope: string;
+  repo: string;
+  kind: TaskKind | null;
+  text: string;
+  runs: number;
+}
+
+/** Runs an option needs in a repo and kind of task before anything is said about it. */
+const SAY_AFTER = 3;
+
+const toolWords = (tool: string) => (tool === "friday" ? "Friday" : engineName(tool as EngineTool));
+
+/**
+ * What routing has learnt, in words a person can check: for each repo and kind of task with two options run there at least
+ * SAY_AFTER times each, how the better one compares ("In acme/api, Codex finishes tests 30% faster at half the cost of Claude
+ * Code"). Options are tools, or models when only one tool ran there. Nothing is said where neither is better on any count.
+ */
+export function learnedView(records: RunRecord[], resets: Record<string, number>, now = Date.now()): LearnedItem[] {
+  const groups = new Map<string, RunRecord[]>();
+  for (const r of learnable(records, resets, now)) {
+    if (!r.repo) continue;
+    const g = groups.get(scopeOf(r)) ?? [];
+    g.push(r);
+    groups.set(scopeOf(r), g);
+  }
+  const items: LearnedItem[] = [];
+  for (const [scope, rs] of groups) {
+    const tools = new Set(rs.map((r) => r.tool));
+    const byTool = tools.size > 1;
+    const opts = new Map<string, RunRecord[]>();
+    for (const r of rs) {
+      const k = byTool ? r.tool : `${r.tool}:${r.model}`;
+      opts.set(k, [...(opts.get(k) ?? []), r]);
+    }
+    const stats = [...opts.entries()]
+      .filter(([, x]) => x.length >= SAY_AFTER)
+      .map(([k, x]) => {
+        const [tool, model] = k.split(":");
+        const label = model ? (benchName(tool!, model) ?? model) : toolWords(tool!);
+        return { label, n: x.length, ok: x.reduce((a, r) => a + r.grade, 0) / x.length, ms: median(x.map((r) => r.ms)), cost: median(x.map((r) => r.cost)) };
+      });
+    if (stats.length < 2) continue;
+    const maxMs = Math.max(...stats.map((s) => s.ms), 1);
+    const maxCost = Math.max(...stats.map((s) => s.cost), 0.0001);
+    const score = (s: (typeof stats)[number]) => s.ok - 0.1 * (s.ms / maxMs) - 0.1 * (s.cost / maxCost);
+    const ranked = [...stats].sort((a, b) => score(b) - score(a));
+    const best = ranked[0]!;
+    const other = ranked.slice(1).sort((a, b) => b.n - a.n)[0]!;
+    const [repo, kindRaw] = [scope.slice(0, scope.lastIndexOf("|")), scope.slice(scope.lastIndexOf("|") + 1)];
+    const kind = kindRaw === "other" ? null : (kindRaw as TaskKind);
+    const what = kind ? KIND_WORDS[kind] : "other tasks";
+    const surer = best.ok - other.ok >= 0.1;
+    const faster = 1 - best.ms / Math.max(other.ms, 1);
+    const ratio = other.cost > 0 ? best.cost / other.cost : 1;
+    const speed = faster >= 0.2 ? `${Math.round(faster * 100)}% faster` : "";
+    const cost = ratio <= 0.7 ? (ratio >= 0.45 && ratio <= 0.55 ? "at half the cost" : `at ${Math.round((1 - ratio) * 100)}% less cost`) : "";
+    let says = "";
+    if (surer) says = `gets ${what} right ${Math.round(best.ok * 100)}% of the time to ${other.label}'s ${Math.round(other.ok * 100)}%${speed ? `, ${speed}` : ""}${cost ? `, ${cost}` : ""}`;
+    else if (speed && cost) says = `finishes ${what} ${speed} ${cost} of ${other.label}`;
+    else if (speed) says = `finishes ${what} ${speed} than ${other.label}`;
+    else if (cost) says = `does ${what} ${cost} of ${other.label}`;
+    if (!says) continue;
+    items.push({ scope, repo, kind, text: `In ${repoNameOf(repo)}, ${best.label} ${says}`, runs: rs.length });
+  }
+  return items.sort((a, b) => b.runs - a.runs);
+}
+
+const benchName = (tool: string, model: string): string | null => (tool === "friday" ? (model === "pro" ? "Friday Pro" : "Friday") : (ENGINE_MODEL_INFO[tool as EngineTool]?.find((m) => m.id === model)?.label ?? null));
+
+function median(xs: number[]): number {
+  const s = [...xs].sort((a, b) => a - b);
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
 }

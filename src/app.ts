@@ -37,12 +37,15 @@ import { defaultTools, type AgentTool } from "./agent/tools.js";
 import { SESSION_COOKIE, SESSION_MAX_AGE_S, clearSessionCookie, readCookie, sessionCookie, signActor, signInvite, signSession, verifyActor, verifyInvite, verifySession, signReplay, verifyReplay } from "./auth.js";
 import { hideSecrets, hideSecretsIn } from "./secrets.js";
 import { applyPrStatus, boardCards, sortCards, summaryOf, waitingOn, weekOf, type BoardCard, type SessionSummary } from "./board.js";
+import { cliLlm } from "./builder-cli.js";
+import { NeedsYou } from "./needs-you.js";
 import { AgentMesh } from "./agent-mesh.js";
 import { Hubs } from "./hubs.js";
 import type { Limits } from "./runner/limits.js";
 import type { MachineTool, SessionOptionsPatch } from "./types.js";
 import type { ToolOption, ToolWindow } from "./routing.js";
 import { runawayIn } from "./runaway.js";
+import { dailyBriefs, type CrewInput, type DailyBrief } from "./daily-brief.js";
 import { fromGh, fromGithubApi, rerequestReview, statusOf, type PrStatus } from "./github-status.js";
 import { commitPaths, FRIDAY, fixMessage, fromPerson, MAX_CHECK_ROUNDS, prBranch, shepherdNext } from "./shepherd.js";
 import { plainCommitMessage } from "./pr-body.js";
@@ -58,7 +61,7 @@ import { clientBuildOptions } from "./client-build.js";
 import { SkillRegistry } from "./skills.js";
 import type { SkillBrief } from "./types.js";
 import { discoverSkills, importChosen, importWholeRepo } from "./skill-import.js";
-import { FileStore, MAX_FILE_BYTES, isUsableFile, resolveAttachments } from "./files.js";
+import { FileStore, MAX_FILE_BYTES, MAX_MEDIA_BYTES, isMediaFile, isUsableFile, resolveAttachments } from "./files.js";
 import { publicAccount, type Account, type Provider } from "./identity-types.js";
 import { LOCAL_WORKSPACE, localAccount } from "./local/identity.js";
 
@@ -78,30 +81,38 @@ import { NoLinks } from "./local/no-links.js";
 import { LocalLinks } from "./local/computers.js";
 import { handOff } from "./hand-off-run.js";
 import { reattachAll } from "./reattach.js";
+import { backBrief as backBriefOf, TeamLooks } from "./team-views.js";
+import { learnedFrom, learnedView, revisionOf, type Learned } from "./route-learning.js";
+import { burn, signInOf } from "./forecast.js";
+import { recordOf, RunLog } from "./run-log.js";
+import { moveAhead, type AheadDeps } from "./limit-ahead.js";
 import { Strengths } from "./strengths.js";
 import { attachmentsIn, MAX_FOLDER_ARCHIVE, uploadsMayRun, UploadedFolders } from "./uploaded.js";
-import { listWork, namedIn, pathParam, serveWork, shownFile, siteIcon, workPath } from "./work-files.js";
+import { findWork, listWork, namedIn, pathParam, serveWork, shownFile, siteIcon, workPath } from "./work-files.js";
 import { FRAME_TTL_MS, frameDir, inFrame, signFrame, verifyFrame } from "./work-frame.js";
 import type { PeerNote } from "./types.js";
 import { ago as agoOf, LocalPeers, LOOK_AT as SESSIONS_LOOKED_AT, MODE_RANK, newId, placeOf as placeOfSession, scheduleOf } from "./app-tools.js";
-import { backupOf, checkInDue, checkInText, quietCheckIns, type CheckIn, cleanRoom, cleanTeammate, MEMORY_FILE, MEMORY_MAX, defaultFolder, makeFolder, MAX_ROOMS, MAX_TEAMMATES, projectsOf, roomKeep, runsOnName, teammateNote, TeammateStore, worktreeHolding, type Room, type Teammate, type TeammateView } from "./teammates.js";
+import { backAt, backupText, offBackup, onBackup, backupOf, checkInDue, checkInText, quietCheckIns, type CheckIn, cleanRoom, cleanTeammate, MEMORY_FILE, MEMORY_MAX, defaultFolder, makeFolder, MAX_ROOMS, MAX_TEAMMATES, projectsOf, roomKeep, runsOnName, teammateNote, TeammateStore, worktreeHolding, type Room, type Teammate, type TeammateView } from "./teammates.js";
 import { limitHit, planLimitHit } from "./limit-reset.js";
 import { heldByPerson, runnableQueue } from "./held.js";
 import { hopBehind } from "./agent-mesh.js";
-import { writeFile as writeFileAt } from "node:fs/promises";
+import { mkdir as mkdirAt, open as openAt, rename as renameAt, writeFile as writeFileAt } from "node:fs/promises";
 import { ownModelId } from "./own-model-id.js";
 import { handoffBrief } from "./handoff.js";
 import { ENGINE_MODEL_INFO } from "./types.js";
 import { hubOf } from "./agents-hub.js";
 import { distinctLook } from "./teammate-look.js";
+import { budgetPatch, cleanRunBudget, CrewBudget, runOver, type RunBudget } from "./team-budget.js";
+import { movedSince, NUDGE_GAP_MS, QUIET_MS, saysGoalReached, selfRunAnswer, selfRunNote, selfRunNudge, STALL_NUDGES, leadSaid } from "./team-selfrun.js";
 import { awayAnswer, awayNote, briefLine, briefWorthPosting, clockOf, endsOnQuestion, roomNews, runsIn, teamBrief as awayBrief, usageOf, type LaneRun, type Place } from "./team-away.js";
 import { boardBusy } from "./session/projection.js";
 import type { MateNote } from "./engine/hub.js";
 import type { MateRun, TeamAway } from "./teammates.js";
 import type { TeamBrief } from "./types.js";
 import { execFile as execFileCb } from "node:child_process";
-import { homedir as osHome, hostname } from "node:os";
+import { homedir as osHome, hostname, tmpdir as osTmp } from "node:os";
 import { TeamWorkflows } from "./team-workflows.js";
+import { localSkills, skillsHttp, type SkillsScope } from "./team-skills.js";
 import type { Workflow } from "./team-workflow-model.js";
 import { localEdition } from "./local-edition.js";
 import { OutsideAgents } from "./outside-agents.js";
@@ -374,6 +385,73 @@ export async function createApp(o: AppOptions) {
     await store.append(sid, FRIDAY, { type: "run.pause" }, { lane });
   };
 
+  /**
+   * Every finished run's record, for forecasts and for what routing learns per repo and kind of task (forecast.ts, run-log.ts);
+   * and each plan's tokens per window percent, learnt from its runner's readings.
+   */
+  const runLog = new RunLog(redis, o.prefix);
+  /** The workspace a session's runs count for: the open-source edition has the one. */
+  const workspaceOf = (state: SessionState) => state.workspaceId ?? (o.local ? LOCAL_WORKSPACE.id : null);
+  /** Moving a person's next task before its coding tool runs out (limit-ahead.ts). */
+  const aheadDeps: AheadDeps = {
+    store,
+    handOff: (sid, from, req) => handOff(store, bus, sid, from, req),
+    records: (ws) => runLog.records(ws),
+    perPct: (ws, host, tool) => runLog.perPct(ws, host, tool),
+    burnOf: (state, lane) => {
+      const key = signInOf(state.engines[lane]);
+      return key ? burn.burn(key) : null;
+    },
+    once: async (key) => (await redis.set(`${o.prefix}${key}`, "1", "EX", 86_400, "NX")) === "OK",
+  };
+  /** A run's record as it ends, what revises it later, each turn's tokens toward its plan's burn rate, and a message queued behind a busy tool. */
+  const noteRun = async (sid: string, ev: SessionEvent) => {
+    const lane = ev.lane ?? MAIN_LANE;
+    const state = await store.state(sid);
+    if (ev.body.type === "agent.usage") {
+      const key = signInOf(state.engines[lane]);
+      if (key) burn.spend(key, ev.body.input + ev.body.output);
+      return;
+    }
+    const ws = workspaceOf(state);
+    if (!ws) return;
+    const events = await store.events(sid);
+    // As logged, with its time: what reaches here may be only its body and place.
+    const logged = events.find((e) => e.seq === ev.seq) ?? ev;
+    if (ev.body.type === "run.ended") {
+      const rec = recordOf(state, events, logged);
+      if (rec) await runLog.add(ws, `${sid}:${lane}:${ev.seq}`, rec);
+      return;
+    }
+    const rev = revisionOf(events, logged);
+    if (rev) await runLog.revise(ws, `${sid}:${rev.run}`, rev.grade, rev.replace);
+    if (ev.body.type === "instruction" && ev.actor.kind === "human" && state.engines[lane]?.tool) await moveAhead(aheadDeps, sid, lane);
+  };
+  // A reading of a sign-in's limits: what it says of that plan's tokens per percent is kept, and the lane it came from is checked
+  // for a next task that should go elsewhere before the limit.
+  const unlistenBurn = burn.listen(async (moved, from) => {
+    if (!(await store.exists(from.sid))) return;
+    const ws = workspaceOf(await store.state(from.sid));
+    if (moved && ws) await runLog.learnPerPct(ws, from.host, from.tool, moved);
+    await moveAhead(aheadDeps, from.sid, from.lane);
+  });
+
+  /**
+   * What routing has learnt for a workspace, as the pickers read it (routing.ts): from the run records, per model and tier, repo,
+   * and repo and kind of task. The hosted service keeps the first two in RouteStats already, Friday's own models among them, so
+   * there only the per-kind level comes from the records.
+   */
+  let learnedFor = async (ws: string): Promise<Learned> => learnedFrom(await runLog.records(ws), await runLog.resets(ws), "all");
+  /** What the page reads for forecasts and "What routing learned": recent runs (what an estimate needs), this person's plans, the view. */
+  const routingView = async (ws: string, me: string) => {
+    const [records, resets, perPct] = await Promise.all([runLog.records(ws), runLog.resets(ws), runLog.perPctOf(ws, me)]);
+    return {
+      records: records.slice(-400).map(({ at, tool, model, tier, kind, repo, ms, tokens }) => ({ at, tool, model, tier, kind, ...(repo ? { repo } : {}), ms, tokens })),
+      perPct,
+      learned: await learnedFor(ws),
+      view: learnedView(records, resets),
+    };
+  };
 
   /** Automations hearing a session's events (set below, once the automations are). */
   let automationsHear: ((sid: string, ev: Pick<SessionEvent, "lane" | "body">) => void) | null = null;
@@ -381,6 +459,8 @@ export async function createApp(o: AppOptions) {
   let teamHear: ((sid: string, ev: SessionEvent) => void) | null = null;
   /** The team's workflows (team-workflows.ts), once the teammates are: their runs follow their boards. */
   let workflows: TeamWorkflows | null = null;
+  /** The crew's skills' page scope for a person (team-skills.ts), in the open-source edition. */
+  let localSkillScope: ((me: { id: string; name: string }) => SkillsScope) | null = null;
   // Anonymous usage counts, in the open-source edition only (usage.ts): nothing goes until the app has said so, nor ever with
   // FRIDAY_NO_TELEMETRY or DO_NOT_TRACK set, or the switch in Settings off.
   const usage = o.local
@@ -418,6 +498,9 @@ export async function createApp(o: AppOptions) {
     if (ev.body.type === "tool.result" && ev.body.isError && (ev.body.name === "shell" || ev.body.name === "run_command")) void guardRunaway(sid, ev.lane ?? MAIN_LANE).catch((e) => console.error("[runaway]", e));
     // A board task settled: what its tool is good at learns from it (strengths.ts).
     if (ev.body.type === "board.reviewed" || ev.body.type === "board.finished") void mesh.learnSkill(sid, ev.body).catch((e) => closingOr("[strengths]", e));
+    // Forecasts and routing's learning (forecast.ts): a run's record, what revises it, tokens toward its plan's burn rate, and a
+    // message queued behind a busy coding tool, which may go elsewhere before the tool's limit.
+    if (["run.ended", "folder.restored", "review.done", "message.reacted", "board.reviewed", "agent.usage"].includes(ev.body.type) || (ev.body.type === "instruction" && ev.actor.kind === "human")) void noteRun(sid, ev as SessionEvent).catch((e) => closingOr("[forecast]", e));
     // An agent's change to a file another agent holds (claim_files): it is told at once (agent-mesh onDiff).
     if (ev.body.type === "agent.diff") void mesh.onDiff(sid, ev.lane ?? MAIN_LANE).catch((e) => closingOr("[holds]", e));
     // Which sessions have a pull request to see through: kept as a set, so the loop looks only at those.
@@ -889,7 +972,35 @@ export async function createApp(o: AppOptions) {
   // hosted service does it as each session is opened.
   const reapAtStart = o.local ? hub.reapAfterLeases(async () => (await store.mine(o.local!.user.id)).map((r) => r.sid)) : null;
   hub.mesh = mesh;
+  hub.learned = learnedFor;
   /** Machines people have linked to this Friday, so a hosted one can reach their CLIs. */
+  /**
+   * Runners attach a few at a time: after a restart every teammate's lane on every computer comes back at once (30 in a second
+   * on 2026-11-01), each reading its session and building its note, and each took up to 2.3 s while the server served nothing
+   * else and its memory peaked. The rest wait their turn, which is quicker for all of them.
+   */
+  const ATTACH_AT_ONCE = 4;
+  let attachingNow = 0;
+  const attachWaiting: (() => void)[] = [];
+  const attachGate = async <T,>(run: () => Promise<T>): Promise<T> => {
+    if (attachingNow >= ATTACH_AT_ONCE) await new Promise<void>((go) => attachWaiting.push(go));
+    attachingNow++;
+    try {
+      return await run();
+    } finally {
+      attachingNow--;
+      attachWaiting.shift()?.();
+    }
+  };
+  // How much memory the server holds, every five minutes, and what kind: past the heap's cap the container is what runs out,
+  // with file buffers (outside the heap) the usual cause (2026-11-01: killed twice at 512 MB with nothing in the log to say why).
+  if (!o.local) {
+    setInterval(() => {
+      const m = process.memoryUsage();
+      const mb = (n: number) => Math.round(n / 1048576);
+      console.log(`[mem] rss ${mb(m.rss)} MB · heap ${mb(m.heapUsed)}/${mb(m.heapTotal)} · buffers ${mb(m.arrayBuffers)} · external ${mb(m.external)}`);
+    }, 5 * 60_000).unref();
+  }
   // Your other computers, linked to this one's Friday (local/computers.ts); NoLinks where there is no person here to own them.
   const links = o.local ? new LocalLinks(o.local.user) : new NoLinks();
   /** The local edition's other computers, when this is it (the hosted registry is something else). */
@@ -957,6 +1068,38 @@ export async function createApp(o: AppOptions) {
   const computerHere = (ownerId: string) => !!links.tokenFor(ownerId) || !!localHost();
   // ── Teammates (teammates.ts): persistent AI teammates on this computer, in the open-source edition ──────────
   const teammates = o.local && localEdition() ? new TeammateStore(redis, o.prefix) : null;
+  /**
+   * The "Needs you" queue (needs-you.ts): what waits on each person across their sessions, Crew rooms and teammates, ranked, each
+   * with a suggested answer. The suggestion is the person's own work: on Friday's model where their plan has one (counted against
+   * the workspace), else their own default model, else their own coding tool when the agent asking runs on their computer.
+   */
+  const suggestWith = async (me: { id: string }, wid: string, tool?: EngineTool): Promise<{ llm: LLM; model?: string } | null> => {
+    // Their coding tool on their own computer: through its link, or here when Friday itself runs on it. Never the server's.
+    let ask: ((q: { system: string; prompt: string }) => Promise<{ text: string }>) | null = tool ? (q) => callHost("ask", { tool, system: q.system, prompt: q.prompt, ...(tool === "claude" ? { model: "haiku" } : {}) }, { serverUrl: selfUrl, user: { id: me.id, name: "" }, runners: localRunners }) as Promise<{ text: string }> : null;
+    return ask ? { llm: cliLlm(ask) } : null;
+  };
+  const needsYou = new NeedsYou({ store, redis, prefix: o.prefix, handle: (sid, me, cmd) => core.handle(sid, me, cmd), suggester: suggestWith });
+  // The daily brief and standup (daily-brief.ts): each person's morning and evening across everything they have going, from the
+  // logs. The Crew's places come from the edition's own Crew (set below with the teammates, or the hosted one's).
+  let briefCrew: (wid: string, me: { id: string; name: string }) => Promise<(CrewInput & { away: boolean }) | null> = async () => null;
+  let briefPush: (uid: string, b: DailyBrief) => Promise<void> = async () => {};
+  const briefs = dailyBriefs({
+    redis,
+    prefix: o.prefix,
+    local: !!o.local,
+    store,
+    context,
+    crew: (wid, me) => briefCrew(wid, me),
+    limits: async (uid) => (await toolOptionsFor(uid)).map((t) => ({ tool: t.tool, windows: t.windows ?? [] })),
+    prState: async (sid, lane, wid, url) => (await prStatusSoon(sid, lane, wid, url))?.state ?? null,
+    invite: (state, uid) => (state.members[uid] ? linkToken(state.id, state, state.members[uid]!.role) : null),
+    push: (uid, b) => briefPush(uid, b),
+    json,
+    readJson,
+    log: (l) => console.log(`[brief] ${l}`),
+  });
+  const briefLoop = setInterval(() => void briefs.tick().catch((e: Error) => console.error(`[brief] ${e.message}`)), 60_000);
+  briefLoop.unref?.();
   /** What was started for them, in a dry run (FRIDAY_TEAMMATES_DRY): for tests. */
   const teammateStarts: Record<string, unknown>[] = [];
   /**
@@ -1147,34 +1290,8 @@ export async function createApp(o: AppOptions) {
    * session has a new event (or half a minute passes, as a usage limit lifting changes how one stands), so a sidebar polling
    * every few seconds from every window, and every turn's rooms brief, doesn't read whole logs again for nothing.
    */
-  type Look = { state: SessionState; agents: ReturnType<typeof hubOf>["agents"]; said: { by: string; text: string; at: number } | null; news: number; checking: Set<string>; runs: LaneRun[]; held: Set<string>; events: SessionEvent[] };
-  const looks = new Map<string, { seq: number; at: number; look: Look }>();
-  const teamLook = async (sid: string): Promise<Look> => {
-    const state = await store.state(sid);
-    const had = looks.get(sid);
-    if (had && had.seq === state.lastSeq && Date.now() - had.at < 30_000) return { ...had.look, state };
-    const events = await store.events(sid);
-    // A check-in with nothing new is neither news nor the room's last words (teammate-checkins.ts quietCheckIns).
-    const { quiet, checking } = quietCheckIns(events);
-    const last = events.findLast((e) => e.body.type === "agent.message" && e.body.text.trim() && !quiet.has(e.seq));
-    // Read once here for everything a look gives: each lane's runs (usage, activity), and who is on hold (held.ts).
-    const lanes = [MAIN_LANE, ...state.lanes.map((l) => l.id)];
-    const look: Look = {
-      state,
-      agents: hubOf(state, events).agents,
-      said: last?.body.type === "agent.message" ? { by: last.actor.name, text: last.body.text.trim().slice(0, 400), at: last.ts } : null,
-      // What the room would show, not every run that ended (team-away.ts roomNews).
-      news: roomNews(events, state.lead, quiet),
-      checking,
-      runs: runsIn(events, new Set(lanes)),
-      held: new Set(lanes.filter((l) => heldByPerson(events, l))),
-      events,
-    };
-    looks.set(sid, { seq: state.lastSeq, at: Date.now(), look });
-    // Kept for the sessions looked at lately only: a removed room's look isn't kept for as long as the server runs.
-    if (looks.size > 64) for (const [k, v] of looks) if (Date.now() - v.at > 10 * 60_000) looks.delete(k);
-    return look;
-  };
+  const teamLooks = new TeamLooks(store);
+  const teamLook = (sid: string) => teamLooks.look(sid);
   /** Whether every lane at work in a team session is on a check-in. */
   const teamOnlyCheckingIn = async (state: SessionState) => {
     const { checking } = await teamLook(state.id);
@@ -1182,85 +1299,35 @@ export async function createApp(o: AppOptions) {
     return live.length > 0 && live.every(([lane]) => checking.has(lane));
   };
   /** Each teammate as the app shows it: its record, how it stands, what it is on, and what waits for it. */
+  /**
+   * Teammates' budgets and hours (team-budget.ts), in either edition: how one stands now, and the hub's gate on its lanes, which
+   * says why once where its work waits. Its plan's usage windows are its runner's, as this server last heard them.
+   */
+  const crewBudget = new CrewBudget({
+    events: (sid) => store.events(sid),
+    windows: (sid, lane) => hub.usage(sid, lane),
+    claim: async (k) => (await redis.set(`${o.prefix}budget-said:${k}`, "1", "EX", 3 * 86_400, "NX")) === "OK",
+    say: (sid, body) => store.append(sid, { id: "friday", name: "Friday", kind: "system" }, body, { lane: MAIN_LANE }),
+  });
   const teammateViews = async (sid: string): Promise<TeammateView[]> => {
-    // How each stands across everywhere it is, the team and its rooms: busy in a room is busy (Arun, 2026-10-27: "the side bar
-    // is idle too", while they all worked in one). Working beats needing you beats limited beats idle beats offline.
+    // How each stands across everywhere it is, the team and its rooms (team-views.ts TeamLooks.mates).
     const [list, rooms] = await Promise.all([teammates!.list(), teammates!.rooms()]);
-    const places = await Promise.all(
-      [{ sid, lanes: Object.fromEntries(list.map((t) => [t.id, t.lane])) as Record<string, string> }, ...rooms.map((r) => ({ sid: r.sid, lanes: r.lanes }))].map(async (p) => {
-        const { state, agents, runs, held } = await teamLook(p.sid).catch(() => ({ state: null, agents: [], runs: [] as LaneRun[], held: new Set<string>() }));
-        return { ...p, state, agents, runs, held };
-      }),
-    );
-    // Its usage today (since this computer's midnight) and over the week, across everywhere it works.
-    const midnight = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
-    const week = Date.now() - 7 * 86_400_000;
-    const usageFor = (id: string, from: number) => {
-      const sum = { turns: 0, minutes: 0, tokens: 0 };
-      for (const p of places) {
-        const lane = p.lanes[id];
-        if (!lane) continue;
-        const u = usageOf(p.runs.filter((r) => r.lane === lane), from);
-        sum.turns += u.turns;
-        sum.minutes += u.minutes;
-        sum.tokens += u.tokens;
-      }
-      return { turns: sum.turns, minutes: sum.minutes, ...(sum.tokens ? { tokens: sum.tokens } : {}) };
-    };
-    const RANK: Record<TeammateView["status"], number> = { working: 5, waiting: 4, stopped: 3, limited: 2, idle: 1, offline: 0 };
+    const places = [{ sid, lanes: Object.fromEntries(list.map((t) => [t.id, t.lane])) as Record<string, string> }, ...rooms.map((r) => ({ sid: r.sid, lanes: r.lanes }))];
     // One on its own model is online only while that model can run: set up in Settings, and its server answering when it is on
     // this computer. The team's owner is the one person in its session.
     const owner = Object.entries((await store.state(sid)).members).find(([, m]) => m.role === "owner");
     const problems = new Map(await Promise.all(list.filter((t) => t.tool === "friday").map(async (t) => [t.id, owner ? await ownModelProblem({ id: owner[0], name: owner[1].name }, t.model ?? "") : ""] as const)));
-    return list.map((t) => {
-      let best: Pick<TeammateView, "status" | "line"> = { status: "offline", line: "" };
-      let queued = 0;
-      for (const p of places) {
-        const lane = p.lanes[t.id];
-        // A room whose session can't be read (gone from the store) counts for nothing.
-        if (!lane || !p.state) continue;
-        const a = p.agents.find((x) => x.lane === lane);
-        const engine = p.state.engines[lane];
-        const status: TeammateView["status"] = !engine?.online ? "offline" : a?.status === "working" ? "working" : a?.status === "waiting" ? "waiting" : a?.status === "limited" ? "limited" : a?.status === "failed" ? "stopped" : "idle";
-        queued += pendingFor(p.state, lane).length;
-        // Offline keeps why (its tool not running, the computer it is on), which the first place said (2026-10-28 QA: a bare "Offline").
-        const line = status === "offline" ? (a?.status === "offline" ? a.line : "Offline · their coding tool isn't running") : (a?.line ?? "");
-        if (RANK[status] > RANK[best.status] || (status === "offline" && !best.line)) best = { status, line };
-      }
-      const problem = problems.get(t.id);
-      const more = { mode: t.mode ?? ("full" as const), held: places.some((p) => !!p.lanes[t.id] && p.held.has(p.lanes[t.id]!)), usage: { today: usageFor(t.id, midnight), week: usageFor(t.id, week) } };
-      // Mid-turn it is working whatever a ping says; otherwise a model that can't run leaves it offline, and says why.
-      if (problem) return { ...t, ...(best.status === "working" ? best : { status: "offline" as const, line: problem }), queued, problem, ...more };
-      return { ...t, ...best, queued, ...more };
-    });
+    const views = await teamLooks.mates(places, list, new Map([...problems].filter(([, why]) => !!why)));
+    // Held for its budget or hours: why, and when it carries on (its status line).
+    return Promise.all(views.map(async (v) => ((hold) => (hold ? { ...v, hold } : v))(await crewBudget.hold(v, places.flatMap((p) => (p.lanes[v.id] ? [{ sid: p.sid, lane: p.lanes[v.id]! }] : []))))));
   };
   /** Each room as the app shows it: who is in it (their lanes there) and how many of them are working or need the person. */
-  const roomViews = async () =>
-    Promise.all(
-      (await teammates!.rooms()).map(async (r) => {
-        const { state, agents: all, said, news } = await teamLook(r.sid);
-        // Renamed from its own page (its title, settings.update): its title is its name. Read, never written here: a write in a
-        // read put back lanes or a room just changed or removed.
-        r.name = state.title || r.name;
-        const lanes = Object.values(r.lanes);
-        const agents = all.filter((a) => lanes.includes(a.lane) && state.engines[a.lane]?.online);
-        // Its last words and who said them, for the Team room's view of the rooms.
-        const last = said;
-        const doing = Object.fromEntries(agents.filter((a) => a.status === "working").map((a) => [a.lane, a.line ?? ""]));
-        return { id: r.id, name: r.name, sid: r.sid, invite: signInvite(o.secret, r.sid, "owner"), lanes: r.lanes, lead: state.lead ?? null, news, ...(r.purpose ? { purpose: r.purpose } : {}), working: agents.filter((a) => a.status === "working").length, waiting: agents.filter((a) => a.status === "waiting").length, last, doing };
-      }),
-    );
+  const roomViews = async () => Promise.all((await teammates!.rooms()).map((r) => teamLooks.room(r, signInvite(o.secret, r.sid, "owner"))));
   /**
    * The Team room's own counts, as each room's are: its teammates at work there and those waiting on the person there (Arun,
    * 2026-10-28: "really iron out bugs and feature problems and gaps"; its sidebar row said "None working" while the lead worked).
    */
-  const teamRoomNow = async (sid: string) => {
-    const [{ agents, news }, list] = await Promise.all([teamLook(sid), teammates!.list()]);
-    const lanes = new Set(list.map((t) => t.lane));
-    const here = agents.filter((a) => lanes.has(a.lane));
-    const doing = Object.fromEntries(here.filter((a) => a.status === "working").map((a) => [a.lane, a.line ?? ""]));
-    return { news, working: Object.keys(doing).length, waiting: here.filter((a) => a.status === "waiting").length, doing };
-  };
+  const teamRoomNow = async (sid: string) => teamLooks.now(sid, new Set((await teammates!.list()).map((t) => t.lane)));
   /** Puts each switched teammate whose limit has lifted back on its own tool (a timer calls it; tests too). */
   let runBack: () => Promise<void> = async () => {};
   /** Asks each teammate its check-ins that are due at `now` (a timer calls it; tests call it with a time). */
@@ -1270,26 +1337,7 @@ export async function createApp(o: AppOptions) {
   const setEffort = async (sid: string, owner: { id: string; name: string }, lane: string, t: Teammate) =>
     t.tool === "friday" ? undefined : store.append(sid, { id: owner.id, name: owner.name, kind: "human" }, { type: "lane.effort", effort: t.effort ?? null, tool: t.tool }, { lane });
   /** The rooms as the Team room's teammates are told them: each one's members, who is working on what, and its last words. */
-  const roomsBrief = async (list: Teammate[]): Promise<string> => {
-    const rooms = await teammates!.rooms();
-    if (!rooms.length) return "";
-    const lines = await Promise.all(
-      rooms.map(async (r) => {
-        const { state, agents, said } = await teamLook(r.sid);
-        const who = Object.entries(r.lanes).map(([id, lane]) => {
-          const name = list.find((t) => t.id === id)?.name ?? "someone";
-          const a = agents.find((x) => x.lane === lane);
-          return a?.status === "working" ? `${name} (working${a.line ? `: ${a.line}` : ""})` : a?.status === "waiting" ? `${name} (needs the person)` : name;
-        });
-        const last = said ? ` Last said, by ${said.by}: "${said.text.replace(/\s+/g, " ").slice(0, 220)}"` : "";
-        return `- "${state.title || r.name}" (session ${r.sid}): ${who.join(", ") || "nobody in it"}.${last}`;
-      }),
-    );
-    return [
-      "The crew's rooms right now, where some of you work apart on one thing. To read one in full use read_session with its session id; to tell or ask its teammates something, message_session.",
-      ...lines,
-    ].join("\n");
-  };
+  const roomsBrief = async (list: Teammate[]): Promise<string> => teamLooks.roomsBrief(await teammates!.rooms(), (id) => list.find((t) => t.id === id)?.name);
   /**
    * A teammate's work everywhere else, for its turn in a room (as roomsBrief is for the Team room): how it stands in the Team room
    * and its other rooms, and its last words there, so it neither redoes nor contradicts what it does elsewhere (2026-10-28).
@@ -1297,20 +1345,7 @@ export async function createApp(o: AppOptions) {
   const elsewhereBrief = async (t: Teammate, here: string): Promise<string> => {
     const team = await teammates!.team();
     const rooms = await teammates!.rooms();
-    const places = [...(team && team !== here ? [{ sid: team, name: "the Crew room", lane: t.lane }] : []), ...rooms.filter((r) => r.sid !== here && r.lanes[t.id]).map((r) => ({ sid: r.sid, name: `the room "${r.name}"`, lane: r.lanes[t.id]! }))];
-    const lines = (
-      await Promise.all(
-        places.map(async (p) => {
-          const look = await teamLook(p.sid).catch(() => null);
-          const run = look?.runs.findLast((r) => r.lane === p.lane);
-          if (!look || !run) return "";
-          const a = look.agents.find((x) => x.lane === p.lane);
-          const how = a?.status === "working" ? `working${a.line ? ` (${a.line})` : ""}` : a?.status === "waiting" ? "waiting on the person" : "not working";
-          return `- In ${p.name} (session ${p.sid}) you are ${how}.${run.said ? ` Your last words there: "${run.said.replace(/\s+/g, " ").slice(0, 200)}"` : ""}`;
-        }),
-      )
-    ).filter(Boolean);
-    return lines.length ? ["[Friday] Your work elsewhere right now (each place keeps its own conversation; read_session reads one):", ...lines].join("\n") : "";
+    return teamLooks.elsewhere([...(team && team !== here ? [{ sid: team, name: "the Crew room", lane: t.lane }] : []), ...rooms.filter((r) => r.sid !== here && r.lanes[t.id]).map((r) => ({ sid: r.sid, name: `the room "${r.name}"`, lane: r.lanes[t.id]! }))]);
   };
   /**
    * A folder for a new teammate no other teammate's record has (2026-10-28 audit: renamed, then a new one given the old name, two
@@ -1362,7 +1397,7 @@ export async function createApp(o: AppOptions) {
       // a look gets a colour none of the team has, while one is free (teammate-look.ts distinctLook; 2026-10-28: Lead and QA,
       // made in a row, came out the same pink).
       const look = c.look ?? distinctLook(more.madeBy && list.some((x) => (x.look ?? x.name) === c.name) ? `${c.name}-${randomBytes(2).toString("hex")}` : c.name, list.map((x) => x.look ?? x.name));
-      const t: Teammate = { id: randomBytes(5).toString("hex"), ...c, ...(more.mode ? { mode: more.mode } : {}), ...(more.madeBy ? { madeBy: more.madeBy } : {}), look, folder, lane, created: Date.now() };
+      const t: Teammate = { id: randomBytes(5).toString("hex"), ...c, ...budgetPatch(body), ...(more.mode ? { mode: more.mode } : {}), ...(more.madeBy ? { madeBy: more.madeBy } : {}), look, folder, lane, created: Date.now() };
       await teammates!.put(t);
       if (t.effort) await setEffort(sid, owner, lane, t);
       // The first teammate leads: what is said in the Team room goes to it, and it hands the rest on (agent-mesh.ts).
@@ -1512,6 +1547,8 @@ export async function createApp(o: AppOptions) {
   let sinceOf: (ts: number) => Promise<TeamBrief> = async (ts) => ({ since: ts, until: Date.now(), done: [], failed: [], waiting: [], assumptions: [], usage: [] });
   let awayOn: (until: number) => Promise<void> = async () => {};
   let awayOff: () => Promise<unknown> = async () => null;
+  let selfRunOn: (sid: string, goal: string, by: { id: string; name: string }, budget?: RunBudget) => Promise<void> = async () => {};
+  let selfRunOff: (sid: string, why: string, by?: { id: string; name: string }, budget?: true) => Promise<void> = async () => {};
   let restartLater = new Map<string, string>();
   if (teammates) {
     // Out of usage, a teammate switches to its backup tool and carries on (Arun, 2026-10-27: "add a status for the teammate if
@@ -1710,7 +1747,10 @@ export async function createApp(o: AppOptions) {
      * something queued, a resume or wake due within two hours, or a board still being worked on.
      */
     const wantsAwake = async (): Promise<boolean> => {
-      if (!(await teammates.away()) || (await teammates.paused())) return false;
+      if (await teammates.paused()) return false;
+      // A room running on its own keeps the computer awake for as long as it runs.
+      if (Object.keys(await teammates.selfRuns()).length) return true;
+      if (!(await teammates.away())) return false;
       const soon = Date.now() + 2 * 3_600_000;
       for (const p of await placesNow()) {
         const state = await store.state(p.sid).catch(() => null);
@@ -1742,6 +1782,8 @@ export async function createApp(o: AppOptions) {
         const by = ownerIn(await store.state(sid));
         if (t && by) await restartLane(sid, by, t, lane, place?.keepAs ? { lane, keepAs: place.keepAs } : undefined);
       }
+      const sr = (await teammates.selfRuns())[sid];
+      if (sr && !end.body.cut) return void (await afterSelfRun(sid, lane, end));
       const a = await teammates.away();
       if (!a || end.body.cut) return;
       const [state, events] = await Promise.all([store.state(sid), store.events(sid)]);
@@ -1760,6 +1802,129 @@ export async function createApp(o: AppOptions) {
       // Once for each question: claimed by the turn's end, so a second process or a repeat call doesn't answer it again.
       if (!(await redis.set(`${o.prefix}away-answered:${sid}:${lane}:${end.seq}`, "1", "EX", 86_400, "NX"))) return;
       await tellTeammate(sid, lane, awayAnswer(a.until), { hop: 1 });
+    };
+
+    /**
+     * Who leads a team session or room while it runs on its own: its lead, or its first teammate when none was made lead; and when
+     * that one's computer is offline, the first teammate there whose is on, so the room doesn't wait on a lead that can't answer.
+     */
+    const leadIn = async (sid: string): Promise<string | null> => {
+      const place = (await placesNow()).find((p) => p.sid === sid);
+      const lanes = place ? Object.values(place.lanes) : [];
+      const state = await store.state(sid).catch(() => null);
+      const lead = state?.lead && lanes.includes(state.lead) ? state.lead : (lanes[0] ?? null);
+      if (!lead || state?.engines[lead]?.online) return lead;
+      return lanes.find((l) => state?.engines[l]?.online) ?? lead;
+    };
+
+    /**
+     * A room running on its own (team-selfrun.ts), after one of its teammates' runs: the lead saying GOAL REACHED ends it; an
+     * error that isn't a usage limit is tried again as in away mode; a turn that ended on a question is answered once, to decide
+     * it (the lead) or ask the lead (the rest).
+     */
+    const afterSelfRun = async (sid: string, lane: string, end: SessionEvent) => {
+      if (end.body.type !== "run.ended") return;
+      const [state, events, lead] = await Promise.all([store.state(sid), store.events(sid), leadIn(sid)]);
+      const start = events.findLast((e) => e.seq < end.seq && (e.lane ?? MAIN_LANE) === lane && e.body.type === "run.started");
+      if (lane === lead && saysGoalReached(leadSaid(events, lane, start?.seq ?? 0))) return void (await selfRunOff(sid, "The lead says the goal is reached."));
+      if (end.body.outcome === "error") {
+        if (limitHit(end.body.error, end.ts)) return;
+        const from = events.findLast((e) => (e.lane ?? MAIN_LANE) === lane && e.body.type === "instruction" && (e.actor.kind === "human" || e.body.mesh?.kind === "task" || !!e.body.mesh?.board))?.seq ?? 0;
+        const tries = events.filter((e) => e.seq > from && (e.lane ?? MAIN_LANE) === lane && e.body.type === "resume.scheduled" && e.actor.id === FRIDAY_SAYS.id).length;
+        if (tries < ERROR_RETRIES.length) await scheduleTeamResume(sid, lane, Date.now() + ERROR_RETRIES[tries]! * 60_000 * (teammateDry.retryMs !== undefined ? teammateDry.retryMs / 60_000 : 1));
+        return;
+      }
+      const said = events.findLast((e) => e.seq > (start?.seq ?? 0) && e.seq < end.seq && (e.lane ?? MAIN_LANE) === lane && e.body.type === "agent.message" && !!e.body.text.trim());
+      const asked = !!state.openQuestions[lane] || !!state.asks[lane] || (said?.body.type === "agent.message" && endsOnQuestion(said.body.text));
+      if (!asked || !(await redis.set(`${o.prefix}selfrun-answered:${sid}:${lane}:${end.seq}`, "1", "EX", 86_400, "NX"))) return;
+      await tellTeammate(sid, lane, selfRunAnswer(lane === lead), { hop: 1 });
+    };
+
+    /** Where a room's board stands, in a few words, for the lead's nudge. */
+    const boardLine = (state: SessionState): string => {
+      const tasks = (state.board?.tasks ?? []).filter((t) => t.status !== "cancelled");
+      if (!tasks.length) return "";
+      const n = (st: string) => tasks.filter((t) => t.status === st).length;
+      return [`${tasks.length - n("done")} open`, `${n("done")} done`, ...(n("blocked") ? [`${n("blocked")} blocked`] : [])].join(", ");
+    };
+
+    /**
+     * Every room running on its own, on away mode's 20-second clock: an approval it is asked is given at once (full access), and a
+     * room gone quiet (nothing running, queued, waiting or due, for 45 s) has its lead handed the goal again, at most every three
+     * minutes. Three nudges in a row that moved nothing (no file changed, no task posted or finished) and it stops by itself.
+     */
+    const runSelfRuns = async (now: number) => {
+      if (await teammates.paused()) return;
+      const runs = await teammates.selfRuns();
+      if (!Object.keys(runs).length) return;
+      const places = await placesNow();
+      for (const [sid, sr] of Object.entries(runs)) {
+        const place = places.find((p) => p.sid === sid);
+        if (!place) {
+          await teammates.setSelfRun(sid, null);
+          continue;
+        }
+        const [state, events] = await Promise.all([store.state(sid).catch(() => null), store.events(sid).catch(() => null)]);
+        if (!state || !events) continue;
+        const lanes = Object.values(place.lanes);
+        // Its budget spent or its end time come (team-budget.ts): it stops, saying which. Turns under way finish.
+        const over = runOver(sr, events, lanes, now);
+        if (over) {
+          await selfRunOff(sid, over, undefined, true);
+          continue;
+        }
+        for (const lane of lanes) {
+          const ask = state.approvals[lane];
+          if (!ask || !(await redis.set(`${o.prefix}selfrun-approved:${sid}:${ask.id}`, "1", "EX", 86_400, "NX"))) continue;
+          // As Friday, not the person: the room runs on its own, at full access.
+          const r = await store.append(sid, FRIDAY_SAYS, { type: "instruction", text: "[Friday] Approved: this room runs on its own, at full access.", interrupt: false, approval: { id: ask.id, approve: true }, hop: 1 }, { lane });
+          if (r.ok) void bus.wake(sid, lane);
+        }
+        const busy = lanes.some((l) => {
+          const st = runOf(state, l).status;
+          return st === "running" || st === "waiting_for_human" || !!state.approvals[l] || runnableQueue(events, l, pendingFor(state, l)).length > 0;
+        });
+        if (busy || Object.values(state.resumes ?? {}).some((r) => r.at > now - 5 * 60_000 && r.at <= now + 10 * 60_000)) continue;
+        const lead = await leadIn(sid);
+        if (!lead || !state.engines[lead]?.online) continue;
+        const quietSince = Math.max(events.findLast((e) => e.body.type === "run.ended")?.ts ?? 0, sr.since);
+        if (now - quietSince < QUIET_MS) continue;
+        const key = `${o.prefix}selfrun-nudge:${sid}`;
+        const had = JSON.parse((await redis.get(key)) ?? "null") as { at: number; seq: number; stalls: number } | null;
+        if (had && had.at >= sr.since && now - had.at < NUDGE_GAP_MS) continue;
+        const stalls = had && had.at >= sr.since && !movedSince(events, had.seq) ? had.stalls + 1 : 0;
+        if (stalls >= STALL_NUDGES) {
+          await selfRunOff(sid, `It stopped getting anywhere: ${STALL_NUDGES} nudges in a row and nothing changed.`);
+          continue;
+        }
+        await redis.set(key, JSON.stringify({ at: now, seq: state.lastSeq, stalls }), "EX", 7 * 86_400);
+        await tellTeammate(sid, lead, selfRunNudge(sr.goal, boardLine(state)), { hop: 1 });
+      }
+    };
+
+    selfRunOn = async (sid, goal, by, budget) => {
+      await teammates.setSelfRun(sid, { goal, since: Date.now(), by, ...(budget ? { budget } : {}) });
+      await redis.del(`${o.prefix}selfrun-nudge:${sid}`);
+      const who = { ...by, kind: "human" as const };
+      await store.append(sid, who, { type: "team.selfrun", on: true, goal, ...(budget?.until ? { due: budget.until } : {}) }, { lane: MAIN_LANE });
+      // Old holds lifted here, as away mode does: one left on would keep the room idle.
+      const place = (await placesNow()).find((p) => p.sid === sid);
+      const events = await store.events(sid).catch(() => null);
+      const held = place && events ? Object.values(place.lanes).filter((l) => heldByPerson(events, l)) : [];
+      if (held.length) await store.append(sid, FRIDAY_SAYS, { type: "holds.lifted", lanes: held, why: "The room runs on its own." }, { lane: MAIN_LANE });
+      // The lead starts on it now, unless it is at work already (then its next turn carries the rules).
+      const lead = await leadIn(sid);
+      const state = await store.state(sid);
+      if (lead && runOf(state, lead).status !== "running") await tellTeammate(sid, lead, selfRunNudge(goal, boardLine(state)).replace("The room has gone quiet, and it runs", "This room now runs"), { hop: 1 });
+      await repump();
+    };
+    selfRunOff = async (sid, why, by, budget) => {
+      const had = (await teammates.selfRuns())[sid];
+      if (!had) return;
+      await teammates.setSelfRun(sid, null);
+      await redis.del(`${o.prefix}selfrun-nudge:${sid}`);
+      await store.append(sid, by ? { ...by, kind: "human" as const } : FRIDAY_SAYS, { type: "team.selfrun", on: false, why, ...(budget ? { budget } : {}) }, { lane: MAIN_LANE });
+      console.log(`[teammates] ${sid} stopped running on its own: ${why}`);
     };
 
     teamHear = (sid, ev) => {
@@ -1831,6 +1996,7 @@ export async function createApp(o: AppOptions) {
           }
         }
       }
+      await runSelfRuns(now);
       await repump();
       mesh.pruneTold(now);
       for (const [k, at] of retried) if (!at.some((x) => now - x < 30 * 60_000)) retried.delete(k);
@@ -1868,21 +2034,17 @@ export async function createApp(o: AppOptions) {
     };
 
     /** A teammate's runs everywhere it works over the last `days`, newest first (GET /api/teammates/:id/activity). */
-    activityOf = async (t: Teammate, days: number): Promise<MateRun[]> => {
-      const from = Date.now() - days * 86_400_000;
-      const out: MateRun[] = [];
-      for (const p of await placesNow()) {
-        const lane = p.lanes[t.id];
-        if (!lane) continue;
-        const look = await teamLook(p.sid).catch(() => null);
-        for (const r of look?.runs ?? []) {
-          if (r.lane !== lane || (r.endedAt ?? Date.now()) < from) continue;
-          out.push({ sid: p.sid, room: p.room ? look!.state.title || p.room.name : null, lane, startedAt: r.startedAt, endedAt: r.endedAt, outcome: r.outcome, said: r.said.slice(0, 2000), files: r.files.slice(0, 50) });
-        }
-      }
-      return out.sort((a, b) => b.startedAt - a.startedAt).slice(0, 500);
-    };
+    activityOf = async (t: Teammate, days: number): Promise<MateRun[]> => teamLooks.activity(await placesNow(), t.id, days);
     sinceOf = (ts: number) => briefOf(ts, Date.now());
+    // The daily brief's view of the Crew (daily-brief.ts): its places and teammates, and whether the person is away.
+    briefCrew = async () => {
+      const places: Place[] = [];
+      for (const p of await placesNow()) {
+        const events = await store.events(p.sid).catch(() => null);
+        if (events) places.push({ sid: p.sid, room: p.room?.name ?? null, events, lanes: p.lanes });
+      }
+      return { places, mates: await teammates.list(), away: !!(await teammates.away()) };
+    };
     awayOn = startAway;
     awayOff = endAway;
     // The Team room's roster tool (agent-mesh.ts TEAMMATE_TOOL): the teammates there add the teammate the person asks for, or
@@ -2034,20 +2196,11 @@ export async function createApp(o: AppOptions) {
         if (!t.switched) {
           // Only its own tool running out switches it; a lane still on something else is left to the usual hand-on.
           if (ran !== t.tool) return false;
-          const to = backupOf(t);
-          if (to === t.tool) return false;
-          // Never to a tool this computer doesn't have ready: the lane was left with no tool at all (2026-10-27 audit).
-          if ((await toolReady(by, to)) === false) return false;
-          const routes = ENGINE_MODEL_INFO[to].some((m) => m.id === "auto");
-          // No account on the backup: the one picked is the first tool's (accounts.ts), never lent to another.
-          next = {
-            ...t,
-            tool: to,
-            model: routes ? "auto" : undefined,
-            effort: t.effort && (EFFORT_LEVELS[to] ?? []).includes(t.effort) ? t.effort : undefined,
-            account: undefined,
-            switched: { from: t.tool, ...(t.model ? { fromModel: t.model } : {}), ...(t.account ? { fromAccount: t.account } : {}), ...(t.effort ? { fromEffort: t.effort } : {}), until: hit.resetsAt ?? null, at: Date.now() },
-          };
+          // On its backup (teammates.ts onBackup); never to a tool this computer doesn't have ready: the lane was left with no
+          // tool at all (2026-10-27 audit).
+          const backup = onBackup(t, hit.resetsAt ?? null);
+          if (!backup || (await toolReady(by, backup.tool)) === false) return false;
+          next = backup;
           await teammates.put(next);
         } else if (ran !== t.switched.from) {
           // Its backup ran out too: nothing left to switch to, so no switching back and forth; the usual hand-on follows.
@@ -2067,16 +2220,13 @@ export async function createApp(o: AppOptions) {
         await store.append(sid, FRIDAY_SAYS, { type: "teammate.switched", name: t.name, lane, from: next.switched!.from, to: next.tool, until: next.switched!.until });
         // It carries on: a new tool is a new conversation, so it is given the record of what it did. As the turn that ran out,
         // agent steps and all, not a new start (behindRun).
-        const brief = handoffBrief(events, lane, end.seq);
-        const text = `[Friday] ${ENGINE_NAMES[next.switched!.from]} ran out of usage partway through your work, so you are on ${ENGINE_NAMES[next.tool]} now. Carry on where you left off and finish it.${brief ? `\n\n${brief}` : ""}`;
-        await tellTeammate(sid, lane, text, { hop: hopBehind(state, events, lane) });
+        await tellTeammate(sid, lane, backupText(next.switched!.from, next.tool, handoffBrief(events, lane, end.seq)), { hop: hopBehind(state, events, lane) });
         return true;
       });
       return switched;
     };
     // Back on its own tool, account, model and effort once that limit lifts (or five hours on, when it never said), and only when
     // none of its lanes is mid-run, so no turn is cut off: checked each minute, one pass at a time.
-    const backAt = (sw: NonNullable<Teammate["switched"]>) => sw.until ?? sw.at + 5 * 3_600_000;
     let backing = false;
     runBack = async () => {
           const team = await teammates.team();
@@ -2094,7 +2244,7 @@ export async function createApp(o: AppOptions) {
               const lanes = await lanesOfMate(cur);
               if (lanes.some((l) => l.busy)) return;
               const sw = cur.switched;
-              const next: Teammate = { ...cur, tool: sw.from, model: sw.fromModel, account: sw.fromAccount, effort: sw.fromEffort, switched: undefined };
+              const next: Teammate = offBackup(cur);
               await teammates.put(next);
               for (const l of lanes) {
                 // What it did on its backup since it switched, for its own tool, whose conversation never saw it (2026-10-27
@@ -2180,13 +2330,7 @@ export async function createApp(o: AppOptions) {
      * Back on its own tool, what it did on its backup meanwhile (runBack), with the first turn there since: its own tool's
      * conversation never saw it. Nothing once a turn has started there.
      */
-    const backBrief = async (sid: string, lane: string): Promise<string> => {
-      const events = await store.events(sid).catch(() => []);
-      const back = events.findLast((e) => e.body.type === "teammate.switched" && e.body.lane === lane);
-      if (back?.body.type !== "teammate.switched" || !back.body.back || !back.body.brief) return "";
-      if (events.some((e) => e.seq > back.seq && e.body.type === "run.started" && (e.lane ?? MAIN_LANE) === lane)) return "";
-      return `\nWhile ${ENGINE_NAMES[back.body.from]} stood in for ${ENGINE_NAMES[back.body.to]}, which had run out of usage, this is what you did on it (you are back on ${ENGINE_NAMES[back.body.to]}, whose conversation didn't see it):\n${back.body.brief}`;
-    };
+    const backBrief = async (sid: string, lane: string): Promise<string> => backBriefOf(await store.events(sid).catch(() => []), lane);
     /**
      * Its memory as the note of each of its conversations (by "sid lane") first had it, kept until that conversation is compacted:
      * the note stays the same turn after turn, so its tool keeps its cache, and what it added since leads the turn's prompt
@@ -2203,9 +2347,11 @@ export async function createApp(o: AppOptions) {
       return { memory: now, now };
     };
     /** What leads a teammate's turn while the person is away (team-away.ts awayNote), every turn: short, and the rule that matters. */
-    const awayPart = async (): Promise<MateNote["preamble"]> => {
-      const a = await teammates.away();
-      return a ? [{ key: "away", text: awayNote(a.until), always: true }] : [];
+    const awayPart = async (sid: string, lane: string): Promise<MateNote["preamble"]> => {
+      const [a, sr] = await Promise.all([teammates.away(), teammates.selfRuns().then((r) => r[sid])]);
+      // A room running on its own (team-selfrun.ts): its rules lead every turn there, the lead's with what leading means.
+      const lead = sr ? await leadIn(sid) : null;
+      return [...(a ? [{ key: "away", text: awayNote(a.until), always: true as const }] : []), ...(sr ? [{ key: "selfrun", text: selfRunNote(sr.goal, lane === lead), always: true as const }] : [])];
     };
     /** The teammate on a lane of the team or one of its rooms, its note there, and what leads its turn: null for any other lane. */
     const noteOn = async (sid: string, lane: string): Promise<({ t: Teammate } & MateNote) | null> => {
@@ -2221,7 +2367,7 @@ export async function createApp(o: AppOptions) {
         // team room be able to get info from all of the other rooms that are currently running too"): with the turn, when it
         // changes, not in the note.
         const rooms = await roomsBrief(list);
-        return { t, note: teammateNote(t, list, undefined, m.memory, copies.get(t.id)), preamble: [{ key: "rooms", text: rooms ? `[Friday] ${rooms}` : "" }, ...memoryPart(m, t), { key: "back", text: (await backBrief(sid, lane)).trim() }, ...(await awayPart())] };
+        return { t, note: teammateNote(t, list, undefined, m.memory, copies.get(t.id)), preamble: [{ key: "rooms", text: rooms ? `[Friday] ${rooms}` : "" }, ...memoryPart(m, t), { key: "back", text: (await backBrief(sid, lane)).trim() }, ...(await awayPart(sid, lane))] };
       }
       // In a room: who else is in it, besides who it is.
       const r = (await teammates.rooms()).find((x) => x.sid === sid);
@@ -2231,13 +2377,22 @@ export async function createApp(o: AppOptions) {
       const others = Object.keys(r.lanes).filter((x) => x !== t.id).flatMap((x) => list.find((y) => y.id === x)?.name ?? []);
       const m = await memoryAsOf(sid, lane, t);
       const note = teammateNote(t, list, { name: (await store.state(sid).catch(() => null))?.title || r.name, with: others, ...(r.purpose ? { purpose: r.purpose } : {}), ...(team ? { team } : {}) }, m.memory, copies.get(t.id));
-      return { t, note, preamble: [{ key: "elsewhere", text: await elsewhereBrief(t, sid) }, ...memoryPart(m, t), { key: "back", text: (await backBrief(sid, lane)).trim() }, ...(await awayPart())] };
+      return { t, note, preamble: [{ key: "elsewhere", text: await elsewhereBrief(t, sid) }, ...memoryPart(m, t), { key: "back", text: (await backBrief(sid, lane)).trim() }, ...(await awayPart(sid, lane))] };
     };
     hub.teammate = async (sid, lane) => {
       const on = await noteOn(sid, lane);
       return on ? { note: on.note, preamble: on.preamble } : null;
     };
-    hub.teamPaused = async (sid) => (await teammates.sessions()).includes(sid) && (await teammates.paused());
+    hub.teamPaused = async (sid, lane, people, running) => {
+      if (!(await teammates.sessions()).includes(sid)) return false;
+      // The person's own message always goes through: the one person here is the crew's owner. Pause holds what waits, not a run.
+      if (people.length) return false;
+      if (!running && (await teammates.paused())) return true;
+      // Its budget spent or its hours over (team-budget.ts): it waits, saying why once; the re-pump starts it when that's over.
+      const place = await placeOf(sid, lane);
+      const t = place && (await teammates.get(place.id));
+      return !!t?.budget && crewBudget.gate(t, (await placesNow()).flatMap((p) => (p.lanes[t.id] ? [{ sid: p.sid, lane: p.lanes[t.id]! }] : [])), sid, lane);
+    };
     /**
      * A teammate's memory kept by Friday Code (teammates.ts teammateNote): its MEMORY.md, in its own folder, which its file tools
      * may not reach when it works in a project. Added to, or written anew; a page at most, as the note reads.
@@ -2278,6 +2433,12 @@ export async function createApp(o: AppOptions) {
   // design like we did with the agent tab page a while ago"). Their schedules go off with the automations' tick.
   if (teammates && o.local) {
     const me = o.local.user;
+    // The crew's skills (team-skills.ts): the agents' tools, each teammate's note listing the ones it may use, and the page's API.
+    const skills = localSkills({ redis, prefix: o.prefix, teammates, store, person: me, wake: (sid, lane) => bus.wake(sid, lane) });
+    localSkillScope = skills.scope;
+    mesh.skillTools = skills.tools;
+    if (hub.teammate) hub.teammate = skills.tools.withNote(hub.teammate);
+    if (runtime.laneOwn) runtime.laneOwn = skills.tools.withOwn(runtime.laneOwn);
     workflows = new TeamWorkflows({ redis, prefix: o.prefix, teammates, store, teamSid: () => teamSession(me, LOCAL_WORKSPACE.id), dispatch: (sid) => mesh.dispatch(sid), log: closingOr });
     // The lead, told with the reports that a workflow's board is through: which workflow it was, and how to land it.
     const teamsOwn = mesh.teamDone;
@@ -2608,11 +2769,14 @@ export async function createApp(o: AppOptions) {
     stopper: stopOnMachine,
     tools: toolOptionsFor,
     plan: async () => "free" as const,
+    learned: learnedFor,
   });
   core.hubs = hubs;
   core.board = mesh;
   // A finished board task's checks run in its agent's own folder, on its machine (AgentMesh.runChecks).
   mesh.repo = async (sid, lane, req) => (await hub.readRepo(sid, req, lane))?.output ?? null;
+  // A proof's picture, taken by the teammate's runner (team-proof.ts), kept as a file of its session.
+  mesh.proofFiles = async (sid, data, type) => (await files.save(sid, { name: `proof.${type.split("/")[1] === "jpeg" ? "jpg" : type.split("/")[1]}`, type, data, uploadedBy: "friday" })).id;
   mesh.usage = (sid, lane) => hub.usage(sid, lane);
   mesh.skills = new Strengths(redis, o.prefix);
   /** Short-lived ids standing in for "which machine, which port" in preview URLs. */
@@ -3344,10 +3508,12 @@ export async function createApp(o: AppOptions) {
       if (!inv || inv.sid !== sid) return json(res, 403, { error: "Invalid invite for this session" });
       const user = await identity(req);
       if (!user) return json(res, 401, { error: "Missing user identity" });
-      const body = (await readJson(req)) as { text?: unknown; attachments?: unknown; shepherd?: unknown };
+      const body = (await readJson(req)) as { text?: unknown; attachments?: unknown; shepherd?: unknown; lane?: unknown };
       const text = str(body.text, 8000);
+      // To one agent of the session when named (Ready to ship's "Send back"); the session's own rules say whether you may.
+      const lane = str(body.lane, 40);
       // cleanAttachments revalidates every field, so unverified input is safe here.
-      const r = await core.handle(sid, { id: user.id, name: user.name }, { type: "instruct", text, attachments: body.attachments as Attachment[] | undefined });
+      const r = await core.handle(sid, { id: user.id, name: user.name }, { type: "instruct", text, attachments: body.attachments as Attachment[] | undefined, ...(lane ? { lane } : {}) });
       // Started from Code Review's "See it through": the pull request goes to Friday's loop as the agent starts on it. Refused
       // quietly (no pull request, no folder) leaves the session as an ordinary one.
       if (r.ok && body.shepherd === true) await core.handle(sid, { id: user.id, name: user.name }, { type: "pr.shepherd", on: true }).catch(() => null);
@@ -3419,12 +3585,6 @@ export async function createApp(o: AppOptions) {
         const who = await identity(req);
         if (!who) return json(res, 401, { error: "Sign in to attach files." });
         if (!can(await store.state(sid), who.id, "upload")) return json(res, 403, { error: "You don't have permission to attach files in this session." });
-        let data: Buffer;
-        try {
-          data = await readBody(req, MAX_FILE_BYTES);
-        } catch {
-          return json(res, 413, { error: `Files can be up to ${MAX_FILE_BYTES / 1024 / 1024} MB.` });
-        }
         let name = "file";
         try {
           name = decodeURIComponent(String(req.headers["x-file-name"] ?? "file"));
@@ -3432,11 +3592,19 @@ export async function createApp(o: AppOptions) {
           // keep default
         }
         const type = String(req.headers["content-type"] ?? "");
+        // A video or a sound may be larger than the rest (file-kinds.ts isMediaFile).
+        const max = isMediaFile(name, type) ? MAX_MEDIA_BYTES : MAX_FILE_BYTES;
+        let data: Buffer;
+        try {
+          data = await readBody(req, max);
+        } catch {
+          return json(res, 413, { error: `${max === MAX_MEDIA_BYTES ? "Videos and sounds" : "Files"} can be up to ${max / 1024 / 1024} MB.` });
+        }
         // The picker filters, but the picker is the browser's: a file the agent
         // can only read as "binary content not shown" is refused here, where it
         // can be said out loud rather than discovered in the prompt.
         if (!isUsableFile(name, type)) {
-          return json(res, 415, { error: `Friday can read text, code, images and PDFs. “${name}” isn't one of those.` });
+          return json(res, 415, { error: `Friday can take text, code, images, PDFs, videos and sounds. “${name}” isn't one of those.` });
         }
         const f = await files.save(sid, { name, type, data, uploadedBy: who.id });
         return json(res, 201, { file: { id: f.id, name: f.name, type: f.type, size: f.size } });
@@ -3638,6 +3806,8 @@ export async function createApp(o: AppOptions) {
       return json(res, 200, { pr: { url: commit.body.prUrl, at: commit.ts, status } });
     }
 
+    // The daily brief: on demand, the latest scheduled one, and its times (daily-brief.ts).
+    if (await briefs.handle(req, res, url)) return;
 
     if (req.method === "GET" && url.pathname === "/api/sessions/mine") {
       const me = await identity(req);
@@ -3760,6 +3930,25 @@ export async function createApp(o: AppOptions) {
       } catch (e) {
         return json(res, 502, { error: (e as Error).message });
       }
+    }
+
+    // The "Needs you" queue (needs-you.ts, needs-rank.ts has the API): read with the sessions the server knows, or a browser's list.
+    if (url.pathname === "/api/needs-you" || url.pathname === "/api/needs-you/answer" || url.pathname === "/api/needs-you/dismiss") {
+      const ctx = await context(req);
+      if (!ctx) return json(res, 401, { error: "Not signed in." });
+      const me = { id: ctx.me.id, name: ctx.me.name };
+      if (url.pathname === "/api/needs-you" && (req.method === "GET" || req.method === "POST")) {
+        const body = req.method === "POST" ? ((await readJson(req)) as { sids?: unknown }) : {};
+        return json(res, 200, { items: await needsYou.list(me, ctx.workspace.id, listedSids(body.sids)) });
+      }
+      if (req.method !== "POST") return json(res, 405, { error: "Use POST." });
+      if (!req.headers.origin || crossSite(req)) return json(res, 403, { error: "Not from Friday." });
+      const body = (await readJson(req)) as { id?: unknown; answer?: unknown; edited?: unknown };
+      const id = str(body.id, 300);
+      if (!id) return json(res, 400, { error: "Which one?" });
+      if (url.pathname === "/api/needs-you/dismiss") return (await needsYou.dismiss(me, id), json(res, 200, { ok: true }));
+      const r = await needsYou.answer(me, ctx.workspace.id, id, typeof body.answer === "string" ? body.answer : "", body.edited === true);
+      return r.ok ? json(res, 200, r) : json(res, r.status, { error: r.error });
     }
 
     if (req.method === "POST" && url.pathname === "/api/attention") {
@@ -3987,6 +4176,17 @@ export async function createApp(o: AppOptions) {
         return json(res, 400, { error: (e as Error).message });
       }
     }
+    // The crew's skills (team-skills.ts): the same paths and answers in both editions, scoped to the person's crew.
+    if (url.pathname === "/api/teammates/skills" || url.pathname.startsWith("/api/teammates/skills/")) {
+      const ctx = await context(req);
+      if (!ctx) return json(res, 401, { error: "Sign in first." });
+      const me = { id: ctx.me.id, name: ctx.me.name };
+      let scope = localSkillScope?.(me) ?? null;
+      if (!scope) return json(res, 404, { error: "There's no crew here." });
+      const method = req.method ?? "GET";
+      const r = await skillsHttp(scope, method, url.pathname, method === "POST" || method === "PATCH" ? await readJson(req) : {});
+      return json(res, r.status, r.body);
+    }
     // Teammates (teammates.ts): the person's own AI teammates on this computer. Theirs alone: the local person only.
     if (teammates && (url.pathname === "/api/teammates" || url.pathname.startsWith("/api/teammates/"))) {
       const ctx = await context(req);
@@ -4003,7 +4203,7 @@ export async function createApp(o: AppOptions) {
         };
         const team = async (more: Record<string, unknown> = {}) => {
           const away = await teammates.away();
-          return json(res, 200, { sid, invite: signInvite(o.secret, sid, "owner"), lead: (await store.state(sid)).lead ?? null, ...(await teamRoomNow(sid)), teammates: await teammateViews(sid), rooms: await roomViews(), hidden: await hidden(), away: away ? { until: away.until, since: away.since } : null, paused: await teammates.paused(), ran: (await workflows?.ended()) ?? [], ...more });
+          return json(res, 200, { sid, invite: signInvite(o.secret, sid, "owner"), lead: (await store.state(sid)).lead ?? null, ...(await teamRoomNow(sid)), teammates: await teammateViews(sid), rooms: await roomViews(), hidden: await hidden(), away: away ? { until: away.until, since: away.since } : null, paused: await teammates.paused(), selfRuns: await teammates.selfRuns(), ran: (await workflows?.ended()) ?? [], ...more });
         };
         if (req.method === "GET" && url.pathname === "/api/teammates") return team();
         // A folder it is given has to be on this computer: a typo would start it in nothing.
@@ -4027,6 +4227,26 @@ export async function createApp(o: AppOptions) {
           }
           const a = await teammates.away();
           return json(res, 200, { until: a?.until ?? null, since: a?.since ?? null } satisfies TeamAway);
+        }
+        // A room running on its own toward a goal, or back (team-selfrun.ts): {sid, goal} to start, {sid, on: false} to stop.
+        if (req.method === "POST" && url.pathname === "/api/teammates/selfrun") {
+          const b = (await readJson(req)) as { sid?: unknown; goal?: unknown; on?: unknown; budget?: unknown };
+          const room = typeof b.sid === "string" ? b.sid : "";
+          if (room !== sid && !(await teammates.rooms()).some((r) => r.sid === room)) return json(res, 404, { error: "That room isn't in your crew." });
+          if (b.on === false) await selfRunOff(room, "Turned off.", { id: owner.id, name: owner.name });
+          else {
+            const goal = typeof b.goal === "string" ? b.goal.trim().slice(0, 2000) : "";
+            if (!goal) return json(res, 400, { error: "Give the room a goal to work toward." });
+            // Its budget and end time (team-budget.ts): the default overnight budget unless the card says otherwise.
+            let budget: RunBudget;
+            try {
+              budget = cleanRunBudget(b.budget);
+            } catch (e) {
+              return json(res, 400, { error: (e as Error).message });
+            }
+            await selfRunOn(room, goal, { id: owner.id, name: owner.name }, budget);
+          }
+          return team();
         }
         // What the team did since a time, for the "Since you left" card: the brief's shape (types.ts TeamBrief).
         if (req.method === "GET" && url.pathname === "/api/teammates/since") {
@@ -4187,7 +4407,7 @@ export async function createApp(o: AppOptions) {
             // An account is its tool's: a new tool drops the old one's, unless the edit names one (2026-10-28 audit: Codex started
             // as Claude's account). Back on its own tool, the account it had there.
             const model = c.model ?? back?.fromModel, account = back ? (c.account ?? back.fromAccount) : c.tool !== t2.tool && !("account" in body) ? undefined : c.account, effort = c.effort ?? (back && !("effort" in body) ? back.fromEffort : undefined);
-            const next: Teammate = { ...t2, ...("machine" in c ? { machine: c.machine } : {}), name: c.name, role: c.role, tool: c.tool, model, account, ...(c.mode ? { mode: c.mode === "full" ? undefined : c.mode } : {}), ...(c.look ? { look: c.look } : {}), ...(c.projects ? { projects: c.projects, project: undefined } : {}), ...("effort" in body || c.tool !== t2.tool ? { effort } : {}), ...("backup" in body ? { backup } : {}), ...(c.checkins ? { checkins: c.checkins.map((x) => ({ ...x, ...(t2.checkins?.find((y) => y.id === x.id)?.last ? { last: t2.checkins.find((y) => y.id === x.id)!.last } : {}) })) } : {}), ...(c.tool !== t2.tool ? { switched: undefined } : {}), ...(body.keep === true ? { madeBy: undefined } : {}) };
+            const next: Teammate = { ...t2, ...budgetPatch(body), ...("machine" in c ? { machine: c.machine } : {}), name: c.name, role: c.role, tool: c.tool, model, account, ...(c.mode ? { mode: c.mode === "full" ? undefined : c.mode } : {}), ...(c.look ? { look: c.look } : {}), ...(c.projects ? { projects: c.projects, project: undefined } : {}), ...("effort" in body || c.tool !== t2.tool ? { effort } : {}), ...("backup" in body ? { backup } : {}), ...(c.checkins ? { checkins: c.checkins.map((x) => ({ ...x, ...(t2.checkins?.find((y) => y.id === x.id)?.last ? { last: t2.checkins.find((y) => y.id === x.id)!.last } : {}) })) } : {}), ...(c.tool !== t2.tool ? { switched: undefined } : {}), ...(body.keep === true ? { madeBy: undefined } : {}) };
             // Folders on another computer of yours are that computer's to have: not looked for here.
             const missing = next.machine ? null : await missingDirOf(c.projects?.filter((d) => !projectsOf(t2).includes(d)));
             if (missing) return `There's no folder at ${missing} on this computer.`;
@@ -4297,8 +4517,9 @@ export async function createApp(o: AppOptions) {
       const rel = pathParam(url.searchParams.get("path"), 600);
       const named = async (p: string) => namedIn((await store.events(sid)).map((e) => JSON.stringify(e.body)), p);
       let file = abs ? await shownFile(abs, roots, named) : url.searchParams.has("root") ? (root ? await workPath(root, rel) : null) : null;
-      // A path an agent named from its own folder, without saying which of the session's folders: the first that has it.
-      for (const r of url.searchParams.has("root") || abs ? [] : roots) if (!file) file = await workPath(r, rel);
+      // A path an agent named from its own folder, without saying which of the session's folders: the first that has it, or
+      // the newest of that name further in (work-files.ts findWork).
+      if (!file && !url.searchParams.has("root") && !abs) file = await findWork(roots, rel);
       if (!file) return json(res, 404, { error: "That file isn't in this session's folders." });
       return serveWork(req, res, file);
     }
@@ -4428,6 +4649,22 @@ export async function createApp(o: AppOptions) {
 
 
 
+    // Forecasts and "What routing learned" (forecast.ts, route-learning.ts), in both editions: recent runs and this person's plans
+    // for the page's estimates, the view in words, and a reset of one preference ("<repo>|<kind>") or of everything ("*").
+    if (url.pathname === "/api/routing" || url.pathname === "/api/routing/reset") {
+      const ctx = await context(req);
+      if (!ctx) return json(res, 401, { error: "Sign in first." });
+      const ws = ctx.workspace.id;
+      if (req.method === "GET" && url.pathname === "/api/routing") return json(res, 200, await routingView(ws, ctx.me.id));
+      if (req.method === "POST" && url.pathname === "/api/routing/reset") {
+        let may = true;
+        if (!may) return json(res, 403, { error: "Only the workspace's owner or an admin can reset what routing learned." });
+        const scope = String((await readJson(req)).scope ?? "").slice(0, 300);
+        if (!scope) return json(res, 400, { error: "Say what to reset." });
+        await runLog.reset(ws, scope);
+        return json(res, 200, await routingView(ws, ctx.me.id));
+      }
+    }
     // The open-source edition: each coding tool's usage on this computer, for the Usage page and the home screen's year. The
     // hosted service answers these for a workspace, below.
     // The page asks for its workspace as it loads (index.html): there is none here, which is an answer, not a missing page.
@@ -4715,7 +4952,7 @@ export async function createApp(o: AppOptions) {
         const why = await admit(sid, verifyInvite(o.secret, url.searchParams.get("invite")), me);
         if (why) return closeSaying(ws, why.code, why.reason);
         const attaching = performance.now();
-        await hub.attach(ws, {
+        await attachGate(() => hub.attach(ws, {
           sid,
           me,
           tool: q("tool", 20),
@@ -4742,7 +4979,7 @@ export async function createApp(o: AppOptions) {
           resumeMessages: Number(q("resumeMessages", 10)) || 0,
           resumeTool: q("resumeTool", 20) || undefined,
           caps: q("caps", 100),
-        });
+        }));
         slowly(`a runner attaching to ${sid}`, attaching);
       })().catch((err) => {
         console.error("[runner]", err);
@@ -5169,7 +5406,9 @@ export async function createApp(o: AppOptions) {
     mesh,
     teammates: { starts: teammateStarts, dry: teammateDry, checkIns: (now: Date) => runCheckIns(now), back: () => runBack(), away: (now?: number) => runAway(now), awake: () => awake(), note: async (sid: string, lane: string) => ((n) => (n ? [n.note, ...n.preamble.map((p) => p.text).filter(Boolean)].join("\n\n") : null))(await (hub.teammate?.(sid, lane) ?? Promise.resolve(null))) },
     workflows: { tick: (now?: Date) => workflows?.tick(now) ?? Promise.resolve([]), engine: () => workflows },
+    briefs: { tick: (now?: number) => briefs.tick(now) },
     async close() {
+      unlistenBurn();
       closing = true;
       clearTimeout(usageFirst);
       clearInterval(usageLoop);
@@ -5180,6 +5419,7 @@ export async function createApp(o: AppOptions) {
       for (const t of teamTimers) clearInterval(t);
       for (const t of retryTimers) clearTimeout(t);
       clearInterval(boardLoop);
+      clearInterval(briefLoop);
       stopMockFocus();
       for (const stop of stopBeats) stop();
       for (const r of localRunners.values()) r.stop();

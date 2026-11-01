@@ -48,8 +48,10 @@ export function unfinishedPlan(events: SessionEvent[], lane: string, sinceSeq: n
 }
 
 /** How the agents stay in touch while they work, said with every nudge to carry on. */
+// Not "check messages between steps": messages reach a working agent anyway, and every check is another full read of its
+// conversation (Arun, 2026-10-31: "i am burning through my claude code usage pretty fast").
 export const CHECK_IN =
-  "Between steps, call the friday check_messages tool for anything the other agents sent you, and post_update a line when you finish a piece (what is done, what is next) so the others and the people watching know where you are.";
+  "When you finish, post_update one line on what is done, so the others and the people watching know where you are.";
 
 /**
  * What to tell the coding tool on `lane` to make it carry on, or null when its turn's end is the end: the work looks finished,

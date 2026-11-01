@@ -13,33 +13,44 @@
  *
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { EllipsisIcon, FileCodeIcon, FileTextIcon, GitPullRequestIcon, ImageIcon, PackageIcon, CirclePauseIcon, KanbanSquareIcon, MessagesSquareIcon, MoonIcon, PlayIcon, SquareIcon, SunIcon, WorkflowIcon } from "lucide-react";
+import { EllipsisIcon, InfinityIcon, ListChecksIcon, FileCodeIcon, FileTextIcon, GitPullRequestIcon, ImageIcon, PackageIcon, CirclePauseIcon, KanbanSquareIcon, MessagesSquareIcon, MoonIcon, PlayIcon, SquareIcon, SunIcon, WorkflowIcon } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import type { SessionEvent } from "../types.js";
 import type { SessionState } from "../session/projection.js";
 import { api } from "./api.js";
 import { useConfirm } from "./ui.js";
 import type { Identity } from "./storage.js";
 import type { Send } from "./useSession.js";
-import { nextAt, nextEight, setAway, setPaused, stopAll, untilOf } from "./team-api.js";
+import { nextAt, nextEight, setAway, setPaused, setSelfRun, stopAll, untilOf } from "./team-api.js";
 import { threadsOf } from "./team-threads.js";
 import { teamCommand } from "./team-commands.js";
 import { plainLine } from "./team-room.js";
 import { agoShort, Face, mateOn, mateStatus, openThread, refreshTeam, threadSaid, useTeamNow } from "./Teammates.js";
 import { assignedTasks, TeamBoard } from "./TeamBoard.js";
+import { proofsIn } from "../team-proof.js";
+import { ProofToggle } from "./ProofCard.js";
 import { openWorkflows } from "./team-workflow-view.js";
+import { SkillsDialog, skillsWaiting, useSkills } from "./CrewSkills.js";
+import { isLocal } from "./edition.js";
+import { DEFAULT_RUN_TOKENS, RUN_BUDGETS, runBudgetLine } from "../team-budget.js";
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
-/** The teammates at work now, anywhere: whom Stop all cuts short. */
+/** The teammates at work now, anywhere: whom Stop all cuts short (on the hosted service, the person's own). */
 function useWorking() {
   const t = useTeamNow();
-  return (t?.teammates ?? []).filter((m) => m.status === "working" || m.status === "waiting");
+  let all = t?.teammates ?? [];
+  return all.filter((m) => m.status === "working" || m.status === "waiting");
 }
 
+/** Where the crew's computer is said to stay on: this Mac, or the person's own computer the hosted service runs them on. */
+const KEEP_ON = isLocal() ? "Keep the lid open and the Mac on power: it stays awake while they work." : "Keep your computer on and Friday's desktop app open: your teammates run there.";
+
+/** The crew's workflows, from a crew chat's header: its automations, each run a board here or in a room. */
 /** Stop every teammate's running turn, after saying whose; the queues stay. */
 export function useStopAll(identity: Identity, notify: (m: string) => void): [() => void, React.ReactNode] {
   const [ask, confirmUI] = useConfirm();
@@ -96,7 +107,6 @@ export function TeamHeaderControls({ identity, state, events, send, notify }: { 
     <>
       {stopUI}
       <ThreadsButton sid={state.id} events={events} />
-      <ResultsButton events={events} />
       {tasks.length ? (
         <button type="button" className="panel-tab icon tm-hd-btn" aria-label={`Board, ${open} open of ${tasks.length}`} title={`Board: ${open} open of ${tasks.length}`} onClick={() => setBoard(true)}>
           <KanbanSquareIcon className="size-[17px]" />
@@ -120,10 +130,6 @@ export function TeamHeaderControls({ identity, state, events, send, notify }: { 
           </PopoverContent>
         </Popover>
       )}
-      {/* The team's workflows: its automations, each run a board here or in a room (TeamWorkflows.tsx; Arun, 2026-10-28). */}
-      <button type="button" className="panel-tab icon tm-hd-btn" aria-label="Workflows" title="Workflows: the crew's automations" onClick={openWorkflows}>
-        <WorkflowIcon className="size-[17px]" />
-      </button>
       {busy && (
         // A quiet ghost that turns red only under the pointer: the faces beside the title already say how many work (Arun,
         // 2026-10-29: "so clean and beautiful…"; DIRECTION.md §9.1). It was a red pill with a count.
@@ -132,8 +138,9 @@ export function TeamHeaderControls({ identity, state, events, send, notify }: { 
           <span className="tm-stop-all-label">Stop all</span>
         </button>
       )}
-      <AwaySwitch identity={identity} notify={notify} />
-      {board && <TeamBoard state={state} send={send} onClose={() => setBoard(false)} />}
+      {/* Everything else, one press away (Arun, 2026-10-31: "there is too many buttons here, we need to simplify this"). */}
+      <RoomMore identity={identity} sid={state.id} events={events} notify={notify} />
+      {board && <TeamBoard state={state} events={events} send={send} onClose={() => setBoard(false)} />}
     </>
   );
 }
@@ -145,8 +152,10 @@ const kindOf = (p: string) => (/\.(png|jpe?g|gif|webp|avif|svg)$/i.test(p) ? "im
  * What this room's teammates made, on one shelf (Arun, 2026-10-28: the critique's "results shelf per room: the files and PRs
  * produced"): the files they changed, newest first, each opening where the session opens a file, and the pull requests they named.
  */
-function ResultsButton({ events }: { events: SessionEvent[] }) {
-  const [open, setOpen] = useState(false);
+/** What the crew made in a room: tasks handed in with their proof, pull requests, files, newest first. */
+function useResults(sid: string, events: SessionEvent[]) {
+  // What was handed in here, newest first, each with its proof (team-proof.ts): checked at a glance, before the files.
+  const handed = useMemo(() => proofsIn(events, sid, (lane) => mateOn(lane)?.name).slice(0, 20), [events, sid]);
   const { files, prs } = useMemo(() => {
     const files = new Map<string, { path: string; lane: string; ts: number; status: string; add: number; del: number }>();
     const prs = new Map<string, { url: string; lane: string; ts: number }>();
@@ -157,24 +166,37 @@ function ResultsButton({ events }: { events: SessionEvent[] }) {
     }
     return { files: [...files.values()].sort((a, b) => b.ts - a.ts), prs: [...prs.values()].sort((a, b) => b.ts - a.ts) };
   }, [events]);
-  if (!files.length && !prs.length) return null;
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <button type="button" className="panel-tab icon tm-hd-btn tm-hd-extra" aria-label={`Results: ${files.length} files${prs.length ? `, ${prs.length} pull requests` : ""}`} title="What the crew made here">
-          <PackageIcon className="size-[17px]" />
-          <span className="tm-hd-n">{files.length + prs.length}</span>
-        </button>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="tm-pop tm-results-pop">
+  return { handed, files, prs, count: files.length + prs.length };
+}
+
+/** The results shelf: its own button, or (embedded) a page of the room's ⋯ menu, `done` closing it. */
+function ResultsButton({ sid, events, embedded }: { sid: string; events: SessionEvent[]; embedded?: () => void }) {
+  const [open, setOpen] = useState(false);
+  const { handed, files, prs } = useResults(sid, events);
+  const close = () => (embedded ? embedded() : setOpen(false));
+  if (!files.length && !prs.length && !handed.length) return null;
+  const list = (
+    <>
         <div className="tm-pop-head">
           <b>Results</b>
           <span>
+            {handed.length ? `${handed.length} handed in · ` : ""}
             {files.length} file{files.length === 1 ? "" : "s"}
             {prs.length ? ` · ${prs.length} PR${prs.length === 1 ? "" : "s"}` : ""}
           </span>
         </div>
         <ul className="tm-threads-list">
+          {handed.map((p) => (
+            <li key={`${p.task ?? "run"}:${p.seq}`} className="pf-handed">
+              <span className="pf-handed-title">
+                <span title={p.title}>{plainLine(p.title)}</span>
+                <span className="pf-num">
+                  {mateOn(p.lane)?.name ?? p.name} · {agoShort(p.at)}
+                </span>
+              </span>
+              <ProofToggle proof={p} />
+            </li>
+          ))}
           {prs.map((p) => {
             const m = mateOn(p.lane);
             return (
@@ -197,7 +219,7 @@ function ResultsButton({ events }: { events: SessionEvent[] }) {
             const m = mateOn(f.lane);
             return (
               <li key={f.path}>
-                <button type="button" className="tm-shelf-row" title={f.path} onClick={() => (dispatchEvent(new CustomEvent("friday:open-file", { detail: { path: f.path, lane: f.lane } })), setOpen(false))}>
+                <button type="button" className="tm-shelf-row" title={f.path} onClick={() => (dispatchEvent(new CustomEvent("friday:open-file", { detail: { path: f.path, lane: f.lane } })), close())}>
                   <span className="tm-shelf-mark" data-kind={kindOf(f.path)}>
                     {kindOf(f.path) === "image" ? <ImageIcon className="size-3.5" /> : kindOf(f.path) === "doc" ? <FileTextIcon className="size-3.5" /> : <FileCodeIcon className="size-3.5" />}
                   </span>
@@ -212,8 +234,87 @@ function ResultsButton({ events }: { events: SessionEvent[] }) {
             );
           })}
         </ul>
+    </>
+  );
+  if (embedded) return list;
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button type="button" className="panel-tab icon tm-hd-btn tm-hd-extra" aria-label={`Results: ${handed.length ? `${handed.length} handed in, ` : ""}${files.length} files${prs.length ? `, ${prs.length} pull requests` : ""}`} title="What the crew made here">
+          <PackageIcon className="size-[17px]" />
+          <span className="tm-hd-n">{files.length + prs.length}</span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="tm-pop tm-results-pop">
+        {list}
       </PopoverContent>
     </Popover>
+  );
+}
+
+/**
+ * The room's ⋯: what the header no longer shows as buttons of their own (Arun, 2026-10-31: "there is too many buttons here, we
+ * need to simplify this and make it easier for the user to use"). The header keeps Threads and the Board, what a person reaches
+ * for while the room works; the rest is a list here, each with how it stands, opening as a page of this menu (Results, Run on
+ * its own, Away and Pause) or its own place (Skills, Workflows). While the room runs on its own, or you are away, or the crew is
+ * paused, the ⋯ itself says so with its mark.
+ */
+function RoomMore({ identity, sid, events, notify }: { identity: Identity; sid: string; events: SessionEvent[]; notify: (m: string) => void }) {
+  const t = useTeamNow();
+  const [open, setOpen] = useState(false);
+  const [page, setPage] = useState<null | "results" | "run" | "away">(null);
+  const [skills, setSkills] = useState(false);
+  const results = useResults(sid, events);
+  const waiting = skillsWaiting(useSkills());
+  const run = t?.selfRuns?.[sid] ?? null;
+  const away = t?.away?.until ? t.away : null;
+  const paused = !!t?.paused;
+  const done = () => (setOpen(false), setPage(null));
+  const on = paused ? "paused" : away ? "away" : run ? "run" : undefined;
+  const say = paused ? "the crew is paused" : away ? `you're away until ${untilOf(away.until!)}` : run ? `running on its own: ${run.goal}` : "";
+  const Row = ({ icon, name, detail, onClick, n }: { icon: React.ReactNode; name: string; detail?: string; onClick: () => void; n?: number }) => (
+    <li>
+      <button type="button" className="tm-more-row" onClick={onClick}>
+        <span className="tm-more-icon">{icon}</span>
+        <span className="tm-text">
+          <span className="tm-name">{name}</span>
+          {detail && <span className="tm-sub">{detail}</span>}
+        </span>
+        {n ? <span className="tm-hd-n">{n}</span> : null}
+      </button>
+    </li>
+  );
+  return (
+    <>
+      <Popover open={open} onOpenChange={(o) => (setOpen(o), o || setPage(null))}>
+        <PopoverTrigger asChild>
+          <button type="button" className="panel-tab icon tm-hd-btn tm-more-btn" data-on={on} aria-label={say ? `More: ${say}` : "More: results, run on its own, away, skills, workflows"} title={say ? `${say[0]!.toUpperCase()}${say.slice(1)}` : "More"}>
+            {paused ? <CirclePauseIcon className="size-4" /> : away ? <MoonIcon className="size-4" /> : run ? <InfinityIcon className="size-4" /> : <EllipsisIcon className="size-4" />}
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="end" className={page ? "tm-pop tm-away-pop" : "tm-pop tm-more-pop"}>
+          {page ? (
+            <>
+              <button type="button" className="tm-more-back" onClick={() => setPage(null)}>
+                ← Back
+              </button>
+              {page === "results" && <ResultsButton sid={sid} events={events} embedded={done} />}
+              {page === "run" && <SelfRunSwitch identity={identity} sid={sid} notify={notify} embedded={done} />}
+              {page === "away" && <AwaySwitch identity={identity} notify={notify} embedded={done} />}
+            </>
+          ) : (
+            <ul className="tm-more-list">
+              {results.handed.length + results.count > 0 && <Row icon={<PackageIcon className="size-4" />} name="Results" detail="What the crew made here" n={results.handed.length + results.count} onClick={() => setPage("results")} />}
+              <Row icon={<InfinityIcon className="size-4" />} name="Run on its own" detail={run ? `On · ${run.goal}` : "Work toward a goal by itself"} onClick={() => setPage("run")} />
+              <Row icon={paused ? <CirclePauseIcon className="size-4" /> : <MoonIcon className="size-4" />} name="Away and pause" detail={away ? `Away until ${untilOf(away.until!)}${paused ? " · paused" : ""}` : paused ? "The crew is paused" : "The crew carries on without you"} onClick={() => setPage("away")} />
+              <Row icon={<ListChecksIcon className="size-4" />} name="Skills" detail={waiting ? `${waiting} to keep or drop` : "How the crew does what it repeats"} n={waiting} onClick={() => (done(), setSkills(true))} />
+              <Row icon={<WorkflowIcon className="size-4" />} name="Workflows" detail="The crew's automations" onClick={() => (done(), openWorkflows())} />
+            </ul>
+          )}
+        </PopoverContent>
+      </Popover>
+      {skills && <SkillsDialog onClose={() => setSkills(false)} />}
+    </>
   );
 }
 
@@ -275,7 +376,114 @@ function ThreadsButton({ sid, events }: { sid: string; events: SessionEvent[] })
  * Away until a time, and Pause team, in one place (Arun, 2026-10-28: "Away until 8:00 AM", with a time picker defaulting to the
  * next 8 AM). While away the button says until when; pressed, it says "I'm back".
  */
-function AwaySwitch({ identity, notify }: { identity: Identity; notify: (m: string) => void }) {
+/**
+ * Run on its own: the room works at full access toward its goal without anyone (Arun, 2026-10-31: "full access for crew that
+ * basically runs and self sustains it selfs… making decisions and achieving a goal as a team"; team-selfrun.ts). Its mark is lit
+ * while it runs; the card says toward what, since when, and stops it. The goal starts as the room's purpose.
+ */
+function SelfRunSwitch({ identity, sid, notify, embedded }: { identity: Identity; sid: string; notify: (m: string) => void; /** A page of the room's ⋯ menu, this closing it. */ embedded?: () => void }) {
+  const t = useTeamNow();
+  const [open, setOpen] = useState(false);
+  const [goal, setGoal] = useState("");
+  // Its budget (tokens for the whole run, 0 for none) and an end time if one is set: an overnight budget unless changed.
+  const [tokens, setTokens] = useState<number>(DEFAULT_RUN_TOKENS);
+  const [ends, setEnds] = useState("");
+  const [busy, setBusy] = useState(false);
+  const run = t?.selfRuns?.[sid] ?? null;
+  const purpose = t?.rooms?.find((r) => r.sid === sid)?.purpose ?? "";
+  // On the hosted service a run drives the teammates of whoever started it and of those who joined; anyone else with a teammate
+  // in the room may join with theirs, or take them out again, and its starter or the room's owner stops it (hosted-crew.ts).
+  let hosted = null as { mine: string[]; joined: boolean; mayStop: boolean; others: number; runners: string[] } | null;
+  const names = (list: string[]) => (list.length < 3 ? list.join(" and ") : `${list.slice(0, -1).join(", ")} and ${list.at(-1)}`);
+  const act = (p: Promise<unknown>, said: string) => {
+    setBusy(true);
+    p.then(() => (notify(said), refreshTeam(identity), (embedded ? embedded() : setOpen(false))))
+      .catch((e: Error) => notify(/not found|404/i.test(e.message) ? "This Friday doesn't have that yet. Update it, then try again." : e.message))
+      .finally(() => setBusy(false));
+  };
+  // Nothing to run with: none of the person's teammates in the room, and nothing running.
+  // Opened as a page of the ⋯ menu: the form starts as the popover's opening sets it.
+  useEffect(() => {
+    if (embedded) setGoal(run?.goal ?? purpose);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  if (hosted && !run && !hosted.mine.length) return embedded ? <p className="tm-away-body">Bring one of your teammates into the room first: running on its own drives your teammates, on your plan.</p> : null;
+  const body = (
+    <>
+        {run ? (
+          <div className="tm-away-body">
+            <b className="tm-away-title">Running on its own</b>
+            <p className="tm-selfrun-goal">{run.goal}</p>
+            <p>
+              Since {untilOf(run.since)}{hosted ? `, with ${names(hosted.runners)} teammates` : ""}. The lead keeps the board going, the crew decides and approves for itself, and it stops when
+              the lead says the goal is reached, nothing moves for three nudges{run.budget?.tokens || run.budget?.until ? ", or its budget is spent" : ""}.
+            </p>
+            {run.budget && <p className="tm-away-note">Budget: {runBudgetLine(run.budget)}.</p>}
+            {hosted && !hosted.joined && hosted.mine.length > 0 && (
+              <p>
+                Join, and {names(hosted.mine)} work{hosted.mine.length === 1 ? "s" : ""} toward it too, on your plan.
+              </p>
+            )}
+            {(!hosted || hosted.mayStop) && (
+              <Button size="sm" variant="outline" disabled={busy} onClick={() => act(setSelfRun(identity, sid, null), "The room is back to waiting for you.")}>
+                <SquareIcon className="size-3" /> Stop running on its own
+              </Button>
+            )}
+          </div>
+        ) : (
+          <form
+            className="tm-away-body"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const until = ends ? (nextAt(ends) ?? undefined) : undefined;
+              if (goal.trim()) act(setSelfRun(identity, sid, goal.trim(), { tokens, ...(until ? { until } : {}), tz: Intl.DateTimeFormat().resolvedOptions().timeZone }), "The room runs on its own now.");
+            }}
+          >
+            <b className="tm-away-title">Run on its own</b>
+            <p>
+              {hosted ? `${names(hosted.mine)} work${hosted.mine.length === 1 ? "s" : ""} toward this goal by ${hosted.mine.length === 1 ? "itself" : "themselves"}, at full access, on your plan: plans, hands out tasks, decides and approves until the lead says it's done.${hosted.others ? " Other people's teammates here keep to their keepers' work, and can join." : ""}` : "The crew works toward this goal by itself, at full access: it plans, hands out tasks, decides, approves and keeps going until the lead says it's done."}
+            </p>
+            <Textarea value={goal} onChange={(e) => setGoal(e.target.value)} placeholder="What should this room get done?" aria-label="The room's goal" rows={3} className="tm-selfrun-input" />
+            <div className="tm-selfrun-budget">
+              <label>
+                <span>Budget</span>
+                <select className="tm-select" value={tokens} aria-label="The run's budget" onChange={(e) => setTokens(Number(e.target.value))}>
+                  {RUN_BUDGETS.map((n) => (
+                    <option key={n} value={n}>
+                      {n / 1_000_000}M tokens{n === DEFAULT_RUN_TOKENS ? " (a night's work)" : ""}
+                    </option>
+                  ))}
+                  <option value={0}>No budget</option>
+                </select>
+              </label>
+              <label>
+                <span>Ends at</span>
+                <Input type="time" className="tm-time" value={ends} aria-label="Ends at" onChange={(e) => setEnds(e.target.value)} />
+              </label>
+            </div>
+            <p className="tm-away-note">It never pushes to a default branch, deploys, deletes data or spends money. {isLocal() ? "Keep the Mac on power: it stays awake while the room runs." : "Keep your computer on: the room runs there."}</p>
+            <Button type="submit" size="sm" disabled={busy || !goal.trim()}>
+              <InfinityIcon className="size-4" /> Start
+            </Button>
+          </form>
+        )}
+    </>
+  );
+  if (embedded) return body;
+  return (
+    <Popover open={open} onOpenChange={(o) => (setOpen(o), o && (setGoal(run?.goal ?? purpose), setTokens(DEFAULT_RUN_TOKENS), setEnds("")))}>
+      <PopoverTrigger asChild>
+        <button type="button" className="panel-tab icon tm-hd-btn tm-selfrun-btn" data-on={run ? "on" : undefined} aria-label={run ? `Running on its own: ${run.goal}` : "Run on its own"} title={run ? `Running on its own toward: ${run.goal}` : "Run on its own: the crew works toward a goal by itself"}>
+          <InfinityIcon className="size-[17px]" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="tm-pop tm-away-pop">
+        {body}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function AwaySwitch({ identity, notify, embedded }: { identity: Identity; notify: (m: string) => void; /** A page of the room's ⋯ menu, this closing it. */ embedded?: () => void }) {
   const t = useTeamNow();
   const [open, setOpen] = useState(false);
   const [at, setAt] = useState("08:00");
@@ -286,22 +494,12 @@ function AwaySwitch({ identity, notify }: { identity: Identity; notify: (m: stri
   // Away and I'm back close the card; the Pause switch, a switch, stays where it is to be read and turned back (QA, 2026-10-28).
   const act = (p: Promise<unknown>, said: string, close = true) => {
     setBusy(true);
-    p.then(() => (notify(said), refreshTeam(identity), close && setOpen(false)))
+    p.then(() => (notify(said), refreshTeam(identity), close && (embedded ? embedded() : setOpen(false))))
       .catch((e: Error) => notify(/not found|404/i.test(e.message) ? "This Friday doesn't have that yet. Update it, then try again." : e.message))
       .finally(() => setBusy(false));
   };
-  return (
-    <Popover open={open} onOpenChange={(o) => (setOpen(o), o && setAt("08:00"))}>
-      <PopoverTrigger asChild>
-        {/* Away and paused at once says both, and the time with AM or PM (Arun, 2026-10-28: "really iron out bugs and feature
-            problems and gaps"; a pause while away didn't show, and "Away until 8:00" read as the morning for 8 PM). */}
-        {/* The header's overflow: Away and Pause live in it (DIRECTION.md §9.1), so the header keeps to the room's name, its faces
-            and its few icons. While away or paused its mark says so (moon, pause), and the banner over the box says the rest. */}
-        <button type="button" className="panel-tab icon tm-hd-btn tm-more-btn" data-on={paused ? "paused" : away ? "away" : undefined} aria-label={away ? `Crew options: away until ${untilOf(away.until!)}${paused ? ", the crew paused" : ""}` : paused ? "Crew options: the crew is paused" : "Crew options: away or pause"} title={away ? `You're away until ${untilOf(away.until!)}${paused ? ": the crew is paused" : ""}` : paused ? "The crew is paused" : "Away or pause"}>
-          {paused ? <CirclePauseIcon className="size-4" /> : away ? <MoonIcon className="size-4" /> : <EllipsisIcon className="size-4" />}
-        </button>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="tm-pop tm-away-pop">
+  const body = (
+    <>
         {away ? (
           <div className="tm-away-body">
             <b className="tm-away-title">You're away until {untilOf(away.until!)}</b>
@@ -324,7 +522,7 @@ function AwaySwitch({ identity, notify }: { identity: Identity; notify: (m: stri
               <span>Back at</span>
               <Input type="time" value={at} onChange={(e) => setAt(e.target.value || "08:00")} aria-label="Back at" />
             </label>
-            <p className="tm-away-note">Keep the lid open and the Mac on power: it stays awake while they work.</p>
+            <p className="tm-away-note">{KEEP_ON}</p>
             <Button type="submit" size="sm" disabled={busy}>
               <MoonIcon className="size-4" /> Away until {untilOf(until)}
             </Button>
@@ -337,6 +535,22 @@ function AwaySwitch({ identity, notify }: { identity: Identity; notify: (m: stri
           </span>
           <Switch checked={paused} disabled={busy} onCheckedChange={(on) => act(setPaused(identity, on), on ? "The crew is paused. Nothing new starts until you resume it." : "The crew is back at work.", false)} />
         </label>
+    </>
+  );
+  if (embedded) return body;
+  return (
+    <Popover open={open} onOpenChange={(o) => (setOpen(o), o && setAt("08:00"))}>
+      <PopoverTrigger asChild>
+        {/* Away and paused at once says both, and the time with AM or PM (Arun, 2026-10-28: "really iron out bugs and feature
+            problems and gaps"; a pause while away didn't show, and "Away until 8:00" read as the morning for 8 PM). */}
+        {/* The header's overflow: Away and Pause live in it (DIRECTION.md §9.1), so the header keeps to the room's name, its faces
+            and its few icons. While away or paused its mark says so (moon, pause), and the banner over the box says the rest. */}
+        <button type="button" className="panel-tab icon tm-hd-btn tm-more-btn" data-on={paused ? "paused" : away ? "away" : undefined} aria-label={away ? `Crew options: away until ${untilOf(away.until!)}${paused ? ", the crew paused" : ""}` : paused ? "Crew options: the crew is paused" : "Crew options: away or pause"} title={away ? `You're away until ${untilOf(away.until!)}${paused ? ": the crew is paused" : ""}` : paused ? "The crew is paused" : "Away or pause"}>
+          {paused ? <CirclePauseIcon className="size-4" /> : away ? <MoonIcon className="size-4" /> : <EllipsisIcon className="size-4" />}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="tm-pop tm-away-pop">
+        {body}
       </PopoverContent>
     </Popover>
   );
@@ -362,7 +576,7 @@ export function TeamBanner({ identity, notify }: { identity: Identity; notify: (
         {t.paused ? <CirclePauseIcon className="size-4 tm-banner-icon" /> : <MoonIcon className="size-4 tm-banner-icon" />}
         <p>
           <b>You're away until {untilOf(away.until!)}.</b>{" "}
-          {t.paused ? "The crew is paused too: nothing new starts until you resume it." : "The crew decides for itself and notes what it assumed. Keep the lid open and the Mac on power."}
+          {t.paused ? "The crew is paused too: nothing new starts until you resume it." : `The crew decides for itself and notes what it assumed. ${KEEP_ON.split(":")[0]}.`}
         </p>
         {t.paused && (
           <button type="button" className="tm-banner-btn" disabled={busy} onClick={() => act(setPaused(identity, false), "The crew is back at work.")}>
@@ -426,6 +640,9 @@ export async function runTeamCommand(text: string, { identity, notify }: { ident
     case "board":
       dispatchEvent(new Event("friday:team-board"));
       return null;
+    case "brief":
+      dispatchEvent(new CustomEvent("friday:brief", { detail: {} }));
+      return null;
   }
 }
 
@@ -460,3 +677,4 @@ export function QueuedActions({ seqs, send, onEdit }: { seqs: { lane: string; se
     </span>
   );
 }
+

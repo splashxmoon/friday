@@ -1,10 +1,13 @@
+import type { SelfRun } from "./team-selfrun.js";
+import type { Hold, MateBudget } from "./team-budget.js";
+import type { Proof } from "./team-proof.js";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import type { Redis } from "ioredis";
 import { isOwnModel, ownModelParts } from "./own-model-id.js";
 import { cleanCheckIn, MAX_CHECKINS, type CheckIn } from "./teammate-checkins.js";
-import { EFFORT_LEVELS, ENGINE_NAMES, ENGINE_TOOLS, isEngineEffort, type EngineEffort, type EngineMode, type EngineTool } from "./types.js";
+import { EFFORT_LEVELS, ENGINE_MODEL_INFO, ENGINE_NAMES, ENGINE_TOOLS, isEngineEffort, type EngineEffort, type EngineMode, type EngineTool } from "./types.js";
 
 /**
  * Teammates: persistent AI teammates on this computer (Arun, 2026-10-27: "i think my local build should be like open bot:
@@ -81,6 +84,8 @@ export interface Teammate {
    * works meanwhile. Cleared once they keep it.
    */
   madeBy?: { lane: string; name: string };
+  /** Its daily caps and its work and quiet hours (team-budget.ts): nothing is capped unless set. */
+  budget?: MateBudget;
   created: number;
 }
 
@@ -109,6 +114,8 @@ export interface TeammateView extends Teammate {
   held: boolean;
   /** Its turns, minutes and tokens today (since local midnight) and over the last seven days. */
   usage: { today: MateUsage; week: MateUsage };
+  /** Why it takes no new turn now, for its budget or hours (team-budget.ts Hold), and when it carries on. */
+  hold?: Hold;
 }
 
 /** Away mode (team-away.ts): the person away until `until`, since `since`. */
@@ -130,6 +137,8 @@ export interface MateRun {
   said: string;
   /** Files it changed in the run. */
   files: string[];
+  /** What shows the work in it worked (team-proof.ts), for a run that changed files or handed proof in. */
+  proof?: Proof;
 }
 
 /** How many folders and repos a teammate works in besides its own. */
@@ -178,6 +187,35 @@ export const backupOf = (t: Pick<Teammate, "tool" | "backup">): EngineTool => t.
 
 export { checkInDue, checkInText, cleanCheckIn, describeCheckIn, MAX_CHECKINS, NO_UPDATE, quietCheckIns, type CheckIn } from "./teammate-checkins.js";
 
+/**
+ * A teammate put on its backup tool as its own runs out of usage (the open-source edition's and the hosted service's one rule): the
+ * backup's routing model when it has one, its effort if the backup takes that level, no account (the one picked is its own
+ * tool's, never lent to another), and what it ran on before to go back to. Null when there is nothing to switch to.
+ */
+export function onBackup<T extends Teammate>(t: T, resetsAt: number | null, now = Date.now()): (T & { tool: EngineTool }) | null {
+  if (t.tool === "friday") return null;
+  const to = backupOf(t);
+  if (to === t.tool) return null;
+  const routes = ENGINE_MODEL_INFO[to].some((m) => m.id === "auto");
+  return {
+    ...t,
+    tool: to,
+    model: routes ? "auto" : undefined,
+    effort: t.effort && (EFFORT_LEVELS[to] ?? []).includes(t.effort) ? t.effort : undefined,
+    account: undefined,
+    switched: { from: t.tool, ...(t.model ? { fromModel: t.model } : {}), ...(t.account ? { fromAccount: t.account } : {}), ...(t.effort ? { fromEffort: t.effort } : {}), until: resetsAt, at: now },
+  };
+}
+
+/** When a switched teammate goes back to its own tool: when its limit lifts, or five hours on when it never said. */
+export const backAt = (sw: NonNullable<Teammate["switched"]>) => sw.until ?? sw.at + 5 * 3_600_000;
+
+/** A switched teammate back on its own tool, model, account and effort. */
+export const offBackup = <T extends Teammate>(t: T): T => (t.switched ? { ...t, tool: t.switched.from, model: t.switched.fromModel, account: t.switched.fromAccount, effort: t.switched.fromEffort, switched: undefined } : t);
+
+/** What a teammate on its backup is told as it carries on: where it was, as the turn that ran out (handoff.ts handoffBrief). */
+export const backupText = (from: EngineTool, to: EngineTool, brief: string) => `[Friday] ${ENGINE_NAMES[from]} ran out of usage partway through your work, so you are on ${ENGINE_NAMES[to]} now. Carry on where you left off and finish it.${brief ? `\n\n${brief}` : ""}`;
+
 /** A teammate's memory, in its own folder: read into its note with every turn, editable by the person. */
 export const MEMORY_FILE = "MEMORY.md";
 /** How much of it is read into the note: its first page or so. */
@@ -224,7 +262,8 @@ export function cleanTeammate(body: Record<string, unknown>, tools: readonly str
   const model = s(body.model, 200);
   if (own && !(isOwnModel(model) && !!owner && ownModelParts(model)?.owner === owner)) throw new Error("Pick one of your own models for it to run on (Settings › Your models).");
   // On another computer of yours: its id there, or "" for this one. Its paths are that computer's, kept as written (~ is its home).
-  const machine = "machine" in body ? (typeof body.machine === "string" && /^[0-9a-f]{16}$/.test(body.machine) ? body.machine : "") : null;
+  // An id is 16 hex characters in the open-source edition (local/computers.ts) and 12 on the hosted service (link/registry.ts).
+  const machine = "machine" in body ? (typeof body.machine === "string" && /^[0-9a-f]{12}(?:[0-9a-f]{4})?$/.test(body.machine) ? body.machine : "") : null;
   const folder = s(body.folder, 600);
   if (folder && !path.isAbsolute(folder.replace(/^~(?=$|\/)/, homedir()))) throw new Error("Its folder has to be a full path, like ~/Friday/teammates/Nova.");
   // A list (`projects`), or the one (`project`) as the page sent it before; absent, none was said.
@@ -264,7 +303,7 @@ export async function makeFolder(folder: string): Promise<void> {
  * What a teammate's tool is told with every turn, besides Friday's own note: who it is, what it is for, where it works and how
  * the team works. Read from its record each turn, so a changed role applies from the next.
  */
-export function teammateNote(t: Teammate, team: readonly Pick<Teammate, "name" | "tool" | "role">[], room?: { name: string; with: string[]; purpose?: string; /** The Team room's session, where the rest of the team is reached. */ team?: string }, memory = "", copy?: { repo: string; path: string; branch: string }): string {
+export function teammateNote(t: Teammate, team: readonly Pick<Teammate, "name" | "tool" | "role">[], room?: { name: string; with: string[]; purpose?: string; /** The Team room's session, where the rest of the team is reached. */ team?: string }, memory = "", copy?: { repo: string; path: string; branch: string }, /** Said another way where Friday keeps it elsewhere: who it is, and where its memory is and how it adds to it. */ kept?: { intro: string; memory: string; how: string }): string {
   const others = team.filter((o) => o.name !== t.name);
   const who = (o: Pick<Teammate, "name" | "tool" | "role">) => `${o.name} (${o.tool === "friday" ? "own model" : ENGINE_NAMES[o.tool]}${o.role ? `: ${o.role.split("\n")[0]!.slice(0, 80)}` : ""})`;
   // In a room only its members are lanes beside it, reachable with message_agent; the rest of the team is in the Team room
@@ -273,7 +312,7 @@ export function teammateNote(t: Teammate, team: readonly Pick<Teammate, "name" |
   const away = room ? others.filter((o) => !room.with.includes(o.name)) : [];
   return [
     ...(room ? [`You are in the room "${room.name}"${room.with.length ? ` with ${room.with.join(", ")}` : ", on your own"}: what is said here is about this room's work. You have a conversation of your own in each room you are in; your folder and notes are the same in all of them.${room.purpose ? ` The room is for: ${room.purpose}` : ""}`] : []),
-    `You are ${t.name}, one of the person's AI teammates in Friday, running on their ${runsOnName(t)} on their own computer.`,
+    kept ? kept.intro : `You are ${t.name}, one of the person's AI teammates in Friday, running on their ${runsOnName(t)} on their own computer.`,
     t.role ? `Your role, in their words: ${t.role}` : "You have no set role: help with whatever you are given.",
     projectsOf(t).length
       ? `You work in ${projectsOf(t)[0]}${projectsOf(t).length > 1 ? `, and also in ${projectsOf(t).slice(1).join(", ")}` : ""}: the person's project${projectsOf(t).length > 1 ? "s" : ""}, where the work is done. Your own folder, ${t.folder}, is for your notes and anything of yours.`
@@ -291,15 +330,15 @@ export function teammateNote(t: Teammate, team: readonly Pick<Teammate, "name" |
     `When a teammate handed you the work, end with four short lines: Status (done, partly, blocked), Result (what you made or found), Evidence (files, tests, links), Unblock (what you need, or nothing). Never hand a task back to whoever gave it to you; say what blocks you instead. Decisions the crew should keep to go in ${onOwnModel(t) ? "remember" : "write_note"}.`,
     // Friday Code reaches only the folder it works in, which may be a project rather than its own: it keeps its memory with a
     // tool of its own (update_memory) instead of editing the file.
-    `Your memory is ${path.join(t.folder, MEMORY_FILE)}: what you learn that you will want next time (how the person likes things, where things are, what didn't work). ${onOwnModel(t) ? "Add to it with update_memory as you go" : "Add to it as you go"}, in short lines; keep it under a page.${memory.trim() ? `\nWhat it holds now:\n${memory.trim()}` : " It is empty so far."}`,
+    `Your memory is ${kept ? kept.memory : path.join(t.folder, MEMORY_FILE)}: what you learn that you will want next time (how the person likes things, where things are, what didn't work). ${kept ? kept.how : onOwnModel(t) ? "Add to it with update_memory as you go" : "Add to it as you go"}, in short lines; keep it under a page.${memory.trim() ? `\nWhat it holds now:\n${memory.trim()}` : " It is empty so far."}`,
   ].join("\n");
 }
 
 /** The teammates and the team session, kept in the local store like the automations are. */
 export class TeammateStore {
   constructor(
-    private redis: Redis,
-    private prefix: string,
+    protected redis: Redis,
+    protected prefix: string,
   ) {}
 
   private key = () => `${this.prefix}teammates`;
@@ -431,6 +470,28 @@ export class TeammateStore {
   async setPaused(on: boolean): Promise<void> {
     if (on) await this.redis.set(this.pausedKey(), "1");
     else await this.redis.del(this.pausedKey());
+  }
+
+  private selfRunKey = () => `${this.prefix}teammates:selfrun`;
+
+  /** The rooms running on their own (team-selfrun.ts), by session id: each one's goal, since when, and who turned it on. */
+  async selfRuns(): Promise<Record<string, SelfRun>> {
+    const all = await this.redis.hgetall(this.selfRunKey());
+    const out: Record<string, SelfRun> = {};
+    for (const [sid, raw] of Object.entries(all)) {
+      try {
+        const r = JSON.parse(raw) as SelfRun;
+        if (typeof r.goal === "string" && typeof r.since === "number") out[sid] = r;
+      } catch {
+        // A broken record runs nothing.
+      }
+    }
+    return out;
+  }
+
+  async setSelfRun(sid: string, r: SelfRun | null): Promise<void> {
+    if (r) await this.redis.hset(this.selfRunKey(), sid, JSON.stringify(r));
+    else await this.redis.hdel(this.selfRunKey(), sid);
   }
 
   /** The team session's id, once there is one. */

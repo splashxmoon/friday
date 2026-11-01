@@ -77,7 +77,16 @@ const IMAGE_EXT = /\.(png|jpe?g|gif|webp)$/i;
  * content not shown" however hard anyone tried.
  */
 export function isUsableFile(name: string, type = ""): boolean {
-  return isTextLike(name, type) || IMAGE_TYPE.test(type) || IMAGE_EXT.test(name) || type === "application/pdf" || /\.pdf$/i.test(name);
+  return isTextLike(name, type) || IMAGE_TYPE.test(type) || IMAGE_EXT.test(name) || type === "application/pdf" || /\.pdf$/i.test(name) || isMediaFile(name, type);
+}
+
+/**
+ * A video or a sound: no agent reads it as it reads a picture, but it is a file to work with (cut, transcribe, caption, edit
+ * with the tools on its computer), so it is taken, and larger than the rest (MAX_MEDIA_BYTES; Arun, 2026-10-31: "make sure the
+ * crews can also handle like the work stuff too like sending videos").
+ */
+export function isMediaFile(name: string, type = ""): boolean {
+  return /^(video|audio)\//.test(type) || /\.(mp4|mov|m4v|webm|mkv|avi|mp3|wav|m4a|aac|ogg|flac)$/i.test(name);
 }
 
 /**

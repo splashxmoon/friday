@@ -45,6 +45,7 @@ export const SHORTCUTS: { title: string; keys: [string[], string][] }[] = [
       [["⌘", "⌥", "1", "–", "9"], "Go to a session in the sidebar, counting from the top"],
       [["⌃", "Tab"], "Back to the session you were in before (⇧ goes the other way)"],
       [["⌘", "⇧", "U"], "Next session that's waiting on you"],
+      [["⌘", "⇧", "Y"], "Everything waiting on you, with Friday's suggested answers"],
       [["⌘", "⇧", "Space"], "Quick prompt from anywhere on your computer, with a snapshot of the screen (desktop app)"],
       [["Esc"], "Close menus and dialogs"],
       [["?"], "Show this list"],

@@ -71,11 +71,12 @@ export function dayInZone(tz?: string): (t: number) => string {
 }
 const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.round(v) : 0);
 
-/** A token count as people read it: 950, 12.4k, 3.1M. */
+/** A token count as people read it: 950, 12.4k, 3.1M, 2.2B. */
 export function shortTokens(t: number): string {
   if (t < 1000) return String(Math.round(t));
   if (t < 1_000_000) return `${(t / 1000).toFixed(t < 10_000 ? 1 : 0).replace(/\.0$/, "")}k`;
-  return `${(t / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+  if (t < 1_000_000_000) return `${(t / 1_000_000).toFixed(t < 100_000_000 ? 1 : 0).replace(/\.0$/, "")}M`;
+  return `${(t / 1_000_000_000).toFixed(1).replace(/\.0$/, "")}B`;
 }
 
 /** Roughly how many tokens some text is: about four characters each in English and code. */

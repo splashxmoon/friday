@@ -16,16 +16,19 @@ import { api } from "./api.js";
 import { focusAgent } from "./agentFocus.js";
 import type { Identity } from "./storage.js";
 import { readActivity, type ActivityRun } from "./team-api.js";
+import { ProofToggle } from "./ProofCard.js";
 import { plainLine } from "./team-room.js";
 import { ACCESS, timeOf } from "./team-status.js";
 import { describeCheckIn } from "../teammate-checkins.js";
+import { SkillsPanel } from "./CrewSkills.js";
 import { base, Face, foldersOf, markOf, mateOn, mateStatus, modelLabel, refreshTeam, short, TeammateDialog, TeammateFolderCard, toolName, useTeamNow, workingSinceOf, type Team } from "./Teammates.js";
 
-export type MateTab = "chat" | "activity" | "results" | "memory" | "settings";
+export type MateTab = "chat" | "activity" | "results" | "skills" | "memory" | "settings";
 const TABS: { id: MateTab; label: string }[] = [
   { id: "chat", label: "Chat" },
   { id: "activity", label: "Activity" },
   { id: "results", label: "Results" },
+  { id: "skills", label: "Skills" },
   { id: "memory", label: "Memory" },
   { id: "settings", label: "Settings" },
 ];
@@ -62,6 +65,11 @@ export function TeammatePage({ lane, identity, notify, branch }: { lane: string;
   const today = m.usage?.today;
   const backup = m.tool === "friday" ? null : ENGINE_NAMES[m.backup ?? (m.tool === "claude" ? "codex" : "claude")];
   const longRole = (m.role?.length ?? 0) > 180 || (m.role ?? "").split("\n").length > 3;
+  // Theirs to change: every teammate here; on the hosted service, only its keeper's (CrewHosted.tsx).
+  let mine = true;
+  let keeper = null as string | null;
+  // The computer it runs on, as its keeper's Crew names it: their desktop app's, or one of their always-on machines.
+  let computer = null as { label: string; connected: boolean } | null;
   return (
     <div className="tm-page" data-tab={tab}>
       <header className="tm-head">
@@ -92,7 +100,7 @@ export function TeammatePage({ lane, identity, notify, branch }: { lane: string;
             <div>
               <dt>Access</dt>
               <dd>
-                <button type="button" className="tm-fact-btn" data-mode={m.mode ?? "full"} onClick={() => setMateTab(lane, "settings")} title={`${access.blurb} Change it in Settings.`}>
+                <button type="button" className="tm-fact-btn" data-mode={m.mode ?? "full"} disabled={!mine} onClick={() => setMateTab(lane, "settings")} title={mine ? `${access.blurb} Change it in Settings.` : access.blurb}>
                   <ShieldIcon className="size-3" />
                   {access.label}
                 </button>
@@ -106,6 +114,21 @@ export function TeammatePage({ lane, identity, notify, branch }: { lane: string;
                 {toolName(m.tool)} · {modelLabel(m.tool, m.model)}
               </dd>
             </div>
+            {keeper && (
+              <div>
+                <dt>Keeper</dt>
+                <dd title={mine ? "Yours: it runs on your computer, on your plan" : `${keeper}'s: it runs on ${keeper}'s computer, and what you ask of it goes to ${keeper} first`}>{keeper}</dd>
+              </div>
+            )}
+            {computer && (
+              <div>
+                <dt>Computer</dt>
+                <dd title={computer.connected ? "Connected now" : "Not connected: it starts once this computer is"}>
+                  {computer.label}
+                  {computer.connected ? "" : " · not connected"}
+                </dd>
+              </div>
+            )}
             {backup && (
               <div>
                 <dt>Backup</dt>
@@ -119,7 +142,7 @@ export function TeammatePage({ lane, identity, notify, branch }: { lane: string;
               </div>
             )}
           </dl>
-          {m.held && identity && (
+          {m.held && identity && mine && (
             <p className="tm-head-held">
               On hold: they wait until you lift it.{" "}
               <button type="button" className="tm-link" onClick={() => void api(identity, "/api/teammates/lift", { method: "POST", body: JSON.stringify({ id: m.id }), headers: { "Content-Type": "application/json" } }).then(() => refreshTeam(identity)).catch((e: Error) => notify?.(e.message))}>
@@ -139,14 +162,14 @@ export function TeammatePage({ lane, identity, notify, branch }: { lane: string;
                 <FolderGit2Icon className="size-3" />
                 <b>{base(d)}</b>
                 {i === 0 && branch && <span className="tm-chip-branch">{branch}</span>}
-                {identity && (
+                {identity && mine && (
                   <button type="button" aria-label={`Stop ${m.name} working in ${short(d)}`} title="Take it away" onClick={() => void api(identity, `/api/teammates/${m.id}`, { method: "PATCH", body: JSON.stringify({ projects: foldersOf(m).filter((x) => x !== d) }), headers: { "Content-Type": "application/json" } }).then(() => refreshTeam(identity)).catch(() => {})}>
                     <XIcon className="size-3" />
                   </button>
                 )}
               </span>
             ))}
-            {identity && (
+            {identity && mine && (
               <button type="button" ref={addBtn} className="tm-chip add" onClick={() => setGiving(true)}>
                 <PlusIcon className="size-3" />
                 Folder or repo
@@ -157,7 +180,8 @@ export function TeammatePage({ lane, identity, notify, branch }: { lane: string;
         </div>
       </header>
       <div className="tm-tabs" role="tablist" aria-label={`${m.name}'s page`}>
-        {TABS.map((x) => (
+        {/* Someone else's memory and settings are its keeper's alone (hosted-crew.ts). */}
+        {TABS.filter((x) => mine || (x.id !== "settings" && x.id !== "memory")).map((x) => (
           <button key={x.id} type="button" role="tab" id={`tm-tab-${x.id}`} aria-selected={tab === x.id} aria-controls={x.id === "chat" ? undefined : `tm-panel-${x.id}`} className="tm-tab" onClick={() => setMateTab(lane, x.id)}>
             {x.label}
           </button>
@@ -167,8 +191,9 @@ export function TeammatePage({ lane, identity, notify, branch }: { lane: string;
         <section className="tm-panel" id={`tm-panel-${tab}`} role="tabpanel" aria-labelledby={`tm-tab-${tab}`}>
           {tab === "activity" && <ActivityTab identity={identity} id={m.id} lane={lane} />}
           {tab === "results" && <ResultsTab identity={identity} id={m.id} lane={lane} />}
-          {tab === "memory" && <MemoryEditor identity={identity} id={m.id} name={m.name} />}
-          {tab === "settings" && (
+          {tab === "skills" && <SkillsPanel mate={m} />}
+          {tab === "memory" && mine && <MemoryEditor identity={identity} id={m.id} name={m.name} />}
+          {tab === "settings" && mine && (
             <>
               <TeammateDialog inline identity={identity} editing={m} onClose={() => {}} />
               {(m.checkins?.length ?? 0) > 0 && <p className="tm-sub tm-panel-note">{m.checkins!.map((c) => `${describeCheckIn(c)}: ${c.text}`).join(" · ")}</p>}
@@ -281,11 +306,31 @@ function ResultsTab({ identity, id, lane }: { identity: Identity; id: string; la
     return [...seen];
   }, [runs]);
   const prs = useMemo(() => (runs ?? []).flatMap((r) => prsIn(r.said).map((u) => ({ u, r }))), [runs]);
+  // Work they handed in, each with its proof (team-proof.ts): what shows it worked, before the files.
+  const handed = useMemo(() => (runs ?? []).filter((r) => r.proof).slice(0, 30), [runs]);
   if (failed) return <p className="tm-panel-empty">Their results show here once this Friday is updated.</p>;
   if (!runs) return <Skeleton rows={3} />;
-  if (!files.length && !prs.length) return <p className="tm-panel-empty">No files changed or pull requests in the last seven days.</p>;
+  if (!files.length && !prs.length && !handed.length) return <p className="tm-panel-empty">No files changed or pull requests in the last seven days.</p>;
   return (
     <div className="tm-results">
+      {handed.length > 0 && (
+        <section>
+          <h4 className="tm-day-head">Handed in · {handed.length}</h4>
+          <ul className="tm-result-list">
+            {handed.map((r) => (
+              <li key={`${r.sid}:${r.startedAt}`} className="pf-handed">
+                <span className="pf-handed-title">
+                  <span title={r.proof!.title}>{plainLine(r.proof!.title || r.said.split("\n")[0] || "Its work")}</span>
+                  <span className="pf-num">
+                    {r.room ?? "Crew room"} · {timeOf(r.startedAt)}
+                  </span>
+                </span>
+                <ProofToggle proof={r.proof!} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       {prs.length > 0 && (
         <section>
           <h4 className="tm-day-head">Pull requests</h4>

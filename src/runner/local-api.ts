@@ -1,6 +1,6 @@
 import { readLimits } from "./limits.js";
 import { findApp, forgetLoginStatus, loginStatusQuick } from "./adapters.js";
-import { mkdir, mkdtemp, rm, rmdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, open, rm, rmdir, stat, writeFile } from "node:fs/promises";
 import { homedir, hostname, tmpdir } from "node:os";
 import path from "node:path";
 import { ENGINE_NAMES, ENGINE_TOOLS, TOOL_INFO, toolList, type EngineMode, type EngineTool } from "../types.js";
@@ -9,8 +9,9 @@ import { ADAPTERS, childEnv, findBin, isClaudeAppBundled, launcher, loginStatus,
 import { discoverAgentFiles, parseModelList } from "./agent-files.js";
 import { addWorktree, branchesOf, dropSpares, dropWorktree, primeSpares, remoteBranchesOf, repoInfo, startRepo, worktreeState } from "./git.js";
 import { listCliSessions } from "./imports.js";
-import { knownModels, Runner, stayAttached } from "./runner.js";
+import { holdAwake, knownModels, Runner, stayAttached } from "./runner.js";
 import { askCli } from "./ask.js";
+import { findWork, shownFile, workKind, workType } from "../work-files.js";
 import { installSkill } from "./tool-commands.js";
 import { listBackground, startBackground, stopBackground } from "./background.js";
 import { listServers, stopServer } from "./ports.js";
@@ -125,6 +126,8 @@ export const HOST_METHODS = [
   "servers.stop",
   "background.stop",
   "usage",
+  // A picture, video or sound shown in a hosted session's chat, read a piece at a time (app.ts mediaFromComputer).
+  "workFile",
 ] as const;
 export type HostMethod = (typeof HOST_METHODS)[number];
 
@@ -295,6 +298,13 @@ export async function callHost(method: string, params: Record<string, unknown> =
     }
     case "folders":
       return { home, cloneRoot: defaultCloneRoot(), recent: await recentReposCached() };
+    // Kept awake between turns for `ms` (the server renewing it while its person is away, or a room of theirs runs on its own):
+    // said on the busy line the desktop app keeps the computer awake by.
+    case "awake": {
+      const ms = Math.max(0, Math.min(Number(params.ms) || 0, 10 * 60_000));
+      holdAwake(ms);
+      return { awake: ms > 0 };
+    }
     case "browse":
       return browse(at(params.path));
     case "describe": {
@@ -692,6 +702,28 @@ export async function callHost(method: string, params: Record<string, unknown> =
     // file server for a folder of HTML. Never a command someone typed.
     // What each CLI says about its own limits, read here and shown by the page; nothing leaves the machine but the numbers.
     // One question to the person's own CLI, for the agent builder: plan mode, a scratch folder, text back.
+    // A picture, video or sound a teammate showed in a hosted session's chat, read here a piece at a time for the hosted Friday to
+    // show (app.ts mediaFromComputer; Arun, 2026-10-31: "make sure the crews can also handle like the work stuff too like sending
+    // videos"): only those kinds, and only in the folders the session's lanes work in on this computer.
+    case "workFile": {
+      const roots = (Array.isArray(params.roots) ? params.roots : []).filter((r): r is string => typeof r === "string" && path.isAbsolute(r)).slice(0, 20);
+      const abs = typeof params.abs === "string" ? params.abs.slice(0, 1000) : "";
+      const rel = typeof params.path === "string" ? params.path.slice(0, 600) : "";
+      let file = abs ? await shownFile(abs, roots) : null;
+      if (!file && !abs) file = await findWork(roots, rel);
+      if (!file || !["image", "video", "audio"].includes(workKind(file) ?? "")) throw new Error(`${abs || rel} isn't a picture, video or sound in this session's ${roots.length} folder${roots.length === 1 ? "" : "s"}.`);
+      const { size, mtimeMs } = await stat(file);
+      const offset = Math.max(0, Math.floor(Number(params.offset) || 0));
+      const length = Math.min(4 * 1024 * 1024, Math.max(0, Math.floor(Number(params.length) || 0)), Math.max(0, size - offset));
+      const fh = await open(file, "r");
+      try {
+        const buf = Buffer.alloc(length);
+        if (length) await fh.read(buf, 0, length, offset);
+        return { size, mtime: Math.floor(mtimeMs), type: workType(file), data: buf.toString("base64") };
+      } finally {
+        await fh.close();
+      }
+    }
     case "ask": {
       const tool = str(params.tool, 20) as EngineTool;
       if (!ENGINE_TOOLS.includes(tool)) throw new Error(`Pick ${toolList()}.`);

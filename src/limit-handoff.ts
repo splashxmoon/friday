@@ -27,12 +27,15 @@ import { engineName, liveMachine, MAIN_LANE, type EventBody, type SessionEvent }
  * carry on by itself then, as that person; with neither, the card is left for a person, as before.
  */
 
-/** Who should carry on the limited run on `lane`, best first, each with why. */
-export function limitTargets(state: SessionState, events: SessionEvent[], lane: string, now = Date.now()): { id: string; why: string }[] {
+/**
+ * Who should carry on the limited run on `lane`, best first, each with why. `owner`: whose work it is, when that is known
+ * better than from the lane (a queued message moved ahead of the limit, limit-ahead.ts: whoever sent it).
+ */
+export function limitTargets(state: SessionState, events: SessionEvent[], lane: string, now = Date.now(), owner?: string): { id: string; why: string }[] {
   const from = state.engines[lane];
   if (!from?.tool) return [];
   // Whose work this is: the person the limited lane was working for (its host's, on a plan of its own).
-  const owner = taskOwner(events, lane, Number.MAX_SAFE_INTEGER) ?? from.hostId;
+  owner ??= taskOwner(events, lane, Number.MAX_SAFE_INTEGER) ?? from.hostId;
   const rootOf = (e: { cwd: string; copyOf?: string; root?: string }) => e.copyOf ?? e.root ?? e.cwd;
   const limited = limitedLanes(state, events, now);
   const out: { id: string; why: string; score: number }[] = [];

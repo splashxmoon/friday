@@ -30,5 +30,7 @@ test("a hand-off carries the work of the run it came from, counted from the tool
 
 test("token counts read as people say them, and text is about four characters a token", () => {
   assert.deepEqual([950, 1240, 48_000, 2_100_000].map(shortTokens), ["950", "1.2k", "48k", "2.1M"]);
+  // A month of busy agents runs into billions: "2.2B", not "2177.5M" (Arun's screenshot, 2026-10-31).
+  assert.deepEqual([58_100_000, 241_000_000, 2_177_500_000].map(shortTokens), ["58.1M", "241M", "2.2B"]);
   assert.equal(tokensIn("x".repeat(4001)), 1001);
 });

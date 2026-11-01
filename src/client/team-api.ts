@@ -39,11 +39,14 @@ export const readAway = (identity: Identity) => quietly<Away>(identity, "/api/te
 export const setAway = (identity: Identity, until: number | null) => api<Away>(identity, "/api/teammates/away", { method: "POST", body: JSON.stringify({ until }), headers: JSON_BODY });
 export const readSince = (identity: Identity, ts: number) => quietly<Brief>(identity, `/api/teammates/since?ts=${Math.floor(ts)}`);
 export const stopAll = (identity: Identity) => api<{ stopped: string[] }>(identity, "/api/teammates/stop-all", { method: "POST", body: "{}", headers: JSON_BODY });
+/** A room set to run on its own toward `goal`, or back (`goal` null). */
+/** A room set running on its own toward `goal`, with its budget and end time (team-budget.ts RunBudget), or stopped (null). */
+export const setSelfRun = (identity: Identity, sid: string, goal: string | null, budget?: { tokens: number; until?: number; tz: string }) => api<unknown>(identity, "/api/teammates/selfrun", { method: "POST", body: JSON.stringify(goal === null ? { sid, on: false } : { sid, goal, ...(budget ? { budget } : {}) }), headers: JSON_BODY });
 export const setPaused = (identity: Identity, paused: boolean) => api<unknown>(identity, "/api/teammates/pause", { method: "POST", body: JSON.stringify({ paused }), headers: JSON_BODY });
 export const readActivity = (identity: Identity, id: string, days = 7) => quietly<{ runs: ActivityRun[] }>(identity, `/api/teammates/${id}/activity?days=${days}`);
 
 /** Whether a brief has anything in it worth a card. */
-export const briefEmpty = (b: Brief) => !b.done.length && !b.failed.length && !b.waiting.length && !b.assumptions.length;
+export const briefEmpty = (b: Brief) => !b.done.length && !b.failed.length && !b.waiting.length && !b.assumptions.length && !b.stops?.length;
 
 /** The next 8:00 AM from now: away mode's default end (Arun, 2026-10-28: "Away until 8:00 AM"). */
 export function nextEight(now = Date.now()): number {

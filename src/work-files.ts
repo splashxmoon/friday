@@ -166,6 +166,8 @@ const LIST_TTL_MS = 3_000;
 const listed = new Map<string, { at: number; files: Promise<WorkFile[]> }>();
 
 export const workKind = (file: string): WorkKind | undefined => KINDS[path.extname(file).toLowerCase()];
+/** A file's media type, by its extension, as serveWork sends it. */
+export const workType = (file: string): string => TYPES[path.extname(file).toLowerCase()] ?? "application/octet-stream";
 
 /** A path inside a folder as the panels and agents name it: with forward slashes, on Windows too. */
 const slashed = (rel: string) => rel.split(path.sep).join("/");
@@ -276,6 +278,52 @@ export async function workPath(root: string, rel: string): Promise<string | null
   } catch {
     return null;
   }
+}
+
+/**
+ * A piece an agent named by a path from its own folder, in any of the session's folders: as named at the top of one, else the
+ * newest of that name further in (Arun, 2026-10-31: Nova named `skit-1-v3.mp4` and the chat said it wasn't there; it was in
+ * a renders folder). Null when none has it.
+ */
+export async function findWork(roots: string[], rel: string): Promise<string | null> {
+  if (!rel || rel.includes("\0")) return null;
+  for (const r of roots) {
+    const at = await workPath(r, rel);
+    if (at) return at;
+  }
+  // By its name, walking the folders' names only (no file is opened or measured, so a render's thousands of frames don't use
+  // the time up), newest of any that match.
+  const want = slashed(rel).replace(/^\.\//, "");
+  const name = want.split("/").pop()!;
+  const hits: string[] = [];
+  let entries = 0;
+  const t0 = Date.now();
+  const walk = async (root: string, dir: string, depth: number): Promise<void> => {
+    if (entries > 200_000 || Date.now() - t0 > 5_000) return;
+    let list;
+    try {
+      list = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of list) {
+      entries++;
+      if (e.name.startsWith(".")) continue;
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        if (depth < MAX_DEPTH && !SKIP.has(e.name)) await walk(root, p, depth + 1);
+      } else if (e.name === name && `/${slashed(p)}`.endsWith(`/${want}`)) {
+        // Matched on its whole path: an agent may name it from a folder above its own (`Pip/marketing/skits/out/skit-1-v3.mp4`
+        // from the crew's folder, Pip's being `…/teammates/Pip`), and the folder must match whole (`ip/…` is not `Pip/…`).
+        const at = await workPath(root, path.relative(root, p));
+        if (at) hits.push(at);
+      }
+    }
+  };
+  for (const r of roots) await walk(r, r, 0);
+  if (hits.length < 2) return hits[0] ?? null;
+  const times = await Promise.all(hits.map((h) => stat(h).then((s) => s.mtimeMs, () => 0)));
+  return hits[times.indexOf(Math.max(...times))]!;
 }
 
 /** Where the agents' browser keeps its screenshots (local/desktop-browser.ts): pictures an agent shows in the chat. */

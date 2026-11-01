@@ -22,6 +22,9 @@ import { engineName, MAIN_LANE, type ActorRef, type BoardTaskDef, type EngineMod
 import { BROWSER_TOOL, browserCall, browserDriver } from "./browser-driver.js";
 import { APP_INSTRUCTIONS, APP_TOOLS } from "./app-tools.js";
 import { loopBetween } from "./team-away.js";
+import { SKILL_TOOLS } from "./team-skills.js";
+import { proofText, taskProof } from "./team-proof.js";
+import { keepProofShot, postProof, PROOF_TOOL } from "./team-proof-tool.js";
 export { meshHead } from "./mesh-note.js";
 
 /**
@@ -58,8 +61,12 @@ export const LEAD_PAIR = 24;
 /** The most tasks one board holds, and how many times a review may send one back before the lead or a person decides. */
 export const MAX_BOARD_TASKS = 24;
 export const MAX_REWORK = 2;
-/** Lines changed (added and removed) up to which a task whose own tests passed goes through without a second agent's check. */
-export const SMALL_CHANGE = 200;
+/**
+ * Lines changed (added and removed) up to which a task whose own tests passed goes through without a second agent's check. 600:
+ * a review is a full turn of another agent's long conversation (about 250k tokens), and in the benchmark it found nothing the
+ * tests hadn't (Arun, 2026-10-31: "i am burning through my claude code usage pretty fast").
+ */
+export const SMALL_CHANGE = 600;
 /** How long a finished task's checks may run in its agent's folder. */
 export const CHECK_SECONDS = 600;
 /** A task whose agent isn't working, waiting or queued, and has been quiet this long, is handed to someone else (sweep). */
@@ -301,10 +308,11 @@ export const MESH_TOOLS: MeshToolDef[] = [
   },
   {
     name: "finish_task",
-    description: "Mark a board task you have as finished, with a short report (done or blocked, what you did, what's left). A task marked blocked is still yours to finish once it is unblocked; the agent that posted the board can finish a stuck task too. Friday adds the files you changed and the checks you ran, runs the board's check in your folder (a failure comes straight back to you with its output), and then another agent reviews it. Ending your turn with the report does the same.",
+    description: "Mark a board task you have as finished, with a short report (done or blocked, what you did, what's left). A task marked blocked is still yours to finish once it is unblocked; the agent that posted the board can finish a stuck task too. Friday adds the files you changed and the checks you ran, runs the board's check in your folder (a failure comes straight back to you with its output), and then another agent reviews it. Ending your turn with the report does the same. Hand in post_proof first.",
     inputSchema: obj({ id: { type: "string" }, report: { type: "string" }, blocked: { type: "boolean", description: "True when you can't go on without someone." }, decline: { type: "boolean", description: "True when this task isn't yours to do (outside your part of the work, or you were told to stay off it). It goes back on the board for another agent and is never offered to you again. Say why in the report." } }, ["id", "report"]),
     annotations: { destructiveHint: false, openWorldHint: false },
   },
+  PROOF_TOOL as MeshToolDef,
   {
     name: "check_messages",
     description: "Read what has come in for you while you work: messages and questions other agents sent you, the team's updates, and files another agent is changing that you changed too. Without this they reach you only when your current turn ends. Check between steps of a long task, and whenever a friday tool says something is waiting.",
@@ -369,7 +377,7 @@ export const MESH_TOOLS: MeshToolDef[] = [
  * they work (Arun, 2026-10-20: "constantly updating and stuff like checking up on each other").
  */
 export const MESH_INSTRUCTIONS =
-  "You are one of several agents in a Friday session; people watch all of you live. These tools keep an open line to the other agents: list_agents to see who is here and what each is doing, check_messages to read what came in for you while you work (do it between the steps of a long task), post_update to tell everyone what you finished or changed without interrupting them, message_agent to tell one agent something it must act on, message_team to tell several or everyone at once, ask_agent to ask one and wait for its answer, reply_to_agent to answer a question asked of you, wait_for_agent to wait until another finishes work yours depends on, show_preview to open a page you started (a dev server on localhost) in the session's Preview panel for the people here, preview_screenshot to see it yourself (never launch Chrome or install a browser to look), list_tasks, claim_task and finish_task for the session's shared task board (take the next ready task when you finish one), read_notes and write_note for the session's shared notes, claim_files before you change files others may be changing (and release_files when done), wake_me_when to be woken when what you wait on happens (another agent's turn, a board task, a job you left running) instead of ending on 'waiting' for a person to check back, hand_off to pass work on, and list_sessions, read_session and message_session for the other Friday sessions your person is in (tell one when you change something it builds on). Stay in touch while you work: check_messages between steps, post_update a one-line status each time you finish a piece (what is done, what is next) and whenever you change something others build on (an interface, a shared file, a schema), and when your work depends on another agent, read what it posted, ask it or wait_for_agent rather than guessing or stopping. Check before you edit a file another agent may be changing. Your own sub-agents are helpers inside your task, in your folder; the agents here are teammates with folders of their own, for work that runs alongside yours. These friday tools are yours, not your sub-agents': they report to you, and you speak for them. Keep going until your task is fully done. Don't chat: every message shows in the session's feed.";
+  "You are one of several agents in a Friday session; people watch all of you live. These tools keep an open line to the other agents: list_agents to see who is here and what each is doing, check_messages to read what came in for you (messages also reach you while you work, so there is no need to keep checking), post_update to tell everyone what you finished or changed without interrupting them, message_agent to tell one agent something it must act on, message_team to tell several or everyone at once, ask_agent to ask one and wait for its answer, reply_to_agent to answer a question asked of you, wait_for_agent to wait until another finishes work yours depends on, show_preview to open a page you started (a dev server on localhost) in the session's Preview panel for the people here, preview_screenshot to see it yourself (never launch Chrome or install a browser to look), list_tasks, claim_task, post_proof and finish_task for the session's shared task board (take the next ready task when you finish one), read_notes and write_note for the session's shared notes, claim_files before you change files others may be changing (and release_files when done), wake_me_when to be woken when what you wait on happens (another agent's turn, a board task, a job you left running) instead of ending on 'waiting' for a person to check back, hand_off to pass work on, and list_sessions, read_session and message_session for the other Friday sessions your person is in (tell one when you change something it builds on). Stay in touch without chatter, since every message and tool call costs usage: post_update once when you finish your task, and whenever you change something others build on (an interface, a shared file, a schema); when your work depends on another agent, read what it posted, ask it or wait_for_agent rather than guessing or stopping. Check before you edit a file another agent may be changing. Your own sub-agents are helpers inside your task, in your folder; the agents here are teammates with folders of their own, for work that runs alongside yours. These friday tools are yours, not your sub-agents': they report to you, and you speak for them. Keep going until your task is fully done. Don't chat: every message shows in the session's feed.";
 
 /**
  * A page on this machine from what an agent gave (http://localhost:5173/x, localhost:5173, 5173), as the Preview opens it.
@@ -441,6 +449,7 @@ export const TEAMMATE_TOOL: MeshToolDef = {
   ),
   annotations: { destructiveHint: false, openWorldHint: false },
 };
+
 
 /**
  * In a team, the lead's hand on the others (Arun, 2026-10-27: the OpenBot gap "lead interrupt/status tools"): stop a teammate's
@@ -575,6 +584,17 @@ export class AgentMesh {
    * true when that is what happened, and the usual hand-on to another agent is skipped. Set by the app.
    */
   teamSwitch: ((sid: string, lane: string) => Promise<boolean>) | null = null;
+  /**
+   * A board task the board couldn't hand to `lane` (its send refused): asked of whoever can let it go there instead, when there is
+   * someone (the hosted service: a teammate on its keeper's own plan, asked of its keeper as a card). True when it was; the task
+   * waits on the board meanwhile. Set by the app; the open-source edition has nobody else to ask.
+   */
+  boardRefused: ((sid: string, task: BoardTask, lane: string, why: string) => Promise<boolean>) | null = null;
+
+  /** The crew's skills (team-skills.ts SKILL_TOOLS: list_skills, use_skill, save_skill): where offered, and the call. Set by the app. */
+  skillTools: { offered(sid: string): Promise<boolean>; call(sid: string, lane: string, name: string, args: Record<string, unknown>): Promise<MeshResult> } | null = null;
+  /** Where a proof's picture is kept (team-proof.ts keepProofShot): a file of the session, its id answered. Set by the app. */
+  proofFiles: ((sid: string, data: Buffer, type: string) => Promise<string>) | null = null;
   /** manage_teammate (TEAMMATE_TOOL): where it is offered, and the call. Set by the app. */
   teammateTool: { offered(sid: string): Promise<boolean>; call(sid: string, lane: string, args: Record<string, unknown>): Promise<MeshResult> } | null = null;
   /**
@@ -624,6 +644,7 @@ export class AgentMesh {
     let l = meshListing(screenshot);
     if (this.appTools) l = { tools: [...l.tools, ...APP_TOOLS], instructions: `${l.instructions}${APP_INSTRUCTIONS}` };
     if (this.teammateTool && (await this.teammateTool.offered(sid).catch(() => false))) l = { ...l, tools: [...l.tools, TEAMMATE_TOOL] };
+    if (this.skillTools && (await this.skillTools.offered(sid).catch(() => false))) l = { ...l, tools: [...l.tools, ...SKILL_TOOLS] };
     // A team's lead steers the others (steer_agent) and puts its board right (manage_task): offered in a team session, answered
     // for its lead only.
     if ((await this.store.state(sid).catch(() => null))?.options.team) l = { tools: [...l.tools, STEER_TOOL, BOARD_TOOL], instructions: `${l.instructions} If you lead the crew, steer_agent stops a teammate's turn or cuts in with new orders that reach it now, and manage_task cancels, retries or reassigns a board task.` };
@@ -763,6 +784,7 @@ export class AgentMesh {
           return previewShot(args);
         case "browser": return await browserCall(sid, args, signal, lane);
         case "manage_teammate": return this.teammateTool ? await this.teammateTool.call(sid, lane, args) : { output: "There's no crew here.", isError: true };
+        case "list_skills": case "use_skill": case "save_skill": return this.skillTools ? await this.skillTools.call(sid, lane, name, args) : { output: "There's no crew here.", isError: true };
         case "search_sessions": case "start_session": case "manage_automation": return this.appTools ? await this.appTools.call(sid, lane, name, args) : { output: "That isn't available here.", isError: true };
         case "steer_agent": return await this.steer(sid, lane, args);
         case "manage_task": return await this.manageTask(sid, lane, args);
@@ -774,6 +796,10 @@ export class AgentMesh {
           return { output: boardText(await this.store.state(sid), lane) };
         case "claim_task":
           return await this.claim(sid, lane, str(args.id));
+        case "post_proof":
+          return await postProof(this.store, sid, lane, args, localPage);
+        case "__proof_shot":
+          return await keepProofShot(this.store, this.proofFiles, sid, lane, args);
         case "finish_task":
           return await this.finish(sid, lane, str(args.id), str(args.report), args.blocked === true, args.decline === true);
         case "post_update":
@@ -1142,7 +1168,10 @@ export class AgentMesh {
     const text = req.text.trim().slice(0, MAX_TEXT);
     if (!text) return { ok: false, error: "The message is empty." };
     const [state, events] = await Promise.all([this.store.state(sid), this.store.events(sid)]);
-    const { person, hop } = behind(state, events, from);
+    const behindLane = behind(state, events, from);
+    // The board's own hand-outs of a board Friday posted for a person (a hosted crew workflow's) are that person's work, whatever
+    // last ran on the lane it came from: a room's owner was taken for it, and refused the workflow's owner's own teammates.
+    const { person, hop } = req.system && req.board && state.board?.by ? { person: state.board.by, hop: behindLane.hop } : behindLane;
     // Whom it may reach: what the person behind it could steer, as for a handoff. With nobody behind it, only an agent nobody
     // steers and nobody's own coding tool.
     const refusal = (id: string): string | null => {
@@ -1231,12 +1260,15 @@ export class AgentMesh {
     const mesh: MeshNote = { id, kind: req.kind, fromLane: from, fromName: laneName(state, from), toName, hop: req.system ? 1 : hop + 1, by: person, ...(req.board ? { board: req.board } : {}), ...(req.review ? { review: true } : {}), ...(req.carriedFrom ? { carriedFrom: req.carriedFrom } : {}), ...(req.team ? { team: req.team } : {}) };
     // A board task's title alone, so the page shows it without the brief (Board task "t1": …).
     if (req.board) mesh.title = state.board?.tasks.find((t) => t.id === req.board)?.title;
+    // Whether it is on hold, read before this message is logged: the store's events are its live list, so once another read
+    // catches up, this message is in `events` too, and a lead's message reads as lifting the hold it only queued behind.
+    const held = heldByPerson(events, to);
     const sent = await this.store.append(sid, agentActor(mesh.fromName), { type: "instruction", text, interrupt: !!req.interrupt, mesh }, { lane: to, expectDriver: driverOf(state, to)?.id ?? "" });
     if (!sent.ok) return { ok: false, error: `${toName} changed hands just now, so the message wasn't sent. Try again.` };
     void this.bus.wake(sid, to);
     const engine = state.engines[to];
     // On hold as a person said: it waits in its queue and doesn't start a turn (held.ts runnableQueue), and the sender is told.
-    return { ok: true, id, to, toName, busy: runOf(state, to).status === "running", offline: !!engine?.tool && !engine.online, held: heldByPerson(events, to) };
+    return { ok: true, id, to, toName, busy: runOf(state, to).status === "running", offline: !!engine?.tool && !engine.online, held };
   }
 
   /** Ask and wait for the answer, for as long as `wait` or the asker being stopped allow. */
@@ -1521,7 +1553,8 @@ export class AgentMesh {
     else if (await this.runChecks(sid, t.id)) await this.reviewOrPass(sid, t.id);
     const handed = await this.dispatch(sid);
     const next = readyTasks(await this.store.state(sid)).find((x) => suits(x, name)) ?? readyTasks(await this.store.state(sid))[0];
-    return { output: `${blocked ? "Marked blocked; the lead (or whoever posted the board) hears it now. It stays yours: once it is unblocked, call finish_task on it again." : "Finished; another agent checks it."}${handed.length ? ` Handed out: ${handed.join(", ")}.` : ""}${next ? ` Next ready: "${next.id}" ${next.title}. claim_task to take it.` : ""}` };
+    const proved = events.some((e) => e.seq > since.seq && e.body.type === "proof.posted" && e.body.id === t.id);
+    return { output: `${blocked ? "Marked blocked; the lead (or whoever posted the board) hears it now. It stays yours: once it is unblocked, call finish_task on it again." : "Finished; another agent checks it."}${proved || blocked ? "" : ` It went in without proof: post_proof for "${t.id}" now, and before finish_task next time.`}${handed.length ? ` Handed out: ${handed.join(", ")}.` : ""}${next ? ` Next ready: "${next.id}" ${next.title}. claim_task to take it.` : ""}` };
   }
 
   /** A finished task is checked by another agent before it counts; one that changed nothing has nothing to check. */
@@ -1856,8 +1889,11 @@ export class AgentMesh {
         // couldn't review this one" with no diff to read, and the task went round again for nothing (Arun, 2026-10-24, t3).
         const to = pickReviewer(state, review.lane!, reviewers);
         const name = laneName(state, to);
+        // Its proof first (team-proof.ts), from the log as this hand-out began: no read between picking and asking.
+        const proof = taskProof(evs, review.id);
         const brief = [
           `Check ${review.name}'s work on the board task "${review.title}".`,
+          proof ? proofText(proof) : "",
           `The task: ${review.detail}${review.owns.length ? `\nFiles it owns: ${review.owns.join(", ")}` : ""}`,
           whereWork(state, review.lane!, to, review.name ?? laneName(state, review.lane!)),
           // Where it can't open the folder, the change itself, as Friday has it from the run.
@@ -1895,7 +1931,8 @@ export class AgentMesh {
         }
         const r = await this.send(sid, state.board!.fromLane, { to: name, toLane: lane, text: taskBrief(state, chosen), kind: "task", board: chosen.id, system: true });
         if (!r.ok) {
-          this.refused.set(`${sid}|${chosen.id}`, r.error);
+          const asked = await this.boardRefused?.(sid, chosen, lane, r.error).catch(() => false);
+          this.refused.set(`${sid}|${chosen.id}`, asked ? `Waiting for ${name}'s keeper to take it on.` : r.error);
           continue;
         }
         this.refused.delete(`${sid}|${chosen.id}`);
@@ -1931,6 +1968,8 @@ export class AgentMesh {
       // Sent first, claimed once it went: a task that couldn't reach that agent stays on the board for someone else.
       const r = await this.send(sid, state.board!.fromLane, { to: name, text: taskBrief(state, pick.t), kind: "task", board: pick.t.id, system: true });
       if (!r.ok) {
+        // Nobody else free takes it meanwhile? It may still go to this one through whoever can let it (boardRefused).
+        if (!free.some((l) => l !== pick!.to && !skip.has(l) && may(pick!.t, l))) await this.boardRefused?.(sid, pick.t, pick.to, r.error).catch(() => false);
         skip.add(pick.to);
         continue;
       }
@@ -2565,7 +2604,7 @@ export function whereWork(state: SessionState, doer: string, reviewer: string, n
   return `${name} works on ${e.hostName}'s computer, in ${at}, which you can't open. Ask it for the diff (ask_agent), or check what it has pushed on that branch.`;
 }
 
-function taskBrief(state: SessionState, t: BoardTask): string {
+export function taskBrief(state: SessionState, t: BoardTask): string {
   const others = (state.board?.tasks ?? []).filter((x) => x.id !== t.id && (x.status === "claimed" || x.status === "review") && x.name);
   return [
     `Board task "${t.id}": ${t.title}`,

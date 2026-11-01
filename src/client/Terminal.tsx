@@ -4,10 +4,15 @@
  * Where shells come from: the desktop app's own (window.fridayDesktop.terminal), or the hosted Friday's way to a shell on another
  * machine of yours (remoteTerminal.ts). The local edition has the desktop app's only.
  */
-const shells: { api: () => NonNullable<Window["fridayDesktop"]>["terminal"] | undefined; onDrop: (fn: () => void) => () => void } = {
+type ShellApi = NonNullable<Window["fridayDesktop"]>["terminal"];
+const shells: { api: () => ShellApi | undefined; onDrop: (fn: () => void) => () => void; lane: (machine?: string) => Promise<ShellApi | undefined> } = {
   api: () => (typeof window === "undefined" ? undefined : window.fridayDesktop?.terminal),
   onDrop: () => () => {},
+  lane: async () => shells.api(),
 };
+/** Each coding agent's screen, by its id (toolShellId): drawn, written to and closed where it was started, on the agent's computer. */
+const laneShells = new Map<string, ShellApi>();
+const shellFor = (id: string) => laneShells.get(id) ?? shells.api();
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ToolResult, ToolResultOutput } from "@/components/agents/tool-result";
@@ -424,10 +429,10 @@ function LocalShell({ id, cwd, run, onOutput, onOpenFile }: { id: string; cwd?: 
   told.current = onOutput;
 
   useEffect(() => {
-    const api = shells.api();
+    const api = shellFor(id);
     const el = host.current;
     if (!api || !el) return;
-    hear();
+    hear(api);
     let dead = false;
     const stop: (() => void)[] = [];
 
@@ -849,11 +854,10 @@ const opened = new Map<string, { line: string; cwd: string }>();
  */
 const printedAt = new Map<string, number>();
 const typedAt = new Map<string, number>();
-let hearing = false;
-function hear(): void {
-  const api = shells.api();
-  if (hearing || !api) return;
-  hearing = true;
+const heard = new WeakSet<object>();
+function hear(api: ShellApi | undefined): void {
+  if (!api || heard.has(api)) return;
+  heard.add(api);
   api.onData((which) => printedAt.set(which, Date.now()));
 }
 /** Nothing printed for a few seconds, and nothing typed for `typedFor`: the tool is waiting, not working. */
@@ -872,7 +876,7 @@ export const handingBack = (sid: string, lane: string) => leaving.has(`${sid}|${
 export function handBackWhenDone(sid: string, invite: string, lane: string, o: { typedFor?: number; unless?: () => boolean } = {}): void {
   const key = `${sid}|${lane}`;
   if (leaving.has(key)) return;
-  hear();
+  hear(shellFor(toolShellId(sid, lane)));
   const stop = () => (clearInterval(leaving.get(key)), leaving.delete(key));
   const go = () => {
     if (o.unless?.()) return void stop();
@@ -911,15 +915,16 @@ export async function openLaneTerminal(sid: string, invite: string, lane: string
  */
 /** Screens on their way, by `sid|lane`: a second ask for one waits on the first and hears how it went, rather than nothing. */
 const warming = new Map<string, Promise<{ error: string; busy?: boolean } | null>>();
-export function warmLaneTerminal(sid: string, invite: string, lane: string): Promise<{ error: string; busy?: boolean } | null> {
+export function warmLaneTerminal(sid: string, invite: string, lane: string, machine?: string): Promise<{ error: string; busy?: boolean } | null> {
   const key = `${sid}|${lane}`;
-  const api = shells.api();
-  if (!api) return Promise.resolve({ error: "This window has no terminal: open Friday's desktop app." });
-  hear();
+  if (!shells.api()) return Promise.resolve({ error: "This window has no terminal: open Friday's desktop app." });
   const going = warming.get(key);
   if (going) return going;
   const run = (async () => {
     try {
+      // On the computer the agent runs on, which needn't be the one the Terminal panel has picked.
+      const api = await bindLaneShell(sid, lane, machine);
+      if (!api) return { error: "That agent's computer has no terminal Friday can reach." };
       // Always asked, never taken from what an earlier open left: handed back since, the lane would run its screen without its
       // turns held, and the view would wait for an open the server never heard of (Arun's screenshot: "Opening Claude Code…").
       const r = await openLaneTerminal(sid, invite, lane);
@@ -938,12 +943,21 @@ export function warmLaneTerminal(sid: string, invite: string, lane: string): Pro
   return run;
 }
 
+/** Where the agent's screen is drawn and typed into from now on: the agent's own computer's shells. */
+async function bindLaneShell(sid: string, lane: string, machine?: string): Promise<ShellApi | undefined> {
+  const api = await shells.lane(machine);
+  if (api) laneShells.set(toolShellId(sid, lane), api);
+  hear(api);
+  return api;
+}
+
 /** Back to Friday: the tool's screen closed, and the lane takes its turns again, from where the terminal left its conversation. */
 export async function handBack(sid: string, invite: string, lane: string): Promise<void> {
   clearInterval(leaving.get(`${sid}|${lane}`));
   leaving.delete(`${sid}|${lane}`);
   opened.delete(`${sid}|${lane}`);
-  shells.api()?.kill(toolShellId(sid, lane));
+  shellFor(toolShellId(sid, lane))?.kill(toolShellId(sid, lane));
+  laneShells.delete(toolShellId(sid, lane));
   forgetScreen(toolShellId(sid, lane));
   await fetch(`/api/sessions/${sid}/terminal?invite=${encodeURIComponent(invite)}`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lane, open: false }) }).catch(() => {});
 }
@@ -1018,14 +1032,14 @@ export function useTuiView(): [boolean, (on: boolean) => void] {
  */
 export function ViewToggle({ on, name, onToggle, size = 14, className = "" }: { on: boolean; name: string; onToggle: () => void; size?: number; className?: string }) {
   return (
-    <button type="button" className={`view-toggle${on ? " on" : ""}${className ? ` ${className}` : ""}`} aria-pressed={on} aria-label={on ? "Terminal view on: back to chat" : `Terminal view, for ${name} and every agent`} data-tip={on ? "Terminal view on · back to chat" : "Terminal view"} onClick={onToggle}>
+    <button type="button" className={`view-toggle${on ? " on" : ""}${className ? ` ${className}` : ""}`} aria-pressed={on} aria-label={on ? "Terminal view on: back to chat" : name === "every agent" ? "Terminal view, for every agent" : `Terminal view, for ${name} and every agent`} data-tip={on ? "Terminal view on · back to chat" : "Terminal view"} onClick={onToggle}>
       <Icon name="terminalSquare" size={size} />
     </button>
   );
 }
 
 /** The agent's coding tool in its own screen, in place of the chat: a real shell in the agent's folder, its tool on the conversation. */
-export function LaneTui({ sid, invite, lane, tool, title, onBack }: { sid: string; invite: string; lane: string; tool: EngineTool; /** The agent's own name, when it isn't its tool's ("Reviewer"). */ title?: string; /** Back to Friday's own view of it, handed back. */ onBack: () => void }) {
+export function LaneTui({ sid, invite, lane, tool, title, machine, onBack }: { sid: string; invite: string; lane: string; tool: EngineTool; /** The agent's own name, when it isn't its tool's ("Reviewer"). */ title?: string; /** The computer the agent runs on (EngineInfo.machine), where its screen is. */ machine?: string; /** Back to Friday's own view of it, handed back. */ onBack: () => void }) {
   const key = `${sid}|${lane}`;
   // Its own agent's line only: kept from another agent, it started that agent's tool in this one's screen.
   const [had, setRun] = useState(() => ({ key, run: opened.get(key) ?? null }));
@@ -1036,7 +1050,7 @@ export function LaneTui({ sid, invite, lane, tool, title, onBack }: { sid: strin
   useEffect(() => {
     if (run) return;
     let gone = false;
-    void openLaneTerminal(sid, invite, lane).then((r) => !gone && ("error" in r ? setErr(r.error) : setRun({ key, run: r })));
+    void Promise.all([openLaneTerminal(sid, invite, lane), bindLaneShell(sid, lane, machine)]).then(([r]) => !gone && ("error" in r ? setErr(r.error) : setRun({ key, run: r })));
     return () => void (gone = true);
   }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
   const name = engineName(tool);

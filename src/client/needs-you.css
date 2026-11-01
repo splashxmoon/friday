@@ -1,0 +1,55 @@
+/* Needs you (NeedsYou.tsx): the queue of what waits on you. A quiet list in the direction's terms: rows on hairlines, not cards;
+   the asker's face wears the amber "needs" ring; Friday's suggestion is one line with the answer in weight, and its button is the
+   only filled one in the row. The row the keys are on is raised, as a selected sidebar row is. */
+
+.ny-page .page-inner { max-width: 760px; gap: 0; }
+.ny-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; padding: 0 12px 14px; }
+.ny-count { margin: 0; font-size: 15px; line-height: 22px; font-weight: 500; color: var(--ink); }
+.ny-keys { margin: 0; font-size: 12px; line-height: 18px; color: var(--faint); }
+.ny-keys kbd { margin-right: 2px; }
+.ny-empty { margin: 8px 12px; max-width: 60ch; font-size: 13px; line-height: 20px; color: var(--text-muted); }
+.ny-error { margin: 6px 0 0; font-size: 13px; line-height: 18px; color: var(--red); }
+.ny-head + .ny-error { margin: 0 12px 10px; }
+
+.ny-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--border); }
+.ny-row { display: flex; gap: 12px; padding: 14px 12px; border-bottom: 1px solid var(--border); border-radius: 0; outline: none; transition: background-color var(--t-hover) var(--ease-out); }
+.ny-row:hover { background: color-mix(in srgb, var(--hover) 50%, transparent); }
+.ny-row.on { background: var(--hover); border-radius: var(--r-md); border-bottom-color: transparent; }
+/* The row above a raised one keeps its hairline off too, so the raised row reads as one shape. */
+.ny-row:has(+ .ny-row.on) { border-bottom-color: transparent; }
+.ny-row:focus-visible { box-shadow: inset 0 0 0 2px var(--border-focus); }
+.ny-face { flex: none; margin-top: 2px; }
+
+.ny-body { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
+.ny-who { display: flex; align-items: baseline; gap: 4px; margin: 0; font-size: 13px; line-height: 18px; color: var(--text-muted); min-width: 0; }
+.ny-name { color: var(--ink); font-weight: 500; white-space: nowrap; }
+.ny-where { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ny-ago { margin-left: auto; padding-left: 12px; flex: none; font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.ny-text { margin: 0; font-size: 14px; line-height: 21px; color: var(--ink); overflow-wrap: anywhere; max-width: 70ch; }
+.ny-text code { font: .92em var(--mono); padding: 0 3px; border-radius: 4px; background: var(--card-2); }
+.ny-detail { margin: 2px 0 0; padding: 8px 10px; max-height: 9em; overflow: auto; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--card); font: 12px/18px var(--mono); color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ny-why { margin: 0; font-size: 12px; line-height: 18px; color: var(--faint); }
+
+.ny-suggest { display: flex; align-items: flex-start; gap: 6px; margin: 6px 0 0; font-size: 13px; line-height: 19px; color: var(--ink-2); }
+.ny-suggest svg { flex: none; margin-top: 2px; color: var(--amber); }
+.ny-suggest b { font-weight: 600; color: var(--ink); }
+.ny-suggest-by { color: var(--text-muted); }
+.ny-reason { color: var(--text-muted); }
+.ny-suggest.quiet { color: var(--faint); }
+
+.ny-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.ny-actions .btn.ghost { border: 1px solid var(--border-strong); }
+.ny-actions .btn.ghost.ny-quiet { border-color: transparent; color: var(--text-muted); }
+.ny-actions .btn[aria-disabled="true"] { opacity: .55; cursor: default; }
+.ny-spacer { flex: 1; }
+
+.ny-edit { display: flex; flex-direction: column; margin-top: 6px; }
+.ny-edit textarea { width: 100%; min-height: 56px; padding: 8px 10px; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--card); color: var(--ink); font: inherit; font-size: 14px; line-height: 20px; resize: vertical; }
+.ny-edit textarea:focus { outline: none; border-color: var(--border-focus); }
+
+@media (max-width: 640px) {
+  .ny-keys { display: none; }
+  .ny-row { padding: 14px 8px; }
+  .ny-actions .btn.small { height: 36px; }
+  .ny-spacer { display: none; }
+}

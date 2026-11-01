@@ -5,12 +5,13 @@
 <h1 align="center">Friday</h1>
 
 <p align="center">
-  <strong>The open-source harness for coding agents that work as a team.</strong><br/>
-  Run Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot and more from one place. They split the work on a shared task board, message each other as they go, hand off when one hits its usage limit, and you review it all before it ships.
+  <strong>Run multiple coding agents together, locally.</strong><br/>
+  Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot and more split the work on one repo, message each other as they go, and keep going when one hits its usage limit. You review everything before it ships.
 </p>
 
 <p align="center">
-  <a href="#install">Install</a> ·
+  <a href="#get-started-in-five-minutes">Get started</a> ·
+  <a href="#how-it-works">How it works</a> ·
   <a href="#your-agents-working-as-a-team">Agents as a team</a> ·
   <a href="#work-more-than-code">Work</a> ·
   <a href="#crew-ai-teammates-that-keep-going">Crew</a> ·
@@ -34,6 +35,10 @@
   <a href="https://github.com/splashxmoon/friday/releases/latest/download/Friday-x86_64.AppImage"><b>Linux</b></a>
   <br/>or, with Node.js 22: <code>npx github:splashxmoon/friday</code>
 </p>
+
+- **Uses the tools you already have.** No API keys and no extra plan: Friday drives the coding tools signed in on your computer.
+- **Runs on your machine.** No account, no server of ours, no model of its own. Your code stays where it is.
+- **Keeps the work moving.** When one agent runs out of usage, the agent best placed to finish picks up where it stopped.
 
 <p align="center">
   <img src="docs/assets/hero.png" alt="Friday's home screen: five sessions and ten agents at work, Claude Code and Codex side by side in the sidebar and under Right now" width="960" />
@@ -60,9 +65,32 @@ Works with the subscriptions you already have. If a coding tool is installed and
   <kbd>Any ACP agent</kbd>
 </p>
 
+## Why Friday
+
+Most of us use one AI coding tool at a time. It hits its usage limit halfway through a task, gets stuck on one approach, and works alone, while the other tools you already pay for sit idle. Friday puts them in one workspace on your computer: they split the job, check each other's work, and carry on for each other, so the work keeps moving and you stay in charge of what ships.
+
+## How it works
+
+1. **Point a session at your repo.** Friday finds the coding tools installed and signed in on your computer.
+2. **Add one or more agents.** Each can work in its own copy of the repo (a Git worktree), so they never overwrite each other.
+3. **Give the session the job.** One agent splits it into tasks on a shared board; the others take the ones that suit them.
+4. **They work together.** Agents message each other as they go. Every finished task has its tests run, and another agent reviews any change the tests don't settle.
+5. **Nothing stalls on a limit.** If an agent runs out of usage, its task moves to the next best agent with everything done so far.
+6. **You review, then ship.** Read every change, send notes back on any line, then commit or open a pull request.
+
+## Get started in five minutes
+
+1. **Sign in to one coding tool** you already use, for example `claude auth login` or `codex login` ([the full list](#install)).
+2. **Install Friday:** download the app for [Mac (Apple silicon)](https://github.com/splashxmoon/friday/releases/latest/download/Friday-arm64.dmg), [Windows](https://github.com/splashxmoon/friday/releases/latest/download/Friday-Setup.exe) or [Linux](https://github.com/splashxmoon/friday/releases/latest/download/Friday-x86_64.AppImage), or run `npx github:splashxmoon/friday` with Node.js 22.
+3. **Open it.** Friday lists the tools it found and which are signed in.
+4. **Start a session** in your repo and give it a task.
+5. **Review what it changed** and keep what you like.
+
+One tool is enough to start. Add a second agent to the session when you want them to split the work.
+
 ## Your agents, working as a team
 
-Friday doesn't just run your coding tools next to each other: it lets them work together. One agent can split a job into a **task board**; the others pick up the tasks that suit them, each in its own files, and every finished task is checked (its tests run, another agent reviews it) before it counts as done. Along the way they **message each other** directly: a heads-up about a rename, a question one of them waits on, an answer that comes back. You see every message as it happens.
+Friday doesn't just run your coding tools next to each other: it lets them work together. One agent can split a job into a **task board**; the others pick up the tasks that suit them, each in its own files, and every finished task is checked before it counts as done: its tests run, and another agent reviews it unless they already passed on a small change. Along the way they **message each other** directly: a heads-up about a rename, a question one of them waits on, an answer that comes back. You see every message as it happens.
 
 <p align="center">
   <img src="docs/assets/agents-in-session.png" alt="One session with three agents at work: Claude Code on the checkout, Codex writing its tests, and a second Claude Code keeping the old cart working, each in its own copy of the repository" width="960" />
@@ -305,6 +333,18 @@ Start a session in your repository with one of them, then add the other from the
 
 **Is this a multi-agent framework I have to code against?**
 No. Friday drives the coding CLIs you already use, as they are. There's nothing to write: you pick the tools and give them the job.
+
+**Can I start with just one agent?**
+Yes. A session with one coding tool works like that tool with Friday's review, Git and preview around it. Add a second agent whenever you want them to split the work.
+
+**Does it work on my existing repo?**
+Yes. Point a session at any folder or repository on your computer. Agents you add can each work in their own Git worktree of it, and Friday won't switch a folder with uncommitted work out from under you.
+
+**Do I need an account, a server, or a new subscription?**
+No. Friday runs on your computer at `127.0.0.1`, with no account and no server of ours, and the work runs on the coding tools you're already signed in to.
+
+**What if a coding tool isn't installed?**
+Friday only uses the tools it finds. Its setup screen shows which are installed and signed in, and can sign the rest in for you.
 
 **Which coding agents does it support?**
 Claude Code, Codex, Cursor, GitHub Copilot, Gemini CLI, OpenCode, Devin CLI, Junie, Kiro, Factory Droid, Grok Build, Cline, Kilo Code, Amp, Muse Code, and any agent that speaks the Agent Client Protocol (ACP).

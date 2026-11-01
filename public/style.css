@@ -7039,6 +7039,9 @@ html[data-band="page"] .page.settings-page { padding-top: 16px; }
    sticking to the top of the page left its lower sections reachable only by scrolling the page, and choosing one sent the page,
    and the list with it, back to the top. */
 .settings-menu { max-height: var(--settings-visible, none); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+/* The scrollbar in a strip of its own, out in the gap beside the menu: against the buttons it read as part of them (Arun's
+   screenshot, 2026-10-31: "move the scroll bar to the right a little more it is close to the tab buttons"). */
+.settings-menu { margin-right: -14px; padding-right: 14px; scrollbar-gutter: stable; }
 .settings-menu-title { margin: 0; padding: 0 10px; font-size: 24px; letter-spacing: -.01em; }
 .settings-search { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 8px 0 11px; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--card); color: var(--text-muted); }
 .settings-search:focus-within { border-color: var(--border-focus, var(--accent)); }
@@ -7137,7 +7140,7 @@ button.ao-row { gap: 12px; }
   .page.settings-page { padding: 20px 16px 0; }
   .settings-layout { grid-template-columns: minmax(0, 1fr); gap: 18px; }
   /* One wrapping row of chips: the groups let their sections flow together, and the title and search take a line each. */
-  .settings-menu { position: static; flex-direction: row; flex-wrap: wrap; gap: 6px; padding-bottom: 0; max-height: none; overflow: visible; }
+  .settings-menu { position: static; flex-direction: row; flex-wrap: wrap; gap: 6px; padding-bottom: 0; max-height: none; overflow: visible; margin-right: 0; padding-right: 0; }
   .settings-menu-title, .settings-search, .settings-none { flex: 1 1 100%; }
   .settings-search { margin-bottom: 4px; }
   .settings-group { display: contents; }
@@ -7570,6 +7573,16 @@ button.ao-row { gap: 12px; }
 .rw-out { grid-column: 3 / 6; font-size: 12px; color: var(--text-muted); }
 .rw-best { grid-column: 5; justify-self: end; white-space: nowrap; padding: 1px 6px; border-radius: 999px; font-size: 12px; font-weight: 600; color: var(--agent); background: color-mix(in srgb, var(--agent) 16%, transparent); }
 .rw-foot { display: flex; justify-content: flex-end; }
+/* The forecast under the routing card's head: how long, and how much of a window (forecast.ts). */
+.rw-forecast { margin: -2px 0 0; font-size: 12px; line-height: 16px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.amp-forecast { min-width: 0; font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* What routing learned (Usage page): one row a preference, its words, where it comes from, and its reset. */
+.rl-list { margin: 0; padding: 4px 0; list-style: none; }
+.rl-row { display: flex; align-items: center; gap: 12px; padding: 10px 16px; }
+.rl-row + .rl-row { border-top: 1px solid var(--border); }
+.rl-text { min-width: 0; flex: 1 1 auto; }
+.rl-says { margin: 0; font-size: 13px; line-height: 18px; color: var(--ink); text-wrap: pretty; }
+.rl-from { margin: 2px 0 0; font-size: 12px; line-height: 16px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 /* Smart routing's switch in the composer, beside the agent picker: off is a quiet pill, on wears the accent. */
 .route-pill { gap: 6px; }
 .route-pill-state { padding: 0 6px; border-radius: 999px; font-size: 12px; font-weight: 600; color: var(--text-muted); background: var(--card-2); }
@@ -8734,6 +8747,9 @@ html.desktop :is(#band-left, #band-slot) :is(.popover, [role="dialog"], [role="m
 .rsp-meta-line { margin: 0; }
 /* "Working · 7s" with its orb in front (RunMeta): the orb's box is pulled in so the line keeps its 18px. */
 .rsp-meta-live { display: inline-flex; align-items: center; gap: 6px; vertical-align: top; }
+/* About how long is left beside the live line of a turn with no steps yet (runForecast.ts). */
+.rsp-live:has(.rsp-live-fc) { display: flex; align-items: center; }
+.rsp-live-fc { margin-left: 8px; font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .rsp-meta-fail { color: var(--red, #d6455d); }
 /* The fold and its chevron go straight to their end state when motion is reduced. */
 @media (prefers-reduced-motion: reduce) { .rsp-fold, .rsp-caret { transition: none; } }
@@ -11386,10 +11402,12 @@ html:not(.dark) .subs-pop { box-shadow: 0 16px 40px -16px rgb(0 0 0 / .18); }
 .activity-main div:has(> table) > table thead { background: transparent; }
 
 .agent-question { border-radius: var(--tray-r) !important; border: 1px solid var(--tray-edge) !important; background: var(--tray) !important; box-shadow: none !important; }
-.agent-question [class*="ApprovalCard_option"] { border-radius: var(--r-md) !important; background: transparent !important; border-color: transparent !important; }
-.agent-question [class*="ApprovalCard_option"]:hover { background: var(--hover) !important; }
+.agent-question .ApprovalCard_option { border-radius: var(--r-md) !important; background: transparent !important; border-color: transparent !important; }
+.agent-question .ApprovalCard_option:hover { background: var(--hover) !important; }
+/* The picked choice reads as picked: a quiet fill and a hairline ring, where the transparent rows above made every row the same. */
+.agent-question .ApprovalCard_option[data-selected="true"] { background: var(--hover) !important; box-shadow: inset 0 0 0 1px var(--border-strong) !important; }
 .rsp-steps .rsp-output { border-radius: var(--r-md) !important; background: var(--code-bg) !important; border-color: transparent !important; }
-.agent-question [class*="ApprovalCard_option"] + [class*="ApprovalCard_option"] { margin-top: 2px; }
+.agent-question .ApprovalCard_option + .ApprovalCard_option { margin-top: 2px; }
 :is(.ApprovalCard_card, .TodoList_todo, .FileDiff_diff) { border-radius: var(--tray-r) !important; border: 1px solid var(--tray-edge) !important; background: var(--tray) !important; box-shadow: none !important; }
 .toast-stack > * { border-radius: var(--tray-r) !important; }
 
@@ -11786,7 +11804,7 @@ html.reduce-motion .shine { color: var(--shine-ink, var(--ink-2)); }
 
 /* ── Work products in the feed: a question to answer, subagents, the review card, a stop for usage or sign-in ── */
 .agent-question [class*="ApprovalCard_title"], .agent-question h3 { font-size: 14px; font-weight: 600; color: var(--ink); }
-.agent-question [class*="ApprovalCard_option"] { min-height: 32px; font-size: 14px; }
+.agent-question .ApprovalCard_option { min-height: 32px; font-size: 14px; }
 .subs-head { min-height: 44px; }
 .subs-head b, .subs-title { font-size: 13px; font-weight: 600; }
 .subs-bar { width: 48px; height: 3px; }
@@ -12125,3 +12143,36 @@ body.resizing-panel { cursor: col-resize; user-select: none; }
 .tui-grid > .lane-tui-wait { background: var(--card); }
 .tui-grid .ftui-banner { display: none; }
 .tui-grid .lane-tui-note { display: none; }
+/* The foot row as one even row: you, the places, the theme and settings, each button the same size and the same distance apart,
+   however many places a plan has (a team's nine squeezed into a row of seven's, the avatar set off and the places crammed; Arun,
+   2026-10-31: "design this better in terms of spacing"). Buttons give way together on a narrow sidebar rather than overflow. */
+.sb-dock { justify-content: space-between; gap: 0; }
+.sb-dock .sb-places { display: contents; }
+.sb-dock .sb-place, .sb-dock .dass-rail-btn, .sb-dock-me { flex: 0 1 34px; width: auto !important; min-width: 28px; height: 34px !important; border-radius: 9px; }
+.sb-dock .sb-place svg, .sb-dock .dass-rail-btn svg { width: 18px; height: 18px; }
+.dass-panel .sb-dock { padding: 0 10px; }
+/* Run on its own (team-selfrun.ts): the header's mark lit while the room runs by itself, and its card's goal. */
+.tm-selfrun-btn[data-on] { color: var(--accent, var(--ink)); background: color-mix(in srgb, var(--accent, var(--ink)) 12%, transparent); }
+.tm-selfrun-goal { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--card-2); color: var(--ink); font-size: 13px; white-space: pre-wrap; }
+.tm-selfrun-input { min-height: 72px; font-size: 13px; }
+/* Project memory (Settings › Memory, brain.ts): each repository folds open to its lessons, each with its kind, where it was
+   learned, how often agents were told it, and pin, edit and forget. Org memory, 2026-10-31. */
+.brain-card { margin-top: 12px; }
+.brain-repos { display: flex; flex-direction: column; margin-top: 8px; }
+.brain-repo { border-top: 1px solid var(--border); }
+.brain-repo-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 0; border: 0; background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.brain-repo-name { font-size: 14px; font-weight: 550; }
+.brain-repo-head .muted { margin-left: auto; white-space: nowrap; }
+.brain-entries { padding: 0 0 10px 21px; }
+.brain-row { padding-right: 96px; }
+.brain-kind { align-self: flex-start; padding: 1px 7px; border-radius: 999px; background: var(--card-2); color: var(--text-muted); font-size: 11px; font-weight: 600; letter-spacing: .01em; }
+.brain-kind.k-pitfall { color: var(--amber, #d98404); }
+.brain-acts { position: absolute; right: 0; top: 9px; display: inline-flex; gap: 2px; }
+.brain-acts .icon-btn.on { color: var(--ink); }
+.brain-edit { display: flex; gap: 8px; }
+.brain-edit input { flex: 1; min-width: 0; height: 32px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg); color: var(--ink); font: inherit; font-size: 14px; }
+.brain-add { margin-top: 10px; }
+/* The goal's deadline, optional (goals.ts): a label and a date-and-time field on one line. */
+.goal-due { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.goal-due > span { white-space: nowrap; }
+.goal-due input { height: 30px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg); color: var(--ink); font: inherit; font-size: 13px; color-scheme: light dark; }

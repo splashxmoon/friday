@@ -11,6 +11,8 @@ const usage = (context: number, window = 1_000_000, tool = "claude") => ({ type:
 test("past the limit, by its own tool, on its own lane, and once until it grows again", () => {
   assert.equal(compactAt(1_000_000), 200_000);
   assert.equal(compactAt(200_000), 100_000, "a small window: at half of it");
+  assert.equal(compactAt(1_000_000, true), 100_000, "a teammate's: sooner");
+  assert.deepEqual(shouldCompact([ev(1, usage(120_000))], "main", "claude", true), { before: 120_000, window: 1_000_000 }, "a teammate past 100k");
   assert.deepEqual(shouldCompact([ev(1, usage(430_000))], "main", "claude"), { before: 430_000, window: 1_000_000 });
   assert.equal(shouldCompact([ev(1, usage(120_000))], "main", "claude"), null, "under it");
   assert.equal(shouldCompact([ev(1, usage(430_000))], "main", "opencode"), null, "a tool Friday can't compact headless");

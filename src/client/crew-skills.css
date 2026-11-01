@@ -1,0 +1,59 @@
+/* The crew's skills (CrewSkills.tsx): the list, its editor, a proposal's steps, Save as a skill and a workflow step's pick. Quiet
+   rows in the room's own type and ink; the faces are the only colour (a quiet room with living faces). */
+
+.sk-panel { display: flex; flex-direction: column; gap: 16px; }
+.sk-panel-head { display: flex; align-items: flex-start; gap: 16px; }
+.sk-lede { flex: 1; margin: 0; color: var(--ink-2); font-size: 13px; line-height: 1.5; text-wrap: pretty; }
+.sk-panel-head > button { flex: none; }
+
+.sk-list, .sk-waiting { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.sk-waiting { gap: 8px; }
+.sk-row { display: flex; align-items: flex-start; gap: 16px; width: 100%; padding: 10px 8px; border: 0; border-radius: var(--r-md); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background-color var(--t-hover, 120ms) var(--ease-out, ease); }
+.sk-row:hover { background: var(--hover); }
+.sk-row:focus-visible { outline: none; box-shadow: var(--dass-ring, 0 0 0 2px var(--ink)); }
+.sk-list li + li .sk-row { border-top: 1px solid var(--border); border-radius: 0; }
+.sk-list li + li .sk-row:hover { border-radius: var(--r-md); }
+.sk-row-main { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
+.sk-row-name { color: var(--ink); font-size: 14px; font-weight: 600; line-height: 20px; }
+.sk-row-when { display: -webkit-box; overflow: hidden; color: var(--ink-2); font-size: 13px; line-height: 19px; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+.sk-row-meta { display: flex; flex: none; flex-direction: column; align-items: flex-end; gap: 3px; max-width: 42%; padding-top: 2px; color: var(--text-muted); font-size: 12px; line-height: 16px; text-align: right; font-variant-numeric: tabular-nums; }
+.sk-for-faces { display: inline-flex; align-items: center; gap: 2px; }
+.sk-for-faces > span { margin-left: 4px; }
+
+.sk-edit { display: flex; flex-direction: column; gap: 14px; }
+.sk-edit-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.sk-edit-acts { display: flex; align-items: center; gap: 8px; padding-top: 2px; }
+.sk-grow { flex: 1; }
+/* Its hints stay on a short window too, unlike the teammate dialog's: how to write steps is the point of the form. */
+.sk-edit .tm-field > small { display: block; }
+.sk-edit input[readonly], .sk-edit textarea[readonly] { background: var(--hover); }
+
+.sk-for { display: flex; flex-wrap: wrap; gap: 6px; }
+.sk-for-chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 999px; background: transparent; color: var(--ink-2); font: inherit; font-size: 13px; cursor: pointer; transition: background-color var(--t-hover, 120ms) var(--ease-out, ease), border-color var(--t-hover, 120ms) var(--ease-out, ease); }
+.sk-for-chip:has(> :first-child:not(:only-child)) { padding-left: 5px; }
+.sk-for-chip:hover:not(:disabled) { background: var(--hover); }
+.sk-for-chip[aria-pressed="true"] { border-color: var(--ink); background: var(--hover-strong, var(--hover)); color: var(--ink); }
+.sk-for-chip:disabled { cursor: default; }
+.sk-for-chip:focus-visible { outline: none; box-shadow: var(--dass-ring, 0 0 0 2px var(--ink)); }
+
+/* A proposal: its card's text column takes the steps and the actions under it. */
+.sk-proposed { align-items: flex-start; }
+.sk-proposed .tm-proposed-text { gap: 6px; }
+.sk-proposed .tm-proposed-acts { margin-top: 2px; }
+.sk-proposed .tm-sub { white-space: normal; }
+.sk-steps { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: var(--r-md); background: var(--hover); }
+.sk-steps p { margin: 0; color: var(--ink-2); font-size: 12.5px; line-height: 1.5; }
+.sk-steps .sk-steps-when { color: var(--ink); font-weight: 500; }
+.sk-steps .sk-steps-now { color: var(--text-muted); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--text-muted) 60%, transparent); }
+.sk-steps pre { max-height: 240px; margin: 0; overflow: auto; color: var(--ink); font: inherit; font-size: 13px; line-height: 1.55; white-space: pre-wrap; }
+
+.sk-save { display: inline-flex; align-items: center; gap: 5px; }
+.sk-save:disabled { opacity: 0.55; }
+.sk-step { gap: 7px; color: var(--ink-2); }
+
+@media (max-width: 560px) {
+  .sk-panel-head { flex-direction: column; gap: 10px; }
+  .sk-row { flex-direction: column; gap: 6px; }
+  .sk-row-meta { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 10px; max-width: none; text-align: left; }
+  .sk-edit-pair { grid-template-columns: 1fr; }
+}

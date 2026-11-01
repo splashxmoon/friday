@@ -1,4 +1,4 @@
-import { ChevronRightIcon, FolderGit2Icon, PlusIcon, SearchIcon, SettingsIcon, LogOutIcon, XIcon } from "lucide-react";
+import { ChevronRightIcon, FolderGit2Icon, PlusIcon, SearchIcon, SettingsIcon, LogOutIcon, MoonIcon, SunIcon, XIcon } from "lucide-react";
 import { useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -33,7 +33,7 @@ import { isRawError, stoppedLine } from "../activity-line.js";
 import { ENGINE_NAMES, type EngineTool } from "../types.js";
 import { shortcut } from "./Shortcuts.js";
 import { isWorkSid, SidebarWorkSwitch, useWorkMode, useWorkSessions, workListed } from "./WorkMode.js";
-import { isTeamSid, newTeammate, SidebarTeammates, useTeam, useTeamTab } from "./Teammates.js";
+import { isTeamSid, newTeammate, SidebarTeammates, useTeam, useTeamNow, useTeamTab } from "./Teammates.js";
 import { byDay } from "./sidebar-days.js";
 import { byState, PresenceRing, useFlip, type Presence } from "./presence.js";
 import { api } from "./api.js";
@@ -70,7 +70,7 @@ export interface SidebarProps {
   activeSid: string | null;
   /** On the new-session page opened from a project's "New session here": the project it will go in, shown in the list. */
   draftProject?: string | undefined;
-  view: "home" | "session" | "connections" | "agents" | "automations" | "people" | "library" | "board" | "review" | "settings" | "usage";
+  view: "home" | "session" | "connections" | "agents" | "automations" | "people" | "library" | "crew" | "board" | "review" | "needs" | "settings" | "usage";
   /** Whether the chat list is showing beside the rail. */
   panelOpen: boolean;
   /** The Chat button: opens Chat, or folds its list away when already there. */
@@ -90,6 +90,7 @@ export interface SidebarProps {
   onOpenPeople: () => void;
   /** The team's library of past sessions (TeamLibrary.tsx). */
   onOpenLibrary: () => void;
+  /** The hosted service's Crew (Teammates.tsx): given, the sidebar has its Code and Crew switch. */
   /** Settings is a page: the gear goes there, where it was last left. */
   onOpenSettings: () => void;
   /** Every agent's tokens, and what hand-offs saved (UsagePage). */
@@ -98,6 +99,8 @@ export interface SidebarProps {
   onWarm?: (view: SidebarProps["view"]) => void;
   onOpenBoard: () => void;
   onOpenReview: () => void;
+  /** The Needs you queue (NeedsYou.tsx). */
+  onOpenNeeds?: () => void;
   /** Pull requests waiting on this person's review, for a mark on Code Review's button. */
   reviewsWaiting?: number;
   peopleCount: number;
@@ -376,6 +379,7 @@ function Head({ p }: { p: SidebarProps }) {
   );
 }
 
+
 const NEEDS_CLOSED_KEY = "friday.sidebar.needsClosed";
 
 // ── the foot: you, the theme, Settings ──────────────────────────────────────────────────────
@@ -389,6 +393,7 @@ function PlaceIcons({ p }: { p: SidebarProps }) {
   const team = !!p.workspace && planLimits(planNow(p.workspace)).team;
   const requests = team ? (p.peopleRequests ?? 0) : 0;
   const places: { icon: IconName; label: string; on: boolean; go: () => void; warm?: SidebarProps["view"]; count?: number; needs?: boolean }[] = [
+    ...(p.onOpenNeeds ? [{ icon: "hand" as const, label: "Needs you", on: p.view === "needs", go: p.onOpenNeeds, warm: "needs" as const, count: p.attention.items.length || undefined, needs: true }] : []),
     { icon: "board", label: "Agent Board", on: p.view === "board", go: p.onOpenBoard, warm: "board" },
     { icon: "gitPullRequest", label: "Code Review", on: p.view === "review", go: p.onOpenReview, warm: "review", count: p.reviewsWaiting, needs: true },
     ...(team ? [{ icon: "book" as const, label: "Team library", on: p.view === "library", go: p.onOpenLibrary, warm: "library" as const }] : []),
@@ -438,6 +443,13 @@ function Foot({ p }: { p: SidebarProps }) {
     return () => mo.disconnect();
   }, []);
   const nextLook = look === "light" ? "dark" : "light";
+  // Light or dark here is Friday's own, as in Settings: a colour theme on (Dracula, one of yours) comes off, or the button only
+  // flipped the class under it and left a mix nobody could read (2026-10-27 audit).
+  const switchLook = () => {
+    if (readTheme()) applyTheme(null);
+    chooseTheme(nextLook);
+    setLook(currentLook());
+  };
   const usageNoticeUp = noticeDue(useUsageSharing());
   const w = p.workspace;
   // The local edition has no plan: it is yours, on this computer.
@@ -456,26 +468,18 @@ function Foot({ p }: { p: SidebarProps }) {
         {/* No account on your own computer, so no avatar and its menu (Arun, 2026-10-26: "get rid of the profile button"). */}
         <PlaceIcons p={p} />
         <UpdateRailButton />
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              className="dass-rail-btn size-8"
-              aria-label={`Switch to ${nextLook} mode`}
-              onClick={() => {
-                // Light or dark here is Friday's own, as in Settings: a colour theme on (Dracula, one of yours) comes off, or the
-                // button only flipped the class under it and left a mix nobody could read (2026-10-27 audit).
-                if (readTheme()) applyTheme(null);
-                chooseTheme(nextLook);
-                setLook(currentLook());
-              }}
-            >
-              {/* The places' own icon set and size, so the row reads as one (Arun, 2026-10-26). */}
-              <Icon name={nextLook === "light" ? "sun" : "moon"} size={19} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="top">Switch to {nextLook}</TooltipContent>
-        </Tooltip>
+        {/* In the open-source edition, with no profile menu, the theme and Settings stay in the dock; the hosted service has them in the menu. */}
+        {isLocal() && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button type="button" className="dass-rail-btn size-8" aria-label={`Switch to ${nextLook} mode`} onClick={switchLook}>
+                {/* The places' own icon set and size, so the row reads as one (Arun, 2026-10-26). */}
+                <Icon name={nextLook === "light" ? "sun" : "moon"} size={19} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">Switch to {nextLook}</TooltipContent>
+          </Tooltip>
+        )}
         {/* The open-source edition's way to say what went wrong or what's missing: a GitHub issue, started for them (feedback.ts). */}
         {isLocal() && (
           <Tooltip>
@@ -487,14 +491,16 @@ function Foot({ p }: { p: SidebarProps }) {
             <TooltipContent side="top">Send feedback</TooltipContent>
           </Tooltip>
         )}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button type="button" className="dass-rail-btn size-8" data-active={p.view === "settings"} aria-label="Settings" onClick={p.onOpenSettings}>
-              <Icon name="settings" size={19} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="top">Settings</TooltipContent>
-        </Tooltip>
+        {isLocal() && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button type="button" className="dass-rail-btn size-8" data-active={p.view === "settings"} aria-label="Settings" onClick={p.onOpenSettings}>
+                <Icon name="settings" size={19} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">Settings</TooltipContent>
+          </Tooltip>
+        )}
       </div>
     </div>
   );
@@ -673,6 +679,7 @@ function SessionsList({ p }: { p: SidebarProps }) {
   // Kept fresh on every tab, so the team's session stays out of Code's list and its robots show wherever it is open.
   useTeam(p.identityForApi);
   const work = useWorkSessions(p.identityForApi);
+  // The hosted service's Crew: its sessions (your own Crew room and the rooms) kept out of Code's list.
   // Not until the Work sessions are known: before, every Work session read as a coding one and showed under Code (the 2026-10-28
   // critique: Code's list showed "Open-source launch posts").
   if (isLocal()) listed = p.recents.filter((r) => workListed() && work.has(r.sid) === workMode && !isTeamSid(r.sid));

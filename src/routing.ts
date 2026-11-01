@@ -172,21 +172,29 @@ const ROUTABLE: Partial<Record<EngineTool, string[]>> = {
   codex: ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-luna"],
 };
 
-/** What runs here have shown for a model and tier: for the workspace, and for the repo when one is known. */
-const seenOf = (learned: Learned, key: string, repo?: string) => ({ seen: learned[key], local: repo ? learned[`${key}@${repo}`] : undefined });
+/**
+ * What runs here have shown for a model and tier: for the workspace, for the repo when one is known, and for the repo's runs of
+ * this kind of task (tests, docs, a bug fix: route-learning.ts learnedFrom).
+ */
+const seenOf = (learned: Learned, key: string, repo?: string, kind?: string | null) => ({ seen: learned[key], local: repo ? learned[`${key}@${repo}`] : undefined, kindly: repo && kind ? learned[`${key}#${kind}@${repo}`] : undefined });
 
-export function fitModels(tool: EngineTool, tier: RouteTier, windows: ToolWindow[] = [], learned: Learned = {}, o: { repo?: string } = {}): ModelFit[] {
+/** Runs of a kind of task on a repo before what they cost there is taken over the benchmark's figure, as runs' worth of evidence. */
+const COST_PRIOR = 5;
+
+export function fitModels(tool: EngineTool, tier: RouteTier, windows: ToolWindow[] = [], learned: Learned = {}, o: { repo?: string; kind?: string | null } = {}): ModelFit[] {
   const effort = EFFORT_TOOLS.has(tool) ? effortFor(tier) : undefined;
   const adj = effort ? EFFORT_ADJ[effort] : EFFORT_ADJ.medium;
   const fits = (ROUTABLE[tool] ?? []).flatMap((model): ModelFit[] => {
     const b = benchFor(tool, model);
     if (!b) return [];
-    const { seen, local } = seenOf(learned, `${tool}:${model}:${tier}`, o.repo);
-    const success = learnedSuccess(successFor(Math.max(0, b.solve + adj.solve), tier), seen, local);
+    const { seen, local, kindly } = seenOf(learned, `${tool}:${model}:${tier}`, o.repo, o.kind);
+    const success = learnedSuccess(successFor(Math.max(0, b.solve + adj.solve), tier), seen, local, kindly);
+    // What its runs of this kind cost here, where measured, weighed against the benchmark's price of a task.
+    const cost = kindly?.n && kindly.c !== undefined ? (COST_PRIOR * b.cost * adj.cost + kindly.c) / (COST_PRIOR + kindly.n) : b.cost * adj.cost;
     // Fable has a weekly limit of its own on Claude's plans (half the week on Max).
     const own = model === "fable" ? usedOf(windows, /fable/i) : -1;
     const runs = o.repo ? (local?.n ?? 0) : (seen?.n ?? 0);
-    return [{ model, success, cost: b.cost * adj.cost, ecc: 0, est: !!b.est, runs, ...(effort ? { effort } : {}), ...(own >= 80 ? { out: `its week is ${Math.round(own)}% used` } : {}) }];
+    return [{ model, success, cost, ecc: 0, est: !!b.est, runs, ...(effort ? { effort } : {}), ...(own >= 80 ? { out: `its week is ${Math.round(own)}% used` } : {}) }];
   });
   // Priced against the strongest that can be picked: what a miss here costs, after.
   const open = fits.filter((f) => !f.out);
@@ -353,6 +361,8 @@ const resetsSoon = (w: ToolWindow, now: number) => !!w.resetsAt && w.resetsAt * 
 /** Extra words the picker takes: the repo, whether a person is waiting, and the model whose run just missed (routing escalates). */
 export interface RouteOpts {
   repo?: string;
+  /** The kind of task (strengths.ts taskKind), for what runs of that kind on the repo have shown. */
+  kind?: string | null;
   attended?: boolean;
   missedOn?: string | null;
 }
@@ -365,7 +375,7 @@ const nameOf = (tool: EngineTool, m: string) => ENGINE_MODEL_INFO[tool].find((x)
  * thinks harder instead where the tool takes an effort. Null for a tool Friday has no figures for: it picks its own.
  */
 export function routeTool(tool: EngineTool, tier: RouteTier, tierWhy: string, windows: ToolWindow[] = [], learned: Learned = {}, o: RouteOpts = {}): { model: string; effort?: Effort; why: string; fit: ModelFit } | null {
-  const fits = fitModels(tool, tier, windows, learned, { ...(o.repo ? { repo: o.repo } : {}) });
+  const fits = fitModels(tool, tier, windows, learned, { ...(o.repo ? { repo: o.repo } : {}), ...(o.kind ? { kind: o.kind } : {}) });
   const open = fits.filter((f) => !f.out);
   if (!open.length) return null;
   const strongest = open.reduce((a, b) => (b.success > a.success ? b : a));
@@ -405,12 +415,12 @@ export function stickyPick(
   tool: EngineTool,
   tier: RouteTier,
   tierWhy: string,
-  o: { windows?: ToolWindow[]; learned?: Learned; current?: string | null; contextTokens?: number; repo?: string; attended?: boolean; missed?: boolean } = {},
+  o: { windows?: ToolWindow[]; learned?: Learned; current?: string | null; contextTokens?: number; repo?: string; kind?: string | null; attended?: boolean; missed?: boolean } = {},
 ): { model: string; effort?: Effort; why: string; fit: ModelFit } | null {
-  const opts: RouteOpts = { ...(o.repo ? { repo: o.repo } : {}), ...(o.attended !== undefined ? { attended: o.attended } : {}), ...(o.missed && o.current ? { missedOn: o.current } : {}) };
+  const opts: RouteOpts = { ...(o.repo ? { repo: o.repo } : {}), ...(o.kind ? { kind: o.kind } : {}), ...(o.attended !== undefined ? { attended: o.attended } : {}), ...(o.missed && o.current ? { missedOn: o.current } : {}) };
   const r = routeTool(tool, tier, tierWhy, o.windows, o.learned, opts);
   if (!r || !o.current || r.model === o.current || o.missed) return r;
-  const cur = fitModels(tool, tier, o.windows, o.learned, { ...(o.repo ? { repo: o.repo } : {}) }).find((f) => f.model === o.current);
+  const cur = fitModels(tool, tier, o.windows, o.learned, { ...(o.repo ? { repo: o.repo } : {}), ...(o.kind ? { kind: o.kind } : {}) }).find((f) => f.model === o.current);
   if (!cur || cur.out || r.fit.success > cur.success) return r;
   const ctx = (o.contextTokens ?? 0) / 1e6;
   const switchCost = ctx * (benchFor(tool, r.model)?.inPrice ?? 0) * 1.25;
@@ -456,9 +466,9 @@ function roomOf(o: ToolOption, now: number): number | null {
  * made dearer as a tool's limits fill: a window nearly spent is worth more than one with room, unless it starts over soon. Then
  * tools Friday has no figures for, by room left. A suggestion only: the person picks.
  */
-export function rankTools(tier: RouteTier, options: ToolOption[], tierWhy = "", learned: Learned = {}, o: { repo?: string; attended?: boolean; now?: number } = {}): ToolRank[] {
+export function rankTools(tier: RouteTier, options: ToolOption[], tierWhy = "", learned: Learned = {}, o: { repo?: string; kind?: string | null; attended?: boolean; now?: number } = {}): ToolRank[] {
   const now = o.now ?? Date.now();
-  const opts: RouteOpts = { ...(o.repo ? { repo: o.repo } : {}), ...(o.attended !== undefined ? { attended: o.attended } : {}) };
+  const opts: RouteOpts = { ...(o.repo ? { repo: o.repo } : {}), ...(o.kind ? { kind: o.kind } : {}), ...(o.attended !== undefined ? { attended: o.attended } : {}) };
   const weighed = options.map((opt) => {
     const room = roomOf(opt, now);
     const out = !opt.ready ? "not set up" : room !== null && room <= 0.1 ? "at its limit" : null;

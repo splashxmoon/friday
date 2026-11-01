@@ -10,6 +10,8 @@ import { keepGoingNote } from "../keep-going.js";
 import { runnableQueue } from "../held.js";
 import { limitHit } from "../limit-reset.js";
 import { fitModels, routeTool, stickyPick, taskTier, type ToolWindow } from "../routing.js";
+import { burn, signInOf } from "../forecast.js";
+import { taskKind } from "../strengths.js";
 import { missedLast, type Learned } from "../route-learning.js";
 import { repoKeyOf } from "../repo-key.js";
 import { randomUUID } from "node:crypto";
@@ -22,7 +24,7 @@ import { accessCommand, type SessionCore } from "../session/core.js";
 import { handoffBrief } from "../handoff.js";
 import { startCheckpoint } from "../rewind.js";
 import { shellSeconds } from "../runner/repo-read.js";
-import { BROWSER_NOTE, WORK_NOTE } from "./work.js";
+import { BROWSER_NOTE, TEAM_CODE_NOTE, TEAM_WORK_NOTE, taskMode, WORK_NOTE, type TaskMode } from "./work.js";
 import { envNamesOnly } from "../runner/git.js";
 import type { AppendGuard, SessionStore } from "../session/store.js";
 import { hideSecretsIn, withShieldNote } from "../secrets.js";
@@ -242,9 +244,13 @@ export function cutTurn(events: SessionEvent[], lane: string): number[] {
  * a turn reads the whole conversation again: on record, Claude Code's lanes ended turns at 427k tokens on average and read
  * 3M cached tokens a turn, because a lane keeps one conversation going for days and the tool only compacts itself near its
  * window's end (Arun, 2026-10-24: "look into optimizing token spends"). FRIDAY_COMPACT_AT sets it; 0 turns it off.
+ *
+ * A teammate's at half that (FRIDAY_TEAM_COMPACT_AT): its conversations run for days and most of its turns start on their own
+ * (messages, tasks, check-ins), each re-reading the lot, and what it must keep is in the board, its notes and its memory, which
+ * every turn after a compaction is told again (Arun, 2026-10-31: "i am burning through my claude code usage pretty fast").
  */
-export const compactAt = (window?: number): number => {
-  const set = Number(process.env.FRIDAY_COMPACT_AT ?? 200_000);
+export const compactAt = (window?: number, team = false): number => {
+  const set = Number((team ? process.env.FRIDAY_TEAM_COMPACT_AT : undefined) ?? process.env.FRIDAY_COMPACT_AT ?? (team ? 100_000 : 200_000));
   if (!set) return Infinity;
   // A small window: at half of it, so there is always room left for the turn itself.
   return window ? Math.min(set, Math.round(window / 2)) : set;
@@ -257,7 +263,7 @@ const COMPACTS = new Set<EngineTool>(["claude", "codex"]);
  * Whether this lane's tool should compact its conversation before its next turn: its last turn ended with its context past
  * compactAt, and it hasn't been compacted since. The size its tool last reported, for the log.
  */
-export function shouldCompact(events: SessionEvent[], lane: string, tool: EngineTool | undefined): { before: number; window?: number } | null {
+export function shouldCompact(events: SessionEvent[], lane: string, tool: EngineTool | undefined, team = false): { before: number; window?: number } | null {
   if (!tool || !COMPACTS.has(tool)) return null;
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i]!;
@@ -265,7 +271,7 @@ export function shouldCompact(events: SessionEvent[], lane: string, tool: Engine
     if (e.body.type === "context.compacted") return null;
     if (e.body.type === "agent.usage" && e.body.tool === tool) {
       const ctx = e.body.context ?? 0;
-      return ctx >= compactAt(e.body.window) ? { before: ctx, ...(e.body.window ? { window: e.body.window } : {}) } : null;
+      return ctx >= compactAt(e.body.window, team) ? { before: ctx, ...(e.body.window ? { window: e.body.window } : {}) } : null;
     }
   }
   return null;
@@ -313,7 +319,12 @@ export class EngineHub {
   /** A teammate's own note for its tool (teammates.ts teammateNote), and what its turn is told first, when the lane is one; null otherwise. */
   teammate: ((sid: string, lane: string) => Promise<MateNote | null>) | null = null;
   /** Set by the app: whether a team's queues are held (the person paused the team), for a lane of a team session. */
-  teamPaused: ((sid: string) => Promise<boolean>) | null = null;
+  /**
+   * Whether the person paused the team a lane is in (on the hosted service, the person keeping that lane's teammate), or its
+   * teammate's budget or hours hold it (team-budget.ts). `people`: who of those queued work is a person; `running`: asked as a
+   * turn of a run ends, with more queued for it.
+   */
+  teamPaused: ((sid: string, lane: string, people: string[], running: boolean) => Promise<boolean>) | null = null;
   /** Set by the app: what runs in a workspace have shown about each model, for routing (route-learning.ts). */
   learned: ((workspaceId: string) => Promise<Learned>) | null = null;
   /** Set by the app: the agents' messages to each other, which a runner's `friday` MCP server calls (agent-mesh.ts). */
@@ -329,6 +340,9 @@ export class EngineHub {
     renew();
     this.leaseTimer = setInterval(renew, (NODE_LEASE_S / 3) * 1000);
     this.leaseTimer.unref?.();
+    // A wake for a coding tool's lane (a team's re-pump: Pause lifted, a usage limit or a budget's hold over) reaches the lane
+    // held here too, which decides again what it may run; before, a wake reached Friday's own agent alone.
+    this.bus.onWake?.((sid, lane) => void this.hosts.get(`${sid}|${lane}`)?.pump());
   }
 
   /**
@@ -721,7 +735,7 @@ export class EngineHub {
     host.steers = (p.caps ?? "").split(",").includes("steer");
     host.mesh = this.mesh;
     host.teammate = this.teammate ? () => this.teammate!(p.sid, lane) : null;
-    host.teamPaused = this.teamPaused ? () => this.teamPaused!(p.sid) : null;
+    host.teamPaused = this.teamPaused ? (people, running) => this.teamPaused!(p.sid, lane, people, running) : null;
     // What its first turn will be told besides the instruction, so its CLI can be started before that turn comes.
     const system = tool ? await host.systemNote(events) : undefined;
     this.hosts.set(key, host);
@@ -828,8 +842,8 @@ class LaneHost {
   private readonly actor: ActorRef;
   /** This lane's teammate note, when it is a teammate (EngineHub.teammate). */
   teammate: (() => Promise<MateNote | null>) | null = null;
-  /** Whether the person paused the team this lane is in (EngineHub.teamPaused). */
-  teamPaused: (() => Promise<boolean>) | null = null;
+  /** Whether the person paused the team this lane is in, or its teammate's budget or hours hold it (EngineHub.teamPaused). */
+  teamPaused: ((people: string[], running: boolean) => Promise<boolean>) | null = null;
   /**
    * What this lane's tool was last told before a turn's prompt (MateNote.preamble), by part: a part goes again only when it has
    * changed, so a teammate's system note stays the same turn after turn (its tool keeps its cache) and what changes reaches it
@@ -853,9 +867,11 @@ class LaneHost {
    * person paused the team, or its tool is out of usage until its limit lifts (a message then woke it only to fail at once). The
    * app's re-pump starts it once that is over (Arun, 2026-10-28: "we need to ensure teams can work basically while you are away").
    */
-  private async teamWaits(events: SessionEvent[], pending: number[]): Promise<boolean> {
-    if (pending.some((q) => events.find((e) => e.seq === q)?.actor.kind === "human")) return false;
-    if (await this.teamPaused?.().catch(() => false)) return true;
+  private async teamWaits(events: SessionEvent[], pending: number[], running = false): Promise<boolean> {
+    const people = pending.flatMap((q) => ((a) => (a?.kind === "human" ? [a.id] : []))(events.find((e) => e.seq === q)?.actor));
+    // The app says whether a person's own message goes through, and whether a run ends here rather than taking the next turn.
+    if (await this.teamPaused?.(people, running).catch(() => false)) return true;
+    if (people.length || running) return false;
     // Out of usage until a time it said: waits for it. One that said no time is tried (its resume comes in an hour), and a tool
     // started on the lane since (its backup, or its own once the limit lifted) isn't the one that ran out.
     const end = events.findLast((e) => (e.lane ?? MAIN_LANE) === this.lane && e.body.type === "run.ended");
@@ -1091,7 +1107,12 @@ class LaneHost {
       const guard: AppendGuard = { expectEpoch: epoch };
       // A team's queue held by the person's pause, or for a tool out of usage: it waits, and the app's re-pump starts it after.
       // No hourly budget: agents bouncing the same thing back and forth are stopped where they message (agent-mesh loopBetween).
-      if (pending.length && run.status !== "running" && state.options.team && (await this.teamWaits(events, pending))) return;
+      if (pending.length && state.options.team && (await this.teamWaits(events, pending, run.status === "running"))) {
+        // Mid-run, its budget spent or its hours over (team-budget.ts): the turn it was on is done, the run ends here and what is
+        // queued waits, rather than going in as the run's next turn.
+        if (run.status === "running") await this.append({ type: "run.ended", outcome: "done", ...(await this.endCheckpoint()) }, guard);
+        return;
+      }
       // On its host's own plan, it takes its host's work alone (own-plan.ts), whoever or whatever queued it: a teammate, another
       // agent working for one, a hand-off, the board. Anything else leaves the queue unrun, with why, before a turn starts.
       if (ownPlan(mine) && pending.length) {
@@ -1177,7 +1198,8 @@ class LaneHost {
         : undefined;
       const asked = ask?.body.type === "engine.approval" ? { scope: ask.body.scope, items: ask.body.items } : {};
       // An Auto lane runs each message on the model picked for it; any other only logs what Auto would have picked.
-      const routing = this.info.model === "auto" ? this.autoRoute(turn.prompt, attachments?.length ?? 0, state, events) : (this.shadowRoute(turn.prompt, attachments?.length ?? 0, state, events), undefined);
+      const byPerson = pending.some((q) => events.find((e) => e.seq === q)?.actor.kind === "human");
+      const routing = this.info.model === "auto" ? this.autoRoute(turn.prompt, attachments?.length ?? 0, state, events, byPerson) : (this.shadowRoute(turn.prompt, attachments?.length ?? 0, state, events), undefined);
       const building = performance.now();
       const [brief, routed, note] = await Promise.all([briefing, routing, this.systemNote(events)]);
       slowly(`a turn's brief for ${this.sid}`, building, { events: events.length });
@@ -1226,11 +1248,12 @@ class LaneHost {
       // A conversation grown long is compacted first, by the tool's own /compact, as a turn of its own: the turn that follows,
       // and every one after, re-reads a summary instead of everything so far. Not before one of the tool's own commands, which
       // may be /compact itself. One that fails is not tried again on this connection; the turn goes ahead either way.
-      const long = !command && !this.compactFailed ? shouldCompact(events, this.lane, this.info.tool) : null;
+      const long = !command && !this.compactFailed ? shouldCompact(events, this.lane, this.info.tool, !!state.options.team) : null;
       if (long) {
         this.inFlight = pending;
         await this.append({ type: "context.compacted", tool: this.info.tool!, ...long }).catch((e) => console.error("[engine] compact:", e));
         this.toldBefore.clear();
+        this.modeTold = "code";
         const c = await this.runTurn("/compact", [], note, undefined, "/compact", model, undefined, cap, false);
         this.inFlight = null;
         if (this.closed || (c.outcome === "error" && this.requeued)) return;
@@ -1242,7 +1265,19 @@ class LaneHost {
         if (c.outcome === "stopped" || runOf(await this.store.state(this.sid), this.lane).status !== "running") continue;
       }
       // A teammate's preamble, after any compaction (which forgets what it was told): what changed since its last turn.
-      if (state.options.team && !command) prompt = withShieldNote(`${brief}${catchUp}${this.preambleNow()}${turn.prompt}`);
+      // Code or content work, from what it was given this turn; said when it turns over (Arun, 2026-10-31: "when we work on code
+      // it goes to code and when it is work stuff it goes to work").
+      let modeNote = "";
+      if (state.options.team && !command) {
+        const texts = pending.flatMap((q) => ((b) => (b?.type === "instruction" ? [b.text] : []))(events.find((e) => e.seq === q)?.body));
+        this.taskMode = taskMode(texts, attachments ?? [], this.taskMode);
+        this.turnWork = this.taskMode === "work";
+        if (this.taskMode !== this.modeTold) {
+          modeNote = `${this.taskMode === "work" ? TEAM_WORK_NOTE : TEAM_CODE_NOTE}\n\n`;
+          this.modeTold = this.taskMode;
+        }
+      }
+      if (state.options.team && !command) prompt = withShieldNote(`${brief}${catchUp}${this.preambleNow()}${modeNote}${turn.prompt}`);
       this.inFlight = pending;
       this.turnCap = cap;
       // Every instruction of it handed back after a dropped connection: the turn its runner may still have running, to take on
@@ -1371,7 +1406,7 @@ class LaneHost {
       this.draft = "";
       this.stopSent = false;
       const msg: Record<string, unknown> = { kind: "turn", id, prompt, system, attachments, ...(approval ? { approval } : {}), ...(command ? { command } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(mode ? { mode } : {}), ...(checkpoint ? { checkpoint: true } : {}), ...(again ? { again: true } : {}) };
-      if (this.work) msg.work = true;
+      if (this.work || (this.turnWork && command === undefined)) msg.work = true;
       this.sendRaw(msg);
     });
   }
@@ -1410,6 +1445,14 @@ class LaneHost {
     void this.append({ type: "model.routed", model: pick.model, tier: t.tier, why: pick.why, shadow: true, tool, current: this.info.model ?? "" }).catch((e) => console.error("[engine] routed:", e));
   }
 
+  /**
+   * A teammate's task as code or content work (work.ts taskMode), read afresh from each turn's messages: a Work turn runs as a
+   * Work session's does where the runner allows it, and the teammate is told when its work turns over, once each way.
+   */
+  private taskMode: TaskMode = "code";
+  private modeTold: TaskMode = "code";
+  private turnWork = false;
+
   /** The model this Auto lane last ran on, which a switch is weighed against (stickyPick). */
   private autoOn: string | null = null;
 
@@ -1418,7 +1461,7 @@ class LaneHost {
    * them, what runs in this workspace have shown, and whether moving from the model it is on pays for re-reading the conversation.
    * Said in the log when it changes, with the tool's models as they were weighed. Undefined leaves the tool on its own default.
    */
-  private async autoRoute(text: string, attachments: number, state: SessionState, events: SessionEvent[]): Promise<{ model: string; effort?: string } | undefined> {
+  private async autoRoute(text: string, attachments: number, state: SessionState, events: SessionEvent[], byPerson = true): Promise<{ model: string; effort?: string } | undefined> {
     const tool = this.info.tool;
     if (!tool) return undefined;
     const t = taskTier(text, { planFirst: state.options.planFirst, attachments, linked: !!(state.options.issue || state.options.pr), previous: this.previousTier(events) });
@@ -1431,12 +1474,21 @@ class LaneHost {
     // The repo this lane is on, for what runs on it have shown; and whether the last run here missed, which sends the next one up.
     const repo = repoKeyOf({ url: this.info.repo ?? null, github: this.info.repo && /^[\w.-]+\/[\w.-]+$/.test(this.info.repo) ? this.info.repo : null }, this.info.cwd)?.key;
     const missed = missedLast(events, this.lane, text);
-    const pick = stickyPick(tool, t.tier, t.why, { windows: this.toolWindows, learned, current, contextTokens, ...(repo ? { repo } : {}), missed });
+    // A teammate's turn nobody typed (a message from another agent, a task, a nudge) stays on the model it is on: the long brief
+    // a task or review carries read as hard work and moved it up, and every move re-read the whole conversation at a cache write's
+    // price (2026-10-31: usage). What a person asks is weighed as ever, and a miss still moves it up.
+    if (state.options.team && !byPerson && current && !missed) {
+      this.autoOn = current;
+      const was = events.findLast((e) => (e.lane ?? MAIN_LANE) === this.lane && e.body.type === "model.routed" && !e.body.shadow)?.body as { model?: string; effort?: string } | undefined;
+      return { model: current, ...(was?.model === current && was.effort ? { effort: was.effort } : {}) };
+    }
+    const kind = taskKind(text);
+    const pick = stickyPick(tool, t.tier, t.why, { windows: this.toolWindows, learned, current, contextTokens, ...(repo ? { repo } : {}), kind, missed });
     if (!pick) return undefined;
     const said = `${pick.model}|${pick.effort ?? ""}|${t.tier}|${missed ? "missed" : ""}`;
     if (pick.model !== this.autoOn || said !== this.shadowed) {
       this.shadowed = said;
-      const options = fitModels(tool, t.tier, this.toolWindows, learned, repo ? { repo } : {}).map((f) => ({ model: f.model, success: Math.round(f.success * 1000) / 1000, cost: f.cost }));
+      const options = fitModels(tool, t.tier, this.toolWindows, learned, { ...(repo ? { repo } : {}), kind }).map((f) => ({ model: f.model, success: Math.round(f.success * 1000) / 1000, cost: f.cost }));
       void this.append({ type: "model.routed", model: pick.model, ...(pick.effort ? { effort: pick.effort } : {}), tier: t.tier, why: pick.why, tool, options }).catch((e) => console.error("[engine] routed:", e));
     }
     this.autoOn = pick.model;
@@ -1475,6 +1527,9 @@ class LaneHost {
       this.toolWindows = (m.windows as Record<string, unknown>[]).slice(0, 12).flatMap((w): ToolWindow[] =>
         w && typeof w.kind === "string" ? [{ kind: w.kind.slice(0, 40), ...(typeof w.label === "string" ? { label: w.label.slice(0, 60) } : {}), usedPercent: typeof w.usedPercent === "number" && Number.isFinite(w.usedPercent) ? w.usedPercent : null, resetsAt: typeof w.resetsAt === "number" && Number.isFinite(w.resetsAt) ? w.resetsAt : null }] : [],
       );
+      // And to the burn rate of its sign-in, which forecasts and the move ahead of a limit read (forecast.ts, limit-ahead.ts).
+      const key = signInOf(this.info);
+      if (key) burn.read(key, this.toolWindows, Date.now(), { sid: this.sid, lane: this.lane, host: this.info.hostId, tool: this.info.tool! });
       return;
     }
     // Arrives once, just after attaching, and so has no turn in flight.

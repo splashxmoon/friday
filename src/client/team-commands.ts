@@ -15,13 +15,14 @@ export const TEAM_COMMANDS: SlashCommand[] = [
   { name: "resume", hint: "Let the crew carry on after a pause", icon: "play", text: "/resume" },
   { name: "away", hint: "Away until 8:00 AM, or a time: /away 7:30", icon: "moon", text: "/away " },
   { name: "back", hint: "End away mode and get the brief", icon: "sun", text: "/back" },
+  { name: "brief", hint: "Your daily brief: done, at risk, next, waiting on you", icon: "list", text: "/brief" },
   { name: "board", hint: "Open the board: every task, by teammate", icon: "kanban", text: "/board" },
   { name: "standup", hint: "Ask everyone here for a stand-up", icon: "users", text: "/standup" },
   { name: "assign", hint: "Give one teammate a task: /assign @Kit fix the FAQ", icon: "agent", text: "/assign @" },
 ];
 
 export type TeamCommand =
-  | { kind: "stop" | "pause" | "resume" | "back" | "board" }
+  | { kind: "stop" | "pause" | "resume" | "back" | "board" | "brief" }
   | { kind: "away"; at: string }
   /** Sent as words, to whom they name: "/standup" is everyone's stand-up, "/assign @Kit …" a task for Kit. */
   | { kind: "say"; text: string }
@@ -39,6 +40,7 @@ export function teamCommand(text: string): TeamCommand | null {
     case "resume":
     case "back":
     case "board":
+    case "brief":
       return { kind: name };
     case "away": {
       const at = rest ? toHHMM(rest) : "08:00";

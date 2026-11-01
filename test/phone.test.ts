@@ -9,7 +9,7 @@ import http from "node:http";
 import { explicitCurve, passedHeaders, PhoneAccess, phoneAllowed, reachable, type PhoneKV } from "../src/local/phone.js";
 
 test("the phone may ask only what the phone app needs", () => {
-  for (const [m, p] of [["GET", "/api/sessions/mine"], ["POST", "/api/sessions/abc123/instruct"], ["POST", "/api/sessions/abc123/answer"], ["GET", "/api/sessions/abc123/history"], ["GET", "/api/teammates"], ["POST", "/api/teammates/away"], ["POST", "/api/runner/tools"], ["GET", "/ws"]] as const) {
+  for (const [m, p] of [["GET", "/api/sessions/mine"], ["POST", "/api/sessions/abc123/instruct"], ["POST", "/api/sessions/abc123/answer"], ["GET", "/api/sessions/abc123/history"], ["GET", "/api/teammates"], ["POST", "/api/teammates/away"], ["POST", "/api/teammates/selfrun"], ["POST", "/api/teammates/pause"], ["POST", "/api/teammates/stop-all"], ["POST", "/api/runner/tools"], ["GET", "/ws"]] as const) {
     assert.ok(phoneAllowed(m, p), `${m} ${p}`);
   }
   for (const [m, p] of [["POST", "/api/runner/login"], ["POST", "/api/runner/install"], ["POST", "/api/runner/start"], ["POST", "/api/phone"], ["GET", "/api/phone"], ["POST", "/api/usage-sharing"], ["GET", "/api/preview/x"], ["POST", "/api/teammates"], ["DELETE", "/api/sessions/abc123"], ["GET", "/api/sessions/../phone"], ["GET", "/"]] as const) {

@@ -1047,6 +1047,8 @@ export function SessionView({
       {/* With a status bar along the foot (Focus), the notice is an item in it that opens upward, never a card over a panel's
           own controls (2026-10-27 design review); the Classic layout keeps the toast. */}
       {!replaying && overlaps && overlaps.length > 0 &&
+        // Not in a crew's chat, whose teammates work the same folders from every room they're in, as Arun's own build has none.
+        !s.state?.options.team &&
         (focus && statusSlot ? (
           <OverlapNotice overlaps={overlaps} slot={statusSlot} {...(onOpenSession ? { onOpen: onOpenSession } : {})} />
         ) : (
@@ -1505,7 +1507,8 @@ function TopBar({
             </span>
           );
         })()}
-        {!solo && (
+        {/* Not in a crew's chat: its faces say who is there and how they stand, as the open-source edition's Crew has it. */}
+        {!solo && !state.options.team && (
           <>
             <PresenceBar presence={presence} state={state} me={me} events={events} send={send} follow={follow} />
             <span className="tb-divider" />
@@ -1517,6 +1520,7 @@ function TopBar({
         {/* One button for the room, on every plan: who is in it, its invite and watch links, and its settings. Share had the same
             links in a second button beside it (Arun, 2026-10-24: "get rid of the share button in the header and add the dropdown
             content in the people's dropdown"); on Solo it was the only way to them, so the People panel is there on Solo too. */}
+        {/* The terminal view's switch in a hosted Code session too, beside the people (the local edition keeps it in SessionMenu). */}
         {/* The local edition's in its place: this session's settings, and the line about Friday Team (SessionMenu). */}
         {isLocal() && gear && (
           <SessionMenu button={!!state.options.work} settings={owner ? <SettingsBody solo state={state} send={send} meter={{ on: meterOn, set: (v) => (setMeterOn(v), localStorage.setItem("mpa.meter", v ? "1" : "0")) }} /> : undefined}>

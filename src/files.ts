@@ -10,6 +10,8 @@ import type { Attachment } from "./types.js";
  */
 
 export const MAX_FILE_BYTES = 10 * 1024 * 1024;
+/** A video or a sound (file-kinds.ts isMediaFile) may be this big: an upload is held whole in memory, on a 512 MB server. */
+export const MAX_MEDIA_BYTES = 50 * 1024 * 1024;
 const MAX_INLINE_CHARS = 60_000;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
@@ -95,7 +97,7 @@ export type ResolvedFile =
   | { kind: "image" | "pdf"; name: string; type: string; size: number; dataUrl: string }
   | { kind: "binary" | "missing" | "too_large"; name: string; type: string; size: number };
 
-export { ACCEPT_ATTR, isTextLike, isUsableFile } from "./file-kinds.js";
+export { ACCEPT_ATTR, isMediaFile, isTextLike, isUsableFile } from "./file-kinds.js";
 import { isTextLike } from "./file-kinds.js";
 
 /**

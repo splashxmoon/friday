@@ -67,3 +67,46 @@ export const BROWSER_NOTE = [
   "To show a picture, a screenshot or a video in the chat, name its file in your message: its path in backticks (`exports/cut-v2.mp4`)",
   "or as Markdown (![the cover, final](/full/path/cover.png)). Friday shows it there, and the person can open it large or play it.",
 ].join("\n");
+
+// ── A teammate's work, code or content, task by task ─────────────────────────────────────────────────────────────────────────
+// (Arun, 2026-10-31: "make sure the crews can also handle like the work stuff too like sending videos", "make it adaptive and
+// dynamic too like when we work on code it goes to code and when it is work stuff it goes to work".) A teammate isn't one or the
+// other: each task it is given is read as code or as content work, and a turn of work runs as a Work session's does (its tools
+// at full power, this guidance once when it changes over), a turn of code as before. Told in the turn, not in its standing note:
+// a change there would make Claude Code read the whole conversation again uncached.
+
+export type TaskMode = "code" | "work";
+
+const CODE_WORDS =
+  /\b(bugs?|fix(es|ed|ing)?|tests?|testing|build(s|ing)?|compiles?|deploy(s|ed|ing)?|refactor\w*|functions?|class(es)?|components?|endpoints?|apis?|repo(sitory)?|branch(es)?|commits?|pull requests?|prs?|merge|typescript|javascript|python|swift|kotlin|rust|golang|css|html|lint\w*|stack ?traces?|exceptions?|crash(es|ing)?|migrations?|schemas?|database|sql|queries|npm|pnpm|yarn|xcode|backend|frontend|server|codebase|types?check|regex|webhook|auth|ci|pipeline)\b/gi;
+const WORK_WORDS =
+  /\b(videos?|clips?|reels?|tiktoks?|youtube|shorts|thumbnails?|captions?|subtitles?|voice ?overs?|podcasts?|footage|b-roll|images?|pictures?|photos?|graphics?|logos?|illustrations?|decks?|slides?|presentations?|posts?|threads?|tweets?|linkedin|instagram|newsletters?|blogs?|articles?|scripts? for|copy(writing)?|emails?|outreach|research|briefs?|reports?|summar(y|ies|ize)|documents?|docs|spreadsheets?|sheets?|calendars?|campaigns?|press|pitch|storyboards?|carousel|infographics?|mood ?boards?)\b/gi;
+const CODE_FILES = /\.(tsx?|jsx?|mjs|py|swift|go|rs|java|kt|rb|php|cs|cpp|c|h|sql|ya?ml|toml|json|sh)\b/gi;
+const WORK_FILES = /\.(mp4|mov|m4v|webm|gif|png|jpe?g|webp|heic|mp3|wav|m4a|pdf|pptx?|key|docx?|xlsx?|csv)\b/gi;
+const MEDIA_TYPE = /^(image|video|audio)\//;
+const WORK_FILE = new RegExp(WORK_FILES.source, "i");
+
+/**
+ * Whether what a teammate was just given is code or content work: the words and files it names, and any picture, video or sound
+ * sent with it. Even, it stays what it was (`was`), and a teammate starts on code.
+ */
+export function taskMode(texts: readonly string[], attachments: readonly { type: string; name: string }[] = [], was: TaskMode = "code"): TaskMode {
+  const text = texts.join("\n");
+  const count = (re: RegExp, s: string) => s.match(re)?.length ?? 0;
+  const work = count(WORK_WORDS, text) + 2 * count(WORK_FILES, text) + 2 * attachments.filter((a) => MEDIA_TYPE.test(a.type) || WORK_FILE.test(a.name)).length;
+  const code = count(CODE_WORDS, text) + 2 * count(CODE_FILES, text);
+  return work > code ? "work" : code > work ? "code" : was;
+}
+
+/** What a teammate is told when its task turns to content work, once until it turns back. */
+export const TEAM_WORK_NOTE = [
+  "[Friday] This task is content work, not code: you have your tools at full power for it, the browser, the person's connected",
+  "apps and MCP servers, web search, and image or video tools. Do the thing rather than describe it.",
+  ...WORK_NOTE.split("\n").slice(8, 15),
+  ...WORK_NOTE.split("\n").slice(16, 19),
+  "Name each piece you made by its path in backticks (`launch/teaser-final.mp4`) and it shows in the chat, a picture as a picture",
+  "and a video playing. Sending anything out (mail, a post, a message to someone) waits for the person's yes.",
+].join("\n");
+
+/** What a teammate is told when its task turns back to code. */
+export const TEAM_CODE_NOTE = "[Friday] This task is software again: work in your folder as a coding task, with its tests and checks; the content-work note no longer applies.";

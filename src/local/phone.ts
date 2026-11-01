@@ -71,7 +71,9 @@ export const PHONE_ROUTES: [string, RegExp][] = [
   // Which tools and folders are here, for a new session: read only. Never the runner's other calls.
   ["POST", /^\/api\/runner\/(tools|folders)$/],
   ["GET", /^\/api\/teammates(\/since)?$/],
-  ["POST", /^\/api\/teammates\/(away|stop-all|pause|lift)$/],
+  // The crew from the phone: away, pause, stop all, lift holds, and a room run on its own or stopped (Arun, 2026-10-31: "so i can
+  // watch and manage the crew pages too").
+  ["POST", /^\/api\/teammates\/(away|stop-all|pause|lift|selfrun)$/],
   // A session's live feed.
   ["GET", /^\/ws$/],
 ];

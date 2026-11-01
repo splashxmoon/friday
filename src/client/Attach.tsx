@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ClipboardEvent } from "react";
-import { ACCEPT_ATTR, isUsableFile } from "../file-kinds.js";
+import { ACCEPT_ATTR, isMediaFile, isUsableFile } from "../file-kinds.js";
 import type { CliSession } from "../runner/imports.js";
 import type { FolderInfo } from "../runner/workspace.js";
 import type { Attachment, EngineTool } from "../types.js";
@@ -56,6 +56,8 @@ const PACKED = /.(png|jpe?g|gif|webp|avif|heic|mp4|mov|webm|mkv|mp3|aac|ogg|zip|
 export const MAX_BYTES = 1024 * 1024 * 1024;
 /** A loose file over this is refused by the server; inside a folder there is no such limit. */
 export const MAX_ONE = 10 * 1024 * 1024;
+/** A video or a sound may be this big (files.ts MAX_MEDIA_BYTES). */
+export const MAX_MEDIA = 50 * 1024 * 1024;
 export const MAX_ONE_IN_FOLDER = 200 * 1024 * 1024;
 
 export interface Attached {
@@ -103,7 +105,7 @@ export function pickable(files: File[], already: Attached[] = []): { keep: Attac
     }
     // The server refuses a loose file this big, so keeping it only trades a
     // message here for a failed upload later.
-    if (file.size > (inFolder ? MAX_ONE_IN_FOLDER : MAX_ONE)) {
+    if (file.size > (inFolder ? MAX_ONE_IN_FOLDER : isMediaFile(path, file.type) ? MAX_MEDIA : MAX_ONE)) {
       huge++;
       continue;
     }

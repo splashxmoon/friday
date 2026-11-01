@@ -22,6 +22,8 @@ export interface GoalState {
   text: string;
   /** A command whose success is the proof, when the person gave one. */
   check?: string;
+  /** When it should be done by (ms), when the person said. */
+  due?: number;
   lane: string;
   by: { id: string; name: string };
   seq: number;

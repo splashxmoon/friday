@@ -10,6 +10,7 @@
  *
  */
 import { isRawError } from "../activity-line.js";
+import { holdLine, type Hold } from "../team-budget.js";
 import { ENGINE_NAMES, type EngineMode, type EngineTool } from "../types.js";
 
 export type MateState = "working" | "waiting" | "stopped" | "limited" | "offline" | "idle";
@@ -27,6 +28,8 @@ export interface MateLike {
   switched?: { from: EngineTool; until: number | null };
   /** On hold as the person said (held.ts): it waits until the hold is lifted. */
   held?: boolean;
+  /** Held for its budget or hours (team-budget.ts): why, and when it carries on. */
+  hold?: Hold;
 }
 
 export interface MateSays {
@@ -93,6 +96,8 @@ export function sayMate(m: MateLike, opts: { here?: MateState; elsewhere?: strin
   if (here === "working") return { state: "working", line: `${(here === m.status && m.line) || "Working"}${on ? ` · on ${on}` : ""}` };
   if (on) return { state: "idle", line: `On ${on}${back}${m.switched ? ` · ${ENGINE_NAMES[m.switched.from]} out` : ""}` };
   if (m.held) return { state: "idle", line: m.queued ? `On hold · ${m.queued} queued` : "On hold" };
+  // Its budget spent or its hours over: why and when it carries on, time first where there is one (team-budget.ts).
+  if (m.hold) return { state: "idle", line: `${holdLine(m.hold, (ts) => timeOf(ts, opts.now))}${m.queued ? ` · ${m.queued} queued` : ""}` };
   if (opts.paused) return { state: "idle", line: m.queued ? `Paused · ${m.queued} queued` : "Paused" };
   return { state: "idle", line: m.queued ? `${m.queued} queued` : "Idle" };
 }

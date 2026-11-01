@@ -19,6 +19,7 @@ import { chooseTheme } from "./prefs.js";
 import { applyTheme, readTheme } from "./theme.js";
 import { isTeamSid, TeamRailItems, useTeamTab } from "./Teammates.js";
 import { isWorkSid, placesBusy, useWorkMode, useWorkSids } from "./WorkMode.js";
+import { isLocal } from "./edition.js";
 
 const ago = (ts: number) => {
   const m = Math.round((Date.now() - ts) / 60_000);
@@ -68,6 +69,8 @@ export function SideRail({ attention, recents, activeSid, view, onOpen, onNew, o
     ["work", "Work", "pencil", () => (setTeam(false), setWork(true))],
     ["team", "Crew", "users", () => setTeam(true)],
   ];
+  // The hosted service has Code and Crew, no Work.
+  let shownPlaces = places;
   // In Code or Work: its sessions, those waiting on you first, then those working, then the latest, each a letter in a ring of how
   // it stands (Arun, 2026-10-27: the rail stood empty in Work with a session in the list). Snoozed ones stay out, as in the list.
   const rank = (sid: string) => (needs.has(sid) ? 2 : attention.working.has(sid) ? 1 : 0);
@@ -86,9 +89,10 @@ export function SideRail({ attention, recents, activeSid, view, onOpen, onNew, o
           </button>
         </RailTip>
       )}
-      {/* The tab list's keys (roving.ts): ↑ and ↓ move between the three and pick, and only the picked one is a Tab stop. */}
-      <div className="rail-places" role="tablist" aria-label="Code, Work or Crew" aria-orientation="vertical" onKeyDown={tabListKeys}>
-        {places.map(([p, label, icon, pick]) => (
+      {/* The tab list's keys (roving.ts): ↑ and ↓ move between the places and pick, and only the picked one is a Tab stop, as the
+          open sidebar's switch is. */}
+      {<div className="rail-places" role="tablist" aria-label={shownPlaces.length === 3 ? "Code, Work or Crew" : "Code or Crew"} aria-orientation="vertical" onKeyDown={tabListKeys}>
+        {shownPlaces.map(([p, label, icon, pick]) => (
           <RailTip key={p} label={label} sub={busy[p] === "needs" ? "An agent is waiting on you" : busy[p] === "working" ? "Agents are working" : p === "team" ? "Teammates who keep their role and memory, and work on your goals" : p === "work" ? "You and a coding tool, on posts, research, video" : "You and a coding tool, on one change"}>
             <button type="button" role="tab" aria-selected={here === p} tabIndex={here === p ? 0 : -1} className="rail-item" data-active={here === p ? "true" : undefined} onClick={pick} aria-label={label}>
               <Icon name={icon} size={18} />
@@ -96,7 +100,7 @@ export function SideRail({ attention, recents, activeSid, view, onOpen, onNew, o
             </button>
           </RailTip>
         ))}
-      </div>
+      </div>}
       {!teamOn && (
         <RailTip label="New session" sub="⌘K">
           <button type="button" className="rail-item rail-new" onClick={onNew} aria-label="New session">

@@ -394,7 +394,7 @@ export function RunLog({
  * their places above (StepGroup). "N files changed" opens the changes; the files aren't listed here as well, where a run
  * of sixty filled the screen with chips that said less than the Diff panel does (Arun, 2026-10-18).
  */
-export function RunMeta({ files, live, onFile, startedAt, endedAt, tokens, compacted, waiting = false }: { files: FileChange[]; live: boolean; onFile?: () => void; startedAt?: number; endedAt?: number; tokens?: number; /** The conversation's size before Friday had it compacted for this run. */ compacted?: number; /** Its turn waits on a person (a question, a permission): not working. */ waiting?: boolean }) {
+export function RunMeta({ files, live, onFile, startedAt, endedAt, tokens, compacted, waiting = false, forecast }: { files: FileChange[]; live: boolean; onFile?: () => void; startedAt?: number; endedAt?: number; tokens?: number; /** The conversation's size before Friday had it compacted for this run. */ compacted?: number; /** Its turn waits on a person (a question, a permission): not working. */ waiting?: boolean; /** While it works: about how long is left, and when its window fills at this pace (runForecast.ts). */ forecast?: string }) {
   // The clock only runs while there is something to time.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -408,7 +408,7 @@ export function RunMeta({ files, live, onFile, startedAt, endedAt, tokens, compa
   const elapsed = startedAt && (live || took >= 1000) ? span(took) : "";
   // Waiting on a person says so: "Working · 32m" under a turn stopped on a question contradicted the bar's "Waiting for you"
   // (2026-10-27 audit).
-  const time = live ? `${waiting ? "Waiting for an answer" : "Working"}${elapsed ? ` · ${elapsed}` : ""}` : elapsed ? `Worked for ${elapsed}` : "";
+  const time = live ? `${waiting ? "Waiting for an answer" : "Working"}${elapsed ? ` · ${elapsed}` : ""}${forecast && !waiting ? ` · ${forecast}` : ""}` : elapsed ? `Worked for ${elapsed}` : "";
   const changed = files.length ? `${files.length} file${files.length === 1 ? "" : "s"} changed` : "";
   const used = tokens ? `${shortTokens(tokens)} tokens` : "";
   const trimmed = compacted ? `conversation compacted from ${shortTokens(compacted)}` : "";

@@ -112,6 +112,8 @@
 .tm-row-field { clear: left; display: grid; grid-template-columns: 72px minmax(0, 1fr); column-gap: 14px; align-items: start; }
 .tm-row-label { padding-top: 9px; color: var(--ink-2); font-size: 13px; font-weight: 500; line-height: 18px; }
 .tm-row-input { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+/* A select in a row's column keeps its own height: .tm-select's flex basis is for a row, and in a column it stood 200px tall. */
+.tm-row-input > .tm-select { flex: none; width: 100%; max-width: 320px; }
 .tm-row-input > small { color: var(--text-muted); font-size: 12px; line-height: 1.4; }
 .tm-path { display: flex; align-items: center; height: 36px; padding: 0 12px; overflow: hidden; border-radius: 8px; background: var(--hover); color: var(--ink-2); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
 .tm-backup { display: flex; align-items: center; gap: 10px; margin-top: 2px; color: var(--text-muted); font-size: 12.5px; }
@@ -541,6 +543,12 @@ html .tm-row[data-active="true"] { background: var(--sel-bg, var(--hover-strong)
 .tm-away-title { color: var(--ink); font-size: 13px; font-weight: 600; }
 .tm-away-body p { margin: 0; color: var(--ink-2); font-size: 12.5px; line-height: 1.5; text-wrap: pretty; }
 .tm-away-body p.tm-away-note { color: var(--text-muted); font-size: 12px; }
+/* Run on its own's budget and end time (team-budget.ts). */
+.tm-selfrun-budget { display: flex; flex-wrap: wrap; gap: 10px; }
+.tm-selfrun-budget label { display: grid; gap: 4px; color: var(--text-muted); font-size: 12px; }
+/* A teammate's budget and hours. */
+.tm-budget .tm-checkin-when { flex-wrap: wrap; align-items: center; }
+.tm-budget-usd { max-width: 120px; }
 .tm-away-time { display: flex; align-items: center; gap: 10px; color: var(--ink-2); font-size: 13px; font-weight: 500; }
 .tm-away-time input { width: 132px; height: 34px; font-variant-numeric: tabular-nums; }
 .tm-away-body > button { align-self: flex-start; }
@@ -956,3 +964,14 @@ html .tm-row[data-active="true"] { background: var(--sel-bg, var(--hover-strong)
 @keyframes tm-rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .tm-handoff-more { animation: none; } .tm-handoff-chev { transition: none; } }
 @media (max-width: 600px) { .tm-handoff-line > .tm-handoff-task { max-width: 16ch; } .tm-handoff-line::before, .tm-handoff-line::after { min-width: 8px; } }
+/* The room's ⋯ menu (TeamControls.tsx RoomMore): one row per thing the header no longer shows, each saying how it stands, and
+   pages for Results, Run on its own and Away (Arun, 2026-10-31: "too many buttons here… simplify this"). */
+.tm-more-pop { width: 300px !important; }
+.tm-more-list { display: flex; flex-direction: column; gap: 1px; margin: 0; padding: 0; list-style: none; }
+.tm-more-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0; border-radius: var(--r-md); background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.tm-more-row:hover, .tm-more-row:focus-visible { background: var(--hover); outline: none; }
+.tm-more-icon { display: grid; flex: none; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: var(--card-2); color: var(--ink-2); }
+.tm-more-row .tm-hd-n { position: static; }
+.tm-more-back { margin: 4px 6px 0; padding: 4px 6px; border: 0; border-radius: 6px; background: none; color: var(--text-muted); font: inherit; font-size: 12px; cursor: pointer; }
+.tm-more-back:hover { background: var(--hover); color: var(--ink); }
+.tm-more-btn[data-on="run"] { color: var(--ink); background: color-mix(in srgb, var(--ink) 10%, transparent); }

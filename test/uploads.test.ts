@@ -34,7 +34,6 @@ test("what is accepted is exactly what the agent can read", () => {
   }
   for (const [name, type] of [
     ["archive.zip", "application/zip"],
-    ["clip.mp4", "video/mp4"],
     ["design.sketch", "application/octet-stream"],
     ["font.woff2", "font/woff2"],
     ["photo.heic", "image/heic"],

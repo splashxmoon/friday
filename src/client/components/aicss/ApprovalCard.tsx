@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import {
   Download,
   ListChecks,
@@ -22,6 +22,18 @@ export interface ApprovalQuestion {
   details?: (string | undefined)[];
   /** The marker each option was written with ("a", "1"), shown in place of A, B, C. */
   keys?: string[];
+  /** The option the asker recommends: marked with a quiet pill, its words left as they are. */
+  recommended?: string;
+}
+
+/**
+ * A question's words with the paths in them set as code: "/Users/maya/acme/api is empty" reads as a place, not prose (Arun's
+ * screenshot, 2026-10-31: "design this better").
+ */
+const PATH = /((?:~|\/(?:Users|home|private|tmp|var|opt|srv|mnt|Volumes))\/[^\s"'(),;]*[^\s"'(),;.:])/g;
+function promptText(text: string): ReactNode {
+  const parts = text.split(PATH);
+  return parts.length === 1 ? text : parts.map((p, i) => (i % 2 ? <code key={i} className={styles.qCode}>{p}</code> : p));
 }
 
 export interface ApprovalPlanStep {
@@ -202,6 +214,8 @@ export interface ApprovalCardProps {
   planSummary?: string;
   planPreviewCount?: number;
   title?: string;
+  /** Who is asking, beside the title (an agent's face or its tool's mark). */
+  mark?: ReactNode;
   approveLabel?: string;
   rejectLabel?: string;
   onApprove?: (payload?: { answers?: Record<string, string> }) => void;
@@ -227,8 +241,12 @@ export function ApprovalCard({
   onReject,
   partial = false,
   className,
+  mark,
 }: ApprovalCardProps) {
-  const [answers, setAnswers] = useState<Record<string, string>>({});
+  // The asker's recommended choice starts picked, so Enter takes it: most answers are that one (Friday's goal is speed).
+  const [answers, setAnswers] = useState<Record<string, string>>(() =>
+    Object.fromEntries(questions.filter((q) => q.recommended && q.options.includes(q.recommended)).map((q) => [q.id, q.recommended!])),
+  );
   const [otherSelected, setOtherSelected] = useState<Record<string, boolean>>(
     {},
   );
@@ -452,10 +470,12 @@ export function ApprovalCard({
       }}
     >
       <div className={styles.head}>
-        {variant !== "questions" && (
+        {variant !== "questions" ? (
           <span className={styles.icon} data-variant={variant}>
             <Icon className={styles.iconSvg} aria-hidden />
           </span>
+        ) : (
+          mark && <span className={styles.asker}>{mark}</span>
         )}
         <div className={styles.headText}>
           <div className={styles.title}>{resolvedTitle}</div>
@@ -509,7 +529,7 @@ export function ApprovalCard({
                   data-active={active ? "true" : undefined}
                   aria-hidden={active ? undefined : true}
                 >
-                  <div className={styles.qPrompt}>{q.prompt}</div>
+                  <div className={styles.qPrompt}>{promptText(q.prompt)}</div>
                   <div
                     className={styles.options}
                     role="radiogroup"
@@ -563,6 +583,7 @@ export function ApprovalCard({
                           ) : (
                             <span className={styles.optionLabel}>{opt}</span>
                           )}
+                          {q.recommended === opt && <span className={styles.recommended}>Recommended</span>}
                         </button>
                       );
                     })}
@@ -605,8 +626,12 @@ export function ApprovalCard({
                             }
                           }}
                         >
-                          <span className={styles.key} aria-hidden>
-                            {otherLetter}
+                          {/* A pen, not a letter: this row is for writing, not one of the asker's choices. */}
+                          <span className={styles.key} data-pen="true" aria-hidden>
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M12 20h9" />
+                              <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                            </svg>
                           </span>
                           <input
                             ref={(el) => {
@@ -615,7 +640,7 @@ export function ApprovalCard({
                             className={styles.optionInput}
                             type="text"
                             value={draft}
-                            placeholder="Or write your own answer…"
+                            placeholder="Something else…"
                             tabIndex={active && otherOn ? 0 : -1}
                             aria-label={`Custom answer for: ${q.prompt}`}
                             onClick={(e) => {
@@ -864,6 +889,12 @@ export function ApprovalCard({
               s
             </span>
           </div>
+        ) : variant === "questions" ? (
+          // How to answer without the pointer, quietly: the choices take arrows, and Enter sends.
+          <span className={styles.hint} aria-hidden>
+            <kbd>↑</kbd>
+            <kbd>↓</kbd> to choose · <kbd>↵</kbd> to send
+          </span>
         ) : (
           <span className={styles.actionsSpacer} aria-hidden />
         )}

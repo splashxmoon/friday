@@ -65,7 +65,7 @@ export function nextRunAt(s: AgentSchedule, now = Date.now()): number | null {
 }
 
 /** One room as a run needs it: its session, its name, each member's lane there, and its lead. */
-interface Place {
+export interface Place {
   room: string;
   sid: string;
   name: string;
@@ -87,7 +87,7 @@ export interface WorkflowEnded {
 export class TeamWorkflows {
   constructor(private d: WorkflowDeps) {}
 
-  private k = (s: string) => `${this.d.prefix}teammates:${s}`;
+  protected k = (s: string) => `${this.d.prefix}teammates:${s}`;
   private key = () => this.k("workflows");
   private runsKey = (id: string) => this.k(`workflow-runs:${id}`);
   /** The run a room's board is now, while it goes: {id, run, seq}. */
@@ -192,7 +192,8 @@ export class TeamWorkflows {
 
   // ── where it runs ────────────────────────────────────────────────────
 
-  private async place(room: string): Promise<Place | null> {
+  /** Where `w` runs: its room, or the Crew room. */
+  protected async place(room: string, _w?: Workflow): Promise<Place | null> {
     if (room === TEAM_ROOM) {
       const sid = await this.d.teamSid();
       return { room, sid, name: "the Crew room", lanes: Object.fromEntries((await this.d.teammates.list()).map((t) => [t.id, t.lane])) };
@@ -212,12 +213,38 @@ export class TeamWorkflows {
     const names = await this.names();
     return {
       ...w,
-      trigger: w.trigger.kind === "webhook" ? { kind: "webhook", secret: "", url: `${hookBase}/api/hooks/workflow/${w.id}?key=${w.trigger.secret}` } : w.trigger,
+      trigger: w.trigger.kind === "webhook" ? { kind: "webhook", secret: "", url: `${this.hookUrl(w, hookBase)}?key=${w.trigger.secret}` } : w.trigger,
       says: { trigger: describeTrigger(w.trigger, names) },
       runs: await this.runs(w.id, 6),
       today: await this.runsToday(w.id),
       next: w.on && w.trigger.kind === "schedule" ? nextRunAt(w.trigger.schedule) : null,
     };
+  }
+
+  /** Whose work a run of `w` is, said on its board: nobody's here, the crew being one person's. */
+  protected byOf(_w: Workflow): { id: string; name: string } | undefined {
+    return undefined;
+  }
+
+  /** Where its webhook is called, without its key. */
+  protected hookUrl(w: Workflow, hookBase: string): string {
+    return `${hookBase}/api/hooks/workflow/${w.id}`;
+  }
+
+  /**
+   * The lanes in `place` a run of `w` may hand work to, and why any other one may not: null, every member (one person's crew, as
+   * here). The hosted service's keeps a run to its owner's teammates (hosted-workflows.ts).
+   */
+  protected async runnable(_w: Workflow, _place: Place, _state: SessionState): Promise<{ lanes: string[]; why: (lane: string) => string; none: string; /** A step for any other lane is asked of its keeper (onBoard), rather than refused. */ asks?: boolean } | null> {
+    return null;
+  }
+
+  /**
+   * While a run's board is being worked on, after each look at it: any change to the run besides its steps as the board has them
+   * (the hosted service's asks of other keepers). Nothing here.
+   */
+  protected async onBoard(_w: Workflow, _run: WorkflowRun, _sid: string, _state: SessionState): Promise<Partial<WorkflowRun> | null> {
+    return null;
   }
 
   // ── a run ────────────────────────────────────────────────────────────
@@ -241,7 +268,7 @@ export class TeamWorkflows {
   private async post(w: Workflow, run: WorkflowRun): Promise<WorkflowRun> {
     const set = async (change: Partial<WorkflowRun>) => (run = (await this.updateRun(w.id, run.id, change)) ?? { ...run, ...change });
     try {
-      const place = await this.place(w.room);
+      const place = await this.place(w.room, w);
       if (!place) throw new Error("Its room isn't there any more. Pick where it runs.");
       return await this.d.teammates.locked(`workflow-post:${place.sid}`, async () => {
         const [mates, rooms, all] = await Promise.all([this.d.teammates.list(), this.d.teammates.rooms(), this.list()]);
@@ -256,15 +283,22 @@ export class TeamWorkflows {
           return await set({ status: "waiting", roomName: place.name, note: `${why} It starts when that's done.` });
         }
         const members = Object.values(place.lanes).filter((l) => state.lanes.some((x) => x.id === l));
-        const lead = state.lead && members.includes(state.lead) ? state.lead : (members[0] ?? "");
-        if (!lead) throw new Error(`Nobody is in ${place.name} to run it.`);
+        // Led by the room's lead, or, where only some may take the run's work, by the room's lead if it is one of them, else the
+        // first of them online.
+        const can = await this.runnable(w, place, state);
+        const pool = can ? members.filter((l) => can.lanes.includes(l)) : members;
+        const lead = state.lead && pool.includes(state.lead) ? state.lead : ((can ? pool.find((l) => state.engines[l]?.online) : undefined) ?? pool[0] ?? "");
+        if (!lead) throw new Error(can && members.length ? can.none : `Nobody is in ${place.name} to run it.`);
         const laneOfMate = (mate: string) => (mate === LEAD ? lead : (place.lanes[mate] ?? ""));
         const missing = w.steps.find((s) => !members.includes(laneOfMate(s.mate)));
         if (missing) throw new Error(`One of its teammates isn't in ${place.name}.`);
+        const held = can && w.steps.map((s) => laneOfMate(s.mate)).find((l) => !can.lanes.includes(l));
+        if (held && !can.asks) throw new Error(can.why(held));
         const tasks = workflowTasks(w, (mate) => laneName(state, laneOfMate(mate)), run.input ?? "");
         const fromName = laneName(state, lead);
         // As Friday, from the lead: the lead hears how it went when it is through, and its report is the run's last word.
-        const posted = await this.d.store.append(place.sid, FRIDAY, { type: "board.posted", fromLane: lead, fromName, tasks }, { lane: lead });
+        const by = this.byOf(w);
+        const posted = await this.d.store.append(place.sid, FRIDAY, { type: "board.posted", fromLane: lead, fromName, tasks, ...(by ? { by } : {}) }, { lane: lead });
         if (!posted.ok) throw new Error(`Couldn't post its board in ${place.name}.`);
         const ref = JSON.stringify({ id: w.id, run: run.id, seq: posted.seq });
         await this.d.redis.multi().set(this.activeKey(place.sid), ref).sadd(this.activesKey(), place.sid).set(this.boardKey(place.sid, posted.seq), ref, "EX", 30 * 86_400).exec();
@@ -279,7 +313,7 @@ export class TeamWorkflows {
     }
   }
 
-  private async active(sid: string): Promise<{ id: string; run: string; seq: number } | null> {
+  protected async active(sid: string): Promise<{ id: string; run: string; seq: number } | null> {
     const raw = await this.d.redis.get(this.activeKey(sid));
     if (!raw) return null;
     try {
@@ -301,7 +335,9 @@ export class TeamWorkflows {
       const tasks = state.board.tasks;
       const steps = run.steps.map((s) => ((t) => (t ? { ...s, status: t.status, name: t.name ?? s.name, ...(t.report ? { report: clip(t.report, 4000) } : {}) } : s))(tasks.find((x) => x.id === s.task)));
       if (!boardBusy(state)) return void (await this.finish(a.id, w, run, sid, state, tasks));
-      if (JSON.stringify(steps) !== JSON.stringify(run.steps)) await this.updateRun(a.id, run.id, { steps });
+      const more = w ? await this.onBoard(w, { ...run, steps }, sid, state) : null;
+      const next = { steps, ...more };
+      if (JSON.stringify(next.steps) !== JSON.stringify(run.steps) || (more?.note !== undefined && more.note !== run.note)) await this.updateRun(a.id, run.id, next);
     });
   }
 
@@ -320,7 +356,9 @@ export class TeamWorkflows {
     const last = steps.filter((s) => !waitedOn.has(s.task) && s.status === "done" && s.report);
     const result = last.map((s) => `## ${s.title} (${s.name})\n${s.report}`).join("\n\n");
     const status = gone || stuck.length || !steps.some((s) => s.status === "done") ? "failed" : "done";
-    const note = gone ?? (stuck.length ? `Step ${stuck.map((s) => s.task.slice(1)).join(", ")} got stuck: ${clip(stuck[0]!.report ?? "no report", 240)}` : status === "failed" ? "Every step was dropped." : "");
+    // A step asked of another keeper who didn't take it on (the hosted service's) was dropped for that: said as theirs.
+    const declined = steps.filter((s) => s.asked?.status === "declined").map((s) => `${s.asked!.keeper} didn't take on step ${s.task.slice(1)}.`);
+    const note = gone ?? (stuck.length ? `Step ${stuck.map((s) => s.task.slice(1)).join(", ")} got stuck: ${clip(stuck[0]!.report ?? "no report", 240)}` : [...declined, status === "failed" ? "Every step was dropped." : ""].filter(Boolean).join(" "));
     const ended = Date.now();
     const done = (await this.updateRun(id, run.id, { status, steps, ended, note, ...(result ? { result: clip(result, 8000) } : {}) })) ?? run;
     if (!w) return;
@@ -384,9 +422,10 @@ export class TeamWorkflows {
     const board = b.type.startsWith("board.");
     if (!board && b.type !== "run.ended") return;
     void (async () => {
-      if (!(await this.d.teammates.sessions()).includes(sid)) return;
+      if (!(await this.ours(sid))) return;
       if (board) await this.sync(sid);
-      const list = (await this.list()).filter((w) => w.on);
+      const list: Workflow[] = [];
+      for (const w of await this.list()) if (w.on && (await this.watches(w, sid))) list.push(w);
       if (!list.length) return;
       const state = await this.d.store.state(sid);
       const mate = await this.mateOn(sid, b.type === "board.reviewed" ? (state.board?.tasks.find((t) => t.id === b.id)?.lane ?? "") : (ev.lane ?? MAIN_LANE));
@@ -422,12 +461,22 @@ export class TeamWorkflows {
     await this.start(w, trigger, input);
   }
 
-  private async roomOf(sid: string): Promise<string | null> {
+  /** Whether `sid` is one of the crew's sessions, whose events workflows follow. */
+  protected async ours(sid: string): Promise<boolean> {
+    return (await this.d.teammates.sessions()).includes(sid);
+  }
+
+  /** Whether what happens in `sid` may start `w`: anywhere in the crew, here. */
+  protected async watches(_w: Workflow, _sid: string): Promise<boolean> {
+    return true;
+  }
+
+  protected async roomOf(sid: string): Promise<string | null> {
     if ((await this.d.teammates.team()) === sid) return TEAM_ROOM;
     return (await this.d.teammates.rooms()).find((r) => r.sid === sid)?.id ?? null;
   }
 
-  private async mateOn(sid: string, lane: string): Promise<{ id: string; name: string } | null> {
+  protected async mateOn(sid: string, lane: string): Promise<{ id: string; name: string } | null> {
     if (!lane) return null;
     const list = await this.d.teammates.list();
     if ((await this.d.teammates.team()) === sid) return list.find((t) => t.lane === lane) ?? null;
@@ -462,7 +511,7 @@ export class TeamWorkflows {
         await this.updateRun(w.id, run.id, { status: "skipped", note: "Its room's board wasn't free within 12 hours.", ended: now.getTime() });
         continue;
       }
-      const place = await this.place(w.room);
+      const place = await this.place(w.room, w);
       const state = place ? await this.d.store.state(place.sid).catch(() => null) : null;
       if (place && ((state?.board && boardBusy(state)) || (await this.active(place.sid)))) continue;
       if (!(await this.d.redis.zrem(this.waitingKey(), entry))) continue;

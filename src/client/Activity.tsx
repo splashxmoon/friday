@@ -125,7 +125,8 @@ import { ENGINE_MODEL_INFO, ENGINE_NAMES, ENGINE_TOOLS, liveMachine, MAIN_LANE, 
 import { fileUrl, uploadFile } from "./api.js";
 import { pickable, uploadAll } from "./Attach.js";
 import { AgentMark, Avatar, FridayMark, Icon, type IconName } from "./icons.js";
-import { RouteWhy, costMark, useLearned } from "./RouteWhy.js";
+import { RouteWhy, RoutedForecast, costMark, useLearned } from "./RouteWhy.js";
+import { useRunForecast } from "./runForecast.js";
 import { forValue, rankTools, taskTier } from "../routing.js";
 import { glanceOf } from "./gauge.js";
 import { useToolLimits } from "./toolLimits.js";
@@ -142,7 +143,9 @@ import { dayBreaks } from "./team-status.js";
 import { teamSid as teamSidNow } from "./Teammates.js";
 /** A phone-wide window: the team's box says less (Arun, 2026-10-28: the critique's "at 420px the placeholder is short"). */
 const narrowBox = () => typeof matchMedia === "function" && matchMedia("(max-width: 600px)").matches;
-import { BriefCard, HoldsLifted, ProposedMate } from "./TeamBrief.js";
+import { BriefCard, HoldsLifted, SelfRunLine, ProposedMate } from "./TeamBrief.js";
+import { ProposedSkill } from "./CrewSkills.js";
+import { BudgetLine } from "./TeammateBudget.js";
 import { CheckInLine, HandoffLine, FoldersGiven, TeammateChanged, FridayLine, teamEmpty, mateOn, mergeSends, reconnectTeammate, useTeamVersion, isCheckIn, quietCheckIns, ToolSwitched, MentionBackdrop, MentionText, RoomsNow, namesSomeone, plumbing, teamReply, TeamRun, TeamWorking, TeammateBoxPicker, TeammateFolderCard, TeammateHeader, teammateAgents, teammateMark, teammatesNamed, TeamRecipients, ThreadChip, ThreadHost, foldTeamTalk, pieceOf, TalkGroup, teamEventKind, type TalkPiece, useSentTo, noteLaneRuns, forgetLaneRuns, useSendCopies, learnLanes, queueWhy, queueWhyAll, crewLeadName, RoomIntro, isAgentTalk , matesIn, teamKnown, teamSid} from "./Teammates.js";
 import { threadsOf } from "./team-threads.js";
 import { isLive, isPersonsWord, isWaiting, leadAnswers, queuedFor, roomRunKind, switchedAfter, turnsFor, type LeadInfo } from "./team-room.js";
@@ -434,6 +437,9 @@ const HIDDEN = new Set<string>([
   "board.finished",
   "board.review",
   "board.reviewed",
+  // A task's proof is shown on its card, the results shelf and the brief (ProofCard.tsx).
+  "proof.posted",
+  "proof.shot",
   "suggestion.dismissed",
   "lane.added",
   "lane.removed",
@@ -1501,7 +1507,7 @@ export function Activity({
     void (async () => {
       for (const lane of warmKey.split(",")) {
         if (gone) return;
-        const r = await warmLaneTerminal(sid, invite, lane);
+        const r = await warmLaneTerminal(sid, invite, lane, state.engines[lane]?.machine);
         // Still finishing (its runner letting the turn go): asked again in a moment.
         if (r?.busy) setTimeout(() => !gone && setRewarm((n) => n + 1), 2_000);
         else if (r) (preferFriday(sid, lane, "briefly"), redraw((n) => n + 1));
@@ -1517,7 +1523,7 @@ export function Activity({
     let gone = false;
     // Its shell started with the request, not after the view has heard back: the tool is already starting as its screen draws.
     const seq = state.engines[lane]?.sinceSeq ?? -1;
-    void warmLaneTerminal(sid, invite, lane).then((r) => {
+    void warmLaneTerminal(sid, invite, lane, state.engines[lane]?.machine).then((r) => {
       if (gone || !r) return;
       if (r.busy) setTimeout(() => !gone && setRetry((n) => n + 1), 2_000);
       else setNativeErr((e) => ({ ...e, [lane]: { msg: r.error, seq } }));
@@ -1806,7 +1812,7 @@ export function Activity({
       {nativeOn ? (
         // One per agent: kept across a switch, it ran the last agent's line in the next one's screen (Arun, 2026-10-30: "it properly
         // switches the native terminals based on the coding tool lane").
-        <LaneTui key={`${sid}|${tuiLane}`} sid={sid} invite={invite} lane={tuiLane!} tool={tuiTool!} title={laneLabel(state, tuiLane!)} onBack={() => toFriday(tuiLane!)} />
+        <LaneTui key={`${sid}|${tuiLane}`} sid={sid} invite={invite} lane={tuiLane!} tool={tuiTool!} title={laneLabel(state, tuiLane!)} {...(state.engines[tuiLane!]?.machine ? { machine: state.engines[tuiLane!]!.machine! } : {})} onBack={() => toFriday(tuiLane!)} />
       ) : nativeWaiting ? (
         <div className="lane-tui lane-tui-wait" role="status">
           {nativeErr[tuiLane!] ? (
@@ -1835,7 +1841,7 @@ export function Activity({
           {everyone.map((l) => {
             const tool = state.engines[l]?.tool;
             const native = !!tool && TERMINAL_TOOLS.has(tool) && state.engines[l]?.hostId === me.id && hasShells() && !friday(sid, l);
-            if (native && state.terminals?.[l]) return <LaneTui key={`${sid}|${l}`} sid={sid} invite={invite} lane={l} tool={tool} title={laneLabel(state, l)} onBack={() => toFriday(l)} />;
+            if (native && state.terminals?.[l]) return <LaneTui key={`${sid}|${l}`} sid={sid} invite={invite} lane={l} tool={tool} title={laneLabel(state, l)} {...(state.engines[l]?.machine ? { machine: state.engines[l]!.machine! } : {})} onBack={() => toFriday(l)} />;
             if (native && !atWork(l) && state.engines[l]?.online)
               return (
                 <div key={`${sid}|${l}`} className="lane-tui lane-tui-wait" role="status">
@@ -3178,6 +3184,8 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   if (ctx.state.options.team) mate = teammateMark(lane, 18)?.mark ?? null;
   // In a team a reply reads as a group chat (Teammates.tsx): its mascot, moving while it works, its name in its colour, bubbles.
   if (ctx.state.options.team) [mate, look] = teamReply(lane, active, mate);
+  // About how long is left while it works (runForecast.ts): asked before the folded return, so the hooks run in the same order.
+  const forecast = useRunForecast(ctx.identity, ctx.state, ctx.events, lane, active, ctx.me.id);
   // An older run: the facts that decide whether to open it, on one line. Before the steps, the receipt and the hand-off are
   // worked out, since none of them are shown: a long session is mostly folded runs.
   if (folded && !unfolded) {
@@ -3486,6 +3494,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   if (ctx.state.options.work) onChanged = changed.length === 1 ? () => void dispatchEvent(new CustomEvent("friday:open-file", { detail: { path: changed[0]!.path }, cancelable: true })) : undefined;
   const runLog = blocks.some((x) => x.kind === "work") ? (
     <RunMeta
+      forecast={forecast}
       files={changed}
       live={active}
       onFile={onChanged}
@@ -3606,6 +3615,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
       {active && !mate && !runLog && (!typing || typing === "waiting") && !waitsOnPerson(ctx.state, lane) && (
         <div className="rsp-live">
           <Working label={blocks.length ? "Working" : "Thinking"} />
+          {forecast && <span className="rsp-live-fc">{forecast}</span>}
         </div>
       )}
       {typing && typing !== "waiting" && <LiveStream sid={ctx.sid} lane={lane} />}
@@ -4967,8 +4977,14 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
       return <BriefCard ev={ev} sid={ctx.sid} stamp={<Stamp ev={ev} />} />;
     case "teammate.proposed":
       return <ProposedMate ev={ev} identity={ctx.identity} stamp={<Stamp ev={ev} />} />;
+    case "skill.proposed":
+      return <ProposedSkill ev={ev} stamp={<Stamp ev={ev} />} />;
     case "holds.lifted":
       return <HoldsLifted ev={ev} stamp={<Stamp ev={ev} />} />;
+    case "team.selfrun":
+      return <SelfRunLine ev={ev} stamp={<Stamp ev={ev} />} />;
+    case "team.budget":
+      return <BudgetLine ev={ev} stamp={<Stamp ev={ev} />} />;
     case "mesh.paused":
       if (b.on) return <MeshPauseCard ev={ev} state={state} me={me} send={ctx.send} notify={ctx.notify} stamp={<Stamp ev={ev} />} />;
       return (
@@ -5378,6 +5394,10 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
       // An Auto lane's coding tool: the model picked for this message, against the tool's other models as they were weighed.
       if (b.tool) {
         const name = (id: string) => ENGINE_MODEL_INFO[b.tool!].find((m) => m.id === id)?.label ?? id;
+        // The task it picked for: the person's message just before it on this lane, for its forecast (forecast.ts).
+        const routedLane = ev.lane ?? MAIN_LANE;
+        const asked = ctx.events.findLast((e) => e.seq < ev.seq && (e.lane ?? MAIN_LANE) === routedLane && e.body.type === "instruction" && e.actor.kind === "human");
+        const askedText = asked?.body.type === "instruction" ? asked.body.text : "";
         return (
           <Notice ev={ev} icon={SparklesIcon}>
             <details className="routed">
@@ -5387,6 +5407,7 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
               <RouteWhy
                 tier={b.tier}
                 why={b.why}
+                forecast={askedText ? <RoutedForecast identity={ctx.identity} tool={b.tool} model={b.model} text={askedText} engine={ctx.state.engines[routedLane]} me={ctx.me.id} /> : undefined}
                 options={(b.options ?? []).map((o) => ({ key: o.model, label: name(o.model), mark: <EngineMark tool={b.tool!} size={14} />, room: null, odds: o.success, cost: costMark(o.cost), best: o.model === b.model, value: o.model === b.model && forValue(o, b.options ?? []) }))}
               />
             </details>
@@ -6159,16 +6180,16 @@ function AgentQuestion({ ctx, q }: { ctx: Ctx; q: OpenQuestion }) {
   }, [q.question, q.options]);
   useEffect(() => setBusy(false), [q.seq]);
 
-  const recommended = (o: string) => (o === q.recommended ? `${o} · recommended` : o);
   return (
     <ApprovalCard
       className={cn("agent-question", busy && "is-busy")}
       variant="questions"
-      title={`${agentNameFor(state, q.lane)} needs a decision`}
-      questions={[{ id: "answer", prompt: [parsed.prompt, q.detail].filter(Boolean).join("\n\n"), options: parsed.options.map((o) => recommended(o.label)) }]}
+      mark={agentLook(state, q.lane, 18).mark}
+      title={`${agentNameFor(state, q.lane)} is asking`}
+      questions={[{ id: "answer", prompt: [parsed.prompt, q.detail].filter(Boolean).join("\n\n"), options: parsed.options.map((o) => o.label), ...(q.recommended ? { recommended: q.recommended } : {}) }]}
       approveLabel={busy === "sending" ? "Sending…" : busy === "sent" ? "Sent" : "Answer"}
       onApprove={(payload) => {
-        const text = (payload?.answers?.answer ?? "").replace(/ · recommended$/, "").trim();
+        const text = (payload?.answers?.answer ?? "").trim();
         if (!text || busy) return;
         setBusy("sending");
         // Free again if it didn't go (offline, say): left busy, the question could never be answered after reconnecting.
@@ -6207,7 +6228,8 @@ function AskCard({ ctx, lane, seq, asks }: { ctx: Ctx; lane: string; seq: number
         variant="questions"
         // Answer what matters and send: a coding tool's questions are often "1=a is enough to go on", and the rest can wait.
         partial
-        title={`${agentNameFor(ctx.state, lane)} needs a decision`}
+        mark={agentLook(ctx.state, lane, 18).mark}
+        title={`${agentNameFor(ctx.state, lane)} is asking`}
         questions={asks.map((a, i) => ({
           id: String(i),
           prompt: a.question,
@@ -6307,11 +6329,13 @@ export function DrivePill({ ctx, lane }: { ctx: Pick<Ctx, "state" | "me" | "send
   // with an old sign-in of yours, or after a drop, is taken back the same way.
   // Only once the session's own workspace has said it is Solo: a teammate arriving from their own Solo home was guessed Solo,
   // pressed into a takeover they may not force, and lost Request control (Marketing, 2026-10-22).
+  // A crew's chat is the same: a teammate's lane is its keeper's alone to drive (hosted-crew.ts), so writing to your own takes it.
+  const own = ctx.soloSure || !!state.options.team;
   useEffect(() => {
-    if (!ctx.soloSure || driving || !may) return;
+    if (!own || driving || !may) return;
     void send(driver ? { type: "control.force", lane } : { type: "control.claim", lane });
-  }, [ctx.soloSure, lane, driver?.id, driving, may]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (!may || ctx.solo) return null;
+  }, [own, lane, driver?.id, driving, may]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!may || ctx.solo || state.options.team) return null;
   // A lane can set its own handoff mode; the main lane uses the session's (as the server decides it, core.ts control.request).
   const takeover = (laneOf(state, lane)?.controlMode ?? state.options.controlMode) === "takeover";
   const requested = state.pendingRequests.some((r) => r.id === me.id && r.lane === lane);
@@ -6564,8 +6588,9 @@ export function agentNameFor(state: SessionState, lane: string): string {
   if (e?.tool) {
     const tool = ENGINE_NAMES[e.tool];
     const tools = Object.entries(state.engines).filter(([, x]) => !!x.tool);
-    // Whose it is, only when there is more than one person's to tell apart: on your own, "Arun's" on every line is noise.
-    const owner = new Set(tools.map(([, x]) => x.hostId)).size > 1 ? `${e.hostName}'s ` : "";
+    // Whose it is, only when there is more than one person's to tell apart: on your own, "Arun's" on every line is noise. Never
+    // a teammate's: it goes by its own name, and its keeper is said where it matters (the sidebar, its page).
+    const owner = !state.options.team && new Set(tools.map(([, x]) => x.hostId)).size > 1 ? `${e.hostName}'s ` : "";
     // The name somebody gave it, over its tool's: renamed, it is called that everywhere.
     const given = givenName(state, lane);
     // A name that already says whose it is ("Arokia's Claude Code", as a teammate's lane is named when it joins) isn't given
@@ -6700,7 +6725,8 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
   const [picking, setPicking] = useState(false);
   // A coding tool on this lane answers to its own `/` commands; Friday's built-in ones are for Friday's agents.
   const laneTool = state.engines[lane]?.tool;
-  const people = Object.entries(state.members).filter(([id, m]) => id !== me.id && !m.removed).map(([id, m]) => ({ id, name: m.name, online: ctx.presence?.some((p) => p.id === id && p.online) }));
+  // A crew's box @-names its teammates: the people in a shared room are there to watch and write, not to be sent work.
+  const people = state.options.team ? [] : Object.entries(state.members).filter(([id, m]) => id !== me.id && !m.removed).map(([id, m]) => ({ id, name: m.name, online: ctx.presence?.some((p) => p.id === id && p.online) }));
   // The teammate the box writes to is being given a folder or repo (Teammates.tsx TeammateFolderCard).
   const [giving, setGiving] = useState(false);
   let naming = false;
@@ -6914,6 +6940,9 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
         ? `Ask ${name} to research, write or make something… @ for people`
         : // Only what works here (2026-10-27 audit: "# for files" with no computer connected, "@ for people" with nobody else).
           `Tell ${name} what to do… / for commands${hasFolder ? ", # for files" : ""}${people.length ? ", @ for people" : ""}`
+      : mode === "suggest" && state.options.team
+        ? // Someone else's teammate in a shared room: what is written goes to its keeper as an ask (CrewHosted.tsx), or straight to it on a key they share.
+          inView !== ALL ? `Ask ${name}${theirPlan ? `: ${theirPlan.hostName} takes it on` : ""}…` : `Give the crew a goal (${name} leads${theirPlan ? `, ${theirPlan.hostName} takes it on` : ""}), or @ a teammate…`
       : mode === "suggest"
         ? theirPlan
           ? `${name} runs on ${theirPlan.hostName}'s own plan, so it takes ${theirPlan.hostName}'s work only. Suggest something to ${theirPlan.hostName}…`
@@ -7000,11 +7029,20 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
       // In a crew "@Kit …" goes to Kit, and "@Kit and @Nova …" to both, wherever the box points (Teammates.tsx).
       if (state.options.team) toLanes = teammatesNamed(sid, text, lane);
       if (!toLanes.length) return putBack("Nobody is in this room yet. Add a teammate to it from its menu at the top.");
+      // Someone else's teammates asked here, through their keepers (CrewHosted.tsx), each "Scout (Sam Rivera)".
+      const asked: string[] = [];
+      // And those on a key their keeper shares, which take anyone's work: sent straight to them.
+      const straight: string[] = [];
       for (const to of toLanes) {
         const r = await send({ ...(mode === "drive" || mode === "claim" ? { type: "instruct", text, interrupt: now && running && to === lane, attachments, lane: to, ...(to === lane ? handoff : {}) } : { type: "suggest", text, attachments, lane: to }), quiet: true });
         if (!r.ok) return putBack(r.error ?? "That didn't send. It's back in the box: try again.");
       }
-      if (toLanes.length > 1 || toLanes[0] !== lane) notify(`Sent to ${new Intl.ListFormat("en", { type: "conjunction" }).format(toLanes.map((l) => agentNameFor(state, l)))}.`);
+      // Nothing went to the room itself: its "Sending…" goes, the asks being with their keepers now.
+      if (asked.length + straight.length === toLanes.length) unecho();
+      const list = (xs: string[]) => new Intl.ListFormat("en", { type: "conjunction" }).format(xs);
+      if (asked.length) notify(`Asked ${list(asked)}: their keeper${asked.length === 1 ? "" : "s"} take${asked.length === 1 ? "s" : ""} it on with one tap.${straight.length ? ` Sent to ${list(straight)}.` : ""}`);
+      else if (straight.length) notify(`Sent to ${list(straight)}.`);
+      else if (toLanes.length > 1 || toLanes[0] !== lane) notify(`Sent to ${new Intl.ListFormat("en", { type: "conjunction" }).format(toLanes.map((l) => agentNameFor(state, l)))}.`);
       if (carry) carried(sid, lane);
       // What has been typed since it went, if anything, is what the box holds now.
       setTyped(textarea.current?.value ?? "");
@@ -7048,7 +7086,7 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
         onSubmit={onSubmit}
         multiple
         maxFiles={10}
-        maxFileSize={10 * 1024 * 1024}
+        maxFileSize={50 * 1024 * 1024}
         globalDrop={canUpload}
         onError={(e) => notify(e.message)}
         className={cn("prompt", mode === "suggest" && "prompt-suggest")}
@@ -7156,9 +7194,10 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
             )}
             {/* Effort is a column of the agent picker for whoever steers the lane. Everybody else still sees the room's level
                 here, read-only, so it isn't behind the view check. */}
-            {(mode === "view" || !agentAndModelAreOne || !effortChoice({ state, me, lane, send, notify })) && <EffortPill state={state} me={me} lane={lane} send={send} notify={notify} />}
+            {!(state.options.team && mode === "suggest") && (mode === "view" || !agentAndModelAreOne || !effortChoice({ state, me, lane, send, notify })) && <EffortPill state={state} me={me} lane={lane} send={send} notify={notify} />}
             {mode !== "view" && !toPeople && toolPick && <ReachPill ctx={ctx} lane={lane} />}
-            {mode !== "view" && !toPeople && !agentAndModelAreOne && <LaneModelPill ctx={ctx} lane={lane} />}
+            {/* A crew works toward a goal by running on its own (TeamControls.tsx), as the open-source edition's does. */}
+            {mode !== "view" && !toPeople && !agentAndModelAreOne && !(state.options.team && mode === "suggest") && <LaneModelPill ctx={ctx} lane={lane} />}
             {/* Model and reasoning in one control, the same one the new session screen uses. Friday's models are for Friday Code: driving
                 somebody's own Claude Code, Codex or Cursor, the model is theirs, and this pill would show a choice that changed nothing. */}
           </PromptInputTools>

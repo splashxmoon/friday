@@ -19,6 +19,8 @@ export function GoalPill({ ctx, lane }: { ctx: { state: SessionState; me: Member
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [check, setCheck] = useState("");
+  // By when, optional (goals.ts reads the pace against it): a date-and-time field's local value, "2026-11-06T17:00".
+  const [due, setDue] = useState("");
   const [busy, setBusy] = useState(false);
   const wrap = useRef<HTMLSpanElement>(null);
   const pop = useRef<HTMLDivElement>(null);
@@ -63,7 +65,9 @@ export function GoalPill({ ctx, lane }: { ctx: { state: SessionState; me: Member
   const set = () => {
     const t = text.trim();
     if (!t) return;
-    void run({ type: "goal.set", text: t, ...(check.trim() ? { check: check.trim() } : {}), lane }, "Goal set: every finished turn is read against it.");
+    const at = due ? new Date(due).getTime() : NaN;
+    if (due && !(at > Date.now())) return notify("Pick a time to come for the goal.");
+    void run({ type: "goal.set", text: t, ...(check.trim() ? { check: check.trim() } : {}), ...(due ? { due: at } : {}), lane }, due ? `Goal set, due ${new Date(at).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}.` : "Goal set: every finished turn is read against it.");
   };
   const running = runOf(state, lane).status === "running";
   const word = !goal ? "Goal" : goal.met ? "Goal met" : goal.last ? (goal.nudges >= MAX_GOAL_NUDGES ? "Goal · needs you" : `Goal · not yet${goal.nudges ? ` · ${goal.nudges}` : ""}`) : running ? "Goal · working" : "Goal · set";
@@ -82,6 +86,7 @@ export function GoalPill({ ctx, lane }: { ctx: { state: SessionState; me: Member
             <div className="goal-status">
               <h4>Done when</h4>
               <p className="goal-text">{goal.text}</p>
+              {goal.due && <p className="muted small">Due {new Date(goal.due).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</p>}
               {goal.check && (
                 <p className="muted small">
                   Proof: <code>{goal.check}</code>
@@ -109,6 +114,7 @@ export function GoalPill({ ctx, lane }: { ctx: { state: SessionState; me: Member
                     onClick={() => {
                       setText(goal.text);
                       setCheck(goal.check ?? "");
+                      setDue(goal.due ? new Date(goal.due - new Date(goal.due).getTimezoneOffset() * 60_000).toISOString().slice(0, 16) : "");
                       void send({ type: "goal.clear" }).then((r) => (r.ok ? undefined : notify(r.error ?? "That didn't go through.")));
                     }}
                   >
@@ -137,6 +143,10 @@ export function GoalPill({ ctx, lane }: { ctx: { state: SessionState; me: Member
                 }}
               />
               <input value={check} placeholder="Proof command, optional: npm test" aria-label="A command whose success proves it" maxLength={400} onChange={(e) => setCheck(e.target.value)} />
+              <label className="goal-due">
+                <span className="muted small">By when, optional</span>
+                <input type="datetime-local" value={due} aria-label="When it should be done by" onChange={(e) => setDue(e.target.value)} />
+              </label>
               <p className="muted small">After each finished turn Friday reads the turn against this and, until it is met, tells the agent to carry on; up to {MAX_GOAL_NUDGES} times, then it's yours.</p>
               <div className="goal-pop-acts">
                 <button type="button" className="btn ghost small" onClick={() => setOpen(false)}>

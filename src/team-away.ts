@@ -1,4 +1,6 @@
 import { isCheckIn, saysNoUpdate } from "./teammate-checkins.js";
+import { budgetStops } from "./team-budget.js";
+import { briefProof, handInProof, runProof } from "./team-proof.js";
 import { MAIN_LANE, type SessionEvent, type TeamBrief } from "./types.js";
 
 /**
@@ -214,7 +216,9 @@ export function teamBrief(places: readonly Place[], mates: readonly { id: string
         const run = runs.findLast((r) => r.lane === b.lane && r.startSeq < e.seq);
         const title = plainText(titles.get(b.id) ?? b.id);
         finished.delete(b.id);
-        if (b.status === "done") finished.set(b.id, { lane: b.lane, done: true, line: { lane: m.lane, name: m.name, title, ...(run?.files.length ? { files: run.files.slice(0, 20) } : {}), ...(run?.prs[0] ? { pr: run.prs[0] } : {}), ...where(p.sid), seq: e.seq } });
+        // Its proof as of this hand-in (team-proof.ts): what the person checks it by.
+        const proof = b.status === "done" ? handInProof(p.events, e, p.sid) : null;
+        if (b.status === "done") finished.set(b.id, { lane: b.lane, done: true, line: { lane: m.lane, name: m.name, title, ...(run?.files.length ? { files: run.files.slice(0, 20) } : {}), ...(run?.prs[0] ? { pr: run.prs[0] } : {}), ...where(p.sid), seq: e.seq, ...(proof ? { proof: briefProof(proof) } : {}) } });
         else finished.set(b.id, { lane: b.lane, done: false, line: { lane: m.lane, name: m.name, title, why: clip(b.report, 300), ...where(p.sid), seq: e.seq } });
       }
       if (b.type === "memory.saved" && e.actor.kind === "agent" && isAssumption(b.key, b.text)) {
@@ -222,6 +226,9 @@ export function teamBrief(places: readonly Place[], mates: readonly { id: string
         if (m) brief.assumptions.push({ lane: m.lane, name: m.name, text: clip(`${b.text}`, 400), seq: e.seq, ...where(p.sid) });
       }
     }
+    // Stops for a budget or hours, and a run stopped by its budget (team-budget.ts).
+    const stops = budgetStops(p.events, (l) => mateOn.get(l), since, until, p.room === null ? undefined : p.sid);
+    if (stops.length) brief.stops = [...(brief.stops ?? []), ...stops];
     // In the order they last finished.
     for (const f of [...finished.values()].sort((x, y) => (x.line.seq ?? 0) - (y.line.seq ?? 0))) {
       if (f.done) {
@@ -242,7 +249,11 @@ export function teamBrief(places: readonly Place[], mates: readonly { id: string
       if (result && !boardDone.has(lane)) {
         const files = [...new Set(inStretch.flatMap((r) => r.files))];
         const prs = [...new Set(inStretch.flatMap((r) => r.prs))];
-        brief.done.push({ lane: m.lane, name: m.name, title: lane === lead ? leadLine(p.events, lane, result) : clip(firstLine(result.said), 140), ...(files.length ? { files: files.slice(0, 20) } : {}), ...(prs[0] ? { pr: prs[0] } : {}), ...where(p.sid), seq: result.saidSeq });
+        const title = lane === lead ? leadLine(p.events, lane, result) : clip(firstLine(result.said), 140);
+        // Proof for work: a run that changed files or handed some in (a lead's goal); a plain answer in the room needs none.
+        const proof = runProof(p.events, result, title, m.name, p.sid);
+        const worked = proof.review || proof.changed.files.length;
+        brief.done.push({ lane: m.lane, name: m.name, title, ...(files.length ? { files: files.slice(0, 20) } : {}), ...(prs[0] ? { pr: prs[0] } : {}), ...where(p.sid), seq: result.saidSeq, ...(worked ? { proof: briefProof(proof) } : {}) });
       }
       // Its last turn stopped on an error, and nothing ran since.
       const last = mine.at(-1);
@@ -281,7 +292,7 @@ function leadLine(events: readonly SessionEvent[], lane: string, r: LaneRun): st
  */
 export const BRIEF_MIN_MS = 10 * 60_000;
 export function briefWorthPosting(b: TeamBrief): boolean {
-  if (b.done.length || b.failed.length || b.waiting.length || b.assumptions.length) return true;
+  if (b.done.length || b.failed.length || b.waiting.length || b.assumptions.length || b.stops?.length) return true;
   return b.until - b.since >= BRIEF_MIN_MS && b.usage.some((u) => u.turns > 0 || u.minutes > 0);
 }
 
@@ -292,6 +303,7 @@ export function briefLine(b: TeamBrief): string {
     b.failed.length ? `${b.failed.length} stopped short` : "",
     b.waiting.length ? `${b.waiting.length} waiting on you` : "",
     b.assumptions.length ? `${b.assumptions.length} assumption${b.assumptions.length === 1 ? "" : "s"} to check` : "",
+    b.stops?.length ? `${b.stops.length} stopped for a budget or hours` : "",
   ].filter(Boolean);
   return parts.length ? `While you were away: ${parts.join(", ")}.` : "While you were away: nothing new.";
 }
@@ -333,7 +345,7 @@ export function loopBetween(events: readonly SessionEvent[], a: string, b: strin
 }
 
 /** What is news in a team chat besides a run's end (its unread mark): a question, an update, a switch, a change, the brief. */
-const NEWS = new Set(["agent.question", "mesh.posted", "teammate.switched", "teammate.folders", "teammate.changed", "teammate.proposed", "team.brief"]);
+const NEWS = new Set(["agent.question", "mesh.posted", "teammate.switched", "team.budget", "teammate.folders", "teammate.changed", "teammate.proposed", "skill.proposed", "team.brief"]);
 
 /**
  * The seq of a team chat's latest news, for its unread mark: what the room shows the person, not every run that ended (2026-10-28

@@ -84,6 +84,8 @@
 .wf-on { display: inline-flex; flex: none; align-items: center; gap: 7px; color: var(--text-muted); font-size: 13px; cursor: pointer; }
 .wf-head-tools { display: flex; flex: none; align-items: center; gap: 6px; margin-left: auto; }
 .wf-runs-word { font-variant-numeric: tabular-nums; }
+/* Someone else's workflow (the hosted service's), said where its Run now and Save would be. */
+.wf-owner { display: inline-flex; align-items: center; height: 28px; padding: 0 10px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-muted); font-size: 12.5px; white-space: nowrap; }
 
 .wf-side { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow-y: auto; padding: 12px; border-right: 1px solid var(--border); background: var(--bg); }
 .wf-side-head { display: flex; align-items: center; justify-content: space-between; min-height: 28px; padding: 0 2px 0 4px; color: var(--ink); font-size: 13px; font-weight: 600; }

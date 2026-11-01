@@ -91,6 +91,11 @@ export type AppendResult =
 
 /** How long a session found in neither Redis nor the archive is taken to be absent, before the archive is asked again. */
 const ABSENT_MS = 30_000;
+/**
+ * How long a kept log with gaps isn't read again: it can never be put back, and reading it whole every 30 seconds (one of
+ * 24,775 events, asked for again and again) is what ran the server out of memory (2026-11-01, Render OOM at 512 MB).
+ */
+const GAPPED_MS = 6 * 60 * 60_000;
 
 /**
  * A session's log and its folded state, kept in memory between calls.
@@ -241,7 +246,7 @@ export class SessionStore {
       const seqs = raws.map((r) => (JSON.parse(r) as { seq: number }).seq);
       if (seqs.some((q, i) => q !== i + 1)) {
         console.error(`[archive] not putting back ${sid}: the kept log runs ${seqs[0]}…${seqs.at(-1)} with gaps (${raws.length} events)`);
-        this.absent.set(sid, Date.now() + ABSENT_MS);
+        this.absent.set(sid, Date.now() + GAPPED_MS);
         return false;
       }
       // The archive keeps the log as it was written, so the copy put back is checked for secrets again from its start.

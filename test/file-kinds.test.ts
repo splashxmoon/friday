@@ -43,8 +43,9 @@ test("no extension means text, because that is where Dockerfile and LICENSE live
   assert.ok(isTextLike("src/vendor/LICENSE"));
 });
 
-test("media, archives and compiled output are still refused", () => {
-  for (const f of ["clip.mp4", "song.mp3", "photo.heic", "bundle.zip", "app.dmg", "lib.so", "font.woff2", "Main.class", "cache.sqlite3", "key.p12"]) {
+test("archives and compiled output are still refused; videos and sounds are taken as files to work with", () => {
+  for (const f of ["clip.mp4", "song.mp3"]) assert.equal(isUsableFile(f), true, `${f} is a file to work with`);
+  for (const f of ["photo.heic", "bundle.zip", "app.dmg", "lib.so", "font.woff2", "Main.class", "cache.sqlite3", "key.p12"]) {
     assert.equal(isTextLike(f), false, `${f} is not text`);
     assert.equal(isUsableFile(f), false, `${f} is not usable`);
   }
@@ -131,9 +132,9 @@ test("a picked folder arrives whole apart from what is generated", () => {
   assert.equal(over, 0);
   assert.equal(skipped, 4);
   assert.match(reason, /4 from build and dependency folders/);
-  // A single file picked on its own still has to be something the agent can read.
-  const loose = pickable([f("hero.mp4", 1000, "video/mp4"), f("notes.md")]);
-  assert.deepEqual(loose.keep.map((k) => k.path), ["notes.md"]);
+  // A single file picked on its own still has to be something the agent can read or work with: a video is, a font isn't.
+  const loose = pickable([f("hero.mp4", 1000, "video/mp4"), f("font.woff2", 1000, "font/woff2"), f("notes.md")]);
+  assert.deepEqual(loose.keep.map((k) => k.path), ["hero.mp4", "notes.md"]);
   assert.match(loose.reason, /1 media and binaries/);
 });
 
