@@ -43,7 +43,7 @@ function DropdownMenuContent({
         sideOffset={sideOffset}
         collisionPadding={collisionPadding}
         className={cn(
-          "z-50 max-h-(--radix-dropdown-menu-content-available-height) min-w-[8rem] origin-(--radix-dropdown-menu-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-[12px] border bg-popover p-1 text-popover-foreground shadow-md",
+          "z-[90] max-h-(--radix-dropdown-menu-content-available-height) min-w-[8rem] origin-(--radix-dropdown-menu-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-[12px] border bg-popover p-1 text-popover-foreground shadow-md",
           className
         )}
         {...props}
@@ -231,7 +231,7 @@ function DropdownMenuSubContent({
     <DropdownMenuPrimitive.SubContent
       data-slot="dropdown-menu-sub-content"
       className={cn(
-        "z-50 min-w-[8rem] origin-(--radix-dropdown-menu-content-transform-origin) overflow-hidden rounded-[12px] border bg-popover p-1 text-popover-foreground shadow-lg",
+        "z-[90] min-w-[8rem] origin-(--radix-dropdown-menu-content-transform-origin) overflow-hidden rounded-[12px] border bg-popover p-1 text-popover-foreground shadow-lg",
         className
       )}
       {...props}

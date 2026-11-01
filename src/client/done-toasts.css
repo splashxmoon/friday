@@ -1,0 +1,12 @@
+/* An agent finished elsewhere (DoneToasts.tsx): small, quiet, in the bottom corner; gone by itself. The "Needs you" toasts are the
+   loud ones (Attention.tsx); these are a note. */
+.done-toasts { position: fixed; right: 16px; bottom: 16px; z-index: 60; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; pointer-events: none; }
+.done-toast { pointer-events: auto; display: flex; align-items: center; gap: 10px; max-width: min(340px, calc(100vw - 32px)); padding: 9px 14px 9px 12px; border: 1px solid var(--line, var(--border)); border-radius: 12px; background: var(--surface, var(--raised)); box-shadow: 0 12px 32px rgb(0 0 0 / .18); color: var(--ink); font: inherit; text-align: left; cursor: pointer; animation: done-toast-in var(--t-open, 180ms) var(--ease-out, ease-out); transition: background-color var(--t-hover, 120ms) var(--ease-out, ease-out); }
+.done-toast:hover { background: var(--hover); }
+.done-toast:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.done-toast-dot { width: 8px; height: 8px; flex-shrink: 0; border-radius: 999px; background: var(--ready, #3fb67b); }
+.done-toast-text { display: flex; min-width: 0; flex-direction: column; gap: 1px; }
+.done-toast-title { overflow: hidden; font-size: 13px; line-height: 18px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.done-toast-what { overflow: hidden; font-size: 12px; line-height: 16px; color: var(--text-muted); text-overflow: ellipsis; white-space: nowrap; }
+@keyframes done-toast-in { from { opacity: 0; transform: translateY(4px); } }
+@media (prefers-reduced-motion: reduce) { .done-toast { animation: none; } }

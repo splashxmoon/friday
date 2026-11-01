@@ -119,7 +119,8 @@ export interface SessionState {
   roleRequests?: { id: string; name: string; seq: number }[];
   /** Messages from another session waiting here for someone who can steer their agent to let them through (peers.ts). */
   peersHeld?: { id: string; lane: string; fromTitle: string; fromName: string; seq: number }[];
-  run: { status: RunStatus; sinceSeq: number; error?: string };
+  /** `sinceAt`: when it went into this status, for "working 4m", "done 12m ago" (absent on a state from before it was kept). */
+  run: { status: RunStatus; sinceSeq: number; sinceAt?: number; error?: string };
   /**
    * Lanes beyond "main", and their run state. `run` and `driver` above stay the
    * main lane's, so everything that predates lanes keeps working unchanged.
@@ -129,7 +130,7 @@ export interface SessionState {
   mainName?: string;
   /** The agent that leads the others (lead.set), if one does. */
   lead?: string | null;
-  laneRuns: Record<string, { status: RunStatus; sinceSeq: number; error?: string }>;
+  laneRuns: Record<string, { status: RunStatus; sinceSeq: number; sinceAt?: number; error?: string }>;
   /** When each lane's last turn finished well, by seq: an idle agent that has done something, not one that never ran. */
   finished?: Record<string, number>;
   /** Each lane whose last turn somebody stopped (run.pause), by seq, until its next turn starts: "stopped", not "done". */
@@ -602,7 +603,7 @@ export function pathsIn(text: string): string[] {
 }
 
 /** A lane's run state, defaulting to idle for a lane that has never run. */
-export function runOf(s: SessionState, lane: string): { status: RunStatus; sinceSeq: number; error?: string } {
+export function runOf(s: SessionState, lane: string): { status: RunStatus; sinceSeq: number; sinceAt?: number; error?: string } {
   return lane === MAIN_LANE ? s.run : (s.laneRuns[lane] ?? { status: "idle", sinceSeq: 0 });
 }
 
@@ -693,7 +694,7 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
     for (const id of b.mentions) if (id !== ev.actor.id) s.mentions[id] = { seq: ev.seq, by: ev.actor.id, byName: ev.actor.name, text: b.text.slice(0, 280), lane };
   }
   const setRun = (status: RunStatus, error?: string) => {
-    const next = { status, sinceSeq: ev.seq, ...(error ? { error } : {}) };
+    const next = { status, sinceSeq: ev.seq, sinceAt: ev.ts, ...(error ? { error } : {}) };
     if (lane === MAIN_LANE) s.run = next;
     else s.laneRuns[lane] = next;
   };

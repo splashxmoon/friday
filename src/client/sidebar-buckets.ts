@@ -23,7 +23,8 @@ export function buckets(recents: RecentSession[], live: { needs: ReadonlySet<str
   for (const r of recents) {
     const awake = live.needs.has(r.sid) || live.working.has(r.sid);
     if (!awake && r.snoozedUntil && r.snoozedUntil > now) out.snoozed.push(r);
-    else if (!awake && (r.settledAt || live.merged?.has(r.sid) || now - r.openedAt > SETTLE_AFTER_MS)) out.settled.push(r);
+    // A pinned one settles only by hand: you pinned it to keep it in sight.
+    else if (!awake && (r.settledAt || (!r.pinnedAt && (live.merged?.has(r.sid) || now - r.openedAt > SETTLE_AFTER_MS)))) out.settled.push(r);
     else out.active.push(r);
   }
   return out;

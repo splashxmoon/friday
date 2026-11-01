@@ -88,7 +88,8 @@ import {
 import { inBand, isTyping, PageSkeleton, SessionSkeleton, useConfirm, useDismiss, type MenuItem } from "./ui.js";
 import { WaitingOnYou, askToNotify, useAttention } from "./Attention.js";
 import { DailyBriefHost } from "./DailyBrief.js";
-import { clearUnread, markUnread, workingChanges } from "./unread.js";
+import { clearUnread, markUnread, useUnread, workingChanges } from "./unread.js";
+import { DoneToasts } from "./DoneToasts.js";
 
 /**
  * The desktop app linking this computer to the hosted Friday, and why signing out of it didn't work (desktop-link.ts). The local
@@ -266,6 +267,7 @@ export function App() {
   // Where you are the thing that is missing, across every session you know of.
   // On Solo the sessions list says what each one is doing (which tool, and what it is at), not the last thing you typed.
   const attention = useAttention(identity, recents, planLimits(planNow(workspace)).fridayAgent === "none");
+  const unreadAll = useUnread();
   // Asked the first time there is something worth being told about, rather
   // than on launch: a permission prompt before the product has done anything
   // is a prompt people refuse on principle.
@@ -1208,6 +1210,8 @@ export function App() {
           and nothing has to float over the page to bring the rest back. */}
       <>
         {identity.id && <PrWatch identity={identity} onOpen={() => navigate({ kind: "review" })} />}
+        {/* An agent finished somewhere you weren't looking: a soft sound and a toast that opens it (Herdr's, 2026-11-01). */}
+        {identity.id && <DoneToasts activeSid={activeSid} />}
         {/* Every agent blocked on you, across sessions, as toasts that stay until answered or closed. */}
         {/* Connecting the computer a browser is on: one dialog, opened from any "Connect this computer". */}
         <Sidebar
@@ -1415,6 +1419,7 @@ export function App() {
           }}
           actions={paletteOrder(sessionActions, baseActions({
             recents,
+            stateOf: (sid) => (attention.items.some((i) => i.sid === sid) ? "needs" : attention.working.has(sid) ? "working" : unreadAll.has(sid) ? "done" : null),
             open: (r) => navigate({ kind: "session", sid: r.sid, invite: r.invite }),
             newSession: () => {
               navigate({ kind: "home" });

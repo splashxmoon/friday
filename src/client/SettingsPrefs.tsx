@@ -20,6 +20,8 @@ import {
   type TextSize,
   type ThemeChoice,
   chimeOn,
+  chooseDoneChime,
+  doneChimeOn,
   chooseChime,
   chooseSessionLayout,
   sessionLayout,
@@ -32,7 +34,7 @@ import {
   type Accent,
   type Contrast,
 } from "./prefs.js";
-import { chime } from "./chime.js";
+import { chime, doneChime } from "./chime.js";
 import { applyFonts, applyTheme, FRIDAY_PALETTES, forgetTheme, keepTheme, PRESETS, readFonts, readTheme, readThemeFile, savedThemes, themeFile, themeFromPalette, type CustomTheme, type Fonts, type Palette } from "./theme.js";
 import { Icon } from "./icons.js";
 import { DownloadIcon, ExternalLinkIcon, UploadIcon } from "lucide-react";
@@ -506,6 +508,7 @@ function ThemeMaker({ start, onCancel, onSave }: { start: Palette; onCancel: () 
 export function NotificationsTab({ identity }: { identity: Identity }) {
   const [on, setOn] = useState(notificationsOn);
   const [sound, setSound] = useState(chimeOn);
+  const [doneSound, setDoneSound] = useState(doneChimeOn);
   const supported = typeof Notification !== "undefined";
   const [perm, setPerm] = useState<NotificationPermission>(
     supported ? Notification.permission : "denied",
@@ -533,15 +536,35 @@ export function NotificationsTab({ identity }: { identity: Identity }) {
           label="A soft chime when something needs you"
           hint={
             sound
-              ? "One short sound, window open or not. Nothing for anything else."
+              ? "One short sound, window open or not."
               : "Silent."
           }
         >
-          <Switch
-            aria-label="A soft chime when something needs you"
-            checked={sound}
-            onCheckedChange={(v) => (setSound(v), chooseChime(v), v && chime())}
-          />
+          <span className="flex items-center gap-2">
+            <Button type="button" variant="ghost" size="sm" onClick={() => chime()} aria-label="Play the needs-you chime">
+              Play
+            </Button>
+            <Switch
+              aria-label="A soft chime when something needs you"
+              checked={sound}
+              onCheckedChange={(v) => (setSound(v), chooseChime(v), v && chime())}
+            />
+          </span>
+        </Row>
+        <Row
+          label="A softer sound when an agent finishes"
+          hint={doneSound ? "When it finishes somewhere you aren't looking. Never for the session on screen." : "Silent."}
+        >
+          <span className="flex items-center gap-2">
+            <Button type="button" variant="ghost" size="sm" onClick={() => doneChime()} aria-label="Play the finished sound">
+              Play
+            </Button>
+            <Switch
+              aria-label="A softer sound when an agent finishes"
+              checked={doneSound}
+              onCheckedChange={(v) => (setDoneSound(v), chooseDoneChime(v), v && doneChime())}
+            />
+          </span>
         </Row>
         <Row
           label="Permission"

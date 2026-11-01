@@ -571,8 +571,10 @@ body > [data-float] { pointer-events: auto; }
    Only as wide as the middle column lets it be, and always laid out at full
    width inside: without that, folding squeezes every title into a sliver for
    the length of the animation before it disappears. */
+/* Clipped, never scrolled: "hidden" still let focus or a scroll into view move it sideways by the 3px the resize handle
+   reaches past its edge (.sb-resize), shifting the whole list. */
 .sb-panel {
-  position: relative; min-width: 0; min-height: 0; overflow: hidden; background: var(--sidebar);
+  position: relative; min-width: 0; min-height: 0; overflow: hidden; overflow: clip; background: var(--sidebar);
   visibility: hidden; opacity: 0;
   transition: opacity .16s ease, visibility 0s linear .24s;
 }
@@ -8833,6 +8835,9 @@ html.desktop :is(#band-left, #band-slot) :is(.popover, [role="dialog"], [role="m
 /* The command palette on the search window's frame (Palette.tsx): its shortcut keys as keys, at the row's end. */
 .quick.srch.palette { width: min(720px, calc(100vw - 32px)); }
 .pal-key { flex: none; margin-left: auto; }
+/* Where a session stands, on its row in ⌘K: a dot and a word, quiet beside the title. */
+.pal-state { display: inline-flex; flex: none; align-items: center; gap: 6px; margin-left: auto; font-size: 12px; line-height: 16px; color: var(--text-muted); }
+.pal-state + .pal-key { margin-left: 8px; }
 .srch-row[role="option"] { cursor: pointer; }
 /* A repo's group in the sidebar is the folder's own name, as it is spelled, not shouted. */
 .sb-section-title:has(.sb-repo-icon) { text-transform: none; letter-spacing: 0; font-size: 13px; color: var(--ink-2); }

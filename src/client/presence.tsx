@@ -76,11 +76,14 @@ export function useNow(ms = 20_000): number {
   return now;
 }
 
-const RANK: Record<string, number> = { needs: 0, waiting: 0, working: 1 };
-/** Needs you, then working, then the rest, each in the order it was in (owner call D): a stable sort by state. */
+const RANK: Record<string, number> = { needs: 0, waiting: 0, done: 1, working: 2 };
+/**
+ * Needs you, then finished and not yet read, then working, then the rest, each in the order it was in (owner call D; "done"
+ * from Herdr's priority order, 2026-11-01: what finished is yours to look at, what works isn't yet): a stable sort by state.
+ */
 export function byState<T>(items: readonly T[], stateOf: (it: T) => string | null | undefined): T[] {
   return items
-    .map((it, i) => ({ it, i, r: RANK[stateOf(it) ?? ""] ?? 2 }))
+    .map((it, i) => ({ it, i, r: RANK[stateOf(it) ?? ""] ?? 3 }))
     .sort((a, b) => a.r - b.r || a.i - b.i)
     .map((x) => x.it);
 }

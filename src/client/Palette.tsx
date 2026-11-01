@@ -6,6 +6,7 @@ import { shortcut } from "./Shortcuts.js";
 import { useDismiss } from "./ui.js";
 import { openWorkflows } from "./team-workflow-view.js";
 import { choosePlace } from "./WorkMode.js";
+import { byState } from "./presence.js";
 
 export interface Action {
   id: string;
@@ -15,8 +16,13 @@ export interface Action {
   /** The person this row is about, drawn as their avatar instead of an icon. */
   who?: { id: string; name: string };
   group: string;
+  /** Where a session stands: said on its row, matched as words ("needs", "finished", "working"), and its order. */
+  state?: SessionState;
   run: () => void;
 }
+
+export type SessionState = "needs" | "done" | "working";
+const STATE_WORD: Record<SessionState, string> = { needs: "Needs you", done: "Finished", working: "Working" };
 
 // Grouped, the way the search window and every menu here read: a heading per kind, in the order the kinds first came.
 // Matching is on what a row says (its label and hint), never its group: "set" used to find every session through "Sessions".
@@ -26,7 +32,7 @@ export function paletteGroups(actions: Action[], q: string): { group: string; it
   // holds the words themselves or their first letters, only those are shown; the scattered kind is for when nothing does.
   const close = (hay: string) => hay.includes(needle) || initials(hay).startsWith(needle.replace(/\s+/g, ""));
   const all = needle
-    ? actions.map((a) => ({ a, hay: `${a.label} ${a.hint ?? ""}`.toLowerCase() })).map((x) => ({ ...x, score: fuzzy(x.hay, needle) + (close(x.hay) ? 100 : 0) })).filter((x) => x.score > 0)
+    ? actions.map((a) => ({ a, hay: `${a.label} ${a.hint ?? ""} ${a.state ? STATE_WORD[a.state] : ""}`.toLowerCase() })).map((x) => ({ ...x, score: fuzzy(x.hay, needle) + (close(x.hay) ? 100 : 0) })).filter((x) => x.score > 0)
     : [];
   const anyClose = all.some((x) => x.score >= 100);
   const scored = needle
@@ -135,6 +141,12 @@ export function Palette({ actions, onClose, onNew }: { actions: Action[]; onClos
                   >
                     {a.who ? <Avatar name={a.who.name} id={a.who.id} size={18} /> : <Icon name={a.icon ?? "chevronRight"} size={15} />}
                     <span className="srch-title">{marked(a.label, q)}</span>
+                    {a.state && (
+                      <span className="pal-state">
+                        <span className="dass-dot size-2" data-state={a.state} aria-hidden />
+                        {STATE_WORD[a.state]}
+                      </span>
+                    )}
                     {a.hint && <kbd className="pal-key">{a.hint}</kbd>}
                   </div>
                 ))}
@@ -238,6 +250,8 @@ function fuzzy(hay: string, needle: string): number {
  */
 export function baseActions(p: {
   recents: RecentSession[];
+  /** Where each session stands, so the ones waiting on you, then finished, then working come first (Herdr's go-to, 2026-11-01). */
+  stateOf?: (sid: string) => SessionState | null;
   open: (r: RecentSession) => void;
   newSession: () => void;
   goto: (where: "connections" | "agents" | "automations" | "people" | "board" | "review" | "needs" | "usage" | "settings") => void;
@@ -289,12 +303,20 @@ export function baseActions(p: {
         ]
       : []),
     { id: "keys", label: "Keyboard shortcuts", hint: "?", icon: "keyboard", group: "View", run: p.showShortcuts },
-    ...p.recents.slice(0, 20).map((r) => ({
-      id: `session-${r.sid}`,
-      label: r.title || "Untitled session",
-      icon: "message" as const,
-      group: "Sessions",
-      run: () => p.open(r),
-    })),
+    // Every one with something going on, however long ago it was opened, then the latest of the rest.
+    ...byState(
+      p.recents.map((r) => ({ r, state: p.stateOf?.(r.sid) ?? undefined })),
+      (x) => x.state,
+    )
+      .filter((x, i) => x.state || i < 20)
+      .slice(0, 40)
+      .map(({ r, state }) => ({
+        id: `session-${r.sid}`,
+        label: r.alias || r.title || "Untitled session",
+        icon: "message" as const,
+        group: "Sessions",
+        ...(state ? { state } : {}),
+        run: () => p.open(r),
+      })),
   ];
 }

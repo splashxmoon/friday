@@ -47,7 +47,7 @@ function TooltipContent({
         className={cn(
           // The floating material, as every menu and popover (2026-10-29 direction §5): --surface, a hairline, the one shadow; it opens
           // with the shared 180ms rise (style.css, r5 block) rather than a zoom.
-          "z-50 w-fit rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-1.5 text-[12px] leading-4 font-medium text-balance text-[var(--ink)] shadow-[var(--shadow-pop)]",
+          "z-[90] w-fit rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-1.5 text-[12px] leading-4 font-medium text-balance text-[var(--ink)] shadow-[var(--shadow-pop)]",
           className
         )}
         {...props}

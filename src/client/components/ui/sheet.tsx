@@ -36,7 +36,7 @@ function SheetOverlay({
     <SheetPrimitive.Overlay
       data-slot="sheet-overlay"
       className={cn(
-        "fixed inset-0 z-50 bg-black/50 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
+        "fixed inset-0 z-[80] bg-black/50 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
         className
       )}
       {...props}
@@ -68,7 +68,9 @@ function SheetContent({
         data-slot="sheet-content"
         className={cn(
           // A layout move (2026-10-29 direction §7): 240ms in on the one curve, 180ms out; the one shadow, as anything that floats.
-          "fixed z-50 flex flex-col gap-4 bg-background shadow-[var(--shadow-pop)] transition ease-[cubic-bezier(.2,.8,.2,1)] data-[state=closed]:animate-out data-[state=closed]:duration-180 data-[state=open]:animate-in data-[state=open]:duration-240",
+          // Over the desktop app's header band (#band-slot, 60; its window buttons, 70): under it, the header's buttons showed
+          // through and sat on the sheet's close button (Arun, 2026-11-01: "fix the close button", the brief).
+          "fixed z-[80] flex flex-col gap-4 bg-background shadow-[var(--shadow-pop)] transition ease-[cubic-bezier(.2,.8,.2,1)] data-[state=closed]:animate-out data-[state=closed]:duration-180 data-[state=open]:animate-in data-[state=open]:duration-240",
           side === "right" &&
             "inset-y-0 right-0 h-full w-3/4 border-l data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:max-w-sm",
           side === "left" &&

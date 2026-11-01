@@ -29,6 +29,7 @@ const KEYS = {
   reduceMotion: "mpa.reduceMotion",
   notify: "mpa.notify",
   chime: "mpa.chime",
+  doneChime: "mpa.doneChime",
   folders: "mpa.folders",
   layout: "mpa.layout",
   sessionLayout: "mpa.sessionLayout",
@@ -127,6 +128,9 @@ export const chooseNotifications = (on: boolean) => write(KEYS.notify, on ? null
 /** One soft sound when something needs you, window open or not; off is off. */
 export const chimeOn = () => read(KEYS.chime) !== "0";
 export const chooseChime = (on: boolean) => write(KEYS.chime, on ? null : "0");
+/** A softer sound when an agent finishes somewhere you aren't looking (chime.ts doneChime); on unless turned off. */
+export const doneChimeOn = () => read(KEYS.doneChime) !== "0";
+export const chooseDoneChime = (on: boolean) => write(KEYS.doneChime, on ? null : "0");
 
 /** Put the saved choices on the page. Called at boot and after every change. */
 export function applyPrefs(): void {
@@ -209,7 +213,7 @@ export function importPrefs(text: string): number {
 /** Back to how it looked on first launch. Leaves recent folders and the account alone. */
 export function resetPrefs(): void {
   // All of it, as its note says: the sound, the colour theme and the fonts too, which it used to leave behind (2026-10-27 audit).
-  for (const k of [KEYS.theme, KEYS.textSize, KEYS.reduceMotion, KEYS.notify, KEYS.chime, KEYS.layout, KEYS.sessionLayout, KEYS.accent, KEYS.contrast]) write(k, null);
+  for (const k of [KEYS.theme, KEYS.textSize, KEYS.reduceMotion, KEYS.notify, KEYS.chime, KEYS.doneChime, KEYS.layout, KEYS.sessionLayout, KEYS.accent, KEYS.contrast]) write(k, null);
   applyTheme(null);
   applyFonts({});
   applyPrefs();

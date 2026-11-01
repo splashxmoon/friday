@@ -235,3 +235,22 @@ export function previewOf(state: SessionState): Preview | null {
   if (!last || !text) return null;
   return { sid: state.id, text: text.slice(0, 160), by: last.by };
 }
+
+/**
+ * Since when a session has stood as it does now, for the time on its row in the sidebar (Herdr's "time since its state changed",
+ * 2026-11-01): what waits on you, since it began waiting; work under way, since the longest-running turn began; finished, since
+ * the last turn ended. Null when nothing has happened in it yet, or its state is from before this was kept.
+ */
+export function sinceOf(state: SessionState, needs: readonly Attention[]): number | null {
+  const runs = [{ lane: MAIN_LANE, ...state.run }, ...Object.entries(state.laneRuns).map(([lane, r]) => ({ lane, ...r }))];
+  const at = (xs: (number | undefined)[]) => xs.filter((x): x is number => typeof x === "number" && x > 0);
+  const waiting = at(needs.map((n) => runs.find((r) => r.lane === (n.lane ?? MAIN_LANE))?.sinceAt));
+  if (needs.length) return waiting.length ? Math.min(...waiting) : null;
+  const working = at(runs.filter((r) => r.status === "running").map((r) => r.sinceAt));
+  if (working.length) return Math.min(...working);
+  const done = at(runs.filter((r) => r.status !== "running" && (state.finished?.[r.lane] ?? 0) > 0).map((r) => r.sinceAt));
+  return done.length ? Math.max(...done) : null;
+}
+
+/** The latest seq at which one of a session's agents finished a turn well (state.finished), or 0: what "unread" is measured against. */
+export const finishedSeq = (state: SessionState): number => Math.max(0, ...Object.values(state.finished ?? {}));

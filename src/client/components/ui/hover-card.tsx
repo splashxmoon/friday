@@ -35,7 +35,7 @@ function HoverCardContent({
         sideOffset={sideOffset}
         collisionPadding={collisionPadding}
         className={cn(
-          "z-50 w-64 origin-(--radix-hover-card-content-transform-origin) rounded-[12px] border bg-popover p-4 text-popover-foreground shadow-md outline-hidden",
+          "z-[90] w-64 origin-(--radix-hover-card-content-transform-origin) rounded-[12px] border bg-popover p-4 text-popover-foreground shadow-md outline-hidden",
           className
         )}
         {...props}

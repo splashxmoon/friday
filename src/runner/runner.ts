@@ -340,6 +340,14 @@ const FINISH_GRACE_MS = 10_000;
  */
 let turnsRunning = 0;
 export const BUSY_LINE = "[friday] busy ";
+
+/** A tool that quits this soon after it is handed a turn, having said nothing, never got going. */
+export const QUIT_AT_START_MS = 2000;
+/** Said of a tool that quit as it started: how it ended, and its last few lines, which is where its reason is. */
+export function quitAtStart(label: string, exit: { code: number | null; signal: NodeJS.Signals | null }, output: string): string {
+  const last = output.trim().split("\n").map((l) => l.trimEnd()).filter(Boolean).slice(-4).join("\n");
+  return `${label} quit as it started (${exit.signal ? `signal ${exit.signal}` : `exit code ${exit.code}`}).${last ? ` Its last words:\n${last}` : ""}`;
+}
 /**
  * Held awake by the server between turns (holdAwake): its keeper away, or a room of theirs running on its own, so the computer
  * doesn't sleep in the quiet between one turn and the next. Until a time, renewed while it lasts; it lapses by itself when the
@@ -1547,6 +1555,11 @@ ${prompt}`;
     let done: { error?: string } | null = null;
     let note = "";
     let stderr = "";
+    // When it was handed the turn and when it quit: one that quits within two seconds saying nothing didn't get going at all, which
+    // is said as that, with its exit code and its last lines (Herdr's fail-fast toast, 2026-11-01), not as a wall of its output.
+    const turnAt = Date.now();
+    let exitedAt = 0;
+    child.once("exit", () => (exitedAt = Date.now()));
     let grace: ReturnType<typeof setTimeout> | undefined;
     let quiet: ReturnType<typeof setTimeout> | undefined;
     let held: ReturnType<typeof setTimeout> | undefined;
@@ -1669,7 +1682,7 @@ ${prompt}`;
       outcome = "error";
       const raw = hung
         ? `${this.label} stopped responding again after Friday restarted it (nothing said or run for ${minutes(hungFor)}), so the turn was ended. Send it again, or try another agent.`
-        : finished?.error || note || stderr.trim() || `${this.label} exited with ${exit.signal ?? `code ${exit.code}`}.`;
+        : finished?.error || note || (!spoke && exitedAt && exitedAt - turnAt < QUIT_AT_START_MS ? quitAtStart(this.label, exit, stderr) : "") || stderr.trim() || `${this.label} exited with ${exit.signal ?? `code ${exit.code}`}.`;
       // A Claude Code conversation still running as a background agent can't be resumed in place, only copied. It refuses
       // before doing anything, so the same instruction goes again at once, on a copy, and nothing is lost; the copy's id then
       // replaces the original's for the turns after (see `forward`).

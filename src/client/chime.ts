@@ -15,6 +15,28 @@ let ctx: AudioContext | null = null;
 const PEAK = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform || navigator.userAgent) ? 0.2 : 0.09;
 
 export function chime(): void {
+  play([
+    [880, 0, 0.32],
+    [1174.66, 0.16, 0.48],
+  ]);
+}
+
+/**
+ * The softer sound for an agent that finished somewhere you weren't looking (Herdr's "done" chime, 2026-11-01): two falling notes,
+ * quieter and shorter than the rising pair that means something needs you, so the two are never mistaken for each other.
+ */
+export function doneChime(): void {
+  play(
+    [
+      [783.99, 0, 0.22],
+      [659.25, 0.11, 0.34],
+    ],
+    0.55,
+  );
+}
+
+/** Notes as [pitch, start, length] in seconds, at `loud` of the usual peak. */
+function play(notes: [number, number, number][], loud = 1): void {
   try {
     const AC = (window as unknown as { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext }).AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AC) return;
@@ -27,14 +49,13 @@ export function chime(): void {
       o.type = "sine";
       o.frequency.value = hz;
       g.gain.setValueAtTime(0.0001, at);
-      g.gain.exponentialRampToValueAtTime(PEAK, at + 0.02);
+      g.gain.exponentialRampToValueAtTime(PEAK * loud, at + 0.02);
       g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
       o.connect(g).connect(ctx!.destination);
       o.start(at);
       o.stop(at + dur + 0.05);
     };
-    note(880, t, 0.32);
-    note(1174.66, t + 0.16, 0.48);
+    for (const [hz, at, dur] of notes) note(hz, t + at, dur);
   } catch {
     // No sound is the quiet default; nothing else depends on it.
   }

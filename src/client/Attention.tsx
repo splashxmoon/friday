@@ -10,6 +10,8 @@ import { api } from "./api.js";
 import type { Identity, RecentSession } from "./storage.js";
 import { notificationsOn, chimeOn } from "./prefs.js";
 import { chime } from "./chime.js";
+import { setServerUnread } from "./unread.js";
+import { sayDone } from "./DoneToasts.js";
 import { Icon, type IconName } from "./icons.js";
 
 /**
@@ -49,6 +51,8 @@ export interface AttentionState {
   overlaps: Map<string, Overlap[]>;
   /** Per session, when asked for (Solo): which agent, doing what, in one line. */
   summaries: Map<string, SessionSummary>;
+  /** Since when each session has stood as it does (attention.ts sinceOf), for the time on its row. */
+  since: Map<string, number>;
   /** False until the first poll answers. */
   loaded: boolean;
   /** Sessions removed from the list on another device. */
@@ -65,6 +69,7 @@ export function useAttention(identity: Identity, recents: RecentSession[], withS
   const [overlaps, setOverlaps] = useState<Map<string, Overlap[]>>(new Map());
   const [loaded, setLoaded] = useState(false);
   const [gone, setGone] = useState<string[]>([]);
+  const [since, setSince] = useState<Map<string, number>>(new Map());
   /**
    * What we have already raised a notification for.
    *
@@ -98,7 +103,7 @@ export function useAttention(identity: Identity, recents: RecentSession[], withS
     let live = true;
 
     const ask = async () => {
-      const got = await api<{ items: Attention[]; working?: Working[]; previews?: Preview[]; crews?: Crew[]; prs?: SessionPr[]; overlaps?: Record<string, Overlap[]>; summaries?: SessionSummary[]; gone?: string[] }>(identity, "/api/attention", {
+      const got = await api<{ items: Attention[]; working?: Working[]; previews?: Preview[]; crews?: Crew[]; prs?: SessionPr[]; overlaps?: Record<string, Overlap[]>; summaries?: SessionSummary[]; gone?: string[]; unread?: string[]; since?: Record<string, number> }>(identity, "/api/attention", {
         method: "POST",
         body: JSON.stringify({ sids: sids.split(","), ...(withSummaries ? { summaries: true } : {}) }),
       }).catch(() => null);
@@ -114,6 +119,9 @@ export function useAttention(identity: Identity, recents: RecentSession[], withS
       setPrs(new Map((got.prs ?? []).map((x) => [x.sid, x])));
       setOverlaps(new Map(Object.entries(got.overlaps ?? {})));
       setSummaries(new Map((got.summaries ?? []).map((s) => [s.sid, s])));
+      setSince(new Map(Object.entries(got.since ?? {})));
+      // What finished since you last looked, on any device: the unread marks (unread.ts).
+      if (got.unread) setServerUnread(got.unread);
       if (got.gone?.length) setGone(got.gone);
       setLoaded(true);
 
@@ -142,6 +150,8 @@ export function useAttention(identity: Identity, recents: RecentSession[], withS
         let title = recents.find((r) => r.sid === sid)?.title ?? "A session";
         title = teamDoneTitle(sid, title);
         notifyDone(title, w.what, sid);
+        // In the window too: a soft sound and a toast, unless it is the session on screen (DoneToasts.tsx).
+        sayDone({ sid, title, what: w.what });
       }
       wasWorking.current = new Map((got.working ?? []).map((w) => [w.sid, w]));
     };
@@ -177,7 +187,7 @@ export function useAttention(identity: Identity, recents: RecentSession[], withS
   // The count on the dock icon in the desktop app: what waits on you, gone the moment it is answered.
   useEffect(() => window.fridayDesktop?.setBadge?.(shown.length), [shown.length]);
   useEffect(() => () => window.fridayDesktop?.setBadge?.(0), []);
-  return { items: shown, working, previews, crews, prs, overlaps, summaries, loaded, gone };
+  return { items: shown, working, previews, crews, prs, overlaps, summaries, since, loaded, gone };
 }
 
 /**

@@ -144,6 +144,7 @@
   .dass-dot[data-state="idle"] { background-color: var(--faint); opacity: .75; }
   .dass-dot[data-state="working"] { background-color: var(--dass-live); }
   .dass-dot[data-state="needs"] { background-color: var(--dass-needs); }
+  .dass-dot[data-state="done"] { background-color: var(--dass-ok); }
   .dass-dot[data-state="bad"] { background-color: var(--red); }
   .dass-dot[data-state="done"] { background-color: var(--dass-ok); }
   /* Finished while you were elsewhere, not opened since (unread.ts): its name a step heavier and its dot lit, as a mail list marks new mail. */

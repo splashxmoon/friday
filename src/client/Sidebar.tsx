@@ -37,8 +37,7 @@ import { isTeamSid, newTeammate, SidebarTeammates, useTeam, useTeamNow, useTeamT
 import { byDay } from "./sidebar-days.js";
 import { byState, PresenceRing, useFlip, type Presence } from "./presence.js";
 import { api } from "./api.js";
-import { useUnread } from "./unread.js";
-import { sendFeedback } from "./feedback.js";
+import { markUnread, useUnread } from "./unread.js";
 import { noticeDue, UsageNotice, useUsageSharing } from "./UsageSharing.js";
 
 /** `fresh`: a project just made, whose name box was never confirmed: Escape takes it away again. */
@@ -481,17 +480,8 @@ function Foot({ p }: { p: SidebarProps }) {
             <TooltipContent side="top">Switch to {nextLook}</TooltipContent>
           </Tooltip>
         )}
-        {/* The open-source edition's way to say what went wrong or what's missing: a GitHub issue, started for them (feedback.ts). */}
-        {isLocal() && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button type="button" className="dass-rail-btn size-8" aria-label="Send feedback" onClick={() => void sendFeedback()}>
-                <Icon name="megaphone" size={19} />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top">Send feedback</TooltipContent>
-          </Tooltip>
-        )}
+        {/* Send feedback lives in Settings › About, not here (Arun, 2026-11-01: "add the send feed back button out of the side bar
+            and into the settings page... for open source"). */}
         {isLocal() && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -699,14 +689,23 @@ function SessionsList({ p }: { p: SidebarProps }) {
   // Needs you, then working, then the rest, within each group (owner call D); a row that moves slides there (useFlip).
   const shortIds = beds.active.filter((r) => stoppedShort(p.attention.crews.get(r.sid), p.attention.working.get(r.sid))).map((r) => r.sid);
   const needSet = new Set([...p.attention.items.map((i) => i.sid), ...shortIds]);
-  const activeIds = byState(beds.active, (r) => (needSet.has(r.sid) ? "needs" : p.attention.working.has(r.sid) ? "working" : null)).map((r) => r.sid);
+  const unreadNow = useUnread();
+  // A finished one you open keeps its place until you leave it, so it doesn't drop away under you as it stops being new (Herdr,
+  // 2026-11-01). Read as it was the moment it was opened: App lets go of its unread mark just after.
+  const doneHeld = useRef<{ sid: string | null; done: boolean }>({ sid: null, done: false });
+  if (doneHeld.current.sid !== p.activeSid) doneHeld.current = { sid: p.activeSid, done: !!p.activeSid && unreadNow.has(p.activeSid) };
+  const isDone = (sid: string) => unreadNow.has(sid) || (doneHeld.current.done && sid === doneHeld.current.sid);
+  const activeIds = byState(beds.active, (r) => (needSet.has(r.sid) ? "needs" : p.attention.working.has(r.sid) ? "working" : isDone(r.sid) ? "done" : null)).map((r) => r.sid);
   const had = new Set(heldIds.current);
   const orderIds = pointerIn || focusIn ? [...activeIds.filter((id) => !had.has(id)), ...heldIds.current.filter((id) => activeIds.includes(id))] : activeIds;
   heldIds.current = orderIds;
   const byId = new Map(beds.active.map((r) => [r.sid, r]));
   const sorted = orderIds.map((id) => byId.get(id)!);
   const projectIds = new Set(p.projects.map((x) => x.id));
-  const loose = sorted.filter((r) => !(r.projectId && projectIds.has(r.projectId)));
+  // Pinned ones sit in Pinned, in the order pinned, and only there (Herdr's pins, 2026-11-01).
+  const pinned = sorted.filter((r) => r.pinnedAt).sort((a, b) => a.pinnedAt! - b.pinnedAt!);
+  const loose = sorted.filter((r) => !r.pinnedAt && !(r.projectId && projectIds.has(r.projectId)));
+  const pin = (r: RecentSession) => p.updateRecent(r.sid, r.pinnedAt ? { pinnedAt: undefined } : { pinnedAt: Date.now(), snoozedUntil: undefined, settledAt: undefined });
 
   const newProject = () => {
     const id = p.createProject("New project");
@@ -757,16 +756,19 @@ function SessionsList({ p }: { p: SidebarProps }) {
     // Said in the app's notice, not an alert that froze the page; and not offered where it can't be done (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
     canFork(p.attention.crews.get(r.sid), isLocal()) ? { label: "Fork session", icon: "gitFork", onSelect: () => void forkSession(r.sid, r.invite).then((e) => e && sayNotice(e)) } : null,
     { label: "Rename session", icon: "pencil", onSelect: () => setRenaming({ kind: "session", id: r.sid }) },
+    // New again on every device, as a mail list's "Mark as unread" (Herdr's most-asked-for, 2026-11-01): its last finished turn unread.
+    r.sid !== p.activeSid && !unreadNow.has(r.sid) ? { label: "Mark as unread", icon: "mail", onSelect: () => (markUnread([r.sid]), void api(p.identityForApi, `/api/sessions/${encodeURIComponent(r.sid)}/unread`, { method: "POST" }).catch(() => {})) } : null,
+    { label: r.pinnedAt ? "Unpin" : "Pin to top", icon: "pin", onSelect: () => pin(r) },
     r.alias ? { label: "Use the original title", icon: "refresh", onSelect: () => p.updateRecent(r.sid, { alias: undefined }) } : null,
     // Out of the way for a while, or for good until something happens in it (sidebar-buckets.ts).
     { heading: r.snoozedUntil && r.snoozedUntil > now ? `Snoozed ${snoozeWord(r.snoozedUntil, now)}` : "Snooze" },
     ...(r.snoozedUntil && r.snoozedUntil > now ? [{ label: "Wake it now", icon: "bell" as const, onSelect: () => p.updateRecent(r.sid, { snoozedUntil: undefined }) }] : []),
-    ...snoozePresets(now).map((s) => ({ label: s.label, icon: "clock" as const, onSelect: () => p.updateRecent(r.sid, { snoozedUntil: s.until, settledAt: undefined }) })),
+    ...snoozePresets(now).map((s) => ({ label: s.label, icon: "clock" as const, onSelect: () => p.updateRecent(r.sid, { snoozedUntil: s.until, settledAt: undefined, pinnedAt: undefined }) })),
     // Settling is not a snooze: a group of its own, not under Snooze's heading (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
     { heading: "" },
     r.settledAt
       ? { label: "Back to the list", icon: "refresh" as const, onSelect: () => p.updateRecent(r.sid, { settledAt: undefined }) }
-      : { label: "Settle it", icon: "check" as const, title: "Done with it for now: it moves to Settled at the foot of the list, and comes back if anything in it needs you", onSelect: () => p.updateRecent(r.sid, { settledAt: now, snoozedUntil: undefined }) },
+      : { label: "Settle it", icon: "check" as const, title: "Done with it for now: it moves to Settled at the foot of the list, and comes back if anything in it needs you", onSelect: () => p.updateRecent(r.sid, { settledAt: now, snoozedUntil: undefined, pinnedAt: undefined }) },
     { heading: "Move to project" },
     ...p.projects.map((proj) => ({ label: proj.name, icon: "folder" as const, checked: r.projectId === proj.id, onSelect: () => p.updateRecent(r.sid, { projectId: proj.id }) })),
     {
@@ -831,6 +833,8 @@ function SessionsList({ p }: { p: SidebarProps }) {
       preview={p.attention.previews.get(r.sid) ?? null}
       summary={p.attention.summaries.get(r.sid) ?? null}
       crew={p.attention.crews.get(r.sid) ?? null}
+      since={p.attention.since.get(r.sid)}
+      onPin={() => pin(r)}
       menu={() => chatMenu(r)}
     />
   );
@@ -894,7 +898,7 @@ function SessionsList({ p }: { p: SidebarProps }) {
         }
       >
         {p.projects.map((proj) => {
-          const items = sorted.filter((r) => r.projectId === proj.id);
+          const items = sorted.filter((r) => r.projectId === proj.id && !r.pinnedAt);
           // The new session about to go in it (its "New session here"): drawn in it, so it's plain where it will go (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
           const draft = p.draftProject === proj.id;
           const open = !proj.collapsed || draft;
@@ -1068,6 +1072,22 @@ function SessionsList({ p }: { p: SidebarProps }) {
           {needing.map((r) => row(r, true))}
         </Group>
       )}
+      {pinned.length > 0 && (
+        <Group
+          label={
+            <>
+              <Icon name="pin" size={12} />
+              Pinned
+            </>
+          }
+          open={isOpen("pinned")}
+          onToggle={() => toggle("pinned")}
+          count={pinned.length}
+          status={<GroupState needs={pinned.filter((c) => needsSids.has(c.sid)).length} working={pinned.filter((c) => p.attention.working.has(c.sid)).length} />}
+        >
+          {pinned.map((r) => row(r))}
+        </Group>
+      )}
       {ids.map((id) => (
         <div
           key={id}
@@ -1113,6 +1133,10 @@ function SessionsList({ p }: { p: SidebarProps }) {
  * One session: its state, its name and when you were last in it, and under them in one quiet line what it is doing. Compact
  * (in Needs you) it is the name and what waits on you.
  */
+/** A row's time in words, for its tooltip: "Working for 4m", "Waiting on you since just now", "Finished 12m ago". */
+const stateFor = (st: "needs" | "working" | "done", t: string) =>
+  st === "done" ? `Finished ${t === "now" ? "just now" : `${t} ago`}` : `${st === "needs" ? "Waiting on you" : "Working"} ${t === "now" ? "since just now" : `for ${t}`}`;
+
 function ChatRow({
   r,
   me,
@@ -1124,15 +1148,19 @@ function ChatRow({
   onOpen,
   onRename,
   onCancelRename,
+  onPin,
   menu,
   compact = false,
   needs = null,
   summary = null,
   crew = null,
   quiet,
+  since,
 }: {
   /** Asleep (snoozed or settled): this in place of what is going on, since nothing is. */
   quiet?: string;
+  /** Since when it has stood as it does (attention.ts sinceOf): its time is that, not when you last opened it. */
+  since?: number | undefined;
   summary?: SessionSummary | null;
   /** Its agents and where each stands (attention.ts crewOf). */
   crew?: Crew | null;
@@ -1148,6 +1176,8 @@ function ChatRow({
   onOpen: () => void;
   onRename: (alias: string) => void;
   onCancelRename: () => void;
+  /** Pin it to the top, or let it go back: the row's time turns into this on hover (Herdr, 2026-11-01). */
+  onPin: () => void;
   menu: () => MenuItem[];
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -1209,9 +1239,26 @@ function ChatRow({
       <div className="flex min-w-0 items-center gap-2">
         {renaming ? <InlineEdit value={label} onSave={onRename} onCancel={onCancelRename} /> : <span className="dass-row-title">{label}{unread && <span className="sr-only">, new since you looked</span>}</span>}
         {working && working.lanes > 1 && <span className="shrink-0 text-[12px] tabular-nums text-[var(--text-muted)]" title={`${working.lanes} agents working`}>{working.lanes}</span>}
-        {!renaming && <span className="dass-row-time shrink-0 text-[12px] text-[var(--text-muted)]">{relTime(r.openedAt)}</span>}
+        {/* How long it has stood as it does (Herdr's per-row timer, 2026-11-01): waiting on you, working, or finished; else when
+            you last opened it. Said in full on hover. */}
+        {!renaming && (
+          <span className="dass-row-time shrink-0 text-[12px] tabular-nums text-[var(--text-muted)]" title={since && !quiet ? stateFor(needs || short ? "needs" : working ? "working" : "done", relTime(since)) : `Opened ${relTime(r.openedAt) === "now" ? "just now" : `${relTime(r.openedAt)} ago`}`}>
+            {relTime(since && !quiet ? since : r.openedAt)}
+          </span>
+        )}
         {!renaming && (
           <span className="dass-row-act -my-1 shrink-0">
+            <button
+              type="button"
+              className="dass-rail-btn size-6"
+              data-pinned={!!r.pinnedAt || undefined}
+              aria-label={r.pinnedAt ? `Unpin ${label}` : `Pin ${label} to the top`}
+              aria-pressed={!!r.pinnedAt}
+              title={r.pinnedAt ? "Unpin" : "Pin to top"}
+              onClick={(e) => (e.stopPropagation(), onPin())}
+            >
+              <Icon name="pin" size={13} />
+            </button>
             <MenuButton label={`Actions for ${label}`} items={menu} onOpenChange={setMenuOpen} />
           </span>
         )}

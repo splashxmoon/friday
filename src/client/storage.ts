@@ -24,6 +24,8 @@ export interface RecentSession {
   snoozedUntil?: number;
   /** Settled by hand (sidebar only): out of the list, in Settled, until something happens in it or you bring it back. */
   settledAt?: number;
+  /** Pinned (sidebar only): kept in Pinned at the top, in the order pinned, and never settled by age (Herdr's pins, 2026-11-01). */
+  pinnedAt?: number;
 }
 
 /** One repo a chat is working in: its name, the branch an agent is on, and whether one is connected now. */

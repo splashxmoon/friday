@@ -52,7 +52,7 @@ import { plainCommitMessage } from "./pr-body.js";
 import { checksText, type CheckFailure } from "./pr-checks.js";
 import { feedbackText, fromWriter, unseen, type PrComment } from "./pr-feedback.js";
 import type { EventBody, ReviewFinding } from "./types.js";
-import { attentionIn, crewOf, prOf, previewOf, sortAttention, workingIn, type Attention, type Crew, type Preview, type SessionPr, type Working } from "./attention.js";
+import { attentionIn, crewOf, finishedSeq, prOf, previewOf, sinceOf as stateSince, sortAttention, workingIn, type Attention, type Crew, type Preview, type SessionPr, type Working } from "./attention.js";
 import { Bus, DELTA_ORIGIN, type BusMessage } from "./bus.js";
 import { cleanFocus } from "./focus.js";
 import { startMockFocus } from "./mock-focus.js";
@@ -3984,20 +3984,30 @@ export async function createApp(o: AppOptions) {
           const m = state.members[me.id];
           if (!m || m.removed) return null;
           const line = body.summaries === true ? summaryOf((await cardsFor(state, me.id).catch(() => null))?.cards ?? []) : null;
-          return { state, line };
+          // How far this person has read it (the page's ack, sent only while it is in sight), for what finished since.
+          const seen = finishedSeq(state) ? await store.getSeen(state.id, me.id).catch(() => 0) : 0;
+          return { state, line, seen };
         },
       );
+      // Finished since this person last looked, on any device (Herdr's "done, not seen yet", 2026-11-01), and since when each
+      // session has stood as it does, for the time on its row.
+      const unread: string[] = [];
+      const since: Record<string, number> = {};
       for (const r of read) {
         if (!r) continue;
-        const { state, line } = r;
+        const { state, line, seen } = r;
         mine.push(state);
         // The browser knows this session and the log says they are in it: the server-side list learns it too.
         void store.remember(me.id, state.id).catch(() => {});
-        found.push(...attentionIn(state, me.id));
+        const needs = attentionIn(state, me.id);
+        found.push(...needs);
+        const at = stateSince(state, needs);
+        if (at) since[state.id] = at;
         let busy = workingIn(state);
         // A team whose only work is check-ins isn't working, so nothing says it finished: one with news says so as news (app.ts teamLook).
         if (busy && state.options.team && teammates && (await teamOnlyCheckingIn(state))) busy = null;
         if (busy) working.push(busy);
+        if (!busy && !needs.length && finishedSeq(state) > seen) unread.push(state.id);
         const said = previewOf(state);
         if (said) previews.push(said);
         const crew = crewOf(state);
@@ -4007,7 +4017,20 @@ export async function createApp(o: AppOptions) {
         if (line) summaries.push(line);
       }
       const theirs: never[] = [];
-      return json(res, 200, { items: sortAttention(found), working, previews, crews, prs, overlaps: Object.fromEntries(overlapsAcross([...mine, ...theirs])), ...(body.summaries === true ? { summaries } : {}), ...(gone.length ? { gone } : {}) });
+      return json(res, 200, { items: sortAttention(found), working, previews, crews, prs, unread, since, overlaps: Object.fromEntries(overlapsAcross([...mine, ...theirs])), ...(body.summaries === true ? { summaries } : {}), ...(gone.length ? { gone } : {}) });
+    }
+    // Mark as unread: this person's place in it set back to before its last finished turn, so every device shows it as new again.
+    const unreadRoute = url.pathname.match(/^\/api\/sessions\/([\w-]+)\/unread$/);
+    if (req.method === "POST" && unreadRoute) {
+      const me = await identity(req);
+      if (!me) return json(res, 401, { error: "Not signed in." });
+      const sid = str(unreadRoute[1], 200);
+      const state = await store.state(sid).catch(() => null);
+      const m = state?.members[me.id];
+      if (!state || !m || m.removed) return json(res, 404, { error: "That session isn't one of yours." });
+      const last = finishedSeq(state);
+      if (last) await store.setSeen(sid, me.id, last - 1);
+      return json(res, 200, { unread: last > 0 });
     }
 
     /**
