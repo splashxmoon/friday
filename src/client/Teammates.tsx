@@ -2276,7 +2276,9 @@ export function TeammateDialog({ identity, editing, onClose, inline }: { identit
   // coding and crew").
   const computers = useComputers();
   const [machine, setMachine] = useState(editing?.machine ?? "");
-  // Which of its tool's accounts on the keeper's computer it runs as (CrewHosted.tsx HostedAccount).
+  // Which of its tool's accounts it runs as, on this computer (LocalAccount) or the keeper's (CrewHosted.tsx HostedAccount): picked
+  // by the person, never moved by Friday (Arun, 2026-11-02, from discussion #8: "an account per step", Personal and Work).
+  const [account, setAccount] = useState(editing?.account ?? "");
   const [saved, setSaved] = useState(false);
   const [later, setLater] = useState("");
   const putCheckIn = (i: number, c: Partial<CheckIn>) => (setCheckErr(""), setCheckins((all) => all.map((x, j) => (j === i ? { ...x, ...c } : x))));
@@ -2314,7 +2316,7 @@ export function TeammateDialog({ identity, editing, onClose, inline }: { identit
   // label focused the field behind it (QA, 2026-10-28).
   const uid = useId();
   // What the form holds, to tell a change from none: Settings' "Save changes" was pressable with nothing changed (QA, 2026-10-28).
-  let snap = JSON.stringify([name, role, tool, model, effort, backup, checkins, look, mode, projects, project.trim(), folder, budget]);
+  const snap = JSON.stringify([name, role, tool, model, effort, backup, checkins, look, mode, projects, project.trim(), folder, budget, machine, account]);
   const firstSnap = useRef(snap);
   const changed = snap !== firstSnap.current;
   const keptName = name.replace(/[^\p{L}\p{N} ._'-]+/gu, "").replace(/\s+/g, " ").trim();
@@ -2367,7 +2369,7 @@ export function TeammateDialog({ identity, editing, onClose, inline }: { identit
     try {
       // What is still in the field counts too: typed, and saved without pressing Enter.
       const all = project.trim() && !projects.includes(project.trim()) ? [...projects, project.trim()] : projects;
-      let body: Record<string, unknown> = { name, role, tool, model, effort: effort ?? "", backup, checkins, budget, look, mode, projects: all, machine, ...(editing ? {} : folder.trim() ? { folder } : {}) };
+      let body: Record<string, unknown> = { name, role, tool, model, effort: effort ?? "", backup, checkins, budget, look, mode, projects: all, machine, account: tool === "friday" || machine ? "" : account, ...(editing ? {} : folder.trim() ? { folder } : {}) };
       // Its folder is made for it on the keeper's computer; the account is the one picked there.
       const r = await api<{ restartLater?: string[] }>(identity, editing ? `/api/teammates/${editing.id}` : "/api/teammates", { method: editing ? "PATCH" : "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json" } });
       await refreshTeam(identity);
@@ -2529,6 +2531,7 @@ export function TeammateDialog({ identity, editing, onClose, inline }: { identit
               </p>
             )}
           </div>
+          {isLocal() && !machine && tool !== "friday" && <LocalAccount identity={identity} tool={tool} value={account} onChange={setAccount} />}
           {isLocal() && (computers.length > 0 || !!machine) && (
             <label className="tm-row-field">
               <span className="tm-row-label">Runs on</span>
@@ -3148,3 +3151,32 @@ const ChevronIcon = ({ open }: { open: boolean }) => (
     <path d="M4.5 2.5 8 6l-3.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
+
+/**
+ * Which of its tool's sign-ins on this computer a teammate runs as (runner/accounts.ts): Personal or Work, picked here and kept,
+ * the way HostedAccount does it on a keeper's computer. Shown once the tool has a second account; "" is its own sign-in.
+ */
+export function LocalAccount({ identity, tool, value, onChange }: { identity: Identity; tool: MateTool; value: string; onChange: (id: string) => void }) {
+  const { state } = useMachine(identity);
+  if (tool === "friday") return null;
+  const accounts = state.tools.find((x) => x.tool === tool)?.accounts ?? [];
+  if (accounts.length < 2 && !value) return null;
+  const at = value && accounts.some((a) => a.id === value) ? value : value ? "?" : "default";
+  return (
+    <label className="tm-row-field">
+      <span className="tm-row-label">Account</span>
+      <span className="tm-row-input">
+        <select className="tm-select" value={at} onChange={(e) => onChange(e.target.value === "default" ? "" : e.target.value)}>
+          {accounts.map((a) => (
+            <option key={a.id} value={a.id} disabled={a.loggedIn === false && a.id !== value}>
+              {a.label}
+              {a.loggedIn === false ? " (signed out)" : a.out ? " (out of usage now)" : ""}
+            </option>
+          ))}
+          {at === "?" && <option value="?">An account no longer on this computer</option>}
+        </select>
+        <small>It always runs as this one, and never moves to another account by itself.</small>
+      </span>
+    </label>
+  );
+}

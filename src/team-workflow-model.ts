@@ -59,6 +59,11 @@ export interface WorkflowStep {
   back?: string;
   /** How many times it sends the work back before the run gives up. */
   tries?: number;
+  /**
+   * Who does the step sent back to, that time: a teammate's id or LEAD; absent is that step's own. A reviewer's FAIL handed to a
+   * fixer on another tool or account, then checked again (Arun, 2026-11-02, from discussion #8: Review → "Prepare fixes" → again).
+   */
+  fixBy?: string;
 }
 
 export const isGate = (s: Pick<WorkflowStep, "kind">): boolean => s.kind === "check" || s.kind === "approve";
@@ -162,6 +167,8 @@ export interface WorkflowRun {
   tries?: Record<string, number>;
   /** Sent back: the step the stage starts again from, its steps before it standing. */
   from?: string;
+  /** Sent back to be done by someone else than that step's own (WorkflowStep.fixBy): who, this once. */
+  fixBy?: string;
   /** Waiting for your OK: which step, what you're asked, since when. */
   asking?: { step: string; ask: string; since: number };
   /** Its first board's seq: the brief finds every stage's tasks after it. */
@@ -255,12 +262,14 @@ export function verdictOf(report: string): { pass: boolean; why: string } | null
 }
 
 /** What the steps sent back to are told: which time this is, why the work came back, and what it came to last time. */
-export function sendBackNote(o: { gate: Pick<WorkflowStep, "kind" | "does">; why: string; attempt: number; max: number; before: string }): string {
+export function sendBackNote(o: { gate: Pick<WorkflowStep, "kind" | "does" | "fixBy">; why: string; attempt: number; max: number; before: string }): string {
   const what =
     o.gate.kind === "approve"
       ? `You were sent back by the person${o.why ? `, who said: ${o.why}` : "."}`
       : `The check “${clipLine(o.gate.does, 200)}” didn't pass${o.why ? `: ${o.why}` : "."}`;
-  return [`This is try ${o.attempt + 1} of ${o.max + 1}. ${what} Fix that, then do your step again.`, o.before.trim() ? `What it came to last time:\n${o.before.trim().slice(0, 6000)}` : ""].filter(Boolean).join("\n\n");
+  // Handed to a fixer (fixBy): the step's work is someone else's so far, to carry on from rather than do again.
+  const then = o.gate.fixBy ? "You're fixing it: the step was done by another teammate, so carry on from their work rather than start over." : "Fix that, then do your step again.";
+  return [`This is try ${o.attempt + 1} of ${o.max + 1}. ${what} ${then}`, o.before.trim() ? `What it came to last time:\n${o.before.trim().slice(0, 6000)}` : ""].filter(Boolean).join("\n\n");
 }
 
 const clipLine = (s: string, n: number) => ((l) => (l.length > n ? `${l.slice(0, n - 1).trimEnd()}…` : l))(s.trim().split("\n")[0]!.trim());
@@ -351,6 +360,11 @@ export function workflowChecks(
     if (isGate(s) && s.ifNot === "back") {
       const to = steps.findIndex((x) => x.id === s.back);
       if (to < 0 || to >= i || isGate(steps[to]!)) out.push({ level: "fix", text: `Pick the earlier step ${n} sends the work back to`, on: s.id });
+      if (s.fixBy && s.fixBy !== LEAD) {
+        const m = team.mates.find((x) => x.id === s.fixBy);
+        if (!m) out.push({ level: "fix", text: `Who fixes what step ${n} sends back isn't in the crew any more`, on: s.id });
+        else if (room && !room.members.includes(m.id)) out.push({ level: "fix", text: `${m.name} isn't in ${room.name}: add them to the room, or pick someone there to fix what step ${n} sends back`, on: s.id });
+      }
     }
     if (s.kind === "approve") return;
     if (!s.mate) out.push({ level: "fix", text: `Pick ${s.kind === "check" ? "who checks" : "a teammate for"} step ${n}`, on: s.id });
@@ -436,7 +450,7 @@ export function cleanWorkflow(
       const owns = Array.isArray(s.owns) ? [...new Set(s.owns.map((o) => str(o, 300)).filter(Boolean))].slice(0, 20) : [];
       const kind: StepKind = s.kind === "check" || s.kind === "approve" ? s.kind : "do";
       const tries = Number(s.tries);
-      const gate = kind === "do" ? {} : { kind, ifNot: s.ifNot === "back" ? ("back" as const) : ("stop" as const), ...(str(s.back, 24) ? { back: str(s.back, 24) } : {}), tries: Number.isFinite(tries) && tries >= 1 ? Math.min(MAX_TRIES, Math.round(tries)) : DEFAULT_TRIES };
+      const gate = kind === "do" ? {} : { kind, ifNot: s.ifNot === "back" ? ("back" as const) : ("stop" as const), ...(str(s.back, 24) ? { back: str(s.back, 24) } : {}), ...(s.ifNot === "back" && str(s.fixBy, 40) ? { fixBy: str(s.fixBy, 40) } : {}), tries: Number.isFinite(tries) && tries >= 1 ? Math.min(MAX_TRIES, Math.round(tries)) : DEFAULT_TRIES };
       return [{ id, mate: kind === "approve" ? "" : str(s.mate, 40), does: str(s.does, 4000), owns: kind === "do" ? owns : [], col: Number.isFinite(col) && col >= 0 ? Math.floor(col) : 0, ...gate }];
     }),
   );

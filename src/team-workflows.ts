@@ -306,7 +306,8 @@ export class TeamWorkflows {
     try {
       const place = await this.place(w.room, w);
       if (!place) throw new Error("Its room isn't there any more. Pick where it runs.");
-      const order = packSteps(w.steps);
+      // Sent back to be fixed by someone else (WorkflowStep.fixBy): that step is theirs, this once.
+      const order = packSteps(w.steps).map((s) => (run.from && run.fixBy && s.id === run.from ? { ...s, mate: run.fixBy } : s));
       const stages = stagesOf(order);
       const at = run.stage ?? 0;
       const stage = stages[at];
@@ -338,7 +339,7 @@ export class TeamWorkflows {
         if (missing) throw new Error(`One of its teammates isn't in ${place.name}.`);
         const held = can && here.map((s) => laneOfMate(s.mate)).find((l) => !can.lanes.includes(l));
         if (held && !can.asks) throw new Error(can.why(held));
-        const tasks = workflowTasks(w, (mate) => laneName(state, laneOfMate(mate)), run.carry ?? run.input ?? "", at, run.from);
+        const tasks = workflowTasks({ ...w, steps: order }, (mate) => laneName(state, laneOfMate(mate)), run.carry ?? run.input ?? "", at, run.from);
         const fromName = laneName(state, lead);
         // As Friday, from the lead: the lead hears how it went when it is through, and its report is the run's last word.
         const by = this.byOf(w);
@@ -433,7 +434,7 @@ export class TeamWorkflows {
   private async onward(w: Workflow | null, run: WorkflowRun, carry: string, state: SessionState | null): Promise<void> {
     const next = (run.stage ?? 0) + 1;
     if (!w || next >= stagesOf(packSteps(w.steps)).length) return this.end(w, run, { status: "done", note: run.note ?? "", result: carry }, state);
-    const moved = (await this.updateRun(w.id, run.id, { steps: run.steps, stage: next, carry: clip(carry, 8000), status: "running", note: "", from: undefined })) ?? run;
+    const moved = (await this.updateRun(w.id, run.id, { steps: run.steps, stage: next, carry: clip(carry, 8000), status: "running", note: "", from: undefined, fixBy: undefined })) ?? run;
     await this.post(w, moved, true);
   }
 
@@ -457,7 +458,7 @@ export class TeamWorkflows {
       .join("\n\n");
     const opening = first.includes(gate.back ?? "") ? run.input ?? "" : "";
     const note = [sendBackNote({ gate, why, attempt: tried + 1, max, before: carry }), handed ? `What the steps before it handed on:\n${handed}` : "", opening.trim() ? `What started this run:\n${opening.trim()}` : ""].filter(Boolean).join("\n\n");
-    const back = (await this.updateRun(w.id, run.id, { steps: run.steps, stage: to, from: gate.back, carry: clip(note, 8000), tries: { ...run.tries, [gate.id]: tried + 1 }, status: "running", note: clip(`Sent back to step ${order.findIndex((s) => s.id === gate.back) + 1}${why ? `: ${why}` : "."}`, 300) })) ?? run;
+    const back = (await this.updateRun(w.id, run.id, { steps: run.steps, stage: to, from: gate.back, fixBy: gate.fixBy || undefined, carry: clip(note, 8000), tries: { ...run.tries, [gate.id]: tried + 1 }, status: "running", note: clip(`Sent back to step ${order.findIndex((s) => s.id === gate.back) + 1}${why ? `: ${why}` : "."}`, 300) })) ?? run;
     await this.post(w, back, true);
   }
 
@@ -536,7 +537,7 @@ export class TeamWorkflows {
     const sid = run.sid;
     const ended = Date.now();
     if (!w) return;
-    const done = (await this.updateRun(w.id, run.id, { status, steps: run.steps, ended, note, asking: undefined, ...(result ? { result: clip(result, 8000) } : {}) })) ?? run;
+    const done = (await this.updateRun(w.id, run.id, { status, steps: run.steps, ended, note, asking: undefined, fixBy: undefined, ...(result ? { result: clip(result, 8000) } : {}) })) ?? run;
     const gone = /replaced by another/.test(note);
     if (w.outcomes.brief && !gone && sid && state) await this.brief(w, done, sid, state).catch((e) => this.d.log?.("[workflows] brief", e));
     if (w.outcomes.notify) {
