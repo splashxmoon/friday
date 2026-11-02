@@ -37,11 +37,11 @@
 </p>
 
 - **Uses the tools you already have.** No API keys and no extra plan: Friday drives the coding tools signed in on your computer.
-- **Runs on your machine.** No account, no server of ours, no model of its own. Your code stays where it is.
+- **Runs on your machine.** No account and no model of its own. Your code stays where it is; the only thing sent to us is a few anonymous usage counts you can turn off.
 - **Keeps the work moving.** When one agent runs out of usage, the agent best placed to finish picks up where it stopped.
 
 <p align="center">
-  <img src="docs/assets/handoff.png" alt="When Claude Code hits its usage limit mid-task, Friday hands the task to Codex, which picks it up with a record of what Claude did and changed" width="960" />
+  <img src="docs/assets/demo.gif" alt="A demo of Friday on a sample project: six coding agents share one session. Cursor tells Codex a route moved, Claude Code runs out of usage and Friday hands its task to Codex, which reruns the tests and finishes with changes ready to review" width="960" />
 </p>
 
 <p align="center">
@@ -137,7 +137,7 @@ Pick **Crew** to keep AI teammates on your computer. Each has a name, a role, a 
 
 ## "So what's the catch?"
 
-There isn't one. Friday on your own computer is free and MIT licensed. It has no account, no server of ours, and no model of its own: the work runs on your coding tools, on their own plans. The only thing that comes back to us is a few anonymous usage counts, listed under [Privacy](#privacy), and you can turn them off.
+There isn't one. Friday on your own computer is free and MIT licensed. It has no account and no model of its own: the work runs on your coding tools, on their own plans. The only thing that comes back to us is a few anonymous usage counts, listed under [Privacy](#privacy), and you can turn them off.
 
 What we sell is [Friday Team](https://www.tryfridaywork.com), the hosted version, for when several people work in the same session: steering one agent together, reviewing each other's changes, and sharing what the agents did.
 
@@ -345,7 +345,7 @@ Yes. A session with one coding tool works like that tool with Friday's review, G
 Yes. Point a session at any folder or repository on your computer. Agents you add can each work in their own Git worktree of it, and Friday won't switch a folder with uncommitted work out from under you.
 
 **Do I need an account, a server, or a new subscription?**
-No. Friday runs on your computer at `127.0.0.1`, with no account and no server of ours, and the work runs on the coding tools you're already signed in to.
+No. Friday runs on your computer at `127.0.0.1`, with no account, and the work runs on the coding tools you're already signed in to.
 
 **What if a coding tool isn't installed?**
 Friday only uses the tools it finds. Its setup screen shows which are installed and signed in, and can sign the rest in for you.
@@ -363,7 +363,7 @@ Its task goes to the agent best placed to finish it, with its notes, files and p
 Yes: an [automation](#automations) starts a coding tool on a schedule, from a webhook, or when another session finishes, and opens a pull request for you to review. Friday has to be running for it to start; you choose whether a run missed while the computer was off happens when it's back.
 
 **Does my code leave my computer?**
-Not through Friday. It runs on `127.0.0.1` with no account and no server of ours; your coding tools talk to their own providers as they always do. The only things Friday sends us are the anonymous usage counts under [Privacy](#privacy), which never include code, and you can turn them off.
+Not through Friday. It runs on `127.0.0.1` with no account; your coding tools talk to their own providers as they always do. The only things Friday sends us are the anonymous usage counts under [Privacy](#privacy), which never include code, and you can turn them off.
 
 ---
 
