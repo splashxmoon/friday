@@ -86,3 +86,19 @@ test("usage counts: a send that fails is dropped quietly", async () => {
   await u.tick();
   await u.sessionStarted("code");
 });
+
+test("usage counts: answered No in the welcome, nothing goes, and it stays No after a restart", async () => {
+  const kept = new Map<string, string>();
+  const sent: string[] = [];
+  const open = () => usageCounts({ store: { hget: async (_k, f) => kept.get(f) ?? null, hset: async (_k, f, v) => void kept.set(f, v) }, key: "k", version: async () => "1.0.0", tools: async () => [{ tool: "claude", ready: true }], desktop: true, env: {}, send: async (b) => void sent.push(b) });
+  const first = open();
+  assert.deepEqual(await first.state(), { on: true, told: false, offBy: null }, "unanswered: on, but nothing goes");
+  await first.tick();
+  assert.equal(sent.length, 0);
+  await first.set({ on: false, told: true });
+  const again = open();
+  await again.tick();
+  await again.sessionStarted("code");
+  assert.equal(sent.length, 0);
+  assert.deepEqual(await again.state(), { on: false, told: true, offBy: null });
+});

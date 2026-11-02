@@ -10,6 +10,8 @@ import { openOutside } from "./openOutside.js";
 import type { Identity, RecentSession } from "./storage.js";
 import { isTeamSid, useTeamNow } from "./Teammates.js";
 import { askTeamDemo, demoBlurb, DemoMarks, isTeamDemo, useDemoTeam } from "./TeamDemo.js";
+import { answerUsage, noticeDue, useUsageSharing, WHAT } from "./UsageSharing.js";
+import { Switch } from "@/components/ui/switch";
 
 /**
  * Getting set up, for someone new (Arun, 2026-10-25: "instead of the tour on load we should have a modal or something where it
@@ -108,7 +110,19 @@ export function Setup({ identity, recents, onDone }: { identity: Identity; recen
   // Once a tool is ready, the last step's first button is the team demo: the person's own agents, working together (TeamDemo.tsx).
   const demoTeam = useDemoTeam(machine);
   const desktop = typeof window !== "undefined" && !!window.fridayDesktop?.link;
+  // The open-source edition's usage counts, asked here rather than only in the sidebar (UsageSharing.tsx): on until changed, and
+  // answered by going on from the welcome or by changing it. Leaving with "Set up later" untouched answers nothing; the sidebar
+  // asks then. Kept up once asked, so the row doesn't vanish under the person's hand as it's answered.
+  const usage = useUsageSharing();
+  const [askUsage, setAskUsage] = useState(false);
+  useEffect(() => void (open && noticeDue(usage) && setAskUsage(true)), [open, usage]);
+  const [share, setShare] = useState(true);
+  const [shareTouched, setShareTouched] = useState(false);
+  const answer = (started: boolean) => {
+    if (askUsage && noticeDue(usage) && (started || shareTouched)) void answerUsage(share);
+  };
   const finish = (started: boolean) => {
+    answer(started);
     write(k);
     if (!signedIn.length) skip();
     // The tour doesn't come for someone who has just been through this; it stays a press away in Settings · About.
@@ -169,9 +183,12 @@ export function Setup({ identity, recents, onDone }: { identity: Identity; recen
     return () => clearTimeout(t);
   }, [showing.id, showing.done, at, open, steps.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Escape leaves as the latest render would (the usage answer above changes after the box opens).
+  const finishNow = useRef(finish);
+  finishNow.current = finish;
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && finish(false);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && finishNow.current(false);
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -183,6 +200,7 @@ export function Setup({ identity, recents, onDone }: { identity: Identity; recen
   const howMany = steps.length === 2 ? "Two things" : "Three things";
   const demo = last && demoTeam.length >= 2;
   const seeTeam = () => {
+    answer(true);
     write(k);
     write(TOUR_KEY(identity.id));
     setOpen(false);
@@ -237,6 +255,28 @@ export function Setup({ identity, recents, onDone }: { identity: Identity; recen
               </div>
             )}
           </section>
+
+          {askUsage && (
+            <section className="wl-usage">
+              <span className="wl-gh-text">
+                <b id="wl-usage-label">Share anonymous usage counts</b>
+                <span>
+                  How often Friday opens and which coding tools it finds. Never your code, prompts or files.{" "}
+                  <button type="button" className="usage-notice-link" onClick={() => void openOutside(WHAT)}>
+                    What's sent
+                  </button>
+                </span>
+              </span>
+              <Switch
+                aria-labelledby="wl-usage-label"
+                checked={share}
+                onCheckedChange={(on) => {
+                  setShare(on);
+                  setShareTouched(true);
+                }}
+              />
+            </section>
+          )}
 
           {ready && demoTeam.length >= 2 && (
             <div className="setup-demo wl-demo">

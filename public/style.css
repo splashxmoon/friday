@@ -12250,6 +12250,8 @@ body.resizing-panel { cursor: col-resize; user-select: none; }
 .wl-gh .btn.small { height: 30px; padding: 0 14px; border-radius: 999px; font-size: 13px; }
 .wl-gh-body { grid-column: 1 / -1; padding-top: 8px; }
 .wl-demo { margin: 0; padding: 14px 2px 0; }
+.wl-usage { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 0 2px; }
+.wl-usage .wl-gh-text b { font-size: 13px; }
 .setup-card.welcome .setup-foot { padding-top: 4px; }
 .setup-card.welcome .tour-next { height: 36px; padding: 0 18px; font-size: 13.5px; }
 @media (max-width: 520px) { .setup-card.welcome { padding: 28px 18px 16px; } }

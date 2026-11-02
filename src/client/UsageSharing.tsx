@@ -7,13 +7,16 @@ import { Switch } from "@/components/ui/switch";
 
 /**
  * The open-source edition's anonymous usage counts, as the person sees them (../usage.ts says what is sent and what never is):
- * a notice the first time Friday opens after they arrived, in the sidebar's foot, saying so and offering the switch; and the
- * switch itself in Settings › Data & backup. Nothing is counted until the notice has been shown.
+ * a question in the first-run welcome (Setup.tsx), with the answer on Yes until they change it; the same as a notice in the
+ * sidebar's foot for anyone who left the welcome without answering; and the switch itself in Settings › Data & backup. Nothing
+ * is counted until one of them has been answered.
+ * The welcome asks since 2026-11-02 (Product's spec, SPEC-usage-notice-first-run.md): a notice in the sidebar's foot alone was
+ * passed by, and passing it by counted the same as turning it off, so most installs never sent a count.
  */
 type State = { on: boolean; told: boolean; offBy: string | null };
 
 /** Where the README says exactly what is sent. */
-const WHAT = "https://github.com/splashxmoon/friday#privacy";
+export const WHAT = "https://github.com/splashxmoon/friday#privacy";
 
 let now: State | null = null;
 const subs = new Set<() => void>();
@@ -46,8 +49,11 @@ export function useUsageSharing(): State | null {
   );
 }
 
-/** Whether the notice is up: shown once, unless sharing was already turned off from outside (DO_NOT_TRACK and the like). */
+/** Whether the question is still open: asked until answered, unless sharing was already turned off from outside (DO_NOT_TRACK and the like). */
 export const noticeDue = (s: State | null) => !!s && !s.told && !s.offBy;
+
+/** The welcome's answer: on or off, and answered either way. */
+export const answerUsage = (on: boolean) => save({ on, told: true });
 
 export function UsageNotice() {
   const s = useUsageSharing();

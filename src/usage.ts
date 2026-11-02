@@ -16,7 +16,8 @@ import { ENGINE_TOOLS } from "./types.js";
  * Never: prompts, code, file names or paths, repository names, email addresses, accounts or sign-ins, or anything a tool
  * says. Only the properties listed in `clean`, each with the values it may hold, can leave: nothing else gets through by mistake.
  *
- * Nothing is sent until the app has said so once (the notice on first open, `told`), nor ever with FRIDAY_NO_TELEMETRY=1,
+ * Nothing is sent until the person has answered the question about them once (`told`: in the first-run welcome, or the notice
+ * in the sidebar for anyone who left the welcome without answering), nor ever with FRIDAY_NO_TELEMETRY=1,
  * DO_NOT_TRACK=1, or Settings › Privacy turned off. No IP-based location, no person profiles; a send that fails is dropped.
  */
 
@@ -30,7 +31,7 @@ export type Milestone = "tool_ready" | "first_turn";
 export interface UsageState {
   /** Sharing is on in Settings. */
   on: boolean;
-  /** The app has shown the notice saying what is sent. */
+  /** The person has answered the question saying what is sent, yes or no. */
   told: boolean;
   /** Turned off from outside the app: the variable that did it. */
   offBy: "FRIDAY_NO_TELEMETRY" | "DO_NOT_TRACK" | null;
@@ -131,7 +132,7 @@ export function usageCounts(d: UsageDeps) {
 
   return {
     state,
-    /** Settings › Privacy, and the notice: `told` once it has been shown, `on` as the person leaves it. */
+    /** The welcome, the notice and Settings › Privacy: `told` once answered, `on` as the person leaves it. */
     async set(p: { on?: boolean; told?: boolean }) {
       if (p.on !== undefined) await set("on", p.on ? "1" : "0");
       if (p.told) await set("told", "1");

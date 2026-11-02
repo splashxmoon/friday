@@ -1,0 +1,59 @@
+# Tells the people who reported a bug that the release fixing it is out, and asks them to download it.
+#
+# Write "Fixes #12" (or Closes, Resolves) in a release's notes. Once the release is published and its notes are saved, each
+# of those issues gets a short note to the person who opened it, with the link to the new version, and is closed. Each issue
+# is told once per release, however often the notes are edited. An issue without "Fixes" in front of its number is left alone,
+# for a reply written by hand.
+#
+# The notes are usually added after release.yml publishes the release, and that edit is what starts this: a release
+# published by release.yml's own token starts no other workflow.
+#
+# It posts as github-actions[bot]. To post as a person instead, add a FOLLOWUP_TOKEN secret: a token of theirs that can
+# write issues on this repository.
+name: Release follow-up
+
+on:
+  release:
+    types: [published, edited]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  tell:
+    if: ${{ !github.event.release.draft && !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Tell each reporter their fix is out
+        env:
+          GH_TOKEN: ${{ secrets.FOLLOWUP_TOKEN || github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+          URL: ${{ github.event.release.html_url }}
+          NOTES: ${{ github.event.release.body }}
+        run: |
+          set -uo pipefail
+          numbers=$(printf %s "$NOTES" | grep -oiE '\b(fix(es|ed)?|close[sd]?|resolve[sd]?):? #[0-9]+' | grep -oE '[0-9]+' | sort -un)
+          [ -n "$numbers" ] || { echo "No 'Fixes #N' in the notes of $TAG."; exit 0; }
+          mark="<!-- friday-followup $TAG -->"
+          for n in $numbers; do
+            issue=$(gh issue view "$n" --repo "$GITHUB_REPOSITORY" --json author,state,comments 2>/dev/null) || { echo "#$n isn't an issue here."; continue; }
+            if printf %s "$issue" | jq -e --arg m "$mark" '[.comments[].body | contains($m)] | any' > /dev/null; then
+              echo "#$n was already told about $TAG."
+              continue
+            fi
+            who=$(printf %s "$issue" | jq -r '.author.login')
+            {
+              echo "Hi @$who, thank you for reporting this, and sorry for the trouble it caused you."
+              echo
+              echo "It's fixed in Friday $TAG, which is out now. Please download the new version when you get a moment: $URL"
+              echo "If you have the desktop app, it will also offer the update itself the next time it checks."
+              echo
+              echo "If it still happens on $TAG, reply here and we'll reopen this straight away. Thanks again for helping make Friday better."
+              echo
+              echo "$mark"
+            } > "$RUNNER_TEMP/comment.md"
+            gh issue comment "$n" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/comment.md"
+            if [ "$(printf %s "$issue" | jq -r '.state')" = "OPEN" ]; then gh issue close "$n" --repo "$GITHUB_REPOSITORY" --reason completed; fi
+            echo "Told @$who on #$n."
+          done

@@ -92,6 +92,29 @@ jobs:
           fi
           npm run desktop:dist -- "${args[@]}"
 
+      # The Linux app as it ships, tried before it's attached: its terminal binary loads in its own Electron and runs a command,
+      # and the AppImage starts and answers. 0.2.6's stopped before its window opened, with no binary (build/pty-arch.cjs).
+      - name: Try the Linux app
+        if: ${{ runner.os == 'Linux' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          exe="$(find release/linux-unpacked -maxdepth 1 -type f -name 'friday*' -perm -u+x | head -1)"
+          pty="$PWD/release/linux-unpacked/resources/app/node_modules/@homebridge/node-pty-prebuilt-multiarch"
+          ELECTRON_RUN_AS_NODE=1 "$exe" -e "
+            const t = require('$pty').spawn('/bin/sh', ['-c', 'echo terminal-works'], {});
+            let out = '';
+            t.onData((d) => (out += d));
+            t.onExit(() => { console.log(out.trim()); process.exit(out.includes('terminal-works') ? 0 : 1); });
+          "
+          sudo apt-get install -y xvfb > /dev/null
+          export FRIDAY_HOME="$RUNNER_TEMP/friday-home" FRIDAY_NO_UPDATE_CHECK=1 PORT=4599
+          xvfb-run -a release/Friday-x86_64.AppImage --appimage-extract-and-run --no-sandbox > "$RUNNER_TEMP/app.log" 2>&1 &
+          for i in $(seq 1 90); do curl -sf http://127.0.0.1:4599/api/info > /dev/null && break; sleep 1; done
+          cat "$RUNNER_TEMP/app.log"
+          curl -sf http://127.0.0.1:4599/api/info > /dev/null || { echo "::error::The AppImage didn't start."; exit 1; }
+          if grep -q "Cannot find module" "$RUNNER_TEMP/app.log"; then echo "::error::The AppImage is missing a module."; exit 1; fi
+
       # Only what people download (and electron-builder's checksums beside them), never the unpacked app folders.
       - name: Attach the installers to the draft
         if: ${{ startsWith(github.ref, 'refs/tags/') }}
