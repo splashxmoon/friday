@@ -6,16 +6,25 @@ import { boardBusy, type BoardTask, type SessionState } from "./session/projecti
 import type { SessionStore } from "./session/store.js";
 import {
   cleanWorkflow,
-  columnsOf,
+  DEFAULT_TRIES,
   describeTrigger,
   LEAD,
   MAX_CHAIN,
+  packSteps,
+  roomRunOf,
+  sendBackNote,
+  stageCols,
+  stageOfStep,
+  stagesOf,
   TEAM_ROOM,
+  verdictOf,
   workflowChecks,
   workflowTasks,
+  type RoomRun,
   type Workflow,
   type WorkflowRun,
   type WorkflowRunStep,
+  type WorkflowStep,
   type WorkflowView,
 } from "./team-workflow-model.js";
 import type { TeammateStore } from "./teammates.js";
@@ -31,6 +40,10 @@ import { MAIN_LANE, type ActorRef, type SessionEvent, type TeamBrief } from "./t
  * watches the board's events, keeps the run's record, and when the board is through runs the outcomes: a brief in the room, a
  * word to the person, the lead asked to open one pull request (told with the reports, mesh.teamDone), the result handed to
  * another workflow.
+ *
+ * A workflow with checks or OKs runs in stages (team-workflow-model.ts stagesOf), one board each: when a stage's board is through,
+ * its check's PASS moves the run on to the next stage's board, handed what this one came to; a FAIL stops it or posts an earlier
+ * stage's board again, with why. An OK waits for you (answer), with no board; meanwhile the room is free.
  *
  * Everything is in the local store beside the teammates: the workflows, each one's last fifty runs, the run each room's board
  * belongs to, the runs waiting for a board, and the day's counts.
@@ -70,6 +83,25 @@ export interface Place {
   sid: string;
   name: string;
   lanes: Record<string, string>;
+}
+
+/** A run waiting for your OK, for the page to show with its answer (GET /api/teammates `asks`). */
+export interface WorkflowAsk {
+  id: string;
+  name: string;
+  run: string;
+  step: string;
+  /** Its number in the workflow. */
+  n: number;
+  ask: string;
+  since: number;
+  /** What the work came to so far, for you to judge. */
+  carry: string;
+  sid?: string;
+  roomName: string;
+  /** Not passed: what happens. */
+  ifNot: "stop" | "back";
+  backTo?: number;
 }
 
 /** A finished run the person asked to be told about, for the page to say (GET /api/teammates `ran`). */
@@ -254,7 +286,7 @@ export class TeamWorkflows {
    * room's board, or waiting for that board to be free, or skipped. Returns the run as it stands.
    */
   async start(w: Workflow, trigger: string, input = "", depth = 0): Promise<WorkflowRun> {
-    let run: WorkflowRun = { id: randomBytes(5).toString("hex"), at: Date.now(), trigger, status: "running", room: w.room, roomName: "", steps: [], ...(input.trim() ? { input: clip(input.trim(), 8000) } : {}), ...(depth ? { depth } : {}) };
+    let run: WorkflowRun = { id: randomBytes(5).toString("hex"), at: Date.now(), trigger, status: "running", room: w.room, roomName: "", steps: [], stage: 0, ...(input.trim() ? { input: clip(input.trim(), 8000), carry: clip(input.trim(), 8000) } : {}), ...(depth ? { depth } : {}) };
     if (!(await this.countRun(w))) {
       run = { ...run, status: "skipped", note: `It has already run ${w.limits.perDay} time${w.limits.perDay === 1 ? "" : "s"} today, its limit.`, ended: Date.now() };
       await this.addRun(w.id, run);
@@ -264,12 +296,22 @@ export class TeamWorkflows {
     return this.post(w, run);
   }
 
-  /** The run's board posted in its room, once that room's board is free; one post at a time per room. */
-  private async post(w: Workflow, run: WorkflowRun): Promise<WorkflowRun> {
+  /**
+   * The run's stage posted in its room, once that room's board is free; one post at a time per room. `cont`: a run already under
+   * way moving on to its next stage, or back to an earlier one, which waits for a busy board rather than being skipped. Your OK's
+   * stage posts nothing: the run waits for you.
+   */
+  private async post(w: Workflow, run: WorkflowRun, cont = false): Promise<WorkflowRun> {
     const set = async (change: Partial<WorkflowRun>) => (run = (await this.updateRun(w.id, run.id, change)) ?? { ...run, ...change });
     try {
       const place = await this.place(w.room, w);
       if (!place) throw new Error("Its room isn't there any more. Pick where it runs.");
+      const order = packSteps(w.steps);
+      const stages = stagesOf(order);
+      const at = run.stage ?? 0;
+      const stage = stages[at];
+      if (!stage) throw new Error("Its steps changed while it ran, so it can't go on.");
+      if (stage.gate?.kind === "approve") return await this.waitForOk(w, run, stage.gate, order, place.name, set);
       return await this.d.teammates.locked(`workflow-post:${place.sid}`, async () => {
         const [mates, rooms, all] = await Promise.all([this.d.teammates.list(), this.d.teammates.rooms(), this.list()]);
         const fix = workflowChecks(w, { mates, rooms: rooms.map((r) => ({ id: r.id, name: r.name, members: Object.keys(r.lanes) })), workflows: all }).find((c) => c.level === "fix");
@@ -278,7 +320,7 @@ export class TeamWorkflows {
         const active = await this.active(place.sid);
         if ((state.board && boardBusy(state)) || active) {
           const why = active?.id === w.id ? `Its last run is still going in ${place.name}.` : `${cap(place.name)}'s board is still being worked on.`;
-          if (w.limits.skipIfRunning) return await set({ status: "skipped", roomName: place.name, note: why, ended: Date.now() });
+          if (w.limits.skipIfRunning && !cont) return await set({ status: "skipped", roomName: place.name, note: why, ended: Date.now() });
           await this.d.redis.zadd(this.waitingKey(), run.at, `${w.id} ${run.id}`);
           return await set({ status: "waiting", roomName: place.name, note: `${why} It starts when that's done.` });
         }
@@ -290,21 +332,27 @@ export class TeamWorkflows {
         const lead = state.lead && pool.includes(state.lead) ? state.lead : ((can ? pool.find((l) => state.engines[l]?.online) : undefined) ?? pool[0] ?? "");
         if (!lead) throw new Error(can && members.length ? can.none : `Nobody is in ${place.name} to run it.`);
         const laneOfMate = (mate: string) => (mate === LEAD ? lead : (place.lanes[mate] ?? ""));
-        const missing = w.steps.find((s) => !members.includes(laneOfMate(s.mate)));
+        const here = stageCols(order, at, run.from).flat();
+        const missing = here.find((s) => !members.includes(laneOfMate(s.mate)));
         if (missing) throw new Error(`One of its teammates isn't in ${place.name}.`);
-        const held = can && w.steps.map((s) => laneOfMate(s.mate)).find((l) => !can.lanes.includes(l));
+        const held = can && here.map((s) => laneOfMate(s.mate)).find((l) => !can.lanes.includes(l));
         if (held && !can.asks) throw new Error(can.why(held));
-        const tasks = workflowTasks(w, (mate) => laneName(state, laneOfMate(mate)), run.input ?? "");
+        const tasks = workflowTasks(w, (mate) => laneName(state, laneOfMate(mate)), run.carry ?? run.input ?? "", at, run.from);
         const fromName = laneName(state, lead);
         // As Friday, from the lead: the lead hears how it went when it is through, and its report is the run's last word.
         const by = this.byOf(w);
         const posted = await this.d.store.append(place.sid, FRIDAY, { type: "board.posted", fromLane: lead, fromName, tasks, ...(by ? { by } : {}) }, { lane: lead });
         if (!posted.ok) throw new Error(`Couldn't post its board in ${place.name}.`);
-        const ref = JSON.stringify({ id: w.id, run: run.id, seq: posted.seq });
+        const ref = JSON.stringify({ id: w.id, run: run.id, seq: posted.seq, last: at === stages.length - 1 });
         await this.d.redis.multi().set(this.activeKey(place.sid), ref).sadd(this.activesKey(), place.sid).set(this.boardKey(place.sid, posted.seq), ref, "EX", 30 * 86_400).exec();
-        const order = columnsOf(w.steps).flat();
-        const steps: WorkflowRunStep[] = tasks.map((t, i) => ({ step: order[i]!.id, task: t.id, title: t.title, name: t.next, lane: laneOfMate(order[i]!.mate), status: "open" }));
-        await set({ status: "running", sid: place.sid, seq: posted.seq, roomName: place.name, steps, note: "" });
+        // This stage's steps as the run has them, fresh; any it did before (sent back) counted again; the rest as they were.
+        const fresh = tasks.map((t, i): WorkflowRunStep => {
+          const s = here[i]!;
+          const was = run.steps.find((x) => x.step === s.id);
+          return { step: s.id, task: t.id, title: t.title, name: t.next, lane: laneOfMate(s.mate), status: "open", ...(s.kind ? { kind: s.kind } : {}), ...(was ? { again: (was.again ?? 0) + 1 } : {}) };
+        });
+        const steps = mergeSteps(order, run.steps, fresh);
+        await set({ status: "running", sid: place.sid, seq: posted.seq, seq0: run.seq0 ?? posted.seq, roomName: place.name, steps, note: "" });
         await this.d.dispatch(place.sid);
         return run;
       });
@@ -333,7 +381,7 @@ export class TeamWorkflows {
       if (!run || run.status !== "running") return void (await this.clearActive(sid));
       if (!state.board || state.board.seq !== a.seq) return void (await this.finish(a.id, w, run, sid, state, [], "Its board was replaced by another before it was through."));
       const tasks = state.board.tasks;
-      const steps = run.steps.map((s) => ((t) => (t ? { ...s, status: t.status, name: t.name ?? s.name, ...(t.report ? { report: clip(t.report, 4000) } : {}) } : s))(tasks.find((x) => x.id === s.task)));
+      const steps = onBoard(run, tasks);
       if (!boardBusy(state)) return void (await this.finish(a.id, w, run, sid, state, tasks));
       const more = w ? await this.onBoard(w, { ...run, steps }, sid, state) : null;
       const next = { steps, ...more };
@@ -345,26 +393,153 @@ export class TeamWorkflows {
     await this.d.redis.multi().del(this.activeKey(sid)).srem(this.activesKey(), sid).exec();
   }
 
-  /** The board is through (or gone): the run's end, and its outcomes, once. */
+  /**
+   * A stage's board is through (or gone), once: a stuck step or a gone board ends the run; a check's answer moves it on, stops it
+   * or sends the work back; past its last stage it ends, with its outcomes.
+   */
   private async finish(id: string, w: Workflow | null, run: WorkflowRun, sid: string, state: SessionState, tasks: BoardTask[], gone?: string): Promise<void> {
     await this.clearActive(sid);
-    if (!(await this.d.redis.set(this.k(`workflow-finished:${run.id}`), "1", "EX", 7 * 86_400, "NX"))) return;
-    const steps = run.steps.map((s) => ((t) => (t ? { ...s, status: t.status, name: t.name ?? s.name, ...(t.report ? { report: clip(t.report, 4000) } : {}) } : s))(tasks.find((x) => x.id === s.task)));
-    const stuck = steps.filter((s) => s.status === "blocked");
-    // What it came to: the last column's reports (the steps nothing waited on), what the brief leads with and what is handed on.
-    const waitedOn = new Set(tasks.flatMap((t) => t.after));
-    const last = steps.filter((s) => !waitedOn.has(s.task) && s.status === "done" && s.report);
-    const result = last.map((s) => `## ${s.title} (${s.name})\n${s.report}`).join("\n\n");
-    const status = gone || stuck.length || !steps.some((s) => s.status === "done") ? "failed" : "done";
+    if (!(await this.d.redis.set(this.k(`workflow-finished:${run.id}:${run.seq ?? 0}`), "1", "EX", 7 * 86_400, "NX"))) return;
+    let steps = onBoard(run, tasks);
+    const mine = steps.filter((s) => tasks.some((t) => t.id === s.task));
+    const stuck = mine.filter((s) => s.status === "blocked");
+    // What this stage came to: the reports of its steps nothing waited on, its check aside.
+    const checks = new Set(mine.filter((s) => s.kind === "check").map((s) => s.task));
+    const waitedOn = new Set(tasks.filter((t) => !checks.has(t.id)).flatMap((t) => t.after));
+    const last = mine.filter((s) => !waitedOn.has(s.task) && s.status === "done" && s.report && s.kind !== "check");
+    const came = last.map((s) => `## ${s.title} (${s.name})\n${s.report}`).join("\n\n");
     // A step asked of another keeper who didn't take it on (the hosted service's) was dropped for that: said as theirs.
-    const declined = steps.filter((s) => s.asked?.status === "declined").map((s) => `${s.asked!.keeper} didn't take on step ${s.task.slice(1)}.`);
-    const note = gone ?? (stuck.length ? `Step ${stuck.map((s) => s.task.slice(1)).join(", ")} got stuck: ${clip(stuck[0]!.report ?? "no report", 240)}` : [...declined, status === "failed" ? "Every step was dropped." : ""].filter(Boolean).join(" "));
+    const declined = mine.filter((s) => s.asked?.status === "declined").map((s) => `${s.asked!.keeper} didn't take on step ${s.task.slice(1)}.`);
+    if (gone || stuck.length || !mine.some((s) => s.status === "done")) {
+      const note = gone ?? (stuck.length ? `Step ${stuck.map((s) => s.task.slice(1)).join(", ")} got stuck: ${clip(stuck[0]!.report ?? "no report", 240)}` : [...declined, "Every step was dropped."].filter(Boolean).join(" "));
+      return this.end(w, { ...run, steps }, { status: "failed", note, result: came || run.carry || "" }, state);
+    }
+    const order = w ? packSteps(w.steps) : [];
+    const stages = stagesOf(order);
+    const at = run.stage ?? 0;
+    const gate = stages[at]?.gate;
+    const carry = came || run.carry || "";
+    if (w && gate?.kind === "check") {
+      const said = steps.find((s) => s.step === gate.id);
+      const v = said?.status === "done" ? (verdictOf(said.report ?? "") ?? { pass: false, why: "Its check didn't end with PASS or FAIL." }) : { pass: false, why: "Its check was dropped." };
+      steps = steps.map((s) => (s.step === gate.id ? { ...s, verdict: { pass: v.pass, why: clip(v.why, 400) } } : s));
+      if (!v.pass) return this.notPassed(w, { ...run, steps }, gate, order, v.why, carry, state);
+    }
+    return this.onward(w, { ...run, steps, ...(declined.length ? { note: declined.join(" ") } : {}) }, carry, state);
+  }
+
+  /** On to the stage after this one, handed `carry`; past the last, the run is done, with it as its result. */
+  private async onward(w: Workflow | null, run: WorkflowRun, carry: string, state: SessionState | null): Promise<void> {
+    const next = (run.stage ?? 0) + 1;
+    if (!w || next >= stagesOf(packSteps(w.steps)).length) return this.end(w, run, { status: "done", note: run.note ?? "", result: carry }, state);
+    const moved = (await this.updateRun(w.id, run.id, { steps: run.steps, stage: next, carry: clip(carry, 8000), status: "running", note: "", from: undefined })) ?? run;
+    await this.post(w, moved, true);
+  }
+
+  /** A check or your OK not passed: the run stopped there, or the work sent back to its earlier step, up to its tries. */
+  private async notPassed(w: Workflow, run: WorkflowRun, gate: WorkflowStep, order: WorkflowStep[], why: string, carry: string, state: SessionState | null): Promise<void> {
+    const n = order.findIndex((s) => s.id === gate.id) + 1;
+    const what = gate.kind === "approve" ? "You" : `Step ${n}'s check`;
+    if (gate.ifNot !== "back") return this.end(w, run, { status: "stopped", note: clip(`${what} stopped it${why ? `: ${why}` : "."}`, 300), result: carry }, state);
+    const max = gate.tries ?? DEFAULT_TRIES;
+    const tried = run.tries?.[gate.id] ?? 0;
+    if (tried >= max) return this.end(w, run, { status: "failed", note: clip(`${gate.kind === "approve" ? "Your OK" : `Step ${n}'s check`} still didn't pass after ${max} ${max === 1 ? "try" : "tries"}${why ? `: ${why}` : "."}`, 300), result: carry }, state);
+    const stages = stagesOf(order);
+    const to = stageOfStep(stages, gate.back ?? "");
+    if (to < 0) return this.end(w, run, { status: "failed", note: "The step it sends the work back to is gone.", result: carry }, state);
+    // The steps before it in its stage stand as they were, so what they handed on goes with it again.
+    const first = stageCols(order, to)[0]?.map((x) => x.id) ?? [];
+    const until = order.findIndex((x) => x.id === gate.back);
+    const handed = run.steps
+      .filter((x) => stageOfStep(stages, x.step) === to && order.findIndex((o) => o.id === x.step) < until && x.kind !== "check" && x.status === "done" && x.report)
+      .map((x) => `## ${x.title} (${x.name})\n${x.report}`)
+      .join("\n\n");
+    const opening = first.includes(gate.back ?? "") ? run.input ?? "" : "";
+    const note = [sendBackNote({ gate, why, attempt: tried + 1, max, before: carry }), handed ? `What the steps before it handed on:\n${handed}` : "", opening.trim() ? `What started this run:\n${opening.trim()}` : ""].filter(Boolean).join("\n\n");
+    const back = (await this.updateRun(w.id, run.id, { steps: run.steps, stage: to, from: gate.back, carry: clip(note, 8000), tries: { ...run.tries, [gate.id]: tried + 1 }, status: "running", note: clip(`Sent back to step ${order.findIndex((s) => s.id === gate.back) + 1}${why ? `: ${why}` : "."}`, 300) })) ?? run;
+    await this.post(w, back, true);
+  }
+
+  /** The run waiting for your OK on `gate`: nothing posted, the room left free, and you told. */
+  private async waitForOk(w: Workflow, run: WorkflowRun, gate: WorkflowStep, order: WorkflowStep[], roomName: string, set: (c: Partial<WorkflowRun>) => Promise<WorkflowRun>): Promise<WorkflowRun> {
+    const n = order.findIndex((s) => s.id === gate.id) + 1;
+    const step: WorkflowRunStep = { step: gate.id, task: `s${n}`, title: gate.does.trim().split("\n")[0]!.slice(0, 90) || "Your OK", name: "You", lane: "", status: "claimed", kind: "approve" };
+    const asking = { step: gate.id, ask: gate.does.trim() || "OK to go on?", since: Date.now() };
+    const got = await set({ status: "asking", roomName, asking, steps: mergeSteps(order, run.steps, [step]), note: "" });
+    await this.d.redis.multi().lpush(this.askedKey(), JSON.stringify({ id: w.id, run: run.id, at: asking.since })).ltrim(this.askedKey(), 0, 19).exec();
+    return got;
+  }
+  private askedKey = () => this.k("workflow-asked");
+
+  /** Your answer to a run waiting for your OK: on with it (what you said handed to the next steps), or not, as its step says. */
+  async answer(w: Workflow, runId: string, ok: boolean, said = ""): Promise<WorkflowRun> {
+    return this.d.teammates.locked(`workflow-answer:${runId}`, async () => {
+      const run = (await this.runs(w.id, 50)).find((r) => r.id === runId);
+      if (!run || run.status !== "asking" || !run.asking) throw new Error("That run isn't waiting for you any more.");
+      const order = packSteps(w.steps);
+      const gate = order.find((s) => s.id === run.asking!.step);
+      if (!gate) throw new Error("Its steps changed while it waited, so it can't go on. Run it again.");
+      const note = said.trim().slice(0, 2000);
+      const steps = run.steps.map((s) => (s.step === gate.id ? { ...s, status: ok ? ("done" as const) : ("cancelled" as const), verdict: { pass: ok, why: note } } : s));
+      const state = run.sid ? await this.d.store.state(run.sid).catch(() => null) : null;
+      const base = { ...run, steps, asking: undefined };
+      await this.updateRun(w.id, run.id, { steps, asking: undefined });
+      if (ok) await this.onward(w, base, [run.carry ?? "", note ? `The person OK'd it and said: ${note}` : "The person OK'd it."].filter(Boolean).join("\n\n"), state);
+      else await this.notPassed(w, base, gate, order, note, run.carry ?? "", state);
+      return (await this.runs(w.id, 50)).find((r) => r.id === runId) ?? run;
+    });
+  }
+
+  /** A run that didn't finish, tried again from the stage it stopped at, handed what that stage was handed. */
+  async retry(w: Workflow, runId: string): Promise<WorkflowRun> {
+    const run = (await this.runs(w.id, 50)).find((r) => r.id === runId);
+    if (!run || (run.status !== "failed" && run.status !== "stopped")) throw new Error("Only a run that didn't finish can be tried again.");
+    if (stagesOf(packSteps(w.steps)).length <= (run.stage ?? 0)) throw new Error("Its steps changed since, so it can't pick up where it was. Run it again.");
+    await this.d.redis.del(this.k(`workflow-ended:${run.id}`));
+    const again = (await this.updateRun(w.id, run.id, { status: "running", note: "", ended: undefined, asking: undefined, tries: {} })) ?? run;
+    return this.post(w, again, true);
+  }
+
+  /** Each room's runs of the last two days, for their cards in the room (roomRunOf). */
+  async roomRuns(now = Date.now()): Promise<RoomRun[]> {
+    const names = await this.names();
+    const out: RoomRun[] = [];
+    for (const w of await this.list())
+      for (const r of await this.runs(w.id, 8)) {
+        if (now - r.at > 2 * 86_400_000) continue;
+        const v = roomRunOf(w, r, names.mate);
+        if (v) out.push(v);
+      }
+    return out;
+  }
+
+  /** The runs waiting for your OK now, oldest first. */
+  async asks(): Promise<WorkflowAsk[]> {
+    const out: WorkflowAsk[] = [];
+    for (const w of await this.list()) {
+      const order = packSteps(w.steps);
+      for (const r of await this.runs(w.id, 10)) {
+        if (r.status !== "asking" || !r.asking) continue;
+        const g = order.find((s) => s.id === r.asking!.step);
+        out.push({ id: w.id, name: w.name, run: r.id, step: r.asking.step, n: order.findIndex((s) => s.id === r.asking!.step) + 1, ask: r.asking.ask, since: r.asking.since, carry: clip(r.carry ?? "", 4000), ...(r.sid ? { sid: r.sid } : {}), roomName: r.roomName, ifNot: g?.ifNot === "back" ? "back" : "stop", ...(g?.ifNot === "back" && g.back ? { backTo: order.findIndex((s) => s.id === g.back) + 1 } : {}) });
+      }
+    }
+    return out.sort((a, b) => a.since - b.since);
+  }
+
+  /** The run's end, once: its record, its brief, you told, its result handed on. */
+  private async end(w: Workflow | null, run: WorkflowRun, e: { status: "done" | "failed" | "stopped"; note: string; result: string }, state: SessionState | null): Promise<void> {
+    if (!(await this.d.redis.set(this.k(`workflow-ended:${run.id}`), "1", "EX", 7 * 86_400, "NX"))) return;
+    const { status, note } = e;
+    const result = e.result.trim();
+    const sid = run.sid;
     const ended = Date.now();
-    const done = (await this.updateRun(id, run.id, { status, steps, ended, note, ...(result ? { result: clip(result, 8000) } : {}) })) ?? run;
     if (!w) return;
-    if (w.outcomes.brief && !gone) await this.brief(w, done, sid, state).catch((e) => this.d.log?.("[workflows] brief", e));
+    const done = (await this.updateRun(w.id, run.id, { status, steps: run.steps, ended, note, asking: undefined, ...(result ? { result: clip(result, 8000) } : {}) })) ?? run;
+    const gone = /replaced by another/.test(note);
+    if (w.outcomes.brief && !gone && sid && state) await this.brief(w, done, sid, state).catch((e) => this.d.log?.("[workflows] brief", e));
     if (w.outcomes.notify) {
-      const e: WorkflowEnded = { id: w.id, name: w.name, run: run.id, status, ended, sid, roomName: run.roomName, ...(note ? { note } : {}) };
+      const e: WorkflowEnded = { id: w.id, name: w.name, run: run.id, status, ended, ...(sid ? { sid } : {}), roomName: run.roomName, ...(note ? { note } : {}) };
       await this.d.redis.multi().lpush(this.endedKey(), JSON.stringify(e)).ltrim(this.endedKey(), 0, 19).exec();
     }
     // Handed on: another workflow started with this one's result, so long as the chain stays short.
@@ -381,16 +556,16 @@ export class TeamWorkflows {
   /** The run's brief in its room: each step done or stuck, by who did it, and what it came to (team.brief). */
   private async brief(w: Workflow, run: WorkflowRun, sid: string, state: SessionState): Promise<void> {
     const events = await this.d.store.events(sid);
-    const seqOf = (task: string) => events.findLast((e) => e.seq > (run.seq ?? 0) && (e.body.type === "board.finished" || e.body.type === "board.reviewed") && e.body.id === task)?.seq;
+    const seqOf = (task: string) => events.findLast((e) => e.seq > (run.seq0 ?? run.seq ?? 0) && (e.body.type === "board.finished" || e.body.type === "board.reviewed") && e.body.id === task)?.seq;
     const b: TeamBrief = {
       since: run.at,
       until: run.ended ?? Date.now(),
-      done: run.steps.filter((s) => s.status === "done").map((s) => ({ lane: s.lane, name: s.name || laneName(state, s.lane), title: s.title, ...(seqOf(s.task) ? { seq: seqOf(s.task)! } : {}) })),
+      done: run.steps.filter((s) => s.status === "done" && s.kind !== "approve").map((s) => ({ lane: s.lane, name: s.name || laneName(state, s.lane), title: s.title, ...(seqOf(s.task) ? { seq: seqOf(s.task)! } : {}) })),
       failed: run.steps.filter((s) => s.status === "blocked" || s.status === "cancelled").map((s) => ({ lane: s.lane, name: s.name || laneName(state, s.lane), title: s.title, why: s.status === "cancelled" ? "Dropped." : clip(s.report ?? "Stuck.", 300), ...(seqOf(s.task) ? { seq: seqOf(s.task)! } : {}) })),
       waiting: [],
       assumptions: [],
       usage: [],
-      workflow: { id: w.id, name: w.name, run: run.id, status: run.status === "done" ? "done" : "failed", ...(run.result ? { result: clip(run.result, 3000) } : {}) },
+      workflow: { id: w.id, name: w.name, run: run.id, status: run.status === "done" || run.status === "stopped" ? "done" : "failed", ...(run.result ? { result: clip(run.result, 3000) } : {}) },
     };
     await this.d.store.append(sid, FRIDAY, { type: "team.brief", ...b }, { lane: MAIN_LANE });
   }
@@ -400,11 +575,15 @@ export class TeamWorkflows {
    * how to land it. `prSaid`: the team's own hand-off already asks for the pull request.
    */
   async landing(sid: string, prSaid = false): Promise<string | null> {
-    const seq = (await this.d.store.state(sid).catch(() => null))?.board?.seq;
+    const state = await this.d.store.state(sid).catch(() => null);
+    const seq = state?.board?.seq;
     const raw = seq ? await this.d.redis.get(this.boardKey(sid, seq)) : null;
     if (!raw) return null;
-    const w = await this.get((JSON.parse(raw) as { id: string }).id);
+    const ref = JSON.parse(raw) as { id: string; last?: boolean };
+    const w = await this.get(ref.id);
     if (!w) return null;
+    // A stage that isn't the last, or the next stage's board already up: Friday hands it on, so there is nothing to land yet.
+    if (ref.last === false || (state?.board && boardBusy(state))) return `[Friday] That board was part of the workflow “${w.name}”: Friday hands what it came to on to its next part. Don't post a board or open a pull request; end with a short report.`;
     return [
       `[Friday] That board was the workflow “${w.name}”.`,
       w.outcomes.pr && !prSaid ? "Land it: merge your teammates' branches into one branch, run the full tests and fix what fails, then open one pull request with gh pr create for the person to review. Don't merge it, push to the default branch or deploy." : "",
@@ -523,3 +702,16 @@ export class TeamWorkflows {
 }
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** The run's steps as a board has them: each on it with its status, name and report; the rest as they were. */
+function onBoard(run: WorkflowRun, tasks: BoardTask[]): WorkflowRunStep[] {
+  return run.steps.map((s) => ((t) => (t ? { ...s, status: t.status, name: t.name ?? s.name, ...(t.report ? { report: clip(t.report, 4000) } : {}) } : s))(tasks.find((x) => x.id === s.task)));
+}
+
+/** A run's steps with `fresh` in place of what it had for the same steps, in the workflow's order. */
+function mergeSteps(order: readonly WorkflowStep[], had: readonly WorkflowRunStep[], fresh: readonly WorkflowRunStep[]): WorkflowRunStep[] {
+  const by = new Map(had.map((s) => [s.step, s]));
+  for (const s of fresh) by.set(s.step, s);
+  const at = (id: string) => ((i) => (i < 0 ? order.length : i))(order.findIndex((s) => s.id === id));
+  return [...by.values()].sort((a, b) => at(a.step) - at(b.step));
+}

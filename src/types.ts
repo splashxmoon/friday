@@ -739,6 +739,8 @@ export interface BoardTaskDef {
   agent?: string;
   /** A command that proves it works ("npm test -- api"), run when it is done; the board's check otherwise. */
   check?: string;
+  /** Done when it is finished, with no review and no check command: its report is a judgment already (a workflow's check). */
+  noReview?: true;
 }
 
 /**

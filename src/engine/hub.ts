@@ -21,7 +21,7 @@ import { WebSocket } from "ws";
 import type { Bus, BusMessage } from "../bus.js";
 import { allowedCommand, can, canDriveLane, laneEffort, laneHeld, pendingFor, roleOf, runOf, unreadPosts, type MeshPost, type SessionState, effortResets } from "../session/projection.js";
 import { accessCommand, type SessionCore } from "../session/core.js";
-import { handoffBrief } from "../handoff.js";
+import { CUT_OFF_CHECK, cutOffBefore, handoffBrief } from "../handoff.js";
 import { startCheckpoint } from "../rewind.js";
 import { shellSeconds } from "../runner/repo-read.js";
 import { BROWSER_NOTE, TEAM_CODE_NOTE, TEAM_WORK_NOTE, taskMode, WORK_NOTE, type TaskMode } from "./work.js";
@@ -1815,9 +1815,11 @@ export function promptFor(events: SessionEvent[], seqs: number[], updates: MeshP
     // A handoff carries the first agent's whole record (handoffBrief): what it read, ran, found and changed, so the one taking
     // over builds on it instead of reading every file again to find out.
     const brief = h ? handoffBrief(events, h.fromLane, seq) : "";
+    // Cut off mid-turn (a limit, a sign-out), its record is where it stopped, not a finished piece of work: checked, not trusted.
+    const cut = !!h && cutOffBefore(events, h.fromLane, seq);
     parts.push(
       h
-        ? `${h.fromName} handed this to you. Why: ${h.reason}${h.carried.length ? `\nAlready established:\n${h.carried.map((c) => `- ${c}`).join("\n")}` : ""}${brief ? `\n\n[Friday] What ${h.fromName} already did, from the session's record. Treat it as done and known: don't re-read files or re-run commands to rediscover it; check something only where you are about to rely on it or change it.\n\n${brief}` : ""}\n\nThe task: ${b.text}${files}`
+        ? `${h.fromName} handed this to you. Why: ${h.reason}${h.carried.length ? `\nAlready established:\n${h.carried.map((c) => `- ${c}`).join("\n")}` : ""}${cut ? `\n\n[Friday] ${CUT_OFF_CHECK}` : ""}${brief ? `\n\n[Friday] What ${h.fromName} already did, from the session's record. ${cut ? "Read it for what was tried and found, then trust the code and the tests over it" : "Treat it as done and known: don't re-read files or re-run commands to rediscover it; check something only where you are about to rely on it or change it"}.\n\n${brief}` : ""}\n\nThe task: ${b.text}${files}`
         : b.peer
           ? `[Friday] ${peerHead(b.peer)}\n\n${b.text}`
           : b.mesh
@@ -1834,7 +1836,7 @@ export function promptFor(events: SessionEvent[], seqs: number[], updates: MeshP
   if (undone.length) parts.unshift(`[Friday] ${undone.at(-1)!.actor.name} put the folder back to how it was before an earlier run, so changes you made then may no longer be there. Check the files before building on them.`);
   // Handed back after a drop cut it off (a deploy, a network drop): carried on, not done again from the start.
   const again = seqs.some((q) => events.some((e) => e.body.type === "instructions.requeued" && e.body.seqs.includes(q)));
-  if (again) parts.unshift("[Friday] Your connection to Friday dropped while you were on this, so it comes to you again. Carry on from where you got to: look at what you already changed before doing any of it again.");
+  if (again) parts.unshift("[Friday] Your connection to Friday dropped while you were on this, so it comes to you again. Carry on from where you got to: look at what you already changed (git status and git diff) before doing any of it again, finish or undo an edit the drop cut off, and run the tests before you go on.");
   return { prompt: parts.join("\n\n"), attachments };
 }
 

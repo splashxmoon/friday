@@ -57,6 +57,12 @@ export function openWorkflows(): void {
   dispatchEvent(new PopStateEvent("popstate"));
 }
 
+/** A field of the team that is a list here and may be something else on the hosted service: the list, or none. */
+export const listOf = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
+
+/** A run waiting for your OK, as GET /api/teammates sends it (`asks`): what the notice needs of it. */
+type Asking = { name: string; run: string; ask: string; since: number };
+
 /** A finished run the person asked to be told about (team-workflows.ts WorkflowEnded), as GET /api/teammates sends it (`ran`). */
 type Ended = { id: string; name: string; run: string; status: string; ended: number; sid?: string; roomName: string; note?: string };
 
@@ -65,11 +71,25 @@ type Ended = { id: string; name: string; run: string; status: string; ended: num
  * open, from the team as it is polled. Pressing it opens the room it ran in.
  */
 export function useWorkflowNotices(): void {
-  const t = useTeamNow() as (Team & { ran?: Ended[] }) | null;
+  const t = useTeamNow() as (Team & { ran?: Ended[]; asks?: Asking[] }) | null;
   const since = useRef(Date.now());
   const told = useRef(new Set<string>());
   useEffect(() => {
-    for (const e of t?.ran ?? []) {
+    // A run waiting for your OK: said once, as it starts waiting; pressing it opens the workflows, where the card is.
+    // The hosted service's team has an `asks` of its own, not a list (Teammates.tsx HostedTeam): read as one only when it is.
+    for (const a of listOf<Asking>(t?.asks)) {
+      const key = `ask:${a.run}:${a.since}`;
+      if (a.since < since.current || told.current.has(key)) continue;
+      told.current.add(key);
+      if (typeof Notification === "undefined" || Notification.permission !== "granted" || !notificationsOn()) continue;
+      try {
+        const n = new Notification(`${a.name} needs your OK`, { body: a.ask, tag: `workflow-ask:${a.run}` });
+        n.onclick = () => (window.focus(), n.close(), openWorkflows());
+      } catch {
+        // A courtesy, as below.
+      }
+    }
+    for (const e of listOf<Ended>(t?.ran)) {
       if (e.ended < since.current || told.current.has(e.run)) continue;
       told.current.add(e.run);
       if (typeof Notification === "undefined" || Notification.permission !== "granted" || !notificationsOn()) continue;

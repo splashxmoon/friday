@@ -147,8 +147,10 @@ import { BriefCard, HoldsLifted, SelfRunLine, ProposedMate } from "./TeamBrief.j
 import { ProposedSkill } from "./CrewSkills.js";
 import { BudgetLine } from "./TeammateBudget.js";
 import { CheckInLine, HandoffLine, FoldersGiven, TeammateChanged, FridayLine, teamEmpty, mateOn, mergeSends, reconnectTeammate, useTeamVersion, isCheckIn, quietCheckIns, ToolSwitched, MentionBackdrop, MentionText, RoomsNow, namesSomeone, plumbing, teamReply, TeamRun, TeamWorking, TeammateBoxPicker, TeammateFolderCard, TeammateHeader, teammateAgents, teammateMark, teammatesNamed, TeamRecipients, ThreadChip, ThreadHost, foldTeamTalk, pieceOf, TalkGroup, teamEventKind, type TalkPiece, useSentTo, noteLaneRuns, forgetLaneRuns, useSendCopies, learnLanes, queueWhy, queueWhyAll, crewLeadName, RoomIntro, isAgentTalk , matesIn, teamKnown, teamSid} from "./Teammates.js";
+import { WorkflowAsks } from "./WorkflowAsks.js";
+import { useRoomRuns, WorkflowRunCard } from "./WorkflowRunCard.js";
 import { threadsOf } from "./team-threads.js";
-import { isLive, isPersonsWord, isWaiting, leadAnswers, queuedFor, roomRunKind, switchedAfter, turnsFor, type LeadInfo } from "./team-room.js";
+import { isLive, isPersonsWord, isWaiting, isWorkflowBoard, leadAnswers, queuedFor, roomRunKind, switchedAfter, turnsFor, workflowChatter, type LeadInfo } from "./team-room.js";
 import { AGENT_DRAG, catchUpIndex, firstUnread, maxColumns, unreadByLane } from "./agentNav.js";
 import { followTarget, openingTarget } from "./follow-target.js";
 import { carried, carriedFrom } from "./carried.js";
@@ -1239,6 +1241,11 @@ export function Activity({
     // user for crew"). A teammate's own chat still folds it. The board stays where it was posted: pinned to the foot it was one
     // more thing on screen.
     const kindIn = (k: "show" | "talk" | "hide") => (room && k === "talk" ? "show" : k);
+    // A crew workflow's steps handed out, reviewed and done are its run card's to say, not each a post (WorkflowRunCard.tsx).
+    if (room) {
+      const flow = workflowChatter(events);
+      visible = visible.filter((it) => (it.kind === "event" ? !flow.events.has(it.ev.seq) : it.kind === "run" ? !(it.messages.length ? it.messages.every((m) => flow.messages.has(m.seq)) : !it.ended && flow.live.has(it.lane)) : true));
+    }
     const folded = foldTeamTalk(visible, (it) => kindIn(it.kind === "run" ? runKind(it) : it.kind === "event" ? teamEventKind(it.ev, room) : "show"), keyOf);
     visible = folded.items;
     const pieceOfItem = (it: FeedItem): TalkPiece => (it.kind === "run" ? { who: [{ lane: it.lane, name: agentNameFor(state, it.lane) }], text: it.messages.findLast((m) => m.body.text.trim())?.body.text ?? "", turn: true } : it.kind === "event" ? pieceOf(it.ev) : { who: [], text: "" });
@@ -1889,6 +1896,8 @@ export function Activity({
           {state.options.team && laneFilter !== ALL && <TeammateHeader lane={laneFilter} identity={ctx.identity} notify={ctx.notify} {...(state.engines[laneFilter]?.branch ? { branch: state.engines[laneFilter]!.branch! } : {})} />}
           {state.options.team && <ThreadHost sid={sid} events={events} send={(c) => send(c as never)} />}
           {state.options.team && laneFilter === ALL && <RoomIntro sid={sid} />}
+          {/* A workflow in this room waiting for your OK (WorkflowAsks.tsx): at the top, where it can't be missed. */}
+          {state.options.team && laneFilter === ALL && ctx.identity && <WorkflowAsks identity={ctx.identity} sid={sid} />}
           {state.options.team && laneFilter === ALL && <RoomsNow sid={sid} identity={ctx.identity} empty={visible.length === 0} onOpen={(r) => dispatchEvent(new CustomEvent("friday:open-session", { detail: { sid: r.sid, invite: r.invite } }))} />}
           {visible.length === 0 ? (
             <ConversationEmptyState
@@ -4966,7 +4975,8 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
         </Notice>
       );
     case "board.posted":
-      return <BoardCard ev={ev} state={state} stamp={<Stamp ev={ev} />} />;
+      // A crew workflow's board is its run card where its run began, and nothing where a later stage of it was posted.
+      return state.options.team && isWorkflowBoard(ev) ? <FlowBoard ev={ev} ctx={ctx} fallback={<BoardCard ev={ev} state={state} stamp={<Stamp ev={ev} />} />} /> : <BoardCard ev={ev} state={state} stamp={<Stamp ev={ev} />} />;
     case "mesh.posted":
       return <AgentUpdateCard ev={ev} state={state} stamp={<Stamp ev={ev} />} />;
     case "teammate.folders":
@@ -4978,6 +4988,8 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
     case "team.brief":
       // A brief of the same stretch posted later takes its place: the one so far, then the one as the person is back.
       if (ctx.events.some((e) => e.seq > ev.seq && e.body.type === "team.brief" && e.body.since === b.since)) return null;
+      // A workflow's brief, where its run card already says it all: left out.
+      if (b.workflow) return <FlowBrief run={b.workflow.run} sid={ctx.sid} fallback={<BriefCard ev={ev} sid={ctx.sid} stamp={<Stamp ev={ev} />} />} />;
       return <BriefCard ev={ev} sid={ctx.sid} stamp={<Stamp ev={ev} />} />;
     case "teammate.proposed":
       return <ProposedMate ev={ev} identity={ctx.identity} stamp={<Stamp ev={ev} />} />;
@@ -7304,4 +7316,22 @@ function compactedBefore(events: SessionEvent[], lane: string, item: { key: numb
   if (item.key < 0) return {};
   const e = events.findLast((x) => x.seq < item.key && (x.lane ?? MAIN_LANE) === lane && (x.body.type === "context.compacted" || x.body.type === "run.started"));
   return e?.body.type === "context.compacted" ? { compacted: e.body.before } : {};
+}
+
+/**
+ * A crew workflow's board in its room: the run's card where the run began, nothing for a later stage of a run that has its card,
+ * and the board as it was for an old run the room no longer has (WorkflowRunCard.tsx).
+ */
+function FlowBoard({ ev, ctx, fallback }: { ev: SessionEvent; ctx: Ctx; fallback: ReactNode }) {
+  const runs = useRoomRuns(ctx.sid);
+  const run = runs.find((r) => r.seq0 === ev.seq);
+  if (run) return <WorkflowRunCard run={run} identity={ctx.identity ?? null} />;
+  if (runs.some((r) => r.seq0 < ev.seq && r.at <= ev.ts && (!r.ended || ev.ts <= r.ended + 60_000))) return null;
+  return <>{fallback}</>;
+}
+
+/** A crew workflow's brief: nothing where its run's card is in the room, else the brief. */
+function FlowBrief({ run, sid, fallback }: { run: string; sid: string; fallback: ReactNode }) {
+  const runs = useRoomRuns(sid);
+  return runs.some((r) => r.run === run) ? null : <>{fallback}</>;
 }

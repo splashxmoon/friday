@@ -2,7 +2,7 @@ import { ownPlan } from "./own-plan.js";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 import type { Bus } from "./bus.js";
-import { resolveTarget, type Resolved } from "./handoff.js";
+import { CUT_OFF_CHECK, resolveTarget, type Resolved } from "./handoff.js";
 import { limitHit, signedOut } from "./limit-reset.js";
 /** Other sessions an agent can reach (peers.ts on the hosted service; none on someone's own computer). */
 export interface Peers {
@@ -1836,14 +1836,29 @@ export class AgentMesh {
     });
   }
 
+  /** Why a person's pick of agent for a task (`next`) couldn't reach it, by session and task: said to them by control. */
+  private refused = new Map<string, string>();
+
+  /**
+   * One hand-out round at a time in a session: two at once each read the board before the other wrote, and gave the same task
+   * out twice (a crew workflow posting its next stage while the board's own round after the last task ran; 2026-11-01).
+   */
+  private rounds = new Map<string, Promise<string[]>>();
+  dispatch(sid: string): Promise<string[]> {
+    const next = (this.rounds.get(sid) ?? Promise.resolve([])).catch(() => []).then(() => this.round(sid));
+    this.rounds.set(sid, next);
+    void next.then(
+      () => this.rounds.get(sid) === next && this.rounds.delete(sid),
+      () => this.rounds.get(sid) === next && this.rounds.delete(sid),
+    );
+    return next;
+  }
+
   /**
    * Hand what is ready to who is free: reviews first (they unlock the rest), then ready tasks, each to an agent that suits it
    * when the poster named one. Returns what it handed out, for whoever asked.
    */
-  /** Why a person's pick of agent for a task (`next`) couldn't reach it, by session and task: said to them by control. */
-  private refused = new Map<string, string>();
-
-  async dispatch(sid: string): Promise<string[]> {
+  private async round(sid: string): Promise<string[]> {
     let state = await this.store.state(sid);
     const b = state.board;
     if (!b) return [];
@@ -2317,6 +2332,8 @@ export class AgentMesh {
           carried: [],
           task: `Carry on with this task, which ${fromName} ${hit ? "was partway through when it ran out of usage" : "couldn't do because it isn't signed in"}. Don't start over: what it already did is in the record with this, so build on it, then finish the task.
 
+${CUT_OFF_CHECK}
+
 The task:
 ${task}`,
         });
@@ -2340,6 +2357,7 @@ ${task}`,
     for (const t of order.map((id) => targets.find((x) => x.id === id)!)) {
       const brief = [
         `${ask.fromName} gave this task to ${ask.toName}, which ran out of usage partway through. Carry it on: don't start over, build on what it already did (the files are as it left them), then finish it and end your turn with a short report.`,
+        CUT_OFF_CHECK,
         `The task:\n${ask.text}`,
         said ? `What ${ask.toName} said last:\n${clip(said, 2500)}` : "",
         facts,

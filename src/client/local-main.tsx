@@ -10,6 +10,7 @@ import { tellDesktopTheme } from "./storage.js";
 import { applyPrefs } from "./prefs.js";
 import { applyFonts, applyTheme, readFonts, readTheme } from "./theme.js";
 import { reloadForChunk, watchChunkErrors } from "./BuildWatch.js";
+import { showCrash } from "./crash.js";
 
 // The desktop app's window buttons follow the theme the boot script settled on.
 tellDesktopTheme();
@@ -26,7 +27,10 @@ freeScrollInPopups();
 
 createRoot(document.getElementById("root")!, {
   onUncaughtError: (error, info) => {
-    if (!reloadForChunk(error)) console.error(error, info.componentStack);
+    if (reloadForChunk(error)) return;
+    console.error(error, info.componentStack);
+    // Said on screen, not left blank (crash.ts).
+    showCrash(error);
   },
 }).render(
   <TooltipProvider delayDuration={300}>

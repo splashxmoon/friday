@@ -232,3 +232,44 @@ export function gist(text: string, max = 160): { line: string; more: boolean } {
   return { line, more: line.length < plain.length };
 }
 
+
+/** A board a crew workflow posted (team-workflow-model.ts workflowTasks): Friday's, its tasks marked as the workflow's steps. */
+export const isWorkflowBoard = (e: SessionEvent): boolean => e.body.type === "board.posted" && (e.body.tasks ?? []).some((t) => typeof t?.detail === "string" && t.detail.includes('[Workflow "'));
+
+/**
+ * A workflow's chatter in a room, which its run card (WorkflowRunCard.tsx) stands in for (Arun, 2026-11-01, the Crew room
+ * concept): each step handed out and reviewed, Friday's word to the lead when a stage before the last is through, and the turns that only did
+ * those. `events`: those to leave out, by seq; `messages`: the agent messages of those turns; `live`: lanes whose turn under way
+ * is one. Anything a turn was also handed by a person, or by a teammate outside the workflow, keeps it in the room.
+ */
+export function workflowChatter(events: readonly SessionEvent[]): { events: Set<number>; messages: Set<number>; live: Set<string> } {
+  const hide = new Set<number>();
+  const messages = new Set<number>();
+  const flowSeqs = new Set<number>();
+  /** Each lane's turn under way: whether everything it was handed is the workflow's (null before anything is). */
+  const turn = new Map<string, boolean | null>();
+  let onFlow = false;
+  // A stage's end is the card's to say; the last one's hand-off stays, as the lead's answer to it carries what landed (its PR).
+  const flowWord = (e: SessionEvent) => e.body.type === "instruction" && typeof e.body.text === "string" && /That board was part of the workflow “/.test(e.body.text);
+  const take = (lane: string, seqs: readonly number[]) => {
+    let cur = turn.get(lane) ?? null;
+    for (const s of seqs ?? []) cur = (cur ?? true) && flowSeqs.has(s);
+    turn.set(lane, cur);
+  };
+  for (const e of events) {
+    const b = e.body;
+    const lane = e.lane ?? MAIN_LANE;
+    if (b.type === "board.posted") onFlow = isWorkflowBoard(e);
+    else if (b.type === "instruction" && ((onFlow && !!b.mesh?.board) || flowWord(e))) {
+      flowSeqs.add(e.seq);
+      hide.add(e.seq);
+    } else if (b.type === "run.started") {
+      turn.set(lane, null);
+      take(lane, [b.causedBy]);
+    } else if (b.type === "instructions.delivered") take(lane, b.seqs);
+    else if (b.type === "run.ended") turn.delete(lane);
+    else if (b.type === "agent.message" && turn.get(lane) === true) messages.add(e.seq);
+  }
+  const live = new Set([...turn].filter(([, v]) => v === true).map(([l]) => l));
+  return { events: hide, messages, live };
+}

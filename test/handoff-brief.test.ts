@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { promptFor } from "../src/engine/hub.js";
-import { handoffBrief, pathsReadBy } from "../src/handoff.js";
+import { CUT_OFF_CHECK, cutOffBefore, handoffBrief, pathsReadBy } from "../src/handoff.js";
+import { backupText } from "../src/teammates.js";
 import type { EventBody, SessionEvent } from "../src/types.js";
 
 /**
@@ -78,6 +79,32 @@ test("the handoff prompt puts the brief between why and the task", () => {
   const task = prompt.indexOf("The task: Pick up");
   assert.ok(why >= 0 && record > why && task > record, "why, then the record, then the task");
   assert.match(prompt, /don't re-read files or re-run commands to rediscover it/);
+});
+
+test("work cut off mid-turn is handed on with the check: the code as it is now and the tests, not the record trusted (Arun, 2026-11-01)", () => {
+  // Codex ran out of usage halfway through an edit: its turn ended in an error, its record says what it changed so far.
+  const events = session();
+  events.pop();
+  events.push(ev(codex, { type: "run.ended", outcome: "error", error: "You've hit your usage limit" }));
+  assert.equal(cutOffBefore(events, "codex", seq + 1), true);
+  events.push(
+    ev(ada, {
+      type: "instruction",
+      text: "Carry on with this task.",
+      interrupt: false,
+      handoff: { fromLane: "codex", fromName: "Codex", toName: "Kiro", reason: "Codex ran out of usage partway through.", carried: [] },
+    }, "kiro"),
+  );
+  const { prompt } = promptFor(events, [seq]);
+  assert.ok(prompt.includes(CUT_OFF_CHECK), "told to check the code and run the tests");
+  assert.match(prompt, /git status and git diff[\s\S]*run the tests/);
+  assert.doesNotMatch(prompt, /don't re-read files or re-run commands/, "not told to trust the record over the code");
+  assert.match(prompt, /trust the code and the tests over it/);
+  // A turn that never ended (a dropped runner) is cut off too; one that ended well isn't.
+  assert.equal(cutOffBefore([ev(codex, { type: "run.started", causedBy: 1 })], "codex", seq + 1), true);
+  assert.equal(cutOffBefore(session(), "codex", seq + 1), false);
+  // A teammate moved to another coding tool on a limit is told the same.
+  assert.ok(backupText("claude", "codex", "").includes(CUT_OFF_CHECK));
 });
 
 test("nothing done yet, nothing carried; and only this agent's own recent work", () => {

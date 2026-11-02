@@ -157,6 +157,7 @@ test("back from its limit, an agent hears what was handed on while it was out, s
   assert.equal(backNote(s, e, "lc", NOW), "", "nothing while it is still out");
   const note = backNote(s, e, "lc", NOW + 3 * 3_600_000);
   assert.match(note, /You ran out of usage about 3 hours ago, partway through what you were doing; your limit has lifted/);
+  assert.match(note, /an edit may be half made: look at the files you were changing \(git status and git diff\) and run the tests/, "back after a limit, it checks its own half-made edit first");
   assert.match(note, /Don't redo it[\s\S]*- Codex took over "Fix the cart total\." and has finished a turn on it since\./);
   assert.equal(backNote(s, e, "lx", NOW + 3 * 3_600_000), "", "and nothing for one that wasn't out");
 });

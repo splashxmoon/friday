@@ -933,7 +933,7 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       const t = s.board?.tasks.find((x) => x.id === b.id);
       if (!t) break;
       if (b.type === "board.claimed") Object.assign(t, { status: "claimed", lane: b.lane, name: b.name, next: undefined, why: b.why });
-      else if (b.type === "board.finished") Object.assign(t, { status: b.status === "blocked" ? "blocked" : "review", lane: b.lane, name: b.name, report: b.report });
+      else if (b.type === "board.finished") Object.assign(t, { status: b.status === "blocked" ? "blocked" : t.noReview ? "done" : "review", lane: b.lane, name: b.name, report: b.report });
       // An empty lane takes the reviewer off: the one asked ran out of usage, and another is found (agent-mesh boardRunEnded).
       else if (b.type === "board.review") t.reviewer = b.lane ? { lane: b.lane, name: b.name } : undefined;
       else {

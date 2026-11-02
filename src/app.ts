@@ -113,7 +113,8 @@ import { execFile as execFileCb } from "node:child_process";
 import { homedir as osHome, hostname, tmpdir as osTmp } from "node:os";
 import { TeamWorkflows } from "./team-workflows.js";
 import { localSkills, skillsHttp, type SkillsScope } from "./team-skills.js";
-import type { Workflow } from "./team-workflow-model.js";
+import { cleanWorkflow, draftFromAnswer, draftPrompt, type Workflow } from "./team-workflow-model.js";
+import { validateSchedule } from "./agents.js";
 import { localEdition } from "./local-edition.js";
 import { OutsideAgents } from "./outside-agents.js";
 import { outsideCommand, outsideSetup } from "./local/outside-mcp.js";
@@ -4179,11 +4180,33 @@ export async function createApp(o: AppOptions) {
       try {
         if (req.method === "GET" && url.pathname === "/api/workflows") return json(res, 200, { workflows: await Promise.all((await flows.list()).map(view)) });
         if (req.method === "POST" && url.pathname === "/api/workflows") return json(res, 201, { workflow: await view(await flows.save((await readJson(req)) as Record<string, unknown>, null)) });
-        const one = url.pathname.match(/^\/api\/workflows\/([\w-]{4,40})(\/run|\/runs)?$/);
+        // A workflow drafted from a sentence, for the builder to open: by the person's own coding tool (a small model), never saved here.
+        if (req.method === "POST" && url.pathname === "/api/workflows/draft") {
+          const b = (await readJson(req)) as { text?: unknown; tz?: unknown };
+          const text = typeof b.text === "string" ? b.text.trim() : "";
+          if (text.length < 8) return json(res, 400, { error: "Say a little more about what it should do." });
+          const [mates, rooms] = await Promise.all([teammates!.list(), teammates!.rooms()]);
+          const tool = mates.map((x) => x.tool).find((x): x is EngineTool => !!x && x !== "friday");
+          const m = await suggestWith({ id: ctx.me.id }, ctx.workspace?.id ?? "", tool);
+          if (!m) return json(res, 503, { error: "Drafting needs a coding tool on one of your teammates. Build it from a template instead." });
+          const q = draftPrompt(text, { mates: mates.map((x) => ({ name: x.name, role: x.role })), rooms: rooms.map((r) => ({ name: r.name })) });
+          const r = await m.llm.complete({ system: q.system, messages: [{ role: "user", content: q.prompt }], tools: [], signal: AbortSignal.timeout(90_000), reasoningEffort: "low", ...(m.model ? { model: m.model } : {}) });
+          const got = draftFromAnswer(r.text, { mates, rooms }, typeof b.tz === "string" ? b.tz.slice(0, 60) : "UTC");
+          if (!got) return json(res, 422, { error: "It couldn't make a workflow of that. Try saying who does what, and when." });
+          const draft = cleanWorkflow(got, null, { secret: () => "", schedule: (x) => validateSchedule(x as Parameters<typeof validateSchedule>[0]) });
+          return json(res, 200, { draft });
+        }
+        const one = url.pathname.match(/^\/api\/workflows\/([\w-]{4,40})(\/run|\/runs|\/runs\/(\w{4,20})\/(answer|retry))?$/);
         if (!one) return json(res, 404, { error: "Not found" });
         const w = await flows.get(one[1]!);
         if (!w) return json(res, 404, { error: "That workflow isn't there any more." });
         if (req.method === "GET" && one[2] === "/runs") return json(res, 200, { runs: await flows.runs(w.id, 30) });
+        // Your OK given or not ({ok, note}), or a run that didn't finish tried again from where it stopped.
+        if (req.method === "POST" && one[4] === "answer") {
+          const b = (await readJson(req)) as { ok?: unknown; note?: unknown };
+          return json(res, 200, { run: await flows.answer(w, one[3]!, b.ok === true, typeof b.note === "string" ? b.note : "") });
+        }
+        if (req.method === "POST" && one[4] === "retry") return json(res, 200, { run: await flows.retry(w, one[3]!) });
         if (req.method === "POST" && one[2] === "/run") {
           const b = (await readJson(req).catch(() => ({}))) as { input?: unknown };
           const run = await flows.start(w, "Run now", typeof b.input === "string" ? b.input.slice(0, 8000) : "");
@@ -4226,7 +4249,7 @@ export async function createApp(o: AppOptions) {
         };
         const team = async (more: Record<string, unknown> = {}) => {
           const away = await teammates.away();
-          return json(res, 200, { sid, invite: signInvite(o.secret, sid, "owner"), lead: (await store.state(sid)).lead ?? null, ...(await teamRoomNow(sid)), teammates: await teammateViews(sid), rooms: await roomViews(), hidden: await hidden(), away: away ? { until: away.until, since: away.since } : null, paused: await teammates.paused(), selfRuns: await teammates.selfRuns(), ran: (await workflows?.ended()) ?? [], ...more });
+          return json(res, 200, { sid, invite: signInvite(o.secret, sid, "owner"), lead: (await store.state(sid)).lead ?? null, ...(await teamRoomNow(sid)), teammates: await teammateViews(sid), rooms: await roomViews(), hidden: await hidden(), away: away ? { until: away.until, since: away.since } : null, paused: await teammates.paused(), selfRuns: await teammates.selfRuns(), ran: (await workflows?.ended()) ?? [], asks: (await workflows?.asks()) ?? [], flowRuns: (await workflows?.roomRuns()) ?? [], ...more });
         };
         if (req.method === "GET" && url.pathname === "/api/teammates") return team();
         // A folder it is given has to be on this computer: a typo would start it in nothing.

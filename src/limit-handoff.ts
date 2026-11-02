@@ -84,7 +84,7 @@ export function backNote(state: SessionState, events: SessionEvent[], lane: stri
   });
   const ago = Math.max(1, Math.round((now - end.ts) / 60_000));
   const when = ago < 90 ? `${ago} minute${ago === 1 ? "" : "s"} ago` : `about ${Math.round(ago / 60)} hours ago`;
-  return `[Friday] You ran out of usage ${when}, partway through what you were doing; your limit has lifted, so you're working again.${
+  return `[Friday] You ran out of usage ${when}, partway through what you were doing; your limit has lifted, so you're working again. You were cut off mid-turn, so an edit may be half made: look at the files you were changing (git status and git diff) and run the tests before you go on.${
     rows.length ? ` While you were out, Friday handed on what you were in the middle of. Don't redo it or pick it back up unless you're asked to:\n${rows.join("\n")}` : ""
   }`;
 }

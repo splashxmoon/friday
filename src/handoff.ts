@@ -8,6 +8,23 @@ import type { SessionState } from "./session/projection.js";
  * passing the same thing back and forth.
  */
 
+/**
+ * Said to an agent taking over, or getting back, work that was cut off mid-turn (a usage limit, a sign-out, a dropped
+ * connection): the record says what was done up to where it stopped, not that the code is in one piece (Arun, 2026-11-01:
+ * "the next agent isn't told to check the code's current state or rerun tests. So if Claude was cut off halfway through an
+ * edit, the next agent won't notice"). An edit may be half made, and the last test run may be older than the last change.
+ */
+export const CUT_OFF_CHECK =
+  "It was cut off mid-turn, so its last edit may be half made and its last test run may be older than its last change. Before building on it: look at the code as it is now (git status and git diff in the folder, and the files it was changing), finish or undo anything half done, and run the tests. Say in a line what you found before you go on.";
+
+/** Whether `lane`'s turn before event `before` was cut off: it ended in an error, or never ended at all. */
+export function cutOffBefore(events: readonly SessionEvent[], lane: string, before: number): boolean {
+  const mine = events.filter((e) => e.seq < before && (e.lane ?? MAIN_LANE) === lane && (e.body.type === "run.started" || e.body.type === "run.ended"));
+  const last = mine.at(-1);
+  if (!last) return false;
+  return last.body.type === "run.started" || (last.body.type === "run.ended" && last.body.outcome === "error");
+}
+
 /** What one lane is, in a line an agent (or a person) can choose by. */
 export function describeLane(state: SessionState, id: string): string {
   const engine = state.engines[id];

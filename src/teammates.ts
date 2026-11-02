@@ -2,6 +2,7 @@ import type { SelfRun } from "./team-selfrun.js";
 import type { Hold, MateBudget } from "./team-budget.js";
 import type { Proof } from "./team-proof.js";
 import { mkdir } from "node:fs/promises";
+import { CUT_OFF_CHECK } from "./handoff.js";
 import { homedir } from "node:os";
 import path from "node:path";
 import type { Redis } from "ioredis";
@@ -214,7 +215,8 @@ export const backAt = (sw: NonNullable<Teammate["switched"]>) => sw.until ?? sw.
 export const offBackup = <T extends Teammate>(t: T): T => (t.switched ? { ...t, tool: t.switched.from, model: t.switched.fromModel, account: t.switched.fromAccount, effort: t.switched.fromEffort, switched: undefined } : t);
 
 /** What a teammate on its backup is told as it carries on: where it was, as the turn that ran out (handoff.ts handoffBrief). */
-export const backupText = (from: EngineTool, to: EngineTool, brief: string) => `[Friday] ${ENGINE_NAMES[from]} ran out of usage partway through your work, so you are on ${ENGINE_NAMES[to]} now. Carry on where you left off and finish it.${brief ? `\n\n${brief}` : ""}`;
+export const backupText = (from: EngineTool, to: EngineTool, brief: string) =>
+  `[Friday] ${ENGINE_NAMES[from]} ran out of usage partway through your work, so you are on ${ENGINE_NAMES[to]} now. Carry on where you left off and finish it. ${CUT_OFF_CHECK}${brief ? `\n\n${brief}` : ""}`;
 
 /** A teammate's memory, in its own folder: read into its note with every turn, editable by the person. */
 export const MEMORY_FILE = "MEMORY.md";

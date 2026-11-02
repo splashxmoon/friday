@@ -22,15 +22,20 @@ import {
   ClockIcon,
   CopyIcon,
   CheckIcon,
+  CornerUpLeftIcon,
   FileTextIcon,
   FolderIcon,
   GitPullRequestIcon,
+  HandIcon,
   HistoryIcon,
+  MessageCircleQuestionIcon,
   LayoutTemplateIcon,
   MinusIcon,
   PlayIcon,
   PlusIcon,
+  RotateCcwIcon,
   ScanIcon,
+  ShieldCheckIcon,
   Trash2Icon,
   UsersIcon,
   WebhookIcon,
@@ -45,15 +50,20 @@ import {
   BLANK_LIMITS,
   BLANK_OUTCOMES,
   columnsOf,
+  DEFAULT_TRIES,
+  isGate,
+  MAX_TRIES,
   FIRST_STEP,
   fromTemplate,
   LEAD,
   MAX_STEPS,
   packSteps,
   scheduleShort,
+  stepTitle,
   TEAM_ROOM,
   WORKFLOW_TEMPLATES,
   workflowChecks,
+  type StepKind,
   type TriggerKind,
   type Workflow,
   type WorkflowCheck,
@@ -83,6 +93,8 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Dot, PageTabs, Tip, type DotState } from "@/components/dass/page-bits";
 import { StepSkill } from "./CrewSkills.js";
+import { WorkflowAsks } from "./WorkflowAsks.js";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import "./workflows.css";
 
 type Draft = Omit<Workflow, "id" | "created" | "updated">;
@@ -105,12 +117,21 @@ const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const WEEKDAYS = [1, 2, 3, 4, 5];
 const uid = () => Math.random().toString(36).slice(2, 10);
 
-const blank = (): Draft => ({ name: "", on: true, room: TEAM_ROOM, trigger: { kind: "manual" }, steps: [], outcomes: { ...BLANK_OUTCOMES }, limits: { ...BLANK_LIMITS } });
-const draftOf = (w: WorkflowView): Draft => ({ name: w.name, on: w.on, room: w.room, trigger: w.trigger, steps: w.steps, outcomes: w.outcomes, limits: w.limits });
+const blank = (): Draft => ({ name: "", on: true, room: TEAM_ROOM, trigger: { kind: "manual" }, steps: [], outcomes: { ...BLANK_OUTCOMES }, limits: { ...BLANK_LIMITS }, ask: "" });
+const draftOf = (w: WorkflowView): Draft => ({ name: w.name, on: w.on, room: w.room, trigger: w.trigger, steps: w.steps, outcomes: w.outcomes, limits: w.limits, ask: w.ask ?? "" });
 const sameDraft = (a: Draft, b: Draft) => JSON.stringify(a) === JSON.stringify(b);
 
-const RUN_WORD: Record<WorkflowRun["status"], string> = { running: "Running", waiting: "Waiting", done: "Done", failed: "Didn't finish", skipped: "Skipped" };
-const runMark = (s: WorkflowRun["status"]): TaskMarkState => (s === "running" ? "working" : s === "done" ? "done" : s === "failed" ? "blocked" : "open");
+const RUN_WORD: Record<WorkflowRun["status"], string> = { running: "Running", waiting: "Waiting", asking: "Needs your OK", done: "Done", stopped: "Stopped", failed: "Didn't finish", skipped: "Skipped" };
+const runMark = (s: WorkflowRun["status"]): TaskMarkState => (s === "running" ? "working" : s === "done" ? "done" : s === "failed" ? "blocked" : s === "asking" ? "review" : "open");
+/** A run under way: going, waiting for its board, or waiting for your OK. */
+const underWay = (r: WorkflowRun | undefined): r is WorkflowRun => !!r && (r.status === "running" || r.status === "waiting" || r.status === "asking");
+/** Where a run under way is, in a few words: its steps counted out of the workflow's, not only those posted so far. */
+const liveWords = (r: WorkflowRun, steps: readonly WorkflowStep[]) => {
+  const n = (id?: string) => packSteps(steps).findIndex((x) => x.id === id) + 1;
+  if (r.status === "asking") return `Waiting for your OK at step ${n(r.asking?.step) || ""}`.trim();
+  if (r.status === "waiting") return r.note ?? "Waiting for the room's board";
+  return `Running in the ${r.roomName.replace(/^the /, "")} · ${r.steps.filter((x) => x.status === "done").length} of ${steps.length || r.steps.length} done`;
+};
 const STEP_WORD: Record<BoardStatus, string> = { open: "Waiting its turn", claimed: "Working", review: "Being checked", done: "Done", blocked: "Stuck", cancelled: "Dropped" };
 const stepMark = (s: BoardStatus): TaskMarkState => (s === "claimed" ? "working" : s === "review" ? "review" : s === "done" ? "done" : s === "blocked" ? "blocked" : "open");
 
@@ -225,6 +246,8 @@ export function TeamWorkflowsPage({ identity, onCoding }: { identity: Identity; 
   const [editing, setEditing] = useState<{ id: string | null; draft: Draft; fresh?: boolean } | null>(null);
   const [busy, setBusy] = useState("");
   const [ask, confirmUI] = useConfirm();
+  /** A workflow whose Run now asks for something first. */
+  const [asking, setAsking] = useState<WorkflowView | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -250,10 +273,11 @@ export function TeamWorkflowsPage({ identity, onCoding }: { identity: Identity; 
     return () => removeEventListener("friday:same-page", again);
   }, []);
 
-  const runNow = async (w: WorkflowView) => {
+  const runNow = async (w: WorkflowView, input?: string) => {
+    if (w.ask?.trim() && input === undefined) return setAsking(w);
     setBusy(w.id);
     try {
-      await api(identity, `/api/workflows/${w.id}/run`, { method: "POST", body: "{}", headers: JSON_BODY });
+      await api(identity, `/api/workflows/${w.id}/run`, { method: "POST", body: JSON.stringify(input ? { input } : {}), headers: JSON_BODY });
       await load();
     } catch (e) {
       setFailed((e as Error).message);
@@ -298,6 +322,7 @@ export function TeamWorkflowsPage({ identity, onCoding }: { identity: Identity; 
     <div className="page conns-page automations-page wf-page px-6! max-[640px]:px-4!">
       <div className="page-inner">
         {confirmUI}
+        {asking && <RunAsk name={asking.name} ask={asking.ask ?? ""} onClose={() => setAsking(null)} onRun={(input) => (setAsking(null), void runNow(asking, input))} />}
         {/* Untitled on screen like every page (Arun, 2026-10-19: "get rid of all of these header text"): the title is the tab's. */}
         <PageHeader
           title="Workflows"
@@ -319,6 +344,8 @@ export function TeamWorkflowsPage({ identity, onCoding }: { identity: Identity; 
             {failed}
           </p>
         )}
+        <WorkflowAsks identity={identity} onAnswered={() => void load()} />
+        <DraftBox identity={identity} onDraft={(draft) => setEditing({ id: null, fresh: true, draft: { ...blank(), ...draft } })} />
         {list === null ? (
           <div className="wf-grid">
             {[0, 1, 2].map((i) => (
@@ -365,7 +392,7 @@ function Intro() {
       <div className="flex min-w-0 flex-col justify-center gap-3">
         <h2 className="text-[20px] leading-tight font-semibold tracking-[-0.01em]">Hand your crew work that runs itself</h2>
         <p className="max-w-[440px] text-[14px] leading-relaxed text-[var(--text-muted)]">
-          A workflow is a trigger, then steps, then what happens after. Each step is a teammate and what it does; each run is a board in the room, so the crew claims, checks and reviews it as it does any work.
+          A workflow is a trigger, then steps, then what happens after. A step is a teammate and what it does; a check sends the work back until it passes; your OK waits for you. Describe one above, or start from a template.
         </p>
       </div>
       <ol className="wf-intro-flow" aria-label="An example">
@@ -384,9 +411,88 @@ function Intro() {
   );
 }
 
+/**
+ * Describe it, and Friday drafts it (POST /api/workflows/draft): who does what, the checks and your OKs, the trigger, opened in
+ * the builder to look over before it is saved. The quickest way in; templates and the builder stay for the rest.
+ */
+function DraftBox({ identity, onDraft }: { identity: Identity; onDraft: (d: Partial<Draft>) => void }) {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const go = async () => {
+    if (text.trim().length < 8 || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const got = await api<{ draft: Partial<Draft> }>(identity, "/api/workflows/draft", { method: "POST", body: JSON.stringify({ text, tz: TZ }), headers: JSON_BODY });
+      onDraft(got.draft);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <form className="wf-draft" onSubmit={(e) => (e.preventDefault(), void go())}>
+      <Textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), void go())}
+        placeholder="Describe a workflow: “Every weekday at 9, Ada runs the tests, Kit fixes what fails until they pass, and I OK the pull request.”"
+        aria-label="Describe a workflow"
+        rows={2}
+        maxLength={2000}
+        disabled={busy}
+        className="wf-draft-box"
+      />
+      <div className="wf-draft-foot">
+        <span className={error ? "wf-draft-note bad" : "wf-draft-note"} role={error ? "alert" : undefined}>
+          {error || (busy ? "Drafting it with your coding tool…" : "Friday drafts it. You look it over before it's saved.")}
+        </span>
+        <Button type="submit" size="sm" className="h-8 px-3 text-[13px]" disabled={busy || text.trim().length < 8}>
+          {busy ? <span className="spinner" aria-hidden="true" /> : null}
+          {busy ? "Drafting…" : "Draft it"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/** Run now, for a workflow that asks for something first: its question, the answer handed to its first steps. */
+function RunAsk({ name, ask, onRun, onClose }: { name: string; ask: string; onRun: (input: string) => void; onClose: () => void }) {
+  const [text, setText] = useState("");
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-[460px]">
+        <DialogHeader>
+          <DialogTitle>Run {name}</DialogTitle>
+          <DialogDescription>{ask}</DialogDescription>
+        </DialogHeader>
+        <Textarea
+          autoFocus
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && (e.metaKey || e.ctrlKey) && text.trim() && onRun(text.trim())}
+          aria-label={ask}
+          className="min-h-[96px] text-[13px] md:text-[13px]"
+          maxLength={8000}
+        />
+        <DialogFooter>
+          <Button variant="ghost" size="sm" className="h-8 px-3 text-[13px]" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button size="sm" className="h-8 px-3 text-[13px]" disabled={!text.trim()} onClick={() => onRun(text.trim())}>
+            <PlayIcon /> Run it
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /** Who does what, in order, in words: "Juno and Kit, then Nova, then the lead". */
 function stepsLine(steps: WorkflowStep[], n: Names): string {
-  const who = (s: WorkflowStep) => (s.mate === LEAD ? "the lead" : (n.mate(s.mate)?.name ?? "someone to pick"));
+  const who = (s: WorkflowStep) => (s.kind === "approve" ? "your OK" : s.kind === "check" ? `a check by ${s.mate === LEAD ? "the lead" : (n.mate(s.mate)?.name ?? "someone")}` : s.mate === LEAD ? "the lead" : (n.mate(s.mate)?.name ?? "someone to pick"));
   const cols = columnsOf(steps).map((c) => {
     const names = [...new Set(c.map(who))];
     return names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0]!;
@@ -405,6 +511,12 @@ function StepFaces({ steps, room, names, size = 22, run }: { steps: WorkflowStep
           {i > 0 && <ChevronRightIcon className="wf-faces-sep size-3" aria-hidden="true" />}
           <span className="wf-faces-stack">
             {col.map((s) => {
+              if (isGate(s))
+                return (
+                  <span key={s.id} className="wf-face-gate" style={{ width: size, height: size }} title={s.kind === "approve" ? `Your OK: ${s.does.split("\n")[0]}` : `Check: ${s.does.split("\n")[0]}`}>
+                    {s.kind === "approve" ? <HandIcon /> : <ShieldCheckIcon />}
+                  </span>
+                );
               const m = s.mate === LEAD ? names.lead(room) : names.mate(s.mate);
               return m ? (
                 <span key={s.id} title={`${s.mate === LEAD ? `The lead (${m.name})` : m.name}: ${s.does.split("\n")[0]}`}>
@@ -423,7 +535,7 @@ function StepFaces({ steps, room, names, size = 22, run }: { steps: WorkflowStep
 
 function WorkflowCard({ w, names, busy, onEdit, onRun, onToggle }: { w: WorkflowView; names: Names; busy: boolean; onEdit: () => void; onRun: () => void; onToggle: (on: boolean) => void }) {
   const last = w.runs[0];
-  const live = last && (last.status === "running" || last.status === "waiting") ? last : null;
+  const live = underWay(last) ? last : null;
   const Icon = TRIGGER_ICON[w.trigger.kind];
   const owner = theirs(w);
   return (
@@ -447,7 +559,7 @@ function WorkflowCard({ w, names, busy, onEdit, onRun, onToggle }: { w: Workflow
       </div>
       {live ? (
         <span className="wf-card-live" role="status">
-          <span className="tm-live-text">{live.status === "waiting" ? (live.note ?? "Waiting for the room's board") : `Running in the ${live.roomName.replace(/^the /, "")} · ${live.steps.filter((x) => x.status === "done").length} of ${live.steps.length} done`}</span>
+          <span className={live.status === "asking" ? "wf-card-asking" : "tm-live-text"}>{liveWords(live, w.steps)}</span>
         </span>
       ) : (
         <span className="wf-card-when">
@@ -539,6 +651,8 @@ function Builder({
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
   const [side, setSide] = useState(fresh && !initial.steps.length);
+  /** Run now asking its question first. */
+  const [asking, setAsking] = useState(false);
   /** Someone else's (the hosted service's): looked at here, changed and run by them. */
   const owner = theirs(view);
   const dirty = !owner && (!id || !sameDraft(d, saved));
@@ -558,19 +672,25 @@ function Builder({
     [d, id, names, others, owner],
   );
   const fixes = checks.filter((c) => c.level === "fix");
-  const live = view?.runs[0]?.status === "running" || view?.runs[0]?.status === "waiting" ? view.runs[0] : null;
+  const live = underWay(view?.runs[0]) ? view.runs[0] : null;
 
   const set = (change: Partial<Draft>) => setD((x) => ({ ...x, ...change }));
   const setStep = (sid: string, change: Partial<WorkflowStep>) => setD((x) => ({ ...x, steps: x.steps.map((s) => (s.id === sid ? { ...s, ...change } : s)) }));
-  /** A new step: in a column of its own at `col` (the rest move along), or beside the steps of column `col`. */
-  const addStep = (col: number, alongside: boolean) => {
+  /**
+   * A new step: in a column of its own at `col` (the rest move along), or beside the steps of column `col`. A check or your OK
+   * sends the work back to the last step before it that does work, when there is one.
+   */
+  const addStep = (col: number, alongside: boolean, kind: StepKind = "do") => {
     if (steps.length >= MAX_STEPS) return setError(`A workflow has up to ${MAX_STEPS} steps.`);
-    const s: WorkflowStep = { id: uid(), mate: "", does: "", owns: [], col: alongside ? col : col - 0.5 };
+    const before = steps.filter((x) => x.col < col && !isGate(x)).at(-1);
+    const gate = kind === "do" ? {} : { kind, ifNot: before ? ("back" as const) : ("stop" as const), ...(before ? { back: before.id } : {}), tries: DEFAULT_TRIES };
+    const s: WorkflowStep = { id: uid(), mate: kind === "check" ? LEAD : "", does: kind === "approve" ? "Is this ready to go on?" : "", owns: [], col: alongside && kind === "do" ? col : col - 0.5, ...gate };
     setD((x) => ({ ...x, steps: packSteps([...x.steps, s]) }));
     setSel(s.id);
   };
   const removeStep = (sid: string) => {
-    setD((x) => ({ ...x, steps: packSteps(x.steps.filter((s) => s.id !== sid)) }));
+    // A check or OK that sent the work back to it now stops instead.
+    setD((x) => ({ ...x, steps: packSteps(x.steps.filter((s) => s.id !== sid).map((s) => (s.back === sid ? { ...s, ifNot: "stop" as const, back: undefined } : s))) }));
     setSel(null);
   };
   /** A step one column earlier or later: beside the steps there, or a column of its own past either end. */
@@ -605,13 +725,14 @@ function Builder({
   };
   /** A check pressed: to its card, or a first step made when there is none. */
   const goTo = (on: string) => (on === FIRST_STEP ? addStep(0, false) : setSel(on));
-  const runNow = async () => {
+  const runNow = async (input?: string) => {
     if (fixes.length) return goTo(fixes[0]!.on);
+    if (d.ask?.trim() && input === undefined) return setAsking(true);
     setRunning(true);
     try {
       const w = dirty ? await save() : view;
       if (!w) return;
-      const { run } = await api<{ run: WorkflowRun }>(identity, `/api/workflows/${w.id}/run`, { method: "POST", body: "{}", headers: JSON_BODY });
+      const { run } = await api<{ run: WorkflowRun }>(identity, `/api/workflows/${w.id}/run`, { method: "POST", body: JSON.stringify(input ? { input } : {}), headers: JSON_BODY });
       // Said with the way out: a run skipped for a busy board can be set to wait for it instead.
       if (run.status === "skipped") setError(`Skipped: ${run.note ?? "it couldn't start."}${/board|still going/.test(run.note ?? "") ? " To have runs wait for the board instead, turn off “Skip a run while one is still going” in its trigger." : ""}`);
       else if (run.status === "failed") setError(`It didn't start: ${run.note ?? "something went wrong."}`);
@@ -669,6 +790,7 @@ function Builder({
 
   return (
     <div className={cn("ag-studio wf-studio", side && "with-side")}>
+      {asking && <RunAsk name={d.name || "it"} ask={d.ask ?? ""} onClose={() => setAsking(false)} onRun={(input) => (setAsking(false), void runNow(input))} />}
       <header className="wf-head">
         <Tip label="Back to the workflows">
           <Button variant="ghost" size="icon-sm" aria-label="Back to the workflows" onClick={back}>
@@ -688,7 +810,7 @@ function Builder({
             </Button>
           </Tip>
           <ReadyChip checks={checks} onPick={(c) => goTo(c.on)} />
-          {id && <RunsButton identity={identity} id={id} runs={view?.runs ?? []} team={team} />}
+          {id && <RunsButton identity={identity} id={id} runs={view?.runs ?? []} team={team} onRan={onRan} />}
           {owner ? (
             // Someone else's: theirs to change and run, said where the buttons would be.
             <span className="wf-owner" title={`Only ${owner.name} changes or runs it`}>
@@ -724,7 +846,12 @@ function Builder({
             </button>
           </p>
         )}
-        {live && <LiveLine run={live} />}
+        {live && <LiveLine run={live} steps={steps} />}
+        {live?.status === "asking" && id && (
+          <div className="wf-asks-float">
+            <WorkflowAsksFor identity={identity} id={id} onAnswered={onRan} />
+          </div>
+        )}
         <Canvas d={d} steps={steps} names={names} others={others} sel={sel} live={live} checks={checks} onPick={setSel} onAdd={addStep} />
         {sel && (
           <Inspector
@@ -751,14 +878,19 @@ function Builder({
   );
 }
 
+/** This workflow's runs waiting for your OK, over its canvas. */
+function WorkflowAsksFor({ identity, id, onAnswered }: { identity: Identity; id: string; onAnswered: () => void }) {
+  return <WorkflowAsks identity={identity} workflow={id} onAnswered={onAnswered} />;
+}
+
 /** While a run goes: where, and how far it has got. */
-function LiveLine({ run }: { run: WorkflowRun }) {
-  const done = run.steps.filter((s) => s.status === "done").length;
+function LiveLine({ run, steps }: { run: WorkflowRun; steps: WorkflowStep[] }) {
   return (
     // One live line, no dot: the faces of the steps under way wear the ring (DIRECTION.md §8).
     <p className="wf-live" role="status">
       <span className={run.status === "running" ? "tm-live-text" : undefined}>
-        {run.status === "waiting" ? (run.note ?? "Waiting for the room's board") : `Running in the ${run.roomName.replace(/^the /, "")} · ${done} of ${run.steps.length} step${run.steps.length === 1 ? "" : "s"} done`}
+        {liveWords(run, steps)}
+        {run.status === "running" && run.note ? ` · ${run.note}` : ""}
         {/* A step asked of another keeper waits on them (the hosted service's): said here, as its card does. */}
         {run.status === "running" && ((k) => (k ? ` · waiting on ${k}` : ""))(run.steps.find((x) => x.asked?.status === "open" && x.status === "open")?.asked?.keeper)}
       </span>
@@ -827,14 +959,28 @@ function ReadyChip({ checks, onPick }: { checks: WorkflowCheck[]; onPick: (c: Wo
 }
 
 /** The last runs, each opening its room, with its steps while it goes. */
-function RunsButton({ identity, id, runs: recent, team }: { identity: Identity; id: string; runs: WorkflowRun[]; team: Team | null }) {
+function RunsButton({ identity, id, runs: recent, team, onRan }: { identity: Identity; id: string; runs: WorkflowRun[]; team: Team | null; onRan: () => void }) {
   const [open, setOpen] = useState(false);
   const [runs, setRuns] = useState(recent);
+  const [retrying, setRetrying] = useState("");
   useEffect(() => setRuns(recent), [recent]);
+  const read = useCallback(() => void api<{ runs: WorkflowRun[] }>(identity, `/api/workflows/${id}/runs`).then((r) => setRuns(r.runs), () => {}), [id, identity]);
   useEffect(() => {
-    if (!open) return;
-    void api<{ runs: WorkflowRun[] }>(identity, `/api/workflows/${id}/runs`).then((r) => setRuns(r.runs), () => {});
-  }, [open, id, identity]);
+    if (open) read();
+  }, [open, read]);
+  /** A run that didn't finish, picked up from the stage it stopped at. */
+  const retry = async (r: WorkflowRun) => {
+    setRetrying(r.id);
+    try {
+      const got = await api<{ run: WorkflowRun }>(identity, `/api/workflows/${id}/runs/${r.id}/retry`, { method: "POST", body: "{}", headers: JSON_BODY });
+      setRuns((l) => l.map((x) => (x.id === r.id ? got.run : x)));
+      onRan();
+    } catch (e) {
+      setRuns((l) => l.map((x) => (x.id === r.id ? { ...x, note: (e as Error).message } : x)));
+    } finally {
+      setRetrying("");
+    }
+  };
   const last = recent[0];
   const openRoom = (r: WorkflowRun) => {
     const invite = r.sid === team?.sid ? team?.invite : team?.rooms.find((x) => x.sid === r.sid)?.invite;
@@ -857,7 +1003,7 @@ function RunsButton({ identity, id, runs: recent, team }: { identity: Identity; 
         ) : (
           <ul className="m-0 flex max-h-[360px] list-none flex-col overflow-y-auto p-0" role="list">
             {runs.map((r) => (
-              <li key={r.id}>
+              <li key={r.id} className="wf-run-li">
                 <button type="button" className="wf-run" disabled={!r.sid} onClick={() => (openRoom(r), setOpen(false))}>
                   <TaskMark state={runMark(r.status)} />
                   <span className="wf-run-body">
@@ -870,7 +1016,7 @@ function RunsButton({ identity, id, runs: recent, team }: { identity: Identity; 
                       {r.roomName ? ` · ${r.roomName}` : ""}
                     </span>
                     {r.note && <span className="wf-run-note">{r.note}</span>}
-                    {r.status === "running" && (
+                    {underWay(r) && (
                       <span className="wf-run-steps">
                         {r.steps.map((s) => (
                           <span key={s.task} title={`${s.title}: ${s.asked?.status === "open" && s.status === "open" ? `waiting on ${s.asked.keeper}` : STEP_WORD[s.status]}`}>
@@ -881,6 +1027,11 @@ function RunsButton({ identity, id, runs: recent, team }: { identity: Identity; 
                     )}
                   </span>
                 </button>
+                {(r.status === "failed" || r.status === "stopped") && r.stage !== undefined && (
+                  <button type="button" className="wf-run-retry" disabled={retrying === r.id} onClick={() => void retry(r)}>
+                    <RotateCcwIcon className="size-3.5" /> {retrying === r.id ? "Starting…" : "Try again from here"}
+                  </button>
+                )}
               </li>
             ))}
           </ul>
@@ -898,7 +1049,9 @@ const stepZoom = (z: number, dir: 1 | -1) => {
   return ZOOMS[Math.min(ZOOMS.length - 1, Math.max(0, (i < 0 ? ZOOMS.length - 1 : i) + dir))]!;
 };
 
-function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd }: { d: Draft; steps: WorkflowStep[]; names: Names; others: { id: string; name: string }[]; sel: Sel; live: WorkflowRun | null; checks: WorkflowCheck[]; onPick: (s: Sel) => void; onAdd: (col: number, alongside: boolean) => void }) {
+type AddStep = (col: number, alongside: boolean, kind?: StepKind) => void;
+
+function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd }: { d: Draft; steps: WorkflowStep[]; names: Names; others: { id: string; name: string }[]; sel: Sel; live: WorkflowRun | null; checks: WorkflowCheck[]; onPick: (s: Sel) => void; onAdd: AddStep }) {
   const scroll = useRef<HTMLDivElement>(null);
   const flow = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ w: 1000, h: 600, fw: 900, fh: 400 });
@@ -906,7 +1059,7 @@ function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd }: {
   const [shift, setShift] = useState({ x: 0, y: 0 });
   const [panning, setPanning] = useState(false);
   const pan = useRef<{ x: number; y: number } | null>(null);
-  const [paths, setPaths] = useState<{ d: string; live: boolean }[]>([]);
+  const [paths, setPaths] = useState<{ d: string; live: boolean; back?: { x: number; y: number; text: string } }[]>([]);
   const cols = columnsOf(steps);
   // Narrower than a column and its neighbours need, the steps are a list, top to bottom, at full size.
   const stacked = view.w < 640;
@@ -971,7 +1124,7 @@ function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd }: {
     if (!f || stacked) return setPaths([]);
     const box = f.getBoundingClientRect();
     const at = (id: string) => f.querySelector<HTMLElement>(`[data-wf-node="${id}"]`)?.getBoundingClientRect();
-    const out: { d: string; live: boolean }[] = [];
+    const out: { d: string; live: boolean; back?: { x: number; y: number; text: string } }[] = [];
     const link = (a: string, b: string, on: boolean) => {
       const r1 = at(a);
       const r2 = at(b);
@@ -990,6 +1143,25 @@ function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd }: {
     for (const s of ids[0] ?? []) link("trigger", s, !!live && working(s));
     for (let i = 1; i < ids.length; i++) for (const a of ids[i - 1]!) for (const b of ids[i]!) link(a, b, finished(a) && working(b));
     for (const s of ids.at(-1) ?? []) link(s, "outcomes", false);
+    // A check or OK that sends the work back: a loop under the cards, from it back to the step it names, clear of the
+    // Alongside buttons; shorter loops inside longer ones, each at its own depth, its count where it bottoms out.
+    const loops = steps
+      .filter((x) => isGate(x) && x.ifNot === "back" && x.back)
+      .map((g) => ({ g, span: steps.indexOf(g) - steps.findIndex((x) => x.id === g.back) }))
+      .sort((a, b) => a.span - b.span);
+    const floor = Math.max(0, ...[...f.querySelectorAll<HTMLElement>("[data-wf-node]")].map((el) => (el.getBoundingClientRect().bottom - box.top) / zoom));
+    loops.forEach(({ g }, i) => {
+      const r1 = at(g.id);
+      const r2 = at(g.back!);
+      if (!r1 || !r2) return;
+      const x1 = (r1.left + r1.width / 2 - box.left) / zoom;
+      const y1 = (r1.bottom - box.top) / zoom;
+      // Into the step's right side, clear of its Alongside button under the middle.
+      const x2 = (r2.right - 36 - box.left) / zoom;
+      const y2 = (r2.bottom - box.top) / zoom;
+      const low = floor + 56 + i * 30;
+      out.push({ d: `M${x1},${y1} L${x1},${low - 14} Q${x1},${low} ${x1 - 14},${low} L${x2 + 14},${low} Q${x2},${low} ${x2},${low - 14} L${x2},${y2 + 3}`, live: false, back: { x: (x1 + x2) / 2, y: low + 4, text: `back to step ${steps.findIndex((x) => x.id === g.back) + 1} · up to ${g.tries ?? DEFAULT_TRIES}×` } });
+    });
     setPaths(out);
   }, [JSON.stringify(d), zoom, view.w, view.fh, stacked, live?.steps.map((s) => s.status).join()]);
 
@@ -1023,18 +1195,32 @@ function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd }: {
         <div className="wf-stage" style={stacked ? undefined : { width: Math.max(view.fw * zoom + 48, view.w), height: Math.max(view.fh * zoom + 96, view.h) }}>
           <div
             ref={flow}
-            className="wf-flow"
+            className={cn("wf-flow", steps.some((x) => isGate(x) && x.ifNot === "back") && "loops")}
             style={stacked ? undefined : { transform: `translate(${shift.x + Math.max(24, (view.w - view.fw * zoom) / 2)}px, ${shift.y + Math.max(24, (view.h - view.fh * zoom) / 2 - 10)}px) scale(${zoom})` }}
           >
             {!stacked && (
               <svg className="wf-wires" aria-hidden="true">
-                {paths.map((p, i) => (
-                  <path key={i} d={p.d} className={p.live ? "live" : undefined} />
-                ))}
+                <defs>
+                  <marker id="wf-back-head" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                    <path d="M1,1 L7,4 L1,7" className="wf-back-head" />
+                  </marker>
+                </defs>
+                {paths.map((p, i) =>
+                  p.back ? (
+                    <g key={i}>
+                      <path d={p.d} className="back" markerEnd="url(#wf-back-head)" />
+                      <text x={p.back.x} y={p.back.y} className="wf-back-label" textAnchor="middle">
+                        {p.back.text}
+                      </text>
+                    </g>
+                  ) : (
+                    <path key={i} d={p.d} className={p.live ? "live" : undefined} />
+                  ),
+                )}
               </svg>
             )}
             <div className="wf-col wf-col-end">{node("trigger", <TriggerBody d={d} names={names} />)}</div>
-            <Gap label={steps.length ? "Add a step before the first" : "Add the first step"} onAdd={() => onAdd(0, false)} stacked={stacked} first={!steps.length} />
+            <Gap label={steps.length ? "Add before the first step" : "Add the first step"} onAdd={(kind) => onAdd(0, false, kind)} stacked={stacked} first={!steps.length} />
             {cols.map((col, i) => (
               <ColumnAndGap key={col.map((s) => s.id).join()} i={i} last={i === cols.length - 1} col={col} steps={steps} node={node} stacked={stacked} onAdd={onAdd} full={steps.length >= MAX_STEPS} names={names} room={d.room} runStep={runStep} />
             ))}
@@ -1071,44 +1257,77 @@ function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd }: {
   );
 }
 
-function ColumnAndGap({ i, last, col, steps, node, stacked, onAdd, full, names, room, runStep }: { i: number; last: boolean; col: WorkflowStep[]; steps: WorkflowStep[]; node: (id: string, children: ReactNode) => ReactNode; stacked: boolean; onAdd: (col: number, alongside: boolean) => void; full: boolean; names: Names; room: string; runStep: (id: string) => Pick<WorkflowRunStep, "status" | "asked"> | null }) {
+function ColumnAndGap({ i, last, col, steps, node, stacked, onAdd, full, names, room, runStep }: { i: number; last: boolean; col: WorkflowStep[]; steps: WorkflowStep[]; node: (id: string, children: ReactNode) => ReactNode; stacked: boolean; onAdd: AddStep; full: boolean; names: Names; room: string; runStep: RunStepOf }) {
+  const gate = col.length === 1 && isGate(col[0]!);
   return (
     <>
       <div className={cn("wf-col", col.length > 1 && "side-by-side")} role="group" aria-label={col.length > 1 ? `Steps ${steps.indexOf(col[0]!) + 1} to ${steps.indexOf(col.at(-1)!) + 1}, side by side` : `Step ${steps.indexOf(col[0]!) + 1}`}>
         {stacked && col.length > 1 && <span className="wf-col-label">Side by side</span>}
-        {col.map((s) => node(s.id, <StepBody s={s} n={steps.indexOf(s) + 1} names={names} room={room} at={runStep(s.id)?.status ?? null} asked={runStep(s.id)?.asked ?? null} />))}
-        <button type="button" className="wf-alongside" disabled={full} onClick={() => onAdd(i, true)}>
-          <PlusIcon className="size-3.5" /> {stacked ? "Add a step alongside" : "Alongside"}
-        </button>
+        {col.map((s) => node(s.id, isGate(s) ? <GateBody s={s} n={steps.indexOf(s) + 1} steps={steps} names={names} room={room} run={runStep(s.id)} /> : <StepBody s={s} n={steps.indexOf(s) + 1} names={names} room={room} at={runStep(s.id)?.status ?? null} asked={runStep(s.id)?.asked ?? null} again={runStep(s.id)?.again ?? 0} />))}
+        {!gate && (
+          <button type="button" className="wf-alongside" disabled={full} onClick={() => onAdd(i, true)}>
+            <PlusIcon className="size-3.5" /> {stacked ? "Add a step alongside" : "Alongside"}
+          </button>
+        )}
       </div>
-      <Gap label={last ? "Add a step after the last" : `Add a step after step ${steps.indexOf(col.at(-1)!) + 1}`} onAdd={() => onAdd(i + 1, false)} stacked={stacked} disabled={full} />
+      <Gap label={last ? "Add after the last step" : `Add after step ${steps.indexOf(col.at(-1)!) + 1}`} onAdd={(kind) => onAdd(i + 1, false, kind)} stacked={stacked} disabled={full} />
     </>
   );
 }
 
-/** The space between two columns, with its "+": a new step in a column of its own there. */
-function Gap({ label, onAdd, stacked, disabled, first }: { label: string; onAdd: () => void; stacked: boolean; disabled?: boolean; /** No steps yet: the "+" says what it does. */ first?: boolean }) {
+const ADD_KINDS: { kind: StepKind; icon: LucideIcon; name: string; says: string }[] = [
+  { kind: "do", icon: UsersIcon, name: "A step", says: "A teammate does part of the work." },
+  { kind: "check", icon: ShieldCheckIcon, name: "A check", says: "A teammate checks the work. Not passed, it goes back or the run stops." },
+  { kind: "approve", icon: HandIcon, name: "Your OK", says: "The run waits for you to OK it, or send it back." },
+];
+
+/** The space between two columns, with its "+": a step, a check or your OK, in a column of its own there. */
+function Gap({ label, onAdd, stacked, disabled, first }: { label: string; onAdd: (kind?: StepKind) => void; stacked: boolean; disabled?: boolean; /** No steps yet: the "+" says what it does. */ first?: boolean }) {
+  const [open, setOpen] = useState(false);
   if (first)
     return (
       <div className="wf-gap first">
-        <button type="button" className="wf-first" onClick={onAdd}>
+        <button type="button" className="wf-first" onClick={() => onAdd("do")}>
           <PlusIcon className="size-4" /> Add the first step
         </button>
       </div>
     );
   return (
     <div className="wf-gap">
-      <Tip label={label} side={stacked ? "right" : "top"}>
-        <button type="button" className="wf-plus" aria-label={label} disabled={disabled} onClick={onAdd}>
-          <PlusIcon className="size-3.5" />
-        </button>
-      </Tip>
+      <Popover open={open} onOpenChange={setOpen}>
+        <Tip label={label} side={stacked ? "right" : "top"}>
+          <PopoverTrigger asChild>
+            <button type="button" className="wf-plus" aria-label={label} disabled={disabled}>
+              <PlusIcon className="size-3.5" />
+            </button>
+          </PopoverTrigger>
+        </Tip>
+        <PopoverContent side={stacked ? "right" : "bottom"} className="w-[280px] p-1.5">
+          <ul className="m-0 flex list-none flex-col p-0" role="list">
+            {ADD_KINDS.map((k) => (
+              <li key={k.kind}>
+                <button type="button" className="wf-add-kind" onClick={() => (setOpen(false), onAdd(k.kind))}>
+                  <span className="wf-add-icon">
+                    <k.icon className="size-3.5" />
+                  </span>
+                  <span className="wf-add-text">
+                    <span className="wf-add-name">{k.name}</span>
+                    <span className="wf-add-says">{k.says}</span>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </PopoverContent>
+      </Popover>
     </div>
   );
 }
 
 /** A card on the canvas: focusable, pressed or Enter to open its settings. */
-function NodeCard({ id, children, sel, flagged, onPick, runStep }: { id: string; children: ReactNode; sel: Sel; flagged: Set<string>; onPick: (s: Sel) => void; runStep: (id: string) => Pick<WorkflowRunStep, "status" | "asked"> | null }) {
+type RunStepOf = (id: string) => Pick<WorkflowRunStep, "status" | "asked" | "verdict" | "again" | "kind"> | null;
+
+function NodeCard({ id, children, sel, flagged, onPick, runStep }: { id: string; children: ReactNode; sel: Sel; flagged: Set<string>; onPick: (s: Sel) => void; runStep: RunStepOf }) {
   const kind = id === "trigger" || id === "outcomes" ? id : "step";
   const run = kind === "step" ? runStep(id) : null;
   const open = () => onPick(sel === id ? null : id);
@@ -1130,9 +1349,10 @@ function NodeCard({ id, children, sel, flagged, onPick, runStep }: { id: string;
     >
       {children}
       {/* Not under a step being done: its face's ring and "On this step" say it, so no second "Working" (DIRECTION.md §9.4). */}
-      {run && run.status !== "claimed" && (
+      {run && (run.status !== "claimed" || run.kind === "approve") && (
         <span className="wf-node-run">
-          <TaskMark state={stepMark(run.status)} /> {STEP_WORD[run.status]}
+          <TaskMark state={run.kind === "approve" && run.status === "claimed" ? "review" : stepMark(run.status)} />
+          {run.kind === "approve" ? (run.status === "claimed" ? "Waiting for you" : run.status === "done" ? "You OK'd it" : run.status === "cancelled" ? "You said no" : STEP_WORD[run.status]) : run.kind === "check" && run.status === "done" && run.verdict ? (run.verdict.pass ? "Passed" : `Didn't pass${run.verdict.why ? `: ${run.verdict.why}` : ""}`) : STEP_WORD[run.status]}
         </span>
       )}
     </div>
@@ -1165,6 +1385,11 @@ function TriggerBody({ d, names }: { d: Draft; names: Names }) {
           <span className="wf-row">
             <HistoryIcon className="size-3.5" /> Up to {d.limits.perDay} a day · {d.limits.skipIfRunning ? "skips while one runs" : "waits for the room"}
           </span>
+          {d.ask?.trim() && (
+            <span className="wf-row">
+              <MessageCircleQuestionIcon className="size-3.5" /> Run now asks: {d.ask.trim()}
+            </span>
+          )}
         </div>
       </div>
     </>
@@ -1199,7 +1424,7 @@ function OutcomesBody({ d, others }: { d: Draft; others: { id: string; name: str
 }
 
 /** A step's card: its number, its teammate's face and how it stands (mateStatus), what it does, and what it owns. */
-function StepBody({ s, n, names, room, at, asked }: { s: WorkflowStep; n: number; names: Names; room: string; /** How this step stands in the run going now. */ at: BoardStatus | null; /** Asked of its teammate's keeper in that run (the hosted service's). */ asked: WorkflowRunStep["asked"] | null }) {
+function StepBody({ s, n, names, room, at, asked, again = 0 }: { s: WorkflowStep; n: number; names: Names; room: string; /** How this step stands in the run going now. */ at: BoardStatus | null; /** Asked of its teammate's keeper in that run (the hosted service's). */ asked: WorkflowRunStep["asked"] | null; /** Sent back to it this many times in that run. */ again?: number }) {
   const lead = s.mate === LEAD;
   const m = lead ? names.lead(room) : names.mate(s.mate);
   // On this step in the run going now, the face and its line say so, as the card's "Working" does: the face read "Idle" beside it,
@@ -1212,6 +1437,7 @@ function StepBody({ s, n, names, room, at, asked }: { s: WorkflowStep; n: number
     <>
       <div className="wf-node-head">
         <span className="wf-node-kind">Step {n}</span>
+        {again > 0 && <span className="wf-again">Try {again + 1}</span>}
       </div>
       <div className="wf-node-body">
         <div className="wf-who">
@@ -1233,6 +1459,49 @@ function StepBody({ s, n, names, room, at, asked }: { s: WorkflowStep; n: number
             {s.owns.length > 3 && <span className="wf-own">+{s.owns.length - 3}</span>}
           </span>
         )}
+      </div>
+    </>
+  );
+}
+
+/**
+ * A check's card or your OK's: who checks (or you), what has to hold or what you're asked, and what happens when it isn't passed.
+ * Its last answer in the run going now, under it (NodeCard).
+ */
+function GateBody({ s, n, steps, names, room, run }: { s: WorkflowStep; n: number; steps: WorkflowStep[]; names: Names; room: string; run: ReturnType<RunStepOf> }) {
+  const ok = s.kind === "approve";
+  const m = ok ? null : s.mate === LEAD ? names.lead(room) : names.mate(s.mate);
+  const back = s.ifNot === "back" ? steps.findIndex((x) => x.id === s.back) + 1 : 0;
+  const onIt = run?.status === "claimed" || run?.status === "review";
+  return (
+    <>
+      <div className="wf-node-head">
+        <span className="wf-node-kind">
+          Step {n} · {ok ? "Your OK" : "Check"}
+        </span>
+        {(run?.again ?? 0) > 0 && <span className="wf-again">Try {(run?.again ?? 0) + 1}</span>}
+      </div>
+      <div className="wf-node-body">
+        <div className="wf-who">
+          {ok ? (
+            <span className="wf-gate-tile" aria-hidden="true">
+              <HandIcon className="size-3.5" />
+            </span>
+          ) : m ? (
+            <Face seed={m.look ?? m.name} size={24} status={onIt ? "working" : m.status} lead={s.mate === LEAD} />
+          ) : (
+            <span className="wf-face-none" style={{ width: 24, height: 24 }} />
+          )}
+          <span className="wf-who-text">
+            <span className="wf-who-name">{ok ? "You" : m ? (s.mate === LEAD ? `The lead · ${m.name}` : m.name) : "Pick who checks"}</span>
+            <span className="tm-sub">{ok ? "Asked before it goes on" : onIt ? "Checking" : "Checks the work so far"}</span>
+          </span>
+        </div>
+        <p className={cn("wf-does", !s.does.trim() && "muted")}>{s.does.trim() ? (ok ? s.does.trim() : `Goes on if ${s.does.trim().replace(/^./, (c) => c.toLowerCase())}`) : ok ? "Say what you're asked." : "Say what has to hold."}</p>
+        <span className="wf-row">
+          {s.ifNot === "back" ? <CornerUpLeftIcon className="size-3.5" /> : <XIcon className="size-3.5" />}
+          {s.ifNot === "back" ? (back ? `${ok ? "If you say no" : "If not"}: back to step ${back}, up to ${s.tries ?? DEFAULT_TRIES}×` : "Pick the step it sends back to") : `${ok ? "If you say no" : "If not"}: the run stops`}
+        </span>
       </div>
     </>
   );
@@ -1271,7 +1540,7 @@ function Inspector({
     ref.current?.querySelector<HTMLElement>("textarea, input, button[role='combobox'], [role='tab']")?.focus();
   }, []);
   const s = steps.find((x) => x.id === sel);
-  const title = sel === "trigger" ? "Trigger" : sel === "outcomes" ? "Then" : s ? `Step ${steps.indexOf(s) + 1}` : "";
+  const title = sel === "trigger" ? "Trigger" : sel === "outcomes" ? "Then" : s ? `Step ${steps.indexOf(s) + 1}${s.kind === "check" ? " · Check" : s.kind === "approve" ? " · Your OK" : ""}` : "";
   if (!title) return null;
   return (
     <aside
@@ -1326,6 +1595,31 @@ const roleLine = (role: string) => {
   return `${cut.slice(0, cut.lastIndexOf(" ") > 30 ? cut.lastIndexOf(" ") : 60).replace(/[\s,;:.]+$/, "")}…`;
 };
 
+/** Who does a step, or checks: the lead, or a teammate in the room. */
+function MatePick({ s, d, names, lead, setStep }: { s: WorkflowStep; d: Draft; names: Names; lead: TeammateView | null; setStep: (id: string, c: Partial<WorkflowStep>) => void }) {
+  return (
+    <Select value={s.mate || undefined} onValueChange={(v) => setStep(s.id, { mate: v })}>
+      <SelectTrigger size="sm" aria-label="Who does it" className="h-9 w-full text-[13px]">
+        <SelectValue placeholder="Pick a teammate" />
+      </SelectTrigger>
+      {/* Under the box and inside the window: centred on the choice, the list ran 14px past the window's right edge (Arun,
+          2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL"). */}
+      <SelectContent position="popper" align="start" collisionPadding={8} className="max-w-[calc(100vw-16px)]">
+        <SelectItem value={LEAD}>The lead{lead ? ` (${lead.name} now)` : ""}</SelectItem>
+        {names.mates.map((m) => (
+          <SelectItem key={m.id} value={m.id} disabled={!names.inRoom(d.room, m.id)}>
+            <Face seed={m.look ?? m.name} size={16} /> {m.name}
+            {names.inRoom(d.room, m.id) && names.keeperOf(m.id) ? <span className="wf-pick-role">· {names.keeperOf(m.id)}'s, asked of them</span> : null}
+            {/* The role ends at a word, and in the closed box with an ellipsis where it runs out of room: cut at 40 letters, it
+                stopped mid-word and was clipped bare (Arun, 2026-10-28: "look for like the little details and designs"). */}
+            {!names.inRoom(d.room, m.id) ? " (not in this room)" : m.role && !names.keeperOf(m.id) ? <span className="wf-pick-role">· {roleLine(m.role)}</span> : ""}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
 function StepForm({ s, n, steps, d, names, setStep, moveStep, removeStep }: { s: WorkflowStep; n: number; steps: WorkflowStep[]; d: Draft; names: Names; setStep: (id: string, c: Partial<WorkflowStep>) => void; moveStep: (id: string, by: -1 | 1) => void; removeStep: (id: string) => void }) {
   const [own, setOwn] = useState("");
   const lead = names.lead(d.room);
@@ -1336,28 +1630,94 @@ function StepForm({ s, n, steps, d, names, setStep, moveStep, removeStep }: { s:
     if (v && !s.owns.includes(v)) setStep(s.id, { owns: [...s.owns, v].slice(0, 20) });
     setOwn("");
   };
+  const kind = s.kind ?? "do";
+  /** The steps before it that do work: where a check or OK can send it back to. */
+  const earlier = steps.slice(0, n - 1).filter((x) => !isGate(x));
+  const setKind = (k: StepKind) => {
+    if (k === kind) return;
+    const last = earlier.at(-1);
+    setStep(s.id, k === "do" ? { kind: undefined, ifNot: undefined, back: undefined, tries: undefined } : { kind: k, mate: k === "approve" ? "" : s.mate || LEAD, owns: [], ifNot: s.ifNot ?? (last ? "back" : "stop"), back: s.back ?? last?.id, tries: s.tries ?? DEFAULT_TRIES, ...(k === "approve" && !s.does.trim() ? { does: "Is this ready to go on?" } : {}) });
+  };
+  const kindTabs = (
+    <Field label="Kind">
+      <PageTabs<StepKind>
+        label="Kind"
+        value={kind}
+        onChange={setKind}
+        options={[
+          { value: "do", label: "Step" },
+          { value: "check", label: "Check" },
+          { value: "approve", label: "Your OK" },
+        ]}
+      />
+    </Field>
+  );
+  if (kind !== "do")
+    return (
+      <>
+        {kindTabs}
+        {kind === "check" && (
+          <Field label="Who checks" hint="Often QA, or the lead. It doesn't change anything, only says PASS or FAIL.">
+            <MatePick s={s} d={d} names={names} lead={lead} setStep={setStep} />
+          </Field>
+        )}
+        <Field label={kind === "check" ? "What has to hold" : "What you're asked"} hint={kind === "check" ? "It's handed what the steps before came to." : "You see what the steps before came to, beside the question."}>
+          <Textarea value={s.does} onChange={(e) => setStep(s.id, { does: e.target.value })} placeholder={kind === "check" ? "The tests pass and every bug QA listed is fixed." : "Is the post ready to go out?"} className="min-h-[96px] text-[13px] leading-relaxed md:text-[13px]" maxLength={4000} />
+        </Field>
+        <Field label={kind === "check" ? "If it doesn't pass" : "If you say no"}>
+          <PageTabs<"stop" | "back">
+            label={kind === "check" ? "If it doesn't pass" : "If you say no"}
+            value={s.ifNot === "back" ? "back" : "stop"}
+            onChange={(v) => setStep(s.id, v === "back" ? { ifNot: "back", back: s.back && earlier.some((x) => x.id === s.back) ? s.back : earlier.at(-1)?.id } : { ifNot: "stop" })}
+            options={[
+              { value: "back", label: "Send it back" },
+              { value: "stop", label: "Stop the run" },
+            ]}
+          />
+        </Field>
+        {s.ifNot === "back" && (
+          <>
+            <Field label="Back to" hint={kind === "check" ? "That step is told why, and does its part again; then the check runs again." : "That step is told what you said, and does its part again."}>
+              <Select value={s.back && earlier.some((x) => x.id === s.back) ? s.back : undefined} onValueChange={(v) => setStep(s.id, { back: v })}>
+                <SelectTrigger size="sm" aria-label="Back to" className="h-9 w-full text-[13px]">
+                  <SelectValue placeholder={earlier.length ? "Pick a step" : "No step before it does work"} />
+                </SelectTrigger>
+                <SelectContent position="popper" align="start" collisionPadding={8} className="max-w-[calc(100vw-16px)]">
+                  {earlier.map((x) => (
+                    <SelectItem key={x.id} value={x.id}>
+                      Step {steps.indexOf(x) + 1} · {stepTitle(x, steps.indexOf(x) + 1)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Times, at most" hint="Past that, the run stops and says why.">
+              <Input type="number" min={1} max={MAX_TRIES} value={s.tries ?? DEFAULT_TRIES} onChange={(e) => setStep(s.id, { tries: Math.min(MAX_TRIES, Math.max(1, Math.round(Number(e.target.value) || 1))) })} aria-label="Times, at most" className="h-9 w-[96px] text-[13px] tabular-nums md:text-[13px]" />
+            </Field>
+          </>
+        )}
+        <Field label="When it runs">
+          <div className="flex flex-wrap gap-1.5">
+            <Button variant="outline" size="sm" className="h-8 border-[var(--border)] px-2.5 text-[13px] shadow-none" disabled={s.col === 0} onClick={() => moveStep(s.id, -1)}>
+              <ChevronLeftIcon /> Earlier
+            </Button>
+            <Button variant="outline" size="sm" className="h-8 border-[var(--border)] px-2.5 text-[13px] shadow-none" disabled={s.col === cols.length - 1} onClick={() => moveStep(s.id, 1)}>
+              Later <ChevronRightIcon />
+            </Button>
+          </div>
+        </Field>
+        <div className="wf-insp-foot">
+          <Button variant="ghost" size="sm" className="h-8 px-2 text-[13px] text-[var(--red)] hover:text-[var(--red)]" onClick={() => removeStep(s.id)}>
+            <Trash2Icon /> Remove step {n}
+          </Button>
+        </div>
+      </>
+    );
   return (
     <>
+      {kindTabs}
       <Field label="Who does it" hint={d.room === TEAM_ROOM ? undefined : `Only teammates in ${names.room(d.room)} can take a step there.`}>
-        <Select value={s.mate || undefined} onValueChange={(v) => setStep(s.id, { mate: v })}>
-          <SelectTrigger size="sm" aria-label="Who does it" className="h-9 w-full text-[13px]">
-            <SelectValue placeholder="Pick a teammate" />
-          </SelectTrigger>
-          {/* Under the box and inside the window: centred on the choice, the list ran 14px past the window's right edge (Arun,
-              2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL"). */}
-          <SelectContent position="popper" align="start" collisionPadding={8} className="max-w-[calc(100vw-16px)]">
-            <SelectItem value={LEAD}>The lead{lead ? ` (${lead.name} now)` : ""}</SelectItem>
-            {names.mates.map((m) => (
-              <SelectItem key={m.id} value={m.id} disabled={!names.inRoom(d.room, m.id)}>
-                <Face seed={m.look ?? m.name} size={16} /> {m.name}
-                {names.inRoom(d.room, m.id) && names.keeperOf(m.id) ? <span className="wf-pick-role">· {names.keeperOf(m.id)}'s, asked of them</span> : null}
-                {/* The role ends at a word, and in the closed box with an ellipsis where it runs out of room: cut at 40 letters, it
-                    stopped mid-word and was clipped bare (Arun, 2026-10-28: "look for like the little details and designs"). */}
-                {!names.inRoom(d.room, m.id) ? " (not in this room)" : m.role && !names.keeperOf(m.id) ? <span className="wf-pick-role">· {roleLine(m.role)}</span> : ""}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <MatePick s={s} d={d} names={names} lead={lead} setStep={setStep} />
       </Field>
       <Field label="What it does" hint={n > 1 && s.col > 0 ? "Gets what the steps before it found." : "Gets what started the run."}>
         <Textarea value={s.does} onChange={(e) => setStep(s.id, { does: e.target.value })} placeholder="Read what merged this week and list the changes, grouped as new, improved and fixed." className="min-h-[132px] text-[13px] leading-relaxed md:text-[13px]" maxLength={4000} />
@@ -1523,6 +1883,9 @@ function TriggerForm({ d, names, hookUrl, set }: { d: Draft; names: Names; hookU
           <RoomSelect value={t.room} names={names} onChange={(room) => set({ trigger: { kind: "board", room } })} label="Which room's board" />
         </Field>
       )}
+      <Field label="Ask when you run it" hint="Optional. Run now asks you this, and the first steps get your answer.">
+        <Input value={d.ask ?? ""} onChange={(e) => set({ ask: e.target.value })} placeholder="Which feature is launching?" aria-label="Ask when you run it" maxLength={200} className="h-9 text-[13px] md:text-[13px]" />
+      </Field>
       <div className="wf-insp-rule" />
       <Field label="Where it runs" hint="Its board is posted there, from the room's lead.">
         <RoomSelect value={d.room} names={names} onChange={(room) => set({ room })} label="Where it runs" />

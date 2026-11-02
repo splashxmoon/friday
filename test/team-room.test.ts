@@ -247,3 +247,38 @@ test("a long brief between teammates comes to its first sentence, Friday's notes
   assert.ok(gist("x".repeat(400)).line.length <= 161, "a sentence too long is cut");
 });
 
+
+test("a crew workflow's chatter in its room: its hand-outs, reviews and the turns that only did them, which its run card stands in for", async () => {
+  const { workflowChatter, isWorkflowBoard } = await import("../src/client/team-room.js");
+  const board = ev("n", friday, { type: "board.posted", fromLane: "n", fromName: "Nova", tasks: [{ id: "s1", title: "Fix it", detail: '[Workflow "Nightly fix", step 1 of 2] Fix it', owns: [], after: [] }] });
+  const plain = ev("n", nova, { type: "board.posted", fromLane: "n", fromName: "Nova", tasks: [{ id: "t1", title: "Other", detail: "Do the other thing", owns: [], after: [] }] });
+  assert.equal(isWorkflowBoard(board), true);
+  assert.equal(isWorkflowBoard(plain), false);
+  const handout = ev("k", nova, { type: "instruction", text: 'Board task "s1": Fix it', interrupt: false, mesh: { id: "m1", kind: "task", fromLane: "n", fromName: "Nova", toName: "Kit", hop: 1, by: null, board: "s1" } });
+  const started = ev("k", kit, { type: "run.started", causedBy: handout.seq });
+  const report = msg("k", kit, "Status: done\nResult: Fixed it.");
+  const ended = ev("k", kit, { type: "run.ended", outcome: "done" });
+  // The person writes to Kit, who is handed it with a workflow step: that turn is theirs, and stays.
+  const word = say("k", "Also bump the version");
+  const handout2 = ev("k", nova, { type: "instruction", text: 'Board task "s1": Fix it', interrupt: false, mesh: { id: "m2", kind: "task", fromLane: "n", fromName: "Nova", toName: "Kit", hop: 1, by: null, board: "s1" } });
+  const started2 = ev("k", kit, { type: "run.started", causedBy: handout2.seq });
+  const delivered = ev("k", kit, { type: "instructions.delivered", seqs: [word.seq] });
+  const mixed = msg("k", kit, "Fixed, and bumped the version.");
+  const ended2 = ev("k", kit, { type: "run.ended", outcome: "done" });
+  // A later board that isn't a workflow's: its hand-outs stay.
+  const other = ev("k", nova, { type: "instruction", text: 'Board task "t1": Other', interrupt: false, mesh: { id: "m3", kind: "task", fromLane: "n", fromName: "Nova", toName: "Kit", hop: 1, by: null, board: "t1" } });
+  const started3 = ev("k", kit, { type: "run.started", causedBy: handout.seq });
+  const going = msg("k", kit, "Working on the fix again");
+  const c = workflowChatter([board, handout, started, report, ended, word, handout2, started2, delivered, mixed, ended2, plain, other, started3, going]);
+  assert.deepEqual([...c.events], [handout.seq, handout2.seq]);
+  assert.deepEqual([...c.messages], [report.seq, going.seq]);
+  assert.deepEqual([...c.live], ["k"]);
+});
+
+test("a step's report in a line: the Result a board report carries, else its first sentence, never the PASS line", async () => {
+  const { reportLine } = await import("../src/team-workflow-model.js");
+  assert.equal(reportLine("Status: done\nResult: Ran the suite: 214 tests pass, and each fix holds.\nEvidence: npm test\nUnblock: nothing\n\nPASS"), "Ran the suite: 214 tests pass, and each fix holds.");
+  assert.equal(reportLine("I added a **Notes** section to `README.md`. Then I checked node.\n\n- Read the README"), "I added a Notes section to README.md.");
+  assert.equal(reportLine("## Fix it (Kit)\nDone."), "Done.");
+  assert.equal(reportLine("Done: I added a Notes section to README.md."), "I added a Notes section to README.md.");
+});
