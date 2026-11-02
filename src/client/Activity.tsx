@@ -122,7 +122,7 @@ import { ownPlan } from "../own-plan.js";
 import { alwaysAllowEntry, can, canDriveLane, driverOf, laneOf, pendingFor, questionsTo, runOf, signoffStatus, type OpenQuestion, type SessionState, type Thread, givenName } from "../session/projection.js";
 import { isRawError, stoppedLine } from "../activity-line.js";
 import { ENGINE_MODEL_INFO, ENGINE_NAMES, ENGINE_TOOLS, liveMachine, MAIN_LANE, type Attachment, type DiffFile, type EngineMode, type EngineTool, type EventBody, type EventType, type Member, type PresenceMember, type SessionEvent, type Thinking, type ToolCall, effortNote, ENGINE_EFFORT_INFO, EFFORT_RESET_NOTE, effortLevelsOf, type EngineEffort } from "../types.js";
-import { fileUrl, uploadFile } from "./api.js";
+import { api, fileUrl, uploadFile } from "./api.js";
 import { pickable, uploadAll } from "./Attach.js";
 import { AgentMark, Avatar, FridayMark, Icon, type IconName } from "./icons.js";
 import { RouteWhy, RoutedForecast, costMark, useLearned } from "./RouteWhy.js";
@@ -2262,6 +2262,57 @@ function Notice({ ev, icon: I, tone = "", children }: { ev: SessionEvent; icon: 
         <I className="size-3.5 shrink-0" />
       </CheckpointIcon>
       <span className="cp-text">{children}</span>
+      <span className="cp-stamp">
+        <Stamp ev={ev} />
+      </span>
+    </Checkpoint>
+  );
+}
+
+/**
+ * A mistake agents were corrected for came back after they had been told (brain.ts): Friday offers the command that would catch
+ * it, run after every change in the repository from then on. One press each way; the answer is said in the session (and closes
+ * the Needs you item), so the card shows it once answered, wherever that was.
+ */
+function CheckOffer({ ev, ctx }: { ev: Ev<"brain.check.proposed">; ctx: Ctx }) {
+  const b = ev.body;
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const answered = ctx.events.some((e) => e.seq > ev.seq && e.body.type === "brain.check.answered" && e.body.entry === b.entry);
+  const answer = async (take: boolean) => {
+    setBusy(true);
+    setError("");
+    try {
+      await api(ctx.identity, `/api/brain/check?repo=${encodeURIComponent(b.repo)}&id=${encodeURIComponent(b.entry)}`, { method: "POST", body: JSON.stringify({ take }) });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Checkpoint className="cp-notice control check-offer">
+      <CheckpointIcon>
+        <ShieldCheckIcon className="size-3.5 shrink-0" />
+      </CheckpointIcon>
+      <span className="cp-text">
+        Agents were corrected {b.times === 2 ? "twice" : `${b.times} times`} on {b.repoName} for the same mistake, and it came back after they were told: {b.why}
+        {answered ? null : (
+          <>
+            {" "}
+            Add <code>{b.command}</code> as a check Friday runs after every change there?
+            <span className="check-offer-acts">
+              <button type="button" className="btn primary small" disabled={busy || !!ctx.replaying} onClick={() => void answer(true)}>
+                Add the check
+              </button>
+              <button type="button" className="btn ghost small" disabled={busy || !!ctx.replaying} onClick={() => void answer(false)}>
+                No
+              </button>
+            </span>
+            {error && <span className="check-offer-error">{error}</span>}
+          </>
+        )}
+      </span>
       <span className="cp-stamp">
         <Stamp ev={ev} />
       </span>
@@ -5188,6 +5239,25 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
       return (
         <Notice ev={ev} icon={BrainIcon} tone="control">
           Briefed on {b.repo}: {b.count} thing{b.count === 1 ? "" : "s"} learned{tools} in {b.sessions} earlier session{b.sessions === 1 ? "" : "s"}
+        </Notice>
+      );
+    }
+    case "brain.check.proposed":
+      return <CheckOffer ev={ev as Ev<"brain.check.proposed">} ctx={ctx} />;
+    case "brain.check.answered": {
+      const offer = ctx.events.findLast((e) => e.seq < ev.seq && e.body.type === "brain.check.proposed" && e.body.entry === b.entry);
+      const command = offer?.body.type === "brain.check.proposed" ? offer.body.command : "the check";
+      return (
+        <Notice ev={ev} icon={b.take ? ShieldCheckIcon : XIcon} tone="control">
+          {b.take ? (
+            <>
+              {who} added <code>{command}</code>: Friday runs it after every change in this repository
+            </>
+          ) : (
+            <>
+              {who} said no to <code>{command}</code>
+            </>
+          )}
         </Notice>
       );
     }

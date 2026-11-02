@@ -59,6 +59,8 @@ export interface NeedsDeps {
   /** A command in a session, as the person (SessionCore.handle). */
   handle: (sid: string, me: Me, cmd: Command) => Promise<{ ok: boolean; error?: string }>;
   suggester: Suggester;
+  /** Project memory (brain.ts): the answer to a check Friday offered after a mistake came back. */
+  checks?: { answer(wid: string, me: Me, repo: string, entry: string, take: boolean): Promise<unknown> };
   /** Hosted Crew: the workspace's asks, and a keeper's answer to one. */
   crew?: { asks(wid: string): Promise<CrewAskLike[]>; answer(wid: string, me: Me, id: string, take: boolean, note?: string): Promise<unknown> };
 }
@@ -73,6 +75,7 @@ type Act =
   | { do: "retry"; sid: string; lane: string; text: string }
   | { do: "resume"; sid: string; lane: string; at: number }
   | { do: "crew"; ask: string }
+  | { do: "check"; repo: string; entry: string }
   | { do: "open" };
 
 /** An item as collected: the page's part, what answering it does, and what a model would read to suggest an answer. */
@@ -302,6 +305,23 @@ export function needsIn(state: SessionState, events: SessionEvent[], me: string,
       act: { do: "say", sid: state.id, lane: g.where.lane },
     });
   }
+  // A check Friday offered here after a mistake came back (brain.ts), for the session's owner, until it is answered.
+  if (state.ownerId === me) {
+    const answered = new Set(events.flatMap((e) => (e.body.type === "brain.check.answered" ? [e.body.entry] : [])));
+    for (const e of events) {
+      if (e.body.type !== "brain.check.proposed" || answered.has(e.body.entry)) continue;
+      const b = e.body;
+      out.push({
+        need: {
+          ...base({ seq: e.seq, lane: e.lane }, "check", "Friday", `Agents were corrected ${b.times === 2 ? "twice" : `${b.times} times`} on ${b.repoName} for the same mistake, and it came back after they were told: ${b.why} Add a check Friday runs after every change there: ${b.command}`),
+          choices: [{ label: "Add the check", value: "yes" }, { label: "No", value: "no" }],
+          free: false,
+          suggestion: { answer: "yes", reason: "A rule agents read didn't stop it; a command Friday runs will catch it.", by: "rule" },
+        },
+        act: { do: "check", repo: b.repo, entry: b.entry },
+      });
+    }
+  }
   return out;
 }
 
@@ -382,7 +402,7 @@ export class NeedsYou {
         states.set(sid, state);
         // The log is read only where something could be waiting: an item, a plan, a stopped run.
         const lanes = [MAIN_LANE, ...state.lanes.map((l) => l.id)];
-        const maybe = attentionIn(state, me.id).length > 0 || lanes.some((l) => state.options.planFirst || runOf(state, l).status === "error");
+        const maybe = attentionIn(state, me.id).length > 0 || lanes.some((l) => state.options.planFirst || runOf(state, l).status === "error") || (state.ownerId === me.id && !!state.checkOffers?.length);
         if (!maybe) return;
         const events = await this.d.store.events(sid).catch(() => [] as SessionEvent[]);
         found.push(...needsIn(state, events, me.id));
@@ -488,6 +508,10 @@ export class NeedsYou {
           break;
         case "crew":
           await this.d.crew!.answer(wid, me, a.ask, choice ? answer === "yes" : true, choice ? undefined : text);
+          break;
+        case "check":
+          if (!this.d.checks) return { ok: false, status: 400, error: "Open it to answer." };
+          await this.d.checks.answer(wid, me, a.repo, a.entry, answer === "yes");
           break;
         case "open":
           return { ok: false, status: 400, error: "Open it to answer." };

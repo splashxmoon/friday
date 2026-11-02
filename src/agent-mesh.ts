@@ -450,6 +450,28 @@ export const TEAMMATE_TOOL: MeshToolDef = {
   annotations: { destructiveHint: false, openWorldHint: false },
 };
 
+/**
+ * Project memory on purpose (org memory, 2026-10-31): the project brain (brain.ts) learns from each finished run by itself;
+ * these let any agent keep a lesson the moment it learns it, and look one up mid-task (a past fix for the error in front of
+ * it), for the repository this session works in. In both editions since 2026-11-02, where the brain now is too.
+ */
+export const LESSON_TOOLS: MeshToolDef[] = [
+  {
+    name: "save_lesson",
+    description:
+      "Keep a lesson in this repository's project memory, for every agent that works here later (any tool, any session): a decision and why, a pitfall and its fix (name the error message, so it is found again), a convention, a fact about the code. Short and specific. Never a key, token or password: name its environment variable instead.",
+    inputSchema: obj({ text: { type: "string", description: "The lesson, in a line or two." }, kind: { type: "string", enum: ["decision", "pitfall", "convention", "fact"], description: "What kind of lesson it is." } }, ["text"]),
+    annotations: { destructiveHint: false, openWorldHint: false },
+  },
+  {
+    name: "search_lessons",
+    description:
+      "Search this repository's project memory: what agents and people here learned before. Search it when you hit an error you don't recognise (paste the error message), before deciding something others may already have settled, or when the person says \"like last time\".",
+    inputSchema: obj({ query: { type: "string", description: "Words to look for: the error message, the area, the decision." } }, ["query"]),
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  },
+];
+
 
 /**
  * In a team, the lead's hand on the others (Arun, 2026-10-27: the OpenBot gap "lead interrupt/status tools"): stop a teammate's
@@ -584,6 +606,10 @@ export class AgentMesh {
    * true when that is what happened, and the usual hand-on to another agent is skipped. Set by the app.
    */
   teamSwitch: ((sid: string, lane: string) => Promise<boolean>) | null = null;
+  /** The checks people added for the repo a lane works in (brain.ts), run after a board task's own; `ran` counts each run. Set by the app. */
+  repoChecks: ((sid: string, lane: string) => Promise<RepoCheck[]>) | null = null;
+  /** save_lesson and search_lessons (LESSON_TOOLS): the repository's project memory. Set by the app. */
+  lessons: { call(sid: string, lane: string, name: string, args: Record<string, unknown>): Promise<MeshResult> } | null = null;
   /**
    * A board task the board couldn't hand to `lane` (its send refused): asked of whoever can let it go there instead, when there is
    * someone (the hosted service: a teammate on its keeper's own plan, asked of its keeper as a card). True when it was; the task
@@ -645,6 +671,7 @@ export class AgentMesh {
     if (this.appTools) l = { tools: [...l.tools, ...APP_TOOLS], instructions: `${l.instructions}${APP_INSTRUCTIONS}` };
     if (this.teammateTool && (await this.teammateTool.offered(sid).catch(() => false))) l = { ...l, tools: [...l.tools, TEAMMATE_TOOL] };
     if (this.skillTools && (await this.skillTools.offered(sid).catch(() => false))) l = { ...l, tools: [...l.tools, ...SKILL_TOOLS] };
+    if (this.lessons) l = { ...l, tools: [...l.tools, ...LESSON_TOOLS] };
     // A team's lead steers the others (steer_agent) and puts its board right (manage_task): offered in a team session, answered
     // for its lead only.
     if ((await this.store.state(sid).catch(() => null))?.options.team) l = { tools: [...l.tools, STEER_TOOL, BOARD_TOOL], instructions: `${l.instructions} If you lead the crew, steer_agent stops a teammate's turn or cuts in with new orders that reach it now, and manage_task cancels, retries or reassigns a board task.` };
@@ -783,6 +810,7 @@ export class AgentMesh {
         case "preview_screenshot":
           return previewShot(args);
         case "browser": return await browserCall(sid, args, signal, lane);
+        case "save_lesson": case "search_lessons": return this.lessons ? await this.lessons.call(sid, lane, name, args) : { output: "There's no project memory here.", isError: true };
         case "manage_teammate": return this.teammateTool ? await this.teammateTool.call(sid, lane, args) : { output: "There's no crew here.", isError: true };
         case "list_skills": case "use_skill": case "save_skill": return this.skillTools ? await this.skillTools.call(sid, lane, name, args) : { output: "There's no crew here.", isError: true };
         case "search_sessions": case "start_session": case "manage_automation": return this.appTools ? await this.appTools.call(sid, lane, name, args) : { output: "That isn't available here.", isError: true };
@@ -1560,8 +1588,9 @@ export class AgentMesh {
   /** A finished task is checked by another agent before it counts; one that changed nothing has nothing to check. */
   /**
    * A finished task's checks, run by Friday in its agent's folder (Arun, 2026-10-19: "find gaps"): the task's own command, the
-   * board's, or the project's typecheck. True when it may go on to review (passed, or nothing could be run); false when it
-   * went back to its agent with what failed, or, after MAX_REWORK, to the lead as blocked.
+   * board's, or the project's typecheck, then each check people added for the repo after agents kept making one mistake
+   * (`repoChecks`, brain.ts). True when it may go on to review (all passed, or nothing could be run); false when it went back
+   * to its agent with what failed, or, after MAX_REWORK, to the lead as blocked.
    */
   async runChecks(sid: string, id: string): Promise<boolean> {
     if (!this.repo) return true;
@@ -1578,22 +1607,27 @@ export class AgentMesh {
       const files = [...t.owns, ...(state.diffs[lane]?.files ?? []).map((f) => f.path)];
       command = ownTestCommand(state.board.check, await pkg(), testsFor(files, shellLines(listed))) || command;
     }
-    if (!command) return true;
-    await this.store.append(sid, FRIDAY, { type: "board.checking", id, lane, command }, { lane });
-    const out = await this.repo(sid, lane, { op: "shell", command, timeoutSec: CHECK_SECONDS } as RepoCall).catch((e: Error) => `Couldn't run it: ${e.message}`);
-    const verdict = checkVerdict(out);
-    const output = clip(out ?? "", 4000);
-    await this.store.append(sid, FRIDAY, { type: "board.checked", id, lane, command, ok: verdict !== "failed", output, ...(verdict === "skipped" ? { skipped: true } : {}) }, { lane });
-    if (verdict !== "failed") return true;
-    const after = (await this.store.state(sid)).board?.tasks.find((x) => x.id === id);
-    if (!after) return false;
-    if (after.rounds > MAX_REWORK) {
-      await this.store.append(sid, FRIDAY, { type: "board.finished", id, lane, name: after.name ?? "", status: "blocked", report: `Its checks failed ${after.rounds} times; the last run of \`${command}\`:\n${clip(out ?? "", 1500)}` }, { lane });
-      await this.reportBoard(sid, true);
+    const added = (await this.repoChecks?.(sid, lane).catch(() => [])) ?? [];
+    const runs: RepoCheck[] = [...(command ? [{ command }] : []), ...added.filter((c) => c.command !== command)];
+    for (const c of runs) {
+      await this.store.append(sid, FRIDAY, { type: "board.checking", id, lane, command: c.command }, { lane });
+      const out = await this.repo(sid, lane, { op: "shell", command: c.command, timeoutSec: CHECK_SECONDS } as RepoCall).catch((e: Error) => `Couldn't run it: ${e.message}`);
+      const verdict = checkVerdict(out);
+      await this.store.append(sid, FRIDAY, { type: "board.checked", id, lane, command: c.command, ok: verdict !== "failed", output: clip(out ?? "", 4000), ...(verdict === "skipped" ? { skipped: true } : {}) }, { lane });
+      if (verdict !== "skipped") await c.ran?.(verdict === "failed").catch(() => undefined);
+      if (verdict !== "failed") continue;
+      const after = (await this.store.state(sid)).board?.tasks.find((x) => x.id === id);
+      if (!after) return false;
+      if (after.rounds > MAX_REWORK) {
+        await this.store.append(sid, FRIDAY, { type: "board.finished", id, lane, name: after.name ?? "", status: "blocked", report: `Its checks failed ${after.rounds} times; the last run of \`${c.command}\`:\n${clip(out ?? "", 1500)}` }, { lane });
+        await this.reportBoard(sid, true);
+        return false;
+      }
+      const why = c.why ? `This check was added because agents kept getting this wrong: ${c.why}\n\n` : "";
+      await this.send(sid, state.board!.fromLane, { to: after.name ?? laneName(state, lane), text: `Friday ran \`${c.command}\` in your folder after you finished "${after.title}", and it failed:\n\n${clip(out ?? "", 3000)}\n\n${why}Fix it, then end your turn with a short report as before. It runs again when you do.`, kind: "task", board: id, system: true });
       return false;
     }
-    await this.send(sid, state.board!.fromLane, { to: after.name ?? laneName(state, lane), text: `Friday ran \`${command}\` in your folder after you finished "${after.title}", and it failed:\n\n${clip(out ?? "", 3000)}\n\nFix it, then end your turn with a short report as before. It runs again when you do.`, kind: "task", board: id, system: true });
-    return false;
+    return true;
   }
 
   /**
@@ -2734,6 +2768,13 @@ export function ownTestCommand(suite: string, pkg: string | null, tests: string[
 }
 
 /** How a check's run went, from the shell's answer: passed, failed, or not run at all (a Manual machine, offline, timed out). */
+/** A check Friday runs after an agent's change: its command, the mistake it was added to catch, and where its runs are counted. */
+export interface RepoCheck {
+  command: string;
+  why?: string;
+  ran?: (failed: boolean) => Promise<void>;
+}
+
 export function checkVerdict(out: string | null): "passed" | "failed" | "skipped" {
   if (!out) return "skipped";
   const status = out.match(/^\$ [^\n]*\n\((exited \S+|timed out[^)]*)\)/);

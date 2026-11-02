@@ -204,6 +204,8 @@ export interface SessionState {
   hub: HubState | null;
   /** The done condition somebody set for an agent's work, and how the turns since have read against it (goal.ts). */
   goal: GoalState | null;
+  /** Checks Friday offered here after a mistake came back (brain.ts), by project memory entry, not answered yet: Needs you reads these. */
+  checkOffers?: string[];
   /**
    * A folder somebody uploaded, unpacked on the server as a working copy.
    *
@@ -867,6 +869,12 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       break;
     case "hub.merged":
       if (s.hub?.id === b.id) s.hub.status = "merging";
+      break;
+    case "brain.check.proposed":
+      s.checkOffers = [...(s.checkOffers ?? []).filter((x) => x !== b.entry), b.entry];
+      break;
+    case "brain.check.answered":
+      s.checkOffers = (s.checkOffers ?? []).filter((x) => x !== b.entry);
       break;
     case "goal.set":
       s.goal = { text: b.text, ...(b.check ? { check: b.check } : {}), ...(b.due ? { due: b.due } : {}), lane: ev.lane ?? MAIN_LANE, by: { id: ev.actor.id, name: ev.actor.name }, seq: ev.seq, checks: 0, nudges: 0 };

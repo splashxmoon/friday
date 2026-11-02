@@ -259,6 +259,10 @@ Point a session at a folder, choose the branch it works on, or have it start a n
 
 Hand your coding tools the jobs that come round again. An automation reads like a sentence: **when** (on a schedule, when its webhook is called, when an agent finishes or fails in a session, or only when you press Run now), **who** (a coding tool, or several that split the work on a board), **where** (a folder, worked on in its own copy so yours stays put), **what** it does, and **then** (open a pull request, tell you). Each run is a session of its own you can open, read and review like any other, and a daily cap keeps a busy trigger in check.
 
+## Project memory: agents that learn from being corrected
+
+When a run finishes, the coding tool that did it (Claude Code on its small, fast model) reads it once more for what the next agent in that repository should know: a decision and why, a pitfall and its fix, a convention. When you correct an agent, the run that fixes it is kept as a correction, and every agent that starts in that repository afterwards is told it first, whichever tool it is. If the same mistake comes back after agents were told, Friday offers a command that would catch it (one that only reads or tests), and once you add it, runs it after every change there and sends a failure back to the agent. A lesson no agent has needed in 60 days, or one a run found out of date, is retired. Read, edit, pin or bring back lessons, or turn learning off, in Settings › Memory. It all stays in Friday's folder on your computer.
+
 <p align="center">
   <img src="docs/assets/automations.png" alt="The Automations page: a webhook that triages new issues, a weekday flaky-test sweep with Claude Code leading Codex, and a nightly dependency bump with Codex" width="960" />
 </p>

@@ -944,7 +944,7 @@ export type EventBody =
   | { type: "member.removed"; userId: string; name: string }
   | { type: "link.updated"; role: LinkRole; enabled: boolean; version: number }
   // Human → agent. Only the driver can append these.
-  | { type: "instruction"; text: string; interrupt: boolean; /** The people it @-mentions, by id (mentions.ts). */ mentions?: string[]; fromSuggestion?: number; attachments?: Attachment[]; handoff?: Handoff; /** A message from another session's agent (peers.ts). */ peer?: PeerNote; /** A message from another agent in this session (agent-mesh.ts). */ mesh?: MeshNote; /** Answers an `engine.approval`: the driver said yes or no to it. */ approval?: { id: string; approve: boolean }; /** An edit of a message still queued: this one takes its place in the queue, and that one is taken back. */ replaces?: number; /** Friday telling a coding tool whose turn ended short of its task to carry on (keep-going.ts). */ keepGoing?: true; /** A reply in a side thread on an earlier message (by its seq): its answer stays in the thread, not the room's main flow. */ thread?: { root: number }; /** Posted by an app on the person's behalf (Friday's token API or MCP, `sessions:write`), not typed by them: capped like a teammate's (Security R3). */ via?: "api"; /** Friday's own message carrying on what agents set going (a wake, a carry-on): how many agent-to-agent steps led to it, so the turn it starts counts on from there rather than from nothing (agent-mesh behindRun). */ hop?: number; /** A turn of its own: never handed to a turn under way, since its answer is read from the turn it starts. */ ownTurn?: true }
+  | { type: "instruction"; text: string; interrupt: boolean; /** The people it @-mentions, by id (mentions.ts). */ mentions?: string[]; fromSuggestion?: number; attachments?: Attachment[]; handoff?: Handoff; /** A message from another session's agent (peers.ts). */ peer?: PeerNote; /** A message from another agent in this session (agent-mesh.ts). */ mesh?: MeshNote; /** Answers an `engine.approval`: the driver said yes or no to it. */ approval?: { id: string; approve: boolean }; /** An edit of a message still queued: this one takes its place in the queue, and that one is taken back. */ replaces?: number; /** Friday telling a coding tool whose turn ended short of its task to carry on (keep-going.ts). */ keepGoing?: true; /** A reply in a side thread on an earlier message (by its seq): its answer stays in the thread, not the room's main flow. */ thread?: { root: number }; /** Posted by an app on the person's behalf (Friday's token API or MCP, `sessions:write`), not typed by them: capped like a teammate's (Security R3). */ via?: "api"; /** Friday's own message carrying on what agents set going (a wake, a carry-on): how many agent-to-agent steps led to it, so the turn it starts counts on from there rather than from nothing (agent-mesh behindRun). */ hop?: number; /** A turn of its own: never handed to a turn under way, since its answer is read from the turn it starts. */ ownTurn?: true; /** Friday's: a check the project added (brain.ts) failed after this agent's change; the command. */ check?: string }
   /**
    * An agent in Manual mode wants to do something it may not do unasked.
    *
@@ -1250,6 +1250,13 @@ export type EventBody =
   | { type: "resume.cancelled"; why?: string }
   /** An agent on this lane was briefed from the project brain: what the team learned on this repo in earlier sessions. */
   | { type: "brain.briefed"; repo: string; count: number; sessions: number; tools: string[] }
+  /**
+   * A mistake agents were corrected for here came back after they had been told about it (brain.ts offersCheck): Friday offers
+   * the command that would catch it, run after every change in the repo. `entry` is the correction in project memory.
+   */
+  | { type: "brain.check.proposed"; repo: string; repoName: string; entry: string; command: string; why: string; times: number }
+  /** The person's answer to that offer: added (Friday runs it from now on) or not. */
+  | { type: "brain.check.answered"; entry: string; take: boolean }
   /** The session now belongs to another workspace: its owner brought it into a team to work on it together. */
   | { type: "session.moved"; workspaceId: string; workspaceName: string }
   /**

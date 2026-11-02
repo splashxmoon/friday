@@ -40,10 +40,13 @@ import { applyPrStatus, boardCards, sortCards, summaryOf, waitingOn, weekOf, typ
 import { cliLlm } from "./builder-cli.js";
 import { NeedsYou } from "./needs-you.js";
 import { AgentMesh } from "./agent-mesh.js";
+import { CHECK_SECONDS, checkVerdict, type RepoCheck } from "./agent-mesh.js";
 import { Hubs } from "./hubs.js";
 import type { Limits } from "./runner/limits.js";
 import type { MachineTool, SessionOptionsPatch } from "./types.js";
 import type { ToolOption, ToolWindow } from "./routing.js";
+import { AFTER_RUN_TRIES, BRIEF_BUDGET, BrainRegistry, clipText, correctionOf, extractLessons, pickBrief, repoKeyOf, repoNameOf, type BrainEntry, type BrainKind } from "./brain.js";
+import { MIN_TOOL_CALLS, transcriptOf } from "./decision-log.js";
 import { runawayIn } from "./runaway.js";
 import { dailyBriefs, type CrewInput, type DailyBrief } from "./daily-brief.js";
 import { fromGh, fromGithubApi, rerequestReview, statusOf, type PrStatus } from "./github-status.js";
@@ -280,6 +283,11 @@ export interface AppOptions {
   /** Where attachments are stored. */
   dataDir?: string;
   /**
+   * The project brain (brain.ts): each finished run read for what it taught, briefings, offered checks. One more model call per
+   * run, so it is asked for: the server and the open-source app turn it on.
+   */
+  decisionLog?: boolean;
+  /**
    * Public base URL, used as the OAuth redirect target when connecting an MCP
    * server. Set it to the deployed origin, or a provider will send people back
    * to a localhost that isn't theirs.
@@ -352,6 +360,8 @@ export async function createApp(o: AppOptions) {
       const [events, state] = await Promise.all([store.events(sid), store.state(sid)]);
       for (const id of threadsToSettle(events, state.threads, lane)) await store.append(sid, { id: "system", name: "System", kind: "system" }, { type: "thread.resolved", id, auto: { lane } });
     })().catch((e) => closingOr("[threads]", e));
+    if (o.decisionLog) void learnFromRun(sid, lane).catch((e) => console.error("[brain]", e));
+    if (o.decisionLog) void checkAfterRun(sid, lane).catch((e) => closingOr("[checks]", e));
     // A hub's task, or the main lane's conflict work for one (hubs.ts): the hub moves on.
     void hubs.onRunEnded(sid, lane).catch((e) => closingOr("[hub]", e));
     // A question another agent asked this one, answered with what it said last (agent-mesh.ts).
@@ -552,6 +562,7 @@ export async function createApp(o: AppOptions) {
    */
   interface Tenant {
     skills: SkillRegistry;
+    brain: BrainRegistry;
   commands: CommandRegistry;
     templates: TemplateRegistry;
   }
@@ -564,6 +575,7 @@ export async function createApp(o: AppOptions) {
       const skills = new SkillRegistry(redis, p);
       t = {
         skills,
+        brain: new BrainRegistry(redis, p),
         commands: new CommandRegistry(redis, p),
         templates: new TemplateRegistry(redis, p),
       };
@@ -739,6 +751,178 @@ export async function createApp(o: AppOptions) {
   const runtime = new AgentRuntime(store, bus, llm, o.tools ?? defaultTools, { mesh, readRepo: openFolder, resolveFiles: (sid, atts) => resolveAttachments(files, sid, atts), works: (s) => isOwnModel(s.options.model) });
   /** Only a model of your own, and only chosen by you: there is nothing else for Friday Code to run on here. */
   const allowedModel = async (_workspaceId: string, model: string, actorId?: string): Promise<string> => (isOwnModel(model) && ownModelParts(model)?.owner === actorId ? model : "");
+
+  // ── the project brain (brain.ts), in both editions since 2026-11-02 ──
+
+  /** Which repo a session's lane works on, asked of its folder once and remembered for the session. */
+  const repoKeys = new Map<string, { key: string; name: string } | null>();
+  async function repoFor(sid: string, lane: string, state: SessionState): Promise<{ key: string; name: string } | null> {
+    const cacheKey = `${sid}|${lane}`;
+    if (repoKeys.has(cacheKey)) return repoKeys.get(cacheKey)!;
+    const engine = state.engines[lane] ?? Object.values(state.engines).find((e) => e.cwd);
+    let remote: { url?: string; github?: string | null } | null = null;
+    try {
+      const out = (await openFolder(sid, { op: "remote" }, engine ? lane : undefined)).output;
+      if (out.trim().startsWith("{")) remote = JSON.parse(out) as { url?: string; github?: string | null };
+    } catch {
+      /* no folder to ask: its name will do */
+    }
+    const found = repoKeyOf(remote, engine?.cwd ?? state.upload?.name ?? null);
+    if (repoKeys.size > 2000) repoKeys.clear();
+    repoKeys.set(cacheKey, found);
+    return found;
+  }
+
+
+  /**
+   * Who reads a run for what it taught, without spending what isn't the workspace's to spend: the session's own model when
+   * it has one; Friday's model where the plan has one; on Solo, the person's own default model, or else their own coding
+   * tool, asked once on their computer. In the open-source edition, the session's own model or else that coding tool.
+   */
+  async function learnerFor(state: SessionState, lane: string): Promise<{ llm: LLM; model?: string } | null> {
+    if (isOwnModel(state.options.model)) return { llm, model: state.options.model };
+    const tool = state.engines[lane]?.tool;
+    if (!tool) return null;
+    const owner = state.ownerId;
+    return {
+      llm: cliLlm(async (q) => {
+        // A lesson read from a run is a small job: Claude Code's fast model, not whatever the account runs by default (2026-10-31: usage).
+        const params = { tool, system: q.system, prompt: q.prompt, ...(tool === "claude" ? { model: "haiku" } : {}) };
+        return (await callHost("ask", params, { serverUrl: selfUrl, user: { id: owner, name: "" }, runners: localRunners })) as { text: string };
+      }),
+    };
+  }
+
+  /**
+   * After any run that ended well, by any agent: what it taught, into the project brain for its repo, and into the session's
+   * own notes as before (the digest and the pull request read those). Once per run, whichever node sees it end. A run that began
+   * with a correction (brain.ts correctionOf) is read as the fix of a mistake, which becomes a rule; what the run found out of
+   * date is retired; and a mistake back again after agents were told is offered as a check, here in the session.
+   */
+  async function learnFromRun(sid: string, lane: string): Promise<void> {
+    const [state, events] = await Promise.all([store.state(sid), store.events(sid)]);
+    const ws = workspaceOf(state);
+    if (!ws) return;
+    const brain = tenant(ws).brain;
+    if (!(await brain.enabled())) return;
+    const onLane = (e: SessionEvent) => (e.lane ?? MAIN_LANE) === lane;
+    const end = events.findLast((e) => onLane(e) && e.body.type === "run.ended");
+    if (!end || end.body.type !== "run.ended" || end.body.outcome !== "done") return;
+    const before = events.findLast((e) => e.seq < end.seq && onLane(e) && e.body.type === "run.ended");
+    const { text, tools } = transcriptOf(events, lane, before?.seq ?? 0);
+    const began = before ? correctionOf(events, lane, before.seq) : "";
+    // A fix can be small: a run that began with a correction is read however few tools it used.
+    if ((tools < MIN_TOOL_CALLS && !began) || !text.trim()) return;
+    if (!(await redis.set(`${o.prefix}brain-run:${sid}:${end.seq}`, "1", "EX", 3600, "NX"))) return;
+    const reader = await learnerFor(state, lane);
+    if (!reader) return;
+    const repo = await repoFor(sid, lane, state);
+    const known = repo ? (await brain.list(repo.key)).filter((e) => !e.retired).sort((a, b) => Number(b.kind === "correction") - Number(a.kind === "correction") || b.uses - a.uses) : [];
+    const { lessons, stale } = await extractLessons(reader.llm, text, AbortSignal.timeout(180_000), reader.model, { known, ...(began ? { began } : {}) });
+    // No correction in how it began, no correction to keep: the model doesn't get to call an ordinary run a mistake.
+    const kept = began ? lessons : lessons.map((l) => (l.kind === "correction" ? { ...l, kind: "pitfall" as const, check: undefined } : l));
+    if (!kept.length && !stale.length) return;
+    // Into the brain when the run had a repo; a session with no folder still keeps its own notes below.
+    const engine = state.engines[lane];
+    const name = engine?.tool ? `${engine.hostName}'s ${ENGINE_NAMES[engine.tool]}` : (state.options.agent?.name ?? "Friday Code");
+    if (repo) {
+      const offered: BrainEntry[] = [];
+      if (kept.length) await brain.learn(repo.key, repo.name, kept, { tool: engine?.tool ?? "friday", name, sid, title: state.title }, offered);
+      await brain.retire(repo.key, stale.map((x) => ({ ...x, why: `${x.why} (found by ${name}${state.title ? ` in “${state.title}”` : ""})` })));
+      for (const e of offered) await store.append(sid, FRIDAY, { type: "brain.check.proposed", repo: repo.key, repoName: repo.name, entry: e.id, command: e.check!.command, why: e.text, times: e.seen ?? 2 }, { lane });
+    }
+    const have = new Set(events.flatMap((e) => (e.body.type === "memory.saved" ? [e.body.text] : [])));
+    for (const l of kept) if (!have.has(l.text)) await store.append(sid, FRIDAY, { type: "memory.saved", key: l.key, text: l.text, auto: true, at: end.seq }, { lane });
+  }
+
+  /**
+   * A person's answer to a check Friday offered (brain.ts), from the session's card, Needs you or the project memory page: kept,
+   * and said in the session it was offered in, so its card there and its Needs you item close wherever it was answered.
+   */
+  async function answerCheck(wid: string, me: { id: string; name: string }, repo: string, id: string, take: boolean): Promise<BrainEntry> {
+    const entry = await tenant(wid).brain.answerCheck(repo, id, take, me.name);
+    const at = entry.check?.sid;
+    if (at && (await store.exists(at))) {
+      const events = await store.events(at);
+      const offer = events.findLast((e) => e.body.type === "brain.check.proposed" && e.body.entry === id);
+      if (offer && !events.some((e) => e.seq > offer.seq && e.body.type === "brain.check.answered" && e.body.entry === id)) {
+        await store.append(at, { id: me.id, name: me.name, kind: "human" }, { type: "brain.check.answered", entry: id, take }, { lane: offer.lane ?? MAIN_LANE });
+      }
+    }
+    return entry;
+  }
+
+  /** The checks people added for the repo `lane` works in (brain.ts), each counting its runs; none where learning is off. */
+  async function repoChecksFor(sid: string, lane: string): Promise<RepoCheck[]> {
+    const state = await store.state(sid);
+    const ws = workspaceOf(state);
+    if (!ws) return [];
+    const brain = tenant(ws).brain;
+    if (!(await brain.enabled())) return [];
+    const repo = await repoFor(sid, lane, state);
+    if (!repo) return [];
+    return (await brain.checks(repo.key)).map((c) => ({ command: c.command, why: c.why, ran: (failed: boolean) => brain.checkRan(repo.key, c.id, failed) }));
+  }
+
+  /**
+   * After a turn that changed files outside a board (a board task runs them with its own checks, AgentMesh.runChecks), the
+   * checks people added for the repo, in the agent's folder: the first that fails goes back to the agent with its output, as a
+   * rule that is run rather than read ("back up your rules with scripts"). At most AFTER_RUN_TRIES in a row before it's left to
+   * the person, who sees each failure in the session.
+   */
+  async function checkAfterRun(sid: string, lane: string): Promise<void> {
+    const events = await store.events(sid);
+    const onLane = (e: SessionEvent) => (e.lane ?? MAIN_LANE) === lane;
+    const end = events.findLast((e) => onLane(e) && e.body.type === "run.ended");
+    if (!end || end.body.type !== "run.ended" || end.body.outcome !== "done") return;
+    const state = await store.state(sid);
+    if (state.board?.tasks.some((t) => t.lane === lane && (t.status === "claimed" || t.status === "review"))) return;
+    const checks = await repoChecksFor(sid, lane);
+    if (!checks.length || !mesh.repo) return;
+    // The turn's change set is logged as it ends, a moment either side of run.ended: read again once it has landed.
+    await new Promise((r) => setTimeout(r, 3000));
+    const now = await store.events(sid);
+    const start = now.findLast((e) => e.seq < end.seq && onLane(e) && e.body.type === "run.started");
+    if (!now.some((e) => e.seq > (start?.seq ?? 0) && onLane(e) && e.body.type === "agent.diff" && e.body.files.length)) return;
+    if (now.some((e) => e.seq > end.seq && onLane(e) && e.body.type === "run.started")) return;
+    if (!(await redis.set(`${o.prefix}repo-check:${sid}:${end.seq}`, "1", "EX", 3600, "NX"))) return;
+    // How many of the turns since a person last spoke here began with a failed check.
+    const since = now.findLast((e) => onLane(e) && e.body.type === "instruction" && e.actor.kind === "human")?.seq ?? 0;
+    const tries = now.filter((e) => e.seq > since && onLane(e) && e.body.type === "instruction" && !!e.body.check).length;
+    for (const c of checks) {
+      const out = await mesh.repo(sid, lane, { op: "shell", command: c.command, timeoutSec: CHECK_SECONDS } as RepoCall).catch((e: Error) => `Couldn't run it: ${e.message}`);
+      const verdict = checkVerdict(out);
+      if (verdict === "skipped") continue;
+      await c.ran?.(verdict === "failed").catch(() => undefined);
+      if (verdict === "passed") continue;
+      if (tries >= AFTER_RUN_TRIES) return;
+      const text = `[Friday] Friday ran \`${c.command}\` after your change, and it failed:\n\n${clipText(out ?? "", 3000)}\n\nThis check was added because agents kept getting this wrong here: ${c.why}\n\nFix it, then end your turn with a short report. It runs again when you do.`;
+      const sent = await store.append(sid, FRIDAY, { type: "instruction", text, interrupt: false, check: c.command }, { lane });
+      if (sent.ok) void bus.wake(sid, lane);
+      return;
+    }
+  }
+
+  /**
+   * What an agent starting on this lane is told from the brain, and a line in the session saying it was, the first time.
+   * Empty when the repo has taught nothing yet, or the workspace turned learning off.
+   */
+  async function briefFor(sid: string, lane: string, task: string): Promise<string> {
+    const state = await store.state(sid);
+    const ws = workspaceOf(state);
+    if (!ws) return "";
+    const brain = tenant(ws).brain;
+    // Nothing learned anywhere yet, or learning off: nothing to ask the folder about.
+    if (!(await brain.enabled()) || !(await brain.repos()).length) return "";
+    const repo = await repoFor(sid, lane, state);
+    const b = repo ? await brain.brief(repo.key, task) : null;
+    if (!repo || !b) return "";
+    const events = await store.events(sid);
+    if (!events.some((e) => e.body.type === "brain.briefed" && (e.lane ?? MAIN_LANE) === lane)) {
+      await store.append(sid, FRIDAY, { type: "brain.briefed", repo: repo.name, count: b.count, sessions: b.sessions, tools: b.tools }, { lane });
+    }
+    return b.text;
+  }
 
 
   /**
@@ -972,6 +1156,41 @@ export async function createApp(o: AppOptions) {
   // with that run reads offline in the sidebar and on the Board too, not only once the session is opened (EngineHub.reap). The
   // hosted service does it as each session is opened.
   const reapAtStart = o.local ? hub.reapAfterLeases(async () => (await store.mine(o.local!.user.id)).map((r) => r.sid)) : null;
+  if (o.decisionLog) hub.brief = briefFor;
+  // The checks people added after a mistake kept coming back (brain.ts), run after a board task's own (AgentMesh.runChecks).
+  if (o.decisionLog) mesh.repoChecks = repoChecksFor;
+  // save_lesson and search_lessons (agent-mesh.ts LESSON_TOOLS): any agent keeps a lesson in its repository's project memory the
+  // moment it learns it, and looks one up mid-task (org memory, 2026-10-31). The same brain the runs teach and the briefings read.
+  if (o.decisionLog)
+    mesh.lessons = {
+      call: async (sid, lane, name, args) => {
+        const state = await store.state(sid);
+        const ws = workspaceOf(state);
+        if (!ws) return { output: "This session isn't in a workspace, so there's no project memory here.", isError: true };
+        const brain = tenant(ws).brain;
+        if (!(await brain.enabled())) return { output: "Project memory is turned off here, so there's none to use.", isError: true };
+        const repo = await repoFor(sid, lane, state);
+        if (!repo) return { output: "This session has no repository, so there's no project memory for it.", isError: true };
+        if (name === "search_lessons") {
+          const chosen = pickBrief(await brain.list(repo.key), str(args.query, 500), 1_600);
+          if (!chosen.length) return { output: `Nothing in ${repo.name}'s project memory matches that yet.` };
+          return { output: `From ${repo.name}'s project memory:\n${chosen.map((e) => `- [${e.kind}] ${e.text} (${e.from.name}${e.from.title ? `, "${e.from.title}"` : ""})`).join("\n")}` };
+        }
+        const text = str(args.text, 400);
+        if (text.length < 3) return { output: "Say the lesson in a line or two.", isError: true };
+        const kinds = ["decision", "pitfall", "convention", "fact"] as const;
+        const kind = kinds.find((k) => k === args.kind) ?? "fact";
+        const engine = state.engines[lane];
+        const by = engine?.tool ? `${engine.hostName}'s ${ENGINE_NAMES[engine.tool]}` : (state.options.agent?.name ?? "Friday Code");
+        try {
+          const [kept] = await brain.learn(repo.key, repo.name, [{ key: text.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40), kind, text }], { tool: engine?.tool ?? "friday", name: by, sid, title: state.title });
+          if (!kept) return { output: "That looks like a key or password, so it wasn't kept. Name its environment variable instead.", isError: true };
+          return { output: `Kept in ${repo.name}'s project memory as a ${kind}. Every agent working on ${repo.name} will be told it when it bears on their task.` };
+        } catch (e) {
+          return { output: (e as Error).message, isError: true };
+        }
+      },
+    };
   hub.mesh = mesh;
   hub.learned = learnedFor;
   /** Machines people have linked to this Friday, so a hosted one can reach their CLIs. */
@@ -1079,7 +1298,7 @@ export async function createApp(o: AppOptions) {
     let ask: ((q: { system: string; prompt: string }) => Promise<{ text: string }>) | null = tool ? (q) => callHost("ask", { tool, system: q.system, prompt: q.prompt, ...(tool === "claude" ? { model: "haiku" } : {}) }, { serverUrl: selfUrl, user: { id: me.id, name: "" }, runners: localRunners }) as Promise<{ text: string }> : null;
     return ask ? { llm: cliLlm(ask) } : null;
   };
-  const needsYou = new NeedsYou({ store, redis, prefix: o.prefix, handle: (sid, me, cmd) => core.handle(sid, me, cmd), suggester: suggestWith });
+  const needsYou = new NeedsYou({ store, redis, prefix: o.prefix, handle: (sid, me, cmd) => core.handle(sid, me, cmd), suggester: suggestWith, ...(o.decisionLog ? { checks: { answer: (wid, me, repo, entry, take) => answerCheck(wid, me, repo, entry, take) } } : {}) });
   // The daily brief and standup (daily-brief.ts): each person's morning and evening across everything they have going, from the
   // logs. The Crew's places come from the edition's own Crew (set below with the teammates, or the hosted one's).
   let briefCrew: (wid: string, me: { id: string; name: string }) => Promise<(CrewInput & { away: boolean }) | null> = async () => null;
@@ -3697,6 +3916,52 @@ export async function createApp(o: AppOptions) {
 
 
 
+    // The project brain (brain.ts): what the workspace has learned per repo, for its page. Anyone in the workspace reads and
+    // tends it, as they would a team wiki; the repo is a query parameter, since its key has slashes in it.
+    if (url.pathname === "/api/brain" || url.pathname.startsWith("/api/brain/")) {
+      const ctx = await context(req);
+      if (!ctx) return json(res, 401, { error: "Sign in first." });
+      const brain = ctx.t.brain;
+      const repo = str(url.searchParams.get("repo"), 300);
+      const kind = (v: unknown) => (["correction", "decision", "pitfall", "convention", "fact"].includes(String(v)) ? (String(v) as BrainKind) : undefined);
+      try {
+        if (req.method === "GET" && url.pathname === "/api/brain") return json(res, 200, { enabled: await brain.enabled(), repos: await brain.repos() });
+        if (req.method === "POST" && url.pathname === "/api/brain/settings") {
+          const b = await readJson(req);
+          await brain.setEnabled(b.enabled !== false);
+          return json(res, 200, { enabled: b.enabled !== false });
+        }
+        if (!repo) return json(res, 400, { error: "Which repo?" });
+        if (req.method === "GET" && url.pathname === "/api/brain/entries") return json(res, 200, { entries: await brain.list(repo) });
+        // What an agent starting here on `task` would be told, for the page to show; looking doesn't count as a briefing.
+        if (req.method === "GET" && url.pathname === "/api/brain/brief") {
+          const chosen = pickBrief(await brain.list(repo), str(url.searchParams.get("task"), 500));
+          return json(res, 200, { ids: chosen.map((e) => e.id), used: chosen.reduce((s, e) => s + e.text.length + 4, 0), budget: BRIEF_BUDGET });
+        }
+        if (req.method === "POST" && url.pathname === "/api/brain/entries") {
+          const b = await readJson(req);
+          const name = (await brain.repos()).find((r) => r.key === repo)?.name ?? repoNameOf(repo);
+          return json(res, 201, { entry: await brain.add(repo, name, { text: String(b.text ?? ""), ...(kind(b.kind) ? { kind: kind(b.kind)! } : {}) }, ctx.me) });
+        }
+        const id = str(url.searchParams.get("id"), 20);
+        if (url.pathname === "/api/brain/entry" && id && req.method === "PATCH") {
+          const b = await readJson(req);
+          return json(res, 200, { entry: await brain.update(repo, id, { ...(typeof b.text === "string" ? { text: b.text } : {}), ...(kind(b.kind) ? { kind: kind(b.kind)! } : {}), ...(typeof b.pinned === "boolean" ? { pinned: b.pinned } : {}), ...(b.restore === true ? { restore: true } : {}) }) });
+        }
+        // An offered check: added (Friday runs it after agents change files here) or not; and an added one taken off.
+        if (url.pathname === "/api/brain/check" && id && req.method === "POST") {
+          const b = await readJson(req);
+          return json(res, 200, { entry: await answerCheck(ctx.workspace.id, ctx.me, repo, id, b.take === true) });
+        }
+        if (url.pathname === "/api/brain/entry" && id && req.method === "DELETE") {
+          await brain.remove(repo, id);
+          return json(res, 200, { ok: true });
+        }
+        return json(res, 404, { error: "Not found" });
+      } catch (err) {
+        return json(res, 400, { error: (err as Error).message });
+      }
+    }
 
     // Saved commands: a prompt the team keeps and runs with /name.
     if (url.pathname === "/api/commands" || url.pathname.startsWith("/api/commands/")) {

@@ -40,7 +40,9 @@ export type NeedKind =
   /** A pull request waiting on your review (from your computer's GitHub, added by the page). */
   | "review"
   /** A goal you set that is at risk (goals.ts): carry on, or re-plan. */
-  | "goal";
+  | "goal"
+  /** A mistake agents were corrected for came back after they were told (brain.ts): add the check Friday offers, or not. */
+  | "check";
 
 export interface NeedChoice {
   label: string;
@@ -103,7 +105,7 @@ export interface Blocks {
 }
 
 /** How much each kind stops by itself: an agent asking first is stopped dead; a mention is somebody's word to read. */
-const BASE: Record<NeedKind, number> = { approval: 40, question: 40, ask: 40, plan: 40, held: 35, crew: 30, control: 25, review: 20, limit: 20, goal: 30, handover: 15, stopped: 15, mention: 5 };
+const BASE: Record<NeedKind, number> = { approval: 40, question: 40, ask: 40, plan: 40, held: 35, crew: 30, control: 25, review: 20, limit: 20, goal: 30, check: 10, handover: 15, stopped: 15, mention: 5 };
 
 /** "4m", "2h", "3d". */
 export function waitedText(ms: number): string {

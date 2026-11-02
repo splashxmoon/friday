@@ -24,7 +24,7 @@ import "./needs-you.css";
 const EVERY_MS = 10_000;
 
 /** Whose face a row wears, and the words before what is asked. */
-const LEAD: Record<Need["kind"], string> = { question: "asks", ask: "asks", approval: "wants your OK", plan: "wants your OK on a plan", held: "sent a message", control: "wants control", handover: "handed you a session", stopped: "stopped", mention: "mentioned you", limit: "is out of usage", crew: "asked your teammate", review: "asked for your review", goal: "says a goal is slipping" };
+const LEAD: Record<Need["kind"], string> = { question: "asks", ask: "asks", approval: "wants your OK", plan: "wants your OK on a plan", held: "sent a message", control: "wants control", handover: "handed you a session", stopped: "stopped", mention: "mentioned you", limit: "is out of usage", crew: "asked your teammate", review: "asked for your review", goal: "says a goal is slipping", check: "suggests a check" };
 
 export function NeedsYou({ identity, recents, onReview, onCrew }: { identity: Identity; recents: RecentSession[]; onReview: () => void; onCrew?: () => void }) {
   const [items, setItems] = useState<Need[] | null>(null);

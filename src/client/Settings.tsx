@@ -13,6 +13,7 @@ import { Avatar, FridayMark, Icon } from "./icons.js";
 import type { Identity } from "./storage.js";
 import { Hint, Skeleton, SkeletonLines, barHeight } from "./ui.js";
 import { EngineMark } from "./BrandMarks.js";
+import { ProjectMemory } from "./ProjectMemory.js";
 import { OwnModelsSection } from "./OwnModels.js";
 import {
   AboutTab,
@@ -81,6 +82,14 @@ export const SECTIONS: SectionDef[] = [
     icon: "keyboard",
     blurb: "Every key that does something.",
     keywords: "keyboard keys hotkeys command",
+  },
+  {
+    id: "memory",
+    label: "Memory",
+    group: "You",
+    icon: "bulb",
+    blurb: "What your agents learned in each repository.",
+    keywords: "memory project lessons learned corrections checks brain remember forget",
   },
   {
     id: "computer",
@@ -376,6 +385,7 @@ export function SettingsPage({
             {current.id === "appearance" && <AppearanceTab />}
             {current.id === "notifications" && <NotificationsTab identity={identity} />}
             {current.id === "shortcuts" && <ShortcutsTab />}
+            {current.id === "memory" && <ProjectMemory identity={identity} />}
             {current.id === "computer" && <ComputerSection identity={identity} />}
             {current.id === "own-models" && <OwnModelsSection identity={identity} workspace={workspace} />}
             {current.id === "outside-agents" && <OutsideAgentsSection identity={identity} />}
