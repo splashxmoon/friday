@@ -40,6 +40,8 @@
 - **Runs on your machine.** No account and no model of its own. Your code stays where it is; the only thing sent to us is a few anonymous usage counts you can turn off.
 - **Keeps the work moving.** When one agent runs out of usage, the agent best placed to finish picks up where it stopped.
 
+Want to help? [Good first issues](https://github.com/splashxmoon/friday/labels/good%20first%20issue) · [CONTRIBUTING.md](CONTRIBUTING.md)
+
 <p align="center">
   <img src="docs/assets/demo.gif" alt="A demo of Friday on a sample project: six coding agents share one session. Cursor tells Codex a route moved, Claude Code runs out of usage and Friday hands its task to Codex, which reruns the tests and finishes with changes ready to review" width="960" />
 </p>
@@ -79,7 +81,7 @@ Most of us use one AI coding tool at a time. It hits its usage limit halfway thr
 2. **Add one or more agents.** Each can work in its own copy of the repo (a Git worktree), so they never overwrite each other.
 3. **Give the session the job.** One agent splits it into tasks on a shared board; the others take the ones that suit them.
 4. **They work together.** Agents message each other as they go. Every finished task has its tests run, and another agent reviews any change the tests don't settle.
-5. **Nothing stalls on a limit.** If an agent runs out of usage, its task moves to the next best agent with everything done so far.
+5. **Nothing stalls on a limit.** If an agent runs out of usage, its task moves to the next best agent with a record of what the first did and changed.
 6. **You review, then ship.** Read every change, send notes back on any line, then commit or open a pull request.
 
 ## Get started in five minutes
@@ -218,7 +220,7 @@ Friday finds the coding tools on your computer and whether each is signed in. Pi
 
 ### Never stuck on a usage limit
 
-Each tool's remaining usage, always in view. When one runs out mid-task, the task moves to the agent best placed to finish it, with everything done so far, instead of starting over. Friday never switches your accounts for you: it tells you which other one is signed in, and you choose.
+Each tool's remaining usage in view where Friday can read it, with a link to the tool's own usage page where it can't. When one runs out mid-task, the task moves to the agent best placed to finish it, with a record of what the first did and changed, instead of starting over. Friday never switches your accounts for you: it tells you which other one is signed in, and you choose.
 
 </td>
 <td width="50%"><img src="docs/assets/usage.png" alt="Each coding tool's remaining usage, at a glance" /></td>
@@ -361,7 +363,7 @@ Claude Code, Codex, Cursor, GitHub Copilot, Gemini CLI, OpenCode, Devin CLI, Jun
 Friday is free and MIT licensed. The work runs on each tool's own plan and sign-in, so there are no keys to paste and nothing extra to pay. If you'd like Friday Code, Friday's own agent, too, give it a key of yours or a model on your computer in Settings › Your models: then it runs on that.
 
 **What happens when one agent runs out of usage?**
-Its task goes to the agent best placed to finish it, with its notes, files and plan, so the work keeps going.
+Its task goes to the agent best placed to finish it, with a record of what the first did and changed, so the work keeps going.
 
 **Can it run my agents while I'm not there?**
 Yes: an [automation](#automations) starts a coding tool on a schedule, from a webhook, or when another session finishes, and opens a pull request for you to review. Friday has to be running for it to start; you choose whether a run missed while the computer was off happens when it's back.
