@@ -1461,6 +1461,8 @@ export const cursor: Adapter = {
  */
 interface AcpProfile {
   tool: EngineTool;
+  /** Required permission modes, selected before every prompt, including restored conversations. */
+  modeIds?: Record<EngineMode, string>;
   bins: string[];
   /** What signs it in, run in a terminal of its own: none means the tool itself, which asks as it starts. */
   login: string[];
@@ -1711,6 +1713,19 @@ function acp(p: AcpProfile): Adapter {
         };
         const opt = (Array.isArray(res?.configOptions) ? res.configOptions : []).find((o: any) => o?.category === "mode" && o.type === "select");
         const modes = res?.modes && Array.isArray(res.modes.availableModes) ? res.modes : null;
+        const required = p.modeIds?.[turn.mode];
+        if (required) {
+          const offered = opt ? choices(opt.options) : choices(modes?.availableModes?.map((m: any) => ({ value: m?.id, name: m?.name })));
+          if (!offered.some((m) => m.id === required)) return finish(`${name} doesn't offer the required permission mode "${required}". Update it before trying again.`);
+          const current = opt ? str(opt.currentValue) : str(modes?.currentModeId);
+          if (current === required) return prompt();
+          ask(opt ? "session/set_config_option" : "session/set_mode", opt ? { sessionId: sid, configId: opt.id, value: required } : { sessionId: sid, modeId: required }, (r) => {
+            if (r.error) return finish(`${name} couldn't select permission mode "${required}": ${str(r.error.message) || "request rejected"}`);
+            keep(opt ? { configOptions: r.result?.configOptions ?? res.configOptions.map((o: any) => o === opt ? { ...o, currentValue: required } : o) } : { modes: { ...modes, currentModeId: required } });
+            return prompt();
+          });
+          return [];
+        }
         const to = opt ? pick(choices(opt.options), str(opt.currentValue)) : modes ? pick(choices(modes.availableModes.map((m: any) => ({ value: m?.id, name: m?.name }))), str(modes.currentModeId)) : null;
         if (!to) return prompt();
         // Whether or not it takes, the turn goes on: Plan is held to reading below either way.
@@ -2012,6 +2027,20 @@ export const devin: Adapter = acp({
   status: { args: ["auth", "status"] },
   args: (t) => ["acp", ...(t.model ? ["--model", t.model] : [])],
   modelAtStart: true,
+});
+
+// Qwen configures providers through its interactive /auth menu. Settings and .env files may hold
+// credentials we cannot detect, so absent keys mean unknown, not signed out.
+export const qwen: Adapter = acp({
+  tool: "qwen",
+  bins: ["qwen"],
+  login: [],
+  logout: [],
+  args: () => ["--acp"],
+  status: anyOf([], ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"]),
+  // Qwen can restore an automatic approval mode when loading a session. Friday answers
+  // permissions itself, so select these modes after opening or restoring the conversation.
+  modeIds: { edits: "default", full: "default", plan: "plan" },
 });
 
 export const gemini: Adapter = acp({
@@ -2489,7 +2518,7 @@ export const muse: Adapter = {
   },
 };
 
-export const ADAPTERS: Record<EngineTool, Adapter> = { claude, codex, cursor, copilot, opencode, gemini, devin, junie, kiro, droid, grok, cline, kilo, amp, muse, acp: custom };
+export const ADAPTERS: Record<EngineTool, Adapter> = { claude, codex, cursor, copilot, opencode, gemini, qwen, devin, junie, kiro, droid, grok, cline, kilo, amp, muse, acp: custom };
 
 // ── finding the executables ──────────────────────────────────────────
 

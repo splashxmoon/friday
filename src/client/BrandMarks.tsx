@@ -197,6 +197,7 @@ export function EngineMark({ tool, size = 15, className }: { tool: EngineTool | 
   if (tool === "droid") return <FactoryIcon size={size} className={className} aria-label={ENGINE_NAMES.droid} style={{ flex: "none" }} />;
   // Muse Code has no mark in an open set either: an infinity sign, Meta's own shape, in the text colour.
   if (tool === "muse") return <InfinityIcon size={size} className={className} aria-label={ENGINE_NAMES.muse} style={{ flex: "none" }} />;
+  if (tool === "qwen") return <BotIcon size={size} className={className} role="img" aria-label={ENGINE_NAMES.qwen} style={{ flex: "none" }} />;
   if (tool === "acp") return <BotIcon size={size} className={className} aria-label={ENGINE_NAMES.acp} style={{ flex: "none" }} />;
   if (tool && TOOL_PATHS[tool]) return <PathMark d={TOOL_PATHS[tool]!} label={ENGINE_NAMES[tool]} size={size} className={className} />;
   return <FridayMark size={size} className={className} />;
