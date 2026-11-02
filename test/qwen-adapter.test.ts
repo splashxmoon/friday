@@ -6,6 +6,32 @@ import { ADAPTERS, loginStatus, type AcpKept, type AdapterOut, type TurnSpec } f
 
 const qwen = ADAPTERS.qwen;
 
+test("Qwen 0.26.5 recorded authenticated turn completes and streams its answer", () => {
+  const recording = JSON.parse(readFileSync(new URL("./fixtures/qwen/success.json", import.meta.url), "utf8")) as { direction: string; frame: Record<string, any> }[];
+  const turn: TurnSpec = { prompt: "Reply exactly FRIDAY_QWEN_OK. Do not use tools.", system: "Work only in this temporary repository. Use local file and shell tools only. Never access network or credentials. Keep your answer brief.", resumeId: null, mode: "edits", ask: true };
+  const sent: Record<string, any>[] = [JSON.parse(qwen.stdin(turn))];
+  let ended = false;
+  const parse = qwen.parser(turn, { cwd: "/work/repo", write: (line) => void sent.push(JSON.parse(line)), end: () => void (ended = true) });
+  const ids = new Map<number, number>();
+  const outs: AdapterOut[] = [];
+  let outgoing = 0;
+  for (const { direction, frame } of recording) {
+    if (direction === "out") {
+      const actual = sent[outgoing++]!;
+      assert.ok(actual, `Friday sent ${frame.method}`);
+      ids.set(frame.id, actual.id);
+      assert.deepEqual({ ...actual, id: frame.id }, frame);
+    } else {
+      outs.push(...parse(JSON.stringify(frame.id === undefined ? frame : { ...frame, id: ids.get(frame.id) })));
+    }
+  }
+  assert.equal(outgoing, sent.length);
+  assert.ok(ended);
+  assert.deepEqual(outs.at(-1), { kind: "done" });
+  assert.equal(outs.filter((o) => o.kind === "delta" && o.channel === "text").map((o) => o.kind === "delta" ? o.text : "").join(""), "FRIDAY_QWEN_OK");
+  assert.ok(outs.some((o) => o.kind === "session" && o.id === "qwen-session-1"));
+});
+
 test("Qwen 0.26.5 recorded handshake and authentication failure", () => {
   const recording = JSON.parse(readFileSync(new URL("./fixtures/qwen/auth-required.json", import.meta.url), "utf8")) as { direction: string; frame: Record<string, any> }[];
   const turn: TurnSpec = { prompt: "Hello", system: "", resumeId: null, mode: "edits" };

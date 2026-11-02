@@ -1,0 +1,539 @@
+[
+  {
+    "direction": "out",
+    "frame": {
+      "jsonrpc": "2.0",
+      "id": 0,
+      "method": "initialize",
+      "params": {
+        "protocolVersion": 1,
+        "clientCapabilities": {
+          "fs": {
+            "readTextFile": false,
+            "writeTextFile": false
+          },
+          "terminal": false
+        },
+        "clientInfo": {
+          "name": "friday",
+          "title": "Friday",
+          "version": "1"
+        }
+      }
+    }
+  },
+  {
+    "direction": "in",
+    "frame": {
+      "jsonrpc": "2.0",
+      "id": 0,
+      "result": {
+        "protocolVersion": 1,
+        "agentInfo": {
+          "name": "qwen-code",
+          "title": "Qwen Code",
+          "version": "0.26.5"
+        },
+        "authMethods": [
+          {
+            "id": "openai",
+            "name": "Use OpenAI API key",
+            "description": "Requires setting the `OPENAI_API_KEY` environment variable",
+            "_meta": {
+              "type": "terminal",
+              "args": [
+                "--auth-type=openai"
+              ]
+            }
+          }
+        ],
+        "agentCapabilities": {
+          "loadSession": true,
+          "promptCapabilities": {
+            "image": true,
+            "audio": true,
+            "embeddedContext": true
+          },
+          "sessionCapabilities": {
+            "list": {},
+            "resume": {}
+          },
+          "mcpCapabilities": {
+            "sse": true,
+            "http": true
+          },
+          "_meta": {
+            "imageCapability": {
+              "autoHandlesWrongModel": true,
+              "maxBytes": 10380902,
+              "maxImagesPerTurn": 4
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "direction": "out",
+    "frame": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "session/new",
+      "params": {
+        "cwd": "/work/repo",
+        "mcpServers": []
+      }
+    }
+  },
+  {
+    "direction": "in",
+    "frame": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "sessionId": "qwen-session-1",
+        "_meta": {
+          "generatedUi": {
+            "version": 1,
+            "enabled": false,
+            "reason": "unsupported-client"
+          }
+        },
+        "models": {
+          "currentModelId": "openrouter/free(openai)",
+          "availableModels": [
+            {
+              "modelId": "openrouter/free(openai)",
+              "name": "Free integration test",
+              "description": null,
+              "_meta": {
+                "contextLimit": 200000
+              }
+            }
+          ]
+        },
+        "modes": {
+          "currentModeId": "default",
+          "availableModes": [
+            {
+              "id": "plan",
+              "name": "Plan",
+              "description": "Analyze only, do not modify files or execute commands"
+            },
+            {
+              "id": "default",
+              "name": "Default",
+              "description": "Require approval for file edits or shell commands"
+            },
+            {
+              "id": "auto-edit",
+              "name": "Auto Edit",
+              "description": "Automatically approve file edits"
+            },
+            {
+              "id": "auto",
+              "name": "Auto",
+              "description": "LLM classifier auto-approves safe actions, blocks risky ones"
+            },
+            {
+              "id": "yolo",
+              "name": "YOLO",
+              "description": "Automatically approve all tools"
+            }
+          ]
+        },
+        "configOptions": [
+          {
+            "id": "mode",
+            "name": "Mode",
+            "description": "Session permission mode",
+            "category": "mode",
+            "type": "select",
+            "currentValue": "default",
+            "options": [
+              {
+                "value": "plan",
+                "name": "Plan",
+                "description": "Analyze only, do not modify files or execute commands"
+              },
+              {
+                "value": "default",
+                "name": "Default",
+                "description": "Require approval for file edits or shell commands"
+              },
+              {
+                "value": "auto-edit",
+                "name": "Auto Edit",
+                "description": "Automatically approve file edits"
+              },
+              {
+                "value": "auto",
+                "name": "Auto",
+                "description": "LLM classifier auto-approves safe actions, blocks risky ones"
+              },
+              {
+                "value": "yolo",
+                "name": "YOLO",
+                "description": "Automatically approve all tools"
+              }
+            ]
+          },
+          {
+            "id": "model",
+            "name": "Model",
+            "description": "AI model to use",
+            "category": "model",
+            "type": "select",
+            "currentValue": "openrouter/free(openai)",
+            "options": [
+              {
+                "value": "openrouter/free(openai)",
+                "name": "Free integration test",
+                "description": ""
+              }
+            ]
+          },
+          {
+            "id": "workflow_mode",
+            "name": "Workflow mode",
+            "description": "Prefer Workflow orchestration for this session",
+            "type": "select",
+            "currentValue": "off",
+            "options": [
+              {
+                "value": "off",
+                "name": "Off"
+              },
+              {
+                "value": "on",
+                "name": "On"
+              }
+            ],
+            "_meta": {
+              "qwen.workflowMode": {
+                "available": false,
+                "effective": false,
+                "reason": "workflow_unavailable"
+              }
+            }
+          },
+          {
+            "id": "reasoning_effort",
+            "name": "Reasoning effort",
+            "description": "How hard reasoning-capable models should think",
+            "category": "thought_level",
+            "type": "select",
+            "currentValue": "default",
+            "options": [
+              {
+                "value": "none",
+                "name": "Thinking off",
+                "description": "Disable thinking for this session"
+              },
+              {
+                "value": "default",
+                "name": "Default",
+                "description": "Use the model or provider default"
+              },
+              {
+                "value": "low",
+                "name": "Low",
+                "description": "Providers map or clamp the requested tier for the active model"
+              },
+              {
+                "value": "medium",
+                "name": "Medium",
+                "description": "Providers map or clamp the requested tier for the active model"
+              },
+              {
+                "value": "high",
+                "name": "High",
+                "description": "Providers map or clamp the requested tier for the active model"
+              },
+              {
+                "value": "xhigh",
+                "name": "Extra high",
+                "description": "Providers map or clamp the requested tier for the active model"
+              },
+              {
+                "value": "max",
+                "name": "Max",
+                "description": "Providers map or clamp the requested tier for the active model"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  {
+    "direction": "out",
+    "frame": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "method": "session/prompt",
+      "params": {
+        "sessionId": "qwen-session-1",
+        "prompt": [
+          {
+            "type": "text",
+            "text": "Work only in this temporary repository. Use local file and shell tools only. Never access network or credentials. Keep your answer brief.\n\n[Friday] The message:\nReply exactly FRIDAY_QWEN_OK. Do not use tools."
+          }
+        ]
+      }
+    }
+  },
+  {
+    "direction": "in",
+    "frame": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "qwen-session-1",
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "content": {
+            "type": "text",
+            "text": ""
+          },
+          "_meta": {
+            "executionLifecycle": {
+              "v": 1,
+              "kind": "request",
+              "executionId": "e00440b0-9c1d-419e-bcd7-0b54deb309a0",
+              "sessionId": "qwen-session-1",
+              "promptId": "qwen-session-1########1",
+              "model": "openrouter/free",
+              "startedAt": 1793645401418,
+              "phase": "started"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "direction": "in",
+    "frame": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "qwen-session-1",
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "content": {
+            "type": "text",
+            "text": "FR"
+          }
+        }
+      }
+    }
+  },
+  {
+    "direction": "in",
+    "frame": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "qwen-session-1",
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "content": {
+            "type": "text",
+            "text": "ID"
+          }
+        }
+      }
+    }
+  },
+  {
+    "direction": "in",
+    "frame": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "qwen-session-1",
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "content": {
+            "type": "text",
+            "text": "AY"
+          }
+        }
+      }
+    }
+  },
+  {
+    "direction": "in",
+    "frame": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "qwen-session-1",
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "content": {
+            "type": "text",
+            "text": "_Q"
+          }
+        }
+      }
+    }
+  },
+  {
+    "direction": "in",
+    "frame": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "qwen-session-1",
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "content": {
+            "type": "text",
+            "text": "W"
+          }
+        }
+      }
+    }
+  },
+  {
+    "direction": "in",
+    "frame": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "qwen-session-1",
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "content": {
+            "type": "text",
+            "text": "EN"
+          }
+        }
+      }
+    }
+  },
+  {
+    "direction": "in",
+    "frame": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "qwen-session-1",
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "content": {
+            "type": "text",
+            "text": "_OK"
+          }
+        }
+      }
+    }
+  },
+  {
+    "direction": "in",
+    "frame": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "qwen-session-1",
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "content": {
+            "type": "text",
+            "text": ""
+          },
+          "_meta": {
+            "executionLifecycle": {
+              "v": 1,
+              "kind": "request",
+              "executionId": "e00440b0-9c1d-419e-bcd7-0b54deb309a0",
+              "sessionId": "qwen-session-1",
+              "promptId": "qwen-session-1########1",
+              "model": "openrouter/free",
+              "startedAt": 1793645401418,
+              "phase": "ended",
+              "endedAt": 1793645404027,
+              "durationMs": 2609,
+              "outcome": "success"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "direction": "in",
+    "frame": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "qwen-session-1",
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "content": {
+            "type": "text",
+            "text": ""
+          },
+          "_meta": {
+            "usage": {
+              "inputTokens": 16746,
+              "outputTokens": 54,
+              "totalTokens": 16800,
+              "thoughtTokens": 45,
+              "cachedReadTokens": 0
+            },
+            "durationMs": 2653
+          }
+        }
+      }
+    }
+  },
+  {
+    "direction": "in",
+    "frame": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "qwen-session-1",
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "content": {
+            "type": "text",
+            "text": ""
+          },
+          "_meta": {
+            "executionLifecycle": {
+              "v": 1,
+              "kind": "request",
+              "executionId": "f6871db3-bdd4-4bc3-a032-cf665f499de9",
+              "sessionId": "qwen-session-1",
+              "promptId": "qwen-session-1#managed-auto-memory-extractor-905dd1de#0",
+              "model": "openrouter/free",
+              "startedAt": 1793645404075,
+              "subagentId": "managed-auto-memory-extractor-905dd1de",
+              "phase": "started"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "direction": "in",
+    "frame": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "stopReason": "end_turn",
+        "_meta": {
+          "qwen.branchPoint": {
+            "assistantRecordUuid": "3a1edf55-9794-4046-91c6-b5c82e447292",
+            "checkpointUuid": "9845226a-2761-4195-b09f-cf1c5e345919"
+          }
+        }
+      }
+    }
+  }
+]
