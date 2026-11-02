@@ -9,8 +9,8 @@ import type { Role } from "../types.js";
 import { lazy, Suspense, type ComponentProps, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { isNarrow } from "./narrow.js";
 import { SideRail } from "./SideRail.js";
-import { TeamHome, useTeamTab } from "./Teammates.js";
-import { usePlaceFollows, usePlaceLeaves, useWorkSessions } from "./WorkMode.js";
+import { readTabNow, setTeamTab, TeamHome, useTeamTab } from "./Teammates.js";
+import { choosePlace, usePlaceFollows, usePlaceLeaves, useWorkSessions } from "./WorkMode.js";
 import { openWorkflows, useAutomationsView, useWorkflowNotices } from "./team-workflow-view.js";
 import type { AgentView, PersonListing } from "../agents.js";
 import type { CollectionView, SkillView } from "../skills.js";
@@ -766,6 +766,19 @@ export function App() {
   );
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
+  /**
+   * The new-session page, from wherever a session is asked for: out of the Crew first, whose home is its room rather than the box,
+   * so "New session" from ⌘K, Code Review or the Board landed in the Crew room and what was typed went nowhere (2026-11-02 review).
+   * `code`: a coding brief, which goes to Code rather than back to Work.
+   */
+  const toNewSession = (r: Route = { kind: "home" }, code = false) => {
+    if (leaving(() => toNewSessionRef.current(r, code))) return;
+    if (code) choosePlace("code");
+    else if (readTabNow()) setTeamTab(false);
+    navigate(r);
+  };
+  const toNewSessionRef = useRef(toNewSession);
+  toNewSessionRef.current = toNewSession;
 
   // ── Solo ⇄ Team, in place (workspaceSwitch.ts) ──
   // The pages are drawn afresh after a switch (keyed on this), so whatever each read for itself is read again in the new
@@ -814,7 +827,7 @@ export function App() {
         } catch (e) {
           console.warn("[quick]", e);
           setPreset({ brief: quickText(m) });
-          navigate({ kind: "home" });
+          toNewSessionRef.current();
         }
       })();
     });
@@ -860,7 +873,8 @@ export function App() {
       const { items, here } = moveRef.current;
       // ⌘⌥1–9: the sidebar's sessions, in the order it shows them (⌘1–4 are a session's panels). By the key, not the character:
       // ⌥ turns 1 into ¡ on a Mac.
-      if (mod && e.altKey && !e.shiftKey && /^Digit[1-9]$/.test(e.code)) {
+      // Not AltGr, which the browser reports as Ctrl+Alt: on a German or French keyboard it and a digit type { [ ] # | \ (2026-11-02 review).
+      if (mod && e.altKey && !e.shiftKey && !e.getModifierState("AltGraph") && /^Digit[1-9]$/.test(e.code)) {
         // Each session once: one waiting on you shows in Needs you and again in its group, and ⌘⌥1 and ⌘⌥2 both opened it (Arun,
         // 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
         const sids = [...new Set([...document.querySelectorAll<HTMLElement>(".dass-row[data-sid]")].filter((el) => el.offsetParent !== null).map((el) => el.dataset.sid!))];
@@ -1072,7 +1086,8 @@ export function App() {
   // Which sessions are which, read from the server here whatever shows: with the sidebar folded nothing else asked (2026-10-28).
   useWorkSessions(identity);
   usePlaceFollows(activeSid);
-  usePlaceLeaves(activeSid, () => navigate({ kind: "home" }));
+  // Automations is each place's own (the Crew's are its workflows) and the hosted Crew page turns the place itself, so both stay.
+  usePlaceLeaves(activeSid, () => navigate({ kind: "home" }), !["home", "session", "automations", "crew"].includes(route.kind));
   const inChat = route.kind === "home" || route.kind === "session";
   const inAgents = route.kind === "agents";
   // "new" is the builder with nothing yet; with no agents at all it is the only page there is.
@@ -1331,10 +1346,12 @@ export function App() {
             onDocChange={(d) => setLayout({ ...(d.open !== undefined ? { docOpen: d.open } : {}), ...(d.width !== undefined ? { docWidth: d.width } : {}) })}
           />
         ) : route.kind === "automations" ? (
-          // With the Team tab on, the team's own: its workflows (TeamWorkflows.tsx), with a way across to these.
-          teamTabOn && autoView === "workflows" ? <TeamWorkflowsPage identity={identity} onCoding={() => setAutoView("coding")} /> :
+          // The coding tools' or the crew's, as the switch at the top of the page says, whichever place the sidebar is on: it was the
+          // crew's only with the Crew tab picked last, with nothing on the page saying so (Arun, 2026-11-02). The hosted Crew's
+          // workflows are its own page (?view=crew&tab=workflows).
+          autoView === "workflows" && (isLocal() || teamTabOn) ? <TeamWorkflowsPage identity={identity} onCoding={() => setAutoView("coding")} /> :
           <AutomationsPage
-            onTeamWorkflows={teamTabOn ? () => setAutoView("workflows") : !isLocal() ? openWorkflows : undefined}
+            onTeamWorkflows={isLocal() || teamTabOn ? () => setAutoView("workflows") : openWorkflows}
             identity={identity}
             agents={agents}
             recents={recents}
@@ -1351,13 +1368,13 @@ export function App() {
               const r = recents.find((x) => x.sid === sid);
               if (r) navigate({ kind: "session", sid, invite: r.invite });
             }}
-            onNew={() => navigate({ kind: "home" })}
+            onNew={() => toNewSession()}
           />
         ) : route.kind === "review" ? (
           <CodeReview
             identity={identity}
             recents={recents}
-            onWork={(brief, opts) => (setPreset({ brief, ...opts }), navigate({ kind: "home" }))}
+            onWork={(brief, opts) => (setPreset({ brief, ...opts }), toNewSession({ kind: "home" }, true))}
             onOpen={(sid) => {
               const r = recents.find((x) => x.sid === sid);
               if (r) navigate({ kind: "session", sid, invite: r.invite });
@@ -1408,7 +1425,7 @@ export function App() {
       {palette && (
         <Palette
           onNew={(q) => {
-            navigate({ kind: "home" });
+            toNewSession();
             setTimeout(() => {
               const el = document.getElementById("code-input") as HTMLTextAreaElement | null;
               if (!el) return;
@@ -1422,7 +1439,7 @@ export function App() {
             stateOf: (sid) => (attention.items.some((i) => i.sid === sid) ? "needs" : attention.working.has(sid) ? "working" : unreadAll.has(sid) ? "done" : null),
             open: (r) => navigate({ kind: "session", sid: r.sid, invite: r.invite }),
             newSession: () => {
-              navigate({ kind: "home" });
+              toNewSession();
               setTimeout(() => document.getElementById("code-input")?.focus(), 0);
             },
             goto: (where) => (where === "settings" && askPage("settings-search"), navigate(where === "settings" ? { kind: "settings", section: settingsSection(null) } : { kind: where })),

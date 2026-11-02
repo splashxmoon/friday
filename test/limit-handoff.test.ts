@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { AgentMesh } from "../src/agent-mesh.js";
-import { backNote, limitedLanes, limitedTask, limitTargets, stillLimited } from "../src/limit-handoff.js";
+import { backNote, humanCause, limitedLanes, limitedTask, limitTargets, RESUME_NUDGE, stillLimited } from "../src/limit-handoff.js";
+import { noteRunEnd } from "../src/limited.js";
 import { nearLimit } from "../src/routing.js";
 import { project, type LaneEngine, type SessionState } from "../src/session/projection.js";
 import { MAIN_LANE, type ActorRef, type EventBody, type SessionEvent } from "../src/types.js";
@@ -180,4 +181,59 @@ test("a tool that isn't signed in hands its task on as one out of usage does, an
   assert.match(two.handed[0]!.task, /Fix the cart total/);
   const lone = run({ lc: engine({}) });
   (await lone.mesh.onLimit("s", "lc", NOW), assert.equal(lone.appended.length, 0, "no resume: nothing brings a sign-in back by itself"));
+});
+
+/** 2026-11-02 review of the open-source edition's hand-offs. */
+test("a task handed on is still the person's: when the second tool runs out too, it goes on to a third", () => {
+  const codex: ActorRef = { id: "engine-x", name: "Codex", kind: "agent" };
+  const [, e] = session({ lc: engine({}), lx: engine({ tool: "codex" }) }, [
+    [tool, { type: "instruction", text: "Carry on with this task", interrupt: false, handoff: { fromLane: "lc", fromName: "Claude", toName: "Codex", reason: "out", carried: [] } } as EventBody, "lx"],
+    [codex, { type: "run.started", causedBy: 11 }, "lx"],
+  ]);
+  assert.equal(humanCause(e, "lc", 6)?.id, ada.id, "Ada's own message");
+  assert.equal(humanCause(e, "lx", 12)?.id, ada.id, "handed on from Ada's run, so Ada's too");
+  const [, nudged] = session({ lc: engine({}) }, [[friday, { type: "instruction", text: "Keep going", interrupt: false, keepGoing: true }, "lc"], [tool, { type: "run.started", causedBy: 11 }, "lc"]]);
+  assert.equal(humanCause(nudged, "lc", 12), null, "Friday's own nudge is nobody's");
+});
+
+test("the carry-on sent when a limit lifts isn't the task: the task is what the run before it was on", () => {
+  const [, e] = session({ lc: engine({}) }, [
+    [ada, { type: "instruction", text: RESUME_NUDGE, interrupt: false }, "lc"],
+    [tool, { type: "run.started", causedBy: 11 }, "lc"],
+    [tool, { type: "instructions.delivered", seqs: [11] }, "lc"],
+    [tool, limited, "lc"],
+  ]);
+  assert.equal(limitedTask(e, "lc", 12, 14), "Ada: Fix the cart total.");
+});
+
+test("a passing rate limit is tried again in a moment, not handed on, and doesn't count the tool out for hours", async () => {
+  const rate = "API Error: 429 rate limit exceeded: 50 requests per minute. Try again in 30 seconds.";
+  const [state, events] = session({ lc: engine({}), lx: engine({ tool: "codex" }) });
+  events[9] = { ...events[9]!, ts: NOW - 10_000, body: { type: "run.ended", outcome: "error", error: rate } } as SessionEvent;
+  assert.equal(stillLimited(events, "lc", NOW), false, "not out of usage");
+  const appended: { actor: ActorRef; body: EventBody }[] = [];
+  const handed: unknown[] = [];
+  const store = { state: async () => state, events: async () => events, append: async (_s: string, actor: ActorRef, body: EventBody) => (appended.push({ actor, body }), { ok: true, seq: 99 }) };
+  const mesh = new AgentMesh(store as never, null as never, async (_sid: string, _lane: string, h: { to: string }) => (handed.push(h), { ok: true as const, toName: h.to }));
+  await mesh.onLimit("s", "lc", NOW);
+  assert.equal(handed.length, 0, "not handed to Codex");
+  assert.equal(appended[0]?.body.type, "resume.scheduled");
+  assert.equal(appended[0]?.actor.id, ada.id);
+  if (appended[0]?.body.type === "resume.scheduled") assert.ok(appended[0].body.at - NOW < 60_000, "in a moment, not hours");
+  // Again and again in twenty minutes is no passing limit: handed on as one.
+  for (let i = 0; i < 3; i++) events.splice(9, 0, { ...events[9]!, seq: 100 + i, ts: NOW - 60_000 * (i + 2) } as SessionEvent);
+  appended.length = 0;
+  await mesh.onLimit("s", "lc", NOW);
+  assert.equal(handed.length, 1, "handed on after three in a row");
+});
+
+test("a tool out of usage in another session isn't handed work here, until a run of it finishes again", () => {
+  // Its own sign-in, so no other test in this file shares it.
+  const codex = engine({ tool: "codex", account: { id: "acct-elsewhere" } as LaneEngine["account"] });
+  const [s, e] = session({ lc: engine({}), lx: codex });
+  assert.ok(limitTargets(s, e, "lc", NOW).some((t) => t.id === "lx"), "nothing said it is out");
+  noteRunEnd(codex, { ts: NOW - 60_000, body: { type: "run.ended", outcome: "error", error: "You've hit your usage limit. Try again in 3 hours." } });
+  assert.ok(!limitTargets(s, e, "lc", NOW).some((t) => t.id === "lx"), "out, said by another session");
+  noteRunEnd(codex, { ts: NOW, body: { type: "run.ended", outcome: "done" } });
+  assert.ok(limitTargets(s, e, "lc", NOW).some((t) => t.id === "lx"), "working again");
 });

@@ -87,10 +87,14 @@ export async function moveAhead(d: AheadDeps, sid: string, lane: string, now = D
   await d.store.append(sid, FRIDAY, { type: "instruction.withdrawn", seq: plan.seq }, { lane });
   for (const t of plan.targets) {
     const toName = laneName(state, t.id);
-    const r = await d.handOff(sid, lane, { to: toName, reason: `${plan.reason}, so Friday gave it to ${toName} ahead of time: ${t.why}.`, carried: [], task: plan.task });
+    // As the person who queued it, by the lane's id: with the turn under way started by an agent, nobody was behind the move and
+    // every coding tool refused it (2026-11-02 review).
+    const r = await d.handOff(sid, lane, { to: t.id, reason: `${plan.reason}, so Friday gave it to ${toName} ahead of time: ${t.why}.`, carried: [], task: plan.task, as: queued.actor });
     if (r.ok) return true;
   }
-  // Nobody took it after all: back in the queue, as the person sent it.
-  await d.store.append(sid, queued.actor, { type: "instruction", text: plan.task, interrupt: false }, { lane });
+  // Nobody took it after all: back in the queue, as the person sent it, and not moved again. As a new message it had a new seq,
+  // so it was tried again, put back again, and the session filled with the two until the turn ended (2026-11-02 review).
+  const back = await d.store.append(sid, queued.actor, { type: "instruction", text: plan.task, interrupt: false }, { lane });
+  if (back.ok) await d.once(`ahead:${sid}:${back.seq}`);
   return false;
 }

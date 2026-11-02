@@ -560,7 +560,10 @@ export function SessionView({
     const st = s.state;
     if (!st || replayAt !== null || e.shiftKey) return;
     const digit = /^Digit(\d)$/.exec(e.code)?.[1];
-    if (digit !== undefined && (e.ctrlKey || e.altKey) && !e.metaKey && !(e.ctrlKey && e.altKey)) {
+    // ⌃ on a Mac, where ⌥ and a digit type # or € on many keyboards; Alt elsewhere, where Ctrl and a digit are the panels' keys
+    // and AltGr (Ctrl+Alt to the browser) types { [ ] (2026-11-02 review: each switched agent and the character never came).
+    const pressed = /Mac|iPhone|iPad/.test(navigator.platform) ? e.ctrlKey && !e.altKey : e.altKey && !e.ctrlKey;
+    if (digit !== undefined && pressed && !e.metaKey && !e.getModifierState("AltGraph")) {
       const ids = [MAIN_LANE, ...st.lanes.map((l) => l.id)];
       const n = Number(digit);
       const lane = n === 0 ? ALL : ids[n - 1];

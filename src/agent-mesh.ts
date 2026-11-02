@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import path from "node:path";
 import type { Bus } from "./bus.js";
 import { CUT_OFF_CHECK, resolveTarget, type Resolved } from "./handoff.js";
-import { limitHit, signedOut } from "./limit-reset.js";
+import { limitHit, planLimitHit, signedOut } from "./limit-reset.js";
 /** Other sessions an agent can reach (peers.ts on the hosted service; none on someone's own computer). */
 export interface Peers {
   list(sid: string, lane: string): Promise<string>;
@@ -138,7 +138,8 @@ export interface PreviewCapture {
   fullPage: boolean;
 }
 
-export type HandOffFn = (sid: string, from: string, req: { to: string; reason: string; carried: string[]; task: string }) => Promise<{ ok: true; toName: string; note?: string } | { ok: false; error: string }>;
+/** `as`: the person the work is for, when it isn't the one behind the run under way on `from` (a message they queued behind it). */
+export type HandOffFn = (sid: string, from: string, req: { to: string; reason: string; carried: string[]; task: string; as?: ActorRef }) => Promise<{ ok: true; toName: string; note?: string } | { ok: false; error: string }>;
 
 const obj = (properties: Record<string, unknown>, required: string[]) => ({ type: "object", properties, required, additionalProperties: false });
 const TO = { type: "string", description: "The other agent's name as the session shows it (from list_agents). A recognisable part works too: \"codex\", \"review\"." };
@@ -2334,6 +2335,17 @@ export class AgentMesh {
     if (after.some((e) => (e.body.type === "instruction" && e.body.handoff?.fromLane === lane) || (e.body.type === "resume.scheduled" && (e.lane ?? MAIN_LANE) === lane))) return;
     const start = events.findLast((e) => e.seq < end.seq && e.body.type === "run.started" && (e.lane ?? MAIN_LANE) === lane);
     if (!start || start.body.type !== "run.started") return;
+    // A passing rate limit (a per-minute 429), not the plan's allowance: tried again here in a moment, as the person who asked,
+    // rather than the task moved to another tool and this one counted out for hours (2026-11-02 review). Three of them in twenty
+    // minutes is no passing limit, and is handed on as one.
+    const passing = (e: SessionEvent) => e.body.type === "run.ended" && e.body.outcome === "error" && (e.lane ?? MAIN_LANE) === lane && e.ts > now - 20 * 60_000 && !!limitHit(e.body.error, e.ts) && !planLimitHit(e.body.error, e.ts);
+    if (hit && !state.options.team && !planLimitHit(end.body.error, end.ts) && events.filter(passing).length <= 3) {
+      const person = personBehind(state, events, lane, start.seq);
+      if (!person) return;
+      const at = hit.resetsAt && hit.resetsAt > now && hit.resetsAt < now + 15 * 60_000 ? hit.resetsAt + 5_000 : now + 2 * 60_000;
+      await this.store.append(sid, { id: person.id, name: person.name, kind: "human" }, { type: "resume.scheduled", at, auto: true }, { lane });
+      return;
+    }
     const cause = events.find((e) => e.seq === (start.body as { causedBy: number }).causedBy);
     // A team's (its switch to the backup tool having found that out too, teamSwitch): whatever its turn was on (the lead's own work,
     // a task or a message from a teammate), it carries on by itself when the limit lifts, unless it went to another agent
@@ -2361,7 +2373,8 @@ export class AgentMesh {
       for (const t of this.roomFirst(sid, targets.map((x) => x.id)).map((id) => targets.find((x) => x.id === id)!)) {
         const toName = laneName(state, t.id);
         const r = await this.handOff(sid, lane, {
-          to: toName,
+          // By its id: lane names needn't be unique, and the first "Codex" by name may not be the one picked (2026-11-02 review).
+          to: t.id,
           reason: `${fromName} ${why}, so Friday handed it to ${toName}: ${t.why}.`,
           carried: [],
           task: `Carry on with this task, which ${fromName} ${hit ? "was partway through when it ran out of usage" : "couldn't do because it isn't signed in"}. Don't start over: what it already did is in the record with this, so build on it, then finish the task.

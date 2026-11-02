@@ -1,23 +1,24 @@
 /**
- * Which automations the Automations page shows while the sidebar's Team tab is on: the team's workflows (TeamWorkflows.tsx), or
- * the coding tools' own (Automations.tsx), remembered on this computer (Arun, 2026-10-28: "make the automation for the teams
- * platform different…"). Kept apart from the page so the app, the rail and the Team room's header can say it without loading it.
- *
+ * Which automations the Automations page shows: the coding tools' own (Automations.tsx) or the crew's workflows (TeamWorkflows.tsx),
+ * picked by the switch at its top (AutomationsSwitch) and remembered on this computer (Arun, 2026-10-28: "make the automation for
+ * the teams platform different…"; 2026-11-02: the same for whichever place the sidebar is on). Kept apart from the page so the app,
+ * the rail and the Crew room's header can say it without loading it.
  */
 import { useEffect, useRef, useState } from "react";
 import { isLocal } from "./edition.js";
 import { notificationsOn } from "./prefs.js";
-import { setTeamTab, useTeamNow, type Team } from "./Teammates.js";
+import { useTeamNow, type Team } from "./Teammates.js";
 
 export type AutomationsView = "workflows" | "coding";
 const KEY = "friday.automationsView";
 const EVENT = "friday:automations-view";
 
+// The coding tools' until the crew's are picked: the sidebar's Automations says "Your coding tools on a schedule" first.
 const read = (): AutomationsView => {
   try {
-    return localStorage.getItem(KEY) === "coding" ? "coding" : "workflows";
+    return localStorage.getItem(KEY) === "workflows" ? "workflows" : "coding";
   } catch {
-    return "workflows";
+    return "coding";
   }
 };
 
@@ -50,8 +51,8 @@ export function openWorkflows(): void {
     history.pushState(null, "", "/?view=crew&tab=workflows");
     return void dispatchEvent(new PopStateEvent("popstate"));
   }
+  // Not the sidebar turned to the Crew too: the page says which automations these are, whichever place it is on.
   setAutomationsView("workflows");
-  setTeamTab(true);
   if (new URLSearchParams(location.search).get("view") === "automations") return void dispatchEvent(new CustomEvent("friday:same-page", { detail: "automations" }));
   history.pushState(null, "", "/?view=automations");
   dispatchEvent(new PopStateEvent("popstate"));

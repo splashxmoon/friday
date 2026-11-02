@@ -1,15 +1,17 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowLeftIcon, ArrowRightIcon, BugIcon, CheckIcon, ClockIcon, CopyIcon, FolderOpenIcon, GitPullRequestIcon, InboxIcon, PlayIcon, PlusIcon, ScrollTextIcon, Trash2Icon, WebhookIcon, WrenchIcon, ZapIcon, type LucideIcon } from "lucide-react";
 import type { AgentSchedule, AgentView } from "../agents.js";
 import type { Automation, AutomationRun } from "../automations.js";
 import { ENGINE_NAMES, type EngineMode, type EngineTool } from "../types.js";
 import { api } from "./api.js";
+import { AutomationsSwitch } from "./AutomationsSwitch.js";
+import { holdLeave } from "./leave-guard.js";
 import { isLocal } from "./edition.js";
 import { EngineMark, FridayMark } from "./BrandMarks.js";
 import { useMachine } from "./local.js";
 import type { Identity, RecentSession } from "./storage.js";
 import { TaskMark, type TaskMarkState } from "./TaskMark.js";
-import { relTime, useConfirm } from "./ui.js";
+import { relTime, useConfirm, type Confirmation } from "./ui.js";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -163,7 +165,7 @@ export function AutomationsPage({
   onOpen: (sid: string, invite: string) => void;
   /** The saved agents' own page: what "Who" can pick from. */
   onSavedAgents: () => void;
-  /** With the Team tab on, the way back to the team's workflows (TeamWorkflows.tsx). */
+  /** Across to the crew's workflows (TeamWorkflows.tsx), by the switch at the top (AutomationsSwitch). */
   onTeamWorkflows?: () => void;
 }) {
   const [list, setList] = useState<View[] | null>(null);
@@ -229,6 +231,7 @@ export function AutomationsPage({
         mine={editing.id ? (list?.find((a) => a.id === editing.id)?.mine ?? true) : true}
         onOpen={onOpen}
         onSavedAgents={onSavedAgents}
+        ask={ask}
         onClose={() => (setEditing(null), void load())}
         onSaved={(v) => (setList((l) => [v, ...(l ?? []).filter((x) => x.id !== v.id)]), setEditing({ id: v.id, draft: toDraft(v) }))}
         onDelete={(name) =>
@@ -253,8 +256,11 @@ export function AutomationsPage({
     <div className="page conns-page automations-page px-6! max-[640px]:px-4!">
       <div className="page-inner">
         {confirmUI}
+        <div className="auto-head">
+        {onTeamWorkflows && <AutomationsSwitch view="coding" onView={onTeamWorkflows} />}
         <PageHeader
           title="Automations"
+          className="mb-0"
           actions={
             <>
               {/* Saved agents are the product's (Agent Studio): the open-source edition's automations run your coding tools. */}
@@ -265,19 +271,13 @@ export function AutomationsPage({
                   </Button>
                 </Tip>
               )}
-              {onTeamWorkflows && (
-                <Tip label="The crew's workflows: teammates in steps, each run a board in a room">
-                  <Button variant="outline" size="sm" className="h-8 border-[var(--border)] bg-[var(--bg)] px-3 text-[13px] shadow-none" onClick={onTeamWorkflows}>
-                    Crew workflows
-                  </Button>
-                </Tip>
-              )}
               <Button size="sm" className="h-8 px-3 text-[13px]" onClick={() => start({})}>
                 <PlusIcon /> New automation
               </Button>
             </>
           }
         />
+        </div>
         {failed && (
           <p role="alert" className="mb-4 rounded-lg border border-[var(--border)] px-3 py-2 text-[13px] text-[var(--red)]">
             {failed}
@@ -483,6 +483,7 @@ function Editor({
   onClose,
   onSaved,
   onDelete,
+  ask,
 }: {
   identity: Identity;
   agents: AgentView[];
@@ -491,6 +492,7 @@ function Editor({
   initial: Draft;
   runs: AutomationRun[];
   mine: boolean;
+  ask: (c: Confirmation) => void;
   onOpen: (sid: string, invite: string) => void;
   onSavedAgents: () => void;
   onClose: () => void;
@@ -559,12 +561,20 @@ function Editor({
   // automation just opened).
   const unchanged = !!id && JSON.stringify(d) === JSON.stringify(initial);
   const NAME_MAX = 80;
+  // What leaving would lose, asked by the arrow and by every other way out, as a workflow's builder asks (leave-guard.ts): an
+  // automation's instructions went without a word (2026-11-02 review).
+  const unsaved = mine && JSON.stringify(d) !== JSON.stringify(initial);
+  const askLeave = (go: () => void) =>
+    ask(id ? { title: "Leave without saving?", body: "Your changes to this automation are lost.", action: "Leave", onConfirm: go } : { title: "Leave this new automation?", body: "It hasn't been created, so it's lost.", action: "Leave", onConfirm: go });
+  const askRef = useRef(askLeave);
+  askRef.current = askLeave;
+  useEffect(() => (unsaved ? holdLeave((go) => askRef.current(go)) : undefined), [unsaved]);
 
   return (
     <div className="page conns-page automations-page px-6! max-[640px]:px-4!">
       <div className="page-inner"><div className="mx-auto w-full max-w-[820px]">
         <div className="mb-4 flex items-center gap-2">
-          <Button variant="ghost" size="sm" className="h-8 px-2 text-[13px]" onClick={onClose}>
+          <Button variant="ghost" size="sm" className="h-8 px-2 text-[13px]" onClick={() => (unsaved ? askLeave(onClose) : onClose())}>
             <ArrowLeftIcon /> Automations
           </Button>
           <div className="ml-auto flex items-center gap-2">

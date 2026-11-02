@@ -868,7 +868,8 @@ class LaneHost {
    * app's re-pump starts it once that is over (Arun, 2026-10-28: "we need to ensure teams can work basically while you are away").
    */
   private async teamWaits(events: SessionEvent[], pending: number[], running = false): Promise<boolean> {
-    const people = pending.flatMap((q) => ((a) => (a?.kind === "human" ? [a.id] : []))(events.find((e) => e.seq === q)?.actor));
+    // An agent outside Friday speaking through its MCP (`via`) is no person here: it doesn't get past Pause or a budget (2026-11-02 review).
+    const people = pending.flatMap((q) => ((a) => (a?.kind === "human" && !a.via ? [a.id] : []))(events.find((e) => e.seq === q)?.actor));
     // The app says whether a person's own message goes through, and whether a run ends here rather than taking the next turn.
     if (await this.teamPaused?.(people, running).catch(() => false)) return true;
     if (people.length || running) return false;

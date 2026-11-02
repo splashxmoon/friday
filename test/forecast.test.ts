@@ -211,7 +211,7 @@ test("moving: the queued message is taken back and handed on with one line sayin
   assert.equal(await moveAhead(deps, "s", "lc", NOW), true);
   assert.deepEqual(appended, [{ body: { type: "instruction.withdrawn", seq: 7 }, lane: "lc" }]);
   assert.equal(handed.length, 1);
-  assert.equal(handed[0]!.to, "Codex");
+  assert.equal(handed[0]!.to, "lx", "by its lane's id: names needn't be unique");
   assert.equal(handed[0]!.task, "Then add tests for the invoice endpoint.");
   assert.match(handed[0]!.reason, /^Claude Code is heading for its 5h limit in about 20 min, before its next task would be done, so Friday gave it to Codex ahead of time: Codex is free\.$/);
   assert.ok(!appended.some((a) => a.body.type === "run.pause" || a.body.type === "run.cancel"));

@@ -3974,6 +3974,30 @@ function SignedOutNote({ ctx, lane, latest }: { ctx: Ctx; lane: string; latest: 
   );
 }
 
+/**
+ * The message an agent stopped on, sent again with one press (2026-11-02 walk-through: a tool that quit as it started left
+ * the error and nothing to do but type the message out again). Only on the lane's last stop, and only until something else
+ * was said on that lane: by then the person has moved on, or the work was handed to another agent.
+ */
+function StoppedAgain({ ctx, lane, seq }: { ctx: Ctx; lane: string; seq: number }) {
+  const [sent, setSent] = useState(false);
+  const latest = ctx.events.findLast((e) => e.body.type === "run.ended" && (e.lane ?? MAIN_LANE) === lane)?.seq === seq;
+  const since = ctx.events.some((e) => e.seq > seq && e.body.type === "instruction" && ((e.lane ?? MAIN_LANE) === lane || e.body.handoff?.fromLane === lane));
+  const asked = ctx.events.findLast((e) => e.seq < seq && e.body.type === "instruction" && (e.lane ?? MAIN_LANE) === lane);
+  const again = asked?.body.type === "instruction" ? asked.body.text.trim() : "";
+  if (!latest || since || !again || runOf(ctx.state, lane).status === "running") return null;
+  const tryAgain = async () => {
+    setSent(true);
+    const r = await ctx.send({ type: "instruct", text: again, ...(lane !== MAIN_LANE ? { lane } : {}) });
+    if (!r.ok) (setSent(false), ctx.notify(r.error ?? "Couldn't send that again. Try once more."));
+  };
+  return (
+    <button type="button" className="btn small stop-again" disabled={sent} onClick={() => void tryAgain()}>
+      {sent ? "Sent" : "Try again"}
+    </button>
+  );
+}
+
 function LimitNote({ ctx, lane, resetsAt, canSteer }: { ctx: Ctx; lane: string; resetsAt: number | null; canSteer: boolean }) {
   const due = ctx.state.resumes?.[lane];
   const tool = ctx.state.engines[lane]?.tool;
@@ -5473,6 +5497,7 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
           ) : (
             <>Agent stopped: {b.error}</>
           )}
+          {b.outcome === "error" && !limitHit(b.error) && <StoppedAgain ctx={ctx} lane={lane} seq={ev.seq} />}
         </Notice>
       );
     }
@@ -5579,7 +5604,9 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
     case "agent.diff":
       // Inside a run block this is rendered once at the end, from the newest
       // diff. Loose in the feed — a diff from a run whose messages have been
-      // trimmed away — it stands on its own.
+      // trimmed away — it stands on its own. One with nothing in it says nothing: after a Stop all, three "No changes in the
+      // folder." lines stood at the foot of the Crew room with no name on them (2026-11-02 crew walk-through).
+      if (!b.files.length) return null;
       return <DiffCard files={b.files} />;
   }
   return null;

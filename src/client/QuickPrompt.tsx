@@ -64,6 +64,8 @@ export function QuickPrompt() {
             maxLength={8000}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
+              // Mid-word in Chinese, Japanese or Korean, Enter picks the word and Escape drops it: neither is for the window (2026-11-02 review).
+              if (e.nativeEvent.isComposing) return;
               if (e.key === "Escape") void q?.close();
               else if (e.key === "Enter" && !e.shiftKey) (e.preventDefault(), void send());
               else if (e.key.toLowerCase() === "s" && e.shiftKey && (e.metaKey || e.ctrlKey)) (e.preventDefault(), void snapshot());

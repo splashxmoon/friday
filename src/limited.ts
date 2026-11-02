@@ -1,5 +1,5 @@
-import { limitHit } from "./limit-reset.js";
-import type { SessionState } from "./session/projection.js";
+import { planLimitHit } from "./limit-reset.js";
+import type { LaneEngine, SessionState } from "./session/projection.js";
 import { MAIN_LANE, type SessionEvent } from "./types.js";
 
 /**
@@ -16,7 +16,9 @@ export function stillLimited(events: SessionEvent[], lane: string, now = Date.no
 function ownLimit(events: SessionEvent[], lane: string, now: number): { until: number | null; at: number } | null {
   const end = events.findLast((e) => e.body.type === "run.ended" && (e.lane ?? MAIN_LANE) === lane);
   if (end?.body.type !== "run.ended" || end.body.outcome !== "error") return null;
-  const hit = limitHit(end.body.error, end.ts);
+  // The plan's allowance, not a per-minute 429: one of those read as out for five hours, it and every agent on its sign-in, and
+  // the work was moved off them (2026-11-02 review).
+  const hit = planLimitHit(end.body.error, end.ts);
   if (!hit || !(hit.resetsAt ? hit.resetsAt > now : now - end.ts < 5 * 3_600_000)) return null;
   return { until: hit.resetsAt, at: end.ts };
 }
@@ -58,4 +60,33 @@ export function limitedLanes(state: SessionState, events: SessionEvent[], now = 
     }
   }
   return out;
+}
+
+/** A coding tool's sign-in: the same tool, on the same computer, signed in the same way, shares one allowance. */
+const signInOf = (e: Pick<LaneEngine, "tool" | "hostId" | "account"> | undefined): string | null => (e?.tool ? `${e.tool}|${e.hostId}|${e.account?.id ?? ""}` : null);
+
+/**
+ * Sign-ins out of usage in any session on this server, from every run's end (app.ts): Codex out in one session was handed work
+ * in another, where nothing had told it, and failed within seconds (2026-11-02 review). In memory: a restart forgets, and the
+ * next run's end says again.
+ */
+const outAnywhere = new Map<string, { until: number | null; at: number }>();
+
+/** A run ended on `engine`: out of usage on its plan's allowance, or working again. */
+export function noteRunEnd(engine: Pick<LaneEngine, "tool" | "hostId" | "account"> | undefined, ev: Pick<SessionEvent, "ts" | "body">): void {
+  const key = signInOf(engine);
+  if (!key || ev.body.type !== "run.ended") return;
+  const hit = ev.body.outcome === "error" ? planLimitHit(ev.body.error, ev.ts) : null;
+  if (hit) outAnywhere.set(key, { until: hit.resetsAt, at: ev.ts });
+  else if (ev.body.outcome === "done") outAnywhere.delete(key);
+}
+
+/** Whether `engine`'s sign-in is out of usage right now, said by a run in any session. */
+export function outOfUsageAnywhere(engine: Pick<LaneEngine, "tool" | "hostId" | "account"> | undefined, now = Date.now()): boolean {
+  const key = signInOf(engine);
+  const hit = key ? outAnywhere.get(key) : undefined;
+  if (!hit) return false;
+  if (hit.until ? hit.until > now : now - hit.at < 5 * 3_600_000) return true;
+  outAnywhere.delete(key!);
+  return false;
 }

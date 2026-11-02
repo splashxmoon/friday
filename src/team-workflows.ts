@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { Redis } from "ioredis";
-import { dueSlot, validateSchedule, type AgentSchedule } from "./agents.js";
+import { dueSlot, dueSlotSince, validateSchedule, type AgentSchedule } from "./agents.js";
 import { laneName } from "./session/core.js";
 import { boardBusy, type BoardTask, type SessionState } from "./session/projection.js";
 import type { SessionStore } from "./session/store.js";
@@ -321,8 +321,9 @@ export class TeamWorkflows {
         if ((state.board && boardBusy(state)) || active) {
           const why = active?.id === w.id ? `Its last run is still going in ${place.name}.` : `${cap(place.name)}'s board is still being worked on.`;
           if (w.limits.skipIfRunning && !cont) return await set({ status: "skipped", roomName: place.name, note: why, ended: Date.now() });
-          await this.d.redis.zadd(this.waitingKey(), run.at, `${w.id} ${run.id}`);
-          return await set({ status: "waiting", roomName: place.name, note: `${why} It starts when that's done.` });
+          const since = Date.now();
+          await this.d.redis.zadd(this.waitingKey(), since, `${w.id} ${run.id}`);
+          return await set({ status: "waiting", roomName: place.name, note: `${why} It starts when that's done.`, waitingSince: since, waitingCont: cont });
         }
         const members = Object.values(place.lanes).filter((l) => state.lanes.some((x) => x.id === l));
         // Led by the room's lead, or, where only some may take the run's work, by the room's lead if it is one of them, else the
@@ -673,7 +674,7 @@ export class TeamWorkflows {
     const names = await this.names();
     for (const w of await this.list()) {
       if (!w.on || w.trigger.kind !== "schedule") continue;
-      const slot = dueSlot(w.trigger.schedule, now);
+      const slot = dueSlotSince(w.trigger.schedule, now, w.updated ?? w.created);
       if (!slot || (await this.d.redis.set(this.k(`workflow-fired:${w.id}:${slot}`), "1", "EX", 2 * 86_400, "NX")) !== "OK") continue;
       started.push(await this.start(w, describeTrigger(w.trigger, names), `It's ${now.toISOString().slice(0, 16).replace("T", " ")} UTC.`));
     }
@@ -685,7 +686,7 @@ export class TeamWorkflows {
         await this.d.redis.zrem(this.waitingKey(), entry);
         continue;
       }
-      if (now.getTime() - run.at > WAIT_FOR_BOARD_MS) {
+      if (now.getTime() - (run.waitingSince ?? run.at) > WAIT_FOR_BOARD_MS) {
         await this.d.redis.zrem(this.waitingKey(), entry);
         await this.updateRun(w.id, run.id, { status: "skipped", note: "Its room's board wasn't free within 12 hours.", ended: now.getTime() });
         continue;
@@ -694,7 +695,7 @@ export class TeamWorkflows {
       const state = place ? await this.d.store.state(place.sid).catch(() => null) : null;
       if (place && ((state?.board && boardBusy(state)) || (await this.active(place.sid)))) continue;
       if (!(await this.d.redis.zrem(this.waitingKey(), entry))) continue;
-      started.push(await this.post(w, run));
+      started.push(await this.post(w, run, !!run.waitingCont));
     }
     for (const sid of await this.d.redis.smembers(this.activesKey())) await this.sync(sid).catch((e) => this.d.log?.("[workflows] sync", e));
     return started;

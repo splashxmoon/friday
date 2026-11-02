@@ -1,5 +1,6 @@
 import type { Bus } from "./bus.js";
 import { BOUNCE_WINDOW_MS, bouncesBetween, carriedFor, MAX_BOUNCES, resolveTarget } from "./handoff.js";
+import { humanCause } from "./limit-handoff.js";
 import { cleanHandoff, laneName } from "./session/core.js";
 import { canDriveLane, driverOf, laneOf } from "./session/projection.js";
 import type { SessionStore } from "./session/store.js";
@@ -15,15 +16,16 @@ const AGENT: ActorRef = { id: "agent", name: "Agent", kind: "agent" };
  * handing work to it. What stops a loop is the same as any instruction: the receiving agent has to decide to hand it back, and
  * every hop is in the log with its reason.
  */
-export async function handOff(store: SessionStore, bus: Bus, sid: string, from: string, req: { to: string; reason: string; carried: string[]; task: string }) {
+export async function handOff(store: SessionStore, bus: Bus, sid: string, from: string, req: { to: string; reason: string; carried: string[]; task: string; as?: ActorRef }) {
   const state = await store.state(sid);
   if (!req.task.trim() || !req.reason.trim()) return { ok: false as const, error: "Say why you're handing it off and what the task is." };
   const events = await store.events(sid);
   // The person who started this run, if one did: the agent hands work only where they could have sent it themselves.
   // With nobody behind it (a trigger, another agent), only to a lane nobody is steering and no one's own coding tool.
+  // Work handed on to this lane counts as the person's who started it (limit-handoff.ts humanCause); a message a person queued
+  // behind the run, moved ahead of a limit (limit-ahead.ts), as theirs.
   const started = events.findLast((e) => e.body.type === "run.started" && (e.lane ?? MAIN_LANE) === from);
-  const cause = started?.body.type === "run.started" ? events.find((e) => e.seq === (started.body as { causedBy: number }).causedBy) : undefined;
-  const person = cause?.body.type === "instruction" && cause.actor.kind === "human" && (cause.lane ?? MAIN_LANE) === from ? cause.actor : null;
+  const person = req.as?.kind === "human" ? req.as : started ? humanCause(events, from, started.seq) : null;
   const refusal = (id: string): string | null => {
     const name = laneName(state, id);
     const driver = driverOf(state, id);

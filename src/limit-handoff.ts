@@ -1,9 +1,9 @@
 import { ownPlan, taskOwner } from "./own-plan.js";
 import { limitHit } from "./limit-reset.js";
-import { limitedLanes, stillLimited } from "./limited.js";
+import { limitedLanes, outOfUsageAnywhere, stillLimited } from "./limited.js";
 import { laneName } from "./session/core.js";
 import { driverOf, laneOf, runOf, type SessionState } from "./session/projection.js";
-import { engineName, liveMachine, MAIN_LANE, type EventBody, type SessionEvent } from "./types.js";
+import { engineName, liveMachine, MAIN_LANE, type ActorRef, type EventBody, type SessionEvent } from "./types.js";
 
 /**
  * A coding tool out of usage hands its task on by itself (Arun, 2026-10-20: "look into auto hand off if a coding tool hits its
@@ -52,7 +52,7 @@ export function limitTargets(state: SessionState, events: SessionEvent[], lane: 
       if (ownPlan(e) && e.hostId !== owner) continue;
       if (!(rootOf(e) === rootOf(from) || (!!e.repo && e.repo === from.repo))) continue;
     } else if (!liveMachine(state, id)) continue;
-    if (limited.has(id)) continue;
+    if (limited.has(id) || (e?.tool && outOfUsageAnywhere(e, now))) continue;
     const busy = runOf(state, id).status !== "idle";
     const score = (busy ? 0 : 4) + (e?.tool ? 2 : 1);
     const name = e?.tool ? engineName(e.tool) : laneName(state, id);
@@ -89,26 +89,63 @@ export function backNote(state: SessionState, events: SessionEvent[], lane: stri
   }`;
 }
 
+/** What a run is sent when its usage limit lifts (app.ts), to carry on with the task it stopped on. */
+export const RESUME_NUDGE = "[session] The usage limit has reset. Carry on with the task where you left off; don't start over.";
+
 /** What the limited run was asked to do: its instructions, in order, as the next agent's task. */
 export function limitedTask(events: SessionEvent[], lane: string, startSeq: number, endSeq: number): string {
   const bySeq = new Map(events.map((e) => [e.seq, e]));
   const asked: string[] = [];
+  let resumed = false;
   for (const e of events) {
     if (e.seq < startSeq || e.seq > endSeq || (e.lane ?? MAIN_LANE) !== lane || e.body.type !== "instructions.delivered") continue;
     for (const q of e.body.seqs) {
       const i = bySeq.get(q);
       // Friday's own nudges to keep going are not the task; the task is what they kept it going on.
       if (i?.body.type !== "instruction" || i.body.keepGoing || i.body.approval) continue;
+      // Nor is "the limit has reset, carry on", which went on to the next agent as the task itself (2026-11-02 review).
+      if (i.body.text === RESUME_NUDGE) {
+        resumed = true;
+        continue;
+      }
       asked.push(i.actor.kind === "human" ? `${i.actor.name}: ${i.body.text}` : i.body.text);
     }
+  }
+  // A run that was only that carry-on: the task is the one the run before it was on, when it first ran out.
+  if (!asked.length && resumed) {
+    const end = events.findLast((e) => e.seq < startSeq && e.body.type === "run.ended" && (e.lane ?? MAIN_LANE) === lane);
+    const start = end && events.findLast((e) => e.seq < end.seq && e.body.type === "run.started" && (e.lane ?? MAIN_LANE) === lane);
+    if (end && start) return limitedTask(events, lane, start.seq, end.seq);
   }
   return asked.join("\n\n").trim().slice(0, 7000);
 }
 
-/** The person behind the run on `lane`: who asked for it, else whoever steers the lane. Who a hand-off or a resume acts for. */
+/**
+ * The person a run on `lane` was for: who sent the message it ran on, or, for work handed to it from another lane, the person
+ * behind the run that handed it, a few hops back at most. A task handed on when Claude Code ran out went no further when Codex
+ * ran out too: the hand-off was the agent's, so nobody was behind it and every coding tool refused it (2026-11-02 review).
+ */
+export function humanCause(events: SessionEvent[], lane: string, startSeq: number): ActorRef | null {
+  let at = lane;
+  let seq = startSeq;
+  for (let hop = 0; hop < 8; hop++) {
+    const started = events.find((e) => e.seq === seq);
+    if (started?.body.type !== "run.started") return null;
+    const cause = events.find((e) => e.seq === (started.body as { causedBy: number }).causedBy);
+    if (cause?.body.type !== "instruction" || (cause.lane ?? MAIN_LANE) !== at) return null;
+    if (cause.actor.kind === "human") return cause.actor;
+    const from = cause.body.handoff?.fromLane;
+    const before = from ? events.findLast((e) => e.seq < cause.seq && e.body.type === "run.started" && (e.lane ?? MAIN_LANE) === from) : undefined;
+    if (!from || !before) return null;
+    at = from;
+    seq = before.seq;
+  }
+  return null;
+}
+
+/** The person behind the run on `lane`: who asked for it (humanCause), else whoever steers the lane. Who a hand-off or a resume acts for. */
 export function personBehind(state: SessionState, events: SessionEvent[], lane: string, startSeq: number): { id: string; name: string } | null {
-  const started = events.find((e) => e.seq === startSeq);
-  const cause = started?.body.type === "run.started" ? events.find((e) => e.seq === (started.body as { causedBy: number }).causedBy) : undefined;
-  if (cause?.body.type === "instruction" && cause.actor.kind === "human") return { id: cause.actor.id, name: cause.actor.name };
+  const cause = humanCause(events, lane, startSeq);
+  if (cause) return { id: cause.id, name: cause.name };
   return driverOf(state, lane);
 }

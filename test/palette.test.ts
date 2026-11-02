@@ -11,7 +11,7 @@ const labels = (gs: { items: { label: string }[] }[]) => gs.flatMap((g) => g.ite
 
 test("it reaches every page, search and the looks; People only with a team; no Connections page", async () => {
   const all = (await base()).map((a) => a.label);
-  for (const want of ["Agent Board", "Code Review", "Automations", "Saved agents", "Usage", "Settings", "People", "Search sessions and what was said", "Use the dark look"]) assert.ok(all.includes(want), want);
+  for (const want of ["Agent Board", "Code Review", "Coding tool automations", "Crew workflows", "Saved agents", "Usage", "Settings", "People", "Search sessions and what was said", "Use the dark look"]) assert.ok(all.includes(want), want);
   // Gone (Arun, 2026-10-22): the coding tools have their MCP servers connected in their own tools.
   assert.ok(!all.includes("Connections"));
   const solo = (await base(false)).map((a) => a.label);

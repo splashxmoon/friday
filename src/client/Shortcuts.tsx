@@ -62,6 +62,9 @@ export const SHORTCUTS: { title: string; keys: [string[], string][] }[] = [
       [["⌘", "2"], "Diff"],
       [["⌘", "3"], "Terminal"],
       [["⌘", "4"], "Preview"],
+      // ⌃ on a Mac and Alt elsewhere (SessionView agentKeys); they were answered to and listed nowhere (2026-11-02 review).
+      [[IS_MAC ? "⌃" : "⌥", "1", "–", "9"], "Bring up one agent (0 for all of them)"],
+      [["⌘", "J"], "The next thing an agent is waiting on you for"],
     ],
   },
   {

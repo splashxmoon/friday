@@ -152,9 +152,10 @@ export function BranchCard({
   };
 
   const typed = q.trim();
-  const hits = (list ?? []).filter((b) => !typed || b.name.toLowerCase().includes(typed.toLowerCase()));
-  // A name nothing matches is a branch you are asking for, not a search that failed.
-  const isNew = !!typed && !(list ?? []).some((b) => b.name === typed);
+  // A name nothing matches is a branch you are asking for, not a search that failed, made one git takes.
+  const named = branchName(typed);
+  const hits = (list ?? []).filter((b) => !typed || b.name.toLowerCase().includes(typed.toLowerCase()) || b.name === named);
+  const isNew = !!named && !(list ?? []).some((b) => b.name === named);
 
   // On the page itself, placed under its button: inside the header, whose rows clip what overflows them, everything under
   // the search box was cut off and no branch could be picked from the list.
@@ -173,7 +174,7 @@ export function BranchCard({
           onKeyDown={(e) => {
             if (e.key !== "Enter") return;
             e.preventDefault();
-            if (isNew) void go(typed, true);
+            if (isNew) void go(named, true);
             else if (hits[0]) void go(hits[0].name);
           }}
         />
@@ -182,9 +183,9 @@ export function BranchCard({
         {err && <p role="alert" className="error small branch-note">{err}</p>}
         {list === null && !err && <p className="muted small branch-note">Reading the branches…</p>}
         {isNew && (
-          <button type="button" className="branch-row" disabled={!!busy} onClick={() => void go(typed, true)}>
-            {busy === typed ? <span className="spinner" /> : <Icon name="plus" size={13} />}
-            <span className="branch-name">Start “{typed}” from here</span>
+          <button type="button" className="branch-row" disabled={!!busy} onClick={() => void go(named, true)}>
+            {busy === named ? <span className="spinner" /> : <Icon name="plus" size={13} />}
+            <span className="branch-name">Start “{named}” from here</span>
           </button>
         )}
         {hits.map((b) => (
@@ -229,6 +230,24 @@ export interface FolderBranch {
 
 /** How a picked branch is named to git: origin's own for one only origin has. */
 export const branchRef = (b: FolderBranch | undefined, name: string): string => (b?.remote ? `origin/${name}` : name);
+
+/**
+ * A typed name as a branch git will take, the way GitHub makes one: "fix login bug" is fix-login-bug (2026-11-02: a name with
+ * spaces started the session and stopped it straight away on git's "is not a valid branch name", with git's hints under it).
+ * Spaces and what git refuses (~ ^ : ? * [ \, "..", "@{", a dot or slash at an end, ".lock") become hyphens or go.
+ */
+export function branchName(typed: string): string {
+  return typed
+    .trim()
+    .replace(/[\s~^:?*[\\\x00-\x1f\x7f]+/g, "-")
+    .replace(/\.{2,}|@\{/g, "-")
+    .replace(/\/{2,}/g, "/")
+    .split("/")
+    .map((part) => part.replace(/^[.-]+/, "").replace(/\.lock$/i, "").replace(/[.-]+$/, ""))
+    .filter(Boolean)
+    .join("/")
+    .replace(/-{2,}/g, "-");
+}
 
 /**
  * Which branch a new session works on, picked before it starts (Arun, 2026-10-25: "make sure they can change the branch they

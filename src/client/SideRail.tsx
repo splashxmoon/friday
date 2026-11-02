@@ -123,10 +123,9 @@ export function SideRail({ attention, recents, activeSid, view, onOpen, onNew, o
       {/* No Search here (Arun, 2026-10-30: "get rid of the search icon in the side bar too"): ⌘⇧F and ⌘K find everything. */}
       <div className="rail-foot">
         {FOOT.map(([p, label, icon, sub]) => (
-          // With the Team tab on, Automations is the team's workflows (TeamWorkflows.tsx; Arun, 2026-10-28).
           <Fragment key={p}>
             {p === "settings" && <LookButton />}
-            <RailTip label={label} sub={teamOn && p === "automations" ? "Your crew's workflows, and your coding tools'" : sub}>
+            <RailTip label={label} sub={sub}>
               <button type="button" className="rail-item" data-active={view === p || (p === "automations" && view === "agents") ? "true" : undefined} aria-current={view === p ? "page" : undefined} onClick={() => onPage(p)} aria-label={label}>
                 <Icon name={icon} size={18} />
               </button>
@@ -170,7 +169,7 @@ function LookButton() {
 const FOOT: [RailPage, string, "board" | "gitPullRequest" | "zap" | "usage" | "gear", string][] = [
   ["board", "Agent Board", "board", "Every agent, by what it's doing"],
   ["review", "Code Review", "gitPullRequest", "Pull requests to look at"],
-  ["automations", "Automations", "zap", "Your coding tools on a schedule"],
+  ["automations", "Automations", "zap", "Your coding tools and your crew, on a schedule"],
   ["usage", "Usage", "usage", "How much of each plan you've used"],
   ["settings", "Settings", "gear", "Appearance, tools, your models"],
 ];

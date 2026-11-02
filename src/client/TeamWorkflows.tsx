@@ -11,6 +11,7 @@
  * Its own code, not the Agent Studio's (that is the paid edition's): the same look, taken from the tray tokens.
  *
  */
+import { AutomationsSwitch } from "./AutomationsSwitch.js";
 import { holdLeave } from "./leave-guard.js";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import {
@@ -324,21 +325,18 @@ export function TeamWorkflowsPage({ identity, onCoding }: { identity: Identity; 
         {confirmUI}
         {asking && <RunAsk name={asking.name} ask={asking.ask ?? ""} onClose={() => setAsking(null)} onRun={(input) => (setAsking(null), void runNow(asking, input))} />}
         {/* Untitled on screen like every page (Arun, 2026-10-19: "get rid of all of these header text"): the title is the tab's. */}
-        <PageHeader
-          title="Workflows"
-          actions={
-            <>
-              <Tip label="Your coding tools on a schedule, each run its own session">
-                <Button variant="outline" size="sm" className="h-8 border-[var(--border)] bg-[var(--bg)] px-3 text-[13px] shadow-none" onClick={onCoding}>
-                  Coding tool automations
-                </Button>
-              </Tip>
+        <div className="auto-head">
+          <AutomationsSwitch view="workflows" onView={onCoding} />
+          <PageHeader
+            title="Crew workflows"
+            className="mb-0"
+            actions={
               <Button size="sm" className="h-8 px-3 text-[13px]" onClick={() => startFrom(null)}>
                 <PlusIcon /> New workflow
               </Button>
-            </>
-          }
-        />
+            }
+          />
+        </div>
         {failed && (
           <p role="alert" className="mb-4 rounded-lg border border-[var(--border)] px-3 py-2 text-[13px] text-[var(--red)]">
             {failed}
@@ -437,7 +435,7 @@ function DraftBox({ identity, onDraft }: { identity: Identity; onDraft: (d: Part
       <Textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), void go())}
+        onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && (e.preventDefault(), void go())}
         placeholder="Describe a workflow: “Every weekday at 9, Ada runs the tests, Kit fixes what fails until they pass, and I OK the pull request.”"
         aria-label="Describe a workflow"
         rows={2}
@@ -1742,7 +1740,7 @@ function StepForm({ s, n, steps, d, names, setStep, moveStep, removeStep }: { s:
           value={own}
           onChange={(e) => setOwn(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") {
+            if (e.key === "Enter" && !e.nativeEvent.isComposing) {
               e.preventDefault();
               addOwn();
             }

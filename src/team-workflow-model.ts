@@ -143,6 +143,13 @@ export interface WorkflowRun {
   input?: string;
   /** Why it failed, waits or was skipped. */
   note?: string;
+  /**
+   * Waiting for its room's board since when, and whether it was already under way: the twelve hours are from then, not from
+   * when the run began, and a run under way isn't skipped as a fresh one would be (2026-11-02 review: OK'd at 9am, a run begun
+   * at 8pm the night before was skipped on the next tick).
+   */
+  waitingSince?: number;
+  waitingCont?: boolean;
   ended?: number;
   /** What it came to: the last column's reports, for the brief and for the workflow it hands on to. */
   result?: string;

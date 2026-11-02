@@ -30,7 +30,7 @@ import { nextAt, nextEight, setAway, setPaused, setSelfRun, stopAll, untilOf } f
 import { threadsOf } from "./team-threads.js";
 import { teamCommand } from "./team-commands.js";
 import { plainLine } from "./team-room.js";
-import { agoShort, Face, mateOn, mateStatus, openThread, refreshTeam, threadSaid, useTeamNow } from "./Teammates.js";
+import { agoShort, Face, markStopped, mateOn, mateStatus, openThread, refreshTeam, threadSaid, useTeamNow } from "./Teammates.js";
 import { assignedTasks, TeamBoard } from "./TeamBoard.js";
 import { proofsIn } from "../team-proof.js";
 import { ProofToggle } from "./ProofCard.js";
@@ -58,14 +58,19 @@ export function useStopAll(identity: Identity, notify: (m: string) => void): [()
   const working = useWorking();
   const run = () => {
     if (!working.length) return notify("Nobody in the crew is working.");
-    const names = working.map((m) => `${m.name}${m.line ? ` (${m.line.slice(0, 48)})` : ""}`);
+    // Their names said plainly, what each is on only when it says more than "Writing its answer" three times over, and no Resume:
+    // there is none after a stop, only the next message (2026-11-02 crew walk-through).
+    const names = working.map((m) => m.name);
+    const said = names.length === 1 ? names[0]! : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+    const lines = new Set(working.map((m) => m.line).filter(Boolean));
+    const on = working.length === 1 && working[0]!.line ? ` (${working[0]!.line.slice(0, 60)})` : lines.size > 1 ? `: ${working.filter((m) => m.line).map((m) => `${m.name}, ${m.line!.slice(0, 40)}`).join("; ")}` : "";
     ask({
       title: working.length === 1 ? `Stop ${working[0]!.name}?` : `Stop all ${working.length} teammates?`,
-      body: `Cut short now: ${names.join("; ")}. What is queued for them stays queued, and they pick it up when you send something or press Resume.`,
+      body: `${said} ${working.length === 1 ? "stops" : "stop"} now, partway through${on}. What is queued for them stays queued, and they pick it up the next time you send them something.`,
       action: working.length === 1 ? "Stop" : "Stop all",
       icon: "stop", // A stop, not a deletion: no trash can (polish-crew, 2026-10-28).
       onConfirm: () =>
-        stopAll(identity)
+        (markStopped(working), stopAll(identity))
           .then((r) => (notify(r.stopped.length ? `Stopped ${r.stopped.length === 1 ? "1 teammate" : `${r.stopped.length} teammates`}. Their queues are kept.` : "Nobody was working."), refreshTeam(identity)))
           // An older server without stop-all: each teammate's own stop, which keeps its queue too.
           .catch(() => Promise.all(working.map((m) => api(identity, `/api/teammates/${m.id}/stop`, { method: "POST" }))).then(() => refreshTeam(identity))),
@@ -107,9 +112,19 @@ export function TeamHeaderControls({ identity, state, events, send, notify, pane
   return (
     <>
       {stopUI}
-      {/* One ⋯ for the room: the board, its threads, Stop all and the rest (Arun, 2026-11-01: "i want to be simplier and easy to
-          digest as a user for crew"). The faces by the title and the line over the box say who works; ⌘. still stops them all. */}
-      <RoomMore identity={identity} sid={state.id} events={events} notify={notify} board={tasks.length ? { open, all: tasks.length, show: () => setBoard(true) } : null} stop={busy ? { n: working.length, run: stop } : null} {...(panel ? { panel } : {})} />
+      {/* Stop all in the header itself while anyone works, one press away, rather than inside the room's menu (Arun, 2026-11-02:
+          "make the stop all button for the crew room pages be in the header too… really functional"). Asked first, queues kept. */}
+      {busy && (
+        <button type="button" className="tm-stop-all" onClick={stop} aria-label={working.length === 1 ? `Stop ${working[0]!.name}` : `Stop all ${working.length} working teammates`} title={`Cut their turns short now; what is queued stays queued (${isMac ? "⌘" : "Ctrl+"}.)`}>
+          <SquareIcon className="size-3" fill="currentColor" />
+          {/* The words go on a narrow window, the stop and the count stay (teammates.css). */}
+          <span className="tm-stop-all-label">{working.length === 1 ? `Stop ${working[0]!.name}` : "Stop all"}</span>
+          {working.length > 1 && <span className="tm-stop-n">{working.length}</span>}
+        </button>
+      )}
+      {/* One ⋯ for the room: the board, its threads and the rest (Arun, 2026-11-01: "i want to be simplier and easy to digest as
+          a user for crew"). The faces by the title and the line over the box say who works. */}
+      <RoomMore identity={identity} sid={state.id} events={events} notify={notify} board={tasks.length ? { open, all: tasks.length, show: () => setBoard(true) } : null} {...(panel ? { panel } : {})} />
       {board && <TeamBoard state={state} events={events} send={send} onClose={() => setBoard(false)} />}
     </>
   );
@@ -229,7 +244,7 @@ function ResultsButton({ sid, events, embedded }: { sid: string; events: Session
  * its own, Away and Pause) or its own place (Skills, Workflows). While the room runs on its own, or you are away, or the crew is
  * paused, the ⋯ itself says so with its mark.
  */
-function RoomMore({ identity, sid, events, notify, board, stop, panel }: { panel?: { on: boolean; toggle: () => void }; identity: Identity; sid: string; events: SessionEvent[]; notify: (m: string) => void; /** The room's board, when it has tasks. */ board: { open: number; all: number; show: () => void } | null; /** Stop all, while anyone works. */ stop: { n: number; run: () => void } | null }) {
+function RoomMore({ identity, sid, events, notify, board, panel }: { panel?: { on: boolean; toggle: () => void }; identity: Identity; sid: string; events: SessionEvent[]; notify: (m: string) => void; /** The room's board, when it has tasks. */ board: { open: number; all: number; show: () => void } | null }) {
   const t = useTeamNow();
   const [open, setOpen] = useState(false);
   const [page, setPage] = useState<null | "results" | "run" | "away" | "threads">(null);
@@ -280,7 +295,6 @@ function RoomMore({ identity, sid, events, notify, board, stop, panel }: { panel
           ) : (
             <ul className="tm-more-list">
               {panel && <Row icon={<PanelRightIcon className="size-4" />} name={panel.on ? "Close the side panel" : "Side panel"} detail={panel.on ? undefined : "Changes, terminal, preview and more"} onClick={() => (done(), panel.toggle())} />}
-              {stop && <Row icon={<SquareIcon className="size-3.5" />} name="Stop all" detail={`${stop.n} working · their queues are kept · ${isMac ? "⌘" : "Ctrl+"}.`} onClick={() => (done(), stop.run())} />}
               {board && <Row icon={<KanbanSquareIcon className="size-4" />} name="Board" detail={`${board.open} open of ${board.all}`} n={board.open} onClick={() => (done(), board.show())} />}
               {threads.length > 0 && <Row icon={<MessagesSquareIcon className="size-4" />} name="Threads" detail={`${threads.length} in this room`} n={threads.filter((x) => x.state === "answering").length} onClick={() => setPage("threads")} />}
               {results.handed.length + results.count > 0 && <Row icon={<PackageIcon className="size-4" />} name="Results" detail="What the crew made here" n={results.handed.length + results.count} onClick={() => setPage("results")} />}

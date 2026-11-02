@@ -11915,6 +11915,15 @@ html.reduce-motion .shine { color: var(--shine-ink, var(--ink-2)); }
 .bench-body .rules-empty-mark { background: var(--surface-hover); color: var(--ink-3); }
 
 /* ── Automations: the intro in plain words, templates as rows with "Use" on hover, the list as rows ── */
+/* Coding tools or Crew workflows, at the top of Automations (AutomationsSwitch.tsx): the switch and what the one picked is, on the
+   left; the page's own button on the right, on the switch's line. */
+.auto-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 16px; margin-bottom: 20px; }
+.auto-switch { display: grid; gap: 8px; min-width: 0; }
+.auto-seg { justify-self: start; }
+.auto-seg button { display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; }
+.auto-seg button svg { opacity: .7; }
+.auto-seg button.on svg { opacity: 1; }
+.auto-switch-line { margin: 0; max-width: 80ch; color: var(--ink-3); font-size: 12.5px; line-height: 18px; }
 .automations-page .auto-label { margin: 0 0 8px; padding: 0 8px; color: var(--ink-3); font-size: 12px; font-weight: 500; }
 .automations-page .auto-intro { padding: 8px 8px 24px !important; border: 0 !important; border-radius: 0 !important; background: none !important; border-bottom: 1px solid var(--line) !important; }
 .automations-page .auto-steps li { padding: 6px 8px; border: 0; background: none; }
@@ -12006,6 +12015,10 @@ body:has(.wf-inspector) .wy-toasts.at-rest { right: calc(16px + 340px + 12px); }
 .stop-detail > pre { max-height: 240px; margin: 8px 0 0; padding: 8px 12px; overflow: auto; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--code-bg); color: var(--ink-2); font: 12px/18px var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .cp-notice:has(.stop-detail[open]) { align-items: flex-start; }
 .cp-notice .cp-text:has(.stop-detail) { flex: 1 1 auto; min-width: 0; }
+/* Try again, after a stopped agent's error: on the line, not under it (the error's own line is a block). */
+.cp-notice .cp-text:has(> .stop-again) { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.cp-notice .cp-text:has(> .stop-again) > .stop-detail { flex: 0 1 auto; }
+.cp-notice .stop-again { flex: none; }
 /* Narrow: "4 subagents" stays on one line and the tally gives way, rather than the title breaking in two (final pass, 420 wide). */
 .subs-title { flex: none; white-space: nowrap; }
 .subs-state { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

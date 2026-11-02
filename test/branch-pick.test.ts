@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { branchesOf, remoteBranchesOf, switchBranch } from "../src/runner/git.js";
 import { callHost } from "../src/runner/local-api.js";
-import { branchRef } from "../src/client/Branches.js";
+import { branchName, branchRef } from "../src/client/Branches.js";
 
 /**
  * The new-session page's branch pick (Arun, 2026-10-25: "make sure they can change the branch they want to work on"): the
@@ -62,4 +62,25 @@ test("a new branch starts from the branch picked, origin's included; an existing
   // An origin-only branch picked to work on is had with its commits, not made up from the checkout.
   await switchBranch(work, "feature");
   assert.equal(git(work, "log", "-1", "--format=%s"), "feature work");
+});
+
+test("a typed branch name is made one git takes, so a session isn't stopped on git's \"not a valid branch name\"", (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), "friday-branch-name-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  git(dir, "init", "-q", "-b", "main");
+  for (const [typed, want] of [
+    ["fix login bug", "fix-login-bug"],
+    ["  Add a short Install section to the README ", "Add-a-short-Install-section-to-the-README"],
+    ["feat/new thing", "feat/new-thing"],
+    ["what?*[x]~^:", "what-x]"],
+    ["a..b", "a-b"],
+    ["ends.lock", "ends"],
+    [".hidden/-dash/trail.", "hidden/dash/trail"],
+    ["x@{1}", "x-1}"],
+    ["friday/2026-11-02-1102", "friday/2026-11-02-1102"],
+    ["   ", ""],
+  ] as const) {
+    assert.equal(branchName(typed), want, typed);
+    if (want) assert.doesNotThrow(() => git(dir, "check-ref-format", "--branch", want), `git takes ${want}`);
+  }
 });

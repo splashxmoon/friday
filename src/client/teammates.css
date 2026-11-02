@@ -513,6 +513,10 @@ html .tm-row[data-active="true"] { background: var(--sel-bg, var(--hover-strong)
 
 /* The header's team controls: Threads and Board as the header's own icon buttons with a count, Stop all while anyone works, and
    the Away / Pause switch as a quiet pill that says its state. */
+/* Stop all, in the room's header while anyone works (TeamControls.tsx): a stop, said in red but quiet until pointed at. */
+.tm-stop-all { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px 0 9px; border: 1px solid color-mix(in srgb, var(--red) 34%, transparent); border-radius: var(--r-pill, 999px); background: color-mix(in srgb, var(--red) 8%, transparent); color: var(--red); font: 500 12.5px/1 var(--font); white-space: nowrap; cursor: pointer; transition: background-color .15s ease, border-color .15s ease; }
+.tm-stop-all:hover { background: color-mix(in srgb, var(--red) 16%, transparent); border-color: color-mix(in srgb, var(--red) 52%, transparent); }
+.tm-stop-n { min-width: 16px; padding: 0 4px; border-radius: 999px; background: color-mix(in srgb, var(--red) 18%, transparent); font-size: 11px; font-weight: 600; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; }
 .tm-hd-btn { position: relative; }
 /* The count beside the icon, not over its corner (Arun, 2026-10-28: "fix placement of numbers it is covering the icons"): the
    button widens to hold it. */
@@ -520,8 +524,6 @@ html .tm-row[data-active="true"] { background: var(--sel-bg, var(--hover-strong)
 .tm-hd-n { position: static; min-width: 0; padding: 0; color: var(--ink-2); font-size: 12px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
 .tm-hd-n.live { color: var(--ink-2); }
 /* Stop all: a quiet ghost, --ink-3 at rest and red only under the pointer (DIRECTION.md §9.1). */
-.tm-stop-all { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 9px 0 8px; border: 0; border-radius: var(--r-md); background: none; color: var(--text-muted); font: inherit; font-size: 13px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: color var(--t-hover) var(--ease-out), background-color var(--t-hover) var(--ease-out); }
-.tm-stop-all:hover { background: var(--red-soft); color: var(--red); }
 .tm-stop-all:focus-visible, .tm-tab:focus-visible, .tm-template:focus-visible, .tm-access-opt:focus-visible, .tm-fact-btn:focus-visible, .tm-kb-card:focus-visible, .tm-run:focus-visible, .tm-result:focus-visible, .tm-brief-go:focus-visible, .tm-banner-btn:focus-visible { outline: none; box-shadow: var(--dass-ring, 0 0 0 2px var(--ink)); }
 /* The overflow (Away and Pause): an icon button like the header's others; its mark is the moon or the pause while one is on. */
 .tm-more-btn[data-on] { color: var(--ink); }
@@ -852,7 +854,6 @@ html .tm-row[data-active="true"] { background: var(--sel-bg, var(--hover-strong)
 .tt-foot > .tt-open:hover { background: var(--tray-hover, var(--hover)); text-decoration: none; }
 .tt-foot > :is(.tt-thread, .tt-open) > svg.lucide { width: 14px; height: 14px; }
 /* The header's pills stand as tall as its icon buttons (26px), not 2px over them. */
-.tm-stop-all { height: 28px; }
 /* A row's "…" covers the row's end: the words make way for it and end in an ellipsis, rather than running under it. */
 .tm-row-wrap:is(:hover, :focus-within) > .tm-row { padding-right: 38px; }
 /* "Runs on" in the teammate dialog and Settings: one field, the size and edge of the dialog's selects, its caret at the end. It was
@@ -918,6 +919,13 @@ html .tm-row[data-active="true"] { background: var(--sel-bg, var(--hover-strong)
 .tm-wait { display: flex; flex: 1 1 auto; align-items: center; min-width: 0; height: 26px; overflow: hidden; white-space: nowrap; }
 .tm-wait-one { display: inline-flex; flex: 0 1 auto; align-items: center; gap: 6px; min-width: 0; height: 24px; padding: 0 4px; border: 0; border-radius: var(--r-md); background: none; color: var(--text-muted); font: inherit; font-size: 12.5px; cursor: pointer; }
 .tm-wait-one:first-child { margin-left: -4px; }
+/* Teammates doing the same thing, said once (TeamWorking): their names, then the line, in the composer's caption. */
+.tm-wait-group { display: inline-flex; flex: 0 1 auto; align-items: center; min-width: 0; color: var(--text-muted); font-size: 12.5px; }
+.tm-wait-group > .tm-wait-one { padding-right: 2px; }
+.tm-wait-group:not(:first-child) > .tm-wait-one:first-of-type { margin-left: 0; }
+.tm-wait-and { color: var(--text-muted); font-weight: 400; }
+.tm-wait-group > .tm-wait-line { margin-left: 4px; }
+.tm-wait-group > .tm-wait-time { margin-left: 6px; }
 .tm-wait-one:hover { color: var(--ink-2); }
 .tm-wait-one:focus-visible { outline: 2px solid var(--focus-ring, var(--ink)); outline-offset: -2px; }
 .tm-wait-one > b { flex: none; color: var(--ink-2); font-weight: 500; }

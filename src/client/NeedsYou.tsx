@@ -223,6 +223,7 @@ export function NeedsYou({ identity, recents, onReview, onCrew }: { identity: Id
                       placeholder={n.kind === "approval" ? "Don't, and do this instead…" : n.kind === "plan" ? "What to change in the plan…" : `Your answer to ${n.who}…`}
                       onChange={(e) => setDraft(e.target.value)}
                       onKeyDown={(e) => {
+                        if (e.nativeEvent.isComposing) return;
                         if (e.key === "Escape") (e.stopPropagation(), setEditing(""), focusRow(n.id));
                         else if (e.key === "Enter" && !e.shiftKey) (e.preventDefault(), draft.trim() && void answer(n, draft, true));
                       }}

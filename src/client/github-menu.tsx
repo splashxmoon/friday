@@ -79,17 +79,22 @@ export function GitMenu({ state, sid, invite, send, children, clickToo, below }:
   const online = !!engine?.online;
   const go = (path: string) => window.open(`https://github.com/${slug}${path}`, "_blank");
 
+  // Why a greyed row is off, said under it: three greyed GitHub rows on a folder with no GitHub remote said nothing (2026-11-02
+  // walk-through).
+  const offline = online ? undefined : "The folder's computer isn't connected";
+  const noGithub = slug ? undefined : "This folder has no GitHub remote";
   const items = (): MenuItem[] => [
     { heading: "Git" },
-    { label: "Commit changes…", icon: "gitCommit", disabled: !changed || !online, onSelect: () => setShip(true) },
+    { label: "Commit changes…", icon: "gitCommit", disabled: !changed || !online, ...(offline || !changed ? { sub: offline ?? "No changes to commit" } : {}), onSelect: () => setShip(true) },
     {
       label: "New branch…",
       icon: "gitBranch",
       disabled: !online,
+      ...(offline ? { sub: offline } : {}),
       onSelect: () => setNaming(true),
     },
     { heading: "GitHub" },
-    { label: "Open pull request", icon: "gitPullRequest", disabled: !slug || !branch || DEFAULT_BRANCH.test(branch), onSelect: () => go(`/compare/${encodeURIComponent(branch)}?expand=1`) },
+    { label: "Open pull request", icon: "gitPullRequest", disabled: !slug || !branch || DEFAULT_BRANCH.test(branch), ...(noGithub ? { sub: noGithub } : branch && DEFAULT_BRANCH.test(branch) ? { sub: `On ${branch}: start a branch for it first` } : {}), onSelect: () => go(`/compare/${encodeURIComponent(branch)}?expand=1`) },
     { label: "Open on GitHub", icon: "external", disabled: !slug, onSelect: () => go(branch ? `/tree/${branch}` : "") },
     { label: "Fork repository", icon: "gitFork", disabled: !slug, onSelect: () => go("/fork") },
     { heading: "Fork" },

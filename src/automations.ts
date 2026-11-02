@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { Redis } from "ioredis";
-import { describeSchedule, dueSlot, validateSchedule, type AgentSchedule } from "./agents.js";
+import { describeSchedule, dueSlotSince, validateSchedule, type AgentSchedule } from "./agents.js";
 import { ENGINE_NAMES, ENGINE_TOOLS, type EngineMode, type EngineTool } from "./types.js";
 
 /**
@@ -50,6 +50,8 @@ export interface Automation {
   then: { pr: boolean; notify: boolean };
   limits: { perDay: number; offline: "wait" | "skip" };
   created: number;
+  /** When it was last saved (turned on or off included): a schedule's missed slot is caught up only from then (dueSlotSince). */
+  updated?: number;
   /** From a saved agent's schedule, moved here when Agents became Automations. */
   from?: string;
 }
@@ -176,7 +178,7 @@ export class AutomationStore {
   }
 
   async put(ws: string, a: Automation, before?: Automation | null): Promise<void> {
-    const m = this.redis.multi().hset(this.key(ws), a.id, JSON.stringify(a)).sadd(this.workspacesKey(), ws);
+    const m = this.redis.multi().hset(this.key(ws), a.id, JSON.stringify({ ...a, updated: Date.now() })).sadd(this.workspacesKey(), ws);
     if (before?.when.kind === "session" && (a.when.kind !== "session" || a.when.sessionId !== before.when.sessionId)) m.srem(this.watchKey(before.when.sessionId), `${ws} ${a.id}`);
     if (a.when.kind === "session") m.sadd(this.watchKey(a.when.sessionId), `${ws} ${a.id}`);
     await m.exec();
@@ -240,8 +242,8 @@ export class AutomationStore {
   }
 }
 
-/** Whether a scheduled automation is due in the minute `now` is in, as its slot's name. */
-export const dueAutomation = (a: Automation, now: Date): string | null => (a.on && a.when.kind === "schedule" ? dueSlot(a.when.schedule, now) : null);
+/** Whether a scheduled automation is due, in the minute `now` is in or one missed since it was saved (dueSlotSince), as its slot's name. */
+export const dueAutomation = (a: Automation, now: Date): string | null => (a.on && a.when.kind === "schedule" ? dueSlotSince(a.when.schedule, now, a.updated ?? a.created) : null);
 
 /** How long a run waits for its owner's computer before it is skipped. */
 export const WAIT_FOR_COMPUTER_MS = 12 * 60 * 60_000;

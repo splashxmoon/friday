@@ -97,6 +97,8 @@ import type { PeerNote } from "./types.js";
 import { ago as agoOf, LocalPeers, LOOK_AT as SESSIONS_LOOKED_AT, MODE_RANK, newId, placeOf as placeOfSession, scheduleOf } from "./app-tools.js";
 import { backAt, backupText, offBackup, onBackup, backupOf, checkInDue, checkInText, quietCheckIns, type CheckIn, cleanRoom, cleanTeammate, MEMORY_FILE, MEMORY_MAX, defaultFolder, makeFolder, MAX_ROOMS, MAX_TEAMMATES, projectsOf, roomKeep, runsOnName, teammateNote, TeammateStore, worktreeHolding, type Room, type Teammate, type TeammateView } from "./teammates.js";
 import { limitHit, planLimitHit } from "./limit-reset.js";
+import { RESUME_NUDGE } from "./limit-handoff.js";
+import { noteRunEnd } from "./limited.js";
 import { heldByPerson, runnableQueue } from "./held.js";
 import { hopBehind } from "./agent-mesh.js";
 import { mkdir as mkdirAt, open as openAt, rename as renameAt, writeFile as writeFileAt } from "node:fs/promises";
@@ -494,6 +496,8 @@ export async function createApp(o: AppOptions) {
     // Every edition's: the open-source one runs automations too, and with this left out of it its runs stayed "Running" for good
     // and "An agent finishes" never fired (2026-10-27 QA).
     if (ev.body.type === "run.ended") automationsHear?.(sid, ev);
+    // Who is out of usage, whichever session said it, for every session's hand-offs (limited.ts).
+    if (ev.body.type === "run.ended") void store.state(sid).then((s) => noteRunEnd(s.engines[ev.lane ?? MAIN_LANE], { ts: Date.now(), body: ev.body }), () => {});
     // A plan naming a file another agent is on: said in the feed now, before either writes it (collisions.ts plannedOverlapsFor).
     if (ev.body.type === "agent.message" && ev.body.toolCalls.some((c) => c.name === "update_plan" || c.name === "todo" || c.name === "TodoWrite")) {
       void (async () => {
@@ -1086,7 +1090,7 @@ export async function createApp(o: AppOptions) {
         // A teammate's: carried on as Friday, told why (teamResume).
         if (teamResume && (await store.state(sid)).options.team) (await teamResume(sid, lane, due.seq)) && sent.push(sid);
         if (teamResume && (await store.state(sid)).options.team) continue;
-        const r = await core.handle(sid, { id: due.by, name: due.byName }, { type: "instruct", lane, text: "[session] The usage limit has reset. Carry on with the task where you left off; don't start over." });
+        const r = await core.handle(sid, { id: due.by, name: due.byName }, { type: "instruct", lane, text: RESUME_NUDGE });
         if (r.ok) sent.push(sid);
         else await store.append(sid, FRIDAY, { type: "resume.cancelled", why: r.error ?? "It couldn't be sent." }, { lane });
       } catch (err) {
@@ -1767,6 +1771,8 @@ export async function createApp(o: AppOptions) {
   let sinceOf: (ts: number) => Promise<TeamBrief> = async (ts) => ({ since: ts, until: Date.now(), done: [], failed: [], waiting: [], assumptions: [], usage: [] });
   let awayOn: (until: number) => Promise<void> = async () => {};
   let awayOff: () => Promise<unknown> = async () => null;
+  /** A room whose self-run stopped on its budget, its waiting work held until the person is back in it. */
+  const spentKey = (sid: string) => `${o.prefix}selfrun-spent:${sid}`;
   let selfRunOn: (sid: string, goal: string, by: { id: string; name: string }, budget?: RunBudget) => Promise<void> = async () => {};
   let selfRunOff: (sid: string, why: string, by?: { id: string; name: string }, budget?: true) => Promise<void> = async () => {};
   let restartLater = new Map<string, string>();
@@ -2123,6 +2129,7 @@ export async function createApp(o: AppOptions) {
     };
 
     selfRunOn = async (sid, goal, by, budget) => {
+      await redis.del(spentKey(sid));
       await teammates.setSelfRun(sid, { goal, since: Date.now(), by, ...(budget ? { budget } : {}) });
       await redis.del(`${o.prefix}selfrun-nudge:${sid}`);
       const who = { ...by, kind: "human" as const };
@@ -2143,19 +2150,24 @@ export async function createApp(o: AppOptions) {
       if (!had) return;
       await teammates.setSelfRun(sid, null);
       await redis.del(`${o.prefix}selfrun-nudge:${sid}`);
+      // Its budget spent: the room's queued and board work waits too, until the person writes there or runs it again. Only the
+      // nudges stopped, and the teammates went on taking work the room said had stopped (2026-11-02 review).
+      if (budget) await redis.set(spentKey(sid), "1");
       await store.append(sid, by ? { ...by, kind: "human" as const } : FRIDAY_SAYS, { type: "team.selfrun", on: false, why, ...(budget ? { budget } : {}) }, { lane: MAIN_LANE });
       console.log(`[teammates] ${sid} stopped running on its own: ${why}`);
     };
 
     teamHear = (sid, ev) => {
       const b = ev.body;
-      const person = b.type === "instruction" && ev.actor.kind === "human";
+      // The person, not an agent outside Friday asking through its MCP (`via`): a terminal Claude Code's ask_teammate at 2am ended
+      // Away and sent the brief early (2026-11-02 review).
+      const person = b.type === "instruction" && ev.actor.kind === "human" && !ev.actor.via;
       if (!person && b.type !== "run.ended" && b.type !== "lane.removed") return;
       void (async () => {
         const state = await store.state(sid).catch(() => null);
         if (!state?.options.team) return;
-        // The person writing in any team chat is them back.
-        if (person) return void (await endAway());
+        // The person writing in any team chat is them back, and a room stopped on its budget goes again for them.
+        if (person) return void (await Promise.all([endAway(), redis.del(spentKey(sid))]));
         if (b.type === "lane.removed") {
           mesh.forget(sid, b.laneId);
           noteMemory.delete(`${sid} ${b.laneId}`);
@@ -2517,7 +2529,20 @@ export async function createApp(o: AppOptions) {
           // Away, a check-in with nothing to look at since the last one isn't asked: its slot is spent, and no usage on it
           // (Arun, 2026-10-28: "Check-ins while away: skipped while nothing changed").
           const lastAsk = away ? teamEvents.findLast((e) => (e.lane ?? MAIN_LANE) === t.lane && e.body.type === "instruction" && e.body.text.startsWith("[Check-in] ")) : undefined;
-          const quietSince = !!lastAsk && !teamEvents.some((e) => e.seq > lastAsk.seq && (e.lane ?? MAIN_LANE) !== t.lane && (e.body.type === "run.started" || (e.body.type === "instruction" && e.actor.kind === "human") || e.body.type === "agent.diff" || e.body.type === "board.posted"));
+          // Its own work counts too, here and in its rooms: only the others' was read, so a crew of one that worked all night had
+          // every check-in after the first skipped (2026-11-02 review). Its own turns aren't counted (answering a check-in is one),
+          // what they changed is.
+          const changed = (e: SessionEvent) => e.body.type === "agent.diff" || e.body.type === "board.posted";
+          let quietSince = !!lastAsk && !teamEvents.some((e) => e.seq > lastAsk.seq && ((e.lane ?? MAIN_LANE) !== t.lane ? e.body.type === "run.started" || (e.body.type === "instruction" && e.actor.kind === "human") || changed(e) : changed(e)));
+          if (quietSince && lastAsk) {
+            for (const r of await teammates.rooms()) {
+              const lane = r.lanes[t.id];
+              if (lane && (await store.events(r.sid).catch(() => [] as SessionEvent[])).some((e) => e.ts > lastAsk.ts && (e.lane ?? MAIN_LANE) === lane && (e.body.type === "run.started" || changed(e)))) {
+                quietSince = false;
+                break;
+              }
+            }
+          }
           // What is due is read and its slot written under the teammate's lock, from the record as it is then: a check-in is
           // asked once a slot however the clock ticks, and never of a teammate removed meanwhile.
           let due: { c: CheckIn; slot: string }[] = [];
@@ -2608,6 +2633,8 @@ export async function createApp(o: AppOptions) {
       // The person's own message always goes through: the one person here is the crew's owner. Pause holds what waits, not a run.
       if (people.length) return false;
       if (!running && (await teammates.paused())) return true;
+      // The room's self-run stopped on its budget (selfRunOff): what waits there stays waiting until the person is back in it.
+      if (!running && (await redis.exists(spentKey(sid)))) return true;
       // Its budget spent or its hours over (team-budget.ts): it waits, saying why once; the re-pump starts it when that's over.
       const place = await placeOf(sid, lane);
       const t = place && (await teammates.get(place.id));
@@ -5927,7 +5954,9 @@ async function preloadsFor(entry: string): Promise<string[]> {
     // `import{a}from"./x.js"` and `import"./x.js"`, never `import("./x.js")`.
     for (const m of Buffer.from(js.body).toString("utf8").matchAll(/\bimport\s*(?:[\w$*{][^;"'()]*?\bfrom\s*)?["'](\.{1,2}\/[^"']+\.js)["']/g)) {
       const dep = new URL(m[1]!, `http://x${file}`).pathname;
-      if (!seen.has(dep)) {
+      // Only the bundle's own: the crew demo's sample code sits in a chunk as text, and its `import { fmt } from "./money.js"`
+      // was named in the page, three 404s on every load (2026-11-02 crew walk-through).
+      if (!seen.has(dep) && bundle.get(dep)) {
         seen.add(dep);
         visit(dep);
       }

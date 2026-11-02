@@ -423,6 +423,25 @@ export function dueSlot(s: AgentSchedule, now: Date): string | null {
   return c.date;
 }
 
+/** How far back a missed slot is still run: a computer asleep or Friday closed through the minute, opened again soon after. */
+export const CATCH_UP_MS = 2 * 60 * 60_000;
+
+/**
+ * The latest slot a schedule fired in from `since` to `now`, at most CATCH_UP_MS back: the clock only looked at the minute
+ * itself, so a weekday 09:00 run with the lid shut until 09:02 never ran that day, and nothing said so (2026-11-02 review).
+ * `since` is when the schedule was last saved, so one set at 10:00 for 09:30 waits for tomorrow rather than going at once.
+ */
+export function dueSlotSince(s: AgentSchedule, now: Date, since: number): string | null {
+  // The minute it is now counts whenever it was saved, as it always did.
+  const minute = Math.floor(now.getTime() / 60_000) * 60_000;
+  const from = Math.min(minute, Math.max(since, now.getTime() - CATCH_UP_MS));
+  for (let t = minute; t >= from; t -= 60_000) {
+    const slot = dueSlot(s, new Date(t));
+    if (slot) return slot;
+  }
+  return null;
+}
+
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 /** "every weekday at 09:00 (Europe/London)": for the first line of the session it starts. */
 export function describeSchedule(s: AgentSchedule): string {

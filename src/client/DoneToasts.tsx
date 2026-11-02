@@ -55,6 +55,9 @@ export function DoneToasts({ activeSid }: { activeSid: string | null }) {
   }, []);
   // Opened from elsewhere (the sidebar): its toast has said what it had to.
   useEffect(() => setShown((s) => s.filter((x) => x.sid !== activeSid)), [activeSid]);
+  // None left (the last one clicked, which took the list away under the pointer, so it never heard the pointer leave): nothing is
+  // being read, or every toast after it stayed until hovered and left (2026-11-02 review).
+  if (!shown.length) held.current = false;
   if (!shown.length) return null;
   return (
     <section className="done-toasts" aria-label="Finished" aria-live="polite" onPointerEnter={() => (held.current = true)} onPointerLeave={() => (held.current = false)}>

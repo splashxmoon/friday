@@ -4,7 +4,7 @@ import { Avatar, Icon, type IconName } from "./icons.js";
 import type { RecentSession } from "./storage.js";
 import { shortcut } from "./Shortcuts.js";
 import { useDismiss } from "./ui.js";
-import { openWorkflows } from "./team-workflow-view.js";
+import { openWorkflows, setAutomationsView } from "./team-workflow-view.js";
 import { choosePlace } from "./WorkMode.js";
 import { byState } from "./presence.js";
 
@@ -275,7 +275,8 @@ export function baseActions(p: {
     { id: "board", label: "Agent Board", icon: "board", group: "Go to", run: () => p.goto("board") },
     { id: "review", label: "Code Review", icon: "gitPullRequest", group: "Go to", run: () => p.goto("review") },
     { id: "needs", label: "Needs you", icon: "hand", group: "Go to", run: () => p.goto("needs") },
-    { id: "automations", label: "Automations", icon: "zap", group: "Go to", run: () => p.goto("automations") },
+    // Each to the automations it names, not to whichever of the two the page showed last.
+    { id: "automations", label: "Coding tool automations", icon: "zap", group: "Go to", run: () => (setAutomationsView("coding"), p.goto("automations")) },
     { id: "workflows", label: "Crew workflows", icon: "zap", group: "Go to", run: openWorkflows },
     // The sidebar's Code, Work and Crew from the keyboard (Arun, 2026-10-28: "iron everything and ensure we are good").
     { id: "place-code", label: "Switch to Code", icon: "code", group: "Go to", run: () => choosePlace("code") },

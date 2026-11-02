@@ -164,8 +164,10 @@ export function usePlaceFollows(activeSid: string | null): void {
  * The other way round: Code, Work or Crew picked in the sidebar while a session of another place is open goes to the new
  * place's home, rather than leaving that session (the Crew room, a Code chat) on screen under a list it isn't in (Arun,
  * 2026-10-28: "iron everything and ensure we are good… any logic errors and fixes"). Only once the places are known.
+ * `elsewhere`: a page that is no place's (Settings, Usage, the Agent Board…), left the same way, since picking Work there
+ * turned the sidebar and kept Settings on screen (2026-11-02 walk-through).
  */
-export function usePlaceLeaves(activeSid: string | null, home: () => void): void {
+export function usePlaceLeaves(activeSid: string | null, home: () => void, elsewhere = false): void {
   const [team] = useTeamTab();
   const [work] = useWorkMode();
   const sids = useWorkSids();
@@ -175,6 +177,7 @@ export function usePlaceLeaves(activeSid: string | null, home: () => void): void
   useEffect(() => {
     if (was.current === place) return;
     was.current = place;
+    if (elsewhere) return home();
     if (!activeSid || !teamKnown || !listed) return;
     const its = isTeamSid(activeSid) ? "team" : sids.has(activeSid) ? "work" : "code";
     if (its !== place) home();

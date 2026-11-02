@@ -83,7 +83,14 @@ export async function startLocal(o: { home?: string; port?: number } = {}): Prom
   const secretFile = path.join(home, "secret");
   const secret = existsSync(secretFile) ? readFileSync(secretFile, "utf8").trim() : randomBytes(32).toString("base64url");
   if (!existsSync(secretFile)) writeFileSync(secretFile, secret, { mode: 0o600 });
+  // The name git has for the person ("Maya Chen"), else their login: the page said "Good morning, mchen" (2026-11-02 walk-through).
   const name = (() => {
+    try {
+      const git = execFileSync("git", ["config", "--global", "user.name"], { encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"] }).trim();
+      if (git) return git.slice(0, 60);
+    } catch {
+      // No git, or no name set in it.
+    }
     try {
       return os.userInfo().username || "You";
     } catch {

@@ -23,7 +23,7 @@ import { keepAuto, reachForMessage } from "./smartReach.js";
 import type { Plan } from "../plan-types.js";
 import { isLocal, ownModel, planLimits } from "./edition.js";
 import { AlsoWorksIn, FolderCard, useResumeLink, type Picked } from "./Workspace.js";
-import { branchRef, FolderBranchPick, type FolderBranch } from "./Branches.js";
+import { branchName, branchRef, FolderBranchPick, type FolderBranch } from "./Branches.js";
 import type { ResumeLink } from "./resume-link.js";
 import { issueBranch, parseIssueUrl, parsePrLink, withIssue, withPr, type Issue, type Pr } from "../github-issue.js";
 import { isTeamSid } from "./Teammates.js";
@@ -589,7 +589,7 @@ export function Code({
     // In the desktop app Friday Code always has this computer, folder or not: with none picked it works in a folder of its
     // own (~/Friday/Projects/…), with the same shell and tools as any coding tool, held to the mode picked like they are.
     const willAttach = hasMachine && (!!folder || !!engine || !!window.fridayDesktop);
-    const newBranchName = newBranch && folder?.isRepo ? branch.trim() || branchSuggestion : "";
+    const newBranchName = newBranch && folder?.isRepo ? branchName(branch) || branchSuggestion : "";
     // The branch the folder is put on: a pull request's own, a new one, the one picked, or the one the conversation being
     // continued ended on.
     const target = pr?.head && !pr.fork && folder?.isRepo ? pr.head : newBranchName || pickedBranch || resumeBranch;
@@ -599,6 +599,8 @@ export function Code({
     let aside: { branch: string; base?: string } | undefined;
     setBusy(true);
     setErr("");
+    // The session once made, until the task is sent to it: one left without its task is taken away again.
+    let made = "";
     // Said under the box as it goes: starting takes a few seconds, and a spinner alone said nothing about which of them was slow.
     try {
       if (willAttach && folder?.isRepo) {
@@ -655,6 +657,7 @@ export function Code({
         }),
       });
       const invite = r.invites.owner!;
+      made = r.sessionId;
       if (work) markWorkSession(r.sessionId);
       // The machine joins first. With a CLI selected the CLI does the work;
       // with Friday Code the computer lends the folder and Friday works in
@@ -722,16 +725,24 @@ export function Code({
           setAttachNote(done < total ? `Uploading ${done} of ${total}…` : "Uploaded."),
         );
         attachments = up.attachments;
-        if (up.failed) setAttachNote(`Attached ${attachments.length + up.folders.reduce((n, f) => n + f.files, 0)}; ${up.failed} didn't upload.`);
+        failedUploads = up.failed;
       };
+      let failedUploads = 0;
       if (willAttach) setAttachNote(`Starting ${engine ? ENGINE_NAMES[engine] : "Friday Code"}…`);
       await Promise.all([attach(), upload()]);
       // Not into a session whose agent never arrived, with the task waiting on it and the reason left behind on this page:
       // the reason stays here, beside the message, so it can be fixed and sent again.
+      // Nor sent without some of its files: "2 didn't upload" was replaced by "Sending the task…" at once and the agent worked
+      // without them (2026-11-02 review). Stopped here instead, with the files still on the box to try again or take off.
+      if (attached && failedUploads) {
+        attached = false;
+        setErr(`${failedUploads === 1 ? "A file" : `${failedUploads} files`} didn't upload, so nothing was sent. Send again, or take ${failedUploads === 1 ? "it" : "them"} off.`);
+      }
       if (!attached) {
         setAttachNote("");
         setBusy(false);
         // Nor left on the list as an empty session, one more each time it is tried again.
+        made = "";
         void api(identity, "/api/sessions/mine/forget", { method: "POST", body: JSON.stringify({ sid: r.sessionId }) }).catch(() => {});
         return;
       }
@@ -743,11 +754,15 @@ export function Code({
           body: JSON.stringify({ text, attachments, ...(shepherd.current && pr ? { shepherd: true } : {}) }),
         });
       }
+      made = "";
       started(r.sessionId, invite);
     } catch (e) {
       setErr((e as Error).message);
       setAttachNote("");
       setBusy(false);
+      // Made, then the task couldn't be sent: the session goes, as one whose agent never arrived does, or each try left another
+      // behind with its agent attached and nothing asked of it (2026-11-02 review).
+      if (made) void api(identity, "/api/sessions/mine/forget", { method: "POST", body: JSON.stringify({ sid: made }) }).catch(() => {});
     }
   };
 

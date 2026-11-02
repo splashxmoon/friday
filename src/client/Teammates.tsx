@@ -986,24 +986,42 @@ export function TeamWorking({ sid }: { sid: string }) {
   // Working here, in this chat's own runs: not busy in another room (statusIn).
   const busy = matesIn(sid).filter(({ lane, m }) => statusIn(sid, lane, m) === "working");
   if (!busy.length) return null;
+  // Those doing the same thing said once: "Nova, Kit and Juno are writing their answers", not the line three times over (2026-11-02
+  // crew walk-through). Each name still opens that teammate's chat.
+  const groups: { line: string; who: typeof busy }[] = [];
+  for (const b of busy) {
+    const line = mateStatus(b.m, { sid, lane: b.lane }).line;
+    const g = groups.find((x) => x.line === line);
+    if (g) g.who.push(b);
+    else groups.push({ line, who: [b] });
+  }
   return (
     <div className="tm-wait" role="status" aria-live="polite">
-      {busy.map(({ lane, m }, i) => {
-        const since = workingSinceOf(m);
-        const line = mateStatus(m, { sid, lane }).line;
+      {groups.map(({ line, who }, i) => {
+        const since = who.length === 1 && busy.length === 1 ? workingSinceOf(who[0]!.m) : null;
         return (
-          <button key={m.id} type="button" className="tm-wait-one" onClick={() => focusAgent(sid, lane)} title={`${m.name}: ${line}. Open ${m.name}'s chat`}>
+          <span key={who[0]!.m.id} className="tm-wait-group">
             {i > 0 && <span className="tm-wait-sep" aria-hidden="true">·</span>}
-            <Face seed={m.look ?? m.name} size={14} />
-            <b>{m.name}</b>
-            <Shine className="tm-wait-line">{lower(line)}</Shine>
-            {busy.length === 1 && since !== null && <span className="tm-wait-time">{elapsed(since, now)}</span>}
-          </button>
+            {who.map(({ lane, m }, j) => (
+              <button key={m.id} type="button" className="tm-wait-one" onClick={() => focusAgent(sid, lane)} title={`${m.name}: ${line}. Open ${m.name}'s chat`}>
+                <Face seed={m.look ?? m.name} size={14} />
+                <b>
+                  {m.name}
+                  {who.length > 1 && j < who.length - 1 && <span className="tm-wait-and">{j === who.length - 2 ? " and" : ","}</span>}
+                </b>
+              </button>
+            ))}
+            <Shine className="tm-wait-line">{who.length > 1 ? plural(line) : lower(line)}</Shine>
+            {since !== null && <span className="tm-wait-time">{elapsed(since, now)}</span>}
+          </span>
         );
       })}
     </div>
   );
 }
+
+/** A doing said of several: "Writing its answer" → "are writing their answers", "Running the tests" → "are running the tests". */
+const plural = (line: string) => (line === "Writing its answer" ? "are writing their answers" : /^[A-Z][a-z]+ing\b/.test(line) ? `are ${line[0]!.toLowerCase()}${line.slice(1).replace(/\bits\b/g, "their")}` : line);
 
 /** "Writing the notes" read after a name: "Nova writing the notes" → "Nova is writing the notes"; a line that isn't a doing stays. */
 const lower = (line: string) => (/^[A-Z][a-z]+ing\b/.test(line) ? `is ${line[0]!.toLowerCase()}${line.slice(1)}` : line);
@@ -1468,6 +1486,11 @@ const doneAt = new Map<string, number>();
 /** When each face started working, as first seen: its elapsed time counts from here. */
 const workingSince = new Map<string, number>();
 const DONE_FOR = 8_000;
+/** When each face (by its seed) was stopped by the person (Stop all, Stop): going idle then is no finish, and gets no check. */
+const stoppedAt = new Map<string, number>();
+export function markStopped(mates: Pick<TeammateView, "look" | "name">[]): void {
+  for (const m of mates) stoppedAt.set(m.look ?? m.name, Date.now());
+}
 function noteStates(was: Team | null, now: Team): void {
   const t = Date.now();
   const before = new Map((was?.teammates ?? []).map((m) => [m.id, m.status]));
@@ -1477,7 +1500,8 @@ function noteStates(was: Team | null, now: Team): void {
     if (m.status === "working") {
       if (!workingSince.has(seed)) workingSince.set(seed, t);
     } else workingSince.delete(seed);
-    if (prev === "working" && m.status === "idle") doneAt.set(seed, t);
+    // Not stopped by the person (held): a check on each face after Stop all said they had finished (2026-11-02 crew walk-through).
+    if (prev === "working" && m.status === "idle" && !m.held && !(t - (stoppedAt.get(seed) ?? 0) < 30_000)) doneAt.set(seed, t);
     if (m.status === "working") doneAt.delete(seed);
   }
 }
@@ -1705,7 +1729,7 @@ export function SidebarTeammates({ identity, onOpen, activeSid, needs = [] }: { 
                 body: `Cut short now${m.line ? `: ${m.line.slice(0, 60)}` : ""}. What is queued for them stays queued, and they pick it up when you send something.`,
                 action: "Stop",
                 icon: "stop",
-                onConfirm: () => void api(identity, `/api/teammates/${m.id}/stop`, { method: "POST" }).then(() => refreshTeam(identity)).catch(fail),
+                onConfirm: () => (markStopped([m]), void api(identity, `/api/teammates/${m.id}/stop`, { method: "POST" }).then(() => refreshTeam(identity)).catch(fail)),
               }),
           },
         ]
@@ -2622,7 +2646,7 @@ export function TeammateDialog({ identity, editing, onClose, inline }: { identit
                   onChange={(e) => (e.target.value.includes(",") ? addProject(e.target.value) : setProject(e.target.value))}
                   onBlur={() => project.trim() && addProject()}
                   onKeyDown={(e) => {
-                    if (e.key !== "Enter") return;
+                    if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
                     e.preventDefault();
                     addProject();
                   }}
@@ -2700,24 +2724,31 @@ function StarterTeam({ identity, onDone }: { identity: Identity; onDone: () => v
   const installed = installedOn(identity);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  // The ones made so far, so a second press makes the rest rather than a second lead.
+  const made = useRef<{ roles: Set<string>; lead: string | null }>({ roles: new Set(), lead: null });
   const make = async () => {
+    // A coding tool on this computer, Claude Code first: with only Cursor or Gemini here all three went on Codex, which wasn't
+    // (2026-11-02 review).
+    const tool = (["claude", "codex", ...ENGINE_TOOLS] as EngineTool[]).find((t) => !installed || installed(t));
+    if (!tool) return setErr("Install a coding tool first (Claude Code, Codex, Cursor…): each teammate works through one.");
     setBusy(true);
     setErr("");
-    const tool: EngineTool = !installed || installed("claude") ? "claude" : "codex";
     try {
-      let lead: string | null = null;
       for (const k of ["Lead", "Engineer", "Writer"] as const) {
+        if (made.current.roles.has(k)) continue;
         const r = ROLES[k];
         const got = await api<Team>(identity, "/api/teammates", { method: "POST", body: JSON.stringify({ name: freeName(r.names), role: r.role, tool, model: canRoute(tool) ? "auto" : "", mode: r.mode, checkins: r.checkin ? [{ id: `c${Date.now().toString(36)}${k}`, text: r.checkin, every: "weekdays", at: "09:00", days: [], tz: Intl.DateTimeFormat().resolvedOptions().timeZone }] : [] }), headers: { "Content-Type": "application/json" } });
         team = got;
-        if (k === "Lead") lead = got.teammates.at(-1)?.id ?? null;
+        made.current.roles.add(k);
+        if (k === "Lead") made.current.lead = got.teammates.at(-1)?.id ?? null;
       }
-      if (lead) await api(identity, `/api/teammates/${lead}/lead`, { method: "POST" }).catch(() => {});
+      if (made.current.lead) await api(identity, `/api/teammates/${made.current.lead}/lead`, { method: "POST" }).catch(() => {});
       await refreshTeam(identity);
       onDone();
     } catch (x) {
-      setErr((x as Error).message);
-      await refreshTeam(identity);
+      // Said here, and the crew not read again until all three are made: read now, a crew of one opened its room, this page went,
+      // and the reason with it (2026-11-02 review).
+      setErr(`${(x as Error).message}${made.current.roles.size ? " Press again to make the rest." : ""}`);
     } finally {
       setBusy(false);
     }
@@ -2725,7 +2756,7 @@ function StarterTeam({ identity, onDone }: { identity: Identity; onDone: () => v
   return (
     <span className="tm-starter">
       <Button type="button" variant="outline" disabled={busy} onClick={() => void make()} title="A lead, an engineer and a writer, ready to go">
-        <UsersIcon className="size-4" /> {busy ? "Making three…" : "Starter crew"}
+        <UsersIcon className="size-4" /> {busy ? "Making three…" : made.current.roles.size ? "Make the rest" : "Starter crew"}
       </Button>
       {err && (
         <span className="tm-err" role="alert">
@@ -2978,7 +3009,7 @@ function ThreadPanel({ sid, root, lane, events, send, onClose }: { sid: string; 
           placeholder={`Reply to ${mate?.name ?? "it"} in this thread…`}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
               void reply();
             }
