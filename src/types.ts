@@ -193,7 +193,7 @@ export type SessionOptionsPatch = Partial<Omit<SessionOptions, "policy">> & { po
  * holds a key for these: the CLI runs on the host's machine, under their login,
  * and a small runner relays the session to it.
  */
-export type EngineTool = "claude" | "codex" | "cursor" | "copilot" | "opencode" | "gemini" | "devin" | "junie" | "kiro" | "droid" | "grok" | "cline" | "kilo" | "amp" | "muse" | "acp";
+export type EngineTool = "claude" | "codex" | "cursor" | "copilot" | "opencode" | "gemini" | "devin" | "junie" | "kiro" | "droid" | "grok" | "cline" | "kilo" | "amp" | "muse" | "qwen" | "acp";
 
 /** What a person sees about a coding tool before and after it is on their machine. Its runner side is in runner/adapters.ts. */
 export interface ToolInfo {
@@ -293,7 +293,8 @@ export const TOOL_INFO: Record<EngineTool, ToolInfo> = {
     tint: "#0866ff",
     note: "macOS and Linux; on Windows, inside WSL.",
   },
-  // Any other agent in the ACP registry (Qwen Code, goose, Mistral Vibe, Auggie, Kimi...), by the command somebody sets on their computer.
+  qwen: { name: "Qwen Code", blurb: "Qwen's coding agent", docs: "https://qwenlm.github.io/qwen-code-docs/en/users/", install: { npm: "@qwen-code/qwen-code" }, tint: "#615ced" },
+  // Any other agent in the ACP registry (goose, Mistral Vibe, Auggie, Kimi...), by the command somebody sets on their computer.
   acp: {
     name: "Other ACP agent",
     blurb: "Any coding agent that speaks ACP",
@@ -484,6 +485,7 @@ export const ENGINE_MODEL_INFO: Record<EngineTool, EngineModelInfo[]> = {
     { id: "high", label: "High", blurb: "More reasoning, for harder work." },
     { id: "ultra", label: "Ultra", blurb: "Its strongest, for the hardest tasks." },
   ],
+  qwen: [],
   acp: [],
 };
 

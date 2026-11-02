@@ -1,0 +1,114 @@
+[
+  {
+    "direction": "out",
+    "frame": {
+      "jsonrpc": "2.0",
+      "id": 0,
+      "method": "initialize",
+      "params": {
+        "protocolVersion": 1,
+        "clientCapabilities": {
+          "fs": {
+            "readTextFile": false,
+            "writeTextFile": false
+          },
+          "terminal": false
+        },
+        "clientInfo": {
+          "name": "friday",
+          "title": "Friday",
+          "version": "1"
+        }
+      }
+    }
+  },
+  {
+    "direction": "in",
+    "frame": {
+      "jsonrpc": "2.0",
+      "id": 0,
+      "result": {
+        "protocolVersion": 1,
+        "agentInfo": {
+          "name": "qwen-code",
+          "title": "Qwen Code",
+          "version": "0.26.5"
+        },
+        "authMethods": [
+          {
+            "id": "openai",
+            "name": "Use OpenAI API key",
+            "description": "Requires setting the `OPENAI_API_KEY` environment variable",
+            "_meta": {
+              "type": "terminal",
+              "args": [
+                "--auth-type=openai"
+              ]
+            }
+          }
+        ],
+        "agentCapabilities": {
+          "loadSession": true,
+          "promptCapabilities": {
+            "image": true,
+            "audio": true,
+            "embeddedContext": true
+          },
+          "sessionCapabilities": {
+            "list": {},
+            "resume": {}
+          },
+          "mcpCapabilities": {
+            "sse": true,
+            "http": true
+          },
+          "_meta": {
+            "imageCapability": {
+              "autoHandlesWrongModel": true,
+              "maxBytes": 10380902,
+              "maxImagesPerTurn": 4
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "direction": "out",
+    "frame": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "session/new",
+      "params": {
+        "cwd": "/work/repo",
+        "mcpServers": []
+      }
+    }
+  },
+  {
+    "direction": "in",
+    "frame": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "error": {
+        "code": -32000,
+        "message": "Authentication required: Use Qwen Code CLI to authenticate first.",
+        "data": {
+          "authMethods": [
+            {
+              "id": "openai",
+              "name": "Use OpenAI API key",
+              "description": "Requires setting the `OPENAI_API_KEY` environment variable",
+              "_meta": {
+                "type": "terminal",
+                "args": [
+                  "--auth-type=openai"
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+]
