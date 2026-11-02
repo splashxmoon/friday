@@ -68,6 +68,7 @@ Works with the subscriptions you already have. If a coding tool is installed and
   <kbd><img src="https://www.google.com/s2/favicons?domain=kilo.ai&sz=64" width="14" valign="middle" alt="" /> Kilo</kbd>
   <kbd><img src="https://www.google.com/s2/favicons?domain=ampcode.com&sz=64" width="14" valign="middle" alt="" /> Amp</kbd>
   <kbd><img src="https://www.google.com/s2/favicons?domain=meta.ai&sz=64" width="14" valign="middle" alt="" /> Muse Code</kbd>
+  <kbd><img src="https://www.google.com/s2/favicons?domain=qwen.ai&sz=64" width="14" valign="middle" alt="" /> Qwen Code</kbd>
   <kbd>Any ACP agent</kbd>
 </p>
 
