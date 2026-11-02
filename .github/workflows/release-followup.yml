@@ -33,7 +33,7 @@ jobs:
           NOTES: ${{ github.event.release.body }}
         run: |
           set -uo pipefail
-          numbers=$(printf %s "$NOTES" | grep -oiE '\b(fix(es|ed)?|close[sd]?|resolve[sd]?):? #[0-9]+' | grep -oE '[0-9]+' | sort -un)
+          numbers=$(printf %s "$NOTES" | grep -oiE '\b(fix(es|ed)?|close[sd]?|resolve[sd]?):? #[0-9]+' | grep -oE '[0-9]+' | sort -un || true)
           [ -n "$numbers" ] || { echo "No 'Fixes #N' in the notes of $TAG."; exit 0; }
           mark="<!-- friday-followup $TAG -->"
           for n in $numbers; do
