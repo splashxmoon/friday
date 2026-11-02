@@ -41,6 +41,10 @@
 - **Keeps the work moving.** When one agent runs out of usage, the agent best placed to finish picks up where it stopped.
 
 <p align="center">
+  <img src="docs/assets/handoff.png" alt="When Claude Code hits its usage limit mid-task, Friday hands the task to Codex, which picks it up with a record of what Claude did and changed" width="960" />
+</p>
+
+<p align="center">
   <img src="docs/assets/hero.png" alt="Friday's home screen: five sessions and ten agents at work, Claude Code and Codex side by side in the sidebar and under Right now" width="960" />
 </p>
 
