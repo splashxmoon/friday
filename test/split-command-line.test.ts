@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { splitCommandLine } from "../src/runner/adapters.js";
+import { formatCommandLine, splitCommandLine } from "../src/runner/adapters.js";
 
 test("splitCommandLine: plain words separated by spaces", () => {
   assert.deepEqual(splitCommandLine("foo bar baz"), ["foo", "bar", "baz"]);
@@ -44,10 +44,63 @@ test("splitCommandLine: quoted path first and flags after", () => {
   );
 });
 
-test("splitCommandLine: unbalanced quote records current behavior", () => {
-  assert.deepEqual(splitCommandLine('run "oops'), ["run", '"oops']);
+test("splitCommandLine: quoted flags with spaces", () => {
+  assert.deepEqual(
+    splitCommandLine('goose acp --dir="C:\\My Projects"'),
+    ["goose", "acp", "--dir=C:\\My Projects"]
+  );
+  assert.deepEqual(
+    splitCommandLine("agent --flag='single with spaces'"),
+    ["agent", "--flag=single with spaces"]
+  );
 });
 
-test("splitCommandLine: quote inside a word records current behavior", () => {
-  assert.deepEqual(splitCommandLine('--name="my name"'), ['--name="my', 'name"']);
+test("splitCommandLine: escaped quotes inside double quotes", () => {
+  assert.deepEqual(
+    splitCommandLine('agent "hello \\\"world\\\""'),
+    ["agent", 'hello "world"']
+  );
+});
+
+test("splitCommandLine: empty quoted arguments", () => {
+  assert.deepEqual(splitCommandLine("agent \"\" ''"), ["agent", "", ""]);
+  assert.deepEqual(splitCommandLine('agent --flag=""'), ["agent", "--flag="]);
+});
+
+test("splitCommandLine: unclosed quotes throw", () => {
+  assert.throws(
+    () => splitCommandLine('agent "hello world'),
+    /Unclosed " in the command line/
+  );
+  assert.throws(
+    () => splitCommandLine("agent 'hello world"),
+    /Unclosed ' in the command line/
+  );
+  assert.throws(
+    () => splitCommandLine('run "oops'),
+    /Unclosed " in the command line/
+  );
+});
+
+test("splitCommandLine: quote inside a word", () => {
+  assert.deepEqual(splitCommandLine('--name="my name"'), ["--name=my name"]);
+});
+
+test("splitCommandLine: preserves UNC backslashes in quoted Windows paths", () => {
+  assert.deepEqual(
+    splitCommandLine('"\\\\server\\share\\agent.exe" --acp'),
+    ["\\\\server\\share\\agent.exe", "--acp"]
+  );
+  assert.deepEqual(
+    splitCommandLine('"\\\\server\\share\\my agent.exe" --flag'),
+    ["\\\\server\\share\\my agent.exe", "--flag"]
+  );
+});
+
+test("formatCommandLine and splitCommandLine round-trip arguments with quotes and spaces", () => {
+  const cmd = "agent";
+  const args = ['hello "world"', "with space", "--dir=C:\\My Projects", "", "it's", "C:\\My Dir\\"];
+  const formatted = formatCommandLine(cmd, args);
+  assert.equal(formatted, 'agent "hello \\\"world\\\"" "with space" "--dir=C:\\My Projects" "" "it\'s" "C:\\My Dir\\\\"');
+  assert.deepEqual(splitCommandLine(formatted), [cmd, ...args]);
 });
