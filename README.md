@@ -170,6 +170,7 @@ What we sell is [Friday Team](https://www.tryfridaywork.com), the hosted version
 | **Kilo** | `npm install -g @kilocode/cli` | `kilo auth login` |
 | **Amp** | `npm install -g @ampcode/cli` | `amp login` |
 | **Muse Code** | **Windows** `irm https://dev.meta.ai/install.ps1 \| iex` <br> **Mac/Linux** `curl -fsSL https://dev.meta.ai/install.sh \| sh` | `muse login` |
+| **Qwen Code** | `npm install -g @qwen-code/qwen-code` | Signs in on its own first screen |
 | **Other ACP agent** | any ACP agent | any ACP agent |
 
 ### The desktop app
