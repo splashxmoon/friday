@@ -147,14 +147,32 @@ What we sell is [Friday Team](https://www.tryfridaywork.com), the hosted version
 ## Install
 
 > [!IMPORTANT]
-> Install and sign in to at least one coding tool first. Friday finds every one on your computer and can sign the rest in from its setup screen.
 >
-> - Claude Code: `claude auth login`
-> - Codex: `codex login`
-> - Cursor: `cursor-agent login`
-> - GitHub Copilot: `copilot login`
-> - OpenCode: `opencode auth login`
-> - Gemini CLI: run `gemini` once and sign in
+> Install and sign in to at least one coding tool first. Friday finds every one on your computer and can sign the rest in from its setup screen.
+
+### Supported Tools and Installation
+
+<!-- Note: Install commands are duplicated from TOOL_INFO in src/types.ts. -->
+
+| Tools | Installation | Sign-in |
+| :--- | :--- | :--- |
+| **Claude Code** | **Windows:** `irm https://claude.ai/install.ps1 \| iex`<br>**Mac/Linux:** `curl -fsSL https://claude.ai/install.sh \| bash` | `claude auth login` |
+| **Codex** | `npm install -g @openai/codex` | `codex login` |
+| **Cursor** | **Windows:** `irm 'https://cursor.com/install?win32=true' \| iex`<br /> **Mac/Linux:** `curl https://cursor.com/install -fsS \| bash` | `cursor-agent login` |
+| **GitHub Copilot** | `npm install -g @github/copilot` | `copilot login` |
+| **Gemini CLI** | `npm install -g @google/gemini-cli` | run `gemini` once and sign in |
+| **OpenCode** | `npm install -g opencode-ai` | `opencode auth login` |
+| **Devin** | **Windows** `irm https://static.devin.ai/cli/setup.ps1 \| iex` <br> **Mac/Linux** `curl -fsSL https://cli.devin.ai/install.sh \| bash` | `devin auth login` |
+| **Junie** | **Windows** `irm https://junie.jetbrains.com/install.ps1 \| iex` <br> **Mac/Linux** `curl -fsSL https://junie.jetbrains.com/install.sh \| bash` | Signs in on its own first screen |
+| **Kiro** | **Windows** `irm 'https://cli.kiro.dev/install.ps1' \| iex` <br> **Mac/Linux** `curl -fsSL https://cli.kiro.dev/install \| bash` | `kiro-cli login` |
+| **Droid** | **Windows** `irm https://app.factory.ai/cli/windows \| iex` <br> **Mac/Linux** `curl -fsSL https://app.factory.ai/cli \| sh` | Signs in on its own first screen |
+| **Grok** | **Windows** `irm https://x.ai/cli/install.ps1 \| iex` <br> **Mac/Linux** `curl -fsSL https://x.ai/cli/install.sh \| bash` | `grok login` |
+| **Cline** | `npm install -g cline` | `cline auth` |
+| **Kilo** | `npm install -g @kilocode/cli` | `kilo auth login` |
+| **Amp** | `npm install -g @ampcode/cli` | `amp login` |
+| **Muse Code** | **Windows** `irm https://dev.meta.ai/install.ps1 \| iex` <br> **Mac/Linux** `curl -fsSL https://dev.meta.ai/install.sh \| sh` | `muse login` |
+| **Qwen Code** | `npm install -g @qwen-code/qwen-code` | run `qwen` once and sign in |
+| **Other ACP agent** | any ACP agent | any ACP agent |
 
 ### The desktop app
 
