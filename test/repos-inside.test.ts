@@ -27,7 +27,7 @@ before(async () => {
 after(() => rm(dir, { recursive: true, force: true, maxRetries: 5 }));
 
 test("the repositories inside a folder that isn't one are found, two levels down, never in node_modules", async () => {
-  const found = (await reposInside(dir)).map((d) => path.relative(dir, d)).sort();
+  const found = (await reposInside(dir)).map((d) => path.relative(dir, d).split(path.sep).join("/")).sort();
   assert.deepEqual(found, ["apps/site", "edge"]);
 });
 
