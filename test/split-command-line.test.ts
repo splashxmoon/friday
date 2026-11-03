@@ -43,3 +43,11 @@ test("splitCommandLine: quoted path first and flags after", () => {
     ["C:\\Program Files\\app.exe", "-f", "--name", "my name"]
   );
 });
+
+test("splitCommandLine: unbalanced quote records current behavior", () => {
+  assert.deepEqual(splitCommandLine('run "oops'), ["run", '"oops']);
+});
+
+test("splitCommandLine: quote inside a word records current behavior", () => {
+  assert.deepEqual(splitCommandLine('--name="my name"'), ['--name="my', 'name"']);
+});
