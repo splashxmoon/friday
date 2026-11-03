@@ -10,6 +10,7 @@ import {
   describeTrigger,
   LEAD,
   MAX_CHAIN,
+  MAX_CONNECTIONS_PER_RUN,
   packSteps,
   roomRunOf,
   sendBackNote,
@@ -345,7 +346,9 @@ export class TeamWorkflows {
         const by = this.byOf(w);
         const posted = await this.d.store.append(place.sid, FRIDAY, { type: "board.posted", fromLane: lead, fromName, tasks, ...(by ? { by } : {}) }, { lane: lead });
         if (!posted.ok) throw new Error(`Couldn't post its board in ${place.name}.`);
-        const ref = JSON.stringify({ id: w.id, run: run.id, seq: posted.seq, last: at === stages.length - 1 });
+        const exit = stage.gate ?? stage.exit;
+        const last = exit?.next ? exit.next === "$finish" : at === stages.length - 1;
+        const ref = JSON.stringify({ id: w.id, run: run.id, seq: posted.seq, last });
         await this.d.redis.multi().set(this.activeKey(place.sid), ref).sadd(this.activesKey(), place.sid).set(this.boardKey(place.sid, posted.seq), ref, "EX", 30 * 86_400).exec();
         // This stage's steps as the run has them, fresh; any it did before (sent back) counted again; the rest as they were.
         const fresh = tasks.map((t, i): WorkflowRunStep => {
@@ -432,9 +435,23 @@ export class TeamWorkflows {
 
   /** On to the stage after this one, handed `carry`; past the last, the run is done, with it as its result. */
   private async onward(w: Workflow | null, run: WorkflowRun, carry: string, state: SessionState | null): Promise<void> {
+    const stage = w && stagesOf(packSteps(w.steps))[run.stage ?? 0];
+    const target = stage && (stage.gate ?? stage.exit)?.next;
+    if (w && target) return this.follow(w, run, target, carry, state);
     const next = (run.stage ?? 0) + 1;
     if (!w || next >= stagesOf(packSteps(w.steps)).length) return this.end(w, run, { status: "done", note: run.note ?? "", result: carry }, state);
     const moved = (await this.updateRun(w.id, run.id, { steps: run.steps, stage: next, carry: clip(carry, 8000), status: "running", note: "", from: undefined, fixBy: undefined })) ?? run;
+    await this.post(w, moved, true);
+  }
+
+  /** Enter the destination's column; other paths aren't posted. Never switch the step's teammate or account. */
+  private async follow(w: Workflow, run: WorkflowRun, target: string, carry: string, state: SessionState | null): Promise<void> {
+    if (target === "$finish") return this.end(w, run, { status: "done", note: "", result: carry }, state);
+    const stage = stageOfStep(stagesOf(packSteps(w.steps)), target);
+    if (stage < 0) return this.end(w, run, { status: "failed", note: "A connection's destination is gone. Reconnect it before running again.", result: carry }, state);
+    const connections = (run.connections ?? 0) + 1;
+    if (connections > MAX_CONNECTIONS_PER_RUN) return this.end(w, run, { status: "failed", note: `Stopped after ${MAX_CONNECTIONS_PER_RUN} connections: check the workflow for a loop without an exit.`, result: carry }, state);
+    const moved = (await this.updateRun(w.id, run.id, { steps: run.steps, stage, from: target, connections, fixBy: undefined, asking: undefined, carry: clip(carry, 8000), status: "running", note: "", tries: run.tries })) ?? run;
     await this.post(w, moved, true);
   }
 
@@ -442,10 +459,14 @@ export class TeamWorkflows {
   private async notPassed(w: Workflow, run: WorkflowRun, gate: WorkflowStep, order: WorkflowStep[], why: string, carry: string, state: SessionState | null): Promise<void> {
     const n = order.findIndex((s) => s.id === gate.id) + 1;
     const what = gate.kind === "approve" ? "You" : `Step ${n}'s check`;
-    if (gate.ifNot !== "back") return this.end(w, run, { status: "stopped", note: clip(`${what} stopped it${why ? `: ${why}` : "."}`, 300), result: carry }, state);
+    if (gate.otherwise === "$finish" || (!gate.otherwise && gate.ifNot !== "back")) return this.end(w, run, { status: "stopped", note: clip(`${what} stopped it${why ? `: ${why}` : "."}`, 300), result: carry }, state);
     const max = gate.tries ?? DEFAULT_TRIES;
     const tried = run.tries?.[gate.id] ?? 0;
     if (tried >= max) return this.end(w, run, { status: "failed", note: clip(`${gate.kind === "approve" ? "Your OK" : `Step ${n}'s check`} still didn't pass after ${max} ${max === 1 ? "try" : "tries"}${why ? `: ${why}` : "."}`, 300), result: carry }, state);
+    if (gate.otherwise) {
+      const note = [why ? `Step ${n} didn't pass: ${why}` : `Step ${n} didn't pass.`, carry].filter(Boolean).join("\n\n");
+      return this.follow(w, { ...run, tries: { ...run.tries, [gate.id]: tried + 1 } }, gate.otherwise, note, state);
+    }
     const stages = stagesOf(order);
     const to = stageOfStep(stages, gate.back ?? "");
     if (to < 0) return this.end(w, run, { status: "failed", note: "The step it sends the work back to is gone.", result: carry }, state);
@@ -581,11 +602,13 @@ export class TeamWorkflows {
     const seq = state?.board?.seq;
     const raw = seq ? await this.d.redis.get(this.boardKey(sid, seq)) : null;
     if (!raw) return null;
-    const ref = JSON.parse(raw) as { id: string; last?: boolean };
+    const ref = JSON.parse(raw) as { id: string; run?: string; last?: boolean };
     const w = await this.get(ref.id);
     if (!w) return null;
     // A stage that isn't the last, or the next stage's board already up: Friday hands it on, so there is nothing to land yet.
-    if (ref.last === false || (state?.board && boardBusy(state))) return `[Friday] That board was part of the workflow “${w.name}”: Friday hands what it came to on to its next part. Don't post a board or open a pull request; end with a short report.`;
+    const wired = w.steps.some(s => s.next || s.otherwise);
+    const run = wired ? (await this.runs(w.id, 50)).find(r => r.id === ref.run) : undefined;
+    if ((wired ? run?.status !== "done" : ref.last === false) || (state?.board && boardBusy(state))) return `[Friday] That board was part of the workflow “${w.name}”: Friday hands what it came to on to its next part. Don't post a board or open a pull request; end with a short report.`;
     return [
       `[Friday] That board was the workflow “${w.name}”.`,
       w.outcomes.pr && !prSaid ? "Land it: merge your teammates' branches into one branch, run the full tests and fix what fails, then open one pull request with gh pr create for the person to review. Don't merge it, push to the default branch or deploy." : "",

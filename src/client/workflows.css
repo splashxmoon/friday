@@ -105,6 +105,16 @@
 .wf-stage { position: relative; }
 .wf-flow { position: absolute; left: 0; top: 0; display: flex; align-items: center; width: max-content; transform-origin: 0 0; padding: 8px 8px 56px; }
 .wf-wires { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.wf-wires .wf-wire-hit { stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer; }
+.wf-wires g:focus-visible .wf-wire-hit { stroke: var(--border-strong); }
+.wf-input-port { position: absolute; left: -10px; top: 50%; border: 0; background: var(--bg); color: var(--ink-2); cursor: crosshair; }
+.wf-input-port:disabled { opacity: .5; cursor: default; }
+.wf-output-ports { display: flex; justify-content: flex-end; gap: 8px; padding: 0 12px 10px; }
+.wf-output-ports button, .wf-reset-connection, .wf-connect-note button { border: 0; border-radius: 4px; background: transparent; color: var(--ink-2); font: inherit; font-size: 12px; cursor: pointer; }
+.wf-output-ports button { cursor: crosshair; padding: 4px; }
+.wf-output-ports button[aria-pressed=true] { outline: 2px solid var(--ink-2); }
+.wf-output-ports button:focus-visible, .wf-input-port:focus-visible { outline: 2px solid var(--ink-2); outline-offset: 2px; }
+.wf-connect-note { position: absolute; z-index: 6; top: 8px; left: 12px; padding: 8px 12px; background: var(--bg); border: 1px solid var(--border-strong); border-radius: var(--r-md); font-size: 13px; }
 .wf-wires path { fill: none; stroke: var(--border-hover); stroke-width: 1.4; stroke-dasharray: 3 4; }
 /* A step being worked on now: its wire carries the work toward it. The one moving thing on the page. */
 .wf-wires path.live { stroke: var(--live); stroke-width: 1.5; animation: wf-flow 2.4s linear infinite; }
@@ -373,3 +383,5 @@
 .wf-col.drop-on::before { content: ""; position: absolute; inset: -8px; z-index: -1; border: 1px dashed var(--border-strong); border-radius: calc(var(--r-lg) + 6px); background: color-mix(in srgb, var(--ink) 4%, transparent); }
 .wf-gap.drop-on::before { content: ""; position: absolute; top: 12%; bottom: 12%; left: 50%; width: 2px; transform: translateX(-50%); border-radius: 2px; background: var(--ink-2); }
 .wf-gap.drop-on .wf-plus { opacity: 0; }
+
+.wf-wires text[data-wf-connection] { pointer-events: auto; cursor: pointer; paint-order: stroke; stroke: var(--bg); stroke-width: 4px; }

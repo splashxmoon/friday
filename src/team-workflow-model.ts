@@ -64,6 +64,10 @@ export interface WorkflowStep {
    * fixer on another tool or account, then checked again (Arun, 2026-11-02, from discussion #8: Review → "Prepare fixes" → again).
    */
   fixBy?: string;
+  /** Explicit success connection; absent follows the next column. "$finish" ends the run. */
+  next?: string;
+  /** A check/OK's explicit failure connection; absent keeps its existing stop/send-back action. */
+  otherwise?: string;
 }
 
 export const isGate = (s: Pick<WorkflowStep, "kind">): boolean => s.kind === "check" || s.kind === "approve";
@@ -71,6 +75,8 @@ export const kindOf = (s: Pick<WorkflowStep, "kind">): StepKind => s.kind ?? "do
 /** Sent back this many times at most, unless it says. */
 export const DEFAULT_TRIES = 3;
 export const MAX_TRIES = 5;
+/** Successful backward connections are bounded too, independently of a check's retry count. */
+export const MAX_CONNECTIONS_PER_RUN = 100;
 
 export interface WorkflowOutcomes {
   /** A brief of the run posted in its room (team.brief). */
@@ -169,6 +175,8 @@ export interface WorkflowRun {
   from?: string;
   /** Sent back to be done by someone else than that step's own (WorkflowStep.fixBy): who, this once. */
   fixBy?: string;
+  /** Explicit connections followed in this run, including successful backward connections. */
+  connections?: number;
   /** Waiting for your OK: which step, what you're asked, since when. */
   asking?: { step: string; ask: string; since: number };
   /** Its first board's seq: the brief finds every stage's tasks after it. */
@@ -200,9 +208,10 @@ export function columnsOf(steps: readonly WorkflowStep[]): WorkflowStep[][] {
   const cols = [...new Set(steps.map((s) => s.col))].sort((a, b) => a - b);
   return cols.flatMap((c) => {
     const col = steps.filter((s) => s.col === c);
-    if (col.length < 2 || !col.some(isGate)) return [col];
-    const work = col.filter((s) => !isGate(s));
-    return [...(work.length ? [work] : []), ...col.filter(isGate).map((g) => [g])];
+    const boundary = (s: WorkflowStep) => isGate(s) || !!s.next;
+    if (col.length < 2 || !col.some(boundary)) return [col];
+    const work = col.filter((s) => !boundary(s));
+    return [...(work.length ? [work] : []), ...col.filter(boundary).map((g) => [g])];
   });
 }
 
@@ -210,6 +219,8 @@ export function columnsOf(steps: readonly WorkflowStep[]): WorkflowStep[][] {
 export interface WorkflowStage {
   cols: WorkflowStep[][];
   gate: WorkflowStep | null;
+  /** A work step with an explicit outgoing connection ends its board here. */
+  exit?: WorkflowStep;
 }
 
 /** The workflow's stages, in order: its columns cut after each check, and around each OK. */
@@ -224,6 +235,9 @@ export function stagesOf(steps: readonly WorkflowStep[]): WorkflowStage[] {
       cur = [];
     } else if (g.kind === "check") {
       out.push({ cols: [...cur, col], gate: g });
+      cur = [];
+    } else if (g.next) {
+      out.push({ cols: [...cur, col], gate: null, exit: g });
       cur = [];
     } else cur.push(col);
   }
@@ -244,6 +258,21 @@ export function stageCols(steps: readonly WorkflowStep[], stage: number, from = 
 
 /** The stage a step is in, or -1. */
 export const stageOfStep = (stages: readonly WorkflowStage[], id: string): number => stages.findIndex((st) => st.gate?.id === id || st.cols.some((c) => c.some((s) => s.id === id)));
+
+export type WorkflowPort = "next" | "otherwise";
+export interface WorkflowConnection { source: string; target: string; port: WorkflowPort; explicit: boolean }
+
+/** The canvas draws the same column connections and overrides the runner follows. */
+export function connectionsOf(steps: readonly WorkflowStep[]): WorkflowConnection[] {
+  return columnsOf(steps).flatMap((col, i, cols) => col.flatMap((s) => {
+    const next = s.next ? [s.next] : (cols[i + 1]?.map(t => t.id) ?? ["$finish"]);
+    const fail = isGate(s) ? s.otherwise ?? (s.ifNot === "back" ? s.back : undefined) : undefined;
+    return [
+      ...next.map(target => ({ source: s.id, target, port: "next" as const, explicit: !!s.next })),
+      ...(fail ? [{ source: s.id, target: fail, port: "otherwise" as const, explicit: !!s.otherwise }] : []),
+    ];
+  }));
+}
 
 /**
  * A check's answer, from the last line of its report that says one: "PASS", or "FAIL: why". Markdown around it is let be. A
@@ -310,7 +339,7 @@ export function workflowTasks(w: Pick<Workflow, "name" | "steps" | "outcomes">, 
     col.map((s, i) => {
       const id = ids[c]![i]!;
       const num = numOf.get(s.id)!;
-      const later = c < cols.length - 1 || !lastStage;
+      const later = c < cols.length - 1 || (s.next ? s.next !== "$finish" : !lastStage);
       const check = s.kind === "check";
       const detail = [
         check
@@ -354,10 +383,13 @@ export function workflowChecks(
   if (w.room !== TEAM_ROOM && !room) out.push({ level: "fix", text: "Its room is gone: pick where it runs", on: "trigger" });
   steps.forEach((s, i) => {
     const n = i + 1;
+    for (const target of [s.next, ...(isGate(s) ? [s.otherwise] : [])]) {
+      if (target && target !== "$finish" && !steps.some(t => t.id === target)) out.push({ level: "fix", text: `Step ${n}'s connection points to a missing step: reconnect it`, on: s.id });
+    }
     if (s.kind === "approve") {
       if (!s.does.trim()) out.push({ level: "fix", text: `Say what you're asked to OK at step ${n}`, on: s.id });
     } else if (s.kind === "check" && !s.does.trim()) out.push({ level: "fix", text: `Say what step ${n} checks`, on: s.id });
-    if (isGate(s) && s.ifNot === "back") {
+    if (isGate(s) && !s.otherwise && s.ifNot === "back") {
       const to = steps.findIndex((x) => x.id === s.back);
       if (to < 0 || to >= i || isGate(steps[to]!)) out.push({ level: "fix", text: `Pick the earlier step ${n} sends the work back to`, on: s.id });
       if (s.fixBy && s.fixBy !== LEAD) {
@@ -451,7 +483,14 @@ export function cleanWorkflow(
       const kind: StepKind = s.kind === "check" || s.kind === "approve" ? s.kind : "do";
       const tries = Number(s.tries);
       const gate = kind === "do" ? {} : { kind, ifNot: s.ifNot === "back" ? ("back" as const) : ("stop" as const), ...(str(s.back, 24) ? { back: str(s.back, 24) } : {}), ...(s.ifNot === "back" && str(s.fixBy, 40) ? { fixBy: str(s.fixBy, 40) } : {}), tries: Number.isFinite(tries) && tries >= 1 ? Math.min(MAX_TRIES, Math.round(tries)) : DEFAULT_TRIES };
-      return [{ id, mate: kind === "approve" ? "" : str(s.mate, 40), does: str(s.does, 4000), owns: kind === "do" ? owns : [], col: Number.isFinite(col) && col >= 0 ? Math.floor(col) : 0, ...gate }];
+      const connection = (v: unknown): string | undefined => {
+        if (v === undefined || v === "") return undefined;
+        if (typeof v !== "string" || (v !== "$finish" && !/^[\w-]{1,24}$/.test(v))) throw new Error("Invalid workflow connection destination.");
+        return v;
+      };
+      const next = connection(s.next);
+      const otherwise = kind === "do" ? undefined : connection(s.otherwise);
+      return [{ id, mate: kind === "approve" ? "" : str(s.mate, 40), does: str(s.does, 4000), owns: kind === "do" ? owns : [], col: Number.isFinite(col) && col >= 0 ? Math.floor(col) : 0, ...gate, ...(next ? { next } : {}), ...(otherwise ? { otherwise } : {}) }];
     }),
   );
   const o = (input.outcomes ?? prev?.outcomes ?? BLANK_OUTCOMES) as Record<string, unknown>;
