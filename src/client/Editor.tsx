@@ -56,44 +56,25 @@ export function paintLines(value: string, tokens: AgentCodeToken[][] | null | un
   return value.split("\n").map((line, i) => ({ line, tokens: texts[i] === bare(line) ? tokens![i] : byText.get(bare(line)) }));
 }
 
-/**
- * The numbers down the left.
- *
- * Its own column rather than text in the lines, because a number that can be
- * selected ends up in whatever you paste — and in the editor it would end up
- * in the file.
- */
-function Gutter({ count, from = 1 }: { count: number; from?: number }) {
-  return (
-    <div className="code-gutter" aria-hidden>
-      {Array.from({ length: count }, (_, i) => (
-        <span key={i}>{from + i}</span>
-      ))}
-    </div>
-  );
-}
-
-function Painted({ lines }: { lines: { line: string; tokens?: AgentCodeToken[] }[] }) {
-  return (
-    <>
-      {lines.map((l, i) => (
-        <span key={i} className="code-line">
-          <AgentCodeLine code={l.line} tokens={l.tokens} />
-          {"\n"}
-        </span>
-      ))}
-    </>
-  );
-}
-
 /** A file shown, not edited: the same colours, without the textarea on top. */
 export function CodeReader({ path, value }: { path: string; value: string }) {
   const lines = useLines(path, value);
+  // Each line with its own number, so a long one wraps at the panel's edge and its number stays beside where it starts (Arun,
+  // 2026-11-03: "show the code without having to horizontally scroll"). The numbers are never selected with the code.
   return (
     <div className="code-wrap code-read">
-      <Gutter count={lines.length} />
-      <pre className="tree-file code-layer">
-        <Painted lines={lines} />
+      <pre className="tree-file code-layer code-wrapped">
+        {lines.map((l, i) => (
+          <span key={i} className="code-line">
+            <span className="code-ln" aria-hidden="true">
+              {i + 1}
+            </span>
+            <span className="code-text">
+              <AgentCodeLine code={l.line} tokens={l.tokens} />
+            </span>
+            {"\n"}
+          </span>
+        ))}
       </pre>
     </div>
   );
@@ -188,6 +169,9 @@ function MirrorEditor({
           crosshairCursor(),
           highlightActiveLine(),
           highlightSelectionMatches(),
+          // Long lines wrap at the panel's edge, as Claude's file panel does: a narrow panel read code by scrolling sideways (Arun,
+          // 2026-11-03: "show the code without having to horizontally scroll").
+          EditorView.lineWrapping,
           keymap.of([
             { key: "Mod-s", run: () => (handlers.current.onSave(), true) },
             ...closeBracketsKeymap,

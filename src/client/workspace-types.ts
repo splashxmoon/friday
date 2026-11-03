@@ -14,6 +14,8 @@ export interface WorkspaceUsage {
   trialEndsAt?: number;
   /** A new team's trial, waiting to start at its first invite or Friday agent run. */
   trialPending?: boolean;
+  /** A new account's workspace on no paid plan yet: it shows the plans instead of starting work (plans.ts needsPlan). */
+  needsPlan?: boolean;
   personal?: boolean;
   limits?: PlanLimits;
   /** What the current window has spent, and when it ends (null while none is open). */

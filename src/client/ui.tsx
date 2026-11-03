@@ -331,7 +331,7 @@ export type MenuItem =
   | { who: { name: string; id?: string; sub: string; /** A second line under the name, in smaller type. */ line?: string } }
   /** Anything that is not a choice: a chart, a note. Never highlighted and never closes the menu. */
   | { node: ReactNode; /** About how tall it is, so the menu is sized to hold it. */ height?: number }
-  | { label: string; /** A tooltip for the row, for what does not fit beside the name. */ title?: string; icon?: IconName; /** A mark of its own, for what no named icon can be: a company's logo. */ mark?: ReactNode; onSelect: () => void; danger?: boolean; checked?: boolean; disabled?: boolean; /** Greyed but still pressable: something offered that isn't part of what you have (Friday Code on Solo opens "Start a team"). */ dim?: boolean; hint?: string; /** A second line under the label, for what a choice means. */ sub?: string; /** A green dot after the label: something is happening here. */ live?: boolean; /** A button of its own at the row's end, for what can be done to the thing without choosing it: stopping a server. */ action?: MenuAction }
+  | { label: string; /** A tooltip for the row, for what does not fit beside the name. */ title?: string; icon?: IconName; /** A mark of its own, for what no named icon can be: a company's logo. */ mark?: ReactNode; onSelect: () => void; danger?: boolean; checked?: boolean; disabled?: boolean; /** Greyed but still pressable: something offered that isn't part of what you have (Friday Code on Solo opens "Start a team"). */ dim?: boolean; hint?: string; /** A second line under the label, for what a choice means. */ sub?: string; /** A green dot after the label: something is happening here. */ live?: boolean; /** Just after the label's words, on its line: an agent's state as its small ring. */ after?: ReactNode; /** A button of its own at the row's end, for what can be done to the thing without choosing it: stopping a server. */ action?: MenuAction }
   | false
   | null
   | undefined;
@@ -553,7 +553,14 @@ function MenuPopup({ anchor, items, onClose, above, beside, compact, end, trigge
           >
             {it.mark ? <span className="menu-mark">{it.mark}</span> : it.icon ? <Icon name={it.icon} size={16} /> : anyIcon ? <span className="menu-spacer" /> : null}
             <span className="menu-label">
-              {it.label}
+              {it.after ? (
+                <span className="menu-label-line">
+                  {it.label}
+                  {it.after}
+                </span>
+              ) : (
+                it.label
+              )}
               {(it.sub || below(it)) && <span className="menu-sub">{[it.sub, below(it)].filter(Boolean).join(" · ")}</span>}
             </span>
             {/* Working shows in the tick's column, so the dots line up with the ticks; on the ticked row the tick takes that place and the dot steps in beside the name. */}

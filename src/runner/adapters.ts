@@ -9,6 +9,7 @@ import { testFailedInChain } from "../receipt.js";
 import { contains } from "../folder-key.js";
 import { execCli, noteBackground } from "./spawn-cli.js";
 import { accountEnv } from "./accounts.js";
+import { localEdition } from "../local-edition.js";
 import { mcpForAgent, type AcpMcpServer } from "./mcp-servers.js";
 import { reviewTarget } from "./tool-commands.js";
 import { ampConfig, claudeConfig, codexConfig, type FridayMcp } from "./friday-mcp.js";
@@ -273,6 +274,32 @@ const MAX_OUTPUT = 20_000;
 
 const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}\n…[truncated ${s.length - n} chars]` : s);
 const str = (v: unknown) => (typeof v === "string" ? v : "");
+
+/**
+ * What else a Claude Code out of usage can do. On your own computer, in the open-source edition, another of your accounts is
+ * one way. Anywhere work is shared (Friday and Friday Team), never: a Team seat is "for one named individual" and moving work
+ * between accounts to use their remaining usage is what both makers' terms forbid (Arun, 2026-11-02: "we should have these
+ * guardrails in place btw … for friday team"). Extra usage on the same account is the way they offer.
+ */
+export const limitWays = (): string =>
+  localEdition()
+    ? "or hand the work to another agent (both are under this run), or sign in as another account with `claude auth login`"
+    : "or hand the work to another of your agents (both are under this run), or turn on extra usage for that account (usage credits, on a Team plan) to keep going now";
+
+/**
+ * Why a Claude Code turn ended in an error, in words: what it said, else the errors it listed, else what its result's
+ * subtype means. Never the subtype itself (Arun, 2026-11-02: "Agent stopped: error_during_execution").
+ */
+const RESULT_WORDS: Record<string, string> = {
+  error_during_execution: "Claude Code hit an error partway through the turn and didn't say what.",
+  error_max_turns: "Claude Code used all the turns it was allowed for this message.",
+  error_max_budget_usd: "Claude Code reached the spending limit set for this run.",
+  error_max_structured_output_retries: "Claude Code couldn't give its answer in the shape it was asked for.",
+};
+export function resultError(m: { result?: unknown; errors?: unknown; subtype?: unknown }): string {
+  const listed = Array.isArray(m.errors) ? m.errors.map(str).map((e) => e.trim()).filter(Boolean) : [];
+  return str(m.result).trim() || [...new Set(listed)].slice(0, 3).join("\n") || RESULT_WORDS[str(m.subtype)] || "Claude Code stopped on an error and didn't say what.";
+}
 
 /** What a coding tool is told when it asks the person something with nobody there to ask: decide, and say what was chosen. */
 export const DECIDE_YOURSELF = "Nobody is being asked in Auto. Decide for yourself, and say in your answer what you chose and why.";
@@ -638,7 +665,7 @@ export const claude: Adapter = {
           // Said while its background tasks still run: it carries on by itself when they finish (see noteBackground).
           const held = running.size > 0 && !m.is_error;
           if (held) out.push({ kind: "delta", channel: "reasoning", text: `\nWaiting for ${running.size === 1 ? "a background task" : `${running.size} background tasks`} to finish…\n` });
-          out.push({ kind: "done", ...(m.is_error ? { error: str(m.result) || str(m.subtype) || "Claude Code reported an error." } : {}), ...(held ? { held: true } : {}) });
+          out.push({ kind: "done", ...(m.is_error ? { error: resultError(m) } : {}), ...(held ? { held: true } : {}) });
           return out;
         }
       }
@@ -661,7 +688,7 @@ export const claude: Adapter = {
     // Claude Code says it as "5-hour limit reached ∙ resets 3pm" and "Weekly limit reached", which the older words missed, so
     // the run ended on the bare message with nothing about what to do.
     if (/usage limit|session limit|limit reached|hit your limit|weekly limit|5-hour limit|rate limit|quota|too many requests|\b429\b/i.test(e))
-      return `${e.trim()} — that's the limit on the Claude account this machine's Claude Code is signed in as, not on Friday or on whoever is driving. Have it carry on when the limit resets, or hand the work to another agent (both are under this run), or sign in as another account with \`claude auth login\`.`;
+      return `${e.trim()} — that's the limit on the Claude account this machine's Claude Code is signed in as, not on Friday or on whoever is driving. Have it carry on when the limit resets, ${limitWays()}.`;
     return e;
   },
 };
@@ -2123,7 +2150,12 @@ export async function readCustomAcp(): Promise<CustomAcp | null> {
   return customAcp;
 }
 
-/** A command line as a shell splits it, quotes kept together: `goose acp`, `"C:\Tools\my agent.exe" --acp`. */
+/**
+ * A command line as a shell splits it, quotes kept together and taken off: `goose acp`, `"C:\Tools\my agent.exe" --acp`, and a
+ * quoted value inside a word, `--dir="C:\My Projects"` as one `--dir=C:\My Projects` (#13). Inside double quotes backslashes
+ * follow Windows' rules: before a quote, two make one and an odd one escapes it; anywhere else they stay, so UNC paths survive.
+ * An unclosed quote is an error, which Settings shows, rather than a guess at what was meant.
+ */
 export function splitCommandLine(line: string): string[] {
   const args: string[] = [];
   let current = "";

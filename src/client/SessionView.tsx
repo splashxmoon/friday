@@ -1,3 +1,4 @@
+import { StateRing } from "./presence.js";
 import { isLocal, ownModel, planLimits, type SessionPlan } from "./edition.js";
 import { openInPreview } from "./previewBus.js";
 import { pictureSession } from "./LiveBlock.js";
@@ -9,7 +10,7 @@ import { EmptyState } from "@/components/dass/EmptyState";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { shortcut } from "./Shortcuts.js";
 import { createPortal } from "react-dom";
-import { tabState } from "./agent-tab.js";
+import { tabRing, tabState } from "./agent-tab.js";
 import type { AgentView } from "../agents.js";
 import { tell } from "./api.js";
 import { badgeFavicon, jumpTargets, TAB_DOT, tabStatus } from "../session-line.js";
@@ -1928,15 +1929,13 @@ const MOD = typeof navigator !== "undefined" && /mac/i.test(navigator.userAgent)
 const MAIN_PANELS: Tab[] = ["overview", "files", "terminal", "preview"];
 
 const VIEWS: { tab: Tab; icon: IconName; label: string }[] = [
-  { tab: "agents", icon: "agent", label: "Agents" },
   { tab: "overview", icon: "list", label: "Tasks" },
   { tab: "tree", icon: "folderOpen", label: "Tree" },
-  { tab: "files", icon: "file", label: "Diff" },
+  { tab: "files", icon: "file", label: "Changes" },
   { tab: "git", icon: "gitBranch", label: "Git" },
   { tab: "terminal", icon: "terminalSquare", label: "Terminal" },
   { tab: "preview", icon: "play", label: "Preview" },
   { tab: "usage", icon: "usage", label: "Usage" },
-  { tab: "rules", icon: "book", label: "Rules" },
 ];
 
 // ── control strip ───────────────────────────────────────────────────
@@ -2211,7 +2210,8 @@ function SplitRail({ sid, state, events, me, shown, active, room, head = false }
             >
               <span className="lane-tab-mark">{look.mark}</span>
               <span className="lane-tab-name">{laneLabel(state, a.lane)}</span>
-              {!head && <AgentState status={a.status} needsYou={a.needsYou} />}
+              {/* Its state as the small ring just after the name, in place of the big one round its mark (Arun, 2026-11-03). */}
+              <StateRing state={tabRing(tabState(a.status, a.needsYou))} />
               {behind > 0 && <span className="lane-tab-unread" aria-label={`${behind} new`}>{behind > 9 ? "9+" : behind}</span>}
             </button>
           );

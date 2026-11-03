@@ -95,3 +95,26 @@
   .ready-acts { width: 100%; padding-left: 36px; }
   .ready-back { padding-left: 8px; }
 }
+
+/* A row each, designed again (Arun, 2026-11-02: "design this better for production too"): face, who and what in up to two
+   lines, and on the right what goes with it, a pull request, its files, a tick where it was checked; its room said once at the
+   list's head when every row shares it. */
+.db-line { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: start; gap: 2px 9px; padding: 5px 6px; margin: 0 -6px; border-radius: 8px; }
+.db-line:hover { background: var(--hover); }
+.db-line .tm-brief-ic { height: 20px; }
+.db-text { display: -webkit-box; min-width: 0; padding: 0; border: 0; background: none; color: var(--ink-2); font: 13px/1.5 var(--font); text-align: left; overflow: hidden; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; cursor: default; }
+button.db-text { cursor: pointer; }
+button.db-text:hover { color: var(--ink); text-decoration: none; }
+.db-where { color: var(--text-muted); }
+.db-line-meta { display: inline-flex; align-items: center; gap: 8px; height: 20px; }
+.db-line-meta .db-meta { height: auto; color: var(--text-muted); }
+.db-proof { display: inline-flex; color: var(--dass-ok, var(--green)); }
+.db-pr { display: inline-flex; align-items: center; gap: 3px; color: var(--pr-ready, var(--green)); font-size: 12px; font-weight: 500; text-decoration: none; font-variant-numeric: tabular-nums; }
+.db-pr.merged { color: var(--pr-merged, var(--violet)); }
+.db-pr:hover { text-decoration: underline; }
+.db-section h4 { align-items: center; }
+.db-section-where { margin-left: auto; color: var(--text-muted); font-weight: 500; }
+.db-more { padding: 4px 0 0 27px; }
+.db-more-go { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; color: var(--ink-2); font: 500 12px var(--font); cursor: pointer; }
+.db-more-go:hover { color: var(--ink); }
+.db-sheet-body { overflow-x: hidden; }

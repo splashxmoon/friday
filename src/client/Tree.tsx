@@ -344,10 +344,11 @@ export function TreePanel({
                       </span>
                     )}
                     {r.dir && !open.has(r.path) && r.changed > 0 && <span className="tree-badge">{r.changed}</span>}
-                    {touch && (
-                      <span className={`tree-who ${live ? "live" : ""}`} title={`${touch.by} ${touch.writing ? "edited" : "read"} this ${relTime(touch.ts)} ago`}>
-                        {live && <span className="tree-dot" />}
-                        {firstName(touch.by)}
+                    {/* Who touched it is said on hover, not written beside each name (Arun, 2026-11-03: "get rid of the name to the
+                        right"); one being worked on now keeps its dot. */}
+                    {touch && live && (
+                      <span className="tree-who live" title={`${touch.by} ${touch.writing ? "edited" : "read"} this ${relTime(touch.ts)} ago`}>
+                        <span className="tree-dot" />
                       </span>
                     )}
                   </button>
@@ -734,5 +735,3 @@ function compare(a: string, b: string, dirs: Map<string, number>): number {
   }
   return as.length - bs.length;
 }
-
-const firstName = (n: string) => n.split(/[\s']/)[0] ?? n;

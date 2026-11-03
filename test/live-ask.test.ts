@@ -55,7 +55,17 @@ test("Claude Code's own limit wording gets the explanation of what to do next", 
   const { claude } = await import("../src/runner/adapters.js");
   for (const said of ["5-hour limit reached ∙ resets 3pm (America/New_York)", "Weekly limit reached ∙ resets Oct 14, 3pm", "Claude usage limit reached. Your limit will reset at 4pm."]) {
     const e = claude.explain(said);
-    assert.match(e, /carry on when the limit resets, or hand the work to another agent/, said);
+    assert.match(e, /carry on when the limit resets, or hand the work to another of your agents/, said);
     assert.doesNotMatch(e, /Friday Code/, "nothing a Solo person can't do");
+    // Where work is shared, extra usage on this account, never another account (Arun, 2026-11-02: guardrails for Friday Team).
+    assert.match(e, /turn on extra usage for that account/, said);
+    assert.doesNotMatch(e, /another account|claude auth login/, said);
+  }
+  // On the person's own computer, in the open-source edition, another of their accounts is still a way on.
+  process.env.FRIDAY_EDITION = "local";
+  try {
+    assert.match(claude.explain("5-hour limit reached ∙ resets 3pm"), /hand the work to another agent .*sign in as another account with `claude auth login`/);
+  } finally {
+    delete process.env.FRIDAY_EDITION;
   }
 });

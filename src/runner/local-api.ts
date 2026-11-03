@@ -101,6 +101,8 @@ export const HOST_METHODS = [
   "clone",
   "start",
   "stop",
+  // The folders beside its own that a running agent may work in, changed from the chat.
+  "dirs",
   "worktree.drop",
   "worktree.state",
   "agents.discover",
@@ -823,6 +825,22 @@ export async function callHost(method: string, params: Record<string, unknown> =
     }
     case "worktree.state":
       return { state: await worktreeState(str(params.path, 600)) };
+    // The folders beside its own that a running agent of yours may work in: what they are, or one added or taken away, kept for its
+    // folder as a start's are (extra-dirs.ts) and used from its next turn (Runner.setDirs).
+    case "dirs": {
+      const r = ctx.runners.get(`${str(params.sid, 64)}|${str(params.lane, 40) || "main"}`);
+      if (!r) throw new Error("No agent of yours is running there.");
+      const now = r.opts.dirs ?? [];
+      const add = str(params.add, 600);
+      const remove = str(params.remove, 600);
+      if (!add && !remove) return { dirs: now, folder: r.opts.copyOf || r.opts.cwd };
+      const folder = r.opts.copyOf || r.opts.cwd;
+      if (add && path.resolve(at(add)) === path.resolve(folder)) throw new Error("That's the folder it works in already.");
+      const next = remove ? now.filter((d) => d !== at(remove)) : [...now, add];
+      const dirs = await startDirs(next, folder, at);
+      r.setDirs(dirs);
+      return { dirs, folder };
+    }
     case "stop": {
       const key = `${str(params.sid, 64)}|${str(params.lane, 40) || "main"}`;
       const r = ctx.runners.get(key);

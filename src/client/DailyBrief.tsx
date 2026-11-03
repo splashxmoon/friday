@@ -72,43 +72,57 @@ function open(b: DailyBrief, w: BriefWhere | undefined) {
   if (w.lane) setTimeout(() => focusAgent(w.sid, w.lane!), 300);
 }
 
-/** One line: its icon (or the teammate's face), who, what, where, and what goes with it. */
-function Line({ tone, icon, face, who, text, where, extra, onClick }: { tone: string; icon: ReactNode; face?: { name: string; look?: string }; who?: string; text: ReactNode; where?: string; extra?: ReactNode; onClick?: () => void }) {
+/**
+ * A web address in a line, as a reader says it: its site and the start of its path, cut short ("tiktok.com/@fridayworkai/vi…").
+ * A raw TikTok link ran the panel wide and scrolled it sideways (Arun, 2026-11-02: "design this better for production too").
+ */
+const tidy = (t: string) => t.replace(/https?:\/\/(?:www\.)?([^\s/]+)(\/[^\s]*)?/g, (_m, host: string, rest = "") => ((s) => (s.length > 36 ? `${s.slice(0, 35)}…` : s))(`${host}${rest === "/" ? "" : rest}`));
+
+/** One row: the teammate's face (or an icon), who and what in up to two lines, where when it isn't the section's, and on the right what goes with it. */
+function Line({ tone, icon, face, who, text, where, meta, onClick }: { tone: string; icon: ReactNode; face?: { name: string; look?: string }; who?: string; text: string; where?: string; meta?: ReactNode; onClick?: () => void }) {
   const body = (
     <>
-      {who && <b className="db-who">{who}</b>} {text}
-      {where && <span className="tm-brief-room"> · {where}</span>}
+      {who && <b className="db-who">{who}</b>} {tidy(text)}
+      {where && <span className="db-where"> · {where}</span>}
     </>
   );
   return (
-    <li className="tm-brief-line" data-tone={tone}>
+    <li className="tm-brief-line db-line" data-tone={tone}>
       <span className="tm-brief-ic db-ic" aria-hidden="true">
         {face ? <Face seed={face.look ?? face.name} size={18} /> : icon}
       </span>
-      <span className="tm-brief-what">
-        {onClick ? (
-          <button type="button" className="tm-brief-go" onClick={onClick}>
-            {body}
-          </button>
-        ) : (
-          <span>{body}</span>
-        )}
-        {extra}
-      </span>
+      {onClick ? (
+        <button type="button" className="tm-brief-go db-text" onClick={onClick} title={text}>
+          {body}
+        </button>
+      ) : (
+        <span className="db-text" title={text}>
+          {body}
+        </span>
+      )}
+      {meta && <span className="db-line-meta">{meta}</span>}
     </li>
   );
 }
 
-function Section({ title, count, children }: { title: string; count?: number; children: ReactNode }) {
+function Section({ title, count, where, children }: { title: string; count?: number; /** Every line's room, said once here instead. */ where?: string; children: ReactNode }) {
   return (
     <section className="db-section">
       <h4>
         {title}
         {count !== undefined && <span className="db-count">{count}</span>}
+        {where && <span className="db-section-where">{where}</span>}
       </h4>
       <ul className="tm-brief-lines">{children}</ul>
     </section>
   );
+}
+
+/** The one room every line of a list is in, when they share one: said once, at the list's head. */
+function sharedRoom<T extends { where?: BriefWhere }>(rows: T[], where: (w?: BriefWhere) => string | undefined): string | undefined {
+  const rooms = new Set(rows.map((r) => where(r.where) ?? ""));
+  const [only] = [...rooms];
+  return rooms.size === 1 && only ? only : undefined;
 }
 
 /** How a plan line reads after its who. */
@@ -122,16 +136,30 @@ const VERB: Record<DailyBrief["plan"][number]["source"], (at?: string) => string
   goal: () => "",
 };
 
-const more = (n: number, shown: number) => (n > shown ? <li className="db-more">+{n - shown} more</li> : null);
+/** The rest of a list: on the home screen a way to the whole brief, in the panel how many more. */
+const more = (n: number, shown: number, b?: DailyBrief) =>
+  n > shown ? (
+    <li className="db-more">
+      {b ? (
+        <button type="button" className="db-more-go" onClick={() => openBrief(b)}>
+          See all {n}
+          <ArrowRightIcon className="size-3" />
+        </button>
+      ) : (
+        `+${n - shown} more`
+      )}
+    </li>
+  ) : null;
 
 /** The brief itself: done, at risk, today's plan, decisions waiting and usage. `max` shortens each list (the home screen's). */
-export function BriefView({ brief: b, max = 12 }: { brief: DailyBrief; max?: number }) {
+export function BriefView({ brief: b, max = 12, card = false }: { brief: DailyBrief; max?: number; /** On the home screen: "See all" opens the panel. */ card?: boolean }) {
   // The session or room it was in; the Crew's own room goes unsaid.
   const where = (w?: BriefWhere) => (w && w.kind !== "crew" ? w.title : undefined);
+  const doneRoom = sharedRoom(b.done, where);
   return (
     <div className="db-body">
       {b.done.length > 0 && (
-        <Section title="Done" count={b.done.length}>
+        <Section title="Done" count={b.done.length} {...(doneRoom ? { where: doneRoom } : {})}>
           {b.done.slice(0, max).map((d, i) => (
             <Line
               key={`d${i}`}
@@ -140,32 +168,31 @@ export function BriefView({ brief: b, max = 12 }: { brief: DailyBrief; max?: num
               {...(d.mate ? { face: d.mate } : {})}
               who={d.who}
               text={d.text}
-              {...((w) => (w && w !== d.text ? { where: w } : {}))(where(d.where))}
+              {...((w) => (w && w !== d.text && !doneRoom ? { where: w } : {}))(where(d.where))}
               onClick={() => open(b, d.where)}
-              extra={
-                (d.pr || d.proof || d.files || d.turns) && (
-                  <span className="tm-brief-files">
+              meta={
+                (d.pr || d.proof || d.files) && (
+                  <>
                     {d.pr && (
-                      <a className="tm-brief-file pr" href={d.pr.url} target="_blank" rel="noreferrer">
+                      <a className={`db-pr${d.pr.state === "merged" ? " merged" : ""}`} href={d.pr.url} target="_blank" rel="noreferrer" title={`Pull request ${d.pr.state}`}>
                         {d.pr.state === "merged" ? <GitMergeIcon className="size-3" /> : <GitPullRequestIcon className="size-3" />}
-                        {/\/pull\/(\d+)/.exec(d.pr.url)?.[1] ? `#${/\/pull\/(\d+)/.exec(d.pr.url)![1]}` : "PR"} {d.pr.state}
+                        {/\/pull\/(\d+)/.exec(d.pr.url)?.[1] ? `#${/\/pull\/(\d+)/.exec(d.pr.url)![1]}` : "PR"}
                       </a>
                     )}
-                    {/* "Checked", with the command under the pointer: the command itself, in a code face, was most of the line. */}
+                    {!!d.files && <span className="db-meta">{d.files} file{d.files === 1 ? "" : "s"}</span>}
+                    {/* Checked: a tick on its own row, the command it ran under the pointer. A line of its own under every task
+                        made a list of twelve read as twenty-four. */}
                     {d.proof && (
-                      <span className="db-meta db-proof" title={`Its check passed: ${d.proof}`}>
-                        <ShieldCheckIcon className="size-3" />
-                        Checked
+                      <span className="db-proof" title={`Checked: ${d.proof}`} aria-label="Checked">
+                        <ShieldCheckIcon className="size-3.5" />
                       </span>
                     )}
-                    {!!d.files && <span className="db-meta">{d.files} file{d.files === 1 ? "" : "s"}</span>}
-                    {!!d.turns && <span className="db-meta">{d.turns} turns</span>}
-                  </span>
+                  </>
                 )
               }
             />
           ))}
-          {more(b.done.length, max)}
+          {more(b.done.length, max, card ? b : undefined)}
         </Section>
       )}
       {b.risk.length > 0 && (
@@ -173,7 +200,7 @@ export function BriefView({ brief: b, max = 12 }: { brief: DailyBrief; max?: num
           {b.risk.slice(0, max).map((r, i) => (
             <Line key={`r${i}`} tone={r.kind === "usage" ? "assumed" : "failed"} icon={<AlertTriangleIcon className="size-3.5" />} {...(r.mate ? { face: r.mate } : {})} {...(r.who ? { who: r.who } : {})} text={r.text} {...(r.where ? { onClick: () => open(b, r.where) } : {})} />
           ))}
-          {more(b.risk.length, max)}
+          {more(b.risk.length, max, card ? b : undefined)}
         </Section>
       )}
       {b.plan.length > 0 && (
@@ -190,7 +217,7 @@ export function BriefView({ brief: b, max = 12 }: { brief: DailyBrief; max?: num
               {...(p.where ? { onClick: () => open(b, p.where) } : {})}
             />
           ))}
-          {more(b.plan.length, max)}
+          {more(b.plan.length, max, card ? b : undefined)}
         </Section>
       )}
       {b.decisions.count > 0 && (
@@ -240,8 +267,9 @@ export function DailyBriefCard() {
           Put away
         </button>
       </div>
-      <p className="db-headline">{brief.headline}</p>
-      <BriefView brief={brief} max={3} />
+      {/* Not "12 done." over a list headed "Done 12". */}
+      {!/^\d+ done\.?$/i.test(brief.headline.trim()) && <p className="db-headline">{brief.headline}</p>}
+      <BriefView brief={brief} max={3} card />
     </section>
   );
 }

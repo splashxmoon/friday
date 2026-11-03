@@ -4,9 +4,7 @@ import type { DiffFile, ReviewFinding, SessionEvent } from "../types.js";
 import { driverOf, type SessionState } from "../session/projection.js";
 import { MAIN_LANE, type Member } from "../types.js";
 import { argsOf } from "./args.js";
-import { FileIcon } from "./fileIcons.js";
 import { Icon } from "./icons.js";
-import { commitWaits, ShipDialog } from "./Ship.js";
 import { useConfirm } from "./ui.js";
 import type { Send } from "./useSession.js";
 
@@ -306,12 +304,55 @@ function SecondReviewView({ r, via, lane, sid, endSeq, send, notify }: { r: Seco
   );
 }
 
-/**
- * Review cards opened, by session, agent and run: closed is how a card starts (Arun, 2026-10-18: one with two dozen files
- * filled the chat and pushed the messages around it out of sight), and one opened stays open while the chat redraws.
- */
-const openCards = new Set<string>();
+/** Rows of a file's mini diff opened, by session, agent, run and file, so one opened stays open while the chat redraws. */
+const openRows = new Set<string>();
+/** Cards opened by hand, by session, agent and run: every card starts folded, and one opened stays open while the chat redraws. */
+const opened = new Set<string>();
+/** How many of a file's changed lines a mini diff shows before "Open in Changes". */
+const MINI_LINES = 8;
+/** How many files a card lists before "N more". */
+const PEEK = 5;
 
+/** The first lines of a file's patch that changed, numbered as the new file has them, for a card's mini diff. */
+export function miniDiff(patch: string, max = MINI_LINES): { lines: { kind: "add" | "del" | "ctx" | "hunk"; n: number | null; text: string }[]; changed: number } {
+  const lines: { kind: "add" | "del" | "ctx" | "hunk"; n: number | null; text: string }[] = [];
+  let next = 0;
+  let changed = 0;
+  let shown = 0;
+  for (const raw of patch.split(/\r?\n/)) {
+    const h = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/.exec(raw);
+    if (h) {
+      next = Number(h[1]);
+      if (shown < max) lines.push({ kind: "hunk", n: null, text: h[2]!.trim() ? `@@ ${h[2]!.trim()} @@` : "@@" });
+      continue;
+    }
+    if (!next || raw.startsWith("\\") || raw.startsWith("+++") || raw.startsWith("---")) continue;
+    const c = raw[0];
+    if (c === "+" || c === "-") changed++;
+    if (shown >= max) {
+      if (c !== "-") next++;
+      continue;
+    }
+    if (c === "+") (lines.push({ kind: "add", n: next++, text: raw.slice(1) }), shown++);
+    else if (c === "-") (lines.push({ kind: "del", n: next, text: raw.slice(1) }), shown++);
+    else if (shown > 0 && lines.at(-1)?.kind !== "ctx") lines.push({ kind: "ctx", n: next++, text: raw.slice(1) });
+    else next++;
+  }
+  while (lines.length && (lines.at(-1)!.kind === "ctx" || lines.at(-1)!.kind === "hunk")) lines.pop();
+  return { lines, changed };
+}
+
+const LETTER: Record<DiffFile["status"], string> = { added: "A", modified: "M", deleted: "D", renamed: "R" };
+
+/**
+ * What a reply changed, under it (Arun, 2026-11-03: "how herdr, devin, etc show their files changed in the chat … make this more
+ * refined and nicer", then "Build it"): one card per reply with this turn's own files, not the folder's running total (Codex's card
+ * kept showing the newest diff under an old turn). Its head says how many and by how much, with Undo (the files back to before this
+ * turn, from its checkpoint) and Review (the Changes panel, where they are read and committed). Each file is a row, its folder
+ * quiet and its name in ink; pressed, it opens a few changed lines in place (Zed's and Cursor's capped diffs), and the whole file is
+ * one press on in Changes. What wants looking at, a check's flags or a second agent's findings, is said on the card, never behind
+ * a press. A separate copy's work is brought over with Apply.
+ */
 export function ReviewCard({
   files,
   tests,
@@ -321,7 +362,6 @@ export function ReviewCard({
   me,
   lane,
   sid,
-  invite,
   send,
   endSeq,
   lastCommitSeq,
@@ -331,25 +371,27 @@ export function ReviewCard({
   second,
   via,
   notify,
-  children,
+  onReview,
+  contended = {},
 }: {
-  /** The files themselves, between the facts and the decision: you read, then decide. */
-  children?: ReactNode;
+  /** Files here another agent changed too, by path, and who (Activity contendedPaths). */
+  contended?: Record<string, string>;
   /** What a second agent made of this change, when the session has it read. */
   second?: SecondReview | null;
   /** How its findings reach the agent from here: as an instruction, as a suggestion to the driver, or not at all. */
   via?: Via;
   notify?: (m: string) => void;
+  /** This turn's files. */
   files: DiffFile[];
   tests: TestRun | null;
   receipt?: Receipt;
-  /** The diff in three sentences, before it is shown: what changed, why, and what to look at first. */
+  /** The diff in three sentences: what changed, why, and what to look at first. */
   explain?: string[];
   state: SessionState;
   me: Member;
   lane: string;
   sid: string;
-  invite: string;
+  invite?: string;
   send: Send;
   /** Where this run ended in the log; what happened after decides what is left to do. */
   endSeq: number;
@@ -358,21 +400,19 @@ export function ReviewCard({
   lastApplySeq?: number;
   lastRestoreSeq: number;
   undo?: () => void;
+  /** The Changes panel, at this file when one is said. */
+  onReview?: (path?: string) => void;
 }) {
-  const [ship, setShip] = useState(false);
   const [applying, setApplying] = useState(false);
   const [applyErr, setApplyErr] = useState("");
+  const [more, setMore] = useState(false);
+  const [, redraw] = useState(0);
   const [ask, confirmUI] = useConfirm();
   const adds = files.reduce((n, f) => n + f.additions, 0);
   const dels = files.reduce((n, f) => n + f.deletions, 0);
   const committed = lastCommitSeq > endSeq;
   const undone = lastRestoreSeq > endSeq;
   const may = me.role === "owner" || driverOf(state, lane)?.id === me.id;
-  // A commit waits for every run in the session to finish (core.ts): said on the button while one goes, not only as an error
-  // after the dialog (2026-10-27 audit).
-  const busy = commitWaits(state);
-  const why = busy ? "Wait for the run to finish, then commit" : "";
-  const branch = (state.engines[lane] ?? Object.values(state.engines)[0])?.branch;
   // Working in a separate copy: the work is brought into the person's folder with Apply, and that is what this card offers first.
   const copyOf = state.engines[lane]?.copyOf;
   const into = copyOf?.split(/[\\/]/).filter(Boolean).pop() ?? "your folder";
@@ -384,147 +424,146 @@ export function ReviewCard({
     setApplying(false);
     if (!r.ok) setApplyErr(r.error ?? "Couldn't bring the changes over.");
   };
-
-  // The explanation, less what the card already says: the sizes are in its header, your own words are in the chat above,
-  // and a flag it would point at is shown as a flag.
-  const flagged = !!receipt?.flags.length;
+  // The explanation, less what the card already says: the sizes are in its head, and your own words are in the chat above.
   const mine = `Because ${me.name} asked: “`;
-  const said = explain
-    .map((line, i) => {
-      if (i === 0 && line.startsWith("Changed ")) return "";
-      if (!line.startsWith(mine)) return line;
-      // Your own words: keep only what the agent decided on the way, if it said.
-      const rest = line.indexOf("On the way it decided:");
-      return rest < 0 ? "" : line.slice(rest);
-    })
-    .filter((line) => line && !(flagged && line.startsWith("Look here first:")));
-
-  // Closed, the card is its one line of facts and its decision: what it says, its files and its receipt open with the line.
-  // What wants looking at is still said on that line, so a closed card never hides a warning.
+  const said = explain.filter((line, i) => !(i === 0 && line.startsWith("Changed ")) && !line.startsWith(mine) && !line.startsWith("Look here first:"));
+  const rowKey = (path: string) => `${sid}:${lane}:${endSeq}:${path}`;
+  const toggle = (path: string) => {
+    const k = rowKey(path);
+    if (openRows.has(k)) openRows.delete(k);
+    else openRows.add(k);
+    redraw((n) => n + 1);
+  };
+  const shown = more ? files : files.slice(0, PEEK);
+  const outcome = applied ? `Brought into ${into}` : committed ? "Committed" : undone ? "Undone" : "";
+  // The whole card folds to its head (Arun, 2026-11-03: "make the whole thing is fully collapsable too", "make sure this is closed
+  // on default"): folded to begin with, its line of facts and its two buttons, and opened with a press on that line.
   const cardKey = `${sid}:${lane}:${endSeq}`;
-  const [open, setOpen] = useState(() => openCards.has(cardKey));
-  const toggle = () =>
-    setOpen((o) => {
-      if (o) openCards.delete(cardKey);
-      else openCards.add(cardKey);
-      return !o;
-    });
-  const issues = (receipt?.flags.length ?? 0) + (second?.findings?.length ?? 0);
-  const bad = !!receipt?.flags.some((f) => f.level === "bad");
+  const folded = !opened.has(cardKey);
+  const fold = () => {
+    if (opened.has(cardKey)) opened.delete(cardKey);
+    else opened.add(cardKey);
+    redraw((n) => n + 1);
+  };
 
   return (
-    <div className={`review-card ${committed ? "done" : ""} ${open ? "open" : "shut"}`}>
+    <div className={`change-card${outcome ? " settled" : ""}${folded ? " folded" : ""}`}>
       {confirmUI}
-      <button type="button" className="review-facts review-toggle" aria-expanded={open} title={`${open ? "Hide the files and details" : "Show the files and details"}${branch ? ` · on ${branch}` : ""}`} onClick={toggle}>
-        <Icon name="chevronDown" size={14} className="review-caret" />
-        <span className="review-title">Review changes</span>
-        <span className="review-stats">
-          {files.length} file{files.length === 1 ? "" : "s"} <b className="diff-add">+{adds}</b> <b className="diff-del">−{dels}</b>
-        </span>
-        {branch && (
-          <span className="review-branch" title="The branch this session is working on">
-            on {branch}
-          </span>
-        )}
-        <span className={`review-tests ${tests?.status ?? "none"}`} title={tests?.command ?? "The agent didn't run any tests in this run"}>
-          {tests?.status === "pass" ? "Tests passed" : tests?.status === "fail" ? "Tests failed" : "Tests not run"}
-        </span>
-        {!open && issues > 0 && (
-          <span className={`review-issues ${bad ? "bad" : ""}`}>
-            {issues} to look at
-          </span>
-        )}
-      </button>
-      {/* Shut, the files themselves under the line, as Synara and T3 Code show a run's edits: up to three, each with its counts,
-          the rest one press away (Arun, 2026-10-27: "take some inspo from like t3, synara, orca"). A file opens the card on it. */}
-      {!open && files.length > 0 && (
-        <ul className="review-peek">
-          {files.slice(0, 3).map((f) => (
-            <li key={f.path}>
-              <button type="button" onClick={toggle} title={`${f.path}: show the diff`}>
-                <FileIcon path={f.path} size={14} />
-                <span className="review-peek-path">{f.path}</span>
-                {f.status === "added" && <span className="review-peek-new">new</span>}
-                <span className="review-peek-n">
-                  <b className="diff-add">+{f.additions}</b> <b className="diff-del">−{f.deletions}</b>
-                </span>
-              </button>
-            </li>
-          ))}
-          {files.length > 3 && (
-            <li>
-              <button type="button" className="review-peek-more" onClick={toggle}>
-                <Icon name="chevronRight" size={12} /> Show {files.length - 3} more {files.length - 3 === 1 ? "file" : "files"}
-              </button>
-            </li>
+      <div className="cc-head">
+        <button type="button" className="cc-toggle" aria-expanded={!folded} title={folded ? "Show the files" : "Fold it away"} onClick={fold}>
+          <Icon name="chevronRight" size={13} className="cc-fold" />
+          <b>
+            {files.length} file{files.length === 1 ? "" : "s"} changed
+          </b>
+          {adds > 0 && <span className="diff-add">+{adds}</span>}
+          {dels > 0 && <span className="diff-del">−{dels}</span>}
+          {tests && (
+            <span className={`cc-tests ${tests.status}`} title={tests.command}>
+              {tests.status === "pass" ? "Tests passed" : "Tests failed"}
+            </span>
           )}
-        </ul>
-      )}
-      {open && (
+          {/* Folded, what wants looking at is still said on its line, so folding never hides a warning. */}
+          {folded && (receipt?.flags.length || second?.findings?.length) ? <span className="cc-warn">{(receipt?.flags.length ?? 0) + (second?.findings?.length ?? 0)} to look at</span> : null}
+        </button>
+        <span className="cc-sp" />
+        {outcome ? (
+          <span className="cc-outcome">
+            {!undone && <Icon name="check" size={13} />} {outcome}
+          </span>
+        ) : (
+          <>
+            {undo && (
+              <button
+                type="button"
+                className="cc-btn quiet"
+                title="Put these files back as they were before this turn"
+                onClick={() =>
+                  ask({
+                    title: "Undo this turn's changes?",
+                    body: "The files it changed go back to how they were before it started. You can redo it from the activity feed.",
+                    action: "Undo",
+                    danger: false,
+                    onConfirm: undo,
+                  })
+                }
+              >
+                <Icon name="rewind" size={13} /> Undo
+              </button>
+            )}
+            {copyOf && (
+              <button type="button" className="cc-btn" disabled={!may || applying} title={may ? `Bring these changes into ${into}` : "Only the driver or an owner can bring changes over"} onClick={() => void apply()}>
+                {applying ? "Applying…" : `Apply to ${into}`}
+              </button>
+            )}
+          </>
+        )}
+        {onReview && (
+          <button type="button" className={`cc-btn${copyOf && !outcome ? " quiet" : ""}`} title="Read them in the Changes panel, and commit them there" onClick={() => onReview()}>
+            Review
+          </button>
+        )}
+      </div>
+      {!folded && (
         <>
-          {said.length > 0 && <p className="review-explain">{said.join(" ")}</p>}
-          {second && <SecondReviewView r={second} via={via ?? null} lane={lane} sid={sid} endSeq={endSeq} send={send} {...(notify ? { notify } : {})} />}
-          {receipt && (receipt.flags.length > 0 || receipt.commands.length > 0) && <ReceiptView receipt={receipt} />}
-          {children}
+      {said.length > 0 && <p className="cc-explain">{said.join(" ")}</p>}
+      {second && <SecondReviewView r={second} via={via ?? null} lane={lane} sid={sid} endSeq={endSeq} send={send} {...(notify ? { notify } : {})} />}
+      {receipt && receipt.flags.length > 0 && <ReceiptView receipt={receipt} />}
+      <ul className="cc-files">
+        {shown.map((f) => {
+          const open = openRows.has(rowKey(f.path));
+          const cut = f.path.lastIndexOf("/");
+          const mini = open && f.patch ? miniDiff(f.patch) : null;
+          return (
+            <li key={f.path} className={open ? "open" : ""}>
+              <button type="button" className="cc-row" aria-expanded={open} title={f.path} onClick={() => toggle(f.path)}>
+                <span className={`cc-st ${LETTER[f.status]}`}>{LETTER[f.status]}</span>
+                <span className="cc-path">
+                  {cut > 0 && <span>{f.path.slice(0, cut + 1)}</span>}
+                  <b>{f.path.slice(cut + 1)}</b>
+                </span>
+                {contended[f.path] && <span className="cc-also">{contended[f.path]}</span>}
+                <span className="cc-n">
+                  {f.additions > 0 && <span className="diff-add">+{f.additions}</span>}
+                  {f.deletions > 0 && <span className="diff-del">−{f.deletions}</span>}
+                </span>
+                <Icon name="chevronRight" size={12} className="cc-car" />
+              </button>
+              {open && (
+                <div className="cc-mini">
+                  {mini?.lines.map((l, i) => (
+                    <div key={i} className={`cc-ln ${l.kind}`}>
+                      <span>{l.n ?? ""}</span>
+                      <span>{l.text}</span>
+                    </div>
+                  ))}
+                  <div className="cc-mini-foot">
+                    <span>{!mini ? "Its lines are in the Changes panel." : mini.changed > MINI_LINES ? `${Math.min(MINI_LINES, mini.changed)} of ${mini.changed} changed lines` : `${mini.changed} changed line${mini.changed === 1 ? "" : "s"}`}</span>
+                    {onReview && (
+                      <button type="button" className="link-btn" onClick={() => onReview(f.path)}>
+                        Open in Changes <Icon name="arrowRight" size={12} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </li>
+          );
+        })}
+        {files.length > PEEK && (
+          <li>
+            <button type="button" className="cc-more" onClick={() => setMore((v) => !v)}>
+              {more ? "Show fewer" : `${files.length - PEEK} more file${files.length - PEEK === 1 ? "" : "s"}`}
+            </button>
+          </li>
+        )}
+      </ul>
         </>
       )}
-      <div className="review-foot">
-      {applied ? (
-        <span className="review-outcome">
-          <Icon name="check" size={13} /> Brought into {into}
-        </span>
-      ) : committed ? (
-        <span className="review-outcome">
-          <Icon name="check" size={13} /> Committed
-        </span>
-      ) : undone ? (
-        <span className="review-outcome muted">Undone</span>
-      ) : (
-        <div className="review-actions">
-          {undo && (
-            <button
-              type="button"
-              className="btn ghost small danger"
-              onClick={() =>
-                ask({
-                  title: "Undo this run?",
-                  body: "The files this run changed go back to how they were before it started. You can redo it from the activity feed.",
-                  action: "Undo run",
-                  danger: false,
-                  onConfirm: undo,
-                })
-              }
-            >
-              Undo
-            </button>
-          )}
-          <button type="button" className="btn ghost small" onClick={() => prefillComposer("Please change: ")}>
-            Ask for changes
-          </button>
-          {copyOf ? (
-            <>
-              <button type="button" className="btn ghost small" disabled={!may || busy} title={why || (may ? `Commit on ${branch ?? "the copy's branch"}, without touching ${into}` : "Only the driver or an owner can commit")} onClick={() => setShip(true)}>
-                Commit on branch
-              </button>
-              <button type="button" className="btn primary small" disabled={!may || applying} title={may ? `Bring these changes into ${into}` : "Only the driver or an owner can bring changes over"} onClick={() => void apply()}>
-                <Icon name="check" size={13} /> {applying ? "Applying…" : `Apply to ${into}`}
-              </button>
-            </>
-          ) : (
-            // Says what it does, as its title does: it opens the commit (2026-10-27 audit: "Accept" whose title said "Commit").
-            <button type="button" className="btn primary small" disabled={!may || busy} title={why || (may ? "Commit these changes" : "Only the driver or an owner can commit")} onClick={() => setShip(true)}>
-              <Icon name="check" size={13} /> {receipt?.flags.some((f) => f.level === "bad") ? "Commit anyway…" : "Commit…"}
-            </button>
-          )}
-        </div>
-      )}
-      </div>
       {applyErr && (
-        <p role="alert" className="error">
+        <p role="alert" className="error cc-err">
           {applyErr}
         </p>
       )}
-      {ship && <ShipDialog state={state} sid={sid} invite={invite} send={send} lane={lane} receipt={receipt} onClose={() => setShip(false)} />}
     </div>
   );
 }

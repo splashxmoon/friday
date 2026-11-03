@@ -1294,6 +1294,7 @@ export function App() {
       <main id="main" className="main" tabIndex={-1}>
         {/* Someone new is set up first (this computer, its coding tools, GitHub), not toured: the tour waits behind it. */}
         {identity.id && route.kind === "home" && <Setup identity={identity} recents={recents} onDone={() => requestAnimationFrame(() => document.querySelector<HTMLElement>(".composer textarea, textarea")?.focus())} />}
+        {/* A new account's workspace on no paid plan: the plans, in front of everything but a shared session, which stays free to watch. */}
 
         {/* A page opened before its code has arrived shows its shape, not a blank. */}
         {/* Keyed on the workspace switches: every page is drawn again in the new workspace, and reads its own lists again. */}

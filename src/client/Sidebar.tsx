@@ -1,4 +1,5 @@
 import { ChevronRightIcon, FolderGit2Icon, PlusIcon, SearchIcon, SettingsIcon, LogOutIcon, MoonIcon, SunIcon, XIcon } from "lucide-react";
+import { SessionPrBadge } from "./SessionPrs.js";
 import { useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -17,6 +18,8 @@ import type { Attention } from "../attention.js";
 import { recordLine, useAgentRecords } from "./useAgentRecords.js";
 import type { Crew, CrewState, Preview, Working } from "../attention.js";
 import { usePrs } from "./prWatch.js";
+import { hostApi } from "./local.js";
+import { openOutside } from "./openOutside.js";
 import { chooseTheme } from "./prefs.js";
 import { applyTheme, readTheme } from "./theme.js";
 import { currentLook, loadFolded, loadSectionOrder, saveFolded, saveSectionOrder } from "./storage.js";
@@ -35,7 +38,7 @@ import { shortcut } from "./Shortcuts.js";
 import { isWorkSid, SidebarWorkSwitch, useWorkMode, useWorkSessions, workListed } from "./WorkMode.js";
 import { isTeamSid, newTeammate, SidebarTeammates, useTeam, useTeamNow, useTeamTab } from "./Teammates.js";
 import { byDay } from "./sidebar-days.js";
-import { byState, PresenceRing, useFlip, type Presence } from "./presence.js";
+import { byState, StateRing, useFlip, type Presence } from "./presence.js";
 import { api } from "./api.js";
 import { markUnread, useUnread } from "./unread.js";
 import { noticeDue, UsageNotice, useUsageSharing } from "./UsageSharing.js";
@@ -276,23 +279,25 @@ const CREW_PRESENCE: Record<CrewState, Presence> = { needs: "needs", working: "w
 const stoppedShort = (crew: Crew | null | undefined, working: unknown): boolean => !working && !!crew?.agents.some((x) => x.state === "short");
 
 /**
- * A session's mark at the head of its row: the coding tool at work in it (a glyph, not a face) wearing the same ring a teammate's
- * face does, so "blue ring = working" holds app-wide (Arun, 2026-10-29: "so clean and beautiful really with a clear direction in
- * design language"). Waiting on you, an amber ring and "?"; a turn that failed, a red ring; finished while you were elsewhere, a
- * check.
+ * A session's state as a small ring just after its name (Arun, 2026-11-03: "get rid of the agent icon to the left … add the
+ * spinning circle ring thing to the right of the tab session title name"): the turning ring while its agents work, amber while
+ * it waits on you, red when a run failed. A quiet session has none, so the ones at work stand out.
  */
-function SessionMark({ state, crew, working, unread, title, stopped = false }: { state: "needs" | "working" | "idle"; crew: Crew | null; working: Working | null; unread: boolean; title?: string | undefined; /** What waits on you is a run that stopped on an error: the red ring, as everywhere a stop shows. */ stopped?: boolean }) {
+function SessionRing({ state, crew, working, title, unread = false, stopped = false }: { state: "needs" | "working" | "idle"; crew: Crew | null; working: Working | null; title?: string | undefined; /** Its agents finished while you were elsewhere (unread.ts). */ unread?: boolean; /** What waits on you is a run that stopped on an error: the red ring, as everywhere a stop shows. */ stopped?: boolean }) {
   const a = crew?.agents ?? [];
-  const lead = a.find((x) => x.state === "needs") ?? a.find((x) => x.state === "working") ?? a[0];
-  const tool = working?.tool ?? lead?.tool;
-  const pr: Presence = state === "needs" ? (stopped && !working ? "error" : "needs") : state === "working" ? "working" : a.some((x) => x.state === "failed") ? "error" : unread ? "done" : a.length && a.every((x) => x.state === "offline") ? "asleep" : "idle";
-  return (
-    <span className="sb-row-mark" title={title}>
-      <PresenceRing state={pr} size={22} square>
-        <span className="sb-mark-disc">{tool ? <EngineMark tool={tool} size={12} /> : <FridayMark size={12} />}</span>
-      </PresenceRing>
-    </span>
-  );
+  const pr: Presence | null = state === "needs" ? (stopped && !working ? "error" : "needs") : state === "working" ? "working" : a.some((x) => x.state === "failed") ? "error" : null;
+  // Finished: a small green check where the ring turned (Arun, 2026-11-03: "add something to show that it was finished"), lit
+  // while you haven't opened it since, quieter once you have.
+  if (!pr && (unread || a.some((x) => x.state === "done")))
+    return (
+      <span className={`state-ring sb-done${unread ? " new" : ""}`} role="img" aria-label="Finished" title={unread ? "Finished while you were away" : "Finished"}>
+        <svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <circle cx="6" cy="6" r="5.1" strokeWidth="1.4" />
+          <path d="m3.9 6.2 1.4 1.4 2.8-3" />
+        </svg>
+      </span>
+    );
+  return <StateRing state={pr} title={title} />;
 }
 
 const CREW_WORD: Record<CrewState, string> = { needs: "needs you", working: "working", failed: "stopped", offline: "offline", done: "done", short: "stopped early", stopped: "stopped", idle: "ready" };
@@ -306,7 +311,7 @@ function CrewLine({ crew }: { crew: Crew }) {
   // (Arun, 2026-10-29: "Yes, fix them"; "2 agents · ready" under Needs you).
   const early = of("short");
   const words =
-    working.length > 1 ? `${working.length} working`
+    working.length > 1 ? "working"
     : working.length ? `${short(working[0]!.name, working[0]!.tool)} working`
     : failed.length ? `${short(failed[0]!.name, failed[0]!.tool)} stopped`
     : a.every((x) => x.state === "offline") ? "Offline"
@@ -316,14 +321,14 @@ function CrewLine({ crew }: { crew: Crew }) {
     : `${a.length} agents · ready`;
   return (
     <span className="sb-crew">
-      {/* The first agent's mark is the row's own (SessionMark); the others sit here, each with its ring, small. */}
-      {a.length > 1 && (
-        <span className="sb-crew-marks">
-          {a.slice(1).map((x) => (
-            <PresenceRing key={x.lane} state={CREW_PRESENCE[x.state]} size={14} className="sb-crew-mark" label={`${short(x.name, x.tool)}: ${CREW_WORD[x.state]}`}>
-              <span className="sb-crew-disc">{x.tool ? <EngineMark tool={x.tool} size={9} /> : x.name === "Main" ? <FridayMark size={9} /> : <Icon name="agent" size={9} />}</span>
-            </PresenceRing>
+      {/* Several at work: each one's coding tool, small, in place of a count (Arun, 2026-11-03: "add the icons off the agents
+          working instead of 3 working, make the icons small but visible"). */}
+      {working.length > 1 && (
+        <span className="sb-crew-tools" role="img" aria-label={`${working.length} working: ${working.map((x) => short(x.name, x.tool)).join(", ")}`}>
+          {working.slice(0, 5).map((x) => (
+            <span key={x.lane} title={short(x.name, x.tool)}>{x.tool ? <EngineMark tool={x.tool} size={12} /> : x.name === "Main" ? <FridayMark size={12} /> : <Icon name="agent" size={12} />}</span>
           ))}
+          {working.length > 5 && <span className="sb-crew-more">+{working.length - 5}</span>}
         </span>
       )}
       <span className={`truncate sb-crew-words${working.length ? " working" : failed.length ? " failed" : of("short").length ? " needs" : ""}`}>{words}</span>
@@ -751,7 +756,48 @@ function SessionsList({ p }: { p: SidebarProps }) {
     }
   };
 
+  /**
+   * The pull requests a session opened, in its menu and on right-click (Arun, 2026-11-02: "be able to open the PR or merge etc
+   * too with right click or the dropdown"): each opens on GitHub, and one ready to merge has Merge at its end, asked first, done
+   * as Code Review does it (squash, through this computer's GitHub login). Newest first, four at most; the badge has them all.
+   */
+  const prItems = (sid: string): MenuItem[] => {
+    const urls = [...(p.attention.prs.get(sid)?.urls ?? [])].reverse();
+    if (!urls.length) return [];
+    const known = new Map([...(github?.merged ?? []), ...(github?.review ?? []), ...(github?.mine ?? [])].map((x) => [x.url, x]));
+    const merge = (pr: NonNullable<ReturnType<typeof known.get>>) =>
+      ask({
+        title: `Squash and merge #${pr.number}?`,
+        body: `${pr.title} goes into ${pr.base || "its base branch"} in ${pr.repo}. This can't be undone from here.`,
+        action: "Squash and merge",
+        danger: false,
+        onConfirm: () =>
+          void hostApi<{ note?: string }>(p.identityForApi, "/api/runner/pr.act", { method: "POST", body: JSON.stringify({ url: pr.url, action: "merge", method: "squash", head: pr.head, id: pr.id }) }).then(
+            (r) => sayNotice(r.note ?? `Merged #${pr.number}.`),
+            (e: Error) => sayNotice(`Couldn't merge #${pr.number}: ${e.message}`),
+          ),
+      });
+    return [
+      { heading: urls.length === 1 ? "Pull request" : "Pull requests" },
+      ...urls.slice(0, 4).map((url): MenuItem => {
+        const pr = known.get(url);
+        const m = /github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/.exec(url);
+        const where = m ? `${m[1]} #${m[2]}` : url;
+        const isMerged = !!pr && (!!pr.mergedAt || (github?.merged ?? []).some((x) => x.url === url));
+        const ready = !!pr && !isMerged && !pr.draft && pr.mergeable !== false;
+        return {
+          label: pr?.title ?? where,
+          icon: isMerged ? "gitFork" : "gitPullRequest",
+          sub: `${isMerged ? "Merged" : pr?.draft ? "Draft" : "Open"}${pr ? ` · ${where}` : ""}`,
+          onSelect: () => openOutside(url),
+          ...(ready ? { action: { icon: "check" as const, label: `Squash and merge #${pr!.number}`, onSelect: () => merge(pr!) } } : {}),
+        };
+      }),
+      { heading: "Session" },
+    ];
+  };
   const chatMenu = (r: RecentSession): MenuItem[] => [
+    ...prItems(r.sid),
     { label: "Open in new tab", icon: "external", onSelect: () => window.open(`/?session=${encodeURIComponent(r.sid)}&invite=${encodeURIComponent(r.invite)}`, "_blank") },
     // Said in the app's notice, not an alert that froze the page; and not offered where it can't be done (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
     canFork(p.attention.crews.get(r.sid), isLocal()) ? { label: "Fork session", icon: "gitFork", onSelect: () => void forkSession(r.sid, r.invite).then((e) => e && sayNotice(e)) } : null,
@@ -834,6 +880,7 @@ function SessionsList({ p }: { p: SidebarProps }) {
       summary={p.attention.summaries.get(r.sid) ?? null}
       crew={p.attention.crews.get(r.sid) ?? null}
       since={p.attention.since.get(r.sid)}
+      prs={p.attention.prs.get(r.sid)?.urls ?? []}
       onPin={() => pin(r)}
       menu={() => chatMenu(r)}
     />
@@ -1156,7 +1203,10 @@ function ChatRow({
   crew = null,
   quiet,
   since,
+  prs = [],
 }: {
+  /** The pull requests it opened (projection.ts prs): a mark on its row, each on hover (SessionPrs.tsx). */
+  prs?: string[];
   /** Asleep (snoozed or settled): this in place of what is going on, since nothing is. */
   quiet?: string;
   /** Since when it has stood as it does (attention.ts sinceOf): its time is that, not when you last opened it. */
@@ -1187,9 +1237,9 @@ function ChatRow({
   const state = needs || short ? "needs" : working ? "working" : "idle";
   // Its agents finished while you were elsewhere, and you haven't opened it since (unread.ts).
   const unread = useUnread().has(r.sid) && !active && !needs && !short && !working;
-  // The branch its agents are on, where the session is about one (the 2026-10-28 critique).
-  let branchChip = true;
-  if (isWorkSid(r.sid)) branchChip = false;
+  // The branch chip stays on the row (Arun, 2026-11-03: "keep the branch thing too"), with the room the agents' marks had, so
+  // it is no longer cut to "2026-1…".
+  const branchChip = true as boolean;
   const ref = useRef<HTMLDivElement>(null);
   // The open session is scrolled into view when it changes, so the list always shows where you are.
   useEffect(() => {
@@ -1235,10 +1285,12 @@ function ChatRow({
       title={r.alias ? `${label} (${r.title})` : label}
     >
       {ctx && <ContextMenu at={ctx} items={menu} onClose={() => setCtx(null)} />}
-      <SessionMark state={state} crew={crew} working={working} unread={unread} stopped={needs?.kind === "stopped"} title={needs ? `${needs.kind === "stopped" ? "" : "Needs you: "}${shortPaths(needs.detail ?? needs.text)}` : working ? `Working now: ${working.what}` : undefined} />
       <div className="flex min-w-0 items-center gap-2">
         {renaming ? <InlineEdit value={label} onSave={onRename} onCancel={onCancelRename} /> : <span className="dass-row-title">{label}{unread && <span className="sr-only">, new since you looked</span>}</span>}
-        {working && working.lanes > 1 && <span className="shrink-0 text-[12px] tabular-nums text-[var(--text-muted)]" title={`${working.lanes} agents working`}>{working.lanes}</span>}
+        {!renaming && <SessionRing state={state} crew={crew} working={working} unread={unread} stopped={needs?.kind === "stopped"} title={needs ? `${needs.kind === "stopped" ? "" : "Needs you: "}${shortPaths(needs.detail ?? needs.text)}` : working ? `Working now: ${working.what}` : undefined} />}
+        {/* No count beside the ring (Arun, 2026-11-03: "get rid of the 3 next to the ring"): the line under the name says "3 working". */}
+        <span className="sb-row-gap" aria-hidden="true" />
+        {!compact && <SessionPrBadge urls={prs} />}
         {/* How long it has stood as it does (Herdr's per-row timer, 2026-11-01): waiting on you, working, or finished; else when
             you last opened it. Said in full on hover. */}
         {!renaming && (
@@ -1273,7 +1325,6 @@ function ChatRow({
             <CrewLine crew={crew} />
           ) : summary ? (
             <>
-              <span className="shrink-0 opacity-80">{summary.tool ? <EngineMark tool={summary.tool} size={11} /> : <Icon name="agent" size={11} />}</span>
               <span className={`truncate ${summary.column === "working" ? "text-[var(--ink-2)]" : ""}`}>
                 {[summary.agent.replace(/^[^']+'s /, ""), summary.running > 1 ? `${summary.running} working` : summary.status, (summary.detail ? shortPaths(summary.detail) : "") || (summary.pr ? `PR ${summary.pr.number ? `#${summary.pr.number}` : "open"}` : "")].filter(Boolean).join(" · ")}
               </span>
@@ -1288,7 +1339,6 @@ function ChatRow({
               ) : working.what && (working.what !== "Main" || working.tool) ? (
                 <>
                   <span className="shrink-0">·</span>
-                  <span className="shrink-0 opacity-90">{working.tool ? <EngineMark tool={working.tool} size={11} /> : <Icon name="agent" size={11} />}</span>
                   <span className="truncate">{working.what === "Main" && working.tool ? ENGINE_NAMES[working.tool] : working.what}</span>
                 </>
               ) : null}

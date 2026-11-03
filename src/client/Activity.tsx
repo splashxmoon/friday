@@ -1,3 +1,5 @@
+import { showDiffSoon } from "./focusDiff.js";
+import { StateRing } from "./presence.js";
 import { shortTokens } from "../tool-usage.js";
 import { collisionsFor } from "../collisions.js";
 import { runawayText } from "../runaway.js";
@@ -123,7 +125,7 @@ import { alwaysAllowEntry, can, canDriveLane, driverOf, laneOf, pendingFor, ques
 import { isRawError, stoppedLine } from "../activity-line.js";
 import { ENGINE_MODEL_INFO, ENGINE_NAMES, ENGINE_TOOLS, liveMachine, MAIN_LANE, type Attachment, type DiffFile, type EngineMode, type EngineTool, type EventBody, type EventType, type Member, type PresenceMember, type SessionEvent, type Thinking, type ToolCall, effortNote, ENGINE_EFFORT_INFO, EFFORT_RESET_NOTE, effortLevelsOf, type EngineEffort } from "../types.js";
 import { api, fileUrl, uploadFile } from "./api.js";
-import { pickable, uploadAll } from "./Attach.js";
+import { DropOverlay, pickable, uploadAll, useFileDragging } from "./Attach.js";
 import { AgentMark, Avatar, FridayMark, Icon, type IconName } from "./icons.js";
 import { RouteWhy, RoutedForecast, costMark, useLearned } from "./RouteWhy.js";
 import { useRunForecast } from "./runForecast.js";
@@ -195,7 +197,7 @@ import { EngineModelPill } from "./EngineModelPill.js";
 import { ContextGauge } from "./gauge.js";
 import { forkSession } from "./github-menu.js";
 import { finishingOrder, heldOrder, type OrderInfo } from "./agent-order.js";
-import { initials, tabOwner, tabState, tabsThatFit, tabWords } from "./agent-tab.js";
+import { initials, tabOwner, tabRing, tabState, tabsThatFit, tabWords } from "./agent-tab.js";
 import { SUBAGENT_CALL, Subagents, subagentRowOf, subagentState, type SubagentRow } from "./Subagents.js";
 import { subTasksIn } from "./Tasks.js";
 import type { Plan } from "../plan-types.js";
@@ -1648,6 +1650,8 @@ export function Activity({
                     {/* Where it stands in a word ("Working · 2m", "Needs you"), and for All agents how many are at work. */}
                     <span className="lane-tab-sub">{tabSub(id)}</span>
                   </span>
+                  {/* Its state as the small ring just after the name, in place of the big one round its mark (Arun, 2026-11-03). */}
+                  {id !== "all" && <StateRing state={tabRing(tabState(st?.status, st?.needsYou))} />}
                   {id !== "all" && state.lead === id && <CrownIcon className="lane-tab-lead size-3.5" aria-label="Leads the other agents" />}
                   {st && <AgentState status={st.status} needsYou={st.needsYou} />}
                   {behind > 0 && <span className="lane-tab-unread" aria-label={`${behind} new`}>{behind > 9 ? "9+" : behind}</span>}
@@ -1848,7 +1852,9 @@ export function Activity({
         // All agents: each one's own screen side by side, its tool's where it has one and Friday's for the rest (Arun, 2026-10-30:
         // "make sure terminal view works for the all agents tab"). One terminal for everyone had every agent held and nothing
         // sent there ran.
-        <div className="tui-grid" style={{ "--tui-cols": everyone.length > 4 ? 3 : everyone.length > 1 ? 2 : 1 } as React.CSSProperties}>
+        // The last pane takes what its row leaves, so three agents are two above and one across, never an empty quarter (Arun,
+        // 2026-11-02: "design this better for terminal view").
+        <div className="tui-grid" style={((cols) => ({ "--tui-cols": cols, "--tui-last": everyone.length % cols ? cols - (everyone.length % cols) + 1 : 1 }))(everyone.length > 4 ? 3 : everyone.length > 1 ? 2 : 1) as React.CSSProperties}>
           {everyone.map((l) => {
             const tool = state.engines[l]?.tool;
             const native = !!tool && TERMINAL_TOOLS.has(tool) && state.engines[l]?.hostId === me.id && hasShells() && !friday(sid, l);
@@ -2814,7 +2820,7 @@ function HumanMessage({ ev, ctx }: { ev: Ev<"instruction"> | Ev<"suggestion">; c
         danger: true,
         onConfirm: async () => {
           const r = await send({ type: "folder.restore", sha: checkpoint!, lane: said, rewindTo: ev.seq });
-          if (!r.ok) return ctx.notify(r.error ?? "Couldn't restore. The folder may have moved on since; check the Diff tab, then try again.");
+          if (!r.ok) return ctx.notify(r.error ?? "Couldn't restore. The folder may have moved on since; check the Changes panel, then try again.");
           if (b.type === "instruction") prefillComposer(b.text);
         },
       });
@@ -2827,7 +2833,7 @@ function HumanMessage({ ev, ctx }: { ev: Ev<"instruction"> | Ev<"suggestion">; c
       danger: true,
       onConfirm: async () => {
         const r = await send({ type: "folder.restore", sha: checkpoint!, lane: said, rewindTo: ev.seq });
-        if (!r.ok) return ctx.notify(r.error ?? "Couldn't rewind. The folder may have moved on since; check the Diff tab, then try again.");
+        if (!r.ok) return ctx.notify(r.error ?? "Couldn't rewind. The folder may have moved on since; check the Changes panel, then try again.");
         if (b.type === "instruction") prefillComposer(b.text);
       },
     });
@@ -3130,6 +3136,79 @@ function didChange(files: DiffFile[] | undefined): files is DiffFile[] {
   return !!files?.some((f) => f.additions > 0 || f.deletions > 0 || f.status !== "modified");
 }
 
+/** Where an agent stands, as the small ring after its name draws it: working, waiting on you, or stopped. */
+function sendRing(state: SessionState, lane: string): "working" | "needs" | "error" | null {
+  const run = runOf(state, lane).status;
+  if (state.openQuestions[lane] || state.approvals?.[lane] || run === "waiting_for_human") return "needs";
+  return run === "running" ? "working" : run === "error" ? "error" : null;
+}
+
+/** The box's agent half: who it goes to, with its tool's mark and its ring, and how many other agents are here. */
+function SendToFace({ state, lane, toPeople, name, more }: { state: SessionState; lane: string; toPeople: boolean; name: string; more: number }) {
+  return (
+    <>
+      <span className="menu-pill-mark">{toPeople ? <Icon name="users" size={14} /> : <EngineMark tool={state.engines[lane]?.tool ?? ""} size={14} />}</span>
+      <span className="send-to-name">{name}</span>
+      {!toPeople && <StateRing state={sendRing(state, lane)} />}
+      {more > 0 && <span className="send-to-more" aria-label={`${more} other agent${more === 1 ? "" : "s"} here`}>+{more}</span>}
+    </>
+  );
+}
+
+/**
+ * Above the box, what is waiting to be looked at, from every agent, until it is committed or undone (Arun, 2026-11-03, the change
+ * card mockup; Cursor's and Zed's bar over the input): how many files and whose, Review all, and Commit (the Changes panel, its
+ * message box in hand).
+ */
+function WaitingChanges({ state, onOpen }: { state: SessionState; onOpen: (tab: "files") => void }) {
+  const by = Object.entries(state.diffs)
+    .map(([id, d]) => ({ id, n: didChange(d.files) ? d.files.length : 0 }))
+    .filter((x) => x.n > 0);
+  // Each file once: two teammates in one repository both list what is changed there.
+  const total = new Set(by.flatMap((x) => state.diffs[x.id]!.files.map((f) => `${f.repo ?? state.engines[x.id]?.root ?? state.engines[x.id]?.cwd ?? x.id}\0${f.path}`))).size;
+  if (!total) return null;
+  const working = by.some((x) => runOf(state, x.id).status === "running");
+  const commit = () => {
+    onOpen("files");
+    // The panel draws first; then its message box, which drafts the message as it is pressed.
+    setTimeout(() => document.querySelector<HTMLTextAreaElement>(".ship-dock .sd-msg")?.focus(), 120);
+  };
+  return (
+    <div className="waiting-changes" role="status">
+      {working && <StateRing state="working" />}
+      <span className="wc-text">
+        <b>
+          {total} file{total === 1 ? "" : "s"}
+        </b>{" "}
+        waiting for review
+        {by.length > 1 && <span className="wc-who"> · {by.map((x) => `${laneLabel(state, x.id)} ${x.n}`).join(", ")}</span>}
+      </span>
+      <button type="button" className="cc-btn quiet" onClick={commit}>
+        Commit…
+      </button>
+      <button type="button" className="cc-btn" onClick={() => onOpen("files")}>
+        Review{by.length > 1 ? " all" : ""}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * What a turn itself changed, out of the lane's diff as it ended (the folder against its base, every earlier turn in it): a file
+ * whose patch is the one already logged before the turn began is the earlier turns' work, and left off its card. The log keeps a
+ * patch it has seen as a reference to the change set that first held it (DiffFile.at), so an unchanged file says so by that.
+ */
+export function turnFilesOf(files: DiffFile[] | undefined, events: readonly SessionEvent[], lane: string, began: number): DiffFile[] {
+  if (!didChange(files)) return [];
+  const before = events.findLast((e) => e.seq < began && e.body.type === "agent.diff" && (e.lane ?? MAIN_LANE) === lane);
+  const was = new Map(before?.body.type === "agent.diff" ? before.body.files.map((f) => [f.path, f]) : []);
+  return files.filter((f) => {
+    if (f.at !== undefined && f.at < began) return false;
+    const p = was.get(f.path);
+    return !(p && p.patch && p.patch === f.patch && p.additions === f.additions && p.deletions === f.deletions);
+  });
+}
+
 /** A command that checks the work: what "still failing" means to whoever takes it over. */
 const CHECK = /\b(test|tests|pytest|jest|vitest|mocha|tsc|lint|eslint|ruff|mypy|build|cargo|go (test|vet|build)|make|gradle|mvn|dotnet|npm run|pnpm|yarn|bun run|check)\b/i;
 
@@ -3230,13 +3309,13 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   const loginLine = item.ended?.body.outcome === "error" && signedOut(item.ended.body.error) && finalMsg && /not logged in|please run \/login/i.test(finalMsg.body.text) ? finalMsg : null;
   // Second opinion (Asides): another model asked about this turn, from the answer's strip; the form opens under the answer.
   const [opinion, setOpinion] = useState(false);
-  // Who wrote each line of the change by hand, read from the lane's log once the run has ended (attribution.ts).
-  const attribution = useMemo(() => (item.ended ? attributionFor(ctx.events, lane) : undefined), [ctx.events.length, item.ended, lane]); // eslint-disable-line react-hooks/exhaustive-deps
   // Asked of one of Friday's own models: the hosted Friday's, so none in the open-source edition.
   let opinionBtn: React.ReactNode = null;
   // What the run left that has a home of its own.
   // The file chips are the same fact as the diff card, so they wait for the same moment.
   const changed: FileChange[] = item.ended ? (item.diffs.at(-1)?.body.files ?? []).map((f) => ({ path: f.path, additions: f.additions, deletions: f.deletions })) : [];
+  // This turn's own files: the lane's diff as the run ended, less a file whose patch was already that before it began (turnFiles).
+  const turnFiles = item.ended ? turnFilesOf(item.diffs.at(-1)?.body.files, ctx.events, lane, item.key) : [];
   // Commands still failing when the run stopped; one that failed and then passed is not one.
   const stillFailing = item.ended ? failingCommands(msgs, ctx.results) : [];
   const via = reviewVia(ctx.state, ctx.me, lane);
@@ -3593,7 +3672,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
       danger: true,
       onConfirm: async () => {
         const r = await ctx.send({ type: "folder.restore", sha: item.checkpoint!.sha, lane: item.checkpoint!.lane, rewindTo: item.checkpoint!.at ?? msgs[0]?.seq ?? item.key });
-        if (!r.ok) ctx.notify(r.error ?? "Couldn't rewind. The folder may have moved on since; check the Diff tab, then try again.");
+        if (!r.ok) ctx.notify(r.error ?? "Couldn't rewind. The folder may have moved on since; check the Changes panel, then try again.");
       },
     });
   // A finished run that changed something is worth showing someone: its recording, a press away, while the viewer link is on.
@@ -3839,12 +3918,12 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
         </ul>
       )}
       {item.ended &&
-        didChange(item.diffs.at(-1)?.body.files) &&
+        turnFiles.length > 0 &&
         !ctx.state.options.work && // A Work session's changes are its outputs, in the rail: no diff to review (Arun, 2026-10-26: "get rid of this for work").
         (
         <div className="change-set">
           <ReviewCard
-            files={item.diffs.at(-1)!.body.files}
+            files={turnFiles}
             tests={tests}
             receipt={receipt ?? undefined}
             explain={explain}
@@ -3862,17 +3941,9 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
             lastApplySeq={ctx.lastApplySeq}
             lastRestoreSeq={ctx.lastRestoreSeq}
             undo={item.checkpoint && canUndo(ctx, item.checkpoint.lane) ? () => ctx.send({ type: "folder.restore", sha: item.checkpoint!.sha, lane: item.checkpoint!.lane }) : undefined}
-          >
-          <DiffCard
-            hideTitle
-            attribution={attribution}
-            files={item.diffs.at(-1)!.body.files}
-            review={{ send: ctx.send, via, lane, notify: ctx.notify, agent: agentNameFor(ctx.state, lane) }}
-            threads={ctx.state.threads}
-            me={ctx.me.id}
-            contendedPaths={contendedPaths(ctx.state, lane)}
+            contended={contendedPaths(ctx.state, lane)}
+            {...(ctx.onOpen ? { onReview: (path?: string) => (ctx.onOpen!("files"), path && showDiffSoon(path, [0, 350, 900, 1700])) } : {})}
           />
-          </ReviewCard>
         </div>
       )}
       </div>
@@ -4044,10 +4115,10 @@ function LimitNote({ ctx, lane, resetsAt, canSteer }: { ctx: Ctx; lane: string; 
           </>
         ) : resetsAt ? (
           <>
-            {who} is out of usage on its account until <b>{clockTime(resetsAt)}</b>. Hand the work to another agent, have it carry on here then, or sign it in as another account.
+            {who} is out of usage on its account until <b>{clockTime(resetsAt)}</b>. {isLocal() ? "Hand the work to another agent, have it carry on here then, or sign it in as another account." : "Hand the work to another of your agents, have it carry on here then, or add extra usage or credits to its account."}
           </>
         ) : (
-          <>{who} is out of usage on its account. Hand the work to another agent, have it try again in an hour, or sign it in as another account.</>
+          <>{who} is out of usage on its account. {isLocal() ? "Hand the work to another agent, have it try again in an hour, or sign it in as another account." : "Hand the work to another of your agents, have it try again in an hour, or add extra usage or credits to its account."}</>
         )}
       </span>
       {canSteer && (
@@ -4220,6 +4291,7 @@ export function DiffCard({
   threads = [],
   me = "",
   contendedPaths = {},
+  repoNote,
 }: {
   files: DiffFile[];
   compact?: boolean;
@@ -4243,6 +4315,8 @@ export function DiffCard({
   /** Who wrote each added line (attribution.ts): a pencil on the lines a person wrote by hand, and a word in the file's header. */
   attribution?: Attribution;
   me?: string;
+  /** Beside each folder's name, who changed files there (the Changes panel's Everyone); folders are named even when only one. */
+  repoNote?: (repo: string) => ReactNode;
 }) {
   const [ask, confirmUI] = useConfirm();
   // On its own in the chat, the list is one line until opened; in the Diff panel, or under a review card (which folds itself), it
@@ -4574,12 +4648,13 @@ export function DiffCard({
         const repos = [...byRepo.keys()].sort((a, b) => (a === "" ? -1 : b === "" ? 1 : a.localeCompare(b)));
         return (
           <>
-            {repos.length <= 1
+            {repos.length <= 1 && !repoNote
               ? shown.map(fileView)
               : repos.map((repo) => (
                   <div key={repo || "own"} className="diff-repo">
                     <h4 className="diff-repo-head" title={repo || "The agent's own folder"}>
                       <Icon name="folder" size={12} /> {repo ? repo.split(/[\\/]/).filter(Boolean).pop() : "This folder"} <span className="muted">{byRepo.get(repo)!.length}</span>
+                      {repoNote?.(repo)}
                     </h4>
                     {byRepo.get(repo)!.map(fileView)}
                   </div>
@@ -6902,11 +6977,28 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
   const theirPlan = ownPlan(state.engines[lane]) && state.engines[lane]!.hostId !== me.id ? state.engines[lane]! : null;
   const mode: "drive" | "claim" | "suggest" | "view" = theirPlan ? (can(state, me.id, "suggest") ? "suggest" : "view") : driving ? "drive" : !driver && mayDrive ? "claim" : can(state, me.id, "suggest") ? "suggest" : "view";
   const canUpload = mode !== "view" && !toPeople && can(state, me.id, "upload");
+  // Files dragged over the window: said over it while they are, and to whom they go (Attach.tsx DropOverlay).
+  const dragging = useFileDragging(canUpload);
   // A folder from this computer, sent up as a working copy the agents can read and edit. For a session with no
   // machine of its own: where one is attached, the code is already on it.
   const folderInput = useRef<HTMLInputElement>(null);
   const [sending, setSending] = useState(false);
   const noMachine = !liveMachine(state, lane);
+  // Another folder for this agent's coding tool to work in, added from the chat as it runs (Arun, 2026-11-03: "be able to add
+  // folders, to the coding sessions while in the chat too"): its own coding tool on this computer, from its next message on.
+  const desktopApp = typeof window !== "undefined" ? window.fridayDesktop : undefined;
+  const myTool = !!state.engines[lane]?.tool && state.engines[lane]!.hostId === me.id && !!desktopApp?.pickFolder;
+  const addFolder = async () => {
+    const p = await desktopApp?.pickFolder();
+    if (!p) return;
+    const name = p.split(/[\\/]/).filter(Boolean).pop() || p;
+    try {
+      await hostApi(ctx.identity, "/api/runner/dirs", { method: "POST", body: JSON.stringify({ sid, lane, add: p }) });
+      notify(`${agentNameFor(state, lane)} can work in ${name} too, from your next message.`);
+    } catch (e) {
+      notify(`Couldn't add ${name}: ${(e as Error).message}`);
+    }
+  };
   const uploadFolder = async (list: FileList | null) => {
     const files = Array.from(list ?? []);
     if (!files.length || sending) return;
@@ -6978,11 +7070,16 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
       // One that can't work now says so first: the list read "Yours" beside an agent out of usage or signed out (QA, 2026-10-28).
       const run = runOf(state, id);
       const stuck = run.status === "error" ? (limitHit(run.error) ? "Out of usage" : signedOut(run.error) ? "Not signed in" : "") : "";
+      // Where it stands first, as the header's tabs say it: at work, asking you something, or whose it is.
+      const asks = state.openQuestions[id]?.question;
+      const said = stuck || (asks ? `Asks: ${asks.length > 26 ? `${asks.slice(0, 25)}…` : asks}` : run.status === "running" ? "Working" : "");
+      const whose = d?.id === me.id ? "Yours" : d ? `${d.name.split(/\s+/)[0]} is driving` : "Free to take";
       return {
         label: targetName(id),
         mark: <EngineMark tool={state.engines[id]?.tool ?? ""} size={15} />,
+        after: <StateRing state={sendRing(state, id)} />,
         checked: !toPeople && id === lane,
-        sub: stuck || (d?.id === me.id ? "Yours" : d ? `${d.name.split(/\s+/)[0]} is driving` : "Free to take"),
+        sub: said ? (run.status === "running" && !stuck && !asks ? `Working · ${whose}` : said) : whose,
         onSelect: () => (setToPeople(false), onLane?.(id)),
       };
     }),
@@ -6993,6 +7090,17 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
       : ctx.solo
         ? soloFriday
         : [{ label: "Friday Code", mark: <EngineMark tool="" size={15} />, sub: "Opens beside it", onSelect: addFriday }]),
+    // Another agent, from where you pick who it goes to as well as from the header's + (Arun, 2026-11-03: "add the add agent part as well").
+    // As the header's + lists them: the tools on this computer not here yet, then the rest.
+    ...(ctx.onConnect && me.role !== "viewer"
+      ? [
+          { heading: "Add an agent" },
+          ...splitTools(installedOn(ctx.identity))
+            .here.filter((t) => !targets.some((id) => state.engines[id]?.tool === t))
+            .map((t) => ({ label: ENGINE_NAMES[t], mark: <EngineMark tool={t} size={15} />, onSelect: () => ctx.onConnect?.("", t) })),
+          { label: "Other agents…", mark: <Icon name="plus" size={15} />, onSelect: () => ctx.onConnect?.("") },
+        ]
+      : []),
     // Talking to the people here without steering anything: @name tells someone.
     ...(others ? [{ heading: "Or" }, { label: "The people here", mark: <Icon name="users" size={15} />, checked: toPeople, sub: "No agent reads it", onSelect: () => setToPeople(true) }] : []),
   ];
@@ -7179,7 +7287,7 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
         {/* On Solo with one agent the picker in the box is the only one: this pill was the same agent again, plus an upsell. */}
         {state.options.team && <TeamRecipients sid={sid} text={typed} />}
         {state.options.team && inView === ALL && !namesSomeone(sid, typed) && <TeamWorking sid={sid} />}
-        {!locked && !naming && (targets.length > 1 || others > 0 || (!fridayIsHere && me.role === "owner" && !ctx.solo)) && <MenuButton className="target-pill" label="Who it goes to" text={toPeople ? "The people here" : targetName(lane)} items={targetItems} width={targetWidth} above />}
+        {/* Who it goes to is the first half of the box's own "agent | model" control now (SendPick), not a pill over the box. */}
         {/* Who has the wheel of that agent is the other half of the same question, so it sits beside it: pick who to write to, and
             here is whether you may, and the one press to take or ask for it. */}
         <DrivePill ctx={ctx} lane={lane} />
@@ -7195,6 +7303,8 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
       {/* The box and the list that opens above it, so the list sits on the box's own edge and never over what is typed. */}
       <div className="composer-box">
       {shortcuts.popover}
+      {!state.options.work && ctx.onOpen && <WaitingChanges state={state} onOpen={ctx.onOpen} />}
+      <DropOverlay on={dragging} to={agentNameFor(state, lane)} />
       <PromptInput
         onSubmit={onSubmit}
         multiple
@@ -7257,6 +7367,11 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
                       <Icon name="folder" size={14} /> <span className="ml-2">{sending ? "Uploading a folder…" : "Upload a folder"}</span>
                     </PromptInputActionMenuItem>
                   )}
+                  {myTool && (
+                    <PromptInputActionMenuItem onSelect={() => void addFolder()}>
+                      <Icon name="folder" size={14} /> <span className="ml-2">Add a folder</span>
+                    </PromptInputActionMenuItem>
+                  )}
                   {state.options.team && (
                     <PromptInputActionMenuItem onSelect={() => setGiving(true)}>
                       <Icon name="folder" size={14} /> <span className="ml-2">Give {agentNameFor(state, lane)} a folder or repo</span>
@@ -7288,8 +7403,24 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
             )}
             {/* Who it goes to and on which model, inside the box under a rule, as on the new-session screen: one box, not a box and a row. */}
             {!toolPick && inView !== ALL && <TeammateBoxPicker identity={ctx.identity} lane={lane} notify={notify} />}
+            {toolPick && (
+              <span className="send-pick">
+                {/* Who it goes to: the agent, its state's ring, and how many others are here; pressed, everyone it can go to
+                    (Arun, 2026-11-03: "coding agent | model (reasoning level)", with the Send to menu). */}
+                {!locked && !naming && (targets.length > 1 || others > 0 || (!fridayIsHere && me.role === "owner" && !ctx.solo) || (!!ctx.onConnect && me.role !== "viewer")) ? (
+                  <MenuButton className="send-to" label="Who it goes to" items={targetItems} width={targetWidth} maxHeight={300} above>
+                    <SendToFace state={state} lane={lane} toPeople={toPeople} name={toPeople ? "The people here" : targetName(lane)} more={targets.length - 1} />
+                    <Icon name="chevronDown" size={13} className="menu-pill-caret" />
+                  </MenuButton>
+                ) : (
+                  <span className="send-to still">
+                    <SendToFace state={state} lane={lane} toPeople={toPeople} name={toPeople ? "The people here" : targetName(lane)} more={0} />
+                  </span>
+                )}
+                {mode !== "view" && !toPeople && <span className="send-bar" aria-hidden="true" />}
             {mode !== "view" && !toPeople && toolPick && (
               <AgentSwitch
+                modelOnly
                 state={state}
                 me={me}
                 identity={ctx.identity}
@@ -7305,14 +7436,16 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
                 {...(ctx.onConnect ? { onSetup: ctx.onConnect } : {})}
               />
             )}
+            {mode !== "view" && !toPeople && !agentAndModelAreOne && !(state.options.team && mode === "suggest") && <LaneModelPill ctx={ctx} lane={lane} />}
+            {/* Model and reasoning in one control, the same one the new session screen uses. Friday's models are for Friday Code: driving
+                somebody's own Claude Code, Codex or Cursor, the model is theirs, and this pill would show a choice that changed nothing. */}
+              </span>
+            )}
             {/* Effort is a column of the agent picker for whoever steers the lane. Everybody else still sees the room's level
                 here, read-only, so it isn't behind the view check. */}
             {!(state.options.team && mode === "suggest") && (mode === "view" || !agentAndModelAreOne || !effortChoice({ state, me, lane, send, notify })) && <EffortPill state={state} me={me} lane={lane} send={send} notify={notify} />}
             {mode !== "view" && !toPeople && toolPick && <ReachPill ctx={ctx} lane={lane} />}
             {/* A crew works toward a goal by running on its own (TeamControls.tsx), as the open-source edition's does. */}
-            {mode !== "view" && !toPeople && !agentAndModelAreOne && !(state.options.team && mode === "suggest") && <LaneModelPill ctx={ctx} lane={lane} />}
-            {/* Model and reasoning in one control, the same one the new session screen uses. Friday's models are for Friday Code: driving
-                somebody's own Claude Code, Codex or Cursor, the model is theirs, and this pill would show a choice that changed nothing. */}
           </PromptInputTools>
           <div className="flex items-center gap-1 composer-send">
             {liveHint && <span className="composer-live-hint">{liveHint}</span>}

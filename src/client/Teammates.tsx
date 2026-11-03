@@ -863,6 +863,7 @@ export function RoomIntro({ sid }: { sid: string }) {
   if (!t || !r) return null;
   const who = Object.keys(r.lanes).flatMap((id) => t.teammates.filter((m) => m.id === id));
   return (
+    <>
     <section className="tm-room-intro" aria-label={`About ${r.name}`}>
       <RoomFaces seeds={who.slice(0, 3).map((m) => m.look ?? m.name)} size={30} off={who.length > 0 && who.every((m) => m.status === "offline")} />
       <div className="tm-text">
@@ -870,6 +871,7 @@ export function RoomIntro({ sid }: { sid: string }) {
         {r.purpose ? <p className="tm-room-intro-for">{r.purpose}</p> : <p className="tm-room-intro-for muted">No purpose set. Add one from the room's settings, and its teammates hear it with every message.</p>}
       </div>
     </section>
+    </>
   );
 }
 

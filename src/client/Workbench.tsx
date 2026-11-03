@@ -39,17 +39,21 @@ import { isWorkSid } from "./WorkMode.js";
 export type Tab = "agents" | "overview" | "tree" | "files" | "git" | "terminal" | "preview" | "usage" | "rules";
 
 export const TAB_LABEL: Record<Tab, string> = {
-  agents: "Agents", overview: "Tasks", tree: "Tree", files: "Diff", git: "Git", terminal: "Terminal", preview: "Preview", usage: "Usage", rules: "Rules",
+  agents: "Agents", overview: "Tasks", tree: "Tree", files: "Changes", git: "Git", terminal: "Terminal", preview: "Preview", usage: "Usage", rules: "Rules",
   ...(isLocal() ? { preview: "Browser" } : {}), // the agents browse in it too (local/desktop-browser.ts)
 };
 /** The panels in the side panel's card, in the order people reach for them. */
 // Usage is the workspace's allowance and what each run cost on it: the hosted Friday's, so not offered in the local edition.
-const PANEL_ORDER: Tab[] = (["overview", "files", "git", "terminal", "preview", "tree", "agents", "usage", "rules"] as Tab[]).filter((t) => t !== "usage" || !isLocal());
+// No Agents or Rules panel (Arun, 2026-11-03: "get rid of the agents side panel too and rules and all panels button too"): the
+// header's tabs say who is there and how each stands, and a tab or panel kept from before opens as Tasks.
+const GONE: ReadonlySet<Tab> = new Set<Tab>(["agents", "rules"]);
+const offered = (t: string): t is Tab => t in TAB_LABEL && !GONE.has(t as Tab);
+const PANEL_ORDER: Tab[] = (["overview", "files", "git", "terminal", "preview", "tree", "usage"] as Tab[]).filter((t) => t !== "usage" || !isLocal());
 /** What each panel holds, under its name in the card. */
 
 const PANEL_SAYS: Record<Tab, string> = {
   overview: "What's running and what finished",
-  files: "The changes the agents made",
+  files: "What the agents changed, its checks, and the commit",
   git: "Stage, commit, pull and the branch's history",
   terminal: "A shell in the agents' folder",
   preview: "The app as it runs",
@@ -338,7 +342,7 @@ export function Workbench({
   const [openTabs, setOpenTabs] = useState<Tab[]>(() => {
     try {
       const v = JSON.parse(localStorage.getItem(tabsKey) ?? "[]") as unknown;
-      return Array.isArray(v) ? (v.filter((t) => typeof t === "string" && t in TAB_LABEL) as Tab[]) : [];
+      return Array.isArray(v) ? (v.filter((t) => typeof t === "string" && offered(t)) as Tab[]) : [];
     } catch {
       return [];
     }
@@ -382,7 +386,7 @@ export function Workbench({
   };
   // The panels this session offers, and every one a second panel can be.
   let order: Tab[] = PANEL_ORDER;
-  let every = Object.keys(TAB_LABEL) as Tab[];
+  let every = (Object.keys(TAB_LABEL) as Tab[]).filter(offered);
   let closeLabel = "Close workbench";
   // A Work session keeps what it made in its rail (WorkRail.tsx), not here, and isn't offered the panels about code (there is no
   // diff of a post): the side panel is its Browser, and the agents' own.
@@ -767,7 +771,6 @@ export function Workbench({
                   { heading: "Open in a new tab" },
                   ...order.map((p) => ({ label: TAB_LABEL[p], icon: TAB_ICON[p], sub: PANEL_SAYS[p], checked: tabs.includes(p), onSelect: () => addTab(p) })),
                   onHistory && { label: "History", icon: "clock" as const, sub: "Wind the session back to any point", onSelect: onHistory },
-                  onPicker && { label: "All panels", icon: "sidePanel" as const, sub: "The card of every panel", onSelect: onPicker },
                 ]}
               />
             </div>
@@ -1115,14 +1118,15 @@ export function useTab(sid = ""): [Tab, (t: Tab) => void] {
   const [tab, setTab] = useState<Tab>(() => {
     try {
       const v = localStorage.getItem(`mpa.bench.${sid}`) ?? localStorage.getItem("mpa.bench");
-      return v && v in TAB_LABEL ? (v as Tab) : "overview";
+      return v && offered(v) ? v : "overview";
     } catch {
       return "overview";
     }
   });
   return [
     tab,
-    (t: Tab) => {
+    (asked: Tab) => {
+      const t = GONE.has(asked) ? "overview" : asked;
       setTab(t);
       try {
         let everyone = true;

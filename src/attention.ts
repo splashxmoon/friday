@@ -223,10 +223,14 @@ export interface SessionPr {
   sid: string;
   url: string;
   merged: boolean;
+  /** Every pull request the session opened, oldest first (projection.ts prs): the sidebar's badge. */
+  urls?: string[];
 }
 
 export function prOf(state: SessionState): SessionPr | null {
-  return state.pr ? { sid: state.id, url: state.pr.url, merged: !!state.pr.merged } : null;
+  const urls = state.prs ?? [];
+  const last = state.pr?.url ?? urls.at(-1);
+  return last ? { sid: state.id, url: last, merged: !!state.pr?.merged && state.pr.url === last, ...(urls.length ? { urls } : {}) } : null;
 }
 
 export function previewOf(state: SessionState): Preview | null {

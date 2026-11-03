@@ -280,7 +280,7 @@ export class SessionCore {
     // On Solo only a session's owner works in it; anyone else watches, whatever role they joined with (they keep it for when the
     // workspace is on Team again). A reaction is watching.
     if (!owner && cmd.type !== "react" && !(await this.collaborates(state))) {
-      return fail("This workspace is on Solo, so only this session's owner works in it; you can watch. Working together needs a Team plan (7 days free).");
+      return fail("This workspace is on Solo, so only this session's owner works in it; you can watch. Working together needs a Team plan.");
     }
     const allowed = (p: "suggest" | "control" | "upload" | "invite") => owner || state.options.policy[role][p];
     const deny = (what: string) =>

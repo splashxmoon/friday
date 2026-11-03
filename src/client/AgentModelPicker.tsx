@@ -80,7 +80,14 @@ export function AgentModelPicker({
   effort,
   ownOnly,
   own: ownGiven,
+  modelOnly = false,
 }: {
+  /**
+   * The pill as the second half of the box's "agent | model (reasoning)" (Arun, 2026-11-03: "it needs to be compact maybe like it
+   * can be like the coding agent | model (reasoning level)"): the model and, in brackets, how hard it thinks; the agent is the
+   * half before it. The panel is the same.
+   */
+  modelOnly?: boolean;
   engine: EngineTool | "";
   onEngine: (t: EngineTool | "") => void;
   /** The CLI's model, when a CLI is the agent. */
@@ -145,6 +152,18 @@ export function AgentModelPicker({
         title={[agentName, modelText, reasoning, effortText].filter(Boolean).join(" · ")}
         onClick={() => setOpen((v) => !v)}
       >
+        {modelOnly ? (
+          <span className="amp-pill-text">
+            {!engine && frontierVendor && (
+              <span className="menu-pill-mark" aria-hidden>
+                <VendorMark vendor={frontierVendor} size={14} />
+              </span>
+            )}
+            {modelText || (engine ? "Default model" : "Auto")}
+            {(reasoning || effortText) && <span className="amp-pill-level"> ({reasoning || effortText})</span>}
+          </span>
+        ) : (
+          <>
         <span className="menu-pill-mark">
           <EngineMark tool={engine} size={14} />
         </span>
@@ -169,6 +188,8 @@ export function AgentModelPicker({
           </>
         )}
         </span>
+          </>
+        )}
         <Icon name="chevronDown" size={13} className="menu-pill-caret" />
       </button>
       {open && <PickerPanel />}
@@ -209,7 +230,9 @@ export function AgentModelPicker({
     const r = btn.current?.getBoundingClientRect();
     if (!r) return null;
     // Upward: this hangs off the composer, near the bottom of the window. One size whichever tool is chosen.
-    const place = placeCard(r, 560, { want: 440, min: 240, prefer: "above", cover: true });
+    // From the model half of the box, the models alone: the agent is picked beside it (Arun, 2026-11-03: "we should only be able
+    // to change the model and not the tool").
+    const place = placeCard(r, modelOnly ? 364 : 560, { want: modelOnly ? 400 : 440, min: 240, prefer: "above", cover: true });
     // Opened from a dialog (a teammate's Runs on), it keeps inside the dialog's edges: it hung about 45px past its right (Arun,
     // 2026-10-29: the verification's "the teammate dialog's model picker pokes past the dialog's right edge").
     const box = btn.current?.closest('[data-slot="dialog-content"]')?.getBoundingClientRect();
@@ -242,7 +265,7 @@ export function AgentModelPicker({
       else rows[next]!.focus();
     };
 
-    // Friday's own agent is Team's: on Solo its row says so, and choosing it offers a team (7 days free) instead. Unless the
+    // Friday's own agent is Team's: on Solo its row says so, and choosing it offers a team instead. Unless the
     // person has a model of their own, which Friday Code then runs on.
     const solo = planLimits(plan).fridayAgent === "none" || !!ownOnly;
     const locked = solo && !own.length && !ownOnly;
@@ -387,9 +410,9 @@ export function AgentModelPicker({
       ) : null; // A tool with no levels to pick has no row: the models start higher, in the same size of card.
 
     return floating(
-      <div ref={pop} className="amp" style={{ ...place, height: place.maxHeight }} role="dialog" aria-label="Agent and model">
+      <div ref={pop} className={`amp${modelOnly ? " models-only" : ""}`} style={{ ...place, height: place.maxHeight }} role="dialog" aria-label={modelOnly ? "Model" : "Agent and model"}>
         {/* Which tool: the ones this computer has first, Friday Code with them (after them on Solo), the rest folded away. */}
-        <div className="amp-tools" role="group" aria-label={machineName ? `Tools on ${machineName}` : "Tools"}>
+        {!modelOnly && <div className="amp-tools" role="group" aria-label={machineName ? `Tools on ${machineName}` : "Tools"}>
           <div className="amp-col-label">Who works</div>
           {here.map((t) => toolRow(t, ENGINE_NAMES[t], <EngineMark tool={t} size={18} />, toolState(t), engine === t, () => onEngine(t)))}
           {(own.length > 0 || ownOnly) && friday}
@@ -402,7 +425,7 @@ export function AgentModelPicker({
               {(others || away.includes(engine as EngineTool)) && away.map((t) => toolRow(t, ENGINE_NAMES[t], <EngineMark tool={t} size={18} />, toolState(t), engine === t, () => onEngine(t)))}
             </>
           )}
-        </div>
+        </div>}
 
         <div className="amp-main" onKeyDown={walk}>
           {/* No name over the column (Arun, 2026-10-26: "get rid of the tool text above the effort section"): the tool is the one

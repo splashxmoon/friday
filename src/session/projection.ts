@@ -225,6 +225,12 @@ export interface SessionState {
   shepherd: { prUrl: string; lane: string; by: string; since: number } | null;
   /** The pull request the session's last commit opened or pushed to, and whether the session saw it merge (a shepherded one). */
   pr: { url: string; merged?: true; /** What it merges into, when known; a branch other than the default one means it is stacked. */ base?: string } | null;
+  /**
+   * Every pull request this session opened, oldest first (the sidebar's badge, client/SessionPrs.tsx): Friday's own commit and
+   * open, one it was asked to see through, `gh pr create`'s link, a GitHub tool's create_pull_request. Not one an agent only
+   * names, nor a list of other people's (Arun, 2026-11-02: "can we add these kinda of things to the coding session like tabs").
+   */
+  prs: string[];
   /** Lanes set to carry on by themselves at a time (a usage limit resetting), and who set it. Off once anyone writes to the lane. */
   resumes: Record<string, { at: number; by: string; byName: string; seq: number }>;
   /**
@@ -448,6 +454,7 @@ export function initialState(id: string): SessionState {
     pins: [],
     shepherd: null,
     pr: null,
+    prs: [],
     resumes: {},
     efforts: {},
   };
@@ -827,6 +834,7 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       break;
     case "pr.shepherd":
       s.shepherd = b.on ? { prUrl: b.prUrl, lane, by: ev.actor.name, since: ev.seq } : null;
+      if (b.on) addPr(s, b.prUrl);
       break;
     case "pr.shepherd.ended":
       if (b.outcome === "merged" && (s.pr || s.shepherd)) s.pr = { url: s.pr?.url ?? s.shepherd!.prUrl, merged: true };
@@ -1054,6 +1062,7 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       // A commit to a new branch moves the folder onto it: the header, the review card, the next commit's suggestion and a
       // hand-off all read the branch from here, and kept the old one, so every commit after offered yet another new branch.
       if (b.type === "folder.committed" && b.prUrl && !b.error && s.pr?.url !== b.prUrl) s.pr = { url: b.prUrl, ...(b.base ? { base: b.base } : {}) };
+      if (b.type === "folder.committed" && b.prUrl && !b.error) addPr(s, b.prUrl);
       if (b.type === "folder.committed" && b.branch && !b.error) {
         const cwd = s.engines[lane]?.cwd;
         for (const [id, e] of Object.entries(s.engines)) if (!cwd || id === lane || e.cwd === cwd) s.engines[id] = { ...e, branch: b.branch };
@@ -1246,10 +1255,29 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       }
       break;
     case "run.interrupt":
-    case "tool.result":
       break;
+    case "tool.result": {
+      const opened = openedPr(b.name, b.output, b.isError);
+      if (opened) addPr(s, opened);
+      break;
+    }
   }
   return s;
+}
+
+const PR_URL = /https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/;
+/** A pull request a tool call just opened: `gh pr create` ends on its link alone; a GitHub tool's create_pull_request says it. */
+export function openedPr(name: string, output: string, isError: boolean): string | null {
+  if (isError || !output.includes("github.com/")) return null;
+  if (/create_?pull_?request/i.test(name)) return PR_URL.exec(output)?.[0] ?? null;
+  const last = output.trimEnd().split(/\r?\n/).at(-1)?.trim() ?? "";
+  return new RegExp(`^${PR_URL.source}$`).test(last) ? last : null;
+}
+
+function addPr(s: SessionState, url: string): void {
+  const u = PR_URL.exec(url)?.[0];
+  // A state kept from before this list was (a snapshot) has none yet.
+  if (u && !(s.prs ?? []).includes(u)) s.prs = [...(s.prs ?? []), u].slice(-50);
 }
 
 export function project(id: string, events: SessionEvent[]): SessionState {

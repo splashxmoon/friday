@@ -1,13 +1,15 @@
+import { agentLook, laneLabel } from "./handoff-ui.js";
+import { StateRing } from "./presence.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { attributionOf } from "../attribution.js";
 import { parseRepo } from "../runner/repo.js";
 import type { FolderInfo } from "../runner/workspace.js";
 import { can, canDriveLane, driverOf, runOf, type SessionState } from "../session/projection.js";
-import { ENGINE_MODELS, ENGINE_NAMES, ENGINE_TOOLS, MAIN_LANE, type EngineMode, type EngineTool, type Member, type SessionEvent } from "../types.js";
+import { ENGINE_MODELS, ENGINE_NAMES, ENGINE_TOOLS, MAIN_LANE, type DiffFile, type EngineMode, type EngineTool, type Member, type SessionEvent } from "../types.js";
 import { DiffCard, reviewVia } from "./Activity.js";
 import { ChangeBar } from "./DiffView.js";
 import { EngineMark } from "./BrandMarks.js";
-import { AccountPicker } from "./Accounts.js";
+import { AccountPicker, preferredAccount } from "./Accounts.js";
 import { Icon } from "./icons.js";
 import { LoginNotice, MachineLine, NoMachine, hostApi, toolLabel, useMachine } from "./local.js";
 import { isScratch, localSessionFolder } from "./quickConnect.js";
@@ -76,7 +78,8 @@ export function ConnectDialog({
   const [mode, setMode] = useState<EngineMode>(existing?.handMode ?? existing?.mode ?? "full");
   const [moreTools, setMoreTools] = useState(false);
   const [model, setModel] = useState(existing?.model ?? "");
-  // Which of the tool's accounts on the computer: the one it was on, else "" for whichever has most room (runner/accounts.ts).
+  // Which of the tool's accounts on the computer: the one it was on, else "" for the one new sessions use (Accounts.tsx
+  // preferredAccount, the tool's own sign-in until another is picked).
   const [account, setAccount] = useState(existing?.account?.id ?? "");
   // Where it runs: the main lane (instead of Friday Code) or a new lane beside it.
   const drivable = [MAIN_LANE, ...state.lanes.filter((l) => l.control.kind !== "standing").map((l) => l.id)].filter((id) => canDriveLane(state, me.id, id));
@@ -222,7 +225,7 @@ export function ConnectDialog({
           // A folder somebody else is editing is joined as a reader, rather than refused: one writer per folder.
           mode: clash ? "plan" : mode,
           ...(model.trim() ? { model: model.trim() } : {}),
-          ...(tool && account && found?.accounts?.some((a) => a.id === account) ? { account } : {}),
+          ...((ac) => (tool && ac !== "default" && found?.accounts?.some((a) => a.id === ac) ? { account: ac } : {}))(account || (tool && found ? preferredAccount(tool, found.accounts) : "default")),
           ...(folder ? { cwd: folder.path } : { noFolder: true }),
           ...(folder && tool && dirs ? { dirs } : {}),
           ...(own ? { worktree: "lane" } : shares ? { share: true } : {}),
@@ -664,6 +667,16 @@ function Commits({ events }: { events: SessionEvent[] }) {
   );
 }
 
+/** Where an agent with changes stands, as the small ring after its name draws it: working, waiting on you, or stopped. */
+function laneRing(state: SessionState, lane: string): "working" | "needs" | "error" | null {
+  const run = runOf(state, lane).status;
+  if (state.openQuestions[lane] || state.approvals?.[lane] || run === "waiting_for_human") return "needs";
+  return run === "running" ? "working" : run === "error" ? "error" : null;
+}
+
+/** The Changes panel's chip for every agent's changes together. */
+const EVERYONE = "*";
+
 export function FilesPanel({
   state,
   onClose,
@@ -684,7 +697,28 @@ export function FilesPanel({
 }) {
   // Who wrote each added line by hand, from the lane's log (attribution.ts): a pencil on those lines, a word in the file's header.
   const attribution = useMemo(() => attributionOf(events, lane ?? MAIN_LANE), [events.length, lane]); // eslint-disable-line react-hooks/exhaustive-deps
-  const ids = Object.keys(state.diffs);
+  // Only the agents with something changed: a room of seven had seven chips, five of them saying 0 (Arun, 2026-11-03: "rework on
+  // how all of the teammates stuff changes and updates can be seen properly").
+  const ids = Object.keys(state.diffs).filter((id) => state.diffs[id]!.files.length > 0);
+  // With more than one, everyone's changes together, by the folder they are in, each file once with whoever changed it: two
+  // teammates in one repository listed its files twice, each under the other's chip too.
+  const many = ids.length > 1;
+  const everyone = useMemo(() => {
+    if (!many) return null;
+    const seen = new Map<string, DiffFile>();
+    const who = new Map<string, string[]>();
+    for (const id of ids) {
+      const en = state.engines[id];
+      for (const f of state.diffs[id]!.files) {
+        const folder = f.repo ?? en?.root ?? en?.cwd ?? "";
+        const k = `${folder}\0${f.path}`;
+        if (!seen.has(k)) seen.set(k, { ...f, repo: folder });
+        const w = who.get(folder) ?? [];
+        if (!w.includes(id)) who.set(folder, [...w, id]);
+      }
+    }
+    return { files: [...seen.values()], who };
+  }, [state.diffs, state.engines, many]); // eslint-disable-line react-hooks/exhaustive-deps
   // Which agent's changes were picked, per session and in this browser only, so coming back to the session finds the same diff.
   const diffKey = `friday.diff.${state.id}`;
   const [pick, setPickNow] = useState<string | null>(() => {
@@ -709,20 +743,32 @@ export function FilesPanel({
     setPickOf(lane);
     setPickNow(null);
   }
-  const current = pick && state.diffs[pick] ? pick : lane && state.diffs[lane] ? lane : (ids[0] ?? null);
-  const d = current ? state.diffs[current]! : null;
+  // Everyone's, unless one was picked or this is an agent's own column.
+  const all = many && (pick === EVERYONE || (!(pick && ids.includes(pick)) && !(lane && ids.includes(lane))));
+  const current = all ? null : pick && ids.includes(pick) ? pick : lane && ids.includes(lane) ? lane : (ids[0] ?? null);
+  const d = all && everyone ? { files: everyone.files } : current ? state.diffs[current]! : null;
   const e = current ? state.engines[current] : null;
   const adds = d?.files.reduce((n, f) => n + f.additions, 0) ?? 0;
   const dels = d?.files.reduce((n, f) => n + f.deletions, 0) ?? 0;
 
   const body = (
     <>
-      {ids.length > 1 && (
-        <div className="art-tabs" role="tablist" aria-label="Agents with changes">
+      {/* Whose changes, and where each of them stands, as herdr's sidebar says it: the small ring after the name while it works,
+          waits on you or stopped, and how many files (Arun, 2026-11-03: the Changes panel "like this"). */}
+      {ids.length > 0 && (
+        <div className="ch-agents" role="tablist" aria-label="Agents with changes">
+          {many && everyone && (
+            <button role="tab" aria-selected={all} className={`ch-agent${all ? " on" : ""}`} onClick={() => setPick(EVERYONE)}>
+              <span className="ch-agent-name">Everyone</span>
+              <span className="ch-agent-n">{everyone.files.length}</span>
+            </button>
+          )}
           {ids.map((id) => (
-            <button key={id} role="tab" aria-selected={id === current} className={`art-tab ${id === current ? "on" : ""}`} onClick={() => setPick(id)}>
-              <span className="art-tab-name">{laneName(state, id)}</span>
-              <span className="art-tab-count">{state.diffs[id]!.files.length}</span>
+            <button key={id} role="tab" aria-selected={id === current} className={`ch-agent${id === current ? " on" : ""}`} onClick={() => setPick(id)}>
+              <span className="ch-agent-mark" aria-hidden="true">{agentLook(state, id, 12).mark}</span>
+              <span className="ch-agent-name">{laneLabel(state, id)}</span>
+              <StateRing state={laneRing(state, id)} />
+              <span className="ch-agent-n">{state.diffs[id]!.files.length}</span>
             </button>
           ))}
         </div>
@@ -748,7 +794,28 @@ export function FilesPanel({
               </span>
               {ship && current && <BranchButton sid={ship.sid} invite={ship.invite} send={ship.send} lane={current} branch={e?.branch} />}
             </div>
-            <DiffCard files={d.files} compact panel hideTitle attribution={attribution} {...(ship && current ? { review: { send: ship.send, via: reviewVia(state, ship.me, current), lane: current } } : {})} />
+            {all && everyone ? (
+              // Each folder named, with whose changes are in it: a name opens that agent's own, to review, comment and commit.
+              <DiffCard
+                key="everyone"
+                files={d.files}
+                compact
+                panel
+                hideTitle
+                repoNote={(repo) => (
+                  <span className="ch-who">
+                    {(everyone.who.get(repo) ?? []).map((id) => (
+                      <button key={id} type="button" className="ch-who-name" title={`Only ${laneLabel(state, id)}'s changes, to review and commit`} onClick={() => setPick(id)}>
+                        <span className="ch-agent-mark" aria-hidden="true">{agentLook(state, id, 10).mark}</span>
+                        {laneLabel(state, id)}
+                      </button>
+                    ))}
+                  </span>
+                )}
+              />
+            ) : (
+              <DiffCard files={d.files} compact panel hideTitle attribution={attribution} {...(ship && current ? { review: { send: ship.send, via: reviewVia(state, ship.me, current), lane: current } } : {})} />
+            )}
           </>
         ) : (
           <div className="dp-empty">
@@ -760,22 +827,22 @@ export function FilesPanel({
           </div>
         )}
         <Commits events={events} />
-        {/* The way from this diff to a pull request: review, checks, commit, push. After the files and the commits already made, so it
-            is the next thing to do once they have been read, and under the changed files when there are no commits yet. */}
-        {ship && d && d.files.length > 0 && <ShipFlow key={current ?? "none"} state={state} lane={current ?? lane ?? MAIN_LANE} events={events} {...ship} />}
       </div>
+      {/* The way from these changes to a pull request, docked at the panel's foot under the files as they scroll: the checks, the
+          message, one button (ShipFlow). */}
+      {ship && !all && d && d.files.length > 0 && <ShipFlow key={current ?? "none"} state={state} lane={current ?? lane ?? MAIN_LANE} events={events} {...ship} />}
     </>
   );
 
   if (bare) return body;
   return (
-    <aside className="doc-panel files-panel" aria-label="Diff">
+    <aside className="doc-panel files-panel" aria-label="Changes">
       <div className="doc-head">
         <Icon name="file" size={15} />
-        <span className="doc-title">Diff</span>
+        <span className="doc-title">Changes</span>
         <span className="doc-count">{d ? `${d.files.length} changed` : "no changes yet"}</span>
         <span className="doc-actions">
-          <button className="icon-btn tiny" title="Close" aria-label="Close files" onClick={onClose}>
+          <button className="icon-btn tiny" title="Close" aria-label="Close changes" onClick={onClose}>
             <Icon name="x" size={15} />
           </button>
         </span>

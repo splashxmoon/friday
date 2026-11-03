@@ -194,7 +194,7 @@ function RunStrip({ steps, onPick }: { steps: Step[]; onPick: (id: string) => vo
 /** A step's mark, drawn: the text glyphs it is named by came out in four sizes from as many fallback fonts, the search one a
  * speck beside the edit one (Arun, 2026-10-28: "a look for like the little details and designs… for the whole app too"). */
 const MARK_ICONS: Record<string, IconName> = { "≡": "file", "⌕": "search", "›_": "terminal", "±": "pencil", "+": "plus", "↗": "globe", "✎": "memory", "☐": "list", "?": "help", "→": "handoff", "◇": "skills", "⇄": "plug" };
-function StepMark({ mark }: { mark: string }) {
+export function StepMark({ mark }: { mark: string }) {
   const icon = MARK_ICONS[mark];
   return (
     <span className="rsp-mark" aria-hidden>
@@ -577,7 +577,7 @@ export function Timeline({
 const BASE: Record<string, string> = { Ran: "run", Read: "read", Listed: "list", Searched: "search", "Searched the web": "search the web", Edited: "edit", Wrote: "write", Opened: "open", Noted: "note", Planned: "plan", Used: "use", "Handed off to": "hand off to" };
 // A verb it has no plain form of is said as it is: the "didn't run" flag beside it says the rest, which "Not run: Bash … didn't
 // run" said twice (2026-10-27 audit).
-const askedVerb = (verb: string) => (BASE[verb] ? `Asked to ${BASE[verb]}` : verb);
+export const askedVerb = (verb: string) => (BASE[verb] ? `Asked to ${BASE[verb]}` : verb);
 
 const clip = (t: string, n: number) => {
   const one = t.replace(/\s+/g, " ");

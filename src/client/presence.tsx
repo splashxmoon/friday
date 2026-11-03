@@ -22,7 +22,7 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 
-export type Presence = "working" | "needs" | "queued" | "done" | "error" | "asleep" | "idle";
+export type Presence = "working" | "needs" | "queued" | "done" | "error" | "asleep" | "idle" | "limited";
 
 export function PresenceRing({ state, size, children, className = "", label, square = false }: {
   state: Presence;
@@ -53,6 +53,21 @@ export function PresenceRing({ state, size, children, className = "", label, squ
           </svg>
         </span>
       )}
+    </span>
+  );
+}
+
+/**
+ * A state as a small ring of its own, set just after a name (Arun, 2026-11-03: "use the small ring instead of this big ring around
+ * the icon"): the sidebar's rows and the agents' tabs. Nothing at rest, so the ones at work stand out.
+ */
+export function StateRing({ state, title }: { state: Presence | null; title?: string | undefined }) {
+  if (!state || state === "idle" || state === "done" || state === "asleep") return null;
+  return (
+    <span className="state-ring" title={title}>
+      <PresenceRing state={state} size={8} label={{ working: "Working", needs: "Needs you", error: "Stopped", queued: "Waiting", limited: "Out of usage" }[state]}>
+        <span />
+      </PresenceRing>
     </span>
   );
 }

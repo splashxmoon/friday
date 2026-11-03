@@ -5,7 +5,7 @@ import type { FolderInfo } from "../runner/workspace.js";
 import { EFFORT_LEVELS, ENGINE_EFFORT_INFO, ENGINE_NAMES, ENGINE_TOOLS, type Attachment, type EngineEffort, type EngineMode, type EngineTool } from "../types.js";
 import { api } from "./api.js";
 import { titleFrom } from "./quick-send.js";
-import { AttachButton, AttachedRow, PICK_FOLDER, attach, droppedFiles, pasteAttach, uploadAll, type Attached } from "./Attach.js";
+import { AttachButton, AttachedRow, DropOverlay, PICK_FOLDER, attach, droppedFiles, pasteAttach, uploadAll, useFileDragging, type Attached } from "./Attach.js";
 import { Icon, type IconName } from "./icons.js";
 import { rememberAsk, walkAsks } from "./askHistory.js";
 import { NoMachine, connectThisComputer, hostApi, useMachine } from "./local.js";
@@ -15,7 +15,7 @@ import { HomeActivity } from "./HomeActivity.js";
 import { MachineBadge } from "./MachineBadge.js";
 import type { Identity, RecentSession } from "./storage.js";
 import { InBand, MenuButton, Switch, useDismiss } from "./ui.js";
-import { AccountPill } from "./Accounts.js";
+import { AccountPill, preferredAccount } from "./Accounts.js";
 import { EngineMark } from "./BrandMarks.js";
 import { AgentModelPicker } from "./AgentModelPicker.js";
 import { canRoute, saveSmartRouting, smartRoutingOn, useRouteHint } from "./RouteWhy.js";
@@ -286,7 +286,8 @@ export function Code({
   // How hard it thinks, for a tool that takes a level; Auto (null) is the tool's own default. Another tool starts on Auto.
   const [effort, setEffort] = useState<EngineEffort | null>(null);
   useEffect(() => setEffort(null), [engine]);
-  // Which of the tool's accounts on the computer (runner/accounts.ts): "" for whichever has most room. Another tool starts on that.
+  // Which of the tool's accounts on the computer (runner/accounts.ts): "" for the one new sessions use (Accounts.tsx
+  // preferredAccount), the tool's own sign-in until another is picked. Another tool starts on that.
   const [account, setAccount] = useState("");
   useEffect(() => setAccount(""), [engine]);
   const effortLevels = (engine && EFFORT_LEVELS[engine]) || [];
@@ -355,6 +356,8 @@ export function Code({
     setEngine(solo ? (ready ?? "claude") : "");
   }, [solo, machine.tools]);
   const [files, setFiles] = useState<Attached[]>([]);
+  // Files dragged over the window: said over it while they are (Attach.tsx DropOverlay).
+  const draggingFiles = useFileDragging();
   // What the picker left out. Worth saying, but not a failure.
   const [attachNote, setAttachNote] = useState("");
   // A file dropped beside the box is attached as one dropped on it would be (the box's onDrop), not opened by the browser in
@@ -685,7 +688,7 @@ export function Code({
               // and the one picked, which everyone else's turns are held to and which it goes back to after that first run.
               handMode: mode,
               ...(model ? { model } : {}),
-              ...(engine && account && tool?.accounts?.some((a) => a.id === account) ? { account } : {}),
+              ...((ac) => (engine && ac !== "default" && tool?.accounts?.some((a) => a.id === ac) ? { account: ac } : {}))(account || (engine ? preferredAccount(engine, tool?.accounts) : "default")),
               // A pull request's own branch, when that is what the session is about; never a copy of the folder unasked.
               // Or, with uncommitted work in the folder, a copy of it on that branch (local-api start's `aside`).
               ...(folder ? (aside ? { worktree: "lane", copyName: engine || "friday", aside } : { branch: target }) : {}),
@@ -917,6 +920,7 @@ export function Code({
       >
         <div className="composer-inner">
           <AttachedRow files={files} onChange={setFiles} />
+          <DropOverlay on={draggingFiles} to="your new session" />
           {/* The folder is part of the request, so it sits in the box with it: a card with where it is, that it stays on the computer, and the branch. */}
           {/* The folder is said by the footer's dropdown (DIRECTION.md §9.5); its branch, when it is a repository, is one quiet line
               here, and a conversation picked up again keeps its card, which says so. */}

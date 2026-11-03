@@ -152,7 +152,9 @@ export async function trackBranch(cwd: string, name: string): Promise<void> {
  * so without this the first diff of a session can be six thousand lines of our
  * own script and its log. Someone's diff should only ever show their work.
  */
-const OURS = /^(friday-runner\.mjs|runner\.log|\.friday\/)/;
+// With what the coding tools and the Mac leave behind, which is nobody's work either: Claude Code's lock while its scheduled
+// tasks run, and Finder's .DS_Store (Arun, 2026-11-03: a teammate's changes listed `.claude/scheduled_tasks.lock`).
+const OURS = /^(friday-runner\.mjs|runner\.log|\.friday\/|\.claude\/scheduled_tasks\.lock$)|(^|\/)\.DS_Store$/;
 
 /**
  * What never belongs in a snapshot of a folder nobody version-controlled.
@@ -658,7 +660,8 @@ export async function dropWorktree(dir: string, force: boolean | "committed" = t
   }
   // Its kept snapshot index is named for the top as git spells it, so that is asked for while git can still answer.
   const top = await git(real, ["rev-parse", "--show-toplevel"]).then((s) => s.trim(), () => null);
-  await git(real, ["worktree", "remove", "--force", real]).catch(() => rm(real, { recursive: true, force: true }));
+  // Retried: on Windows a file git, an editor or a virus scan still holds for a moment fails the delete with EBUSY (CI, 2026-11-02).
+  await git(real, ["worktree", "remove", "--force", real]).catch(() => rm(real, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   if (top) for (const f of [keptIndex(top), `${keptIndex(top)}.exclude`]) await rm(f, { force: true }).catch(() => {});
   return true;
 }
@@ -705,6 +708,30 @@ export async function sweepWorktrees(olderThanMs = 3 * 24 * 60 * 60_000, inUse: 
     if (st && Date.now() - st.mtimeMs > 14 * 24 * 60 * 60_000) await rm(at, { force: true, recursive: true }).catch(() => {});
   }
   return gone;
+}
+
+/**
+ * The git repositories inside a folder that isn't one, two levels down at most (a folder of projects, a project kept one
+ * folder in), eight at most. A snapshot of the folder holds each of them as a single line ("Subproject commit …-dirty"),
+ * which says nothing; their changes are read from each of them instead (Arun, 2026-11-03: the Manager's folder, ~/Desktop/edge,
+ * showed one such line for the repository edge/edge it was working in).
+ */
+export async function reposInside(dir: string, depth = 2): Promise<string[]> {
+  const found: string[] = [];
+  const skip = new Set(NEVER.filter((n) => n.endsWith("/")).map((n) => n.slice(0, -1)));
+  const walk = async (at: string, left: number) => {
+    if (found.length >= 8) return;
+    const entries = await readdir(at, { withFileTypes: true }).catch(() => []);
+    for (const e of entries) {
+      if (found.length >= 8) return;
+      if (!e.isDirectory() || e.name.startsWith(".") || skip.has(e.name)) continue;
+      const sub = path.join(at, e.name);
+      if (await access(path.join(sub, ".git")).then(() => true, () => false)) found.push(sub);
+      else if (left > 1) await walk(sub, left - 1);
+    }
+  };
+  await walk(dir, depth);
+  return found;
 }
 
 /** The snapshot is ours and temporary; it goes when the runner does. */

@@ -3478,13 +3478,15 @@ a.rsp-chip.link:hover { color: var(--ink); background: var(--hover); }
 .tree-split > .tree-scroll { flex: 1; min-width: 0; }
 /* With a file open the list becomes a sidebar: narrow enough to leave the code
    room, wide enough for a real filename. */
-.tree-split.open > .tree-scroll { flex: 0 0 172px; min-width: 0; border-right: 1px solid var(--border); }
-.tree-editor-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; flex: 1; }
+.tree-split.open > .tree-scroll { flex: 0 0 172px; min-width: 0; border-left: 1px solid var(--border); }
+/* The code first and the files beside it on the right (Arun, 2026-11-03: "swap the placement of the file code section with
+   the file section"). */
+.tree-editor-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; flex: 1; order: -1; }
 
 @media (max-width: 720px) {
-  /* Two columns of nothing. Back to stacked, with the list kept short. */
+  /* Two columns of nothing. Back to stacked, with the list kept short, under the code. */
   .tree-split { flex-direction: column; }
-  .tree-split.open > .tree-scroll { flex: 0 0 140px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .tree-split.open > .tree-scroll { flex: 0 0 140px; border-left: 0; border-top: 1px solid var(--border); }
 }
 .tree-tabs { display: flex; gap: 2px; padding: 4px 6px 0; overflow-x: auto; background: var(--panel); }
 .tree-tab {
@@ -3512,16 +3514,6 @@ a.rsp-chip.link:hover { color: var(--ink); background: var(--hover); }
 /* Reading has no textarea over it, so the gutter and the text sit side by side. */
 .code-read { display: flex; min-height: 0; }
 .code-read .code-layer { position: static; }
-/* The numbers: their own column, so selecting the code never takes them with it. */
-.code-gutter {
-  display: flex; flex-direction: column; flex: 0 0 auto; padding: 10px 8px 10px 10px;
-  font: 13px/1.55 var(--mono); text-align: right; color: var(--faint);
-  user-select: none; -webkit-user-select: none;
-}
-.code-gutter-clip {
-  position: absolute; inset: 0 auto 0 0; z-index: 1; overflow: hidden;
-  background: var(--code-bg); border-right: 1px solid var(--border);
-}
 /* The text starts clear of the gutter. 4ch fits a five-digit file. */
 .code-wrap:not(.code-read) .code-layer { padding-left: calc(4ch + 26px); }
 .code-layer {
@@ -3536,6 +3528,9 @@ a.rsp-chip.link:hover { color: var(--ink); background: var(--hover); }
 }
 .code-input::selection { background: var(--violet-soft); }
 .code-line { display: block; min-height: 1.55em; }
+.code-wrapped .code-line { display: grid; grid-template-columns: calc(4ch + 18px) minmax(0, 1fr); }
+.code-wrapped .code-ln { padding-right: 12px; text-align: right; color: var(--faint); user-select: none; -webkit-user-select: none; }
+.code-wrapped .code-text { min-width: 0; overflow-wrap: anywhere; }
 
 /* ── open a file by name ─────────────────────────────────────────────── */
 .quick-back { position: fixed; inset: 0; z-index: 120; display: flex; justify-content: center; padding-top: 12vh; background: rgb(0 0 0 / .32); animation: r5-fade var(--t-open) var(--ease-out); }
@@ -5799,33 +5794,7 @@ html[data-band] .home-corner { top: 26px; right: 28px; }
 
 /* ── the ship drawer: diff to pull request, in four steps ───────────── */
 .files-panel { display: flex; flex-direction: column; }
-.ship-flow { flex: none; border-top: 1px solid var(--border-strong); background: var(--panel); max-height: 70%; display: flex; flex-direction: column; }
-.sf-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 10px 14px; border: 0; background: none; font: inherit; font-size: 13px; color: var(--ink); cursor: pointer; text-align: left; }
-.sf-bar:hover { background: var(--hover); }
-.sf-bar-main { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
-.sf-bar-go { display: inline-flex; align-items: center; gap: 4px; color: var(--violet); font-size: 13px; font-weight: 500; }
-.sf-body { overflow-y: auto; padding: 0 0 6px; }
-.sf-step { border-top: 1px solid var(--border); }
-.sf-step-head { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 14px; border: 0; background: none; font: inherit; font-size: 13px; color: var(--text-muted); cursor: pointer; text-align: left; }
-.sf-step.on .sf-step-head { color: var(--ink); font-weight: 600; }
-.sf-step-head em { margin-left: auto; font-style: normal; font-size: 12px; font-weight: 400; color: var(--faint); max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sf-step-head em.bad { color: var(--red, #d6455d); }
-.sf-mark { display: inline-grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid var(--border-strong); font-size: 12px; font-weight: 600; color: var(--text-muted); }
-.sf-mark.now { border-color: var(--violet); color: var(--violet); }
-.sf-mark.ok { background: var(--green, #2fb574); border-color: var(--green, #2fb574); color: #fff; }
-.sf-step-body { padding: 2px 14px 12px 44px; display: flex; flex-direction: column; gap: 10px; }
-.sf-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .commit-err { margin: 3px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sf-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.sf-checks li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; font-size: 13px; }
-.sf-checks li label { display: inline-flex; align-items: center; gap: 8px; }
-.sf-checks li.pass .sf-result { color: var(--green, #2fb574); }
-.sf-checks li.fail .sf-result { color: var(--red, #d6455d); }
-.sf-checks li .cmd-out { flex-basis: 100%; max-height: 180px; border: 1px solid var(--border); border-radius: var(--r-sm); }
-.sf-result { display: inline-flex; align-items: center; gap: 8px; }
-.sf-warn { display: flex; align-items: flex-start; gap: 6px; margin: 0; padding: 8px 10px; border-radius: var(--r-md); background: color-mix(in srgb, var(--amber, #c98a14) 14%, transparent); font-size: 13px; }
-.sf-done { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
-.sf-done p { margin: 0; }
 
 
 /* The Mac app loads this page from the web, so what lines its cards up has to ship with the page, not wait for a new app build. */
@@ -6598,7 +6567,7 @@ body:has(> .overlay, [data-slot="dialog-overlay"], [data-slot="sheet-overlay"]) 
 .bench-body[data-size="md"] .tree-split.open > .tree-scroll { flex-basis: 190px; }
 .bench-body[data-size="sm"] .tree-split.open > .tree-scroll { flex-basis: 150px; }
 .bench-body[data-size="xs"] .tree-split { flex-direction: column; }
-.bench-body[data-size="xs"] .tree-split.open > .tree-scroll { flex: 0 0 150px; border-right: 0; border-bottom: 1px solid var(--border); }
+.bench-body[data-size="xs"] .tree-split.open > .tree-scroll { flex: 0 0 150px; border-left: 0; border-top: 1px solid var(--border); }
 .tree-edit-bar { flex-wrap: wrap; row-gap: 6px; }
 .bench-body[data-size="xs"] .tree-edit-bar > .muted { flex-basis: 100%; }
 
@@ -6645,16 +6614,14 @@ body:has(> .overlay, [data-slot="dialog-overlay"], [data-slot="sheet-overlay"]) 
    or at the end of a long file the colours would sit a few pixels off the text. */
 .code-paint { scrollbar-width: none; padding-bottom: 20px; padding-right: 22px; }
 .code-paint::-webkit-scrollbar { display: none; }
-/* The numbers stop above the bar, so the whole bar is there to grab. */
-.code-gutter-clip { bottom: 10px; }
-/* Reading: the numbers and the code are one thing that scrolls, with the numbers staying put as the code goes sideways. */
+/* Reading: the numbers and the code are one thing that scrolls; long lines wrap, so it scrolls only down. */
 .code-read { overflow: auto; align-items: flex-start; scrollbar-width: auto; scrollbar-color: auto; }
 .code-read::-webkit-scrollbar { width: 10px; height: 10px; }
 .code-read::-webkit-scrollbar-track { background: color-mix(in srgb, var(--ink) 4%, transparent); }
 .code-read::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--ink) 24%, transparent); border: 2px solid transparent; background-clip: padding-box; border-radius: 99px; }
 .code-read::-webkit-scrollbar-corner { background: transparent; }
-.code-read .code-gutter { position: sticky; left: 0; z-index: 1; min-height: 100%; background: var(--code-bg); border-right: 1px solid var(--border); }
 .code-read .code-layer { overflow: visible; width: auto; min-width: 0; height: auto; flex: 1 0 auto; }
+.code-read .code-wrapped { flex: 1 1 0; width: 100%; padding: 10px 12px 10px 0; white-space: pre-wrap; }
 
 /* A long file name gives way to its own ellipsis before the +/− counts are pushed off the panel. */
 .bench-body .rsp-diff-head { min-width: 0; }
@@ -6677,21 +6644,6 @@ body:has(> .overlay, [data-slot="dialog-overlay"], [data-slot="sheet-overlay"]) 
 .pb-row:has(.pb-row-name.two) { align-items: center; }
 
 /* The commit bar, as the first thing in the Diff panel and something you would notice: a card with the call to action on it. */
-.ship-flow { flex: none; margin: 10px 12px 2px; border: 1px solid color-mix(in srgb, var(--green, #2fb574) 40%, var(--border-strong)); border-radius: 14px; background: color-mix(in srgb, var(--green, #2fb574) 7%, var(--panel)); max-height: none; overflow: hidden; box-shadow: 0 1px 2px rgb(0 0 0 / .06); }
-.ship-flow.done { border-color: var(--border-strong); background: var(--panel); }
-.ship-flow .sf-bar { gap: 12px; padding: 11px 12px; }
-.ship-flow .sf-bar:hover { background: color-mix(in srgb, var(--green, #2fb574) 5%, transparent); }
-.sf-lead { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; background: var(--green, #2fb574); color: #fff; }
-.ship-flow.done .sf-lead { background: var(--hover); color: var(--ink-2); }
-.sf-bar-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.sf-bar-main { font-size: 14px; font-weight: 600; color: var(--ink); }
-.sf-bar-sub { font-size: 12px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sf-bar-sub .diff-add, .sf-bar-sub .diff-del { font-size: 12px; }
-.sf-bar-go { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 30px; padding: 0 12px; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-size: 13px; font-weight: 600; }
-.ship-flow.done .sf-bar-go { background: transparent; color: var(--ink-2); border: 1px solid var(--border-strong); }
-.ship-flow .sf-body { max-height: 60vh; border-top: 1px solid var(--border); background: var(--panel); }
-.bench-body[data-size="xs"] .sf-bar-sub .sf-bar-dot, .bench-body[data-size="xs"] .sf-bar-sub:not(:has(.diff-add)) { display: none; }
-.bench-body[data-size="xs"] .sf-bar-go { padding: 0 10px; }
 
 /* A diff asked for by name lights up for a moment so the eye finds it. */
 .rsp-diff-flash { animation: rsp-diff-flash 2s ease-out; }
@@ -6956,7 +6908,10 @@ html.desktop:not(.desktop-mac) .home-tools { top: 5px; right: calc(var(--band-ri
 .mb-inline .mb-tools { gap: 0; border: 1px solid var(--border); border-radius: 12px; background: color-mix(in srgb, var(--panel) 88%, transparent); overflow: hidden; }
 .mb-inline .mb-tool { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px 10px; padding: 8px 8px 8px 10px; border: 0; border-radius: 0; background: none; }
 .mb-inline .mb-tool + .mb-tool, .mb-inline .mb-more { border-top: 1px solid var(--border); }
-.mb-inline .mb-tool.out { box-shadow: inset 2px 0 0 var(--amber); }
+/* A tool that needs signing in says so where its state is read, a small amber dot before the words, not a bar down its side
+   (Arun, 2026-11-02: "better design than those yellow side bars"). */
+.mb-inline .mb-tool.out .mb-tool-state { display: inline-flex; align-items: center; gap: 6px; color: var(--st-queued); }
+.mb-inline .mb-tool.out .mb-tool-state::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .mb-inline .mb-tool > * { grid-column: 1 / -1; }
 .mb-inline .mb-tool > .mb-tool-line { grid-column: 1; grid-row: 1; }
 .mb-inline .mb-tool > .mb-tool-go, .mb-inline .mb-tool > .mb-tool-more, .mb-inline .mb-tool > .acct > .acct-sum { grid-column: 2; grid-row: 1; }
@@ -6990,7 +6945,7 @@ html.desktop:not(.desktop-mac) .home-tools { top: 5px; right: calc(var(--band-ri
 }
 
 /* In a session, a card's actions sit at its right edge, the white one last: the thing to do is where the eye ends. */
-.review-actions, .apv-actions, .plan-approval-actions, .sf-actions { justify-content: flex-end; margin-left: auto; }
+.review-actions, .apv-actions, .plan-approval-actions { justify-content: flex-end; margin-left: auto; }
 
 /* In the desktop app the page runs to the window's right and bottom edges, square on its right: no strip of frame left showing past it. */
 html.desktop .shell .main { margin-right: 0; margin-bottom: 0; border-right: 0; border-bottom: 0; border-radius: var(--r-shell) 0 0 var(--r-shell); }
@@ -7907,6 +7862,7 @@ button.ao-row { gap: 12px; }
 .live-btn:hover { background: var(--hover); color: var(--ink); }
 .live-btn.on { background: var(--hover-strong); color: var(--ink); }
 .live-stage { position: relative; transition: height 240ms cubic-bezier(0.23, 1, 0.32, 1); }
+.live-slot { display: contents; }
 .live-frame { display: block; width: 100%; height: 100%; border: 0; background: transparent; opacity: 0; transition: opacity 200ms cubic-bezier(0.23, 1, 0.32, 1); }
 .live-stage.ready .live-frame { opacity: 1; }
 .live-loading { position: absolute; inset: 12px; border-radius: var(--r-md); background: linear-gradient(90deg, var(--hover) 0%, var(--hover-strong) 50%, var(--hover) 100%); background-size: 200% 100%; animation: live-shimmer 1.4s ease-in-out infinite; }
@@ -7918,7 +7874,12 @@ button.ao-row { gap: 12px; }
 .live-stage > .live-wait { position: absolute; inset: 0; justify-content: center; padding: 0; }
 .live-overlay { z-index: 120; }
 /* Opened large it takes most of the window, on a big screen too: capped at 1200 it sat small in the middle of a 1920 one. */
-.live-block.big { display: flex; flex-direction: column; width: min(1680px, 94vw); height: min(1120px, 92vh); margin: 0; }
+/* Large, it fills the app's window inside a small margin, never the screen (LiveBlock.tsx), and starts under the window's own
+   buttons in the desktop app: the Mac's traffic lights, and on Windows and Linux the 40px band its minimise and close are in. */
+.live-overlay { display: flex; align-items: stretch; padding: 12px; }
+html.desktop-mac .live-overlay { padding-top: 40px; }
+html.desktop:not(.desktop-mac) .live-overlay { padding-top: 48px; }
+.live-block.big { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; max-width: none; margin: 0; }
 .live-block.big .live-stage { flex: 1; min-height: 0; }
 .live-img { display: block; max-width: 100%; height: auto; margin: 8px 0; border: 1px solid var(--border); border-radius: var(--r-md); cursor: zoom-in; }
 .live-img-big { max-width: 94vw; max-height: 90vh; border-radius: var(--r-md); box-shadow: 0 20px 60px rgb(0 0 0 / .5); cursor: zoom-out; }
@@ -9678,6 +9639,7 @@ html .shell .sb-panel .sb-panel-inner.dass-panel.dass-panel.dass-panel { padding
   box-shadow: var(--shadow-pop);
   animation: dass-pop var(--dass-med, 200ms) var(--dass-ease, ease) both;
 }
+.amp.models-only { grid-template-columns: minmax(0, 1fr); }
 .amp-col-label { padding: 10px 10px 6px; font-size: 12px; font-weight: 500; color: var(--text-muted); }
 .amp-tools { display: flex; flex-direction: column; gap: 1px; min-height: 0; overflow-y: auto; padding: 4px 6px 8px; border-right: 1px solid var(--border); background: color-mix(in srgb, var(--ink) 2.5%, transparent); }
 .amp-tool { display: flex; align-items: center; gap: 9px; width: 100%; padding: 6px 8px; border: 0; border-radius: var(--r-md); background: transparent; color: var(--ink-2); text-align: left; cursor: pointer; transition: background-color var(--dass-fast, 120ms) ease; }
@@ -9879,7 +9841,6 @@ html.desktop .home { padding-top: calc(max(7.5vh, 48px) + 40px); }
 .hub-btn-n.busy { background: var(--dass-live); color: #fff; }
 
 /* A visual in full screen: the whole screen, edge to edge. */
-.live-block.big:fullscreen { width: 100vw; height: 100vh; max-width: none; border-radius: 0; border: 0; }
 
 /* Team tasks and the to-dos never float over anything (Arun, 2026-10-20: it sat over the chat whenever a side panel or a split
    made the chat narrow). Folded, a chip at the end of the row above the input, beside who it goes to; open, a row of its own
@@ -10409,6 +10370,26 @@ html:not(.desktop) .shell:not(.with-panel) #main { padding-left: 44px; }
 .acct-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .acct-pick .acct-more { width: auto; align-self: flex-start; }
 .acct-foot { margin: 0; font-size: 12px; color: var(--faint); }
+/* The redesigned list (Accounts.tsx, 2026-11-02 "design the multiple account support better"): usage at a glance, which one
+   new sessions use, a menu per account, and the line that Friday never switches by itself. */
+.acct-row { align-items: start; padding: 8px 6px 8px 7px; }
+.acct-row .acct-mark { margin-top: 1px; }
+.acct-row.pick .acct-mark { box-shadow: 0 0 0 2px color-mix(in srgb, var(--ink) 18%, transparent); }
+.acct-default { flex: none; padding: 1px 7px; border-radius: var(--r-pill, 999px); background: color-mix(in srgb, var(--ink) 8%, transparent); color: var(--ink-2); font-size: 11.5px; font-weight: 500; line-height: 16px; }
+.acct-rename { min-width: 0; width: 160px; height: 22px; padding: 0 6px; border: 1px solid var(--ink); border-radius: 6px; background: var(--bg); color: var(--ink); font: 500 13px var(--font); outline: none; }
+.acct-usage { display: flex; flex-direction: column; gap: 3px; max-width: 380px; margin-top: 6px; }
+.acct-bar { display: grid; grid-template-columns: 78px minmax(40px, 1fr) 34px; align-items: center; gap: 8px; font-size: 11.5px; white-space: nowrap; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.acct-bar-track { position: relative; height: 4px; overflow: hidden; border-radius: 2px; background: color-mix(in srgb, var(--ink) 9%, transparent); }
+.acct-bar-track > span { position: absolute; inset: 0 auto 0 0; border-radius: 2px; background: var(--ink-2); transition: width var(--t-hover, .15s) var(--ease-out, ease); }
+.acct-bar.warm .acct-bar-track > span { background: var(--amber); }
+.acct-bar.hot .acct-bar-track > span { background: var(--red); }
+.acct-bar.hot .acct-bar-pct { color: var(--red); }
+.acct-bar-pct { text-align: right; }
+.acct-menu { width: 24px; height: 24px; color: var(--faint); }
+.acct-menu:hover, .acct-menu.on { color: var(--ink); background: var(--hover); }
+li.acct-foot { padding: 6px 8px 2px; line-height: 1.45; }
+.account-pill.out { color: var(--st-queued); }
+@media (prefers-reduced-motion: reduce) { .acct-bar-track > span { transition: none; } }
 @media (prefers-reduced-motion: reduce) { .acct-more, .acct-chip, .acct-combo, .acct-x { transition: none; } }
 /* A one-colour mark (Codex's, Cursor's, Copilot's) in full ink on its agent's card, not its grey tint: Codex read dim beside
    Claude Code's orange (Arun, 2026-10-24: "make the codex icon more visible too it is kinda dim"). Coloured marks keep their own. */
@@ -10696,22 +10677,29 @@ html:not(.dark) .route-pill.on .route-pill-state { color: color-mix(in srgb, var
 /* A session's row (Sidebar.tsx ChatRow): its mark spanning both lines (the coding tool at work, with the presence ring), the
    name at 13/500 and the live line at 12 in --ink-2 under it, the time at the right (2026-10-29 direction §9.2). */
 /* 44px with its live line, 32px without, as a teammate's or a room's row is (teammates.css .tm-row; final pass, 2026-10-29). */
-.sb-row { display: grid !important; grid-template-columns: 24px minmax(0, 1fr); column-gap: 10px; row-gap: 2px; align-items: center; min-height: 32px; padding: 4px 8px 4px 6px !important; }
+.sb-row { display: grid !important; grid-template-columns: minmax(0, 1fr); row-gap: 2px; align-items: center; min-height: 32px; padding: 4px 8px 4px 10px !important; }
 .sb-row:has(> .dass-row-sub:not(:empty)) { min-height: 44px; }
 .sb-row > .flex { line-height: 18px; }
 .sb-row > .dass-row-sub { line-height: 16px; }
-.sb-row > .sb-row-mark { grid-column: 1; grid-row: 1 / span 2; display: grid; place-items: center; width: 24px; height: 24px; }
-.sb-row > .flex { grid-column: 2; grid-row: 1; }
-.sb-row > .dass-row-sub { grid-column: 2; grid-row: 2; padding-left: 0 !important; }
+.sb-row > .flex { grid-column: 1; grid-row: 1; }
+.sb-row > .dass-row-sub { grid-column: 1; grid-row: 2; padding-left: 0 !important; }
+/* No mark before the name (Arun, 2026-11-03): the name takes only its own width, its state's ring just after it, and the rest of
+   the line is room before the time. */
+.sb-row .dass-row-title { flex: 0 1 auto; }
+.sb-row-gap { flex: 1 1 0; min-width: 0; margin-left: -8px; }
+.state-ring { display: inline-grid; place-items: center; flex: none; width: 14px; height: 14px; }
+.sb-row .state-ring { margin-left: -2px; }
+.state-ring .pr-badge { display: none; } /* too small for its "?": the amber ring and the line under the name say it */
 .sb-row .dass-row-title { color: var(--ink); font-weight: 500; }
 .sb-row .dass-row-time { color: var(--text-muted); font-size: 12px; }
 .sb-mark-disc { display: grid; place-items: center; width: 100%; height: 100%; border-radius: 50%; background: var(--hover-strong); color: var(--ink-2); }
 .dass-row[data-active="true"] .sb-mark-disc { background: var(--card-2); }
 /* The session's other agents, small, each with its ring, then the one that matters most in words. */
 .sb-crew { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.sb-crew-marks { display: flex; align-items: center; gap: 7px; flex: none; padding: 0 2px; }
-.sb-crew-disc { display: grid; place-items: center; width: 100%; height: 100%; border-radius: 50%; background: var(--hover-strong); color: var(--ink-2); }
 .sb-crew-words { color: var(--text-muted); }
+.sb-crew-tools { display: inline-flex; align-items: center; gap: 4px; flex: none; color: var(--ink-2); }
+.sb-crew-tools > span { display: grid; place-items: center; width: 14px; height: 14px; }
+.sb-crew-more { width: auto !important; font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .sb-crew-words.working { color: var(--ink-2); }
 .sb-crew-words.failed { color: var(--ink-2); }
 .sb-crew-words.needs { color: var(--ink); } /* stopped short of its plan: needs you, its line in ink as every waiting row's */
@@ -10770,7 +10758,7 @@ html .shell.with-panel .main { border-top-left-radius: 0 !important; }
 
 /* The sidebar's rows (Arun, 2026-10-25, after the other tools' rows): the branch the session's agents are on, small and in
    mono, at the sub line's end; sessions put to bed in quieter rows. */
-.dass-row-branch { display: inline-flex; align-items: center; gap: 3px; flex: 0 1 auto; min-width: 3.5em; max-width: 34%; margin-left: auto; padding: 0 5px; border-radius: 5px; background: color-mix(in srgb, var(--ink) 6%, transparent); color: var(--text-muted); font: 12px/16px var(--mono); white-space: nowrap; }
+.dass-row-branch { display: inline-flex; align-items: center; gap: 3px; flex: 0 1 auto; min-width: 3.5em; max-width: 55%; margin-left: auto; padding: 0 5px; border-radius: 5px; background: color-mix(in srgb, var(--ink) 6%, transparent); color: var(--text-muted); font: 12px/16px var(--mono); white-space: nowrap; }
 .dass-row-branch svg { flex: none; }
 /* The branch gives way before the row's state does: "3 agents · d…" beside a whole "checko…" read worse than the state in
    full and the branch cut short (Arun, 2026-10-28: "a look for like the little details and designs… for the whole app too"). */
@@ -10967,6 +10955,10 @@ html .shell.with-panel .main { border-top-left-radius: 0 !important; }
 .diff-repo + .diff-repo { margin-top: 10px; }
 .diff-repo-head { margin: 0 0 4px; display: flex; align-items: center; gap: 6px; font: 600 12px var(--font); letter-spacing: 0.04em; text-transform: none; color: var(--ink-2); padding: 0 2px; }
 .diff-repo-head .muted { font-weight: 500; letter-spacing: 0; }
+/* Whose changes are in the folder, on Everyone: each name opens that agent's own. */
+.ch-who { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: auto; letter-spacing: 0; }
+.ch-who-name { height: 20px; padding: 0 7px; border: 0; border-radius: 6px; background: color-mix(in srgb, var(--ink) 6%, transparent); color: var(--ink-2); font: 500 11.5px var(--font); cursor: pointer; }
+.ch-who-name:hover { background: var(--hover-strong); color: var(--ink); }
 .gitp-dir { max-width: 40%; }
 .gitp-dir select { height: 26px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); color: var(--ink); font: 12px var(--font); padding: 0 6px; max-width: 100%; }
 
@@ -11902,14 +11894,12 @@ html.reduce-motion .shine { color: var(--shine-ink, var(--ink-2)); }
 .task.go .task-mark { color: var(--live); }
 .task.ok .task-mark { color: var(--ready); }
 /* Ready to commit: a card like any work product (hairline, --surface), the green kept for its mark. */
-.ship-flow { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); }
-.ship-flow .sf-bar:hover { background: var(--surface-hover); }
-.sf-lead { width: 28px; height: 28px; border-radius: var(--r-md); background: transparent; color: var(--ready); box-shadow: inset 0 0 0 1px var(--line-strong); }
-.ship-flow .sf-body { background: var(--surface); }
 /* The Agents panel's cards: a hairline card, no lift. */
 .bench-body .agent-card { box-shadow: none !important; border: 1px solid var(--line); background: var(--surface); border-radius: var(--r-lg); }
 /* Controls along a panel's top (filters, the branch, the address bar): quiet, on the panel's ground. */
-.bench-body :is(.dp-tools, .dp-filter) { background: transparent; }
+/* On the panel's own ground, never see-through: the filter bar stays put as the files scroll, and they went under it and showed
+   through (Arun, 2026-11-03: "fix the scroll header thing"). */
+.bench-body :is(.dp-tools, .dp-filter) { background: var(--bg); }
 .bench-body .branch-pill { border-color: transparent; background: transparent; color: var(--ink-3); font-size: 12px; }
 .bench-body .branch-pill:hover { background: var(--surface-hover); color: var(--ink); }
 .bench-body .rules-empty-mark { background: var(--surface-hover); color: var(--ink-3); }
@@ -12170,6 +12160,8 @@ body.resizing-panel { cursor: col-resize; user-select: none; }
 .tui-grid > .lane-tui, .tui-grid > .ftui { min-width: 0; min-height: 0; border-top: 0; }
 .tui-grid > .lane-tui-wait { background: var(--card); }
 .tui-grid .ftui-banner { display: none; }
+/* Its head says who and where: the same again as the screen's first line was twice over in a grid. */
+.tui-grid .ftui-hello { display: none; }
 .tui-grid .lane-tui-note { display: none; }
 /* The foot row as one even row: you, the places, the theme and settings, each button the same size and the same distance apart,
    however many places a plan has (a team's nine squeezed into a row of seven's, the avatar set off and the places crammed; Arun,
@@ -12305,3 +12297,209 @@ body.resizing-panel { cursor: col-resize; user-select: none; }
 }
 .menu-agent-mark[data-state="working"]::before { display: none; }
 @media (prefers-reduced-motion: reduce) { .feed-toolbar .lane-tab[data-state="working"] .lane-tab-mark::after, .menu-agent-mark[data-state="working"]::after, .pr[data-pr="working"] > .pr-ring { animation: none !important; } }
+
+/* Files dragged over the window (Attach.tsx DropOverlay): the whole window says what a drop does, and takes it. */
+html.desktop:not(.desktop-mac) .drop-overlay { top: 48px; }
+.drop-overlay { position: fixed; inset: 8px; z-index: 130; display: grid; place-items: center; border: 2px dashed color-mix(in srgb, var(--ink) 30%, transparent); border-radius: 16px; background: color-mix(in srgb, var(--bg) 72%, transparent); backdrop-filter: blur(2px); pointer-events: none; animation: r5-fade var(--t-open) var(--ease-out); }
+.drop-overlay-card { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 22px 28px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--panel); box-shadow: var(--shadow-pop); text-align: center; }
+.drop-overlay-icon { display: grid; place-items: center; width: 40px; height: 40px; margin-bottom: 4px; border-radius: 12px; background: color-mix(in srgb, var(--ink) 7%, transparent); color: var(--ink); }
+.drop-overlay-title { color: var(--ink); font-size: 15px; font-weight: 600; }
+.drop-overlay-sub { color: var(--text-muted); font-size: 13px; }
+@media (prefers-reduced-motion: reduce) { .drop-overlay { animation: none; } }
+
+/* A session's pull requests, on its row in the sidebar (SessionPrs.tsx): GitHub's own colours for where each stands. */
+:root { --pr-ready: #3fb950; --pr-merged: #a371f7; --pr-closed: #f85149; }
+:root:not(.dark) { --pr-ready: #1a7f37; --pr-merged: #8250df; --pr-closed: #cf222e; }
+.sb-pr { display: inline-flex; flex: none; align-items: center; gap: 4px; height: 22px; margin-left: auto; padding: 0 6px; border: 0; border-radius: 7px; background: none; color: var(--text-muted); font: 500 13px/1 var(--font); font-variant-numeric: tabular-nums; cursor: pointer; }
+.sb-pr:hover, .sb-pr[data-state="open"] { background: var(--hover-strong, var(--hover)); }
+/* Close up against the pin and ⋯ when they show in place of the time: the pin's own padding read as a wide gap. */
+:is(.sb-row:hover, .sb-row:focus-visible, .sb-row:has(:focus-visible), .sb-row[data-menu="true"]) .sb-pr { margin-right: -6px; }
+.sb-pr:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
+.sb-pr.t-ready { color: var(--pr-ready); }
+.sb-pr.t-merged { color: var(--pr-merged); }
+.sb-pr-card { width: 360px; max-height: min(420px, 70vh); padding: 4px; overflow-y: auto; }
+.sb-pr-list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.sb-pr-item { display: flex; flex-direction: column; gap: 3px; width: 100%; padding: 7px 9px; border: 0; border-radius: 8px; background: none; color: inherit; text-align: left; cursor: pointer; }
+.sb-pr-item:hover, .sb-pr-item:focus-visible { background: var(--hover); outline: none; }
+.sb-pr-title { overflow: hidden; color: var(--ink); font-size: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.sb-pr-meta { display: flex; align-items: center; gap: 5px; min-width: 0; color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+.sb-pr-stand { display: inline-flex; flex: none; align-items: center; gap: 4px; font-weight: 500; }
+.sb-pr-stand.s-ready, .sb-pr-stand.s-open { color: var(--pr-ready); }
+.sb-pr-stand.s-merged { color: var(--pr-merged); }
+.sb-pr-stand.s-closed { color: var(--pr-closed); }
+.sb-pr-where { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sb-pr-lines { flex: none; margin-left: auto; font-variant-numeric: tabular-nums; }
+.sb-pr-lines .add { color: var(--pr-ready); }
+.sb-pr-lines .del { color: var(--pr-closed); }
+
+/* The terminal view, designed again (Arun, 2026-11-02: "design this better for terminal view"): every pane's head the same
+   height and shape, its tool's own screen or Friday's, the name in the ink and where it is quiet beside it; the way across a
+   button that says so; the pane you're typing in lit along its top, the rest a step quieter; and the last pane taking what its
+   row leaves, so three agents never leave an empty quarter. */
+.tui-grid > :last-child { grid-column: span var(--tui-last, 1); }
+.lane-tui-head, .ftui-bar { min-height: 34px; padding: 0 8px 0 12px; gap: 8px; border-bottom: 1px solid var(--border); background: var(--card); font: 12.5px/1 var(--font); white-space: nowrap; }
+.lane-tui-name, .ftui-chip { flex: none; padding: 0; border-radius: 0; background: none; color: var(--ink); font-weight: 600; }
+.ftui-chip { color: var(--ink); }
+.ftui-bar .ftui-chip::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 7px; border-radius: 50%; background: var(--ftui-tint, var(--ink-2)); vertical-align: 0; }
+.lane-tui-where, .ftui-where { color: var(--text-muted); font: 12px/1 var(--mono); }
+.ftui-link { flex: none; height: 24px; margin-left: auto; padding: 0 9px; border: 1px solid var(--border); border-radius: 7px; background: none; color: var(--ink-2); font: 500 12px/1 var(--font); cursor: pointer; }
+.ftui-bar .ftui-grow + .ftui-link { margin-left: 0; }
+.ftui-link:hover { border-color: color-mix(in srgb, var(--ink) 25%, var(--border)); background: var(--hover); color: var(--ink); }
+.tui-grid > .lane-tui, .tui-grid > .ftui { position: relative; }
+.tui-grid > :is(.lane-tui, .ftui) > :is(.lane-tui-head, .ftui-bar) { opacity: .72; transition: opacity var(--t-hover, .15s) var(--ease-out, ease); }
+.tui-grid > :is(.lane-tui, .ftui):focus-within > :is(.lane-tui-head, .ftui-bar), .tui-grid > :is(.lane-tui, .ftui):hover > :is(.lane-tui-head, .ftui-bar) { opacity: 1; }
+.tui-grid > :is(.lane-tui, .ftui):focus-within::before { content: ""; position: absolute; inset: 0 0 auto; z-index: 2; height: 2px; background: var(--ftui-tint, color-mix(in srgb, var(--ink) 60%, transparent)); pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { .tui-grid > :is(.lane-tui, .ftui) > :is(.lane-tui-head, .ftui-bar) { transition: none; } }
+.lane-tui-note + .ftui-link { margin-left: 4px; }
+
+/* The agents' tabs: their state as the small ring just after the name, as the sidebar's rows have it, and the mark plain (Arun,
+   2026-11-03: "use the small ring instead of this big ring around the icon and show me a proper placement"). */
+.feed-toolbar .lane-tab .lane-tab-mark::after { display: none !important; }
+.feed-toolbar .lane-tab .state-ring { margin-left: -2px; }
+.pr[data-pr="limited"] > .pr-ring { background: conic-gradient(var(--st-limited, #fb923c) 0 13%, color-mix(in srgb, var(--st-limited, #fb923c) 26%, transparent) 13% 100%); -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - var(--pr-w)), #000 calc(100% - var(--pr-w))); mask: radial-gradient(farthest-side, transparent calc(100% - var(--pr-w)), #000 calc(100% - var(--pr-w))); }
+/* The name close to its mark (Arun, 2026-11-03: "make the text be closer to the icon"). */
+.feed-toolbar .lane-tab .lane-tab-mark { margin-right: -8px !important; }
+.feed-toolbar.in-head .lane-tab .lane-tab-mark { margin-right: -5px !important; }
+
+/* ── The Changes panel (Arun, 2026-11-03: "Build the Changes panel like this", after the mockup) ───────────────────────────────
+   Whose changes as chips, each with its state's small ring and how many files; the files; and docked at the foot, the checks as
+   one card and the commit, the message whole and one button. */
+.ch-agents { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 12px 2px; }
+.ch-agent { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: none; color: var(--ink-2); font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.ch-agent:hover { background: var(--hover); color: var(--ink); }
+.ch-agent.on { border-color: color-mix(in srgb, var(--ink) 22%, transparent); background: var(--hover); color: var(--ink); font-weight: 500; }
+.ch-agent .state-ring { margin: 0 -2px; }
+.ch-agent-n { color: var(--text-muted); font-variant-numeric: tabular-nums; font-weight: 400; }
+/* Whose: a teammate's face in a crew, the tool's mark otherwise. */
+.ch-agent-mark { display: inline-grid; place-items: center; width: 18px; height: 18px; margin-left: -3px; flex: none; }
+.ch-agent-mark > * { max-width: 18px; max-height: 18px; }
+.ch-who-name { display: inline-flex; align-items: center; gap: 5px; }
+.ch-who-name .ch-agent-mark { width: 14px; height: 14px; margin-left: -3px; }
+.ch-who-name .ch-agent-mark > * { max-width: 14px; max-height: 14px; }
+.ship-dock { flex: none; display: flex; flex-direction: column; gap: 12px; max-height: 70%; overflow-y: auto; padding: 12px; border-top: 1px solid var(--border); background: var(--panel, var(--card)); }
+.sd-checks { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.sd-checks-head { display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-muted); }
+.sd-checks-head b { color: var(--ink); font-weight: 600; }
+.sd-checks-head .bad { color: var(--ink); }
+.sd-checks-head .sd-act { margin-left: auto; }
+.sd-chk { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; column-gap: 10px; min-height: 40px; padding: 0 8px 0 12px; }
+.sd-chk + .sd-chk { border-top: 1px solid var(--border); }
+.sd-chk.off .sd-chk-t { opacity: .5; }
+.sd-chk-t { min-width: 0; overflow: hidden; padding: 0; border: 0; background: none; color: var(--ink); font: inherit; font-size: 13px; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.sd-chk-t:disabled { cursor: default; }
+.sd-chk-t em { font-style: normal; color: var(--text-muted); }
+.sd-out { grid-column: 1 / -1; margin: 0 0 10px; max-height: 220px; overflow: auto; }
+/* A check's state: an empty circle not run yet (pressed, it is left out), turning while it runs, green passed, red failed. */
+.sd-mk { position: relative; display: grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 1.5px solid color-mix(in srgb, var(--ink) 28%, transparent); border-radius: 50%; background: none; color: var(--panel, var(--card)); cursor: pointer; }
+.sd-chk.off .sd-mk { border-style: dashed; }
+.sd-mk.ok { border-color: var(--green); background: var(--green); }
+.sd-mk.bad { border-color: var(--red); background: var(--red); }
+.sd-mk.run { border-color: color-mix(in srgb, var(--live) 22%, transparent); border-top-color: var(--live); animation: pr-turn 1s linear infinite; }
+.sd-mk svg { stroke-width: 3; }
+.sd-act { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border: 0; border-radius: 7px; background: var(--hover-strong); color: var(--ink); font: inherit; font-size: 12px; font-weight: 500; white-space: nowrap; cursor: pointer; }
+.sd-act:hover:not(:disabled) { background: color-mix(in srgb, var(--ink) 14%, transparent); }
+.sd-act:disabled { opacity: .5; cursor: default; }
+.sd-commit { display: flex; flex-direction: column; gap: 8px; }
+.sd-msg { width: 100%; min-height: 56px; resize: vertical; padding: 9px 11px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg); color: var(--ink); font: inherit; font-size: 13px; line-height: 1.45; }
+.sd-msg:focus { outline: none; border-color: color-mix(in srgb, var(--ink) 30%, transparent); }
+.sd-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.sd-where { display: inline-flex; align-items: center; gap: 4px; min-width: 0; padding: 0; border: 0; background: none; color: var(--text-muted); font: inherit; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.sd-where:hover { color: var(--ink); }
+.sd-go { display: inline-flex; align-items: center; gap: 10px; height: 32px; margin-left: auto; padding: 0 10px 0 14px; border: 0; border-radius: 8px; background: var(--ink); color: var(--bg); font: inherit; font-size: 13px; font-weight: 600; white-space: nowrap; text-decoration: none; cursor: pointer; }
+.sd-go:disabled { opacity: .45; cursor: default; }
+.sd-go kbd { padding: 1px 5px; border-radius: 4px; background: color-mix(in srgb, var(--bg) 18%, transparent); color: inherit; font: 500 11px var(--mono); opacity: .75; }
+a.sd-go { padding-right: 14px; }
+.sd-details { display: flex; flex-direction: column; gap: 10px; padding: 10px 0 2px; }
+.sd-note { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.45; }
+.sd-done { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: start; gap: 10px; }
+.sd-done .sd-mk { margin-top: 2px; cursor: default; }
+.sd-done-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sd-done-text b { overflow: hidden; color: var(--ink); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.sd-done-text em { color: var(--text-muted); font-size: 12px; font-style: normal; }
+@media (prefers-reduced-motion: reduce) { .sd-mk.run { animation: none; } }
+
+/* ── What a reply changed, under it (RunReview.tsx ReviewCard; Arun, 2026-11-03, after the mockup): its head with Undo and Review,
+   a row per file, a few changed lines opened in place. */
+.change-card { margin-top: 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); overflow: hidden; }
+.change-card.settled { background: transparent; }
+.cc-head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; min-height: 44px; padding: 7px 8px 7px 12px; font-size: 13px; }
+.cc-head > b { color: var(--ink); font-weight: 600; }
+.cc-head .diff-add, .cc-head .diff-del { font-size: 13px; }
+.cc-tests { padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--green) 12%, transparent); color: var(--green); font-size: 12px; }
+.cc-tests.fail { background: color-mix(in srgb, var(--red) 12%, transparent); color: var(--red); }
+.cc-sp { flex: 1 1 0; }
+.cc-outcome { display: inline-flex; align-items: center; gap: 5px; color: var(--text-muted); font-size: 12.5px; }
+.cc-btn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border: 0; border-radius: 7px; background: var(--hover-strong); color: var(--ink); font: inherit; font-size: 12.5px; font-weight: 500; white-space: nowrap; cursor: pointer; }
+.cc-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--ink) 14%, transparent); }
+.cc-btn.quiet { background: none; color: var(--ink-2); }
+.cc-btn.quiet:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
+.cc-btn:disabled { opacity: .5; cursor: default; }
+.cc-explain { margin: 0; padding: 0 14px 10px; color: var(--ink-2); font-size: 13px; line-height: 1.5; }
+.change-card > :is(.receipt, .sr-block) { margin: 0 10px 10px; }
+.cc-files { margin: 0; padding: 0; list-style: none; }
+.cc-files > li { border-top: 1px solid var(--border); }
+.cc-row { display: flex; align-items: center; gap: 10px; width: 100%; height: 36px; padding: 0 12px 0 14px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.cc-row:hover, li.open > .cc-row { background: color-mix(in srgb, var(--ink) 3%, transparent); }
+.cc-st { flex: none; width: 14px; font: 600 11px var(--mono); text-align: center; }
+.cc-st.M { color: var(--amber); } .cc-st.A { color: var(--green); } .cc-st.D { color: var(--red); } .cc-st.R { color: var(--live); }
+.cc-path { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--text-muted); font: 12.5px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.cc-path b { color: var(--ink); font-weight: 500; }
+.cc-also { flex: none; max-width: 40%; overflow: hidden; padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--amber) 12%, transparent); color: var(--amber); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.cc-n { flex: none; display: inline-flex; gap: 7px; font: 12px var(--mono); }
+.cc-n .diff-add, .cc-n .diff-del { font: 600 12px var(--mono); }
+.cc-car { flex: none; color: var(--text-muted); transition: transform var(--dass-fast, .15s); }
+li.open > .cc-row .cc-car { transform: rotate(90deg); }
+.cc-mini { border-top: 1px solid var(--border); background: color-mix(in srgb, var(--ink) 2%, transparent); font: 12px/20px var(--mono); }
+.cc-ln { display: grid; grid-template-columns: 44px minmax(0, 1fr); }
+.cc-ln > span:first-child { padding-right: 10px; color: var(--text-muted); opacity: .6; text-align: right; font-variant-numeric: tabular-nums; }
+.cc-ln > span:last-child { overflow: hidden; color: var(--ink-2); white-space: pre; text-overflow: ellipsis; }
+.cc-ln.add { background: color-mix(in srgb, var(--green) 11%, transparent); }
+.cc-ln.del { background: color-mix(in srgb, var(--red) 11%, transparent); }
+.cc-ln.add > span:last-child::before { content: "+ "; color: var(--green); }
+.cc-ln.del > span:last-child::before { content: "− "; color: var(--red); }
+.cc-ln.ctx > span:last-child::before { content: "  "; }
+.cc-ln.hunk > span:last-child { color: var(--text-muted); }
+.cc-mini-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 32px; padding: 0 14px 0 44px; border-top: 1px solid var(--border); color: var(--text-muted); font: 12px var(--font, inherit); }
+.cc-mini-foot .link-btn { display: inline-flex; align-items: center; gap: 4px; color: var(--ink); font-weight: 500; }
+.cc-more { width: 100%; height: 34px; padding: 0 14px 0 38px; border: 0; background: none; color: var(--text-muted); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.cc-more:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 3%, transparent); }
+.cc-err { margin: 0; padding: 8px 14px; }
+/* In the chat the tray round it is its frame (.change-set, as every tray is drawn), so the card draws none of its own. */
+.change-set > .change-card { margin: 0; border: 0; border-radius: 0; background: transparent; }
+/* Above the box: what waits to be reviewed, a tab on the box's top edge (Activity.tsx WaitingChanges). */
+.waiting-changes { display: flex; align-items: center; gap: 10px; min-height: 38px; margin: 0 14px; padding: 4px 6px 4px 12px; border: 1px solid var(--border); border-bottom: 0; border-radius: 12px 12px 0 0; background: var(--card); color: var(--ink-2); font-size: 12.5px; }
+.waiting-changes .wc-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.waiting-changes b { color: var(--ink); font-weight: 600; }
+.waiting-changes .wc-who { color: var(--text-muted); }
+.waiting-changes .state-ring { margin: 0 -2px 0 -3px; }
+/* The card folds to its head: the line of facts is its toggle, a caret before it. */
+.cc-toggle { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; min-width: 0; margin-left: -6px; padding: 4px 6px; border: 0; border-radius: 7px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.cc-toggle:hover { background: var(--hover); }
+.cc-toggle > b { color: var(--ink); font-weight: 600; }
+.cc-fold { flex: none; margin-right: -4px; color: var(--text-muted); transform: rotate(90deg); transition: transform var(--dass-fast, .15s); }
+.change-card.folded .cc-fold { transform: none; }
+.cc-warn { padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--amber) 12%, transparent); color: var(--amber); font-size: 12px; }
+/* One file, so no "reviewed" row: its box clear of the tools' line above it, not on it (Arun, 2026-11-03: "add some space from
+   the horizontal line please"). */
+.dp-tools + .rsp-diff { margin-top: 12px !important; }
+/* The sidebar's rows: the state's ring the size of the group's spinner beside it, 10px (Arun, 2026-11-03: "use that small ring
+   thing at the top for the ring size next to the tab session title"), and a finished session's check the same size. */
+.sb-row .state-ring { width: 12px; height: 12px; }
+.sb-row .state-ring .pr[data-pr] { --pr-size: 4px !important; }
+.sb-done { color: color-mix(in srgb, var(--green) 55%, var(--text-muted)); }
+.sb-done.new { color: var(--green); }
+
+/* The box's one control, "agent | model (reasoning)" (Arun, 2026-11-03): who it goes to, a rule, what it thinks with. */
+.send-pick { display: inline-flex; align-items: center; min-width: 0; height: 30px; border-radius: 9px; background: color-mix(in srgb, var(--ink) 5%, transparent); }
+.send-pick > .send-to, .send-pick > .menu-pill { display: inline-flex; align-items: center; gap: 7px; min-width: 0; height: 30px; padding: 0 9px; border: 0 !important; border-radius: 9px; background: none !important; box-shadow: none !important; color: var(--ink); font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer; }
+.send-pick > .send-to.still { cursor: default; }
+.send-pick > :is(.send-to, .menu-pill):hover:not(.still), .send-pick > :is(.send-to, .menu-pill).on, .send-pick > :is(.send-to, .menu-pill)[aria-expanded="true"] { background: var(--hover-strong) !important; }
+.send-pick > .menu-pill { color: var(--ink-2); }
+.send-to-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.send-to .state-ring { margin: 0 -3px 0 -2px; }
+.send-to-more { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: color-mix(in srgb, var(--ink) 9%, transparent); color: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.send-bar { flex: none; width: 1px; height: 14px; background: color-mix(in srgb, var(--ink) 16%, transparent); }
+.send-bar:last-child { display: none; }
+.amp-pill-level { color: var(--text-muted); }
+.menu-label-line { display: inline-flex; align-items: center; gap: 7px; }
+.menu-label-line .state-ring { width: 12px; height: 12px; }

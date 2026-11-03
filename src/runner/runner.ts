@@ -9,7 +9,7 @@ import { clock, closingSaid, keepAlive } from "../heartbeat.js";
 import { CLI_ID, ENGINE_NAMES, isEngineEffort, type Attachment, type EngineMode, type EngineTool, type ToolCommand, type DiffFile } from "../types.js";
 import { ADAPTERS, DECIDE_YOURSELF, PLAN_REFUSES, askedItem, childEnv, claudeMcpServers, claudePictures, imageType, codexExec, findBin, launcher, loginStatusCached, loginStatusQuick, tooLongForArgv, withDirs, type Adapter, type AdapterOut, type Launch, type TurnSpec } from "./adapters.js";
 import { folderVars } from "./environment.js";
-import { applyCopy, baseAfterCommit, checkpoint, diffSince, diffTrees, dropShadow, fetchBranch, repoInfo, sameTree, sessionBase, setSessionBase, shadowSnapshot, switchBranch, trackBranch, warmSnapshot, type RepoInfo, type Shadow } from "./git.js";
+import { applyCopy, baseAfterCommit, checkpoint, diffSince, diffTrees, dropShadow, reposInside, fetchBranch, repoInfo, sameTree, sessionBase, setSessionBase, shadowSnapshot, switchBranch, trackBranch, warmSnapshot, type RepoInfo, type Shadow } from "./git.js";
 import { hasCliTranscript, readCliTranscript } from "./imports.js";
 import { isTerminalTool, shellLine, terminalArgs } from "./terminal-line.js";
 import { dialOptions, getBytes } from "./dial.js";
@@ -1212,6 +1212,15 @@ export class Runner {
     this.log(`shared ${t.partial ? `the last ${t.turns.length}` : `${t.turns.length} of ${t.total}`} messages from “${t.title.slice(0, 60)}” with the session`);
   }
 
+  /**
+   * The folders beside its own it may work in from its next turn, changed while it runs (Arun, 2026-11-03: "be able to add
+   * folders, to the coding sessions while in the chat too"). Each turn's tool is started with them (spec), and a tool kept warm
+   * or started ahead with the old ones isn't used, since its arguments no longer match; the conversation carries on.
+   */
+  setDirs(dirs: string[]): void {
+    this.opts.dirs = dirs;
+  }
+
   stop(): void {
     this.stopped = true;
     this.friday?.close();
@@ -1739,7 +1748,9 @@ ${prompt}`;
         return this.turn(m, files);
       }
       error = tooLong ? `What ${this.label} was handed this turn is too long for this computer to start it with. Send a shorter instruction, or several.` : adapter.explain(raw);
-      if (other) error = `${error} Your ${other.label} account is signed in here too: switch this agent to it from its account menu to carry on.`;
+      // Named only in the open-source edition, on the person's own computer: where work is shared, another account is not the
+      // way on (adapters.ts limitWays), however many are signed in here.
+      if (other && localEdition()) error = `${error} Your ${other.label} account is signed in here too: switch this agent to it from its account menu to carry on.`;
       // A failed resume would fail the same way every time; start fresh next turn. Remembered as lost (see `saveResume`), so a
       // reconnect for the same pick doesn't bring the dead id back, and the server is told, here and on each reconnect, so the
       // fresh conversation is sent the history it no longer has.
@@ -2080,6 +2091,12 @@ ${prompt}`;
   /** Send the change set if it moved since the last one. `quietIfEmpty`: a clean folder is not news. */
   /** Where each of the agent's other folders stood when the session first looked there (reportDiff). */
   private dirBases = new Map<string, string>();
+  /** The repositories inside a folder that isn't one, looked for again a minute after the last time (an agent may clone one). */
+  private inside: { at: number; dirs: string[] } | null = null;
+  private async reposInside(): Promise<string[]> {
+    if (!this.inside || Date.now() - this.inside.at > 60_000) this.inside = { at: Date.now(), dirs: await reposInside(this.opts.cwd).catch(() => []) };
+    return this.inside.dirs;
+  }
 
   private async reportDiff(quietIfEmpty = false): Promise<void> {
     if (this.stopped) return;
@@ -2094,11 +2111,16 @@ ${prompt}`;
     const base = this.base ?? this.repo?.head ?? this.shadow?.head;
     if (!base) return;
     try {
-      const own = this.base && !this.baseIsHead ? await diffTrees(this.opts.cwd, this.base) : await diffSince(this.opts.cwd, base, this.repo ? undefined : (this.shadow ?? undefined));
+      // A folder that isn't a repository but holds some: each is read as a folder of its own below, and its one line in the
+      // snapshot is left out.
+      const inside = this.repo ? [] : await this.reposInside();
+      const insideRel = new Set(inside.map((d) => path.relative(this.opts.cwd, d).split(path.sep).join("/")));
+      const ownAll = this.base && !this.baseIsHead ? await diffTrees(this.opts.cwd, this.base) : await diffSince(this.opts.cwd, base, this.repo ? undefined : (this.shadow ?? undefined));
+      const own: typeof ownAll = Object.assign(ownAll.filter((f) => !insideRel.has(f.path)), ownAll.more ? { more: ownAll.more } : {});
       // The folders the agent also works in, each measured from where it stood when this session first looked (kept in the
       // repository like the folder's own base, so a runner coming back finds it); a folder that isn't a repository shows nothing.
       const elsewhere: DiffFile[] = [];
-      for (const dir of this.opts.dirs ?? []) {
+      for (const dir of [...new Set([...(this.opts.dirs ?? []), ...inside])]) {
         if (dir === this.opts.cwd) continue;
         try {
           let b = this.dirBases.get(dir) ?? (await sessionBase(dir, this.baseKey, true));

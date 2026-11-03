@@ -189,10 +189,10 @@ test("the real Preview keeps its tabs and pages through the Diff, a swap, anothe
 
   await s.draw({ tab: "files" });
   await s.draw({ tab: "preview" });
-  await menu(s.el, "Diff"); // Diff as the second panel
+  await menu(s.el, "Changes"); // Changes as the second panel
   await menu(s.el, "Swap the two"); // Preview below, Diff on top
   assert.ok(pages()[0]!.closest("bench-body")!.className.includes("split"), "the Preview is now second");
-  await menu(s.el, "Rules"); // another second panel: the Preview is put away
+  await menu(s.el, "Git"); // another second panel: the Preview is put away
   await menu(s.el, "Just one panel");
   await s.draw({ bench: false }); // closed
   await s.draw({ history: true }); // History in its place
@@ -290,9 +290,10 @@ test("the real Terminal: one screen and one start, through the Diff and back, th
 test("the Diff stays on the agent picked, through a switch and into a new view of the session", async (t) => {
   const a = session("s5", true);
   await a.draw({ tab: "files" });
-  const lanes = (el: FakeElement) => walk(el).filter((n) => n.getAttribute("role") === "tab" && n.className.includes("art-tab"));
+  const lanes = (el: FakeElement) => walk(el).filter((n) => n.getAttribute("role") === "tab" && n.className.includes("ch-agent"));
   const picked = (el: FakeElement) => lanes(el).find((n) => n.getAttribute("aria-selected") === "true")?.textContent;
-  assert.equal(lanes(a.el).length, 2);
+  // Everyone's, and each of the two agents'.
+  assert.equal(lanes(a.el).length, 3);
   const first = picked(a.el);
   await click(lanes(a.el).find((n) => n.getAttribute("aria-selected") !== "true"));
   const second = picked(a.el);

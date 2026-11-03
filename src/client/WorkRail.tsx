@@ -935,7 +935,7 @@ function FileRow({ f, url, onOpen, twin }: { f: WorkFile; url: (f: WorkFile) => 
 // ── sources and connectors ──────────────────────────────────────────
 
 /** A site's own icon, fetched from the site by Friday on this computer (work-files.ts siteIcon); its initial until then, or without one. */
-function SiteIcon({ host, sid, invite }: { host: string; sid: string; invite: string }) {
+export function SiteIcon({ host, sid, invite }: { host: string; sid: string; invite: string }) {
   // Only a public site's name is asked about: this computer, an address, or a name on its network has no icon to fetch (and the
   // server, work-files.ts publicHost, refuses those anyway).
   const [failed, setFailed] = useState(() => !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(host) || /^[\d.]+$/.test(host) || /\.(local|localhost|internal|lan|home)$/i.test(host));

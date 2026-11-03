@@ -69,3 +69,7 @@ export function tabsThatFit(widths: readonly number[], room: number, gap: number
   }
   return Math.max(1, n);
 }
+
+/** A tab's state as the small ring after its name draws it (presence.tsx StateRing). */
+export const tabRing = (t: TabState): "working" | "needs" | "error" | "queued" | "limited" | null =>
+  t === "working" ? "working" : t === "needs" ? "needs" : t === "waiting" ? "queued" : t === "failed" ? "error" : t === "limited" ? "limited" : null;

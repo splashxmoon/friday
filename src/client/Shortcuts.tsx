@@ -59,7 +59,7 @@ export const SHORTCUTS: { title: string; keys: [string[], string][] }[] = [
       [["⌘", "S"], "Save the file you are editing"],
       [["⌘", "."], "Show or hide the document"],
       [["⌘", "1"], "Tasks"],
-      [["⌘", "2"], "Diff"],
+      [["⌘", "2"], "Changes"],
       [["⌘", "3"], "Terminal"],
       [["⌘", "4"], "Preview"],
       // ⌃ on a Mac and Alt elsewhere (SessionView agentKeys); they were answered to and listed nowhere (2026-11-02 review).
