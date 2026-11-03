@@ -2125,7 +2125,75 @@ export async function readCustomAcp(): Promise<CustomAcp | null> {
 
 /** A command line as a shell splits it, quotes kept together: `goose acp`, `"C:\Tools\my agent.exe" --acp`. */
 export function splitCommandLine(line: string): string[] {
-  return [...line.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2] ?? m[3]!);
+  const args: string[] = [];
+  let current = "";
+  let inQuote: '"' | "'" | null = null;
+  let hasToken = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]!;
+
+    if (inQuote) {
+      if (inQuote === '"' && ch === "\\") {
+        let slashes = 0;
+        while (i < line.length && line[i] === "\\") {
+          slashes++;
+          i++;
+        }
+        if (i < line.length && line[i] === '"') {
+          current += "\\".repeat(Math.floor(slashes / 2));
+          if (slashes % 2 === 1) {
+            current += '"';
+          } else {
+            inQuote = null;
+          }
+        } else {
+          current += "\\".repeat(slashes);
+          i--;
+        }
+      } else if (ch === inQuote) {
+        inQuote = null;
+      } else {
+        current += ch;
+      }
+    } else {
+      if (ch === '"' || ch === "'") {
+        inQuote = ch;
+        hasToken = true;
+      } else if (/\s/.test(ch)) {
+        if (hasToken) {
+          args.push(current);
+          current = "";
+          hasToken = false;
+        }
+      } else {
+        hasToken = true;
+        current += ch;
+      }
+    }
+  }
+
+  if (inQuote !== null) {
+    throw new Error(`Unclosed ${inQuote} in the command line`);
+  }
+
+  if (hasToken) {
+    args.push(current);
+  }
+
+  return args;
+}
+
+/** A command line formatted from an executable and arguments, quotes and embedded quotes preserved for round-tripping. */
+export function formatCommandLine(command: string, args: string[]): string {
+  const quote = (a: string) => {
+    if (a.length === 0 || /\s|"|'/.test(a)) {
+      const doubled = a.replace(/(\\+)("|$)/g, "$1$1$2");
+      return `"${doubled.replaceAll('"', '\\"')}"`;
+    }
+    return a;
+  };
+  return [command, ...args].map(quote).join(" ");
 }
 
 /** Set the agent for "Other ACP agent" from a command line, or clear it with an empty one. */

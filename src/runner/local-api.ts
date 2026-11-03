@@ -5,7 +5,7 @@ import { homedir, hostname, tmpdir } from "node:os";
 import path from "node:path";
 import { ENGINE_NAMES, ENGINE_TOOLS, TOOL_INFO, toolList, type EngineMode, type EngineTool } from "../types.js";
 import { DEMO_FILES } from "../team-demo.js";
-import { ADAPTERS, childEnv, findBin, isClaudeAppBundled, launcher, loginStatus, readCustomAcp, runCli, saveCustomAcp } from "./adapters.js";
+import { ADAPTERS, childEnv, findBin, formatCommandLine, isClaudeAppBundled, launcher, loginStatus, readCustomAcp, runCli, saveCustomAcp } from "./adapters.js";
 import { discoverAgentFiles, parseModelList } from "./agent-files.js";
 import { addWorktree, branchesOf, dropSpares, dropWorktree, primeSpares, remoteBranchesOf, repoInfo, startRepo, worktreeState } from "./git.js";
 import { listCliSessions } from "./imports.js";
@@ -427,7 +427,7 @@ export async function callHost(method: string, params: Record<string, unknown> =
     // The agent for "Other ACP agent", as a command line.
     case "acp.get": {
       const set = await readCustomAcp();
-      return { line: set ? [set.command, ...set.args].map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(" ") : "" };
+      return { line: set ? formatCommandLine(set.command, set.args) : "" };
     }
     case "acp.set": {
       const set = await saveCustomAcp(str(params.line, 1000));
