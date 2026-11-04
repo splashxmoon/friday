@@ -1,3 +1,6 @@
+import { showDiffSoon } from "./focusDiff.js";
+import { StateRing } from "./presence.js";
+import { GO_AHEAD_WORDS } from "../guardrails.js";
 import { shortTokens } from "../tool-usage.js";
 import { collisionsFor } from "../collisions.js";
 import { runawayText } from "../runaway.js";
@@ -10,6 +13,7 @@ import { GitMergeIcon,
   BrainIcon,
   GitPullRequestIcon,
   ShieldCheckIcon,
+  ShieldXIcon,
   CheckIcon,
   ChevronRightIcon,
   CircleHelpIcon,
@@ -49,6 +53,7 @@ import { GitMergeIcon,
   type LucideIcon,
 } from "lucide-react";
 import { createPortal } from "react-dom";
+import { ChatFind } from "./ChatFind.js";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { attributionFor, byHand, handWord, type Attribution } from "../attribution.js";
 import { useNear } from "./feed-near.js";
@@ -123,7 +128,7 @@ import { alwaysAllowEntry, can, canDriveLane, driverOf, laneOf, pendingFor, ques
 import { isRawError, stoppedLine } from "../activity-line.js";
 import { ENGINE_MODEL_INFO, ENGINE_NAMES, ENGINE_TOOLS, liveMachine, MAIN_LANE, type Attachment, type DiffFile, type EngineMode, type EngineTool, type EventBody, type EventType, type Member, type PresenceMember, type SessionEvent, type Thinking, type ToolCall, effortNote, ENGINE_EFFORT_INFO, EFFORT_RESET_NOTE, effortLevelsOf, type EngineEffort } from "../types.js";
 import { api, fileUrl, uploadFile } from "./api.js";
-import { pickable, uploadAll } from "./Attach.js";
+import { DropOverlay, pickable, uploadAll, useFileDragging } from "./Attach.js";
 import { AgentMark, Avatar, FridayMark, Icon, type IconName } from "./icons.js";
 import { RouteWhy, RoutedForecast, costMark, useLearned } from "./RouteWhy.js";
 import { useRunForecast } from "./runForecast.js";
@@ -182,7 +187,9 @@ import { askIosPreview, isLocalUrl, lookOf, openInPreview, pageAppears, servedUr
 import { latestTests, prefillComposer, ReviewCard, secondReviewOf, testsIn } from "./RunReview.js";
 import { CLASS_LABEL, headlineClass, mayApprove } from "../command-class.js";
 import { checkpointsByMessage, isSetAside, rewindImpact, rewindsIn, type Rewind } from "../rewind.js";
-import { ContextMenu, MenuButton, useConfirm, type MenuItem, relTime } from "./ui.js";
+import { Check, ContextMenu, MenuButton, Picker, useConfirm, type MenuItem, relTime } from "./ui.js";
+import { RuleForm, RuleHow, RuleText } from "./RuleForm.js";
+import type { RuleCheck } from "../rules.js";
 import { hostApi, installedOn } from "./local.js";
 import { WORK_MODE_BLURB } from "./WorkMode.js";
 import { openOutside } from "./openOutside.js";
@@ -195,7 +202,7 @@ import { EngineModelPill } from "./EngineModelPill.js";
 import { ContextGauge } from "./gauge.js";
 import { forkSession } from "./github-menu.js";
 import { finishingOrder, heldOrder, type OrderInfo } from "./agent-order.js";
-import { initials, tabOwner, tabState, tabsThatFit, tabWords } from "./agent-tab.js";
+import { initials, tabOwner, tabRing, tabState, tabsThatFit, tabWords } from "./agent-tab.js";
 import { SUBAGENT_CALL, Subagents, subagentRowOf, subagentState, type SubagentRow } from "./Subagents.js";
 import { subTasksIn } from "./Tasks.js";
 import type { Plan } from "../plan-types.js";
@@ -468,6 +475,8 @@ const HIDDEN = new Set<string>([
   "board.cancelled",
   "board.checking",
   "board.checked",
+  // Said on its run's card instead (RunReview failedWords).
+  "tests.base",
   "instructions.requeued",
   "crew.applied",
 ]);
@@ -1100,10 +1109,13 @@ export function Activity({
   const items = useMemo(() => foldNotes(group(quiet.size ? events.filter((e) => !quiet.has(e.seq)) : events, new Set(streamKey ? streamKey.split(",") : []))), [events, streamKey, quiet]);
   // A run block belongs to the lane that produced it.
   const laneOfItem = (it: FeedItem) => (it.kind === "event" ? it.ev.lane : it.kind === "notes" ? it.evs[0]?.lane : it.lane) ?? MAIN_LANE;
+  // Which permission requests somebody answered, by id: those stay as a one-line receipt saying who said what (ApprovalReceipt).
+  const answeredIds = useMemo(() => new Set(events.flatMap((e) => (e.body.type === "instruction" && e.body.approval ? [e.body.approval.id] : []))), [events]);
   const logOrder = items.filter(
     (it) =>
-      // A permission card goes once it is answered: the run's review card keeps what was asked and what was said.
-      !(it.kind === "event" && it.ev.body.type === "engine.approval" && state.approvals[it.ev.lane ?? MAIN_LANE]?.id !== it.ev.body.id) &&
+      // A permission card that went unanswered (the run moved on, or stopped) goes once it isn't waiting; an answered one stays as
+      // its receipt (Arun, 2026-11-03, after Orca's resolution receipts: in a shared session who said yes matters).
+      !(it.kind === "event" && it.ev.body.type === "engine.approval" && state.approvals[it.ev.lane ?? MAIN_LANE]?.id !== it.ev.body.id && !answeredIds.has(it.ev.body.id)) &&
       (filter === "all" ? true : filter === "agent" ? it.kind === "run" || (it.kind === "event" && it.ev.body.type === "run.ended") : it.kind !== "run" && !(it.kind === "event" && it.ev.body.type === "run.ended")) &&
       // An aside is to the people in the room, not to one agent: it shows whichever agent's feed you are looking at.
       (laneFilter === "all" || laneOfItem(it) === laneFilter || (it.kind === "event" && it.ev.body.type === "chat")),
@@ -1648,6 +1660,8 @@ export function Activity({
                     {/* Where it stands in a word ("Working · 2m", "Needs you"), and for All agents how many are at work. */}
                     <span className="lane-tab-sub">{tabSub(id)}</span>
                   </span>
+                  {/* Its state as the small ring just after the name, in place of the big one round its mark (Arun, 2026-11-03). */}
+                  {id !== "all" && <StateRing state={tabRing(tabState(st?.status, st?.needsYou))} />}
                   {id !== "all" && state.lead === id && <CrownIcon className="lane-tab-lead size-3.5" aria-label="Leads the other agents" />}
                   {st && <AgentState status={st.status} needsYou={st.needsYou} />}
                   {behind > 0 && <span className="lane-tab-unread" aria-label={`${behind} new`}>{behind > 9 ? "9+" : behind}</span>}
@@ -1848,7 +1862,9 @@ export function Activity({
         // All agents: each one's own screen side by side, its tool's where it has one and Friday's for the rest (Arun, 2026-10-30:
         // "make sure terminal view works for the all agents tab"). One terminal for everyone had every agent held and nothing
         // sent there ran.
-        <div className="tui-grid" style={{ "--tui-cols": everyone.length > 4 ? 3 : everyone.length > 1 ? 2 : 1 } as React.CSSProperties}>
+        // The last pane takes what its row leaves, so three agents are two above and one across, never an empty quarter (Arun,
+        // 2026-11-02: "design this better for terminal view").
+        <div className="tui-grid" style={((cols) => ({ "--tui-cols": cols, "--tui-last": everyone.length % cols ? cols - (everyone.length % cols) + 1 : 1 }))(everyone.length > 4 ? 3 : everyone.length > 1 ? 2 : 1) as React.CSSProperties}>
           {everyone.map((l) => {
             const tool = state.engines[l]?.tool;
             const native = !!tool && TERMINAL_TOOLS.has(tool) && state.engines[l]?.hostId === me.id && hasShells() && !friday(sid, l);
@@ -2007,6 +2023,18 @@ export function Activity({
               <AgentQuestion ctx={ctx} q={q} />
             </div>
           ))}
+          {/* ⌘F in this chat (ChatFind.tsx). */}
+          <ChatFind primary={!secondary} />
+          {/* Words selected in the chat, quoted into the box and sent to whoever wrote them (QuoteSelection). */}
+          {me.role !== "viewer" && (
+            <QuoteSelection
+              onQuote={(text, from) => {
+                const known = !!from && (from === MAIN_LANE || state.lanes.some((l) => l.id === from));
+                if (known && !pin && from !== target) (pick(from), laneFilter !== ALL && setLaneFilter(from));
+                requestAnimationFrame(() => quoteIntoComposer(text));
+              }}
+            />
+          )}
           <Composer ctx={ctx} lane={target} locked={!!pin} onLane={(l) => (pick(l), laneFilter !== ALL && setLaneFilter(l))} onPin={() => setPinning(true)} events={events} plan={<LivePlan events={events} state={state} {...(pin ? { lane: pin } : {})} team={!secondary && boardHere} {...(me.role !== "viewer" ? { control: (id: string, action: TaskAction, to?: string) => void send({ type: "board.task", id, action, ...(to ? { to } : {}) }).then((r) => !r.ok && ctx.notify(r.error ?? "Couldn't change that task.")) } : {})} />} />
           {/* Under the box: the way back through the session on the left, and what the agent's context has cost on the right, under send.
               In the Focus layout both live in the status bar along the window's foot instead. */}
@@ -2266,6 +2294,72 @@ function Notice({ ev, icon: I, tone = "", children }: { ev: SessionEvent; icon: 
         <Stamp ev={ev} />
       </span>
     </Checkpoint>
+  );
+}
+
+/**
+ * A rule offered from a person's own correction (rules.ts; Arun, 2026-11-03: "Rules that stick"): what it says, how every change
+ * will be checked for it, and one press to keep it, a look to put it right first, or no. Answered, the card says so in place.
+ */
+function RuleOffer({ ev, ctx }: { ev: Ev<"brain.check.proposed">; ctx: Ctx }) {
+  const b = ev.body;
+  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [error, setError] = useState("");
+  const answer = ctx.events.find((e) => e.seq > ev.seq && e.body.type === "brain.check.answered" && e.body.entry === b.entry);
+  const took = answer?.body.type === "brain.check.answered" ? answer.body.take : null;
+  const check: RuleCheck = { how: b.how!, pattern: b.pattern ?? "", ...(b.only?.length ? { only: b.only } : {}), ...(b.except?.length ? { except: b.except } : {}) };
+  const go = async (path: string, body: unknown) => {
+    setBusy(true);
+    setError("");
+    try {
+      await api(ctx.identity, `${path}?repo=${encodeURIComponent(b.repo)}&id=${encodeURIComponent(b.entry)}`, { method: "POST", body: JSON.stringify(body) });
+      setEditing(false);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className={cn("rule-offer", took !== null && "answered")} role="group" aria-label="A rule offered">
+      <div className="rule-offer-head">
+        <ShieldCheckIcon className="size-3.5 shrink-0" />
+        <span className="rule-offer-title">{took === true ? `Kept as a rule for ${b.repoName}` : took === false ? "Not kept as a rule" : `Make this a rule for ${b.repoName}?`}</span>
+        {took === null && !editing && (
+          <span className="rule-offer-acts">
+            <button type="button" className="btn ghost small" disabled={busy || !!ctx.replaying} onClick={() => void go("/api/brain/check", { take: false })}>
+              No
+            </button>
+            <button type="button" className="btn ghost small" disabled={busy || !!ctx.replaying} onClick={() => setEditing(true)}>
+              Edit
+            </button>
+            <button type="button" className="btn primary small" disabled={busy || !!ctx.replaying} onClick={() => void go("/api/brain/check", { take: true })}>
+              Keep it
+            </button>
+          </span>
+        )}
+        <span className="cp-stamp">
+          <Stamp ev={ev} />
+        </span>
+      </div>
+      {editing ? (
+        <RuleForm start={{ text: b.why, ...check }} busy={busy} saveWord="Keep the rule" onCancel={() => setEditing(false)} onSave={(r) => void go("/api/brain/rule", r)} />
+      ) : (
+        <div className="rule-offer-body">
+          <span className="rule-offer-rule">
+            <RuleText text={b.why} />
+          </span>
+          {took !== false && (
+            <span className="rule-offer-how">
+              {took === true ? "Every agent's change there is checked: " : "Checked on every change, in every session and teammate: "}
+              <RuleHow check={check} />
+            </span>
+          )}
+        </div>
+      )}
+      {error && <p className="rule-offer-error">{error}</p>}
+    </div>
   );
 }
 
@@ -2616,13 +2710,13 @@ function HubCard({ ev, ctx }: { ev: Ev<"hub.planned">; ctx: Ctx }) {
               </div>
               <span className="hub-task-tool">
                 {planned && owner ? (
-                  <select className="own-select" value={tool ?? ""} aria-label={`Tool for ${t.title}`} onChange={(e) => setTools({ ...tools, [t.id]: e.target.value as EngineTool })}>
-                    {b.tools.map((x) => (
-                      <option key={x} value={x}>
-                        {ENGINE_NAMES[x]}
-                      </option>
-                    ))}
-                  </select>
+                  <Picker<EngineTool | "">
+                    className="small-pick"
+                    value={tool ?? ""}
+                    label={`Tool for ${t.title}`}
+                    onChange={(x) => x && setTools({ ...tools, [t.id]: x })}
+                    options={b.tools.map((x) => ({ value: x, label: ENGINE_NAMES[x], mark: <EngineMark tool={x} size={13} /> }))}
+                  />
                 ) : (
                   <span className="hub-tool-name">
                     <EngineMark tool={tool ?? ""} size={13} /> {tool ? ENGINE_NAMES[tool] : ""}
@@ -2814,7 +2908,7 @@ function HumanMessage({ ev, ctx }: { ev: Ev<"instruction"> | Ev<"suggestion">; c
         danger: true,
         onConfirm: async () => {
           const r = await send({ type: "folder.restore", sha: checkpoint!, lane: said, rewindTo: ev.seq });
-          if (!r.ok) return ctx.notify(r.error ?? "Couldn't restore. The folder may have moved on since; check the Diff tab, then try again.");
+          if (!r.ok) return ctx.notify(r.error ?? "Couldn't restore. The folder may have moved on since; check the Changes panel, then try again.");
           if (b.type === "instruction") prefillComposer(b.text);
         },
       });
@@ -2827,7 +2921,7 @@ function HumanMessage({ ev, ctx }: { ev: Ev<"instruction"> | Ev<"suggestion">; c
       danger: true,
       onConfirm: async () => {
         const r = await send({ type: "folder.restore", sha: checkpoint!, lane: said, rewindTo: ev.seq });
-        if (!r.ok) return ctx.notify(r.error ?? "Couldn't rewind. The folder may have moved on since; check the Diff tab, then try again.");
+        if (!r.ok) return ctx.notify(r.error ?? "Couldn't rewind. The folder may have moved on since; check the Changes panel, then try again.");
         if (b.type === "instruction") prefillComposer(b.text);
       },
     });
@@ -2956,6 +3050,81 @@ function ChatMessage({ ev, ctx }: { ev: Ev<"chat">; ctx: Ctx }) {
       <CopyMessage text={ev.body.text} mine={mine} />
     </Message>
   );
+}
+
+/**
+ * Words selected in the chat, quoted into the message box (Arun, 2026-11-03, after Orca's "Quote"): a small button over the
+ * selection puts them in as a quote, kept above whatever is already typed, and turns the box to the agent that wrote them, so
+ * "this part, but…" goes to the right one. Only in the feed, and never over a text field's own selection.
+ */
+function QuoteSelection({ onQuote }: { onQuote: (text: string, lane: string | null) => void }) {
+  const [at, setAt] = useState<{ x: number; y: number; text: string; lane: string | null } | null>(null);
+  // Where it sits, to tell its own column of the chat from another open beside it (a split): each quotes only its own.
+  const anchor = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    const read = () => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !sel.rangeCount) return setAt(null);
+      const range = sel.getRangeAt(0);
+      const node = range.commonAncestorContainer;
+      const el = (node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement) as Element | null;
+      const row = el?.closest(".feed-item");
+      const text = sel.toString().trim();
+      if (!row || !text || el?.closest("textarea, input, [contenteditable='true']")) return setAt(null);
+      const column = anchor.current?.closest(".composer-dock")?.parentElement;
+      if (column && !column.contains(row)) return setAt(null);
+      const r = range.getBoundingClientRect();
+      if (!r.width && !r.height) return setAt(null);
+      setAt({ x: Math.min(Math.max(r.left + r.width / 2, 48), innerWidth - 48), y: Math.max(r.top, 44), text: text.slice(0, 4000), lane: row.getAttribute("data-lane") });
+    };
+    // After the pointer or a shift-arrow lets go, once the selection has settled; gone as soon as it is.
+    const settle = () => setTimeout(read, 0);
+    const gone = () => {
+      const s = window.getSelection();
+      if (!s || s.isCollapsed) setAt(null);
+    };
+    const hide = () => setAt(null);
+    document.addEventListener("mouseup", settle);
+    document.addEventListener("keyup", settle);
+    document.addEventListener("selectionchange", gone);
+    addEventListener("scroll", hide, true);
+    return () => {
+      document.removeEventListener("mouseup", settle);
+      document.removeEventListener("keyup", settle);
+      document.removeEventListener("selectionchange", gone);
+      removeEventListener("scroll", hide, true);
+    };
+  }, []);
+  const quote = at && (
+    <button
+      type="button"
+      className="quote-pop"
+      style={{ left: at.x, top: at.y }}
+      // Pressed without taking the selection away first.
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => {
+        onQuote(at.text, at.lane);
+        setAt(null);
+        window.getSelection()?.removeAllRanges();
+      }}
+    >
+      <Icon name="message" size={13} />
+      Quote
+    </button>
+  );
+  return (
+    <span ref={anchor} hidden>
+      {quote && createPortal(quote, document.body)}
+    </span>
+  );
+}
+
+/** The quote, as Markdown, above what is already in the box. */
+function quoteIntoComposer(text: string) {
+  const el = document.getElementById("composer-input") as HTMLTextAreaElement | null;
+  const quote = `${text.split(/\r?\n/).map((l) => `> ${l}`.trimEnd()).join("\n")}\n\n`;
+  const had = el?.value.trim() ?? "";
+  prefillComposer(had ? `${quote}${had}` : quote);
 }
 
 /**
@@ -3130,6 +3299,41 @@ function didChange(files: DiffFile[] | undefined): files is DiffFile[] {
   return !!files?.some((f) => f.additions > 0 || f.deletions > 0 || f.status !== "modified");
 }
 
+/** Where an agent stands, as the small ring after its name draws it: working, waiting on you, or stopped. */
+function sendRing(state: SessionState, lane: string): "working" | "needs" | "error" | null {
+  const run = runOf(state, lane).status;
+  if (state.openQuestions[lane] || state.approvals?.[lane] || run === "waiting_for_human") return "needs";
+  return run === "running" ? "working" : run === "error" ? "error" : null;
+}
+
+/** The box's agent half: who it goes to, with its tool's mark and its ring, and how many other agents are here. */
+function SendToFace({ state, lane, toPeople, name, more }: { state: SessionState; lane: string; toPeople: boolean; name: string; more: number }) {
+  return (
+    <>
+      <span className="menu-pill-mark">{toPeople ? <Icon name="users" size={14} /> : <EngineMark tool={state.engines[lane]?.tool ?? ""} size={14} />}</span>
+      <span className="send-to-name">{name}</span>
+      {!toPeople && <StateRing state={sendRing(state, lane)} />}
+      {more > 0 && <span className="send-to-more" aria-label={`${more} other agent${more === 1 ? "" : "s"} here`}>+{more}</span>}
+    </>
+  );
+}
+
+/**
+ * What a turn itself changed, out of the lane's diff as it ended (the folder against its base, every earlier turn in it): a file
+ * whose patch is the one already logged before the turn began is the earlier turns' work, and left off its card. The log keeps a
+ * patch it has seen as a reference to the change set that first held it (DiffFile.at), so an unchanged file says so by that.
+ */
+export function turnFilesOf(files: DiffFile[] | undefined, events: readonly SessionEvent[], lane: string, began: number): DiffFile[] {
+  if (!didChange(files)) return [];
+  const before = events.findLast((e) => e.seq < began && e.body.type === "agent.diff" && (e.lane ?? MAIN_LANE) === lane);
+  const was = new Map(before?.body.type === "agent.diff" ? before.body.files.map((f) => [f.path, f]) : []);
+  return files.filter((f) => {
+    if (f.at !== undefined && f.at < began) return false;
+    const p = was.get(f.path);
+    return !(p && p.patch && p.patch === f.patch && p.additions === f.additions && p.deletions === f.deletions);
+  });
+}
+
 /** A command that checks the work: what "still failing" means to whoever takes it over. */
 const CHECK = /\b(test|tests|pytest|jest|vitest|mocha|tsc|lint|eslint|ruff|mypy|build|cargo|go (test|vet|build)|make|gradle|mvn|dotnet|npm run|pnpm|yarn|bun run|check)\b/i;
 
@@ -3230,17 +3434,20 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   const loginLine = item.ended?.body.outcome === "error" && signedOut(item.ended.body.error) && finalMsg && /not logged in|please run \/login/i.test(finalMsg.body.text) ? finalMsg : null;
   // Second opinion (Asides): another model asked about this turn, from the answer's strip; the form opens under the answer.
   const [opinion, setOpinion] = useState(false);
-  // Who wrote each line of the change by hand, read from the lane's log once the run has ended (attribution.ts).
-  const attribution = useMemo(() => (item.ended ? attributionFor(ctx.events, lane) : undefined), [ctx.events.length, item.ended, lane]); // eslint-disable-line react-hooks/exhaustive-deps
   // Asked of one of Friday's own models: the hosted Friday's, so none in the open-source edition.
   let opinionBtn: React.ReactNode = null;
   // What the run left that has a home of its own.
   // The file chips are the same fact as the diff card, so they wait for the same moment.
   const changed: FileChange[] = item.ended ? (item.diffs.at(-1)?.body.files ?? []).map((f) => ({ path: f.path, additions: f.additions, deletions: f.deletions })) : [];
+  // This turn's own files: the lane's diff as the run ended, less a file whose patch was already that before it began (turnFiles).
+  const turnFiles = item.ended ? turnFilesOf(item.diffs.at(-1)?.body.files, ctx.events, lane, item.key) : [];
   // Commands still failing when the run stopped; one that failed and then passed is not one.
   const stillFailing = item.ended ? failingCommands(msgs, ctx.results) : [];
   const via = reviewVia(ctx.state, ctx.me, lane);
-  const tests = item.ended ? testsIn(msgs.flatMap((m) => m.body.toolCalls), (id) => (ctx.results.has(id) ? commandFailed(ctx.results.get(id)!.body) : null)) : null;
+  const ran = item.ended ? testsIn(msgs.flatMap((m) => m.body.toolCalls), (id) => (ctx.results.has(id) ? commandFailed(ctx.results.get(id)!.body) : null)) : null;
+  // Its failures against the commit its copy started from, once Friday has worked that out (baseline.ts, app.ts testsAfterRun).
+  const based = ran?.status === "fail" && item.ended ? ctx.events.findLast((e) => e.body.type === "tests.base" && e.body.run === item.ended!.seq && (e.lane ?? MAIN_LANE) === lane) : undefined;
+  const tests = ran && based?.body.type === "tests.base" ? { ...ran, base: { pre: based.body.pre, fresh: based.body.fresh, ...(based.body.whole !== undefined ? { whole: based.body.whole } : {}) } } : ran;
 
   // A teammate speaks as its face (Teammates.tsx), not its tool's mark.
   let mate: React.ReactNode = null;
@@ -3593,7 +3800,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
       danger: true,
       onConfirm: async () => {
         const r = await ctx.send({ type: "folder.restore", sha: item.checkpoint!.sha, lane: item.checkpoint!.lane, rewindTo: item.checkpoint!.at ?? msgs[0]?.seq ?? item.key });
-        if (!r.ok) ctx.notify(r.error ?? "Couldn't rewind. The folder may have moved on since; check the Diff tab, then try again.");
+        if (!r.ok) ctx.notify(r.error ?? "Couldn't rewind. The folder may have moved on since; check the Changes panel, then try again.");
       },
     });
   // A finished run that changed something is worth showing someone: its recording, a press away, while the viewer link is on.
@@ -3839,12 +4046,12 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
         </ul>
       )}
       {item.ended &&
-        didChange(item.diffs.at(-1)?.body.files) &&
+        turnFiles.length > 0 &&
         !ctx.state.options.work && // A Work session's changes are its outputs, in the rail: no diff to review (Arun, 2026-10-26: "get rid of this for work").
         (
         <div className="change-set">
           <ReviewCard
-            files={item.diffs.at(-1)!.body.files}
+            files={turnFiles}
             tests={tests}
             receipt={receipt ?? undefined}
             explain={explain}
@@ -3862,17 +4069,9 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
             lastApplySeq={ctx.lastApplySeq}
             lastRestoreSeq={ctx.lastRestoreSeq}
             undo={item.checkpoint && canUndo(ctx, item.checkpoint.lane) ? () => ctx.send({ type: "folder.restore", sha: item.checkpoint!.sha, lane: item.checkpoint!.lane }) : undefined}
-          >
-          <DiffCard
-            hideTitle
-            attribution={attribution}
-            files={item.diffs.at(-1)!.body.files}
-            review={{ send: ctx.send, via, lane, notify: ctx.notify, agent: agentNameFor(ctx.state, lane) }}
-            threads={ctx.state.threads}
-            me={ctx.me.id}
-            contendedPaths={contendedPaths(ctx.state, lane)}
+            contended={contendedPaths(ctx.state, lane)}
+            {...(ctx.onOpen ? { onReview: (path?: string) => (ctx.onOpen!("files"), path && showDiffSoon(path, [0, 350, 900, 1700])) } : {})}
           />
-          </ReviewCard>
         </div>
       )}
       </div>
@@ -3975,6 +4174,31 @@ function SignedOutNote({ ctx, lane, latest }: { ctx: Ctx; lane: string; latest: 
 }
 
 /**
+ * Continue, where a task stopped: the agent picks up where it left off rather than being sent the whole message again, which
+ * redid what was done (Arun, 2026-11-03, after Orca's Continue). The coding tools keep their conversation, so "carry on" is
+ * enough. Only on the lane's latest stop, while nothing has been said or started on that lane since: once anyone here continues,
+ * or moves on, it goes for everyone. Not for someone who only watches.
+ */
+function CarryOn({ ctx, lane, seq }: { ctx: Ctx; lane: string; seq: number }) {
+  const [sent, setSent] = useState(false);
+  // A stop is a person's (pause, cancel) or a run that ended on an error; the turn's own end just after a person's stop is part of it.
+  const stops = (e: SessionEvent) => (e.lane ?? MAIN_LANE) === lane && (e.body.type === "run.pause" || e.body.type === "run.cancel" || (e.body.type === "run.ended" && e.body.outcome === "error"));
+  const latest = ctx.events.findLast(stops)?.seq === seq;
+  const since = ctx.events.some((e) => e.seq > seq && (((e.lane ?? MAIN_LANE) === lane && (e.body.type === "instruction" || e.body.type === "run.started" || e.body.type === "run.resume")) || (e.body.type === "instruction" && e.body.handoff?.fromLane === lane)));
+  if (ctx.me.role === "viewer" || !latest || since || runOf(ctx.state, lane).status === "running") return null;
+  const go = async () => {
+    setSent(true);
+    const r = await ctx.send({ type: "instruct", text: "[session] Carry on where you left off.", ...(lane !== MAIN_LANE ? { lane } : {}) });
+    if (!r.ok) (setSent(false), ctx.notify(r.error ?? "Couldn't send that. Try once more."));
+  };
+  return (
+    <button type="button" className="btn small stop-again" disabled={sent} onClick={() => void go()} title="Picks up where it stopped, with what it already did">
+      {sent ? "Continuing…" : "Continue"}
+    </button>
+  );
+}
+
+/**
  * The message an agent stopped on, sent again with one press (2026-11-02 walk-through: a tool that quit as it started left
  * the error and nothing to do but type the message out again). Only on the lane's last stop, and only until something else
  * was said on that lane: by then the person has moved on, or the work was handed to another agent.
@@ -3985,6 +4209,11 @@ function StoppedAgain({ ctx, lane, seq }: { ctx: Ctx; lane: string; seq: number 
   const since = ctx.events.some((e) => e.seq > seq && e.body.type === "instruction" && ((e.lane ?? MAIN_LANE) === lane || e.body.handoff?.fromLane === lane));
   const asked = ctx.events.findLast((e) => e.seq < seq && e.body.type === "instruction" && (e.lane ?? MAIN_LANE) === lane);
   const again = asked?.body.type === "instruction" ? asked.body.text.trim() : "";
+  // It had done some of the work before it stopped: carried on from there, not started over (Arun, 2026-11-03, after Orca's
+  // Continue). Sending the whole message again redid what was done; a tool that quit as it started has nothing to carry on.
+  const began = ctx.events.findLast((e) => e.seq < seq && e.body.type === "run.started" && (e.lane ?? MAIN_LANE) === lane)?.seq ?? seq;
+  const worked = ctx.events.some((e) => e.seq > began && e.seq < seq && (e.lane ?? MAIN_LANE) === lane && e.body.type === "agent.message" && e.body.toolCalls.length > 0);
+  if (worked) return <CarryOn ctx={ctx} lane={lane} seq={seq} />;
   if (!latest || since || !again || runOf(ctx.state, lane).status === "running") return null;
   const tryAgain = async () => {
     setSent(true);
@@ -4044,10 +4273,10 @@ function LimitNote({ ctx, lane, resetsAt, canSteer }: { ctx: Ctx; lane: string; 
           </>
         ) : resetsAt ? (
           <>
-            {who} is out of usage on its account until <b>{clockTime(resetsAt)}</b>. Hand the work to another agent, have it carry on here then, or sign it in as another account.
+            {who} is out of usage on its account until <b>{clockTime(resetsAt)}</b>. {isLocal() ? "Hand the work to another agent, have it carry on here then, or sign it in as another account." : "Hand the work to another of your agents, have it carry on here then, or add extra usage or credits to its account."}
           </>
         ) : (
-          <>{who} is out of usage on its account. Hand the work to another agent, have it try again in an hour, or sign it in as another account.</>
+          <>{who} is out of usage on its account. {isLocal() ? "Hand the work to another agent, have it try again in an hour, or sign it in as another account." : "Hand the work to another of your agents, have it try again in an hour, or add extra usage or credits to its account."}</>
         )}
       </span>
       {canSteer && (
@@ -4220,6 +4449,7 @@ export function DiffCard({
   threads = [],
   me = "",
   contendedPaths = {},
+  repoNote,
 }: {
   files: DiffFile[];
   compact?: boolean;
@@ -4243,6 +4473,8 @@ export function DiffCard({
   /** Who wrote each added line (attribution.ts): a pencil on the lines a person wrote by hand, and a word in the file's header. */
   attribution?: Attribution;
   me?: string;
+  /** Beside each folder's name, who changed files there (the Changes panel's Everyone); folders are named even when only one. */
+  repoNote?: (repo: string) => ReactNode;
 }) {
   const [ask, confirmUI] = useConfirm();
   // On its own in the chat, the list is one line until opened; in the Diff panel, or under a review card (which folds itself), it
@@ -4574,12 +4806,13 @@ export function DiffCard({
         const repos = [...byRepo.keys()].sort((a, b) => (a === "" ? -1 : b === "" ? 1 : a.localeCompare(b)));
         return (
           <>
-            {repos.length <= 1
+            {repos.length <= 1 && !repoNote
               ? shown.map(fileView)
               : repos.map((repo) => (
                   <div key={repo || "own"} className="diff-repo">
                     <h4 className="diff-repo-head" title={repo || "The agent's own folder"}>
                       <Icon name="folder" size={12} /> {repo ? repo.split(/[\\/]/).filter(Boolean).pop() : "This folder"} <span className="muted">{byRepo.get(repo)!.length}</span>
+                      {repoNote?.(repo)}
                     </h4>
                     {byRepo.get(repo)!.map(fileView)}
                   </div>
@@ -4891,6 +5124,35 @@ export function answerRights(state: SessionState, me: { id: string; role: Member
   };
 }
 
+/**
+ * A permission request once answered: one quiet line where the card was, saying who said what to which command, and when
+ * (Arun, 2026-11-03, after Orca's resolution receipts). The card used to go, so nothing in the chat said a command had been let
+ * through, or by whom; in a session several people drive, that is the line people look for.
+ */
+function ApprovalReceipt({ ask, said, ctx }: { ask: Ev<"engine.approval">; said: Ev<"instruction">; ctx: Ctx }) {
+  const b = ask.body;
+  const yes = !!said.body.approval?.approve;
+  const by = said.actor.id === ctx.me.id ? "You" : said.actor.name.split(/\s+/)[0];
+  const agent = agentNameFor(ctx.state, ask.lane ?? MAIN_LANE);
+  const what =
+    b.scope !== "commands" ? null
+    : b.items.length === 1 ? <code>{b.items[0]}</code>
+    : <span title={b.items.join("\n")}>{b.items.length} commands</span>;
+  return (
+    <Notice ev={said} icon={yes ? ShieldCheckIcon : ShieldXIcon}>
+      {what ? (
+        <>
+          {by} {yes ? "let" : "didn't let"} {agent} run {what}
+        </>
+      ) : (
+        <>
+          {by} {yes ? "let" : "didn't let"} {agent} {b.live ? "go on" : "change things"}
+        </>
+      )}
+    </Notice>
+  );
+}
+
 function PermissionCard({ ev, ctx }: { ev: Ev<"engine.approval">; ctx: Ctx }) {
   const { state, me, send } = ctx;
   const b = ev.body;
@@ -4898,6 +5160,8 @@ function PermissionCard({ ev, ctx }: { ev: Ev<"engine.approval">; ctx: Ctx }) {
   const { waiting, mayDrive, allowedKinds, may, viaInstruct, hostWait } = answerRights(state, me, lane, b);
   const who = agentNameFor(state, lane);
   const [busy, setBusy] = useState(false);
+  const said = waiting ? undefined : ctx.events.find((e): e is Ev<"instruction"> => e.body.type === "instruction" && e.body.approval?.id === b.id);
+  if (said) return <ApprovalReceipt ask={ev} said={said} ctx={ctx} />;
   const answer = async (approve: boolean) => {
     if (approve && hostWait) return;
     setBusy(true);
@@ -4922,23 +5186,35 @@ function PermissionCard({ ev, ctx }: { ev: Ev<"engine.approval">; ctx: Ctx }) {
     >
       <div className="apv-head">
         <Icon name="shield" size={14} />
-        <span>
-          {who} {b.scope === "commands" ? (b.items.length === 1 ? "wants to run a command" : `wants to run ${b.items.length} commands`) : b.live ? "is asking before it goes on" : "was stopped from changing things"}
-        </span>
+        {/* A teammate's go-ahead (guardrails.ts): which of the few things it asks before, as a tag, its reason under the item. */}
+        {b.guard ? (
+          <span>
+            {who} asks first <span className="apv-tag" data-guard={b.guard}>{GO_AHEAD_WORDS[b.guard]}</span>
+          </span>
+        ) : (
+          <span>
+            {who} {b.scope === "commands" ? (b.items.length === 1 ? "wants to run a command" : `wants to run ${b.items.length} commands`) : b.live ? "is asking before it goes on" : "was stopped from changing things"}
+          </span>
+        )}
         <span className="apv-stamp">
           <Stamp ev={ev} />
         </span>
       </div>
-      <ul className="apv-items">
-        {b.items.map((i) => (
-          <li key={i}>
-            <code>{i}</code>
-            {b.scope === "commands" && <span className="apv-kind">{CLASS_LABEL[headlineClass(i)].label}</span>}
-          </li>
-        ))}
-      </ul>
-      {b.why && <p className="apv-note">{b.why}</p>}
-      {b.scope === "turn" && !b.live && <p className="apv-note">{b.tool ? ENGINE_NAMES[b.tool] : "This tool"} can't ask about one thing at a time, so a yes lets it try the whole turn again with permission to change files and run commands.</p>}
+      {/* Compact (Arun, 2026-11-03: "desing these more compact and better"): the command, its reason beside it and the answers
+          on one line, wrapping under it only where there isn't room. A go-ahead's tag already says what kind it is. */}
+      <div className="apv-body">
+        <div className="apv-main">
+          <ul className="apv-items">
+            {b.items.map((i) => (
+              <li key={i}>
+                <code>{i}</code>
+                {b.scope === "commands" && !b.guard && <span className="apv-kind">{CLASS_LABEL[headlineClass(i)].label}</span>}
+              </li>
+            ))}
+          </ul>
+          {b.why && <p className="apv-note">{b.guard ? b.why.replace(/^[^:]+:\s*/, "") : b.why}</p>}
+          {b.scope === "turn" && !b.live && <p className="apv-note">{b.tool ? ENGINE_NAMES[b.tool] : "This tool"} can't ask about one thing at a time, so a yes lets it try the whole turn again with permission to change files and run commands.</p>}
+        </div>
       {waiting &&
         (may ? (
           <div className="apv-actions">
@@ -4986,6 +5262,7 @@ function PermissionCard({ ev, ctx }: { ev: Ev<"engine.approval">; ctx: Ctx }) {
             {me.role === "editor" && allowedKinds.length > 0 && b.scope === "commands" && " You can answer commands of the kinds the owner allowed, but not this one."}
           </p>
         ))}
+      </div>
     </div>
   );
 }
@@ -5267,10 +5544,12 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
       );
     }
     case "brain.check.proposed":
-      return <CheckOffer ev={ev as Ev<"brain.check.proposed">} ctx={ctx} />;
+      return b.how ? <RuleOffer ev={ev as Ev<"brain.check.proposed">} ctx={ctx} /> : <CheckOffer ev={ev as Ev<"brain.check.proposed">} ctx={ctx} />;
     case "brain.check.answered": {
       const offer = ctx.events.findLast((e) => e.seq < ev.seq && e.body.type === "brain.check.proposed" && e.body.entry === b.entry);
       const command = offer?.body.type === "brain.check.proposed" ? offer.body.command : "the check";
+      // A rule's answer is said on its own card (RuleOffer), where it was offered: no second line for it.
+      if (offer?.body.type === "brain.check.proposed" && offer.body.how) return null;
       return (
         <Notice ev={ev} icon={b.take ? ShieldCheckIcon : XIcon} tone="control">
           {b.take ? (
@@ -5462,6 +5741,7 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
       return (
         <Notice ev={ev} icon={SquareIcon}>
           {who} stopped {ev.lane && ev.lane !== MAIN_LANE ? `${agentNameFor(ctx.state, ev.lane)}'s` : "the agent's"} task
+          <CarryOn ctx={ctx} lane={ev.lane ?? MAIN_LANE} seq={ev.seq} />
         </Notice>
       );
     case "run.resume":
@@ -5833,7 +6113,7 @@ function PlanApproval({ ctx, events, lane }: { ctx: Ctx; events: SessionEvent[];
             {steps.map((t, i) => (
               <li key={`${i}-${t}`} className={unticked.has(i) ? "unticked" : ""}>
                 {may ? (
-                  <input type="checkbox" className="plan-step-tick" checked={!unticked.has(i)} aria-label={`Step ${i + 1}: ${unticked.has(i) ? "left out" : "approved"}`} title={unticked.has(i) ? "Left out of what it may do" : "Untick to leave this step out"} onChange={() => tick(i)} />
+                  <Check className="plan-step-tick" checked={!unticked.has(i)} label={`Step ${i + 1}: ${unticked.has(i) ? "left out" : "approved"}`} title={unticked.has(i) ? "Left out of what it may do" : "Untick to leave this step out"} onChange={() => tick(i)} />
                 ) : (
                   <span className="plan-step-n">{i + 1}</span>
                 )}
@@ -6779,8 +7059,9 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
   // What is in the box, so an empty message can't be sent — by the button or
   // by Enter, which checks the button's disabled state before submitting.
   const [typed, setTyped] = useState("");
-  // What was being typed, kept per session for this tab, so switching away and back doesn't lose it. Not saved until it has
-  // been read back: the empty box on mount used to delete it before the effect below could restore it.
+  // What was being typed, kept per session on this computer, so switching away and back, or quitting Friday, doesn't lose it
+  // (Arun, 2026-11-03, after Orca's drafts: it was this tab's only, gone with the app). Not saved until it has been read back:
+  // the empty box on mount used to delete it before the effect below could restore it.
   const draftKey = `mpa.draft.${sid}`;
   const draftRead = useRef(false);
   // Kept once typing pauses rather than on every key (a synchronous storage write the key waited on), and whatever is still
@@ -6791,8 +7072,8 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
     saveDraft.current = () => {
       saveDraft.current = null;
       try {
-        if (typed) sessionStorage.setItem(draftKey, typed);
-        else sessionStorage.removeItem(draftKey);
+        if (typed) localStorage.setItem(draftKey, typed);
+        else (localStorage.removeItem(draftKey), sessionStorage.removeItem(draftKey));
       } catch {
         /* nothing kept: the box still works */
       }
@@ -6819,8 +7100,8 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
       const k = `mpa.startWith.${sid}`;
       left = sessionStorage.getItem(k) ?? "";
       if (left) sessionStorage.removeItem(k);
-      // Otherwise what was left half-typed here.
-      else left = sessionStorage.getItem(`mpa.draft.${sid}`) ?? "";
+      // Otherwise what was left half-typed here (this tab's, from before drafts outlived it).
+      else left = localStorage.getItem(`mpa.draft.${sid}`) ?? sessionStorage.getItem(`mpa.draft.${sid}`) ?? "";
     } catch {
       /* nothing kept, nothing to pick up */
     }
@@ -6902,11 +7183,28 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
   const theirPlan = ownPlan(state.engines[lane]) && state.engines[lane]!.hostId !== me.id ? state.engines[lane]! : null;
   const mode: "drive" | "claim" | "suggest" | "view" = theirPlan ? (can(state, me.id, "suggest") ? "suggest" : "view") : driving ? "drive" : !driver && mayDrive ? "claim" : can(state, me.id, "suggest") ? "suggest" : "view";
   const canUpload = mode !== "view" && !toPeople && can(state, me.id, "upload");
+  // Files dragged over the window: said over it while they are, and to whom they go (Attach.tsx DropOverlay).
+  const dragging = useFileDragging(canUpload);
   // A folder from this computer, sent up as a working copy the agents can read and edit. For a session with no
   // machine of its own: where one is attached, the code is already on it.
   const folderInput = useRef<HTMLInputElement>(null);
   const [sending, setSending] = useState(false);
   const noMachine = !liveMachine(state, lane);
+  // Another folder for this agent's coding tool to work in, added from the chat as it runs (Arun, 2026-11-03: "be able to add
+  // folders, to the coding sessions while in the chat too"): its own coding tool on this computer, from its next message on.
+  const desktopApp = typeof window !== "undefined" ? window.fridayDesktop : undefined;
+  const myTool = !!state.engines[lane]?.tool && state.engines[lane]!.hostId === me.id && !!desktopApp?.pickFolder;
+  const addFolder = async () => {
+    const p = await desktopApp?.pickFolder();
+    if (!p) return;
+    const name = p.split(/[\\/]/).filter(Boolean).pop() || p;
+    try {
+      await hostApi(ctx.identity, "/api/runner/dirs", { method: "POST", body: JSON.stringify({ sid, lane, add: p }) });
+      notify(`${agentNameFor(state, lane)} can work in ${name} too, from your next message.`);
+    } catch (e) {
+      notify(`Couldn't add ${name}: ${(e as Error).message}`);
+    }
+  };
   const uploadFolder = async (list: FileList | null) => {
     const files = Array.from(list ?? []);
     if (!files.length || sending) return;
@@ -6978,11 +7276,16 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
       // One that can't work now says so first: the list read "Yours" beside an agent out of usage or signed out (QA, 2026-10-28).
       const run = runOf(state, id);
       const stuck = run.status === "error" ? (limitHit(run.error) ? "Out of usage" : signedOut(run.error) ? "Not signed in" : "") : "";
+      // Where it stands first, as the header's tabs say it: at work, asking you something, or whose it is.
+      const asks = state.openQuestions[id]?.question;
+      const said = stuck || (asks ? `Asks: ${asks.length > 26 ? `${asks.slice(0, 25)}…` : asks}` : run.status === "running" ? "Working" : "");
+      const whose = d?.id === me.id ? "Yours" : d ? `${d.name.split(/\s+/)[0]} is driving` : "Free to take";
       return {
         label: targetName(id),
         mark: <EngineMark tool={state.engines[id]?.tool ?? ""} size={15} />,
+        after: <StateRing state={sendRing(state, id)} />,
         checked: !toPeople && id === lane,
-        sub: stuck || (d?.id === me.id ? "Yours" : d ? `${d.name.split(/\s+/)[0]} is driving` : "Free to take"),
+        sub: said ? (run.status === "running" && !stuck && !asks ? `Working · ${whose}` : said) : whose,
         onSelect: () => (setToPeople(false), onLane?.(id)),
       };
     }),
@@ -6993,6 +7296,17 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
       : ctx.solo
         ? soloFriday
         : [{ label: "Friday Code", mark: <EngineMark tool="" size={15} />, sub: "Opens beside it", onSelect: addFriday }]),
+    // Another agent, from where you pick who it goes to as well as from the header's + (Arun, 2026-11-03: "add the add agent part as well").
+    // As the header's + lists them: the tools on this computer not here yet, then the rest.
+    ...(ctx.onConnect && me.role !== "viewer"
+      ? [
+          { heading: "Add an agent" },
+          ...splitTools(installedOn(ctx.identity))
+            .here.filter((t) => !targets.some((id) => state.engines[id]?.tool === t))
+            .map((t) => ({ label: ENGINE_NAMES[t], mark: <EngineMark tool={t} size={15} />, onSelect: () => ctx.onConnect?.("", t) })),
+          { label: "Other agents…", mark: <Icon name="plus" size={15} />, onSelect: () => ctx.onConnect?.("") },
+        ]
+      : []),
     // Talking to the people here without steering anything: @name tells someone.
     ...(others ? [{ heading: "Or" }, { label: "The people here", mark: <Icon name="users" size={15} />, checked: toPeople, sub: "No agent reads it", onSelect: () => setToPeople(true) }] : []),
   ];
@@ -7179,7 +7493,7 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
         {/* On Solo with one agent the picker in the box is the only one: this pill was the same agent again, plus an upsell. */}
         {state.options.team && <TeamRecipients sid={sid} text={typed} />}
         {state.options.team && inView === ALL && !namesSomeone(sid, typed) && <TeamWorking sid={sid} />}
-        {!locked && !naming && (targets.length > 1 || others > 0 || (!fridayIsHere && me.role === "owner" && !ctx.solo)) && <MenuButton className="target-pill" label="Who it goes to" text={toPeople ? "The people here" : targetName(lane)} items={targetItems} width={targetWidth} above />}
+        {/* Who it goes to is the first half of the box's own "agent | model" control now (SendPick), not a pill over the box. */}
         {/* Who has the wheel of that agent is the other half of the same question, so it sits beside it: pick who to write to, and
             here is whether you may, and the one press to take or ask for it. */}
         <DrivePill ctx={ctx} lane={lane} />
@@ -7195,6 +7509,9 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
       {/* The box and the list that opens above it, so the list sits on the box's own edge and never over what is typed. */}
       <div className="composer-box">
       {shortcuts.popover}
+      {/* No "N files waiting for review" bar over the box (Arun, 2026-11-03: "get rid of this"): each reply's own change card and
+          the Changes panel say what changed. */}
+      <DropOverlay on={dragging} to={agentNameFor(state, lane)} />
       <PromptInput
         onSubmit={onSubmit}
         multiple
@@ -7257,6 +7574,11 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
                       <Icon name="folder" size={14} /> <span className="ml-2">{sending ? "Uploading a folder…" : "Upload a folder"}</span>
                     </PromptInputActionMenuItem>
                   )}
+                  {myTool && (
+                    <PromptInputActionMenuItem onSelect={() => void addFolder()}>
+                      <Icon name="folder" size={14} /> <span className="ml-2">Add a folder</span>
+                    </PromptInputActionMenuItem>
+                  )}
                   {state.options.team && (
                     <PromptInputActionMenuItem onSelect={() => setGiving(true)}>
                       <Icon name="folder" size={14} /> <span className="ml-2">Give {agentNameFor(state, lane)} a folder or repo</span>
@@ -7288,8 +7610,24 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
             )}
             {/* Who it goes to and on which model, inside the box under a rule, as on the new-session screen: one box, not a box and a row. */}
             {!toolPick && inView !== ALL && <TeammateBoxPicker identity={ctx.identity} lane={lane} notify={notify} />}
+            {toolPick && (
+              <span className="send-pick">
+                {/* Who it goes to: the agent, its state's ring, and how many others are here; pressed, everyone it can go to
+                    (Arun, 2026-11-03: "coding agent | model (reasoning level)", with the Send to menu). */}
+                {!locked && !naming && (targets.length > 1 || others > 0 || (!fridayIsHere && me.role === "owner" && !ctx.solo) || (!!ctx.onConnect && me.role !== "viewer")) ? (
+                  <MenuButton className="send-to" label="Who it goes to" items={targetItems} width={targetWidth} maxHeight={300} above>
+                    <SendToFace state={state} lane={lane} toPeople={toPeople} name={toPeople ? "The people here" : targetName(lane)} more={targets.length - 1} />
+                    <Icon name="chevronDown" size={13} className="menu-pill-caret" />
+                  </MenuButton>
+                ) : (
+                  <span className="send-to still">
+                    <SendToFace state={state} lane={lane} toPeople={toPeople} name={toPeople ? "The people here" : targetName(lane)} more={0} />
+                  </span>
+                )}
+                {mode !== "view" && !toPeople && <span className="send-bar" aria-hidden="true" />}
             {mode !== "view" && !toPeople && toolPick && (
               <AgentSwitch
+                modelOnly
                 state={state}
                 me={me}
                 identity={ctx.identity}
@@ -7305,14 +7643,16 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
                 {...(ctx.onConnect ? { onSetup: ctx.onConnect } : {})}
               />
             )}
+            {mode !== "view" && !toPeople && !agentAndModelAreOne && !(state.options.team && mode === "suggest") && <LaneModelPill ctx={ctx} lane={lane} />}
+            {/* Model and reasoning in one control, the same one the new session screen uses. Friday's models are for Friday Code: driving
+                somebody's own Claude Code, Codex or Cursor, the model is theirs, and this pill would show a choice that changed nothing. */}
+              </span>
+            )}
             {/* Effort is a column of the agent picker for whoever steers the lane. Everybody else still sees the room's level
                 here, read-only, so it isn't behind the view check. */}
             {!(state.options.team && mode === "suggest") && (mode === "view" || !agentAndModelAreOne || !effortChoice({ state, me, lane, send, notify })) && <EffortPill state={state} me={me} lane={lane} send={send} notify={notify} />}
             {mode !== "view" && !toPeople && toolPick && <ReachPill ctx={ctx} lane={lane} />}
             {/* A crew works toward a goal by running on its own (TeamControls.tsx), as the open-source edition's does. */}
-            {mode !== "view" && !toPeople && !agentAndModelAreOne && !(state.options.team && mode === "suggest") && <LaneModelPill ctx={ctx} lane={lane} />}
-            {/* Model and reasoning in one control, the same one the new session screen uses. Friday's models are for Friday Code: driving
-                somebody's own Claude Code, Codex or Cursor, the model is theirs, and this pill would show a choice that changed nothing. */}
           </PromptInputTools>
           <div className="flex items-center gap-1 composer-send">
             {liveHint && <span className="composer-live-hint">{liveHint}</span>}

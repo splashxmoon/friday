@@ -22,7 +22,7 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 
-export type Presence = "working" | "needs" | "queued" | "done" | "error" | "asleep" | "idle";
+export type Presence = "working" | "needs" | "queued" | "done" | "error" | "asleep" | "idle" | "limited";
 
 export function PresenceRing({ state, size, children, className = "", label, square = false }: {
   state: Presence;
@@ -57,6 +57,21 @@ export function PresenceRing({ state, size, children, className = "", label, squ
   );
 }
 
+/**
+ * A state as a small ring of its own, set just after a name (Arun, 2026-11-03: "use the small ring instead of this big ring around
+ * the icon"): the sidebar's rows and the agents' tabs. Nothing at rest, so the ones at work stand out.
+ */
+export function StateRing({ state, title }: { state: Presence | null; title?: string | undefined }) {
+  if (!state || state === "idle" || state === "done" || state === "asleep") return null;
+  return (
+    <span className="state-ring" title={title}>
+      <PresenceRing state={state} size={8} label={{ working: "Working", needs: "Needs you", error: "Stopped", queued: "Waiting", limited: "Out of usage" }[state]}>
+        <span />
+      </PresenceRing>
+    </span>
+  );
+}
+
 /** "now", "4m", "1h 5m", "3h": how long something has been at it, in tabular figures, counted up by the caller's tick. */
 export function elapsed(since: number, now = Date.now()): string {
   const m = Math.floor((now - since) / 60_000);
@@ -76,7 +91,8 @@ export function useNow(ms = 20_000): number {
   return now;
 }
 
-const RANK: Record<string, number> = { needs: 0, waiting: 0, done: 1, working: 2 };
+// "quiet": working, but unheard a while (Sidebar.tsx crewQuiet), after those at work and before the rest.
+const RANK: Record<string, number> = { needs: 0, waiting: 0, done: 1, working: 2, quiet: 2.5 };
 /**
  * Needs you, then finished and not yet read, then working, then the rest, each in the order it was in (owner call D; "done"
  * from Herdr's priority order, 2026-11-01: what finished is yours to look at, what works isn't yet): a stable sort by state.

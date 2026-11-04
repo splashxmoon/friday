@@ -16,7 +16,7 @@ const shellFor = (id: string) => laneShells.get(id) ?? shells.api();
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ToolResult, ToolResultOutput } from "@/components/agents/tool-result";
-import { engineName, MAIN_LANE, type EngineTool, type SessionEvent } from "../types.js";
+import { engineName, MAIN_LANE, TOOL_INFO, type EngineTool, type SessionEvent } from "../types.js";
 import { EngineMark } from "./BrandMarks.js";
 import type { Send } from "./useSession.js";
 import { Icon } from "./icons.js";
@@ -1056,14 +1056,14 @@ export function LaneTui({ sid, invite, lane, tool, title, machine, onBack }: { s
   const name = engineName(tool);
   const where = run?.cwd.replace(/^\/(Users|home)\/[^/]+/, "~") ?? "";
   return (
-    <div className="lane-tui">
+    <div className="lane-tui" style={{ "--ftui-tint": TOOL_INFO[tool]?.tint } as React.CSSProperties}>
       <div className="lane-tui-head">
         <EngineMark tool={tool} size={14} />
         <span className="lane-tui-name">{title && title !== name ? `${title} · ${name}` : name}</span>
         {where && <span className="lane-tui-where" title={run!.cwd}>{where}</span>}
         <span className="lane-tui-note">What's sent to it runs once it's waiting</span>
         <button type="button" className="ftui-link" onClick={onBack} title="Hand it back to Friday, in Friday's terminal view">
-          ← friday
+          Friday's view
         </button>
       </div>
       {err ? <p className="error small lane-tui-err">{err}</p> : run ? <LocalShell id={toolShellId(sid, lane)} cwd={run.cwd} run={run.line} onOutput={() => {}} /> : <p className="muted small lane-tui-err">Opening {name}…</p>}

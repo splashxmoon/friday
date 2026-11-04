@@ -575,7 +575,10 @@ html .rail-item[data-active="true"], html .rail-fly-row[data-active="true"] { ba
 /* In the desktop app the rail starts under the window's header (40px, its traffic lights and buttons), whether or not the page
    has set --band yet: its edge ran up beside the traffic lights (Arun, 2026-10-27: "fix the line over extending into the
    header"). */
-html.desktop .side-rail { top: calc(var(--band-top, 0px) + max(var(--band, 0px), 40px)); } /* until the page's own top is measured (SideRail) */
+html.desktop .side-rail { top: 0; padding-top: calc(var(--band-top, 0px) + max(var(--band, 0px), 40px) + 8px); } /* until the page's own top is measured (SideRail) */
+/* Up behind the traffic lights, where there is nothing to press: the strip still moves the window, under the rail's own buttons. */
+html.desktop .side-rail::before { content: ""; position: absolute; z-index: -1; inset: 0 0 auto; height: var(--rail-head, 40px); -webkit-app-region: drag; }
+html.desktop .side-rail { border-top: 0; isolation: isolate; }
 /* Its top on the header's line, that line carried across it (Arun, 2026-10-27: "sit flush with the header horinztonal line"). */
 .side-rail { border-top: 1px solid var(--border); }
 /* Solid, not glass: the page's dotted backdrop showed through it (Arun, 2026-10-27: "make the side more opaque"). */

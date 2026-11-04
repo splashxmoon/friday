@@ -8,7 +8,6 @@ import { BuildWatch } from "./BuildWatch.js";
 import type { Role } from "../types.js";
 import { lazy, Suspense, type ComponentProps, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { isNarrow } from "./narrow.js";
-import { SideRail } from "./SideRail.js";
 import { readTabNow, setTeamTab, TeamHome, useTeamTab } from "./Teammates.js";
 import { choosePlace, usePlaceFollows, usePlaceLeaves, useWorkSessions } from "./WorkMode.js";
 import { openWorkflows, useAutomationsView, useWorkflowNotices } from "./team-workflow-view.js";
@@ -65,6 +64,7 @@ import type { SkillTemplate } from "../skill-catalog.js";
 import type { WorkspaceUsage } from "./workspace-types.js";
 import { Icon } from "./icons.js";
 import { Setup } from "./Setup.js";
+import { WhatsNew } from "./WhatsNew.js";
 import { QuickPrompt } from "./QuickPrompt.js";
 import { quickText, sendQuickTo, startQuick } from "./quick-send.js";
 import { ShortcutList } from "./Shortcuts.js";
@@ -200,17 +200,6 @@ export function App() {
     };
     addEventListener("friday:setup", setup);
     return () => removeEventListener("friday:setup", setup);
-  }, []);
-  // The team demo starts on the start page too (Code.tsx), where the computer's tools are: from Settings it goes there first.
-  useEffect(() => {
-    const demo = (e: Event) => {
-      if ((e as CustomEvent).detail === "again" || parseRoute(location.search).kind === "home") return;
-      history.pushState(null, "", routeUrl({ kind: "home" }));
-      setRoute({ kind: "home" });
-      setTimeout(() => dispatchEvent(new CustomEvent("friday:team-demo", { detail: "again" })), 300);
-    };
-    addEventListener("friday:team-demo", demo);
-    return () => removeEventListener("friday:team-demo", demo);
   }, []);
   // Another window or tab of Friday saved the list (a rename, a snooze, a session settled): take its copy, rather than writing this
   // window's older one over it at the next change (2026-10-27 audit: renames and snoozes were lost between two windows).
@@ -1210,7 +1199,7 @@ export function App() {
       {/* The first thing the keyboard reaches: straight to the page, past the rail and the list. */}
       <a className="skip-link" href="#main">Skip to the page</a>
       {/* Where a session puts its header in the desktop app: the band along the top of the window, which has the room. Fixed, so it takes no place in the grid. */}
-      <WindowNav open={panelOpen} onToggle={togglePanel} what={inAgents ? "agents" : "sessions"} />
+      <WindowNav open={panelOpen} onToggle={togglePanel} what={inAgents ? "agents" : "sessions"} working={attention.working.keys()} needs={attention.items.map((i) => i.sid)} />
       {/* In a browser the sidebar folds by itself on a narrow window, and the window bar's button (WindowNav) is the app's: with
           the sidebar folded there was no way back to it but ⌘B (Arun, 2026-10-24: UX gaps). */}
       {!panelOpen && !window.fridayDesktop && (
@@ -1287,13 +1276,14 @@ export function App() {
         />
         {/* Only where the list floats over the page, so clicking off it puts it away. */}
         {panelOpen && <div className="sb-backdrop" onClick={() => setLayout({ sidebarCollapsed: true })} />}
-        {/* Folded, the sidebar leaves a rail in its place: places, a new session, what is going on. In a narrow window the list
-            floats over the page beside it, so the rail stays and the page doesn't move (Arun, 2026-10-28). */}
-        {(!panelOpen || narrowNow) && identity.id && <SideRail attention={attention} recents={recents} activeSid={activeSid} view={route.kind} onOpen={(r) => navigate({ kind: "session", sid: r.sid, invite: r.invite })} onNew={() => navigate({ kind: "home" })} onShow={togglePanel} shown={panelOpen} onPage={(p) => (p === "settings" ? navigate({ kind: "settings", section: lastSettings.current }) : navigate({ kind: p }))} />}
+        {/* Closed, the sidebar is gone, with no rail left in its place: the window's own sidebar button and ⌘B bring it back
+            (Arun, 2026-11-03: "have the side bar fully close on close instead of being still there slightly"). */}
       </>
       <main id="main" className="main" tabIndex={-1}>
         {/* Someone new is set up first (this computer, its coding tools, GitHub), not toured: the tour waits behind it. */}
         {identity.id && route.kind === "home" && <Setup identity={identity} recents={recents} onDone={() => requestAnimationFrame(() => document.querySelector<HTMLElement>(".composer textarea, textarea")?.focus())} />}
+        {identity.id && <WhatsNew recents={recents} />}
+        {/* A new account's workspace on no paid plan: the plans, in front of everything but a shared session, which stays free to watch. */}
 
         {/* A page opened before its code has arrived shows its shape, not a blank. */}
         {/* Keyed on the workspace switches: every page is drawn again in the new workspace, and reads its own lists again. */}

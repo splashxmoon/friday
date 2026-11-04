@@ -5,6 +5,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { arch, cpus, homedir, hostname, platform, release, totalmem } from "node:os";
 import path from "node:path";
 import { childEnv } from "./adapters.js";
+import { BLOCK, databaseIn, localPostgres, stackFor, stackVars } from "./stack.js";
 
 /**
  * A session's environment, on the machine its agents work on (Arun, 2026-10-18): what that computer is, which of the
@@ -36,7 +37,11 @@ export interface EnvironmentInfo {
   /** The variables the folder's .env files set, by file: names only, values never. */
   envFiles: { file: string; names: string[] }[];
   /** What this computer keeps for the folder (saveEnvironment): its setup command, and its variables' names only. */
-  saved: { setup: string; autoSetup: boolean; vars: string[]; updatedAt?: number };
+  saved: { setup: string; autoSetup: boolean; vars: string[]; updatedAt?: number; /** Each agent's copy gets its own database. */ ownDb?: boolean };
+  /** This copy's own ports and database (stack.ts), when it is an agent's copy. */
+  stack?: { ports: [number, number]; moved?: Record<string, number>; db?: { kind: "sqlite" | "postgres"; name: string; from: string }; note?: string };
+  /** The database the folder's env names, by kind and name only (never its address or password): what "its own database" copies. */
+  database?: { kind: "sqlite" | "postgres" | "other"; name: string };
   /** Commands the agents run here can reach the internet: it is the person's own computer, with no sandbox between. */
   network: "full";
 }
@@ -44,6 +49,8 @@ export interface EnvironmentInfo {
 interface Saved {
   setup?: string;
   autoSetup?: boolean;
+  /** Each agent's copy gets its own copy of the folder's local Postgres database (stack.ts). */
+  ownDb?: boolean;
   vars?: Record<string, string>;
   updatedAt?: number;
 }
@@ -109,8 +116,12 @@ export function folderVars(cwd: string | undefined): Record<string, string> {
   const vars = readSaved(cwd).vars ?? {};
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(vars)) if (VAR_NAME.test(k) && !KEEP.has(k) && typeof v === "string") out[k] = v;
-  return out;
+  // An agent's copy runs on its own ports (stack.ts): its PORT over the project's own.
+  return { ...out, ...stackVars(cwd) };
 }
+
+/** Whether the folder is set to give each agent's copy its own database (stack.ts). */
+export const folderOwnDb = (cwd: string): boolean => !!readSaved(cwd).ownDb;
 
 /** The setup command kept for this folder, and whether it runs when an agent starts here. */
 export function folderSetup(cwd: string): { setup: string; autoSetup: boolean } {
@@ -122,9 +133,10 @@ export function folderSetup(cwd: string): { setup: string; autoSetup: boolean } 
  * Change what this computer keeps for the folder. `vars` is the whole new set when given: a name with an empty value is
  * dropped. Values a caller sent back as `null` keep what they were (the page never holds them, so it sends null for "unchanged").
  */
-export function saveEnvironment(cwd: string, change: { setup?: string; autoSetup?: boolean; vars?: Record<string, string | null> }): EnvironmentInfo["saved"] {
+export function saveEnvironment(cwd: string, change: { setup?: string; autoSetup?: boolean; ownDb?: boolean; vars?: Record<string, string | null> }): EnvironmentInfo["saved"] {
   const now = readSaved(cwd);
   const next: Saved = { ...now, updatedAt: Date.now() };
+  if (typeof change.ownDb === "boolean") next.ownDb = change.ownDb;
   if (typeof change.setup === "string") next.setup = change.setup.trim().slice(0, 2000);
   if (typeof change.autoSetup === "boolean") next.autoSetup = change.autoSetup;
   if (change.vars && typeof change.vars === "object") {
@@ -146,7 +158,7 @@ export function saveEnvironment(cwd: string, change: { setup?: string; autoSetup
     /* not on this filesystem */
   }
   cache.delete(file);
-  return { setup: next.setup ?? "", autoSetup: !!next.autoSetup, vars: Object.keys(next.vars ?? {}).sort(), ...(next.updatedAt ? { updatedAt: next.updatedAt } : {}) };
+  return { setup: next.setup ?? "", autoSetup: !!next.autoSetup, vars: Object.keys(next.vars ?? {}).sort(), ...(next.updatedAt ? { updatedAt: next.updatedAt } : {}), ...(next.ownDb ? { ownDb: true } : {}) };
 }
 
 function version(cmd: string, args: string[], pick: RegExp = /(\d+\.\d+(?:\.\d+)?)/): Promise<string | null> {
@@ -244,12 +256,18 @@ export async function describeEnvironment(cwd: string): Promise<EnvironmentInfo>
       .map(async (file) => ({ file, names: envNames(await text(base, file)).slice(0, 200) })),
   );
   const saved = readSaved(base);
+  const stack = stackFor(base);
+  // The database by kind and name, read from the folder's own env (or the copy's): never its address or password.
+  const db = databaseIn(await Promise.all(files.filter((f) => /^\.env(\.[\w.-]+)?$/.test(f)).sort().slice(0, 12).map(async (file) => ({ file, text: await text(base, file) }))));
+  const dbName = db ? (db.kind === "postgres" ? (localPostgres(db.value)?.db ?? "a Postgres database") : db.kind === "sqlite" ? path.basename(db.value.replace(/^(?:file:|sqlite:(?:\/\/)?)/i, "")) : db.key) : "";
   return {
     machine: { name: process.env.FRIDAY_MACHINE_NAME || hostname().replace(/\.local$/i, ""), os, arch: arch() === "arm64" && platform() === "darwin" ? "Apple silicon" : arch(), cpus: cpus().length, memoryGb: Math.round(totalmem() / 2 ** 30), shell: shellName() },
     folder: base,
     tools,
     envFiles,
-    saved: { setup: saved.setup ?? "", autoSetup: !!saved.autoSetup, vars: Object.keys(saved.vars ?? {}).sort(), ...(saved.updatedAt ? { updatedAt: saved.updatedAt } : {}) },
+    saved: { setup: saved.setup ?? "", autoSetup: !!saved.autoSetup, vars: Object.keys(saved.vars ?? {}).sort(), ...(saved.updatedAt ? { updatedAt: saved.updatedAt } : {}), ...(saved.ownDb ? { ownDb: true } : {}) },
+    ...(stack ? { stack: { ports: [stack.ports, stack.ports + BLOCK - 1] as [number, number], ...(stack.moved ? { moved: stack.moved } : {}), ...(stack.db ? { db: { kind: stack.db.kind, name: stack.db.name, from: stack.db.from } } : {}), ...(stack.note ? { note: stack.note } : {}) } } : {}),
+    ...(db && dbName ? { database: { kind: db.kind, name: dbName } } : {}),
     network: "full",
   };
 }

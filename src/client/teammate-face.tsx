@@ -14,7 +14,7 @@
  *
  */
 import { memo } from "react";
-import { teamColour } from "./teammate-block.js";
+import { isV2, teamColour } from "./teammate-block.js";
 import { reducedMotion } from "./presence.js";
 
 const hash = (seed: string) => [...seed].reduce((h, c) => (Math.imul(h, 31) + c.charCodeAt(0)) >>> 0, 2166136261);
@@ -32,7 +32,23 @@ function numbers(seed: number): () => number {
 }
 
 type Wave = { k: number; a: number; p: number };
-export type Look = { waves: Wave[]; turn: number; eyeGap: number; eyeY: number; eyeX: number; eyeW: number; eyeH: number };
+/**
+ * The second set of faces (Arun, 2026-11-03: "add more mascot designs and colors too"), for looks marked "v2:": still round and
+ * soft, never a box or a pill (2026-10-29), now with a body of four kinds (a blob, a cloud of six soft bumps, a five-petal flower,
+ * a pebble), eyes of four (dots, round ones with a shine, small beads, wide-set ovals) and one small extra or none (cheeks,
+ * freckles, a sprout, round ears, an antenna). Every look made before is a plain blob with dots, as it was.
+ */
+export type Body = "blob" | "cloud" | "flower" | "pebble";
+export type EyeKind = "dot" | "round" | "bead" | "wide";
+export type Extra = "none" | "cheeks" | "freckles" | "sprout" | "ears" | "antenna";
+export type Look = { waves: Wave[]; turn: number; eyeGap: number; eyeY: number; eyeX: number; eyeW: number; eyeH: number; body: Body; eyeKind: EyeKind; extra: Extra };
+const pick = <T,>(r: () => number, xs: readonly (readonly [T, number])[]): T => {
+  let x = r() * xs.reduce((s, [, w]) => s + w, 0);
+  for (const [v, w] of xs) if ((x -= w) < 0) return v;
+  return xs[0]![0];
+};
+/** Something on top of the head (a sprout, ears, an antenna), which the lead's crown takes the place of. */
+export const onTop = (e: Extra) => e === "sprout" || e === "ears" || e === "antenna";
 
 const looks = new Map<string, Look>();
 /** A seed's shape and eyes: three harmonics of small amplitude, and where the eyes sit. */
@@ -53,7 +69,22 @@ export function lookOf(seed: string): Look {
     eyeX: between(-2.5, 2.5),
     eyeW: between(5, 6.2),
     eyeH: between(8.6, 10.6),
+    body: "blob",
+    eyeKind: "dot",
+    extra: "none",
   };
+  if (isV2(seed)) {
+    // Drawn from the same numbers, after the first set's, so a v2 look is as fixed for its seed as any.
+    look.body = pick<Body>(r, [["blob", 3], ["cloud", 2], ["flower", 2], ["pebble", 2]]);
+    look.eyeKind = pick<EyeKind>(r, [["dot", 3], ["round", 3], ["bead", 2], ["wide", 2]]);
+    look.extra = pick<Extra>(r, [["none", 3], ["cheeks", 2], ["freckles", 1], ["sprout", 1.5], ["ears", 1.5], ["antenna", 1]]);
+    const p = () => between(0, Math.PI * 2);
+    if (look.body === "cloud") look.waves = [{ k: 6, a: between(0.045, 0.06), p: p() }, { k: 3, a: between(0.01, 0.025), p: p() }];
+    else if (look.body === "flower") look.waves = [{ k: 5, a: between(0.06, 0.08), p: p() }, { k: 2, a: between(0.01, 0.02), p: p() }];
+    else if (look.body === "pebble") (look.waves = [{ k: 2, a: between(0.08, 0.11), p: p() }, { k: 3, a: between(0.01, 0.03), p: p() }]), (look.turn = r() < 0.5 ? 0 : Math.PI / 4);
+    if (look.eyeKind === "wide") look.eyeGap = between(16, 18.5);
+    if (look.eyeKind === "bead") look.eyeGap = between(10, 13);
+  }
   looks.set(seed, look);
   return look;
 }
@@ -106,6 +137,13 @@ export function inkOn(hex: string): string {
   return 0.2126 * r! + 0.7152 * g! + 0.0722 * b! > 0.33 ? "rgb(17 19 22 / 0.86)" : "#fff";
 }
 
+/** A colour made deeper by `k` (0 to 1, of its brightness), for a face's own small parts. */
+export function shade(hex: string, k: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => Math.round(v * k).toString(16).padStart(2, "0"));
+  return `#${c.join("")}`;
+}
+
 export type Eyes = "open" | "blink" | "closed";
 const EYE = "#111316";
 
@@ -119,10 +157,24 @@ function EyesOf({ look, eyes, size }: { look: Look; eyes: Eyes; size: number }) 
   const h = Math.max(look.eyeH, 1 * px);
   const gap = Math.max(look.eyeGap, w + 1.4 * px);
   const xs = [look.eyeX - gap, look.eyeX + gap];
+  if (eyes === "open" && (look.eyeKind === "round" || look.eyeKind === "bead")) {
+    const rr = look.eyeKind === "round" ? Math.max(7.2, 1 * px) : Math.max(4.4, 0.9 * px);
+    return (
+      <g>
+        {xs.map((x) => (
+          <g key={x}>
+            <circle cx={f(x)} cy={f(look.eyeY)} r={f(rr)} fill={EYE} fillOpacity={0.88} />
+            {/* A round eye's shine, where a light from the top left would catch it; too small to draw on a tiny face. */}
+            {look.eyeKind === "round" && size >= 20 && <circle cx={f(x + rr * 0.35)} cy={f(look.eyeY - rr * 0.38)} r={f(rr * 0.32)} fill="#fff" fillOpacity={0.9} />}
+          </g>
+        ))}
+      </g>
+    );
+  }
   if (eyes === "open")
     return (
       <g fill={EYE} fillOpacity={0.88}>
-        {xs.map((x) => <ellipse key={x} cx={f(x)} cy={f(look.eyeY)} rx={f(w)} ry={f(h)} />)}
+        {xs.map((x) => <ellipse key={x} cx={f(x)} cy={f(look.eyeY)} rx={f(look.eyeKind === "wide" ? w * 0.9 : w)} ry={f(look.eyeKind === "wide" ? h * 0.78 : h)} />)}
       </g>
     );
   // A blink is a short straight line; asleep, each eye a soft downward curve.
@@ -144,24 +196,65 @@ function EyesOf({ look, eyes, size }: { look: Look; eyes: Eyes; size: number }) 
  * A teammate's face at `size` px: its blob in its hue and its eyes, or (`letters`) its initials on the same blob. `breathing`
  * lets a working face drift; it holds still with reduced motion.
  */
-export const BlobFace = memo(function BlobFace({ seed, size, eyes = "open", breathing = false, letters }: { seed: string; size: number; eyes?: Eyes; breathing?: boolean; letters?: string }) {
+export const BlobFace = memo(function BlobFace({ seed, size, eyes = "open", breathing = false, letters, crowned = false }: { seed: string; size: number; eyes?: Eyes; breathing?: boolean; letters?: string; /** The lead: its crown is on its head, so nothing else is. */ crowned?: boolean }) {
   const look = lookOf(seed);
   const shape = shapeOf(seed);
   const fill = teamColour(seed);
   const moving = breathing && !reducedMotion();
+  const extra = letters || (crowned && onTop(look.extra)) ? "none" : look.extra;
+  // Something on its head: the body a little smaller and lower, so all of it stays in the face's circle and its ring.
+  const top = onTop(extra);
   return (
     // Its size inline: the places a face sits size their own icons' svgs (".rsp-avatar svg" and the like), never a face's.
     <svg className="tm-face tm-blob" width={size} height={size} style={{ width: size, height: size }} viewBox="-50 -50 100 100" aria-hidden="true" focusable="false">
-      <path className="tm-blob-body" d={shape.still} fill={fill}>
-        {moving && <animate attributeName="d" dur="9s" repeatCount="indefinite" values={shape.breathing} keyTimes="0;0.34;0.67;1" calcMode="spline" keySplines="0.45 0 0.55 1;0.45 0 0.55 1;0.45 0 0.55 1" />}
-      </path>
-      {letters ? (
-        <text x="0" y="1" textAnchor="middle" dominantBaseline="central" fill={inkOn(fill)} fontSize={letters.length > 1 ? 40 : 48} fontWeight={600} letterSpacing="-0.02em" style={{ fontFamily: "var(--font)" }}>
-          {letters}
-        </text>
-      ) : (
-        <EyesOf look={look} eyes={eyes} size={size} />
+      {extra === "ears" && (
+        <g fill={fill}>
+          {[-1, 1].map((s) => (
+            <g key={s}>
+              <circle cx={s * 25} cy={-29} r={12} />
+              <circle cx={s * 25} cy={-29} r={5.5} fill={shade(fill, 0.78)} />
+            </g>
+          ))}
+        </g>
       )}
+      {extra === "antenna" && (
+        // In a deeper shade of its own colour, so it reads on either ground and grows out of its head rather than floating.
+        <g>
+          <path d="M0 -32V-43" stroke={shade(fill, 0.68)} strokeWidth={3.6} strokeLinecap="round" />
+          <circle cx={0} cy={-44.5} r={5.2} fill={fill} stroke={shade(fill, 0.68)} strokeWidth={2.6} />
+        </g>
+      )}
+      {extra === "sprout" && (
+        <g>
+          <path d="M0 -35C0 -40 0.5 -43 1.5 -46" fill="none" stroke="#5f9e5c" strokeWidth={3} strokeLinecap="round" />
+          <ellipse cx={-6} cy={-45} rx={6.5} ry={3.6} transform="rotate(-25 -6 -45)" fill="#74b86f" />
+          <ellipse cx={7.5} cy={-47} rx={6} ry={3.4} transform="rotate(20 7.5 -47)" fill="#86c47f" />
+        </g>
+      )}
+      <g transform={top ? "translate(0 7) scale(0.85)" : undefined}>
+        <path className="tm-blob-body" d={shape.still} fill={fill}>
+          {moving && <animate attributeName="d" dur="9s" repeatCount="indefinite" values={shape.breathing} keyTimes="0;0.34;0.67;1" calcMode="spline" keySplines="0.45 0 0.55 1;0.45 0 0.55 1;0.45 0 0.55 1" />}
+        </path>
+        {letters ? (
+          <text x="0" y="1" textAnchor="middle" dominantBaseline="central" fill={inkOn(fill)} fontSize={letters.length > 1 ? 40 : 48} fontWeight={600} letterSpacing="-0.02em" style={{ fontFamily: "var(--font)" }}>
+            {letters}
+          </text>
+        ) : (
+          <>
+            {extra === "cheeks" && size >= 18 && (
+              <g fill="#ff6f8a" fillOpacity={0.42}>
+                {[-1, 1].map((s) => <ellipse key={s} cx={f(look.eyeX + s * (look.eyeGap + 9))} cy={f(look.eyeY + 13)} rx={7} ry={4.6} />)}
+              </g>
+            )}
+            {extra === "freckles" && size >= 22 && (
+              <g fill={EYE} fillOpacity={0.3}>
+                {[-1, 1].flatMap((s) => [0, 1, 2].map((i) => <circle key={`${s}${i}`} cx={f(look.eyeX + s * (look.eyeGap + 4 + i * 4))} cy={f(look.eyeY + 13 + (i === 1 ? 2.5 : 0))} r={1.5} />))}
+              </g>
+            )}
+            <EyesOf look={look} eyes={eyes} size={size} />
+          </>
+        )}
+      </g>
     </svg>
   );
 });

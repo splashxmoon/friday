@@ -14,6 +14,8 @@ interface Branch {
 
 /** When each session's folder was last asked its branch, so the pills on a page don't each ask. */
 const asked = new Map<string, number>();
+/** The lanes whose folder answered that it isn't a git repository: no branch to show or pick (Arun, 2026-11-03, the Manager's). */
+const notRepo = new Set<string>();
 
 const branchesUrl = (sid: string, invite: string, lane: string) =>
   `/api/sessions/${encodeURIComponent(sid)}/repo?op=branches&invite=${encodeURIComponent(invite)}&lane=${encodeURIComponent(lane)}`;
@@ -32,6 +34,7 @@ const branchesUrl = (sid: string, invite: string, lane: string) =>
 export function BranchButton({ sid, invite, send, lane, branch, idle = true }: { sid: string; invite: string; send: Send; lane: string; branch?: string; /** No run going: an agent may just have switched. */ idle?: boolean }) {
   const [open, setOpen] = useState(false);
   const btn = useRef<HTMLButtonElement>(null);
+  const [none, setNone] = useState(() => notRepo.has(`${sid}:${lane}`));
 
   /**
    * The branch the folder is on now, asked of the folder itself.
@@ -47,7 +50,15 @@ export function BranchButton({ sid, invite, send, lane, branch, idle = true }: {
       // Shared by every pill on the page (the header's and the status bar's), so one folder is asked once.
       if (Date.now() - (asked.get(key) ?? 0) < 20_000) return;
       asked.set(key, Date.now());
-      void fetch(branchesUrl(sid, invite, lane)).catch(() => {});
+      void fetch(branchesUrl(sid, invite, lane))
+        .then((r) => r.json() as Promise<{ error?: string }>)
+        .then((r) => {
+          const no = /isn't a git repository/.test(r.error ?? "");
+          if (no) notRepo.add(key);
+          else notRepo.delete(key);
+          setNone(no);
+        })
+        .catch(() => {});
     };
     ask();
     const onFocus = () => document.visibilityState === "visible" && ask();
@@ -59,6 +70,7 @@ export function BranchButton({ sid, invite, send, lane, branch, idle = true }: {
     };
   }, [sid, invite, lane, idle]);
 
+  if (none) return null;
   return (
     <>
       <button

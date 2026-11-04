@@ -47,6 +47,8 @@ type SwitchProps = {
   onThinking: (t: Thinking) => void;
   /** This lane's effort, as a column of the picker (effortChoice in Activity.tsx); null when its tool takes none. */
   effort?: EffortChoice | null;
+  /** The pill says the model and its level only: the box's agent half names the agent (AgentModelPicker modelOnly). */
+  modelOnly?: boolean;
 };
 
 /** Whether this person can rewire this lane from here, which is when the one picker for the agent and its model is shown. */
@@ -157,7 +159,7 @@ function Bring({ identity, onSetup }: { identity: Identity; onSetup: (lane: stri
   );
 }
 
-function Switch({ state, me, identity, sid, invite, lane, events = [], notify, onSetup, plan, onFridayModel, onThinking, effort }: SwitchProps) {
+function Switch({ state, me, identity, sid, invite, lane, events = [], notify, onSetup, plan, onFridayModel, onThinking, effort, modelOnly = false }: SwitchProps) {
   const engine = state.engines[lane];
   const current: EngineTool | "" = engine?.tool ?? "";
   const { state: machine } = useMachine(identity);
@@ -249,6 +251,7 @@ function Switch({ state, me, identity, sid, invite, lane, events = [], notify, o
       thinking={state.options.thinking}
       onThinking={onThinking}
       effort={effort ?? null}
+      modelOnly={modelOnly}
     />
   );
 }

@@ -12,6 +12,7 @@ export interface Peers {
 }
 import { limitedLanes, limitedTask, limitTargets, personBehind, type Limited } from "./limit-handoff.js";
 import { commandFailed, TEST_CMD } from "./receipt.js";
+import { compare, failingTests, onlyPre, type Baseline } from "./baseline.js";
 import { heldByPerson } from "./held.js";
 import { nearLimit, type ToolWindow } from "./routing.js";
 import { KIND_WORDS, skillOf, strongAt, taskKind, type Skills, type TaskKind } from "./strengths.js";
@@ -609,6 +610,8 @@ export class AgentMesh {
   teamSwitch: ((sid: string, lane: string) => Promise<boolean>) | null = null;
   /** The checks people added for the repo a lane works in (brain.ts), run after a board task's own; `ran` counts each run. Set by the app. */
   repoChecks: ((sid: string, lane: string) => Promise<RepoCheck[]>) | null = null;
+  /** What a test command came to at the commit a lane's copy started from (app.ts baselineFor, baseline.ts); null when it can't be said. */
+  baseline: ((sid: string, lane: string, command: string) => Promise<Baseline | null>) | null = null;
   /** save_lesson and search_lessons (LESSON_TOOLS): the repository's project memory. Set by the app. */
   lessons: { call(sid: string, lane: string, name: string, args: Record<string, unknown>): Promise<MeshResult> } | null = null;
   /**
@@ -1612,9 +1615,16 @@ export class AgentMesh {
     const runs: RepoCheck[] = [...(command ? [{ command }] : []), ...added.filter((c) => c.command !== command)];
     for (const c of runs) {
       await this.store.append(sid, FRIDAY, { type: "board.checking", id, lane, command: c.command }, { lane });
-      const out = await this.repo(sid, lane, { op: "shell", command: c.command, timeoutSec: CHECK_SECONDS } as RepoCall).catch((e: Error) => `Couldn't run it: ${e.message}`);
-      const verdict = checkVerdict(out);
-      await this.store.append(sid, FRIDAY, { type: "board.checked", id, lane, command: c.command, ok: verdict !== "failed", output: clip(out ?? "", 4000), ...(verdict === "skipped" ? { skipped: true } : {}) }, { lane });
+      // A rule read off the change: nothing to run, its breaches are what goes back (rules.ts).
+      const broke = c.judge ? await c.judge().catch(() => null) : null;
+      const out = c.judge ? (broke ? `$ ${c.command}\n(exited 1)\n${broke}` : `$ ${c.command}\n(exited 0)\n`) : await this.repo(sid, lane, { op: "shell", command: c.command, timeoutSec: CHECK_SECONDS } as RepoCall).catch((e: Error) => `Couldn't run it: ${e.message}`);
+      let verdict = checkVerdict(out);
+      // Failures that were already there at the commit the agent's copy started from aren't the task's (baseline.ts): only the
+      // new ones send it back, and a run whose every failure was there before passes, saying so.
+      const was = verdict === "failed" && TEST_CMD.test(c.command) ? await this.baseline?.(sid, lane, c.command).catch(() => null) : null;
+      const vs = was ? compare(failingTests(out ?? ""), was) : null;
+      if (onlyPre(vs)) verdict = "passed";
+      await this.store.append(sid, FRIDAY, { type: "board.checked", id, lane, command: c.command, ok: verdict !== "failed", output: clip(out ?? "", 4000), ...(verdict === "skipped" ? { skipped: true } : {}), ...(vs?.pre.length ? { pre: vs.pre } : {}), ...(vs?.whole ? { whole: true } : {}) }, { lane });
       if (verdict !== "skipped") await c.ran?.(verdict === "failed").catch(() => undefined);
       if (verdict !== "failed") continue;
       const after = (await this.store.state(sid)).board?.tasks.find((x) => x.id === id);
@@ -1625,7 +1635,9 @@ export class AgentMesh {
         return false;
       }
       const why = c.why ? `This check was added because agents kept getting this wrong: ${c.why}\n\n` : "";
-      await this.send(sid, state.board!.fromLane, { to: after.name ?? laneName(state, lane), text: `Friday ran \`${c.command}\` in your folder after you finished "${after.title}", and it failed:\n\n${clip(out ?? "", 3000)}\n\n${why}Fix it, then end your turn with a short report as before. It runs again when you do.`, kind: "task", board: id, system: true });
+      const pre = vs?.pre.length ? `\n\nOnly these failures are new: ${vs.fresh.join(", ")}. ${vs.pre.length === 1 ? "The other one" : `The other ${vs.pre.length}`} already failed at the commit your copy started from (${vs.pre.slice(0, 6).join(", ")}${vs.pre.length > 6 ? "…" : ""}), so leave ${vs.pre.length === 1 ? "it" : "them"} unless you're asked.` : "";
+      const text = broke ? `Friday checked your change to "${after.title}" against this repo's rules, and it breaks one:\n\n${broke.replace(/^\[Friday\] /, "")}` : `Friday ran \`${c.command}\` in your folder after you finished "${after.title}", and it failed:\n\n${clip(out ?? "", 3000)}${pre}\n\n${why}Fix it, then end your turn with a short report as before. It runs again when you do.`;
+      await this.send(sid, state.board!.fromLane, { to: after.name ?? laneName(state, lane), text, kind: "task", board: id, system: true });
       return false;
     }
     return true;
@@ -2783,9 +2795,12 @@ export function ownTestCommand(suite: string, pkg: string | null, tests: string[
 /** How a check's run went, from the shell's answer: passed, failed, or not run at all (a Manual machine, offline, timed out). */
 /** A check Friday runs after an agent's change: its command, the mistake it was added to catch, and where its runs are counted. */
 export interface RepoCheck {
+  /** The command to run; for a rule read off the change (`judge`), its words. */
   command: string;
   why?: string;
   ran?: (failed: boolean) => Promise<void>;
+  /** A rule read off the change rather than run (rules.ts): what to send the agent when it breaks it, or null when it holds. */
+  judge?: () => Promise<string | null>;
 }
 
 export function checkVerdict(out: string | null): "passed" | "failed" | "skipped" {

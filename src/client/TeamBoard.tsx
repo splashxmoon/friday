@@ -1,11 +1,11 @@
 /**
- * A team chat's task board as a kanban, from the header's Board button or /board (Arun, 2026-10-28: the critique's "a Board button
- * in the team header opens a kanban: To do / Doing / Needs you / Done, swimlanes per teammate with mascots, links to results"):
- * one row per teammate who has a task, and one for what nobody has yet. A card dragged to another teammate's row goes to them
- * (board.task reassign, the same as the task's own menu); its menu also tries again, sends back or drops it.
+ * A team chat's task board, from the header's Board button or /board: one list by what each task needs, what needs you first,
+ * then what is being done, what waits, and what is done, folded away (Arun, 2026-11-03, of the kanban: "design this better", then
+ * of this one: "i like this tbh"). A row is the teammate's face and name, the task and how it went on one line under it, its
+ * proof and the one thing to do with it; its menu hands it to another teammate, tries it again, sends it back or drops it.
  *
  */
-import { useMemo, useState, type DragEvent } from "react";
+import { useMemo, useState } from "react";
 import { EllipsisIcon } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { meshOf, pendingFor, runOf, type BoardTask, type SessionState } from "../session/projection.js";
@@ -20,11 +20,12 @@ import { taskProof, type Proof } from "../team-proof.js";
 import { ProofButton } from "./ProofCard.js";
 
 type Col = "todo" | "doing" | "needs" | "done";
-const COLS: { id: Col; title: string; empty: string }[] = [
-  { id: "todo", title: "To do", empty: "Nothing waiting" },
-  { id: "doing", title: "Doing", empty: "Nobody on one" },
-  { id: "needs", title: "Needs you", empty: "Nothing stuck" },
-  { id: "done", title: "Done", empty: "Nothing yet" },
+/** The groups, in the order the list reads: what is yours to do first. */
+const COLS: { id: Col; title: string }[] = [
+  { id: "needs", title: "Needs you" },
+  { id: "doing", title: "Doing" },
+  { id: "todo", title: "To do" },
+  { id: "done", title: "Done" },
 ];
 
 /** Which column a task is in: blocked is the person's to look at; under review is still being done. */
@@ -73,9 +74,8 @@ export function TeamBoard({ state, events = [], send, onClose }: { state: Sessio
   })), [board, events, state.id]);
   const mates = matesIn(state.id);
   const [menu, setMenu] = useState<{ t: Task; x: number; y: number } | null>(null);
-  const [drag, setDrag] = useState<string | null>(null);
-  const [over, setOver] = useState<string | null>(null);
   const [err, setErr] = useState("");
+  const [doneOpen, setDoneOpen] = useState(true);
   const leadName = mateOn(state.lead ?? "")?.name ?? "the lead";
   /** Work the lead handed out isn't the board's to move: the lead is asked to, in the room. */
   const askLead = (t: Task, to: string) =>
@@ -85,21 +85,8 @@ export function TeamBoard({ state, events = [], send, onClose }: { state: Sessio
     if (t?.assigned) return action === "reassign" && to ? askLead(t, to) : undefined;
     void send({ type: "board.task", id, action, ...(to ? { to } : {}) }).then((r) => setErr(r.ok ? "" : (r.error ?? "Couldn't change that task.")));
   };
-  // Rows: every teammate here, the lead's first, so a card always has another row to be dragged to (2026-10-28 QA: with rows only
-  // for those holding a task, one task left nowhere to drop it); then what nobody has.
   const laneOfTask = (t: Task) => (t.lane && mates.some((x) => x.lane === t.lane) ? t.lane : "");
-  const rows = [...new Set([...mates.map((x) => x.lane), ...tasks.map(laneOfTask)])].sort((a, b) => (a === "" ? 1 : b === "" ? -1 : Number(b === state.lead) - Number(a === state.lead)));
-  const movable = mates.length > 1 && tasks.some((t) => t.status !== "done");
   const byId = new Map(tasks.map((t) => [t.id, t]));
-  const drop = (lane: string) => (e: DragEvent) => {
-    e.preventDefault();
-    setOver(null);
-    const t = byId.get(e.dataTransfer.getData("text/x-board-task") || drag || "");
-    setDrag(null);
-    const m = mateOn(lane);
-    if (!t || !m || laneOfTask(t) === lane || t.status === "done") return;
-    control(t.id, "reassign", m.name);
-  };
   /** "Open Kit's chat" (2026-10-28 QA: "Open Kit chat"). */
   const chatOf = (lane: string) => (mateOn(lane)?.name ? `Open ${mateOn(lane)!.name}'s chat` : "Open their chat");
   const items = (t: Task): MenuItem[] => {
@@ -126,16 +113,36 @@ export function TeamBoard({ state, events = [], send, onClose }: { state: Sessio
     return out;
   };
   const done = tasks.filter((t) => t.status === "done").length;
+  const needs = tasks.filter((t) => colOf(t) === "needs").length;
+  const open = (t: Task) => t.lane && (focusAgent(state.id, t.lane), onClose());
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      {/* Escape with a card's menu open closes the menu, not the board under it (Arun, 2026-10-28: "really iron out bugs…"). An
-          empty board is a dialog's width for its one line, not the lanes' 1180px (Arun, 2026-10-28: "look for like the little
-          details and designs"). */}
-      <DialogContent className={`tm-board-dialog max-h-[calc(100dvh-2rem)] overflow-hidden ${tasks.length ? "sm:max-w-[min(1180px,calc(100vw-2rem))]" : "sm:max-w-md"}`} onEscapeKeyDown={(e) => menu && (e.preventDefault(), setMenu(null))}>
+      {/* Escape with a row's menu open closes the menu, not the board under it (Arun, 2026-10-28: "really iron out bugs…"). An
+          empty board is a dialog's width for its one line. */}
+      <DialogContent className={`tm-board-dialog max-h-[calc(100dvh-2rem)] overflow-hidden ${tasks.length ? "sm:max-w-[min(860px,calc(100vw-2rem))]" : "sm:max-w-md"}`} onEscapeKeyDown={(e) => menu && (e.preventDefault(), setMenu(null))}>
         <DialogHeader>
           <DialogTitle>Board</DialogTitle>
-          <DialogDescription>
-            {tasks.length ? `${done} of ${tasks.length} done${board ? ` · ${board.fromName} posted the board` : ""}.${movable ? " Drag a card to another teammate's row to hand it to them." : ""}` : "Nothing on the board yet. Give the lead a goal: they split the work into tasks here and hand them out."}
+          <DialogDescription className={tasks.length ? "tm-bl-sum" : undefined}>
+            {tasks.length ? (
+              <>
+                {/* How far the round has got, in the colours of where its tasks stand. */}
+                <span className="tm-bl-bar" aria-hidden="true">
+                  {(["done", "needs", "doing", "todo"] as const).map((c) => {
+                    const n = tasks.filter((t) => colOf(t) === c).length;
+                    return n ? <i key={c} data-col={c} style={{ flex: n }} /> : null;
+                  })}
+                </span>
+                <span>
+                  <b>
+                    {done} of {tasks.length} done
+                  </b>
+                  {needs ? ` · ${needs} need${needs === 1 ? "s" : ""} you` : ""}
+                  {board ? ` · ${board.fromName} posted it` : ""}
+                </span>
+              </>
+            ) : (
+              "Nothing on the board yet. Give the lead a goal: they split the work into tasks here and hand them out."
+            )}
           </DialogDescription>
         </DialogHeader>
         {err && (
@@ -144,40 +151,25 @@ export function TeamBoard({ state, events = [], send, onClose }: { state: Sessio
           </p>
         )}
         {tasks.length > 0 && (
-          <div className="tm-kb" role="grid" aria-label="Tasks by teammate and stage">
-            <div className="tm-kb-row tm-kb-head" role="row">
-              <span className="tm-kb-who" role="columnheader" />
-              {COLS.map((c) => (
-                <span key={c.id} className="tm-kb-colhead" data-col={c.id} role="columnheader">
-                  {c.title}
-                  <b>{tasks.filter((t) => colOf(t) === c.id).length}</b>
-                </span>
-              ))}
-            </div>
-            {rows.map((lane) => {
-              const m = lane ? mateOn(lane) : null;
-              const s = m ? mateStatus(m, { sid: state.id, lane }) : null;
+          <div className="tm-bl" aria-label="Tasks by what they need">
+            {COLS.map((c) => {
+              const here = tasks.filter((t) => colOf(t) === c.id);
+              if (!here.length) return null;
+              const folds = c.id === "done";
               return (
-                <div key={lane || "none"} className="tm-kb-row" role="row" data-over={over === lane ? "true" : undefined} onDragOver={(e) => lane && drag && (e.preventDefault(), setOver(lane))} onDragLeave={() => setOver((o) => (o === lane ? null : o))} onDrop={drop(lane)}>
-                  <span className="tm-kb-who" role="rowheader">
-                    {/* The face stands as the line beside it does, in this room: "Idle here" with a working dot read two ways. */}
-                    {m ? <Face seed={m.look ?? m.name} size={24} status={s?.state ?? m.status} lead={lane === state.lead} /> : <span className="tm-kb-nobody" aria-hidden="true" />}
-                    <span className="tm-text">
-                      <span className="tm-name">{m?.name ?? "Nobody yet"}</span>
-                      <span className={`tm-sub s-${s?.state ?? "idle"}`}>{s?.line ?? "Waiting for a teammate"}</span>
-                    </span>
-                  </span>
-                  {COLS.map((c) => {
-                    const here = tasks.filter((t) => laneOfTask(t) === lane && colOf(t) === c.id);
-                    return (
-                      <div key={c.id} className="tm-kb-cell" role="gridcell" data-col={c.id} aria-label={`${m?.name ?? "Nobody"}, ${c.title}: ${here.length}`}>
-                        {here.map((t) => (
-                          <Card key={t.id} t={t} state={state} proof={proofs.get(t.id)} dragging={drag === t.id} onDrag={(on) => setDrag(on ? t.id : null)} onMenu={(x, y) => setMenu({ t, x, y })} onOpen={() => t.lane && (focusAgent(state.id, t.lane), onClose())} />
-                        ))}
-                      </div>
-                    );
-                  })}
-                </div>
+                <section key={c.id} className="tm-bl-group" data-col={c.id} aria-label={`${c.title}: ${here.length}`}>
+                  <h3 className="tm-bl-head">
+                    <span className="tm-bl-dot" data-col={c.id} aria-hidden="true" />
+                    {c.title}
+                    <b>{here.length}</b>
+                    {folds && (
+                      <button type="button" className="tm-bl-fold" aria-expanded={doneOpen} onClick={() => setDoneOpen((o) => !o)}>
+                        {doneOpen ? "Hide" : "Show"}
+                      </button>
+                    )}
+                  </h3>
+                  {(!folds || doneOpen) && here.map((t) => <Row key={t.id} t={t} state={state} lane={laneOfTask(t)} proof={proofs.get(t.id)} onMenu={(x, y) => setMenu({ t, x, y })} onOpen={() => open(t)} />)}
+                </section>
               );
             })}
           </div>
@@ -188,8 +180,10 @@ export function TeamBoard({ state, events = [], send, onClose }: { state: Sessio
   );
 }
 
-/** One task: its title, what it waits on or how it went, and its result a press away. */
-function Card({ t, state, proof, dragging, onDrag, onMenu, onOpen }: { t: Task; state: SessionState; proof?: Proof; dragging: boolean; onDrag: (on: boolean) => void; onMenu: (x: number, y: number) => void; onOpen: () => void }) {
+/** One task: its teammate, its title and how it stands, its proof, and the one thing to do with it. */
+function Row({ t, state, lane, proof, onMenu, onOpen }: { t: Task; state: SessionState; lane: string; proof?: Proof; onMenu: (x: number, y: number) => void; onOpen: () => void }) {
+  const m = lane ? mateOn(lane) : null;
+  const s = m ? mateStatus(m, { sid: state.id, lane }) : null;
   const waits = t.status === "open" ? t.after.filter((d) => state.board?.tasks.find((x) => x.id === d)?.status !== "done") : [];
   const line =
     t.status === "blocked"
@@ -200,33 +194,50 @@ function Card({ t, state, proof, dragging, onDrag, onMenu, onOpen }: { t: Task; 
           ? // Its words, not its markdown ("**Notes**", backticks; QA, 2026-10-28), nor Friday's record under them: its proof says that.
             plainLine((t.report ?? "").split("\n\n[Friday, from the record]")[0]!)
           : t.status === "claimed"
-            ? // No "On it" under every card in Doing: the column says it, and the row's head carries the teammate's live line
-              // beside its ringed face (Arun, 2026-10-29: "so clean and beautiful…"; DIRECTION.md §9.4).
-              t.checks?.running
+            ? t.checks?.running
               ? "Running its checks"
-              : ""
+              : (s?.line ?? "On it")
             : waits.length
-              ? `After ${waits.map((d) => state.board?.tasks.find((x) => x.id === d)?.title ?? d).join(", ")}`
+              ? `After “${waits.map((d) => plainLine(boardTitle(state.board?.tasks.find((x) => x.id === d)?.title ?? d))).join("”, “")}”`
               : t.next
                 ? `Next for ${t.next}`
                 : "Ready for whoever is free";
+  const col = colOf(t);
+  // A workflow's check is posted as "Check: …": said as its tag, not as the first word of every one.
+  const said = plainLine(boardTitle(t.title));
+  const check = /^check:\s*/i.test(said);
+  const title = check ? said.replace(/^check:\s*/i, "") : said;
   return (
-    <article
-      className="tm-kb-card"
-      data-status={t.status}
-      data-dragging={dragging ? "true" : undefined}
-      draggable={t.status !== "done"}
-      onDragStart={(e) => (e.dataTransfer.setData("text/x-board-task", t.id), (e.dataTransfer.effectAllowed = "move"), onDrag(true))}
-      onDragEnd={() => onDrag(false)}
-      onContextMenu={(e) => (e.preventDefault(), onMenu(e.clientX, e.clientY))}
-    >
-      {/* The "…" beside the title, where it has a place of its own: at the foot it wrapped onto a row alone (QA, 2026-10-28). */}
-      <span className="tm-kb-top">
-        <span className="tm-kb-title">{plainLine(boardTitle(t.title))}</span>
+    <article className="tm-bl-row" data-col={col ?? undefined} onContextMenu={(e) => (e.preventDefault(), onMenu(e.clientX, e.clientY))}>
+      {m ? <Face seed={m.look ?? m.name} size={30} status={s?.state ?? m.status} lead={lane === state.lead} /> : <span className="tm-kb-nobody" aria-hidden="true" />}
+      <div className="tm-bl-main">
+        <p className="tm-bl-title" title={title}>
+          <span className="tm-bl-name">{m?.name || t.name || "Nobody yet"}</span>
+          {check && <span className="tm-bl-kind">Check</span>}
+          <span className="tm-bl-words">{title}</span>
+        </p>
+        {line && (
+          <p className="tm-bl-line" data-col={col ?? undefined} title={line}>
+            {col === "doing" && <span className="tm-bl-dots" aria-hidden="true"><i /><i /><i /></span>}
+            {line}
+          </p>
+        )}
+      </div>
+      <div className="tm-bl-side">
+        {/* Its proof, a press away: the checks, the files, the picture and its own review (ProofCard.tsx). */}
+        {proof && t.status !== "claimed" && <ProofButton proof={proof} />}
+        {!proof && t.checks && !t.checks.running && t.checks.ok !== undefined && <span className={t.checks.ok ? "tm-kb-check ok" : "tm-kb-check bad"}>{t.checks.ok ? "Checks pass" : "Checks failed"}</span>}
+        {t.rounds > 0 && <span className="tm-bl-chip">Round {t.rounds + 1}</span>}
+        {t.assigned && <span className="tm-bl-chip">From the lead</span>}
+        {lane && (
+          <button type="button" className={col === "needs" ? "btn primary small" : "btn small"} onClick={onOpen}>
+            {col === "done" ? "Result" : col === "needs" ? "Answer" : "Open chat"}
+          </button>
+        )}
         <button
           type="button"
           className="tm-kb-more"
-          aria-label={`Change "${plainLine(boardTitle(t.title))}"`}
+          aria-label={`Change "${title}"`}
           onClick={(e) => {
             const b = e.currentTarget.getBoundingClientRect();
             onMenu(b.left, b.bottom + 4);
@@ -234,20 +245,7 @@ function Card({ t, state, proof, dragging, onDrag, onMenu, onOpen }: { t: Task; 
         >
           <EllipsisIcon className="size-3.5" />
         </button>
-      </span>
-      {t.assigned && <span className="tm-kb-from">Handed out by the lead</span>}
-      {line && <span className="tm-kb-line">{line}</span>}
-      {/* Its proof, a press away: the checks, the files, the picture and its own review (ProofCard.tsx). */}
-      {proof && t.status !== "claimed" && <ProofButton proof={proof} />}
-      <span className="tm-kb-foot">
-        {!proof && t.checks && !t.checks.running && t.checks.ok !== undefined && <span className={t.checks.ok ? "tm-kb-check ok" : "tm-kb-check bad"}>{t.checks.ok ? "Checks pass" : "Checks failed"}</span>}
-        {t.rounds > 0 && <span className="tm-kb-check">Round {t.rounds + 1}</span>}
-        {t.lane && (
-          <button type="button" className="tm-kb-link" onClick={onOpen}>
-            {t.status === "done" ? "See the result" : "Open chat"} →
-          </button>
-        )}
-      </span>
+      </div>
     </article>
   );
 }

@@ -331,7 +331,7 @@ export type MenuItem =
   | { who: { name: string; id?: string; sub: string; /** A second line under the name, in smaller type. */ line?: string } }
   /** Anything that is not a choice: a chart, a note. Never highlighted and never closes the menu. */
   | { node: ReactNode; /** About how tall it is, so the menu is sized to hold it. */ height?: number }
-  | { label: string; /** A tooltip for the row, for what does not fit beside the name. */ title?: string; icon?: IconName; /** A mark of its own, for what no named icon can be: a company's logo. */ mark?: ReactNode; onSelect: () => void; danger?: boolean; checked?: boolean; disabled?: boolean; /** Greyed but still pressable: something offered that isn't part of what you have (Friday Code on Solo opens "Start a team"). */ dim?: boolean; hint?: string; /** A second line under the label, for what a choice means. */ sub?: string; /** A green dot after the label: something is happening here. */ live?: boolean; /** A button of its own at the row's end, for what can be done to the thing without choosing it: stopping a server. */ action?: MenuAction }
+  | { label: string; /** A tooltip for the row, for what does not fit beside the name. */ title?: string; icon?: IconName; /** A mark of its own, for what no named icon can be: a company's logo. */ mark?: ReactNode; onSelect: () => void; danger?: boolean; checked?: boolean; disabled?: boolean; /** Greyed but still pressable: something offered that isn't part of what you have (Friday Code on Solo opens "Start a team"). */ dim?: boolean; hint?: string; /** A second line under the label, for what a choice means. */ sub?: string; /** A green dot after the label: something is happening here. */ live?: boolean; /** Just after the label's words, on its line: an agent's state as its small ring. */ after?: ReactNode; /** A button of its own at the row's end, for what can be done to the thing without choosing it: stopping a server. */ action?: MenuAction }
   | false
   | null
   | undefined;
@@ -353,7 +353,10 @@ export function MenuButton({
   width,
   maxHeight,
   onOpenChange,
+  fit,
 }: {
+  /** The menu as wide as the button, as a select's is, and at least this wide for its longest row. */
+  fit?: number;
   /** A mark before a pill's text, for a value that is somebody's product. */
   mark?: ReactNode;
   /** The pill's trailing mark: a chevron, or the up-and-down one for a picker. */
@@ -415,7 +418,7 @@ export function MenuButton({
         )}
       </button>
       {anchor && (
-        <MenuPopup anchor={anchor} above={above} beside={beside} compact={compact} end={end} width={width} {...(maxHeight ? { maxHeight } : {})} trigger={btn.current} items={items().filter(Boolean) as Exclude<MenuItem, false | null | undefined>[]} onClose={() => set(null)} />
+        <MenuPopup anchor={anchor} above={above} beside={beside} compact={compact} end={end} width={fit ? Math.max(Math.round(anchor.width), fit) : width} {...(maxHeight ? { maxHeight } : {})} trigger={btn.current} items={items().filter(Boolean) as Exclude<MenuItem, false | null | undefined>[]} onClose={() => set(null)} />
       )}
     </>
   );
@@ -553,7 +556,14 @@ function MenuPopup({ anchor, items, onClose, above, beside, compact, end, trigge
           >
             {it.mark ? <span className="menu-mark">{it.mark}</span> : it.icon ? <Icon name={it.icon} size={16} /> : anyIcon ? <span className="menu-spacer" /> : null}
             <span className="menu-label">
-              {it.label}
+              {it.after ? (
+                <span className="menu-label-line">
+                  {it.label}
+                  {it.after}
+                </span>
+              ) : (
+                it.label
+              )}
               {(it.sub || below(it)) && <span className="menu-sub">{[it.sub, below(it)].filter(Boolean).join(" · ")}</span>}
             </span>
             {/* Working shows in the tick's column, so the dots line up with the ticks; on the ticked row the tick takes that place and the dot steps in beside the name. */}
@@ -662,6 +672,52 @@ export function Switch({ on, onChange, label, disabled }: { on: boolean; onChang
   return (
     <button type="button" role="switch" aria-checked={on} aria-label={label} disabled={disabled} className={`switch ${on ? "on" : ""}`} onClick={() => onChange(!on)}>
       <span />
+    </button>
+  );
+}
+
+/** One choice of a Picker. */
+export type PickerOption<T extends string | number> = { value: T; label: string; /** A second line under it in the menu. */ sub?: string; mark?: ReactNode; disabled?: boolean; hint?: string };
+
+/**
+ * Friday's own select (Arun, 2026-11-03: "i said to fix the native stuff please run a full app audit"): the choice on a field-like
+ * button, Friday's menu under it, never the system's. `className` sizes it as the select it replaces did.
+ */
+export function Picker<T extends string | number>({ value, options, onChange, label, className = "", disabled, placeholder = "Choose…", heading }: { value: T; options: PickerOption<T>[]; onChange: (v: T) => void; /** What it picks, for a screen reader and its tooltip. */ label: string; className?: string; disabled?: boolean; placeholder?: string; /** A line over the choices. */ heading?: string }) {
+  const cur = options.find((o) => o.value === value);
+  // Its longest row, a name and its hint at about 7px a letter, the tick and the padding round them.
+  const least = Math.round(Math.max(...options.map((o) => o.label.length * 7.4 + (o.hint ? o.hint.length * 6.6 + 8 : 0)), 60) + (options.some((o) => o.mark) ? 26 : 0) + 46);
+  if (disabled || !options.length)
+    return (
+      <button type="button" className={`menu-pill pick ${className}`} disabled aria-label={label}>
+        {cur?.mark && <span className="menu-pill-mark">{cur.mark}</span>}
+        <span>{cur?.label ?? placeholder}</span>
+        <Icon name="chevronDown" size={13} className="menu-pill-caret" />
+      </button>
+    );
+  return (
+    <MenuButton
+      className={`pick ${className}`}
+      text={cur?.label ?? placeholder}
+      {...(cur?.mark ? { mark: cur.mark } : {})}
+      label={label}
+      // As wide as the field and no wider, its rows tight, a hint on the row beside its name (Arun, 2026-11-03: "it is too big even
+      // when there is really nothing there just a bunch of empty space").
+      fit={least}
+      compact
+      maxHeight={340}
+      items={() => [heading ? { heading } : null, ...options.map((o) => ({ label: o.label, checked: o.value === value, ...(o.sub ? { sub: o.sub } : {}), ...(o.mark ? { mark: o.mark } : {}), ...(o.hint ? { after: <span className="pick-hint">{o.hint}</span> } : {}), ...(o.disabled ? { disabled: true } : {}), onSelect: () => onChange(o.value) }))]}
+    />
+  );
+}
+
+/** Friday's own checkbox: a button, so a <label> around it and its words still toggles it. */
+export function Check({ checked, onChange, label, title, disabled, className = "" }: { checked: boolean; onChange: (v: boolean) => void; /** Only where no words beside it say what it is. */ label?: string; title?: string; disabled?: boolean; className?: string }) {
+  return (
+    <button type="button" role="checkbox" aria-checked={checked} aria-label={label} title={title} disabled={disabled} className={`fcheck ${checked ? "on" : ""} ${className}`} onClick={() => onChange(!checked)}>
+      <svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="m2.6 6.2 2.2 2.2 4.6-4.9" />
+      </svg>
     </button>
   );
 }

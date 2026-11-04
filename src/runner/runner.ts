@@ -1,5 +1,6 @@
 import { realpathSync } from "node:fs";
 import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { GO_AHEAD_WORDS, guardTool, type GoAhead, type GuardPlace, type Verdict } from "../guardrails.js";
 import { createHash, randomUUID } from "node:crypto";
 import { homedir, hostname, tmpdir } from "node:os";
 import path from "node:path";
@@ -9,7 +10,7 @@ import { clock, closingSaid, keepAlive } from "../heartbeat.js";
 import { CLI_ID, ENGINE_NAMES, isEngineEffort, type Attachment, type EngineMode, type EngineTool, type ToolCommand, type DiffFile } from "../types.js";
 import { ADAPTERS, DECIDE_YOURSELF, PLAN_REFUSES, askedItem, childEnv, claudeMcpServers, claudePictures, imageType, codexExec, findBin, launcher, loginStatusCached, loginStatusQuick, tooLongForArgv, withDirs, type Adapter, type AdapterOut, type Launch, type TurnSpec } from "./adapters.js";
 import { folderVars } from "./environment.js";
-import { applyCopy, baseAfterCommit, checkpoint, diffSince, diffTrees, dropShadow, fetchBranch, repoInfo, sameTree, sessionBase, setSessionBase, shadowSnapshot, switchBranch, trackBranch, warmSnapshot, type RepoInfo, type Shadow } from "./git.js";
+import { applyCopy, baseAfterCommit, checkpoint, diffSince, diffTrees, dropShadow, reposInside, fetchBranch, repoInfo, sameTree, sessionBase, setSessionBase, shadowSnapshot, switchBranch, trackBranch, warmSnapshot, type RepoInfo, type Shadow } from "./git.js";
 import { hasCliTranscript, readCliTranscript } from "./imports.js";
 import { isTerminalTool, shellLine, terminalArgs } from "./terminal-line.js";
 import { dialOptions, getBytes } from "./dial.js";
@@ -139,7 +140,7 @@ type ServerMsg =
   /** A message for the turn running now, to read at its next step (Parser.steer); answered with `steer.result`. */
   | { kind: "steer"; id: string; text: string }
   /** A person's answer to what the tool is waiting on mid-turn (an `engine.approval` sent `live`). */
-  | { kind: "approval"; id: string; approve: boolean }
+  | { kind: "approval"; id: string; approve: boolean; /** Friday's own answer (a teammate's go-ahead while the person is away, or left unanswered): what to tell the tool. */ note?: string }
   /** Someone else in the session asking to read the folder this runner opened. */
   | ({ kind: "repo"; id: string } & Omit<RepoRequest, "mode">)
   | { kind: "released" }
@@ -1064,6 +1065,8 @@ export class Runner {
       ...(thinks ? { effort: thinks } : {}),
       ...(mcp.length ? { mcp } : {}),
       ...(ask ? { ask: true } : {}),
+      // A teammate at full access is held to the go-ahead list (guardrails.ts; Arun, 2026-11-03).
+      ...(this.opts.keepAs && mode === "full" ? { guarded: true } : {}),
       ...(this.acpMcp.length || (this.friday && acpTool) ? { acpMcp: [...this.acpMcp, ...(this.friday && acpTool ? [acpEntry(this.friday.spec)] : [])] } : {}),
       ...(this.friday ? { friday: this.friday.spec } : {}),
       ...(this.skipFlags.size ? { skip: [...this.skipFlags] } : {}),
@@ -1210,6 +1213,15 @@ export class Runner {
     }
     this.send({ kind: "imported", sourceId: this.opts.resumeId, title: t.title, turns: t.turns, total: t.total, ...(t.partial ? { partial: true } : {}), cwd: t.cwd, ...(t.branch ? { branch: t.branch } : {}) });
     this.log(`shared ${t.partial ? `the last ${t.turns.length}` : `${t.turns.length} of ${t.total}`} messages from “${t.title.slice(0, 60)}” with the session`);
+  }
+
+  /**
+   * The folders beside its own it may work in from its next turn, changed while it runs (Arun, 2026-11-03: "be able to add
+   * folders, to the coding sessions while in the chat too"). Each turn's tool is started with them (spec), and a tool kept warm
+   * or started ahead with the old ones isn't used, since its arguments no longer match; the conversation carries on.
+   */
+  setDirs(dirs: string[]): void {
+    this.opts.dirs = dirs;
   }
 
   stop(): void {
@@ -1381,7 +1393,7 @@ export class Runner {
       if (!asked) return void this.adopted?.onMessage(m);
       this.live.delete(m.id);
       if (asked.reply) asked.reply(m.approve);
-      else this.warm?.answer(asked.requestId, m.approve, asked.input, "The person driving said no to that. Don't try to get round it: do it another way, or ask them what they would rather.");
+      else this.warm?.answer(asked.requestId, m.approve, asked.input, m.note ?? "The person driving said no to that. Don't try to get round it: do it another way, or ask them what they would rather.");
       this.log(`${m.approve ? "allowed" : "refused"} what it asked (${m.id})`);
       // The next one it asked meanwhile, now that this one is answered.
       const next = this.waitingAsks.shift();
@@ -1739,7 +1751,9 @@ ${prompt}`;
         return this.turn(m, files);
       }
       error = tooLong ? `What ${this.label} was handed this turn is too long for this computer to start it with. Send a shorter instruction, or several.` : adapter.explain(raw);
-      if (other) error = `${error} Your ${other.label} account is signed in here too: switch this agent to it from its account menu to carry on.`;
+      // Named only in the open-source edition, on the person's own computer: where work is shared, another account is not the
+      // way on (adapters.ts limitWays), however many are signed in here.
+      if (other && localEdition()) error = `${error} Your ${other.label} account is signed in here too: switch this agent to it from its account menu to carry on.`;
       // A failed resume would fail the same way every time; start fresh next turn. Remembered as lost (see `saveResume`), so a
       // reconnect for the same pick doesn't bring the dead id back, and the server is told, here and on each reconnect, so the
       // fresh conversation is sent the history it no longer has.
@@ -1868,14 +1882,21 @@ ${prompt}`;
    * at a time, so a second card replaced the first, and the first could then never be answered: these wait their turn and
    * are put one after another, each once the one before is answered.
    */
-  private readonly waitingAsks: { scope: "commands" | "turn"; item: string; why?: string; requestId: string; input: Record<string, unknown>; reply?: (allow: boolean) => void }[] = [];
+  private readonly waitingAsks: { scope: "commands" | "turn"; item: string; why?: string; guard?: GoAhead; requestId: string; input: Record<string, unknown>; reply?: (allow: boolean) => void }[] = [];
+
+  /** Where a teammate works, for its go-ahead list: its own folder or copy, and the projects it was given. */
+  private guardPlace(): GuardPlace {
+    const cwd = this.opts.cwd;
+    const mine = !!this.opts.copyOf || /[\\/]Friday[\\/]teammates[\\/]/.test(cwd);
+    return { own: mine ? [cwd] : [], given: [...(mine ? [] : [cwd]), ...(this.opts.copyOf ? [this.opts.copyOf] : []), ...(this.opts.dirs ?? [])], home: homedir(), cwd };
+  }
 
   /** Put an ask to the session as its card. */
   private putAsk(a: (typeof this.waitingAsks)[number]): void {
     const id = randomUUID().slice(0, 8);
     this.live.set(id, { requestId: a.requestId, input: a.input, ...(a.reply ? { reply: a.reply } : {}) });
     this.askedLive.add(a.item);
-    this.send({ kind: "event", body: { type: "engine.approval", id, scope: a.scope, items: [a.item], live: true, ...(a.why ? { why: a.why } : {}) } });
+    this.send({ kind: "event", body: { type: "engine.approval", id, scope: a.scope, items: [a.item], live: true, ...(a.why ? { why: a.why } : {}), ...(a.guard ? { guard: a.guard } : {}) } });
   }
   /** How the turn now running is stopped, for a tool that has a way of its own (see Parser.cancel). */
   private cancelTurn: (() => void) | null = null;
@@ -1919,6 +1940,22 @@ ${prompt}`;
         // Auto: nobody is asked, so what the tool would have asked about goes ahead, as for a person who always says yes. A
         // question for the person (Claude Code's AskUserQuestion) is the one thing not answered for them.
         if (this.mode === "full") {
+          // A teammate is held to the go-ahead list (guardrails.ts): most of what it does runs, a few things are asked of the
+          // person, and the floor is refused outright with the reason, so it does it another way.
+          const v: Verdict = this.opts.keepAs && out.tool !== "AskUserQuestion" ? guardTool(out.tool, out.input, this.guardPlace()) : { kind: "run" };
+          if (v.kind === "never") {
+            if (out.reply) out.reply(false);
+            else this.warm?.answer(out.requestId, false, out.input, `${v.why} A teammate never does this, whoever asks. Do it another way, or tell the person what you needed and why.`);
+            this.log(`${this.label}: refused (never): ${v.why}`);
+            break;
+          }
+          if (v.kind === "ask") {
+            const { scope, item } = askedItem(out.tool, out.input);
+            const ask = { scope, item: item || out.tool, why: `${GO_AHEAD_WORDS[v.tag]}: ${v.why}`, guard: v.tag, requestId: out.requestId, input: out.input, ...(out.reply ? { reply: out.reply } : {}) };
+            if (this.live.size) this.waitingAsks.push(ask);
+            else this.putAsk(ask);
+            break;
+          }
           const allow = out.tool !== "AskUserQuestion";
           if (out.reply) out.reply(allow);
           else this.warm?.answer(out.requestId, allow, out.input, DECIDE_YOURSELF);
@@ -2080,6 +2117,12 @@ ${prompt}`;
   /** Send the change set if it moved since the last one. `quietIfEmpty`: a clean folder is not news. */
   /** Where each of the agent's other folders stood when the session first looked there (reportDiff). */
   private dirBases = new Map<string, string>();
+  /** The repositories inside a folder that isn't one, looked for again a minute after the last time (an agent may clone one). */
+  private inside: { at: number; dirs: string[] } | null = null;
+  private async reposInside(): Promise<string[]> {
+    if (!this.inside || Date.now() - this.inside.at > 60_000) this.inside = { at: Date.now(), dirs: await reposInside(this.opts.cwd).catch(() => []) };
+    return this.inside.dirs;
+  }
 
   private async reportDiff(quietIfEmpty = false): Promise<void> {
     if (this.stopped) return;
@@ -2094,11 +2137,16 @@ ${prompt}`;
     const base = this.base ?? this.repo?.head ?? this.shadow?.head;
     if (!base) return;
     try {
-      const own = this.base && !this.baseIsHead ? await diffTrees(this.opts.cwd, this.base) : await diffSince(this.opts.cwd, base, this.repo ? undefined : (this.shadow ?? undefined));
+      // A folder that isn't a repository but holds some: each is read as a folder of its own below, and its one line in the
+      // snapshot is left out.
+      const inside = this.repo ? [] : await this.reposInside();
+      const insideRel = new Set(inside.map((d) => path.relative(this.opts.cwd, d).split(path.sep).join("/")));
+      const ownAll = this.base && !this.baseIsHead ? await diffTrees(this.opts.cwd, this.base) : await diffSince(this.opts.cwd, base, this.repo ? undefined : (this.shadow ?? undefined));
+      const own: typeof ownAll = Object.assign(ownAll.filter((f) => !insideRel.has(f.path)), ownAll.more ? { more: ownAll.more } : {});
       // The folders the agent also works in, each measured from where it stood when this session first looked (kept in the
       // repository like the folder's own base, so a runner coming back finds it); a folder that isn't a repository shows nothing.
       const elsewhere: DiffFile[] = [];
-      for (const dir of this.opts.dirs ?? []) {
+      for (const dir of [...new Set([...(this.opts.dirs ?? []), ...inside])]) {
         if (dir === this.opts.cwd) continue;
         try {
           let b = this.dirBases.get(dir) ?? (await sessionBase(dir, this.baseKey, true));

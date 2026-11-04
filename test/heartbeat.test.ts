@@ -120,9 +120,10 @@ test("the client half forgives one missed answer, as the server does", async (t)
     if (first) return void (first = false);
     pong(...a);
   };
-  keepAlive(ws, 40);
+  // Rounds of 120ms, not 40: on a slow Windows runner the answers to a 40ms ping came late enough to count as missed (CI, 2026-11-02).
+  keepAlive(ws, 120);
 
-  await new Promise((r) => setTimeout(r, 300));
+  await new Promise((r) => setTimeout(r, 900));
   assert.equal(ws.readyState, WebSocket.OPEN, "one late round is a slow server, not a dead link");
   ws.terminate();
 });

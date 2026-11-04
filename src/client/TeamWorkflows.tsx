@@ -13,7 +13,7 @@
  */
 import { AutomationsSwitch } from "./AutomationsSwitch.js";
 import { holdLeave } from "./leave-guard.js";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
@@ -25,11 +25,13 @@ import {
   CheckIcon,
   CornerUpLeftIcon,
   FileTextIcon,
+  FlagIcon,
   FolderIcon,
   GitPullRequestIcon,
   HandIcon,
   HistoryIcon,
   MessageCircleQuestionIcon,
+  LayoutGridIcon,
   LayoutTemplateIcon,
   MessageSquareTextIcon,
   MinusIcon,
@@ -70,6 +72,7 @@ import {
   type TriggerKind,
   type Workflow,
   type WorkflowCheck,
+  type WorkflowLayout,
   type WorkflowRun,
   type WorkflowRunStep,
   type WorkflowStep,
@@ -126,7 +129,7 @@ const WEEKDAYS = [1, 2, 3, 4, 5];
 const uid = () => Math.random().toString(36).slice(2, 10);
 
 const blank = (): Draft => ({ name: "", on: true, room: TEAM_ROOM, trigger: { kind: "manual" }, steps: [], outcomes: { ...BLANK_OUTCOMES }, limits: { ...BLANK_LIMITS }, ask: "" });
-const draftOf = (w: WorkflowView): Draft => ({ name: w.name, on: w.on, room: w.room, trigger: w.trigger, steps: w.steps, outcomes: w.outcomes, limits: w.limits, ask: w.ask ?? "" });
+const draftOf = (w: WorkflowView): Draft => ({ name: w.name, on: w.on, room: w.room, trigger: w.trigger, steps: w.steps, outcomes: w.outcomes, limits: w.limits, ask: w.ask ?? "", ...(w.layout ? { layout: w.layout } : {}) });
 const sameDraft = (a: Draft, b: Draft) => JSON.stringify(a) === JSON.stringify(b);
 
 const RUN_WORD: Record<WorkflowRun["status"], string> = { running: "Running", waiting: "Waiting", asking: "Needs your OK", done: "Done", stopped: "Stopped", failed: "Didn't finish", skipped: "Skipped" };
@@ -655,7 +658,9 @@ function Builder({
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
-  const [side, setSide] = useState(fresh && !initial.steps.length);
+  // The templates closed on load, a new workflow's too: opened from the button in the head (Arun, 2026-11-03: "have the template
+  // side panel thing in the workflow page be closed by default on load").
+  const [side, setSide] = useState(false);
   // Describe it, and Friday drafts it, here on the canvas it fills (Arun, 2026-11-02: "add this into the workflow page… instead of
   // in the automations page"): open on a new one, a button away on one with steps.
   const [describing, setDescribing] = useState(fresh && !initial.steps.length);
@@ -890,7 +895,7 @@ function Builder({
             <WorkflowAsksFor identity={identity} id={id} onAnswered={onRan} />
           </div>
         )}
-        <Canvas d={d} steps={steps} names={names} others={others} sel={sel} live={live} checks={checks} onPick={setSel} onAdd={addStep} onMove={owner ? undefined : moveTo} onConnect={owner || live ? undefined : (source, port, target) => setStep(source, { [port]: target })} />
+        <Canvas d={d} steps={steps} names={names} others={others} sel={sel} live={live} checks={checks} onPick={setSel} onAdd={addStep} onMove={owner ? undefined : moveTo} onLayout={owner ? undefined : (layout) => set({ layout })} onConnect={owner || live ? undefined : (source, port, target) => setStep(source, { [port]: target })} />
         {sel && (
           <Inspector
             key={sel}
@@ -1090,33 +1095,159 @@ const stepZoom = (z: number, dir: 1 | -1) => {
 
 type AddStep = (col: number, alongside: boolean, kind?: StepKind) => void;
 
-function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd, onMove, onConnect }: { d: Draft; steps: WorkflowStep[]; names: Names; others: { id: string; name: string }[]; sel: Sel; live: WorkflowRun | null; checks: WorkflowCheck[]; onPick: (s: Sel) => void; onAdd: AddStep; /** A step's card dropped: onto column `col` (alongside), or into the space before it. */ onMove?: (id: string, col: number, alongside: boolean) => void; onConnect?: (source: string, port: WorkflowPort, target: string) => void }) {
+/**
+ * Where the cards sit (Arun, 2026-11-03: "be able to drag around the layout of the workflow… everything still being connected,
+ * rather than just relying on it being a straight line order"). Each column is laid out as before, left to right, and a card
+ * moved by hand keeps its offset from there (Workflow.layout): a step added or taken out moves the columns after it along, and
+ * the cards moved by hand go with them rather than under a new one. The wires are drawn from where the cards are, so they follow.
+ * The widths are workflows.css's .wf-node and .wf-node-trigger.
+ */
+const STEP_W = 248;
+const END_W = 224;
+const COL_GAP = 96;
+const ROW_GAP = 20;
+const PAD = 48;
+type Pt = { x: number; y: number };
+type Box = Pt & { id: string; w: number; h: number };
+const avg = (xs: number[]) => xs.reduce((t, x) => t + x, 0) / Math.max(1, xs.length);
+
+function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd, onMove, onLayout, onConnect }: { d: Draft; steps: WorkflowStep[]; names: Names; others: { id: string; name: string }[]; sel: Sel; live: WorkflowRun | null; checks: WorkflowCheck[]; onPick: (s: Sel) => void; onAdd: AddStep; /** A step's card dropped: onto column `col` (alongside), or into the space before it. */ onMove?: (id: string, col: number, alongside: boolean) => void; /** Cards moved by hand: each one's offset from where its column puts it; {} puts them all back. */ onLayout?: (l: WorkflowLayout) => void; onConnect?: (source: string, port: WorkflowPort, target: string) => void }) {
   const scroll = useRef<HTMLDivElement>(null);
   const flow = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ w: 1000, h: 600, fw: 900, fh: 400 });
   const [userZoom, setZoom] = useState(1);
   const [shift, setShift] = useState({ x: 0, y: 0 });
   const [panning, setPanning] = useState(false);
-  const pan = useRef<{ x: number; y: number } | null>(null);
-  /** A step's card held: where from, and once it has moved, the card and the drop under it. */
-  const drag = useRef<{ id: string; x: number; y: number; card: HTMLElement | null; on: Element | null } | null>(null);
-  const [dragging, setDragging] = useState(false);
+  const pan = useRef<Pt | null>(null);
   const connectionDrag = useRef<{ x: number; y: number; moved: boolean } | null>(null);
   const [connecting, setConnecting] = useState<{ source: string; port: WorkflowPort } | null>(null);
-  const [paths, setPaths] = useState<{ d: string; source: string; target: string; live?: boolean; port?: WorkflowPort; label?: { x: number; y: number; text: string } }[]>([]);
+  /** A card held: where the pointer went down, whether it has moved yet, and the drop under it. */
+  const drag = useRef<{ id: string; x: number; y: number; moved: boolean; on: Element | null } | null>(null);
+  /** The card being dragged and how far, in the canvas's units: drawn there, its wires with it. */
+  const [held, setHeld] = useState<{ id: string; dx: number; dy: number } | null>(null);
+  /** The cards' heights as drawn: a column is centred on them. */
+  const [hs, setHs] = useState<Record<string, number>>({});
+  /**
+   * A card dropped into a new place in the order, once the columns are laid out again: kept at `at` (under a column's cards), or,
+   * with none, in line in its new column, the columns after moved along to make room.
+   */
+  const pin = useRef<{ id: string; at: Pt | null } | null>(null);
+  /** A card kept still on the screen after a drop, as the drawing around it grows or shrinks. */
+  const anchor = useRef<{ id: string; left: number; top: number } | null>(null);
+  /** The column under the pointer: its Alongside shows. */
+  const [hot, setHot] = useState(-1);
   const cols = columnsOf(steps);
   // Narrower than a column and its neighbours need, the steps are a list, top to bottom, at full size.
   const stacked = view.w < 640;
   const stackedNow = useRef(stacked);
   stackedNow.current = stacked;
-  // Wider than the window, it is shown whole, scaled down to half at the least; the zoom buttons scale on top of that.
-  // Never below 60% by itself, where a card's words can still be read: a wider one is panned across, or zoomed out.
-  // Its margins are the stage's 24px a side: fitted to 32 it came out 16px wider than the window, with a scrollbar under it
-  // (Arun, 2026-10-28: "look for like the little details and designs").
-  const fit = stacked ? 1 : Math.max(0.6, Math.min(1, (view.w - 48) / view.fw));
-  const zoom = +(userZoom * fit).toFixed(3);
   const flagged = new Set(checks.filter((c) => c.level === "fix").map((c) => c.on));
   const runStep = (id: string) => live?.steps.find((s) => s.step === id) ?? null;
+  const full = steps.length >= MAX_STEPS;
+
+  // The columns as drawn: the trigger, the steps', then what happens after; each laid out in its place, centred on one line.
+  const lanes: { id: string; w: number }[][] = [[{ id: "trigger", w: END_W }], ...cols.map((c) => c.map((s) => ({ id: s.id, w: STEP_W }))), [{ id: "outcomes", w: END_W }]];
+  const hOf = (id: string) => hs[id] ?? 132;
+  const auto: Record<string, Pt> = {};
+  let autoW = 0;
+  for (const lane of lanes) {
+    const colW = Math.max(...lane.map((n) => n.w));
+    let y = -(lane.reduce((t, n) => t + hOf(n.id), 0) + ROW_GAP * (lane.length - 1)) / 2;
+    for (const n of lane) {
+      auto[n.id] = { x: autoW + (colW - n.w) / 2, y };
+      y += hOf(n.id) + ROW_GAP;
+    }
+    // With no steps yet, room between the two for "Add the first step".
+    autoW += colW + (steps.length ? COL_GAP : 236);
+  }
+  autoW -= steps.length ? COL_GAP : 236;
+  // Moved by hand: its own offset. A card added since takes its column's, or the column before's, so it lands among them.
+  const saved = d.layout ?? {};
+  const offs: Record<string, Pt> = {};
+  let carry: Pt = { x: 0, y: 0 };
+  for (const lane of lanes) {
+    const own = lane.find((n) => saved[n.id]);
+    const lean = own ? saved[own.id]! : carry;
+    for (const n of lane) offs[n.id] = saved[n.id] ?? lean;
+    carry = offs[lane[0]!.id]!;
+  }
+  const at = (id: string, still = false): Pt => {
+    const a = auto[id]!;
+    const o = offs[id]!;
+    const h = !still && held?.id === id ? held : null;
+    return { x: a.x + o.x + (h?.dx ?? 0), y: a.y + o.y + (h?.dy ?? 0) };
+  };
+  const ids = lanes.flat().map((n) => n.id);
+  const boxOf = (id: string, still = false): Box => ({ id, ...at(id, still), w: id === "trigger" || id === "outcomes" ? END_W : STEP_W, h: hOf(id) });
+  const boxes = ids.map((id) => boxOf(id));
+  const byId = new Map(boxes.map((b) => [b.id, b]));
+  // The frame, without the card being dragged's move, so the drawing doesn't slide under the pointer while it moves.
+  const still = ids.map((id) => boxOf(id, true));
+  const frame = { x: Math.min(...still.map((b) => b.x)), y: Math.min(...still.map((b) => b.y)), r: Math.max(...still.map((b) => b.x + b.w)), b: Math.max(...still.map((b) => b.y + b.h)) };
+
+  // Explicit paths use the same card boxes as the free layout, so moving a card moves every connection with it.
+  const connections = connectionsOf(steps).map(c => ({ ...c, target: c.target === "$finish" ? "outcomes" : c.target }));
+  for (const n of cols[0] ?? []) connections.unshift({ source: "trigger", target: n.id, port: "next", explicit: false });
+  if (!steps.length) connections.push({ source: "trigger", target: "outcomes", port: "next", explicit: false });
+  const routed = (c: typeof connections[number]) => c.explicit || isGate(steps.find(s => s.id === c.source) ?? { kind: "do" });
+  const working = (id: string) => ((s) => s?.status === "claimed" || s?.status === "review")(runStep(id));
+  const finished = (id: string) => runStep(id)?.status === "done";
+  const loops = connections.filter(c => routed(c) && byId.has(c.target)).map((c, i) => {
+    const A = byId.get(c.source)!;
+    const B = byId.get(c.target)!;
+    const gate = steps.find(s => s.id === c.source)!;
+    const x1 = A.x + A.w / 2, x2 = B.x + B.w / 2;
+    const lo = Math.min(A.x, B.x), hi = Math.max(A.x + A.w, B.x + B.w);
+    const floor = Math.max(...boxes.filter(b => b.x < hi && b.x + b.w > lo).map(b => b.y + b.h));
+    const low = floor + 46 + i * 34;
+    const under = boxes.some(b => b.id !== B.id && b.id !== A.id && b.x < B.x + B.w && b.x + b.w > B.x && b.y >= B.y + B.h - 1 && b.y < low);
+    const xe = under ? B.x + B.w + 22 : x2;
+    const r = Math.min(12, Math.abs(xe - x1) / 2), direction = xe < x1 ? -1 : 1;
+    const end = under ? `L${xe},${B.y + B.h - 22 + r} Q${xe},${B.y + B.h - 22} ${xe - r},${B.y + B.h - 22} L${B.x + B.w + 7},${B.y + B.h - 22}` : `L${x2},${B.y + B.h + 7}`;
+    const label = c.port === "otherwise" ? (gate.kind === "approve" ? "NO" : "FAIL") : isGate(gate) ? (gate.kind === "approve" ? "YES" : "PASS") : "Next";
+    return {
+      ...c, id: `${c.source}:${c.port}:${c.target}`,
+      d: `M${x1},${A.y + A.h} L${x1},${low - r} Q${x1},${low} ${x1 + direction * r},${low} L${xe - direction * r},${low} Q${xe},${low} ${xe},${low - r} ${end}`,
+      x: (x1 + xe) / 2, y: low, low, label,
+      text: `${label} → ${c.target === "outcomes" ? (c.port === "otherwise" ? "Stop" : "Finish") : `step ${steps.findIndex(s => s.id === c.target) + 1}`}${c.port === "otherwise" && c.target !== "outcomes" ? ` · up to ${gate.tries ?? DEFAULT_TRIES}×` : ""}`,
+      live: !!live && finished(c.source) && working(c.target),
+    };
+  });
+  frame.b = Math.max(frame.b, ...loops.map(l => l.low + 14));
+  // Into the flow's own units: the frame's corner at PAD, PAD. Held as it was while a card is dragged: a loop dragged lower
+  // grew the frame, and the whole drawing slid up under the pointer.
+  const live0 = { fw: frame.r - frame.x + PAD * 2, fh: frame.b - frame.y + PAD * 2, ox: PAD - frame.x, oy: PAD - frame.y };
+  const frozen = useRef(live0);
+  if (!held) frozen.current = live0;
+  const { fw, fh, ox, oy } = held ? frozen.current : live0;
+
+  // Default next-column wires retain the upstream bends and selection/working states.
+  const wires = connections.filter(c => !routed(c) && byId.has(c.target)).map(c => {
+    const A = byId.get(c.source)!, B = byId.get(c.target)!;
+    const x1 = A.x + A.w, y1 = A.y + A.h / 2, x2 = B.x, y2 = B.y + B.h / 2;
+    const k = Math.max(44, Math.abs(x2 - x1) / 2, x2 < x1 + 24 ? 96 : 0);
+    return { d: `M${x1},${y1} C${x1 + k},${y1} ${x2 - k},${y2} ${x2},${y2}`, live: !!live && (c.source === "trigger" || finished(c.source)) && working(c.target), on: !!sel && (sel === c.source || sel === c.target) };
+  });
+  // The "+" between two columns, on the wires between them: a step there, or a card dropped there taking a column of its own.
+  const gaps = lanes.slice(0, -1).map((lane, i) => {
+    const A = lane.map((n) => byId.get(n.id)!);
+    const B = lanes[i + 1]!.map((n) => byId.get(n.id)!);
+    return { at: i, x: (avg(A.map((b) => b.x + b.w)) + avg(B.map((b) => b.x))) / 2, y: (avg(A.map((b) => b.y + b.h / 2)) + avg(B.map((b) => b.y + b.h / 2))) / 2 };
+  });
+  // Alongside, under a column's lowest card, for the column under the pointer or with a card open.
+  const besides = cols.flatMap((col, i) => {
+    if (col.length === 1 && (isGate(col[0]!) || !!col[0]!.next)) return [];
+    const low = col.map((s) => byId.get(s.id)!).sort((a, b) => b.y + b.h - (a.y + a.h))[0]!;
+    return [{ i, x: low.x, y: low.y + low.h + 10, on: hot === i + 1 || col.some((s) => s.id === sel) }];
+  });
+
+  // Never below 60% by itself, where a card's words can still be read: a wider one is panned across, or zoomed out. Fitted to
+  // the columns as laid out, not to where cards were dragged, so moving one doesn't zoom the rest.
+  const fit = stacked ? 1 : Math.max(0.6, Math.min(1, (view.w - 48) / (autoW + PAD * 2)));
+  const zoom = +(userZoom * fit).toFixed(3);
+  const moved = Object.keys(saved).length > 0;
+  /** Every card's offset as drawn now: written whole the first time one is moved, so the others stay where they are. */
+  const whole = (): WorkflowLayout => Object.fromEntries(ids.map((id) => [id, { x: Math.round(offs[id]!.x), y: Math.round(offs[id]!.y) }]));
 
   useLayoutEffect(() => {
     const el = scroll.current;
@@ -1129,6 +1260,29 @@ function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd, onM
     ro.observe(f);
     return () => ro.disconnect();
   }, []);
+  // Every drawing: the cards' heights as they came out, then a dropped card kept where it was let go, then kept still on screen.
+  useLayoutEffect(() => {
+    const f = flow.current;
+    if (!f || stacked) return;
+    const got: Record<string, number> = {};
+    for (const el of f.querySelectorAll<HTMLElement>("[data-wf-node]")) got[el.dataset.wfNode!] = el.offsetHeight;
+    if (Object.keys(got).some((k) => got[k] !== hs[k])) return setHs(got);
+    const p = pin.current;
+    if (p && auto[p.id] && onLayout) {
+      pin.current = null;
+      const l = whole();
+      if (p.at) l[p.id] = { x: Math.round(p.at.x - auto[p.id]!.x), y: Math.round(p.at.y - auto[p.id]!.y) };
+      else delete l[p.id];
+      return onLayout(l);
+    }
+    const a = anchor.current;
+    const card = a && f.querySelector<HTMLElement>(`[data-wf-node="${a.id}"]`);
+    anchor.current = null;
+    if (a && card) {
+      const r = card.getBoundingClientRect();
+      if (Math.abs(r.left - a.left) > 0.5 || Math.abs(r.top - a.top) > 0.5) setShift((s) => ({ x: s.x + a.left - r.left, y: s.y + a.top - r.top }));
+    }
+  });
   useEffect(() => {
     const el = scroll.current;
     if (!el) return;
@@ -1162,39 +1316,6 @@ function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd, onM
     }, 30);
     return () => clearTimeout(t);
   }, [sel, stacked]);
-  // Draw the same connections the runner follows, including forward branches and backward routes.
-  useLayoutEffect(() => {
-    const f = flow.current;
-    if (!f || stacked) return setPaths([]);
-    const box = f.getBoundingClientRect();
-    const at = (id: string) => f.querySelector<HTMLElement>(`[data-wf-node="${id === "$finish" ? "outcomes" : id}"]`)?.getBoundingClientRect();
-    const out: typeof paths = [];
-    const floor = Math.max(0, ...[...f.querySelectorAll<HTMLElement>("[data-wf-node]")].map(el => (el.getBoundingClientRect().bottom - box.top) / zoom));
-    let below = 0;
-    const edges = connectionsOf(steps);
-    for (const first of cols[0] ?? []) edges.unshift({ source: "trigger", target: first.id, port: "next", explicit: false });
-    if (!steps.length) edges.push({ source: "trigger", target: "$finish", port: "next", explicit: false });
-    for (const edge of edges) {
-      const a = at(edge.source), b = at(edge.target);
-      if (!a || !b) continue;
-      const step = steps.find(s => s.id === edge.source);
-      const fail = edge.port === "otherwise";
-      const label = fail ? (step?.kind === "approve" ? "NO" : "FAIL") : isGate(step ?? { kind: "do" }) ? (step?.kind === "approve" ? "YES" : "PASS") : edge.explicit ? "Next" : "";
-      const x1 = (a.right - box.left) / zoom, y1 = (a.top + a.height / 2 - box.top) / zoom;
-      const x2 = (b.left - box.left) / zoom, y2 = (b.top + b.height / 2 - box.top) / zoom;
-      const port = step && (edge.explicit || isGate(step)) ? edge.port : undefined;
-      if (edge.explicit || (step && isGate(step)) || x2 <= x1) {
-        const low = floor + 44 + below++ * 28;
-        const ax = (a.left + a.width / 2 - box.left) / zoom, by = (b.bottom - box.top) / zoom;
-        const bx = (b.left + b.width / 2 - box.left) / zoom;
-        out.push({ source: edge.source, target: edge.target, port, d: `M${ax},${(a.bottom - box.top) / zoom} L${ax},${low} L${bx},${low} L${bx},${by + 3}`, label: { x: (ax + bx) / 2, y: low + 16, text: label } });
-      } else {
-        const mx = (x1 + x2) / 2;
-        out.push({ source: edge.source, target: edge.target, port, d: `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`, ...(label ? { label: { x: mx, y: (y1 + y2) / 2 - 8, text: label } } : {}) });
-      }
-    }
-    setPaths(out.map(p => ({ ...p, live: !!live && (p.source === "trigger" || runStep(p.source)?.status === "done") && ["claimed", "review"].includes(runStep(p.target)?.status ?? "") })));
-  }, [JSON.stringify(d), zoom, view.w, view.fh, stacked, live?.steps.map(s => s.status).join()]);
 
   const connect = (source: string, port: WorkflowPort, target: string) => {
     if (!onConnect || !steps.some(s => s.id === source && (port === "next" || isGate(s)))) return;
@@ -1202,23 +1323,38 @@ function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd, onM
     setConnecting(null);
     onPick(source);
   };
-  const node = (id: string, children: ReactNode) => {
-    const step = steps.find(s => s.id === id);
+  const tidy = () => (onLayout?.({}), setZoom(1), setShift({ x: 0, y: 0 }));
+  const node = (id: string, children: ReactNode, lane = -1) => {
+    const b = byId.get(id);
+    const s = steps.find((x) => x.id === id);
+    const col = s ? cols.findIndex((c) => c.includes(s)) : -1;
     return (
-      <NodeCard key={id} id={id} sel={sel} flagged={flagged} onPick={onPick} runStep={runStep}>
+      <NodeCard
+        key={id}
+        id={id}
+        sel={sel}
+        flagged={flagged}
+        onPick={onPick}
+        runStep={runStep}
+        held={held?.id === id}
+        style={stacked || !b ? undefined : { left: b.x + ox, top: b.y + oy }}
+        drop={!stacked && s && !(cols[col]!.length === 1 && (isGate(s) || !!s.next)) ? `col:${col}` : undefined}
+        onEnter={lane < 0 ? undefined : () => setHot(lane)}
+        onLeave={lane < 0 ? undefined : () => setHot((h) => (h === lane ? -1 : h))}
+      >
         {children}
         {onConnect && id !== "trigger" && (
-          <button type="button" className="wf-input-port" aria-label={`Connect to ${step ? stepTitle(step, steps.indexOf(step) + 1) : "Finish"}`} disabled={!connecting}
+          <button type="button" className="wf-input-port" aria-label={`Connect to ${s ? stepTitle(s, steps.indexOf(s) + 1) : "Finish"}`} disabled={!connecting}
             onClick={e => { e.stopPropagation(); if (connecting) connect(connecting.source, connecting.port, id); }}>
             ●
           </button>
         )}
-        {onConnect && step && (
+        {onConnect && s && (
           <div className="wf-output-ports">
-            {(["next", ...(isGate(step) ? ["otherwise"] : [])] as WorkflowPort[]).map(port => {
-              const label = port === "otherwise" ? "FAIL" : isGate(step) ? "PASS" : "Next";
+            {(["next", ...(isGate(s) ? ["otherwise"] : [])] as WorkflowPort[]).map(port => {
+              const label = port === "otherwise" ? "FAIL" : isGate(s) ? "PASS" : "Next";
               return (
-                <button type="button" key={port} aria-pressed={connecting?.source === id && connecting.port === port} aria-label={`Connect ${label} from ${stepTitle(step, 1)}`}
+                <button type="button" key={port} aria-pressed={connecting?.source === id && connecting.port === port} aria-label={`Connect ${label} from ${stepTitle(s, 1)}`}
                   onPointerDown={e => {
                     if (e.button !== 0) return;
                     e.stopPropagation();
@@ -1253,21 +1389,22 @@ function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd, onM
       </NodeCard>
     );
   };
+  const body = (s: WorkflowStep) => (isGate(s) ? <GateBody s={s} n={steps.indexOf(s) + 1} steps={steps} names={names} room={d.room} run={runStep(s.id)} /> : <StepBody s={s} n={steps.indexOf(s) + 1} names={names} room={d.room} at={runStep(s.id)?.status ?? null} asked={runStep(s.id)?.asked ?? null} again={runStep(s.id)?.again ?? 0} />);
+  const gapLabel = (i: number) => (i === 0 ? (steps.length ? "Add before the first step" : "Add the first step") : i === lanes.length - 2 ? "Add after the last step" : `Add after step ${steps.indexOf(cols[i - 1]!.at(-1)!) + 1}`);
   return (
     <div className={cn("wf-canvas", stacked && "stacked")} onKeyDown={e => { if (e.key === "Escape") { connectionDrag.current = null; setConnecting(null); } }}>
-      {connecting && <div className="wf-connect-note" role="status">Choose an input dot to connect this path. <button type="button" onClick={() => setConnecting(null)}>Cancel</button></div>}
+      {connecting && <div className="wf-connect-note" role="status">Choose an input dot to connect this path. <button type="button" onClick={() => { connectionDrag.current = null; setConnecting(null); }}>Cancel</button></div>}
       <div
-        className={cn("wf-scroll", panning && "panning", dragging && "dragging-card")}
+        className={cn("wf-scroll", panning && "panning", held && "dragging-card")}
         ref={scroll}
         onPointerDown={(e) => {
           const t = e.target as HTMLElement;
           if (e.button !== 0 || stacked || t.closest("button, input, textarea, [data-wf-connection]")) return;
           const card = t.closest<HTMLElement>("[data-wf-node]");
           if (card) {
-            // A step's card, not while a run is going: held, it is dragged once it moves; let go where it was, it opens.
-            const id = card.dataset.wfNode!;
-            if (!onMove || live || id === "trigger" || id === "outcomes") return;
-            drag.current = { id, x: e.clientX, y: e.clientY, card: null, on: null };
+            // A card, not while a run is going: held, it is dragged once it moves; let go where it was, it opens.
+            if (!onMove || !onLayout || live) return;
+            drag.current = { id: card.dataset.wfNode!, x: e.clientX, y: e.clientY, moved: false, on: null };
             e.currentTarget.setPointerCapture(e.pointerId);
             return;
           }
@@ -1279,15 +1416,13 @@ function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd, onM
           if (g) {
             const dx = e.clientX - g.x;
             const dy = e.clientY - g.y;
-            if (!g.card) {
-              if (Math.hypot(dx, dy) < 4) return;
-              g.card = flow.current?.querySelector<HTMLElement>(`[data-wf-node="${g.id}"]`) ?? null;
-              g.card?.classList.add("dragging");
-              setDragging(true);
-            }
-            if (g.card) g.card.style.transform = `translate(${dx / zoom}px, ${dy / zoom}px)`;
-            const gate = isGate(steps.find((x) => x.id === g.id) ?? { kind: undefined });
-            const under = document.elementFromPoint(e.clientX, e.clientY)?.closest(gate ? "[data-wf-drop^='gap:']" : "[data-wf-drop]") ?? null;
+            if (!g.moved && Math.hypot(dx, dy) < 4) return;
+            g.moved = true;
+            setHeld({ id: g.id, dx: dx / zoom, dy: dy / zoom });
+            // A step dropped on a "+" takes a column of its own there; on another step's card, it runs alongside it. A check or
+            // your OK stands alone, so only a "+"; the trigger and Then only move.
+            const s = steps.find((x) => x.id === g.id);
+            const under = s ? (document.elementFromPoint(e.clientX, e.clientY)?.closest((isGate(s) || !!s.next) ? "[data-wf-drop^='gap:']" : "[data-wf-drop]") ?? null) : null;
             if (under !== g.on) {
               g.on?.classList.remove("drop-on");
               under?.classList.add("drop-on");
@@ -1306,61 +1441,103 @@ function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd, onM
         onPointerUp={() => {
           const g = drag.current;
           drag.current = null;
-          if (g && !g.card) return onPick(sel === g.id ? null : g.id);
-          if (g?.card) {
-            g.card.classList.remove("dragging");
-            g.card.style.transform = "";
+          if (g && !g.moved) return onPick(sel === g.id ? null : g.id);
+          if (g) {
             g.on?.classList.remove("drop-on");
-            setDragging(false);
             const [where, n] = (g.on?.getAttribute("data-wf-drop") ?? "").split(":");
-            if (where && onMove) onMove(g.id, Number(n), where === "col");
-            return;
+            const card = flow.current?.querySelector<HTMLElement>(`[data-wf-node="${g.id}"]`);
+            setHeld(null);
+            if (where && onMove) {
+              // Into a new place in the order. On a card: under that column's cards, the card it was dropped on kept still. On a
+              // "+": in line there, the columns after moved along, the card before the "+" kept still.
+              const onto = where === "col" ? (g.on as HTMLElement).dataset.wfNode! : lanes[Number(n)]![0]!.id;
+              if (moved) {
+                const mates = where === "col" ? cols[Number(n)]!.filter((x) => x.id !== g.id).map((x) => byId.get(x.id)!) : [];
+                pin.current = { id: g.id, at: mates.length ? { x: byId.get(onto)!.x, y: Math.max(...mates.map((b) => b.y + b.h)) + ROW_GAP } : null };
+              }
+              const r = flow.current?.querySelector<HTMLElement>(`[data-wf-node="${onto}"]`)?.getBoundingClientRect();
+              if (r) anchor.current = { id: onto, left: r.left, top: r.top };
+              return onMove(g.id, Number(n), where === "col");
+            }
+            // Anywhere else: it stays there, and only it moves.
+            const r = card?.getBoundingClientRect();
+            if (r) anchor.current = { id: g.id, left: r.left, top: r.top };
+            const o = offs[g.id]!;
+            return onLayout?.({ ...whole(), [g.id]: { x: Math.round(o.x + (held?.dx ?? 0)), y: Math.round(o.y + (held?.dy ?? 0)) } });
           }
           pan.current = null;
           setPanning(false);
         }}
         onPointerCancel={() => {
-          const g = drag.current;
+          drag.current?.on?.classList.remove("drop-on");
           drag.current = null;
-          if (g?.card) (g.card.classList.remove("dragging"), (g.card.style.transform = ""), g.on?.classList.remove("drop-on"), setDragging(false));
+          setHeld(null);
           pan.current = null;
           setPanning(false);
         }}
       >
         <div className="wf-stage" style={stacked ? undefined : { width: Math.max(view.fw * zoom + 48, view.w), height: Math.max(view.fh * zoom + 96, view.h) }}>
-          <div
-            ref={flow}
-            className={cn("wf-flow", steps.some(x => x.otherwise || x.next || (isGate(x) && x.ifNot === "back")) && "loops")}
-            style={stacked ? undefined : { transform: `translate(${shift.x + Math.max(24, (view.w - view.fw * zoom) / 2)}px, ${shift.y + Math.max(24, (view.h - view.fh * zoom) / 2 - 10)}px) scale(${zoom})` }}
-          >
-            {!stacked && (
-              <svg className="wf-wires" aria-label="Workflow connections">
-                <defs><marker id="wf-back-head" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1,1 L7,4 L1,7" className="wf-back-head" /></marker></defs>
-                {paths.map((p, i) => (
-                  <g key={i} data-wf-connection={p.source} role={p.port && onConnect ? "button" : undefined} tabIndex={p.port && onConnect ? 0 : undefined}
-                    aria-label={p.port ? `Edit ${p.label?.text || "Next"} connection from step ${steps.findIndex(s => s.id === p.source) + 1}` : undefined}
-                    onClick={() => p.port && onPick(p.source)}
-                    onKeyDown={e => { if (p.port && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onPick(p.source); } }}>
-                    {p.port && onConnect && <path d={p.d} className="wf-wire-hit" />}
-                    <path d={p.d} className={p.live ? "live" : undefined} markerEnd="url(#wf-back-head)" />
-                  </g>
-                ))}
-                {/* Labels sit above every wire's hit area, so crossing wires cannot take their clicks. */}
-                {paths.map((p, i) => p.label && (
-                  <text key={i} x={p.label.x} y={p.label.y} className="wf-back-label" textAnchor="middle" aria-hidden="true"
-                    data-wf-connection={p.source} onClick={() => p.port && onPick(p.source)}>
-                    {p.label.text}
-                  </text>
-                ))}
+          {stacked ? (
+            <div ref={flow} className="wf-flow">
+              <div className="wf-col wf-col-end">{node("trigger", <TriggerBody d={d} names={names} />)}</div>
+              <Gap at={0} label={gapLabel(0)} onAdd={(kind) => onAdd(0, false, kind)} stacked first={!steps.length} />
+              {cols.map((col, i) => (
+                <ColumnAndGap key={col.map((s) => s.id).join()} i={i} last={i === cols.length - 1} col={col} steps={steps} node={(id, c) => node(id, c)} stacked onAdd={onAdd} full={full} names={names} room={d.room} runStep={runStep} />
+              ))}
+              <div className="wf-col wf-col-end">{node("outcomes", <OutcomesBody d={d} others={others} />)}</div>
+            </div>
+          ) : (
+            <div
+              ref={flow}
+              className="wf-flow free"
+              style={{ width: fw, height: fh, transform: `translate(${shift.x + Math.max(24, (view.w - fw * zoom) / 2)}px, ${shift.y + Math.max(24, (view.h - fh * zoom) / 2 - 10)}px) scale(${zoom})` }}
+            >
+              <svg className="wf-wires" aria-hidden="true">
+                <defs>
+                  <marker id="wf-back-head" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                    <path d="M1,1 L7,4 L1,7" className="wf-back-head" />
+                  </marker>
+                </defs>
+                <g transform={`translate(${ox} ${oy})`}>
+                  {wires.map((w, i) => (
+                    <path key={i} d={w.d} className={cn(w.live && "live", w.on && "on")} />
+                  ))}
+                  {loops.map(l => (
+                    <g key={l.id} data-wf-connection={l.source} onClick={() => onConnect && onPick(l.source)}>
+                      {onConnect && <path d={l.d} className="wf-wire-hit" />}
+                      <path d={l.d} className={cn("back", l.live && "live", sel === l.source && "on")} markerEnd="url(#wf-back-head)" />
+                    </g>
+                  ))}
+                </g>
               </svg>
-            )}
-            <div className="wf-col wf-col-end">{node("trigger", <TriggerBody d={d} names={names} />)}</div>
-            <Gap at={0} label={steps.length ? "Add before the first step" : "Add the first step"} onAdd={(kind) => onAdd(0, false, kind)} stacked={stacked} first={!steps.length} />
-            {cols.map((col, i) => (
-              <ColumnAndGap key={col.map((s) => s.id).join()} i={i} last={i === cols.length - 1} col={col} steps={steps} node={node} stacked={stacked} onAdd={onAdd} full={steps.length >= MAX_STEPS} names={names} room={d.room} runStep={runStep} />
-            ))}
-            <div className="wf-col wf-col-end">{node("outcomes", <OutcomesBody d={d} others={others} />)}</div>
-          </div>
+              {loops.map(l => (
+                <button key={l.id} type="button" className="wf-loop" data-wf-connection={l.source} style={{ left: l.x + ox, top: l.y + oy }}
+                  disabled={!onConnect} aria-label={`Edit ${l.label} connection from step ${steps.findIndex(s => s.id === l.source) + 1}`} onClick={() => onConnect && onPick(l.source)}>
+                  <RotateCcwIcon className="size-3" aria-hidden="true" />{l.text}
+                </button>
+              ))}
+              {node("trigger", <TriggerBody d={d} names={names} />)}
+              {cols.map((col, i) => col.map((s) => node(s.id, body(s), i + 1)))}
+              {node("outcomes", <OutcomesBody d={d} others={others} />)}
+              {gaps.map((g) => (
+                <Gap key={g.at} at={g.at} label={gapLabel(g.at)} onAdd={(kind) => onAdd(g.at, false, kind)} stacked={false} disabled={full} first={!steps.length} style={{ left: g.x + ox, top: g.y + oy }} />
+              ))}
+              {besides.map((b) => (
+                <button
+                  key={b.i}
+                  type="button"
+                  className={cn("wf-alongside free", b.on && "on")}
+                  style={{ left: b.x + ox, top: b.y + oy, width: STEP_W }}
+                  disabled={full}
+                  onPointerEnter={() => setHot(b.i + 1)}
+                  onPointerLeave={() => setHot((h) => (h === b.i + 1 ? -1 : h))}
+                  onClick={() => onAdd(b.i, true)}
+                >
+                  <PlusIcon className="size-3.5" /> Alongside
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
       {!stacked && (
@@ -1386,6 +1563,17 @@ function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd, onM
               <ScanIcon />
             </Button>
           </Tip>
+          {/* Cards moved by hand, put back in their columns. */}
+          {moved && onLayout && !live && (
+            <>
+              <span className="wf-zoom-sep" aria-hidden="true" />
+              <Tip label="Put every card back in its column" side="top">
+                <Button variant="ghost" size="sm" className="h-8 gap-1.5 px-2.5 text-[13px] font-medium text-[var(--ink)]" onClick={tidy}>
+                  <LayoutGridIcon className="size-3.5" /> Tidy up
+                </Button>
+              </Tip>
+            </>
+          )}
         </div>
       )}
     </div>
@@ -1417,18 +1605,18 @@ const ADD_KINDS: { kind: StepKind; icon: LucideIcon; name: string; says: string 
 ];
 
 /** The space between two columns, with its "+": a step, a check or your OK, in a column of its own there. */
-function Gap({ at, label, onAdd, stacked, disabled, first }: { /** Where a card dropped here goes: a column of its own before column `at`. */ at: number; label: string; onAdd: (kind?: StepKind) => void; stacked: boolean; disabled?: boolean; /** No steps yet: the "+" says what it does. */ first?: boolean }) {
+function Gap({ at, label, onAdd, stacked, disabled, first, style }: { /** Where a card dropped here goes: a column of its own before column `at`. */ at: number; label: string; onAdd: (kind?: StepKind) => void; stacked: boolean; disabled?: boolean; /** No steps yet: the "+" says what it does. */ first?: boolean; /** On the free canvas: its middle, there. */ style?: CSSProperties }) {
   const [open, setOpen] = useState(false);
   if (first)
     return (
-      <div className="wf-gap first">
+      <div className={cn("wf-gap first", style && "free")} style={style}>
         <button type="button" className="wf-first" onClick={() => onAdd("do")}>
           <PlusIcon className="size-4" /> Add the first step
         </button>
       </div>
     );
   return (
-    <div className="wf-gap" data-wf-drop={`gap:${at}`}>
+    <div className={cn("wf-gap", style && "free")} data-wf-drop={`gap:${at}`} style={style}>
       <Popover open={open} onOpenChange={setOpen}>
         <Tip label={label} side={stacked ? "right" : "top"}>
           <PopoverTrigger asChild>
@@ -1462,19 +1650,23 @@ function Gap({ at, label, onAdd, stacked, disabled, first }: { /** Where a card 
 /** A card on the canvas: focusable, pressed or Enter to open its settings. */
 type RunStepOf = (id: string) => Pick<WorkflowRunStep, "status" | "asked" | "verdict" | "again" | "kind"> | null;
 
-function NodeCard({ id, children, sel, flagged, onPick, runStep }: { id: string; children: ReactNode; sel: Sel; flagged: Set<string>; onPick: (s: Sel) => void; runStep: RunStepOf }) {
+function NodeCard({ id, children, sel, flagged, onPick, runStep, held, style, drop, onEnter, onLeave }: { id: string; children: ReactNode; sel: Sel; flagged: Set<string>; onPick: (s: Sel) => void; runStep: RunStepOf; /** Being dragged. */ held?: boolean; /** Where it sits on the free canvas. */ style?: CSSProperties; /** What a card dropped on it does: `col:n`, alongside it. */ drop?: string; onEnter?: () => void; onLeave?: () => void }) {
   const kind = id === "trigger" || id === "outcomes" ? id : "step";
   const run = kind === "step" ? runStep(id) : null;
   const open = () => onPick(sel === id ? null : id);
   return (
     <div
-      className={cn("wf-node", `wf-node-${kind}`, sel === id && "sel", flagged.has(id) && "flag")}
+      className={cn("wf-node", `wf-node-${kind}`, sel === id && "sel", flagged.has(id) && "flag", held && "held")}
       data-wf-node={id}
+      data-wf-drop={drop}
       data-run={run?.status}
+      style={style}
       tabIndex={0}
       role="button"
       aria-pressed={sel === id}
       onClick={open}
+      onPointerEnter={onEnter}
+      onPointerLeave={onLeave}
       onKeyDown={(e: KeyboardEvent) => {
         if (e.target !== e.currentTarget) return;
         if (e.key === "Enter" || e.key === " ") {
@@ -1483,7 +1675,7 @@ function NodeCard({ id, children, sel, flagged, onPick, runStep }: { id: string;
         }
       }}
     >
-      {children}
+      <div className="wf-node-in">{children}</div>
       {/* Not under a step being done: its face's ring and "On this step" say it, so no second "Working" (DIRECTION.md §9.4). */}
       {run && (run.status !== "claimed" || run.kind === "approve") && (
         <span className="wf-node-run">
@@ -1499,16 +1691,16 @@ function TriggerBody({ d, names }: { d: Draft; names: Names }) {
   const Icon = TRIGGER_ICON[d.trigger.kind];
   return (
     <>
-      <div className="wf-node-head">
-        <span className="wf-node-kind">Trigger</span>
+      <div className="wf-node-top">
+        <span className="wf-tile">
+          <Icon className="size-4" />
+        </span>
+        <span className="wf-who-text">
+          <span className="wf-kind">Starts</span>
+          <span className="wf-who-name wrap">{triggerLong(d.trigger, names)}</span>
+        </span>
       </div>
       <div className="wf-node-body">
-        <div className="wf-trigger">
-          <span className="wf-trigger-tile">
-            <Icon className="size-4" />
-          </span>
-          <span className="wf-trigger-text">{triggerLong(d.trigger, names)}</span>
-        </div>
         <div className="wf-node-rows">
           {d.trigger.kind === "schedule" && d.trigger.schedule.every !== "hourly" && (
             <span className="wf-row">
@@ -1544,8 +1736,14 @@ function OutcomesBody({ d, others }: { d: Draft; others: { id: string; name: str
   ];
   return (
     <>
-      <div className="wf-node-head">
-        <span className="wf-node-kind">Then</span>
+      <div className="wf-node-top">
+        <span className="wf-tile then">
+          <FlagIcon className="size-4" />
+        </span>
+        <span className="wf-who-text">
+          <span className="wf-kind">Then</span>
+          <span className="wf-who-name">When the run is through</span>
+        </span>
       </div>
       <div className="wf-node-body wf-outcomes">
         {rows.map(([Icon, text, on]) => (
@@ -1571,18 +1769,18 @@ function StepBody({ s, n, names, room, at, asked, again = 0 }: { s: WorkflowStep
   const says = m ? (onIt ? { state: "working", line: at === "review" ? "Being checked" : "On this step" } : (waits ?? mateStatus(m))) : null;
   return (
     <>
-      <div className="wf-node-head">
-        <span className="wf-node-kind">Step {n}</span>
+      <div className="wf-node-top">
+        {m ? <Face seed={m.look ?? m.name} size={30} status={onIt ? "working" : m.status} lead={lead} /> : <span className="wf-face-none" style={{ width: 30, height: 30 }} />}
+        <span className="wf-who-text">
+          <span className="wf-who-name">{m ? (lead ? `The lead · ${m.name}` : m.name) : lead ? "The lead" : "Pick a teammate"}</span>
+          {says ? <span className={cn("tm-sub", `s-${says.state}`)}>{says.line}</span> : <span className="tm-sub">{lead ? "Nobody leads this room" : "Nobody does this yet"}</span>}
+        </span>
         {again > 0 && <span className="wf-again">Try {again + 1}</span>}
+        <span className="wf-num" title={`Step ${n}`} aria-label={`Step ${n}`}>
+          {n}
+        </span>
       </div>
       <div className="wf-node-body">
-        <div className="wf-who">
-          {m ? <Face seed={m.look ?? m.name} size={24} status={onIt ? "working" : m.status} lead={lead} /> : <span className="wf-face-none" style={{ width: 24, height: 24 }} />}
-          <span className="wf-who-text">
-            <span className="wf-who-name">{m ? (lead ? `The lead · ${m.name}` : m.name) : lead ? "The lead" : "Pick a teammate"}</span>
-            {says ? <span className={cn("tm-sub", `s-${says.state}`)}>{says.line}</span> : <span className="tm-sub">{lead ? "Nobody leads this room" : "Nobody does this yet"}</span>}
-          </span>
-        </div>
         <p className={cn("wf-does", !s.does.trim() && "muted")}>{s.does.trim() || "Say what this step does."}</p>
         {s.owns.length > 0 && (
           <span className="wf-owns">
@@ -1612,30 +1810,30 @@ function GateBody({ s, n, steps, names, room, run }: { s: WorkflowStep; n: numbe
   const onIt = run?.status === "claimed" || run?.status === "review";
   return (
     <>
-      <div className="wf-node-head">
-        <span className="wf-node-kind">
-          Step {n} · {ok ? "Your OK" : "Check"}
+      <div className="wf-node-top">
+        {ok ? (
+          <span className="wf-tile ok" aria-hidden="true">
+            <HandIcon className="size-4" />
+          </span>
+        ) : m ? (
+          <Face seed={m.look ?? m.name} size={30} status={onIt ? "working" : m.status} lead={s.mate === LEAD} />
+        ) : (
+          <span className="wf-face-none" style={{ width: 30, height: 30 }} />
+        )}
+        <span className="wf-who-text">
+          <span className="wf-who-name">{ok ? "You" : m ? (s.mate === LEAD ? `The lead · ${m.name}` : m.name) : "Pick who checks"}</span>
+          <span className="tm-sub">{ok ? "Asked before it goes on" : onIt ? "Checking" : "Checks the work so far"}</span>
         </span>
         {(run?.again ?? 0) > 0 && <span className="wf-again">Try {(run?.again ?? 0) + 1}</span>}
+        {/* Its kind and its place in the order, in one: a check's shield, your OK's hand. */}
+        <span className={cn("wf-num", ok ? "ok" : "check")} title={`Step ${n} · ${ok ? "Your OK" : "Check"}`} aria-label={`Step ${n}, ${ok ? "your OK" : "a check"}`}>
+          {ok ? <HandIcon className="size-3" /> : <ShieldCheckIcon className="size-3" />}
+          {n}
+        </span>
       </div>
       <div className="wf-node-body">
-        <div className="wf-who">
-          {ok ? (
-            <span className="wf-gate-tile" aria-hidden="true">
-              <HandIcon className="size-3.5" />
-            </span>
-          ) : m ? (
-            <Face seed={m.look ?? m.name} size={24} status={onIt ? "working" : m.status} lead={s.mate === LEAD} />
-          ) : (
-            <span className="wf-face-none" style={{ width: 24, height: 24 }} />
-          )}
-          <span className="wf-who-text">
-            <span className="wf-who-name">{ok ? "You" : m ? (s.mate === LEAD ? `The lead · ${m.name}` : m.name) : "Pick who checks"}</span>
-            <span className="tm-sub">{ok ? "Asked before it goes on" : onIt ? "Checking" : "Checks the work so far"}</span>
-          </span>
-        </div>
         <p className={cn("wf-does", !s.does.trim() && "muted")}>{s.does.trim() ? (ok ? s.does.trim() : `Goes on if ${s.does.trim().replace(/^./, (c) => c.toLowerCase())}`) : ok ? "Say what you're asked." : "Say what has to hold."}</p>
-        <span className="wf-row">
+        <span className="wf-row wf-if">
           {s.ifNot === "back" ? <CornerUpLeftIcon className="size-3.5" /> : <XIcon className="size-3.5" />}
           {s.otherwise ? `If not: ${s.otherwise === "$finish" ? "stop the run" : `step ${steps.findIndex(x => x.id === s.otherwise) + 1}`}` : s.ifNot === "back" ? (back ? `${ok ? "If you say no" : "If not"}: back to step ${back}${fixer ? `, fixed by ${fixer}` : ""}, up to ${s.tries ?? DEFAULT_TRIES}×` : "Pick the step it sends back to") : `${ok ? "If you say no" : "If not"}: the run stops`}
         </span>

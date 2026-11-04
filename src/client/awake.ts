@@ -1,17 +1,17 @@
 import { useSyncExternalStore } from "react";
 
 /**
- * Whether Friday is the window being used: shown and focused (Arun, 2026-10-19: "optimizing this app to be lightweight").
- * Every endless animation (a pulse, a shimmer, a spinner, the thinking orb) drew a frame on every refresh of the screen, 120 a
- * second on a ProMotion Mac, for as long as the window was visible, even behind another app's: the page sat at a fifth of a
- * core and the GPU near that while nothing changed. While Friday isn't the window in use, the endless ones are held still (holdEndless)
- * and canvases stop drawing (`html.asleep` says so to anything that asks); what they say (working, waiting on you) is still shown, and
- * the moment the window is used again they move.
+ * Whether Friday can be seen (Arun, 2026-10-19: "optimizing this app to be lightweight"). While it can't (minimised, on another
+ * desktop, covered), the endless animations (a pulse, a shimmer, a spinner, the thinking orb) are held still (holdEndless) and
+ * canvases stop drawing (`html.asleep` says so to anything that asks), so a page nobody sees draws nothing; the moment it shows
+ * again they move. A window in sight behind another app's keeps moving (Arun, 2026-11-03: "make sure all of the animations and
+ * stuff are still running visibily even if you click off the app … i dont like how it looks static when not on the app"): it
+ * was held still on losing focus, and a working session's ring sat frozen beside the app he was in.
  */
 
 const subs = new Set<() => void>();
-/** Shown and focused; a page with no notion of focus (a test's stand-in document) counts as in use. */
-const inUse = () => !document.hidden && (typeof document.hasFocus !== "function" || document.hasFocus());
+/** Shown, focused or not. */
+const inUse = () => !document.hidden;
 let awake = typeof document === "undefined" ? true : inUse();
 
 /**
@@ -56,14 +56,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined" && document
     holdEndless();
     sweep = setInterval(holdEndless, 2000);
   }
-  window.addEventListener("focus", update);
-  // A click into a preview's page moves the focus into its frame: that is still Friday in use, so blur is checked a moment
-  // later, once the focus has landed, and only a window that really lost it sleeps.
-  window.addEventListener("blur", () => setTimeout(update, 50));
   document.addEventListener("visibilitychange", update);
 }
 
-/** True while Friday is the window in use; a component that animates draws still while it is false. */
+/** True while Friday can be seen; a component that animates draws still while it is false. */
 export function useAwake(): boolean {
   return useSyncExternalStore(
     (f) => {

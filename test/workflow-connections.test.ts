@@ -64,3 +64,14 @@ test("invalid connection values are rejected and changing a check to work drops 
   assert.throws(() => clean([{ ...steps[0]!, next: "$unknown" }]), /connection/i);
   assert.equal(clean([{ ...steps[2]!, kind: "do" }]).steps[0]!.otherwise, undefined);
 });
+
+test("free card positions round-trip alongside branch connections without changing execution order", () => {
+  const input = { name: "Review branches", steps, layout: { review: { x: -220, y: 140 }, fixes: { x: 30, y: 360 }, trigger: { x: 0, y: -80 } } };
+  const make = { secret: () => "test", schedule: () => undefined };
+  const w = cleanWorkflow(input, null, make);
+  const reopened = cleanWorkflow(JSON.parse(JSON.stringify(w)), null, make);
+  assert.deepEqual(reopened.layout, input.layout);
+  assert.deepEqual(reopened.steps.map(s => s.id), steps.map(s => s.id));
+  assert.deepEqual(connectionsOf(reopened.steps), connectionsOf(steps));
+  assert.deepEqual(workflowTasks(reopened, id => id, "", 2).map(t => t.title), ["Prepare fixes"]);
+});

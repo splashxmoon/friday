@@ -8,7 +8,7 @@ import { Icon } from "./icons.js";
 import { NoMachine, hostApi, useMachine } from "./local.js";
 import { loadOwnModels, useOwnModels, type OwnChoice } from "./ownModelStore.js";
 import type { Identity } from "./storage.js";
-import { MenuButton, useConfirm, type MenuItem } from "./ui.js";
+import { Check, MenuButton, useConfirm, type MenuItem } from "./ui.js";
 import type { WorkspaceUsage } from "./workspace-types.js";
 
 /**
@@ -180,7 +180,7 @@ export function OwnModelsSection({ identity, workspace }: { identity: Identity; 
           </div>
         ))}
 
-        {draft && <ModelForm identity={identity} draft={draft} onChange={setDraft} onDone={async () => (setDraft(null), await loadOwnModels(identity, true))} />}
+        {draft && <ModelForm identity={identity} draft={draft} saved={models} onChange={setDraft} onDone={async () => (setDraft(null), await loadOwnModels(identity, true))} />}
 
         {models.map((m) => (
           <div key={m.id} className="set-row own-row">
@@ -241,8 +241,10 @@ export function OwnModelsSection({ identity, workspace }: { identity: Identity; 
   );
 }
 
-function ModelForm({ identity, draft, onChange, onDone }: { identity: Identity; draft: Draft; onChange: (d: Draft | null) => void; onDone: () => Promise<void> }) {
+function ModelForm({ identity, draft, saved, onChange, onDone }: { identity: Identity; draft: Draft; saved: OwnChoice[]; onChange: (d: Draft | null) => void; onDone: () => Promise<void> }) {
   const [found, setFound] = useState<string[]>([]);
+  // Several ticked from the list and added at once, instead of one per pass of the form (issue #17). Null: one, as before.
+  const [many, setMany] = useState<Set<string> | null>(null);
   // A long list of models narrowed by typing, in the list itself (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
   const [filter, setFilter] = useState("");
   // The filter takes the focus once as the list opens (the menu itself puts it on the model ticked, a moment before).
@@ -286,6 +288,18 @@ function ModelForm({ identity, draft, onChange, onDone }: { identity: Identity; 
     return () => clearTimeout(t);
   }, [draft.apiKey, draft.baseUrl, draft.provider]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const addMany = async (picked: string[]) => {
+    if (signInToken) return setError(signInToken);
+    setBusy("save");
+    setError("");
+    try {
+      await hostApi(identity, "/api/runner/models.own.addMany", { method: "POST", body: JSON.stringify({ provider: draft.provider, baseUrl: draft.baseUrl, models: picked, ...(draft.apiKey ? { apiKey: draft.apiKey } : {}) }) });
+      await onDone();
+    } catch (e) {
+      setError(machineError(e));
+      setBusy("");
+    }
+  };
   const save = async () => {
     if (signInToken) return setError(signInToken);
     setBusy("save");
@@ -301,6 +315,12 @@ function ModelForm({ identity, draft, onChange, onDone }: { identity: Identity; 
       setBusy("");
     }
   };
+  // Already saved for this address: shown, but not ticked again. The list keeps at most MAX_OWN, and says so before the press.
+  const clean = draft.baseUrl.trim().replace(/\/+$/, "").replace(/\/chat\/completions$/, "");
+  const have = new Set(saved.filter((m) => m.baseUrl === clean).map((m) => m.model));
+  const fresh = many ? found.filter((m) => many.has(m) && !have.has(m)) : [];
+  const room = Math.max(0, MAX_OWN - saved.length);
+  const over = fresh.length - room;
   const host = (() => {
     try {
       const u = new URL(draft.baseUrl);
@@ -352,6 +372,7 @@ function ModelForm({ identity, draft, onChange, onDone }: { identity: Identity; 
             </span>
           )}
         </div>
+        {!many && (
         <label>
           <span>Model</span>
           <span className="own-model-pick">
@@ -402,7 +423,15 @@ function ModelForm({ identity, draft, onChange, onDone }: { identity: Identity; 
               </button>
             )}
           </span>
+          {found.length > 1 && !draft.id && (
+            <span className="own-hint">
+              <button type="button" className="link-btn" onClick={() => (setError(""), setMany(new Set()))}>
+                Add several at once
+              </button>
+            </span>
+          )}
         </label>
+        )}
         {addressOpen && (
           <label className="wide">
             <span>Address</span>
@@ -430,6 +459,10 @@ function ModelForm({ identity, draft, onChange, onDone }: { identity: Identity; 
             </span>
           </label>
         )}
+        {many ? (
+          <ManyPicker found={found} picked={many} onPick={setMany} have={have} />
+        ) : (
+          <>
         <label className="wide">
           <span>
             Name <span className="own-optional">optional</span>
@@ -438,23 +471,103 @@ function ModelForm({ identity, draft, onChange, onDone }: { identity: Identity; 
         </label>
         {/* Pictures attached to a message go to it only when it can read them: a picture sent to one that can't fails the step. */}
         <label className="wide own-vision">
-          <input type="checkbox" checked={draft.vision ?? draft.sees ?? seesByName(draft.model)} onChange={(e) => set({ vision: e.target.checked })} />
+          <Check checked={draft.vision ?? draft.sees ?? seesByName(draft.model)} onChange={(on) => set({ vision: on })} />
           <span>
             Can see images <span className="own-optional">{draft.vision === undefined ? "guessed from its name" : "set by you"}</span>
           </span>
         </label>
+          </>
+        )}
       </div>
       {error && <p className="error small">{error}</p>}
       <div className="own-form-actions">
         <span className="muted small">
           <Icon name="shield" size={12} /> Kept on this computer. It passes through Friday only on its way here, and is never stored there.
         </span>
+        {many ? (
+          <>
+            {over > 0 && <span className="error small own-many-over">{room ? `${fresh.length} new, room for ${room} more: untick ${over}` : `${MAX_OWN} saved, the most Friday keeps`}</span>}
+            <button type="button" className="btn ghost small" onClick={() => (setError(""), setMany(null))}>
+              Cancel
+            </button>
+            <button type="button" className="btn primary small" disabled={busy !== "" || !fresh.length || over > 0 || needsKey} title={needsKey ? "Paste your key first" : !fresh.length ? "Tick the models to add" : undefined} onClick={() => void addMany(fresh)}>
+              {busy === "save" ? "Adding…" : fresh.length > 1 ? `Add ${fresh.length} models` : "Add model"}
+            </button>
+          </>
+        ) : (
+          <>
         <button type="button" className="btn ghost small" onClick={() => onChange(null)}>
           Cancel
         </button>
         <button type="button" className="btn primary small" disabled={busy !== "" || !draft.baseUrl.trim() || !draft.model.trim() || needsKey} title={needsKey ? "Paste your key first" : !draft.model.trim() ? "Pick or type a model" : undefined} onClick={() => void save()}>
           {busy === "save" ? "Saving…" : draft.id ? "Save" : "Add model"}
         </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** The most models kept on a computer (runner/own-models.ts MAX_OWN_MODELS). */
+const MAX_OWN = 40;
+
+/**
+ * A server's models to tick, for adding several at once (issue #17): filtered by name, with Select all and Select none acting on
+ * the ones the filter leaves, how many are ticked, and the ticked ones alone. One already saved for this address is listed, not
+ * offered again.
+ */
+function ManyPicker({ found, picked, onPick, have }: { found: string[]; picked: Set<string>; onPick: (s: Set<string>) => void; have: Set<string> }) {
+  const [filter, setFilter] = useState("");
+  const [only, setOnly] = useState(false);
+  const words = filter.trim().toLowerCase();
+  const shown = found.filter((m) => (!words || m.toLowerCase().includes(words)) && (!only || picked.has(m)));
+  const open = shown.filter((m) => !have.has(m));
+  const ticked = open.filter((m) => picked.has(m));
+  const set = (ms: string[], on: boolean) => {
+    const next = new Set(picked);
+    for (const m of ms) if (on) next.add(m);
+    else next.delete(m);
+    onPick(next);
+  };
+  const count = found.filter((m) => picked.has(m) && !have.has(m)).length;
+  return (
+    <div className="wide own-many">
+      <div className="own-many-top">
+        <input className="set-input" value={filter} placeholder={`Filter ${found.length} models`} aria-label="Filter models" spellCheck={false} autoFocus onChange={(e) => setFilter(e.target.value)} />
+        <span className="own-many-count" aria-live="polite">
+          <b>{count}</b> of {found.length} selected
+        </span>
+      </div>
+      <div className="own-many-bar">
+        <button type="button" className="link-btn" disabled={!open.length || ticked.length === open.length} onClick={() => set(open, true)}>
+          {words && !only ? `Select these ${open.length}` : "Select all"}
+        </button>
+        <button type="button" className="link-btn" disabled={!ticked.length} onClick={() => set(open, false)}>
+          {words && !only ? "Select none of these" : "Select none"}
+        </button>
+        <label className="own-many-only">
+          <Check checked={only} onChange={setOnly} />
+          Selected only
+        </label>
+      </div>
+      <div className="own-many-list" role="group" aria-label="Models">
+        {shown.map((m) =>
+          have.has(m) ? (
+            <div key={m} className="own-many-row saved">
+              <Check checked disabled onChange={() => {}} label={`${m}, already added`} />
+              <code>{m}</code>
+              <span className="own-many-tag">Added</span>
+            </div>
+          ) : (
+            <label key={m} className="own-many-row">
+              <Check checked={picked.has(m)} onChange={(on) => set([m], on)} />
+              <code>{m}</code>
+              {seesByName(m) && <span className="own-many-tag">Sees images</span>}
+            </label>
+          ),
+        )}
+        {!shown.length && <p className="own-many-empty">{only ? "Nothing selected yet." : `No model has “${filter.trim()}” in its name.`}</p>}
       </div>
     </div>
   );

@@ -5,7 +5,7 @@ import { driverOf, type SessionState } from "../session/projection.js";
 import type { DiffFile, Member } from "../types.js";
 import { Icon } from "./icons.js";
 import { splitPath } from "./diff-lines.js";
-import { Segmented, useDismiss } from "./ui.js";
+import { Check, Segmented, useDismiss } from "./ui.js";
 import type { Send } from "./useSession.js";
 import type { Receipt } from "../receipt.js";
 import { commitPaths } from "../shepherd.js";
@@ -208,13 +208,12 @@ export function ShipDialog({ state, sid, invite, send, lane, onClose, receipt, d
               const out = leave.has(f.path);
               return (
                 <label key={f.path} className={`ship-file ${out ? "out" : ""}`} title={f.path}>
-                  <input
-                    type="checkbox"
+                  <Check
                     checked={!out}
-                    onChange={(e) =>
+                    onChange={(on) =>
                       setLeave((had) => {
                         const next = new Set(had);
-                        if (e.target.checked) next.delete(f.path);
+                        if (on) next.delete(f.path);
                         else next.add(f.path);
                         return next;
                       })
@@ -290,7 +289,7 @@ export function ShipDialog({ state, sid, invite, send, lane, onClose, receipt, d
                 <p key={c.text}>{c.text}.</p>
               ))}
               <label className="check-row">
-                <input type="checkbox" checked={anyway} onChange={(e) => setAnyway(e.target.checked)} />
+                <Check checked={anyway} onChange={(on) => setAnyway(on)} />
                 Commit anyway
               </label>
             </div>

@@ -126,3 +126,23 @@ test("the folders a start gives are checked, kept for the folder, and used again
   assert.deepEqual(await savedDirs(repo), []);
   assert.ok(!(path.resolve(repo) in JSON.parse(await readFile(process.env.FRIDAY_EXTRA_DIRS!, "utf8"))));
 });
+
+test("a running agent is given another folder from the chat, and has it from its next turn; one taken away is gone", async () => {
+  const own = path.join(dir, "own");
+  const other = path.join(dir, "other");
+  await mkdir(own, { recursive: true });
+  await mkdir(other, { recursive: true });
+  const r = new Runner({ server: "http://127.0.0.1:1", session: "s1", invite: "i", userId: "u", name: "Ada", tool: "claude", cwd: own, mode: "full" });
+  const ctx = { serverUrl: "http://127.0.0.1:1", user: { id: "u", name: "Ada" }, runners: new Map([["s1|main", r]]) };
+  const next = () => (r as unknown as { spec(p: string, s: string, m: string[]): TurnSpec }).spec("Go", "Standing note", []).dirs;
+  assert.equal(next(), undefined);
+  assert.deepEqual(await callHost("dirs", { sid: "s1", lane: "main", add: other }, ctx), { dirs: [other], folder: own });
+  assert.deepEqual(next(), [other], "the next turn's tool is started with it");
+  assert.ok(ADAPTERS.claude.args({ ...spec(), dirs: next()! }).includes(other));
+  assert.deepEqual(await savedDirs(own), [other], "kept for its folder, as a start's are");
+  await assert.rejects(callHost("dirs", { sid: "s1", lane: "main", add: own }, ctx), /already/);
+  await assert.rejects(callHost("dirs", { sid: "s1", lane: "main", add: path.join(dir, "nowhere") }, ctx), /no folder/);
+  await assert.rejects(callHost("dirs", { sid: "s2", lane: "main", add: other }, ctx), /No agent of yours/);
+  assert.deepEqual(await callHost("dirs", { sid: "s1", lane: "main", remove: other }, ctx), { dirs: [], folder: own });
+  assert.equal(next(), undefined, "none left, no flag");
+});

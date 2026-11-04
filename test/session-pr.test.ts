@@ -13,13 +13,13 @@ test("the session remembers the pull request its commit opened, and that a sheph
   s = apply(s, ev({ type: "session.created", title: "t", ownerId: "u1", ownerName: "Arun" } as EventBody));
   assert.equal(prOf(s), null);
   s = apply(s, ev({ type: "folder.committed", files: 2, message: "Fix it", branch: "fix", pushed: true, prUrl: "https://github.com/acme/app/pull/12", prCreated: true } as EventBody));
-  assert.deepEqual(prOf(s), { sid: "s1", url: "https://github.com/acme/app/pull/12", merged: false });
+  assert.deepEqual(prOf(s), { sid: "s1", url: "https://github.com/acme/app/pull/12", merged: false, urls: ["https://github.com/acme/app/pull/12"] });
   s = apply(s, ev({ type: "pr.shepherd", on: true, prUrl: "https://github.com/acme/app/pull/12" } as EventBody));
   s = apply(s, ev({ type: "pr.shepherd.ended", outcome: "merged", text: "Merged." } as EventBody));
-  assert.deepEqual(prOf(s), { sid: "s1", url: "https://github.com/acme/app/pull/12", merged: true });
+  assert.deepEqual(prOf(s), { sid: "s1", url: "https://github.com/acme/app/pull/12", merged: true, urls: ["https://github.com/acme/app/pull/12"] }, "seen through, still the one");
   // A commit without a pull request leaves it; a commit to a different pull request replaces it.
   s = apply(s, ev({ type: "folder.committed", files: 1, message: "More", branch: "fix" } as EventBody));
   assert.equal(prOf(s)?.merged, true);
   s = apply(s, ev({ type: "folder.committed", files: 1, message: "Next", branch: "next", prUrl: "https://github.com/acme/app/pull/13" } as EventBody));
-  assert.deepEqual(prOf(s), { sid: "s1", url: "https://github.com/acme/app/pull/13", merged: false });
+  assert.deepEqual(prOf(s), { sid: "s1", url: "https://github.com/acme/app/pull/13", merged: false, urls: ["https://github.com/acme/app/pull/12", "https://github.com/acme/app/pull/13"] }, "and the badge keeps both");
 });

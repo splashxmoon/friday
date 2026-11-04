@@ -3,6 +3,7 @@ import type { Redis } from "ioredis";
 import type { LLM } from "./agent/llm.js";
 import { hideSecrets } from "./secrets.js";
 import { MAIN_LANE, type SessionEvent } from "./types.js";
+import { ruleWords, type RuleCheck, type RuleHow } from "./rules.js";
 
 /** A key or password in a lesson: never kept, whoever wrote it (org memory, 2026-10-31). */
 const holdsSecret = (text: string) => hideSecrets(text).hidden > 0;
@@ -34,7 +35,16 @@ export const BRAIN_KINDS: BrainKind[] = ["correction", "decision", "pitfall", "c
  * it came back (and Needs you), until the person adds it (Friday then runs it after agents change files in the repo) or says no.
  */
 export interface BrainCheck {
+  /** A `command` check's shell command; a rule read off the change (`how`) keeps its words here (rules.ts ruleWords). */
   command: string;
+  /**
+   * How it is checked (rules.ts; Arun, 2026-11-03: "Rules that stick"): absent or `command`, the command has to pass in the
+   * agent's folder; `lines`, `runs` and `paths` are read straight off the change, with `pattern` (and `only`/`except` globs).
+   */
+  how?: RuleHow;
+  pattern?: string;
+  only?: string[];
+  except?: string[];
   state: "suggested" | "proposed" | "added" | "declined";
   at: number;
   /** Where it was offered: the answer is said there too. */
@@ -135,7 +145,7 @@ export function briefText(name: string, chosen: BrainEntry[], sessions: number):
   if (!chosen.length) return "";
   const parts = BRAIN_KINDS.flatMap((k) => {
     const of = chosen.filter((e) => e.kind === k);
-    return of.length ? [`${KIND_TITLE[k]}:\n${of.map((e) => `- ${e.text}${e.check?.state === "added" ? ` Friday runs \`${e.check.command}\` after changes here to catch it.` : ""}`).join("\n")}`] : [];
+    return of.length ? [`${KIND_TITLE[k]}:\n${of.map((e) => `- ${e.text}${e.check?.state === "added" ? (e.check.how && e.check.how !== "command" ? " Friday checks every change here for it." : ` Friday runs \`${e.check.command}\` after changes here to catch it.`) : ""}`).join("\n")}`] : [];
   });
   return `[Friday] What this team has learned working on ${name}, from ${sessions} earlier session${sessions === 1 ? "" : "s"} with any coding agent. It is background and may be out of date: where it and the code disagree, the code is right, and say so.\n\n${parts.join("\n\n")}\n\n`;
 }
@@ -172,6 +182,13 @@ export function checkCommand(v: unknown): string | undefined {
   return c;
 }
 
+const ruleRegexOk = (p: string) => {
+  try {
+    return p.length > 0 && p.length <= 200 && !!new RegExp(p);
+  } catch {
+    return false;
+  }
+};
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
 
 function jsonArray(raw: string): Record<string, unknown>[] {
@@ -394,9 +411,72 @@ export class BrainRegistry {
     return next;
   }
 
-  /** The checks people added for this repo, with the mistake each catches. */
+  /** The checks people added for this repo that are commands to run, with the mistake each catches. */
   async checks(repo: string): Promise<{ id: string; command: string; why: string }[]> {
-    return (await this.list(repo)).flatMap((e) => (e.check?.state === "added" ? [{ id: e.id, command: e.check.command, why: e.text }] : []));
+    return (await this.list(repo)).flatMap((e) => (e.check?.state === "added" && (!e.check.how || e.check.how === "command") ? [{ id: e.id, command: e.check.command, why: e.text }] : []));
+  }
+
+  /** The rules kept for this repo that are read off a change (rules.ts): what each says, and how it is checked. */
+  async rules(repo: string): Promise<{ id: string; rule: string; check: RuleCheck }[]> {
+    return (await this.list(repo)).flatMap((e) => {
+      const c = e.check;
+      if (c?.state !== "added" || !c.how || c.how === "command" || !c.pattern) return [];
+      return [{ id: e.id, rule: e.text, check: { how: c.how, pattern: c.pattern, ...(c.only?.length ? { only: c.only } : {}), ...(c.except?.length ? { except: c.except } : {}) } }];
+    });
+  }
+
+  /**
+   * A rule drafted from a person's correction (rules.ts draftRule), offered in the session where they said it: kept as a
+   * correction whose check is proposed until they keep it. Null when the repo already has it, kept or still being asked about.
+   */
+  async offerRule(repo: string, name: string, p: { text: string; check: RuleCheck }, from: BrainEntry["from"], where: { sid: string; lane: string }): Promise<BrainEntry | null> {
+    if (holdsSecret(p.text) || holdsSecret(p.check.pattern)) return null;
+    const have = await this.list(repo);
+    if (have.some((e) => e.check?.how === p.check.how && e.check.pattern === p.check.pattern && e.check.state !== "declined")) return null;
+    const now = Date.now();
+    const key = slug(p.text) || randomBytes(4).toString("hex");
+    const same = have.find((e) => e.key === key);
+    const entry: BrainEntry = {
+      ...(same ?? { id: randomBytes(5).toString("hex"), key, uses: 0 }),
+      text: p.text.trim().slice(0, MAX_TEXT),
+      kind: "correction",
+      from,
+      at: now,
+      seen: (same?.seen ?? 0) + 1,
+      seenAt: now,
+      check: { command: ruleWords(p.check), state: "proposed", at: now, sid: where.sid, lane: where.lane, ...p.check },
+    };
+    delete entry.retired;
+    await this.redis.hset(this.entriesKey(repo), entry.id, JSON.stringify(entry));
+    await this.touchRepo(repo, name, where.sid);
+    await this.trim(repo);
+    return entry;
+  }
+
+  /**
+   * A rule written or changed by a person, from the project memory page or the offer's Edit: kept at once (a person wrote it).
+   * `id` changes that entry; without one it is a new rule.
+   */
+  async putRule(repo: string, name: string, p: { id?: string; text: string; check: RuleCheck }, by: { id: string; name: string }): Promise<BrainEntry> {
+    const text = p.text.trim().slice(0, MAX_TEXT);
+    if (text.length < 3) throw new Error("Say what the rule is.");
+    if (holdsSecret(text) || holdsSecret(p.check.pattern)) throw new Error(SECRET_REFUSED);
+    if (p.check.how !== "paths" && !ruleRegexOk(p.check.pattern)) throw new Error("That pattern isn't a regular expression Friday can read.");
+    if (p.check.how === "paths" && !p.check.pattern.trim()) throw new Error("Name the files or folders.");
+    const now = Date.now();
+    const had = p.id ? await this.redis.hget(this.entriesKey(repo), p.id) : null;
+    if (p.id && !had) throw new Error("That's no longer in project memory.");
+    const before = had ? (JSON.parse(had) as BrainEntry) : null;
+    const check: BrainCheck = { ...(before?.check ?? {}), command: ruleWords(p.check), state: "added", at: now, by: by.name, how: p.check.how, pattern: p.check.pattern };
+    if (p.check.only?.length) check.only = p.check.only;
+    else delete check.only;
+    if (p.check.except?.length) check.except = p.check.except;
+    else delete check.except;
+    const entry: BrainEntry = { ...(before ?? { id: randomBytes(5).toString("hex"), key: slug(text) || randomBytes(4).toString("hex"), uses: 0, from: { tool: "person", name: by.name }, at: now }), text, kind: "correction", check };
+    delete entry.retired;
+    await this.redis.hset(this.entriesKey(repo), entry.id, JSON.stringify(entry));
+    await this.touchRepo(repo, name);
+    return entry;
   }
 
   /** A check ran after a change: counted, and counted as caught when it failed, so the page shows whether it earns its place. */

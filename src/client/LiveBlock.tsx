@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { CustomRendererProps } from "streamdown";
 import { Icon } from "./icons.js";
@@ -150,6 +150,39 @@ const SEEN = new Map<string, number>();
 // Trimmed: the block as it streamed and as it was saved can differ by the whitespace at their ends, and are the same visual.
 const seenKey = (kind: LiveKind, code: string, tall: boolean) => `${kind}${tall ? ":big" : ""}\n${code.trim()}`;
 
+/**
+ * A drawn frame kept running while its place in the chat is drawn again. An answer's visual moves as the answer streams (from
+ * the part still being written to the finished part) and again when the saved message takes the stream's place; each move
+ * made a new frame, so the page loaded again, faded in again and started over (a network training from epoch 0), which read
+ * as flicker (Arun, 2026-11-03: "fix the visuals and generative components flickering"). Now the frame waits a moment off
+ * screen, still running, and the new place takes it: moveBefore moves an iframe without reloading it.
+ */
+type Kept = { frame: HTMLIFrameElement; doc: string; drop: ReturnType<typeof setTimeout> };
+const KEPT = new Map<string, Kept>();
+let parking: HTMLDivElement | null = null;
+const canMove = typeof Element !== "undefined" && "moveBefore" in Element.prototype;
+function park(key: string, frame: HTMLIFrameElement, doc: string) {
+  if (!canMove || !frame.isConnected || KEPT.has(key)) return;
+  if (!parking?.isConnected) {
+    parking = document.createElement("div");
+    parking.setAttribute("aria-hidden", "true");
+    parking.style.cssText = "position:fixed;left:-10000px;top:0;width:640px;height:1px;overflow:hidden;pointer-events:none";
+    document.body.append(parking);
+  }
+  (parking as unknown as { moveBefore(n: Node, c: Node | null): void }).moveBefore(frame, null);
+  // Not taken up within a few seconds: it was really closed.
+  KEPT.set(key, { frame, doc, drop: setTimeout(() => (KEPT.delete(key), frame.remove()), 5000) });
+}
+function adopt(key: string, doc: string): HTMLIFrameElement | null {
+  const k = KEPT.get(key);
+  if (!k) return null;
+  KEPT.delete(key);
+  clearTimeout(k.drop);
+  if (k.doc === doc) return k.frame;
+  k.frame.remove();
+  return null;
+}
+
 const isDark = () => typeof document !== "undefined" && document.documentElement.classList.contains("dark");
 
 /** Asks a drawn diagram for the SVG it became: set by the frame while it is showing, for Download. */
@@ -219,7 +252,43 @@ function LiveFrame({ kind, code, tall, exporter }: { kind: LiveKind; code: strin
   const doc = useMemo(() => liveDocument(kind, code, dark, !!tall), [kind, code, dark, tall]);
   // Before it is ready it is a blank box while a library loads from the CDN; four seconds is as long as that is kept up.
   const [ready, setReady] = useState(false);
-  useEffect(() => setReady(false), [doc]);
+  const shown = useRef(doc);
+  useEffect(() => {
+    if (shown.current !== doc) setReady(false);
+    shown.current = doc;
+  }, [doc]);
+  // The frame itself, made here rather than by React, so it can be handed from this place to the next (park, adopt).
+  const slot = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const at = slot.current;
+    if (!near || !at) return;
+    let f = adopt(key, doc);
+    if (f) {
+      (at as unknown as { moveBefore(n: Node, c: Node | null): void }).moveBefore(f, null);
+      // Shown as it was, before anything is painted: no fade in again (its own size message won't come, nothing changed).
+      const was = f;
+      was.style.transition = "none";
+      setReady(true);
+      requestAnimationFrame(() => requestAnimationFrame(() => (was.style.transition = "")));
+    } else {
+      f = document.createElement("iframe");
+      f.className = "live-frame";
+      f.title = KINDS[kind].label;
+      // Scripts, and nothing else: no origin of its own, no forms, no popups, no navigating the app.
+      f.setAttribute("sandbox", "allow-scripts");
+      f.srcdoc = doc;
+      at.append(f);
+    }
+    // The same scheme as the page around it, or the browser paints the frame's own opaque canvas behind it.
+    f.style.colorScheme = dark ? "dark" : "light";
+    frame.current = f;
+    const mine = f;
+    return () => {
+      if (frame.current === mine) frame.current = null;
+      park(key, mine, doc);
+      if (mine.parentElement === at) mine.remove();
+    };
+  }, [near, key, doc, dark, kind]);
   useEffect(() => {
     if (ready || !near) return;
     const t = setTimeout(() => setReady(true), 4000);
@@ -231,18 +300,7 @@ function LiveFrame({ kind, code, tall, exporter }: { kind: LiveKind; code: strin
       {!ready && known === undefined && <div className="live-loading" aria-hidden />}
       {/* What is on its way, said over the shimmer: an unlabelled grey slab sat there for seconds (the 2026-10-28 critique). */}
       {!ready && known === undefined && <div className="live-wait live-wait-soft" role="status"><Icon name={KINDS[kind].icon} size={13} /> {kind === "mermaid" ? "Drawing the diagram…" : kind === "svg" ? "Drawing it…" : "Loading the page…"}</div>}
-      {near && (
-        <iframe
-          ref={frame}
-          className="live-frame"
-          title={KINDS[kind].label}
-          // Scripts, and nothing else: no origin of its own, no forms, no popups, no navigating the app.
-          sandbox="allow-scripts"
-          srcDoc={doc}
-          // The same scheme as the page around it, or the browser paints the frame's own opaque canvas behind it.
-          style={{ colorScheme: dark ? "dark" : "light" }}
-        />
-      )}
+      <div ref={slot} className="live-slot" />
     </div>
   );
 }
@@ -287,21 +345,9 @@ export function LiveBlock({ code, language, isIncomplete }: CustomRendererProps)
     if (svg) return save(name, "image/svg+xml", svg.includes("xmlns=") ? svg : svg.replace(/<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"'));
     save(name.replace(/\.svg$/, ".mmd"), "text/plain", code);
   };
-  // Full screen for real where the browser allows it (the desktop app does), the large view inside the window otherwise.
-  // Leaving full screen (Esc) closes it, so one press is always the way back.
+  // Large, it fills Friday's window, not the screen (Arun, 2026-11-02: "it doesnt load up full screen like completely but like
+  // full screen on window size of the app"): the screen's own full screen took the Mac to a space of its own. Esc closes it.
   const bigEl = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!big) return;
-    const el = bigEl.current;
-    let entered = false;
-    void el?.requestFullscreen?.().then(() => (entered = true), () => {});
-    const left = () => entered && !document.fullscreenElement && setBig(false);
-    document.addEventListener("fullscreenchange", left);
-    return () => {
-      document.removeEventListener("fullscreenchange", left);
-      if (document.fullscreenElement === el) void document.exitFullscreen().catch(() => {});
-    };
-  }, [big]);
   const copy = () => {
     void navigator.clipboard?.writeText(code).then(() => {
       setCopied(true);
@@ -336,13 +382,13 @@ export function LiveBlock({ code, language, isIncomplete }: CustomRendererProps)
           {/* Full screen, the way out is a button that says so, as the Code toggle beside it does: a lone 13px shrink icon in a
               corner read as no way out but Esc (2026-10-28 QA; Arun: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL"). */}
           {inBig ? (
-            <button type="button" className="live-btn live-close" title="Leave full screen (Esc)" onClick={() => setBig(false)}>
+            <button type="button" className="live-btn live-close" title="Close (Esc)" onClick={() => setBig(false)}>
               <Icon name="x" size={13} />
               Close
               <kbd>Esc</kbd>
             </button>
           ) : (
-            <button type="button" className="icon-btn tiny" title="Full screen" aria-label="Full screen" onClick={() => setBig(true)}>
+            <button type="button" className="icon-btn tiny" title="Expand to the window" aria-label="Expand to the window" onClick={() => setBig(true)}>
               <Icon name="expand" size={13} />
             </button>
           )}

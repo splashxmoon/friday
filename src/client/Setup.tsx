@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { FridayMark, GitHubMark } from "./BrandMarks.js";
+import { EngineMark, FridayMark, GitHubMark } from "./BrandMarks.js";
+import { WELCOME_TOOLS } from "./engines.js";
 import { isLocal } from "./edition.js";
 import { GitHubConnect, useGithub } from "./GitHubConnect.js";
 import { Icon, type IconName } from "./icons.js";
@@ -9,8 +10,8 @@ import { MachineBadge } from "./MachineBadge.js";
 import { openOutside } from "./openOutside.js";
 import type { Identity, RecentSession } from "./storage.js";
 import { isTeamSid, useTeamNow } from "./Teammates.js";
-import { askTeamDemo, demoBlurb, DemoMarks, isTeamDemo, useDemoTeam } from "./TeamDemo.js";
 import { answerUsage, noticeDue, useUsageSharing, WHAT } from "./UsageSharing.js";
+import { CrewFaces } from "./WhatsNew.js";
 import { Switch } from "@/components/ui/switch";
 
 /**
@@ -76,14 +77,14 @@ export function becameDone(was: { id: string; done: boolean }, now: { id: string
 
 export function Setup({ identity, recents, onDone }: { identity: Identity; recents: RecentSession[]; /** Pressed Start: the box is theirs. */ onDone: () => void }) {
   const k = keyFor(identity.id);
-  // Someone with sessions of their own is not new. The Crew room and the team demo are Friday's, not theirs: the Crew room is made
+  // Someone with sessions of their own is not new. The Crew room is Friday's, not theirs: the Crew room is made
   // as Friday starts, so counting it marked every fresh install as set up before the welcome could show (2026-11-01). Which
   // sessions are the Crew's is known once the crew is: until then (a moment), nothing is decided.
   const t = useTeamNow();
   const [teamLate, setTeamLate] = useState(false);
   useEffect(() => void setTimeout(() => setTeamLate(true), 4000), []);
   const known = !isLocal() || !!t || teamLate;
-  const hasHistory = recents.some((r) => !isTeamSid(r.sid) && !isTeamDemo(r.sid, r.title));
+  const hasHistory = recents.some((r) => !isTeamSid(r.sid));
   const [open, setOpen] = useState(false);
   const { state: machine, refresh } = useMachine(identity);
   const connected = machine.mode === "local" || machine.mode === "linked";
@@ -107,8 +108,6 @@ export function Setup({ identity, recents, onDone }: { identity: Identity; recen
   }, []);
   const gh = useGithub(identity, open && connected);
   const [ghOpen, setGhOpen] = useState(false);
-  // Once a tool is ready, the last step's first button is the team demo: the person's own agents, working together (TeamDemo.tsx).
-  const demoTeam = useDemoTeam(machine);
   const desktop = typeof window !== "undefined" && !!window.fridayDesktop?.link;
   // The open-source edition's usage counts, asked here rather than only in the sidebar (UsageSharing.tsx): on until changed, and
   // answered by going on from the welcome or by changing it. Leaving with "Set up later" untouched answers nothing; the sidebar
@@ -162,6 +161,10 @@ export function Setup({ identity, recents, onDone }: { identity: Identity; recen
   const doneCount = steps.filter((s) => s.done).length;
 
   const [at, setAt] = useState(0);
+  // The open-source welcome's own three steps, from the first each time it opens.
+  const [ob, setOb] = useState(0);
+  const gutter = useGutter();
+  useEffect(() => void (open && setOb(0)), [open]);
   // Opened: on the first step that still needs something.
   const placed = useRef(false);
   useEffect(() => {
@@ -198,118 +201,165 @@ export function Setup({ identity, recents, onDone }: { identity: Identity; recen
   const last = i === steps.length - 1;
   const next = () => (last ? finish(true) : setAt(i + 1));
   const howMany = steps.length === 2 ? "Two things" : "Three things";
-  const demo = last && demoTeam.length >= 2;
-  const seeTeam = () => {
-    answer(true);
-    write(k);
-    write(TOUR_KEY(identity.id));
-    setOpen(false);
-    askTeamDemo();
-  };
 
-  // On someone's own computer: a welcome, not a form (Arun, 2026-11-01: "design this way better, needs to be more polished since
-  // this is the first impression of our app"). What Friday is in a line, the coding tools to start with (the well-known ones
-  // always, ready first, each a press from signed in or installed), GitHub as an optional row rather than a step, and one way on.
+  // On someone's own computer: a welcome in three short steps, in What's new's frame (Arun, 2026-11-03: "Use this same design
+  // can redesign the onboarding", then of one sheet or three steps, "B"). What Friday is, the coding tools (the five people know
+  // and any other here that's ready, each a press from signed in or installed), then GitHub and the usage counts, both optional.
   if (isLocal()) {
-    const ready = signedIn[0];
+    // Counted as the list shows them: the five, and any other that is surely signed in (MachineBadge, welcome).
+    const shownReady = signedIn.filter((t) => WELCOME_TOOLS.includes(t.tool) || t.loggedIn === true);
+    const ready = shownReady[0] ?? signedIn[0];
     const toSign = tools.find((t) => t.loggedIn === false);
-    const status = machine.mode === "checking" ? "Looking…" : ready ? `${signedIn.length === 1 ? ready.name : `${signedIn.length} tools`} ready` : toSign ? "Sign in to one to start" : "Install one to start";
+    const status = machine.mode === "checking" ? "Looking…" : ready ? `${shownReady.length <= 1 ? ready.name : `${shownReady.length} tools`} ready` : toSign ? "Sign in to one to start" : "Install one to start";
+    const n = Math.min(ob, 2);
+    const back = () => setOb(n - 1);
     return createPortal(
-      <div className="overlay setup-overlay" role="dialog" aria-modal="true" aria-label="Welcome to Friday">
-        <div className="setup-card welcome">
-          <button type="button" className="icon-btn tiny setup-x" aria-label="Set up later" title="Set up later" onClick={() => finish(false)}>
+      <div className="overlay setup-overlay wn-overlay" role="dialog" aria-modal="true" aria-label="Welcome to Friday">
+        <section className="wn ob">
+          <div className={`wn-hero${n === 1 ? " ob-hero-tools" : ""}`} aria-hidden="true">
+            {n === 1 ? <ToolMarks ready={shownReady.map((t) => t.tool)} /> : <CrewFaces />}
+          </div>
+          <span className="wn-ver ob-steps" aria-label={`Step ${n + 1} of 3`}>
+            {[0, 1, 2].map((k) => (
+              <i key={k} className={k === n ? "on" : k < n ? "done" : ""} />
+            ))}
+            <span>{n + 1} of 3</span>
+          </span>
+          <button type="button" className="wn-x" aria-label="Set up later" title="Set up later" onClick={() => finish(false)}>
             <Icon name="x" size={14} />
           </button>
-          <header className="wl-head">
-            <span className="wl-mark" aria-hidden>
-              <FridayMark size={26} />
-            </span>
-            <h2>Welcome to Friday</h2>
-            <p>Your coding agents, working together on this computer, on the plans you already pay for.</p>
-          </header>
 
-          <section className="wl-tools" aria-live="polite">
-            <div className="wl-label">
-              <b>Start with a coding tool</b>
-              <span data-ready={ready ? "true" : undefined}>{status}</span>
-            </div>
-            <div className="wl-list">{connected ? <MachineBadge inline welcome identity={identity} machine={machine} refresh={refresh} /> : <p className="muted small setup-wait">Looking for your coding tools…</p>}</div>
-          </section>
+          <div className="wn-body" key={n}>
+            {n === 0 && (
+              <>
+                <h2>Welcome to Friday</h2>
+                <p className="wn-sub">Your coding agents, working together on this computer, on the plans you already pay for.</p>
+                <ul className="wn-grid">
+                  {POINTS.map((p) => (
+                    <li key={p.title}>
+                      <span className="wn-tile" aria-hidden="true">
+                        <Icon name={p.icon} size={15} />
+                      </span>
+                      <span className="wn-item">
+                        <b>{p.title}</b>
+                        <span>{p.line}</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+            {n === 1 && (
+              <>
+                <h2>Pick a coding tool</h2>
+                <p className="wn-sub">Friday drives the tools you already have, each on your own plan. One is enough to start; add the rest any time.</p>
+                <div className="ob-label" aria-live="polite">
+                  <b>On this computer</b>
+                  <span data-ready={ready ? "true" : undefined}>{status}</span>
+                </div>
+                <div className="ob-tools ob-scroll" ref={gutter}>
+                  {connected ? (
+                    <MachineBadge inline welcome identity={identity} machine={machine} refresh={refresh} />
+                  ) : (
+                    <p className="ob-wait">
+                      <span className="spinner" aria-hidden /> Looking for your coding tools…
+                    </p>
+                  )}
+                </div>
+              </>
+            )}
+            {n === 2 && (
+              <>
+                <h2>{ready ? "Your crew is ready" : "Nearly there"}</h2>
+                <p className="wn-sub">All optional, and each one waits for you if you skip it now.</p>
+                <ul className="ob-list ob-scroll" ref={gutter}>
+                  <li className="ob-row">
+                    <span className="wn-tile ob-tile" aria-hidden="true">
+                      <Icon name="folder" size={15} />
+                    </span>
+                    <span className="wn-item">
+                      <b>Your project</b>
+                      <span>A folder or repo to work in, on a branch of its own.</span>
+                    </span>
+                    {/* The box's own folder picker, behind this sheet: the welcome closes first so it's seen. */}
+                    <button type="button" className="btn small" onClick={() => (finish(true), setTimeout(() => document.querySelector<HTMLButtonElement>(".cw-drop")?.click(), 0))}>
+                      Pick a folder
+                    </button>
+                  </li>
+                  <li className="ob-row">
+                    <span className="wn-tile ob-tile" aria-hidden="true">
+                      <GitHubMark size={16} />
+                    </span>
+                    <span className="wn-item">
+                      <b>GitHub</b>
+                      <span>{gh.status?.connected ? `Connected as @${gh.status.login ?? "you"}` : "For pull requests and issues, as you."}</span>
+                    </span>
+                    {gh.status?.connected ? (
+                      <span className="ob-ready">
+                        <Icon name="check" size={13} /> Connected
+                      </span>
+                    ) : (
+                      <button type="button" className="btn small" aria-expanded={ghOpen} onClick={() => setGhOpen(!ghOpen)}>
+                        {ghOpen ? "Hide" : "Connect"}
+                      </button>
+                    )}
+                    {ghOpen && !gh.status?.connected && (
+                      <div className="ob-row-body">
+                        <GitHubConnect bare identity={identity} />
+                      </div>
+                    )}
+                  </li>
+                  {askUsage && (
+                    <li className="ob-row">
+                      <span className="wn-tile ob-tile" aria-hidden="true">
+                        <Icon name="usage" size={15} />
+                      </span>
+                      <span className="wn-item">
+                        <b id="wl-usage-label">Share anonymous usage counts</b>
+                        <span>
+                          How often Friday opens and which tools it finds. Never your code.{" "}
+                          <button type="button" className="usage-notice-link" onClick={() => void openOutside(WHAT)}>
+                            What's sent
+                          </button>
+                        </span>
+                      </span>
+                      <Switch
+                        aria-labelledby="wl-usage-label"
+                        checked={share}
+                        onCheckedChange={(on) => {
+                          setShare(on);
+                          setShareTouched(true);
+                        }}
+                      />
+                    </li>
+                  )}
+                </ul>
+              </>
+            )}
+          </div>
 
-          <section className="wl-gh">
-            <span className="wl-gh-mark" aria-hidden>
-              <GitHubMark size={16} />
-            </span>
-            <span className="wl-gh-text">
-              <b>GitHub</b>
-              <span>{gh.status?.connected ? `Connected as @${gh.status.login ?? "you"}` : "Optional. For pull requests and issues."}</span>
-            </span>
-            {!gh.status?.connected && (
-              <button type="button" className="btn small" aria-expanded={ghOpen} onClick={() => setGhOpen(!ghOpen)}>
-                {ghOpen ? "Hide" : "Connect"}
+          <footer className="wn-foot">
+            {n === 0 ? (
+              <button type="button" className="wn-notes" onClick={() => finish(false)}>
+                Set up later
+              </button>
+            ) : (
+              <button type="button" className="wn-notes" onClick={back}>
+                <Icon name="arrowLeft" size={13} />
+                Back
               </button>
             )}
-            {ghOpen && !gh.status?.connected && (
-              <div className="wl-gh-body">
-                <GitHubConnect bare identity={identity} />
-              </div>
+            {n < 2 ? (
+              <button type="button" className="btn small primary wn-got" autoFocus onClick={() => setOb(n + 1)}>
+                {n === 0 ? "Get started" : "Next"}
+              </button>
+            ) : (
+              <button type="button" className="btn small primary wn-got" autoFocus onClick={() => finish(true)}>
+                {ready ? `Start with ${ready.name}` : "Look around first"}
+              </button>
             )}
-          </section>
-
-          {askUsage && (
-            <section className="wl-usage">
-              <span className="wl-gh-text">
-                <b id="wl-usage-label">Share anonymous usage counts</b>
-                <span>
-                  How often Friday opens and which coding tools it finds. Never your code, prompts or files.{" "}
-                  <button type="button" className="usage-notice-link" onClick={() => void openOutside(WHAT)}>
-                    What's sent
-                  </button>
-                </span>
-              </span>
-              <Switch
-                aria-labelledby="wl-usage-label"
-                checked={share}
-                onCheckedChange={(on) => {
-                  setShare(on);
-                  setShareTouched(true);
-                }}
-              />
-            </section>
-          )}
-
-          {ready && demoTeam.length >= 2 && (
-            <div className="setup-demo wl-demo">
-              <DemoMarks team={demoTeam} />
-              <div>
-                <h3>See your agents work as a team</h3>
-                <p>{demoBlurb(demoTeam)}</p>
-              </div>
-            </div>
-          )}
-
-          <footer className="setup-foot">
-            <button type="button" className="tour-skip" onClick={() => finish(false)}>
-              Set up later
-            </button>
-            <span className="tour-nav">
-              {ready && demoTeam.length >= 2 ? (
-                <>
-                  <button type="button" className="tour-skip" onClick={() => finish(true)}>
-                    Start on my own
-                  </button>
-                  <button type="button" className="tour-next" autoFocus onClick={seeTeam}>
-                    Watch the team demo
-                  </button>
-                </>
-              ) : (
-                <button type="button" className={`tour-next${ready ? "" : " quiet"}`} autoFocus onClick={() => finish(true)}>
-                  {ready ? `Start with ${ready.name}` : "Look around first"}
-                </button>
-              )}
-            </span>
           </footer>
-        </div>
+        </section>
       </div>,
       document.body,
     );
@@ -381,17 +431,6 @@ export function Setup({ identity, recents, onDone }: { identity: Identity; recen
           </div>
         </section>
 
-        {/* What the demo is, over the footer whose first button starts it. */}
-        {demo && (
-          <div className="setup-demo">
-            <DemoMarks team={demoTeam} />
-            <div>
-              <h3>Then see your agents work as a team</h3>
-              <p>{demoBlurb(demoTeam)}</p>
-            </div>
-          </div>
-        )}
-
         <footer className="setup-foot">
           {/* No tour in the open-source edition (Arun, 2026-10-26: "get rid of the tour on the open source version"). */}
           {i === 0 && isLocal() ? (
@@ -411,24 +450,60 @@ export function Setup({ identity, recents, onDone }: { identity: Identity; recen
                 Skip for now
               </button>
             )}
-            {demo ? (
-              <>
-                <button type="button" className="tour-skip" onClick={next}>
-                  Start on my own
-                </button>
-                <button type="button" className="tour-next" autoFocus onClick={seeTeam}>
-                  See your agents work as a team
-                </button>
-              </>
-            ) : (
-              <button type="button" className={`tour-next${showing.done ? "" : " quiet"}`} autoFocus onClick={next}>
-                {last ? (doneCount === steps.length ? "Start" : "Start anyway") : "Next"}
-              </button>
-            )}
+            <button type="button" className={`tour-next${showing.done ? "" : " quiet"}`} autoFocus onClick={next}>
+              {last ? (doneCount === steps.length ? "Start" : "Start anyway") : "Next"}
+            </button>
           </span>
         </footer>
       </div>
     </div>,
     document.body,
   );
+}
+
+/** What Friday is, in four, on the welcome's first step. */
+const POINTS: { icon: IconName; title: string; line: string }[] = [
+  { icon: "users", title: "A crew that stays", line: "Teammates with names and memory, working through their queue while you're away." },
+  { icon: "key", title: "On plans you pay for", line: "Claude Code, Codex, Cursor and the rest run on your own sign-ins." },
+  { icon: "shield", title: "Checked before it ships", line: "Your rules and your project's checks run on what the agents change." },
+  { icon: "server", title: "Stays on this computer", line: "Your code, keys and sessions stay here. No account." },
+];
+
+// The welcome's five tools where the faces stand on its other steps: one even row, the largest in the middle, each lit and ticked
+// once it's ready (Arun, 2026-11-03: "fix the placement of the coding tool icons").
+const MARK_SIZES = [42, 50, 60, 50, 42];
+function ToolMarks({ ready }: { ready: string[] }) {
+  // The ready ones nearest the middle: the middle first, then either side of it, then the ends.
+  const order = [...WELCOME_TOOLS].sort((a, b) => Number(!ready.includes(a)) - Number(!ready.includes(b)));
+  const slots = [3, 1, 0, 2, 4].map((i) => order[i]!);
+  return (
+    <div className="ob-marks">
+      {slots.map((t, k) => (
+        <span key={t} className={`ob-mark${ready.includes(t) ? " ready" : ""}`} style={{ width: MARK_SIZES[k], height: MARK_SIZES[k] }}>
+          <EngineMark tool={t} size={Math.round(MARK_SIZES[k]! * 0.44)} />
+          {ready.includes(t) && (
+            <i className="ob-ok">
+              <Icon name="check" size={10} />
+            </i>
+          )}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * A scrolling list's rows end where the sheet's other lines do whatever scrollbar the system draws: none on a Mac (it floats over
+ * the content), a strip that takes room on Windows and Linux. Its width is measured and taken off the room kept for it, as it
+ * comes and goes with the list's length (Arun, 2026-11-04: "we need to ensure linux and windows").
+ */
+function useGutter() {
+  return useCallback((el: HTMLElement | null) => {
+    if (!el) return;
+    const set = () => el.style.setProperty("--sb", `${Math.max(0, el.offsetWidth - el.clientWidth)}px`);
+    set();
+    const watch = new ResizeObserver(set);
+    watch.observe(el);
+    return () => watch.disconnect();
+  }, []);
 }

@@ -71,7 +71,7 @@ function computerName(): string {
   return os.hostname().replace(/\.local$/, "").slice(0, 60) || "This computer";
 }
 
-export async function startLocal(o: { home?: string; port?: number } = {}): Promise<Started> {
+export async function startLocal(o: { home?: string; port?: number; /** A link from another computer's Settings › Your computers: this one is paired with it, once (add-computer.ts). */ join?: string; /** Removed or turned away there for good: what to do (a service exits, so it isn't started again). */ onGone?: () => void } = {}): Promise<Started> {
   // The local client, built from its own entry (client-build.ts), whatever the environment says.
   process.env.FRIDAY_EDITION = "local";
   const home = path.resolve(o.home || process.env.FRIDAY_HOME || path.join(os.homedir(), ".friday"));
@@ -106,7 +106,7 @@ export async function startLocal(o: { home?: string; port?: number } = {}): Prom
   // Your phone (phone.ts): its own listener, off until turned on in Settings, handing what it may ask to this server.
   const phone = new PhoneAccess({ kv: kv.redis, home, appPort: port, computer: computerName() });
   // This computer used from another one's Friday (join.ts): a link it holds there, once paired from Settings › Your computers.
-  const join = new JoinHub({ kv: kv.redis, name: computerName(), log: (l) => console.log(`[computers] ${l}`) });
+  const join = new JoinHub({ kv: kv.redis, name: computerName(), log: (l) => console.log(`[computers] ${l}`), ...(o.onGone ? { onGone: o.onGone } : {}) });
   const app = await createApp({
     port,
     // Friday at 127.0.0.1, where the runner it starts connects back too; previews at localhost, which a browser counts as another
@@ -127,6 +127,14 @@ export async function startLocal(o: { home?: string; port?: number } = {}): Prom
   // Turned on before, so on again: the phone stays connected through a restart.
   void phone.resume();
   void join.resume();
+  // Started to be another computer's extra machine (`--join`): paired the first time; after that the link it keeps is held.
+  if (o.join) {
+    const now = await join.state();
+    if (!now.hub) {
+      const got = await join.join(o.join);
+      console.log(got.hub ? `[computers] paired with ${got.hub.name}` : `[computers] couldn't pair: ${got.error ?? "no answer"}`);
+    }
+  }
   const runningFile = path.join(home, "running.json");
   writeFileSync(runningFile, JSON.stringify({ url, pid: process.pid }), { mode: 0o600 });
 

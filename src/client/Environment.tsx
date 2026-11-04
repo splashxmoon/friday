@@ -115,7 +115,7 @@ function Panel({ anchor, close, state, me, sid, invite, identity, lane, onOpen }
     else setLoading(false);
   }, [lane, engine?.hostId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const save = async (change: { setup?: string; autoSetup?: boolean; vars?: Record<string, string | null> }, said: string) => {
+  const save = async (change: { setup?: string; autoSetup?: boolean; ownDb?: boolean; vars?: Record<string, string | null> }, said: string) => {
     if (!cwd) return;
     setBusy("save");
     setNote("");
@@ -299,6 +299,53 @@ function Panel({ anchor, close, state, me, sid, invite, identity, lane, onOpen }
                         </li>
                       ))}
                     </ul>
+                  </section>
+                )}
+
+                {/* Its own app to run (stack.ts; Arun, 2026-11-03): an agent's copy has its own ports and database. */}
+                {(info.stack || info.database) && (
+                  <section>
+                    <h4>
+                      <Icon name="globe" size={12} /> Its own app
+                    </h4>
+                    {info.stack ? (
+                      <ul className="env-stack">
+                        <li>
+                          <span>Ports</span>
+                          <b className="env-mono">
+                            {info.stack.ports[0]}–{info.stack.ports[1]}
+                          </b>
+                          <small>PORT is {info.stack.ports[0]} for its commands, its dev server and the Preview</small>
+                        </li>
+                        {info.stack.moved && Object.keys(info.stack.moved).length > 0 && (
+                          <li>
+                            <span>Moved</span>
+                            <b className="env-mono">
+                              {Object.entries(info.stack.moved)
+                                .map(([a, b]) => `${a} → ${b}`)
+                                .join(", ")}
+                            </b>
+                            <small>In its copy of the project's .env files, so it calls its own servers</small>
+                          </li>
+                        )}
+                        <li>
+                          <span>Database</span>
+                          <b className={info.stack.db ? "env-mono" : undefined}>{info.stack.db ? info.stack.db.name : info.database ? `Shares ${info.database.name}` : "None in its .env"}</b>
+                          <small>{info.stack.db ? `Its own copy of ${info.stack.db.from}, dropped when its copy goes` : (info.stack.note ?? (info.database?.kind === "postgres" ? "Turn on its own database below to stop agents changing each other's data" : info.database ? "Shared with your folder" : ""))}</small>
+                        </li>
+                      </ul>
+                    ) : (
+                      <p className="env-line">Works in your folder itself, on the project's own ports. Agents in copies of it get their own.</p>
+                    )}
+                    {mine && info.database?.kind === "postgres" && (
+                      <div className="env-check">
+                        <span>
+                          Each agent's copy gets its own database
+                          <small>A copy of {info.database.name}, made when an agent's copy is, dropped when it goes. Up to 2 GB.</small>
+                        </span>
+                        <Switch on={!!info.saved.ownDb} label="Each agent's copy gets its own database" onChange={(v) => void save({ ownDb: v }, v ? `Agents' copies made from now on get their own copy of ${info.database!.name}.` : `New copies share ${info.database!.name} again.`)} />
+                      </div>
+                    )}
                   </section>
                 )}
 

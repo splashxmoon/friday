@@ -1,3 +1,4 @@
+import { PaperclipIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ClipboardEvent } from "react";
 import { ACCEPT_ATTR, isMediaFile, isUsableFile } from "../file-kinds.js";
 import type { CliSession } from "../runner/imports.js";
@@ -538,6 +539,50 @@ export function AttachedRow({ files, onChange }: { files: Attached[]; onChange: 
           </ul>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Files being dragged over the window, from the desktop or a screenshot's thumbnail (Arun, 2026-11-02: "a hover component or
+ * pop up something like claude has when you drag and drop something in the input box"): true from the drag coming in until it
+ * is dropped or taken back out. Counted, since every element it passes over says enter and leave.
+ */
+export function useFileDragging(on = true): boolean {
+  const [dragging, setDragging] = useState(false);
+  useEffect(() => {
+    if (!on) return setDragging(false);
+    let depth = 0;
+    const files = (e: DragEvent) => !!e.dataTransfer?.types.includes("Files");
+    const enter = (e: DragEvent) => files(e) && (depth++, setDragging(true));
+    const leave = (e: DragEvent) => files(e) && (depth = Math.max(0, depth - 1)) === 0 && setDragging(false);
+    const end = () => ((depth = 0), setDragging(false));
+    addEventListener("dragenter", enter);
+    addEventListener("dragleave", leave);
+    addEventListener("drop", end);
+    addEventListener("dragend", end);
+    return () => {
+      removeEventListener("dragenter", enter);
+      removeEventListener("dragleave", leave);
+      removeEventListener("drop", end);
+      removeEventListener("dragend", end);
+    };
+  }, [on]);
+  return dragging;
+}
+
+/** What a drop does, said over the window while files are dragged: a quiet panel, nothing it covers stops working. */
+export function DropOverlay({ on, to }: { on: boolean; /** Who the files go to: "Claude Code", "your next message". */ to: string }) {
+  if (!on) return null;
+  return (
+    <div className="drop-overlay" aria-hidden="true">
+      <div className="drop-overlay-card">
+        <span className="drop-overlay-icon">
+          <PaperclipIcon className="size-[18px]" />
+        </span>
+        <span className="drop-overlay-title">Drop to attach</span>
+        <span className="drop-overlay-sub">Screenshots, images, files and folders, for {to}</span>
+      </div>
     </div>
   );
 }

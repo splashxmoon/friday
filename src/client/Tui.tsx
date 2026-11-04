@@ -289,7 +289,7 @@ export function FridayTui({
         <span className="ftui-grow" />
         {onNative && (
           <button type="button" className="ftui-link" onClick={onNative} title={`${target.name}'s own screen, on this conversation. Friday holds its turns while it's open.`}>
-            {target.tool === "codex" ? "codex" : "claude"} ↗
+            {target.tool === "codex" ? "Codex" : "Claude Code"}'s screen
           </button>
         )}
       </div>

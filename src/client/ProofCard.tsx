@@ -39,6 +39,15 @@ export function ProofFacts({ proof }: { proof: Proof }) {
         {c === "ok" ? <CircleCheckIcon /> : c === "bad" ? <CircleXIcon /> : <CircleDashedIcon />}
         {c === "ok" ? "Checks pass" : c === "bad" ? "Checks failed" : "No checks"}
       </span>
+      {/* Passed with tests failing that already failed before the task began (baseline.ts): said, not hidden. */}
+      {(() => {
+        const pre = proof.checks.reduce((n, x) => n + (x.pre ?? 0), 0);
+        return pre > 0 ? (
+          <span className="pf-fact" title="These tests were already failing at the commit the teammate's copy started from, so they don't count against the task.">
+            {pre} failing from before
+          </span>
+        ) : null;
+      })()}
       {n > 0 && (
         <span className="pf-fact">
           <FileDiffIcon />

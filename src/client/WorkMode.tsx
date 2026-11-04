@@ -15,56 +15,18 @@ import { tabListKeys } from "./roving.js";
 import { leaving } from "./leave-guard.js";
 import "./work.css";
 
-const KEY = "friday.newSession.work";
-
-const readMode = () => {
-  try {
-    return localStorage.getItem(KEY) === "1";
-  } catch {
-    return false;
-  }
-};
-
 /**
- * Code or Work, remembered on this computer: whichever was used last is where the page opens. One setting for the sidebar's
- * switch and the new-session page's, so flipping either flips both.
+ * Work is gone from the app (Arun, 2026-11-03: "remove work, this mainly for coding and stuff, i think working gets in the way"):
+ * the mode is always off, so the new-session page is Code's and every session, Work ones made before included, lists under Code.
  */
 export function useWorkMode(): [boolean, (on: boolean) => void] {
-  const [on, setOn] = useState(readMode);
-  useEffect(() => {
-    const heard = () => setOn(readMode());
-    // Another window of Friday flipping it too: its own event never reaches this one, and the sidebar here and a new session's
-    // page disagreed on Code or Work (Arun, 2026-10-28: "iron everything and ensure we are good… any logic errors and fixes").
-    const stored = (e: StorageEvent) => e.key === KEY && heard();
-    addEventListener("friday:work-mode", heard);
-    addEventListener("storage", stored);
-    return () => (removeEventListener("friday:work-mode", heard), removeEventListener("storage", stored));
-  }, []);
-  return [
-    on,
-    (v: boolean) => {
-      setOn(v);
-      try {
-        localStorage.setItem(KEY, v ? "1" : "0");
-      } catch {
-        // A preference: losing it costs nothing.
-      }
-      dispatchEvent(new Event("friday:work-mode"));
-    },
-  ];
+  return [false, () => {}];
 }
 
-/** Code, Work or Crew, from anywhere (⌘K's "Switch to…"): as the sidebar's switch picks it. */
-export function choosePlace(p: "code" | "work" | "team"): void {
+/** Code or Crew, from anywhere (⌘K's "Switch to…"): as the window's switch picks it. */
+export function choosePlace(p: "code" | "team"): void {
   if (p !== "team" && readTabNow() && leaving(() => choosePlace(p))) return;
-  if (p === "team") return setTeamTab(true);
-  setTeamTab(false);
-  try {
-    localStorage.setItem(KEY, p === "work" ? "1" : "0");
-  } catch {
-    // A preference: losing it costs nothing.
-  }
-  dispatchEvent(new Event("friday:work-mode"));
+  setTeamTab(p === "team");
 }
 
 /**
@@ -134,54 +96,42 @@ export function useWorkSessions(identity: Identity): Set<string> {
 
 /** The Work sessions as the sidebar knows them, re-read whenever that list grows (`friday:work-sessions`). */
 /**
- * The sidebar's place follows the session that is open: a Team room opened from a notification turns the sidebar to Team, a Work
- * session to Work, a coding one to Code (2026-10-27 audit: the rail and the tabs said Code while a Team room was open). Only when
- * the open session changes, so turning to another tab while one is open is left alone.
+ * The place follows the session that is open: a Crew room opened from a notification turns to Crew, a coding one to Code (2026-10-27
+ * audit: the rail and the tabs said Code while a Crew room was open). Only when the open session changes, so turning to the other
+ * place while one is open is left alone.
  */
 export function usePlaceFollows(activeSid: string | null): void {
   const [team, setTeam] = useTeamTab();
-  const [work, setWork] = useWorkMode();
-  const sids = useWorkSids();
   const teamKnown = useTeamKnown();
   const last = useRef<string | null>(null);
   useEffect(() => {
     if (!activeSid) return void (last.current = null);
-    // Not before the team is known: a Team room read as a coding session until then, and turned the sidebar away from Team. Nor
-    // before the Work sessions are: a Work session opened from a link read as a coding one, turned the sidebar to Code, and
-    // usePlaceLeaves then took the page home from the session just opened (2026-10-28).
-    if (!teamKnown || !listed) return;
-    const place = isTeamSid(activeSid) ? "team" : sids.has(activeSid) ? "work" : "code";
-    const key = `${activeSid}:${place}`;
+    // Not before the team is known: a Crew room read as a coding session until then, and turned the place away from Crew.
+    if (!teamKnown) return;
+    const crew = isTeamSid(activeSid);
+    const key = `${activeSid}:${crew}`;
     if (last.current === key) return;
     last.current = key;
-    if (place === "team") return void (team || setTeam(true));
-    if (team) setTeam(false);
-    if (work !== (place === "work")) setWork(place === "work");
-  }, [activeSid, sids.size, teamKnown, listed]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (crew !== team) setTeam(crew);
+  }, [activeSid, teamKnown]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
 /**
- * The other way round: Code, Work or Crew picked in the sidebar while a session of another place is open goes to the new
- * place's home, rather than leaving that session (the Crew room, a Code chat) on screen under a list it isn't in (Arun,
- * 2026-10-28: "iron everything and ensure we are good… any logic errors and fixes"). Only once the places are known.
- * `elsewhere`: a page that is no place's (Settings, Usage, the Agent Board…), left the same way, since picking Work there
- * turned the sidebar and kept Settings on screen (2026-11-02 walk-through).
+ * The other way round: Code or Crew picked while a session of the other place is open goes to the new place's home, rather than
+ * leaving that session on screen under a list it isn't in (Arun, 2026-10-28). `elsewhere`: a page that is no place's (Settings,
+ * Usage, the Agent Board…), left the same way (2026-11-02 walk-through).
  */
 export function usePlaceLeaves(activeSid: string | null, home: () => void, elsewhere = false): void {
   const [team] = useTeamTab();
-  const [work] = useWorkMode();
-  const sids = useWorkSids();
   const teamKnown = useTeamKnown();
-  const place = team ? "team" : work ? "work" : "code";
-  const was = useRef(place);
+  const was = useRef(team);
   useEffect(() => {
-    if (was.current === place) return;
-    was.current = place;
+    if (was.current === team) return;
+    was.current = team;
     if (elsewhere) return home();
-    if (!activeSid || !teamKnown || !listed) return;
-    const its = isTeamSid(activeSid) ? "team" : sids.has(activeSid) ? "work" : "code";
-    if (its !== place) home();
-  }, [place]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!activeSid || !teamKnown) return;
+    if (isTeamSid(activeSid) !== team) home();
+  }, [team]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
 export function useWorkSids(): ReadonlySet<string> {
@@ -194,47 +144,41 @@ export function useWorkSids(): ReadonlySet<string> {
   return workSids;
 }
 
-/** Which of Code, Work and Team has an agent at work, or one waiting on the person, from the sessions the sidebar watches. */
-export function placesBusy(working: Iterable<string>, needs: Iterable<string>): Record<"code" | "work" | "team", "needs" | "working" | null> {
-  const out: Record<"code" | "work" | "team", "needs" | "working" | null> = { code: null, work: null, team: null };
-  const place = (sid: string) => (isTeamSid(sid) ? "team" : workSids.has(sid) ? "work" : "code");
+/** Which of Code and Crew has an agent at work, or one waiting on the person, from the sessions the sidebar watches. */
+export function placesBusy(working: Iterable<string>, needs: Iterable<string>): Record<"code" | "team", "needs" | "working" | null> {
+  const out: Record<"code" | "team", "needs" | "working" | null> = { code: null, team: null };
+  const place = (sid: string) => (isTeamSid(sid) ? "team" : "code");
   for (const sid of working) out[place(sid)] ??= "working";
   for (const sid of needs) out[place(sid)] = "needs";
   return out;
 }
 
 /**
- * In the sidebar, under search: which kind of sessions it lists and a new one is, or the Team: his AI teammates (Teammates.tsx).
- * A place you're not looking at shows a small dot when an agent there is at work, amber when one waits on you (Arun, 2026-10-27:
- * "add like a subtle hint if there is working going on in these platforms").
+ * Code or Crew, as one small switch: in the desktop app it sits in the window's bar beside the sidebar's button, where back and
+ * forward were, so it is in reach with the sidebar shut too; in a browser, at the top of the sidebar (Arun, 2026-11-03: "get rid
+ * of the arrows, and make a simple and easier toggle to switch between Code and Crew.... it should be simple and elegant").
+ * Two words on a track, the picked one raised on a thumb that slides between them. The other place shows a small amber dot
+ * when something there waits on you; working shows on the faces and marks themselves (2026-10-29 direction §8).
  */
-export function SidebarWorkSwitch({ working = [], needs = [] }: { working?: Iterable<string>; needs?: Iterable<string> }) {
-  const [on, setOn] = useWorkMode();
-  const [team, setTeam] = useTeamTab();
-  // Leaving the Crew with unsaved work on screen (a workflow's builder) asks first (leave-guard.ts).
-  const pick = (work: boolean) => void (!(team && leaving(() => pick(work))) && (setTeam(false), setOn(work)));
+export function CodeCrewToggle({ working = [], needs = [], className = "" }: { working?: Iterable<string>; needs?: Iterable<string>; className?: string }) {
+  const [team] = useTeamTab();
   const busy = placesBusy(working, needs);
-  const here = team ? "team" : on ? "work" : "code";
-  const hint = (p: "code" | "work" | "team") =>
-    // Only what waits on you marks a place, in amber; working shows on the faces and marks themselves (2026-10-29 direction §8).
-    p !== here && busy[p] === "needs" ? <span className="sb-work-hint" data-state="needs" aria-label="Waiting on you" /> : null;
-  // A tab list's keys: the arrows move between the three and pick, Home and End go to either end, only the picked one is a Tab
-  // stop, and focus stays on the list while the place picked opens, rather than going to its message box (roving.ts).
+  const here = team ? "team" : "code";
+  const hint = (p: "code" | "team") => (p !== here && busy[p] === "needs" ? <span className="ps-hint" aria-hidden="true" /> : null);
+  // A tab list's keys: the arrows move between the two and pick, only the picked one is a Tab stop (roving.ts).
   return (
-    <div className="work-seg sb-work sb-work-3" role="tablist" aria-label="Code, Work or Crew" onKeyDown={tabListKeys}>
-      <button type="button" role="tab" tabIndex={here === "code" ? 0 : -1} aria-selected={!team && !on} className={!team && !on ? "on" : ""} onClick={() => pick(false)} title="Code: you and a coding tool, on one change. You see every step and every diff.">
-        <Icon name="code" size={14} />
-        Code
+    <div className={`place-switch ${className}`} data-on={here} role="tablist" aria-label="Code or Crew" onKeyDown={tabListKeys}>
+      <span className="ps-thumb" aria-hidden="true" />
+      <button type="button" role="tab" tabIndex={here === "code" ? 0 : -1} aria-selected={here === "code"} onClick={() => choosePlace("code")} title="Code: you and your coding tools, on one change" aria-label={busy.code === "needs" && here !== "code" ? "Code, waiting on you" : "Code"}>
+        {/* Icons, the word in the tip and to a screen reader (Arun, 2026-11-03: "swap out the text for icons instead"); in a
+            browser's sidebar, where it has the room, the word beside it too. */}
+        <Icon name="code" size={15} />
+        <span className="ps-word">Code</span>
         {hint("code")}
       </button>
-      <button type="button" role="tab" tabIndex={here === "work" ? 0 : -1} aria-selected={!team && on} className={!team && on ? "on" : ""} onClick={() => pick(true)} title="Work: you and a coding tool, on posts, scripts, research, images and video.">
-        <Icon name="pencil" size={14} />
-        Work
-        {hint("work")}
-      </button>
-      <button type="button" role="tab" tabIndex={here === "team" ? 0 : -1} aria-selected={team} className={team ? "on" : ""} onClick={() => setTeam(true)} title="Crew: teammates who keep their role and memory, and work on your goals while you're away.">
-        <Icon name="users" size={14} />
-        Crew
+      <button type="button" role="tab" tabIndex={here === "team" ? 0 : -1} aria-selected={here === "team"} onClick={() => choosePlace("team")} title="Crew: teammates who keep their role and memory, and work on your goals while you're away" aria-label={busy.team === "needs" && here !== "team" ? "Crew, waiting on you" : "Crew"}>
+        <Icon name="users" size={15} />
+        <span className="ps-word">Crew</span>
         {hint("team")}
       </button>
     </div>

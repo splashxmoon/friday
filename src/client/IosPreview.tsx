@@ -5,6 +5,7 @@ import { Icon } from "./icons.js";
 import { hostApi } from "./local.js";
 import type { Identity } from "./storage.js";
 import type { Send } from "./useSession.js";
+import { MenuButton, Picker } from "./ui.js";
 
 /**
  * The Preview panel's iOS side, on a Mac with Xcode: the folder's app built for a simulator and run there, shown as the
@@ -346,29 +347,22 @@ export function IosPreview({
     <div className="ios-preview">
       <div className="ios-bar">
         {/* The device as its name and iOS, the way Xcode shows it: a picker drawn as the label it is. */}
-        <label className="ios-device-pick" title="Which simulator">
+        <MenuButton
+          className="ios-device-pick"
+          label="Which simulator"
+          maxHeight={360}
+          items={() => (status?.simulators ?? []).map((s) => ({ label: s.name, hint: s.runtime, checked: s.udid === sim?.udid, live: s.state === "Booted", onSelect: () => setUdid(s.udid) }))}
+        >
           <span className="ios-device-text">
             <span className="ios-device-name">{sim?.name ?? "Simulator"}</span>
             <span className="ios-device-os">{sim?.runtime ?? ""}</span>
           </span>
           <Icon name="chevronDown" size={12} className="ios-device-caret" />
-          <select aria-label="Simulator" value={sim?.udid ?? ""} onChange={(e) => setUdid(e.target.value)}>
-            {status?.simulators.map((s) => (
-              <option key={s.udid} value={s.udid}>
-                {s.name} · {s.runtime}
-                {s.state === "Booted" ? " · on" : ""}
-              </option>
-            ))}
-          </select>
-        </label>
+        </MenuButton>
         {status && status.projects.length > 1 && (
-          <select className="ios-select" aria-label="Project" value={proj?.path ?? ""} onChange={(e) => (setProject(e.target.value), setScheme(""))}>
-            {status.projects.map((p) => <option key={p.path} value={p.path}>{p.path}</option>)}
-          </select>
+          <Picker className="ios-select" label="Project" value={proj?.path ?? ""} onChange={(v) => (setProject(v), setScheme(""))} options={status.projects.map((p) => ({ value: p.path, label: p.path.split(/[\\/]/).pop() ?? p.path, sub: p.path }))} />
         )}
-        <select className="ios-select" aria-label="Scheme" value={sch} onChange={(e) => setScheme(e.target.value)} disabled={!proj?.schemes.length}>
-          {(proj?.schemes.length ? proj.schemes : ["No scheme"]).map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
+        <Picker className="ios-select" label="Scheme" value={sch} onChange={setScheme} disabled={!proj?.schemes.length} placeholder="No scheme" options={(proj?.schemes ?? []).map((s) => ({ value: s, label: s }))} />
         {busy ? (
           <button type="button" className="btn ghost small ios-go" onClick={() => void stop()}>
             <Icon name="stop" size={12} /> Stop

@@ -710,6 +710,10 @@ export const PromptInput = ({
     // where user input during async blob conversion would be lost
     if (!usingProvider) {
       form.reset();
+      // Emptied as React sees it too: a reset goes past React, which kept the words just sent as the box's value, so pasting
+      // them again read as no change and Send stayed off until a letter was deleted and typed again (Arun, 2026-11-03: "fix me
+      // not be able to send the prompt if i copy and paste it").
+      for (const t of form.querySelectorAll("textarea")) t.value = "";
     }
 
     // Convert blob URLs to data URLs asynchronously

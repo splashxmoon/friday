@@ -1,0 +1,99 @@
+/* What's new after an update (WhatsNew.tsx): the crew's faces over the version, a sentence, four changes, the notes. */
+.wn-overlay { z-index: 990; overflow-y: auto; align-items: safe center; }
+/* In the desktop app a sheet keeps clear of the window's own bar, 40px (the Mac's traffic lights, the minimise and close on
+   Windows and Linux): centred in what's below it, as the app's dialogs are, so its close never sits in the part that drags. */
+html.desktop .wn-overlay { padding-top: 52px; }
+.wn { position: relative; width: min(544px, 100%); overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: var(--panel); box-shadow: 0 1px 0 color-mix(in srgb, #fff 4%, transparent) inset, 0 18px 48px -16px rgb(0 0 0 / .45), 0 4px 12px -6px rgb(0 0 0 / .25); animation: wn-in var(--t-open, .18s) var(--ease-out, ease-out); }
+:root:not(.dark) .wn { box-shadow: 0 18px 48px -18px rgb(0 0 0 / .22), 0 4px 12px -6px rgb(0 0 0 / .1); }
+@keyframes wn-in { from { opacity: 0; transform: translateY(6px) scale(.985); } }
+@media (prefers-reduced-motion: reduce) { .wn { animation: none; } }
+.wn-hero { display: grid; place-items: center; height: 148px; border-bottom: 1px solid var(--border); background:
+  radial-gradient(60% 90% at 50% 100%, color-mix(in srgb, var(--ink) 7%, transparent), transparent 70%),
+  color-mix(in srgb, var(--ink) 3%, var(--panel)); }
+.wn-faces { display: flex; align-items: flex-end; gap: 14px; padding-top: 22px; }
+.wn-faces > span { display: block; }
+.wn-ver { position: absolute; left: 20px; top: 16px; height: 22px; padding: 0 8px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--ink-2); font: 500 12px/20px var(--mono, ui-monospace, monospace); font-variant-numeric: tabular-nums; }
+.wn-x { position: absolute; right: 14px; top: 14px; display: grid; place-items: center; width: 26px; height: 26px; border: 0; border-radius: 7px; background: transparent; color: var(--text-muted); cursor: pointer; }
+.wn-x:hover { background: color-mix(in srgb, var(--ink) 7%, transparent); color: var(--ink); }
+.wn-body { padding: 20px 24px 6px; }
+.wn-body h2 { margin: 0; color: var(--ink); font-size: 18px; font-weight: 600; letter-spacing: -.01em; }
+.wn-sub { margin: 6px 0 14px; color: var(--text-muted); font-size: 13.5px; line-height: 20px; text-wrap: pretty; }
+.wn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 22px; margin: 0; padding: 12px 0 8px; border-top: 1px solid var(--border); list-style: none; }
+.wn-grid li { display: flex; align-items: flex-start; gap: 11px; min-width: 0; padding: 8px 0; }
+.wn-tile { display: grid; flex: none; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: color-mix(in srgb, var(--ink) 6%, transparent); color: var(--ink-2); }
+.wn-item { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wn-item b { overflow: hidden; color: var(--ink); font-size: 13px; font-weight: 500; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.wn-item span { color: var(--text-muted); font-size: 12.5px; line-height: 17px; }
+.wn-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 24px 18px; }
+.wn-notes { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; color: var(--text-muted); font: inherit; font-size: 12.5px; font-weight: 500; white-space: nowrap; cursor: pointer; }
+.wn-notes:hover { color: var(--ink); }
+.wn-got { white-space: nowrap; }
+/* A narrow window: one column, so no line is squeezed. */
+@media (max-width: 560px) { .wn-grid { grid-template-columns: 1fr; } .wn-hero { height: 120px; } }
+
+/* The open-source welcome, in the same frame (Setup.tsx): three steps, the step where the version sits. */
+/* One height for every step (Arun, 2026-11-04: "make the onboarding cards all the same height… instead of jumping around in
+   size"): the hero and the foot fixed, the step between them, and a step longer than its room (the tools, a sign-in or GitHub's
+   code opening) scrolls inside, under its title. */
+.wn.ob { display: flex; flex-direction: column; height: min(536px, calc(100dvh - 48px)); }
+html.desktop .wn.ob { height: min(536px, calc(100dvh - 76px)); }
+/* The tools' step gives its hero's room to its list; the others' rows take a little more air, so no step ends in a gap. */
+.wn.ob > .ob-hero-tools { height: 120px; }
+.ob-list .ob-row { min-height: 56px; }
+.wn.ob > .wn-hero, .wn.ob > .wn-foot { flex: none; }
+.wn.ob > .wn-body { display: flex; flex: 1; flex-direction: column; min-height: 0; padding-bottom: 0; }
+.wn.ob > .wn-body > h2, .wn.ob > .wn-body > .wn-sub, .wn.ob > .wn-body > .ob-label { flex: none; }
+.wn.ob > .wn-body > .wn-grid { flex: none; }
+.ob-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  /* Shadows at an edge only while there's more past it (they ride with the content, and the panel's colour covers them at the ends). */
+  background:
+    linear-gradient(var(--panel) 30%, transparent) center top / 100% 28px no-repeat local,
+    linear-gradient(transparent, var(--panel) 70%) center bottom / 100% 28px no-repeat local,
+    radial-gradient(farthest-side at 50% 0, color-mix(in srgb, #000 22%, transparent), transparent) center top / 100% 9px no-repeat scroll,
+    radial-gradient(farthest-side at 50% 100%, color-mix(in srgb, #000 22%, transparent), transparent) center bottom / 100% 9px no-repeat scroll; }
+:root:not(.dark) .ob-scroll { background-image: linear-gradient(var(--panel) 30%, transparent), linear-gradient(transparent, var(--panel) 70%), radial-gradient(farthest-side at 50% 0, rgb(0 0 0 / .1), transparent), radial-gradient(farthest-side at 50% 100%, rgb(0 0 0 / .1), transparent); }
+.ob-scroll::-webkit-scrollbar { width: 6px; }
+.ob-scroll::-webkit-scrollbar-thumb { border-radius: 99px; background: color-mix(in srgb, var(--ink) 18%, transparent); }
+.ob-tools.ob-scroll { padding-bottom: 6px; }
+/* The scrollbar in the sheet's right margin, never over the rows' buttons (Windows and Linux draw one that takes room). */
+.ob-scroll { margin-right: -16px; padding-right: calc(16px - var(--sb, 0px)); }
+.ob-wait { display: flex; align-items: center; justify-content: center; gap: 8px; height: 100%; min-height: 96px; margin: 0; color: var(--text-muted); font-size: 13px; }
+.ob-steps { display: inline-flex; align-items: center; gap: 4px; padding: 0 8px 0 9px; font-family: inherit; }
+.ob-steps i { width: 6px; height: 6px; border-radius: 50%; background: color-mix(in srgb, var(--ink) 18%, transparent); transition: width var(--t-hover, .15s) var(--ease-out, ease-out); }
+.ob-steps i.done { background: color-mix(in srgb, var(--ink) 45%, transparent); }
+.ob-steps i.on { width: 16px; border-radius: 99px; background: var(--ink); }
+.ob-steps span { margin-left: 5px; color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+/* The coding tools where the faces stand: one even row on the hero's middle line. */
+.ob-marks { display: flex; align-items: center; justify-content: center; gap: 16px; padding-top: 12px; }
+.ob-mark { position: relative; display: grid; flex: none; place-items: center; border: 1px solid var(--border); border-radius: 30%; background: var(--panel); box-shadow: 0 6px 16px -10px rgb(0 0 0 / .45); }
+.ob-mark:not(.ready) > svg { opacity: .5; }
+.ob-ok { position: absolute; top: -5px; right: -5px; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--green); color: #fff; box-shadow: 0 0 0 2px var(--panel); }
+.ob-label { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 12px 0 4px; border-top: 1px solid var(--border); }
+.ob-label b { color: var(--ink); font-size: 12.5px; font-weight: 600; }
+.ob-label span { color: var(--text-muted); font-size: 12px; }
+.ob-label span[data-ready] { color: color-mix(in srgb, var(--green) 85%, var(--ink)); }
+.ob-list { display: flex; flex-direction: column; margin: 0; padding: 4px 0 6px; border-top: 1px solid var(--border); list-style: none; }
+.ob-row { display: flex; flex-wrap: wrap; align-items: center; gap: 11px; min-height: 48px; padding: 8px 0; }
+.ob-row + .ob-row { border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+.ob-row > .wn-item { flex: 1; }
+.ob-row .wn-item .usage-notice-link { padding: 0; border: 0; background: none; color: var(--ink-2); font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.ob-row-body { flex: 1 1 100%; padding: 4px 0 2px 43px; }
+.ob-tile { width: 32px; height: 32px; border-radius: 9px; color: var(--ink); }
+.ob-ready { display: inline-flex; align-items: center; gap: 5px; color: color-mix(in srgb, var(--green) 85%, var(--ink)); font-size: 12.5px; font-weight: 500; white-space: nowrap; }
+.ob .btn.small { height: 28px; padding: 0 12px; font-size: 12.5px; }
+/* The tool rows (MachineBadge, welcome): hairline rows, as the sheet's own lists, not boxed cards. */
+.ob-tools .mb-welcome .mb-tools { gap: 0; }
+.ob-tools .mb-welcome .mb-tool { min-height: 48px; padding: 8px 0; border: 0; border-radius: 0; background: none; }
+.ob-tools .mb-welcome .mb-tool + .mb-tool { border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+.ob-tools .mb-welcome .mb-tool:hover, .ob-tools .mb-welcome .mb-tool.in { border-color: color-mix(in srgb, var(--border) 60%, transparent); }
+.ob-tools .mb-welcome .mb-tool-line { gap: 11px; }
+.ob-tools .mb-welcome .mb-tool-mark { width: 32px; height: 32px; border-radius: 9px; background: color-mix(in srgb, var(--ink) 6%, transparent); }
+.ob-tools .mb-welcome .mb-tool-mark svg, .ob-tools .mb-welcome .mb-tool-mark img { width: 16px; height: 16px; }
+.ob-tools .mb-welcome .mb-tool-name { font-size: 13px; line-height: 18px; }
+.ob-tools .mb-welcome .mb-tool-state { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; line-height: 17px; }
+.ob-tools .mb-welcome .mb-tool-state::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--faint); }
+.ob-tools .mb-welcome .mb-tool.in .mb-tool-state::before { background: var(--green); }
+.ob-tools .mb-welcome .mb-tool.out .mb-tool-state::before { background: var(--amber); }
+.ob-tools .mb-welcome .btn.small.mb-tool-go { height: 28px; padding: 0 12px; border-radius: 999px; font-size: 12.5px; }
+.ob-tools .mb-welcome .mb-more { border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+.ob-tools .mb-welcome .mb-more .more-tools { justify-content: flex-start; padding: 10px 0 2px 43px; }

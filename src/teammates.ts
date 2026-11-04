@@ -107,6 +107,8 @@ export interface TeammateView extends Teammate {
   line: string;
   /** How many messages wait for it. */
   queued: number;
+  /** When it last did anything, anywhere it works: for the order of the Crew's conversation list (Sidebar B, 2026-11-03). */
+  lastAt?: number;
   /** On its own model, what keeps it from running, said to the person: the model gone from Settings, or its server not answering. */
   problem?: string;
   /** How far its tool may go, always said (Teammate.mode absent is full). */

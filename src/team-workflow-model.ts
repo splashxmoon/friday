@@ -107,9 +107,17 @@ export interface Workflow {
   limits: WorkflowLimits;
   /** What Run now asks you for, handed to the first steps: "Which feature is launching?". "" (or missing) asks nothing. */
   ask?: string;
+  /** Cards moved by hand on the canvas (TeamWorkflows.tsx Canvas). Drawing only: the columns are still the order. */
+  layout?: WorkflowLayout;
   created: number;
   updated: number;
 }
+
+/**
+ * Where cards were dragged to on the canvas, by step id, "trigger" and "outcomes": each one's offset from where its column puts
+ * it, so a step added or taken out still moves the columns after it along (Arun, 2026-11-03: "be able to drag around the layout").
+ */
+export type WorkflowLayout = Record<string, { x: number; y: number }>;
 
 /** "asking": waiting for your OK. "stopped": a check or you stopped it, as it was told to. */
 export type WorkflowRunStatus = "running" | "waiting" | "asking" | "done" | "stopped" | "failed" | "skipped";
@@ -493,6 +501,16 @@ export function cleanWorkflow(
       return [{ id, mate: kind === "approve" ? "" : str(s.mate, 40), does: str(s.does, 4000), owns: kind === "do" ? owns : [], col: Number.isFinite(col) && col >= 0 ? Math.floor(col) : 0, ...gate, ...(next ? { next } : {}), ...(otherwise ? { otherwise } : {}) }];
     }),
   );
+  // Only the cards there are, each a finite offset within reason; sent as {} (Tidy up), none.
+  const lay = (input.layout === undefined ? prev?.layout : input.layout) as Record<string, unknown> | null | undefined;
+  const cards = new Set(["trigger", "outcomes", ...steps.map((s) => s.id)]);
+  const layout: WorkflowLayout = {};
+  for (const [k, v] of lay && typeof lay === "object" ? Object.entries(lay) : []) {
+    const p = v as { x?: unknown; y?: unknown } | null;
+    const x = Number(p?.x);
+    const y = Number(p?.y);
+    if (cards.has(k) && Number.isFinite(x) && Number.isFinite(y)) layout[k] = { x: Math.round(Math.max(-20000, Math.min(20000, x))), y: Math.round(Math.max(-20000, Math.min(20000, y))) };
+  }
   const o = (input.outcomes ?? prev?.outcomes ?? BLANK_OUTCOMES) as Record<string, unknown>;
   const l = (input.limits ?? prev?.limits ?? BLANK_LIMITS) as Record<string, unknown>;
   const perDay = Number(l.perDay);
@@ -505,6 +523,7 @@ export function cleanWorkflow(
     outcomes: { brief: o.brief !== false, notify: o.notify !== false, pr: o.pr === true, then: str(o.then, 40) },
     limits: { perDay: Number.isFinite(perDay) && perDay > 0 ? Math.min(48, Math.max(1, Math.round(perDay))) : BLANK_LIMITS.perDay, skipIfRunning: l.skipIfRunning !== false },
     ask: input.ask === undefined ? (prev?.ask ?? "") : str(input.ask, 200),
+    ...(Object.keys(layout).length ? { layout } : {}),
   };
 }
 

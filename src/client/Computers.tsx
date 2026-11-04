@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { MenuButton } from "./ui.js";
+import { MenuButton, Picker, Segmented } from "./ui.js";
 import { pickMachine, pickedMachine } from "./local.js";
 import { Icon } from "./icons.js";
 
@@ -87,9 +87,23 @@ export function ComputerPill({ here = "This computer", onPick }: { here?: string
 }
 
 /** Settings › Computer & coding tools › Your computers. */
+/** How a computer is added (add-computer.ts): over SSH, with one command pasted there, or in its own Friday app. */
+type AddHow = "ssh" | "command" | "app";
+const ADD_HOW: [AddHow, string][] = [
+  ["ssh", "Over SSH"],
+  ["command", "A command"],
+  ["app", "Its Friday app"],
+];
+
 export function ComputersSettings() {
   const [state, setState] = useState<State | null>(null);
-  const [link, setLink] = useState<{ link: string; until: number } | null>(null);
+  const [link, setLink] = useState<{ link: string; until: number; unix?: string; windows?: string } | null>(null);
+  /** Adding one: how, the host typed or picked, the hosts in ~/.ssh/config, and how setting it up went. */
+  const [how, setHow] = useState<AddHow | null>(null);
+  const [host, setHost] = useState("");
+  const [hosts, setHosts] = useState<string[]>([]);
+  const [setting, setSetting] = useState<{ busy: boolean; said?: string; ok?: boolean }>({ busy: false });
+  const [shell, setShell] = useState<"unix" | "windows">(() => (/Win/.test(navigator.platform) ? "windows" : "unix"));
   const [copied, setCopied] = useState(false);
   const [paste, setPaste] = useState("");
   const [busy, setBusy] = useState(false);
@@ -115,17 +129,33 @@ export function ComputersSettings() {
   }, [link]);
   if (!state) return null;
 
-  const add = async () => {
+  // A code for the way picked: one command to paste there, or the link its Friday app takes. Over SSH makes its own when it runs.
+  const add = async (way: AddHow) => {
+    setHow(way);
     setError("");
     setCopied(false);
+    setSetting({ busy: false });
+    setLink(null);
+    if (way === "ssh") return void call<{ hosts: string[] }>("/api/computers/hosts").then((r) => (setHosts(r.hosts), setHost((h) => h || r.hosts[0] || "")), () => {});
     try {
-      const r = await call<{ link?: string; until?: number; error?: string }>("/api/computers/code", { method: "POST" });
+      const r = await call<{ link?: string; until?: number; unix?: string; windows?: string; error?: string }>(way === "command" ? "/api/computers/add" : "/api/computers/code", { method: "POST", ...(way === "command" ? { body: JSON.stringify({ how: "command" }) } : {}) });
       if (r.error || !r.link) return setError(r.error ?? "Couldn't make a link.");
-      setLink({ link: r.link, until: r.until ?? Date.now() + 600_000 });
+      setLink({ link: r.link, until: r.until ?? Date.now() + 600_000, ...(r.unix ? { unix: r.unix, windows: r.windows ?? r.unix } : {}) });
     } catch (e) {
       setError((e as Error).message);
     }
   };
+  const overSsh = async () => {
+    setSetting({ busy: true, said: `Setting up ${host}: installing Friday there and starting it. This can take a few minutes.` });
+    try {
+      const r = await call<{ ok: boolean; how?: string; warn?: string; error?: string }>("/api/computers/add", { method: "POST", body: JSON.stringify({ how: "ssh", host }) });
+      setSetting(r.ok ? { busy: false, ok: true, said: `${host} is set up${r.how === "launchd" || r.how === "systemd" ? " as a service that comes back after a restart" : ""}. It shows up below once it links.${r.warn ? ` ${r.warn}` : ""}` } : { busy: false, ok: false, said: r.error ?? "It didn't finish." });
+      read();
+    } catch (e) {
+      setSetting({ busy: false, ok: false, said: (e as Error).message });
+    }
+  };
+  const done = () => (setHow(null), setLink(null), setSetting({ busy: false }));
   const remove = async (id: string) => setState(await call<State>(`/api/computers/${id}`, { method: "DELETE" }).catch(() => state));
   const join = async (link = paste.trim()) => {
     setBusy(true);
@@ -163,13 +193,55 @@ export function ComputersSettings() {
           <div className="set-label">Your computers</div>
           <div className="muted small">Run coding tools and teammates on your other computers from here, over Wi-Fi or Tailscale. Nothing goes through Friday's servers.</div>
         </div>
-        {!link && (
-          <button type="button" className="btn small" onClick={() => void add()}>
+        {!how && (
+          <button type="button" className="btn small" onClick={() => void add("ssh")}>
             Add a computer
           </button>
         )}
       </div>
-      {link && (
+      {/* Three ways in (add-computer.ts): a machine Friday reaches over SSH is set up from here; any other takes one command, or
+          the link in its own Friday app. */}
+      {how && (
+        <div className="computers-add">
+          <div className="computers-add-head">
+            <Segmented value={how} options={ADD_HOW} onChange={(w) => void add(w)} className="computers-add-how" />
+            <button type="button" className="link-btn small" onClick={done}>
+              {setting.ok || (link && how !== "app") ? "Done" : "Cancel"}
+            </button>
+          </div>
+          {how === "ssh" && (
+            <div className="computers-add-body">
+              <p className="muted small">Friday connects with your own SSH (your ~/.ssh/config, keys and ssh-agent), installs Friday there in a folder of its own, and leaves it running as a service, linked to this computer. A Mac or Linux machine with Node.js 22 and git.</p>
+              <div className="computers-add-row">
+                {hosts.length > 0 && <Picker className="computers-host-pick" value={hosts.includes(host) ? host : ""} label="A host from your SSH config" placeholder="Your SSH hosts" onChange={(h) => setHost(h)} options={hosts.map((h) => ({ value: h, label: h }))} />}
+                <input className="input computers-host" value={host} placeholder="user@machine or an alias" spellCheck={false} aria-label="The machine, as ssh takes it" onChange={(e) => setHost(e.target.value)} onKeyDown={(e) => e.key === "Enter" && host.trim() && !setting.busy && void overSsh()} />
+                <button type="button" className="btn small primary" disabled={!host.trim() || setting.busy} onClick={() => void overSsh()}>
+                  {setting.busy ? "Setting up…" : "Set it up"}
+                </button>
+              </div>
+              {setting.said && <p className={`small computers-said${setting.ok === false ? " bad" : setting.ok ? " ok" : ""}`}>{setting.said}</p>}
+            </div>
+          )}
+          {how === "command" && link?.unix && (
+            <div className="computers-add-body">
+              <p className="muted small">Paste this in a terminal on the other machine. It needs Node.js 22, runs Friday there with nothing to open, and stays linked while it runs.</p>
+              <div className="computers-link-row">
+                <Segmented value={shell} options={[["unix", "Mac or Linux"], ["windows", "Windows"]]} onChange={setShell} className="computers-shell" />
+              </div>
+              <div className="computers-link-row">
+                <code className="computers-link-text" title={shell === "unix" ? link.unix : link.windows}>
+                  {shell === "unix" ? link.unix : link.windows}
+                </code>
+                <button type="button" className="btn small" onClick={() => void navigator.clipboard.writeText((shell === "unix" ? link.unix : link.windows) ?? "").then(() => setCopied(true), () => {})}>
+                  {copied ? "Copied" : "Copy"}
+                </button>
+              </div>
+              <span className="muted small">Its code works once, for ten minutes. To keep it running after a restart, add it over SSH instead.</span>
+            </div>
+          )}
+        </div>
+      )}
+      {link && how === "app" && (
         <div className="computers-link">
           <ol className="computers-steps small">
             <li>On the other computer, open Friday › Settings › Computer & coding tools.</li>
@@ -182,9 +254,7 @@ export function ComputersSettings() {
             <button type="button" className="btn small" onClick={() => void navigator.clipboard.writeText(link.link).then(() => setCopied(true), () => {})}>
               {copied ? "Copied" : "Copy link"}
             </button>
-            <button type="button" className="link-btn small" onClick={() => setLink(null)}>
-              Done
-            </button>
+
           </div>
           <span className="muted small">It works once, for ten minutes, and carries this computer's certificate, which the other one checks.</span>
         </div>

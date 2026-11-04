@@ -5,19 +5,17 @@ import { Icon } from "./icons.js";
 import { commitPaths } from "../shepherd.js";
 import { scriptsIn, type Script } from "./Problems.js";
 import type { Send } from "./useSession.js";
+import { Check } from "./ui.js";
 
 /**
- * From a diff to a pull request, in the order people do it.
+ * From the changes to a pull request, docked at the foot of the Changes panel (Arun, 2026-11-03: the Changes panel "like this",
+ * after Conductor's checks and Claude Code's Changes card): the project's checks as one card, each with its state and, when it
+ * failed, the agent asked to fix it; under it the commit message whole and one button, Commit, Commit and push, or Commit and
+ * open PR. Which files go in, the branch and where it pushes are under Details. Nothing runs until somebody presses it, and a
+ * failing check is advice, not a gate.
  *
- * Look at what changed, run the checks, commit what belongs, push it, and
- * open the pull request or read what reviewers said. They were four trips: the
- * diff here, a terminal for the tests, a dialog for the commit, a browser tab
- * for the PR. This is one drawer at the foot of the Diff panel with the four
- * as steps, each saying where it stands, so the whole path is in view and the
- * next move is always the one button that is lit.
- *
- * Nothing runs until somebody presses it. Checks are advice, not a gate: a
- * failing one is said plainly on the commit step, and the person decides.
+ * The message is drafted by a model, so it is drafted when somebody starts to commit (the box is pressed), not each time the
+ * panel shows.
  */
 
 const BRANCHY = /^(main|master|trunk|develop)$/;
@@ -45,8 +43,9 @@ export function ShipFlow({ state, me, sid, invite, send, lane, events }: { state
 
   // Where the log stood when the drawer opened, so a commit made now is told apart from one made last week.
   const base = useRef(events.at(-1)?.seq ?? 0);
+  // Somebody started to commit (the message box pressed): the message is drafted and where it pushes is asked, once.
   const [open, setOpen] = useState(false);
-  const [step, setStep] = useState(1);
+  const [details, setDetails] = useState(false);
 
   // 1. Review: which files go in.
   const [leave, setLeave] = useState<Set<string>>(new Set());
@@ -62,7 +61,7 @@ export function ShipFlow({ state, me, sid, invite, send, lane, events }: { state
   const [skipped, setSkipped] = useState(false);
   const [shown, setShown] = useState<string | null>(null);
   useEffect(() => {
-    if (!open || scripts || !canAct) return;
+    if (scripts || !canAct || !files.length) return;
     let live = true;
     const read = (path: string) =>
       fetch(`/api/sessions/${encodeURIComponent(sid)}/repo?op=read&raw=1&path=${encodeURIComponent(path)}&invite=${encodeURIComponent(invite)}${lane ? `&lane=${encodeURIComponent(lane)}` : ""}`)
@@ -78,7 +77,7 @@ export function ShipFlow({ state, me, sid, invite, send, lane, events }: { state
     return () => {
       live = false;
     };
-  }, [open, canAct, sid, invite, lane, scripts]);
+  }, [canAct, sid, invite, lane, scripts, files.length > 0]); // eslint-disable-line react-hooks/exhaustive-deps
   /** The newest result of each command since this round of checks began. */
   const results = useMemo(() => {
     const out = new Map<string, Ran>();
@@ -158,7 +157,6 @@ export function ShipFlow({ state, me, sid, invite, send, lane, events }: { state
     });
     setBusy(false);
     if (!r.ok) return setError(r.error ?? "Couldn't commit. Check git's message in the Terminal tab, then try again.");
-    setStep(4);
   };
 
   // What the commit did, read from the log it was recorded in.
@@ -182,279 +180,205 @@ export function ShipFlow({ state, me, sid, invite, send, lane, events }: { state
 
   const blocked = !may ? "Only the driver or an owner can commit." : running ? "Wait for the run to finish." : plan ? "This computer is in Plan mode, so nothing can be committed from it. Its host can change that in the session header." : "";
   const canCommit = !blocked && !busy && !!message.trim() && taking.length > 0;
+  const go = hasRemote && pr && remote?.github ? "Commit & open PR" : hasRemote && push ? "Commit & push" : "Commit";
+  // A failed check handed to the agent with what it said, as a person would paste it.
+  const fixIt = async (c: Script) => {
+    const out = results.get(c.run)?.output.slice(-4000) ?? "";
+    const r = await send({ type: "instruct", lane, text: `The check \`${c.run}\` failed after your changes. Fix what it reports, then run it again.\n\nWhat it said:\n\`\`\`\n${out}\n\`\`\`` });
+    if (!r.ok) setError(r.error ?? "Couldn't hand that to the agent.");
+  };
+  const needs = failed.length;
+  const checksSay = checking ? "running…" : needs ? `${needs} need${needs === 1 ? "s" : ""} you` : chosen.length && passed.length === chosen.length ? "all passed" : "not run yet";
 
-  const mark = (n: number, ok: boolean) => (
-    <span className={`sf-mark ${ok ? "ok" : step === n ? "now" : ""}`}>{ok ? <Icon name="check" size={11} /> : n}</span>
-  );
+  if (done)
+    return (
+      <section className="ship-dock" aria-label="Ship these changes">
+        <div className="sd-done">
+          <span className="sd-mk ok" aria-hidden="true">
+            <Icon name="check" size={10} />
+          </span>
+          <span className="sd-done-text">
+            <b>{done.message.split("\n")[0]}</b>
+            <em>
+              {done.sha.slice(0, 7)} on {done.branch || "this branch"} · {done.files} file{done.files === 1 ? "" : "s"}
+              {done.pushed ? " · pushed" : ""}
+            </em>
+          </span>
+        </div>
+        {done.error && <p className="error small">{done.error}</p>}
+        {prUrl ? (
+          <div className="sd-row">
+            <button type="button" className="sd-act" onClick={() => void pullReview()}>
+              Pull in review comments
+            </button>
+            <button type="button" className="sd-act" onClick={() => void fixChecks()}>
+              Fix failing checks
+            </button>
+            {may && !/\/compare\//.test(prUrl) && (
+              <button
+                type="button"
+                className="sd-act"
+                title="Friday watches the pull request, hands red checks and new review comments to the agent, and pushes the fixes until it merges"
+                onClick={async () => {
+                  const r = await send({ type: "pr.shepherd", on: state.shepherd?.prUrl !== prUrl, lane });
+                  if (!r.ok) setFetched(r.error ?? "Couldn't hand the pull request over.");
+                }}
+              >
+                {state.shepherd?.prUrl === prUrl ? "Stop seeing it through" : "See it through to merge"}
+              </button>
+            )}
+            <a className="sd-go" href={prUrl} target="_blank" rel="noreferrer">
+              <Icon name="gitPullRequest" size={13} /> {done.prCreated === false ? "Open the PR page" : "Open the PR"}
+            </a>
+          </div>
+        ) : (
+          !done.pushed && <p className="sd-note">It's committed on this computer. {hasRemote ? "Push it from the Git panel when you're ready." : "There is no remote to push to from here."}</p>
+        )}
+        {fetched && <p className="sd-note">{fetched}</p>}
+      </section>
+    );
 
   return (
-    <section className={`ship-flow ${open ? "open" : ""} ${done ? "done" : "ready"}`} aria-label="Ship these changes">
-      <button type="button" className="sf-bar" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-        <span className="sf-lead" aria-hidden="true">
-          <Icon name={done ? "check" : "commit"} size={16} />
-        </span>
-        <span className="sf-bar-text">
-          <span className="sf-bar-main">
-            {done ? (
-              <>Committed{done.pushed ? " and pushed" : ""}</>
-            ) : (
-              <>
-                {taking.length} file{taking.length === 1 ? "" : "s"} ready to commit
-              </>
+    <section className="ship-dock" aria-label="Ship these changes">
+      {canAct && !!scripts?.length && (
+        <div className="sd-checks">
+          <div className="sd-checks-head">
+            <b>Checks</b>
+            <span className={needs ? "bad" : ""}>· {checksSay}</span>
+            {chosen.length > 0 && (
+              <button type="button" className="sd-act" disabled={checking || !may || running} onClick={() => void runChecks()}>
+                {checking ? <span className="spinner tiny" /> : null}
+                {checking ? "Running" : failed.length || passed.length ? "Run again" : "Run"}
+              </button>
             )}
-          </span>
-          <span className="sf-bar-sub" title={done ? `${done.sha.slice(0, 7)} on ${done.branch || "this branch"}` : `+${adds} −${dels} · ${running ? "the agent is still working" : "review, check and commit them"}`}>
-            {done ? (
-              <>
-                {done.sha.slice(0, 7)} on {done.branch || "this branch"}
-              </>
-            ) : (
-              <>
-                <span className="diff-add">+{adds}</span> <span className="diff-del">−{dels}</span>
-                <span className="sf-bar-dot"> · </span>
-                {running ? "the agent is still working" : "review, check and commit them"}
-              </>
-            )}
-          </span>
-        </span>
-        <span className="sf-bar-go">
-          {done ? (prUrl ? "Pull request" : "Details") : "Review & commit"} <Icon name={open ? "chevronDown" : "chevronRight"} size={13} />
-        </span>
-      </button>
-
-      {open && (
-        <div className="sf-body">
-          {done ? (
-            <div className="sf-done">
-              <p>
-                <b>{done.message.split("\n")[0]}</b>
-                <span className="muted small">
-                  {" "}
-                  {done.sha.slice(0, 7)} on {done.branch || "this branch"} · {done.files} file{done.files === 1 ? "" : "s"}
-                </span>
-              </p>
-              {done.error && <p className="error small">{done.error}</p>}
-              {prUrl ? (
-                <div className="sf-actions">
-                  <button type="button" className="btn ghost small" onClick={() => void pullReview()}>
-                    Pull in review comments
+          </div>
+          {scripts.map((c) => {
+            const r = results.get(c.run);
+            const on = picked.has(c.run);
+            const now = current === c.run;
+            return (
+              <div key={c.run} className={`sd-chk${on ? "" : " off"}`}>
+                <button
+                  type="button"
+                  className={`sd-mk${now ? " run" : r ? (r.ok ? " ok" : " bad") : ""}`}
+                  aria-pressed={on}
+                  disabled={checking}
+                  title={on ? "Left out of the next run" : "Run it with the others"}
+                  aria-label={on ? `Leave ${c.name} out` : `Run ${c.name}`}
+                  onClick={() =>
+                    setPicked((all) => {
+                      const next = new Set(all);
+                      if (next.has(c.run)) next.delete(c.run);
+                      else next.add(c.run);
+                      return next;
+                    })
+                  }
+                >
+                  {now ? null : r ? <Icon name={r.ok ? "check" : "x"} size={9} /> : null}
+                </button>
+                <button type="button" className="sd-chk-t" disabled={!r} onClick={() => setShown(shown === c.run ? null : c.run)} title={r ? (shown === c.run ? "Hide what it said" : "What it said") : c.run}>
+                  {c.name} <em>· {now ? "running…" : r ? (r.ok ? "passed" : "failed") : c.run}</em>
+                </button>
+                {r && !r.ok && may && (
+                  <button type="button" className="sd-act" onClick={() => void fixIt(c)}>
+                    Fix it
                   </button>
-                  <button type="button" className="btn ghost small" onClick={() => void fixChecks()}>
-                    Fix the failing checks
-                  </button>
-                  {may && !/\/compare\//.test(prUrl) && (
-                    <button
-                      type="button"
-                      className={`btn small ${state.shepherd?.prUrl === prUrl ? "ghost" : ""}`}
-                      title="Friday watches the pull request, hands red checks and new review comments to the agent, and pushes the fixes until it merges"
-                      onClick={async () => {
-                        const r = await send({ type: "pr.shepherd", on: state.shepherd?.prUrl !== prUrl, lane });
-                        if (!r.ok) setFetched(r.error ?? "Couldn't hand the pull request over.");
-                      }}
-                    >
-                      {state.shepherd?.prUrl === prUrl ? "Stop seeing it through" : "See it through to merge"}
-                    </button>
-                  )}
-                  <a className="btn primary small" href={prUrl} target="_blank" rel="noreferrer">
-                    <Icon name="gitPullRequest" size={13} /> {done.prCreated === false ? "Open the pull request page" : "Open the pull request"}
-                  </a>
-                </div>
-              ) : (
-                !done.pushed && <p className="muted small">It's committed on this computer. {hasRemote ? "Push it from the Git menu when you're ready." : "There is no remote to push to from here."}</p>
-              )}
-              {fetched && <p className="muted small">{fetched}</p>}
-            </div>
-          ) : (
-            <>
-              {/* 1 · Review */}
-              <div className={`sf-step ${step === 1 ? "on" : ""}`}>
-                <button type="button" className="sf-step-head" onClick={() => setStep(1)}>
-                  {mark(1, step > 1)}
-                  <span>Review the diff</span>
-                  <em>
-                    {taking.length} of {files.length} included
-                  </em>
-                </button>
-                {step === 1 && (
-                  <div className="sf-step-body">
-                    <div className="ship-files">
-                      {files.map((f) => (
-                        <label key={f.path} className={`ship-file ${leave.has(f.path) ? "out" : ""}`}>
-                          <input
-                            type="checkbox"
-                            checked={!leave.has(f.path)}
-                            onChange={(e) =>
-                              setLeave((all) => {
-                                const next = new Set(all);
-                                if (e.target.checked) next.delete(f.path);
-                                else next.add(f.path);
-                                return next;
-                              })
-                            }
-                          />
-                          {/* Cut short from the left (direction: rtl), so the whole path is in the tooltip; <bdi> keeps a leading dot where it belongs. */}
-                          <span className="ship-file-path" title={f.path}>
-                            <bdi>{f.path}</bdi>
-                          </span>
-                          <span className="ship-file-counts">
-                            {f.additions > 0 && <span className="diff-add">+{f.additions}</span>}
-                            {f.deletions > 0 && <span className="diff-del">−{f.deletions}</span>}
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-                    {leave.size > 0 && <p className="muted small">The {leave.size} left out stay in the folder, uncommitted.</p>}
-                    <div className="sf-actions">
-                      <button type="button" className="btn primary small" disabled={!taking.length} onClick={() => setStep(2)}>
-                        Next: checks
-                      </button>
-                    </div>
-                  </div>
                 )}
+                {shown === c.run && r && <pre className="cmd-out sd-out">{r.output.slice(-6000)}</pre>}
               </div>
-
-              {/* 2 · Checks */}
-              <div className={`sf-step ${step === 2 ? "on" : ""}`}>
-                <button type="button" className="sf-step-head" onClick={() => setStep(2)}>
-                  {mark(2, step > 2 && (skipped || (chosen.length > 0 && passed.length === chosen.length)))}
-                  <span>Run the checks</span>
-                  <em className={failed.length ? "bad" : ""}>
-                    {checking ? "running…" : failed.length ? `${failed.length} failed` : passed.length && passed.length === chosen.length ? "all passed" : skipped ? "skipped" : ""}
-                  </em>
-                </button>
-                {step === 2 && (
-                  <div className="sf-step-body">
-                    {!canAct ? (
-                      <p className="muted small">{plan ? "This computer is in Plan mode, so nothing runs there until its host changes that in the session header." : "Connect a computer to run checks here. You can still commit."}</p>
-                    ) : scripts === null ? (
-                      <p className="muted small">Looking for this project's checks…</p>
-                    ) : scripts.length === 0 ? (
-                      <p className="muted small">No test, lint or typecheck script found in this folder.</p>
-                    ) : (
-                      <ul className="sf-checks">
-                        {scripts.map((s) => {
-                          const r = results.get(s.run);
-                          const now = current === s.run;
-                          return (
-                            <li key={s.run} className={r ? (r.ok ? "pass" : "fail") : ""}>
-                              <label>
-                                <input
-                                  type="checkbox"
-                                  checked={picked.has(s.run)}
-                                  disabled={checking}
-                                  onChange={(e) =>
-                                    setPicked((all) => {
-                                      const next = new Set(all);
-                                      if (e.target.checked) next.add(s.run);
-                                      else next.delete(s.run);
-                                      return next;
-                                    })
-                                  }
-                                />
-                                <code>{s.run}</code>
-                              </label>
-                              <span className="sf-result">
-                                {now ? <span className="spinner tiny" /> : r ? <Icon name={r.ok ? "check" : "x"} size={12} /> : null}
-                                {r && (
-                                  <button type="button" className="link-btn" onClick={() => setShown(shown === s.run ? null : s.run)}>
-                                    {shown === s.run ? "Hide output" : "Output"}
-                                  </button>
-                                )}
-                              </span>
-                              {shown === s.run && r && <pre className="cmd-out">{r.output.slice(-6000)}</pre>}
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-                    <div className="sf-actions">
-                      {canAct && chosen.length > 0 && (
-                        <button type="button" className="btn small" disabled={checking || !may || running} onClick={() => void runChecks()}>
-                          {checking ? "Running…" : failed.length || passed.length ? "Run again" : `Run ${chosen.length} check${chosen.length === 1 ? "" : "s"}`}
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        className="btn primary small"
-                        disabled={checking}
-                        onClick={() => {
-                          if (!passed.length && !failed.length) setSkipped(true);
-                          setStep(3);
-                        }}
-                      >
-                        {passed.length || failed.length ? "Next: commit" : "Skip checks"}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* 3 · Commit */}
-              <div className={`sf-step ${step === 3 ? "on" : ""}`}>
-                <button type="button" className="sf-step-head" onClick={() => setStep(3)}>
-                  {mark(3, false)}
-                  <span>Commit</span>
-                  <em>{branch.trim() || engine?.branch || ""}</em>
-                </button>
-                {step === 3 && (
-                  <div className="sf-step-body">
-                    {failed.length > 0 && (
-                      <p className="sf-warn">
-                        <Icon name="shield" size={12} /> {failed.map((s) => s.run).join(", ")} failed. You can still commit; it is your call.
-                      </p>
-                    )}
-                    <label className="field">
-                      Message
-                      <textarea
-                        // Reached by "Next": the message is what this step is for, so typing starts here.
-                        autoFocus
-                        rows={4}
-                        value={message}
-                        placeholder={drafting ? "Writing a message from the diff…" : "What changed, and why"}
-                        onChange={(e) => setMessage(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && canCommit) void commit();
-                        }}
-                      />
-                    </label>
-                    <label className="field">
-                      Branch
-                      <input value={branch} onChange={(e) => setBranch(e.target.value)} placeholder={engine?.branch ?? "current branch"} spellCheck={false} />
-                      <em className="muted small">{branch.trim() && branch.trim() !== engine?.branch ? "Created if it doesn't exist, and switched to." : "Commits to the branch the folder is on."}</em>
-                    </label>
-                    {hasRemote ? (
-                      <div className="ship-options">
-                        <label className="check-row">
-                          <input type="checkbox" checked={push || pr} disabled={pr && !!remote?.github} onChange={(e) => setPush(e.target.checked)} />
-                          Push to {remote?.github ?? "origin"}
-                        </label>
-                        {remote?.github && (
-                          <label className="check-row">
-                            <input type="checkbox" checked={pr} onChange={(e) => setPr(e.target.checked)} />
-                            Open a pull request
-                          </label>
-                        )}
-                      </div>
-                    ) : (
-                      pushNote && <p className="muted small">{pushNote}</p>
-                    )}
-                    {(error || blocked) && (
-                      <p className="error small" role="alert">
-                        {error || blocked}
-                      </p>
-                    )}
-                    <div className="sf-actions">
-                      <button type="button" className="btn primary" disabled={!canCommit} onClick={() => void commit()}>
-                        {busy ? "Committing…" : hasRemote && pr && remote?.github ? "Commit and open PR" : hasRemote && push ? "Commit and push" : "Commit"}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
+            );
+          })}
         </div>
       )}
+
+      <div className="sd-commit">
+        <textarea
+          className="sd-msg"
+          rows={3}
+          value={message}
+          aria-label="Commit message"
+          placeholder={drafting ? "Writing a message from the changes…" : "Commit message"}
+          onFocus={() => setOpen(true)}
+          onChange={(e) => setMessage(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && canCommit) void commit();
+          }}
+        />
+        <div className="sd-row">
+          <button type="button" className="sd-where" aria-expanded={details} onClick={() => setDetails((v) => !v)} title="Which files go in, the branch, and where it pushes">
+            {taking.length === files.length ? `${files.length} file${files.length === 1 ? "" : "s"}` : `${taking.length} of ${files.length} files`}
+            {(branch.trim() || engine?.branch) && <> · {branch.trim() || engine?.branch}</>}
+            <Icon name={details ? "chevronDown" : "chevronRight"} size={12} />
+          </button>
+          <button
+            type="button"
+            className="sd-go"
+            disabled={!canCommit}
+            title={!message.trim() ? "Write a message first" : blocked || undefined}
+            onClick={() => (message.trim() ? void commit() : setOpen(true))}
+          >
+            {busy ? "Committing…" : go} <kbd>⌘↵</kbd>
+          </button>
+        </div>
+        {details && (
+          <div className="sd-details">
+            <div className="ship-files">
+              {files.map((f) => (
+                <label key={f.path} className={`ship-file ${leave.has(f.path) ? "out" : ""}`}>
+                  <Check
+                    checked={!leave.has(f.path)}
+                    onChange={(on) =>
+                      setLeave((all) => {
+                        const next = new Set(all);
+                        if (on) next.delete(f.path);
+                        else next.add(f.path);
+                        return next;
+                      })
+                    }
+                  />
+                  {/* Cut short from the left (direction: rtl), so the whole path is in the tooltip; <bdi> keeps a leading dot where it belongs. */}
+                  <span className="ship-file-path" title={f.path}>
+                    <bdi>{f.path}</bdi>
+                  </span>
+                  <span className="ship-file-counts">
+                    {f.additions > 0 && <span className="diff-add">+{f.additions}</span>}
+                    {f.deletions > 0 && <span className="diff-del">−{f.deletions}</span>}
+                  </span>
+                </label>
+              ))}
+            </div>
+            {leave.size > 0 && <p className="sd-note">The {leave.size} left out stay in the folder, uncommitted.</p>}
+            <label className="field">
+              Branch
+              <input value={branch} onChange={(e) => setBranch(e.target.value)} placeholder={engine?.branch ?? "current branch"} spellCheck={false} />
+              <em className="muted small">{branch.trim() && branch.trim() !== engine?.branch ? "Created if it doesn't exist, and switched to." : "Commits to the branch the folder is on."}</em>
+            </label>
+            {hasRemote ? (
+              <div className="ship-options">
+                <label className="check-row">
+                  <Check checked={push || pr} disabled={pr && !!remote?.github} onChange={(on) => setPush(on)} />
+                  Push to {remote?.github ?? "origin"}
+                </label>
+                {remote?.github && (
+                  <label className="check-row">
+                    <Check checked={pr} onChange={(on) => setPr(on)} />
+                    Open a pull request
+                  </label>
+                )}
+              </div>
+            ) : (
+              pushNote && <p className="sd-note">{pushNote}</p>
+            )}
+          </div>
+        )}
+        {error ? (
+          <p className="error small" role="alert">
+            {error}
+          </p>
+        ) : (
+          blocked && message.trim() && <p className="sd-note">{blocked}</p>
+        )}
+      </div>
     </section>
   );
 }

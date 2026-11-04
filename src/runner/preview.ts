@@ -6,6 +6,7 @@ import net from "node:net";
 import path from "node:path";
 import { childEnv, childPath } from "./adapters.js";
 import { folderVars } from "./environment.js";
+import { stackFor } from "./stack.js";
 
 /**
  * Running the thing, not just reading it.
@@ -136,12 +137,22 @@ async function serveStatic(cwd: string, port: number): Promise<http.Server> {
  * Friday's server — an uploaded project's dev server has no business seeing
  * Friday's keys, so the caller passes a built environment there instead.
  */
+/** Nothing listening on `port` here. */
+const portFree = (port: number) =>
+  new Promise<boolean>((resolve) => {
+    const srv = net.createServer();
+    srv.once("error", () => resolve(false));
+    srv.listen(port, "127.0.0.1", () => srv.close(() => resolve(true)));
+  });
+
 export async function startPreview(cwd: string, script?: string, envBase?: NodeJS.ProcessEnv, staticOnly = false, opts: { install?: boolean } = {}): Promise<PreviewInfo> {
   const current = running.get(cwd);
   if (current) return current.info;
 
   const options = await previewOptions(cwd);
-  const port = await freePort();
+  // An agent's copy runs on its own block of ports (stack.ts): its first, while nothing of the agent's own is on it already.
+  const own = stackFor(cwd)?.ports;
+  const port = own && (await portFree(own)) ? own : await freePort();
   const log: string[] = [];
 
   if (script && !options.scripts.includes(script)) throw new Error(`This project has no "${script}" script. It offers: ${options.scripts.join(", ") || "none"}.`);

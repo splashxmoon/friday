@@ -128,8 +128,46 @@ export async function saveOwnModel(p: { id?: string; name?: string; baseUrl?: st
     ...((p.provider ?? had?.provider) ? { provider: (p.provider ?? had?.provider)!.slice(0, 30) } : {}),
     ...((p.vision ?? had?.vision) !== undefined ? { vision: (p.vision ?? had?.vision)! } : {}),
   };
-  await store(had ? models.map((m) => (m.id === had.id ? next : m)) : [...models, next].slice(-40));
+  await store(had ? models.map((m) => (m.id === had.id ? next : m)) : [...models, next].slice(-MAX_OWN_MODELS));
   return { model: view(next) };
+}
+
+/** The most kept here: more would be a list nobody picks from. */
+export const MAX_OWN_MODELS = 40;
+
+/**
+ * Several models of one server at once, ticked from its list (issue #17: a router's couple of hundred, of which someone uses a
+ * handful): each saved as Add would, with the same provider, address and key, named after itself, and seen as able to read
+ * pictures or not from its name. One already saved for that address is left as it is. Refused whole, never cut short, when they
+ * would take the list past its most: past it, the oldest would go without a word.
+ */
+export async function addOwnModels(p: { baseUrl: string; models: string[]; apiKey?: string; provider?: string }): Promise<{ added: OwnModelView[]; skipped: string[] }> {
+  const models = await load();
+  const baseUrl = cleanUrl(p.baseUrl);
+  const apiKey = p.apiKey?.trim();
+  checkKey(apiKey);
+  const picked = [...new Set(p.models.map((m) => m.trim().slice(0, 200)).filter(Boolean))];
+  if (!picked.length) throw new Error("Tick the models to add.");
+  const saved = new Set(models.filter((m) => m.baseUrl === baseUrl).map((m) => m.model));
+  const fresh = picked.filter((m) => !saved.has(m));
+  const room = Math.max(0, MAX_OWN_MODELS - models.length);
+  if (fresh.length > room) {
+    throw new Error(
+      room === 0
+        ? `You have ${MAX_OWN_MODELS} models saved, the most Friday keeps. Remove some to add others.`
+        : `That's ${fresh.length} new models, and there's room for ${room} more (Friday keeps ${MAX_OWN_MODELS}). Untick ${fresh.length - room}, or remove some saved ones first.`,
+    );
+  }
+  const added: OwnModel[] = fresh.map((model) => ({
+    id: randomBytes(4).toString("hex"),
+    name: model.slice(0, 60),
+    baseUrl,
+    model,
+    ...(apiKey ? { apiKey } : {}),
+    ...(p.provider ? { provider: p.provider.slice(0, 30) } : {}),
+  }));
+  if (added.length) await store([...models, ...added]);
+  return { added: added.map(view), skipped: picked.filter((m) => saved.has(m)) };
 }
 
 export async function removeOwnModel(p: { id: string }): Promise<{ ok: true }> {

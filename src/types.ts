@@ -345,7 +345,8 @@ export interface RepoCall {
   /** `commands`: the `/` commands the lane's own coding tool answers to (see ToolCommand). */
   /** `apply`: a separate copy's work, brought into the folder it was copied from. */
   /** `terminal`: the line that carries the lane's conversation on in the person's own terminal (terminal-line.ts); with `query` "closed", that it is back. */
-  op: "tree" | "read" | "search" | "write" | "edit" | "shell" | "checkpoint" | "restore" | "commit" | "publish" | "remote" | "branches" | "switch" | "prcomments" | "prstatus" | "prchecks" | "preview" | "ios" | "environment" | "context" | "bgstart" | "bgread" | "bgstop" | "diff" | "commands" | "apply" | "status" | "log" | "show" | "gitdiff" | "stage" | "unstage" | "discard" | "hunk" | "pull" | "compare" | "terminal";
+  /** `baseline`: `command` run in a throwaway copy at the commit `ref`, never in the folder (baseline.ts). */
+  op: "tree" | "read" | "search" | "write" | "edit" | "shell" | "baseline" | "checkpoint" | "restore" | "commit" | "publish" | "remote" | "branches" | "switch" | "prcomments" | "prstatus" | "prchecks" | "preview" | "ios" | "environment" | "context" | "bgstart" | "bgread" | "bgstop" | "diff" | "commands" | "apply" | "status" | "log" | "show" | "gitdiff" | "stage" | "unstage" | "discard" | "hunk" | "pull" | "compare" | "terminal";
   /** For `stage`, `unstage` and `discard`: the files. */
   paths?: string[];
   /** For `hunk`: one hunk as a unified diff with its file header, applied to the index (`cached`) or taken back (`reverse`). */
@@ -906,7 +907,20 @@ export type EventBody =
    * see how we can improve"): started, then how they went. Failed, the task goes back to its agent with the output.
    */
   | { type: "board.checking"; id: string; lane: string; command: string }
-  | { type: "board.checked"; id: string; lane: string; command: string; ok: boolean; output: string; /** It couldn't be run there (a Manual machine, no shell): neither passed nor failed. */ skipped?: boolean }
+  | {
+      type: "board.checked";
+      id: string;
+      lane: string;
+      command: string;
+      ok: boolean;
+      output: string;
+      /** It couldn't be run there (a Manual machine, no shell): neither passed nor failed. */
+      skipped?: boolean;
+      /** Failures that were already there at the commit the copy started from (baseline.ts): not the task's, so `ok`. */
+      pre?: string[];
+      /** The command fails as a whole there too, where its tests can't be named. */
+      whole?: boolean;
+    }
   /** A person's say over a task from the team's list: taken back to be handed to someone else, opened again, or dropped. */
   | { type: "board.released"; id: string; why: string; /** Who it should go to next, when a person picked. */ to?: string; /** The agent that turned it down: not offered to it again. */ declined?: string }
   | { type: "board.cancelled"; id: string }
@@ -964,6 +978,8 @@ export type EventBody =
       live?: boolean;
       /** The tool's own reason for asking, e.g. "This command changes directory before running git". */
       why?: string;
+      /** A teammate's go-ahead (guardrails.ts): which of the things it asks before, for the card's tag and Away mode's answer. */
+      guard?: "outside" | "ship" | "delete" | "money" | "keys" | "computer" | "takeover";
     }
   // Anyone allowed to suggest who isn't driving. Never reaches the agent unless promoted.
   | { type: "suggestion"; text: string; mentions?: string[]; attachments?: Attachment[]; /** Raised at one step of a run: the tool call it is about, and the step's label. */ at?: { call: string; step: string } }
@@ -1125,6 +1141,11 @@ export type EventBody =
    */
   | { type: "engine.detached"; reason: "disconnected" | "released"; tool?: EngineTool }
   /** What the CLI changed in its folder since it attached, taken with git after each turn. */
+  /**
+   * A run's failing tests against the commit its copy started from (baseline.ts), worked out once it ended: `pre` were already
+   * failing there, `fresh` are new; `whole` when names couldn't be read, and the command failed (true) or passed (false) there.
+   */
+  | { type: "tests.base"; run: number; command: string; base: string; pre: string[]; fresh: string[]; whole?: boolean }
   | { type: "agent.diff"; base: string; files: DiffFile[]; /** Files past the 80 shown, by name only, so a commit can still name them all. */ more?: string[] }
   /**
    * A subagent (or background command) a coding tool started, as it starts and each time its status changes: Claude Code's
@@ -1256,7 +1277,25 @@ export type EventBody =
    * A mistake agents were corrected for here came back after they had been told about it (brain.ts offersCheck): Friday offers
    * the command that would catch it, run after every change in the repo. `entry` is the correction in project memory.
    */
-  | { type: "brain.check.proposed"; repo: string; repoName: string; entry: string; command: string; why: string; times: number }
+  | {
+      type: "brain.check.proposed";
+      repo: string;
+      repoName: string;
+      entry: string;
+      /** The command, or for a rule read off the change, its words (rules.ts ruleWords). */
+      command: string;
+      why: string;
+      times: number;
+      /**
+       * A rule drafted straight from a person's correction (rules.ts; Arun, 2026-11-03: "Rules that stick"): how it is checked,
+       * and the message it came from (`said`), so the card sits under it.
+       */
+      how?: "lines" | "runs" | "paths";
+      pattern?: string;
+      only?: string[];
+      except?: string[];
+      said?: number;
+    }
   /** The person's answer to that offer: added (Friday runs it from now on) or not. */
   | { type: "brain.check.answered"; entry: string; take: boolean }
   /** The session now belongs to another workspace: its owner brought it into a team to work on it together. */
