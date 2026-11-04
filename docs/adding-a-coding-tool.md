@@ -2,11 +2,100 @@
 
 Friday supports multiple AI coding tools. When a tool natively implements the Agent Client Protocol (ACP), adding it is straightforward using the `acp({...})` helper. However, several major coding assistants—such as **Claude Code**, **Codex**, and **Cursor**—do not speak ACP. Instead, Friday interacts with them by launching their CLI binaries directly, communicating over `stdio`, parsing their output lines, and managing their permission policies.
 
-This document walks through the architecture of non-ACP adapters in `src/runner/adapters.ts` (evaluated at commit `7abfb71b06c15b4464965fe0107d1e5bde6561c1`). It covers how turns start, how output streams are parsed into Friday events, how authentication lifecycle is handled, and how Friday's permission modes map to CLI flags.
+This document walks through the architecture of coding tool integration in Friday (evaluated at commit `7abfb71b06c15b4464965fe0107d1e5bde6561c1`). It covers:
+1. The **three essential places** every new tool must touch (`src/types.ts`, `src/client/BrandMarks.tsx`, and `src/runner/adapters.ts`).
+2. The core non-ACP `Adapter` architecture (auth lifecycle, process spawning, `stdio` streaming, output parsing, and permission mode mappings).
+3. Worked examples from existing tools, including Qwen Code's integration ([PR #10](https://github.com/splashxmoon/friday/pull/10)).
 
 ---
 
-## 1. The `Adapter` Interface
+## 1. The Three Integration Points
+
+Regardless of whether a tool speaks ACP or uses a custom CLI adapter, registering a new tool in Friday requires entries in three places across the codebase. [PR #10](https://github.com/splashxmoon/friday/pull/10) (which added Qwen Code) serves as a canonical reference.
+
+### 1.1 Type Definitions and Metadata (`src/types.ts`)
+
+`src/types.ts` is the single source of truth for tool identity and installation instructions.
+
+1. **`EngineTool` union**: Add the tool identifier slug:
+   ```typescript
+   export type EngineTool =
+     | "claude"
+     | "codex"
+     | "cursor"
+     // ...
+     | "qwen"
+     | "mytool"
+     | "acp";
+   ```
+2. **`TOOL_INFO` entry**: Define user-facing labels, documentation links, install commands for each OS, and branding tint color:
+   ```typescript
+   export const TOOL_INFO: Record<EngineTool, ToolInfo> = {
+     // ...
+     mytool: {
+       name: "MyTool",
+       blurb: "Vendor's coding assistant",
+       docs: "https://example.com/docs",
+       install: {
+         npm: "@vendor/mytool-cli", // or { windows: "irm ... | iex", unix: "curl ... | bash" }
+       },
+       tint: "#4a90e2",
+     },
+   };
+   ```
+3. **Derived Lists**: Friday automatically derives `ENGINE_TOOLS` and `ENGINE_NAMES` from `TOOL_INFO`:
+   ```typescript
+   export const ENGINE_TOOLS = Object.keys(TOOL_INFO) as EngineTool[];
+   export const ENGINE_NAMES = Object.fromEntries(
+     ENGINE_TOOLS.map((t) => [t, TOOL_INFO[t].name])
+   ) as Record<EngineTool, string>;
+   ```
+4. **`ENGINE_MODEL_INFO`**: Provide offered models or an empty array `[]` if the tool discovers models dynamically via its CLI or protocol:
+   ```typescript
+   export const ENGINE_MODEL_INFO: Record<EngineTool, EngineModelInfo[]> = {
+     // ...
+     mytool: [],
+   };
+   ```
+
+### 1.2 UI Brand Mark (`src/client/BrandMarks.tsx`)
+
+Every tool displays an icon beside its name across menus, agent handoffs, and lane headers.
+
+In `src/client/BrandMarks.tsx`:
+- If the tool has a vendor SVG logo, provide a dedicated component (e.g. `ClaudeMark`, `CursorMark`) or define its SVG path in `TOOL_COLOR` or `TOOL_PATHS`.
+- If the tool uses a generic icon or open icon set, map it in `EngineMark`:
+  ```typescript
+  export function EngineMark({ tool, size = 15, className }: { tool: EngineTool | ""; size?: number; className?: string }) {
+    if (tool === "claude") return <ClaudeMark size={size} className={className} />;
+    if (tool === "cursor") return <CursorMark size={size} className={className} />;
+    // Generic fallback or icon:
+    if (tool === "qwen") return <BotIcon size={size} className={className} role="img" aria-label={ENGINE_NAMES.qwen} style={{ flex: "none" }} />;
+    if (tool === "mytool") return <BotIcon size={size} className={className} role="img" aria-label={ENGINE_NAMES.mytool} style={{ flex: "none" }} />;
+    // ...
+  }
+  ```
+
+### 1.3 The Runner Adapter (`src/runner/adapters.ts`)
+
+This is where Friday communicates with the tool process.
+- For ACP tools: declare an `acp({...})` profile (see Qwen in PR #10, Kilo, or Grok).
+- For non-ACP tools: implement the full `Adapter` interface described below.
+- Finally, register the adapter in `ADAPTERS`:
+  ```typescript
+  export const ADAPTERS: Record<EngineTool, Adapter> = {
+    claude,
+    codex,
+    cursor,
+    // ...
+    mytool,
+    acp: custom,
+  };
+  ```
+
+---
+
+## 2. The `Adapter` Interface
 
 Every tool adapter implements the `Adapter` interface defined in `src/runner/adapters.ts` (around line 229):
 
