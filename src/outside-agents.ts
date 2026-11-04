@@ -26,20 +26,19 @@ const agentArg = { type: "string", description: "Which agent in it: its id or na
 export const OUTSIDE_TOOLS = [
   {
     name: "list_sessions",
-    description: "Friday's sessions on this computer, latest first: Code, Work and the Crew's, each with its agents, what each is doing, and anything waiting on the person.",
+    description: "Friday's sessions on this computer, latest first: Code and the Crew's, each with its agents, what each is doing, and anything waiting on the person.",
     inputSchema: obj({ limit: { type: "number", description: "How many, 1 to 50 (default 20)." } }),
     annotations: { readOnlyHint: true, openWorldHint: false },
   },
   {
     name: "start_session",
     description:
-      "Hand work to Friday: start a new session on this computer whose coding agent does the task. Code for work in a folder or repo, Work for writing, research and the like. It starts at once and shows in Friday's sidebar as started by you; follow it with wait_for_idle or read_session.",
+      "Hand work to Friday: start a new session on this computer whose coding agent does the task. It starts at once and shows in Friday's sidebar as started by you; follow it with wait_for_idle or read_session.",
     inputSchema: obj(
       {
         prompt: { type: "string", description: "The task, as a complete instruction: what, where, and what done looks like." },
         folder: { type: "string", description: "The full path of the folder or repo it works in. A repo gets its own copy (a git worktree) unless in_place is true. Left out: a new project folder." },
         tool: { type: "string", description: `Its coding tool: auto (default: Friday picks the best one ready for the task) or one of ${ENGINE_TOOLS.join(", ")}.` },
-        kind: { type: "string", enum: ["code", "work"], description: "Code (default) or Work." },
         title: { type: "string", description: "A short title. From the prompt if left out." },
         mode: { type: "string", enum: ["plan", "edits", "full"], description: "How far its agent may go without asking: plan (look, don't change), edits (change files, ask before commands) or full (default, as Friday's own new sessions)." },
         in_place: { type: "boolean", description: "Work in the folder itself rather than a copy of the repo. Off by default, so it never edits under you." },

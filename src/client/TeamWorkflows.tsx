@@ -47,6 +47,7 @@ import {
   XIcon,
   ZapIcon,
   type LucideIcon,
+  LightbulbIcon,
 } from "lucide-react";
 import type { AgentSchedule } from "../agents.js";
 import type { BoardStatus } from "../session/projection.js";
@@ -54,6 +55,12 @@ import {
   BLANK_LIMITS,
   BLANK_OUTCOMES,
   columnsOf,
+  afterFix,
+  connectionsOf,
+  fixSteps,
+  ifNotOf,
+  ifNotTo,
+  sendsOn,
   DEFAULT_TRIES,
   isGate,
   MAX_TRIES,
@@ -75,6 +82,7 @@ import {
   type WorkflowRun,
   type WorkflowRunStep,
   type WorkflowStep,
+  type WorkflowPort,
   type WorkflowTemplate,
   type WorkflowTrigger,
   type WorkflowView,
@@ -83,7 +91,8 @@ import type { TeammateView } from "../teammates.js";
 import { api } from "./api.js";
 import type { Identity } from "./storage.js";
 import { TaskMark, type TaskMarkState } from "./TaskMark.js";
-import { relTime, useConfirm } from "./ui.js";
+import { isTyping, relTime, useConfirm } from "./ui.js";
+import { history } from "./undo-stack.js";
 import { base, Face, mateStatus, refreshTeam, useTeam, type Team } from "./Teammates.js";
 import { useMachine } from "./local.js";
 import { canRoute } from "./RouteWhy.js";
@@ -96,7 +105,8 @@ import { PageHeader } from "@/components/dass";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectItem,
+  SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -202,7 +212,8 @@ function triggerShort(t: WorkflowTrigger, n: Names): string {
   if (t.kind === "webhook") return "Webhook";
   if (t.kind === "teammate") return `${n.mate(t.mate)?.name ?? "A teammate"} finishes ${t.on === "task" ? "a task" : "a turn"}`;
   if (t.kind === "board") return `A board in ${n.room(t.room) || "a room"} finishes`;
-  return "Run now";
+  // When it runs, in words, never the button's name beside "Use →" (audit CREW-41, 2026-11-04).
+  return "When you start it";
 }
 
 function triggerLong(t: WorkflowTrigger, n: Names): string {
@@ -438,15 +449,18 @@ function DraftBox({ identity, over, onDraft, onClose }: { identity: Identity; /*
     }
   };
   return (
-    <form className="wf-draft" onSubmit={(e) => (e.preventDefault(), void go())}>
+    // One line until something is typed: "Describe it instead…" and Draft it beside it (audit CREW-36, 2026-11-04).
+    <form className={cn("wf-draft", !text && !busy && !error && "line")} onSubmit={(e) => (e.preventDefault(), void go())}>
+      <LightbulbIcon className="wf-draft-mark size-4" aria-hidden="true" />
       <Textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => (e.key === "Escape" ? (e.preventDefault(), onClose()) : e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && (e.preventDefault(), void go()))}
         autoFocus
-        placeholder="Describe a workflow: “Every weekday at 9, Ada runs the tests, Kit fixes what fails until they pass, and I OK the pull request.”"
+        placeholder="Describe it instead…"
+        title="Every weekday at 9, Ada runs the tests, Kit fixes what fails until they pass, and I OK the pull request."
         aria-label="Describe a workflow"
-        rows={2}
+        rows={text ? 2 : 1}
         maxLength={2000}
         disabled={busy}
         className="wf-draft-box"
@@ -662,6 +676,9 @@ function Builder({
   // Describe it, and Friday drafts it, here on the canvas it fills (Arun, 2026-11-02: "add this into the workflow page… instead of
   // in the automations page"): open on a new one, a button away on one with steps.
   const [describing, setDescribing] = useState(fresh && !initial.steps.length);
+  // A new workflow says what is left in neutral words until it is first saved or run: red before anything was typed read as
+  // mistakes (audit CREW-36, 2026-11-04).
+  const [tried, setTried] = useState(!fresh);
   /** Run now asking its question first. */
   const [asking, setAsking] = useState(false);
   /** Someone else's (the hosted service's): looked at here, changed and run by them. */
@@ -691,6 +708,24 @@ function Builder({
    * A new step: in a column of its own at `col` (the rest move along), or beside the steps of column `col`. A check or your OK
    * sends the work back to the last step before it that does work, when there is one.
    */
+  /**
+   * A fix step for a check or your OK (design A, Arun 2026-11-04): drawn under it, run only when it doesn't pass, then the work
+   * goes back to what it checks. Who does it is asked next, in its settings.
+   */
+  const addFix = (gate: string) => {
+    if (steps.length >= MAX_STEPS) return setError(`A workflow has up to ${MAX_STEPS} steps.`);
+    const id = uid();
+    setD((x) => {
+      const g = x.steps.find((t) => t.id === gate);
+      if (!g) return x;
+      // Back afterwards to where the check sent it before, when that was an earlier step: the choice made a moment ago stays.
+      const was = ifNotOf(g);
+      const back = was && x.steps.findIndex((t) => t.id === was) < x.steps.indexOf(g) && !isGate(x.steps.find((t) => t.id === was)!) ? was : undefined;
+      const all = [...x.steps, { id, fixFor: gate, mate: g.fixBy && g.fixBy !== LEAD ? g.fixBy : "", does: "", owns: [], col: Math.max(...x.steps.map((t) => t.col)) + 1, ...(back ? { next: back } : {}) }];
+      return { ...x, steps: packSteps(all.map((t) => (t.id === gate ? { ...t, ...ifNotTo(all, t, id) } : t))) };
+    });
+    setSel(id);
+  };
   const addStep = (col: number, alongside: boolean, kind: StepKind = "do") => {
     if (steps.length >= MAX_STEPS) return setError(`A workflow has up to ${MAX_STEPS} steps.`);
     const before = steps.filter((x) => x.col < col && !isGate(x)).at(-1);
@@ -727,6 +762,7 @@ function Builder({
     });
 
   const save = async (): Promise<WorkflowView | null> => {
+    setTried(true);
     setSaving(true);
     setError("");
     try {
@@ -748,6 +784,7 @@ function Builder({
   /** A check pressed: to its card, or a first step made when there is none. */
   const goTo = (on: string) => (on === FIRST_STEP ? addStep(0, false) : setSel(on));
   const runNow = async (input?: string) => {
+    setTried(true);
     if (fixes.length) return goTo(fixes[0]!.on);
     if (d.ask?.trim() && input === undefined) return setAsking(true);
     setRunning(true);
@@ -788,16 +825,31 @@ function Builder({
         onDeleted();
       },
     });
-  // ⌘S saves.
+  // ⌘S saves. ⌘Z and ⌘⇧Z (Ctrl on Windows and Linux) undo and redo a change to the steps, a wire dragged or a step added, when
+  // nothing is being typed: the canvas had no undo, so ⌘Z went to the browser, which emptied the Name field instead (2026-11-04
+  // retest). In a field, they stay the field's own.
   const saveRef = useRef(save);
   saveRef.current = save;
   const ownerRef = useRef(owner);
   ownerRef.current = owner;
+  const undoSteps = useRef({ now: d.steps, back: false, h: history<Draft["steps"]>() });
+  if (undoSteps.current.now !== d.steps) {
+    if (!undoSteps.current.back) undoSteps.current.h.changed(undoSteps.current.now);
+    undoSteps.current = { ...undoSteps.current, now: d.steps, back: false };
+  }
   useEffect(() => {
     const key = (e: globalThis.KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
         if (!ownerRef.current) void saveRef.current();
+      }
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "z" && !isTyping(e.target) && !ownerRef.current) {
+        e.preventDefault();
+        const s = undoSteps.current;
+        const to = e.shiftKey ? s.h.redo(s.now) : s.h.undo(s.now);
+        if (to === undefined) return;
+        s.back = true;
+        setD((x) => ({ ...x, steps: to }));
       }
     };
     addEventListener("keydown", key);
@@ -845,7 +897,7 @@ function Builder({
               <LayoutTemplateIcon />
             </Button>
           </Tip>
-          <ReadyChip checks={checks} onPick={(c) => goTo(c.on)} />
+          <ReadyChip checks={checks} quiet={!tried} onPick={(c) => goTo(c.on)} />
           {id && <RunsButton identity={identity} id={id} runs={view?.runs ?? []} team={team} onRan={onRan} />}
           {owner ? (
             // Someone else's: theirs to change and run, said where the buttons would be.
@@ -873,7 +925,7 @@ function Builder({
         </div>
       </header>
       {side && <TemplatePanel names={names} onUse={useTemplate} onClose={() => setSide(false)} />}
-      <section className="wf-canvas-wrap" aria-label="How this workflow runs">
+      <section className={cn("wf-canvas-wrap", !tried && "quiet")} aria-label="How this workflow runs">
         {error && (
           <p role="alert" className="wf-error">
             {error}
@@ -893,7 +945,7 @@ function Builder({
             <WorkflowAsksFor identity={identity} id={id} onAnswered={onRan} />
           </div>
         )}
-        <Canvas d={d} steps={steps} names={names} others={others} sel={sel} live={live} checks={checks} onPick={setSel} onAdd={addStep} onMove={owner ? undefined : moveTo} onLayout={owner ? undefined : (layout) => set({ layout })} />
+        <Canvas d={d} steps={steps} names={names} others={others} sel={sel} live={live} checks={checks} onPick={setSel} onAdd={addStep} onMove={owner ? undefined : moveTo} onLayout={owner ? undefined : (layout) => set({ layout })} onConnect={owner || live ? undefined : (source, port, target) => setStep(source, port === "otherwise" ? ifNotTo(steps, steps.find((x) => x.id === source)!, target) : { next: target })} />
         {sel && (
           <Inspector
             key={sel}
@@ -913,6 +965,7 @@ function Builder({
             setStep={setStep}
             moveStep={moveStep}
             removeStep={removeStep}
+            addFix={addFix}
           />
         )}
       </section>
@@ -966,16 +1019,18 @@ function TemplatePanel({ names, onUse, onClose }: { names: Names; onUse: (t: Wor
 }
 
 /** What is missing, worst first, in a chip that opens to the list; an item pressed goes to its card. */
-function ReadyChip({ checks, onPick }: { checks: WorkflowCheck[]; onPick: (c: WorkflowCheck) => void }) {
+function ReadyChip({ checks, onPick, quiet }: { checks: WorkflowCheck[]; onPick: (c: WorkflowCheck) => void; /** Not yet saved or run: what is left, in neutral words (audit CREW-36). */ quiet?: boolean }) {
   const fixes = checks.filter((c) => c.level === "fix").length;
-  const tone: DotState = fixes ? "bad" : checks.length ? "idle" : "done";
+  const tone: DotState = fixes && !quiet ? "bad" : checks.length ? "idle" : "done";
+  // The steps still to finish, each once, however many things each lacks.
+  const toFinish = new Set(checks.filter((c) => c.level === "fix").map((c) => c.on)).size;
   const [open, setOpen] = useState(false);
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button variant="outline" size="sm" className="h-8 gap-2 border-[var(--border)] bg-[var(--bg)] text-[13px] shadow-none">
           <Dot state={tone} />
-          {fixes ? `${fixes} to fix` : checks.length ? `${checks.length} to check` : "Ready to run"}
+          {fixes ? (quiet ? `${toFinish} step${toFinish === 1 ? "" : "s"} to finish` : `${fixes} to fix`) : checks.length ? `${checks.length} to check` : "Ready to run"}
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-80 p-1.5">
@@ -1086,6 +1141,16 @@ function RunsButton({ identity, id, runs: recent, team, onRan }: { identity: Ide
 // ── the canvas ───────────────────────────────────────────────────────
 
 const ZOOMS = [0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.25, 1.5];
+/**
+ * "Fit it in view": the zoom, on top of the one the canvas picks by itself (`fit`, never under 60% so words stay readable), that
+ * shows the whole line across `viewW`. It only reset to that 60%, so a workflow of five steps still ran past the right edge
+ * (2026-11-04 retest). Never under 30%, nor over the canvas's own.
+ */
+export function fitAllZoom(viewW: number, contentW: number, fit: number): number {
+  const all = Math.max(0.3, Math.min(1, (viewW - 48) / Math.max(1, contentW)));
+  return +Math.min(1, all / fit).toFixed(3);
+}
+
 const stepZoom = (z: number, dir: 1 | -1) => {
   const i = ZOOMS.findIndex((v) => v >= z - 0.001);
   return ZOOMS[Math.min(ZOOMS.length - 1, Math.max(0, (i < 0 ? ZOOMS.length - 1 : i) + dir))]!;
@@ -1109,7 +1174,7 @@ type Pt = { x: number; y: number };
 type Box = Pt & { id: string; w: number; h: number };
 const avg = (xs: number[]) => xs.reduce((t, x) => t + x, 0) / Math.max(1, xs.length);
 
-function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd, onMove, onLayout }: { d: Draft; steps: WorkflowStep[]; names: Names; others: { id: string; name: string }[]; sel: Sel; live: WorkflowRun | null; checks: WorkflowCheck[]; onPick: (s: Sel) => void; onAdd: AddStep; /** A step's card dropped: onto column `col` (alongside), or into the space before it. */ onMove?: (id: string, col: number, alongside: boolean) => void; /** Cards moved by hand: each one's offset from where its column puts it; {} puts them all back. */ onLayout?: (l: WorkflowLayout) => void }) {
+function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd, onMove, onLayout, onConnect }: { d: Draft; steps: WorkflowStep[]; names: Names; others: { id: string; name: string }[]; sel: Sel; live: WorkflowRun | null; checks: WorkflowCheck[]; onPick: (s: Sel) => void; onAdd: AddStep; /** A step's card dropped: onto column `col` (alongside), or into the space before it. */ onMove?: (id: string, col: number, alongside: boolean) => void; /** Cards moved by hand: each one's offset from where its column puts it; {} puts them all back. */ onLayout?: (l: WorkflowLayout) => void; onConnect?: (source: string, port: WorkflowPort, target: string) => void }) {
   const scroll = useRef<HTMLDivElement>(null);
   const flow = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ w: 1000, h: 600, fw: 900, fh: 400 });
@@ -1117,6 +1182,10 @@ function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd, onM
   const [shift, setShift] = useState({ x: 0, y: 0 });
   const [panning, setPanning] = useState(false);
   const pan = useRef<Pt | null>(null);
+  const connectionDrag = useRef<{ x: number; y: number; moved: boolean } | null>(null);
+  const [connecting, setConnecting] = useState<{ source: string; port: WorkflowPort } | null>(null);
+  /** Why a wire dropped where it was couldn't go there. */
+  const [refused, setRefused] = useState("");
   /** A card held: where the pointer went down, whether it has moved yet, and the drop under it. */
   const drag = useRef<{ id: string; x: number; y: number; moved: boolean; on: Element | null } | null>(null);
   /** The card being dragged and how far, in the canvas's units: drawn there, its wires with it. */
@@ -1133,6 +1202,10 @@ function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd, onM
   /** The column under the pointer: its Alongside shows. */
   const [hot, setHot] = useState(-1);
   const cols = columnsOf(steps);
+  // Fix steps: under the check that sends them work, not a column of the line (design A).
+  const fix = fixSteps(steps);
+  const fixLane = (lane: { id: string }[]) => lane.length > 0 && lane.every((n) => fix.has(n.id));
+  const gateOf = (id: string) => ((f) => steps.find((x) => isGate(x) && x.id === f?.fixFor))(steps.find((x) => x.id === id));
   // Narrower than a column and its neighbours need, the steps are a list, top to bottom, at full size.
   const stacked = view.w < 640;
   const stackedNow = useRef(stacked);
@@ -1147,6 +1220,7 @@ function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd, onM
   const auto: Record<string, Pt> = {};
   let autoW = 0;
   for (const lane of lanes) {
+    if (fixLane(lane)) continue;
     const colW = Math.max(...lane.map((n) => n.w));
     let y = -(lane.reduce((t, n) => t + hOf(n.id), 0) + ROW_GAP * (lane.length - 1)) / 2;
     for (const n of lane) {
@@ -1157,16 +1231,32 @@ function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd, onM
     autoW += colW + (steps.length ? COL_GAP : 236);
   }
   autoW -= steps.length ? COL_GAP : 236;
+  // Each fix step under its check, room between for the answer's words, a check's several one under another.
+  const under: Record<string, number> = {};
+  for (const id of [...fix]) {
+    const g = gateOf(id);
+    const ga = g && auto[g.id];
+    if (!g || !ga) {
+      auto[id] = { x: autoW + COL_GAP, y: 0 };
+      continue;
+    }
+    const y = under[g.id] ?? ga.y + hOf(g.id) + 76;
+    auto[id] = { x: ga.x, y };
+    under[g.id] = y + hOf(id) + ROW_GAP;
+  }
   // Moved by hand: its own offset. A card added since takes its column's, or the column before's, so it lands among them.
   const saved = d.layout ?? {};
   const offs: Record<string, Pt> = {};
   let carry: Pt = { x: 0, y: 0 };
   for (const lane of lanes) {
+    if (fixLane(lane)) continue;
     const own = lane.find((n) => saved[n.id]);
     const lean = own ? saved[own.id]! : carry;
     for (const n of lane) offs[n.id] = saved[n.id] ?? lean;
     carry = offs[lane[0]!.id]!;
   }
+  // A fix step moves with its check, unless moved by hand.
+  for (const id of fix) offs[id] = saved[id] ?? offs[gateOf(id)?.id ?? ""] ?? { x: 0, y: 0 };
   const at = (id: string, still = false): Pt => {
     const a = auto[id]!;
     const o = offs[id]!;
@@ -1181,37 +1271,59 @@ function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd, onM
   const still = ids.map((id) => boxOf(id, true));
   const frame = { x: Math.min(...still.map((b) => b.x)), y: Math.min(...still.map((b) => b.y)), r: Math.max(...still.map((b) => b.x + b.w)), b: Math.max(...still.map((b) => b.y + b.h)) };
 
-  // A check or OK that sends the work back: a loop under the cards from it to the step it names, shorter loops inside longer
-  // ones, each at its own depth, its words where it bottoms out.
-  const loops = steps
-    .filter((x) => isGate(x) && x.ifNot === "back" && x.back && byId.has(x.back))
-    .map((g) => ({ g, span: steps.indexOf(g) - steps.findIndex((x) => x.id === g.back) }))
-    .sort((a, b) => a.span - b.span)
-    .map(({ g }, i) => {
-      const A = byId.get(g.id)!;
-      const B = byId.get(g.back!)!;
-      const x1 = A.x + A.w / 2;
-      const x2 = B.x + B.w / 2;
-      const lo = Math.min(A.x, B.x);
-      const hi = Math.max(A.x + A.w, B.x + B.w);
-      const floor = Math.max(...boxes.filter((b) => b.x < hi && b.x + b.w > lo).map((b) => b.y + b.h));
-      const low = floor + 46 + i * 34;
-      // A card under the step it goes back to (one alongside it): up its right side and in there, not through that card.
-      const under = boxes.some((b) => b.id !== B.id && b.id !== A.id && b.x < B.x + B.w && b.x + b.w > B.x && b.y >= B.y + B.h - 1 && b.y < low);
-      const xe = under ? B.x + B.w + 22 : x2;
-      const r = Math.min(12, Math.abs(xe - x1) / 2);
-      const s = xe < x1 ? -1 : 1;
-      const end = under ? `L${xe},${B.y + B.h - 22 + r} Q${xe},${B.y + B.h - 22} ${xe - r},${B.y + B.h - 22} L${B.x + B.w + 7},${B.y + B.h - 22}` : `L${x2},${B.y + B.h + 7}`;
-      return {
-        id: g.id,
-        d: `M${x1},${A.y + A.h} L${x1},${low - r} Q${x1},${low} ${x1 + s * r},${low} L${xe - s * r},${low} Q${xe},${low} ${xe},${low - r} ${end}`,
-        x: (x1 + xe) / 2,
-        y: low,
-        low,
-        text: `Back to step ${steps.findIndex((x) => x.id === g.back) + 1} · up to ${g.tries ?? DEFAULT_TRIES}×`,
-      };
-    });
-  frame.b = Math.max(frame.b, ...loops.map((l) => l.low + 14));
+  // Explicit paths use the same card boxes as the free layout, so moving a card moves every connection with it.
+  const connections = connectionsOf(steps).map(c => ({ ...c, target: c.target === "$finish" ? "outcomes" : c.target }));
+  for (const n of cols[0] ?? []) connections.unshift({ source: "trigger", target: n.id, port: "next", explicit: false });
+  if (!steps.length) connections.push({ source: "trigger", target: "outcomes", port: "next", explicit: false });
+  // Drawn under the cards: a path somebody chose, and where a check sends work that doesn't pass. The rest are the wires between columns.
+  // A chosen next that is the next column anyway is an ordinary wire, as the end after the last column is.
+  const laneAt = new Map(lanes.filter((l) => !fixLane(l)).flatMap((lane, k) => lane.map((n) => [n.id, k] as const)));
+  const plainNext = (c: { source: string; target: string; port: WorkflowPort }) => c.port === "next" && !fix.has(c.source) && laneAt.has(c.source) && laneAt.get(c.target) === laneAt.get(c.source)! + 1;
+  const routed = (c: typeof connections[number]) => ((c.explicit && !plainNext(c)) || c.port === "otherwise" || fix.has(c.source));
+  const working = (id: string) => ((s) => s?.status === "claimed" || s?.status === "review")(runStep(id));
+  const finished = (id: string) => runStep(id)?.status === "done";
+  const loops = connections.filter(c => routed(c) && byId.has(c.target)).map((c, i) => {
+    const A = byId.get(c.source)!;
+    const B = byId.get(c.target)!;
+    const gate = steps.find(s => s.id === c.source)!;
+    const x1 = A.x + A.w / 2, x2 = B.x + B.w / 2;
+    const lo = Math.min(A.x, B.x), hi = Math.max(A.x + A.w, B.x + B.w);
+    const floor = Math.max(...boxes.filter(b => b.x < hi && b.x + b.w > lo).map(b => b.y + b.h));
+    const low = floor + 46 + i * 34;
+    const under = boxes.some(b => b.id !== B.id && b.id !== A.id && b.x < B.x + B.w && b.x + b.w > B.x && b.y >= B.y + B.h - 1 && b.y < low);
+    const xe = under ? B.x + B.w + 22 : x2;
+    const r = Math.min(12, Math.abs(xe - x1) / 2), direction = xe < x1 ? -1 : 1;
+    const end = under ? `L${xe},${B.y + B.h - 22 + r} Q${xe},${B.y + B.h - 22} ${xe - r},${B.y + B.h - 22} L${B.x + B.w + 7},${B.y + B.h - 22}` : `L${x2},${B.y + B.h + 7}`;
+    const ok = gate.kind === "approve";
+    const label = c.port === "otherwise" ? (ok ? "No" : "Fail") : isGate(gate) ? (ok ? "Yes" : "Pass") : "Next";
+    const to = steps.findIndex((s) => s.id === c.target) + 1;
+    const back = to > 0 && to <= steps.indexOf(gate);
+    // Said as the card says it: back to an earlier step, down to a fix step, or on to where it was told to go.
+    const text =
+      c.port === "otherwise"
+        ? fix.has(c.target) ? `${ok ? "If you say no" : "If it fails"} · up to ${gate.tries ?? DEFAULT_TRIES}×` : `Back to step ${to} · up to ${gate.tries ?? DEFAULT_TRIES}×`
+        : fix.has(c.source) ? (c.target === "outcomes" ? "Then the end" : `Then ${back ? "back to " : ""}step ${to}`)
+        : `${isGate(gate) ? (ok ? "If yes: " : "If it passes: ") : "Then "}${c.target === "outcomes" ? "the end" : `step ${to}`}`;
+    // Down to a fix step under it: straight down. A fix step's way back up: out of its side, along, and up into that step.
+    const ya = A.y + A.h / 2;
+    const down = B.y >= A.y + A.h - 1 && Math.abs(x2 - x1) < A.w;
+    const up = fix.has(c.source) && A.y >= B.y + B.h - 1 && (x2 < A.x || x2 > A.x + A.w);
+    const sx = x2 < A.x ? A.x : A.x + A.w;
+    const turn = x2 < A.x ? 12 : -12;
+    const path = down
+      ? `M${x1},${A.y + A.h} C${x1},${A.y + A.h + 28} ${x2},${B.y - 34} ${x2},${B.y - 7}`
+      : up
+        ? `M${sx},${ya} L${x2 + turn},${ya} Q${x2},${ya} ${x2},${ya - 12} L${x2},${B.y + B.h + 7}`
+        : `M${x1},${A.y + A.h} L${x1},${low - r} Q${x1},${low} ${x1 + direction * r},${low} L${xe - direction * r},${low} Q${xe},${low} ${xe},${low - r} ${end}`;
+    return {
+      ...c, id: `${c.source}:${c.port}:${c.target}`,
+      d: path,
+      x: down ? (x1 + x2) / 2 : up ? (sx + x2) / 2 : (x1 + xe) / 2, y: down ? (A.y + A.h + B.y) / 2 : up ? ya : low, low: down || up ? A.y + A.h : low, label,
+      text,
+      live: !!live && finished(c.source) && working(c.target),
+    };
+  });
+  frame.b = Math.max(frame.b, ...loops.map(l => l.low + 14));
   // Into the flow's own units: the frame's corner at PAD, PAD. Held as it was while a card is dragged: a loop dragged lower
   // grew the frame, and the whole drawing slid up under the pointer.
   const live0 = { fw: frame.r - frame.x + PAD * 2, fh: frame.b - frame.y + PAD * 2, ox: PAD - frame.x, oy: PAD - frame.y };
@@ -1219,33 +1331,25 @@ function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd, onM
   if (!held) frozen.current = live0;
   const { fw, fh, ox, oy } = held ? frozen.current : live0;
 
-  // The wires: from each card's right side to the next column's cards' left sides. A card moved back past the one before it
-  // gets a wire that swings out and round rather than doubling back over the cards.
-  const working = (id: string) => ((s) => s?.status === "claimed" || s?.status === "review")(runStep(id));
-  const finished = (id: string) => runStep(id)?.status === "done";
-  const wires: { d: string; live: boolean; on: boolean }[] = [];
-  for (let i = 1; i < lanes.length; i++)
-    for (const a of lanes[i - 1]!)
-      for (const b of lanes[i]!) {
-        const A = byId.get(a.id)!;
-        const B = byId.get(b.id)!;
-        const x1 = A.x + A.w;
-        const y1 = A.y + A.h / 2;
-        const x2 = B.x;
-        const y2 = B.y + B.h / 2;
-        const k = Math.max(44, Math.abs(x2 - x1) / 2, x2 < x1 + 24 ? 96 : 0);
-        const on = i === 1 ? !!live && working(b.id) : i === lanes.length - 1 ? false : finished(a.id) && working(b.id);
-        wires.push({ d: `M${x1},${y1} C${x1 + k},${y1} ${x2 - k},${y2} ${x2},${y2}`, live: on, on: !!sel && (sel === a.id || sel === b.id) });
-      }
+  // Default next-column wires retain the upstream bends and selection/working states.
+  const wires = connections.filter(c => !routed(c) && byId.has(c.target)).map(c => {
+    const A = byId.get(c.source)!, B = byId.get(c.target)!;
+    const x1 = A.x + A.w, y1 = A.y + A.h / 2, x2 = B.x, y2 = B.y + B.h / 2;
+    const k = Math.max(44, Math.abs(x2 - x1) / 2, x2 < x1 + 24 ? 96 : 0);
+    return { d: `M${x1},${y1} C${x1 + k},${y1} ${x2 - k},${y2} ${x2},${y2}`, live: !!live && (c.source === "trigger" || finished(c.source)) && working(c.target), on: !!sel && (sel === c.source || sel === c.target) };
+  });
   // The "+" between two columns, on the wires between them: a step there, or a card dropped there taking a column of its own.
-  const gaps = lanes.slice(0, -1).map((lane, i) => {
+  // Between the columns of the line only: a fix step's column has none (a step added there goes before it).
+  const drawn = lanes.map((lane, i) => ({ lane, i })).filter((x) => !fixLane(x.lane));
+  const gaps = drawn.slice(0, -1).map(({ lane }, k) => {
+    const next = drawn[k + 1]!;
     const A = lane.map((n) => byId.get(n.id)!);
-    const B = lanes[i + 1]!.map((n) => byId.get(n.id)!);
-    return { at: i, x: (avg(A.map((b) => b.x + b.w)) + avg(B.map((b) => b.x))) / 2, y: (avg(A.map((b) => b.y + b.h / 2)) + avg(B.map((b) => b.y + b.h / 2))) / 2 };
+    const B = next.lane.map((n) => byId.get(n.id)!);
+    return { at: next.i - 1, x: (avg(A.map((b) => b.x + b.w)) + avg(B.map((b) => b.x))) / 2, y: (avg(A.map((b) => b.y + b.h / 2)) + avg(B.map((b) => b.y + b.h / 2))) / 2 };
   });
   // Alongside, under a column's lowest card, for the column under the pointer or with a card open.
   const besides = cols.flatMap((col, i) => {
-    if (col.length === 1 && isGate(col[0]!)) return [];
+    if (col.length === 1 && (isGate(col[0]!) || !!col[0]!.next || fix.has(col[0]!.id))) return [];
     const low = col.map((s) => byId.get(s.id)!).sort((a, b) => b.y + b.h - (a.y + a.h))[0]!;
     return [{ i, x: low.x, y: low.y + low.h + 10, on: hot === i + 1 || col.some((s) => s.id === sel) }];
   });
@@ -1254,6 +1358,7 @@ function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd, onM
   // the columns as laid out, not to where cards were dragged, so moving one doesn't zoom the rest.
   const fit = stacked ? 1 : Math.max(0.6, Math.min(1, (view.w - 48) / (autoW + PAD * 2)));
   const zoom = +(userZoom * fit).toFixed(3);
+  const fitAll = () => (setZoom(fitAllZoom(view.w, autoW + PAD * 2, fit)), setShift({ x: 0, y: 0 }));
   const moved = Object.keys(saved).length > 0;
   /** Every card's offset as drawn now: written whole the first time one is moved, so the others stay where they are. */
   const whole = (): WorkflowLayout => Object.fromEntries(ids.map((id) => [id, { x: Math.round(offs[id]!.x), y: Math.round(offs[id]!.y) }]));
@@ -1326,7 +1431,66 @@ function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd, onM
     return () => clearTimeout(t);
   }, [sel, stacked]);
 
+  const connect = (source: string, port: WorkflowPort, target: string) => {
+    // Never to itself: a check whose Fails was dropped on its own card sent its work back to itself (2026-11-04 end-to-end check).
+    // Said, for a moment, rather than nothing happening (2026-11-04 retest).
+    if (onConnect && target === source) (setRefused("A step can't send its work to itself: drop it on another step."), setTimeout(() => setRefused(""), 4000));
+    if (!onConnect || target === source || !steps.some(s => s.id === source && (port === "next" || isGate(s)))) return setConnecting(null);
+    onConnect(source, port, target === "outcomes" ? "$finish" : target);
+    setConnecting(null);
+    onPick(source);
+  };
   const tidy = () => (onLayout?.({}), setZoom(1), setShift({ x: 0, y: 0 }));
+  /** A card's way out, dragged onto a step to send it there; clicked, the card's settings open where every choice is. */
+  const portProps = (id: string, port: WorkflowPort) => ({
+    onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      connectionDrag.current = { x: e.clientX, y: e.clientY, moved: false };
+      setConnecting({ source: id, port });
+      e.currentTarget.setPointerCapture(e.pointerId);
+    },
+    onPointerMove: (e: React.PointerEvent<HTMLButtonElement>) => {
+      const drag = connectionDrag.current;
+      if (drag && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 6) drag.moved = true;
+    },
+    onPointerUp: (e: React.PointerEvent<HTMLButtonElement>) => {
+      e.stopPropagation();
+      if (connectionDrag.current?.moved) {
+        const target = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>("[data-wf-node]")?.dataset.wfNode;
+        if (target && target !== "trigger") connect(id, port, target);
+      } else if (connectionDrag.current) {
+        setConnecting(null);
+        onPick(id);
+      }
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+    },
+    onPointerCancel: () => {
+      connectionDrag.current = null;
+      setConnecting(null);
+    },
+    onClick: (e: React.MouseEvent<HTMLButtonElement>) => {
+      e.stopPropagation();
+      if (e.detail === 0) setConnecting({ source: id, port });
+      connectionDrag.current = null;
+    },
+  });
+  /** A step said the way the cards say it: "4 · Finalize and land it"; the end, as such. */
+  const titleOf = (id: string) => {
+    if (id === "outcomes" || id === "$finish") return "The end";
+    const x = steps.find((t) => t.id === id);
+    return x ? `${steps.indexOf(x) + 1} · ${stepTitle(x, steps.indexOf(x) + 1)}` : "A step that's gone";
+  };
+  const passTo = (x: WorkflowStep) => {
+    const t = connections.filter((c) => c.source === x.id && c.port === "next").map((c) => c.target);
+    return t.length ? `${titleOf(t[0]!)}${t.length > 1 ? ` +${t.length - 1}` : ""}` : "The end";
+  };
+  const failTo = (x: WorkflowStep) => {
+    const t = ifNotOf(x);
+    if (!t) return sendsOn(x) ? "Pick a step" : "Stops the run";
+    const n = steps.findIndex((y) => y.id === t);
+    return n >= 0 && n < steps.indexOf(x) ? `Back to ${titleOf(t)}` : titleOf(t);
+  };
   const node = (id: string, children: ReactNode, lane = -1) => {
     const b = byId.get(id);
     const s = steps.find((x) => x.id === id);
@@ -1341,24 +1505,65 @@ function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd, onM
         runStep={runStep}
         held={held?.id === id}
         style={stacked || !b ? undefined : { left: b.x + ox, top: b.y + oy }}
-        drop={!stacked && s && !(cols[col]!.length === 1 && isGate(s)) ? `col:${col}` : undefined}
+        drop={!stacked && s && !(cols[col]!.length === 1 && (isGate(s) || !!s.next || fix.has(s.id))) ? `col:${col}` : undefined}
         onEnter={lane < 0 ? undefined : () => setHot(lane)}
         onLeave={lane < 0 ? undefined : () => setHot((h) => (h === lane ? -1 : h))}
       >
         {children}
+        {onConnect && id !== "trigger" && (
+          <button type="button" className="wf-input-port" aria-label={`Connect to ${s ? stepTitle(s, steps.indexOf(s) + 1) : "Finish"}`} disabled={!connecting}
+            onClick={e => { e.stopPropagation(); if (connecting) connect(connecting.source, connecting.port, id); }}>
+            ●
+          </button>
+        )}
+        {s && isGate(s) && (
+          <div className="wf-exits">
+            {(["next", "otherwise"] as WorkflowPort[]).map((port) => {
+              const pass = port === "next";
+              const ok = s.kind === "approve";
+              const word = pass ? (ok ? "Yes" : "Passes") : ok ? "No" : "Fails";
+              const to = pass ? passTo(s) : failTo(s);
+              const inner = (
+                <>
+                  {pass ? <CheckIcon className="wf-exit-ic" aria-hidden="true" /> : <XIcon className="wf-exit-ic" aria-hidden="true" />}
+                  <span className="wf-exit-k">{word}</span>
+                  <span className="wf-exit-to">{to}</span>
+                </>
+              );
+              return onConnect ? (
+                <button key={port} type="button" className={cn("wf-exit", pass ? "pass" : "fail")} aria-pressed={connecting?.source === id && connecting.port === port} aria-label={`${word}: ${to}. Drag onto a step to change it`} title="Drag onto a step to send it there" {...portProps(id, port)}>
+                  {inner}
+                </button>
+              ) : (
+                <div key={port} className={cn("wf-exit", pass ? "pass" : "fail")}>
+                  {inner}
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {onConnect && s && !isGate(s) && (
+          <div className="wf-output-ports">
+            <button type="button" aria-pressed={connecting?.source === id && connecting.port === "next"} aria-label={`Connect Next from ${stepTitle(s, 1)}`} {...portProps(id, "next")}>
+              Next ●
+            </button>
+          </div>
+        )}
       </NodeCard>
     );
   };
   const body = (s: WorkflowStep) => (isGate(s) ? <GateBody s={s} n={steps.indexOf(s) + 1} steps={steps} names={names} room={d.room} run={runStep(s.id)} /> : <StepBody s={s} n={steps.indexOf(s) + 1} names={names} room={d.room} at={runStep(s.id)?.status ?? null} asked={runStep(s.id)?.asked ?? null} again={runStep(s.id)?.again ?? 0} />);
-  const gapLabel = (i: number) => (i === 0 ? (steps.length ? "Add before the first step" : "Add the first step") : i === lanes.length - 2 ? "Add after the last step" : `Add after step ${steps.indexOf(cols[i - 1]!.at(-1)!) + 1}`);
+  const gapLabel = (i: number) => (i === 0 ? (steps.length ? "Add before the first step" : "Add the first step") : lanes.slice(i + 1, -1).every(fixLane) ? "Add after the last step" : `Add after step ${steps.indexOf(cols[i - 1]!.at(-1)!) + 1}`);
   return (
-    <div className={cn("wf-canvas", stacked && "stacked")}>
+    <div className={cn("wf-canvas", stacked && "stacked")} onKeyDown={e => { if (e.key === "Escape") { connectionDrag.current = null; setConnecting(null); } }}>
+      {connecting && <div className="wf-connect-note" role="status">Choose an input dot to connect this path. <button type="button" onClick={() => { connectionDrag.current = null; setConnecting(null); }}>Cancel</button></div>}
+      {!connecting && refused && <div className="wf-connect-note" role="status">{refused}</div>}
       <div
         className={cn("wf-scroll", panning && "panning", held && "dragging-card")}
         ref={scroll}
         onPointerDown={(e) => {
           const t = e.target as HTMLElement;
-          if (e.button !== 0 || stacked || t.closest("button, input, textarea")) return;
+          if (e.button !== 0 || stacked || t.closest("button, input, textarea, [data-wf-connection]")) return;
           const card = t.closest<HTMLElement>("[data-wf-node]");
           if (card) {
             // A card, not while a run is going: held, it is dragged once it moves; let go where it was, it opens.
@@ -1381,7 +1586,7 @@ function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd, onM
             // A step dropped on a "+" takes a column of its own there; on another step's card, it runs alongside it. A check or
             // your OK stands alone, so only a "+"; the trigger and Then only move.
             const s = steps.find((x) => x.id === g.id);
-            const under = s ? (document.elementFromPoint(e.clientX, e.clientY)?.closest(isGate(s) ? "[data-wf-drop^='gap:']" : "[data-wf-drop]") ?? null) : null;
+            const under = s ? (document.elementFromPoint(e.clientX, e.clientY)?.closest((isGate(s) || !!s.next) ? "[data-wf-drop^='gap:']" : "[data-wf-drop]") ?? null) : null;
             if (under !== g.on) {
               g.on?.classList.remove("drop-on");
               under?.classList.add("drop-on");
@@ -1461,16 +1666,19 @@ function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd, onM
                   {wires.map((w, i) => (
                     <path key={i} d={w.d} className={cn(w.live && "live", w.on && "on")} />
                   ))}
-                  {loops.map((l) => (
-                    <path key={l.id} d={l.d} className={cn("back", sel === l.id && "on")} markerEnd="url(#wf-back-head)" />
+                  {loops.map(l => (
+                    <g key={l.id} data-wf-connection={l.source} onClick={() => onConnect && onPick(l.source)}>
+                      {onConnect && <path d={l.d} className="wf-wire-hit" />}
+                      <path d={l.d} className={cn("back", l.live && "live", sel === l.source && "on")} markerEnd="url(#wf-back-head)" />
+                    </g>
                   ))}
                 </g>
               </svg>
-              {loops.map((l) => (
-                <span key={l.id} className="wf-loop" style={{ left: l.x + ox, top: l.y + oy }}>
-                  <RotateCcwIcon className="size-3" aria-hidden="true" />
-                  {l.text}
-                </span>
+              {loops.map(l => (
+                <button key={l.id} type="button" className="wf-loop" data-wf-connection={l.source} style={{ left: l.x + ox, top: l.y + oy }}
+                  disabled={!onConnect} aria-label={`Edit ${l.label} connection from step ${steps.findIndex(s => s.id === l.source) + 1}`} onClick={() => onConnect && onPick(l.source)}>
+                  <RotateCcwIcon className="size-3" aria-hidden="true" />{l.text}
+                </button>
               ))}
               {node("trigger", <TriggerBody d={d} names={names} />)}
               {cols.map((col, i) => col.map((s) => node(s.id, body(s), i + 1)))}
@@ -1504,7 +1712,7 @@ function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd, onM
             </Button>
           </Tip>
           <Tip label="Fit it in view" side="top">
-            <Button variant="ghost" size="sm" className="h-8 min-w-14 px-2 text-[13px] font-medium text-[var(--ink)] tabular-nums" onClick={() => (setZoom(1), setShift({ x: 0, y: 0 }))}>
+            <Button variant="ghost" size="sm" className="h-8 min-w-14 px-2 text-[13px] font-medium text-[var(--ink)] tabular-nums" onClick={fitAll}>
               {Math.round(zoom * 100)}%
             </Button>
           </Tip>
@@ -1515,7 +1723,7 @@ function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd, onM
           </Tip>
           <span className="wf-zoom-sep" aria-hidden="true" />
           <Tip label="Fit it in view" side="top">
-            <Button variant="ghost" size="icon-sm" aria-label="Fit it in view" className="text-[var(--ink-2)]" onClick={() => (setZoom(1), setShift({ x: 0, y: 0 }))}>
+            <Button variant="ghost" size="icon-sm" aria-label="Fit it in view" className="text-[var(--ink-2)]" onClick={fitAll}>
               <ScanIcon />
             </Button>
           </Tip>
@@ -1537,7 +1745,7 @@ function Canvas({ d, steps, names, others, sel, live, checks, onPick, onAdd, onM
 }
 
 function ColumnAndGap({ i, last, col, steps, node, stacked, onAdd, full, names, room, runStep }: { i: number; last: boolean; col: WorkflowStep[]; steps: WorkflowStep[]; node: (id: string, children: ReactNode) => ReactNode; stacked: boolean; onAdd: AddStep; full: boolean; names: Names; room: string; runStep: RunStepOf }) {
-  const gate = col.length === 1 && isGate(col[0]!);
+  const gate = col.length === 1 && (isGate(col[0]!) || !!col[0]!.next);
   return (
     <>
       <div className={cn("wf-col", col.length > 1 && "side-by-side")} data-wf-drop={gate ? undefined : `col:${i}`} role="group" aria-label={col.length > 1 ? `Steps ${steps.indexOf(col[0]!) + 1} to ${steps.indexOf(col.at(-1)!) + 1}, side by side` : `Step ${steps.indexOf(col[0]!) + 1}`}>
@@ -1624,6 +1832,7 @@ function NodeCard({ id, children, sel, flagged, onPick, runStep, held, style, dr
       onPointerEnter={onEnter}
       onPointerLeave={onLeave}
       onKeyDown={(e: KeyboardEvent) => {
+        if (e.target !== e.currentTarget) return;
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           open();
@@ -1634,7 +1843,8 @@ function NodeCard({ id, children, sel, flagged, onPick, runStep, held, style, dr
       {/* Not under a step being done: its face's ring and "On this step" say it, so no second "Working" (DIRECTION.md §9.4). */}
       {run && (run.status !== "claimed" || run.kind === "approve") && (
         <span className="wf-node-run">
-          <TaskMark state={run.kind === "approve" && run.status === "claimed" ? "review" : stepMark(run.status)} />
+          {/* A check that didn't pass says so in its mark too: it read "✓ Didn't pass" (2026-11-04 end-to-end check). */}
+          {run.kind === "check" && run.status === "done" && run.verdict && !run.verdict.pass ? <XIcon className="size-3.5 shrink-0 text-[var(--red)]" aria-hidden="true" /> : <TaskMark state={run.kind === "approve" && run.status === "claimed" ? "review" : stepMark(run.status)} />}
           {run.kind === "approve" ? (run.status === "claimed" ? "Waiting for you" : run.status === "done" ? "You OK'd it" : run.status === "cancelled" ? "You said no" : STEP_WORD[run.status]) : run.kind === "check" && run.status === "done" && run.verdict ? (run.verdict.pass ? "Passed" : `Didn't pass${run.verdict.why ? `: ${run.verdict.why}` : ""}`) : STEP_WORD[run.status]}
         </span>
       )}
@@ -1760,8 +1970,6 @@ function StepBody({ s, n, names, room, at, asked, again = 0 }: { s: WorkflowStep
 function GateBody({ s, n, steps, names, room, run }: { s: WorkflowStep; n: number; steps: WorkflowStep[]; names: Names; room: string; run: ReturnType<RunStepOf> }) {
   const ok = s.kind === "approve";
   const m = ok ? null : s.mate === LEAD ? names.lead(room) : names.mate(s.mate);
-  const back = s.ifNot === "back" ? steps.findIndex((x) => x.id === s.back) + 1 : 0;
-  const fixer = s.ifNot === "back" && s.fixBy ? (s.fixBy === LEAD ? "the lead" : (names.mate(s.fixBy)?.name ?? "")) : "";
   const onIt = run?.status === "claimed" || run?.status === "review";
   return (
     <>
@@ -1788,10 +1996,6 @@ function GateBody({ s, n, steps, names, room, run }: { s: WorkflowStep; n: numbe
       </div>
       <div className="wf-node-body">
         <p className={cn("wf-does", !s.does.trim() && "muted")}>{s.does.trim() ? (ok ? s.does.trim() : `Goes on if ${s.does.trim().replace(/^./, (c) => c.toLowerCase())}`) : ok ? "Say what you're asked." : "Say what has to hold."}</p>
-        <span className="wf-row wf-if">
-          {s.ifNot === "back" ? <CornerUpLeftIcon className="size-3.5" /> : <XIcon className="size-3.5" />}
-          {s.ifNot === "back" ? (back ? `${ok ? "If you say no" : "If not"}: back to step ${back}${fixer ? `, fixed by ${fixer}` : ""}, up to ${s.tries ?? DEFAULT_TRIES}×` : "Pick the step it sends back to") : `${ok ? "If you say no" : "If not"}: the run stops`}
-        </span>
       </div>
     </>
   );
@@ -1812,6 +2016,7 @@ function Inspector({
   setStep,
   moveStep,
   removeStep,
+  addFix,
 }: {
   identity: Identity;
   sel: string;
@@ -1825,6 +2030,8 @@ function Inspector({
   setStep: (id: string, c: Partial<WorkflowStep>) => void;
   moveStep: (id: string, by: -1 | 1) => void;
   removeStep: (id: string) => void;
+  /** A fix step for this check, under it. */
+  addFix: (gate: string) => void;
 }) {
   const ref = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -1856,7 +2063,7 @@ function Inspector({
       <div className="wf-insp-body">
         {sel === "trigger" && <TriggerForm d={d} names={names} hookUrl={hookUrl} set={set} />}
         {sel === "outcomes" && <OutcomesForm d={d} others={others} set={set} />}
-        {s && <StepForm identity={identity} s={s} n={steps.indexOf(s) + 1} steps={steps} d={d} names={names} setStep={setStep} moveStep={moveStep} removeStep={removeStep} />}
+        {s && <StepForm identity={identity} s={s} n={steps.indexOf(s) + 1} steps={steps} d={d} names={names} setStep={setStep} moveStep={moveStep} removeStep={removeStep} addFix={addFix} />}
       </div>
     </aside>
   );
@@ -2019,7 +2226,7 @@ function FixPick({ identity, s, d, steps, names, lead, setStep }: { identity: Id
   );
 }
 
-function StepForm({ identity, s, n, steps, d, names, setStep, moveStep, removeStep }: { identity: Identity; s: WorkflowStep; n: number; steps: WorkflowStep[]; d: Draft; names: Names; setStep: (id: string, c: Partial<WorkflowStep>) => void; moveStep: (id: string, by: -1 | 1) => void; removeStep: (id: string) => void }) {
+function StepForm({ identity, s, n, steps, d, names, setStep, moveStep, removeStep, addFix }: { addFix: (gate: string) => void; identity: Identity; s: WorkflowStep; n: number; steps: WorkflowStep[]; d: Draft; names: Names; setStep: (id: string, c: Partial<WorkflowStep>) => void; moveStep: (id: string, by: -1 | 1) => void; removeStep: (id: string) => void }) {
   const [own, setOwn] = useState("");
   const lead = names.lead(d.room);
   const cols = columnsOf(steps);
@@ -2032,10 +2239,18 @@ function StepForm({ identity, s, n, steps, d, names, setStep, moveStep, removeSt
   const kind = s.kind ?? "do";
   /** The steps before it that do work: where a check or OK can send it back to. */
   const earlier = steps.slice(0, n - 1).filter((x) => !isGate(x));
+  /** Where it can send work that doesn't pass: an earlier step to do its part again, or a later one, a path of its own. */
+  const targets = steps.filter((x) => x.id !== s.id && !isGate(x));
+  const fixIds = fixSteps(steps);
+  const later = steps.slice(n).filter((x) => !isGate(x));
+  const failTarget = ifNotOf(s);
+  const nameOf = (id: string) => ((x) => (x ? `${steps.indexOf(x) + 1} · ${stepTitle(x, steps.indexOf(x) + 1)}` : "a step that's gone"))(steps.find((t) => t.id === id));
+  /** Where it goes when it passes and nothing says: the next step on the line, or the end. */
+  const passDefault = connectionsOf(steps.map((x) => (x.id === s.id ? { ...x, next: undefined } : x))).find((c) => c.source === s.id && c.port === "next")?.target ?? "$finish";
   const setKind = (k: StepKind) => {
     if (k === kind) return;
     const last = earlier.at(-1);
-    setStep(s.id, k === "do" ? { kind: undefined, ifNot: undefined, back: undefined, tries: undefined } : { kind: k, mate: k === "approve" ? "" : s.mate || LEAD, owns: [], ifNot: s.ifNot ?? (last ? "back" : "stop"), back: s.back ?? last?.id, tries: s.tries ?? DEFAULT_TRIES, ...(k === "approve" && !s.does.trim() ? { does: "Is this ready to go on?" } : {}) });
+    setStep(s.id, k === "do" ? { kind: undefined, ifNot: undefined, back: undefined, tries: undefined, otherwise: undefined } : { kind: k, mate: k === "approve" ? "" : s.mate || LEAD, owns: [], ifNot: s.ifNot ?? (last ? "back" : "stop"), back: s.back ?? last?.id, tries: s.tries ?? DEFAULT_TRIES, ...(k === "approve" && !s.does.trim() ? { does: "Is this ready to go on?" } : {}) });
   };
   const kindTabs = (
     <Field label="Kind">
@@ -2063,39 +2278,61 @@ function StepForm({ identity, s, n, steps, d, names, setStep, moveStep, removeSt
         <Field label={kind === "check" ? "What has to hold" : "What you're asked"} hint={kind === "check" ? "It's handed what the steps before came to." : "You see what the steps before came to, beside the question."}>
           <Textarea value={s.does} onChange={(e) => setStep(s.id, { does: e.target.value })} placeholder={kind === "check" ? "The tests pass and every bug QA listed is fixed." : "Is the post ready to go out?"} className="min-h-[96px] text-[13px] leading-relaxed md:text-[13px]" maxLength={4000} />
         </Field>
-        <Field label={kind === "check" ? "If it doesn't pass" : "If you say no"}>
-          <PageTabs<"stop" | "back">
-            label={kind === "check" ? "If it doesn't pass" : "If you say no"}
-            value={s.ifNot === "back" ? "back" : "stop"}
-            onChange={(v) => setStep(s.id, v === "back" ? { ifNot: "back", back: s.back && earlier.some((x) => x.id === s.back) ? s.back : earlier.at(-1)?.id } : { ifNot: "stop" })}
-            options={[
-              { value: "back", label: "Send it back" },
-              { value: "stop", label: "Stop the run" },
-            ]}
-          />
-        </Field>
-        {s.ifNot === "back" && (
-          <>
-            <Field label="Back to" hint={kind === "check" ? "That step is told why, and does its part again; then the check runs again." : "That step is told what you said, and does its part again."}>
-              <Select value={s.back && earlier.some((x) => x.id === s.back) ? s.back : undefined} onValueChange={(v) => setStep(s.id, { back: v })}>
-                <SelectTrigger size="sm" aria-label="Back to" className="h-9 w-full text-[13px]">
-                  <SelectValue placeholder={earlier.length ? "Pick a step" : "No step before it does work"} />
+        {/* Where the work goes on each answer, said as a sentence, every choice in its menu (design A, Arun 2026-11-04: "make
+            this easier to understand… keep full functionality"). */}
+        <Field label="Where it goes" hint={sendsOn(s) ? (failTarget && fixIds.has(failTarget) ? "The fix step runs only when it doesn't pass, then the work is checked again. Past the most times, the run stops." : "Past the most times, the run stops. Or drag Passes or Fails on its card onto a step.") : "Or drag Passes or Fails on its card onto a step."}>
+          <div className="wf-route">
+            <div className="wf-route-row">
+              <CheckIcon className="wf-route-ic pass" aria-hidden="true" />
+              <span>{kind === "approve" ? "If you say yes, go on to" : "If it passes, go on to"}</span>
+              <Select value={s.next && s.next !== passDefault ? s.next : "$default"} onValueChange={(v) => setStep(s.id, { next: v === "$default" ? undefined : v })}>
+                <SelectTrigger size="sm" aria-label={kind === "approve" ? "If you say yes" : "If it passes"} className="wf-route-pick">
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent position="popper" align="start" collisionPadding={8} className="max-w-[calc(100vw-16px)]">
-                  {earlier.map((x) => (
-                    <SelectItem key={x.id} value={x.id}>
-                      Step {steps.indexOf(x) + 1} · {stepTitle(x, steps.indexOf(x) + 1)}
-                    </SelectItem>
-                  ))}
+                  <SelectItem value="$default">{passDefault === "$finish" ? "the end of the run" : nameOf(passDefault)}</SelectItem>
+                  {steps.map((x) => (x.id === s.id || x.id === passDefault || fixIds.has(x.id) ? null : <SelectItem key={x.id} value={x.id}>{nameOf(x.id)}</SelectItem>))}
+                  {passDefault !== "$finish" && <SelectItem value="$finish">the end of the run</SelectItem>}
                 </SelectContent>
               </Select>
-            </Field>
-            <FixPick identity={identity} s={s} d={d} steps={steps} names={names} lead={lead} setStep={setStep} />
-            <Field label="Times, at most" hint="Past that, the run stops and says why.">
-              <Input type="number" min={1} max={MAX_TRIES} value={s.tries ?? DEFAULT_TRIES} onChange={(e) => setStep(s.id, { tries: Math.min(MAX_TRIES, Math.max(1, Math.round(Number(e.target.value) || 1))) })} aria-label="Times, at most" className="h-9 w-[96px] text-[13px] tabular-nums md:text-[13px]" />
-            </Field>
-          </>
-        )}
+            </div>
+            <div className="wf-route-row">
+              <XIcon className="wf-route-ic fail" aria-hidden="true" />
+              <span>{kind === "approve" ? "If you say no," : "If it fails,"}</span>
+              <Select value={sendsOn(s) ? failTarget : "$stop"} onValueChange={(v) => (v === "$new" ? addFix(s.id) : setStep(s.id, ifNotTo(steps, s, v === "$stop" ? undefined : v)))}>
+                <SelectTrigger size="sm" aria-label={kind === "approve" ? "If you say no" : "If it fails"} className="wf-route-pick">
+                  <SelectValue placeholder="pick a step" />
+                </SelectTrigger>
+                <SelectContent position="popper" align="start" collisionPadding={8} className="max-w-[calc(100vw-16px)]">
+                  <SelectItem value="$stop">stop the run</SelectItem>
+                  {earlier.length > 0 && <SelectSeparator />}
+                  {earlier.map((x) => (
+                    <SelectItem key={x.id} value={x.id}>
+                      send it back to {nameOf(x.id)}
+                    </SelectItem>
+                  ))}
+                  {later.length > 0 && <SelectSeparator />}
+                  {later.map((x) => (
+                    <SelectItem key={x.id} value={x.id}>
+                      send it to {nameOf(x.id)}
+                      {fixIds.has(x.id) ? " (its fix step)" : ""}
+                    </SelectItem>
+                  ))}
+                  <SelectSeparator />
+                  <SelectItem value="$new">add a fix step for it</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {sendsOn(s) && (
+              <div className="wf-route-sub">
+                At most
+                <Input type="number" min={1} max={MAX_TRIES} value={s.tries ?? DEFAULT_TRIES} onChange={(e) => setStep(s.id, { tries: Math.min(MAX_TRIES, Math.max(1, Math.round(Number(e.target.value) || 1))) })} aria-label="Times, at most" className="h-8 w-[60px] text-[13px] tabular-nums md:text-[13px]" />
+                times
+              </div>
+            )}
+          </div>
+        </Field>
+        {sendsOn(s) && !s.otherwise && <FixPick identity={identity} s={s} d={d} steps={steps} names={names} lead={lead} setStep={setStep} />}
         <Field label="When it runs">
           <div className="flex flex-wrap gap-1.5">
             <Button variant="outline" size="sm" className="h-8 border-[var(--border)] px-2.5 text-[13px] shadow-none" disabled={s.col === 0} onClick={() => moveStep(s.id, -1)}>
@@ -2124,6 +2361,7 @@ function StepForm({ identity, s, n, steps, d, names, setStep, moveStep, removeSt
         {/* A crew skill for the step: its line leads what it does, and the teammate fetches the steps (CrewSkills.tsx). */}
         <StepSkill does={s.does} onChange={(does) => setStep(s.id, { does })} />
       </Field>
+      <NextField s={s} steps={steps} setStep={setStep} />
       <Field label="Files or folders it owns" hint="No other step edits these while it runs.">
         {s.owns.length > 0 && (
           <span className="wf-owns">
@@ -2153,6 +2391,8 @@ function StepForm({ identity, s, n, steps, d, names, setStep, moveStep, removeSt
           className="h-9 text-[13px] md:text-[13px]"
         />
       </Field>
+      {/* A fix step runs when its check doesn't pass, wherever its column is: no earlier or later for it. */}
+      {!fixSteps(steps).has(s.id) && (
       <Field label="When it runs" hint={cols.length > 1 || !alone ? (alone ? "On its own in its column: it waits on the column before it." : "Side by side with the others in its column.") : undefined}>
         <div className="flex flex-wrap gap-1.5">
           <Button variant="outline" size="sm" className="h-8 border-[var(--border)] px-2.5 text-[13px] shadow-none" disabled={s.col === 0 && alone} onClick={() => moveStep(s.id, -1)}>
@@ -2163,6 +2403,7 @@ function StepForm({ identity, s, n, steps, d, names, setStep, moveStep, removeSt
           </Button>
         </div>
       </Field>
+      )}
       <div className="wf-insp-foot">
         <Button variant="ghost" size="sm" className="h-8 px-2 text-[13px] text-[var(--red)] hover:text-[var(--red)]" onClick={() => removeStep(s.id)}>
           <Trash2Icon /> Remove step {n}
@@ -2356,5 +2597,34 @@ function OutcomesForm({ d, others, set }: { d: Draft; others: WorkflowView[]; se
         </Select>
       </Field>
     </>
+  );
+}
+
+/**
+ * Where a step goes when it's done (a check or your OK: when it passes): the next column unless it says, another step, or the
+ * end of the run. The same setting as its card's Next wire (#15), for narrow screens and keyboards too.
+ */
+function NextField({ s, steps, setStep }: { s: WorkflowStep; steps: WorkflowStep[]; setStep: (id: string, change: Partial<WorkflowStep>) => void }) {
+  const label = isGate(s) ? (s.kind === "approve" ? "If you say yes" : "If it passes") : "After it";
+  const fixIds = fixSteps(steps);
+  const nameOf = (id: string) => ((x) => (x ? `${steps.indexOf(x) + 1} · ${stepTitle(x, steps.indexOf(x) + 1)}` : "a step that's gone"))(steps.find((t) => t.id === id));
+  // Where it goes when nothing says: on to the next step on the line, or, for a fix step, back to the work it fixes.
+  const dflt = fixIds.has(s.id) ? afterFix(steps, s.id) : (connectionsOf(steps.map((x) => (x.id === s.id ? { ...x, next: undefined } : x))).find((c) => c.source === s.id && c.port === "next")?.target ?? "$finish");
+  const back = steps.findIndex((x) => x.id === dflt) < steps.indexOf(s);
+  const gone = !!s.next && s.next !== "$finish" && !steps.some((x) => x.id === s.next);
+  return (
+    <Field label={label} hint={fixIds.has(s.id) ? "A fix step: it runs only when its check doesn't pass." : s.next && s.next !== "$finish" ? "The steps alongside that one run with it." : undefined}>
+      <Select value={s.next && s.next !== dflt ? s.next : "$default"} onValueChange={(v) => setStep(s.id, { next: v === "$default" ? undefined : v })}>
+        <SelectTrigger size="sm" aria-label={label} className="h-9 w-full text-[13px]">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent position="popper" align="start" collisionPadding={8} className="max-w-[calc(100vw-16px)]">
+          <SelectItem value="$default">{dflt === "$finish" ? "The end of the run" : `${back ? "Back to" : "On to"} ${nameOf(dflt)}`}</SelectItem>
+          {steps.map((x) => (x.id === s.id || x.id === dflt || fixIds.has(x.id) ? null : <SelectItem key={x.id} value={x.id}>{nameOf(x.id)}</SelectItem>))}
+          {gone && <SelectItem value={s.next!}>A step that's gone: pick another</SelectItem>}
+          {dflt !== "$finish" && <SelectItem value="$finish">The end of the run</SelectItem>}
+        </SelectContent>
+      </Select>
+    </Field>
   );
 }

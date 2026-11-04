@@ -5,6 +5,7 @@
  *
  */
 import { isCheckIn } from "../teammate-checkins.js";
+import { runOf, type SessionState } from "../session/projection.js";
 import { MAIN_LANE, type SessionEvent } from "../types.js";
 
 /**
@@ -232,6 +233,96 @@ export function gist(text: string, max = 160): { line: string; more: boolean } {
   return { line, more: line.length < plain.length };
 }
 
+
+/**
+ * The questions a crew's room docks over its box (audit CREW-1, 2026-11-04): each teammate that ended its answer asking something
+ * and isn't at work again, for those the person may answer. The same ask its own chat shows under the answer, so an answer given
+ * in either place, or in Needs you, is the lane's next instruction and the projection drops it from both.
+ */
+export function roomAsks(state: SessionState, mayAnswer: (lane: string) => boolean): { lane: string; seq: number; questions: SessionState["asks"][string]["questions"] }[] {
+  return state.lanes.flatMap((l) => {
+    const a = state.asks[l.id];
+    return a && runOf(state, l.id).status !== "running" && mayAnswer(l.id) ? [{ lane: l.id, ...a }] : [];
+  });
+}
+
+/**
+ * A teammate's words that only repeat what it said before Friday told it to keep going (keep-going.ts), by seq: the room posts
+ * one, not one per nudge (audit CREW-4, 2026-11-04: four or five identical "Done: …" posts). The message must come straight after
+ * a nudge (the latest thing its lane was handed is Friday's carry on) and say what the lane last said, marks and case aside.
+ */
+export function nudgedRepeats(events: readonly SessionEvent[]): Set<number> {
+  const out = new Set<number>();
+  const nudges = new Set<number>();
+  const lastSaid = new Map<string, string>();
+  const handed = new Map<string, boolean>();
+  const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  for (const e of events) {
+    const lane = e.lane ?? MAIN_LANE;
+    const b = e.body;
+    if (b.type === "instruction" && b.keepGoing) nudges.add(e.seq);
+    else if (b.type === "instructions.delivered") handed.set(lane, b.seqs.length > 0 && b.seqs.every((s) => nudges.has(s)));
+    else if (b.type === "run.started") handed.set(lane, false);
+    else if (b.type === "agent.message" && b.text.trim()) {
+      const t = norm(b.text);
+      if (handed.get(lane) && lastSaid.get(lane) === t) out.add(e.seq);
+      lastSaid.set(lane, t);
+    }
+  }
+  return out;
+}
+
+/**
+ * The board's report to its poster ("## s1: Run the tests (done by Rex, approved by Mira)" and each task's report), told from the
+ * board's own record up to `seq` (audit CREW-12, 2026-11-04): each task by its title, never its id, done by whoever's lane finished
+ * it and checked by whoever's lane reviewed it, by their names now (`nameOf`), as the room names them everywhere else.
+ */
+export function boardReportText(text: string, events: readonly SessionEvent[], seq: number, nameOf: (lane: string) => string | undefined): string {
+  type Rec = { title: string; lane?: string; name?: string; blocked?: boolean; review?: { lane: string; name: string; ok: boolean } };
+  const tasks = new Map<string, Rec>();
+  for (const e of events) {
+    if (e.seq >= seq) continue;
+    const b = e.body;
+    if (b.type === "board.posted") {
+      tasks.clear();
+      for (const t of b.tasks) tasks.set(t.id, { title: t.title });
+    } else if (b.type === "board.finished") {
+      const t = tasks.get(b.id);
+      if (t) Object.assign(t, { lane: b.lane, name: b.name, blocked: b.status === "blocked", review: undefined });
+    } else if (b.type === "board.reviewed") {
+      const t = tasks.get(b.id);
+      if (t) t.review = { lane: b.lane, name: b.name, ok: b.ok };
+    }
+  }
+  const who = (lane: string | undefined, name: string | undefined) => (lane ? nameOf(lane) : undefined) ?? name ?? "";
+  return text.replace(/^## ([^:\n]+): ([^\n]*)$/gm, (line, id: string, rest: string) => {
+    const t = tasks.get(id.trim());
+    if (!t) return `## ${rest}`;
+    const title = t.title.replace(/^Board task\s+"[^"]*"\s*:\s*/i, "");
+    const did = t.blocked ? `blocked${t.name || t.lane ? ` (${who(t.lane, t.name)})` : ""}` : `done by ${who(t.lane, t.name)}`;
+    const checked = t.review ? `, ${t.review.ok ? "approved" : "not approved"} by ${who(t.review.lane, t.review.name)}` : "";
+    return `## ${title} (${did}${checked})`;
+  });
+}
+
+/** Words quoted into a message, as Markdown: each line marked, blank lines inside kept as quote lines, one blank line after. */
+export const quoteBlock = (text: string): string =>
+  text
+    .trim()
+    .split(/\r?\n/)
+    .map((l) => (l.trim() ? `> ${l.trimEnd()}` : ">"))
+    .join("\n");
+
+/**
+ * A sent message's quote and the words after it (audit CREW-21, 2026-11-04): the "> " lines it starts with, unmarked, and the rest
+ * without the blank lines between. Null when it starts with no quote.
+ */
+export function splitQuote(text: string): { quote: string; rest: string } | null {
+  const m = /^((?:[ \t]*>[^\n]*(?:\n|$))+)/.exec(text);
+  if (!m) return null;
+  const quote = m[1]!.split("\n").map((l) => l.replace(/^[ \t]*>[ \t]?/, "")).join("\n").trim();
+  return quote ? { quote, rest: text.slice(m[0].length).replace(/^\s+/, "") } : null;
+}
 
 /** A board a crew workflow posted (team-workflow-model.ts workflowTasks): Friday's, its tasks marked as the workflow's steps. */
 export const isWorkflowBoard = (e: SessionEvent): boolean => e.body.type === "board.posted" && (e.body.tasks ?? []).some((t) => typeof t?.detail === "string" && t.detail.includes('[Workflow "'));

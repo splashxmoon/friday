@@ -54,6 +54,8 @@ export interface StreamingResponseProps {
   showActions?: boolean;
   /** More controls at the end of the same row, for what only this surface knows to offer. */
   extraActions?: ReactNode;
+  /** Quiet words at the row's far end, right-aligned: what the turn used. */
+  actionsEnd?: ReactNode;
   className?: string;
   contentClassName?: string;
   actionsClassName?: string;
@@ -108,6 +110,7 @@ export function StreamingResponse({
   announce = true,
   showActions = true,
   extraActions,
+  actionsEnd,
   className,
   contentClassName,
   actionsClassName,
@@ -246,6 +249,7 @@ export function StreamingResponse({
                 </button>
               ) : null}
               {extraActions ? <div className="ml-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">{extraActions}</div> : null}
+              {actionsEnd ? <span className="ml-auto shrink-0 pl-3">{actionsEnd}</span> : null}
             </div>
 
             {hasSources ? (

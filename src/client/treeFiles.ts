@@ -7,6 +7,8 @@
 export function treeFiles(answer: { output?: string; error?: string }): { files: string[]; why: string } {
   const out = answer.output ?? "";
   if (/^\d+ files? under /.test(out)) return { files: out.split("\n").slice(1).map((l) => l.trim()).filter((l) => l && !l.startsWith("[")), why: "" };
+  // An empty folder is a folder with nothing to name, not a reason to show ("(no files).").
+  if (!answer.error && out.trim() === "(no files)") return { files: [], why: "" };
   const said = (answer.error || out).trim();
   return { files: [], why: said ? said.split(/(?<=[.!?])\s/)[0]! : "" };
 }

@@ -1,4 +1,4 @@
-import { CloudDownloadIcon, CornerLeftUpIcon, FolderGit2Icon, FolderIcon, FolderOpenIcon, FolderSearchIcon, HistoryIcon, LockIcon, SearchIcon } from "lucide-react";
+import { ChevronRightIcon, CloudDownloadIcon, CornerLeftUpIcon, FolderGit2Icon, FolderIcon, FolderOpenIcon, FolderSearchIcon, HistoryIcon, LockIcon, SearchIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { CliSession, CliSessionList } from "../runner/imports.js";
@@ -6,6 +6,7 @@ import { parseRepo } from "../runner/repo.js";
 import type { FolderInfo, GithubRepo } from "../runner/workspace.js";
 import { ENGINE_NAMES, ENGINE_TOOLS, type EngineMode, type EngineTool } from "../types.js";
 import { EngineMark } from "./BrandMarks.js";
+import { PresenceRing } from "./presence.js";
 import { Icon } from "./icons.js";
 import { api } from "./api.js";
 import { GitHubConnect } from "./GitHubConnect.js";
@@ -115,6 +116,8 @@ declare global {
 
 interface Data {
   recent: FolderInfo[] | null;
+  /** The computer's home folder, for paths said from it ("~/code"). */
+  home?: string;
   github: { installed: boolean; available: boolean; account?: string; reason?: string; repos: GithubRepo[]; from?: "connection" } | null;
   sessions: { sessions: CliSession[]; notes: Record<string, string> } | null;
 }
@@ -142,13 +145,13 @@ function useWorkspaceData(identity: Identity, tool: EngineTool, open: boolean, n
     let live = true;
     const set = (patch: Partial<Data>) => live && setData((d) => ({ ...d, ...patch }));
     // Three independent requests, each rendering the moment it lands.
-    void cached("folders", () => hostApi<{ recent: FolderInfo[] }>(identity, "/api/runner/folders")).then(
+    void cached("folders", () => hostApi<{ recent: FolderInfo[]; home?: string }>(identity, "/api/runner/folders")).then(
       async (r) => {
         const mine = await Promise.all(
           loadRecentFolders().map((p) => hostApi<{ folder: FolderInfo }>(identity, `/api/runner/describe?path=${encodeURIComponent(p)}`).then((x) => x.folder, () => null)),
         );
         const seen = new Set<string>();
-        set({ recent: [...mine.filter((f): f is FolderInfo => !!f), ...r.recent].filter((f) => !seen.has(f.path) && !!seen.add(f.path)) });
+        set({ recent: [...mine.filter((f): f is FolderInfo => !!f), ...r.recent].filter((f) => !seen.has(f.path) && !!seen.add(f.path)), ...(r.home ? { home: r.home } : {}) });
       },
       () => set({ recent: [] }),
     );
@@ -221,7 +224,7 @@ export function WorkspacePill({
   const btn = useRef<HTMLButtonElement>(null);
   const [drag, setDrag] = useState(false);
 
-  const label = value ? `${value.name}${value.branch ? ` · ${value.branch}` : ""}` : "Choose code";
+  const label = value ? `${folderName(value)}${value.branch ? ` · ${value.branch}` : ""}` : "Choose code";
   return (
     <>
       <button
@@ -301,6 +304,8 @@ export function WorkspaceCard({
   const [err, setErr] = useState("");
   const [browsing, setBrowsing] = useState<string | null>(null);
   const [drag, setDrag] = useState(false);
+  /** The repository whose other worktrees are shown under it. */
+  const [worktreesOf, setWorktreesOf] = useState<string | null>(null);
   const desktop = typeof window !== "undefined" ? window.fridayDesktop : undefined;
 
   // Above the trigger, like the composer's other cards (Arun, 2026-10-20): with Home's box now near the top, "below where
@@ -383,7 +388,10 @@ export function WorkspaceCard({
   // recent ones, which said "Nothing matches" (Arun, 2026-10-28: "iron everything and ensure we are good").
   const [typed, setTyped] = useState<{ q: string; entries: FolderInfo[] } | null>(null);
   useEffect(() => {
-    if (!plain || !looksLikePath) return void setTyped(null);
+    // Nothing set while the query isn't a path in the folder picker: a state set from this effect on every key, null over null,
+    // ran a render of its own after each one, and fast typing stacked them past React's limit (#185) and lost keys (audit CODE-3,
+    // Arun 2026-11-04). The rows below show only the answer for the query as it is now (typedRows), so an old one is never seen.
+    if (!plain || !looksLikePath) return;
     const cut = query.search(/[\\/][^\\/]*$/);
     const parent = cut >= 0 ? query.slice(0, cut + 1) : query;
     const part = cut >= 0 ? query.slice(cut + 1).toLowerCase() : "";
@@ -459,7 +467,8 @@ export function WorkspaceCard({
               title={s.title}
               // A transcript too long to read whole has no count worth showing: the part that was read says nothing about the rest.
               // No count is known for a session the tool itself listed (over ACP): it is left out rather than said as none.
-              sub={[s.cwd.split(/[\\/]/).pop(), s.approx ? "long session" : s.messages ? `${s.messages} message${s.messages === 1 ? "" : "s"}` : "", relTime(s.updatedAt)].filter(Boolean).join(" · ")}
+              // The folder by a person's name for it: "Scratch folder", not "scratch-2026-11-03-c0317b" (Arun's e2e pass, 2026-11-04).
+              sub={[folderName({ name: s.cwd.split(/[\\/]/).filter(Boolean).pop() ?? s.cwd, path: s.cwd }), s.approx ? "long session" : s.messages ? `${s.messages} message${s.messages === 1 ? "" : "s"}` : "", relTime(s.updatedAt)].filter(Boolean).join(" · ")}
               active={resume?.id === s.id}
               onClick={() => void byPath(s.cwd, s)}
             />
@@ -470,15 +479,33 @@ export function WorkspaceCard({
       {only !== "sessions" && !(plain && looksLikePath && recent.length === 0) && (
         <>
       <Section label={plain ? "Recent folders" : "Your repos"} loading={data.recent === null}>
-        {recent.slice(0, 8).map((f) => (
-          <Row
-            key={f.path}
-            icon={busy === f.path ? <span className="spinner" /> : f.isRepo && !plain ? <FolderGit2Icon className="size-4" /> : <FolderIcon className="size-4" />}
-            title={f.name}
-            sub={f.branch && !plain ? `${f.branch} · ${shortPath(f.path)}` : shortPath(f.path)}
-            onClick={() => choose(f)}
-          />
-        ))}
+        {/* A row a repository, its other worktrees folded under it; a folder by the name a person gives it; under it, its branch
+            and where it is from home ("fix/export-timeout · ~/code"), not a /private/tmp path cut off (audit CODE-16 A, Arun
+            2026-11-04: edge-app twice, "scratch-2026-11-03-c0317b"). */}
+        {ranked(byRepo(recent, plain), plain).slice(0, 8).map(({ f, more }) => {
+          const row = (x: FolderInfo, inner = false) => (
+            <Row
+              key={x.path}
+              icon={busy === x.path ? <span className="spinner" /> : x.isRepo && !plain ? <FolderGit2Icon className="size-4" /> : <FolderIcon className="size-4" />}
+              title={inner ? (x.branch ?? folderName(x)) : folderName(x)}
+              sub={folderLine(x, plain, data.home, inner)}
+              onClick={() => choose(x)}
+            />
+          );
+          const open = worktreesOf === f.path;
+          return (
+            <div key={f.path} className={`ws-repo${open ? " open" : ""}`}>
+              {row(f)}
+              {more.length > 0 && (
+                <button type="button" className="ws-wt" aria-expanded={open} onClick={() => setWorktreesOf(open ? null : f.path)}>
+                  {more.length + 1} {more.some((x) => inWorktrees(x.path)) ? "worktrees" : "copies"}
+                  <ChevronRightIcon className="size-3.5" />
+                </button>
+              )}
+              {open && <div className="ws-wt-list">{more.map((x) => row(x, true))}</div>}
+            </div>
+          );
+        })}
         {data.recent?.length === 0 && <p className="ws-empty">{plain ? "No folders yet. Browse to one, or type its path." : "No git repos found in your usual code folders."}</p>}
         {data.recent !== null && recent.length === 0 && data.recent.length > 0 && !(plain && looksLikePath) && <p className="ws-empty">Nothing matches “{query}”.</p>}
       </Section>
@@ -689,6 +716,124 @@ const MODE_PILL: Record<EngineMode, { text: string; tone: string; why: string }>
 /** What continuing a conversation does with it, wherever that is offered. */
 const SHARED = "Its latest messages are shared with this session: every agent in it can work from them, and everyone in it can read them.";
 
+/** A worktree Friday made for a session or keeps spare: in its own folder under worktrees, not where the repository is. */
+const inWorktrees = (p: string) => /[\\/]worktrees[\\/][^\\/]+[\\/]?$/.test(p);
+
+/**
+ * The folder picker's rows: a repository once, the checkout someone keeps first and its other worktrees under it; any other
+ * folder as itself (audit CODE-16 A).
+ */
+export function byRepo(list: FolderInfo[], plain = false): { f: FolderInfo; more: FolderInfo[] }[] {
+  // One repository: the same origin, or a worktree of it, known by its name. Two clones with nothing to tie them stay two.
+  const groups: FolderInfo[][] = [];
+  // A worktree's folder is "<repo>-<id>" (git.ts addWorktree): it is the repository's.
+  const base = (x: FolderInfo) => (inWorktrees(x.path) ? x.name.replace(/-[0-9a-f]{8}$/, "") : x.name);
+  const same = (g: FolderInfo[], f: FolderInfo) => g.some((x) => (!!f.remote && x.remote === f.remote) || ((inWorktrees(f.path) || inWorktrees(x.path)) && base(x) === base(f)));
+  for (const f of list) {
+    const g = f.isRepo && !plain ? groups.find((g) => g[0]!.isRepo && same(g, f)) : undefined;
+    if (g) g.push(f);
+    else groups.push([f]);
+  }
+  return groups.map((all) => {
+    const f = all.find((x) => !inWorktrees(x.path)) ?? all[0]!;
+    return { f, more: all.filter((x) => x !== f) };
+  });
+}
+
+/** A folder Friday made for a session nobody gave one: ~/Friday/Projects/<what was asked> (local-api.ts projectFolder, CODE-20). */
+export const madeByFriday = (p: string): boolean => /[\\/]Friday[\\/]Projects[\\/][^\\/]+[\\/]?$/.test(p);
+
+/**
+ * Your repos before the folders Friday made for "New folder" sessions, each kept in its order of use: a day of those filled the
+ * list's eight and pushed the real repositories out of it (Arun's e2e pass, 2026-11-04). A plain folder list is left as used.
+ */
+export function ranked<T extends { f: FolderInfo }>(groups: T[], plain = false): T[] {
+  if (plain) return groups;
+  return [...groups.filter((g) => !madeByFriday(g.f.path)), ...groups.filter((g) => madeByFriday(g.f.path))];
+}
+
+/** A folder's second line: its branch and where it is from home ("fix/export-timeout · ~/code"); a scratch folder, whose it is. */
+export function folderLine(f: FolderInfo, plain: boolean, home: string | undefined, inner = false): string {
+  // A coding app's scratch folder by its app and day (audit CREW-19); any other in one, whose it is.
+  const scratch = scratchSub(f);
+  if (scratch) return scratch;
+  if (/[\\/]scratch-workspaces[\\/]/.test(f.path)) return /[\\/]Claude[\\/]/.test(f.path) ? "Claude Desktop · this computer" : "this computer";
+  const at = (p: string) => shortPath(p, home);
+  const parent = f.path.replace(/[\\/]+$/, "").replace(/[\\/][^\\/]+$/, "") || f.path;
+  if (plain) return at(f.path);
+  if (inner) return at(f.path);
+  return f.branch ? `${f.branch} · ${at(parent)}` : at(parent);
+}
+
+/** A coding app's scratch folder said by its app and day ("Claude Desktop · Tue 3 Nov"); null for any other folder. */
+export function scratchSub(folder: { name: string; path: string }): string | null {
+  if (folderName(folder) !== "Scratch folder") return null;
+  const app = /[\\/]Claude[\\/]scratch-workspaces[\\/]/.test(folder.path) ? "Claude Desktop" : "Scratch";
+  const d = /scratch-(\d{4})-(\d{2})-(\d{2})/.exec(folder.name || folder.path);
+  if (!d) return app;
+  const day = new Date(Number(d[1]), Number(d[2]) - 1, Number(d[3]));
+  return `${app} · ${day.toLocaleDateString([], { weekday: "short" })} ${day.getDate()} ${day.toLocaleDateString([], { month: "short" })}`;
+}
+
+/**
+ * A folder by the name a person would give it: a coding app's own scratch folder ("scratch-2026-11-03-c0317b" under Claude's
+ * scratch-workspaces) is a "Scratch folder", not its generated name.
+ */
+export function folderName(folder: { name: string; path: string }): string {
+  return /[\\/]scratch-workspaces[\\/]/.test(folder.path) || /^scratch-\d{4}-\d{2}-\d{2}\b/.test(folder.name) ? "Scratch folder" : folder.name;
+}
+
+/**
+ * A conversation picked up again, as a card in the message box (Arun, 2026-11-04, design A of three: "beautiful see this is what
+ * im talking about"). The conversation leads: its tool's mark at rest, its title, that it is being continued, how long it is and
+ * when it was last worked on, and (on the dot) what continuing does with it. Under it, one row: the folder, then its branch when
+ * it is a repository (the page's controls, `children`) or else where it is, then the other folders it may work in (`extra`).
+ */
+function ConversationCard({ folder, resume, where, children, extra, onClear }: { folder: FolderInfo; resume: CliSession; where: string; children?: ReactNode; extra?: ReactNode; onClear?: () => void }) {
+  const ago = relTime(resume.updatedAt);
+  const size = resume.approx ? "a long conversation" : resume.messages ? `${resume.messages} message${resume.messages === 1 ? "" : "s"}` : "";
+  return (
+    <div className="ccard">
+      <div className="ccard-top">
+        <PresenceRing state="idle" size={18} square className="ccard-mark">
+          <EngineMark tool={resume.tool} size={18} />
+        </PresenceRing>
+        <div className="ccard-body">
+          <div className="ccard-title" title={resume.title}>
+            {resume.title}
+          </div>
+          <div className="ccard-meta">
+            <span>Continuing</span>
+            {size && <span>{size}</span>}
+            <span>{ago === "now" ? "just now" : `${ago} ago`}</span>
+            {/* Said before it happens: the conversation's latest messages go into the session, which everyone in it can read. */}
+            <span className="ccard-info" tabIndex={0} role="img" aria-label={SHARED} title={SHARED}>
+              i
+            </span>
+          </div>
+        </div>
+        {onClear && (
+          <button type="button" className="ccard-clear" onClick={onClear} aria-label="Remove this conversation and folder" title="Remove this conversation">
+            <Icon name="x" size={13} />
+          </button>
+        )}
+      </div>
+      <div className="ccard-foot">
+        <span className="ccard-folder" title={`${folder.path}\nThe folder stays on ${where}.`}>
+          {folder.isRepo ? <FolderGit2Icon className="size-3 shrink-0" /> : <FolderIcon className="size-3 shrink-0" />}
+          <span>{folderName(folder)}</span>
+        </span>
+        <span className="ccard-dot" aria-hidden>
+          ·
+        </span>
+        {children ?? <span className="ccard-where">{where}</span>}
+        {extra && <span className="ccard-sep" aria-hidden />}
+        {extra}
+      </div>
+    </div>
+  );
+}
+
 /**
  * The folder the work happens in, as a card inside the message box, above what is being typed.
  *
@@ -696,7 +841,8 @@ const SHARED = "Its latest messages are shared with this session: every agent in
  * what kind of thing it is, where it lives, that it stays on the machine, and (for a repo) which branch the work lands on.
  * It takes its controls as children, so the page that owns the branch choice owns the choice.
  */
-export function FolderCard({ folder, resume, where, children, onClear }: { folder: FolderInfo; resume?: CliSession; /** Which computer, in words: "this computer", or the machine's name. */ where: string; children?: ReactNode; onClear?: () => void }) {
+export function FolderCard({ folder, resume, where, children, extra, onClear }: { folder: FolderInfo; resume?: CliSession; /** Which computer, in words: "this computer", or the machine's name. */ where: string; children?: ReactNode; /** With a conversation: the other folders it may work in, at the end of the card's last row (AlsoWorksIn inCard). */ extra?: ReactNode; onClear?: () => void }) {
+  if (resume) return <ConversationCard folder={folder} resume={resume} where={where} {...(children ? { children } : {})} {...(extra ? { extra } : {})} {...(onClear ? { onClear } : {})} />;
   return (
     <div className="fcard">
       <div className="fcard-top">
@@ -717,16 +863,9 @@ The folder stays on this machine.`}>
             <LockIcon className="size-3 shrink-0" />
             <span className="fcard-where">on {where}</span>
           </div>
-          {/* Said before it happens: the conversation's latest messages go into the session, which everyone in it can read. */}
-          {resume && (
-            <div className="fcard-resume" title={`${resume.title}\n${SHARED}`}>
-              <HistoryIcon className="size-3 shrink-0" />
-              <span>Continues “{resume.title}” · its latest messages are shared with this session</span>
-            </div>
-          )}
         </div>
         {onClear && (
-          <button type="button" className="fcard-clear" onClick={onClear} aria-label={resume ? "Remove this session and folder" : "Remove this folder"} title={resume ? "Remove this session" : "Remove this folder"}>
+          <button type="button" className="fcard-clear" onClick={onClear} aria-label="Remove this folder" title="Remove this folder">
             <Icon name="x" size={13} />
           </button>
         )}
@@ -828,11 +967,12 @@ function ScrollTabs({ className, label, active, children }: { className: string;
  * folder is picked. The runner keeps them for the folder, so they are shown again the next time it is picked, and a lane
  * started again keeps them; `value` is null until the person changes them, and then is what the start sends (see startDirs).
  */
-export function AlsoWorksIn({ identity, folder, value, onChange }: { identity: Identity; folder: string; value: string[] | null; onChange: (dirs: string[]) => void }) {
-  const desktop = typeof window !== "undefined" ? window.fridayDesktop : undefined;
+/**
+ * The other folders an agent may work in, kept by the runner for its folder (see AlsoWorksIn): what they are now, and adding one
+ * by its path (checked on the machine) or taking one away. Shared by the conversation card's row and the box's folder menu.
+ */
+export function useExtraDirs(identity: Identity, folder: string, value: string[] | null, onChange: (dirs: string[]) => void) {
   const [kept, setKept] = useState<string[]>([]);
-  const [typing, setTyping] = useState(false);
-  const [path, setPath] = useState("");
   const [err, setErr] = useState("");
   useEffect(() => {
     let live = true;
@@ -847,31 +987,47 @@ export function AlsoWorksIn({ identity, folder, value, onChange }: { identity: I
     };
   }, [folder]); // eslint-disable-line react-hooks/exhaustive-deps
   const dirs = value ?? kept;
-  const add = async (p: string) => {
-    if (!p.trim()) return;
+  /** True once it is added (or was already there). */
+  const add = async (p: string): Promise<boolean> => {
+    if (!p.trim()) return false;
     setErr("");
     try {
       const r = await hostApi<{ folder: FolderInfo }>(identity, `/api/runner/describe?path=${encodeURIComponent(p.trim())}`);
       const d = r.folder.path;
-      if (d === folder) return setErr("That's the folder it works in already.");
+      if (d === folder) return (setErr("That's the folder it works in already."), false);
       if (!dirs.includes(d)) onChange([...dirs, d]);
-      setPath("");
-      setTyping(false);
+      return true;
     } catch {
       setErr(`There's no folder at ${p.trim()} on this machine.`);
+      return false;
     }
+  };
+  const remove = (d: string) => onChange(dirs.filter((x) => x !== d));
+  return { dirs, add, remove, err };
+}
+
+export function AlsoWorksIn({ identity, folder, value, onChange, inCard = false }: { identity: Identity; folder: string; value: string[] | null; onChange: (dirs: string[]) => void; /** In a conversation's card, after its folder: no label of its own, and "Add a folder". */ inCard?: boolean }) {
+  const desktop = typeof window !== "undefined" ? window.fridayDesktop : undefined;
+  const [typing, setTyping] = useState(false);
+  const [path, setPath] = useState("");
+  const extra = useExtraDirs(identity, folder, value, onChange);
+  const { dirs, err } = extra;
+  const add = async (p: string) => {
+    if (await extra.add(p)) (setPath(""), setTyping(false));
   };
   const name = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() || p;
   return (
-    <div className="xdirs">
-      <span className="xdirs-label" title="Folders the agent may read and change besides its own, as its --add-dir allows">
-        Also works in
-      </span>
+    <div className={`xdirs${inCard ? " in-card" : ""}`}>
+      {!inCard && (
+        <span className="xdirs-label" title="Folders the agent may read and change besides its own, as its --add-dir allows">
+          Also works in
+        </span>
+      )}
       {dirs.map((d) => (
         <span key={d} className="xdirs-chip" title={d}>
           <FolderIcon className="size-3 shrink-0" />
           <span className="xdirs-name">{name(d)}</span>
-          <button type="button" className="xdirs-x" aria-label={`Stop working in ${name(d)}`} onClick={() => onChange(dirs.filter((x) => x !== d))}>
+          <button type="button" className="xdirs-x" aria-label={`Stop working in ${name(d)}`} onClick={() => extra.remove(d)}>
             <Icon name="x" size={11} />
           </button>
         </span>
@@ -909,7 +1065,14 @@ export function AlsoWorksIn({ identity, folder, value, onChange }: { identity: I
               if (p) await add(p);
             }}
           >
-            + Another folder
+            {inCard ? (
+              <>
+                <Icon name="plus" size={12} />
+                Add a folder
+              </>
+            ) : (
+              "+ Another folder"
+            )}
           </button>
         )
       )}

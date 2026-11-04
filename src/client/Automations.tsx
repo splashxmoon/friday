@@ -74,6 +74,7 @@ const blank = (): Draft => ({
 
 /** The common ones, a press away. Each is a draft to look over, not something that runs before it is saved. */
 /** `tone`: a state colour from style.css (--st-*), so each template is told apart at a glance. */
+// A scheduled template's line says what it does; its chip says when, once (audit REST-20, Arun 2026-11-04).
 const TEMPLATES: { id: string; title: string; blurb: string; icon: LucideIcon; tone: string; make: () => Partial<Draft> }[] = [
   {
     id: "ci",
@@ -96,7 +97,7 @@ const TEMPLATES: { id: string; title: string; blurb: string; icon: LucideIcon; t
     icon: BugIcon,
     tone: "--st-queued",
     title: "Morning bug sweep",
-    blurb: "Every weekday at 9: goes through the open bugs, fixes the safe ones, lists the rest.",
+    blurb: "Goes through the open bugs, fixes the safe ones, lists the rest.",
     make: () => ({ name: "Morning bug sweep", when: { kind: "schedule", schedule: { every: "weekly", at: "09:00", days: WEEKDAYS, tz: TZ } }, does: "Look through the open bugs and yesterday's errors. Fix the ones you can fix safely and list the rest with where each one lives in the code.", then: { pr: true, notify: true } }),
   },
   {
@@ -112,7 +113,7 @@ const TEMPLATES: { id: string; title: string; blurb: string; icon: LucideIcon; t
     icon: ScrollTextIcon,
     tone: "--st-done",
     title: "Weekly changelog",
-    blurb: "Fridays at 4: writes up what merged this week, in plain words, grouped by area.",
+    blurb: "Writes up what merged this week, in plain words, grouped by area.",
     make: () => ({ name: "Weekly changelog", when: { kind: "schedule", schedule: { every: "weekly", at: "16:00", days: [5], tz: TZ } }, does: "Write a changelog of what merged this week, grouped by area, in plain words a customer would understand.", then: { pr: false, notify: true } }),
   },
 ];
@@ -127,7 +128,7 @@ const LOCAL_TEMPLATES: typeof TEMPLATES = [
     icon: CheckIcon,
     tone: "--st-review",
     title: "Nightly tests",
-    blurb: "Every night at 2: runs the tests, fixes what fails, and opens a pull request with the fix.",
+    blurb: "Runs the tests, fixes what fails, and opens a pull request with the fix.",
     make: () => ({ name: "Nightly tests", when: { kind: "schedule", schedule: { every: "daily", at: "02:00", days: [], tz: TZ } }, does: "Run the project's tests. If anything fails, find the cause, fix it, and run them again until they pass.", then: { pr: true, notify: true } }),
   },
   {
@@ -135,7 +136,7 @@ const LOCAL_TEMPLATES: typeof TEMPLATES = [
     icon: WrenchIcon,
     tone: "--st-working",
     title: "Monday dependencies",
-    blurb: "Mondays at 9: updates what's safe to update, runs the tests, and says what it left alone.",
+    blurb: "Updates what's safe to update, runs the tests, and says what it left alone.",
     make: () => ({ name: "Monday dependencies", when: { kind: "schedule", schedule: { every: "weekly", at: "09:00", days: [1], tz: TZ } }, does: "Check the project's dependencies for updates. Update the ones that are safe (patch and minor), run the tests, and list the major updates you left alone with what each would take.", then: { pr: true, notify: true } }),
   },
 ];

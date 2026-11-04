@@ -6,6 +6,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import http from "node:http";
+import net from "node:net";
 import { explicitCurve, passedHeaders, PhoneAccess, phoneAllowed, reachable, type PhoneKV } from "../src/local/phone.js";
 
 test("the phone may ask only what the phone app needs", () => {
@@ -131,6 +132,63 @@ test("a phone removed, or access turned off, loses its open session socket at on
   } finally {
     await phone.stop();
     for (const sk of appSockets) sk.destroy();
+    app.close();
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("adding a computer leaves phone access as it was: its code opens the listener, Cancel closes it, a phone stays refused (audit REST-1)", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "phone-"));
+  const app = http.createServer((req, res) => res.end(JSON.stringify({ path: req.url })));
+  await new Promise<void>((r) => app.listen(0, "127.0.0.1", () => r()));
+  const appPort = (app.address() as { port: number }).port;
+  const phone = new PhoneAccess({ kv: memKV(), home, appPort, computer: "Test Mac", addresses: () => [{ address: "127.0.0.1", via: "tailscale" }] });
+  const pairWith = (link: string, kind: "phone" | "computer") =>
+    new Promise<{ token: string; device: string }>((resolve) => {
+      const u = new URL(link);
+      const req = (u.searchParams.get("s") === "https" ? https : http).request({ host: "127.0.0.1", port: Number(u.searchParams.get("p")), method: "POST", path: "/phone/pair", rejectUnauthorized: false, headers: { "content-type": "application/json" } }, (r) => {
+        let b = "";
+        r.on("data", (c) => (b += c));
+        r.on("end", () => resolve(JSON.parse(b)));
+      });
+      req.end(JSON.stringify({ code: u.searchParams.get("c"), name: kind === "computer" ? "Mac mini" : "iPhone", kind }));
+    });
+  const listening = () => new Promise<boolean>((resolve) => {
+    const s = new net.Socket();
+    s.once("connect", () => (s.destroy(), resolve(true)));
+    s.once("error", () => resolve(false));
+    s.connect(port, "127.0.0.1");
+  });
+  let port = 0;
+  try {
+    const code = (await phone.pairCode("computer")) as { link: string };
+    port = Number(new URL(code.link).searchParams.get("p"));
+    const st = await phone.state();
+    assert.equal(st.on, false, "phone access still off");
+    assert.equal(st.listening, false, "and not listening for a phone");
+    assert.deepEqual(await phone.pairCode("phone"), { error: "Turn on phone access first." });
+    assert.equal(await listening(), true, "open for the other computer");
+    await phone.dropCode();
+    assert.equal(await listening(), false, "cancelled: closed again");
+
+    // A computer pairs; then phone access on and off again: the listener stays for the computer, and a phone is refused.
+    const again = (await phone.pairCode("computer")) as { link: string };
+    port = Number(new URL(again.link).searchParams.get("p"));
+    await pairWith(again.link, "computer");
+    await phone.setOn(true);
+    const pc = (await phone.pairCode()) as { link: string };
+    const { token } = await pairWith(pc.link, "phone");
+    const off = await phone.setOn(false);
+    assert.equal(off.on, false);
+    assert.equal(await listening(), true, "still open for the computer");
+    const status = await new Promise<number>((resolve) => {
+      const u = new URL(pc.link);
+      const req = (u.searchParams.get("s") === "https" ? https : http).request({ host: "127.0.0.1", port, method: "GET", path: "/api/sessions/mine", rejectUnauthorized: false, headers: { authorization: `Bearer ${token}` } }, (r) => (r.resume(), resolve(r.statusCode ?? 0)));
+      req.end();
+    });
+    assert.equal(status, 401, "a phone, with phone access off");
+  } finally {
+    await phone.stop();
     app.close();
     await rm(home, { recursive: true, force: true });
   }

@@ -33,6 +33,8 @@ export interface RepoUse {
   name: string;
   branch?: string;
   live: boolean;
+  /** A project folder Friday made for the session (~/Friday/Projects/…), not one somebody picked. */
+  made?: boolean;
 }
 
 export interface Project {

@@ -2,6 +2,7 @@ import { readLimits } from "./limits.js";
 import { findApp, forgetLoginStatus, loginStatusQuick } from "./adapters.js";
 import { mkdir, mkdtemp, open, rm, rmdir, stat, writeFile } from "node:fs/promises";
 import { homedir, hostname, tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { ENGINE_NAMES, ENGINE_TOOLS, TOOL_INFO, toolList, type EngineMode, type EngineTool } from "../types.js";
 import { ADAPTERS, childEnv, findBin, formatCommandLine, isClaudeAppBundled, launcher, loginStatus, readCustomAcp, runCli, saveCustomAcp } from "./adapters.js";
@@ -24,6 +25,7 @@ import { browse, cloneRepo, defaultCloneRoot, describe, findByName, ghBin, githu
 import { githubCancel, githubConnect, githubDisconnect, githubStatus } from "./github.js";
 import { githubItem, localRepo, prAct, prReview, type DraftComment, type PrAction } from "./pr-actions.js";
 import { savedDirs, startDirs } from "./extra-dirs.js";
+import { readRepo } from "./repo-read.js";
 import { addOwnModels, detectLocal, discoverModels, listOwnModels, ownComplete, ownVision, removeOwnModel, saveOwnModel, testOwnModel } from "./own-models.js";
 
 /**
@@ -43,7 +45,24 @@ export interface MachineInfo {
   home: string;
 }
 
-export const machineInfo = (): MachineInfo => ({ name: process.env.FRIDAY_MACHINE_NAME || hostname().replace(/\.local$/i, ""), platform: process.platform, home: homedir() });
+/**
+ * The computer's name as its owner gave it, "Arun's Mac Studio" rather than the host name "Aruns-Mac-Studio", read once: what
+ * Settings says first about the computer (audit REST-16, Arun 2026-11-04). Elsewhere, and where it can't be read, the host name.
+ */
+let pretty: string | undefined;
+function prettyName(): string {
+  if (pretty !== undefined) return pretty;
+  pretty = "";
+  if (process.platform === "darwin") {
+    try {
+      pretty = execFileSync("scutil", ["--get", "ComputerName"], { encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"] }).trim().slice(0, 60);
+    } catch {
+      // The host name, then.
+    }
+  }
+  return pretty;
+}
+export const machineInfo = (): MachineInfo => ({ name: process.env.FRIDAY_MACHINE_NAME || prettyName() || hostname().replace(/\.local$/i, ""), platform: process.platform, home: homedir() });
 
 export interface HostContext {
   /** The Friday server runners started here should connect back to. */
@@ -61,6 +80,8 @@ export const HOST_METHODS = [
   "tools",
   "folders",
   "browse",
+  // A folder's files, for "#" in the new-session box before there is a session to ask (audit CODE-9).
+  "tree",
   "describe",
   "find",
   "github",
@@ -293,6 +314,11 @@ export async function callHost(method: string, params: Record<string, unknown> =
     }
     case "browse":
       return browse(at(params.path));
+    case "tree": {
+      const p = at(params.path);
+      if (!(await isDir(p))) throw new Error(`There's no folder at ${p}.`);
+      return { output: await readRepo(p, { op: "tree", mode: "plan" }) };
+    }
     case "describe": {
       const p = at(params.path);
       if (!(await isDir(p))) throw new Error(`There's no folder at ${p}.`);
@@ -368,6 +394,7 @@ export async function callHost(method: string, params: Record<string, unknown> =
         models: (Array.isArray(params.models) ? params.models : []).slice(0, 500).map((m) => str(m, 200)),
         ...(typeof params.apiKey === "string" ? { apiKey: str(params.apiKey, 500) } : {}),
         ...(typeof params.provider === "string" ? { provider: str(params.provider, 30) } : {}),
+        ...(str(params.id, 20) ? { id: str(params.id, 20) } : {}),
       });
     case "models.own.vision":
       return ownVision({ id: str(params.id, 20) });
@@ -588,7 +615,14 @@ export async function callHost(method: string, params: Record<string, unknown> =
       // copy can't say what it was cut from, and without it Apply went away for that agent.
       let copyOf = params.worktree ? "" : str(params.copyOf, 600);
       // The folders beside it that its tool may work in too, as chosen now or as kept for the folder it was started from.
-      // Before any copy is made, so a folder refused here leaves none behind.
+      // Before any copy is made, so a folder refused here leaves none behind. A teammate's own folder among them, started from
+      // another computer's Friday, is made as its working folder is (makeDir, under ~/Friday only): a teammate with a project
+      // there never started, for its own folder that nothing had made (2026-11-04 linking test).
+      if (params.makeDir === true && Array.isArray(params.dirs))
+        for (const raw of params.dirs.slice(0, 8)) {
+          const d = typeof raw === "string" && raw.trim() ? at(raw) : "";
+          if (d.startsWith(path.join(homedir(), "Friday", "teammates") + path.sep) && !(await isDir(d))) await mkdir(d, { recursive: true });
+        }
       const dirs = await startDirs(params.dirs, copyOf || cwd, at);
       if (params.worktree) {
         // A folder never put in git is made a repository first, on this computer only (startRepo): a copy is a git worktree.

@@ -36,7 +36,9 @@ interface Floating {
 }
 const openSurfaces = new Set<Floating>();
 /** Whether a menu, picker or card is open: a dialog's Escape leaves the dialog open while one is (components/ui/dialog.tsx). */
-export const surfaceOpen = () => openSurfaces.size > 0;
+export const surfaceOpen = () => [...openSurfaces].some(shown);
+/** Drawn now: a few callers keep the hook mounted with nothing open (MachineBadge's card), and those aren't open. */
+const shown = (s: Floating) => !!s.el()?.isConnected;
 
 function claimSurface(self: Floating, trigger: HTMLElement | null): () => void {
   for (const other of [...openSurfaces]) {
@@ -194,8 +196,12 @@ export function useDismiss(ref: RefObject<HTMLElement | null>, onClose: () => vo
     // so one press used to close them all) (2026-10-27 audit).
     const key = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      const top = [...openSurfaces].at(-1);
+      const top = [...openSurfaces].filter(shown).at(-1);
       if (top && me.current && top !== me.current && openSurfaces.has(me.current)) return;
+      // Handled: what this sits in (the welcome's account panel, a panel's own Escape) reads that and stays, so one press is
+      // one level. The welcome folded its account panel with the same press that closed the panel's "⋯" menu (audit e2e,
+      // Arun 2026-11-04). Only when something was drawn to close.
+      if (ref.current?.isConnected) e.preventDefault();
       close.current();
     };
     document.addEventListener("mousedown", down);
@@ -587,7 +593,10 @@ export function InlineEdit({
   maxLength = 80,
   label = "New name",
   placeholder,
+  caretAtEnd = false,
 }: {
+  /** Opened with the caret after the name and its start in view, rather than all of it selected and scrolled to its end. */
+  caretAtEnd?: boolean;
   value: string;
   onSave: (v: string) => void;
   onCancel: () => void;
@@ -635,7 +644,13 @@ export function InlineEdit({
         value={v}
         maxLength={maxLength}
         onChange={(e) => setV(e.target.value)}
-        onFocus={(e) => e.target.select()}
+        onFocus={(e) => {
+          const el = e.target;
+          if (!caretAtEnd) return el.select();
+          el.setSelectionRange(el.value.length, el.value.length);
+          // Its start in view: the caret at the end had scrolled a long name to "…tor the pricing table".
+          requestAnimationFrame(() => (el.scrollLeft = 0));
+        }}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
           e.stopPropagation();
@@ -927,10 +942,8 @@ export function ConfirmDialog({ confirmation, onClose }: { confirmation: Confirm
   return floating(
     <div className="overlay">
       <div className={`modal confirm ${confirmation.danger === false ? "" : "danger"}`} ref={ref} data-owned-floating role="alertdialog" aria-modal="true" aria-label={confirmation.title}>
+        {/* No icon in the title row: the title and its body share one left edge (audit REST-28, Arun 2026-11-04). */}
         <div className="confirm-head">
-          <span className="confirm-icon">
-            <Icon name={confirmation.icon ?? (confirmation.input && confirmation.input.match === undefined ? "pencil" : confirmation.danger === false ? "help" : "trash")} size={16} />
-          </span>
           <h2>{confirmation.title}</h2>
         </div>
         {confirmation.body && <p className="confirm-body">{confirmation.body}</p>}
@@ -999,17 +1012,43 @@ export function inBand(): boolean {
   return bandSeen;
 }
 
+/**
+ * Runs `then` once the window's band is there, and its cleanup with the returned one: at once when it is; in the desktop window
+ * before it is, as soon as it comes. The window puts its stylesheet in once the page has loaded, so a page opened by a reload
+ * asked before it was there and laid out as in a browser: 12px lower than the same page reached from another (audit e2e, Arun
+ * 2026-11-04). In a browser, never.
+ */
+export function onBand(then: () => void | (() => void)): () => void {
+  let undo: void | (() => void);
+  let ran = false;
+  const run = () => {
+    if (ran || !inBand()) return;
+    ran = true;
+    undo = then();
+  };
+  run();
+  const timers = ran || !(window.fridayDesktop || /\bElectron\//.test(navigator.userAgent)) ? [] : [50, 150, 400, 1000, 2500, 5000].map((ms) => window.setTimeout(run, ms));
+  return () => {
+    timers.forEach(clearTimeout);
+    undo?.();
+  };
+}
+
 export function InBand({ children }: { children: ReactNode }) {
   const [slot, setSlot] = useState<HTMLElement | null>(null);
-  useLayoutEffect(() => {
-    const el = document.getElementById("band-slot");
-    if (!inBand() || !el || document.documentElement.dataset.band === "session") return;
-    document.documentElement.dataset.band = "page";
-    setSlot(el);
-    return () => {
-      if (document.documentElement.dataset.band === "page") delete document.documentElement.dataset.band;
-    };
-  }, []);
+  useLayoutEffect(
+    () =>
+      onBand(() => {
+        const el = document.getElementById("band-slot");
+        if (!el || document.documentElement.dataset.band === "session") return;
+        document.documentElement.dataset.band = "page";
+        setSlot(el);
+        return () => {
+          if (document.documentElement.dataset.band === "page") delete document.documentElement.dataset.band;
+        };
+      }),
+    [],
+  );
   return slot ? createPortal(children, slot) : <>{children}</>;
 }
 

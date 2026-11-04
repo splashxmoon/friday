@@ -250,9 +250,14 @@ export function DiffView({
             {/* The file's own mark, as the editor shows it; then the name, what a reader looks for; the folder after it, faint,
                 and the first thing to give way. */}
             <FileIcon path={path} size={16} />
+            {/* The name and its folder, then the chips: on one line when they fit, the chips on a line of their own under the name
+                when they don't, whole. Shrunk to fit beside it, they read "De…", "Mi…", "7 l…" (Arun's e2e pass, 2026-11-04). */}
+            <span className="dv-main">
+            <span className="dv-title">
             <span className={`${styles.diffFile} dv-name`}>{name}</span>
             {dir && <span className="dv-dir">{dir.replace(/\/$/, "")}</span>}
             {status && <span className="rsp-diff-status">{status}</span>}
+            </span>
             {/* On the header, because the collision is about the file rather
                 than about any line in it — and because this is the moment
                 somebody is deciding whether to trust the change. */}
@@ -272,6 +277,7 @@ export function DiffView({
                 {contended}
               </span>
             )}
+            </span>
           </span>
           {/* What happened to it, as a letter at the end of the row, where the editor's changes view puts it. */}
           {change && (

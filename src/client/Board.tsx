@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { shortPaths } from "./shortPaths.js";
 import type { BoardCard, BoardColumn } from "../board.js";
+import type { NeedMark } from "../needs-rank.js";
+import { NEEDS_CHANGED } from "./Attention.js";
 import { api } from "./api.js";
 import { EngineMark, FridayMark } from "./BrandMarks.js";
 import { Avatar, Icon } from "./icons.js";
@@ -89,10 +91,16 @@ function useBoard(identity: Identity, recents: RecentSession[]) {
     const t = setInterval(ask, POLL_MS);
     const wake = () => (setHidden(document.hidden), !document.hidden && void ask());
     document.addEventListener("visibilitychange", wake);
+    // Answered, asked or put off anywhere: read again now, as the badge is.
+    const now = () => void ask();
+    addEventListener("friday:attention", now);
+    addEventListener(NEEDS_CHANGED, now);
     return () => {
       live = false;
       clearInterval(t);
       document.removeEventListener("visibilitychange", wake);
+      removeEventListener("friday:attention", now);
+      removeEventListener(NEEDS_CHANGED, now);
     };
   }, [identity.id, sids]);
 
@@ -277,12 +285,26 @@ function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; chi
   );
 }
 
-export function Board({ identity, recents, projects, onOpen, onNew, solo = false }: { identity: Identity; recents: RecentSession[]; projects: Project[]; onOpen: (sid: string) => void; onNew: () => void; solo?: boolean }) {
+export function Board({ identity, recents, projects, onOpen, onNew, solo = false, needs = [], off }: { identity: Identity; recents: RecentSession[]; projects: Project[]; onOpen: (sid: string) => void; onNew: () => void; solo?: boolean; /** What the Needs you page lists, not put off (Attention.tsx). */ needs?: NeedMark[]; off?: Set<string> }) {
   const board = useBoard(identity, recents);
   let { cards } = board;
   const { week, failed, fails, at, hidden, trying, retry } = board;
   // A team's cards are its teammates', named and faced as the sidebar has them, never a raw error (Teammates.tsx teamCards).
   cards = teamCards(cards);
+  // What waits on you outside the sessions on the Board, a workflow at its Your OK, a pull request to review, as a card each in
+  // Needs you, so its count is the Needs you page's: the Board said 3 and 5 over a page of 3, and nothing for a workflow waiting on
+  // you (2026-11-04 retest). Opened, each goes to the Needs you page, where it is answered.
+  const { prs: reviewing } = usePrs();
+  if (cards) {
+    // Not already a card waiting on you there: a workflow in a room whose teammates' cards rest is a card of its own.
+    const onBoard = new Set(cards.filter((c) => c.you).map((c) => c.sid));
+    const card = (id: string, title: string, who: string, text: string, since: number): BoardCard => ({ id: `need|${id}`, sid: "", lane: "", title, task: "", agent: who, tool: null, column: "needs", status: "Needs you", detail: text, branch: "", files: 0, pr: null, at: since, you: true, mine: true });
+    cards = [
+      ...cards,
+      ...needs.filter((n) => !n.sid || !onBoard.has(n.sid)).map((n) => card(n.id, n.title, n.who, n.text, n.since)),
+      ...(reviewing?.review ?? []).filter((p) => !off?.has(`review~${p.url}`)).map((p) => card(`review~${p.url}`, p.repo, p.author, `Asked for your review: #${p.number} ${p.title}`, Date.parse(p.requestedAt ?? p.createdAt ?? p.updatedAt) || 0)),
+    ];
+  }
   // A retry that works takes the Try again button away; the focus goes to the board's heading, not to the page.
   const heading = useRef<HTMLHeadingElement>(null);
   const retried = useRef(false);
@@ -401,7 +423,8 @@ export function Board({ identity, recents, projects, onOpen, onNew, solo = false
   }, []);
 
   const ago = at ? Math.max(0, Math.round((now - at) / 1000)) : null;
-  const freshness = hidden ? "Paused while hidden" : failed ? (cards === null ? "Couldn't load" : "Couldn't refresh, showing the last answer") : ago === null ? "Reading…" : ago < 5 ? "Live" : `Updated ${ago < 60 ? `${ago}s` : relTime(at)} ago`;
+  // No sessions: nothing to read, and anything started shows at once, so it is Live, not "Reading…" forever (audit REST-3).
+  const freshness = hidden ? "Paused while hidden" : failed ? (cards === null ? "Couldn't load" : "Couldn't refresh, showing the last answer") : ago === null ? (cards?.length === 0 ? "Live" : "Reading…") : ago < 5 ? "Live" : `Updated ${ago < 60 ? `${ago}s` : relTime(at)} ago`;
   const filtered = !!(query || project || onlyYou);
 
   return (
@@ -423,6 +446,14 @@ export function Board({ identity, recents, projects, onOpen, onNew, solo = false
               aria-label="Search the board"
               className="h-8 border-[var(--border)] bg-[var(--bg)] pr-9 pl-8 text-[13px] shadow-none md:text-[13px]"
               onChange={(e) => setQuery(e.target.value)}
+              // Escape clears the search and leaves it: left filled, the board stayed narrowed by a search no longer in view
+              // (audit e2e, Arun 2026-11-04).
+              onKeyDown={(e) => {
+                if (e.key !== "Escape") return;
+                e.preventDefault();
+                setQuery("");
+                e.currentTarget.blur();
+              }}
             />
             <span className="absolute top-1/2 right-1.5 flex -translate-y-1/2 items-center">
               {query ? (
@@ -452,8 +483,9 @@ export function Board({ identity, recents, projects, onOpen, onNew, solo = false
               value={onlyYou ? "you" : "all"}
               onChange={(v) => setFilter({ onlyYou: v === "you" })}
               options={[
-                { value: "all", label: <>All{active > 0 && <Count n={active} />}</> },
-                { value: "you", label: <>Needs you{waitingOnYou > 0 && <Count n={waitingOnYou} needs />}</> },
+                // Each count's slot kept when it is empty, so a tab never grows as a count comes (audit REST-30, Arun 2026-11-04).
+                { value: "all", label: <>All<Count n={active} className={active > 0 ? undefined : "invisible"} /></> },
+                { value: "you", label: <>Needs you<Count n={waitingOnYou} needs={waitingOnYou > 0} className={waitingOnYou > 0 ? undefined : "invisible"} /></> },
               ]}
             />
           </div>
@@ -584,7 +616,7 @@ export function Board({ identity, recents, projects, onOpen, onNew, solo = false
         <footer className="status-bar bd-status-bar mx-[-24px]! max-[640px]:mx-[-16px]!" aria-label="Agent Board status">
           <div className="stb-start">
             <span className="stb-run" role="status">
-              <Dot state={failed ? "bad" : hidden || ago === null ? "idle" : "done"} />
+              <Dot state={failed ? "bad" : hidden || (ago === null && cards?.length !== 0) ? "idle" : "done"} />
               <span className="stb-run-text">{freshness}</span>
             </span>
             {week && (week.sessions || week.runs) ? (
@@ -593,8 +625,9 @@ export function Board({ identity, recents, projects, onOpen, onNew, solo = false
               </span>
             ) : null}
           </div>
-          {/* The keys move between cards, so with no board to move in (its first reading failed) they aren't offered. */}
-          {!(cards === null && failed) && (
+          {/* The keys move between cards, so with no card to move to (none yet, or the first reading failed) they aren't offered
+              (audit REST-30). */}
+          {!!cards?.length && (
             <div className="stb-end rv-status-keys" aria-hidden>
               <span><kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> Move</span>
               <span><kbd>↵</kbd> Open</span>

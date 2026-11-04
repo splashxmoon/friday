@@ -31,6 +31,23 @@ const RANGES: ["7" | "30" | "90", string][] = [
   ["90", "90 days"],
 ];
 type Range = (typeof RANGES)[number][0];
+/** The range picked, kept in this browser: leaving the page and coming back put it back to 30 days (audit e2e, Arun 2026-11-04). */
+const RANGE_KEY = "friday.usage.range";
+function savedRange(): Range {
+  try {
+    const v = localStorage.getItem(RANGE_KEY);
+    return RANGES.some(([r]) => r === v) ? (v as Range) : "30";
+  } catch {
+    return "30";
+  }
+}
+function keepRange(r: Range): void {
+  try {
+    localStorage.setItem(RANGE_KEY, r);
+  } catch {
+    /* a preference */
+  }
+}
 
 /**
  * Tokens used: read fresh and written. What a tool reads back from its cache isn't counted here: it reads the whole conversation
@@ -51,7 +68,7 @@ const dayName = (d: string) => new Date(`${d}T12:00:00`).toLocaleDateString(unde
  * there is no allowance to point at, and everything listed is yours, so nobody's name goes in front of it.
  */
 export function UsagePage({ identity, solo = false }: { identity: Identity; solo?: boolean }) {
-  const [range, setRange] = useState<Range>("30");
+  const [range, setRange] = useState<Range>(savedRange);
   const [data, setData] = useState<{ days: UsageDay[]; recent: CarriedEntry[] } | null>(null);
   const [failed, setFailed] = useState("");
   const [tries, setTries] = useState(0);
@@ -105,7 +122,9 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
   const saved = Math.max(0, totals.carried.spent - totals.carried.sent);
   const dayTotal = (d: UsageDay) => USAGE_TOOLS.reduce((n, t) => n + (d.tools[t] ? sum(d.tools[t]!) : 0), 0);
   const peak = Math.max(1, ...days.map(dayTotal));
-  const every = days.length > 45 ? 14 : days.length > 20 ? 5 : days.length > 10 ? 2 : 1;
+  // A label a week on a month, "Oct 13" rather than a bare 13 (audit REST-29, Arun 2026-11-04).
+  const every = days.length > 45 ? 14 : days.length > 20 ? 7 : days.length > 10 ? 2 : 1;
+  const tick = (day: string) => new Date(`${day}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
   return (
     <div className="page conns-page usage-page px-6!">
@@ -128,7 +147,7 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
             className="mb-0"
             title="Activity"
             description={solo ? `Your coding tools, in tokens: ${toolList("and")}.` : "Every agent in this workspace, in tokens: Friday's own and the coding tools people bring."}
-            action={<Choice<Range> label="Range" value={range} options={RANGES} onChange={setRange} />}
+            action={<Choice<Range> label="Range" value={range} options={RANGES} onChange={(r) => (setRange(r), keepRange(r))} />}
           />
 
           {failed ? (
@@ -186,7 +205,7 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
                               {/* Top to bottom in the column; the first tool sits on the baseline. */}
                               {[...USAGE_TOOLS].reverse().map((t) => (d.tools[t] ? <span key={t} className={`usage-part tool-${t}`} style={{ flexGrow: sum(d.tools[t]!) }} /> : null))}
                             </div>
-                            <span className="usage-tick">{(days.length - 1 - i) % every === 0 ? d.day.slice(8) : " "}</span>
+                            <span className="usage-tick">{(days.length - 1 - i) % every === 0 ? tick(d.day) : " "}</span>
                           </div>
                         );
                       })}

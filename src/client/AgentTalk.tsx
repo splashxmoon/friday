@@ -10,6 +10,7 @@ import type { TodoStep } from "@/components/aicss/TodoList";
 import { MAIN_LANE, type Member, type MeshNote, type SessionEvent } from "../types.js";
 import type { Send } from "./useSession.js";
 import { mateOn, TeamTalk } from "./Teammates.js";
+import { boardReportText } from "./team-room.js";
 
 /**
  * The agents in a session talking to each other (agent-mesh.ts), as the people watching read it: who wrote to whom, what, and
@@ -64,7 +65,7 @@ export function taskStatus(state: SessionState, m: MeshNote, lane: string): Talk
  * lines, the answer or report in its own panel under it, and where it stands as a small pill at the foot, with the brake
  * while it is in motion.
  */
-export function AgentTalkCard({ ev, state, me, send, notify, delivered, stamp, team }: { ev: SessionEvent; state: SessionState; me: Member; send: Send; notify: (m: string) => void; delivered: Set<number>; stamp: ReactNode; /** Everyone a message to the team went to (message_team), drawn once. */ team?: string[] }) {
+export function AgentTalkCard({ ev, state, me, send, notify, delivered, stamp, team, events }: { ev: SessionEvent; state: SessionState; me: Member; send: Send; notify: (m: string) => void; delivered: Set<number>; stamp: ReactNode; /** Everyone a message to the team went to (message_team), drawn once. */ team?: string[]; /** The log, for a board's report told from its record (team-room.ts boardReportText). */ events?: readonly SessionEvent[] }) {
   if (ev.body.type !== "instruction" || !ev.body.mesh) return null;
   const m: MeshNote = ev.body.mesh;
   const lane = ev.lane ?? MAIN_LANE;
@@ -95,7 +96,9 @@ export function AgentTalkCard({ ev, state, me, send, notify, delivered, stamp, t
                 : null;
   const moving = queued || (!!ask && !ask.reply);
   // A team (teammates.ts) reads it as a group chat (Teammates.tsx TeamTalk).
-  if (state.options.team) return <TeamTalk fromLane={m.fromLane} toLane={lane} fromName={m.fromName} toName={m.toName} kind={m.kind} report={!!m.ofTask} review={!!(m.board && m.review)} carried={!!m.carriedFrom} {...(team ? { team } : {})} text={ev.body.text} why={why} {...(ask?.reply ? { answer: { text: ask.reply.text, auto: !!ask.reply.auto } } : {})} status={status} stamp={stamp} fromMark={from.mark} toMark={to.mark} />;
+  // A board's report reads from the board's record: titles, not ids, and who did and checked each by their names (audit CREW-12).
+  const said = m.kind === "reply" && m.ofTask && events ? boardReportText(ev.body.text, events, ev.seq, (l) => mateOn(l)?.name) : ev.body.text;
+  if (state.options.team) return <TeamTalk fromLane={m.fromLane} toLane={lane} fromName={m.fromName} toName={m.toName} kind={m.kind} report={!!m.ofTask} review={!!(m.board && m.review)} carried={!!m.carriedFrom} {...(team ? { team } : {})} text={said} why={why} {...(ask?.reply ? { answer: { text: ask.reply.text, auto: !!ask.reply.auto } } : {})} status={status} stamp={stamp} fromMark={from.mark} toMark={to.mark} />;
   return (
     <div className={cn("tk-card", moving && "waiting")}>
       <div className="tk-head">

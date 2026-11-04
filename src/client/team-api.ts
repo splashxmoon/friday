@@ -8,6 +8,8 @@
 import { api } from "./api.js";
 import { isRawError, stoppedLine } from "../activity-line.js";
 import { clockUntil } from "../limit-reset.js";
+import { briefWorthPosting } from "../team-away.js";
+import { isLocal } from "./edition.js";
 import type { Identity } from "./storage.js";
 import type { TeamBrief } from "../types.js";
 import type { MateRun, MateUsage, TeamAway } from "../teammates.js";
@@ -44,6 +46,19 @@ export const stopAll = (identity: Identity) => api<{ stopped: string[] }>(identi
 export const setSelfRun = (identity: Identity, sid: string, goal: string | null, budget?: { tokens: number; until?: number; tz: string }) => api<unknown>(identity, "/api/teammates/selfrun", { method: "POST", body: JSON.stringify(goal === null ? { sid, on: false } : { sid, goal, ...(budget ? { budget } : {}) }), headers: JSON_BODY });
 export const setPaused = (identity: Identity, paused: boolean) => api<unknown>(identity, "/api/teammates/pause", { method: "POST", body: JSON.stringify({ paused }), headers: JSON_BODY });
 export const readActivity = (identity: Identity, id: string, days = 7) => quietly<{ runs: ActivityRun[] }>(identity, `/api/teammates/${id}/activity?days=${days}`);
+
+/**
+ * Back from away mode: off, and the words to say. "The brief is in the Crew room" only when there is one: the server posts a brief
+ * only when it has something to say (team-away.ts briefWorthPosting), and said with none it sent the person looking for nothing
+ * (audit CREW-10, 2026-11-04).
+ */
+export async function comeBack(identity: Identity): Promise<string> {
+  const had = await readAway(identity);
+  await setAway(identity, null);
+  const b = had?.since ? await readSince(identity, had.since) : null;
+  // With no brief, nothing to say: the room's own line says you're back (audit CREW-23); the hosted service, which posts no line, says it.
+  return b && briefWorthPosting({ ...b, until: b.until || Date.now() }) ? "Welcome back. The brief is in the Crew room." : isLocal() ? "" : "Welcome back.";
+}
 
 /** Whether a brief has anything in it worth a card. */
 export const briefEmpty = (b: Brief) => !b.done.length && !b.failed.length && !b.waiting.length && !b.assumptions.length && !b.stops?.length;

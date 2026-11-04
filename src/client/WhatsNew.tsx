@@ -3,9 +3,8 @@ import { createPortal } from "react-dom";
 import { isLocal } from "./edition.js";
 import { Icon } from "./icons.js";
 import { openOutside } from "./openOutside.js";
-import type { RecentSession } from "./storage.js";
 import { BlobFace } from "./teammate-face.js";
-import { isTeamSid, useTeamNow } from "./Teammates.js";
+import { useTeamNow } from "./Teammates.js";
 import { WHATS_NEW, notesUrl, whatsNewDue } from "./whats-new.js";
 import "./whats-new.css";
 
@@ -18,7 +17,10 @@ import "./whats-new.css";
  * under people with every deploy, which no one release note covers.
  */
 
-const SEEN = "friday.whatsNew.seen";
+// "shown", not the first key ("seen"): that one was also set, unseen, for anyone Friday took for new, which counted only Code
+// sessions and so took someone in the Crew for new (Arun, 2026-11-04: "release notes didnt appear immesditaley after restarting",
+// "it should appear in code and crew btw regardless").
+const SEEN = "friday.whatsNew.shown";
 const seen = () => {
   try {
     return localStorage.getItem(SEEN);
@@ -30,6 +32,34 @@ const markSeen = () => {
   try {
     localStorage.setItem(SEEN, WHATS_NEW.version);
   } catch {}
+};
+/** Someone new, as the welcome opens for them (Setup.tsx): what's new is everything to them, so these notes aren't. */
+export const markWhatsNewSeen = markSeen;
+
+// The version that ran here last, read once as the page loads (before this start writes its own over it).
+const LAST = "friday.lastVersion";
+let lastAtStart: string | null | undefined;
+const lastVersion = () => {
+  if (lastAtStart !== undefined) return lastAtStart;
+  try {
+    lastAtStart = localStorage.getItem(LAST);
+  } catch {
+    lastAtStart = null;
+  }
+  return lastAtStart;
+};
+const noteVersion = (v: string) => {
+  try {
+    localStorage.setItem(LAST, v);
+  } catch {}
+};
+// Past the welcome before: it keeps that per person (Setup.tsx).
+const knew = (userId: string) => {
+  try {
+    return !!localStorage.getItem(`mpa.setup.${userId}`);
+  } catch {
+    return false;
+  }
 };
 
 // Across the top, the tallest in the middle: the lead there, the rest either side of it, lower as they go out.
@@ -68,22 +98,42 @@ export function CrewFaces() {
   );
 }
 
-export function WhatsNew({ recents }: { recents: RecentSession[] }) {
+export function WhatsNew({ userId }: { userId: string }) {
   const [open, setOpen] = useState(false);
+  // Looked at once the welcome has decided (it waits for the crew, or four seconds): it opens 600ms after, this a while later.
   const t = useTeamNow();
-  // Which sessions are the Crew's is known once the crew is, as for the welcome (Setup.tsx): until then, nothing is decided.
   const [late, setLate] = useState(false);
   useEffect(() => void setTimeout(() => setLate(true), 4000), []);
   const known = !!t || late;
-  const returning = recents.some((r) => !isTeamSid(r.sid));
+  const [running, setRunning] = useState("");
   useEffect(() => {
-    if (!isLocal() || !known) return;
-    if (!returning) return void markSeen();
-    if (!whatsNewDue(WHATS_NEW.version, seen(), returning)) return;
-    // After the window has drawn, and never over the welcome.
-    const id = setTimeout(() => !document.querySelector(".setup-overlay") && setOpen(true), 900);
+    if (!isLocal()) return;
+    const last = lastVersion();
+    void fetch("/api/version", { credentials: "same-origin" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b: { version?: string } | null) => {
+        const v = b?.version ?? "";
+        if (!v) return;
+        // Asked of this start's own: the last version is read before this one is written.
+        setRunning(whatsNewDue({ notes: WHATS_NEW.version, running: v, last, shown: seen(), knew: knew(userId) }) ? v : "");
+        noteVersion(v);
+      })
+      .catch(() => {});
+  }, [userId]);
+  useEffect(() => {
+    if (!known || !running) return;
+    // A moment after the window has drawn, in Code or the Crew alike. Someone new is shown the welcome instead, which marks these
+    // notes as seen as it opens; one who already knows Friday and finds the welcome up (no coding tool ready yet) is shown them
+    // once it's gone.
+    let left = 120;
+    const look = () => {
+      if (seen() === WHATS_NEW.version) return;
+      if (!document.querySelector(".setup-overlay")) return setOpen(true);
+      if (--left > 0) id = setTimeout(look, 1000);
+    };
+    let id = setTimeout(look, 1400);
     return () => clearTimeout(id);
-  }, [known, returning]);
+  }, [known, running]);
   useEffect(() => {
     const on = () => setOpen(true);
     window.addEventListener("friday:whats-new", on);

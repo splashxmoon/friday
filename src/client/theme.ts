@@ -104,7 +104,9 @@ export function vscodeTheme(json: unknown): CustomTheme | null {
   const dark = t.type === "dark" || t.type === "hc" || (t.type !== "light" && t.type !== "hcLight" && isDark(bg));
   const sidebar = c("sideBar.background") ?? c("activityBar.background") ?? mix(bg, dark ? 70 : 96, dark ? "#000000" : "#000000");
   const panel = c("editorWidget.background") ?? c("panel.background") ?? mix(bg, 90, dark ? "#ffffff" : "#000000");
-  const card = c("input.background") ?? c("dropdown.background") ?? mix(bg, 85, dark ? "#ffffff" : "#000000");
+  // Cards a step lighter than the page, always: an input's colour went darker than the page on Solarized Light and a grey slab on
+  // Dracula, and the borders vanished (audit REST-23, Arun 2026-11-04).
+  const card = mix(bg, dark ? 96 : 97, "#ffffff");
   const border = c("editorGroup.border") ?? c("panel.border") ?? c("sideBar.border") ?? c("widget.border") ?? mix(fg, 14, bg);
   const accent = c("button.background") ?? c("focusBorder") ?? c("textLink.foreground") ?? c("activityBarBadge.background") ?? fg;
   const onAccent = c("button.foreground") ?? (isDark(accent) ? "#ffffff" : "#111111");

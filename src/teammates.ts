@@ -119,6 +119,8 @@ export interface TeammateView extends Teammate {
   usage: { today: MateUsage; week: MateUsage };
   /** Why it takes no new turn now, for its budget or hours (team-budget.ts Hold), and when it carries on. */
   hold?: Hold;
+  /** Its last turn was stopped by a person (a stop, Stop all) and it hasn't run since: no finish to mark (audit CREW-40). */
+  halted?: true;
 }
 
 /** Away mode (team-away.ts): the person away until `until`, since `since`. */

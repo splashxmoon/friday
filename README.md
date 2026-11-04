@@ -13,13 +13,14 @@
   <a href="#get-started-in-five-minutes">Get started</a> ·
   <a href="#how-it-works">How it works</a> ·
   <a href="#your-agents-working-as-a-team">Agents as a team</a> ·
-  <a href="#work-more-than-code">Work</a> ·
   <a href="#crew-ai-teammates-that-keep-going">Crew</a> ·
   <a href="#features">Features</a> ·
   <a href="#automations">Automations</a> ·
   <a href="#privacy">Privacy</a> ·
   <a href="#faq">FAQ</a>
 </p>
+
+<p align="center"><sub>If Friday saves you time, a star helps other developers find it.</sub></p>
 
 <p align="center">
   <a href="https://github.com/splashxmoon/friday/stargazers"><img src="https://img.shields.io/github/stars/splashxmoon/friday?style=flat&label=%E2%98%85&color=08C" alt="GitHub stars" /></a>
@@ -115,14 +116,6 @@ An agent you add to a session can work in its own copy of the repository, so thr
 <td width="50%" valign="top"><sub><b>Agents talking.</b> Codex tells Cursor what it renamed before Cursor trips over it; Gemini asks Claude Code whether a discount comes off before or after tax, and goes on with the answer.</sub></td>
 </tr>
 </table>
-
-## Work: more than code
-
-Pick **Work** in the sidebar for everything that isn't software: a week of posts, a thread from a video, a script, a newsletter, a research brief, a deck, a cover image. Claude Code and Codex work on it together in one folder, and the session's rail keeps what they make in view: **Progress**, the **Outputs** (documents open in a reader, pictures and videos play in place), the **Sources** they read, numbered, and the **Connectors** they can use. In the desktop app the agents browse in Friday's own browser panel while you watch, or in your own Chrome with Claude in Chrome.
-
-<p align="center">
-  <img src="docs/assets/work.png" alt="A Work session for a checkout launch: the cover image Claude Code made, Codex planning a week of posts, and the rail with progress at 3 of 5 and four outputs" width="960" />
-</p>
 
 ## Crew: AI teammates that keep going
 
@@ -303,7 +296,7 @@ or, from a clone or with npx, `claude mcp add friday --scope user -- npx -y gith
 | Tool | What it does |
 | --- | --- |
 | `list_sessions` | Your sessions, latest first, with their agents and anything waiting on you |
-| `start_session` | A new Code or Work session with a task, in a folder or repo (its own copy, unless asked), on a coding tool you name or the one Friday picks (`auto`) |
+| `start_session` | A new Code session with a task, in a folder or repo (its own copy, unless asked), on a coding tool you name or the one Friday picks (`auto`) |
 | `send_message` | Tell an agent in a session something, or leave a note for the people in it |
 | `read_session` | Each agent's status, what is waiting on you, and the latest messages |
 | `wait_for_idle` | Wait until the agents are done or one needs you, with a timeout |
@@ -333,7 +326,7 @@ It has no account, and your code, prompts and files never come to us. What it do
 - A random id made on your computer for this install, tied to nothing else.
 - Friday's version, your system (macOS, Windows or Linux) and its architecture, and whether it's the desktop app.
 - Once a day you open it: that you did, the names of the coding tools it found, and how many are signed in.
-- Each session started, and whether it's a Code, Work or Crew one.
+- Each session started, and whether it's a Code or Crew one.
 - Once each: the first time a coding tool is ready, and the first time an agent finishes a turn.
 
 Never: prompts, code, file names or paths, repository names, email addresses, accounts or sign-ins, or anything a tool writes. Friday asks about the counts in its welcome the first time it opens (or in a note in the sidebar, if you skip the welcome), and sends nothing before you answer. To turn them off, use Settings › Data & backup › Share anonymous usage, or set `FRIDAY_NO_TELEMETRY=1` or `DO_NOT_TRACK=1` where Friday runs.

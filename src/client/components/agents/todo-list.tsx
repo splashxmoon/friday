@@ -6,6 +6,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   type KeyboardEvent,
   type ReactNode,
+  memo,
   useCallback,
   useEffect,
   useId,
@@ -59,6 +60,12 @@ export interface TodoListProps {
   icon?: ReactNode;
   /** Under the list, inside it: actions over all of it. */
   footer?: ReactNode;
+  /** Opens by itself when new items follow a finished list (on unless said). */
+  reopenOnNew?: boolean;
+  /** How far along, when the chip stands for more than the items shown (several lists in one, as the dock's Plans). */
+  progress?: { done: number; total: number };
+  /** What the open list shows in place of its items' rows (the dock's Plans: a row for each agent, its steps under it). */
+  body?: ReactNode;
 }
 
 function statusLabel(status: TodoItemStatus) {
@@ -157,7 +164,7 @@ function TodoStatusIcon({ status }: { status: TodoItemStatus }) {
   );
 }
 
-export function TodoList({
+export const TodoList = memo(function TodoList({
   items,
   title = "To-dos",
   open,
@@ -168,6 +175,9 @@ export function TodoList({
   className,
   icon,
   footer,
+  reopenOnNew = true,
+  progress,
+  body,
 }: TodoListProps) {
   const reduce = useReducedMotion() ?? false;
   const baseId = useId();
@@ -177,8 +187,9 @@ export function TodoList({
   const previousComplete = useRef(false);
   const [internalOpen, setInternalOpen] = useState(defaultOpen);
   const currentOpen = open ?? internalOpen;
-  const completed = items.filter((item) => item.status === "completed").length;
-  const allComplete = items.length > 0 && completed === items.length;
+  const completed = progress?.done ?? items.filter((item) => item.status === "completed").length;
+  const of = progress?.total ?? items.length;
+  const allComplete = of > 0 && completed === of;
   const itemCount = items.length;
 
   const setOpen = useCallback(
@@ -190,14 +201,14 @@ export function TodoList({
   );
 
   useEffect(() => {
-    if (previousComplete.current && !allComplete) {
+    if (previousComplete.current && !allComplete && reopenOnNew) {
       setOpen(true);
     }
     if (!previousComplete.current && allComplete && collapseOnComplete) {
       setOpen(false);
     }
     previousComplete.current = allComplete;
-  }, [allComplete, collapseOnComplete, setOpen]);
+  }, [allComplete, collapseOnComplete, setOpen, reopenOnNew]);
 
   // Opened at its top, where the list starts (Arun, 2026-10-23: "make sure on pop up it loads at the top not the bottom"). It
   // scrolled to its last task each time one was added, so it opened on the end of a long list.
@@ -223,7 +234,7 @@ export function TodoList({
         onClick={() => setOpen(!currentOpen)}
         className="group flex h-11 w-full items-center gap-2.5 rounded-2xl px-3.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <TodoHeaderIcon complete={allComplete} icon={icon} done={items.length ? completed / items.length : 0} />
+        <TodoHeaderIcon complete={allComplete} icon={icon} done={of ? completed / of : 0} />
         <h2 className="min-w-0 flex-1 truncate text-sm font-medium text-foreground/90">
           {title}
         </h2>
@@ -234,14 +245,14 @@ export function TodoList({
           )}
         >
           <span className="sr-only">
-            {completed} of {items.length} tasks completed
+            {completed} of {of} tasks completed
           </span>
           <span aria-hidden="true" className="inline-flex">
             <ActionSwapRollText value={String(completed)}>
               {completed}
             </ActionSwapRollText>
             <span>/</span>
-            <span>{items.length}</span>
+            <span>{of}</span>
           </span>
         </span>
         <motion.span
@@ -265,109 +276,115 @@ export function TodoList({
           className="scrollbar-hide overflow-y-auto px-2 pb-2"
           style={{ maxHeight }}
         >
-          {items.length ? (
-            <ol className="space-y-0">
-            <AnimatePresence initial={false} mode="popLayout">
-              {items.map((item) => {
-                const status = item.status ?? "pending";
-                return (
-                  <motion.li
-                    layout="position"
-                    key={item.id}
-                    initial={reduce ? { opacity: 1 } : { opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={reduce ? { opacity: 0 } : { opacity: 0, y: -3 }}
-                    transition={
-                      reduce
-                        ? { duration: 0 }
-                        : {
-                            opacity: { duration: 0.18, ease: EASE_OUT },
-                            y: SPRING_LAYOUT,
-                            layout: SPRING_LAYOUT,
-                          }
-                    }
-                    className={cn(
-                      "flex min-h-9 items-center gap-2.5 rounded-xl px-1.5 py-1",
-                      item.onSelect && "cursor-pointer outline-none transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring",
-                    )}
-                    {...(item.onSelect
-                      ? {
-                          role: "button",
-                          tabIndex: 0,
-                          onClick: item.onSelect,
-                          onKeyDown: (e: KeyboardEvent) => {
-                            if (e.key !== "Enter" && e.key !== " ") return;
-                            e.preventDefault();
-                            item.onSelect!();
-                          },
-                        }
-                      : {})}
-                  >
-                    <TodoStatusIcon status={status} />
-                    <span className="sr-only">{statusLabel(status)}: </span>
-                    <span className="flex min-w-0 flex-1 flex-col">
-                    <span
-                      className={cn(
-                        "min-w-0 truncate text-sm leading-5",
-                        status === "pending" && "text-muted-foreground/65",
-                        status === "in-progress" && "text-foreground",
-                        status === "completed" && "text-muted-foreground/60",
-                        status === "cancelled" && "text-muted-foreground/55",
-                      )}
-                    >
-                      {/* Cut short with an ellipsis of its own: an inline block isn't cut by its line's, so a long title was clipped
-                          mid-letter (2026-10-27 audit). */}
-                      <span className="relative inline-block max-w-full truncate align-bottom">
-                        {item.title}
-                        <motion.span
-                          aria-hidden="true"
-                          initial={false}
-                          animate={{
-                            scaleX: status === "completed" ? 1 : 0,
-                            opacity: status === "completed" ? 1 : 0,
-                          }}
-                          transition={
-                            reduce
-                              ? { duration: 0 }
-                              : { duration: 0.28, ease: EASE_OUT, delay: 0.06 }
-                          }
-                          className="absolute inset-x-0 top-1/2 h-px origin-left bg-current"
-                        />
-                      </span>
-                    </span>
-                    {item.meta ? (
-                      <span className="flex min-w-0 items-center gap-1.5 truncate text-xs leading-4 text-muted-foreground/70">
-                        {item.meta}
-                      </span>
-                    ) : null}
-                    </span>
-                    {item.detail ? (
-                      <span className="shrink-0 text-sm text-muted-foreground/55">
-                        {item.detail}
-                      </span>
-                    ) : null}
-                    {item.actions ? (
-                      <span
-                        className="shrink-0"
-                        onClick={(e) => e.stopPropagation()}
-                        onKeyDown={(e) => e.stopPropagation()}
-                      >
-                        {item.actions}
-                      </span>
-                    ) : null}
-                  </motion.li>
-                );
-              })}
-            </AnimatePresence>
-            </ol>
-          ) : (
-            <p className="px-1.5 py-2 text-sm text-muted-foreground">
-              No tasks yet
-            </p>
-          )}
+          {body ?? <TodoItems items={items} />}
           {footer}
         </div>
       </AgentDisclosure>
     </section>
   );
-}
+});
+
+/** The rows of a list, as TodoList shows them; also the steps under each agent in the dock's Plans (Activity.tsx DockPlans). */
+export const TodoItems = memo(function TodoItems({ items }: { items: TodoItem[] }) {
+  const reduce = useReducedMotion() ?? false;
+  return items.length ? (
+      <ol className="space-y-0">
+      <AnimatePresence initial={false} mode="popLayout">
+        {items.map((item) => {
+          const status = item.status ?? "pending";
+          return (
+            <motion.li
+              layout="position"
+              key={item.id}
+              initial={reduce ? { opacity: 1 } : { opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={reduce ? { opacity: 0 } : { opacity: 0, y: -3 }}
+              transition={
+                reduce
+                  ? { duration: 0 }
+                  : {
+                      opacity: { duration: 0.18, ease: EASE_OUT },
+                      y: SPRING_LAYOUT,
+                      layout: SPRING_LAYOUT,
+                    }
+              }
+              className={cn(
+                "flex min-h-9 items-center gap-2.5 rounded-xl px-1.5 py-1",
+                item.onSelect && "cursor-pointer outline-none transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring",
+              )}
+              {...(item.onSelect
+                ? {
+                    role: "button",
+                    tabIndex: 0,
+                    onClick: item.onSelect,
+                    onKeyDown: (e: KeyboardEvent) => {
+                      if (e.key !== "Enter" && e.key !== " ") return;
+                      e.preventDefault();
+                      item.onSelect!();
+                    },
+                  }
+                : {})}
+            >
+              <TodoStatusIcon status={status} />
+              <span className="sr-only">{statusLabel(status)}: </span>
+              <span className="flex min-w-0 flex-1 flex-col">
+              <span
+                className={cn(
+                  "min-w-0 truncate text-sm leading-5",
+                  status === "pending" && "text-muted-foreground/65",
+                  status === "in-progress" && "text-foreground",
+                  status === "completed" && "text-muted-foreground/60",
+                  status === "cancelled" && "text-muted-foreground/55",
+                )}
+              >
+                {/* Cut short with an ellipsis of its own: an inline block isn't cut by its line's, so a long title was clipped
+                    mid-letter (2026-10-27 audit). */}
+                <span className="relative inline-block max-w-full truncate align-bottom">
+                  {item.title}
+                  <motion.span
+                    aria-hidden="true"
+                    initial={false}
+                    animate={{
+                      scaleX: status === "completed" ? 1 : 0,
+                      opacity: status === "completed" ? 1 : 0,
+                    }}
+                    transition={
+                      reduce
+                        ? { duration: 0 }
+                        : { duration: 0.28, ease: EASE_OUT, delay: 0.06 }
+                    }
+                    className="absolute inset-x-0 top-1/2 h-px origin-left bg-current"
+                  />
+                </span>
+              </span>
+              {item.meta ? (
+                <span className="flex min-w-0 items-center gap-1.5 truncate text-xs leading-4 text-muted-foreground/70">
+                  {item.meta}
+                </span>
+              ) : null}
+              </span>
+              {item.detail ? (
+                <span className="shrink-0 text-sm text-muted-foreground/55">
+                  {item.detail}
+                </span>
+              ) : null}
+              {item.actions ? (
+                <span
+                  className="shrink-0"
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => e.stopPropagation()}
+                >
+                  {item.actions}
+                </span>
+              ) : null}
+            </motion.li>
+          );
+        })}
+      </AnimatePresence>
+      </ol>
+    ) : (
+      <p className="px-1.5 py-2 text-sm text-muted-foreground">
+        No tasks yet
+      </p>
+    );
+});

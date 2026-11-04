@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { askReply, parseAsks, parseChoices } from "../src/client/ask-choices.js";
+import { askProse, askReply, parseAsks, parseChoices } from "../src/client/ask-choices.js";
 
 /**
  * A coding tool's questions, read off the end of its answer.
@@ -154,9 +154,9 @@ test("code is never read as questions", () => {
 
 test("the reply is the agent's own shorthand with the words beside it", () => {
   const asks = parseAsks(EXAMPLE);
-  assert.equal(askReply(asks, [{ key: "b", label: "Cross-network generalisation (the 19% holdout recall)" }]), "1=b (Cross-network generalisation (the 19% holdout recall))");
+  assert.equal(askReply(asks, [{ key: "b", label: "Cross-network generalisation (the 19% holdout recall)" }]), "1: b, Cross-network generalisation (the 19% holdout recall)");
   const two = parseAsks("[1] Which?\n- a) X\n- b) Y\n[2] When?\n- a) Now\n- b) Later");
-  assert.equal(askReply(two, [{ key: "a", label: "X" }, { text: "after the release" }]), "1=a (X)\n2: after the release");
+  assert.equal(askReply(two, [{ key: "a", label: "X" }, { text: "after the release" }]), "1: a, X\n2: after the release");
   assert.equal(askReply([{ question: "Should I go ahead with step 2?", options: [] }], [{ text: "Yes, go ahead" }]), "Yes, go ahead");
   assert.equal(askReply([{ question: "Bump the version?", options: [] }, { question: "Add a changelog entry?", options: [] }], [{ text: "yes" }, { text: "no" }]), "Bump the version? yes\nAdd a changelog entry? no");
 });
@@ -189,4 +189,15 @@ test("keeps the whole question as the prompt when there is no lead-in", () => {
   const { prompt, options } = parseChoices("A) yes B) no");
   assert.equal(prompt, "A) yes B) no");
   assert.equal(options.length, 2);
+});
+
+// The options are said once, in the card: the prose keeps only what leads up to them (audit CODE-10 A, Arun 2026-11-04).
+test("the answer's prose stops where the questions the card asks begin", () => {
+  assert.equal(askProse(EXAMPLE), "I looked at the last three sweeps and the holdout numbers.\n\nBefore I plan further: **which thread does the team want to pull?**");
+  assert.equal(askProse("The migration is ready.\n\nHow should I roll it out?\n- a) All at once\n- b) Behind a flag"), "The migration is ready.");
+  assert.equal(askProse("I see two ways forward:\n\nA) Rewrite the parser\nB) Patch the regex"), "");
+  const plain = "Done. Anything else you need?";
+  assert.equal(askProse(plain), plain);
+  const code = "```sh\nnpm test\n```\n\nShall I commit it?\na) Yes\nb) Not yet";
+  assert.equal(askProse(code), "```sh\nnpm test\n```");
 });

@@ -174,7 +174,7 @@ function AddAccount({ identity, tool, taken, onAdded, onCancel }: { identity: Id
             placeholder="Work, Personal…"
             aria-label="Name for the account"
             onChange={(e) => setLabel(e.target.value)}
-            onKeyDown={(e) => e.key === "Escape" && onCancel()}
+            onKeyDown={(e) => e.key === "Escape" && (e.preventDefault(), onCancel())}
           />
           {free.length > 0 && (
             <MenuButton
@@ -337,7 +337,7 @@ export function AccountList({ identity, tool, onChanged }: { identity: Identity;
                         onBlur={() => rename(a.id, renaming.label)}
                         onKeyDown={(e) => {
                           if (e.key === "Enter" && !e.nativeEvent.isComposing) (e.preventDefault(), rename(a.id, renaming.label));
-                          if (e.key === "Escape") setRenaming(null);
+                          if (e.key === "Escape") (e.preventDefault(), setRenaming(null));
                         }}
                       />
                     ) : (

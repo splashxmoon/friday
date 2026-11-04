@@ -81,7 +81,11 @@ test("one stuck agent is one row, however many questions it asked", () => {
   const found = needsIn(session("s1", { asks, engines: { main: { tool: "claude" } } } as unknown as Partial<SessionState>), [], ME.id, NOW);
   assert.equal(found.length, 1);
   assert.equal(found[0]!.need.kind, "ask");
-  assert.deepEqual(found[0]!.need.choices.map((c) => c.value), ["1=a (EU)", "1=b (US)"]);
+  assert.deepEqual(found[0]!.need.choices.map((c) => c.value), ["1: a, EU", "1: b, US"]);
+  // Every question, its choices once, as rows (audit CREW-17): no options block, and question 2 kept.
+  assert.equal(found[0]!.need.text, "Which store?");
+  assert.equal(found[0]!.need.detail, undefined);
+  assert.deepEqual(found[0]!.need.asks!.map((a) => [a.question, a.options.map((o) => o.label)]), [["Which store?", ["EU", "US"]], ["Ship today?", []]]);
 });
 
 test("what an item blocks: a lead holds up the room, a task holds up what waits on it", () => {
@@ -243,11 +247,14 @@ test("one tap answers in the right place; an edit sends your words; an item answ
   assert.equal((r as { status: number }).status, 404);
 });
 
-test("Not now takes it off this person's queue only", async () => {
+test("Not now puts it off for this person only, kept as put off rather than gone while it still waits (audit CREW-6)", async () => {
   const { q } = queue([session("s1", { openQuestions: question() })]);
   const [it] = await q.list(ME, "w1");
+  assert.equal(it!.putOff, undefined);
   await q.dismiss(ME, it!.id);
-  assert.equal((await q.list(ME, "w1")).length, 0);
+  const after = await q.list(ME, "w1");
+  assert.equal(after.length, 1, "the counts still say it waits, so the page still has it");
+  assert.equal(after[0]!.putOff, true);
   assert.equal((await q.list({ id: "u-sam", name: "Sam" }, "w1")).length, 0);
 });
 
@@ -275,4 +282,26 @@ test("a question answered here or in the session, the answer not yet read by the
   assert.equal(needsIn(s, [], ME.id, NOW).length, 0);
   // An older message still queued from before it asked doesn't count as the answer.
   assert.equal(needsIn({ ...s, pendingInstructions: [9] } as SessionState, [], ME.id, NOW).length, 1);
+});
+
+test("a plan stopped short is in the queue, as the Board and the sidebar count it (2026-11-04 end-to-end check)", async () => {
+  // Nothing else waits in this session: the list used to skip reading it, so "stopped at 1 of 5" was on every count but this one.
+  const { q } = queue([session("s1", { planDone: { main: { done: 1, of: 5 } }, finished: { main: 30 } } as Partial<SessionState>)]);
+  const items = await q.list(ME, "w1");
+  assert.deepEqual(items.map((i) => [i.kind, i.text]), [["stopped", "Stopped at 1 of 5 of its plan"]]);
+});
+
+test("a crew workflow waiting at Your OK is on the queue, and answering it there answers the run (2026-11-04 end-to-end check)", async () => {
+  const said: unknown[] = [];
+  const { q } = queue([], {
+    workflows: {
+      asks: async () => [{ id: "w1", name: "Ship it", run: "r1", n: 6, ask: "OK to open the pull request?", since: 1, roomName: "Crew room" }],
+      answer: async (...a: unknown[]) => void said.push(a),
+    },
+  });
+  const items = await q.list(ME, "w1");
+  assert.deepEqual(items.map((i) => [i.kind, i.text]), [["crew", "Ship it, step 6: OK to open the pull request?"]]);
+  assert.ok((await q.answer(ME, "w1", items[0]!.id, "yes")).ok);
+  assert.ok((await q.answer(ME, "w1", items[0]!.id, "Not yet: the tests are red")).ok);
+  assert.deepEqual(said, [["w1", "r1", true, ""], ["w1", "r1", false, "Not yet: the tests are red"]]);
 });

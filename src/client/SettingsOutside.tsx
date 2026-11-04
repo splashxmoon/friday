@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { CheckIcon, CopyIcon, TerminalSquareIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Note, SettingsGroup, SettingsRow } from "@/components/dass";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { api } from "./api.js";
 import { EngineMark } from "./BrandMarks.js";
 import type { Identity } from "./storage.js";
@@ -16,24 +17,42 @@ interface Setup {
   shim: string;
 }
 
-/** What is to copy, in a box the line can be read and selected in, with Copy beside it. */
+/**
+ * What is to copy, in a box the line can be read and selected in, with Copy beside it: a 28px mark that turns into a check, and
+ * "Copied" said in its tooltip, so nothing beside it moves (audit REST-14, Arun 2026-11-04: "Copied" was 12px wider than "Copy").
+ */
 function Copyable({ text, label }: { text: string; label: string }) {
-  const [copied, setCopied] = useState(false);
   return (
     <div className="flex min-w-0 items-start gap-2">
       <pre className="m-0 min-w-0 flex-1 overflow-x-auto whitespace-pre rounded-md border border-[var(--border)] bg-[var(--surface-2,transparent)] px-3 py-2 font-mono text-[12px] leading-relaxed text-[var(--ink)]">{text}</pre>
-      <Button
-        variant="outline"
-        size="sm"
-        aria-label={`Copy ${label}`}
-        onClick={() => void navigator.clipboard.writeText(text).then(() => (setCopied(true), setTimeout(() => setCopied(false), 1500)))}
-      >
-        {copied ? <CheckIcon /> : <CopyIcon />}
-        {copied ? "Copied" : "Copy"}
-      </Button>
+      <CopyMark text={text} label={label} />
     </div>
   );
 }
+
+/** Copy, as a mark beside what it copies: the same in Your computers' command and link. */
+export function CopyMark({ text, label }: { text: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+      <Tooltip open={copied || undefined}>
+        <TooltipTrigger asChild>
+          <Button
+            variant="outline"
+            size="icon"
+            className="size-7 shrink-0"
+            aria-label={copied ? `${label} copied` : `Copy ${label}`}
+            onClick={() => void navigator.clipboard.writeText(text).then(() => (setCopied(true), setTimeout(() => setCopied(false), 1500)))}
+          >
+            {copied ? <CheckIcon /> : <CopyIcon />}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">{copied ? "Copied" : "Copy"}</TooltipContent>
+      </Tooltip>
+  );
+}
+
+/** A file in the home folder said the short way, as Codex's already is: ~/.cursor/mcp.json (audit REST-26). */
+const homeShort = (file: string) => file.replace(/^.*?([\\/])(\.cursor[\\/]mcp\.json)$/, "~$1$2");
 
 /**
  * Agents outside Friday handing it work (outside-agents.ts; Arun, 2026-10-30): Claude Code, Codex and Cursor on this computer,
@@ -90,7 +109,7 @@ export function OutsideAgentsSection({ identity }: { identity: Identity }) {
             </SettingsRow>
           </SettingsGroup>
           <SettingsGroup title={<span className="inline-flex items-center gap-2"><EngineMark tool="cursor" size={16} /> Cursor</span>}>
-            <SettingsRow stack label={`Add this to ${setup.cursor.file}`} hint="Merge it with any servers already there. Cursor picks it up the next time it starts.">
+            <SettingsRow stack label={`Add this to ${homeShort(setup.cursor.file)}`} hint="Merge it with any servers already there.">
               <Copyable text={setup.cursor.json} label="the Cursor settings" />
             </SettingsRow>
           </SettingsGroup>

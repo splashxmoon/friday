@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { describeCall, doingNow, isRawError, stoppedLine } from "../src/activity-line.js";
+import { describeCall, doingNow, isRawError, stoppedDetail, stoppedLine, stoppedRow } from "../src/activity-line.js";
 import type { EventBody, SessionEvent } from "../src/types.js";
 
 const ev = (seq: number, body: EventBody, lane?: string): SessionEvent => ({ seq, ts: seq * 1000, actor: { id: "a", name: "A" } as SessionEvent["actor"], body, ...(lane ? { lane } : {}) });
@@ -77,4 +77,32 @@ test("a stopped run says what it means in words, and keeps an error that already
     assert.equal(stoppedLine(plain), plain);
   }
   assert.equal(stoppedLine(""), "Stopped on an error");
+});
+
+// A tool that worked and then hit an error didn't fail to start (audit CODE-4, Arun 2026-11-04), and one out of usage says
+// until when, never "Stopped on an error" (audit CODE-5).
+test("a stopped agent's row says what happened, not that its tool failed to start", () => {
+  const midTurn = "node:fs:624 return binding.readFileUtf8(path, stringToFlags(options.flag));\n ^\nError: ENOENT: no such file or directory, open 'package.json'\n    at readFileSync (node:fs:624:20)\n    at turn (file:///x/claude-storm.mjs:192:28) { errno: -2, code: 'ENOENT', syscall: 'open', path: 'package.json' }";
+  assert.equal(stoppedLine(midTurn), "Stopped on an error");
+  assert.equal(stoppedRow("Claude Code", midTurn), "Claude Code stopped with an error");
+  assert.equal(stoppedLine("Error: spawn claude ENOENT\n    at ChildProcess._handle.onexit (node:internal/child_process:285:19)"), "Stopped: their tool failed to start");
+  assert.equal(stoppedRow("Codex", "node:internal/modules/cjs/loader:1228\n  throw err;\nError: Cannot find module 'x'"), "Codex stopped: their tool failed to start");
+  assert.equal(stoppedRow("Kit", "The folder disconnected."), "Kit stopped: The folder disconnected.");
+  const now = new Date(2026, 10, 4, 10, 0).getTime();
+  assert.match(stoppedRow("Claude Code", "5-hour limit reached ∙ resets 3pm", now), /^Claude Code · Out of usage until 3\sPM$/);
+  assert.equal(stoppedRow("Claude Code", "Claude AI usage limit reached|1000000000", now), "Claude Code · Out of usage");
+});
+
+// The first line of a crash, as a session's row keeps it ("node:fs:624"), is still a raw error (audit CODE-4).
+test("a crash's first line alone is still raw", () => {
+  assert.equal(isRawError("node:fs:624"), true);
+  assert.equal(stoppedRow("Claude Code", "node:fs:624"), "Claude Code stopped with an error");
+});
+
+// Right now and the board say a stopped run as the row does (audit CODE-17 A/B, CODE-5).
+test("a stopped run's detail where its agent is already named", () => {
+  const now = new Date(2026, 10, 4, 10, 0).getTime();
+  assert.equal(stoppedDetail("node:fs:624\nError: ENOENT: no such file or directory, open 'package.json'", now), "Stopped with an error");
+  assert.match(stoppedDetail("5-hour limit reached ∙ resets 3pm", now), /^Out of usage until 3\sPM$/);
+  assert.equal(stoppedDetail("The folder disconnected.", now), "Stopped: The folder disconnected.");
 });

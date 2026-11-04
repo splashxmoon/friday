@@ -114,7 +114,7 @@ export class LocalPeers implements Peers {
       const agents = lanesOf(s).filter((l) => !(s.options.team && l === MAIN_LANE)).map((l) => `${laneName(s, l)} (${status(s, l)})`).join(", ");
       return `- "${s.title}" [id ${s.id}] · ${placeOf(s, team)} · ${agents || "no agents yet"}${whereOf(s)} · active ${ago(at)}`;
     });
-    return `Sessions on this computer, latest first (Code, Work and the crew's):\n${rows.join("\n")}${near.length > 25 ? `\n…and ${near.length - 25} more, less recent: search_sessions finds what was said in any of them.` : ""}`;
+    return `Sessions on this computer, latest first (Code and the crew's):\n${rows.join("\n")}${near.length > 25 ? `\n…and ${near.length - 25} more, less recent: search_sessions finds what was said in any of them.` : ""}`;
   }
 
   /** The session meant, from the list, or by its id when it is older than the list goes (one search_sessions found). */
@@ -200,7 +200,7 @@ export const APP_TOOLS: MeshToolDef[] = [
   {
     name: "search_sessions",
     description:
-      "Search everything said in every session on this computer (Code, Work and the crew's): what the person asked, what agents answered, decisions, errors, file names. Use it to find context another session already has before you work something out again, or to find the session to read_session or message_session.",
+      "Search everything said in every session on this computer (Code and the crew's): what the person asked, what agents answered, decisions, errors, file names. Use it to find context another session already has before you work something out again, or to find the session to read_session or message_session.",
     inputSchema: obj(
       {
         query: { type: "string", description: "Words to look for: at least three letters." },
@@ -257,7 +257,7 @@ export const APP_TOOLS: MeshToolDef[] = [
 ];
 
 export const APP_INSTRUCTIONS =
-  " The whole app is yours to use for the person, from any session: list_sessions, read_session and search_sessions see every session on this computer (Code, Work, the Crew room and its rooms) and what was said in them, so look there before working out again what another session already knows; message_session tells an agent in any of them something (a teammate in the Team room by its name, the agent in a Code or Work session), start_session starts a new Code or Work session with a task and a coding tool, manage_automation lists, makes, changes, pauses and runs automations, and manage_teammate lists the team, adds a teammate the person asked for and changes one's role. Use these when the person asks, or when the work needs them; say what you did in your reply.";
+  " The whole app is yours to use for the person, from any session: list_sessions, read_session and search_sessions see every session on this computer (Code, the Crew room and its rooms) and what was said in them, so look there before working out again what another session already knows; message_session tells an agent in any of them something (a teammate in the Team room by its name, the agent in a Code session), start_session starts a new Code session with a task and a coding tool, manage_automation lists, makes, changes, pauses and runs automations, and manage_teammate lists the team, adds a teammate the person asked for and changes one's role. Use these when the person asks, or when the work needs them; say what you did in your reply.";
 
 /** "every weekday at 9:00" as an automation's schedule (agents.ts AgentSchedule), from the tool's {days, time, every}. Null when none was given. */
 export function scheduleOf(raw: unknown, tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"): AgentSchedule | null {

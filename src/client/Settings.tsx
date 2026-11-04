@@ -63,8 +63,9 @@ export const SECTIONS: SectionDef[] = [
     group: "You",
     icon: "sun",
     blurb: "How Friday looks on this device.",
+    // Each thing on its page, by the word on it: a search for accent or layout found nothing (audit e2e, Arun 2026-11-04).
     keywords:
-      "theme dark light mode color colour look system size zoom text font scale motion animation",
+      "theme dark light mode color colour look system size zoom text font scale motion animation accent contrast layout session focus classic",
   },
   {
     id: "notifications",
@@ -74,6 +75,16 @@ export const SECTIONS: SectionDef[] = [
     blurb:
       "Only when something waits on you: a question, a finished run, a failure. Banners come while Friday's window is hidden; the chime, if you want it, either way.",
     keywords: "alerts away banner chime sound permission",
+  },
+  // Not a section: a row to the Usage page, so a search for usage, a budget or a limit finds it (audit REST-21, Arun 2026-11-04).
+  // App.tsx opens the page for it.
+  {
+    id: "usage-limits",
+    label: "Usage & limits",
+    group: "You",
+    icon: "usage",
+    blurb: "Your coding tools' limits, what your plans cost, and the tokens your agents used.",
+    keywords: "usage limits limit budget spend cost price plan tokens 5-hour weekly alert reset heatmap busiest hours history",
   },
   {
     id: "shortcuts",
@@ -97,8 +108,7 @@ export const SECTIONS: SectionDef[] = [
     group: "This computer",
     icon: "plug",
     blurb: "The computer your coding agents run on, and the tools on it.",
-    keywords:
-      "computer machine connect link claude code codex cursor sign in install account folder runner",
+    keywords: "computer machine connect link claude code codex cursor sign in install account folder runner acp github git ssh keep awake phone iphone mobile tailscale other computers",
   },
   {
     id: "own-models",
@@ -133,7 +143,7 @@ export const SECTIONS: SectionDef[] = [
     group: "More",
     icon: "help",
     blurb: "Updates, release notes and setup.",
-    keywords: "version update release notes tour desktop app",
+    keywords: "version update release notes desktop app welcome setup set up onboarding what's new whats changelog feedback bug report",
   },
 ];
 const GROUPS: Group[] = ["You", "Workspace", "This computer", "More"];

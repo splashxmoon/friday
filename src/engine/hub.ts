@@ -179,6 +179,8 @@ export interface RunnerParams {
   os?: string;
   /** Hostname of the machine the CLI runs on. */
   machine?: string;
+  /** The other computer of yours it runs on, by its device id (EngineInfo.computer). */
+  computer?: string;
   /** The shell its commands run in. */
   shell?: string;
   /** The effort levels its ACP tool said it offers, comma separated (EngineInfo.efforts). */
@@ -207,6 +209,13 @@ export interface RunnerParams {
 }
 
 /**
+ * Put back by a drop (instructions.requeued), not a message its turn couldn't take: only a drop means a turn was cut off (2026-11-04
+ * soak: every message Codex couldn't take mid-turn told its next turn the connection had dropped, to look at git and run the
+ * tests again, and hid the turn under way from a restart after it).
+ */
+const dropped = (e: SessionEvent): boolean => e.body.type === "instructions.requeued" && !e.body.steer;
+
+/**
  * The lane's running run has no checkpoint and every turn it handed out was cut by a drop (requeued) before its runner said
  * one: no turn of it reached a CLI (see Runner.turn), so a checkpoint taken now is still the folder from before the run.
  */
@@ -219,7 +228,7 @@ function neverRan(events: SessionEvent[], lane: string): boolean {
     const e = events[i]!;
     if ((e.lane ?? MAIN_LANE) !== lane) continue;
     if (e.body.type === "instructions.delivered") delivered++;
-    else if (e.body.type === "instructions.requeued") cut++;
+    else if (dropped(e)) cut++;
   }
   return delivered > 0 && cut >= delivered;
 }
@@ -233,10 +242,12 @@ export function cutTurn(events: SessionEvent[], lane: string): number[] {
   const mine = events.filter((e) => (e.lane ?? MAIN_LANE) === lane);
   const start = mine.findLastIndex((e) => e.body.type === "run.started");
   if (start < 0) return [];
-  const i = mine.findLastIndex((e, j) => j >= start && e.body.type === "instructions.delivered");
+  // A message handed to the turn and put back because it couldn't take it isn't the turn: the one before it is.
+  const notTaken = (e: SessionEvent, j: number) => e.body.type === "instructions.delivered" && mine.slice(j + 1).some((x) => x.body.type === "instructions.requeued" && x.body.steer && e.body.type === "instructions.delivered" && e.body.seqs.every((q) => x.body.type === "instructions.requeued" && x.body.seqs.includes(q)));
+  const i = mine.findLastIndex((e, j) => j >= start && e.body.type === "instructions.delivered" && !notTaken(e, j));
   if (i < 0) return [];
   const d = mine[i]!.body;
-  if (mine.slice(i + 1).some((e) => e.body.type === "instructions.requeued")) return [];
+  if (mine.slice(i + 1).some(dropped)) return [];
   return d.type === "instructions.delivered" ? d.seqs : [];
 }
 
@@ -702,6 +713,7 @@ export class EngineHub {
       ...(p.root || p.real ? { root: (p.root || p.real)!.slice(0, 400) } : {}),
       ...(p.os ? { os: p.os.slice(0, 10) } : {}),
       ...(p.machine ? { machine: p.machine.slice(0, 60) } : {}),
+      ...(p.computer && /^[0-9a-f]{16}$/.test(p.computer) ? { computer: p.computer } : {}),
       ...(p.shell ? { shell: p.shell.slice(0, 20) } : {}),
       ...(p.efforts && p.efforts.split(",").some(isEngineEffort) ? { efforts: [...new Set(p.efforts.split(",").filter(isEngineEffort))] } : {}),
       ...(p.model ? { model: p.model.slice(0, 60) } : {}),
@@ -1044,7 +1056,7 @@ class LaneHost {
     if (seq === undefined) return;
     this.steering.delete(id);
     if (ok) return;
-    await this.append({ type: "instructions.requeued", seqs: [seq] }).catch((e) => console.error("[engine] requeue:", e));
+    await this.append({ type: "instructions.requeued", seqs: [seq], steer: true }).catch((e) => console.error("[engine] requeue:", e));
     void this.pump();
   }
 
@@ -1284,7 +1296,7 @@ class LaneHost {
       this.turnCap = cap;
       // Every instruction of it handed back after a dropped connection: the turn its runner may still have running, to take on
       // where it got to rather than start again (runner adopt).
-      const again = pending.every((q) => events.some((e) => e.body.type === "instructions.requeued" && e.body.seqs.includes(q)));
+      const again = pending.every((q) => events.some((e) => dropped(e) && e.body.type === "instructions.requeued" && e.body.seqs.includes(q)));
       let end = await this.runTurn(prompt, [...(attachments ?? [])], note, approval && { ...approval, ...asked }, command, model, effort, cap, this.owesCheckpoint, again);
       // A coding tool that lost its earlier conversation (a resume that failed) starts a fresh one at once and does the same turn
       // there, told where the session stands, rather than stopping until a person writes again: the runner has already dropped
@@ -1837,7 +1849,7 @@ export function promptFor(events: SessionEvent[], seqs: number[], updates: MeshP
   const undone = events.filter((e) => e.seq > lastDelivered && e.body.type === "folder.restored");
   if (undone.length) parts.unshift(`[Friday] ${undone.at(-1)!.actor.name} put the folder back to how it was before an earlier run, so changes you made then may no longer be there. Check the files before building on them.`);
   // Handed back after a drop cut it off (a deploy, a network drop): carried on, not done again from the start.
-  const again = seqs.some((q) => events.some((e) => e.body.type === "instructions.requeued" && e.body.seqs.includes(q)));
+  const again = seqs.some((q) => events.some((e) => dropped(e) && e.body.type === "instructions.requeued" && e.body.seqs.includes(q)));
   if (again) parts.unshift("[Friday] Your connection to Friday dropped while you were on this, so it comes to you again. Carry on from where you got to: look at what you already changed (git status and git diff) before doing any of it again, finish or undo an edit the drop cut off, and run the tests before you go on.");
   return { prompt: parts.join("\n\n"), attachments };
 }

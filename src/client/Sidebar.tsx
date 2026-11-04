@@ -13,7 +13,7 @@ import { CodingToolLimits } from "./gauge.js";
 import type { McpPublic } from "../mcp-types.js";
 import { Avatar, Icon, type IconName } from "./icons.js";
 import type { AgentView, PersonListing } from "../agents.js";
-import { withCode, type AttentionState } from "./Attention.js";
+import { useNeedsCount, withCode, type AttentionState } from "./Attention.js";
 import type { Attention } from "../attention.js";
 import { recordLine, useAgentRecords } from "./useAgentRecords.js";
 import type { Crew, CrewState, Preview, Working } from "../attention.js";
@@ -32,18 +32,21 @@ import { isLocal, planLimits, planNow } from "./edition.js";
 import { TeamTip } from "./TeamTip.js";
 import type { SessionSummary } from "../board.js";
 import { EngineMark, FridayMark } from "./BrandMarks.js";
-import { isRawError, stoppedLine } from "../activity-line.js";
+import { isRawError, stoppedLine, stoppedRow } from "../activity-line.js";
+import { limitHit } from "../limit-reset.js";
+import { namedBranch } from "./branch-names.js";
 import { ENGINE_NAMES, type EngineTool } from "../types.js";
 import { doingWords, QUIET_AFTER_MS, quietFor } from "../step-words.js";
 import { useSettledOrder } from "./sidebar-order.js";
 import { shortcut } from "./Shortcuts.js";
 import { CodeCrewToggle, isWorkSid, useWorkSessions } from "./WorkMode.js";
-import { isTeamSid, newTeammate, SidebarTeammates, useTeam, useTeamNow, useTeamTab } from "./Teammates.js";
+import { isTeamSid, newTeammate, SidebarTeammates, useTeam, useTeamTab } from "./Teammates.js";
 import { byDay } from "./sidebar-days.js";
 import { byState, StateRing, useFlip, useNow, type Presence } from "./presence.js";
 import { api } from "./api.js";
 import { markUnread, useUnread } from "./unread.js";
 import { noticeDue, UsageNotice, useUsageSharing } from "./UsageSharing.js";
+import { folderName } from "./Workspace.js";
 
 /** `fresh`: a project just made, whose name box was never confirmed: Escape takes it away again. */
 type Renaming = { kind: "session" | "project"; id: string; fresh?: boolean } | null;
@@ -208,11 +211,17 @@ function PanelResize() {
       onPointerDown={(e) => {
         e.preventDefault();
         const left = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect().left;
-        let x = e.clientX;
+        const from = e.clientX;
+        let x = from;
         let frame = 0;
-        document.body.classList.add("resizing", "resizing-x", "resizing-panel");
+        // A drag once it has moved 3px: a click, or each half of a double-click, leaves the width as it is, so the double-click lands
+        // on the handle and resets it (audit REST-4, Arun 2026-11-04: each click took 4px off and the double-click missed).
+        let dragging = false;
         const move = (ev: PointerEvent) => {
           x = ev.clientX;
+          if (!dragging && Math.abs(x - from) < 3) return;
+          if (!dragging) document.body.classList.add("resizing", "resizing-x", "resizing-panel");
+          dragging = true;
           frame ||= requestAnimationFrame(() => {
             frame = 0;
             setPanelWidth(x - left, false);
@@ -220,7 +229,7 @@ function PanelResize() {
         };
         const up = () => {
           if (frame) cancelAnimationFrame(frame);
-          setPanelWidth(x - left);
+          if (dragging) setPanelWidth(x - left);
           document.body.classList.remove("resizing", "resizing-x", "resizing-panel");
           removeEventListener("pointermove", move);
           removeEventListener("pointerup", up);
@@ -243,9 +252,11 @@ function RepoTile({ name }: { name: string }) {
   );
 }
 
-/** How a group stands, said on its own line even folded: what needs you first, else how many are working. */
-function GroupState({ needs, working }: { needs: number; working: number }) {
-  if (needs) return <span className="sb-gstate needs">{needs > 1 ? `${needs} need you` : "Needs you"}</span>;
+/**
+ * How a group stands, said on its own line even folded: how many are working. What waits on you is said once, in Needs you at
+ * the top, never again as an amber badge on the group it left (audit CODE-1 B, Arun 2026-11-04).
+ */
+function GroupState({ working }: { working: number }) {
   if (working) return <span className="sb-gstate live" title={`${working} working`}><span className="sb-gspin" aria-hidden />{working > 1 ? working : ""}</span>;
   return null;
 }
@@ -280,6 +291,15 @@ const CREW_PRESENCE: Record<CrewState, Presence> = { needs: "needs", working: "w
 /** A session whose agent stopped short of its plan, waiting on the person to carry it on, with nothing of it still running. */
 const stoppedShort = (crew: Crew | null | undefined, working: unknown): boolean => !working && !!crew?.agents.some((x) => x.state === "short");
 
+/** Which agent a stopped run was, by the name its row uses ("Claude Code", not the lane's "Main"). */
+const stopper = (crew: Crew | null | undefined, needs: Attention): string => {
+  const x = crew?.agents.find((c) => c.lane === needs.lane) ?? crew?.agents.find((c) => c.state === "failed");
+  return x ? agentWord(x.name.replace(/^[^']+'s /, ""), x.tool) : (needs.agent ?? "The agent");
+};
+
+/** Every agent that stopped did so on its usage limit: waiting on the clock, amber, never the red of an error. */
+const onlyLimited = (a: Crew["agents"]) => a.some((x) => x.state === "failed") && a.filter((x) => x.state === "failed").every((x) => !!x.why && !!limitHit(x.why));
+
 /**
  * A session's state as a small ring just after its name (Arun, 2026-11-03: "get rid of the agent icon to the left … add the
  * spinning circle ring thing to the right of the tab session title name"): the turning ring while its agents work, amber while
@@ -297,15 +317,16 @@ function SessionRing({ state, crew, working, title, unread = false, stopped = fa
         </svg>
       </span>
     );
-  const pr: Presence | null = state === "needs" ? (stopped && !working ? "error" : "needs") : state === "working" ? "working" : a.some((x) => x.state === "failed") ? "error" : null;
-  // Finished: a small green check where the ring turned (Arun, 2026-11-03: "add something to show that it was finished"), lit
-  // while you haven't opened it since, quieter once you have.
+  const pr: Presence | null = state === "needs" ? (stopped && !working ? "error" : "needs") : state === "working" ? "working" : onlyLimited(a) ? "needs" : a.some((x) => x.state === "failed") ? "error" : null;
+  // Finished: a green ring where the ring turned (Arun, 2026-11-03: "add something to show that it was finished"; 2026-11-04:
+  // "also can they make this just a green ring instead"), the size and place of the other rings, lit while you haven't opened it
+  // since, quieter once you have.
   if (!pr && (unread || a.some((x) => x.state === "done")))
     return (
       <span className={`state-ring sb-done${unread ? " new" : ""}`} role="img" aria-label="Finished" title={unread ? "Finished while you were away" : "Finished"}>
-        <svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <circle cx="6" cy="6" r="5.1" strokeWidth="1.4" />
-          <path d="m3.9 6.2 1.4 1.4 2.8-3" />
+        {/* The presence ring's own size: 10.5px across, a 1.75px line, in the 12px slot (presence.tsx .pr-ring). */}
+        <svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
+          <circle cx="6" cy="6" r="4.375" />
         </svg>
       </span>
     );
@@ -337,7 +358,7 @@ function CrewLine({ crew, now }: { crew: Crew; now: number }) {
   // (Arun, 2026-10-29: "Yes, fix them"; "2 agents · ready" under Needs you).
   const early = of("short");
   const words =
-    failed.length && failed[0]!.why ? (/^Stopped/.test(stoppedLine(failed[0]!.why)) ? `${short(failed[0]!.name, failed[0]!.tool)} · ${stoppedLine(failed[0]!.why)}` : `${short(failed[0]!.name, failed[0]!.tool)} stopped: ${stoppedLine(failed[0]!.why)}`)
+    failed.length && failed[0]!.why ? stoppedRow(short(failed[0]!.name, failed[0]!.tool), failed[0]!.why)
     : working.length > 1 ? "working"
     : working.length ? `${short(working[0]!.name, working[0]!.tool)} · ${working[0]!.doing ? doingWords(working[0]!.doing) : "working"}`
     : quiet.length ? `${short(quiet[0]!.name, quiet[0]!.tool)} · no update in ${quietFor(quiet[0]!.heardAt!, now)}`
@@ -398,8 +419,9 @@ function Head({ p }: { p: SidebarProps }) {
           </Tooltip>
         )}
       </div>
-      {/* Code or Crew: in the desktop app it is in the window's bar (WindowNav), in a browser here. */}
-      {isLocal() && !agents && !window.fridayDesktop && <CodeCrewToggle className="in-sidebar" working={p.attention.working.keys()} needs={p.attention.items.map((i) => i.sid)} />}
+      {/* Code or Crew, in both editions the same switch (Arun, 2026-11-04: "add this for production btw"): in the desktop app it
+          is in the window's bar (WindowNav), in a browser here. */}
+      {!agents && !window.fridayDesktop && <CodeCrewToggle className="in-sidebar" working={p.attention.working.keys()} needs={p.attention.needSids} />}
       {/* Not in the Crew: its faces end with their own Add (Teammates.tsx, Sidebar B). */}
       {!crewTab && <button
         type="button"
@@ -427,8 +449,11 @@ const NEEDS_CLOSED_KEY = "friday.sidebar.needsClosed";
 function PlaceIcons({ p }: { p: SidebarProps }) {
   const team = !!p.workspace && planLimits(planNow(p.workspace)).team;
   const requests = team ? (p.peopleRequests ?? 0) : 0;
+  const [usageCard, setUsageCard] = useState(false);
+  // What the Needs you page lists, put off ones left out, as it counts them (Attention.tsx useNeedsCount).
+  const waiting = useNeedsCount(p.attention);
   const places: { icon: IconName; label: string; on: boolean; go: () => void; warm?: SidebarProps["view"]; count?: number; needs?: boolean }[] = [
-    ...(p.onOpenNeeds ? [{ icon: "hand" as const, label: "Needs you", on: p.view === "needs", go: p.onOpenNeeds, warm: "needs" as const, count: p.attention.items.length || undefined, needs: true }] : []),
+    ...(p.onOpenNeeds ? [{ icon: "hand" as const, label: "Needs you", on: p.view === "needs", go: p.onOpenNeeds, warm: "needs" as const, count: waiting || undefined, needs: true }] : []),
     { icon: "board", label: "Agent Board", on: p.view === "board", go: p.onOpenBoard, warm: "board" },
     { icon: "gitPullRequest", label: "Code Review", on: p.view === "review", go: p.onOpenReview, warm: "review", count: p.reviewsWaiting, needs: true },
     ...(team ? [{ icon: "book" as const, label: "Team library", on: p.view === "library", go: p.onOpenLibrary, warm: "library" as const }] : []),
@@ -445,11 +470,14 @@ function PlaceIcons({ p }: { p: SidebarProps }) {
             {!!x.count && <span className={`sb-place-n${x.needs ? " needs" : ""}`}>{x.count > 99 ? "99+" : x.count}</span>}
           </button>
         );
-        // Usage, with your coding tools' limits a short rest away: "how much have I got left?" needs no page.
-        if (x.icon === "usage")
+        // Usage, with your coding tools' limits a short rest away: "how much have I got left?" needs no page. Not over the Usage page
+        // itself, which says it all, and gone when the pointer leaves or the button is pressed (audit REST-10, Arun 2026-11-04).
+        if (x.icon === "usage" && !x.on)
           return (
-            <HoverCard key={x.label} openDelay={500} closeDelay={150}>
-              <HoverCardTrigger asChild>{button}</HoverCardTrigger>
+            <HoverCard key={x.label} openDelay={500} closeDelay={150} open={usageCard} onOpenChange={setUsageCard}>
+              <HoverCardTrigger asChild onClick={() => setUsageCard(false)}>
+                {button}
+              </HoverCardTrigger>
               {/* Five tools of two bars each ran past the top of the window: the card stays short and scrolls (Arun, 2026-10-25). */}
               <HoverCardContent side="top" align="center" className="usage-card w-80 p-3">
                 <div className="mb-2 text-xs font-medium text-[var(--text-muted)]">Usage · your coding tools' limits</div>
@@ -703,7 +731,7 @@ function SessionsList({ p }: { p: SidebarProps }) {
   if (isLocal()) listed = p.recents.filter((r) => !isTeamSid(r.sid));
   const beds = buckets(
     [...listed].sort((a, b) => b.openedAt - a.openedAt),
-    { needs: new Set(p.attention.items.map((i) => i.sid)), working: new Set(p.attention.working.keys()), merged },
+    { needs: p.attention.needSids, working: new Set(p.attention.working.keys()), merged },
     now,
   );
   // Held in the order it stands while the pointer or the keyboard is in the list, so the row under them doesn't move as the list
@@ -713,8 +741,9 @@ function SessionsList({ p }: { p: SidebarProps }) {
   const flip = useFlip<HTMLDivElement>();
   const [focusIn, setFocusIn] = useState(false);
   // Needs you, then working, then the rest, within each group (owner call D); a row that moves slides there (useFlip).
-  const shortIds = beds.active.filter((r) => stoppedShort(p.attention.crews.get(r.sid), p.attention.working.get(r.sid))).map((r) => r.sid);
-  const needSet = new Set([...p.attention.items.map((i) => i.sid), ...shortIds]);
+  // What waits on you is what the Needs you page lists, a plan stopped short included, and not what was put off there: the group
+  // left out STORM and QUESTIONS while the page listed them, and kept one put off (2026-11-04 retest).
+  const needSet = p.attention.needSids;
   const unreadNow = useUnread();
   // A finished one you open keeps its place until you leave it, so it doesn't drop away under you as it stops being new (Herdr,
   // 2026-11-01). Read as it was the moment it was opened: App lets go of its unread mark just after.
@@ -902,6 +931,7 @@ function SessionsList({ p }: { p: SidebarProps }) {
       onCancelRename={() => setRenaming(null)}
       working={p.attention.working.get(r.sid) ?? null}
       needs={p.attention.items.find((i) => i.sid === r.sid) ?? null}
+      waiting={p.attention.needSids.has(r.sid)}
       preview={p.attention.previews.get(r.sid) ?? null}
       summary={p.attention.summaries.get(r.sid) ?? null}
       crew={p.attention.crews.get(r.sid) ?? null}
@@ -914,8 +944,12 @@ function SessionsList({ p }: { p: SidebarProps }) {
 
   // Sessions waiting on you, pulled to the top: what needs you first (Dass: "what needs you rises"). Closed with its ×, it
   // stays closed for the ones waiting then, and comes back with any session that starts waiting after (Arun, 2026-10-20).
-  const needsIds = [...new Set([...p.attention.items.map((i) => i.sid), ...shortIds])];
+  const needsIds = [...needSet];
   const needing = needsIds.flatMap((sid) => sorted.filter((r) => r.sid === sid)).filter((r) => !dismissed.includes(r.sid));
+  // Said once: a session in Needs you leaves its own group (pinned, project, folder or Recent) while it waits, and goes back
+  // when it stops waiting or Needs you is closed (audit CODE-1 B, Arun 2026-11-04).
+  const inNeeds = new Set(needing.map((r) => r.sid));
+  const pinnedShown = pinned.filter((r) => !inNeeds.has(r.sid));
   // A closed session that has stopped waiting is forgotten, so the next time it waits it shows again.
   const waitingKey = needsIds.join(",");
   // Not before the first look has answered: until then nothing reads as waiting, and every closed one was forgotten on a reload (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
@@ -943,17 +977,19 @@ function SessionsList({ p }: { p: SidebarProps }) {
   const repoGroups = (() => {
     const by = new Map<string, { name: string; chats: RecentSession[] }>();
     for (const r of loose) {
+      if (inNeeds.has(r.sid)) continue;
       const u = r.repos?.[0];
       if (!u) continue;
       const g = by.get(u.name) ?? { name: u.name, chats: [] };
       g.chats.push(r);
       by.set(u.name, g);
     }
-    return [...by.values()];
+    // A folder Friday made for one session ("ask-clean-out-folder-2") is no group of its own: its session stays in Recent until a
+    // second one works there (audit CODE-20 A, Arun 2026-11-04: one-session groups with letter tiles fragmented the list).
+    return [...by.values()].filter((g) => g.chats.length > 1 || !g.chats[0]!.repos?.[0]?.made);
   })();
   const filed = new Set(repoGroups.flatMap((g) => g.chats.map((c) => c.sid)));
-  const needsSids = new Set(p.attention.items.map((i) => i.sid));
-  const unfiled = loose.filter((r) => !filed.has(r.sid));
+  const unfiled = loose.filter((r) => !filed.has(r.sid) && !inNeeds.has(r.sid));
 
   const blocks = new Map<string, ReactNode>();
   if (p.projects.length > 0)
@@ -971,7 +1007,7 @@ function SessionsList({ p }: { p: SidebarProps }) {
         }
       >
         {p.projects.map((proj) => {
-          const items = sorted.filter((r) => r.projectId === proj.id && !r.pinnedAt);
+          const items = sorted.filter((r) => r.projectId === proj.id && !r.pinnedAt && !inNeeds.has(r.sid));
           // The new session about to go in it (its "New session here"): drawn in it, so it's plain where it will go (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
           const draft = p.draftProject === proj.id;
           const open = !proj.collapsed || draft;
@@ -1058,25 +1094,29 @@ function SessionsList({ p }: { p: SidebarProps }) {
       <Group
         label={
           <>
-            <RepoTile name={g.name} />
-            <span className="truncate normal-case tracking-normal">{g.name}</span>
+            {/* A coding app's scratch folder by a person's name for it, not "scratch-2026-11-03-c0317b" (Arun's e2e pass, 2026-11-04). */}
+            <RepoTile name={folderName({ name: g.name, path: "" })} />
+            <span className="truncate normal-case tracking-normal">{folderName({ name: g.name, path: "" })}</span>
           </>
         }
         open={isOpen(id)}
         onToggle={() => toggle(id)}
         count={g.chats.length}
-        status={<GroupState needs={g.chats.filter((c) => needsSids.has(c.sid)).length} working={g.chats.filter((c) => p.attention.working.has(c.sid)).length} />}
+        status={<GroupState working={g.chats.filter((c) => p.attention.working.has(c.sid)).length} />}
         drag={dragSection(id)}
       >
         {byDay(g.chats, now).map((x) => (typeof x === "string" ? <div key={`day:${x}`} className="sb-day">{x}</div> : row(x)))}
       </Group>,
     );
   }
+  // Sessions there are, in a folder's group or waiting in Needs you: an empty Recent is then left out, never "Sessions you start or
+  // join appear here" under three of them (audit e2e, Arun 2026-11-04).
+  const elsewhere = repoGroups.length > 0 || inNeeds.size > 0;
   blocks.set(
     "recent",
-    <div className={`rounded-lg ${drop === "__recent" ? "bg-sidebar-accent ring-1 ring-sidebar-ring" : ""}`} hidden={unfiled.length === 0 && repoGroups.length > 0 && !drop && !dragging} {...dropZone(null)}>
-      <Group label="Recent" open={isOpen("recent")} onToggle={() => toggle("recent")} count={unfiled.length || undefined} status={<GroupState needs={unfiled.filter((c) => needsSids.has(c.sid)).length} working={unfiled.filter((c) => p.attention.working.has(c.sid)).length} />} drag={dragSection("recent")}>
-        {unfiled.length === 0 && repoGroups.length === 0 ? <p className="px-2 py-1 text-xs text-[var(--text-muted)]">Sessions you start or join appear here.</p> : byDay(unfiled, now).map((x) => (typeof x === "string" ? <div key={`day:${x}`} className="sb-day">{x}</div> : row(x)))}
+    <div className={`rounded-lg ${drop === "__recent" ? "bg-sidebar-accent ring-1 ring-sidebar-ring" : ""}`} hidden={unfiled.length === 0 && elsewhere && !drop && !dragging} {...dropZone(null)}>
+      <Group label="Recent" open={isOpen("recent")} onToggle={() => toggle("recent")} count={unfiled.length || undefined} status={<GroupState working={unfiled.filter((c) => p.attention.working.has(c.sid)).length} />} drag={dragSection("recent")}>
+        {unfiled.length === 0 && !elsewhere ? <p className="px-2 py-1 text-xs text-[var(--text-muted)]">Sessions you start or join appear here.</p> : byDay(unfiled, now).map((x) => (typeof x === "string" ? <div key={`day:${x}`} className="sb-day">{x}</div> : row(x)))}
       </Group>
     </div>,
   );
@@ -1092,7 +1132,7 @@ function SessionsList({ p }: { p: SidebarProps }) {
   };
 
   // The Team tab (Teammates.tsx): the sidebar is the team, not the sessions.
-  if (teamTab) return <div className="sb-scroll flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-1"><SidebarTeammates identity={p.identityForApi} onOpen={p.onOpen} activeSid={p.activeSid} needs={p.attention.items} /></div>;
+  if (teamTab) return <div className="sb-scroll flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-1"><SidebarTeammates identity={p.identityForApi} onOpen={p.onOpen} activeSid={p.activeSid} needs={p.attention.items} marks={p.attention.needs} /></div>;
   return (
     <div
       ref={flip}
@@ -1128,7 +1168,9 @@ function SessionsList({ p }: { p: SidebarProps }) {
         <Group
           label={
             <>
-              <span className="dass-dot size-2" data-state="needs" />
+              <span className="sb-needs-icon" aria-hidden>
+                <Icon name="clock" size={13} />
+              </span>
               Needs you
             </>
           }
@@ -1145,7 +1187,7 @@ function SessionsList({ p }: { p: SidebarProps }) {
           {needing.map((r) => row(r, true))}
         </Group>
       )}
-      {pinned.length > 0 && (
+      {pinnedShown.length > 0 && (
         <Group
           label={
             <>
@@ -1155,10 +1197,10 @@ function SessionsList({ p }: { p: SidebarProps }) {
           }
           open={isOpen("pinned")}
           onToggle={() => toggle("pinned")}
-          count={pinned.length}
-          status={<GroupState needs={pinned.filter((c) => needsSids.has(c.sid)).length} working={pinned.filter((c) => p.attention.working.has(c.sid)).length} />}
+          count={pinnedShown.length}
+          status={<GroupState working={pinnedShown.filter((c) => p.attention.working.has(c.sid)).length} />}
         >
-          {pinned.map((r) => row(r))}
+          {pinnedShown.map((r) => row(r))}
         </Group>
       )}
       {ids.map((id) => (
@@ -1230,7 +1272,10 @@ function ChatRow({
   quiet,
   since,
   prs = [],
+  waiting = false,
 }: {
+  /** The Needs you page lists something of it that isn't put off (Attention.tsx needSids): its ring says so, and only then. */
+  waiting?: boolean;
   /** The pull requests it opened (projection.ts prs): a mark on its row, each on hover (SessionPrs.tsx). */
   prs?: string[];
   /** Asleep (snoozed or settled): this in place of what is going on, since nothing is. */
@@ -1262,10 +1307,10 @@ function ChatRow({
   const now = useNow(30_000);
   const quietRing = working && !needs && crewQuiet(crew, now) && working.heardAt ? quietFor(working.heardAt, now) : undefined;
   const who = preview ? (preview.by === me ? "You" : preview.by.split(/\s+/)[0]) : "";
-  const short = !needs && stoppedShort(crew, working);
-  const state = needs || short ? "needs" : working ? "working" : "idle";
+  const short = !needs && waiting && stoppedShort(crew, working);
+  const state = needs || short || (waiting && !working) ? "needs" : working ? "working" : "idle";
   // Its agents finished while you were elsewhere, and you haven't opened it since (unread.ts).
-  const unread = useUnread().has(r.sid) && !active && !needs && !short && !working;
+  const unread = useUnread().has(r.sid) && !active && state === "idle";
   // The branch chip stays on the row (Arun, 2026-11-03: "keep the branch thing too"), with the room the agents' marks had, so
   // it is no longer cut to "2026-1…".
   const branchChip = true as boolean;
@@ -1315,23 +1360,29 @@ function ChatRow({
     >
       {ctx && <ContextMenu at={ctx} items={menu} onClose={() => setCtx(null)} />}
       <div className="flex min-w-0 items-center gap-2">
-        {renaming ? <InlineEdit value={label} onSave={onRename} onCancel={onCancelRename} /> : <span className="dass-row-title">{label}{unread && <span className="sr-only">, new since you looked</span>}</span>}
+        {/* New since you looked, or marked unread: an accent dot in the row's margin and its name in semibold, as a mail list does
+            (audit CODE-8, Arun 2026-11-04: "Mark as unread" had changed nothing to see). */}
+        {unread && !renaming && <span className="sb-unread-dot" aria-hidden="true" />}
+        {/* The whole title line up to the time, opened at the name's start with the caret at its end (audit CODE-25, Arun 2026-11-04:
+            a 135px field in a 260px row, scrolled to "tor the pricing table"). */}
+        {renaming ? <InlineEdit className="sb-rename" value={label} onSave={onRename} onCancel={onCancelRename} caretAtEnd /> : <span className="dass-row-title">{label}{unread && <span className="sr-only">, new since you looked</span>}</span>}
         {!renaming && <SessionRing state={state} crew={crew} working={working} unread={unread} stopped={needs?.kind === "stopped"} quiet={quietRing} title={needs ? `${needs.kind === "stopped" ? "" : "Needs you: "}${shortPaths(needs.detail ?? needs.text)}` : working ? `Working now: ${working.what}` : undefined} />}
         {/* No count beside the ring (Arun, 2026-11-03: "get rid of the 3 next to the ring"): the line under the name says "3 working". */}
-        <span className="sb-row-gap" aria-hidden="true" />
+        {!renaming && <span className="sb-row-gap" aria-hidden="true" />}
         {!compact && <SessionPrBadge urls={prs} />}
         {/* How long it has stood as it does (Herdr's per-row timer, 2026-11-01): waiting on you, working, or finished; else when
             you last opened it. Said in full on hover. */}
-        {!renaming && (
+        {/* The time and, on hover, the row's actions share one slot of a fixed width, so the name never changes length as the
+            pointer passes (Arun, 2026-11-04: "the tab shouldnt change in size"). */}
+        {(
+        <span className="sb-row-end">
           <span className="dass-row-time shrink-0 text-[12px] tabular-nums text-[var(--text-muted)]" title={since && !quiet ? stateFor(needs || short ? "needs" : working ? "working" : "done", relTime(since)) : `Opened ${relTime(r.openedAt) === "now" ? "just now" : `${relTime(r.openedAt)} ago`}`}>
             {relTime(since && !quiet ? since : r.openedAt)}
           </span>
-        )}
-        {!renaming && (
-          <span className="dass-row-act -my-1 shrink-0">
+          {!renaming && <span className="dass-row-act shrink-0">
             <button
               type="button"
-              className="dass-rail-btn size-6"
+              className="icon-btn tiny sb-row-pin"
               data-pinned={!!r.pinnedAt || undefined}
               aria-label={r.pinnedAt ? `Unpin ${label}` : `Pin ${label} to the top`}
               aria-pressed={!!r.pinnedAt}
@@ -1341,15 +1392,17 @@ function ChatRow({
               <Icon name="pin" size={13} />
             </button>
             <MenuButton label={`Actions for ${label}`} items={menu} onOpenChange={setMenuOpen} />
-          </span>
+          </span>}
+        </span>
         )}
       </div>
-      {!renaming && (
+      {(
         <div className="dass-row-sub">
           {quiet ? (
             <span className="truncate text-[var(--text-muted)]">{quiet}</span>
           ) : needs ? (
-            <span className="truncate text-[var(--ink)]">{withCode(shortPaths(isRawError(needs.text) ? (needs.kind === "stopped" ? stoppedLine(needs.text) : "Needs you") : needs.text))}</span>
+            // A stopped run says who stopped and how, from what happened (audit CODE-4: "Claude Code stopped with an error").
+            <span className="truncate text-[var(--ink)]">{withCode(shortPaths(needs.kind === "stopped" ? stoppedRow(stopper(crew, needs), needs.detail ?? needs.text) : isRawError(needs.text) ? "Needs you" : needs.text))}</span>
           ) : compact && !short ? null : crew ? (
             <CrewLine crew={crew} now={now} />
           ) : summary ? (
@@ -1380,10 +1433,11 @@ function ChatRow({
           // at work stand out (Arun, 2026-10-27: "take some inspo from like t3, synara, orca"). Its branch or your role, if any, stay.
           null}
           {/* The branch its agents are on, as the other tools' rows carry it (Arun, 2026-10-25): where the work lands. */}
-          {branchChip && !compact && !quiet && r.repos?.find((u) => u.branch)?.branch && (
-            <span className="dass-row-branch" title={`On branch ${r.repos.find((u) => u.branch)!.branch}`}>
-              <Icon name="gitBranch" size={10} />
-              <span className="truncate">{r.repos.find((u) => u.branch)!.branch!.split("/").pop()}</span>
+          {/* Only a branch somebody named, as plain words after the status ("· dev"): Friday's own generated ones say nothing a
+              person chose, and as a boxed mono tag they were the loudest thing in the row (audit CODE-15 A, Arun 2026-11-04). */}
+          {branchChip && !compact && !quiet && namedBranch(r.repos?.find((u) => u.branch)?.branch) && (
+            <span className="sb-row-branch" title={`On branch ${r.repos!.find((u) => u.branch)!.branch}`}>
+              · {r.repos!.find((u) => u.branch)!.branch}
             </span>
           )}
           {r.role !== "owner" && (

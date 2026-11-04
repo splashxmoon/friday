@@ -1378,8 +1378,14 @@ export class AgentMesh {
     if (!r.ok) return;
     if (ask.task) return this.reportToLead(sid, ask, urgent);
     if (!asker) return;
-    const a = meshOf(await this.store.state(sid)).asks[ask.id];
-    if (a?.unwaitedSeq === undefined || a.unwaitedSeq > r.seq) return;
+    const now = await this.store.state(sid);
+    const a = meshOf(now).asks[ask.id];
+    // Still waiting only while the run that asked is the one going: an ask lives in its run. One cut off by a crash or a stop never
+    // said it stopped waiting, and its answer, logged after the restart, never reached the asker (2026-11-04 soak: Sol answered
+    // Ivy, and Ivy's check_messages said "Nothing new" for 25 minutes).
+    const run = runOf(now, ask.fromLane);
+    const waiting = run.status === "running" && run.sinceSeq <= ask.seq;
+    if (a?.unwaitedSeq === undefined ? waiting : a.unwaitedSeq > r.seq) return;
     // A report starts a chain rather than lengthening one, as the board's do (Arun, 2026-10-28: the hop limit stopped a night's work
     // at its fourth report).
     const mesh: MeshNote = { id: randomBytes(5).toString("hex"), kind: "reply", re: ask.id, ...(ask.task ? { ofTask: true } : {}), fromLane: ask.toLane, fromName: ask.toName, toName: ask.fromName, hop: 1, by: ask.by };
@@ -2128,7 +2134,11 @@ export class AgentMesh {
       .filter(Boolean)
       .join("\n\n")
       .slice(0, MAX_TEXT * 2);
-    const mesh: MeshNote = { id: randomBytes(5).toString("hex"), kind: "reply", ofTask: true, batch: busy ? "early" : "done", fromLane: b.fromLane, fromName: "The board", toName: b.fromName, hop: 1, by: null };
+    // Whose work the report is: whoever's the board was, as when it was posted (a person's board Friday posted, else the person
+    // behind the run that posted it). With nobody, the lead reading it couldn't message its own session's Codex on its owner's
+    // plan ("takes arundass's work only"), 189 times in a 50-minute soak (2026-11-04).
+    const by = b.by ?? behindRun(state, events.filter((e) => e.seq < b.seq), b.fromLane).person;
+    const mesh: MeshNote = { id: randomBytes(5).toString("hex"), kind: "reply", ofTask: true, batch: busy ? "early" : "done", fromLane: b.fromLane, fromName: "The board", toName: b.fromName, hop: 1, by };
     let more = "";
     if (!busy) more = (await this.teamDone?.(sid, b.fromLane).catch(() => null)) ?? "";
     const sent = await this.store.append(sid, agentActor("The board"), { type: "instruction", text: more ? `${text}\n\n${more}` : text, interrupt: false, mesh }, { lane: b.fromLane });

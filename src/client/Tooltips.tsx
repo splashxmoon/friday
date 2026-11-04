@@ -132,7 +132,21 @@ export function Tooltips() {
       current = el;
       show(el, true);
     };
+    // A resize handle being dragged says nothing: its title is the browser's own tooltip outside the scope above (the sidebar's
+    // edge), and it slid along with the pointer for the whole drag (Arun, 2026-11-04: "this glides as a resize the side bar it
+    // shouldnt do that"). Taken off as the drag starts, put back as it ends.
+    const grip = (e: PointerEvent) => {
+      const g = (e.target as Element | null)?.closest?.('.sb-resize, .resizer, .split-grip, [role="separator"]') as HTMLElement | null;
+      const t = g?.getAttribute("title") || g?.getAttribute("data-tip");
+      if (!g || !t) return;
+      g.removeAttribute("title");
+      g.removeAttribute("data-tip");
+      const back = () => (g.setAttribute("title", t), removeEventListener("pointerup", back, true), removeEventListener("pointercancel", back, true));
+      addEventListener("pointerup", back, true);
+      addEventListener("pointercancel", back, true);
+    };
     document.addEventListener("pointerover", over);
+    document.addEventListener("pointerdown", grip, true);
     document.addEventListener("pointerdown", hide, true);
     document.addEventListener("focusin", focus);
     document.addEventListener("focusout", hide);
@@ -147,6 +161,7 @@ export function Tooltips() {
     return () => {
       window.clearTimeout(timer);
       document.removeEventListener("pointerover", over);
+      document.removeEventListener("pointerdown", grip, true);
       document.removeEventListener("pointerdown", hide, true);
       document.removeEventListener("focusin", focus);
       document.removeEventListener("focusout", hide);

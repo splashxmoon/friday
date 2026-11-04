@@ -1,5 +1,4 @@
 import { Icon } from "./icons.js";
-import { isLocal } from "./edition.js";
 import { CodeCrewToggle } from "./WorkMode.js";
 
 /**
@@ -24,7 +23,8 @@ export function WindowNav({ open, onToggle, what = "sessions", working, needs }:
       <button type="button" aria-label="Search" title={`Search (${find})`} onClick={() => window.dispatchEvent(new Event("friday:search"))}>
         <Icon name="search" size={16} />
       </button>
-      {isLocal() && window.fridayDesktop && <CodeCrewToggle className="in-bar" working={working} needs={needs} />}
+      {/* Both editions (Arun, 2026-11-04: "add this for production btw"). */}
+      {window.fridayDesktop && <CodeCrewToggle className="in-bar" working={working} needs={needs} />}
     </div>
   );
 }

@@ -35,8 +35,9 @@ html.desktop .wn-overlay { padding-top: 52px; }
 /* One height for every step (Arun, 2026-11-04: "make the onboarding cards all the same height… instead of jumping around in
    size"): the hero and the foot fixed, the step between them, and a step longer than its room (the tools, a sign-in or GitHub's
    code opening) scrolls inside, under its title. */
-.wn.ob { display: flex; flex-direction: column; height: min(536px, calc(100dvh - 48px)); }
-html.desktop .wn.ob { height: min(536px, calc(100dvh - 76px)); }
+/* As tall as its step, up to that size (audit REST-6): Setup.tsx eases the height between steps. */
+.wn.ob { display: flex; flex-direction: column; max-height: min(536px, calc(100dvh - 48px)); transition: height .18s var(--ease-out, ease-out); }
+html.desktop .wn.ob { max-height: min(536px, calc(100dvh - 76px)); }
 /* The tools' step gives its hero's room to its list; the others' rows take a little more air, so no step ends in a gap. */
 .wn.ob > .ob-hero-tools { height: 120px; }
 .ob-list .ob-row { min-height: 56px; }

@@ -1,5 +1,6 @@
 import { StateRing } from "./presence.js";
 import { isLocal, ownModel, planLimits, type SessionPlan } from "./edition.js";
+import { sessionComputer, useSessionMachine } from "./local.js";
 import { openInPreview } from "./previewBus.js";
 import { pictureSession } from "./LiveBlock.js";
 import { WorkBar, WorkRail } from "./WorkRail.js";
@@ -49,7 +50,7 @@ import { md } from "./markdown.js";
 /** This session's workspace, Solo or Team (Team.tsx): the hosted Friday's question. Every session in the local edition is Solo. */
 const sessionWorkspace: { useSessionPlan: (sid: string, invite?: string, member?: string) => SessionPlan | null } = { useSessionPlan: () => null };
 import type { Identity, RecentSession, RepoUse } from "./storage.js";
-import { Check, ActionNote, InlineEdit, MenuButton, Segmented, SessionSkeleton, ShownText, Switch, inBand, isTyping, useConfirm, useDismiss, type MenuItem } from "./ui.js";
+import { Check, ActionNote, InlineEdit, MenuButton, Segmented, SessionSkeleton, ShownText, Switch, isTyping, onBand, useConfirm, useDismiss, type MenuItem } from "./ui.js";
 import { useSession, type Send } from "./useSession.js";
 import type { Focus } from "../focus.js";
 import { CLASS_LABEL, COMMAND_CLASSES, type CommandClass } from "../command-class.js";
@@ -65,6 +66,7 @@ import { clearDiffRequest, readDiffRequest, showDiffSoon } from "./focusDiff.js"
 import { HandoverDialog } from "./Handover.js";
 import { StatusBar, useSessionLayout } from "./StatusBar.js";
 import { EnvironmentButton } from "./Environment.js";
+import { folderName } from "./Workspace.js";
 
 export interface DocLayout {
   open: boolean;
@@ -114,6 +116,8 @@ export function SessionView({
   connections: McpPublic[];
 }) {
   const s = useSession(sid, invite, identity);
+  // Where this session's coding tools run, among your computers (open-source edition): what it asks of a computer goes there.
+  useSessionMachine(isLocal() && s.state && !s.state.options.team ? sessionComputer(s.state.engines) : null);
   /** The latest state, for listeners added once. */
   const stateRef = useRef(s.state);
   stateRef.current = s.state;
@@ -1490,8 +1494,6 @@ function TopBar({
     <>
       {strip}
       <div className="tb-right">
-        {/* Other sessions waiting on you, as a button here rather than toasts over the chat and its panels (see WaitingOnYou). */}
-        <span id="wy-slot" />
         {/* Who is here, and the people panel, are Team's: on Solo you work alone (sharing to viewers is to be worked out). */}
         {/* On Solo nobody else works here, but a watch link can bring viewers: a quiet eye and a count, only while somebody is watching. */}
         {/* People watching through the viewer link without an account are counted here too, on every plan, as "someone watching". */}
@@ -1574,13 +1576,16 @@ function TopBar({
   // header it always was.
   const [band, setBand] = useState<{ left: HTMLElement; right: HTMLElement } | null>(null);
   useLayoutEffect(() => {
-    const left = document.getElementById("band-left");
-    const right = document.getElementById("band-slot");
-    const banded = inBand();
-    setBand(banded && left && right ? { left, right } : null);
-    // Tells the window's stylesheet where the page should start while this header is up there.
-    if (banded) document.documentElement.dataset.band = "session";
+    // When the band comes (ui.tsx onBand): after a reload the window's stylesheet arrives after this has opened.
+    const off = onBand(() => {
+      const left = document.getElementById("band-left");
+      const right = document.getElementById("band-slot");
+      setBand(left && right ? { left, right } : null);
+      // Tells the window's stylesheet where the page should start while this header is up there.
+      document.documentElement.dataset.band = "session";
+    });
     return () => {
+      off();
       delete document.documentElement.dataset.band;
     };
   }, []);
@@ -1717,7 +1722,9 @@ export function reposOf(state: SessionState | null | undefined): RepoUse[] {
     const name = base.replace(/-[0-9a-f]{8}$/, "");
     const had = by.get(name);
     // The main lane's branch is the one to show; a lane's own worktree branch is a detail of that lane.
-    if (!had || lane === MAIN_LANE) by.set(name, { name, branch: lane === MAIN_LANE || !had ? e.branch : had.branch, live: !!had?.live || e.online });
+    // Made by Friday for the session, when nobody picked a folder: ~/Friday/Projects/<what was asked> (audit CODE-20).
+    const made = /[\\/]Friday[\\/]Projects[\\/][^\\/]+[\\/]?$/.test(e.cwd);
+    if (!had || lane === MAIN_LANE) by.set(name, { name, branch: lane === MAIN_LANE || !had ? e.branch : had.branch, live: !!had?.live || e.online, ...(made || had?.made ? { made: true } : {}) });
     else had.live = had.live || e.online;
   }
   return [...by.values()];
@@ -1758,7 +1765,10 @@ function repoOf(state: SessionState): { name: string; branch?: string; path: str
   const lane = state.engines[MAIN_LANE] ? MAIN_LANE : (Object.keys(state.engines)[0] ?? MAIN_LANE);
   const e = state.engines[lane];
   if (!e?.cwd) return null;
-  return { name: (e.cwd.split(/[\\/]/).filter(Boolean).pop() ?? e.cwd).replace(/-[0-9a-f]{8}$/, ""), branch: e.branch, path: e.cwd, host: e.hostName, lane };
+  // A coding app's scratch folder by a person's name for it, "Scratch folder", not its generated one (Arun's e2e pass, 2026-11-04:
+  // a continued conversation's footer said "scratch-2026-11-03-c0317b").
+  const base = (e.cwd.split(/[\\/]/).filter(Boolean).pop() ?? e.cwd).replace(/-[0-9a-f]{8}$/, "");
+  return { name: folderName({ name: base, path: e.cwd }), branch: e.branch, path: e.cwd, host: e.hostName, lane };
 }
 
 /** The session's settings, as the second tab of the People panel: one button for the room and how it runs. */

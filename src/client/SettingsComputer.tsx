@@ -37,7 +37,7 @@ export function ComputerSection({ identity }: { identity: Identity }) {
       <Facts
         className="px-0.5"
         items={[
-          { term: "What runs here", detail: "Your own Claude Code, Codex and Cursor, under your own logins. Friday never sees their keys or meters them." },
+          { term: "What runs here", detail: "Your own coding tools, under your own logins. Friday never sees their keys or meters them." },
           ...(isLocal() ? [] : [{ term: "Friday's agent", detail: "Works in folders this computer lends it, with the files, terminal and preview shown in the session." }]),
           {
             term: desktop ? "This app" : "In a browser",

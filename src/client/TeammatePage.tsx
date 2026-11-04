@@ -38,7 +38,7 @@ const tabs = new Map<string, MateTab>();
 const watchers = new Set<() => void>();
 let tabsVersion = 0;
 export const setMateTab = (lane: string, tab: MateTab) => (tabs.set(lane, tab), tabsVersion++, watchers.forEach((f) => f()));
-const useMateTab = (lane: string): MateTab => {
+export const useMateTab = (lane: string): MateTab => {
   useSyncExternalStore(
     (f) => (watchers.add(f), () => void watchers.delete(f)),
     () => tabsVersion,
@@ -77,7 +77,8 @@ export function TeammatePage({ lane, identity, notify, branch }: { lane: string;
         <div className="tm-head-text">
           <h2 className="tm-head-name">
             {m.name}
-            {lead && <span className="tm-head-lead">Leads the crew</span>}
+            {/* "Lead", not the role's own first words again (audit CREW-25). */}
+            {lead && <span className="tm-head-lead">Lead</span>}
           </h2>
           {/* The live line under the name, in body size (DIRECTION.md §8), with how long it has been at it. */}
           <span className={`tm-head-status s-${s.state}`}>
@@ -158,10 +159,10 @@ export function TeammatePage({ lane, identity, notify, branch }: { lane: string;
               <small>notes</small>
             </span>
             {foldersOf(m).map((d, i) => (
-              <span key={d} className="tm-chip" title={d}>
+              // The repo by its name; its branch on hover, not a generated name as a code chip (audit CREW-19, 2026-11-04).
+              <span key={d} className="tm-chip" title={i === 0 && branch ? `${d}\nOn ${branch}` : d}>
                 <FolderGit2Icon className="size-3" />
                 <b>{base(d)}</b>
-                {i === 0 && branch && <span className="tm-chip-branch">{branch}</span>}
                 {identity && mine && (
                   <button type="button" aria-label={`Stop ${m.name} working in ${short(d)}`} title="Take it away" onClick={() => void api(identity, `/api/teammates/${m.id}`, { method: "PATCH", body: JSON.stringify({ projects: foldersOf(m).filter((x) => x !== d) }), headers: { "Content-Type": "application/json" } }).then(() => refreshTeam(identity)).catch(() => {})}>
                     <XIcon className="size-3" />
@@ -194,10 +195,8 @@ export function TeammatePage({ lane, identity, notify, branch }: { lane: string;
           {tab === "skills" && <SkillsPanel mate={m} />}
           {tab === "memory" && mine && <MemoryEditor identity={identity} id={m.id} name={m.name} />}
           {tab === "settings" && mine && (
-            <>
-              <TeammateDialog inline identity={identity} editing={m} onClose={() => {}} />
-              {(m.checkins?.length ?? 0) > 0 && <p className="tm-sub tm-panel-note">{m.checkins!.map((c) => `${describeCheckIn(c)}: ${c.text}`).join(" · ")}</p>}
-            </>
+            // The form alone: its Check-ins say them, and a lowercase summary under Save said them again (audit CREW-30).
+            <TeammateDialog inline identity={identity} editing={m} onClose={() => {}} />
           )}
         </section>
       )}

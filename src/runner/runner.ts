@@ -1,6 +1,7 @@
 import { realpathSync } from "node:fs";
 import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { GO_AHEAD_WORDS, guardTool, type GoAhead, type GuardPlace, type Verdict } from "../guardrails.js";
+import { errorHead } from "../error-head.js";
 import { createHash, randomUUID } from "node:crypto";
 import { homedir, hostname, tmpdir } from "node:os";
 import path from "node:path";
@@ -1790,7 +1791,8 @@ ${prompt}`;
       this.send({ kind: "event", body: { type: "engine.approval", ...this.asked } });
     }
     this.send({ kind: "turn.end", id: m.id, outcome, ...(error ? { error } : {}) });
-    this.log(`turn ${m.id} ${outcome}${error ? `: ${error}` : ""}`);
+    // One line: the tool's whole report (a stack trace) is in the session's feed; app.log had it in full for every failed turn.
+    this.log(`turn ${m.id} ${outcome}${error ? `: ${errorHead(error)}` : ""}`);
     this.shareLimits();
     this.contextAfterTurn();
     // The next turn's process, started now as that turn will most likely start it (this one's model, effort and mode, the

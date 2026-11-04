@@ -8,7 +8,7 @@
  */
 import { leaving } from "./leave-guard.js";
 import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
-import { ArrowUpIcon, CheckIcon, ChevronRightIcon, CopyIcon, EllipsisIcon, EyeIcon, HandIcon, ZapIcon, MessageSquareReplyIcon, UsersIcon, Settings2Icon, FolderGit2Icon, PlusIcon, ShuffleIcon, TriangleAlertIcon, UserPlusIcon, XIcon } from "lucide-react";
+import { ArrowUpIcon, CheckIcon, ChevronRightIcon, CopyIcon, EllipsisIcon, EyeIcon, HandIcon, ZapIcon, MessageSquareIcon, MessageSquareReplyIcon, UsersIcon, Settings2Icon, FolderGit2Icon, PlusIcon, ShuffleIcon, TriangleAlertIcon, UserPlusIcon, XIcon } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,6 +34,7 @@ import { ContextMenu, MenuButton, Picker, relTime, useConfirm, type MenuItem } f
 import { useComputers } from "./Computers.js";
 import type { Identity, RecentSession } from "./storage.js";
 import type { Attention } from "../attention.js";
+import type { NeedMark } from "../needs-rank.js";
 import { distinctLook, teamColour as mascotColour } from "./teammate-block.js";
 import { BlobFace, Crown, type Eyes } from "./teammate-face.js";
 import { Initials, initialsFaces } from "./teammate-initials.js";
@@ -42,7 +43,7 @@ import { MessageResponse } from "@/components/ai-elements/message";
 import { ANSWER, mediaText } from "./AnswerParts.js";
 import { EVERYONE, mentionsIn, namedIn, namesEveryone } from "./teammate-mentions.js";
 import { threadsOf, type ThreadState } from "./team-threads.js";
-import { gist, isFridayNote, plainLine, withoutFridayNotes } from "./team-room.js";
+import { gist, isFridayNote, plainLine, splitQuote, withoutFridayNotes } from "./team-room.js";
 import { Avatar } from "./icons.js";
 import { createPortal } from "react-dom";
 import { ACCESS, backupFor, sayMate, type MateSays } from "./team-status.js";
@@ -50,12 +51,11 @@ import { boardTitle, plainError, readSince, type Away } from "./team-api.js";
 import { SinceYouLeft } from "./TeamBrief.js";
 import { prefillComposer } from "./RunReview.js";
 import { notificationsOn } from "./prefs.js";
-import { TeammatePage } from "./TeammatePage.js";
+import { TeammatePage, useMateTab } from "./TeammatePage.js";
 import { BudgetFields } from "./TeammateBudget.js";
 import type { MateBudget, RunBudget } from "../team-budget.js";
 import { SaveAsSkill } from "./CrewSkills.js";
 import "./teammates.css";
-import { Shine } from "./shine.js";
 
 /** A team's size (teammates.ts MAX_TEAMMATES). */
 const MAX = 12;
@@ -166,10 +166,12 @@ export function matesIn(sid: string): { lane: string; m: TeammateView }[] {
 const laneRunsIn = new Map<string, Record<string, "working" | "waiting">>();
 
 /** The runs of a team chat as it is drawn (its laneRuns), kept for how its teammates stand there; a change re-renders what reads it. */
-export function noteLaneRuns(sid: string, runs: Record<string, { status: string }>): void {
+export function noteLaneRuns(sid: string, runs: Record<string, { status: string }>, waits: (lane: string) => boolean = () => false): void {
   const now: Record<string, "working" | "waiting"> = {};
   for (const [lane, r] of Object.entries(runs)) {
-    if (r.status === "running") now[lane] = "working";
+    // Mid-turn but held on the person (a command to approve, a question put to them): waiting, never working, so no working line,
+    // shimmer or stop says otherwise (audit CREW-2, 2026-11-04).
+    if (r.status === "running") now[lane] = waits(lane) ? "waiting" : "working";
     else if (r.status === "waiting_for_human") now[lane] = "waiting";
   }
   if (JSON.stringify(laneRunsIn.get(sid) ?? null) === JSON.stringify(now)) return;
@@ -410,7 +412,8 @@ export function teammateAgents(sid: string): { id: string; name: string; mark: R
     ),
     // How it stands when that is anything but ready (out of usage, offline, at work), so who to ask is clear as it is picked
     // (Arun, 2026-10-28: the critique's "the @ menu shows status for teammates not ready"); its role otherwise.
-    hint: ((s) => (s.state !== "idle" || s.line !== "Idle" ? s.line : m.role ? m.role.split("\n")[0]! : toolName(m.tool)))(mateStatus(m, { sid, lane: m.lane })).slice(0, 56),
+    // Its role's first sentence, whole, never cut mid-word (audit CREW-32, 2026-11-04); a status line is cut with an ellipsis.
+    hint: ((s) => (s.state !== "idle" || s.line !== "Idle" ? s.line : m.role ? firstSentence(m.role) : toolName(m.tool)))(mateStatus(m, { sid, lane: m.lane })),
     // In its state's colour, out of usage amber, as everywhere else (2026-10-28 QA: every status grey here).
     tone: mateStatus(m, { sid, lane: m.lane }).state,
   }))];
@@ -627,6 +630,15 @@ export function MentionBackdrop({ sid, text, textarea }: { sid: string; text: st
 /** A sent message's words with each @Name in it as its teammate's pill, as it looked in the box (MentionBackdrop). */
 export function MentionText({ sid, text }: { sid: string; text: string }) {
   useTeamNow();
+  // A quote it starts with: drawn with a bar at its left, the words after it under it, not as "> " lines (audit CREW-21).
+  const q = splitQuote(text);
+  if (q)
+    return (
+      <span className="tm-sent-text">
+        <span className="tm-quote">{q.quote}</span>
+        {q.rest && <MentionText sid={sid} text={q.rest} />}
+      </span>
+    );
   // Who is in the chat now, then the rest of the team: a teammate since taken out of the room keeps its pill in what was said
   // to it there (2026-10-27 audit).
   const now = here(sid);
@@ -1005,16 +1017,38 @@ export function TeamWorking({ sid }: { sid: string }) {
         return (
           <span key={who[0]!.m.id} className="tm-wait-group">
             {i > 0 && <span className="tm-wait-sep" aria-hidden="true">·</span>}
-            {who.map(({ lane, m }, j) => (
-              <button key={m.id} type="button" className="tm-wait-one" onClick={() => focusAgent(sid, lane)} title={`${m.name}: ${line}. Open ${m.name}'s chat`}>
-                <Face seed={m.look ?? m.name} size={14} />
-                <b>
-                  {m.name}
-                  {who.length > 1 && j < who.length - 1 && <span className="tm-wait-and">{j === who.length - 2 ? " and" : ","}</span>}
-                </b>
-              </button>
-            ))}
-            <Shine className="tm-wait-line">{who.length > 1 ? plural(line) : lower(line)}</Shine>
+            {/* More than three doing the same thing: their faces side by side and how many, not eight names run into each other
+                (Arun, 2026-11-04: a crew of eight at work). Each face still opens that teammate's chat. */}
+            {who.length > 3 ? (
+              <span className="tm-wait-many">
+                <span className="tm-wait-faces">
+                  {who.map(({ lane, m }) => (
+                    <button key={m.id} type="button" className="tm-wait-face" onClick={() => focusAgent(sid, lane)} title={`${m.name}: ${line}. Open ${m.name}'s chat`} aria-label={`Open ${m.name}'s chat`}>
+                      <Face seed={m.look ?? m.name} size={14} />
+                    </button>
+                  ))}
+                </span>
+                <b>{who.length} teammates</b>
+              </span>
+            ) : (
+              // Their faces side by side, then their names, then what they do: still, no shimmer (audit CREW-33, 2026-11-04).
+              <>
+                <span className="tm-wait-stack" aria-hidden="true">
+                  {who.map(({ m }) => (
+                    <Face key={m.id} seed={m.look ?? m.name} size={14} />
+                  ))}
+                </span>
+                {who.map(({ lane, m }, j) => (
+                  <button key={m.id} type="button" className="tm-wait-one" onClick={() => focusAgent(sid, lane)} title={`${m.name}: ${line}. Open ${m.name}'s chat`}>
+                    <b>
+                      {m.name}
+                      {who.length > 1 && j < who.length - 1 && <span className="tm-wait-and">{j === who.length - 2 ? " and" : ","}</span>}
+                    </b>
+                  </button>
+                ))}
+              </>
+            )}
+            <span className="tm-wait-line">{who.length > 1 ? plural(line) : lower(line)}</span>
             {since !== null && <span className="tm-wait-time">{elapsed(since, now)}</span>}
           </span>
         );
@@ -1024,10 +1058,13 @@ export function TeamWorking({ sid }: { sid: string }) {
 }
 
 /** A doing said of several: "Writing its answer" → "are writing their answers", "Running the tests" → "are running the tests". */
-const plural = (line: string) => (line === "Writing its answer" ? "are writing their answers" : /^[A-Z][a-z]+ing\b/.test(line) ? `are ${line[0]!.toLowerCase()}${line.slice(1).replace(/\bits\b/g, "their")}` : line);
+const plural = (line: string) => (/^[A-Z][a-z]+ing\b/.test(shortDoing(line)) ? `are ${shortDoing(line)[0]!.toLowerCase()}${shortDoing(line).slice(1).replace(/\bits\b/g, "their")}` : line);
+
+/** The generic doings said short: "Writing its answer" is "writing", "Thinking about what to do next" is "thinking" (audit CREW-33). */
+const shortDoing = (line: string) => (line === "Writing its answer" ? "Writing" : /^Thinking about what to do next\b/.test(line) ? "Thinking" : line);
 
 /** "Writing the notes" read after a name: "Nova writing the notes" → "Nova is writing the notes"; a line that isn't a doing stays. */
-const lower = (line: string) => (/^[A-Z][a-z]+ing\b/.test(line) ? `is ${line[0]!.toLowerCase()}${line.slice(1)}` : line);
+const lower = (line: string) => ((l) => (/^[A-Z][a-z]+ing\b/.test(l) ? `is ${l[0]!.toLowerCase()}${l.slice(1)}` : l))(shortDoing(line));
 
 /**
  * A hand-off between teammates in a crew chat, as one centred line between hairlines: "Nova gave Write the launch thread to
@@ -1122,7 +1159,7 @@ export function TeamRun({ sid, lane, active, doing, said, outcome, changed, stam
         {active && (
           // One live line, in --ink-2 with the feed's shimmer: the ring on the face above says it works (DIRECTION.md §8).
           <div className="tt-status is-work">
-            <Shine className="tm-live-text">{doing || "Working"}</Shine>
+            <span className="tm-live-text">{doing || "Working"}</span>
           </div>
         )}
         {/* Under a post, what it changed and its chat; a thread with replies says so. Copy, Save as a skill and an empty "Reply in
@@ -1133,7 +1170,9 @@ export function TeamRun({ sid, lane, active, doing, said, outcome, changed, stam
               {changed} file{changed === 1 ? "" : "s"} changed
             </span>
           )}
+          {/* With its icon, as every action beside it has (audit CREW-38). */}
           <button type="button" className="tt-open" onClick={() => focusAgent(sid, lane)}>
+            <MessageSquareIcon className="size-3.5" aria-hidden="true" />
             {active ? `Watch ${name} work` : `Open ${name}'s chat`}
           </button>
           {thread}
@@ -1361,6 +1400,7 @@ export function useTeamNow(): Team | null {
 
 /** The top of a teammate's own chat: their page, with its tabs (TeammatePage.tsx). */
 // A function, not the import itself: the two files import each other, and a const taken from one still loading is not there yet.
+export { useMateTab };
 export function TeammateHeader(p: { lane: string; identity?: Identity; notify?: (m: string) => void; branch?: string }) {
   return <TeammatePage {...p} />;
 }
@@ -1396,13 +1436,14 @@ export function TeamHome({ identity, onOpen }: { identity: Identity; onOpen: (r:
       <h1>Your AI teammates</h1>
       {/* About teammates, not about Code (Arun, 2026-10-28: the critique's "TeamHome talks about teammates, not Code"). */}
       <p>{intro}</p>
+      {/* The quiet one left, the primary right (audit CREW-35, 2026-11-04). */}
       <div className="tm-home-acts">
+        <StarterTeam identity={identity} onDone={() => {}} />
         <Button onClick={newTeammate}>
           <UserPlusIcon className="size-4" /> Add your first teammate
         </Button>
-        <StarterTeam identity={identity} onDone={() => {}} />
       </div>
-      <p className="tm-home-note">A starter crew is a lead, an engineer and a writer. Change any of them later.</p>
+      <p className="tm-home-note">A starter crew is a lead, an engineer and a writer.</p>
     </div>
   );
 }
@@ -1495,6 +1536,8 @@ const stoppedAt = new Map<string, number>();
 export function markStopped(mates: Pick<TeammateView, "look" | "name">[]): void {
   for (const m of mates) stoppedAt.set(m.look ?? m.name, Date.now());
 }
+/** When each face (by its seed) was seen stopped by the person, its turn cut short: a neutral stopped mark a while, never a check. */
+const haltedAt = new Map<string, number>();
 function noteStates(was: Team | null, now: Team): void {
   const t = Date.now();
   const before = new Map((was?.teammates ?? []).map((m) => [m.id, m.status]));
@@ -1505,7 +1548,13 @@ function noteStates(was: Team | null, now: Team): void {
       if (!workingSince.has(seed)) workingSince.set(seed, t);
     } else workingSince.delete(seed);
     // Not stopped by the person (held): a check on each face after Stop all said they had finished (2026-11-02 crew walk-through).
-    if (prev === "working" && m.status === "idle" && !m.held && !(t - (stoppedAt.get(seed) ?? 0) < 30_000)) doneAt.set(seed, t);
+    // Stopped from anywhere (its chat's stop, Stop all, the menu), the server says so (halted): a neutral stopped mark instead of a
+    // green check (audit CREW-40, 2026-11-04).
+    if (m.halted && m.status === "idle") {
+      if (!haltedAt.has(seed)) haltedAt.set(seed, t);
+      doneAt.delete(seed);
+    } else haltedAt.delete(seed);
+    if (prev === "working" && m.status === "idle" && !m.held && !m.halted && !(t - (stoppedAt.get(seed) ?? 0) < 30_000)) doneAt.set(seed, t);
     if (m.status === "working") doneAt.delete(seed);
   }
 }
@@ -1513,18 +1562,21 @@ function noteStates(was: Team | null, now: Team): void {
 export const workingSinceOf = (m: Pick<TeammateView, "look" | "name" | "status">): number | null => (m.status === "working" ? (workingSince.get(m.look ?? m.name) ?? null) : null);
 export const presenceOf = (status: TeammateView["status"] | undefined): Presence => PRESENCE[status ?? "idle"];
 const STATE_WORD: Partial<Record<Presence, string>> = { working: "working", needs: "needs you", error: "stopped", limited: "out of usage", done: "just finished", queued: "waiting its turn" };
+const HALTED_WORD = "stopped by you";
 export const Face = memo(function Face({ seed, size, status, label, lead }: { seed: string; size: number; status?: TeammateView["status"]; /** Said to a screen reader; none when the name is beside it. */ label?: string; /** Leads where it is shown: a crown. */ lead?: boolean }) {
   const finished = status === "idle" ? doneAt.get(seed) : undefined;
   const done = finished !== undefined && Date.now() - finished < DONE_FOR;
+  const cut = status === "idle" ? haltedAt.get(seed) : undefined;
+  const halted = cut !== undefined && Date.now() - cut < DONE_FOR;
   const [, tick] = useState(0);
   useEffect(() => {
-    if (!done) return;
-    const t = setTimeout(() => tick((n) => n + 1), DONE_FOR - (Date.now() - finished!));
+    if (!done && !halted) return;
+    const t = setTimeout(() => tick((n) => n + 1), DONE_FOR - (Date.now() - (halted ? cut! : finished!)));
     return () => clearTimeout(t);
-  }, [done, finished]);
+  }, [done, finished, halted, cut]);
   const blink = useBlink(status === "working" && !initialsFaces());
   const eyes: Eyes = status === "offline" ? "closed" : blink ? "blink" : "open";
-  const state = done ? "done" : presenceOf(status);
+  const state: Presence | "halted" = halted ? "halted" : done ? "done" : presenceOf(status);
   // How it stands as a badge on the top right of its head (Arun, 2026-11-03, picked "solid badges", then "2 · Soft depth" of three
   // finishes): a disc in the state's colour with a white sign, a faint light from above and a cut-out of the ground round it, so it
   // sits cleanly on a face of any colour. Bouncing dots at work, ? waiting on you, ! stopped, ✓ just finished; nothing at rest, and
@@ -1532,7 +1584,7 @@ export const Face = memo(function Face({ seed, size, status, label, lead }: { se
   const b = Math.max(12, Math.round(size * 0.4));
   const sign = Math.round(b * 0.72);
   return (
-    <PresenceRing state="idle" size={size} className="tm-face-wrap" {...(label ? { label: `${label}${state === "idle" || state === "asleep" ? "" : `, ${STATE_WORD[state]}`}` } : {})}>
+    <PresenceRing state="idle" size={size} className="tm-face-wrap" {...(label ? { label: `${label}${state === "idle" || state === "asleep" ? "" : `, ${state === "halted" ? HALTED_WORD : STATE_WORD[state]}`}` } : {})}>
       <span className="tm-face-in" data-lead={lead ? "true" : undefined} aria-hidden="true">
         {initialsFaces() ? <Initials seed={seed} size={size} /> : <BlobFace seed={seed} size={size} eyes={eyes} breathing={status === "working"} crowned={lead} />}
         {lead && <Crown />}
@@ -1554,6 +1606,10 @@ export const Face = memo(function Face({ seed, size, status, label, lead }: { se
             <svg viewBox="0 0 12 12" width={sign} height={sign} fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round">
               <path d="m3.3 6.3 1.9 1.9 3.6-4.2" />
             </svg>
+          ) : state === "halted" ? (
+            <svg viewBox="0 0 12 12" width={sign} height={sign} aria-hidden="true">
+              <rect x="3.6" y="3.6" width="4.8" height="4.8" rx="1" fill="currentColor" />
+            </svg>
           ) : (
             <svg viewBox="0 0 12 12" width={sign} height={sign} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <path d="M6 3.2v3.6" />
@@ -1571,7 +1627,8 @@ export const RoomFaces = memo(function RoomFaces({ seeds, size, off = false, sta
   const shown = seeds.slice(0, 3);
   // Initials side by side, not overlapping: letters over letters were cut and unreadable (QA, 2026-10-28).
   const ini = initialsFaces();
-  const each = Math.round(size * (shown.length > 1 ? (ini ? 0.48 : 0.62) : 0.9));
+  // Packed in the slot: three of them a little smaller than two (a room row's fixed 28px slot, audit CREW-27).
+  const each = Math.round(size * (shown.length > 2 ? (ini ? 0.48 : 0.6) : shown.length > 1 ? (ini ? 0.48 : 0.62) : 0.9));
   return (
     <span className={`tm-room-faces${ini ? " ini" : ""}${off ? " off" : ""}`} data-n={shown.length} style={{ width: size, height: size }} aria-hidden="true">
       {shown.map((seed, i) => (
@@ -1582,6 +1639,12 @@ export const RoomFaces = memo(function RoomFaces({ seeds, size, off = false, sta
     </span>
   );
 });
+
+/** A role's first sentence, from its first line: "Builds features and fixes bugs in our code." */
+export const firstSentence = (text: string): string => {
+  const line = text.split("\n").find((l) => l.trim())?.trim() ?? "";
+  return /^(.+?[.!?])(?=\s|$)/.exec(line)?.[1] ?? line;
+};
 
 /** A folder by its own name, "site" for ~/code/site: what a repo is called (the whole path is on hover). */
 export const base = (p: string) => p.replace(/\/+$/, "").split("/").pop() || p;
@@ -1610,7 +1673,7 @@ export function teammateMark(lane: string, size: number): { tool: MateTool; mark
 /** The sidebar's Teammates: the Team room, then each teammate like a person, with what it is on under its name. */
 const TRAYS_FOLDED = "friday.crew.foldedTrays";
 
-export function SidebarTeammates({ identity, onOpen, activeSid, needs = [] }: { identity: Identity; onOpen: (r: RecentSession) => void; activeSid: string | null; /** What waits on the person (Attention.tsx): the team's own are listed first here. */ needs?: Attention[] }) {
+export function SidebarTeammates({ identity, onOpen, activeSid, needs = [], marks }: { identity: Identity; onOpen: (r: RecentSession) => void; activeSid: string | null; /** What waits on the person (Attention.tsx): the team's own are listed first here. */ needs?: Attention[]; /** What the Needs you page lists and isn't put off (Attention.tsx needs): what the rooms' "N needs you" counts. */ marks?: NeedMark[] }) {
   // The sidebar already keeps the team fresh (Sidebar.tsx useTeam): read it here, without a second timer.
   const t = useTeamNow();
   // Elapsed times count up; rows that change state slide to their place (presence.tsx).
@@ -1651,7 +1714,6 @@ export function SidebarTeammates({ identity, onOpen, activeSid, needs = [] }: { 
   );
   const [roomMenu, setRoomMenu] = useState<{ r: RoomView; x: number; y: number } | null>(null);
   // What waits on you, folded to its one bar until opened (Sidebar B).
-  const [needsOpen, setNeedsOpen] = useState(false);
   // Right-click anywhere else in the Team tab: the Team room's row or the space around the rows.
   const [panelMenu, setPanelMenu] = useState<{ x: number; y: number; room?: boolean } | null>(null);
   // A room being made (true) or changed.
@@ -1719,7 +1781,11 @@ export function SidebarTeammates({ identity, onOpen, activeSid, needs = [] }: { 
   if (roomInView && t.news) markSeen(t.sid, t.news);
   const teamFresh = unseen(t.sid, t.news, roomInView);
   const teamBusy = workingInTeamRoom(t);
-  const rooms = t.rooms ?? [];
+  // What waits on you in a room is what the Needs you page lists there, a workflow at its Your OK included and what was put off left
+  // out: the Crew room's row showed only an unread dot over a workflow waiting on you (2026-11-04 retest).
+  const waitIn = (sid: string, server: number) => (marks ? marks.filter((n) => n.sid === sid).length : server);
+  const teamWaiting = waitIn(t.sid, t.waiting ?? 0);
+  const rooms = (t.rooms ?? []).map((r) => ({ ...r, waiting: waitIn(r.sid, r.waiting) }));
   // The person's own teammates: those in the Crew room, theirs to restart, and what counts toward the most they keep.
   const own = ownOf(t);
   const roomItems = (r: RoomView): MenuItem[] => [
@@ -1802,38 +1868,10 @@ export function SidebarTeammates({ identity, onOpen, activeSid, needs = [] }: { 
   const ownSub = (m: TeammateView) => (m.status === "idle" && m.role ? m.role.split("\n")[0] : statusLine(m));
   let subOf = ownSub;
   let mates = byState(t.teammates, (m) => (m.status === "waiting" ? "needs" : m.status));
+  // The strip across the top keeps the crew's own order, the lead first, so a face never moves as teammates work; only the list
+  // under it goes by who needs you, who works and the latest (audit CREW-13, 2026-11-04).
+  let strip = [...t.teammates.filter((m) => m.lane === t.lead), ...t.teammates.filter((m) => m.lane !== t.lead)];
   const teamNeeds = needs.filter((it) => isTeamSid(it.sid));
-  // What people in the workspace asked of the person's teammates, first in Needs you: a press opens the card (CrewHosted.tsx).
-  let askRows: ReactNode[] = [];
-  const needRows = teamNeeds.slice(0, Math.max(0, 6 - askRows.length)).map((it) => {
-    const m = it.lane ? mateOn(it.lane) : null;
-    const where = t.rooms?.find((r) => r.sid === it.sid);
-    return (
-      <button
-        key={`${it.sid}:${it.seq}`}
-        type="button"
-        className="tm-row tm-need"
-        onClick={() => (where ? openRoom(where, onOpen) : openTeammate(t, null, onOpen), it.lane && focusAgent(it.sid, it.lane))}
-      >
-        {m ? <Face seed={m.look ?? m.name} size={24} status={it.kind === "stopped" ? "stopped" : "waiting"} /> : <PresenceRing state={it.kind === "stopped" ? "error" : "needs"} size={24}><span className="tm-face-none" /></PresenceRing>}
-        <span className="tm-text">
-          <span className="tm-name">
-            {m?.name ?? it.agent ?? "A teammate"}
-            {/* A no-break space: the row is a flex line, which drops a plain one at the tag's start ("Nova· Launch week"). */}
-            {where ? <span className="tm-where-tag">{"\u00a0· "}{where.name}</span> : null}
-          </span>
-          {/* A short status in words, never a tool's raw error (Arun, 2026-10-29: "node:internal/modules/cjs/loader:1…" read
-              as a needs-you line); the error is on hover here and in full in the chat. */}
-          <span className={`tm-sub ${it.kind === "stopped" ? "s-stopped" : "s-waiting"}`} title={it.detail}>{isRawError(it.text) ? (it.kind === "stopped" ? stoppedLine(it.text) : "Needs you") : m ? ((x) => x.charAt(0).toUpperCase() + x.slice(1))(it.text.replace(`${m.name} asks: `, "").replace(`${m.name} wants to `, "Wants to ")) : it.text}</span>
-        </span>
-        <span className="sr-only">Needs you</span>
-      </button>
-    );
-  });
-  // Waiting on you without an item of its own here (the room open is left out of the attention list): counted all the same.
-  const waitingMates = mates.filter((m) => m.status === "waiting" && !teamNeeds.some((it) => it.lane === m.lane));
-  const needCount = teamNeeds.length + askRows.length + waitingMates.length;
-  const needNames = [...new Set([...teamNeeds.map((it) => (it.lane ? (mateOn(it.lane)?.name ?? it.agent) : it.agent) ?? ""), ...waitingMates.map((m) => m.name)].filter(Boolean))].join(" · ");
   // The list after the Crew room: its rooms, then its teammates (Arun, 2026-11-03: "make sure rooms are above the teammates"), each
   // with those waiting on you first, then those at work, then the latest.
   // A teammate waiting on you says what for, in its own words (its question, the command it wants to run).
@@ -1871,7 +1909,7 @@ export function SidebarTeammates({ identity, onOpen, activeSid, needs = [] }: { 
           like contacts, what waits on you as one bar that opens to the list, then one list of conversations, the Crew room first and
           the rest by who needs you, who is working, then the latest. */}
       <div className="cv-faces" role="list" aria-label="Your crew">
-        {mates.map((m) => (
+        {strip.map((m) => (
           <button
             key={m.id}
             type="button"
@@ -1898,31 +1936,8 @@ export function SidebarTeammates({ identity, onOpen, activeSid, needs = [] }: { 
           </button>
         )}
       </div>
-      {needCount > 0 && (
-        <button type="button" className="cv-needbar" aria-expanded={needsOpen} onClick={() => setNeedsOpen((o) => !o)}>
-          <span className="cv-needdot" aria-hidden="true" />
-          <b>
-            {needCount} need{needCount === 1 ? "s" : ""} you
-          </b>
-          <span className="cv-needwho">{needNames}</span>
-          <ChevronRightIcon className="cv-needchev size-3.5" data-open={needsOpen || undefined} aria-hidden />
-        </button>
-      )}
-      {needCount > 0 && needsOpen && (
-        <div className="cv-needs">
-          {askRows.slice(0, 6)}
-          {needRows}
-          {waitingMates.map((m) => (
-            <button key={m.id} type="button" className="tm-row tm-need" onClick={() => pick(m)}>
-              <Face seed={m.look ?? m.name} size={24} status="waiting" />
-              <span className="tm-text">
-                <span className="tm-name">{m.name}</span>
-                <span className="tm-sub s-waiting">{statusLine(m).replace(/^Needs you: /, "")}</span>
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
+      {/* No banner over the list: the Needs you badge and each row's ? say it, and nothing under it moves (audit CREW-20,
+          2026-11-04). What arrives is said once by its toast. */}
       <div className="cv-head">
         <span>Conversations</span>
         <MenuButton
@@ -1948,15 +1963,15 @@ export function SidebarTeammates({ identity, onOpen, activeSid, needs = [] }: { 
           }}
         >
           <span className={`tm-room-mark${own.length ? "" : " empty"}`} aria-hidden="true">
-            {own.length ? <RoomFaces seeds={byState(own, (m) => (m.status === "waiting" ? "needs" : m.status)).slice(0, 3).map((m) => m.look ?? m.name)} states={byState(own, (m) => (m.status === "waiting" ? "needs" : m.status)).slice(0, 3).map((m) => m.status)} size={28} off={own.every((m) => m.status === "offline")} /> : <UsersIcon className="size-4" />}
+            {own.length ? <RoomFaces seeds={own.slice(0, 3).map((m) => m.look ?? m.name)} size={28} off={own.every((m) => m.status === "offline")} /> : <UsersIcon className="size-4" />}
           </span>
           <span className="tm-text">
             <span className={teamFresh ? "tm-name tm-unread" : "tm-name"}>Crew room</span>
-            <span className={`tm-sub${t.waiting ? " s-waiting" : teamBusy ? " s-working" : ""}`}>{!own.length ? "Where your teammates work together" : t.waiting ? `${t.waiting} need${t.waiting === 1 ? "s" : ""} you` : teamBusy ? `${teamBusy} working` : t.last ? `${t.last.by.replace(/^[^']+'s /, "")}: ${t.last.text.replace(/\s+/g, " ")}` : `${own.length} in the crew`}</span>
+            <span className={`tm-sub${teamWaiting ? " s-waiting" : ""}`}>{!own.length ? "Where your teammates work together" : teamWaiting ? `${teamWaiting} need${teamWaiting === 1 ? "s" : ""} you` : t.last ? `${t.last.by.replace(/^[^']+'s /, "")}: ${plainLine(t.last.text)}` : `${own.length} in the crew`}</span>
           </span>
           <span className="cv-meta">
             {t.last && <span className="cv-time">{relTime(t.last.at)}</span>}
-            {!t.waiting && !teamBusy && teamFresh ? <span className="tm-dot" data-state="new" aria-label="New since you looked" /> : null}
+            {!teamWaiting && !teamBusy && teamFresh ? <span className="tm-dot" data-state="new" aria-label="New since you looked" /> : null}
           </span>
         </button>
         {convs.map((c) =>
@@ -1978,21 +1993,17 @@ export function SidebarTeammates({ identity, onOpen, activeSid, needs = [] }: { 
                 <Face seed={c.m.look ?? c.m.name} size={28} status={c.m.status} lead={c.m.lane === t.lead} />
                 <span className="tm-text">
                   <span className="tm-name">{c.m.name}</span>
-                  <span className={`tm-sub s-${mateStatus(c.m).state}`}>{c.ask ?? subOf(c.m).replace(/^Needs you: /, "")}</span>
+                  <span className={`tm-sub s-${mateStatus(c.m).state}`}>{plainLine(c.ask ?? subOf(c.m).replace(/^Needs you: /, ""))}</span>
                 </span>
                 <span className="cv-meta">
                   {workingSinceOf(c.m) !== null ? <span className="cv-time">{elapsed(workingSinceOf(c.m)!, now)}</span> : c.m.lastAt ? <span className="cv-time">{relTime(c.m.lastAt)}</span> : null}
-                  {c.m.queued > 0 && c.m.status !== "idle" && <span className="tm-queued" title={queuedTitle(c.m)} aria-label={queuedTitle(c.m)}>{c.m.queued}</span>}
+                  {/* Not on the chat that is open: its queue is over its box there, and a count on its row read as unread (audit CREW-39). */}
+                  {c.m.queued > 0 && c.m.status !== "idle" && !inView(c.m.lane) && <span className="tm-queued" title={queuedTitle(c.m)} aria-label={queuedTitle(c.m)}>{c.m.queued}</span>}
                 </span>
               </button>
               <RowMore label={`More for ${c.m.name}`} open={menu?.m.id === c.m.id} onOpen={(x, y) => setMenu({ m: c.m, x, y })} />
             </div>
           ),
-        )}
-        {!t.teammates.length && (
-          <button type="button" className="tm-empty" onClick={() => setAdding(true)}>
-            Add your first teammate: a name, a role and one of your coding tools.
-          </button>
         )}
       </div>
       {menu && <ContextMenu at={menu} items={() => itemsOf(menu.m)} onClose={() => setMenu(null)} />}
@@ -2112,7 +2123,7 @@ function RoomRow({ r, t, here, onOpen, onMenu }: { r: RoomView; t: Team; here: b
       <span className="tm-text">
         <span className={fresh ? "tm-name tm-unread" : "tm-name"}>{r.name}</span>
         {/* Quiet, its last words, who said them first, as a conversation list has them (Sidebar B, 2026-11-03). */}
-        <span className={`tm-sub${r.waiting ? " s-waiting" : r.working ? " s-working" : ""}`}>{r.waiting ? `${r.waiting} need${r.waiting === 1 ? "s" : ""} you` : r.working ? `${r.working} working · ${who.map((m) => m.name).join(", ")}` : r.last ? `${r.last.by.replace(/^[^']+'s /, "")}: ${r.last.text.replace(/\s+/g, " ")}` : who.map((m) => m.name).join(", ") || "Nobody in it yet"}</span>
+        <span className={`tm-sub${r.waiting ? " s-waiting" : ""}`}>{r.waiting ? `${r.waiting} need${r.waiting === 1 ? "s" : ""} you` : r.last ? `${r.last.by.replace(/^[^']+'s /, "")}: ${plainLine(r.last.text)}` : who.map((m) => m.name).join(", ") || "Nobody in it yet"}</span>
       </span>
       <span className="cv-meta">
         {r.last && <span className="cv-time">{relTime(r.last.at)}</span>}
@@ -2157,21 +2168,19 @@ export function TeamFaces({ sid, lead }: { sid: string; lead: string | null }) {
   const mates = matesIn(sid);
   const purpose = team?.rooms?.find((r) => r.sid === sid)?.purpose;
   if (!mates.length) return null;
-  // Each face carries its own ring; how many are at it is said once after them, in words (DIRECTION.md §8).
-  const working = mates.filter(({ lane, m }) => statusIn(sid, lane, m) === "working").length;
+  // Faces only: the sidebar's faces wear the badges and the line over the box says who works, so the header says neither again
+  // (audit CREW-14, 2026-11-04). How each stands is still in its title.
   return (
     <span className="tm-faces" role="group" aria-label="Who is in it" title={purpose || undefined}>
       {mates.map(({ lane, m }) => {
-        // How it stands in this chat, not across every room it is in (statusIn).
-        const status = statusIn(sid, lane, m);
+        // How it stands in this chat, not across every room it is in (statusLineIn), said on hover.
         const line = statusLineIn(sid, lane, m);
         return (
           <button key={lane} type="button" className="tm-faces-one" data-on={focused === lane ? "true" : undefined} title={`${m.name}${lane === lead ? " · leads" : ""} · ${line}`} aria-label={`${m.name}${lane === lead ? ", leads" : ""}: ${line}`} onClick={() => focusAgent(sid, focused === lane ? ALL : lane)}>
-            <Face seed={m.look ?? m.name} size={24} status={status} lead={lane === lead} />
+            <Face seed={m.look ?? m.name} size={24} lead={lane === lead} />
           </button>
         );
       })}
-      {working > 0 && <span className="tm-faces-n">{working} working</span>}
     </span>
   );
 }
@@ -2653,7 +2662,7 @@ export function TeammateDialog({ identity, editing, onClose, inline }: { identit
             <label className="tm-row-field">
               <span className="tm-row-label">Runs on</span>
               <span className="tm-row-input">
-                <Picker className="tm-select" value={machine} label="Runs on" onChange={setMachine} options={[{ value: "", label: "This computer" }, ...computers.map((c) => ({ value: c.id, label: c.label })), ...(machine && !computers.some((c) => c.id === machine) ? [{ value: machine, label: "Your other computer", hint: "not connected now" }] : [])]} />
+                <Picker className="tm-select" value={machine} label="Runs on" onChange={setMachine} options={[{ value: "", label: "This computer" }, ...computers.map((c) => ({ value: c.id, label: c.label, ...(c.detail ? { hint: c.detail } : {}) })), ...(machine && !computers.some((c) => c.id === machine) ? [{ value: machine, label: "Your other computer", hint: "not connected now" }] : [])]} />
                 <small>{machine ? `Its coding tool, its own folder (~/Friday/teammates/${name.trim() || "Name"}) and the folders it works in are on that computer.` : "Its coding tool and its folders are on this computer."}</small>
               </span>
             </label>
@@ -2897,7 +2906,8 @@ export function ThreadChip({ sid, root, lane, events }: { sid: string; root: num
               {mate && <Face seed={mate.look ?? mate.name} size={14} />}
             </span>
             {list.length} {list.length === 1 ? "reply" : "replies"}
-            <span className="tt-thread-when">{said ?? (last ? `last ${agoShort(last.ts)}` : "")}</span>
+            {/* "2 replies · 1m ago" (audit CREW-34, 2026-11-04). */}
+            <span className="tt-thread-when">{said ?? (last ? `· ${agoShort(last.ts)}` : "")}</span>
           </>
         ) : (
           <>
@@ -2938,7 +2948,7 @@ export const openThread = (t: { sid: string; root: number; lane: string } | null
 };
 
 /** Where the open thread is drawn, once per room (Activity): it stays open while the room's messages come and go. */
-export function ThreadHost({ sid, events, send }: { sid: string; events: SessionEvent[]; send: SendCmd }) {
+export function ThreadHost({ sid, events, send, meId }: { sid: string; events: SessionEvent[]; send: SendCmd; /** Who is reading: their own replies say "You". */ meId?: string }) {
   const t = useSyncExternalStore(
     (f) => (threadWatchers.add(f), () => void threadWatchers.delete(f)),
     () => openNow,
@@ -2973,7 +2983,7 @@ export function ThreadHost({ sid, events, send }: { sid: string; events: Session
   return createPortal(
     <>
       <div className="tt-thread-scrim" aria-hidden="true" onClick={() => openThread(null)} />
-      <ThreadPanel key={t.root} sid={sid} root={t.root} lane={t.lane} events={events} send={send} onClose={() => openThread(null)} />
+      <ThreadPanel key={t.root} sid={sid} root={t.root} lane={t.lane} events={events} send={send} {...(meId ? { meId } : {})} onClose={() => openThread(null)} />
     </>,
     document.body,
   );
@@ -2985,7 +2995,7 @@ export const agoShort = (ts: number) => {
 };
 
 /** A thread, beside the room: the message it hangs off, every reply and answer in order, and a box to reply in. */
-function ThreadPanel({ sid, root, lane, events, send, onClose }: { sid: string; root: number; lane: string; events: SessionEvent[]; send: SendCmd; onClose: () => void }) {
+function ThreadPanel({ sid, root, lane, events, send, onClose, meId }: { sid: string; root: number; lane: string; events: SessionEvent[]; send: SendCmd; onClose: () => void; meId?: string }) {
   const [text, setText] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
@@ -3033,7 +3043,8 @@ function ThreadPanel({ sid, root, lane, events, send, onClose }: { sid: string; 
       <div key={e.seq} className={`tt-thread-msg${agent ? "" : " mine"}${isRoot ? " root" : ""}`}>
         <span className="tt-thread-who">
           {agent && mate ? <Face seed={mate.look ?? mate.name} size={18} /> : null}
-          <b>{agent ? (mate?.name ?? e.actor.name) : e.actor.name}</b>
+          {/* "You" for your own replies, as the room says it (audit CREW-34). */}
+          <b>{agent ? (mate?.name ?? e.actor.name) : e.actor.id === meId ? "You" : e.actor.name}</b>
           <span>{agoShort(e.ts)}</span>
         </span>
         <div className="tt-thread-text">{agent ? <MessageResponse {...ANSWER}>{mediaText(said(e).trim())}</MessageResponse> : said(e)}</div>
@@ -3063,6 +3074,8 @@ function ThreadPanel({ sid, root, lane, events, send, onClose }: { sid: string; 
           void reply();
         }}
       >
+        {/* The send inside the field, as the room's own box has it (audit CREW-34). */}
+        <div className="tt-thread-field">
         <Textarea
           value={text}
           rows={2}
@@ -3080,6 +3093,7 @@ function ThreadPanel({ sid, root, lane, events, send, onClose }: { sid: string; 
         <button type="submit" className="tt-thread-send" disabled={!text.trim() || busy} aria-label="Send reply" title="Send (Enter)">
           <ArrowUpIcon className="size-4" />
         </button>
+        </div>
         {err && <p className="tm-err">{err}</p>}
       </form>
     </aside>

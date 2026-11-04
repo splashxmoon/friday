@@ -47,3 +47,49 @@ test("own models: several of one server added at once (issue #17): its key and a
   await assert.rejects(addOwnModels({ baseUrl: "http://example.com/v1", models: ["a"] }), /Use https:\/\//);
   await assert.rejects(addOwnModels({ baseUrl: base, apiKey: "two\nlines here", models: ["a/b"] }), /spaces or line breaks/);
 });
+
+test("own models: more from a server already in use go on its saved key, only to that address (issue #17's follow-up)", async (t) => {
+  const home = await mkdtemp(path.join(tmpdir(), "friday-own-more-"));
+  const real = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+  Object.assign(process.env, { HOME: home, USERPROFILE: home });
+  t.after(async () => {
+    for (const [k, v] of Object.entries(real)) (v === undefined ? delete process.env[k] : (process.env[k] = v));
+    await rm(home, { recursive: true, force: true });
+  });
+  const { readFile } = await import("node:fs/promises");
+  const { addOwnModels, listOwnModels } = await import("../src/runner/own-models.js");
+  const base = "https://router.example.com/v1";
+  const key = "sk-router-0123456789abcdef";
+  const { added } = await addOwnModels({ provider: "custom", baseUrl: base, apiKey: key, models: ["a/one"] });
+  const first = added[0]!;
+
+  const more = await addOwnModels({ provider: "custom", baseUrl: base, id: first.id, models: ["a/two", "a/three"] });
+  assert.deepEqual(more.added.map((m) => [m.model, m.hasKey]), [["a/two", true], ["a/three", true]], "no key typed: the saved one goes with them");
+  const file = JSON.parse(await readFile(path.join(home, ".friday", "models.json"), "utf8")) as { models: { model: string; apiKey?: string }[] };
+  assert.deepEqual(file.models.map((m) => m.apiKey), [key, key, key], "the very key, kept on this computer");
+  assert.ok((await listOwnModels()).models.every((m) => !("apiKey" in m)), "and never listed out");
+
+  await assert.rejects(addOwnModels({ baseUrl: "https://elsewhere.example.com/v1", id: first.id, models: ["b/one"] }), /saved key only goes to the address it was saved for/, "never to another address");
+  await assert.rejects(addOwnModels({ baseUrl: base, id: "nope1234", models: ["a/four"] }), /isn't on this computer any more/);
+  const typed = await addOwnModels({ baseUrl: base, id: first.id, apiKey: "sk-other-0123456789abcd", models: ["a/five"] });
+  assert.equal(typed.added[0]!.hasKey, true, "a key typed wins over the saved one");
+});
+
+test("your models listed by server: each address once, in the order first added, with how its keys stand", async () => {
+  const { groupOwn } = await import("../src/client/own-groups.js");
+  const m = (id: string, baseUrl: string, hasKey: boolean, provider = "custom", local = false) => ({ id, baseUrl, hasKey, provider, local });
+  const groups = groupOwn([
+    m("1", "https://router.example.com/v1", true),
+    m("2", "http://localhost:11434/v1", false, "ollama", true),
+    m("3", "https://router.example.com/v1/", true),
+    m("4", "https://openrouter.ai/api/v1", true, "openrouter"),
+    m("5", "https://router.example.com/v1", false),
+  ]);
+  assert.deepEqual(groups.map((g) => [g.host, g.models.map((x) => x.id).join(""), g.keyed]), [
+    ["router.example.com/v1", "135", "some"],
+    ["localhost:11434/v1", "2", "none"],
+    ["openrouter.ai/api/v1", "4", "all"],
+  ]);
+  assert.equal(groups[1]!.local, true);
+  assert.equal(groups[2]!.provider, "openrouter");
+});

@@ -16,6 +16,7 @@
 
 import { BotIcon, FactoryIcon, InfinityIcon } from "lucide-react";
 import { ENGINE_NAMES, type EngineTool } from "../types.js";
+import type { ReactNode } from "react";
 
 interface MarkProps {
   size?: number;
@@ -222,4 +223,65 @@ export function GitHubMark({ size = 16, className }: MarkProps) {
       <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z" />
     </svg>
   );
+}
+
+/**
+ * The model servers' own marks, for Settings › Your models, where they were grey letter tiles (audit REST-25, Arun 2026-11-04):
+ * Groq's orange "g", Mistral's pixel M in its sunset rows, Together's blue, Ollama's llama and LM Studio's purple. Drawn small and
+ * plain, in each one's colours; Ollama's, black on white as it ships, takes the ink so it reads in both themes.
+ */
+export function ModelHostMark({ id, size = 16, className }: { id: string } & MarkProps) {
+  const svg = (label: string, body: ReactNode) => (
+    <svg className={className} width={size} height={size} viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" role="img" aria-label={label} style={{ flex: "none" }}>
+      {body}
+    </svg>
+  );
+  if (id === "groq")
+    return svg(
+      "Groq",
+      <>
+        <circle cx="12" cy="12" r="12" fill="#F55036" />
+        <circle cx="11.6" cy="10.4" r="3.6" fill="none" stroke="#fff" strokeWidth="2.2" />
+        <path d="M15.2 10.4v4.2a3.6 3.6 0 0 1-6.3 2.4" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" />
+      </>,
+    );
+  if (id === "mistral") {
+    // Five rows of the M, top to bottom, each in its colour: which of the five columns each fills.
+    const rows: [string, number[]][] = [
+      ["#FFD800", [0, 4]],
+      ["#FFAF00", [0, 1, 3, 4]],
+      ["#FF8205", [0, 1, 2, 3, 4]],
+      ["#FA500F", [0, 2, 4]],
+      ["#E10500", [0, 4]],
+    ];
+    return svg("Mistral", rows.flatMap(([fill, cols], r) => cols.map((c) => <rect key={`${r}-${c}`} x={2 + c * 4} y={2 + r * 4} width="4" height="4" fill={fill} />)));
+  }
+  if (id === "together")
+    return svg(
+      "Together",
+      <>
+        <rect x="1" y="1" width="22" height="22" rx="6" fill="#0F6FFF" />
+        <rect x="7" y="7" width="10" height="10" rx="2.5" fill="none" stroke="#fff" strokeWidth="2" />
+      </>,
+    );
+  if (id === "ollama")
+    return svg(
+      "Ollama",
+      <g fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M7.6 9.6V3.8a1.9 1.9 0 0 1 3.8 0v4.4M12.6 8.2V3.8a1.9 1.9 0 0 1 3.8 0v5.8" />
+        <path d="M5.8 22v-7a6.2 6.2 0 0 1 12.4 0v7" />
+        <ellipse cx="12" cy="16.4" rx="3" ry="2.2" />
+      </g>,
+    );
+  if (id === "lmstudio")
+    return svg(
+      "LM Studio",
+      <>
+        <rect x="1" y="1" width="22" height="22" rx="6" fill="#6D5DFC" />
+        <g stroke="#fff" strokeWidth="2" strokeLinecap="round">
+          <path d="M6 7.5h8M9 12h9M6 16.5h7" />
+        </g>
+      </>,
+    );
+  return null;
 }

@@ -12,6 +12,7 @@
  *   POST /api/needs-you {sids?}          → { items: Need[] }   (and these sessions too: a browser's list, Crew rooms)
  *   POST /api/needs-you/answer {id, answer, edited?} → { ok: true, said } | 4xx { error }
  *   POST /api/needs-you/dismiss {id}     → { ok: true }        ("Not now": off this person's queue until it waits again)
+ *   POST /api/attention                  → { needs: NeedMark[], off: string[], … }   (the same list, as every count reads it)
  *
  * `answer` is one of the item's `choices[].value` (one tap), or words of the person's own when `free` (an edit). Nothing is
  * ever answered without the person: the suggestion is a suggestion.
@@ -91,6 +92,10 @@ export interface Need {
   /** For the page only: an approval's command, a review's link. */
   command?: boolean;
   url?: string;
+  /** A coding tool's numbered questions, each with its lettered choices: drawn as its own answer card's rows (audit CREW-17). */
+  asks?: { question: string; options: { key: string; label: string; detail?: string }[] }[];
+  /** Put off with "Not now": still waiting, kept under the list's "N put off · Show" (audit CREW-6). */
+  putOff?: true;
 }
 
 export interface Blocks {
@@ -149,3 +154,19 @@ export function scoreNeed(n: Pick<Need, "kind" | "blocks" | "since" | "goal" | "
 export function rankNeeds<T extends Pick<Need, "kind" | "blocks" | "since" | "goal" | "where">>(items: T[], now = Date.now()): (T & { score: number; why: string })[] {
   return items.map((n) => ({ ...n, ...scoreNeed(n, now) })).sort((a, b) => b.score - a.score || a.since - b.since);
 }
+
+/** One item waiting on a person, as much as a count needs: its id, its session, its kind, and whether it was put off. */
+export interface NeedMark {
+  id: string;
+  sid?: string;
+  kind: NeedKind;
+  putOff?: true;
+  /** Who asks, where, what, and since when: for a card where there is no session's to show it (Board.tsx). */
+  who: string;
+  title: string;
+  text: string;
+  since: number;
+}
+
+/** An item as a count reads it. */
+export const markOf = (n: Omit<Need, "score" | "why">): NeedMark => ({ id: n.id, kind: n.kind, ...(n.where.sid ? { sid: n.where.sid } : {}), ...(n.putOff ? { putOff: true as const } : {}), who: n.who, title: n.where.title, text: n.text.length > 160 ? `${n.text.slice(0, 159)}…` : n.text, since: n.since });

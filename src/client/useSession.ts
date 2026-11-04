@@ -11,6 +11,8 @@ export type { Digest } from "../session/digest.js";
 
 /** How long away counts as "away" for the catch-up panel. */
 const AWAY_MS = 60_000;
+/** How long a command waits for a socket that is opening before it says it isn't connected. */
+const SEND_WAIT_MS = 8_000;
 
 export type ConnState = "connecting" | "live" | "reconnecting" | "rejected" | "removed";
 /**
@@ -172,6 +174,9 @@ export function useSession(sid: string, invite: string, who: Identity) {
   const [rejectReason, setRejectReason] = useState("");
   const [toast, setToast] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  // The session this hook is on now: a command waiting for its socket goes only to the session it was sent in.
+  const sidNow = useRef(sid);
+  sidNow.current = sid;
   /** Last seq acknowledged as read, and when the tab was last hidden. */
   const acked = useRef(0);
   const replies = useRef(new Map<string, { resolve: (r: { ok: boolean; error?: string }) => void; quiet: boolean }>());
@@ -510,8 +515,20 @@ export function useSession(sid: string, invite: string, who: Identity) {
   const send = useCallback<Send>((cmd) => {
     const ws = wsRef.current;
     if (ws?.readyState !== WebSocket.OPEN) {
-      setToast("Not connected. Retrying…");
-      return Promise.resolve({ ok: false, error: "Not connected." });
+      // Opening (a chat just opened, from Needs you say, or a reconnect under way): the command waits for the socket, a few
+      // seconds at most, rather than failing with "Not connected" while it is only seconds away (audit CREW-8, 2026-11-04).
+      return new Promise((resolve) => {
+        const until = Date.now() + SEND_WAIT_MS;
+        const forSid = sidNow.current;
+        const wait = () => {
+          if (sidNow.current !== forSid) return resolve({ ok: false, error: "Not connected." });
+          if (wsRef.current?.readyState === WebSocket.OPEN) return void sendRef.current(cmd).then(resolve);
+          if (Date.now() < until) return void setTimeout(wait, 100);
+          setToast("Not connected. Retrying…");
+          resolve({ ok: false, error: "Not connected." });
+        };
+        wait();
+      });
     }
     const id = `${Date.now()}-${++seq.current}`;
     return new Promise((resolve) => {
@@ -526,6 +543,8 @@ export function useSession(sid: string, invite: string, who: Identity) {
       }, 120_000);
     });
   }, []);
+  const sendRef = useRef(send);
+  sendRef.current = send;
 
   /**
    * Tell the room where this person is looking. Paced and de-duplicated here (a pointer moves faster than anyone can follow),

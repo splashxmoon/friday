@@ -117,6 +117,8 @@ interface Item {
   status: string;
   /** Commands are typed, so they are shown as typed. */
   mono?: boolean;
+  /** Who ran it, before it, in a crew: the teammate, not "arundass's Codex" (audit CREW-19). */
+  who?: string;
   standing?: boolean;
   /** Where to go to see it, when there is somewhere. */
   open?: () => void;
@@ -302,6 +304,8 @@ export function TasksPanel({
   // A command as the row shows it: without the `cd <folder> &&` an agent puts in front, which filled the line with a path.
   // Copying it still gives the whole thing.
   const asTyped = (command: string) => inFolder(command.replace(/^cd\s+("[^"]*"|'[^']*'|\S+)\s*&&\s*/, ""), folders);
+  // In a crew, a command leads with the teammate that ran it, and its tool says only what it is (audit CREW-19, 2026-11-04).
+  const crewWho = (lane: string) => (state.options.team ? state.lanes.find((l) => l.id === lane)?.name : undefined);
   const commands: Item[] = commandsIn(events)
     .slice(-6)
     .reverse()
@@ -309,11 +313,12 @@ export function TasksPanel({
       id: c.id,
       name: asTyped(c.command),
       mono: true,
+      ...(crewWho(c.lane) ? { who: crewWho(c.lane)! } : {}),
       ...(c.isError && c.output ? { why: lastWords(c.output) } : {}),
       // No output yet is a command still running: the result lands as its own
       // event when it ends.
       status: c.output === undefined ? "running" : c.isError ? "error" : "done",
-      sub: `${c.by}${ago(c.ts)}${c.output === undefined ? ` · ${duration(now - c.ts)}` : c.endTs && c.endTs - c.ts >= 1000 ? ` · took ${duration(c.endTs - c.ts)}` : ""}`,
+      sub: `${crewWho(c.lane) ? c.by.replace(/^[^']+'s /, "") : c.by}${ago(c.ts)}${c.output === undefined ? ` · ${duration(now - c.ts)}` : c.endTs && c.endTs - c.ts >= 1000 ? ` · took ${duration(c.endTs - c.ts)}` : ""}`,
       copy: c.command,
       // What it printed opens under the card; there is nowhere else to go to read it.
       ...(c.output !== undefined ? { output: c.output.trim() ? c.output.slice(-20_000) : "(no output)" } : {}),
@@ -388,6 +393,7 @@ export function TasksPanel({
         </span>
         <div className="task-body">
           <div className={`task-name ${i.mono ? "mono" : ""}`}>
+            {i.who && <span className="task-who">{i.who} ·</span>}
             <span className="task-title" title={i.name}>{i.name}</span>
             {i.standing && <span className="chip-mini">standing</span>}
           </div>

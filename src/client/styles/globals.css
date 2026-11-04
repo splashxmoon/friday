@@ -108,7 +108,7 @@
   .dass-rail-btn:focus-visible { box-shadow: var(--dass-ring); outline: none; }
   .dass-rail-btn[data-active="true"] { background: var(--hover-strong); color: var(--ink); box-shadow: none; }
   .dass-rail-badge {
-    @apply absolute -top-0.5 -right-0.5 grid h-4 min-w-4 place-items-center rounded-full px-1 text-[11px] font-semibold leading-none;
+    @apply absolute -top-0.5 -right-0.5 grid h-4 min-w-4 place-items-center rounded-full px-1 text-[12px] font-semibold leading-none;
     background: color-mix(in srgb, var(--dass-needs) 16%, var(--sidebar)); color: var(--dass-needs); box-shadow: 0 0 0 2px var(--sidebar);
   }
 

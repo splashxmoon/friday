@@ -71,7 +71,11 @@ export function ChatFind({ primary }: { primary: boolean }) {
       if (!col?.querySelector("[data-scroll-root]")) return;
       e.preventDefault();
       if (open) document.querySelector<HTMLInputElement>(".chat-find input")?.select();
-      else setOpen(true);
+      else {
+        // The whole chat, not only its newest items (Activity.tsx FEED_WINDOW): the search covers the day, as before.
+        dispatchEvent(new CustomEvent("friday:feed-from", { detail: 0 }));
+        setOpen(true);
+      }
     };
     // Caught on the way down: the message box's own keys stop it on the way back up.
     addEventListener("keydown", onKey, true);
@@ -160,7 +164,11 @@ function FindBar({ column, onClose }: { column: () => HTMLElement | null; onClos
   };
   const close = () => {
     onClose();
-    if (back.current instanceof HTMLElement && back.current.isConnected) back.current.focus();
+    // Back to the field it was opened from; from anywhere else (the chat itself, a code block scrolled in it, nowhere), to this
+    // chat's message box, where the next thing is typed (Arun's e2e pass, 2026-11-04: Esc left focus on a code block).
+    const was = back.current;
+    if (was instanceof HTMLElement && was.isConnected && /^(INPUT|TEXTAREA)$/.test(was.tagName)) return was.focus();
+    column()?.querySelector<HTMLTextAreaElement>(".composer-dock textarea")?.focus();
   };
 
   if (!place) return null;

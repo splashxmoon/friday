@@ -90,7 +90,9 @@ export function sayMate(m: MateLike, opts: { here?: MateState; elsewhere?: strin
   const on = m.switched && m.tool !== "friday" ? ENGINE_NAMES[m.tool] : "";
   const back = m.switched?.until ? ` until ${timeOf(m.switched.until, opts.now)}` : "";
   if (here === "waiting") {
-    const ask = m.line && here === m.status ? `: ${m.line}` : "";
+    // What it asks, not "Needs a decision: …" after "Needs you" (audit CREW-25, 2026-11-04).
+    const said = m.line.replace(/^(?:Needs (?:a decision|you)|Asking you):\s*/i, "");
+    const ask = said && here === m.status ? `: ${said}` : "";
     return { state: "waiting", line: `Needs you${ask}${on ? ` · on ${on}` : ""}` };
   }
   if (here === "working") return { state: "working", line: `${(here === m.status && m.line) || "Working"}${on ? ` · on ${on}` : ""}` };

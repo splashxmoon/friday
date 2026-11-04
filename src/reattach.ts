@@ -18,14 +18,23 @@ export const REATTACH_WINDOW_MS = 7 * 86_400_000;
 /** The most lanes one link brings back. */
 export const REATTACH_MAX = 8;
 
-/** This computer's lanes in a session that are offline and have somewhere to come back to, main lane first. */
-export function lanesToReattach(state: SessionState, hostId: string, machine?: string): { lane: string; engine: LaneEngine }[] {
+/**
+ * This computer's lanes in a session that are offline and have somewhere to come back to, main lane first.
+ *
+ * `computer`, in the open-source edition: which of the person's computers is asking, by the device id its lanes carry
+ * (EngineInfo.computer), or null for the one Friday runs on. Each comes back only on its own: a lane on another computer used
+ * to be started again here, in this computer's copy of the same path, when Friday opened (2026-11-04 linking test).
+ */
+export function lanesToReattach(state: SessionState, hostId: string, machine?: string, computer?: string | null, also: readonly string[] = []): { lane: string; engine: LaneEngine }[] {
   const out: { lane: string; engine: LaneEngine }[] = [];
   for (const lane of [MAIN_LANE, ...state.lanes.map((l) => l.id)]) {
     const e = state.engines[lane];
     if (!e?.tool || e.online || e.hostId !== hostId || !e.cwd) continue;
-    // Another of this person's computers held it (local/computers.ts): it comes back there, by its own runner, not here.
-    if (machine && e.machine && e.machine !== machine) continue;
+    // Held by another of this person's computers: it comes back there, by that computer's own runner, never here. `also`: the
+    // ids that computer had before it was paired again (a re-pair of the same machine, LocalLinks.aliases).
+    if (computer !== undefined && (e.computer ?? null) !== computer && !(e.computer && also.includes(e.computer))) continue;
+    // Held on another machine by name (a lane from before computers were told apart by id): not brought back here either.
+    if (typeof computer !== "string" && machine && e.machine && e.machine !== machine) continue;
     out.push({ lane, engine: e });
   }
   return out;
@@ -75,6 +84,10 @@ export async function reattachAll(
     alive?: () => boolean;
     /** This computer's name, as its runners give it: only lanes held here are brought back here. */
     machine?: string;
+    /** Which computer's lanes (lanesToReattach): another of yours by its device id, null for this one, absent for either. */
+    computer?: string | null;
+    /** Ids the same computer had before it was paired again. */
+    also?: readonly string[];
     log: (line: string) => void;
   },
   now = Date.now(),
@@ -87,7 +100,7 @@ export async function reattachAll(
     const m = state?.members[owner.id];
     if (!state || !m || m.removed) continue;
     const invite = deps.invite(sid, state, m.role);
-    for (const { lane, engine } of lanesToReattach(state, owner.id, deps.machine)) {
+    for (const { lane, engine } of lanesToReattach(state, owner.id, deps.machine, deps.computer, deps.also)) {
       if (want.length >= REATTACH_MAX) break;
       want.push({ sid, lane, params: reattachParams(sid, invite, lane, engine, deps.actorToken(sid, owner.id)) });
     }

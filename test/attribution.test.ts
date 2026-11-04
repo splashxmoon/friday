@@ -45,3 +45,35 @@ test("Attribution: a line changed by hand reads as by hand, a line the person re
   assert.equal(attributionOf(gone).size, 0);
   assert.deepEqual(addedLines("+++ b/x\n+one\n-two\n+three"), ["one", "three"]);
 });
+
+test("Attribution: a redone run's lines stay the agent's, not \"by hand\" (Arun's e2e pass, 2026-11-04)", () => {
+  seq = 0;
+  const sha = (c: string) => c.repeat(40);
+  const patch = "@@ -1,2 +1,4 @@\n a\n+const x = 1;\n+const y = 2;\n b";
+  const events = [
+    ev({ type: "run.started", checkpoint: sha("a") } as EventBody),
+    diff(patch),
+    ev({ type: "run.ended", outcome: "done", after: sha("b") } as EventBody),
+    // Undone: the change set that follows no longer has the file.
+    ev({ type: "folder.restored", sha: sha("a"), undo: sha("c"), restored: 1, removed: 0 } as EventBody, ADA),
+    ev({ type: "agent.diff", base: "b", files: [] } as EventBody),
+    // Redone: the agent's lines are back, between runs.
+    ev({ type: "folder.restored", sha: sha("c"), undo: sha("d"), restored: 1, removed: 0 } as EventBody, ADA),
+    diff(patch),
+  ];
+  const attr = attributionOf(events);
+  assert.equal(attr.size, 0, "nothing in the redone file reads as written by hand");
+  assert.equal(handWord(attr, "src/a.ts"), "");
+});
+
+test("Attribution: a change set sent without its text (an older one, to a page) marks nothing as by hand (Arun's e2e pass, 2026-11-04)", () => {
+  seq = 0;
+  const light = ev({ type: "agent.diff", base: "b", files: [{ path: "src/a.ts", status: "modified", additions: 2, deletions: 0, patch: "", later: 2 }] } as EventBody);
+  const events = [
+    ev({ type: "run.started" } as EventBody),
+    light,
+    ev({ type: "run.ended", outcome: "done" } as EventBody),
+    diff("@@ -1,2 +1,4 @@\n a\n+const x = 1;\n+const y = 2;\n b"),
+  ];
+  assert.equal(attributionOf(events).size, 0, "the agent's lines are not read as a person's because their text stayed on the server");
+});

@@ -1,6 +1,6 @@
 import { formatBytes, type ResolvedFile } from "../files.js";
 import { ENGINE_NAMES, MAIN_LANE, type Attachment, type PeerNote, type SessionEvent } from "../types.js";
-import { withoutRewound } from "../rewind.js";
+import { isRedo, withoutRewound } from "../rewind.js";
 import { meshHead } from "../mesh-note.js";
 import { HIDDEN, SHIELD_NOTE } from "../secrets.js";
 import type { ChatMessage, ContentPart } from "./llm.js";
@@ -174,6 +174,10 @@ export function buildContext(allEvents: SessionEvent[], opts: ContextOptions = {
       case "folder.restored":
         if (b.rewoundTo !== undefined) {
           note(`[session] ${ev.actor.name} rewound this session to before one of their earlier messages: the folder is back to how it was then (${b.restored} file${b.restored === 1 ? "" : "s"} restored, ${b.removed} removed), and everything said and done after that point has been set aside. Treat it as not having happened, carry on from what came before, and read files again before relying on them.`);
+          break;
+        }
+        if (isRedo(events, ev)) {
+          note(`[session] ${ev.actor.name} redid changes they had undone: the folder has that run's edits back (${b.restored} file${b.restored === 1 ? "" : "s"} put back, ${b.removed} removed). Read files again before relying on them.`);
           break;
         }
         note(`[session] ${ev.actor.name} undid changes: the folder is back to how it was before an earlier run (${b.restored} file${b.restored === 1 ? "" : "s"} restored, ${b.removed} removed). Edits you made in that run are gone; read files again before relying on them.`);

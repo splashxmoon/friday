@@ -165,3 +165,67 @@ export function sharedWorkDuring(events: SessionEvent[], lane: string, sha: stri
   // A run of theirs still going (or never said to end) that began before the window closed.
   return [...open.values()].some((s) => s <= to);
 }
+
+/**
+ * The restore a restore reverses, when it puts back the checkpoint an earlier one took just before it (its `undo`): a Redo pressed
+ * on an undo, or an undo of that redo. Undefined for a restore to a run's own checkpoint.
+ */
+export function reversedBy(events: SessionEvent[], ev: SessionEvent): SessionEvent | undefined {
+  if (ev.body.type !== "folder.restored") return undefined;
+  const sha = ev.body.sha;
+  const lane = ev.lane ?? MAIN_LANE;
+  return events.findLast((e) => e.seq < ev.seq && (e.lane ?? MAIN_LANE) === lane && e.body.type === "folder.restored" && e.body.undo === sha);
+}
+
+/**
+ * Whether a restore is a redo (Arun's e2e pass, 2026-11-04: a Redo was said as "You undid a run" a second time). A restore that
+ * reverses an undo is a redo; one that reverses a redo is an undo again.
+ */
+export function isRedo(events: SessionEvent[], ev: SessionEvent): boolean {
+  let redo = false;
+  for (let at: SessionEvent | undefined = reversedBy(events, ev); at; at = reversedBy(events, at)) redo = !redo;
+  return redo;
+}
+
+/**
+ * The runs that stand undone now, by the checkpoint each started from. An undo of a run takes back that run, and with it every
+ * later run on its lane when it wasn't bounded by where the run left the folder (a rewind, or a run whose end saved no `after`);
+ * a redo gives back what the undo it reverses took, and nothing else. A card reads its own run here, not "any undo since":
+ * undoing the second of two runs said "Undone" on both (Arun's e2e pass, 2026-11-04).
+ */
+export function undoneRuns(events: SessionEvent[]): Set<string> {
+  const out = new Set<string>();
+  /** Each lane's runs in order, by the checkpoint each started from. */
+  const runs = new Map<string, { sha: string; seq: number }[]>();
+  /** What each restore took back or gave back, by its seq. */
+  const touched = new Map<number, string[]>();
+  for (const e of events) {
+    const lane = e.lane ?? MAIN_LANE;
+    if (e.body.type === "run.started") {
+      const sha = startCheckpoint(events, e);
+      if (sha) runs.set(lane, [...(runs.get(lane) ?? []), { sha, seq: e.seq }]);
+      continue;
+    }
+    if (e.body.type !== "folder.restored") continue;
+    const back = reversedBy(events, e);
+    if (back) {
+      const shas = touched.get(back.seq) ?? [];
+      touched.set(e.seq, shas);
+      const redo = isRedo(events, e);
+      for (const sha of shas) redo ? out.delete(sha) : out.add(sha);
+      continue;
+    }
+    const sha = e.body.sha;
+    const list = runs.get(lane) ?? [];
+    const at = list.findIndex((r) => r.sha === sha);
+    if (at < 0) {
+      touched.set(e.seq, []);
+      continue;
+    }
+    const bounded = e.body.rewoundTo === undefined && !e.body.whole && !!runEndAfter(events, lane, sha);
+    const shas = (bounded ? [list[at]!] : list.slice(at)).map((r) => r.sha);
+    touched.set(e.seq, shas);
+    for (const s of shas) out.add(s);
+  }
+  return out;
+}

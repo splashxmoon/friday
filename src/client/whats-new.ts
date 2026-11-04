@@ -15,20 +15,30 @@ export interface WhatsNewNotes {
 }
 
 export const WHATS_NEW: WhatsNewNotes = {
-  version: "0.2.10",
-  summary: "Your crew checks its work against your rules, knows which tests were failing before it started, and each agent runs its own copy of the app.",
+  version: "0.2.11",
+  summary: "Your other computers stay linked, what waits on you is counted once, and your sessions and settings come through every update.",
   items: [
-    { icon: "shield", title: "Rules that stick", line: "Say “never touch the migrations” once and every agent's work is checked against it." },
-    { icon: "rewind", title: "Was it already broken?", line: "A failing test is checked against the code from before the agent started." },
-    { icon: "box", title: "Every agent its own app", line: "Its own ports and its own copy of the database, so two can run the app at once." },
-    { icon: "terminal", title: "Add a computer", line: "Run agents on another machine over SSH, or with one command pasted there." },
+    { icon: "connections", title: "Other computers, linked", line: "An agent there stays there after a drop, and Reconnecting says why." },
+    { icon: "hand", title: "Needs you, counted once", line: "The sidebar, its badge, the Board and Home all count what the page lists." },
+    { icon: "shield", title: "Checks you can read", line: "Each check says where a pass and a fail go, with its fix step right under it." },
+    { icon: "rewind", title: "Nothing lost", line: "Sessions carry over from v0.2.10, and settings survive a quick quit." },
   ],
 };
 
 /** The release's own page, for everything else it changed. */
 export const notesUrl = (version: string) => `https://github.com/splashxmoon/friday/releases/tag/v${version}`;
 
-/** The sheet is due: someone who has used Friday before, on notes they haven't been shown. Someone new has the welcome instead. */
-export function whatsNewDue(notes: string, seen: string | null, returning: boolean): boolean {
-  return returning && seen !== notes;
+/** A version as its release is tagged: 0.2.10-mine.202611040538 is 0.2.10. */
+export const releaseOf = (version: string) => version.trim().replace(/^v/, "").replace(/[-+].*$/, "");
+
+/**
+ * The sheet is due only on the first start after an update (Arun, 2026-11-04: "only appears after ugrading to new version the
+ * first time... like not randomly"): this Friday is a different version from the one that ran here last, these notes are this
+ * version's, and they haven't been shown. Before Friday kept the last version (`last` null), someone it already knew (past the
+ * welcome) counts as updated; someone new doesn't, and never sees notes for the version they installed.
+ */
+export function whatsNewDue(p: { notes: string; running: string; last: string | null; shown: string | null; knew: boolean }): boolean {
+  const now = releaseOf(p.running);
+  if (!now || p.notes !== now || p.shown === p.notes) return false;
+  return p.last ? releaseOf(p.last) !== now : p.knew;
 }

@@ -19,3 +19,8 @@ test("an answer that is not a listing is the reason, in its first sentence", () 
 test("the folders the files are in, each once", () => {
   assert.deepEqual(foldersOf(["README.md", "src/a.ts", "src/b/c.ts", "src/b/d.ts"]), ["src/", "src/b/"]);
 });
+
+// "#" in the new-session box on an empty folder (audit CODE-9): nothing to name, said as such, not as "(no files).".
+test("an empty folder has no files and no reason to show", () => {
+  assert.deepEqual(treeFiles({ output: "(no files)" }), { files: [], why: "" });
+});

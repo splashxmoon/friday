@@ -198,7 +198,12 @@ export interface Crew {
 /** The most agents a row shows. */
 const CREW_MAX = 6;
 
-export function crewOf(state: SessionState): Crew | null {
+/**
+ * `hostUp`: whether the computer a lane's tool runs on is linked now. A tool that isn't attached is only offline when its computer
+ * is: after a restart every finished session's tool read "Offline" until it was sent something, though the computer was right
+ * here (2026-11-04 end-to-end check).
+ */
+export function crewOf(state: SessionState, hostUp?: (hostId: string) => boolean): Crew | null {
   const lanes = [MAIN_LANE, ...state.lanes.filter((l) => l.control.kind !== "standing").map((l) => l.id)];
   // The main lane counts once something is in it: a coding tool attached, or a run that has gone; a session of coding tools
   // alone has an empty main lane that is no one.
@@ -210,7 +215,7 @@ export function crewOf(state: SessionState): Crew | null {
     // Finished with its plan short: "stopped at 3 of 5", as the Work rail says it, never "done" (QA, 2026-10-28).
     const plan = state.planDone?.[lane];
     const short = !!plan && plan.done < plan.of;
-    const st: CrewState = state.openQuestions[lane] || state.approvals?.[lane] || run.status === "waiting_for_human" ? "needs" : run.status === "running" ? "working" : run.status === "error" && !carriedOn(state, lane) ? "failed" : run.status === "error" ? "idle" : engine?.tool && !engine.online ? "offline" : state.stopped?.[lane] !== undefined ? "stopped" : ran && short ? "short" : ran ? "done" : "idle";
+    const st: CrewState = state.openQuestions[lane] || state.approvals?.[lane] || run.status === "waiting_for_human" ? "needs" : run.status === "running" ? "working" : run.status === "error" && !carriedOn(state, lane) ? "failed" : run.status === "error" ? "idle" : engine?.tool && !engine.online && !(engine.hostId && hostUp?.(engine.hostId)) ? "offline" : state.stopped?.[lane] !== undefined ? "stopped" : ran && short ? "short" : ran ? "done" : "idle";
     const doing = st === "working" ? state.doing?.[lane] : undefined;
     const heard = st === "working" ? heardOf(state, lane) : undefined;
     const why = st === "failed" ? run.error?.trim().split(/\r?\n/)[0]?.slice(0, 160) : undefined;

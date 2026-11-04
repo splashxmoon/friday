@@ -774,7 +774,13 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
         queue[at] = ev.seq;
         if (!s.withdrawn.includes(b.replaces!)) s.withdrawn.push(b.replaces!);
       } else queue.push(ev.seq);
-      s.lastInstruction = { seq: ev.seq, text: b.text, by: ev.actor.name };
+      // Friday's own nudge to keep going is to the agent, not what the session is about: Home's "Right now" read "Keep going: your
+      // plan still has 1 step open. Nobody asked you to stop…" (2026-11-04 end-to-end check).
+      if (!b.keepGoing) s.lastInstruction = { seq: ev.seq, text: b.text, by: ev.actor.name };
+      // New work for the agent: a plan it stopped short of was for the work before. Kept, "Kit stopped at 4 of 5 · Continue" came
+      // back after every later turn, and Needs you still asked to carry it on after Juno had moved to Codex (2026-11-04 end-to-end
+      // check). Friday's own nudge to keep going is about that plan, so it leaves it.
+      if (!b.keepGoing && s.planDone?.[lane]) delete s.planDone[lane];
       if (b.mesh) {
         const m = (s.mesh ??= { paused: null, asks: {}, msgs: [] });
         m.msgs.push(ev.seq);
@@ -1026,6 +1032,8 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       // Decided here from the engine it replaces, so every client folding the log drops the same pin on the same attach.
       if (effortResets(s, lane, b.engine)) delete s.efforts![lane];
       if (s.othersFull && s.engines[lane]?.hostId !== b.engine.hostId) delete s.othersFull[lane];
+      // Another tool on the lane: the plan the one before stopped short of isn't this one's to carry on.
+      if (s.engines[lane]?.tool && s.engines[lane]!.tool !== b.engine.tool && s.planDone?.[lane]) delete s.planDone[lane];
       const repo = s.engines[lane]?.repo;
       s.engines[lane] = { ...(repo ? { repo } : {}), ...b.engine, online: true, sinceSeq: ev.seq };
       break;

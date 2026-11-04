@@ -12,8 +12,9 @@ const link: { useAutoLink: () => "idle" | "trying" | "ok" | "failed"; useAutoLin
   linkNow: async () => {},
 };
 import { EngineMark } from "./BrandMarks.js";
+import { isLocal } from "./edition.js";
 import { openOutside } from "./openOutside.js";
-import { ENGINE_INFO, installStep, osOf, splitTools, WELCOME_TOOLS } from "./engines.js";
+import { ENGINE_INFO, installStep, osOf, splitTools } from "./engines.js";
 import { Icon } from "./icons.js";
 import { NoMachine, hostApi, machineRefusal, type LocalTool, type MachineState } from "./local.js";
 import type { Identity } from "./storage.js";
@@ -90,15 +91,14 @@ export function MachineBadge({ identity, machine, refresh, inline = false, welco
   // The installed ones up top. The one whose install line is open stays where it was clicked: one opened from the tools folded
   // away stays among them, not moved up the list as its form opens (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
   let shown = splitTools(here ? (t) => tools.some((x) => x.tool === t) : null, moreTools ? "" : installing);
-  // A new person picks from the tools people know, whether or not they have them yet, the ready ones first (Arun, 2026-11-01:
-  // "this is the first impression of our app"): Claude Code under "14 more" told someone without it nothing.
-  if (welcome) {
-    const rank = (t: EngineTool) => { const f = tools.find((x) => x.tool === t); return !f ? 2 : f.loggedIn === false ? 1 : 0; };
-    // Five people know, and any other here that is signed in: one not signed in, or whose sign-in can't be told, waits under
-    // "more" (Arun, 2026-11-03: OpenCode and Devin in the five, not Muse Code and GitHub Copilot).
-    const first = ENGINE_TOOLS.filter((t) => WELCOME_TOOLS.includes(t) || tools.some((x) => x.tool === t && x.loggedIn === true)).sort((a, b) => rank(a) - rank(b));
-    shown = { here: first, away: ENGINE_TOOLS.filter((t) => !first.includes(t)) };
-  }
+  // One order, in the welcome and in Settings alike: signed in, then installed and signed out, then not installed, A to Z within
+  // each, any other ACP agent last (audit REST-24, Arun 2026-11-04: the two listed the same tools in different orders).
+  const rank = (t: EngineTool) => {
+    const f = tools.find((x) => x.tool === t);
+    return t === "acp" ? 3 : !f ? 2 : f.loggedIn === false ? 1 : 0;
+  };
+  const inOrder = (list: EngineTool[]) => [...list].sort((a, b) => rank(a) - rank(b) || ENGINE_NAMES[a].localeCompare(ENGINE_NAMES[b]));
+  shown = { here: inOrder(shown.here), away: inOrder(shown.away) };
   const needsSignIn = tools.find((t) => t.loggedIn === false);
 
   // While something is being set up, keep asking — the runner arrives on its
@@ -244,7 +244,7 @@ export function MachineBadge({ identity, machine, refresh, inline = false, welco
   const ready = tools.filter((t) => t.loggedIn !== false);
   const connecting = !here && auto === "trying";
   const look = !here
-    ? { tone: connecting ? "warn" : "off", text: connecting ? "Connecting…" : desktop ? "Not connected" : "No computer connected" }
+    ? { tone: connecting || isLocal() ? "warn" : "off", text: connecting ? "Connecting…" : isLocal() ? "Reconnecting…" : desktop ? "Not connected" : "No computer connected" }
     : ready.length >= 1
       ? { tone: "on", text: `${ready.length} coding tool${ready.length === 1 ? "" : "s"} connected`, short: `${ready.length} tool${ready.length === 1 ? "" : "s"}` }
       : needsSignIn
@@ -256,11 +256,14 @@ export function MachineBadge({ identity, machine, refresh, inline = false, welco
       <section className={`mb-inline ${look.tone}${welcome ? " mb-welcome" : ""}`} aria-label="Coding tools on this computer">
         {!(welcome && here) && <div className="mb-where">
           {machine.mode === "checking" || step !== "idle" || connecting ? <span className="spinner" /> : <span className={`mb-dot ${look.tone}`} aria-hidden />}
-          <span className="mb-where-text">{machine.mode === "checking" ? "Looking for your computer…" : here ? "Connected" : look.text}</span>
-          {here && machine.home && (
-            <code className="mb-path" title={machine.home}>
-              {machine.home}
-            </code>
+          <span className="mb-where-text" title={here && machine.home ? machine.home : undefined}>
+            {machine.mode === "checking" ? "Looking for your computer…" : here ? "Connected" : look.text}
+          </span>
+          {/* The computer by its name, its folder on hover: a raw path led the card (audit REST-16, Arun 2026-11-04). */}
+          {here && machine.machine?.name && (
+            <span className="mb-where-name" title={machine.home || undefined}>
+              · {machine.machine.name}
+            </span>
           )}
         </div>}
         {here ? (
@@ -315,21 +318,19 @@ export function MachineBadge({ identity, machine, refresh, inline = false, welco
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >
-        {machine.mode === "checking" || step !== "idle" || connecting ? <span className="spinner" /> : <span className="mb-dot" aria-hidden />}
-        {/* Three of the installed tools' marks, overlapping, then how many there are: a pill, not a row of fourteen. Signed-in
-            ones first; one that needs signing in wears an amber ring. Every one is in the card behind it. */}
-        {here && (() => {
-          const marks = [...shown.here].sort((a, b) => Number(machine.tools.find((x) => x.tool === a)?.loggedIn === false) - Number(machine.tools.find((x) => x.tool === b)?.loggedIn === false));
+        {/* The ready tools' marks, side by side, each at rest in a thin dashed circle, then how many: "2 tools" wears two marks, no
+            dot and no rings (audit REST-5, Arun 2026-11-04). One signed out is in the card behind it, not here. */}
+        {(() => {
+          const marks = here ? shown.here.filter((t) => ready.some((r) => r.tool === t)).slice(0, 3) : [];
+          if (machine.mode === "checking" || step !== "idle" || connecting) return <span className="spinner" />;
+          if (!marks.length) return <span className="mb-dot" aria-hidden />;
           return (
             <span className="mb-marks" aria-hidden>
-              {marks.slice(0, 3).map((t) => {
-                const f = machine.tools.find((x) => x.tool === t);
-                return (
-                  <span key={t} className={`mb-mark ${!f?.path ? "missing" : f.loggedIn === false ? "out" : "in"}`}>
-                    <EngineMark tool={t} size={11} />
-                  </span>
-                );
-              })}
+              {marks.map((t) => (
+                <span key={t} className="mb-mark">
+                  <EngineMark tool={t} size={11} />
+                </span>
+              ))}
             </span>
           );
         })()}
@@ -379,11 +380,14 @@ export function MachineBadge({ identity, machine, refresh, inline = false, welco
             <section className="mb-body">
               <div className="mb-where">
                 <span className="mb-dot on" aria-hidden />
-                <span className="mb-where-text">Connected</span>
-                {machine.home && (
-                  <code className="mb-path" title={machine.home}>
-                    {machine.home}
-                  </code>
+                {/* The computer by its name first, its folder on hover (audit REST-16, Arun 2026-11-04: a raw path led the card). */}
+                <span className="mb-where-text" title={machine.home || undefined}>
+                  Connected
+                </span>
+                {machine.machine?.name && (
+                  <span className="mb-where-name" title={machine.home || undefined}>
+                    · {machine.machine.name}
+                  </span>
                 )}
               </div>
 
@@ -421,6 +425,25 @@ export function MachineBadge({ identity, machine, refresh, inline = false, welco
       )}
     </div>
   );
+}
+
+/**
+ * Scrolls the list a row sits in (or the sheet, in the welcome) just enough to show all of the row, its top first when it is
+ * taller than the room: never past its top. The list's sticky "Fewer coding tools" row at its foot is not room.
+ */
+function showRowIn(li: HTMLElement): void {
+  let box: HTMLElement | null = li.parentElement;
+  while (box && !(box.scrollHeight > box.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(box).overflowY))) box = box.parentElement;
+  if (!box) return;
+  const foot = box.querySelector<HTMLElement>(":scope > .mb-more");
+  const b = box.getBoundingClientRect();
+  const r = li.getBoundingClientRect();
+  const bottom = b.bottom - (foot && getComputedStyle(foot).position === "sticky" ? foot.offsetHeight : 0);
+  let by = r.bottom > bottom ? r.bottom - bottom : 0;
+  if (r.top - by < b.top) by = r.top - b.top;
+  if (Math.abs(by) < 1) return;
+  const calm = document.documentElement.classList.contains("reduce-motion") || matchMedia("(prefers-reduced-motion: reduce)").matches;
+  box.scrollBy({ top: by, behavior: calm ? "auto" : "smooth" });
 }
 
 /**
@@ -475,6 +498,17 @@ function ToolRow({
   accounts?: ReactNode;
 }) {
   const [copied, setCopied] = useState(false);
+  // What opens under the row (an install line, Other ACP agent's form) is brought into view, opening at its top: in the capped
+  // list on Settings it opened under the visible part, behind "Fewer coding tools" (audit e2e, Arun 2026-11-04).
+  const row = useRef<HTMLLIElement>(null);
+  useEffect(() => {
+    if (!installing) return;
+    const raf = requestAnimationFrame(() => {
+      const li = row.current;
+      if (li) showRowIn(li);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [installing]);
   // Run in Terminal: running, then what happened, said under the line.
   const [ran, setRan] = useState<"" | "running" | "opened" | "failed">("");
   const [line, setLine] = useState(acpLine ?? "");
@@ -510,7 +544,7 @@ function ToolRow({
                   : // Found, its sign-in not something the tool lets us check: said as found, not promised as ready.
                     "Installed";
   return (
-    <li className={`mb-tool ${state} ${acting ? "acting" : ""} ${justIn ? "just-in" : ""}`}>
+    <li ref={row} className={`mb-tool ${state} ${acting ? "acting" : ""} ${justIn ? "just-in" : ""}`}>
       <span className="mb-tool-line">
         <span className="mb-tool-mark">
           <EngineMark tool={tool} size={18} />

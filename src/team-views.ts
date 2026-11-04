@@ -107,7 +107,9 @@ export class TeamLooks {
         if (RANK[status] > RANK[best.status] || (status === "offline" && !best.line)) best = { status, line };
       }
       const problem = problems.get(t.id);
-      const more = { ...(lastAt ? { lastAt } : {}), mode: t.mode ?? ("full" as const), held: read.some((p) => !!p.lanes[t.id] && p.held.has(p.lanes[t.id]!)), usage: { today: usageFor(t.id, midnight), week: usageFor(t.id, week) } };
+      // Stopped by a person where it last ran, and idle since: its face says stopped, never done (audit CREW-40).
+      const halted = best.status === "idle" && read.some((p) => !!p.lanes[t.id] && p.state?.stopped?.[p.lanes[t.id]!] !== undefined);
+      const more = { ...(lastAt ? { lastAt } : {}), ...(halted ? { halted: true as const } : {}), mode: t.mode ?? ("full" as const), held: read.some((p) => !!p.lanes[t.id] && p.held.has(p.lanes[t.id]!)), usage: { today: usageFor(t.id, midnight), week: usageFor(t.id, week) } };
       // Mid-turn it is working whatever a ping says; otherwise a model that can't run leaves it offline, and says why.
       if (problem) return { ...t, ...(best.status === "working" ? best : { status: "offline" as const, line: problem }), queued, problem, ...more };
       return { ...t, ...best, queued, ...more };

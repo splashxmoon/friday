@@ -17,12 +17,14 @@ import type { Identity, RecentSession } from "./storage.js";
 import { InBand, MenuButton, Switch, useDismiss } from "./ui.js";
 import { AccountPill, preferredAccount } from "./Accounts.js";
 import { EngineMark } from "./BrandMarks.js";
+import { savedCommands, useSavedCommands, useShortcuts } from "./Shortcuts.js";
 import { AgentModelPicker } from "./AgentModelPicker.js";
 import { canRoute, saveSmartRouting, smartRoutingOn, useRouteHint } from "./RouteWhy.js";
 import { keepAuto, reachForMessage } from "./smartReach.js";
 import type { Plan } from "../plan-types.js";
 import { isLocal, ownModel, planLimits } from "./edition.js";
-import { AlsoWorksIn, FolderCard, useResumeLink, type Picked } from "./Workspace.js";
+import { AlsoWorksIn, FolderCard, folderName, useResumeLink, type Picked } from "./Workspace.js";
+import { FolderPill, type BranchChoice } from "./FolderMenu.js";
 import { branchName, branchRef, FolderBranchPick, type FolderBranch } from "./Branches.js";
 import type { ResumeLink } from "./resume-link.js";
 import { issueBranch, parseIssueUrl, parsePrLink, withIssue, withPr, type Issue, type Pr } from "../github-issue.js";
@@ -31,7 +33,6 @@ import { leaveWorkNote, markWorkSession, startTeammate, teammateOf, useWorkMode,
 import { CircleDotIcon, GitPullRequestIcon } from "lucide-react";
 import { DailyBriefCard, openBrief } from "./DailyBrief.js";
 import { GoalsCard } from "./Goals.js";
-import { ReadyCard } from "./ReadyCard.js";
 import { GettingStarted, markOwnFolder } from "./GettingStarted.js";
 
 // The message box is this page's state, so every keystroke draws the page again. These take nothing that changes as you type,
@@ -87,6 +88,9 @@ const STARTERS = [
 ];
 
 /** "Good morning, Arun · Wednesday, 8 October": the page knows who you are and what day it is. */
+/** A long generated branch cut in its middle, as the box's notice says it: "friday/…-0519". */
+const shortBranch = (b: string) => (b.length <= 18 ? b : b.includes("/") ? `${b.slice(0, b.indexOf("/"))}/…${b.slice(-5)}` : `${b.slice(0, 8)}…${b.slice(-5)}`);
+
 function Greeting({ name }: { name: string }) {
   const h = new Date().getHours();
   const word = h < 5 ? "Working late" : h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
@@ -382,6 +386,11 @@ export function Code({
   // there is nothing to choose from until then, so ask for that instead.
   const [linking, setLinking] = useState(false);
   const [err, setErr] = useState("");
+  // The folder's uncommitted work keeps it off a new branch: said inside the box, with the way on, never as a paragraph with the
+  // folder's whole path under it (audit CODE-6 A, Arun 2026-11-04). The branch it is on.
+  const [dirtyOn, setDirtyOn] = useState<string | null>(null);
+  // Sent again once the choice it offers is made (Use that branch): after the render that holds the choice.
+  const [again, setAgain] = useState(0);
   const input = useRef<HTMLTextAreaElement>(null);
   const starters = useStarters();
   // Your computer: the one Friday runs on, or the one you linked.
@@ -549,6 +558,24 @@ export function Code({
 
   /** Where ↑ has got to in your past asks (askHistory.ts); -1 while the box holds your own text. */
   const askAt = useRef(-1);
+  // "/", "@" and "#" as a session's box has them (audit CODE-9, Arun 2026-11-04: the home box ignored all three): the tool's
+  // commands and your saved ones, the coding tools to send it to, and the files of the folder picked.
+  const savedCmds = useSavedCommands();
+  const shortcuts = useShortcuts({
+    textarea: input,
+    sid: "",
+    invite: "",
+    commands: !work,
+    files: hasMachine && !!folder,
+    saved: savedCommands(savedCmds.commands),
+    ...(engine ? { tool: ENGINE_NAMES[engine] } : {}),
+    agents: ready.map((t) => ({ id: t, name: ENGINE_NAMES[t], mark: <EngineMark tool={t} size={13} />, hint: t === engine ? "Writing to it" : "Send it to" })),
+    onAgent: (id) => ((chose.current = true), setEngine(id as EngineTool)),
+    loadFiles: () => hostApi<{ output?: string; error?: string }>(identity, `/api/runner/tree?path=${encodeURIComponent(folder?.path ?? "")}`).catch((e: Error) => ({ error: e.message })),
+    filesFrom: folder?.path ?? "",
+    noFolder: hasMachine ? "Pick a folder first: # names the files in it." : "Connect this computer first: # names the files in the folder you pick.",
+    below: true,
+  });
   const submit = async () => {
     // "/brief": the daily brief, not a task (DailyBrief.tsx).
     if (goal.trim().toLowerCase() === "/brief") return void (setGoal(""), openBrief());
@@ -573,6 +600,7 @@ export function Code({
     let aside: { branch: string; base?: string } | undefined;
     setBusy(true);
     setErr("");
+    setDirtyOn(null);
     // The session once made, until the task is sent to it: one left without its task is taken away again.
     let made = "";
     // Said under the box as it goes: starting takes a few seconds, and a spinner alone said nothing about which of them was slow.
@@ -590,6 +618,14 @@ export function Code({
         if (dirty && canAside && target && target !== newBranchName && now!.folder.branch !== target && target !== resumeBranch) aside = { branch: target };
         else if (dirty && target && target !== newBranchName && now!.folder.branch !== target) {
           setErr(`${folder.name} has uncommitted changes on ${now!.folder.branch ?? "its current branch"}, so it won't be switched to ${target}${pr ? ", where the pull request is" : target === pickedBranch ? "" : ", where that conversation is"}. Commit or stash them, then send again.`);
+          setAttachNote("");
+          setBusy(false);
+          return;
+        }
+        // A new branch from where it is, over uncommitted work: the runner won't move the work onto it. Said before a session is
+        // made, inside the box, with the branch it is on to use instead (audit CODE-6 A).
+        if (dirty && !aside && target && target === newBranchName && !branchFrom && now!.folder.branch && now!.folder.branch !== target) {
+          setDirtyOn(now!.folder.branch);
           setAttachNote("");
           setBusy(false);
           return;
@@ -689,7 +725,9 @@ export function Code({
           void begun;
         } catch (e) {
           attached = false;
-          setErr(`${engine ? ENGINE_NAMES[engine] : "Your folder"} didn't connect: ${(e as Error).message}`);
+          const dirty = /has uncommitted changes on (.+?), so it isn't mine to move onto /.exec((e as Error).message);
+          if (dirty) setDirtyOn(dirty[1] === "its current branch" ? "" : dirty[1]!);
+          else setErr(`${engine ? ENGINE_NAMES[engine] : "Your folder"} didn't connect: ${(e as Error).message}`);
         }
       };
       let attachments: Attachment[] = [];
@@ -739,6 +777,11 @@ export function Code({
       if (made) void api(identity, "/api/sessions/mine/forget", { method: "POST", body: JSON.stringify({ sid: made }) }).catch(() => {});
     }
   };
+
+  useEffect(() => {
+    if (again) void submit();
+  }, [again]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => setDirtyOn(null), [folder?.path]);
 
   let placeholder = solo ? "Describe the change…" : "Describe the change. Teammates can join, watch the run and steer it live…";
   if (work) placeholder = WORK_PLACEHOLDER;
@@ -798,6 +841,43 @@ export function Code({
                 )}
     </>
   );
+  // The folder menu's branch section (FolderMenu.tsx): its branches to work on, or a new one from the one chosen.
+  const branchChoice: BranchChoice | null = branchy
+    ? {
+        branches: canPickBranch ? branches : null,
+        ...(folder?.branch ? { current: folder.branch } : {}),
+        ...(lands ? { lands } : {}),
+        pick: pickBranch,
+        onPick: (v) => (setPickBranch(v), setErr("")),
+        newBranch,
+        onNew: (on) => (setNewBranch(on), setErr(""), !on && branches?.find((b) => b.name === pickBranch)?.elsewhere && setPickBranch("")),
+        name: branch,
+        onName: setBranch,
+        suggestion: branchSuggestion,
+        ...(pr && !pr.fork && pr.head ? { fixed: pr.head } : {}),
+      }
+    : null;
+  // In a continued conversation's card, one quiet menu in its row (Arun, 2026-11-04, design A): the branch it carries on, or a new
+  // one from it, named in the field that follows. The switch and its words stay for the other ways in.
+  const keepOn = lands || folder?.branch || "its branch";
+  const cardBranch = branchy ? (
+    <span className="ws-branch-set">
+      <MenuButton
+        className="ccard-branch"
+        text={newBranch ? "New branch" : keepOn}
+        mark={<Icon name="gitBranch" size={12} />}
+        label="Which branch the work lands on"
+        compact
+        items={() => [
+          { label: `Keep working on ${keepOn}`, sub: "Where the conversation left off", checked: !newBranch, onSelect: () => (setNewBranch(false), setErr("")) },
+          { label: "Start a new branch from it", sub: "Named in the field beside it", checked: newBranch, onSelect: () => (setNewBranch(true), setErr("")) },
+        ]}
+      />
+      {newBranch && (
+        <input className="ws-branch-input" value={branch} placeholder={branchSuggestion} spellCheck={false} aria-label="Branch name" title="Leave it empty to use the suggested name" onChange={(e) => setBranch(e.target.value)} />
+      )}
+    </span>
+  ) : null;
   return (
     <div className="home">
       {/* Code's home is one flat ground (Arun, 2026-10-29: "so clean and beautiful really with a clear direction in design
@@ -831,37 +911,8 @@ export function Code({
       )}
 
       <div className="composer-above">
-        {/* Smart routing (routing.ts): Auto for whichever agent is chosen, when it can route. Above the box, on its own, so it is
-            seen before writing rather than found among the controls under it. Off until someone turns it on; then it stays on,
-            on this computer, until they turn it off here or pick a model of their own. */}
-        {/* Not on a first visit: one more thing to read before the first task, and a word nobody new knows yet (2026-11-01). */}
-        {!firstRun && (engine ? canRoute(engine) : planLimits(plan).fridayAgent !== "none") &&
-          (() => {
-            const on = engine ? model === "auto" : fridayModelId === "auto";
-            return (
-              <button
-                type="button"
-                className={`menu-pill agent-pill route-pill${on ? " on" : ""}`}
-                aria-pressed={on}
-                title={
-                  on
-                    ? "Smart routing is on: each message runs on the model most likely to get it right for the least, from benchmarks, your limits and how your runs have gone. Press to pick the model yourself."
-                    : "Smart routing: let Friday pick the model for each message, from how hard it reads, your limits and how your runs have gone."
-                }
-                onClick={() => {
-                  const next = !on;
-                  saveSmartRouting(next);
-                  if (engine && next && model !== "auto") pickedModel.current = model;
-                  if (engine) setModel(next ? "auto" : pickedModel.current);
-                  else ((choseModel.current = true), setFridayModelId(next ? "auto" : ""));
-                }}
-              >
-                <Icon name="zap" size={13} />
-                <span>Smart routing</span>
-                <span className="route-pill-state">{on ? "On" : "Off"}</span>
-              </button>
-            );
-          })()}
+        {/* Smart routing is the tool's model "Smart" (AgentModelPicker), said on its pill: "Claude Code · Smart" (Arun, 2026-11-04,
+            design A: nothing over the box). */}
       </div>
       <form
         className="composer-card"
@@ -889,6 +940,7 @@ export function Code({
           input.current?.focus();
         }}
       >
+        {shortcuts.popover}
         <div className="composer-inner">
           <AttachedRow files={files} onChange={setFiles} />
           <DropOverlay on={draggingFiles} to="your new session" />
@@ -896,12 +948,19 @@ export function Code({
           {/* The folder is said by the footer's dropdown (DIRECTION.md §9.5); its branch, when it is a repository, is one quiet line
               here, and a conversation picked up again keeps its card, which says so. */}
           {hasMachine && folder && picked?.resume && (
-            <FolderCard folder={folder} resume={picked.resume} where={machine.mode === "linked" ? (machine.machine?.name ?? "your computer") : "this computer"} onClear={() => (setPicked(null), setBranch(""), setNewBranch(true), setPickBranch(""))}>
-              {branchLine}
+            <FolderCard
+              folder={folder}
+              resume={picked.resume}
+              where={machine.mode === "linked" ? (machine.machine?.name ?? "your computer") : "this computer"}
+              onClear={() => (setPicked(null), setBranch(""), setNewBranch(true), setPickBranch(""))}
+              {...(engine ? { extra: <AlsoWorksIn identity={identity} folder={folder.path} value={dirs} onChange={setDirs} inCard /> } : {})}
+            >
+              {/* Only a repository has a branch to say: otherwise the card says where the folder is (an empty line here was a rule
+                  with nothing under it). */}
+              {cardBranch}
             </FolderCard>
           )}
-          {hasMachine && folder && !picked?.resume && branchy && <div className="cw-branch">{branchLine}</div>}
-          {hasMachine && folder && engine && <AlsoWorksIn identity={identity} folder={folder.path} value={dirs} onChange={setDirs} />}
+          {/* No rows over the request for a folder's branch or its other folders: the box's folder menu holds both (FolderMenu.tsx). */}
           {/* A prompt link's repo that isn't on this computer yet: one press clones it, and the box is ready. */}
           {linkRepo && !pr && !issue && hasMachine && !picked && repoMissing === linkRepo && (
             <div className="composer-link-repo">
@@ -1020,8 +1079,13 @@ export function Code({
             onChange={(e) => {
               setGoal(e.target.value);
               grow(e.target);
+              shortcuts.sync();
             }}
+            onClick={shortcuts.sync}
+            onBlur={shortcuts.close}
             onKeyDown={(e) => {
+              // A list of commands, tools or files that is open takes the arrows, Enter and Escape.
+              if (shortcuts.onKeyDown(e)) return;
               // ↑ in an empty box: what you asked before, in any session.
               if (!busy && walkAsks(e, e.currentTarget, askAt, (t) => setGoal(t))) return;
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -1030,6 +1094,19 @@ export function Code({
               }
             }}
           />
+          {dirtyOn !== null && (
+            <div className="cw-dirty" role="alert">
+              <span className="cw-dirty-text">
+                Uncommitted changes on {dirtyOn ? <code title={dirtyOn}>{shortBranch(dirtyOn)}</code> : "its branch"}
+              </span>
+              <button type="button" className="btn small" title="Commit or stash them in the folder, then send again" onClick={() => (setDirtyOn(null), input.current?.focus())}>
+                Commit them first
+              </button>
+              <button type="button" className="btn small primary" title={`Work on ${dirtyOn || "the branch it is on"}, with the changes, instead of a new branch`} onClick={() => (setDirtyOn(null), setNewBranch(false), setPickBranch(""), setAgain((n) => n + 1))}>
+                Use that branch
+              </button>
+            </div>
+          )}
           <div className="composer-bar">
             {/* One control for everything a run starts from: files, a folder
                 you hand over, and the code already on your computer. A folder
@@ -1058,14 +1135,15 @@ export function Code({
             {isLocal() && <ComputerPill onPick={() => (setPicked(null), setBranch(""), setNewBranch(true), setPickBranch(""))} />}
             {hasMachine && (
               <span className="cw-where">
+                {folder ? (
+                  <FolderPill identity={identity} folder={folder} dirs={dirs} onDirs={setDirs} branch={branchChoice} onChangeFolder={(from) => window.dispatchEvent(new CustomEvent(PICK_FOLDER, { detail: { from } }))} />
+                ) : (
                 <button
                   type="button"
                   className="cw-drop"
-                  aria-label={folder ? `Folder: ${folder.name}. Choose another` : "Choose a folder"}
+                  aria-label="Choose a folder"
                   title={
-                    folder
-                      ? `${folder.path}\nThe folder stays on ${machine.mode === "linked" ? (machine.machine?.name ?? "your computer") : "this computer"}.`
-                      : noFolderLine === "work"
+                    noFolderLine === "work"
                         ? "Your pieces are saved in a new folder. Choose one."
                         : files.some((f) => f.folder)
                           ? // A folder's copy attached is not a folder picked (2026-10-28 QA).
@@ -1076,9 +1154,10 @@ export function Code({
                 >
                   <Icon name="folder" size={13} />
                   {/* "New folder" in Code too: Friday makes one, and "No folder" read as something missing (2026-11-01, the first run). */}
-                  <span className="cw-drop-text">{folder ? folder.name : "New folder"}</span>
+                  <span className="cw-drop-text">New folder</span>
                   <Icon name="chevronDown" size={12} className="menu-pill-caret" />
                 </button>
+                )}
                 {folder && (
                   <button type="button" className="cw-clear" aria-label={picked?.resume ? "Remove this session and folder" : "Remove this folder"} title="Remove this folder" onClick={() => (setPicked(null), setBranch(""), setNewBranch(true), setPickBranch(""))}>
                     <Icon name="x" size={12} />
@@ -1226,12 +1305,9 @@ export function Code({
       <DailyBriefCard />
       {/* Every goal you set, at risk first (goals.ts). */}
       {/* Every agent's finished work, proven first, one press from shipped (ready.ts). */}
-      <ReadyCard identity={identity} />
+      {/* Ready to ship is in Right now, below (HomeActivity; audit CODE-17 B). */}
       <GoalsCard identity={identity} />
       {/* What happened while you were away, before what you might do next. */}
-
-      {/* Where the toasts of what waits on you sit on a phone, in the page rather than over "Right now" (Attention.tsx). */}
-      <div id="wy-home" className="wy-home" />
 
       {/* Your agents right now, and how the last weeks went: in place of suggested prompts, what someone opening Friday wants first. */}
       <HomeActivity

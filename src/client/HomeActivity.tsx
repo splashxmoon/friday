@@ -9,6 +9,10 @@ import { relTime } from "./ui.js";
 import { PresenceRing } from "./presence.js";
 import { isWorkSid } from "./WorkMode.js";
 import { workRightNow } from "./work-outputs.js";
+import type { ReadyItem } from "../ready.js";
+import { focusAgent } from "./agentFocus.js";
+import { NEEDS_CHANGED, useNeedMarks } from "./Attention.js";
+import "./daily-brief.css";
 
 /**
  * Under the box on the home screen: your agents right now, then your last thirteen weeks of work.
@@ -36,12 +40,31 @@ function useRightNow(identity: Identity, recents: RecentSession[]) {
       );
     void ask();
     const t = setInterval(ask, 10_000);
+    // Answered, asked or put off anywhere: read again now, as the badge is.
+    const now = () => void ask();
+    addEventListener("friday:attention", now);
+    addEventListener(NEEDS_CHANGED, now);
     return () => {
       live = false;
       clearInterval(t);
+      removeEventListener("friday:attention", now);
+      removeEventListener(NEEDS_CHANGED, now);
     };
   }, [identity.id, sids]);
   return cards;
+}
+
+/** Every agent's finished work waiting to ship (ready.ts), for its rows at the top of Right now. */
+function useReady(identity: Identity) {
+  const [items, setItems] = useState<ReadyItem[]>([]);
+  useEffect(() => {
+    let gone = false;
+    const read = () => void api<{ items: ReadyItem[] }>(identity, "/api/ready").then((r) => !gone && setItems(r.items), () => {});
+    read();
+    const t = setInterval(read, 60_000);
+    return () => ((gone = true), clearInterval(t));
+  }, [identity.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  return items;
 }
 
 function useDays() {
@@ -100,10 +123,25 @@ export function streaks(cells: { turns: number }[]): { longest: number; current:
 
 export function HomeActivity({ identity, recents, onOpen, onBoard }: { identity: Identity; recents: RecentSession[]; onOpen: (sid: string, invite: string) => void; onBoard?: () => void }) {
   let cards = useRightNow(identity, recents);
+  // What waits on you outside these sessions (a workflow at its Your OK): a row of its own, as on the Board, so Home lists what the
+  // Needs you page does (2026-11-04 retest). Opened, it goes to the Needs you page.
+  const { needs } = useNeedMarks();
+  if (cards) {
+    const here = new Set(cards.filter((c) => c.you).map((c) => c.sid));
+    cards = [...cards, ...needs.filter((n) => !n.sid || !here.has(n.sid)).map((n): BoardCard => ({ id: `need|${n.id}`, sid: "", lane: "", title: n.title, task: n.text, agent: n.who, tool: null, column: "needs", status: "Needs you", detail: n.text, branch: "", files: 0, pr: null, at: n.since, you: true, mine: true }))];
+  }
   // Work's home: one row a session, in plain words (work-outputs.ts workRightNow).
   if (cards?.length && cards.every((c) => isWorkSid(c.sid))) cards = workRightNow(cards);
   const days = useDays();
-  const now = (cards ?? []).filter((c) => c.column !== "idle").sort((a, b) => (ORDER[a.column] ?? 9) - (ORDER[b.column] ?? 9) || Number(b.you) - Number(a.you) || b.at - a.at);
+  // Ready to ship is part of Right now, one list (audit CODE-17 B, Arun 2026-11-04: a card of its own above it said "Main's
+  // changes" twice and never which session): each session's finished work once, by its title, with Review on the right.
+  const listed = new Set(recents.map((r) => r.sid));
+  const ready = useReady(identity).filter((i) => listed.has(i.sid) && !i.waiting && !i.pr?.merged);
+  // Not one that is working or waiting on you: that is what it is right now, said in its own row.
+  const busy = new Set((cards ?? []).filter((c) => c.column === "needs" || c.column === "working").map((c) => c.sid));
+  const shipping = [...new Map(ready.filter((i) => !busy.has(i.sid)).map((i) => [i.sid, i])).values()];
+  const shipSids = new Set(shipping.map((i) => i.sid));
+  const now = (cards ?? []).filter((c) => c.column !== "idle" && !shipSids.has(c.sid)).sort((a, b) => (ORDER[a.column] ?? 9) - (ORDER[b.column] ?? 9) || Number(b.you) - Number(a.you) || b.at - a.at);
   const cols = useMemo(() => heatmap(days ?? []), [days]);
   const flat = cols.flat();
   const total = flat.reduce((n, c) => n + c.turns, 0);
@@ -122,7 +160,7 @@ export function HomeActivity({ identity, recents, onOpen, onBoard }: { identity:
 
   return (
     <div className="ha">
-      {now.length > 0 && (
+      {(now.length > 0 || shipping.length > 0) && (
         <section className="ha-now" aria-label="Your agents right now">
           <div className="ha-head">
             <h2>Right now</h2>
@@ -133,10 +171,42 @@ export function HomeActivity({ identity, recents, onOpen, onBoard }: { identity:
             )}
           </div>
           <ul className="ha-list">
+            {shipping.slice(0, 3).map((i) => {
+              const r = recents.find((x) => x.sid === i.sid);
+              const repo = r?.repos?.[0];
+              const review = () => (focusAgent(i.sid, i.lane), onOpen(i.sid, invite(i.sid)));
+              return (
+                <li key={`ship:${i.sid}`}>
+                  <div className="ha-row ship" onClick={review}>
+                    <PresenceRing state="idle" size={24} square className="ha-pr">
+                      <span className="ha-mark">{i.tool ? <EngineMark tool={i.tool} size={13} /> : <FridayMark size={13} />}</span>
+                    </PresenceRing>
+                    <span className="ha-text">
+                      <span className="ha-title" title={r?.alias || r?.title || i.where}>{r?.alias || r?.title || i.where}</span>
+                      <span className="ha-task">
+                        {[repo?.name, repo?.branch].filter(Boolean).join(" · ")}
+                        {repo?.name ? " · " : ""}
+                        <b className="ready-add">+{i.additions}</b> <b className="ready-del">−{i.deletions}</b>
+                      </span>
+                    </span>
+                    <span className="ha-state ship">Ready to ship</span>
+                    {i.pr ? (
+                      <a className="ready-btn" href={i.pr.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
+                        Open PR
+                      </a>
+                    ) : (
+                      <button type="button" className="ready-btn" onClick={(e) => (e.stopPropagation(), review())}>
+                        Review
+                      </button>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
             {/* Three quiet rows under the box (DIRECTION.md §9.5); the rest are on the Agent Board. */}
             {now.slice(0, 3).map((c) => (
               <li key={c.id}>
-                <button type="button" className={`ha-row ${c.column}${c.you ? " you" : ""}`} onClick={() => onOpen(c.sid, invite(c.sid))}>
+                <button type="button" className={`ha-row ${c.column}${c.you ? " you" : ""}`} onClick={() => (c.sid ? onOpen(c.sid, invite(c.sid)) : dispatchEvent(new Event("friday:open-needs")))}>
                   {/* The coding tool's mark wears the ring of how it stands, as everywhere (presence.tsx): no dot beside the word. */}
                   <PresenceRing state={c.column === "needs" ? "needs" : c.column === "working" ? "working" : "idle"} size={24} square className="ha-pr">
                     <span className="ha-mark">{c.tool ? <EngineMark tool={c.tool} size={13} /> : c.agent === "Friday Code" ? <FridayMark size={13} /> : <Icon name="agent" size={13} />}</span>
@@ -146,6 +216,9 @@ export function HomeActivity({ identity, recents, onOpen, onBoard }: { identity:
                     {/* Its task under its title only when it says something the title doesn't. */}
                     {(() => {
                       const line = shortPaths(c.task && c.task !== c.title ? c.task : c.detail || c.agent);
+                      // Nothing rather than its title again (audit CODE-17).
+                      const same = (a: string, b: string) => a.trim().replace(/[.…]+$/, "").toLowerCase() === b.trim().replace(/[.…]+$/, "").toLowerCase();
+                      if (!line || same(line, c.title) || c.title.toLowerCase().startsWith(line.trim().replace(/[.…]+$/, "").toLowerCase())) return null;
                       return (
                         <span className="ha-task" title={line}>
                           {line}
@@ -180,7 +253,7 @@ export function HomeActivity({ identity, recents, onOpen, onBoard }: { identity:
                   <span key={i}>{labelAt.get(i) ?? ""}</span>
                 ))}
               </div>
-              <div className="ha-grid" role="img" aria-label={`${total} turns over the last year, on ${active} days; longest streak ${longest} days`}>
+              <div className="ha-grid" role="img" aria-label={`${total} turn${total === 1 ? "" : "s"} over the last year, on ${active} day${active === 1 ? "" : "s"}; longest streak ${longest} day${longest === 1 ? "" : "s"}`}>
                 <div className="ha-days" aria-hidden>
                   <span />
                   <span>Mon</span>
@@ -202,9 +275,10 @@ export function HomeActivity({ identity, recents, onOpen, onBoard }: { identity:
             {/* The numbers, not a sentence: what the graph adds up to, on one line under it, the key at its end. */}
             <div className="ha-foot">
               <dl className="ha-stats">
-                <div><dd>{total.toLocaleString()}</dd><dt>turns</dt></div>
-                <div><dd>{active}</dd><dt>active days</dt></div>
-                <div><dd>{longest}</dd><dt>{current > 1 && current === longest ? "day streak, still going" : "day longest streak"}</dt></div>
+                {/* The plural follows the count, the streak said short: "1 active day · 1-day streak" (audit REST-31, Arun 2026-11-04). */}
+                <div><dd>{total.toLocaleString()}</dd><dt>{total === 1 ? "turn" : "turns"}</dt></div>
+                <div><dd>{active}</dd><dt>{active === 1 ? "active day" : "active days"}</dt></div>
+                <div><dd>{longest}-day</dd><dt>{current > 1 && current === longest ? "streak, still going" : "streak"}</dt></div>
                 {busiest && <div><dd>{busiest}s</dd><dt>busiest</dt></div>}
               </dl>
               <div className="ha-key" aria-hidden>

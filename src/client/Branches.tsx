@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { spareBranch } from "./branch-names.js";
 import { createPortal } from "react-dom";
 import { Icon } from "./icons.js";
 import type { Send } from "./useSession.js";
@@ -146,7 +147,8 @@ export function BranchCard({
         }
         if (parsed.error) return setErr(parsed.error);
         if (parsed.current) setOn(parsed.current);
-        setList(parsed.branches ?? []);
+        // Never Friday's spare branches, kept ready for new sessions (audit CODE-16 A); the one it is on, whatever it is.
+        setList((parsed.branches ?? []).filter((b) => !spareBranch(b.name) || b.name === parsed.current));
       })
       .catch((e: Error) => live && setErr(e.message));
     return () => {
@@ -298,7 +300,8 @@ function FolderBranchCard({ branches, current, value, asBase, trigger, onPick, o
   const [q, setQ] = useState("");
   const [err, setErr] = useState("");
   const typed = q.trim().toLowerCase();
-  const hits = branches.filter((b) => !typed || b.name.toLowerCase().includes(typed));
+  // Never Friday's spare branches, kept ready for new sessions (audit CODE-16 A).
+  const hits = branches.filter((b) => (!spareBranch(b.name) || b.name === current) && (!typed || b.name.toLowerCase().includes(typed)));
   const here = hits.filter((b) => !b.remote);
   const origin = hits.filter((b) => b.remote);
   // Checked out in another folder: git won't put this one on it too. As the place a new branch starts, it is fine.

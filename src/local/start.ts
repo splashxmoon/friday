@@ -1,5 +1,5 @@
-import { execFileSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { execFile, execFileSync } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import os from "node:os";
@@ -71,6 +71,42 @@ function computerName(): string {
   return os.hostname().replace(/\.local$/, "").slice(0, 60) || "This computer";
 }
 
+/**
+ * This computer's names on the network, for a link another computer keeps (phone.ts pairCode): its .local name, which follows it
+ * to any network where the two see each other, and its Tailscale (MagicDNS) name when Tailscale is on. Read once, a few seconds
+ * at most; none where they can't be had.
+ */
+let namesRead: Promise<string[]> | null = null;
+export function networkNames(): Promise<string[]> {
+  const run = (bin: string, args: string[]) => new Promise<string>((resolve) => execFile(bin, args, { timeout: 3000, windowsHide: true }, (e, out) => resolve(e ? "" : String(out))));
+  return (namesRead ??= (async () => {
+    const out: string[] = [];
+    const local = process.platform === "darwin" ? (await run("scutil", ["--get", "LocalHostName"])).trim() : os.hostname().replace(/\.local$/i, "");
+    if (/^[\w-]{1,60}$/.test(local)) out.push(`${local}.local`);
+    for (const bin of ["tailscale", "/Applications/Tailscale.app/Contents/MacOS/Tailscale"]) {
+      const raw = await run(bin, ["status", "--json"]);
+      if (!raw) continue;
+      try {
+        const dns = String((JSON.parse(raw) as { Self?: { DNSName?: unknown } }).Self?.DNSName ?? "").replace(/\.$/, "");
+        if (/^[\w.-]{1,64}$/.test(dns)) out.push(dns);
+      } catch {
+        // Not JSON: no Tailscale name.
+      }
+      break;
+    }
+    return out;
+  })());
+}
+
+/** This Friday's version (its package.json), said to another computer as they link. */
+function fridayVersion(): string {
+  try {
+    return String((JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { version?: unknown }).version ?? "");
+  } catch {
+    return "";
+  }
+}
+
 export async function startLocal(o: { home?: string; port?: number; /** A link from another computer's Settings › Your computers: this one is paired with it, once (add-computer.ts). */ join?: string; /** Removed or turned away there for good: what to do (a service exits, so it isn't started again). */ onGone?: () => void } = {}): Promise<Started> {
   // The local client, built from its own entry (client-build.ts), whatever the environment says.
   process.env.FRIDAY_EDITION = "local";
@@ -104,9 +140,12 @@ export async function startLocal(o: { home?: string; port?: number; /** A link f
   const port = await freePort(o.port ?? Number(process.env.PORT ?? 4321));
   const url = `http://127.0.0.1:${port}`;
   // Your phone (phone.ts): its own listener, off until turned on in Settings, handing what it may ask to this server.
-  const phone = new PhoneAccess({ kv: kv.redis, home, appPort: port, computer: computerName() });
+  const version = fridayVersion();
+  const phone = new PhoneAccess({ kv: kv.redis, home, appPort: port, computer: computerName(), names: networkNames, version });
   // This computer used from another one's Friday (join.ts): a link it holds there, once paired from Settings › Your computers.
-  const join = new JoinHub({ kv: kv.redis, name: computerName(), log: (l) => console.log(`[computers] ${l}`), ...(o.onGone ? { onGone: o.onGone } : {}) });
+  // Known there by this install's own id (from its secret, so the same each time and nobody else's): pairing it again replaces its row.
+  const machineId = createHash("sha256").update(`friday-machine:${secret}`).digest("hex").slice(0, 32);
+  const join = new JoinHub({ kv: kv.redis, name: computerName(), log: (l) => console.log(`[computers] ${l}`), machineId, version, ...(o.onGone ? { onGone: o.onGone } : {}) });
   const app = await createApp({
     port,
     // Friday at 127.0.0.1, where the runner it starts connects back too; previews at localhost, which a browser counts as another
@@ -126,15 +165,16 @@ export async function startLocal(o: { home?: string; port?: number; /** A link f
   });
   // Turned on before, so on again: the phone stays connected through a restart.
   void phone.resume();
-  void join.resume();
-  // Started to be another computer's extra machine (`--join`): paired the first time; after that the link it keeps is held.
-  if (o.join) {
-    const now = await join.state();
-    if (!now.hub) {
-      const got = await join.join(o.join);
-      console.log(got.hub ? `[computers] paired with ${got.hub.name}` : `[computers] couldn't pair: ${got.error ?? "no answer"}`);
-    }
-  }
+  // Started to be another computer's extra machine (`--join`): paired with that link the first time, and the pairing it keeps
+  // held after that (a service restarting). A link it wasn't paired with (added again by SSH or a command, after a removal
+  // there) pairs anew, replacing the pairing kept: it used to be skipped for the old one, which was refused, so the service
+  // stopped for good while setup said it was done (2026-11-04 linking test).
+  if (o.join && !(await join.pairedWith(o.join))) {
+    const got = await join.join(o.join);
+    console.log(!got.error && got.hub ? `[computers] paired with ${got.hub.name}` : `[computers] couldn't pair: ${got.error ?? "no answer"}`);
+    // Not paired: the pairing it had, if it still holds, is kept.
+    if (got.error) void join.resume();
+  } else void join.resume();
   const runningFile = path.join(home, "running.json");
   writeFileSync(runningFile, JSON.stringify({ url, pid: process.pid }), { mode: 0o600 });
 

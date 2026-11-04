@@ -2,10 +2,11 @@ import { seesByName } from "../own-vision.js";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { isOwnModel } from "../own-model-id.js";
 import { api } from "./api.js";
-import { EngineMark, VendorMark } from "./BrandMarks.js";
+import { EngineMark, ModelHostMark, VendorMark } from "./BrandMarks.js";
 import { machineError } from "./GitHubConnect.js";
 import { Icon } from "./icons.js";
 import { NoMachine, hostApi, useMachine } from "./local.js";
+import { groupOwn } from "./own-groups.js";
 import { loadOwnModels, useOwnModels, type OwnChoice } from "./ownModelStore.js";
 import type { Identity } from "./storage.js";
 import { Check, MenuButton, useConfirm, type MenuItem } from "./ui.js";
@@ -21,8 +22,8 @@ import type { WorkspaceUsage } from "./workspace-types.js";
  */
 
 /** Where people get models, with the address each one's OpenAI-compatible API lives at. */
-/** `keys`: where the provider hands out keys, for the form's "Get a key". */
-const PRESETS: { id: string; name: string; baseUrl: string; key: boolean; hint: string; keys?: string }[] = [
+/** `keys`: where the provider hands out keys, for the form's "Get a key". `key`: "optional" where some servers take none. */
+const PRESETS: { id: string; name: string; baseUrl: string; key: boolean | "optional"; hint: string; keys?: string }[] = [
   { id: "openai", name: "OpenAI", baseUrl: "https://api.openai.com/v1", key: true, hint: "gpt-6.1-sol, gpt-6-luna", keys: "https://platform.openai.com/api-keys" },
   { id: "anthropic", name: "Anthropic", baseUrl: "https://api.anthropic.com/v1", key: true, hint: "claude-sonnet-5-5, claude-opus-5-5", keys: "https://console.anthropic.com/settings/keys" },
   { id: "google", name: "Google Gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", key: true, hint: "gemini-3.8-flash", keys: "https://aistudio.google.com/apikey" },
@@ -33,11 +34,14 @@ const PRESETS: { id: string; name: string; baseUrl: string; key: boolean; hint: 
   { id: "together", name: "Together", baseUrl: "https://api.together.xyz/v1", key: true, hint: "Open models, hosted", keys: "https://api.together.ai/settings/api-keys" },
   { id: "ollama", name: "Ollama", baseUrl: "http://localhost:11434/v1", key: false, hint: "Models you pulled with ollama pull" },
   { id: "lmstudio", name: "LM Studio", baseUrl: "http://localhost:1234/v1", key: false, hint: "Models loaded in LM Studio's server" },
-  { id: "custom", name: "Another server", baseUrl: "", key: true, hint: "Anything that speaks the OpenAI chat API" },
+  // A server of your own may take no key, as LM Studio's doesn't (audit e2e, Arun 2026-11-04: a keyless one couldn't be added).
+  { id: "custom", name: "Another server", baseUrl: "", key: "optional", hint: "Anything that speaks the OpenAI chat API" },
 ];
 const presetOf = (id?: string) => PRESETS.find((p) => p.id === id);
 const LOGO: Record<string, string> = { openai: "OpenAI", anthropic: "Anthropic", google: "Google", deepseek: "DeepSeek" };
 const LOCAL_IDS = new Set(["ollama", "lmstudio"]);
+/** Their own marks, not letters (audit REST-25). */
+const HOST_MARKS = new Set(["groq", "mistral", "together", "ollama", "lmstudio"]);
 
 /**
  * A provider's mark: its logo where the app has one, else its initial; each in the same small tile, so a list of them reads as
@@ -48,7 +52,7 @@ function ProviderMark({ id, size = 15 }: { id?: string; size?: number }) {
   const inner = Math.round(size * 0.75);
   return (
     <span className="own-mono" style={{ width: size + 3, height: size + 3 }} aria-hidden>
-      {id && LOGO[id] ? <VendorMark vendor={LOGO[id]} size={inner} /> : id === "xai" ? <EngineMark tool="grok" size={inner} /> : id === "custom" || !p ? <Icon name="globe" size={inner} /> : p.name[0]}
+      {id && LOGO[id] ? <VendorMark vendor={LOGO[id]} size={inner} /> : id && HOST_MARKS.has(id) ? <ModelHostMark id={id} size={inner} /> : id === "xai" ? <EngineMark tool="grok" size={inner} /> : id === "custom" || !p ? <Icon name="globe" size={inner} /> : p.name[0]}
     </span>
   );
 }
@@ -86,7 +90,24 @@ function Field({ label, mark, text, items, width = 300, placeholder }: { label: 
 
 /** `savedUrl`: the address a model being changed was saved with, which its saved key belongs to. */
 /** `vision`: set by the person; unset, it is guessed from the model's name on the computer (seesImages), and `sees` says the guess. */
-type Draft = { id?: string; provider: string; baseUrl: string; apiKey: string; model: string; name: string; hasKey?: boolean; savedUrl?: string; vision?: boolean; sees?: boolean };
+type Draft = {
+  id?: string;
+  provider: string;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  name: string;
+  hasKey?: boolean;
+  savedUrl?: string;
+  vision?: boolean;
+  sees?: boolean;
+  /** More models from a server already in use: its list straight away, ticked to add (issue #17's follow-up). */
+  more?: boolean;
+  /** A saved model there whose key the server's list and the new models use. */
+  keyFrom?: string;
+};
+/** More from the server a saved model is on, with that model's key. */
+const moreFrom = (m: { id: string; provider?: string; baseUrl: string; hasKey: boolean }): Draft => ({ provider: m.provider ?? "custom", baseUrl: m.baseUrl, apiKey: "", model: "", name: "", hasKey: m.hasKey, savedUrl: m.baseUrl, more: true, keyFrom: m.id });
 type Local = { provider: string; name: string; baseUrl: string; models: string[] };
 
 export function OwnModelsSection({ identity, workspace }: { identity: Identity; workspace: WorkspaceUsage | null }) {
@@ -95,7 +116,8 @@ export function OwnModelsSection({ identity, workspace }: { identity: Identity; 
   const models = useOwnModels(machine.mode === "none" ? undefined : identity);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [local, setLocal] = useState<Local[]>([]);
-  const [notes, setNotes] = useState<Record<string, { text: string; bad?: boolean }>>({});
+  /** What a test said, for the model as it was tested: changed since (edited, moved, another model), it is gone (audit REST-7). */
+  const [notes, setNotes] = useState<Record<string, { text: string; bad?: boolean; of: string }>>({});
   const [error, setError] = useState("");
   const [ask, confirmUI] = useConfirm();
   const solo = true;
@@ -116,13 +138,15 @@ export function OwnModelsSection({ identity, workspace }: { identity: Identity; 
     );
   }
 
+  const testedAs = (m: OwnChoice) => `${m.baseUrl}|${m.model}|${m.hasKey}`;
   const test = async (m: OwnChoice) => {
-    setNotes((n) => ({ ...n, [m.id]: { text: "Asking it…" } }));
+    const of = testedAs(m);
+    setNotes((n) => ({ ...n, [m.id]: { text: "Asking it…", of } }));
     try {
       const r = await hostApi<{ ms: number; reply: string }>(identity, "/api/runner/models.own.test", { method: "POST", body: JSON.stringify({ id: m.id }) });
-      setNotes((n) => ({ ...n, [m.id]: { text: `Answered in ${(r.ms / 1000).toFixed(1)}s${r.reply ? `: “${r.reply}”` : ""}` } }));
+      setNotes((n) => ({ ...n, [m.id]: { text: `Answered in ${(r.ms / 1000).toFixed(1)}s${r.reply ? `: “${r.reply}”` : ""}`, of } }));
     } catch (e) {
-      setNotes((n) => ({ ...n, [m.id]: { text: machineError(e), bad: true } }));
+      setNotes((n) => ({ ...n, [m.id]: { text: machineError(e), bad: true, of } }));
     }
   };
   const remove = (m: OwnChoice) =>
@@ -149,6 +173,7 @@ export function OwnModelsSection({ identity, workspace }: { identity: Identity; 
     }
   };
   const current = workspace?.defaults?.model ?? "";
+  const form = (d: Draft) => <ModelForm key={`${d.id ?? ""}|${d.more ? d.baseUrl : ""}`} identity={identity} draft={d} saved={models} onChange={setDraft} onDone={async () => (setNotes((n) => Object.fromEntries(Object.entries(n).filter(([id]) => id !== d.id))), setDraft(null), await loadOwnModels(identity, true))} />;
   const unadded = local.flatMap((s) => (models.some((m) => m.baseUrl === s.baseUrl) ? [] : [s]));
 
   return (
@@ -180,34 +205,80 @@ export function OwnModelsSection({ identity, workspace }: { identity: Identity; 
           </div>
         ))}
 
-        {draft && <ModelForm identity={identity} draft={draft} saved={models} onChange={setDraft} onDone={async () => (setDraft(null), await loadOwnModels(identity, true))} />}
+        {/* A new one is added above the list; one changed, or more from a server, opens where it is in it. */}
+        {draft && !draft.id && !draft.more && form(draft)}
 
-        {models.map((m) => (
-          <div key={m.id} className="set-row own-row">
-            <div className="set-text">
-              <div className="set-label">
-                {m.name}
-                {current === m.choice && <span className="chip-mini ok">Default</span>}
+        {groupOwn(models).map((g) => {
+          // Named after its provider where it has one (a preset, like LM Studio); another server goes by its address.
+          const named = g.provider && g.provider !== "custom" ? presetOf(g.provider)?.name : undefined;
+          const key = [g.local ? "on this computer" : "", g.keyed === "all" ? "key saved here" : g.keyed === "some" ? "some without a key" : g.local ? "" : "no key"].filter(Boolean).join(" · ");
+          return (
+            <div key={g.baseUrl} className="own-group" role="group" aria-label={`${named ?? g.host}, ${g.models.length} model${g.models.length === 1 ? "" : "s"}`}>
+              <div className="set-row own-group-head">
+                <span className="own-group-mark" aria-hidden="true">
+                  <ProviderMark id={g.provider} size={16} />
+                </span>
+                <div className="set-text">
+                  <div className="set-label">{named ?? g.host}</div>
+                  <div className="muted small own-sub">
+                    {named && (
+                      <>
+                        <code>{g.host}</code> ·{" "}
+                      </>
+                    )}
+                    {g.models.length} model{g.models.length === 1 ? "" : "s"}
+                    {key && ` · ${key}`}
+                  </div>
+                </div>
+                {!(draft?.more && draft.baseUrl === g.baseUrl) && (
+                  <button type="button" className="btn ghost small" onClick={() => setDraft(moreFrom(g.models.find((m) => m.hasKey) ?? g.models[0]!))}>
+                    <Icon name="plus" size={13} /> More from {named ?? g.host}
+                  </button>
+                )}
               </div>
-              <div className="muted small own-sub">
-                <code>{m.model}</code> · {m.local ? "on this computer" : (presetOf(m.provider)?.name ?? new URL(m.baseUrl).host)}
-                {m.hasKey ? " · key saved here" : ""}
-              </div>
-              {notes[m.id] && <div className={`small ${notes[m.id]!.bad ? "error" : "muted"}`}>{notes[m.id]!.text}</div>}
+              {draft?.more && draft.baseUrl === g.baseUrl && form(draft)}
+              {g.models.map((m) => (
+                <div key={m.id}>
+                  <div className="set-row own-row">
+                    <div className="set-text">
+                      <div className="set-label own-name">
+                        {/* One line, cut with an ellipsis, the whole name on hover (audit REST-8). */}
+                        <span className="own-name-text" title={m.name}>
+                          {m.name}
+                        </span>
+                        {current === m.choice && <span className="chip-mini ok">Default</span>}
+                      </div>
+                      {m.name !== m.model && (
+                        <div className="muted small own-sub">
+                          <code>{m.model}</code>
+                        </div>
+                      )}
+                    </div>
+                    {/* In a slot of its own, one line beside the marks: the row keeps its height, the whole of it on hover. */}
+                    {notes[m.id]?.of === testedAs(m) && draft?.id !== m.id && (
+                      <span className={`small own-note ${notes[m.id]!.bad ? "error" : "muted"}`} title={notes[m.id]!.text} role="status">
+                        {notes[m.id]!.text}
+                      </span>
+                    )}
+                    {/* Three marks close together, not words (Arun, 2026-11-04: "use svg icons for these… closer together"). */}
+                    <div className="own-acts">
+                      <button type="button" className="icon-btn" aria-label={`Test ${m.name}`} title="Test: ask it for a short reply" onClick={() => void test(m)}>
+                        <Icon name="play" size={14} />
+                      </button>
+                      <button type="button" className={`icon-btn${draft?.id === m.id ? " on" : ""}`} aria-label={`Edit ${m.name}`} aria-pressed={draft?.id === m.id} title="Edit" onClick={() => setDraft(draft?.id === m.id ? null : { id: m.id, provider: m.provider ?? "custom", baseUrl: m.baseUrl, apiKey: "", model: m.model, name: m.name, hasKey: m.hasKey, savedUrl: m.baseUrl, ...(m.vision !== undefined ? { vision: m.vision } : {}), sees: m.sees })}>
+                        <Icon name="pencil" size={14} />
+                      </button>
+                      <button type="button" className="icon-btn own-act-remove" aria-label={`Remove ${m.name}`} title="Remove" onClick={() => remove(m)}>
+                        <Icon name="trash" size={14} />
+                      </button>
+                    </div>
+                  </div>
+                  {draft?.id === m.id && form(draft)}
+                </div>
+              ))}
             </div>
-            <div className="set-inline">
-              <button type="button" className="btn ghost small" onClick={() => void test(m)}>
-                Test
-              </button>
-              <button type="button" className="btn ghost small" onClick={() => setDraft({ id: m.id, provider: m.provider ?? "custom", baseUrl: m.baseUrl, apiKey: "", model: m.model, name: m.name, hasKey: m.hasKey, savedUrl: m.baseUrl, ...(m.vision !== undefined ? { vision: m.vision } : {}), sees: m.sees })}>
-                Edit
-              </button>
-              <button type="button" className="icon-btn" aria-label={`Remove ${m.name}`} onClick={() => remove(m)}>
-                <Icon name="trash" size={14} />
-              </button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
 
         {models.length > 0 && canDefault && (
           <div className="set-row">
@@ -259,32 +330,43 @@ function ModelForm({ identity, draft, saved, onChange, onDone }: { identity: Ide
   // A saved key goes only to the address it was saved for (own-models.ts): one moved elsewhere has to be given again.
   const moved = !!draft.savedUrl && draft.baseUrl.trim().replace(/\/+$/, "") !== draft.savedUrl.replace(/\/+$/, "");
   const keySaved = !!draft.hasKey && !moved;
-  const needsKey = preset.key && !draft.apiKey.trim() && !keySaved;
+  const needsKey = preset.key === true && !draft.apiKey.trim() && !keySaved;
 
   // What `claude setup-token` prints signs in to Claude Code only; said here at once, since Anthropic's own refusal is a bare 400.
   const signInToken = /^sk-ant-oat/i.test(draft.apiKey.trim()) ? "That's a Claude Code sign-in token, not an API key: it only works inside Claude Code. Create an API key at console.anthropic.com/settings/keys and paste that." : "";
+  /** The address and key the models shown were listed with: another key or address lists them again. */
+  const listedFor = useRef<string | null>(null);
   const list = async (quiet = false) => {
     if (signInToken) return setError(signInToken);
     setBusy("list");
     if (!quiet) setError("");
+    listedFor.current = `${draft.baseUrl.trim()}|${draft.apiKey.trim()}`;
     try {
-      const r = await hostApi<{ models: string[] }>(identity, "/api/runner/models.own.discover", { method: "POST", body: JSON.stringify({ baseUrl: draft.baseUrl, apiKey: draft.apiKey, ...(draft.id && !moved ? { id: draft.id } : {}) }) });
+      const from = draft.id ?? draft.keyFrom;
+      const r = await hostApi<{ models: string[] }>(identity, "/api/runner/models.own.discover", { method: "POST", body: JSON.stringify({ baseUrl: draft.baseUrl, apiKey: draft.apiKey, ...(from && !moved ? { id: from } : {}) }) });
       setFound(r.models);
-      if (!draft.model && r.models[0]) set({ model: r.models[0] });
+      if (draft.more) setMany((m) => m ?? new Set());
+      else if (!draft.model && r.models[0]) set({ model: r.models[0] });
       if (!r.models.length && !quiet) setError("That server didn't list any models. Type the model's name instead.");
     } catch (e) {
+      // What was listed with another key or address no longer stands: not kept, as if it still did (2026-11-04 retest).
+      setFound([]);
       // Asked by itself as a key was pasted: a refused key is said at once; anything else waits for a press of List models.
       const why = machineError(e);
-      if (!quiet || /accept the key/i.test(why)) setError(why);
+      if (!quiet || draft.more || /accept the key/i.test(why)) setError(why);
     }
     setBusy("");
   };
   // A key pasted, or a server on this computer picked: its models are asked for at once, so they are picked rather than typed.
   useEffect(() => {
-    if (found.length || !draft.baseUrl.trim()) return;
+    // Listed already with this address and key; or with none yet, when nothing was ever listed. A key changed after the models
+    // were listed lists them again, rather than keeping the old list with no word (2026-11-04 retest).
+    if (!draft.baseUrl.trim() || (found.length ? listedFor.current === `${draft.baseUrl.trim()}|${draft.apiKey.trim()}` || listedFor.current === null : false)) return;
     // Whole keys only: asked of a key still being typed, part of it would go round for nothing.
-    if (preset.key && draft.apiKey.trim().length < 30) return;
-    const t = setTimeout(() => void list(true), 900);
+    // Another server with no key: asked at once only on this computer, where a keyless one is likely; one elsewhere waits for its key.
+    const keyless = preset.key === "optional" && !draft.apiKey.trim() && /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/|$)/i.test(draft.baseUrl.trim());
+    if (preset.key && !keyless && draft.apiKey.trim().length < 30 && !keySaved) return;
+    const t = setTimeout(() => void list(true), draft.more ? 0 : 900);
     return () => clearTimeout(t);
   }, [draft.apiKey, draft.baseUrl, draft.provider]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -293,7 +375,7 @@ function ModelForm({ identity, draft, saved, onChange, onDone }: { identity: Ide
     setBusy("save");
     setError("");
     try {
-      await hostApi(identity, "/api/runner/models.own.addMany", { method: "POST", body: JSON.stringify({ provider: draft.provider, baseUrl: draft.baseUrl, models: picked, ...(draft.apiKey ? { apiKey: draft.apiKey } : {}) }) });
+      await hostApi(identity, "/api/runner/models.own.addMany", { method: "POST", body: JSON.stringify({ provider: draft.provider, baseUrl: draft.baseUrl, models: picked, ...(draft.apiKey ? { apiKey: draft.apiKey } : draft.keyFrom && !moved ? { id: draft.keyFrom } : {}) }) });
       await onDone();
     } catch (e) {
       setError(machineError(e));
@@ -302,6 +384,8 @@ function ModelForm({ identity, draft, saved, onChange, onDone }: { identity: Ide
   };
   const save = async () => {
     if (signInToken) return setError(signInToken);
+    // The same model from the same server once: added twice, it was two rows of one model (2026-11-04 retest).
+    if (!draft.id && have.has(draft.model.trim())) return setError(`${draft.model.trim()} from ${host} is already in your models.`);
     setBusy("save");
     setError("");
     try {
@@ -332,8 +416,22 @@ function ModelForm({ identity, draft, saved, onChange, onDone }: { identity: Ide
 
   return (
     <div className="own-form">
-      <div className="own-form-head">{draft.id ? `Change ${draft.name || draft.model}` : "Add a model"}</div>
+      <div className="own-form-head">{draft.more ? `More from ${host}` : draft.id ? `Change ${draft.name || draft.model}` : "Add a model"}</div>
       <div className="own-form-grid">
+        {/* One line: asking, or what went wrong with Try again beside it (audit REST-15). */}
+        {draft.more && !many && (busy === "list" || !error ? (
+          <p className="wide own-more-wait">
+            <span className="spinner" aria-hidden /> Asking {host} for its models…
+          </p>
+        ) : (
+          <div className="wide own-more-failed" role="alert">
+            <span className="error small">{error}</span>
+            <button type="button" className="btn small" onClick={() => void list()}>
+              Try again
+            </button>
+          </div>
+        ))}
+        {!draft.more && (
         <div className="own-field">
           <span>Provider</span>
           <Field
@@ -372,7 +470,8 @@ function ModelForm({ identity, draft, saved, onChange, onDone }: { identity: Ide
             </span>
           )}
         </div>
-        {!many && (
+        )}
+        {!many && !draft.more && (
         <label>
           <span>Model</span>
           <span className="own-model-pick">
@@ -430,25 +529,35 @@ function ModelForm({ identity, draft, saved, onChange, onDone }: { identity: Ide
               </button>
             </span>
           )}
+          {/* Editing one, the others on its server a press away, with its key (issue #17's follow-up). */}
+          {found.length > 1 && draft.id && !moved && (
+            <span className="own-hint">
+              <button type="button" className="link-btn" onClick={() => (setError(""), onChange(moreFrom({ id: draft.id!, provider: draft.provider, baseUrl: draft.savedUrl ?? draft.baseUrl, hasKey: !!draft.hasKey })))}>
+                Add others from this server
+              </button>
+            </span>
+          )}
         </label>
         )}
-        {addressOpen && (
+        {addressOpen && !draft.more && (
           <label className="wide">
             <span>Address</span>
             <input className="set-input" value={draft.baseUrl} placeholder="https://api.example.com/v1" spellCheck={false} onChange={(e) => set({ baseUrl: e.target.value })} />
             <span className="own-hint">Where its OpenAI-compatible API lives, ending before /chat/completions.</span>
           </label>
         )}
-        {preset.key && (
+        {preset.key && !(draft.more && keySaved && !error) && (
           <label className="wide">
-            <span>API key</span>
+            <span>
+              API key{preset.key === "optional" && <> <span className="own-optional">optional</span></>}
+            </span>
             <span className="own-key">
               <input
                 className="set-input"
                 type="password"
                 autoComplete="off"
                 value={draft.apiKey}
-                placeholder={keySaved ? "Saved on this computer · leave empty to keep it" : moved && draft.hasKey ? "Enter the key again for the new address" : "Paste your key"}
+                placeholder={keySaved ? "Saved on this computer · leave empty to keep it" : moved && draft.hasKey ? "Enter the key again for the new address" : preset.key === "optional" ? "Only if the server asks for one" : "Paste your key"}
                 onChange={(e) => set({ apiKey: e.target.value })}
               />
               {preset.keys && (
@@ -460,8 +569,8 @@ function ModelForm({ identity, draft, saved, onChange, onDone }: { identity: Ide
           </label>
         )}
         {many ? (
-          <ManyPicker found={found} picked={many} onPick={setMany} have={have} />
-        ) : (
+          <ManyPicker found={found} picked={many} onPick={(f) => setMany((m) => f(m ?? new Set()))} have={have} />
+        ) : draft.more ? null : (
           <>
         <label className="wide">
           <span>
@@ -479,21 +588,28 @@ function ModelForm({ identity, draft, saved, onChange, onDone }: { identity: Ide
           </>
         )}
       </div>
-      {error && <p className="error small">{error}</p>}
+      {error && !(draft.more && !many) && <p className="error small">{error}</p>}
       <div className="own-form-actions">
-        <span className="muted small">
-          <Icon name="shield" size={12} /> Kept on this computer. It passes through Friday only on its way here, and is never stored there.
-        </span>
+        {/* About a key: only where one is typed, never on a form with no key field (audit e2e, Arun 2026-11-04). */}
+        {preset.key && (!draft.more || !keySaved) && (
+          <span className="muted small">
+            <Icon name="shield" size={12} /> Kept on this computer and sent only to the model's server.
+          </span>
+        )}
         {many ? (
           <>
             {over > 0 && <span className="error small own-many-over">{room ? `${fresh.length} new, room for ${room} more: untick ${over}` : `${MAX_OWN} saved, the most Friday keeps`}</span>}
-            <button type="button" className="btn ghost small" onClick={() => (setError(""), setMany(null))}>
+            <button type="button" className="btn ghost small" onClick={() => (setError(""), draft.more ? onChange(null) : setMany(null))}>
               Cancel
             </button>
             <button type="button" className="btn primary small" disabled={busy !== "" || !fresh.length || over > 0 || needsKey} title={needsKey ? "Paste your key first" : !fresh.length ? "Tick the models to add" : undefined} onClick={() => void addMany(fresh)}>
               {busy === "save" ? "Adding…" : fresh.length > 1 ? `Add ${fresh.length} models` : "Add model"}
             </button>
           </>
+        ) : draft.more ? (
+          <button type="button" className="btn ghost small" onClick={() => onChange(null)}>
+            Cancel
+          </button>
         ) : (
           <>
         <button type="button" className="btn ghost small" onClick={() => onChange(null)}>
@@ -517,19 +633,20 @@ const MAX_OWN = 40;
  * the ones the filter leaves, how many are ticked, and the ticked ones alone. One already saved for this address is listed, not
  * offered again.
  */
-function ManyPicker({ found, picked, onPick, have }: { found: string[]; picked: Set<string>; onPick: (s: Set<string>) => void; have: Set<string> }) {
+function ManyPicker({ found, picked, onPick, have }: { found: string[]; picked: Set<string>; /** From what's ticked as it stands: ticks in quick succession each count. */ onPick: (f: (prev: Set<string>) => Set<string>) => void; have: Set<string> }) {
   const [filter, setFilter] = useState("");
   const [only, setOnly] = useState(false);
   const words = filter.trim().toLowerCase();
   const shown = found.filter((m) => (!words || m.toLowerCase().includes(words)) && (!only || picked.has(m)));
   const open = shown.filter((m) => !have.has(m));
   const ticked = open.filter((m) => picked.has(m));
-  const set = (ms: string[], on: boolean) => {
-    const next = new Set(picked);
-    for (const m of ms) if (on) next.add(m);
-    else next.delete(m);
-    onPick(next);
-  };
+  const set = (ms: string[], on: boolean) =>
+    onPick((prev) => {
+      const next = new Set(prev);
+      for (const m of ms) if (on) next.add(m);
+      else next.delete(m);
+      return next;
+    });
   const count = found.filter((m) => picked.has(m) && !have.has(m)).length;
   return (
     <div className="wide own-many">

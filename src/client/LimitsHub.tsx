@@ -150,7 +150,6 @@ export function LimitsHub({ read }: { read: Read }) {
   const tools = ENGINE_TOOLS.filter((t) => wins.some((w) => w.tool === t) || planOf(t, limits) || (t === "claude" && claudeSaid.length > 0)).sort((a, b) => Number(wins.some((w) => w.tool === b)) - Number(wins.some((w) => w.tool === a)));
   const fives = wins.filter(isFiveHour);
   const weeklies = wins.filter(isWeekly);
-  const closestWeek = [...weeklies].sort((a, b) => b.used - a.used)[0];
   const room = mostRoom(wins);
   const costOf = (t: EngineTool) => costs[t] ?? listPrice(t, planOf(t, limits))?.usd;
   const spend = tools.reduce((n, t) => n + (costOf(t) ?? 0), 0);
@@ -161,27 +160,50 @@ export function LimitsHub({ read }: { read: Read }) {
     return h ? [{ tool: t, now: usd!, ...h }] : [];
   });
 
-  return (
-    <div className="flex flex-col gap-5">
-      {/* The one line to read first: every five-hour window, and the week closest to its end. */}
-      {fives.length > 0 && (
-        <div className="lh-strip" role="status" aria-label="Five-hour limits now">
-          {fives.map((w) => (
-            <span key={idOf(w)} className={`lh-chip ${level(w.used)}`} title={w.resetsAt ? `${ENGINE_NAMES[w.tool]}: resets at ${clock(w.resetsAt)}` : ENGINE_NAMES[w.tool]}>
-              <EngineMark tool={w.tool} size={13} />
-              <b>{Math.round(w.used)}%</b>
-              <span>of 5 hours{w.resetsAt ? ` · resets ${clock(w.resetsAt)}` : ""}</span>
+  // One tool's week, hour by hour.
+  const heat = (w: (typeof fives)[number]) => {
+    const g = weekGrid(history[idOf(w)] ?? [], now);
+    return (
+      <div key={idOf(w)} className="lh-heat">
+        <div className="lh-heat-head">
+          <EngineMark tool={w.tool} size={14} />
+          <b>{ENGINE_NAMES[w.tool]}</b>
+          <span className="lh-heat-stats">
+            {g.hits > 0 && <span className={g.hits > 1 ? "hot" : "warm"}>{g.hits}× full</span>}
+            {g.busiest && g.busiest.used > 0 && <span>Peak {g.busiest.day} {g.busiest.hour % 12 || 12} {g.busiest.hour < 12 ? "AM" : "PM"}</span>}
+          </span>
+        </div>
+        <div className="lh-heat-grid" role="img" aria-label={`${ENGINE_NAMES[w.tool]}'s 5-hour limit each hour this week${g.hits ? `, full ${g.hits} times` : ""}`}>
+          <span aria-hidden />
+          {[0, 6, 12, 18].map((h) => (
+            <span key={h} className="lh-heat-hour" aria-hidden style={{ gridColumn: `${h + 2} / span 6` }}>
+              {h === 0 ? "12a" : h === 12 ? "12p" : h < 12 ? `${h}a` : `${h - 12}p`}
             </span>
           ))}
-          {closestWeek && (
-            <span className={`lh-chip quiet ${level(closestWeek.used)}`}>
-              Week: {ENGINE_NAMES[closestWeek.tool]} closest, <b>{Math.round(closestWeek.used)}%</b>
-            </span>
-          )}
+          {g.days.map((d) => (
+            <div key={d.label} className="lh-heat-row">
+              <span className="lh-heat-day">{d.label}</span>
+              {d.hours.map((u, h) => (
+                <i
+                  key={h}
+                  className={`lh-hcell ${u === null ? "" : level(u)}`}
+                  style={u !== null && u < 70 ? { opacity: 0.35 + (u / 70) * 0.65 } : undefined}
+                  title={u === null ? `${d.label} ${h}:00 · not read` : `${d.label} ${h}:00 · ${Math.round(u)}%`}
+                />
+              ))}
+            </div>
+          ))}
         </div>
-      )}
+      </div>
+    );
+  };
+  // One tool alone: its week beside its card, not under a void the width of two more cards (audit REST-9, Arun 2026-11-04).
+  const single = tools.length === 1 && fives.length === 1 && fives[0]!.tool === tools[0];
 
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-3">
+  return (
+    <div className="flex flex-col gap-5">
+      {/* No chips over the cards: the same percentages and resets were said three and four times (audit REST-11, Arun 2026-11-04). */}
+      <div className={single ? "grid grid-cols-[minmax(300px,1fr)_minmax(0,2fr)] items-start gap-3 max-md:grid-cols-1" : "grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-3"}>
         {tools.map((t) => {
           const mine = wins.filter((w) => w.tool === t);
           // Every window as the same ring, with when it resets and where its pace leads: the five-hour first, then the week,
@@ -202,6 +224,7 @@ export function LimitsHub({ read }: { read: Read }) {
             </section>
           );
         })}
+        {single && heat(fives[0]!)}
       </div>
 
       <div className="grid grid-cols-3 gap-3 max-md:grid-cols-1">
@@ -234,7 +257,7 @@ export function LimitsHub({ read }: { read: Read }) {
         />
       </div>
 
-      {fives.length > 0 && (
+      {fives.length > 0 && !single && (
         <section className="lh-history" aria-label="Five-hour limits through the week">
           <div className="lh-section-head">
             <h3 className="m-0 text-[13px] font-semibold text-[var(--ink)]">The week, hour by hour</h3>
@@ -243,42 +266,7 @@ export function LimitsHub({ read }: { read: Read }) {
             </span>
           </div>
           <div className="lh-heats">
-            {fives.map((w) => {
-              const g = weekGrid(history[idOf(w)] ?? [], now);
-              return (
-                <div key={idOf(w)} className="lh-heat">
-                  <div className="lh-heat-head">
-                    <EngineMark tool={w.tool} size={14} />
-                    <b>{ENGINE_NAMES[w.tool]}</b>
-                    <span className="lh-heat-stats">
-                      {g.hits > 0 && <span className={g.hits > 1 ? "hot" : "warm"}>{g.hits}× full</span>}
-                      {g.busiest && g.busiest.used > 0 && <span>Peak {g.busiest.day} {g.busiest.hour % 12 || 12} {g.busiest.hour < 12 ? "AM" : "PM"}</span>}
-                    </span>
-                  </div>
-                  <div className="lh-heat-grid" role="img" aria-label={`${ENGINE_NAMES[w.tool]}'s 5-hour limit each hour this week${g.hits ? `, full ${g.hits} times` : ""}`}>
-                    <span aria-hidden />
-                    {[0, 6, 12, 18].map((h) => (
-                      <span key={h} className="lh-heat-hour" aria-hidden style={{ gridColumn: `${h + 2} / span 6` }}>
-                        {h === 0 ? "12a" : h === 12 ? "12p" : h < 12 ? `${h}a` : `${h - 12}p`}
-                      </span>
-                    ))}
-                    {g.days.map((d) => (
-                      <div key={d.label} className="lh-heat-row">
-                        <span className="lh-heat-day">{d.label}</span>
-                        {d.hours.map((u, h) => (
-                          <i
-                            key={h}
-                            className={`lh-hcell ${u === null ? "" : level(u)}`}
-                            style={u !== null && u < 70 ? { opacity: 0.35 + (u / 70) * 0.65 } : undefined}
-                            title={u === null ? `${d.label} ${h}:00 · not read` : `${d.label} ${h}:00 · ${Math.round(u)}%`}
-                          />
-                        ))}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
+            {fives.map(heat)}
           </div>
         </section>
       )}

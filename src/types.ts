@@ -586,6 +586,11 @@ export interface EngineInfo {
   os?: string;
   /** Which machine that is, when someone has more than one. */
   machine?: string;
+  /**
+   * Which of your other computers it runs on, in the open-source edition (local/computers.ts): the device id the computer paired
+   * with, as the listener says it, so the lane comes back there and never moves to this one by itself. Absent: this computer.
+   */
+  computer?: string;
   /** The shell commands run in there ("sh", "git-bash" or "powershell"), so the agent writes them in its syntax. Absent from older runners. */
   shell?: string;
   /**
@@ -1041,14 +1046,20 @@ export type EventBody =
       rewoundTo?: number;
       /** A checkpoint of the folder just after this, so a redo puts back only what this changed. */
       after?: string;
+      /** Every file went back to the checkpoint, not only what its run changed: a coding tool's rewind, whose conversation stays. */
+      whole?: true;
     }
   | { type: "run.ended"; outcome: "done" | "waiting" | "error"; error?: string; /** Cut off by a lost connection, its turn put back to carry on when the machine is back: not a failure of the work. */ cut?: true; /** A checkpoint of where the run left the folder, so its undo puts back only what it changed. */ after?: string }
   // The moment queued instructions entered the agent's context. Instructions
   // are placed in the context here, not at the position they were sent, so the
   // log records exactly what the agent knew at each step.
   | { type: "instructions.delivered"; seqs: number[] }
-  /** A coding tool's machine dropped in the middle of a turn (a lost connection, a server restart): what it was working on waits again, first in line, for when it is back. */
-  | { type: "instructions.requeued"; seqs: number[] }
+  /**
+   * A coding tool's machine dropped in the middle of a turn (a lost connection, a server restart): what it was working on waits
+   * again, first in line, for when it is back. `steer`: no drop, a message handed to the turn running that its tool couldn't take
+   * then (Codex run as `codex exec`, a turn past its last step), so it waits for the next turn like any other.
+   */
+  | { type: "instructions.requeued"; seqs: number[]; steer?: true }
   | {
       type: "agent.message";
       text: string;
@@ -1241,6 +1252,8 @@ export type EventBody =
    * away mode turning on (old holds would keep the team idle all night).
    */
   | { type: "holds.lifted"; lanes?: string[]; why: string }
+  /** The person stepped away until `until`, or came back (null): a line in the Crew room, in place of a toast (audit CREW-23). */
+  | { type: "team.away"; until: number | null }
   /** A room turned to run on its own toward `goal` (team-selfrun.ts), or back (`on: false`): by a person, the goal reached, or stalled. */
   | { type: "team.selfrun"; on: boolean; goal?: string; /** Its end time (team-budget.ts RunBudget.until), which is when the goal is due. */ due?: number; why?: string; /** Stopped by its budget or end time (team-budget.ts). */ budget?: true }
   /** A teammate (on `lane`) stopped taking new turns for its budget or hours (team-budget.ts), said once where its work waits: its queue is kept. */

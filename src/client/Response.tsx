@@ -9,6 +9,7 @@ import { shortTokens } from "../tool-usage.js";
 import { Shine } from "./shine.js";
 import { stepsSummary } from "../step-summary.js";
 import { Check } from "./ui.js";
+import { plainLine } from "./team-room.js";
 
 /**
  * The pieces an agent's response is drawn with.
@@ -395,7 +396,7 @@ export function RunLog({
  * their places above (StepGroup). "N files changed" opens the changes; the files aren't listed here as well, where a run
  * of sixty filled the screen with chips that said less than the Diff panel does (Arun, 2026-10-18).
  */
-export function RunMeta({ files, live, onFile, startedAt, endedAt, tokens, compacted, waiting = false, forecast }: { files: FileChange[]; live: boolean; onFile?: () => void; startedAt?: number; endedAt?: number; tokens?: number; /** The conversation's size before Friday had it compacted for this run. */ compacted?: number; /** Its turn waits on a person (a question, a permission): not working. */ waiting?: boolean; /** While it works: about how long is left, and when its window fills at this pace (runForecast.ts). */ forecast?: string }) {
+export function RunMeta({ files, live, onFile, startedAt, endedAt, tokens, compacted, waiting = false, forecast, tokensApart = false, quietWait = false }: { /** Waiting on a card that says how long itself (a permission card): no "Waiting for an answer" line too (audit CODE-21 A). */ quietWait?: boolean; /** The tokens are said on the reply's own icon row (audit CODE-11 B): not here as well. */ tokensApart?: boolean; files: FileChange[]; live: boolean; onFile?: () => void; startedAt?: number; endedAt?: number; tokens?: number; /** The conversation's size before Friday had it compacted for this run. */ compacted?: number; /** Its turn waits on a person (a question, a permission): not working. */ waiting?: boolean; /** While it works: about how long is left, and when its window fills at this pace (runForecast.ts). */ forecast?: string }) {
   // The clock only runs while there is something to time.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -409,9 +410,9 @@ export function RunMeta({ files, live, onFile, startedAt, endedAt, tokens, compa
   const elapsed = startedAt && (live || took >= 1000) ? span(took) : "";
   // Waiting on a person says so: "Working · 32m" under a turn stopped on a question contradicted the bar's "Waiting for you"
   // (2026-10-27 audit).
-  const time = live ? `${waiting ? "Waiting for an answer" : "Working"}${elapsed ? ` · ${elapsed}` : ""}${forecast && !waiting ? ` · ${forecast}` : ""}` : elapsed ? `Worked for ${elapsed}` : "";
+  const time = live && waiting && quietWait ? "" : live ? `${waiting ? "Waiting for an answer" : "Working"}${elapsed ? ` · ${elapsed}` : ""}${forecast && !waiting ? ` · ${forecast}` : ""}` : elapsed ? `Worked for ${elapsed}` : "";
   const changed = files.length ? `${files.length} file${files.length === 1 ? "" : "s"} changed` : "";
-  const used = tokens ? `${shortTokens(tokens)} tokens` : "";
+  const used = tokens && !tokensApart ? `${shortTokens(tokens)} tokens` : "";
   const trimmed = compacted ? `conversation compacted from ${shortTokens(compacted)}` : "";
   // A failure is said by its group and by the verdict under the reply; a third time here was one too many.
   if (!time && !changed && !used && !trimmed) return null;
@@ -614,8 +615,10 @@ export function HandoffCard({ from, to, reason, carried, by, task, fromLook, toL
         <div className="rsp-ho-carried">
           <div className="rsp-ho-label">carried over</div>
           <ul>
+            {/* One line each, as plain text: what carries over is the agent's markdown ("**Notes**", `README.md`), and the card showed
+                its marks (Arun's e2e pass, 2026-11-04; one-line previews already read this way, CREW-16). */}
             {carried.map((c, i) => (
-              <li key={i}>{c}</li>
+              <li key={i}>{plainLine(c)}</li>
             ))}
           </ul>
         </div>
@@ -853,7 +856,7 @@ export function HandoffComposer({
                   })
                 }
               />
-              <span>{c}</span>
+              <span>{plainLine(c)}</span>
             </label>
           ))}
         </fieldset>

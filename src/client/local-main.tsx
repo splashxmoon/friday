@@ -11,6 +11,11 @@ import { applyPrefs } from "./prefs.js";
 import { applyFonts, applyTheme, readFonts, readTheme } from "./theme.js";
 import { reloadForChunk, watchChunkErrors } from "./BuildWatch.js";
 import { showCrash } from "./crash.js";
+import { keepPage, takeKeptPage } from "./page-keep.js";
+
+// On an address that has kept nothing yet (another app had Friday's usual port), the settings kept beside the data first (page-keep.ts).
+if (await takeKeptPage()) await new Promise(() => {});
+keepPage();
 
 // The desktop app's window buttons follow the theme the boot script settled on.
 tellDesktopTheme();

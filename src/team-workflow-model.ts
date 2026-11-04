@@ -64,6 +64,16 @@ export interface WorkflowStep {
    * fixer on another tool or account, then checked again (Arun, 2026-11-02, from discussion #8: Review → "Prepare fixes" → again).
    */
   fixBy?: string;
+  /** Explicit success connection; absent follows the next column. "$finish" ends the run. */
+  next?: string;
+  /** A check/OK's explicit failure connection; absent keeps its existing stop/send-back action. */
+  otherwise?: string;
+  /**
+   * A fix step: the check or OK it was added for (design A). Off the line the work takes when it passes, drawn under that check,
+   * run only when the check sends work to it. Set when it is made as one, never guessed from where a wire goes: a check's Fails
+   * dragged onto the next step on the line is a jump there, and that step stays on the line (2026-11-04 end-to-end check).
+   */
+  fixFor?: string;
 }
 
 export const isGate = (s: Pick<WorkflowStep, "kind">): boolean => s.kind === "check" || s.kind === "approve";
@@ -71,6 +81,8 @@ export const kindOf = (s: Pick<WorkflowStep, "kind">): StepKind => s.kind ?? "do
 /** Sent back this many times at most, unless it says. */
 export const DEFAULT_TRIES = 3;
 export const MAX_TRIES = 5;
+/** Successful backward connections are bounded too, independently of a check's retry count. */
+export const MAX_CONNECTIONS_PER_RUN = 100;
 
 export interface WorkflowOutcomes {
   /** A brief of the run posted in its room (team.brief). */
@@ -177,6 +189,8 @@ export interface WorkflowRun {
   from?: string;
   /** Sent back to be done by someone else than that step's own (WorkflowStep.fixBy): who, this once. */
   fixBy?: string;
+  /** Explicit connections followed in this run, including successful backward connections. */
+  connections?: number;
   /** Waiting for your OK: which step, what you're asked, since when. */
   asking?: { step: string; ask: string; since: number };
   /** Its first board's seq: the brief finds every stage's tasks after it. */
@@ -201,6 +215,25 @@ export const BLANK_OUTCOMES: WorkflowOutcomes = { brief: true, notify: true, pr:
 export const BLANK_LIMITS: WorkflowLimits = { perDay: 6, skipIfRunning: true };
 
 /**
+ * Fix steps: where a check or your OK sends work that doesn't pass, set after it. They are off the line the work takes when it
+ * passes: a run reaches them only through that answer, never by going on from the column before (Arun, 2026-11-04, design A
+ * for #15's paths: "make this easier to understand… keep full functionality"), and each is a column of its own.
+ */
+export function fixSteps(steps: readonly WorkflowStep[]): Set<string> {
+  const gates = new Set(steps.filter(isGate).map((g) => g.id));
+  return new Set(steps.filter((x) => !isGate(x) && !!x.fixFor && gates.has(x.fixFor)).map((x) => x.id));
+}
+
+/** Where a fix step sends the work when it says nothing: back to the last step before its check that does work, to be checked again. */
+export function afterFix(steps: readonly WorkflowStep[], id: string): string {
+  const order = [...steps].sort((a, b) => a.col - b.col);
+  const g = order.find((x) => x.id === order.find((f) => f.id === id)?.fixFor);
+  if (!g) return "$finish";
+  const fix = fixSteps(steps);
+  return order.slice(0, order.indexOf(g)).filter((x) => !isGate(x) && !fix.has(x.id)).at(-1)?.id ?? g.id;
+}
+
+/**
  * The steps by column, in order, each column's in its order, with the columns numbered 0, 1, 2… with none empty. A check or
  * your OK stands alone: one sharing a column is given its own, after the column's work.
  */
@@ -208,9 +241,11 @@ export function columnsOf(steps: readonly WorkflowStep[]): WorkflowStep[][] {
   const cols = [...new Set(steps.map((s) => s.col))].sort((a, b) => a - b);
   return cols.flatMap((c) => {
     const col = steps.filter((s) => s.col === c);
-    if (col.length < 2 || !col.some(isGate)) return [col];
-    const work = col.filter((s) => !isGate(s));
-    return [...(work.length ? [work] : []), ...col.filter(isGate).map((g) => [g])];
+    const fix = fixSteps(steps);
+    const boundary = (s: WorkflowStep) => isGate(s) || !!s.next || fix.has(s.id);
+    if (col.length < 2 || !col.some(boundary)) return [col];
+    const work = col.filter((s) => !boundary(s));
+    return [...(work.length ? [work] : []), ...col.filter(boundary).map((g) => [g])];
   });
 }
 
@@ -218,12 +253,15 @@ export function columnsOf(steps: readonly WorkflowStep[]): WorkflowStep[][] {
 export interface WorkflowStage {
   cols: WorkflowStep[][];
   gate: WorkflowStep | null;
+  /** A work step with an explicit outgoing connection ends its board here. */
+  exit?: WorkflowStep;
 }
 
 /** The workflow's stages, in order: its columns cut after each check, and around each OK. */
 export function stagesOf(steps: readonly WorkflowStep[]): WorkflowStage[] {
   const out: WorkflowStage[] = [];
   let cur: WorkflowStep[][] = [];
+  const fix = fixSteps(steps);
   for (const col of columnsOf(steps)) {
     const g = col[0]!;
     if (g.kind === "approve") {
@@ -233,10 +271,36 @@ export function stagesOf(steps: readonly WorkflowStep[]): WorkflowStage[] {
     } else if (g.kind === "check") {
       out.push({ cols: [...cur, col], gate: g });
       cur = [];
+    } else if (fix.has(g.id)) {
+      // A fix step is a stage of its own: the work before it never carries on into it.
+      if (cur.length) out.push({ cols: cur, gate: null });
+      out.push({ cols: [col], gate: null, exit: g });
+      cur = [];
+    } else if (g.next) {
+      out.push({ cols: [...cur, col], gate: null, exit: g });
+      cur = [];
     } else cur.push(col);
   }
   if (cur.length) out.push({ cols: cur, gate: null });
   return out;
+}
+
+/** A stage of fix steps only: reached by a check's answer, never by going on from the stage before. */
+export const fixStage = (stage: WorkflowStage, fix: Set<string>): boolean => !stage.gate && stage.cols.length > 0 && stage.cols.every((c) => c.every((s) => fix.has(s.id)));
+
+/** The stage after `at` that a run goes on to when nothing says where: past fix stages; past the last, none (-1). */
+export function nextStage(steps: readonly WorkflowStep[], at: number): number {
+  const stages = stagesOf(steps);
+  const fix = fixSteps(steps);
+  for (let i = at + 1; i < stages.length; i++) if (!fixStage(stages[i]!, fix)) return i;
+  return -1;
+}
+
+/** Where a stage hands the work on, when something says: its check's pass, its last step's next, or a fix step's way back. */
+export function stageTarget(steps: readonly WorkflowStep[], stage: WorkflowStage | undefined): string | undefined {
+  const exit = stage?.gate ?? stage?.exit;
+  if (!exit) return undefined;
+  return exit.next ?? (fixSteps(steps).has(exit.id) ? afterFix(steps, exit.id) : undefined);
 }
 
 /**
@@ -252,6 +316,42 @@ export function stageCols(steps: readonly WorkflowStep[], stage: number, from = 
 
 /** The stage a step is in, or -1. */
 export const stageOfStep = (stages: readonly WorkflowStage[], id: string): number => stages.findIndex((st) => st.gate?.id === id || st.cols.some((c) => c.some((s) => s.id === id)));
+
+export type WorkflowPort = "next" | "otherwise";
+export interface WorkflowConnection { source: string; target: string; port: WorkflowPort; explicit: boolean }
+
+/**
+ * Where a check or your OK sends work that doesn't pass: one setting, set from the settings beside the canvas or by its FAIL
+ * wire (Arun, 2026-11-04, integrating #15: "integrate their work into ours"). An earlier step that does work is the send-back
+ * it always was, with its fixer; any other step is a path of its own (`otherwise`); "$finish" or nothing stops the run.
+ */
+export function ifNotTo(steps: readonly WorkflowStep[], gate: WorkflowStep, target: string | undefined): Partial<WorkflowStep> {
+  if (!target || target === "$finish") return { ifNot: "stop", back: undefined, otherwise: undefined, fixBy: undefined };
+  const at = steps.findIndex((s) => s.id === target);
+  const before = at >= 0 && at < steps.findIndex((s) => s.id === gate.id) && !isGate(steps[at]!);
+  return before ? { ifNot: "back", back: target, otherwise: undefined } : { ifNot: "back", otherwise: target, back: undefined, fixBy: undefined };
+}
+
+/** The step a check or your OK sends work it doesn't pass to, however it was set; none when it stops the run. */
+export const ifNotOf = (s: WorkflowStep): string | undefined => (s.otherwise && s.otherwise !== "$finish" ? s.otherwise : s.ifNot === "back" ? s.back : undefined);
+/** It sends work that doesn't pass somewhere (#15's paths were saved beside `ifNot: "stop"`), even before the step is picked. */
+export const sendsOn = (s: WorkflowStep): boolean => !!ifNotOf(s) || s.ifNot === "back";
+
+/** The canvas draws the same column connections and overrides the runner follows. */
+export function connectionsOf(steps: readonly WorkflowStep[]): WorkflowConnection[] {
+  const fix = fixSteps(steps);
+  const cols = columnsOf(steps);
+  // Going on from a column skips the fix steps' columns: they are reached only by a check's answer.
+  const onFrom = (i: number): string[] => cols.slice(i + 1).find((c) => c.some((t) => !fix.has(t.id)))?.map((t) => t.id) ?? ["$finish"];
+  return cols.flatMap((col, i) => col.flatMap((s) => {
+    const next = s.next ? [s.next] : fix.has(s.id) ? [afterFix(steps, s.id)] : onFrom(i);
+    const fail = isGate(s) ? s.otherwise ?? (s.ifNot === "back" ? s.back : undefined) : undefined;
+    return [
+      ...next.map(target => ({ source: s.id, target, port: "next" as const, explicit: !!s.next })),
+      ...(fail ? [{ source: s.id, target: fail, port: "otherwise" as const, explicit: !!s.otherwise }] : []),
+    ];
+  }));
+}
 
 /**
  * A check's answer, from the last line of its report that says one: "PASS", or "FAIL: why". Markdown around it is let be. A
@@ -312,13 +412,15 @@ export function workflowTasks(w: Pick<Workflow, "name" | "steps" | "outcomes">, 
   const numOf = new Map(all.flat().map((s, i) => [s.id, i + 1]));
   const cols = stageCols(w.steps, stage, from);
   const stages = stagesOf(w.steps);
-  const lastStage = !stages.length || stage >= stages.length - 1;
+  const fix = fixSteps(w.steps);
+  // The last stage the work reaches by going on: a fix stage after it isn't more work after it.
+  const lastStage = !stages.length || (!fixStage(stages[stage] ?? { cols: [], gate: null }, fix) && nextStage(w.steps, stage) < 0);
   const ids = cols.map((col) => col.map((s) => `s${numOf.get(s.id)}`));
   return cols.flatMap((col, c) =>
     col.map((s, i) => {
       const id = ids[c]![i]!;
       const num = numOf.get(s.id)!;
-      const later = c < cols.length - 1 || !lastStage;
+      const later = c < cols.length - 1 || (s.next || fix.has(s.id) ? s.next !== "$finish" : !lastStage);
       const check = s.kind === "check";
       const detail = [
         check
@@ -362,10 +464,19 @@ export function workflowChecks(
   if (w.room !== TEAM_ROOM && !room) out.push({ level: "fix", text: "Its room is gone: pick where it runs", on: "trigger" });
   steps.forEach((s, i) => {
     const n = i + 1;
+    for (const target of [s.next, ...(isGate(s) ? [s.otherwise] : [])]) {
+      if (target && target !== "$finish" && !steps.some(t => t.id === target)) out.push({ level: "fix", text: `Step ${n}'s connection points to a missing step: reconnect it`, on: s.id });
+    }
+    // Wires that can't mean what they say (2026-11-04 end-to-end check: dragged answers that left the workflow saying "Ready").
+    if (isGate(s) && (s.otherwise === s.id || s.next === s.id)) out.push({ level: "fix", text: `Step ${n} sends its work to itself: pick another step`, on: s.id });
+    if (isGate(s) && s.otherwise && s.otherwise !== "$finish" && s.otherwise === (s.next ?? connectionsOf(steps).find((c) => c.source === s.id && c.port === "next")?.target))
+      out.push({ level: "warn", text: `Step ${n} goes to the same step whether it passes or not`, on: s.id });
+    if (s.fixFor && !isGate(s) && fixSteps(steps).has(s.id) && !steps.some((g) => g.id === s.fixFor && ifNotOf(g) === s.id))
+      out.push({ level: "warn", text: `Step ${n} is a fix step its check no longer sends work to: send the check's Fails to it, or remove it`, on: s.id });
     if (s.kind === "approve") {
       if (!s.does.trim()) out.push({ level: "fix", text: `Say what you're asked to OK at step ${n}`, on: s.id });
     } else if (s.kind === "check" && !s.does.trim()) out.push({ level: "fix", text: `Say what step ${n} checks`, on: s.id });
-    if (isGate(s) && s.ifNot === "back") {
+    if (isGate(s) && !s.otherwise && s.ifNot === "back") {
       const to = steps.findIndex((x) => x.id === s.back);
       if (to < 0 || to >= i || isGate(steps[to]!)) out.push({ level: "fix", text: `Pick the earlier step ${n} sends the work back to`, on: s.id });
       if (s.fixBy && s.fixBy !== LEAD) {
@@ -459,7 +570,15 @@ export function cleanWorkflow(
       const kind: StepKind = s.kind === "check" || s.kind === "approve" ? s.kind : "do";
       const tries = Number(s.tries);
       const gate = kind === "do" ? {} : { kind, ifNot: s.ifNot === "back" ? ("back" as const) : ("stop" as const), ...(str(s.back, 24) ? { back: str(s.back, 24) } : {}), ...(s.ifNot === "back" && str(s.fixBy, 40) ? { fixBy: str(s.fixBy, 40) } : {}), tries: Number.isFinite(tries) && tries >= 1 ? Math.min(MAX_TRIES, Math.round(tries)) : DEFAULT_TRIES };
-      return [{ id, mate: kind === "approve" ? "" : str(s.mate, 40), does: str(s.does, 4000), owns: kind === "do" ? owns : [], col: Number.isFinite(col) && col >= 0 ? Math.floor(col) : 0, ...gate }];
+      const connection = (v: unknown): string | undefined => {
+        if (v === undefined || v === "") return undefined;
+        if (typeof v !== "string" || (v !== "$finish" && !/^[\w-]{1,24}$/.test(v))) throw new Error("Invalid workflow connection destination.");
+        return v;
+      };
+      const next = connection(s.next);
+      const otherwise = kind === "do" ? undefined : connection(s.otherwise);
+      const fixFor = kind === "do" && typeof s.fixFor === "string" && /^[\w-]{1,24}$/.test(s.fixFor) ? s.fixFor : undefined;
+      return [{ id, mate: kind === "approve" ? "" : str(s.mate, 40), does: str(s.does, 4000), owns: kind === "do" ? owns : [], col: Number.isFinite(col) && col >= 0 ? Math.floor(col) : 0, ...gate, ...(next ? { next } : {}), ...(otherwise ? { otherwise } : {}), ...(fixFor ? { fixFor } : {}) }];
     }),
   );
   // Only the cards there are, each a finite offset within reason; sent as {} (Tidy up), none.
@@ -581,10 +700,17 @@ export function fromTemplate(t: WorkflowTemplate, mates: readonly { id: string; 
     return mates.find((m) => words.some((w) => m.name.toLowerCase().includes(w))) ?? mates.find((m) => words.some((w) => m.role.toLowerCase().includes(w)));
   };
   const ids = t.steps.map(() => uid());
+  /** Who does the work so far: a check goes to somebody else. */
+  const did = new Set<string>();
   const steps = t.steps.flatMap((s, i): WorkflowStep[] => {
     if (s.suits[0] === "*") return (mates.length ? mates : [{ id: "" }]).map((m) => ({ id: uid(), mate: m.id, does: s.does, owns: [], col: s.col }));
     const gate = s.kind && s.kind !== "do" ? { kind: s.kind, ifNot: s.back === undefined ? ("stop" as const) : ("back" as const), ...(s.back === undefined ? {} : { back: ids[s.back]! }), tries: s.tries ?? DEFAULT_TRIES } : {};
-    const mate = s.kind === "approve" ? "" : s.suits[0] === LEAD ? LEAD : (fit(s.suits)?.id ?? (s.kind === "check" ? LEAD : ""));
+    const fitted = fit(s.suits)?.id;
+    // A check by someone who didn't do the work it checks: with no QA in the crew, Bug sweep and Ship a feature gave every step,
+    // the checks too, to the one engineer (2026-11-04 end-to-end check). Nobody else there: left for you to pick.
+    const other = (id: string | undefined) => (id && !did.has(id) ? id : (mates.find((m) => !did.has(m.id))?.id ?? ""));
+    const mate = s.kind === "approve" ? "" : s.suits[0] === LEAD ? LEAD : s.kind === "check" ? other(fitted) : (fitted ?? "");
+    if (!s.kind || s.kind === "do") did.add(mate);
     return [{ id: ids[i]!, mate, does: s.does, owns: [], col: s.col, ...gate }];
   });
   const tz = (() => {

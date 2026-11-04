@@ -56,6 +56,17 @@ export function finishingOrder<T>(items: T[], info: (t: T) => OrderInfo, last: (
 }
 
 /**
+ * In a crew's room, strict post order (audit CREW-3, 2026-11-04): what was said stays where it was said. A message sent to a
+ * teammate never moves down to the turn that takes it up, nor does a yes to its command; a permission card once answered is a
+ * receipt at its own place, so the result the teammate posted after it reads after it. Only a card still waiting stays with the
+ * turn under way, at the foot. A teammate's turn is placed where it last spoke (finishingOrder's `ended`).
+ */
+export function roomOrder(x: OrderInfo, pending: boolean): OrderInfo {
+  if (x.kind === "ask" || (x.kind === "after" && !pending)) return { kind: "other", seq: x.seq };
+  return x;
+}
+
+/**
  * The order while someone is reading further up: what they were shown, as it was, with anything new after it. A turn moving
  * above the view while it is being read would pull the words out from under them; it moves once they are back at the bottom.
  */

@@ -37,27 +37,51 @@ const counts = (xs: string[]) => {
 export function attributionOf(events: SessionEvent[], lane = MAIN_LANE): Attribution {
   let running = false;
   let lastHuman: string | undefined;
-  /** The agent's latest set per file: the added lines of the last change set that landed during a run. */
-  const agent = new Map<string, Map<string, number>>();
+  /**
+   * The agent's latest set per file: the added lines of the last change set that landed during a run. Null when that change set
+   * came without its text: a page is sent the older ones by name and counts only (session/patches.ts lightLog), and an empty set
+   * in its place read every line the agent wrote as written by hand once a later change set landed between runs (an undo, a
+   * redo, a reconnect; Arun's e2e pass, 2026-11-04). Not knowing, no line is marked.
+   */
+  let agent = new Map<string, Map<string, number> | null>();
   const out: Attribution = new Map();
+  /**
+   * The agent's sets as they stood before each restore, by the checkpoint it took of the folder just before (its `undo`). A redo
+   * puts that checkpoint back, and with it the agent's lines: they were read as written by hand, since the undo's change set had
+   * dropped them (Arun's e2e pass, 2026-11-04: "by hand" on every line of a redone run, even after a reload).
+   */
+  const before = new Map<string, Map<string, Map<string, number> | null>>();
   for (const e of events) {
     if ((e.lane ?? MAIN_LANE) !== lane) continue;
     const b = e.body;
     if (b.type === "run.started") running = true;
     else if (b.type === "run.ended") running = false;
+    else if (b.type === "folder.restored") {
+      const back = before.get(b.sha);
+      before.set(b.undo, new Map(agent));
+      if (back) agent = new Map([...agent, ...back]);
+    }
     else if (b.type === "folder.edited" && e.actor.kind === "human") lastHuman = e.actor.name;
     else if (b.type === "agent.diff") {
       const seen = new Set<string>();
       for (const f of b.files) {
         seen.add(f.path);
+        const textless = f.later !== undefined || (!f.patch && f.additions > 0);
         const added = addedLines(f.patch);
         if (running) {
-          agent.set(f.path, counts(added));
+          agent.set(f.path, textless ? null : counts(added));
+          out.delete(f.path);
+          continue;
+        }
+        // Between runs, with no text to read now or the agent's own to read it against: nothing can be told, so nothing is said.
+        if (textless) continue;
+        const known = agent.get(f.path);
+        if (known === null) {
           out.delete(f.path);
           continue;
         }
         // Between runs: what is here now that the agent's set didn't have is the person's.
-        const was = agent.get(f.path) ?? new Map<string, number>();
+        const was = known ?? new Map<string, number>();
         const human = new Set<string>();
         const left = new Map(was);
         for (const line of added) {

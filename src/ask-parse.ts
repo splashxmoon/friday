@@ -116,6 +116,8 @@ const OPTION = /^(\s*)(?:[-*+•]\s+)?(?:\*\*|__)?(?:\(([A-Za-z]|\d{1,2})\)|([A-
 const NUMBERED = /^(\s*)(?:#{1,6}\s+)?(?:[-*+]\s+)?(?:\*\*|__)?(?:\[(\d{1,2})\]|[Qq](\d{1,2})\s*[:.)]?|(\d{1,2})[.)](?=\s|\*\*|__))(?:\*\*|__)?\s*[:.]?\s*(.*\S)\s*$/;
 
 interface Group {
+  /** Where its first line starts, in the answer's text: the prose before the questions ends there (askProse). */
+  at: number;
   n?: number;
   /** How it was numbered, so "1." options under a "[1]" question are told apart from the next question. */
   style?: "bracket" | "q" | "dot";
@@ -135,15 +137,32 @@ const firstKey = (k: string) => k === "1" || k === "a" || k === "A";
 const FOOTER = /^\s*(?:\(.*\)|_.*_|\*[^*].*\*|(?:let me know|reply|answer|pick|choose|tell me|just say)\b.*)\s*$/i;
 
 export function parseAsks(text: string): Ask[] {
+  return readAsks(text).asks;
+}
+
+/**
+ * The answer without the questions the card under it asks (audit CODE-10 A, Arun 2026-11-04: the options were printed in the
+ * prose and again in the card): the prose before them, the lead-in kept. The answer as it is when it asks nothing.
+ */
+export function askProse(text: string): string {
+  const { asks, from } = readAsks(text);
+  return asks.length && from >= 0 ? text.slice(0, from).trimEnd() : text;
+}
+
+function readAsks(text: string): { asks: Ask[]; from: number } {
   // Only what comes after the last code block can be the end of the answer, and an answer that ends in code asks nothing.
   const fences = text.split(/^\s*(?:```|~~~)/m);
-  if (fences.length % 2 === 0) return [];
+  if (fences.length % 2 === 0) return { asks: [], from: -1 };
   const tail = fences.at(-1)!;
+  const base = text.length - tail.length;
+  let at = base;
 
   let groups: Group[] = [];
   /** The line just before, when it was prose: "Pick one:" over a list of options is the question that list answers. */
-  let lead: { text: string; indent: number } | null = null;
+  let lead: { text: string; indent: number; at: number } | null = null;
   for (const line of tail.split("\n")) {
+    const lineAt = at;
+    at += line.length + 1;
     if (!line.trim()) continue;
     const indent = line.length - line.trimStart().length;
     const cur = groups.at(-1);
@@ -162,7 +181,7 @@ export function parseAsks(text: string): Ask[] {
       }
       // Lettered only: "Here's what I did:" over "1. … 2. …" is a summary, but "a) … b) …" under anything is a choice.
       if (lead && firstKey(key) && !numeric) {
-        groups.push({ indent: lead.indent, question: lead.text, options: [{ ...option(key, o[4]!), indent }] });
+        groups.push({ at: lead.at, indent: lead.indent, question: lead.text, options: [{ ...option(key, o[4]!), indent }] });
         lead = null;
         continue;
       }
@@ -170,7 +189,7 @@ export function parseAsks(text: string): Ask[] {
     const q = NUMBERED.exec(line);
     if (q) {
       const n = Number(q[2] ?? q[3] ?? q[4]);
-      groups.push({ n, style: q[2] ? "bracket" : q[3] ? "q" : "dot", indent, question: q[5]!, options: [] });
+      groups.push({ at: lineAt, n, style: q[2] ? "bracket" : q[3] ? "q" : "dot", indent, question: q[5]!, options: [] });
       lead = null;
       continue;
     }
@@ -187,15 +206,15 @@ export function parseAsks(text: string): Ask[] {
       lead = null;
     } else if (/\?\W*$/.test(plain(said)) || /\?\W*$/.test(plain(parseChoices(said).prompt))) {
       // A question, or one with its options after it on the same line: "Which next? A) the docs B) the tests".
-      groups.push({ indent, question: said, options: [] });
+      groups.push({ at: lineAt, indent, question: said, options: [] });
       lead = null;
     } else {
       // Prose: whatever was asked before it was not the end of the answer.
       groups = [];
-      lead = { text: said, indent };
+      lead = { text: said, indent, at: lineAt };
     }
   }
-  if (!groups.length) return [];
+  if (!groups.length) return { asks: [], from: -1 };
 
   // The questions at the very end, all numbered or all not: an unnumbered line over numbered questions is their lead-in.
   const numbered = groups.at(-1)!.n !== undefined;
@@ -217,8 +236,8 @@ export function parseAsks(text: string): Ask[] {
       }
     }
     // One option is not a choice, and a line with neither options nor a question mark is not a question.
-    if (options.length === 1 || !prompt || (!options.length && !/\?\W*$/.test(prompt))) return [];
-    if (numbered && g.n !== i + 1) return [];
+    if (options.length === 1 || !prompt || (!options.length && !/\?\W*$/.test(prompt))) return { asks: [], from: -1 };
+    if (numbered && g.n !== i + 1) return { asks: [], from: -1 };
     // An unnumbered question with nothing to choose between is conversation, answered in the box under the chat.
     if (!options.length && !numbered) continue;
     asks.push({ ...(numbered ? { n: g.n } : {}), question: prompt, options });
@@ -226,24 +245,25 @@ export function parseAsks(text: string): Ask[] {
   // Only a choice is a decision (Arun, 2026-10-24: "only multiple choice answers should prompt this"): questions with nothing
   // to pick ("Want me to go deeper on any of these?", "Should I go on?") got a card with no choices on it. A tool's numbered
   // questions where one has options keep the free-text ones beside it, since they're answered together.
-  return asks.some((a) => a.options.length) ? asks : [];
+  return asks.some((a) => a.options.length) ? { asks, from: block[0]!.at } : { asks: [], from: -1 };
 }
 
 /** What the person picked for one question: one of its options, or words of their own. */
 export type AskAnswer = { key: string; label: string } | { text: string };
 
 /**
- * The answers, as the next instruction: "1=b (Cross-network generalisation)", one line a question, in the agent's own
- * shorthand so it reads them the way it asked, with the words so the room can too.
+ * The answers, as the next instruction, in one form: "1: b, Cross-network generalisation", "2: Yes, keep it running", one line a
+ * question, its number, the option's letter and its words, so the agent reads them the way it asked and the room can too
+ * (audit CODE-10 A, Arun 2026-11-04: "1=b (…)" beside "2: …").
  */
 export function askReply(asks: Ask[], answers: (AskAnswer | undefined)[]): string {
   return asks
     .flatMap((a, i) => {
       const ans = answers[i];
       if (!ans) return [];
-      const said = "text" in ans ? ans.text.trim() : `${ans.key} (${ans.label})`;
+      const said = "text" in ans ? ans.text.trim() : `${ans.key}, ${ans.label}`;
       if (!said) return [];
-      if (a.n !== undefined) return [`${a.n}${"text" in ans ? ": " : "="}${said}`];
+      if (a.n !== undefined) return [`${a.n}: ${said}`];
       return [asks.length > 1 ? `${a.question} ${said}` : said];
     })
     .join("\n");

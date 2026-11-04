@@ -201,12 +201,16 @@ export const BlobFace = memo(function BlobFace({ seed, size, eyes = "open", brea
   const shape = shapeOf(seed);
   const fill = teamColour(seed);
   const moving = breathing && !reducedMotion();
+  // A face as large as a page's header morphs its outline; a smaller one, which is nearly every face (rows, the sidebar, the
+  // chat), breathes as a whole by transform, which the compositor runs: eight agents at work had their outlines re-drawn on the
+  // main thread every frame, in every place their faces showed (Arun, 2026-11-04: "look at app performance… a lot of agents").
+  const morph = moving && size >= 40;
   const extra = letters || (crowned && onTop(look.extra)) ? "none" : look.extra;
   // Something on its head: the body a little smaller and lower, so all of it stays in the face's circle and its ring.
   const top = onTop(extra);
   return (
     // Its size inline: the places a face sits size their own icons' svgs (".rsp-avatar svg" and the like), never a face's.
-    <svg className="tm-face tm-blob" width={size} height={size} style={{ width: size, height: size }} viewBox="-50 -50 100 100" aria-hidden="true" focusable="false">
+    <svg className={`tm-face tm-blob${moving && !morph ? " tm-breathe" : ""}`} width={size} height={size} style={{ width: size, height: size }} viewBox="-50 -50 100 100" aria-hidden="true" focusable="false">
       {extra === "ears" && (
         <g fill={fill}>
           {[-1, 1].map((s) => (
@@ -233,7 +237,7 @@ export const BlobFace = memo(function BlobFace({ seed, size, eyes = "open", brea
       )}
       <g transform={top ? "translate(0 7) scale(0.85)" : undefined}>
         <path className="tm-blob-body" d={shape.still} fill={fill}>
-          {moving && <animate attributeName="d" dur="9s" repeatCount="indefinite" values={shape.breathing} keyTimes="0;0.34;0.67;1" calcMode="spline" keySplines="0.45 0 0.55 1;0.45 0 0.55 1;0.45 0 0.55 1" />}
+          {morph && <animate attributeName="d" dur="9s" repeatCount="indefinite" values={shape.breathing} keyTimes="0;0.34;0.67;1" calcMode="spline" keySplines="0.45 0 0.55 1;0.45 0 0.55 1;0.45 0 0.55 1" />}
         </path>
         {letters ? (
           <text x="0" y="1" textAnchor="middle" dominantBaseline="central" fill={inkOn(fill)} fontSize={letters.length > 1 ? 40 : 48} fontWeight={600} letterSpacing="-0.02em" style={{ fontFamily: "var(--font)" }}>

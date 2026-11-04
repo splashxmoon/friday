@@ -45,10 +45,17 @@ export const isLocalUrl = (u: string) => /^https?:\/\/(localhost|127\.0\.0\.1|\[
  */
 const keyFor = (had: OwnModel | undefined, base: string) => (had?.apiKey && had.baseUrl === base ? had.apiKey : undefined);
 
-/** A key as a header can carry it: one line of printable characters. One pasted across two lines would be echoed back whole by a failed request. */
-const KEY = /^[\x21-\x7e]{8,500}$/;
+/**
+ * A key as a header can carry it: one line of printable characters. One pasted across two lines would be echoed back whole by a
+ * failed request. No shortest: a server people run themselves takes whatever key it was started with (LiteLLM's own example is
+ * "sk-1234", seven characters), and the server says when a key is wrong. Each refusal says its own reason: a short key was told
+ * it had spaces in it (audit e2e, Arun 2026-11-04).
+ */
+const KEY = /^[\x21-\x7e]+$/;
 function checkKey(key: string | undefined): void {
-  if (key && !KEY.test(key)) throw new Error("That key has spaces or line breaks in it. Paste it again as one line.");
+  if (key && /\s/.test(key)) throw new Error("That key has spaces or line breaks in it. Paste it again as one line.");
+  if (key && key.length > 500) throw new Error("That's longer than any API key. Paste the key alone.");
+  if (key && !KEY.test(key)) throw new Error("That key has characters an API key doesn't. Paste it again as plain text.");
   // What `claude setup-token` prints is a sign-in for Claude Code only; Anthropic refuses it anywhere else, with a 400 that says
   // nothing a person can act on.
   if (key && /^sk-ant-oat/i.test(key)) throw new Error("That's a Claude Code sign-in token, not an API key: it only works inside Claude Code. Create an API key at console.anthropic.com/settings/keys and paste that.");
@@ -56,7 +63,8 @@ function checkKey(key: string | undefined): void {
 /** An error with any key in it taken out: errors travel to the session and its log, and a key must never go with them. */
 function redacted(e: unknown, ...keys: (string | undefined)[]): Error {
   let msg = e instanceof Error ? e.message : String(e);
-  for (const k of keys) if (k && k.length >= 8) msg = msg.split(k).join("[key]");
+  // Any key long enough to be one: a three-letter one would take every word it is part of with it, and guards nothing.
+  for (const k of keys) if (k && k.length >= 4) msg = msg.split(k).join("[key]");
   return Object.assign(new Error(msg), e instanceof Error && "status" in e ? { status: (e as { status: unknown }).status } : {});
 }
 const MOVED = "Enter the key again: a saved key only goes to the address it was saved for.";
@@ -141,11 +149,16 @@ export const MAX_OWN_MODELS = 40;
  * pictures or not from its name. One already saved for that address is left as it is. Refused whole, never cut short, when they
  * would take the list past its most: past it, the oldest would go without a word.
  */
-export async function addOwnModels(p: { baseUrl: string; models: string[]; apiKey?: string; provider?: string }): Promise<{ added: OwnModelView[]; skipped: string[] }> {
+export async function addOwnModels(p: { baseUrl: string; models: string[]; apiKey?: string; provider?: string; id?: string }): Promise<{ added: OwnModelView[]; skipped: string[] }> {
   const models = await load();
   const baseUrl = cleanUrl(p.baseUrl);
-  const apiKey = p.apiKey?.trim();
-  checkKey(apiKey);
+  checkKey(p.apiKey?.trim());
+  // More from a server already in use: the key a saved model there has, unless another is given (issue #17's follow-up). Only to
+  // the very address it was saved for, as everywhere here.
+  const had = p.id ? models.find((m) => m.id === p.id) : undefined;
+  if (p.id && !had) throw new Error("That model isn't on this computer any more.");
+  const apiKey = p.apiKey?.trim() || keyFor(had, baseUrl);
+  if (!p.apiKey?.trim() && had?.apiKey && !apiKey) throw new Error(MOVED);
   const picked = [...new Set(p.models.map((m) => m.trim().slice(0, 200)).filter(Boolean))];
   if (!picked.length) throw new Error("Tick the models to add.");
   const saved = new Set(models.filter((m) => m.baseUrl === baseUrl).map((m) => m.model));
@@ -176,6 +189,23 @@ export async function removeOwnModel(p: { id: string }): Promise<{ ok: true }> {
 }
 
 /** The models a server offers, from its /models list: what to pick from instead of typing a name. */
+/** A server that didn't answer at all, said as List models says it, never Node's bare "fetch failed". */
+function unreachable(base: string, e: Error & { cause?: { code?: string } }): Error {
+  if (!isLocalUrl(base)) return new Error(`Couldn't reach ${base}${e.cause?.code ? ` (${e.cause.code})` : ""}.`);
+  // "Nothing answered at localhost:11434. Is Ollama running?": the server by name where its address is one of the known ones
+  // (audit REST-15).
+  const name = LOCAL.find((s) => cleanUrl(s.baseUrl) === base)?.name;
+  let at = base;
+  try {
+    at = new URL(base).host;
+  } catch {
+    // As given.
+  }
+  return new Error(`Nothing answered at ${at}. Is ${name ?? "the model server"} running?`);
+}
+/** Whether a call failed before any server answered: refused, not found, timed out on the way. */
+export const noAnswer = (e: unknown): e is Error & { cause?: { code?: string } } => e instanceof Error && (/^fetch failed$/i.test(e.message) || /^(ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ECONNRESET|ETIMEDOUT|EHOSTUNREACH|UND_ERR_\w+)$/.test(String((e as { cause?: { code?: string } }).cause?.code ?? "")));
+
 export async function discoverModels(p: { baseUrl: string; apiKey?: string; id?: string }): Promise<{ models: string[] }> {
   const had = p.id ? (await load()).find((m) => m.id === p.id) : undefined;
   const base = cleanUrl(p.baseUrl || had?.baseUrl || "");
@@ -187,7 +217,7 @@ export async function discoverModels(p: { baseUrl: string; apiKey?: string; id?:
   const headers: Record<string, string> = !key ? {} : anthropic ? { "x-api-key": key, "anthropic-version": "2023-06-01" } : { Authorization: `Bearer ${key}` };
   // Never followed elsewhere: a redirect to another host would carry the key there (Anthropic's header isn't dropped on the way).
   const r = await fetch(`${base}/models`, { headers, redirect: "error", signal: AbortSignal.timeout(8000) }).catch((e: Error & { cause?: { code?: string } }) => {
-    throw redacted(new Error(isLocalUrl(base) ? `Nothing answered at ${base}. Is the model server running?` : `Couldn't reach ${base}${e.cause?.code ? ` (${e.cause.code})` : ""}.`), key);
+    throw redacted(unreachable(base, e), key);
   });
   if (!r.ok) {
     // The server's own words for why, so a refusal can be acted on ("invalid x-api-key", "credit balance is too low") rather than
@@ -274,6 +304,10 @@ export async function ownVision(p: { id: string }): Promise<{ vision: boolean }>
 /** Does it answer? A short question, with how long it took. */
 export async function testOwnModel(p: { id: string }): Promise<{ ok: true; ms: number; reply: string }> {
   const start = Date.now();
-  const r = await ownComplete({ id: p.id, system: "Answer in one word.", messages: [{ role: "user", content: "Say OK." }], tools: [], timeoutMs: 60_000 });
+  const m = await find(p.id);
+  // Nothing at its address: the words List models uses, not "fetch failed" (audit REST-7, Arun 2026-11-04).
+  const r = await ownComplete({ id: p.id, system: "Answer in one word.", messages: [{ role: "user", content: "Say OK." }], tools: [], timeoutMs: 60_000 }).catch((e: unknown) => {
+    throw noAnswer(e) ? unreachable(cleanUrl(m.baseUrl), e) : e;
+  });
   return { ok: true, ms: Date.now() - start, reply: r.text.trim().slice(0, 80) };
 }

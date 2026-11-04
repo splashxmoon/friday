@@ -1,4 +1,5 @@
 import { MAIN_LANE, type SessionEvent, type ToolCall } from "./types.js";
+import { limitHit } from "./limit-reset.js";
 
 /**
  * What an agent is doing right now, in a few words.
@@ -146,7 +147,7 @@ export function doingNow(events: SessionEvent[], lane: string): Doing | null {
 export function isRawError(text: string): boolean {
   const t = text.trim();
   if (t.split("\n").filter((l) => l.trim()).length > 2) return true;
-  return /node:internal|\x1b\[|^\s*at\s|\bat\s+\S+\s+\(|\(\S+:\d+:\d+\)|\S+\.(?:[cm]?[jt]sx?|py|rb|go|rs|java):\d+|\b[A-Z][A-Za-z]*(?:Error|Exception)\b|\bTraceback\b|\b(?:E[A-Z]{3,}|MODULE_NOT_FOUND|ERR_[A-Z_]+)\b|^\s*(?:[{<]|\[(?!Friday\]))|npm ERR!|^panic:|\berrno\b/m.test(t);
+  return /node:internal|\bnode:[a-z_]+:\d+|\x1b\[|^\s*at\s|\bat\s+\S+\s+\(|\(\S+:\d+:\d+\)|\S+\.(?:[cm]?[jt]sx?|py|rb|go|rs|java):\d+|\b[A-Z][A-Za-z]*(?:Error|Exception)\b|\bTraceback\b|\b(?:E[A-Z]{3,}|MODULE_NOT_FOUND|ERR_[A-Z_]+)\b|^\s*(?:[{<]|\[(?!Friday\]))|npm ERR!|^panic:|\berrno\b/m.test(t);
 }
 
 /**
@@ -157,7 +158,31 @@ export function stoppedLine(error: string | undefined | null): string {
   const e = (error ?? "").trim();
   if (!e) return "Stopped on an error";
   if (!isRawError(e) && e.length <= 100) return e;
-  if (/cannot find module|MODULE_NOT_FOUND|modules\/cjs|ENOENT|EACCES|\bspawn\b|command not found|didn't start|failed to start|exited (?:with )?code|exit code/i.test(e)) return "Stopped: their tool failed to start";
+  // Only a tool that never ran: its program missing or not runnable. A file it couldn't open part way through (ENOENT on
+  // package.json at readFileSync), or a non-zero exit after it had worked, is an error, not a failure to start (audit CODE-4,
+  // Arun 2026-11-04: "failed to start" after the tool had edited two files).
+  if (/cannot find module|MODULE_NOT_FOUND|\bspawn\s+\S+\s+(?:ENOENT|EACCES)\b|command not found|didn't start|failed to start/i.test(e)) return "Stopped: their tool failed to start";
   if (/\btests? (?:failed|failing)\b|\b\d+ failing\b|\bfailed tests?\b/i.test(e)) return "Stopped: tests failed";
   return "Stopped on an error";
+}
+
+/** "3 PM", "3:30 PM": when a coding tool's usage comes back, as a row says it. */
+const backAt = (t: number) => new Date(t).toLocaleTimeString([], { hour: "numeric", ...(new Date(t).getMinutes() ? { minute: "2-digit" } : {}) });
+
+/**
+ * A stopped agent's line in its session's row, from what really happened: out of usage until when (audit CODE-5 A, Arun
+ * 2026-11-04: it read "Stopped on an error"), the plain words of a short error, "stopped: their tool failed to start" only when it
+ * never started, and else "stopped with an error" (audit CODE-4: "failed to start" after the tool had edited two files).
+ */
+export function stoppedRow(who: string, why: string, now = Date.now()): string {
+  const hit = limitHit(why, now);
+  if (hit) return `${who} · ${hit.resetsAt && hit.resetsAt > now ? `Out of usage until ${backAt(hit.resetsAt)}` : "Out of usage"}`;
+  const said = stoppedLine(why);
+  if (said === "Stopped on an error") return `${who} stopped with an error`;
+  return `${who} stopped: ${said.replace(/^Stopped: /, "")}`;
+}
+
+/** A stopped run's line where its agent is already named (Right now, the board): "Out of usage until 3 PM", "Stopped with an error". */
+export function stoppedDetail(error: string | undefined | null, now = Date.now()): string {
+  return stoppedRow("", error ?? "", now).replace(/^ · /, "").replace(/^ stopped/, "Stopped");
 }

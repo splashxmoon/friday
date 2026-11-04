@@ -292,8 +292,8 @@ export function baseActions(p: {
     // Every Settings section by name, so "appearance" or "shortcuts" lands on its page without a second search.
     ...SECTIONS.map((s) => ({ id: `settings-${s.id}`, label: `Settings · ${s.label}`, icon: "settings" as const, group: "Go to", run: () => dispatchEvent(new CustomEvent("friday:settings", { detail: { tab: s.id } })) })),
     // The waiting cards come last in the Tab order (after the page); this goes straight to the first one.
-    ...(typeof document !== "undefined" && document.querySelector(".wy-toasts .wy-open, .wy-pill")
-      ? [{ id: "waiting", label: "Go to what is waiting on you", icon: "hand" as const, group: "Go to", run: () => requestAnimationFrame(() => document.querySelector<HTMLElement>(".wy-toasts .wy-open, .wy-pill")?.focus()) }]
+    ...(typeof document !== "undefined" && document.querySelector(".sb-group-needs .dass-row")
+      ? [{ id: "waiting", label: "Go to what is waiting on you", icon: "hand" as const, group: "Go to", run: () => requestAnimationFrame(() => document.querySelector<HTMLElement>(".sb-group-needs .dass-row")?.focus()) }]
       : []),
     { id: "sidebar", label: "Show or hide the sidebar", hint: shortcut("⌘B"), icon: "panel", group: "View", run: p.toggleSidebar },
     ...(p.look

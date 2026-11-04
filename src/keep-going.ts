@@ -47,6 +47,26 @@ export function unfinishedPlan(events: SessionEvent[], lane: string, sinceSeq: n
   return 0;
 }
 
+/** Words compared as said: case, marks and spacing aside. */
+const same = (a: string, b: string) => a.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() === b.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+/**
+ * Whether the agent on `lane` got anywhere after Friday's nudge at `nudgeSeq`: it said something new (not its last answer again),
+ * or it closed a step of its plan.
+ */
+export function progressSince(events: SessionEvent[], lane: string, sinceSeq: number, nudgeSeq: number): boolean {
+  const mine = (e: SessionEvent) => (e.lane ?? MAIN_LANE) === lane && e.body.type === "agent.message" && !!e.body.text.trim();
+  const after = events.findLast((e) => e.seq > nudgeSeq && mine(e));
+  const before = events.findLast((e) => e.seq > sinceSeq && e.seq < nudgeSeq && mine(e));
+  const now = after?.body.type === "agent.message" ? after.body.text.trim() : "";
+  const then = before?.body.type === "agent.message" ? before.body.text.trim() : "";
+  if (now && !same(now, then)) return true;
+  // The same words, or none: did its plan move?
+  const leftThen = unfinishedPlan(events.filter((e) => e.seq < nudgeSeq), lane, sinceSeq);
+  const leftNow = unfinishedPlan(events, lane, sinceSeq);
+  return leftNow < leftThen;
+}
+
 /** How the agents stay in touch while they work, said with every nudge to carry on. */
 // Not "check messages between steps": messages reach a working agent anyway, and every check is another full read of its
 // conversation (Arun, 2026-10-31: "i am burning through my claude code usage pretty fast").
@@ -68,9 +88,15 @@ export function keepGoingNote(state: SessionState, events: SessionEvent[], lane:
   // Told to stop, or holding as told: the person's word, not Friday's, sends it on (held.ts).
   if (heldByPerson(events, lane)) return null;
   const inRun = events.filter((e) => e.seq > run.sinceSeq && (e.lane ?? MAIN_LANE) === lane);
-  if (inRun.filter((e) => e.body.type === "instruction" && e.body.keepGoing).length >= MAX_KEEP_GOING) return null;
+  const nudges = inRun.filter((e) => e.body.type === "instruction" && e.body.keepGoing);
+  if (nudges.length >= MAX_KEEP_GOING) return null;
   const said = inRun.findLast((e) => e.body.type === "agent.message" && !!e.body.text.trim());
   const text = said?.body.type === "agent.message" ? said.body.text.trim() : "";
+  // Told to carry on and nothing came of it: no new words (or the same answer again) and no step of its plan done since. Another
+  // nudge only gets the same reply again, each one a post in the crew's room (audit CREW-4, 2026-11-04: four or five identical
+  // "Done: …" messages), so its turn's end is the end.
+  const last = nudges.at(-1);
+  if (last && !progressSince(events, lane, run.sinceSeq, last.seq)) return null;
   // Ended on a question: it is asking someone, and the answer is what it needs to go on.
   if (text.endsWith("?")) return null;
   const why: string[] = [];

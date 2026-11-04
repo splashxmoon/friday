@@ -109,7 +109,8 @@
 .tm-note svg { flex: none; margin-top: 1px; }
 .tm-where { display: flex; flex-direction: column; gap: 14px; min-width: 0; margin: 0; padding: 18px 0 0; border: 0; border-top: 1px solid var(--border); }
 .tm-where > legend { float: left; width: 100%; margin: 0 0 2px; padding: 0; color: var(--ink); font-size: 13px; font-weight: 600; }
-.tm-row-field { clear: left; display: grid; grid-template-columns: 72px minmax(0, 1fr); column-gap: 14px; align-items: start; }
+/* One label column through the whole form, the same as Budget and hours' (tb-row): every control starts on one line (audit CREW-26). */
+.tm-row-field { clear: left; display: grid; grid-template-columns: 112px minmax(0, 1fr); column-gap: 14px; align-items: start; }
 .tm-row-label { padding-top: 9px; color: var(--ink-2); font-size: 13px; font-weight: 500; line-height: 18px; }
 .tm-row-input { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 /* A select in a row's column keeps its own height: .tm-select's flex basis is for a row, and in a column it stood 200px tall. */
@@ -118,7 +119,7 @@
 .tm-path { display: flex; align-items: center; height: 36px; padding: 0 12px; overflow: hidden; border-radius: 8px; background: var(--hover); color: var(--ink-2); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
 .tm-backup { display: flex; align-items: center; gap: 10px; margin-top: 2px; color: var(--text-muted); font-size: 12.5px; }
 .tm-backup .tm-select { flex: 0 1 220px; height: 32px; }
-.tm-switched { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; background: color-mix(in srgb, var(--amber) 14%, transparent); color: color-mix(in srgb, var(--amber) 75%, var(--ink)); font-size: 11.5px; font-weight: 500; }
+.tm-switched { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; background: color-mix(in srgb, var(--amber) 14%, transparent); color: color-mix(in srgb, var(--amber) 75%, var(--ink)); font-size: 12px; font-weight: 500; }
 .tm-checkins { display: flex; flex-direction: column; gap: 10px; }
 .tm-checkin { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--border); border-radius: var(--r-lg); }
 .tm-checkin-when { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
@@ -130,7 +131,7 @@ html.dark .tm-time { color-scheme: dark; }
 .tm-time::-webkit-calendar-picker-indicator { opacity: .5; cursor: pointer; }
 .tm-time::-webkit-calendar-picker-indicator:hover { opacity: .85; }
 .tm-days { display: inline-flex; gap: 2px; }
-.tm-days button { width: 26px; height: 26px; border: 1px solid var(--border-strong); border-radius: 7px; background: transparent; color: var(--text-muted); font: inherit; font-size: 11.5px; cursor: pointer; }
+.tm-days button { width: 26px; height: 26px; border: 1px solid var(--border-strong); border-radius: 7px; background: transparent; color: var(--text-muted); font: inherit; font-size: 12px; cursor: pointer; }
 /* A picked day filled, not a faint border (QA, 2026-10-28). */
 .tm-days button[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: var(--bg); font-weight: 600; }
 .tm-days button:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
@@ -287,6 +288,13 @@ body[style*="pointer-events: none"] > .amp { pointer-events: auto; }
 /* The room's settings button sits with the header's other icon buttons (panel-tab icon) and takes their look. */
 .tm-room-menu[aria-expanded="true"] { background: var(--hover); color: var(--ink); }
 .tm-sent-text { display: block; white-space: pre-wrap; }
+/* What a message quotes: a bar at its left, the words after it below (audit CREW-21). */
+.tm-quote { display: block; margin: 0 0 6px; padding: 0 0 0 10px; border-left: 2px solid var(--border-strong); color: var(--ink-2); white-space: pre-wrap; }
+/* The box holding a quote until it is sent: a chip over the words, as an attachment is, with its x (audit CREW-21). */
+.composer-quote { display: inline-flex; align-items: center; gap: 6px; max-width: min(100%, 520px); height: 28px; padding: 0 4px 0 10px; border-left: 2px solid var(--border-strong); border-radius: 0 var(--r-md) var(--r-md) 0; background: var(--hover); color: var(--ink-2); font-size: 13px; }
+.composer-quote-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-quote-x { display: grid; flex: none; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); cursor: pointer; }
+.composer-quote-x:hover { background: var(--hover-strong); color: var(--ink); }
 
 /* @everyone in the @ list: the first few faces together. */
 .tm-pick-all { display: inline-flex; width: auto; min-width: 20px; }
@@ -428,6 +436,13 @@ body[style*="pointer-events: none"] > .amp { pointer-events: auto; }
 .tt-thread-send:disabled { cursor: default; }
 .tt-thread-send:focus-visible { outline: 2px solid var(--focus-ring, var(--ink)); outline-offset: 2px; }
 .tt-thread-box:has(.tm-err) { flex-wrap: wrap; }
+/* The reply field with its send inside it, as the room's box (audit CREW-34). */
+.tt-thread-field { display: flex; flex: 1 1 auto; align-items: flex-end; gap: 6px; min-width: 0; padding: 2px 6px 2px 0; border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--bg); }
+.tt-thread-field:focus-within { border-color: var(--border-focus); }
+.tt-thread-field textarea { border: 0 !important; background: transparent !important; box-shadow: none !important; outline: none; }
+.tt-thread-field .tt-thread-send { width: 30px; height: 30px; margin-bottom: 4px; border-radius: 50%; }
+/* A thread's count leads the line under its message, never pushed along by actions shown only under the pointer (audit CREW-34). */
+.tt-foot > .tt-thread.has { order: -1; margin-left: -6px; }
 /* The open room or teammate in the sidebar: the app's one selected highlight (style.css --sel-*). */
 html .tm-row[data-active="true"] { background: var(--sel-bg, var(--hover-strong)) !important; box-shadow: inset 0 0 0 1px var(--sel-edge, var(--border)), var(--sel-lift, none) !important; }
 
@@ -516,7 +531,7 @@ html .tm-row[data-active="true"] { background: var(--sel-bg, var(--hover-strong)
 /* Stop all, in the room's header while anyone works (TeamControls.tsx): a stop, said in red but quiet until pointed at. */
 .tm-stop-all { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px 0 9px; border: 1px solid color-mix(in srgb, var(--red) 34%, transparent); border-radius: var(--r-pill, 999px); background: color-mix(in srgb, var(--red) 8%, transparent); color: var(--red); font: 500 12.5px/1 var(--font); white-space: nowrap; cursor: pointer; transition: background-color .15s ease, border-color .15s ease; }
 .tm-stop-all:hover { background: color-mix(in srgb, var(--red) 16%, transparent); border-color: color-mix(in srgb, var(--red) 52%, transparent); }
-.tm-stop-n { min-width: 16px; padding: 0 4px; border-radius: 999px; background: color-mix(in srgb, var(--red) 18%, transparent); font-size: 11px; font-weight: 600; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; }
+.tm-stop-n { min-width: 16px; padding: 0 4px; border-radius: 999px; background: color-mix(in srgb, var(--red) 18%, transparent); font-size: 12px; font-weight: 600; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; }
 .tm-hd-btn { position: relative; }
 /* The count beside the icon, not over its corner (Arun, 2026-10-28: "fix placement of numbers it is covering the icons"): the
    button widens to hold it. */
@@ -639,7 +654,7 @@ html .tm-row[data-active="true"] { background: var(--sel-bg, var(--hover-strong)
 .tm-brief-col { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
 .tm-brief-name { display: flex; align-items: baseline; gap: 8px; }
 .tm-brief-name b { color: var(--ink); font-size: 13px; font-weight: 600; }
-.tm-brief-name span { color: var(--faint); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.tm-brief-name span { color: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; }
 .tm-brief-lines { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
 .tm-brief-line { display: flex; gap: 7px; color: var(--ink-2); font-size: 13px; line-height: 1.45; }
 .tm-brief-ic { display: grid; flex: none; place-items: center; height: 19px; color: var(--text-muted); }
@@ -798,7 +813,7 @@ html .tm-row[data-active="true"] { background: var(--sel-bg, var(--hover-strong)
 .tm-goal { height: auto; min-height: 26px; padding: 3px 10px; border-radius: 13px; text-align: left; line-height: 1.4; }
 
 /* Day dividers in a long team chat. */
-.tm-daybreak { display: flex; align-items: center; gap: 12px; margin: 4px 0 -4px; color: var(--faint); font-size: 11.5px; font-weight: 600; letter-spacing: 0.01em; }
+.tm-daybreak { display: flex; align-items: center; gap: 12px; margin: 4px 0 -4px; color: var(--faint); font-size: 12px; font-weight: 600; letter-spacing: 0.01em; }
 .tm-daybreak::before, .tm-daybreak::after { content: ""; flex: 1; height: 1px; background: var(--border); }
 .tm-brief-room { color: var(--faint); }
 .tm-brief-why { color: var(--text-muted); }
@@ -893,16 +908,18 @@ html .tm-row[data-active="true"] { background: var(--sel-bg, var(--hover-strong)
 .tm-board-empty-text { margin: 0; padding: 2px 10px 10px; color: var(--ink-2); font-size: 13px; line-height: 1.5; text-wrap: pretty; }
 /* "3 working" after the header's faces: meta, tabular (2026-10-29 direction §8). */
 .tm-faces-n { margin-left: 6px; color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-/* A room's row: its teammates' faces side by side, a little overlapped, each with its own ring (DIRECTION.md §8), rather than
-   three rings tangled in one 28px tile. */
-.tm-row.tm-room .tm-room-mark { width: auto; min-width: 24px; height: 24px; }
-.tm-row.tm-room .tm-room-faces { display: flex; align-items: center; width: auto !important; height: 24px !important; }
-.tm-row.tm-room .tm-room-faces .tm-room-face { position: static; transform: none; }
-/* Round faces overlapping, each on a collar of the ground as wide as its ring, so a face and its ring sit cleanly over the one
-   before it rather than tangling with it (Arun, 2026-10-29: "those avatars should be purely circle based"). */
-.tm-row.tm-room .tm-room-faces .tm-room-face + .tm-room-face { margin-left: -5px; }
+/* A room's row: up to three of its teammates' faces packed in one fixed 28px slot, the size of a teammate's face, so its title
+   lines up with theirs and nothing moves as the crew grows (audit CREW-27, 2026-11-04). Each later face sits on a collar of the
+   ground, so it reads cleanly over the one before it. */
+.tm-row.tm-room .tm-room-mark { width: 28px; min-width: 28px; height: 28px; }
+.tm-row.tm-room .tm-room-faces { position: relative; display: block; width: 28px !important; height: 28px !important; }
+.tm-row.tm-room .tm-room-faces .tm-room-face { position: absolute; transform: none; }
+.tm-row.tm-room .tm-room-faces[data-n="2"] .tm-room-face[data-i="0"] { left: 0; top: 3px; right: auto; bottom: auto; }
+.tm-row.tm-room .tm-room-faces[data-n="2"] .tm-room-face[data-i="1"] { left: 11px; top: 9px; right: auto; bottom: auto; }
+.tm-row.tm-room .tm-room-faces[data-n="3"] .tm-room-face[data-i="0"] { left: 0; top: 9px; right: auto; bottom: auto; }
+.tm-row.tm-room .tm-room-faces[data-n="3"] .tm-room-face[data-i="1"] { left: 6px; top: 1px; right: auto; bottom: auto; }
+.tm-row.tm-room .tm-room-faces[data-n="3"] .tm-room-face[data-i="2"] { left: 11px; top: 11px; right: auto; bottom: auto; }
 .tm-row.tm-room .tm-room-faces .tm-room-face + .tm-room-face .pr::before { content: ""; position: absolute; inset: calc(-1 * var(--pr-collar)); border-radius: 50%; background: var(--pr-ground, var(--bg)); }
-.tm-row.tm-room .tm-room-faces.ini .tm-room-face + .tm-room-face { margin-left: 1px; }
 .tm-row:hover .tm-room-face .pr { --pr-ground: var(--hover); }
 .tm-row[data-active="true"] .tm-room-face .pr { --pr-ground: var(--hover-strong); }
 .sb-new > .dass-kbd, .sb-new .dass-kbd { flex: none; }
@@ -929,7 +946,10 @@ html .tm-row[data-active="true"] { background: var(--sel-bg, var(--hover-strong)
 .tm-wait-one:hover { color: var(--ink-2); }
 .tm-wait-one:focus-visible { outline: 2px solid var(--focus-ring, var(--ink)); outline-offset: -2px; }
 .tm-wait-one > b { flex: none; color: var(--ink-2); font-weight: 500; }
-.tm-wait-sep { margin-right: 2px; color: var(--faint, var(--text-muted)); }
+.tm-wait-sep { margin: 0 6px; color: var(--faint, var(--text-muted)); }
+/* Several doing the same thing: their faces overlapped before their names (audit CREW-33). */
+.tm-wait-stack { display: inline-flex; flex: none; align-items: center; margin-right: 2px; }
+.tm-wait-stack > * + * { margin-left: -3px; }
 .tm-wait-line { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tm-wait-time { flex: none; font-variant-numeric: tabular-nums; }
 /* The live line's shimmer: a faint lighter band passing left to right every 2.8s (DIRECTION.md §7), drawn by the compositor
@@ -1026,13 +1046,13 @@ html.dark .tm-budget .tb-seg button.on { background: color-mix(in srgb, var(--in
 .tm-look:hover { background: var(--hover); }
 .tm-look[aria-checked="true"] { border-color: var(--border-strong, var(--border)); background: var(--card); }
 .tm-look:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
-.tm-look-more { gap: 2px; align-content: center; color: var(--text-muted); font-size: 11.5px; }
+.tm-look-more { gap: 2px; align-content: center; color: var(--text-muted); font-size: 12px; }
 .tm-look-more:hover { color: var(--ink); }
 
 /* Sidebar B (Teammates.tsx SidebarTeammates, Arun 2026-11-03): faces across the top like contacts, the needs-you bar, one list. */
 /* A grid of contacts, as many to a line as the sidebar holds, wrapping onto the next: every face in view, none cut at the edge. */
 .cv-faces { display: grid; grid-template-columns: repeat(auto-fill, minmax(42px, 1fr)); gap: 2px; padding: 2px 0 6px; }
-.cv-face { display: grid; justify-items: center; gap: 5px; min-width: 0; padding: 6px 0 5px; border: 0; border-radius: 12px; background: transparent; color: var(--ink-2); font: 500 11.5px/1.2 var(--font); cursor: pointer; scroll-snap-align: start; transition: background-color var(--t-hover) var(--ease-out); }
+.cv-face { display: grid; justify-items: center; gap: 5px; min-width: 0; padding: 6px 0 5px; border: 0; border-radius: 12px; background: transparent; color: var(--ink-2); font: 500 12px/1.2 var(--font); cursor: pointer; scroll-snap-align: start; transition: background-color var(--t-hover) var(--ease-out); }
 .cv-face:hover { background: var(--hover); }
 .cv-face[data-active="true"] { background: var(--hover-strong); color: var(--ink); }
 .cv-face:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
@@ -1040,32 +1060,22 @@ html.dark .tm-budget .tb-seg button.on { background: color-mix(in srgb, var(--in
 .cv-add-ring { display: grid; place-items: center; width: 30px; height: 30px; margin: 2px; border: 1.5px dashed var(--border-strong, var(--border)); border-radius: 50%; color: var(--text-muted); transition: color var(--t-hover) var(--ease-out), border-color var(--t-hover) var(--ease-out); }
 .cv-face-add { color: var(--text-muted); }
 .cv-face-add:hover .cv-add-ring { color: var(--ink); border-color: var(--text-muted); }
-.cv-needbar { display: flex; align-items: center; gap: 8px; width: 100%; height: 34px; margin: 0 0 2px; padding: 0 10px 0 11px; border: 0; border-radius: 10px; background: color-mix(in srgb, var(--amber) 12%, transparent); color: var(--amber); font: 13px var(--font); text-align: left; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out); }
-.cv-needbar:hover { background: color-mix(in srgb, var(--amber) 18%, transparent); }
-.cv-needbar:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
-.cv-needbar b { flex: none; font-weight: 600; }
-.cv-needdot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--amber); }
-.cv-needwho { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--text-muted); text-overflow: ellipsis; white-space: nowrap; }
-.cv-needchev { flex: none; transition: transform var(--t-move) var(--ease-out); }
-.cv-needchev[data-open] { transform: rotate(90deg); }
-.cv-needs { display: grid; gap: 1px; padding: 2px 0 6px; }
 .cv-head { display: flex; align-items: center; justify-content: space-between; height: 28px; margin-top: 6px; padding: 0 2px 0 10px; color: var(--text-muted); font: 500 12px var(--font); }
 .cv-head .cv-plus { width: 24px; height: 24px; border-radius: 7px; }
 .cv-list { display: flex; flex-direction: column; gap: 1px; }
 .cv-meta { display: flex; flex: none; flex-direction: column; align-items: flex-end; gap: 4px; margin-left: auto; padding-left: 6px; }
+/* A conversation's row is one height whatever its meta holds: a count under the time grew it (audit CREW-39). */
+.cv-list .tm-row { height: 44px; }
+.cv-list .cv-meta { gap: 2px; }
 .cv-time { color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-@media (prefers-reduced-motion: reduce) { .cv-needchev { transition: none; } }
 .tm-side:has(> .cv-faces) { gap: 4px; }
 .tm-row-wrap:hover .cv-meta, .tm-row-wrap:focus-within .cv-meta { visibility: hidden; }
-.cv-needs .tm-row { min-width: 0; }
-.cv-needs .tm-text { flex: 1 1 auto; min-width: 0; }
-.cv-needs .tm-name, .cv-needs .tm-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* A face's state as a badge on the top right of its head (Teammates.tsx Face; Arun 2026-11-03, "Soft depth"): a disc in the state's
    colour, tuned per theme, a white sign (dark on amber), a faint light from above, a hairline edge and a cut-out of the ground it
    sits on, so it reads on a face of any colour. */
-:root { --badge-work: #3b82f6; --badge-need: #f5a524; --badge-done: #22a861; --badge-stop: #e5484d; }
-html.dark { --badge-work: #4d8eff; --badge-need: #f7b23b; --badge-done: #2fbf71; --badge-stop: #f0585d; }
+:root { --badge-work: #3b82f6; --badge-need: #f5a524; --badge-done: #22a861; --badge-stop: #e5484d; --badge-halt: #8e8e93; }
+html.dark { --badge-work: #4d8eff; --badge-need: #f7b23b; --badge-done: #2fbf71; --badge-stop: #f0585d; --badge-halt: #7c7c82; }
 .tm-face-wrap { position: relative; }
 .tm-badge { position: absolute; z-index: 2; top: calc(var(--b) * -0.22); right: calc(var(--b) * -0.26); display: grid; place-items: center; width: var(--b); height: var(--b); border-radius: 50%; color: #fff; line-height: 0; pointer-events: none;
   background-image: linear-gradient(180deg, rgb(255 255 255 / .22), rgb(255 255 255 / 0) 60%);
@@ -1074,11 +1084,15 @@ html.dark { --badge-work: #4d8eff; --badge-need: #f7b23b; --badge-done: #2fbf71;
 .tm-badge[data-state="needs"] { background-color: var(--badge-need); color: #2a1a00; }
 .tm-badge[data-state="done"] { background-color: var(--badge-done); animation: tm-badge-in .24s cubic-bezier(.3, 1.4, .5, 1); }
 .tm-badge:is([data-state="error"], [data-state="limited"]) { background-color: var(--badge-stop); }
+/* Stopped by the person: a neutral mark, not a finish (audit CREW-40). */
+.tm-badge[data-state="halted"] { background-color: var(--badge-halt); }
 .tm-badge-dots { display: flex; gap: calc(var(--b) * .08); }
-.tm-badge-dots i { width: calc(var(--b) * .15); height: calc(var(--b) * .15); min-width: 2px; min-height: 2px; border-radius: 50%; background: currentColor; animation: tm-badge-dot 1.2s infinite ease-in-out; }
+.tm-badge-dots i { width: calc(var(--b) * .15); height: calc(var(--b) * .15); min-width: 2px; min-height: 2px; border-radius: 50%; background: currentColor; }
 .tm-badge-dots i:nth-child(2) { animation-delay: .15s; }
 .tm-badge-dots i:nth-child(3) { animation-delay: .3s; }
-@keyframes tm-badge-dot { 0%, 60%, 100% { opacity: .5; transform: translateY(0); } 30% { opacity: 1; transform: translateY(calc(var(--b) * -.07)); } }
+/* The lift as a share of the dot's own height (.15 of the badge, so -47% is the badge's -.07): a var() in keyframes keeps an
+   animation off the compositor, and with a crew at work its dots, three on every face, restyled the page every frame. */
+@keyframes tm-badge-dot { 0%, 60%, 100% { opacity: .5; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-47%); } }
 @keyframes tm-badge-in { from { transform: scale(.4); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .tm-badge-dots i, .tm-badge { animation: none !important; } }
 .tm-row:hover .tm-badge, .cv-face:hover .tm-badge { --pr-ground: var(--hover); }
@@ -1114,7 +1128,7 @@ html.dark { --badge-work: #4d8eff; --badge-need: #f7b23b; --badge-done: #2fbf71;
 .tm-bl-title { display: flex; align-items: baseline; gap: 7px; margin: 0; min-width: 0; color: var(--ink); font-size: 13.5px; font-weight: 500; line-height: 20px; white-space: nowrap; }
 .tm-bl-name { flex: none; color: var(--ink-2); font-weight: 600; }
 .tm-bl-name::after { content: "·"; margin-left: 7px; color: var(--faint); font-weight: 400; }
-.tm-bl-kind { flex: none; align-self: center; padding: 0 6px; border-radius: 5px; background: color-mix(in srgb, var(--st-review) 15%, transparent); color: var(--st-review); font-size: 11px; font-weight: 600; line-height: 18px; }
+.tm-bl-kind { flex: none; align-self: center; padding: 0 6px; border-radius: 5px; background: color-mix(in srgb, var(--st-review) 15%, transparent); color: var(--st-review); font-size: 12px; font-weight: 600; line-height: 18px; }
 .tm-bl-words { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tm-bl-group[data-col="done"] .tm-bl-words { color: var(--ink-2); }
 .tm-bl-line { margin: 1px 0 0; overflow: hidden; color: var(--text-muted); font-size: 12.5px; line-height: 18px; white-space: nowrap; text-overflow: ellipsis; }
@@ -1128,8 +1142,34 @@ html.dark { --badge-work: #4d8eff; --badge-need: #f7b23b; --badge-done: #2fbf71;
 .tm-bl-side { display: flex; align-items: center; gap: 8px; }
 .tm-bl-side .tm-kb-more { margin: 0; }
 .tm-bl-side .pf-row-btn { padding: 0; }
-.tm-bl-chip { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 6px; background: color-mix(in srgb, var(--ink) 6%, transparent); color: var(--text-muted); font-size: 11.5px; font-weight: 500; white-space: nowrap; }
+.tm-bl-chip { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 6px; background: color-mix(in srgb, var(--ink) 6%, transparent); color: var(--text-muted); font-size: 12px; font-weight: 500; white-space: nowrap; }
 @media (max-width: 640px) {
   .tm-bl-row { grid-template-columns: 30px minmax(0, 1fr); }
   .tm-bl-side { grid-column: 2; flex-wrap: wrap; }
 }
+
+/* A small working face breathing (teammate-face.tsx): the whole face, by transform, so the compositor runs it. The same 9s as the
+   large faces' morph, a squash and a stretch as slight as their outline's drift. */
+.tm-blob.tm-breathe { transform-origin: 50% 70%; animation: tm-breathe 9s cubic-bezier(.45, 0, .55, 1) infinite; }
+@keyframes tm-breathe { 0%, 100% { transform: scale(1, 1); } 34% { transform: scale(1.035, .97); } 67% { transform: scale(.975, 1.03); } }
+@media (prefers-reduced-motion: reduce) { .tm-blob.tm-breathe { animation: none; } }
+/* Who's at work and their plans, side by side over the box, never one over the other (Arun, 2026-11-04, a crew of eight at work:
+   "Ivy, Rex, Mira and Sol are thinking…" ran under four plan chips, and eight chips ran past the box's left edge). The line takes
+   what the chips leave it, down to 240px, cut with an ellipsis; past that the chips go to a line of their own under it, at its
+   right, wrapping onto another when there are more than fit. Each chip's list still opens above it: nothing here clips. */
+.composer .composer-caption:has(> .tm-wait) { flex-wrap: wrap !important; row-gap: 2px; }
+.composer .composer-caption:has(> .tm-wait) > .tm-wait { flex: 1 1 240px; min-width: 240px; max-width: 100%; }
+/* Three plans or more: their own line, under who's at work, which keeps the whole width. */
+.composer .composer-caption:has(> .tm-wait):has(.dock-plan-stack > :nth-child(3)) > .dock-plan { flex-basis: 100%; }
+.composer .composer-caption:has(> .tm-wait) > .dock-plan { position: static !important; inset: auto !important; flex: 0 1 auto; justify-content: flex-end; width: auto !important; min-width: 0; max-width: 100%; margin: 0 0 0 auto !important; }
+.composer .composer-caption:has(> .tm-wait) .dock-plan-stack { flex-wrap: wrap; justify-content: flex-end; row-gap: 2px; }
+/* Who's at work, many of them (TeamWorking): faces a little over each other, then how many. Names never squeeze into each other:
+   the line ends in an ellipsis instead. */
+.tm-wait-one { flex: none; }
+.tm-wait-many { display: inline-flex; flex: none; align-items: center; gap: 6px; color: var(--text-muted); font-size: 12.5px; }
+.tm-wait-many > b { color: var(--ink-2); font-weight: 500; white-space: nowrap; }
+.tm-wait-faces { display: inline-flex; align-items: center; }
+.tm-wait-face { display: inline-grid; place-items: center; margin-left: -3px; padding: 1px; border: 0; border-radius: 50%; background: var(--card, var(--bg)); cursor: pointer; }
+.tm-wait-face:first-child { margin-left: 0; }
+.tm-wait-face:hover { position: relative; z-index: 1; transform: translateY(-1px); }
+.tm-wait-face:focus-visible { outline: 2px solid var(--focus-ring, var(--ink)); outline-offset: 1px; }

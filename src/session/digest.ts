@@ -1,5 +1,6 @@
 import { commandFailed } from "../receipt.js";
 import { MAIN_LANE, type Member, type SessionEvent } from "../types.js";
+import { isRedo } from "../rewind.js";
 import { questionsTo, requestsTo, type SessionState } from "./projection.js";
 
 export interface DigestGroup {
@@ -68,7 +69,7 @@ export function buildDigest(missed: SessionEvent[], state: SessionState, me: Mem
     } else if (b.type === "control.granted") control.push(`${b.toName} took control (${b.reason})`);
     else if (b.type === "control.released") control.push(`control was released (${b.reason})`);
     else if (b.type === "run.cancel") control.push(`${e.actor.name} cancelled the run`);
-    else if (b.type === "folder.restored") control.push(`${e.actor.name} undid a run's changes`);
+    else if (b.type === "folder.restored") control.push(isRedo(missed, e) ? `${e.actor.name} redid a run's changes` : `${e.actor.name} undid a run's changes`);
     else if (b.type === "folder.committed") control.push(`${e.actor.name} committed ${b.files} file${b.files === 1 ? "" : "s"}${b.prUrl && b.prCreated ? " and opened a pull request" : b.pushed ? " and pushed" : ""}`);
     else if (b.type === "agent.question") questions.push(b.question);
     if (b.type === "agent.message" && b.text.trim()) laneOf(e.lane ?? MAIN_LANE).answers++;

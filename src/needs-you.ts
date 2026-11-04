@@ -5,7 +5,7 @@ import { askReply, parseChoices, type Ask } from "./ask-parse.js";
 import { CLASS_LABEL, classesOf, type CommandClass } from "./command-class.js";
 import { limitHit } from "./limit-reset.js";
 import { stillLimited } from "./limited.js";
-import { rankNeeds, type Blocks, type Need, type NeedChoice, type Suggestion } from "./needs-rank.js";
+import { markOf, rankNeeds, type Blocks, type Need, type NeedChoice, type NeedMark, type Suggestion } from "./needs-rank.js";
 import { goalChoices, goalsIn } from "./goals.js";
 import { HIDDEN } from "./secrets.js";
 import { laneName, type Command } from "./session/core.js";
@@ -63,6 +63,21 @@ export interface NeedsDeps {
   checks?: { answer(wid: string, me: Me, repo: string, entry: string, take: boolean): Promise<unknown> };
   /** Hosted Crew: the workspace's asks, and a keeper's answer to one. */
   crew?: { asks(wid: string): Promise<CrewAskLike[]>; answer(wid: string, me: Me, id: string, take: boolean, note?: string): Promise<unknown> };
+  /** The open-source edition's crew workflows: runs waiting at a Your OK, and the answer to one (team-workflows.ts). */
+  workflows?: { asks(): Promise<WorkflowAskLike[]>; answer(id: string, run: string, ok: boolean, said: string): Promise<unknown> };
+}
+
+/** A crew workflow's run waiting at its Your OK step. */
+export interface WorkflowAskLike {
+  id: string;
+  name: string;
+  run: string;
+  n: number;
+  ask: string;
+  since: number;
+  roomName?: string;
+  /** The session the run works in. */
+  sid?: string;
 }
 
 /** What an item does when answered: kept on the server, never sent to the page. */
@@ -75,6 +90,7 @@ type Act =
   | { do: "retry"; sid: string; lane: string; text: string }
   | { do: "resume"; sid: string; lane: string; at: number }
   | { do: "crew"; ask: string }
+  | { do: "workflow"; id: string; run: string }
   | { do: "check"; repo: string; entry: string }
   | { do: "open" };
 
@@ -206,7 +222,9 @@ export function needsIn(state: SessionState, events: SessionEvent[], me: string,
       const choices = first.options.map((o) => ({ label: o.label, value: askReply(asks, [{ key: o.key, label: o.label }]) }));
       const secret = touchesSecret(...asks.map((x) => x.question), ...first.options.map((o) => o.label));
       out.push({
-        need: { ...base(a, "ask", who, a.text), ...(first.options.some((o) => o.detail) ? { detail: first.options.map((o) => `${o.key}. ${o.label}${o.detail ? ` — ${o.detail}` : ""}`).join("\n") } : {}), choices, free: true, ...(secret ? { noSuggestion: "Friday doesn't suggest answers about keys or passwords." } : {}) },
+        // Every question with its choices, as the agent's own card draws them, rather than the first's choices once as text and
+        // again as buttons with the rest left out (audit CREW-17, 2026-11-04).
+        need: { ...base(a, "ask", who, first.question || a.text), asks: asks.map((q) => ({ question: q.question, options: q.options.map((o) => ({ key: o.key, label: o.label, ...(o.detail ? { detail: o.detail } : {}) })) })), choices, free: true, ...(secret ? { noSuggestion: "Friday doesn't suggest answers about keys or passwords." } : {}) },
         act: { do: "say", sid: state.id, lane, asks },
         context,
         ...tool,
@@ -271,6 +289,16 @@ export function needsIn(state: SessionState, events: SessionEvent[], me: string,
           ask: true,
         });
       }
+    }
+    // Finished its turn with its plan short ("stopped at 3 of 5"): Carry on is yours, as the Board has always said it, so this
+    // list and the Board count the same things (audit REST-2, Arun 2026-11-04).
+    const plan = state.planDone?.[lane];
+    const ended = state.finished?.[lane];
+    if (plan && plan.done < plan.of && ended !== undefined && state.stopped?.[lane] === undefined && run.status !== "running" && run.status !== "error" && run.status !== "paused") {
+      out.push({
+        need: { ...base({ seq: ended, lane }, "stopped", who, `Stopped at ${plan.done} of ${plan.of} of its plan`), choices: [{ label: "Carry on", value: "Carry on with the plan." }], free: true, suggestion: { answer: "Carry on with the plan.", reason: "Picks up at the next step of its own plan.", by: "rule" } },
+        act: { do: "say", sid: state.id, lane },
+      });
     }
     // Out of usage, nothing carried it on and nothing will pick it up: carry on when it resets, or leave it.
     if (run.status === "error" && !state.resumes[lane] && stillLimited(events, lane, now)) {
@@ -346,6 +374,30 @@ export function crewNeed(a: CrewAskLike, board?: SessionState): Found {
   };
 }
 
+/**
+ * A workflow waiting at its Your OK: on this list as everywhere else that waits on you. It showed only on the canvas and in the
+ * Crew room, with Needs you saying "Nothing is waiting on you" and its badge at 0 (2026-11-04 end-to-end check).
+ */
+export function workflowNeed(a: WorkflowAskLike): Found {
+  return {
+    need: {
+      // Its run and when this ask began: sent back with a note, the same run asks again later, and that new ask is a new item. Keyed
+      // by the run alone, the page still held the answered one as gone and the new ask never showed until a reload (2026-11-04 retest).
+      id: `wf~${a.id}~${a.run}~${a.since}`,
+      kind: "crew",
+      who: a.name,
+      // In its room's session when it has one, so the room's row counts it as everything else waiting there.
+      where: { title: a.roomName ?? "Crew", ...(a.roomName ? { room: a.roomName } : {}), ...(a.sid ? { sid: a.sid } : {}) },
+      text: `${a.name}, step ${a.n}: ${a.ask}`,
+      since: a.since,
+      blocks: { agents: 1, tasks: 0 },
+      choices: [{ label: "OK", value: "yes" }, { label: "Say no", value: "no" }],
+      free: true,
+    },
+    act: { do: "workflow", id: a.id, run: a.run },
+  };
+}
+
 /** What the model is asked: pick one of the answers, or write a short one, and say why in a line; "none" when nothing is right. */
 export function suggestPrompt(f: Found): { system: string; prompt: string } {
   const n = f.need;
@@ -402,24 +454,32 @@ export class NeedsYou {
         states.set(sid, state);
         // The log is read only where something could be waiting: an item, a plan, a stopped run.
         const lanes = [MAIN_LANE, ...state.lanes.map((l) => l.id)];
-        const maybe = attentionIn(state, me.id).length > 0 || lanes.some((l) => state.options.planFirst || runOf(state, l).status === "error") || (state.ownerId === me.id && !!state.checkOffers?.length);
+        // A plan stopped short counts too: it was left out here, so this list never had it while the Board, the sidebar and Home did
+        // (2026-11-04 end-to-end check: "stopped at 4 of 5" counted 2 or 3 there, 1 here, and ⌘⇧U never reached it).
+        const short = (l: string) => ((p) => !!p && p.done < p.of && state.finished?.[l] !== undefined && state.stopped?.[l] === undefined)(state.planDone?.[l]);
+        const maybe = attentionIn(state, me.id).length > 0 || lanes.some((l) => state.options.planFirst || runOf(state, l).status === "error" || short(l)) || (state.ownerId === me.id && !!state.checkOffers?.length);
         if (!maybe) return;
         const events = await this.d.store.events(sid).catch(() => [] as SessionEvent[]);
         found.push(...needsIn(state, events, me.id));
       }),
     );
+    if (this.d.workflows) for (const a of await this.d.workflows.asks().catch(() => [] as WorkflowAskLike[])) found.push(workflowNeed(a));
     if (this.d.crew && wid) {
       const asks = (await this.d.crew.asks(wid).catch(() => [])).filter((a) => a.keeper.id === me.id && a.status === "open");
       for (const a of asks) found.push(crewNeed(a, a.board ? states.get(a.board.sid) : undefined));
     }
-    const off = new Set(await this.d.redis.smembers(this.key("off", me.id)));
-    return found.filter((f) => !off.has(f.need.id));
+    // Put off: kept under the page's "N put off · Show", and left out of every count of what waits on the person, the page's own
+    // heading and the badge alike (2026-11-04 retest: after Not now the page said "Nothing new is waiting on you" and the badge
+    // "1 waiting").
+    const off = await this.offOf(me);
+    for (const f of found) if (off.has(f.need.id)) f.need.putOff = true;
+    return found;
   }
 
   /** The queue: ranked, each with its suggestion (cached, or asked for now in the background), none of the server's own parts. */
   async list(me: Me, wid: string, more: string[] = []): Promise<Need[]> {
     const found = await this.collect(me, wid, more);
-    const want = found.filter((f) => f.ask && !f.need.suggestion);
+    const want = found.filter((f) => f.ask && !f.need.suggestion && !f.need.putOff);
     const cached = want.length ? await this.d.redis.mget(...want.map((f) => this.key("s", me.id, f.need.id))) : [];
     let started = 0;
     want.forEach((f, i) => {
@@ -435,6 +495,22 @@ export class NeedsYou {
       } else f.need.thinking = true;
     });
     return rankNeeds(found.map((f) => f.need));
+  }
+
+  /**
+   * The queue as counts read it: every item the page lists, put off or not, without suggestions, and the ids put off (a pull
+   * request's review is put off by its id too, though it is read on the person's computer). The sidebar, its badge, the Board,
+   * Home and the Crew rows count from this, so they count what the page lists, and leave out what it keeps under "put off"
+   * (2026-11-04 retest: the page said 3, the badge 1, the sidebar 1, the Board 3 and 5).
+   */
+  async marks(me: Me, wid: string, more: string[] = []): Promise<{ needs: NeedMark[]; off: string[] }> {
+    const [found, off] = await Promise.all([this.collect(me, wid, more), this.offOf(me)]);
+    return { needs: found.map((f) => markOf(f.need)), off: [...off].slice(0, 500) };
+  }
+
+  /** The ids this person put off with "Not now". */
+  async offOf(me: Me): Promise<Set<string>> {
+    return new Set(await this.d.redis.smembers(this.key("off", me.id)));
   }
 
   /** One short model call for one item, once: a lock so two polls don't both ask, and the answer (or that there was none) kept. */
@@ -469,7 +545,7 @@ export class NeedsYou {
    * rather than landing somewhere it no longer fits. `answer` is a choice's value, or their own words where the item takes them.
    */
   async answer(me: Me, wid: string, id: string, answer: string, edited = false): Promise<{ ok: true; said: string } | { ok: false; status: number; error: string }> {
-    const sid = id.startsWith("crew~") ? "" : id.split("~")[0]!;
+    const sid = id.startsWith("crew~") || id.startsWith("wf~") ? "" : id.split("~")[0]!;
     const found = (await this.collect(me, wid, sid ? [sid] : [])).find((f) => f.need.id === id);
     if (!found) return { ok: false, status: 404, error: "That's no longer waiting on you: it was answered or went away." };
     const n = found.need;
@@ -508,6 +584,10 @@ export class NeedsYou {
           break;
         case "crew":
           await this.d.crew!.answer(wid, me, a.ask, choice ? answer === "yes" : true, choice ? undefined : text);
+          break;
+        case "workflow":
+          // Your own words: a no, with what to change, as the canvas's Say no takes it.
+          await this.d.workflows!.answer(a.id, a.run, !!choice && answer === "yes", choice ? "" : text);
           break;
         case "check":
           if (!this.d.checks) return { ok: false, status: 400, error: "Open it to answer." };

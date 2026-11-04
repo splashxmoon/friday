@@ -85,7 +85,7 @@ import {
   type Project,
   type RecentSession,
 } from "./storage.js";
-import { inBand, isTyping, PageSkeleton, SessionSkeleton, useConfirm, useDismiss, type MenuItem } from "./ui.js";
+import { inBand, isTyping, onBand, PageSkeleton, SessionSkeleton, useConfirm, useDismiss, type MenuItem } from "./ui.js";
 import { WaitingOnYou, askToNotify, useAttention } from "./Attention.js";
 import { DailyBriefHost } from "./DailyBrief.js";
 import { clearUnread, markUnread, useUnread, workingChanges } from "./unread.js";
@@ -783,6 +783,8 @@ export function App() {
   useEffect(() => {
     const on = (e: Event) => {
       const tab = (e as CustomEvent<{ tab?: string }>).detail?.tab;
+      // Usage & limits is the Usage page's row in Settings (audit REST-21).
+      if (tab === "usage-limits") return navigate({ kind: "usage" });
       // Asked for a section by name: land on its heading. Asked for Settings: land in its search.
       askPage(tab ? "settings-section" : "settings-search");
       navigate({ kind: "settings", section: settingsSection(tab ?? lastSettings.current) });
@@ -843,8 +845,8 @@ export function App() {
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
   // For the keys that move between sessions: the list, what waits on you, and the sessions in the order you were last in them.
-  const moveRef = useRef({ recents, items: attention.items, here: route.kind === "session" ? route.sid : "" });
-  moveRef.current = { recents, items: attention.items, here: route.kind === "session" ? route.sid : "" };
+  const moveRef = useRef({ recents, items: attention.items, here: route.kind === "session" ? route.sid : "", identity });
+  moveRef.current = { recents, items: attention.items, here: route.kind === "session" ? route.sid : "", identity };
   const visited = useRef<string[]>([]);
   useEffect(() => {
     if (route.kind === "session") visited.current = [route.sid, ...visited.current.filter((x) => x !== route.sid)].slice(0, 20);
@@ -885,13 +887,22 @@ export function App() {
         navigate({ kind: "needs" });
         return;
       }
-      // ⌘⇧U: the next session that waits on you, after this one, round to the first (as cmux binds it).
+      // ⌘⇧U: the next session that waits on you, after this one, round to the first (as cmux binds it). What waits is the Needs you
+      // page's list, the one the Board and Home count too; nothing waiting is said, not a key that does nothing (audit REST-2).
       if (mod && e.shiftKey && !e.altKey && k === "u") {
-        const sids = [...new Set(items.map((i) => i.sid))];
-        if (!sids.length) return;
         e.preventDefault();
-        const at = sids.indexOf(here);
-        go(sids[(at + 1) % sids.length]);
+        const { recents: listed, identity: who } = moveRef.current;
+        void api<{ items: { where: { sid?: string }; putOff?: true }[] }>(who, "/api/needs-you", { method: "POST", body: JSON.stringify({ sids: listed.map((r) => r.sid) }) })
+          .catch(() => null)
+          .then((got) => {
+            // Not what was put off: it's out of every count of what waits on you.
+            const needs = (got?.items ?? []).filter((n) => !n.putOff);
+            const sids = [...new Set([...needs.flatMap((n) => (n.where.sid ? [n.where.sid] : [])), ...items.map((i) => i.sid)])].filter((sid) => listed.some((r) => r.sid === sid));
+            if (sids.length) return void go(sids[(sids.indexOf(here) + 1) % sids.length]);
+            // Waiting, but not in a session of the list (a teammate's ask, a review): the page that has it.
+            if (needs.length) return navigate({ kind: "needs" });
+            dispatchEvent(new CustomEvent("friday:notice", { detail: "Nothing is waiting on you" }));
+          });
         return;
       }
       // ⌘K opens the palette, as every tool of this kind binds it (Arun, 2026-10-25, after T3 Code, Orca and MonoCode). It used
@@ -987,7 +998,10 @@ export function App() {
       if (r) navigate({ kind: "session", sid: r.sid, invite: r.invite });
     };
     window.addEventListener("friday:open-session", on);
-    return () => window.removeEventListener("friday:open-session", on);
+    // Something waiting on you that isn't a session of the list (Home's row for a workflow at its Your OK): where it is answered.
+    const needs = () => navigate({ kind: "needs" });
+    window.addEventListener("friday:open-needs", needs);
+    return () => (window.removeEventListener("friday:open-session", on), window.removeEventListener("friday:open-needs", needs));
   }, [navigate]);
   // The last teammate removed from the Team room: the Team tab's first run, not an empty room (Arun, 2026-10-28: "really iron
   // out bugs and feature problems and gaps").
@@ -1177,11 +1191,14 @@ export function App() {
   let crewWorkflows = false;
   const fullBleed = crewWorkflows || route.kind === "agents" || route.kind === "automations" || route.kind === "connections" || route.kind === "people" || route.kind === "library" || route.kind === "board" || route.kind === "review" || route.kind === "needs" || route.kind === "usage" || route.kind === "settings";
   useLayoutEffect(() => {
-    if (!fullBleed || !inBand()) return;
-    document.documentElement.dataset.band = "page";
-    return () => {
-      if (document.documentElement.dataset.band === "page") delete document.documentElement.dataset.band;
-    };
+    if (!fullBleed) return;
+    // When the band comes, not only if it is there as this opens: after a reload it came later, and the page stood 12px lower.
+    return onBand(() => {
+      document.documentElement.dataset.band = "page";
+      return () => {
+        if (document.documentElement.dataset.band === "page") delete document.documentElement.dataset.band;
+      };
+    });
   }, [fullBleed]);
 
   // The quick prompt's window: the box, nothing else (QuickPrompt.tsx).
@@ -1199,7 +1216,7 @@ export function App() {
       {/* The first thing the keyboard reaches: straight to the page, past the rail and the list. */}
       <a className="skip-link" href="#main">Skip to the page</a>
       {/* Where a session puts its header in the desktop app: the band along the top of the window, which has the room. Fixed, so it takes no place in the grid. */}
-      <WindowNav open={panelOpen} onToggle={togglePanel} what={inAgents ? "agents" : "sessions"} working={attention.working.keys()} needs={attention.items.map((i) => i.sid)} />
+      <WindowNav open={panelOpen} onToggle={togglePanel} what={inAgents ? "agents" : "sessions"} working={attention.working.keys()} needs={attention.needSids} />
       {/* In a browser the sidebar folds by itself on a narrow window, and the window bar's button (WindowNav) is the app's: with
           the sidebar folded there was no way back to it but ⌘B (Arun, 2026-10-24: UX gaps). */}
       {!panelOpen && !window.fridayDesktop && (
@@ -1282,7 +1299,7 @@ export function App() {
       <main id="main" className="main" tabIndex={-1}>
         {/* Someone new is set up first (this computer, its coding tools, GitHub), not toured: the tour waits behind it. */}
         {identity.id && route.kind === "home" && <Setup identity={identity} recents={recents} onDone={() => requestAnimationFrame(() => document.querySelector<HTMLElement>(".composer textarea, textarea")?.focus())} />}
-        {identity.id && <WhatsNew recents={recents} />}
+        {identity.id && <WhatsNew userId={identity.id} />}
         {/* A new account's workspace on no paid plan: the plans, in front of everything but a shared session, which stays free to watch. */}
 
         {/* A page opened before its code has arrived shows its shape, not a blank. */}
@@ -1354,9 +1371,13 @@ export function App() {
             identity={identity}
             recents={recents}
             projects={projects}
+            needs={attention.needs}
+            off={attention.off}
             onOpen={(sid) => {
               const r = recents.find((x) => x.sid === sid);
+              // Not a session of the list (a workflow waiting on your OK, a review): the Needs you page, where it is answered.
               if (r) navigate({ kind: "session", sid, invite: r.invite });
+              else navigate({ kind: "needs" });
             }}
             onNew={() => toNewSession()}
           />
@@ -1371,13 +1392,13 @@ export function App() {
             }}
           />
         ) : route.kind === "needs" ? (
-          <NeedsYouPage identity={identity} recents={recents} onReview={() => navigate({ kind: "review" })} />
+          <NeedsYouPage identity={identity} recents={recents} onReview={() => navigate({ kind: "review" })} onBoard={() => navigate({ kind: "board" })} />
         ) : route.kind === "settings" ? (
           <SettingsPage
             identity={identity}
             workspace={workspace}
             section={route.section}
-            onSection={(section) => navigate({ kind: "settings", section })}
+            onSection={(section) => navigate(section === "usage-limits" ? { kind: "usage" } : { kind: "settings", section })}
             onRename={rename}
           />
         ) : route.kind === "usage" ? (
@@ -1426,7 +1447,7 @@ export function App() {
           }}
           actions={paletteOrder(sessionActions, baseActions({
             recents,
-            stateOf: (sid) => (attention.items.some((i) => i.sid === sid) ? "needs" : attention.working.has(sid) ? "working" : unreadAll.has(sid) ? "done" : null),
+            stateOf: (sid) => (attention.needSids.has(sid) ? "needs" : attention.working.has(sid) ? "working" : unreadAll.has(sid) ? "done" : null),
             open: (r) => navigate({ kind: "session", sid: r.sid, invite: r.invite }),
             newSession: () => {
               toNewSession();

@@ -74,7 +74,8 @@ export function AppearanceTab() {
   }, []);
   /** The theme maker, open on a palette: a new one, or one of yours to change. */
   const [making, setMaking] = useState<{ palette: Palette; id?: string } | null>(null);
-  const use = (t: CustomTheme | null) => (applyTheme(t), setCustom(t));
+  // Picking a theme answers a failed import: its "isn't a theme" stayed under the cards after another was picked (audit e2e).
+  const use = (t: CustomTheme | null) => (applyTheme(t), setCustom(t), setThemeErr(""));
   const importTheme = async (file: File | undefined) => {
     if (!file) return;
     setThemeErr("");
@@ -118,7 +119,7 @@ export function AppearanceTab() {
   }, [custom, making]);
   const [tint, setTint] = useState<Accent>(accent);
   const [firm, setFirm] = useState<Contrast>(contrast);
-  const pickLook = (v: ThemeChoice) => (setTheme(v), applyTheme(null), setCustom(null), chooseTheme(v));
+  const pickLook = (v: ThemeChoice) => (setTheme(v), applyTheme(null), setCustom(null), setThemeErr(""), chooseTheme(v));
   return (
     // Appearance after Synara's honest token set (DIRECTION.md §9.10; Arun, 2026-10-29: "so clean and beautiful really with a
     // clear direction in design language"): the look as three pictures, then accent, contrast, size and the two fonts; motion and

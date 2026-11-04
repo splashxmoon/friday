@@ -209,7 +209,7 @@
 .wr-plan li:last-child { padding-bottom: 0; }
 .wr-plan li::before { content: ""; position: absolute; left: 8.5px; top: 21px; bottom: 3px; width: 1px; background: var(--border-strong); }
 .wr-plan li:last-child::before { display: none; }
-.wr-step { box-sizing: border-box; display: grid; place-items: center; width: 18px; height: 18px; border: 1.5px dashed color-mix(in srgb, var(--text-muted) 75%, transparent); border-radius: 50%; background: transparent; color: var(--text-muted); font: 500 9.5px/1 var(--font); font-variant-numeric: tabular-nums; }
+.wr-step { box-sizing: border-box; display: grid; place-items: center; width: 18px; height: 18px; border: 1.5px dashed color-mix(in srgb, var(--text-muted) 75%, transparent); border-radius: 50%; background: transparent; color: var(--text-muted); font: 500 12px/1 var(--font); font-variant-numeric: tabular-nums; }
 .wr-plan li.st-completed { color: var(--text-muted); }
 .wr-plan li.st-completed .wr-step { border: 0; color: var(--green); }
 .wr-plan li.st-active { color: var(--ink); font-weight: 500; }
@@ -553,7 +553,7 @@ html .shell:not(.with-panel):has(> .side-rail) > .main { margin-left: 52px !impo
 /* The rail's sessions panel (SideRail SessionsFly): beside the rail, a tray of the sessions by name, grouped, each a row. */
 .rail-fly-wrap { position: relative; }
 html:not(.dark) .rail-count { color: #fff; } /* white on the light theme's darker amber: 6.5:1, where the dark ink was 3.7:1 */
-.rail-count { position: absolute; top: 3px; right: 2px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 999px; background: var(--dass-needs, var(--amber)); color: #1a1205; font-size: 10px; font-weight: 600; line-height: 15px; text-align: center; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 2px var(--sidebar); }
+.rail-count { position: absolute; top: 3px; right: 2px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 999px; background: var(--dass-needs, var(--amber)); color: #1a1205; font-size: 12px; font-weight: 600; line-height: 15px; text-align: center; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 2px var(--sidebar); }
 /* The fly-out: the floating material (style.css), its groups a label and rows with no box, each row the sidebar's own: the
    session's mark wearing its state, the name in ui ink and the live line in --ink-2 (2026-10-29 direction §5, §8; r5). */
 .rail-fly { position: fixed; z-index: 75; display: flex; flex-direction: column; gap: 4px; width: 300px; max-height: min(520px, calc(100vh - 16px)); padding: 6px; overflow-y: auto; border-radius: var(--r-lg); animation: r5-rise var(--t-open) var(--ease-out); }
@@ -647,7 +647,7 @@ html .wr-part-body { margin: 0 !important; padding: 0 0 16px; border-radius: 0; 
 /* A collection with no pictures: its name's first word set as its cover, in the document serif, and how much is in it. */
 .wr-hub-cover.type { display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-end; gap: 1px; padding: 6px; box-sizing: border-box; background: var(--hover-strong); }
 .wr-hub-cover.type b { max-width: 100%; overflow: hidden; text-overflow: clip; white-space: nowrap; color: var(--ink); font-family: var(--font-doc); font-size: 14px; font-weight: 500; line-height: 1.05; letter-spacing: -0.01em; }
-.wr-hub-cover.type em { color: var(--text-muted); font-size: 10px; line-height: 12px; font-style: normal; font-weight: 500; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.wr-hub-cover.type em { color: var(--text-muted); font-size: 12px; line-height: 12px; font-style: normal; font-weight: 500; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .wr-hub.big .wr-hub-cover.type { padding: 16px; gap: 4px; }
 .wr-hub.big .wr-hub-cover.type b { font-size: 30px; }
 .wr-hub.big .wr-hub-cover.type em { font-size: 12px; }
@@ -678,7 +678,7 @@ button.wr-source:not(.search) { grid-template-columns: 16px 24px minmax(0, 1fr);
    56px strip); on a phone's width no strip at all (the bar's Overview opens it). */
 .wr-tab { gap: 3px; padding: 8px 0 7px; border-radius: var(--r-md); transition: background-color var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out); }
 .wr-tab:hover { color: var(--ink); }
-.wr-tab-label { max-width: 54px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font: 500 10px/1.1 var(--font); letter-spacing: -0.01em; }
+.wr-tab-label { max-width: 54px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font: 500 12px/1.1 var(--font); letter-spacing: -0.01em; }
 @media (max-width: 720px) { .sv-body > .wr.wr-shut { display: none; } }
 .wr-grip:focus-visible { outline: none; }
 .wr-grip:focus-visible::after { background: var(--border-focus); }

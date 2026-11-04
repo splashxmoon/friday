@@ -20,7 +20,7 @@ import { readRepo as readFolder } from "./runner/repo-read.js";
 import { readFailed } from "./project-rules.js";
 import { parseRepo } from "./runner/repo.js";
 import { Runner } from "./runner/runner.js";
-import { joinCommand, joinScript, joinSshResult, SSH_HOST, sshConfigHosts } from "./local/add-computer.js";
+import { joinCommand, joinScript, joinSshResult, logTailScript, SSH_HOST, sshConfigHosts } from "./local/add-computer.js";
 import { copyIncluded } from "./runner/git.js";
 import { setupStack, stackFor } from "./runner/stack.js";
 import { folderOwnDb } from "./runner/environment.js";
@@ -40,7 +40,8 @@ import { AgentRuntime } from "./agent/runtime.js";
 import { defaultTools, type AgentTool } from "./agent/tools.js";
 import { SESSION_COOKIE, SESSION_MAX_AGE_S, clearSessionCookie, readCookie, sessionCookie, signActor, signInvite, signSession, verifyActor, verifyInvite, verifySession, signReplay, verifyReplay } from "./auth.js";
 import { hideSecrets, hideSecretsIn } from "./secrets.js";
-import { applyPrStatus, boardCards, sortCards, summaryOf, waitingOn, weekOf, type BoardCard, type SessionSummary } from "./board.js";
+import { applyPrStatus, boardCards, putOffCards, sortCards, summaryOf, waitingOn, weekOf, type BoardCard, type SessionSummary } from "./board.js";
+import { errorHead } from "./error-head.js";
 import { cliLlm } from "./builder-cli.js";
 import { NeedsYou } from "./needs-you.js";
 import { AgentMesh } from "./agent-mesh.js";
@@ -71,7 +72,7 @@ import { clientBuildOptions } from "./client-build.js";
 import { SkillRegistry } from "./skills.js";
 import type { SkillBrief } from "./types.js";
 import { discoverSkills, importChosen, importWholeRepo } from "./skill-import.js";
-import { FileStore, MAX_FILE_BYTES, MAX_MEDIA_BYTES, isMediaFile, isUsableFile, resolveAttachments } from "./files.js";
+import { FileStore, MAX_FILE_BYTES, MAX_MEDIA_BYTES, isMediaFile, isUsableFile, resolveAttachments, uploadedFileHeaders } from "./files.js";
 import { publicAccount, type Account, type Provider } from "./identity-types.js";
 import { LOCAL_WORKSPACE, localAccount } from "./local/identity.js";
 
@@ -87,7 +88,7 @@ import { can, canDriveLane, driverOf, pendingFor, project, roleOf, runOf, type S
 import { SessionStore, WorkspaceClosing } from "./session/store.js";
 import type { ImportedTurn, Member, PresenceMember, RepoCall, SessionEvent } from "./types.js";
 import { NoLinks } from "./local/no-links.js";
-import { LocalLinks } from "./local/computers.js";
+import { computerDetail, LocalLinks } from "./local/computers.js";
 import { handOff } from "./hand-off-run.js";
 import { reattachAll } from "./reattach.js";
 import { backBrief as backBriefOf, TeamLooks } from "./team-views.js";
@@ -320,7 +321,14 @@ export interface AppOptions {
       state(): Promise<unknown>;
       setOn(on: boolean): Promise<unknown>;
       pairCode(kind?: "phone" | "computer"): Promise<unknown>;
+      /** The computer code on screen, cancelled (Add a computer › Cancel): the listener closes if only it needed it. */
+      dropCode?(): Promise<unknown>;
       forget(id: string): Promise<unknown>;
+      /** Another computer called something else in Settings, and what it said of itself as it linked (local/phone.ts). */
+      rename?(id: string, name: string): Promise<unknown>;
+      note?(id: string, patch: { host?: string; platform?: string; address?: string; version?: string }): Promise<unknown>;
+      /** What the listener tells the app about other computers: paired again under a new id, gone, its version heard. */
+      hooks?: { replaced?: (old: string[], now: string) => void; forgot?: (id: string) => void; heard?: (id: string, version: string) => void };
     };
     /** This computer used from another one's Friday (local/join.ts): the link it was given, and whether it holds now. */
     join?: {
@@ -368,7 +376,8 @@ export async function createApp(o: AppOptions) {
       const [events, state] = await Promise.all([store.events(sid), store.state(sid)]);
       for (const id of threadsToSettle(events, state.threads, lane)) await store.append(sid, { id: "system", name: "System", kind: "system" }, { type: "thread.resolved", id, auto: { lane } });
     })().catch((e) => closingOr("[threads]", e));
-    if (o.decisionLog) void learnFromRun(sid, lane).catch((e) => console.error("[brain]", e));
+    // A coding tool that couldn't answer is a line, not a stack trace each run (2026-11-04 end-to-end check: 33 of them).
+    if (o.decisionLog) void learnFromRun(sid, lane).catch((e) => console.warn(`[brain] couldn't learn from ${sid}/${lane}: ${errorHead(String((e as Error)?.message ?? e))}`));
     if (o.decisionLog) void checkAfterRun(sid, lane).catch((e) => closingOr("[checks]", e));
     // Its own failing tests, against the commit its copy started from: which were already failing there (baseline.ts).
     void testsAfterRun(sid, lane).catch((e) => closingOr("[baseline]", e));
@@ -1484,6 +1493,59 @@ export async function createApp(o: AppOptions) {
   const links = o.local ? new LocalLinks(o.local.user) : new NoLinks();
   /** The local edition's other computers, when this is it (the hosted registry is something else). */
   const localLinks = (links as unknown) instanceof LocalLinks ? (links as unknown as LocalLinks) : null;
+  /**
+   * What the listener and the links hear of your other computers (local/phone.ts, local/computers.ts): what one said of itself
+   * as it linked, kept with its pairing for its row in Settings; the Friday it runs; and the same computer paired again under a
+   * new id (added again by SSH or a command, or re-paired), whose old link closes and whose sessions and teammates are its
+   * still, through a restart too (2026-11-04 linking test: rows piled up, and what ran on the old pairing was stranded).
+   */
+  const ALIASES = `${o.prefix}local:computer-aliases`;
+  if (localLinks) {
+    void redis.hgetall(ALIASES).then(
+      (all) => {
+        for (const [was, now] of Object.entries(all ?? {})) localLinks.alias(was, now);
+      },
+      () => {},
+    );
+    localLinks.onHello = (id, h) => void o.local?.phone?.note?.(id, h)?.catch(() => {});
+    const hooks = o.local?.phone?.hooks;
+    if (hooks) {
+      hooks.replaced = (old, now) => {
+        for (const id of old) (localLinks.alias(id, now), localLinks.forget(id));
+        const all = localLinks.aliasMap();
+        if (Object.keys(all).length) void redis.hset(ALIASES, all).catch(() => {});
+      };
+      hooks.heard = (id, version) => localLinks.said(id, version);
+    }
+  }
+  /** What one of your other computers is called here, linked now or not (its pairing, local/phone.ts), or null. */
+  const computerName = async (id: string): Promise<string | null> => {
+    const now = localLinks?.current(id) ?? id;
+    const live = localLinks?.label(now) ?? localLinks?.known(now);
+    if (live) return live;
+    const st = (await o.local?.phone?.state().catch(() => null)) as { devices?: { id: string; name: string }[] } | null;
+    return st?.devices?.find((d) => d.id === now)?.name ?? null;
+  };
+  /**
+   * In the open-source edition, the computer a session's lane runs on, for a start or stop of that lane: another of yours (its
+   * id), this one (""), or why it can't be had now. Undefined for anything else (new work goes where the page picked): an agent
+   * never moves to another computer by itself (2026-11-04 linking test).
+   */
+  const laneHome = async (method: string, params: Record<string, unknown>): Promise<{ id: string } | { error: string } | undefined> => {
+    if (!localLinks || (method !== "start" && method !== "stop") || params.newLane) return undefined;
+    const sid = typeof params.sid === "string" ? params.sid : "";
+    if (!sid) return undefined;
+    const lane = typeof params.lane === "string" && params.lane ? params.lane : MAIN_LANE;
+    const e = (await store.state(sid).catch(() => null))?.engines[lane];
+    // Never attached anywhere yet (a new session's first agent, its lane made with no folder): it goes where the page picked.
+    // Read as "this computer", a new session on another computer started its first agent here, in that computer's folder path.
+    if (!e?.tool || !e.cwd) return undefined;
+    if (!e.computer) return { id: "" };
+    const id = localLinks.current(e.computer);
+    if (localLinks.connected(id)) return { id };
+    const name = await computerName(id);
+    return { error: `${name ?? "Its computer"} isn't connected, so ${engineName(e.tool)} can't ${method} there now. It carries on there once ${name ?? "that computer"} links again.` };
+  };
   /** Runners this server started for its own machine's user (desktop app, local dev). */
   const localRunners = new Map<string, Runner>();
   /** Whether this server may run things on the machine it is on: the desktop app, or local development. */
@@ -1557,7 +1619,7 @@ export async function createApp(o: AppOptions) {
     let ask: ((q: { system: string; prompt: string }) => Promise<{ text: string }>) | null = tool ? (q) => callHost("ask", { tool, system: q.system, prompt: q.prompt, ...(tool === "claude" ? { model: "haiku" } : {}) }, { serverUrl: selfUrl, user: { id: me.id, name: "" }, runners: localRunners }) as Promise<{ text: string }> : null;
     return ask ? { llm: cliLlm(ask) } : null;
   };
-  const needsYou = new NeedsYou({ store, redis, prefix: o.prefix, handle: (sid, me, cmd) => core.handle(sid, me, cmd), suggester: suggestWith, ...(o.decisionLog ? { checks: { answer: (wid, me, repo, entry, take) => answerCheck(wid, me, repo, entry, take) } } : {}) });
+  const needsYou = new NeedsYou({ store, redis, prefix: o.prefix, handle: (sid, me, cmd) => core.handle(sid, me, cmd), suggester: suggestWith, workflows: { asks: () => (workflows ? workflows.asks() : Promise.resolve([])), answer: async (id, run, ok, said) => { const w = workflows ? await workflows.get(id) : null; if (!w) throw new Error("That workflow is gone."); return workflows!.answer(w, run, ok, said); } }, ...(o.decisionLog ? { checks: { answer: (wid, me, repo, entry, take) => answerCheck(wid, me, repo, entry, take) } } : {}) });
   // The daily brief and standup (daily-brief.ts): each person's morning and evening across everything they have going, from the
   // logs. The Crew's places come from the edition's own Crew (set below with the teammates, or the hosted one's).
   let briefCrew: (wid: string, me: { id: string; name: string }) => Promise<(CrewInput & { away: boolean }) | null> = async () => null;
@@ -1718,8 +1780,10 @@ export async function createApp(o: AppOptions) {
       const { dirs: _here, ...rest } = params as typeof params & { dirs?: string[] };
       const there = { ...rest, cwd: projectsOf(t)[0] ?? `~/Friday/teammates/${t.name}`, makeDir: true, ...(projectsOf(t).length ? { dirs: [...projectsOf(t).slice(1), `~/Friday/teammates/${t.name}`] } : {}) };
       if (process.env.FRIDAY_TEAMMATES_DRY === "1") return (teammateStarts.push(there), { lane: there.lane });
-      if (!localLinks.connected(t.machine)) throw new Error(`${t.name}'s computer isn't connected: it starts once that computer links again.`);
-      return (await localLinks.call(t.machine, "start", there, 10 * 60_000)) as { lane: string };
+      const on = localLinks.current(t.machine);
+      const name = localLinks.connected(on) ? null : await computerName(on);
+      if (!localLinks.connected(on)) throw new Error(`${t.name}'s computer${name ? `, ${name},` : ""} isn't connected: it starts once that computer links again.`);
+      return (await localLinks.call(on, "start", there, 10 * 60_000)) as { lane: string };
     }
     // Tests say what would be started rather than start a real coding tool on the machine running them. A folder lent with no
     // tool starts no coding tool, so it is started for real: its lane needs it to run.
@@ -1799,6 +1863,16 @@ export async function createApp(o: AppOptions) {
     // this computer. The team's owner is the one person in its session.
     const owner = Object.entries((await store.state(sid)).members).find(([, m]) => m.role === "owner");
     const problems = new Map(await Promise.all(list.filter((t) => t.tool === "friday").map(async (t) => [t.id, owner ? await ownModelProblem({ id: owner[0], name: owner[1].name }, t.model ?? "") : ""] as const)));
+    // One on another of your computers that isn't linked now: which, or that it was removed here, so it doesn't read as a tool
+    // that isn't running, or wait as "Queued" with nothing said (2026-11-04 linking test: "Offline · Hub's computer").
+    const away = localLinks ? list.filter((t) => !!t.machine && !problems.get(t.id) && !localLinks.connected(localLinks.current(t.machine))) : [];
+    const paired = away.length ? new Set((((await o.local?.phone?.state().catch(() => null)) as { devices?: { id: string }[] } | null)?.devices ?? []).map((d) => d.id)) : null;
+    if (localLinks)
+      for (const t of away) {
+        const on = localLinks.current(t.machine!);
+        const name = paired?.has(on) ? await computerName(on) : null;
+        problems.set(t.id, name ? `${name} isn't connected. It carries on once that computer links again.` : "Its computer was removed. It comes back if that computer is added again, or pick this computer under Runs on.");
+      }
     const views = await teamLooks.mates(places, list, new Map([...problems].filter(([, why]) => !!why)));
     // Held for its budget or hours: why, and when it carries on (its status line).
     return Promise.all(views.map(async (v) => ((hold) => (hold ? { ...v, hold } : v))(await crewBudget.hold(v, places.flatMap((p) => (p.lanes[v.id] ? [{ sid: p.sid, lane: p.lanes[v.id]! }] : []))))));
@@ -3822,7 +3896,8 @@ export async function createApp(o: AppOptions) {
     // Your other computers as the places a session or a teammate can run (local/computers.ts), as the hosted Friday lists linked
     // machines: this computer's own runner is the page's own, so it isn't listed.
     if (o.local && localLinks && req.method === "GET" && url.pathname === "/api/machines")
-      return json(res, 200, { machines: localLinks.list().map((c) => ({ id: c.id, label: c.label, connected: true, tools: c.tools, since: c.since, machine: { name: c.label, platform: c.platform } })) });
+      // Each with what tells two of the same name apart: its system, and its host name or address (2026-11-04 linking test).
+      return json(res, 200, { machines: localLinks.list().map((c) => ({ id: c.id, label: c.label, connected: true, tools: c.tools, since: c.since, machine: { name: c.label, platform: c.platform }, detail: computerDetail(c) })) });
 
 
     /**
@@ -3838,7 +3913,13 @@ export async function createApp(o: AppOptions) {
     if (url.pathname.startsWith("/api/runner/")) {
       if (crossSite(req)) return json(res, 403, { error: "Cross-site requests can't reach a machine." });
       const method = url.pathname.slice("/api/runner/".length);
-      const picked = await pickedMachine(req);
+      const params: Record<string, unknown> = req.method === "POST" ? ((await readJson(req)) as Record<string, unknown>) : Object.fromEntries(url.searchParams);
+      // Your other computers (local/computers.ts): a session's agent is started and stopped again only on the computer it runs on,
+      // whatever computer the page has picked for new work. Opening a session whose agent was on another computer used to start
+      // it again here, in this computer's copy of the same path (2026-11-04 linking test).
+      const home = localLinks ? await laneHome(method, params) : undefined;
+      if (home && "error" in home) return json(res, 503, { error: home.error });
+      const picked = home ? (home.id ? { token: home.id } : {}) : await pickedMachine(req);
       if ("error" in picked) return json(res, picked.status, { error: picked.error });
       const token = picked.token ?? str(req.headers["x-friday-link"], 200);
       const onThisMachine = !picked.token && isOwnMachine(req) && req.headers["x-friday-local"] === "1";
@@ -3853,7 +3934,6 @@ export async function createApp(o: AppOptions) {
       }
       // With both available, the person chooses; otherwise there's one answer.
       const useLink = linked && (!onThisMachine || req.headers["x-friday-prefer"] === "link");
-      const params: Record<string, unknown> = req.method === "POST" ? ((await readJson(req)) as Record<string, unknown>) : Object.fromEntries(url.searchParams);
       // Starting a runner means acting as someone in a session. Mint that
       // permission here, where the signing secret is, rather than letting the
       // runner assert a user id when it connects back.
@@ -3881,9 +3961,14 @@ export async function createApp(o: AppOptions) {
         // Everything else is quick.
         // An agent review is one of the person's own CLIs reading a whole pull request: minutes, not seconds.
         const value = (await links.call(token, method, params, method === "clone" || method === "start" ? 10 * 60_000 : method === "pr.review" ? 6 * 60_000 : 30_000)) as object;
-        return json(res, ok, method === "tools" ? { ...value, where: "linked" } : value);
+        // Another of your computers is called what you call it here (Settings › Your computers), as everywhere else on the page.
+        const named = method === "tools" && localLinks?.label(token) ? { machine: { ...((value as { machine?: object }).machine ?? {}), name: localLinks.label(token) } } : {};
+        return json(res, ok, method === "tools" ? { ...value, ...named, where: "linked" } : value);
       } catch (e) {
-        return json(res, 400, { error: (e as Error).message });
+        // The computer going as it was asked is its being away (503), not a bad request (2026-11-04 linking test: a red
+        // "400 Bad Request" on the session and Crew pages as another computer dropped).
+        const away = !!localLinks && !localLinks.connected(token ?? "");
+        return json(res, away ? 503 : 400, { error: (e as Error).message });
       }
     }
 
@@ -4097,13 +4182,14 @@ export async function createApp(o: AppOptions) {
         if (!(await memberOnly(req, res, sid))) return;
         const f = await files.get(sid, fileRoute[2]);
         if (!f) return json(res, 404, { error: "File not found" });
-        // Never render uploaded markup on our own origin.
-        const risky = /html|svg|xml|javascript/i.test(f.meta.type);
+        // Never render uploaded markup on our own origin. An SVG is a picture, served as one so it draws in the chat (audit CODE-7),
+        // under a policy that runs nothing in it and loads nothing from it, even opened on its own (files.ts uploadedFileHeaders).
+        const head = uploadedFileHeaders(f.meta.type);
         res.writeHead(200, {
-          "Content-Type": risky ? "application/octet-stream" : f.meta.type,
+          ...head,
           "Content-Length": f.data.length,
           "X-Content-Type-Options": "nosniff",
-          "Content-Disposition": `${risky ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(f.meta.name)}`,
+          "Content-Disposition": `${head["Content-Type"] === "application/octet-stream" ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(f.meta.name)}`,
           "Cache-Control": "private, max-age=3600",
         });
         return res.end(f.data);
@@ -4485,7 +4571,9 @@ export async function createApp(o: AppOptions) {
       const me = { id: ctx.me.id, name: ctx.me.name };
       if (url.pathname === "/api/needs-you" && (req.method === "GET" || req.method === "POST")) {
         const body = req.method === "POST" ? ((await readJson(req)) as { sids?: unknown }) : {};
-        return json(res, 200, { items: await needsYou.list(me, ctx.workspace.id, listedSids(body.sids)) });
+        // And the pull requests' reviews put off, which the page reads on this computer and ranks itself.
+        const [items, off] = await Promise.all([needsYou.list(me, ctx.workspace.id, listedSids(body.sids)), needsYou.offOf(me)]);
+        return json(res, 200, { items, reviewsOff: [...off].filter((id) => id.startsWith("review~")) });
       }
       if (req.method !== "POST") return json(res, 405, { error: "Use POST." });
       if (!req.headers.origin || crossSite(req)) return json(res, 403, { error: "Not from Friday." });
@@ -4498,10 +4586,13 @@ export async function createApp(o: AppOptions) {
     }
 
     if (req.method === "POST" && url.pathname === "/api/attention") {
-      const me = await identity(req);
-      if (!me) return json(res, 401, { error: "Not signed in." });
+      const ctx = await context(req);
+      if (!ctx) return json(res, 401, { error: "Not signed in." });
+      const me = ctx.me;
       const body = (await readJson(req)) as { sids?: unknown; summaries?: unknown };
       const sids = listedSids(body.sids);
+      // What the Needs you page lists, read by its own rule (needs-you.ts marks): every count of what waits on you is of this.
+      const marking = needsYou.marks({ id: me.id, name: me.name }, ctx.workspace.id, sids).catch(() => null);
       // Removed on another device: this one drops them too.
       const hidden = await store.hidden(me.id);
       // And deleted, by its owner or with its team: a session that no longer exists leaves every list it was on.
@@ -4556,14 +4647,21 @@ export async function createApp(o: AppOptions) {
         if (!busy && !needs.length && finishedSeq(state) > seen) unread.push(state.id);
         const said = previewOf(state);
         if (said) previews.push(said);
-        const crew = crewOf(state);
+        // A computer is up when it is linked, or when it is the one this Friday runs on: the open-source edition's own computer is
+        // never a link, so every finished session's tool still read "Offline" after a restart (2026-11-04 retest).
+        const crew = crewOf(state, computerHere);
         if (crew) crews.push(crew);
         const pr = prOf(state);
         if (pr) prs.push(pr);
         if (line) summaries.push(line);
       }
       const theirs: never[] = [];
-      return json(res, 200, { items: sortAttention(found), working, previews, crews, prs, unread, since, overlaps: Object.fromEntries(overlapsAcross([...mine, ...theirs])), ...(body.summaries === true ? { summaries } : {}), ...(gone.length ? { gone } : {}) });
+      // A session waits on you when the page lists something of it that isn't put off: its rows and rings follow the page, so one
+      // put off, or answered and waiting for the agent to read it, stops waiting everywhere at once.
+      const marks = await marking;
+      const waitingIn = marks ? new Set(marks.needs.filter((n) => !n.putOff && n.sid).map((n) => n.sid!)) : null;
+      const items = sortAttention(waitingIn ? found.filter((a) => waitingIn.has(a.sid)) : found);
+      return json(res, 200, { items, ...(marks ? { needs: marks.needs, off: marks.off } : {}), working, previews, crews, prs, unread, since, overlaps: Object.fromEntries(overlapsAcross([...mine, ...theirs])), ...(body.summaries === true ? { summaries } : {}), ...(gone.length ? { gone } : {}) });
     }
     // Mark as unread: this person's place in it set back to before its last finished turn, so every device shows it as new again.
     const unreadRoute = url.pathname.match(/^\/api\/sessions\/([\w-]+)\/unread$/);
@@ -4624,7 +4722,8 @@ export async function createApp(o: AppOptions) {
         }),
       );
       // `more`: older sessions past what one look reads, said rather than left out silently.
-      return json(res, 200, { cards: sortCards(cards), week, ...(more > 0 ? { more } : {}) });
+      const off = await needsYou.offOf({ id: me.id, name: me.name }).catch(() => new Set<string>());
+      return json(res, 200, { cards: sortCards(putOffCards(cards, off)), week, ...(more > 0 ? { more } : {}) });
     }
 
 
@@ -4810,6 +4909,7 @@ export async function createApp(o: AppOptions) {
           }
           if (req.method !== "POST") return json(res, 405, { error: "Not allowed" });
           const b = (await readJson(req)) as { until?: unknown };
+          const was = await teammates.away();
           if (b.until === null) await awayOff();
           else {
             const until = Math.floor(Number(b.until));
@@ -4817,6 +4917,11 @@ export async function createApp(o: AppOptions) {
             await awayOn(until);
           }
           const a = await teammates.away();
+          // Said once in the Crew room, as a line where the work is, rather than a toast over it (audit CREW-23, 2026-11-04).
+          if ((a?.until ?? null) !== (was?.until ?? null)) {
+            const home = await teammates.team();
+            if (home) await store.append(home, { id: owner.id, name: owner.name, kind: "human" }, { type: "team.away", until: a?.until ?? null }, { lane: MAIN_LANE }).catch(() => {});
+          }
           return json(res, 200, { until: a?.until ?? null, since: a?.since ?? null } satisfies TeamAway);
         }
         // A room running on its own toward a goal, or back (team-selfrun.ts): {sid, goal} to start, {sid, on: false} to stop.
@@ -5328,19 +5433,75 @@ export async function createApp(o: AppOptions) {
     }
     // Your other computers (local/computers.ts), from this computer's own page only: the ones paired and whether each is linked
     // now, a code to add one, and taking one away; and this computer used from another's Friday (local/join.ts).
+    // The page's own settings, kept beside the data (client/page-keep.ts): a page keeps them in its browser storage, which belongs to
+    // its address, and the address changes when Friday can't have its usual port (another app on 4321). The open-source edition only:
+    // one person, this computer.
+    if (o.local && url.pathname === "/api/local/page") {
+      const key = `${o.prefix}local:page`;
+      if (req.method === "GET") return json(res, 200, { page: JSON.parse((await redis.get(key)) ?? "null") });
+      if (req.method === "PUT") {
+        const raw = (await readBody(req, 4 * 1024 * 1024)).toString();
+        const got = JSON.parse(raw || "null") as { origin?: unknown; keys?: unknown } | null;
+        if (!got || typeof got.origin !== "string" || !got.keys || typeof got.keys !== "object") return json(res, 400, { error: "Not a page's settings." });
+        const keys = Object.fromEntries(Object.entries(got.keys as Record<string, unknown>).filter(([k, v]) => /^(mpa|friday)\./.test(k) && typeof v === "string"));
+        await redis.set(key, JSON.stringify({ origin: got.origin, at: Date.now(), keys }));
+        return json(res, 200, { ok: true });
+      }
+    }
     if (o.local && localLinks && (url.pathname === "/api/computers" || url.pathname.startsWith("/api/computers/"))) {
       const join = o.local.join;
+      type Paired = { id: string; name: string; kind?: string; at: number; seen: number; host?: string; platform?: string; address?: string; version?: string; fp?: string; port?: number };
       const mine = async () => {
-        const st = (phone ? await phone.state() : { devices: [] }) as { devices: { id: string; name: string; kind?: string; at: number; seen: number }[]; error?: string };
+        const st = (phone ? await phone.state() : { devices: [] }) as { devices: Paired[]; computers?: { port: number | null; fingerprint: string }; error?: string };
         const live = new Map(localLinks.list().map((c) => [c.id, c]));
+        const joined = join ? ((await join.state()) as { version?: string }) : null;
+        // Why one that isn't linked can't be, when this computer can tell (2026-11-04 linking test: a new certificate here, or a
+        // port that moved, left it "Not connected" for good with nothing said): only pairing it again fixes either.
+        const why = (d: Paired): string | undefined => {
+          if (live.has(d.id)) return undefined;
+          if (d.fp && st.computers?.fingerprint && d.fp !== st.computers.fingerprint) return "This computer made a new certificate since they paired, so it won't link. Pair it again.";
+          if (d.port && st.computers?.port && d.port !== st.computers.port) return `It was paired on port ${d.port}, and this computer now listens on ${st.computers.port}. Pair it again.`;
+          return undefined;
+        };
         return {
-          computers: st.devices.filter((d) => d.kind === "computer").map((d) => ({ id: d.id, name: d.name, at: d.at, seen: d.seen, connected: live.has(d.id), tools: live.get(d.id)?.tools ?? [], platform: live.get(d.id)?.platform ?? "" })),
-          joined: join ? await join.state() : null,
+          computers: st.devices
+            .filter((d) => d.kind === "computer")
+            .map((d) => {
+              const c = live.get(d.id);
+              const problem = why(d);
+              const version = localLinks.version(d.id) ?? d.version;
+              const platform = c?.platform || d.platform || "", host = c?.host || d.host || "", address = c?.address || d.address || "";
+              return { id: d.id, name: d.name, at: d.at, seen: c ? Date.now() : d.seen, connected: !!c, tools: c?.tools ?? [], platform, host, address, detail: computerDetail({ name: d.name, platform, host, address }), ...(version ? { version } : {}), ...(problem ? { problem } : {}) };
+            }),
+          joined,
+          ...(joined?.version ? { version: joined.version } : {}),
           ...(st.error ? { error: st.error } : {}),
         };
       };
+      /** What runs on one of your other computers: its teammates and the sessions whose agents are there (Remove says so). */
+      const usesOf = async (id: string) => {
+        const on = (m: string | undefined) => !!m && localLinks.current(m) === id;
+        const mates = teammates ? (await teammates.list()).filter((t) => on(t.machine)).map((t) => ({ id: t.id, name: t.name })) : [];
+        let sessions = 0;
+        for (const s of await store.mine(o.local!.user.id, 200).catch(() => [])) {
+          const st = await store.state(s.sid).catch(() => null);
+          if (st && Object.values(st.engines).some((e) => on(e?.computer))) sessions++;
+        }
+        return { teammates: mates, sessions };
+      };
+      const one = /^\/api\/computers\/([0-9a-f]{16})(\/uses)?$/.exec(url.pathname);
+      if (req.method === "GET" && one?.[2]) return json(res, 200, await usesOf(one[1]!));
+      // Called something of your own: two of yours can have the same name (2026-11-04 linking test: every row said the same).
+      if (req.method === "PATCH" && one && !one[2] && phone?.rename) {
+        const name = String((await readJson(req)).name ?? "").replace(/\s+/g, " ").trim().slice(0, 60);
+        if (!name) return json(res, 400, { error: "Give it a name." });
+        await phone.rename(one[1]!, name);
+        localLinks.rename(one[1]!, name);
+        return json(res, 200, await mine());
+      }
       if (req.method === "GET" && url.pathname === "/api/computers") return json(res, 200, await mine());
       if (req.method === "POST" && url.pathname === "/api/computers/code") return json(res, 200, phone ? await phone.pairCode("computer") : { error: "Friday here can't take other computers." });
+      if (req.method === "DELETE" && url.pathname === "/api/computers/code") return json(res, 200, (await phone?.dropCode?.(), { ok: true }));
       // An extra machine without the app (add-computer.ts): the hosts in this person's ~/.ssh/config, to pick from.
       if (req.method === "GET" && url.pathname === "/api/computers/hosts") return json(res, 200, { hosts: sshConfigHosts(await readFile(path.join(osHome(), ".ssh", "config"), "utf8").catch(() => "")).slice(0, 100) });
       // Added over SSH (Friday installs and starts it there as a service, paired with a fresh code) or with one command to paste.
@@ -5353,18 +5514,42 @@ export async function createApp(o: AppOptions) {
         if (!made.link) return json(res, 400, { error: made.error ?? "Couldn't make a code for it." });
         const link = made.link;
         if (b.how !== "ssh") return json(res, 200, { link, until: made.until, ...joinCommand(link) });
-        const ran = await new Promise<{ code: number | null; out: string }>((resolve) => {
-          const child = spawnChild("ssh", ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "--", host, "sh -s"], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
-          let out = "";
-          const take = (d: Buffer) => void (out = (out + d.toString("utf8")).slice(-20_000));
-          child.stdout.on("data", take);
-          child.stderr.on("data", take);
-          const timer = setTimeout(() => child.kill("SIGTERM"), 15 * 60_000);
-          child.on("error", (e: Error) => (clearTimeout(timer), resolve({ code: null, out: `${out}\n${e.message}` })));
-          child.on("close", (code: number | null) => (clearTimeout(timer), resolve({ code, out })));
-          child.stdin.end(joinScript(link, host));
-        });
-        return json(res, 200, joinSshResult(ran.code, ran.out, host));
+        // Its own ssh (accept-new: a host never connected to before is taken, one whose key changed is refused), a script on stdin.
+        const ssh = (script: string, ms: number) =>
+          new Promise<{ code: number | null; out: string }>((resolve) => {
+            const child = spawnChild("ssh", ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "StrictHostKeyChecking=accept-new", "--", host, "sh -s"], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+            let out = "";
+            const take = (d: Buffer) => void (out = (out + d.toString("utf8")).slice(-20_000));
+            child.stdout.on("data", take);
+            child.stderr.on("data", take);
+            const timer = setTimeout(() => child.kill("SIGTERM"), ms);
+            child.on("error", (e: Error) => (clearTimeout(timer), resolve({ code: null, out: `${out}\n${e.message}` })));
+            child.on("close", (code: number | null) => (clearTimeout(timer), resolve({ code, out })));
+            child.stdin.end(script);
+          });
+        // Installed first, and only then a code made for it: a slow install outlived the code's ten minutes (2026-11-04 research).
+        const installed = await ssh(joinScript("", host, "install"), 15 * 60_000);
+        if (!/^FRIDAY_INSTALLED$/m.test(installed.out)) return json(res, 200, joinSshResult(installed.code, installed.out, host));
+        const fresh = (await phone.pairCode("computer")) as { link?: string; error?: string };
+        if (!fresh.link) return json(res, 200, { ok: false, error: fresh.error ?? "Couldn't make a code for it." });
+        const before = new Set(localLinks.list().map((c) => c.id));
+        const ran = await ssh(joinScript(fresh.link, host, "service"), 2 * 60_000);
+        const got = joinSshResult(ran.code, ran.out, host);
+        if (!got.ok) return json(res, 200, got);
+        // Set up is not linked: a machine that can't reach this one (a cloud VM off this network) was said to be set up, and
+        // never showed up (2026-11-04 linking test). It is waited for, and if it doesn't link, why, with its log's last lines.
+        const wait = Number(process.env.FRIDAY_LINK_WAIT_MS) || 45_000;
+        for (let at = Date.now(); Date.now() - at < wait; await new Promise((r) => setTimeout(r, 500))) {
+          const linked = localLinks.list().find((c) => !before.has(c.id));
+          if (linked) return json(res, 200, { ...got, linked: linked.label });
+        }
+        const where = ((await phone.state()) as { computers?: { port: number | null; addresses: string[] } }).computers;
+        // Its own lines about linking, where it has them; Node's warnings and the start banner say nothing about why.
+        const lines = (await ssh(logTailScript, 20_000)).out.split(/\r?\n/).filter((l) => l.trim() && !/Warning|--trace-|^Kept in |^Friday is running/.test(l));
+        const said = lines.filter((l) => l.startsWith("[computers]"));
+        const tail = (said.length ? said : lines).slice(-2).join(" / ").slice(0, 400);
+        const at = where?.addresses.length ? ` at ${where.addresses.join(", ")}${where.port ? ` (port ${where.port})` : ""}` : "";
+        return json(res, 200, { ok: false, error: `${host} is set up, but it can't reach this computer${at}. Both need to be on the same network, or both on Tailscale.${tail ? ` Its log: ${tail}` : ""}` });
       }
       if (url.pathname === "/api/computers/join" && join) {
         if (req.method === "POST") {
@@ -5375,8 +5560,19 @@ export async function createApp(o: AppOptions) {
       }
       const gone = /^\/api\/computers\/([0-9a-f]{16})$/.exec(url.pathname);
       if (req.method === "DELETE" && gone && phone) {
+        // Its teammates moved to this computer when Remove was asked to (Computers.tsx): otherwise they stay its, said offline
+        // there, and come back to it if the same computer is added again (phone.ts pair, hooks.replaced).
+        const moving = url.searchParams.get("move") === "teammates" && teammates ? (await usesOf(gone[1]!)).teammates : [];
         localLinks.forget(gone[1]!);
         await phone.forget(gone[1]!);
+        const team = moving.length ? await teammates!.team() : null;
+        for (const m of moving) {
+          const t2 = await teammates!.get(m.id);
+          if (!t2 || !team) continue;
+          const next: Teammate = { ...t2, machine: undefined };
+          await teammates!.put(next);
+          await restartEverywhere(team, o.local.user, t2, next).catch((e: Error) => console.error(`[computers] ${t2.name} didn't move: ${e.message}`));
+        }
         return json(res, 200, await mine());
       }
       return json(res, 404, { error: "Not found" });
@@ -5494,7 +5690,11 @@ export async function createApp(o: AppOptions) {
   // laptop that went to sleep.
   // A browser's terminals on one of its owner's machines (registry termOpen, src/runner/terminals.ts).
   const termWss = new WebSocketServer({ noServer: true, maxPayload: 4 << 20 });
-  const stopBeats = ([[wss, "page"], [runnerWss, "runner"], [linkWss, "link"], [termWss, "term"]] as const).map(([w, name]) => heartbeat(w, undefined, name));
+  // Your other computers' links (the open-source edition, over a home network or Tailscale) are asked every 10s, not 25: one
+  // frozen there read "connected" here for 60-75s (2026-11-04 linking test). Two rounds missed still end it, and a round this
+  // server itself was late for still counts against nobody (heartbeat), so a busy moment here is no false alarm.
+  const LOCAL_LINK_BEAT_MS = Number(process.env.FRIDAY_LINK_BEAT_MS) || 10_000;
+  const stopBeats = ([[wss, "page"], [runnerWss, "runner"], [linkWss, "link"], [termWss, "term"]] as const).map(([w, name]) => heartbeat(w, name === "link" && o.local ? LOCAL_LINK_BEAT_MS : undefined, name));
   server.on("upgrade", (req, socket, head) => {
     if (o.local && !localOnly(req, appOrigin)) return void socket.destroy();
     const p = new URL(req.url ?? "/", "http://localhost").pathname;
@@ -5544,6 +5744,37 @@ export async function createApp(o: AppOptions) {
 
 
 
+  /**
+   * A terminal on another of your computers, in the open-source edition (`/term?machine=<its id>`): the page of a session that
+   * runs there opens its shells there (runner/terminals.ts on that computer), not in this computer's own shell. Only this
+   * computer's own pages reach it (localOnly); a phone or another computer can't (phone.ts).
+   */
+  if (localLinks)
+    termWss.on("connection", (ws, req) => {
+      const id = new URL(req.url ?? "/", "http://localhost").searchParams.get("machine") ?? "";
+      if (!/^[0-9a-f]{16}$/.test(id)) return closeSaying(ws, 4003, "That isn't one of your computers");
+      const on = localLinks.current(id);
+      if (!localLinks.connected(on)) return void computerName(on).then((n) => closeSaying(ws, 4004, `${n ?? "That computer"} isn't connected`));
+      const owner = randomBytes(9).toString("base64url");
+      localLinks.termOpen(
+        on,
+        owner,
+        (msg) => ws.readyState === 1 && ws.send(JSON.stringify(msg)),
+        (why) => closeSaying(ws, 4004, why),
+      );
+      ws.on("message", (raw) => {
+        let msg: Record<string, unknown>;
+        try {
+          msg = JSON.parse(String(raw)) as Record<string, unknown>;
+        } catch {
+          return;
+        }
+        if (typeof msg.op === "string" && ["start", "write", "resize", "kill"].includes(msg.op)) localLinks.termSend(on, owner, msg);
+      });
+      ws.on("close", () => localLinks.termClose(on, owner));
+      ws.send(JSON.stringify({ op: "ready", machine: localLinks.label(on) ?? "" }));
+    });
+
   // A paired computer's link, handed over by the device listener (local/phone.ts → local/computers.ts).
   linkWss.on("connection", (ws, req) => (localLinks ? localLinks.accept(ws, req) : ws.close(4003, "No other computer links here.")));
 
@@ -5581,6 +5812,9 @@ export async function createApp(o: AppOptions) {
           root: q("root", 400),
           os: q("os", 10),
           machine: q("machine", 60),
+          // Which of your other computers it came from, as only the device listener says it (local/phone.ts passedHeaders): where
+          // the lane comes back when that computer links again, and the only place it is started again (EngineInfo.computer).
+          ...(o.local && req.headers["x-friday-via"] === "computer" ? { computer: String(req.headers["x-friday-device"] ?? "") } : {}),
           shell: q("shell", 20),
           efforts: q("efforts", 60),
           model: q("model", 60),
@@ -5960,6 +6194,8 @@ export async function createApp(o: AppOptions) {
       actorToken: (sid, uid) => signActor(o.secret, sid, uid),
       start: (params) => callHost("start", params, hostCtx(me)),
       machine: process.env.FRIDAY_MACHINE_NAME || hostname().replace(/\.local$/i, ""),
+      // Only this computer's: a lane on another of yours comes back there as it links (localLinks.onLinked below).
+      computer: null,
       log: (l) => console.log(`[friday] ${l}`),
     }).catch((e) => console.error("[friday] bringing coding tools back:", e));
     // Every teammate, whenever it last worked: they are always there (teammates.ts). Each on its own account, in its own folder,
@@ -5981,16 +6217,31 @@ export async function createApp(o: AppOptions) {
       })();
     }
   }
-  // One of your other computers linked (local/computers.ts): the teammates that run on it come back there, in the team and in each
-  // room they are in, as the ones on this computer did when Friday opened.
-  if (o.local && localLinks && teammates) {
+  // One of your other computers linked (local/computers.ts): the coding tools its sessions held come back there and carry on
+  // (a drop, a restart of that computer), and the teammates that run on it come back there, in the team and in each room they
+  // are in, as the ones on this computer did when Friday opened. They used to wait for the page, which started them here.
+  if (o.local && localLinks) {
     const me = o.local.user;
+    let ownWay = new Set<string>();
     localLinks.onLinked = (machine) =>
       void (async () => {
+        if (teammates) ownWay = new Set(await teammates.sessions());
+        await reattachAll(me, {
+          mine: async (uid, n) => (await store.mine(uid, n)).filter((x) => !ownWay.has(x.sid)),
+          state: (sid) => store.state(sid).catch(() => null),
+          invite: linkToken,
+          actorToken: (sid, uid) => signActor(o.secret, sid, uid),
+          start: (params) => localLinks.call(machine, "start", params, 10 * 60_000),
+          alive: () => localLinks.connected(machine),
+          computer: machine,
+          also: localLinks.formerly(machine),
+          log: (l) => console.log(`[computers] ${l}`),
+        }).catch((e) => console.error("[computers] bringing coding tools back:", e));
+        if (!teammates) return;
         const team = await teammates.team();
         if (!team) return;
         const rooms = await teammates.rooms();
-        for (const t of (await teammates.list()).filter((x) => x.machine === machine)) {
+        for (const t of (await teammates.list()).filter((x) => !!x.machine && localLinks.current(x.machine) === machine)) {
           await startTeammate(team, me, t, { ifOffline: true })
             .then(() => console.log(`[computers] ${t.name} is back on its computer`))
             .catch((e: Error) => console.error(`[computers] ${t.name} didn't come back: ${e.message}`));

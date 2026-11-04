@@ -163,6 +163,7 @@ export function placesBusy(working: Iterable<string>, needs: Iterable<string>): 
 export function CodeCrewToggle({ working = [], needs = [], className = "" }: { working?: Iterable<string>; needs?: Iterable<string>; className?: string }) {
   const [team] = useTeamTab();
   const busy = placesBusy(working, needs);
+  // On the hosted service, someone asking one of your teammates something waits on you in the Crew too (CrewHosted.tsx).
   const here = team ? "team" : "code";
   const hint = (p: "code" | "team") => (p !== here && busy[p] === "needs" ? <span className="ps-hint" aria-hidden="true" /> : null);
   // A tab list's keys: the arrows move between the two and pick, only the picked one is a Tab stop (roving.ts).

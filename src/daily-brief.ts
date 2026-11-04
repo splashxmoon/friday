@@ -1,4 +1,5 @@
 import { rankReady, readyIn } from "./ready.js";
+import { errorHead } from "./error-head.js";
 import type { Redis } from "ioredis";
 import { goalsIn, rankGoals, type TrackedGoal } from "./goals.js";
 import { attentionIn, sortAttention, type Attention } from "./attention.js";
@@ -358,7 +359,7 @@ export function collectBrief(i: BriefInput): DailyBrief | null {
       const mate = crew ? mateAt(state.id, lane) : undefined;
       if (lastRun?.outcome === "error" && lastRun.endedAt !== null && lastRun.endedAt >= since && !crew) {
         const hit = limitHit(lastRun.error, lastRun.endedAt, i.tz);
-        risk.push({ kind: hit ? "limit" : "error", who, text: hit ? `hit its usage limit in ${state.title}${hit.resetsAt ? ` (resets ${clockIn(hit.resetsAt, i.tz)})` : ""}` : `stopped on an error in ${state.title}: ${clip(lastRun.error ?? "it stopped", 140)}`, where: whereOf(state, { lane, ...(lastRun.endSeq ? { seq: lastRun.endSeq } : {}) }) });
+        risk.push({ kind: hit ? "limit" : "error", who, text: hit ? `hit its usage limit in ${state.title}${hit.resetsAt ? ` (resets ${clockIn(hit.resetsAt, i.tz)})` : ""}` : `stopped on an error in ${state.title}: ${clip(errorHead(lastRun.error ?? "") || "it stopped", 140)}`, where: whereOf(state, { lane, ...(lastRun.endSeq ? { seq: lastRun.endSeq } : {}) }) });
       }
       // Waiting on the person is a decision, not work under way.
       const waits = !!(state.openQuestions[lane] || state.approvals[lane] || state.asks[lane]);

@@ -26,7 +26,7 @@ import { api } from "./api.js";
 import { Picker, useConfirm } from "./ui.js";
 import type { Identity } from "./storage.js";
 import type { Send } from "./useSession.js";
-import { nextAt, nextEight, setAway, setPaused, setSelfRun, stopAll, untilOf } from "./team-api.js";
+import { comeBack, nextAt, nextEight, setAway, setPaused, setSelfRun, stopAll, untilOf } from "./team-api.js";
 import { threadsOf } from "./team-threads.js";
 import { teamCommand } from "./team-commands.js";
 import { plainLine } from "./team-room.js";
@@ -39,13 +39,21 @@ import { SkillsDialog, skillsWaiting, useSkills } from "./CrewSkills.js";
 import { isLocal } from "./edition.js";
 import { DEFAULT_RUN_TOKENS, RUN_BUDGETS, runBudgetLine } from "../team-budget.js";
 
+/**
+ * In the local edition, stepping away, coming back and a stop are each a line in the Crew room (Activity.tsx team.away, run.pause),
+ * so no toast says them again over it (audit CREW-23, 2026-11-04); the hosted service posts no such line and keeps its toasts.
+ */
+const awaySaid = (until: number) => (isLocal() ? "" : `Away until ${untilOf(until)}. The crew carries on without asking.`);
+const sayIf = (notify: (m: string) => void, said: string) => void (said && notify(said));
+
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
 /** The teammates at work now, anywhere: whom Stop all cuts short (on the hosted service, the person's own). */
 function useWorking() {
   const t = useTeamNow();
   let all = t?.teammates ?? [];
-  return all.filter((m) => m.status === "working" || m.status === "waiting");
+  // One waiting on the person isn't at work: it has nothing to stop (audit CREW-2, 2026-11-04).
+  return all.filter((m) => m.status === "working");
 }
 
 /** Where the crew's computer is said to stay on: this Mac, or the person's own computer the hosted service runs them on. */
@@ -71,7 +79,7 @@ export function useStopAll(identity: Identity, notify: (m: string) => void): [()
       icon: "stop", // A stop, not a deletion: no trash can (polish-crew, 2026-10-28).
       onConfirm: () =>
         (markStopped(working), stopAll(identity))
-          .then((r) => (notify(r.stopped.length ? `Stopped ${r.stopped.length === 1 ? "1 teammate" : `${r.stopped.length} teammates`}. Their queues are kept.` : "Nobody was working."), refreshTeam(identity)))
+          .then((r) => ((!isLocal() || !r.stopped.length) && notify(r.stopped.length ? `Stopped ${r.stopped.length === 1 ? "1 teammate" : `${r.stopped.length} teammates`}. Their queues are kept.` : "Nobody was working."), refreshTeam(identity)))
           // An older server without stop-all: each teammate's own stop, which keeps its queue too.
           .catch(() => Promise.all(working.map((m) => api(identity, `/api/teammates/${m.id}/stop`, { method: "POST" }))).then(() => refreshTeam(identity))),
     });
@@ -112,16 +120,8 @@ export function TeamHeaderControls({ identity, state, events, send, notify, pane
   return (
     <>
       {stopUI}
-      {/* Stop all in the header itself while anyone works, one press away, rather than inside the room's menu (Arun, 2026-11-02:
-          "make the stop all button for the crew room pages be in the header too… really functional"). Asked first, queues kept. */}
-      {busy && (
-        <button type="button" className="tm-stop-all" onClick={stop} aria-label={working.length === 1 ? `Stop ${working[0]!.name}` : `Stop all ${working.length} working teammates`} title={`Cut their turns short now; what is queued stays queued (${isMac ? "⌘" : "Ctrl+"}.)`}>
-          <SquareIcon className="size-3" fill="currentColor" />
-          {/* The words go on a narrow window, the stop and the count stay (teammates.css). */}
-          <span className="tm-stop-all-label">{working.length === 1 ? `Stop ${working[0]!.name}` : "Stop all"}</span>
-          {working.length > 1 && <span className="tm-stop-n">{working.length}</span>}
-        </button>
-      )}
+      {/* No stop in the header: the box's own stop is the one, and with several at work it opens a menu of each and all (audit
+          CREW-15, 2026-11-04). ⌘. still stops them all, asked first. */}
       {/* One ⋯ for the room: the board, its threads and the rest (Arun, 2026-11-01: "i want to be simplier and easy to digest as
           a user for crew"). The faces by the title and the line over the box say who works. */}
       <RoomMore identity={identity} sid={state.id} events={events} notify={notify} board={tasks.length ? { open, all: tasks.length, show: () => setBoard(true) } : null} {...(panel ? { panel } : {})} />
@@ -471,9 +471,9 @@ function AwaySwitch({ identity, notify, embedded }: { identity: Identity; notify
   const paused = !!t?.paused;
   const until = nextAt(at) ?? nextEight();
   // Away and I'm back close the card; the Pause switch, a switch, stays where it is to be read and turned back (QA, 2026-10-28).
-  const act = (p: Promise<unknown>, said: string, close = true) => {
+  const act = (p: Promise<unknown>, said: string | ((r: unknown) => string), close = true) => {
     setBusy(true);
-    p.then(() => (notify(said), refreshTeam(identity), close && (embedded ? embedded() : setOpen(false))))
+    p.then((r) => (sayIf(notify, typeof said === "string" ? said : said(r)), refreshTeam(identity), close && (embedded ? embedded() : setOpen(false))))
       .catch((e: Error) => notify(/not found|404/i.test(e.message) ? "This Friday doesn't have that yet. Update it, then try again." : e.message))
       .finally(() => setBusy(false));
   };
@@ -483,7 +483,7 @@ function AwaySwitch({ identity, notify, embedded }: { identity: Identity; notify
           <div className="tm-away-body">
             <b className="tm-away-title">You're away until {untilOf(away.until!)}</b>
             <p>The crew decides for itself and notes what it assumed. You get the brief when you're back.</p>
-            <Button size="sm" disabled={busy} onClick={() => act(setAway(identity, null), "Welcome back. The brief is in the Crew room.")}>
+            <Button size="sm" disabled={busy} onClick={() => act(comeBack(identity), (said) => String(said))}>
               <SunIcon className="size-4" /> I'm back
             </Button>
           </div>
@@ -492,7 +492,7 @@ function AwaySwitch({ identity, notify, embedded }: { identity: Identity; notify
             className="tm-away-body"
             onSubmit={(e) => {
               e.preventDefault();
-              act(setAway(identity, until), `Away until ${untilOf(until)}. The crew carries on without asking.`);
+              act(setAway(identity, until), awaySaid(until));
             }}
           >
             <b className="tm-away-title">Step away</b>
@@ -545,9 +545,9 @@ export function TeamBanner({ identity, notify }: { identity: Identity; notify: (
   const [busy, setBusy] = useState(false);
   if (!t) return null;
   const away = t.away?.until ? t.away : null;
-  const act = (p: Promise<unknown>, said: string) => {
+  const act = (p: Promise<unknown>, said: string | ((r: unknown) => string)) => {
     setBusy(true);
-    p.then(() => (notify(said), refreshTeam(identity))).catch((e: Error) => notify(e.message)).finally(() => setBusy(false));
+    p.then((r) => (sayIf(notify, typeof said === "string" ? said : said(r)), refreshTeam(identity))).catch((e: Error) => notify(e.message)).finally(() => setBusy(false));
   };
   if (away)
     return (
@@ -562,7 +562,7 @@ export function TeamBanner({ identity, notify }: { identity: Identity; notify: (
             <PlayIcon className="size-3.5" /> Resume
           </button>
         )}
-        <button type="button" className="tm-banner-btn" disabled={busy} onClick={() => act(setAway(identity, null), "Welcome back. The brief is in the Crew room.")}>
+        <button type="button" className="tm-banner-btn" disabled={busy} onClick={() => act(comeBack(identity), (said) => String(said))}>
           I'm back
         </button>
       </div>
@@ -590,8 +590,9 @@ export function TeamBanner({ identity, notify }: { identity: Identity; notify: (
 export async function runTeamCommand(text: string, { identity, notify }: { identity: Identity; notify: (m: string) => void; sid: string }): Promise<string | null> {
   const c = teamCommand(text);
   if (!c) return text;
-  const done = (p: Promise<unknown>, said: string) =>
-    p.then(() => (notify(said), void refreshTeam(identity))).catch((e: Error) => notify(/not found|404/i.test(e.message) ? "This Friday doesn't have that yet. Update it, then try again." : e.message));
+  // `said` may come from what was done: coming back says the brief is there only when it is (team-api.ts comeBack).
+  const done = (p: Promise<unknown>, said: string | ((r: unknown) => string)) =>
+    p.then((r) => (sayIf(notify, typeof said === "string" ? said : said(r)), void refreshTeam(identity))).catch((e: Error) => notify(/not found|404/i.test(e.message) ? "This Friday doesn't have that yet. Update it, then try again." : e.message));
   switch (c.kind) {
     case "bad":
       notify(c.why);
@@ -601,7 +602,7 @@ export async function runTeamCommand(text: string, { identity, notify }: { ident
     case "stop":
       // Says who it stopped, or that nobody was working (2026-10-28 QA: it always said it stopped everyone).
       await stopAll(identity)
-        .then((r) => (notify(r.stopped.length ? `Stopped ${r.stopped.join(", ")}. Their queues are kept.` : "Nobody was working."), void refreshTeam(identity)))
+        .then((r) => ((!isLocal() || !r.stopped.length) && notify(r.stopped.length ? `Stopped ${r.stopped.join(", ")}. Their queues are kept.` : "Nobody was working."), void refreshTeam(identity)))
         .catch((e: Error) => notify(/not found|404/i.test(e.message) ? "This Friday doesn't have that yet. Update it, then try again." : e.message));
       return null;
     case "pause":
@@ -610,11 +611,11 @@ export async function runTeamCommand(text: string, { identity, notify }: { ident
       return null;
     case "away": {
       const until = nextAt(c.at) ?? nextEight();
-      await done(setAway(identity, until), `Away until ${untilOf(until)}. The crew carries on without asking.`);
+      await done(setAway(identity, until), awaySaid(until));
       return null;
     }
     case "back":
-      await done(setAway(identity, null), "Welcome back. The brief is in the Crew room.");
+      await done(comeBack(identity), (said) => String(said));
       return null;
     case "board":
       dispatchEvent(new Event("friday:team-board"));

@@ -30,6 +30,8 @@ const SAY: Record<DesktopUpdate["stage"], (s: DesktopUpdate) => string> = {
   error: (s) => s.error ?? "Couldn't check for updates. Check your connection and try again.",
   unsupported: () => "Updates apply to an installed copy of Friday.",
 };
+// Arun's own build is the installed copy, and it updates from his checkout (audit REST-27, Arun 2026-11-04: it said updates needed an
+// installed copy, on the installed copy).
 
 /** The app's own account of updates, kept current as it talks back. Null outside the desktop app. */
 function useAppUpdate() {

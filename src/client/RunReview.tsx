@@ -378,6 +378,7 @@ export function ReviewCard({
   lastCommitSeq,
   lastApplySeq = 0,
   lastRestoreSeq,
+  undone: undoneRun,
   undo,
   second,
   via,
@@ -410,6 +411,8 @@ export function ReviewCard({
   /** When a separate copy's work was last brought into its folder. */
   lastApplySeq?: number;
   lastRestoreSeq: number;
+  /** Whether this card's own run stands undone (rewind.ts undoneRuns), when its checkpoint is known; otherwise any undo since it. */
+  undone?: boolean;
   undo?: () => void;
   /** The Changes panel, at this file when one is said. */
   onReview?: (path?: string) => void;
@@ -422,7 +425,7 @@ export function ReviewCard({
   const adds = files.reduce((n, f) => n + f.additions, 0);
   const dels = files.reduce((n, f) => n + f.deletions, 0);
   const committed = lastCommitSeq > endSeq;
-  const undone = lastRestoreSeq > endSeq;
+  const undone = undoneRun ?? lastRestoreSeq > endSeq;
   const may = me.role === "owner" || driverOf(state, lane)?.id === me.id;
   // Working in a separate copy: the work is brought into the person's folder with Apply, and that is what this card offers first.
   const copyOf = state.engines[lane]?.copyOf;

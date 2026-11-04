@@ -1,15 +1,14 @@
 // xterm styles the grid it draws; the panel styles everything around it.
+import { laneTerminalApi, onTermDrop, terminalApi } from "./remoteTerminal.js";
 
 /**
  * Where shells come from: the desktop app's own (window.fridayDesktop.terminal), or the hosted Friday's way to a shell on another
- * machine of yours (remoteTerminal.ts). The local edition has the desktop app's only.
+ * machine of yours (remoteTerminal.ts), or another of your computers in the local edition.
  */
 type ShellApi = NonNullable<Window["fridayDesktop"]>["terminal"];
-const shells: { api: () => ShellApi | undefined; onDrop: (fn: () => void) => () => void; lane: (machine?: string) => Promise<ShellApi | undefined> } = {
-  api: () => (typeof window === "undefined" ? undefined : window.fridayDesktop?.terminal),
-  onDrop: () => () => {},
-  lane: async () => shells.api(),
-};
+// The hosted Friday's always-on machines, and in the open-source edition your other computers (local/computers.ts): a session
+// running on one of them has its terminal there, not in the desktop app's own shell (2026-11-04 linking test).
+const shells: { api: () => ShellApi | undefined; onDrop: (fn: () => void) => () => void; lane: (machine?: string) => Promise<ShellApi | undefined> } = { api: terminalApi, onDrop: onTermDrop, lane: laneTerminalApi };
 /** Each coding agent's screen, by its id (toolShellId): drawn, written to and closed where it was started, on the agent's computer. */
 const laneShells = new Map<string, ShellApi>();
 const shellFor = (id: string) => laneShells.get(id) ?? shells.api();

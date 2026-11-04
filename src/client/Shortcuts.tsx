@@ -287,7 +287,23 @@ export function useShortcuts({
   agents = [],
   onAgent,
   only,
+  loadFiles,
+  filesFrom = "",
+  noFolder = "No folder to search right now: no computer of yours is connected to this chat.",
+  below = false,
 }: {
+  /**
+   * The new-session box, before there is a session: its folder's files read from the computer, not from the session's
+   * (audit CODE-9, Arun 2026-11-04: "@", "/" and "#" did nothing there). Without a session, "/" offers the tool's commands as it
+   * last listed them.
+   */
+  loadFiles?: () => Promise<{ output?: string; error?: string }>;
+  /** Which folder `loadFiles` reads: another one is read afresh. */
+  filesFrom?: string;
+  /** What "#" says when there is no folder to read, in place of the session's "no computer of yours is connected". */
+  noFolder?: string;
+  /** The list opens under the box, where there is room: the new-session box sits near the top of its page. */
+  below?: boolean;
   /** "/" offers these and nothing else: a team chat's own commands (team-commands.ts), not a coding tool's. */
   only?: SlashCommand[];
   /** Agents "@" can name: offered before people, and picking one points the box at it. */
@@ -327,6 +343,8 @@ export function useShortcuts({
     if (!tool) return;
     const known = knownCmds(sid, lane, tool);
     if (known && toolCmds?.lane !== lane) setToolCmds(known);
+    // No session to ask yet: the list it gave last time, or none ("lists its commands when it starts").
+    if (!sid) return void (!known && setToolCmds({ lane, list: [] }));
     // Asked again sooner while it has none: Claude Code gives its list a few seconds after it starts.
     if (askedCmds.current.lane === lane && Date.now() - askedCmds.current.at < (toolCmds?.list.length ? 60_000 : 5_000)) return;
     askedCmds.current = { at: Date.now(), lane };
@@ -343,13 +361,18 @@ export function useShortcuts({
   }, [open?.kind, tool, lane, sid, invite]); // eslint-disable-line react-hooks/exhaustive-deps
   const own = toolCmds?.lane === lane ? toolCmds.list : null;
 
+  // Another folder picked in the new-session box: its own files, read afresh.
+  useEffect(() => {
+    fetched.current = 0;
+    setFiles(null);
+    setFilesWhy("");
+  }, [filesFrom]);
   // The folder can change under a run, so the list is fetched again when it is
   // more than half a minute old — not on every keystroke.
   useEffect(() => {
     if (open?.kind !== "file" || !filesEnabled || Date.now() - fetched.current < 30_000) return;
     fetched.current = Date.now();
-    fetch(`/api/sessions/${encodeURIComponent(sid)}/repo?op=tree&invite=${encodeURIComponent(invite)}`)
-      .then((r) => r.json() as Promise<{ output?: string; error?: string }>)
+    (loadFiles ? loadFiles() : fetch(`/api/sessions/${encodeURIComponent(sid)}/repo?op=tree&invite=${encodeURIComponent(invite)}`).then((r) => r.json() as Promise<{ output?: string; error?: string }>))
       .then((d) => {
         // A reason was read as an empty folder (2026-10-28 QA: "The folder has no files to name yet." for a session with none).
         const got = treeFiles(d);
@@ -357,7 +380,7 @@ export function useShortcuts({
         setFiles(got.files);
       })
       .catch(() => (setFilesWhy("The folder couldn't be read just now."), setFiles([])));
-  }, [open?.kind, filesEnabled, sid, invite]);
+  }, [open?.kind, filesEnabled, sid, invite, filesFrom]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const write = (insert: string) => {
     const el = textarea.current;
@@ -494,7 +517,12 @@ export function useShortcuts({
     // Enter on it sent the "/" as a message).
     const manage = visible && open.kind === "command" && !!onManage;
     const rows = items.length + (manage ? 1 : 0);
-    if (!rows) return false;
+    // Nothing to pick: Enter is the box's own, and sends. The list goes with it, rather than floating over the feed through the
+    // next turn ("@" with nobody here, "#" with no files; Arun's e2e pass, 2026-11-04).
+    if (!rows) {
+      if (e.key === "Enter" && !e.shiftKey) setOpen(null);
+      return false;
+    }
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       setActive((i) => (i + (e.key === "ArrowDown" ? 1 : rows - 1)) % rows);
@@ -520,10 +548,10 @@ export function useShortcuts({
 
   const popover =
     open && visible ? (
-      <div className="shortcut-pop" role="listbox" aria-label={open.kind === "command" ? "Commands" : open.kind === "person" ? (agents.length && !people.length ? "Agents" : "People") : "Files"}>
+      <div className={`shortcut-pop${below ? " below" : ""}`} role="listbox" aria-label={open.kind === "command" ? "Commands" : open.kind === "person" ? (agents.length && !people.length ? "Agents" : "People") : "Files"}>
         <div className="shortcut-head">{open.kind === "command" ? (tool ? `${tool} commands` : "Commands") : open.kind === "person" ? (agents.length && !people.length ? "Send it to" : "People here") : "Files in the folder"}</div>
         {open.kind === "file" && filesEnabled && files === null && <div className="shortcut-empty">Reading the folder…</div>}
-        {open.kind === "file" && !filesEnabled && <div className="shortcut-empty">No folder to search right now: no computer of yours is connected to this chat.</div>}
+        {open.kind === "file" && !filesEnabled && <div className="shortcut-empty">{noFolder}</div>}
         {open.kind === "file" && filesEnabled && files !== null && !items.length && (
           <div className="shortcut-empty">{filesWhy ? `${filesWhy.replace(/\.?$/, ".")}` : files.length ? `No file in the folder matches “${open.query}”.` : "The folder has no files to name yet."}</div>
         )}

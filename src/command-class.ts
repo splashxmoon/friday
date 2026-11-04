@@ -11,7 +11,7 @@
 export const COMMAND_CLASSES = ["read", "checks", "build", "install", "git", "publish", "deploy", "destructive", "other"] as const;
 export type CommandClass = (typeof COMMAND_CLASSES)[number];
 
-export const CLASS_LABEL: Record<CommandClass, { label: string; hint: string; careful?: boolean }> = {
+export const CLASS_LABEL: Record<CommandClass, { label: string; hint: string; careful?: boolean; /** What the command does, for its chip on a permission card, where the class's name reads oddly (audit CREW-24). */ chip?: string }> = {
   read: { label: "Look around", hint: "ls, cat, grep, git log and diff: nothing changes" },
   checks: { label: "Tests and checks", hint: "npm test, pytest, lint, typecheck" },
   build: { label: "Builds", hint: "npm run build, cargo build, go build" },
@@ -19,7 +19,7 @@ export const CLASS_LABEL: Record<CommandClass, { label: string; hint: string; ca
   git: { label: "Git, on this machine", hint: "add, commit, checkout, pull, merge, stash" },
   publish: { label: "Publish", hint: "git push, opening a pull request, releases", careful: true },
   deploy: { label: "Deploy", hint: "deploy, kubectl, terraform, cloud CLIs, ssh", careful: true },
-  destructive: { label: "Delete or overwrite", hint: "rm, git reset --hard, force push, dropping data", careful: true },
+  destructive: { label: "Delete or overwrite", hint: "rm, git reset --hard, force push, dropping data", careful: true, chip: "Deletes files" },
   other: { label: "Anything else", hint: "Commands this list doesn't recognise", careful: true },
 };
 

@@ -9,7 +9,7 @@
 .ny-keys kbd { margin-right: 2px; }
 .ny-empty { margin: 8px 12px; max-width: 60ch; font-size: 13px; line-height: 20px; color: var(--text-muted); }
 .ny-error { margin: 6px 0 0; font-size: 13px; line-height: 18px; color: var(--red); }
-.ny-head + .ny-error { margin: 0 12px 10px; }
+.ny-head + .ny-error, .page-inner > .ny-error:first-of-type { margin: 0 12px 10px; }
 
 .ny-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--border); }
 .ny-row { display: flex; gap: 12px; padding: 14px 12px; border-bottom: 1px solid var(--border); border-radius: 0; outline: none; transition: background-color var(--t-hover) var(--ease-out); }
@@ -24,11 +24,38 @@
 .ny-who { display: flex; align-items: baseline; gap: 4px; margin: 0; font-size: 13px; line-height: 18px; color: var(--text-muted); min-width: 0; }
 .ny-name { color: var(--ink); font-weight: 500; white-space: nowrap; }
 .ny-where { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The room it was asked in, as a chip with its faces (audit CREW-37). */
+.ny-room { display: inline-flex; flex: none; align-items: center; gap: 5px; height: 22px; margin-left: 4px; padding: 0 8px 0 5px; border: 1px solid var(--border); border-radius: 999px; background: var(--card); color: var(--ink-2); font-size: 12px; white-space: nowrap; align-self: center; }
+.ny-room .tm-room-faces { flex: none; }
 .ny-ago { margin-left: auto; padding-left: 12px; flex: none; font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums; }
 .ny-text { margin: 0; font-size: 14px; line-height: 21px; color: var(--ink); overflow-wrap: anywhere; max-width: 70ch; }
 .ny-text code { font: .92em var(--mono); padding: 0 3px; border-radius: 4px; background: var(--card-2); }
+/* A coding tool's error, in a line, with the whole of it a press away (NeedsYou.tsx ErrorDetail). */
+.ny-err { display: flex; align-items: baseline; gap: 10px; min-width: 0; margin: 2px 0 0; line-height: 18px; color: var(--ink-2); }
+.ny-err > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px/18px var(--mono); }
+.ny-err > button { flex: none; }
 .ny-detail { margin: 2px 0 0; padding: 8px 10px; max-height: 9em; overflow: auto; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--card); font: 12px/18px var(--mono); color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; }
 .ny-why { margin: 0; font-size: 12px; line-height: 18px; color: var(--faint); }
+/* A teammate's own face, its badge as the sidebar has it (audit CREW-5). */
+.ny-mate { display: inline-flex; width: 32px; height: 32px; margin-top: 0; }
+/* A coding tool's questions: its choices as rows like its own answer card, a press answering, the next question said under them
+   (audit CREW-17). */
+.ny-opts { display: flex; flex-direction: column; margin: 4px 0 0 -8px; }
+.ny-opt { display: flex; align-items: flex-start; gap: 10px; padding: 7px 8px; border: 0; border-radius: var(--r-md); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out); }
+.ny-opt:hover { background: var(--hover); }
+.ny-opt:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--border-focus); }
+.ny-opt[aria-disabled="true"] { opacity: .55; cursor: default; }
+.ny-opt-key { display: grid; flex: none; place-items: center; width: 20px; height: 20px; border-radius: 5px; background: var(--card-2); color: var(--text-muted); font-size: 12px; }
+.ny-opt-text { display: flex; flex-direction: column; min-width: 0; }
+.ny-opt-text b { color: var(--ink); font-size: 14px; font-weight: 500; line-height: 20px; }
+.ny-opt-text span { color: var(--text-muted); font-size: 12px; line-height: 18px; }
+.ny-then { margin: 4px 0 0; padding-top: 8px; border-top: 1px solid var(--border); font-size: 13px; line-height: 19px; color: var(--ink-2); }
+/* Put off with Not now: kept under one quiet row (audit CREW-6). */
+.ny-row.off { opacity: .8; }
+.ny-off { align-self: flex-start; margin: 10px 4px 0; padding: 4px 8px; border: 0; border-radius: var(--r-md); background: transparent; color: var(--text-muted); font: inherit; font-size: 13px; line-height: 20px; cursor: pointer; }
+.ny-off span { color: var(--ink); font-weight: 500; }
+.ny-off:hover { background: var(--hover); }
+.ny-off:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--border-focus); }
 
 .ny-suggest { display: flex; align-items: flex-start; gap: 6px; margin: 6px 0 0; font-size: 13px; line-height: 19px; color: var(--ink-2); }
 .ny-suggest svg { flex: none; margin-top: 2px; color: var(--amber); }
@@ -53,3 +80,25 @@
   .ny-actions .btn.small { height: 36px; }
   .ny-spacer { display: none; }
 }
+
+/* With nothing waiting: the line under the heading, close to it, then the crew right now (NeedsYou.tsx CrewNow). */
+.ny-head:has(+ .ny-empty) { padding-bottom: 0; }
+.ny-head + .ny-empty { margin: 4px 12px 14px; }
+.ny-crew { padding-top: 4px; }
+.ny-crew-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 14px 12px 6px; }
+.ny-crew-head b { color: var(--ink-2); font-size: 12.5px; font-weight: 600; }
+.ny-crew-head span { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+.ny-crew-list { margin: 0; padding: 0; list-style: none; }
+.ny-crew-list li + li { box-shadow: 0 -1px 0 color-mix(in srgb, var(--border) 60%, transparent); }
+.ny-crew-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 0 12px; border: 0; border-radius: var(--r-md, 8px); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out); }
+.ny-crew-row:hover { background: color-mix(in srgb, var(--hover) 50%, transparent); }
+.ny-crew-row:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--border-focus); }
+.ny-crew-list li:has(> .ny-crew-row:hover) + li, .ny-crew-list li:has(+ li > .ny-crew-row:hover) { box-shadow: none; }
+.ny-crew-text { display: flex; flex: 1; align-items: baseline; gap: 8px; min-width: 0; font-size: 13.5px; line-height: 20px; }
+.ny-crew-text b { color: var(--ink); font-weight: 500; white-space: nowrap; }
+.ny-crew-text span { overflow: hidden; color: var(--text-muted); text-overflow: ellipsis; white-space: nowrap; }
+.ny-crew-row.s-working .ny-crew-text span { color: var(--ink-2); }
+.ny-crew-row.s-offline { opacity: .72; }
+.ny-crew-ago { flex: none; color: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; }
+.ny-crew-foot { margin: 12px 12px 0; color: var(--faint); font-size: 12.5px; line-height: 18px; }
+@media (max-width: 640px) { .ny-crew-text { flex-direction: column; gap: 0; } }

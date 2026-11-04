@@ -141,6 +141,17 @@ export async function resolveAttachments(store: FileStore, sid: string, atts: At
   return out;
 }
 
+/**
+ * The headers an uploaded file is served with. Markup (HTML, XML, script) is never rendered on the app's own origin: it comes
+ * down as a file to save. An SVG is a picture people attach, so it is served as one, to draw in the chat, with a policy that
+ * runs no script in it and loads nothing from it, even opened in a tab of its own (audit CODE-7, Arun 2026-11-04).
+ */
+export function uploadedFileHeaders(type: string): { "Content-Type": string; "Content-Security-Policy"?: string } {
+  if (/^image\/svg\+xml\b/i.test(type)) return { "Content-Type": "image/svg+xml", "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox" };
+  if (/html|svg|xml|javascript/i.test(type)) return { "Content-Type": "application/octet-stream" };
+  return { "Content-Type": type };
+}
+
 export function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;

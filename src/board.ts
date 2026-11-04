@@ -1,10 +1,11 @@
 import { roleOf, type SessionState } from "./session/projection.js";
 import type { PrStatus } from "./github-status.js";
-import { doingNow, stoppedLine } from "./activity-line.js";
+import { doingNow, stoppedDetail } from "./activity-line.js";
 import { ENGINE_NAMES, MAIN_LANE, type EngineTool, type SessionEvent } from "./types.js";
 import { commandFailed, receiptOf } from "./receipt.js";
 import { riskOf, type Risk, type RiskFacts } from "./review-risk.js";
-import { carriedOn } from "./limit-reset.js";
+import { carriedOn, limitHit } from "./limit-reset.js";
+import { needsIn } from "./needs-you.js";
 
 /**
  * Every agent that is working for you, as cards on a board.
@@ -55,8 +56,10 @@ export interface BoardCard {
   shepherd?: string;
   /** When this agent last did or was asked something. */
   at: number;
-  /** Whether it is waiting on this person in particular. */
+  /** Whether it is waiting on this person in particular: exactly when the Needs you page lists it, and it isn't put off. */
   you: boolean;
+  /** The Needs you items it waits on (needs-you.ts ids), so one put off there leaves the Board's count too (putOffCards). */
+  waits?: string[];
   /** Whether this person is the one driving this agent, for what only a driver can act on. */
   mine: boolean;
   /** What GitHub says about the pull request, when it could be asked. */
@@ -143,11 +146,30 @@ const clip = (t: string, n: number) => {
   return s.length > n ? `${s.slice(0, n - 1)}…` : s;
 };
 
+/**
+ * The cards with what this person put off on the Needs you page taken out of it: a card whose every item there is put off no longer
+ * waits on them, as the page keeps it under "N put off" and every other count leaves it out (2026-11-04 retest).
+ */
+export function putOffCards(cards: BoardCard[], off: ReadonlySet<string>): BoardCard[] {
+  if (!off.size) return cards;
+  return cards.map((c) => (c.you && c.waits?.length && c.waits.every((id) => off.has(id)) ? { ...c, you: false, column: "idle" as const, status: "Put off", detail: "Put off on Needs you" } : c));
+}
+
 /** The cards for one session, as seen by one person. */
 export function boardCards(state: SessionState, events: SessionEvent[], meId: string): BoardCard[] {
   const lanes = [MAIN_LANE, ...state.lanes.map((l) => l.id)];
   const out: BoardCard[] = [];
 
+  // What waits on this person, lane by lane, by the Needs you page's own rule (needs-you.ts needsIn): the Board, Home and that page
+  // count the same things. The Board said "Needs you" over an agent out of usage that Friday carries on by itself, while the page
+  // said nothing waited (audit REST-2, Arun 2026-11-04).
+  const waits = new Map<string, string>();
+  const waitIds = new Map<string, string[]>();
+  for (const f of needsIn(state, events, meId)) {
+    const at = "lane" in f.act ? f.act.lane : MAIN_LANE;
+    if (!waits.has(at)) waits.set(at, f.need.text);
+    waitIds.set(at, [...(waitIds.get(at) ?? []), f.need.id]);
+  }
   for (const lane of lanes) {
     const mine = events.filter((e) => (e.lane ?? MAIN_LANE) === lane);
     const engine = state.engines[lane];
@@ -162,7 +184,9 @@ export function boardCards(state: SessionState, events: SessionEvent[], meId: st
         : (laneDef?.agent?.name ?? laneDef?.name ?? "Agent");
 
     // The last thing it was asked, then the last thing it did: either is "recently".
-    const lastAsk = mine.findLast((e) => e.body.type === "instruction" && !e.body.approval && !e.body.text.startsWith("[session]"));
+    // Never Friday's own nudge to carry on, or its note that a check failed: they are to the agent, and Home's "Right now" read
+    // "Keep going: your plan still has 1 step open. Nobody asked you to stop…" as the task (2026-11-04 retest).
+    const lastAsk = mine.findLast((e) => e.body.type === "instruction" && !e.body.approval && !e.body.keepGoing && !e.body.check && !e.body.text.startsWith("[session]"));
     const task = lastAsk && lastAsk.body.type === "instruction" ? clip(lastAsk.body.text, 140) : lane === MAIN_LANE && state.lastInstruction ? clip(state.lastInstruction.text, 140) : "";
     const at = mine.length ? mine[mine.length - 1]!.ts : 0;
 
@@ -205,7 +229,8 @@ export function boardCards(state: SessionState, events: SessionEvent[], meId: st
     } else if (run.status === "error") {
       column = "needs";
       status = "Stopped";
-      detail = clip(run.error ? stoppedLine(run.error) : "The run stopped.", 120);
+      // Said as the session's row says it: "Out of usage until 3 PM", "Stopped with an error" (audit CODE-5, CODE-17).
+      detail = clip(run.error ? stoppedDetail(run.error) : "The run stopped.", 120);
       you = driverIsMe;
     } else if (approval) {
       column = "needs";
@@ -259,6 +284,24 @@ export function boardCards(state: SessionState, events: SessionEvent[], meId: st
       status = commitBody.pushed ? "Pushed" : "Committed";
       detail = commitBody.pushed ? "Open a pull request to ship it" : "Push it to share it";
     }
+    // Yours exactly when the Needs you page lists it. Out of usage with nothing waiting on anybody (Friday carries it on when the
+    // limit lifts, or another agent took it): not a card in Needs you.
+    const waiting = waits.get(lane);
+    if (!waiting && column === "needs" && run.status === "error" && limitHit(run.error)) {
+      column = "idle";
+      status = "Out of usage";
+      detail = state.resumes?.[lane] ? "Carries on when its limit lifts" : detail;
+    }
+    you = waiting !== undefined;
+    if (you && column !== "needs") {
+      column = "needs";
+      status = "Needs you";
+      detail = clip(waiting!, 120);
+    }
+    // And only then: the column is "Needs you", so a run stopped that nobody but its driver can restart, or a question put to
+    // someone else, rests with the rest, saying what it is. The column read 5 over a Needs you page of 3 (2026-11-04 retest).
+    // Review comments the agent hasn't taken up yet stay with what's in review.
+    if (column === "needs" && !you) column = feedback && pr ? "review" : "idle";
 
     const prFrom = lane === MAIN_LANE ? state.options.pr?.url : undefined;
     const watching = state.shepherd && state.shepherd.lane === lane ? state.shepherd : null;
@@ -269,7 +312,7 @@ export function boardCards(state: SessionState, events: SessionEvent[], meId: st
     const review = pr || files > 0 || commitBody ? ((files > 0 && reviewFacts(mine, true)) || (commitBody ? reviewFacts(mine, false) : null)) : null;
     out.push({
       id: `${state.id}|${lane}`, sid: state.id, lane, title: state.title || "Untitled session", task, agent, tool, column, status, detail, branch, files, pr,
-      ...(prFrom ? { prFrom } : {}), ...(shepherd ? { shepherd } : {}), at, you, mine: driverIsMe,
+      ...(prFrom ? { prFrom } : {}), ...(shepherd ? { shepherd } : {}), at, you, ...(you ? { waits: waitIds.get(lane) } : {}), mine: driverIsMe,
       ...(review ? { review, risk: riskOf(review) } : {}),
     });
   }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { EngineMark, FridayMark, GitHubMark } from "./BrandMarks.js";
 import { WELCOME_TOOLS } from "./engines.js";
@@ -11,7 +11,7 @@ import { openOutside } from "./openOutside.js";
 import type { Identity, RecentSession } from "./storage.js";
 import { isTeamSid, useTeamNow } from "./Teammates.js";
 import { answerUsage, noticeDue, useUsageSharing, WHAT } from "./UsageSharing.js";
-import { CrewFaces } from "./WhatsNew.js";
+import { CrewFaces, markWhatsNewSeen } from "./WhatsNew.js";
 import { Switch } from "@/components/ui/switch";
 
 /**
@@ -98,7 +98,9 @@ export function Setup({ identity, recents, onDone }: { identity: Identity; recen
     if (!known) return;
     if (!identity.id || hasHistory) return void (identity.id && hasHistory && write(k));
     if (read(k) && (!unready || skipped())) return;
-    const t = setTimeout(() => setOpen(true), 600);
+    // The first welcome is someone new: the release's notes would tell them nothing the welcome doesn't (WhatsNew.tsx).
+    const first = !read(k);
+    const t = setTimeout(() => (first && markWhatsNewSeen(), setOpen(true)), 600);
     return () => clearTimeout(t);
   }, [identity.id, hasHistory, k, unready, known]);
   useEffect(() => {
@@ -164,6 +166,29 @@ export function Setup({ identity, recents, onDone }: { identity: Identity; recen
   // The open-source welcome's own three steps, from the first each time it opens.
   const [ob, setOb] = useState(0);
   const gutter = useGutter();
+  // Each step as tall as it is, up to the window's room, eased between them in 180ms: the last step's two rows sat over a 130px
+  // gap at the tools' height (audit REST-6, Arun 2026-11-04).
+  const sheet = useRef<HTMLElement | null>(null);
+  const lastHeight = useRef(0);
+  useLayoutEffect(() => {
+    const el = sheet.current;
+    if (!el) return;
+    const from = lastHeight.current;
+    el.style.height = "";
+    const to = el.getBoundingClientRect().height;
+    lastHeight.current = to;
+    if (!from || Math.abs(from - to) < 1 || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    el.style.height = `${from}px`;
+    void el.offsetHeight;
+    el.style.height = `${to}px`;
+    const done = () => {
+      el.style.height = "";
+      lastHeight.current = el.getBoundingClientRect().height;
+    };
+    el.addEventListener("transitionend", done, { once: true });
+    const t = setTimeout(done, 260);
+    return () => (clearTimeout(t), el.removeEventListener("transitionend", done));
+  }, [ob, open]);
   useEffect(() => void (open && setOb(0)), [open]);
   // Opened: on the first step that still needs something.
   const placed = useRef(false);
@@ -191,7 +216,20 @@ export function Setup({ identity, recents, onDone }: { identity: Identity; recen
   finishNow.current = finish;
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && finishNow.current(false);
+    // The innermost thing first (audit REST-19, Arun 2026-11-04): a menu open over it closes itself; a panel opened inside it (an
+    // account list, GitHub's sign-in) folds; only then the welcome.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (document.querySelector('[role="menu"], [role="listbox"], [data-radix-popper-content-wrapper]')) return;
+      const opened = [...document.querySelectorAll<HTMLElement>('.setup-overlay [aria-expanded="true"]')].pop();
+      if (opened) {
+        e.preventDefault();
+        opened.click();
+        opened.focus();
+        return;
+      }
+      finishNow.current(false);
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -215,7 +253,7 @@ export function Setup({ identity, recents, onDone }: { identity: Identity; recen
     const back = () => setOb(n - 1);
     return createPortal(
       <div className="overlay setup-overlay wn-overlay" role="dialog" aria-modal="true" aria-label="Welcome to Friday">
-        <section className="wn ob">
+        <section className="wn ob" ref={sheet}>
           <div className={`wn-hero${n === 1 ? " ob-hero-tools" : ""}`} aria-hidden="true">
             {n === 1 ? <ToolMarks ready={shownReady.map((t) => t.tool)} /> : <CrewFaces />}
           </div>

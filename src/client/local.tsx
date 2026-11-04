@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { MachineInfo } from "../runner/local-api.js";
 import { ENGINE_NAMES, type EngineTool } from "../types.js";
 import { api } from "./api.js";
+import { isLocal } from "./edition.js";
 import { openOutside } from "./openOutside.js";
 import type { Identity } from "./storage.js";
 
@@ -119,10 +120,56 @@ export function pickMachine(id: string): void {
   window.dispatchEvent(new Event("friday:machine"));
 }
 
+/**
+ * The computer the open session runs on, in the open-source edition: another of yours by its id (EngineInfo.computer), "" for
+ * this one, or null with no session open (or none with a coding tool yet). While a session is open, what it asks of a computer
+ * goes there, whatever computer was picked for new work: an agent added to it, its terminal, its reconnects. They used to go to
+ * the picked one, so Codex added to a session on another computer started here, in that computer's folder path (2026-11-04).
+ */
+let sessionOn: string | null = null;
+/** Which open session set it: one opening and another closing in the same moment leave the newer one's. */
+let sessionOwner: object | null = null;
+
+/** The computer a session's coding tools run on (its main lane's, else the first with a tool), for useSessionMachine. */
+export function sessionComputer(engines: Record<string, { tool?: string; computer?: string } | undefined>, main = "main"): string | null {
+  const first = engines[main]?.tool ? engines[main] : Object.values(engines).find((e) => e?.tool);
+  return first ? (first.computer ?? "") : null;
+}
+
+const machineChanged = () => {
+  shared = null;
+  noMachine = null;
+  if (typeof window !== "undefined") queueMicrotask(() => window.dispatchEvent(new Event("friday:machine")));
+};
+
+/** A session's view says where it runs (sessionComputer), from its first render, so a terminal it opens at once is there too. */
+export function useSessionMachine(on: string | null): void {
+  const me = useRef({}).current;
+  if (sessionOwner !== me || sessionOn !== on) {
+    const changed = sessionOn !== on;
+    sessionOwner = me;
+    sessionOn = on;
+    if (changed) machineChanged();
+  }
+  useEffect(
+    () => () => {
+      if (sessionOwner !== me) return;
+      sessionOwner = null;
+      if (sessionOn === null) return;
+      sessionOn = null;
+      machineChanged();
+    },
+    [me],
+  );
+}
+
+/** The computer what is asked now goes to: the open session's, else the one picked for new work. */
+export const currentMachine = (): string => sessionOn ?? pickedMachine();
+
 /** The headers that say which machine a request is for: an always-on machine picked by id, this one, or the linked one. */
 export const hostHeaders = (): Record<string, string> => {
   const token = linkToken();
-  const on = pickedMachine();
+  const on = currentMachine();
   return { "x-friday-local": "1", "x-friday-prefer": machinePref(), ...(token ? { "x-friday-link": token } : {}), ...(on ? { "x-friday-machine": on } : {}) };
 };
 
@@ -217,7 +264,7 @@ export const deadline = (ms: number): AbortSignal | undefined => {
  * and shown at once, and the real check runs behind it and corrects it. Per
  * account, because whose machine it is is part of the answer.
  */
-const CACHE_KEY = (id: string) => `mpa.machine.${id}${pickedMachine() ? `.${pickedMachine()}` : ""}`;
+const CACHE_KEY = (id: string) => `mpa.machine.${id}${currentMachine() ? `.${currentMachine()}` : ""}`;
 
 function remembered(id: string): MachineState | null {
   try {
@@ -383,6 +430,15 @@ export function useMachine(identity: Identity): { state: MachineState; refresh: 
 
   const refresh = useCallback(() => ((maxAge.current = 0), setN((x) => x + 1)), []);
 
+  // In the open-source edition the page's own server is the computer, so none means the page lost it (a restart, a sleep):
+  // look again every few seconds until it is back, as Home says it is doing (audit e2e, Arun 2026-11-04).
+  const lost = isLocal() && state.mode === "none";
+  useEffect(() => {
+    if (!lost) return;
+    const t = setInterval(() => document.visibilityState === "visible" && ((maxAge.current = 2_000), setN((x) => x + 1)), 3_000);
+    return () => clearInterval(t);
+  }, [lost]);
+
   // The desktop app linking itself is the computer becoming available: look
   // straight away rather than waiting for the next focus or poll. Once, for every copy of this that hears it.
   useEffect(() => {
@@ -442,7 +498,15 @@ export const connectThisComputer = () => window.dispatchEvent(new Event("friday:
  * happening. In a browser, this computer is connected with one command in a terminal (or the app, for those who want it).
  */
 export function NoMachine({ className = "muted small" }: { className?: string }) {
-  if (typeof window !== "undefined" && window.fridayDesktop?.link) return <p className={className}>Friday’s desktop app connects this computer on its own. This updates once it has.</p>;
+  // The open-source edition is its own computer: none means this page can't reach Friday's server right now, and it looks
+  // again by itself (useMachine). Never "Get the desktop app" from inside the desktop app (audit e2e, Arun 2026-11-04).
+  if (isLocal())
+    return (
+      <p className={`no-machine-wait ${className}`} role="status">
+        <span className="spinner" aria-hidden /> Can’t reach Friday on this computer. Reconnecting…
+      </p>
+    );
+  if (typeof window !== "undefined" && window.fridayDesktop) return <p className={className}>Friday’s desktop app connects this computer on its own. This updates once it has.</p>;
   // The app first: it connects the computer by itself, where the other way is Node 20 and a command in a terminal, which a
   // first run on Solo could not get past (Arun, 2026-10-24: UX gaps).
   return (
@@ -481,9 +545,10 @@ export function MachineLine({ identity, state, refresh }: { identity: Identity; 
       <span className="engine-dot" aria-hidden />
       <span className="machine-name">
         Working on <strong>{name}</strong>
-        <span className="muted small"> · {state.mode === "linked" ? "linked" : "this computer"}</span>
+        <span className="muted small"> · {state.mode === "linked" ? (isLocal() ? "your other computer" : "linked") : "this computer"}</span>
       </span>
-      {state.mode === "linked" && state.hereAvailable && (
+      {/* In the open-source edition the session's own computer is where its agents go (useSessionMachine): nothing to switch. */}
+      {state.mode === "linked" && state.hereAvailable && !isLocal() && (
         <button
           type="button"
           className="link-btn"
@@ -511,6 +576,7 @@ export function MachineLine({ identity, state, refresh }: { identity: Identity; 
           be undone by the app a minute later, so signing out is how it is disconnected. A runner started from a terminal
           (a browser's link) is still disconnected from here. */}
       {state.mode === "linked" &&
+        !isLocal() &&
         (typeof window !== "undefined" && window.fridayDesktop?.link ? (
           <span className="muted small">Friday’s desktop app keeps this computer connected until you sign out.</span>
         ) : (

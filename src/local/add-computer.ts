@@ -28,24 +28,26 @@ export function joinCommand(link: string): { unix: string; windows: string } {
 }
 
 /**
- * The script `ssh <host> sh -s` runs to make the machine an extra one: Node.js 22 found (the login shell's PATH, nvm, Homebrew),
- * the open-source Friday installed into ~/.friday-linked (no sudo), then a service started with the link, its data kept apart
- * from any Friday already there (FRIDAY_HOME), and FRIDAY_SERVICE set so a removal ends it with 0, which neither systemd
- * (Restart=on-failure) nor launchd (KeepAlive SuccessfulExit false) starts again. Lines starting FRIDAY_ are read by
+ * The script `ssh <host> sh -s` runs to make the machine an extra one: Node.js 22 found (the login shell's PATH, nvm, fnm, volta,
+ * mise, Homebrew), the open-source Friday installed into ~/.friday-linked (no sudo), then a service started with the link, its
+ * data kept apart from any Friday already there (FRIDAY_HOME), and FRIDAY_SERVICE set so a removal ends it with 0, which neither
+ * systemd (Restart=on-failure) nor launchd (KeepAlive SuccessfulExit false) starts again. Lines starting FRIDAY_ are read by
  * joinSshResult; the rest is shown if something goes wrong.
+ *
+ * In two parts, run one after the other (app.ts): "install", then "service" with a code made only once the install is done, so
+ * a slow install can't outlive the code's ten minutes (2026-11-04 linking research). "all" is both at once.
  */
-export function joinScript(link: string, name: string): string {
-  if (!JOIN_LINK.test(link)) throw new Error("That isn't a link from Your computers.");
+export function joinScript(link: string, name: string, part: "all" | "install" | "service" = "all"): string {
+  if (part !== "install" && !JOIN_LINK.test(link)) throw new Error("That isn't a link from Your computers.");
   const label = name.replace(/[^\w.-]/g, "").slice(0, 40) || "this";
-  return `set -e
-LINK='${link}'
-say() { printf '%s\\n' "$*"; }
+  const head = `set -e
+${part === "install" ? "" : `LINK='${link}'\n`}say() { printf '%s\\n' "$*"; }
 LOGIN_PATH=$("\${SHELL:-/bin/sh}" -lc 'printf %s "$PATH"' 2>/dev/null || true)
 [ -n "$LOGIN_PATH" ] && PATH="$LOGIN_PATH:$PATH"
 export PATH
 NODE=$(command -v node || true)
 if [ -z "$NODE" ]; then
-  for f in "$HOME"/.nvm/versions/node/*/bin/node /opt/homebrew/bin/node /usr/local/bin/node /usr/bin/node; do [ -x "$f" ] && NODE="$f"; done
+  for f in "$HOME"/.nvm/versions/node/*/bin/node "$HOME"/.local/share/fnm/node-versions/*/installation/bin/node "$HOME"/Library/Application\\ Support/fnm/node-versions/*/installation/bin/node "$HOME"/.fnm/node-versions/*/installation/bin/node "$HOME"/.volta/bin/node "$HOME"/.local/share/mise/installs/node/*/bin/node "$HOME"/.local/share/mise/shims/node /opt/homebrew/bin/node /usr/local/bin/node /usr/bin/node; do [ -x "$f" ] && NODE="$f"; done
 fi
 [ -n "$NODE" ] || { say "FRIDAY_ERROR no-node"; exit 20; }
 MAJOR=$("$NODE" -p 'process.versions.node.split(".")[0]')
@@ -53,13 +55,18 @@ MAJOR=$("$NODE" -p 'process.versions.node.split(".")[0]')
 NPM="$(dirname "$NODE")/npm"
 [ -x "$NPM" ] || NPM=$(command -v npm || true)
 [ -n "$NPM" ] || { say "FRIDAY_ERROR no-npm"; exit 23; }
-command -v git >/dev/null 2>&1 || { say "FRIDAY_ERROR no-git"; exit 24; }
 DIR="$HOME/.friday-linked"
+`;
+  // git itself, not only a git on the PATH: macOS's /usr/bin/git is a placeholder that asks for the developer tools.
+  const install = `git --version >/dev/null 2>&1 || { say "FRIDAY_ERROR no-git"; exit 24; }
 mkdir -p "$DIR"
 chmod 700 "$DIR"
 say "FRIDAY_STEP install"
 PATH="$(dirname "$NODE"):$PATH" "$NPM" install --prefix "$DIR" --no-audit --no-fund --loglevel=error ${PACKAGE} >"$DIR/install.log" 2>&1 || { tail -n 20 "$DIR/install.log"; say "FRIDAY_ERROR install"; exit 25; }
-BIN="$DIR/node_modules/.bin/friday"
+[ -e "$DIR/node_modules/.bin/friday" ] || { say "FRIDAY_ERROR install"; exit 25; }
+say "FRIDAY_INSTALLED"
+`;
+  const service = `BIN="$DIR/node_modules/.bin/friday"
 [ -e "$BIN" ] || { say "FRIDAY_ERROR install"; exit 25; }
 LOG="$DIR/friday.log"
 ENVS="FRIDAY_HOME=$DIR/data FRIDAY_SERVICE=1 FRIDAY_NO_OPEN=1"
@@ -104,7 +111,12 @@ else
   say "FRIDAY_DONE background"
 fi
 `;
+  return head + (part === "service" ? "" : install) + (part === "install" ? "" : service);
 }
+
+/** The last lines of a machine's Friday log, for setup to show when it set up but didn't link (its service's, else its file). */
+export const logTailScript = `journalctl --user -u friday-linked.service -n 12 --no-pager -o cat 2>/dev/null | grep . || tail -n 12 "$HOME/.friday-linked/friday.log" 2>/dev/null || true
+`;
 
 export type SshOutcome = { ok: true; how: "systemd" | "launchd" | "background"; warn?: string } | { ok: false; error: string };
 
@@ -142,7 +154,10 @@ export function joinSshResult(code: number | null, out: string, host: string): S
   if (/^FRIDAY_ERROR install$/m.test(out)) return { ok: false, error: `Friday couldn't be installed on ${host}: ${out.split("\n").filter((l) => l.trim() && !/^FRIDAY_/.test(l)).slice(-2).join(" ").slice(0, 300) || "npm said no"}` };
   if (/Permission denied|publickey/i.test(out)) return { ok: false, error: `${host} didn't accept your key. If your key has a passphrase, run ssh-add once so it's remembered, then try again. Check you can run ssh ${host} in a terminal.` };
   if (/Could not resolve hostname|Name or service not known/i.test(out)) return { ok: false, error: `Couldn't find ${host}. Check the name, or add it to your ~/.ssh/config.` };
-  if (/Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED/i.test(out)) return { ok: false, error: `${host}'s identity has changed since you last connected, so Friday stopped. If you expected that, update ~/.ssh/known_hosts, then try again.` };
+  // Changed since you last connected, said so; never connected before is something else (2026-11-04 linking test: a first-time
+  // host was told its identity had changed). Friday's own ssh accepts a new host's key (accept-new), so this is an older run.
+  if (/REMOTE HOST IDENTIFICATION HAS CHANGED/i.test(out)) return { ok: false, error: `${host}'s identity has changed since you last connected, so Friday stopped. If you expected that, update ~/.ssh/known_hosts, then try again.` };
+  if (/Host key verification failed/i.test(out)) return { ok: false, error: `You haven't connected to ${host} over SSH before, and its key couldn't be checked. Run ssh ${host} once in a terminal and accept its key, then try again.` };
   if (/timed out|Connection refused|No route to host/i.test(out)) return { ok: false, error: `Couldn't reach ${host}. Check it's on and that SSH is open, then try again.` };
   if (/'sh' is not recognized|is not recognized as an internal or external command/i.test(out)) return { ok: false, error: `${host} looks like a Windows machine. Over SSH works for macOS and Linux; on Windows, paste the command instead.` };
   const last = out.trim().split(/\r?\n/).filter((l) => !l.startsWith("FRIDAY_")).slice(-3).join(" ").slice(0, 300);

@@ -1,6 +1,7 @@
 import { commandFailed, receiptOf } from "./receipt.js";
 import type { SessionState } from "./session/projection.js";
 import type { SessionEvent } from "./types.js";
+import { isRedo } from "./rewind.js";
 
 /**
  * What a pull request should say, written from the session that made it.
@@ -116,7 +117,7 @@ export function prBodyFor(state: SessionState, events: SessionEvent[], link?: st
   if (answers.length) out.push(`## Approvals\n${answers.slice(0, 15).join("\n")}${answers.length > 15 ? `\n- …and ${answers.length - 15} more` : ""}`);
 
   // Attempts that were undone on the way: what the change is not, said so a reviewer doesn't suggest it again.
-  const undone = events.filter((e) => e.body.type === "folder.restored").length;
+  const undone = events.filter((e) => e.body.type === "folder.restored" && !isRedo(events, e)).length;
   if (undone) out.push(`## Tried and undone\nThe work was rewound ${undone} time${undone === 1 ? "" : "s"} before this version: the recording below shows what was tried.`);
 
   // What is not done, so a pull request never reads as finished when the session knows otherwise.

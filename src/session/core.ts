@@ -644,7 +644,7 @@ export class SessionCore {
         const done = parseJson<{ undo?: string; after?: string | null; restored?: number; removed?: number; error?: string }>(r.output);
         if (!done?.undo) return fail(done?.error ?? (r.output || "Couldn't undo that."));
         const after = typeof done.after === "string" && /^[0-9a-f]{40}$/.test(done.after) ? done.after : undefined;
-        const a = await append({ type: "folder.restored", sha: cmd.sha, undo: done.undo, restored: done.restored ?? 0, removed: done.removed ?? 0, ...(rewoundTo !== undefined ? { rewoundTo } : {}), ...(after ? { after } : {}) });
+        const a = await append({ type: "folder.restored", sha: cmd.sha, undo: done.undo, restored: done.restored ?? 0, removed: done.removed ?? 0, ...(rewoundTo !== undefined ? { rewoundTo } : {}), ...(whole ? { whole: true as const } : {}), ...(after ? { after } : {}) });
         return a.ok ? ok(a.seq) : fail("Undone, but it couldn't be recorded.");
       }
 
