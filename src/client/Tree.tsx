@@ -1,5 +1,6 @@
 import { FileIcon } from "./fileIcons.js";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyEvent } from "react";
+import { MarkdownDoc } from "./MarkdownDoc.js";
 import { FileDiff } from "@/components/agents/file-diff";
 import { driverOf, type SessionState } from "../session/projection.js";
 import type { DiffFile, Member, SessionEvent } from "../types.js";
@@ -74,6 +75,23 @@ function readLayout(sid: string): { open: string[]; tabs: string[]; pick: string
   }
 }
 
+/** The file list folded away beside an open file, as left last time (Tree.tsx tree-list-toggle). */
+const LIST_SHUT = "friday.tree.listShut";
+const readListShut = () => {
+  try {
+    return localStorage.getItem(LIST_SHUT) === "1";
+  } catch {
+    return false;
+  }
+};
+const keepListShut = (on: boolean) => {
+  try {
+    localStorage.setItem(LIST_SHUT, on ? "1" : "0");
+  } catch {
+    /* a preference */
+  }
+};
+
 export function TreePanel({
   state,
   events,
@@ -109,6 +127,7 @@ export function TreePanel({
   const [open, setOpen] = useState<Set<string>>(() => new Set(saved.open));
   const [tabs, setTabs] = useState<string[]>(saved.tabs);
   const [pick, setPick] = useState<string | null>(saved.pick && saved.tabs.includes(saved.pick) ? saved.pick : null);
+  const [listShut, setListShut] = useState(readListShut);
   const [menu, setMenu] = useState<{ x: number; y: number; path: string; dir: boolean } | null>(null);
   const rowsEl = useRef<HTMLDivElement>(null);
   // Which file this person has in front of them, for the teammates who might be following. Nothing while the panel is closed.
@@ -300,7 +319,7 @@ export function TreePanel({
         </button>
       </div>
 
-      <div className={`tree-split ${pick ? "open" : ""}`}>
+      <div className={`tree-split ${pick ? "open" : ""}${pick && listShut ? " list-shut" : ""}`}>
       <div className="doc-scroll tree-scroll">
         {!where ? (
           <p className="muted small">
@@ -373,6 +392,11 @@ export function TreePanel({
                 </button>
               </span>
             ))}
+            {/* The list of files folded away, the open file given the panel's whole width, and back (Arun, 2026-11-03: "be able to
+                collapse this too"); remembered on this computer. */}
+            <button type="button" className="tree-list-toggle" aria-pressed={!listShut} title={listShut ? "Show the files" : "Hide the files"} aria-label={listShut ? "Show the files" : "Hide the files"} onClick={() => setListShut((v) => (keepListShut(!v), !v))}>
+              <Icon name="panelRight" size={14} />
+            </button>
           </div>
           <FileView
             key={`${lane ?? ""}|${pick}`}
@@ -498,12 +522,16 @@ function FileView({
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [editing, setEditing] = useState(true);
+  // A Markdown file opens as a page, its source a switch away (MarkdownDoc.tsx); its edits stay when switching back and forth.
+  const markdown = /\.(md|markdown|mdx)$/i.test(path);
+  const [formatted, setFormatted] = useState(true);
 
   // Another file starts fresh. Said while drawing: an effect would also run each time a kept Tree is shown again.
   const [viewOf, setViewOf] = useState(path);
   if (viewOf !== path) {
     setViewOf(path);
     setEditing(true);
+    setFormatted(true);
     setText(null);
     setErr("");
   }
@@ -553,10 +581,27 @@ function FileView({
   }
 
   const value = draft ?? text ?? "";
+  const asPage = markdown && formatted && text !== null;
   return (
-    <div className="tree-open">
+    <div className={`tree-open${asPage ? " as-page" : ""}`}>
       {err && <p className="error small">{err}</p>}
-      {text === null && !err ? (
+      {markdown && text !== null && (
+        <div className="md-bar">
+        <div className="md-switch" role="tablist" aria-label="Show this file">
+          <button type="button" role="tab" aria-selected={formatted} className={formatted ? "on" : ""} onClick={() => setFormatted(true)}>
+            Formatted
+          </button>
+          <button type="button" role="tab" aria-selected={!formatted} className={formatted ? "" : "on"} onClick={() => setFormatted(false)}>
+            {canEdit && send ? "Edit" : "Source"}
+          </button>
+        </div>
+        </div>
+      )}
+      {asPage ? (
+        <div className="md-page">
+          <MarkdownDoc text={value} path={path} />
+        </div>
+      ) : text === null && !err ? (
         <p className="muted small">Reading…</p>
       ) : text === null ? (
         // Nothing was read, so there is nothing to edit or save: only the reason, and the diff when there is one.

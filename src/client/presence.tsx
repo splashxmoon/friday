@@ -91,7 +91,8 @@ export function useNow(ms = 20_000): number {
   return now;
 }
 
-const RANK: Record<string, number> = { needs: 0, waiting: 0, done: 1, working: 2 };
+// "quiet": working, but unheard a while (Sidebar.tsx crewQuiet), after those at work and before the rest.
+const RANK: Record<string, number> = { needs: 0, waiting: 0, done: 1, working: 2, quiet: 2.5 };
 /**
  * Needs you, then finished and not yet read, then working, then the rest, each in the order it was in (owner call D; "done"
  * from Herdr's priority order, 2026-11-01: what finished is yours to look at, what works isn't yet): a stable sort by state.

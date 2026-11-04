@@ -90,6 +90,8 @@ export class TeamLooks {
     return list.map((t): T & TeammateView => {
       let best: Pick<TeammateView, "status" | "line"> = { status: "offline", line: "" };
       let queued = 0;
+      // When it last did anything anywhere it works: its own last event (projection.ts heardAt), or its last run's start or end.
+      let lastAt = 0;
       for (const p of read) {
         const lane = p.lanes[t.id];
         // A room whose session can't be read (gone from the store) counts for nothing.
@@ -98,12 +100,14 @@ export class TeamLooks {
         const engine = p.state.engines[lane];
         const status: TeammateView["status"] = !engine?.online ? "offline" : a?.status === "working" ? "working" : a?.status === "waiting" ? "waiting" : a?.status === "limited" ? "limited" : a?.status === "failed" ? "stopped" : "idle";
         queued += pendingFor(p.state, lane).length;
+        const run = lane === MAIN_LANE ? p.state.run : p.state.laneRuns[lane];
+        lastAt = Math.max(lastAt, p.state.heardAt?.[lane] ?? 0, run?.sinceAt ?? 0);
         // Offline keeps why (its tool not running, the computer it is on), which the first place said (2026-10-28 QA: a bare "Offline").
         const line = status === "offline" ? (a?.status === "offline" ? a.line : "Offline · their coding tool isn't running") : (a?.line ?? "");
         if (RANK[status] > RANK[best.status] || (status === "offline" && !best.line)) best = { status, line };
       }
       const problem = problems.get(t.id);
-      const more = { mode: t.mode ?? ("full" as const), held: read.some((p) => !!p.lanes[t.id] && p.held.has(p.lanes[t.id]!)), usage: { today: usageFor(t.id, midnight), week: usageFor(t.id, week) } };
+      const more = { ...(lastAt ? { lastAt } : {}), mode: t.mode ?? ("full" as const), held: read.some((p) => !!p.lanes[t.id] && p.held.has(p.lanes[t.id]!)), usage: { today: usageFor(t.id, midnight), week: usageFor(t.id, week) } };
       // Mid-turn it is working whatever a ping says; otherwise a model that can't run leaves it offline, and says why.
       if (problem) return { ...t, ...(best.status === "working" ? best : { status: "offline" as const, line: problem }), queued, problem, ...more };
       return { ...t, ...best, queued, ...more };
@@ -123,10 +127,10 @@ export class TeamLooks {
 
   /** A Crew room's own counts, as each room's are: its teammates (`lanes`) at work there and those waiting on the person there. */
   async now(sid: string, lanes: Set<string>) {
-    const { agents, news } = await this.look(sid);
+    const { agents, news, said } = await this.look(sid);
     const here = agents.filter((a) => lanes.has(a.lane));
     const doing = Object.fromEntries(here.filter((a) => a.status === "working").map((a) => [a.lane, a.line ?? ""]));
-    return { news, working: Object.keys(doing).length, waiting: here.filter((a) => a.status === "waiting").length, doing };
+    return { news, working: Object.keys(doing).length, waiting: here.filter((a) => a.status === "waiting").length, doing, last: said };
   }
 
   /** A teammate's runs everywhere it works over the last `days`, newest first, for its Activity and Results. */

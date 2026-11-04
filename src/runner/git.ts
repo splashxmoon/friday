@@ -1,12 +1,15 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { access, copyFile, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, rmdir, stat, symlink, unlink, utimes, writeFile } from "node:fs/promises";
+import { lstatSync as fsLstatSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import type { DiffFile } from "../types.js";
 import { mergeFeedback, parsePrUrl, type PrComment } from "../pr-feedback.js";
 import { failedChecks, tailLog, type CheckFailure } from "../pr-checks.js";
 import { authEnv } from "./github.js";
+import { releaseStack, setupStack } from "./stack.js";
+import { folderOwnDb } from "./environment.js";
 
 /** git's id for the empty tree: a base for repositories with no commits yet. */
 export const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
@@ -244,7 +247,7 @@ export async function shadowSnapshot(cwd: string, onSkip?: (why: string) => void
 }
 
 /** Where racing agents get their own checkouts, and one of the two places they are ever deleted from. */
-const RACE_DIR = /friday-race-[0-9a-f]{8}$/;
+const RACE_DIR = /friday-(?:race|base)-[0-9a-f]{8}$/;
 /** A lane's own worktree: `<repo>-<id>`, under the worktrees folder and nowhere else. */
 const LANE_DIR = /-[0-9a-f]{8}$/;
 
@@ -397,7 +400,9 @@ export async function addWorktree(cwd: string, name?: string, carry = false, on?
   // `.env` files are found by directory reads that skip what git ignores, done here; what a `.worktreeinclude` names takes a walk of every ignored
   // file (all of node_modules, 3-7s), so that is handed back to run once the lane is there, and only its first turn waits.
   const listed = await access(path.join(root, ".worktreeinclude")).then(() => true, () => false);
-  if (!listed) await copyIncluded(root, dir).catch(() => {});
+  // Its own ports and database (stack.ts), made with the env files it was given, so its app never runs into another copy's.
+  const stack = (env: string[]) => setupStack(root, dir, env, { ownDb: folderOwnDb(root) }).catch(() => undefined);
+  if (!listed) await stack(await copyIncluded(root, dir).catch(() => [] as string[]));
   // The same folder inside the copy, if the agent was started from a subfolder.
   // Asked of git rather than worked out from two paths: on Windows the root and
   // the temp directory come back in different spellings of the same place, and
@@ -412,7 +417,11 @@ export async function addWorktree(cwd: string, name?: string, carry = false, on?
   const repo = top?.length === 2 ? { root: top[0]!, head: top[1]!, branch, dirty: false } : await repoInfo(at);
   // The next spare, once this copy is made: never beside the carry, which is what this attach is waiting on.
   if (own) void topUpSpares(root);
-  return { path: at, branch, repo, ...(listed ? { include: () => copyIncluded(root, dir) } : {}) };
+  return { path: at, branch, repo, ...(listed ? { include: async () => {
+          const got = await copyIncluded(root, dir);
+          await stack(got);
+          return got;
+        } } : {}) };
 }
 
 /** A spare copy's branch, until a lane takes it and it is renamed for that lane. */
@@ -607,7 +616,7 @@ async function copyIgnored(root: string, dir: string, matching: string[]): Promi
 /** The top of one of our worktrees that `dir` is in, or null for anything else. */
 function ownTop(dir: string): string | null {
   const norm = dir.split(path.sep).join("/");
-  const race = norm.match(/^(.*friday-race-[0-9a-f]{8})(\/|$)/)?.[1];
+  const race = norm.match(/^(.*friday-(?:race|base)-[0-9a-f]{8})(\/|$)/)?.[1];
   if (race && RACE_DIR.test(race) && path.resolve(race).indexOf(path.resolve(tmpdir())) === 0) return path.resolve(race);
   const base = worktreeRoot().split(path.sep).join("/");
   if (!norm.startsWith(`${base}/`)) return null;
@@ -640,6 +649,64 @@ export async function worktreeState(dir: string): Promise<{ dirty: number; ahead
  * that exists nowhere else, or the caller says to throw that away. The branch
  * is never deleted: it is the work, and costs nothing to keep.
  */
+/** The tree a commit holds: two commits with the same files are one starting point (a session's snapshot of a clean folder). */
+export async function treeOf(cwd: string, ref: string): Promise<string | null> {
+  const root = await toplevel(cwd).catch(() => null);
+  if (!root || !/^[0-9a-f]{7,40}$/i.test(ref)) return null;
+  return (await git(root, ["rev-parse", "--verify", "-q", `${ref}^{tree}`]).catch(() => "")).trim() || null;
+}
+
+/** What a project's tests need that git leaves out of a copy, linked from the folder rather than installed again. */
+const DEP_DIRS = ["node_modules", ".venv", "venv"];
+
+/**
+ * A throwaway copy of the repo `cwd` is in, at `ref`, to run a command as things stood there (baseline.ts): detached, in the
+ * temp folder, its dependency folders the folder's own (linked, at the top and up to two levels down, where a monorepo keeps
+ * its packages'), its .env files copied. Returns where to run (the same place under the copy as `cwd` is under its repo), the
+ * copy, and the links made, which dropBaseCopy takes out as links before the copy goes.
+ */
+export async function baseCopy(cwd: string, ref: string): Promise<{ dir: string; top: string; links: string[] }> {
+  const root = await toplevel(cwd);
+  const top = path.join(tmpdir(), `friday-base-${randomUUID().slice(0, 8)}`);
+  await git(root, ["worktree", "add", "-q", "--detach", top, ref], [0], 120_000);
+  const links: string[] = [];
+  const link = async (rel: string) => {
+    const from = path.join(root, rel);
+    const to = path.join(top, rel);
+    if (!(await lstat(from).then((s) => s.isDirectory() || s.isSymbolicLink(), () => false))) return;
+    if (await lstat(to).then(() => true, () => false)) return;
+    if (!(await lstat(path.dirname(to)).then((s) => s.isDirectory(), () => false))) return;
+    await symlink(await realpath(from).catch(() => from), to, "junction").then(() => links.push(to), () => {});
+  };
+  for (const d of DEP_DIRS) await link(d);
+  // A monorepo's packages keep their own node_modules (pnpm, npm and yarn workspaces): packages/x, apps/y, and one level more.
+  const dirs = async (rel: string) => (await readdir(path.join(root, rel), { withFileTypes: true }).catch(() => [])).filter((e) => e.isDirectory() && !e.name.startsWith(".") && !DEP_DIRS.includes(e.name)).map((e) => path.join(rel, e.name));
+  let found = 0;
+  for (const a of (await dirs("")).slice(0, 40)) {
+    for (const b of [a, ...(await dirs(a)).slice(0, 40)]) {
+      if (found > 60) break;
+      if (await lstat(path.join(root, b, "node_modules")).then(() => true, () => false)) (found++, await link(path.join(b, "node_modules")));
+    }
+  }
+  await copyIncluded(root, top).catch(() => {});
+  const sub = path.relative(root, path.resolve(cwd));
+  return { dir: sub && !sub.startsWith("..") && !path.isAbsolute(sub) ? path.join(top, sub) : top, top, links };
+}
+
+/** A base copy gone: its links out as links first, never followed, so nothing can reach into the folder's own dependencies. */
+export async function dropBaseCopy(copy: { top: string; links: string[] }): Promise<void> {
+  for (const l of copy.links) await unlink(l).catch(() => rmdir(l)).catch(() => {});
+  if (copy.links.some((l) => lstatSync(l))) return;
+  await dropWorktree(copy.top, true).catch(() => false);
+}
+const lstatSync = (p: string): boolean => {
+  try {
+    return !!fsLstatSync(p);
+  } catch {
+    return false;
+  }
+};
+
 export async function dropWorktree(dir: string, force: boolean | "committed" = true): Promise<boolean> {
   const real = ownTop(dir);
   if (!real) return false;
@@ -649,6 +716,8 @@ export async function dropWorktree(dir: string, force: boolean | "committed" = t
     // commits on no branch at all, keep it.
     if (s && (s.dirty || (s.ahead && (force === false || s.branch === "HEAD" || !s.branch)))) return false;
   }
+  // Its own ports freed and its database copy dropped (stack.ts), before the folder goes.
+  await releaseStack(real).catch(() => undefined);
   // Take the link to the shared dependencies out first, as a link and never
   // recursively, so removing the tree cannot reach into the real ones. If it
   // will not come out, the checkout stays: a leftover folder costs nothing, a

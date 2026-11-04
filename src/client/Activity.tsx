@@ -1,5 +1,6 @@
 import { showDiffSoon } from "./focusDiff.js";
 import { StateRing } from "./presence.js";
+import { GO_AHEAD_WORDS } from "../guardrails.js";
 import { shortTokens } from "../tool-usage.js";
 import { collisionsFor } from "../collisions.js";
 import { runawayText } from "../runaway.js";
@@ -12,6 +13,7 @@ import { GitMergeIcon,
   BrainIcon,
   GitPullRequestIcon,
   ShieldCheckIcon,
+  ShieldXIcon,
   CheckIcon,
   ChevronRightIcon,
   CircleHelpIcon,
@@ -51,6 +53,7 @@ import { GitMergeIcon,
   type LucideIcon,
 } from "lucide-react";
 import { createPortal } from "react-dom";
+import { ChatFind } from "./ChatFind.js";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { attributionFor, byHand, handWord, type Attribution } from "../attribution.js";
 import { useNear } from "./feed-near.js";
@@ -184,7 +187,9 @@ import { askIosPreview, isLocalUrl, lookOf, openInPreview, pageAppears, servedUr
 import { latestTests, prefillComposer, ReviewCard, secondReviewOf, testsIn } from "./RunReview.js";
 import { CLASS_LABEL, headlineClass, mayApprove } from "../command-class.js";
 import { checkpointsByMessage, isSetAside, rewindImpact, rewindsIn, type Rewind } from "../rewind.js";
-import { ContextMenu, MenuButton, useConfirm, type MenuItem, relTime } from "./ui.js";
+import { Check, ContextMenu, MenuButton, Picker, useConfirm, type MenuItem, relTime } from "./ui.js";
+import { RuleForm, RuleHow, RuleText } from "./RuleForm.js";
+import type { RuleCheck } from "../rules.js";
 import { hostApi, installedOn } from "./local.js";
 import { WORK_MODE_BLURB } from "./WorkMode.js";
 import { openOutside } from "./openOutside.js";
@@ -470,6 +475,8 @@ const HIDDEN = new Set<string>([
   "board.cancelled",
   "board.checking",
   "board.checked",
+  // Said on its run's card instead (RunReview failedWords).
+  "tests.base",
   "instructions.requeued",
   "crew.applied",
 ]);
@@ -1102,10 +1109,13 @@ export function Activity({
   const items = useMemo(() => foldNotes(group(quiet.size ? events.filter((e) => !quiet.has(e.seq)) : events, new Set(streamKey ? streamKey.split(",") : []))), [events, streamKey, quiet]);
   // A run block belongs to the lane that produced it.
   const laneOfItem = (it: FeedItem) => (it.kind === "event" ? it.ev.lane : it.kind === "notes" ? it.evs[0]?.lane : it.lane) ?? MAIN_LANE;
+  // Which permission requests somebody answered, by id: those stay as a one-line receipt saying who said what (ApprovalReceipt).
+  const answeredIds = useMemo(() => new Set(events.flatMap((e) => (e.body.type === "instruction" && e.body.approval ? [e.body.approval.id] : []))), [events]);
   const logOrder = items.filter(
     (it) =>
-      // A permission card goes once it is answered: the run's review card keeps what was asked and what was said.
-      !(it.kind === "event" && it.ev.body.type === "engine.approval" && state.approvals[it.ev.lane ?? MAIN_LANE]?.id !== it.ev.body.id) &&
+      // A permission card that went unanswered (the run moved on, or stopped) goes once it isn't waiting; an answered one stays as
+      // its receipt (Arun, 2026-11-03, after Orca's resolution receipts: in a shared session who said yes matters).
+      !(it.kind === "event" && it.ev.body.type === "engine.approval" && state.approvals[it.ev.lane ?? MAIN_LANE]?.id !== it.ev.body.id && !answeredIds.has(it.ev.body.id)) &&
       (filter === "all" ? true : filter === "agent" ? it.kind === "run" || (it.kind === "event" && it.ev.body.type === "run.ended") : it.kind !== "run" && !(it.kind === "event" && it.ev.body.type === "run.ended")) &&
       // An aside is to the people in the room, not to one agent: it shows whichever agent's feed you are looking at.
       (laneFilter === "all" || laneOfItem(it) === laneFilter || (it.kind === "event" && it.ev.body.type === "chat")),
@@ -2013,6 +2023,18 @@ export function Activity({
               <AgentQuestion ctx={ctx} q={q} />
             </div>
           ))}
+          {/* ⌘F in this chat (ChatFind.tsx). */}
+          <ChatFind primary={!secondary} />
+          {/* Words selected in the chat, quoted into the box and sent to whoever wrote them (QuoteSelection). */}
+          {me.role !== "viewer" && (
+            <QuoteSelection
+              onQuote={(text, from) => {
+                const known = !!from && (from === MAIN_LANE || state.lanes.some((l) => l.id === from));
+                if (known && !pin && from !== target) (pick(from), laneFilter !== ALL && setLaneFilter(from));
+                requestAnimationFrame(() => quoteIntoComposer(text));
+              }}
+            />
+          )}
           <Composer ctx={ctx} lane={target} locked={!!pin} onLane={(l) => (pick(l), laneFilter !== ALL && setLaneFilter(l))} onPin={() => setPinning(true)} events={events} plan={<LivePlan events={events} state={state} {...(pin ? { lane: pin } : {})} team={!secondary && boardHere} {...(me.role !== "viewer" ? { control: (id: string, action: TaskAction, to?: string) => void send({ type: "board.task", id, action, ...(to ? { to } : {}) }).then((r) => !r.ok && ctx.notify(r.error ?? "Couldn't change that task.")) } : {})} />} />
           {/* Under the box: the way back through the session on the left, and what the agent's context has cost on the right, under send.
               In the Focus layout both live in the status bar along the window's foot instead. */}
@@ -2272,6 +2294,72 @@ function Notice({ ev, icon: I, tone = "", children }: { ev: SessionEvent; icon: 
         <Stamp ev={ev} />
       </span>
     </Checkpoint>
+  );
+}
+
+/**
+ * A rule offered from a person's own correction (rules.ts; Arun, 2026-11-03: "Rules that stick"): what it says, how every change
+ * will be checked for it, and one press to keep it, a look to put it right first, or no. Answered, the card says so in place.
+ */
+function RuleOffer({ ev, ctx }: { ev: Ev<"brain.check.proposed">; ctx: Ctx }) {
+  const b = ev.body;
+  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [error, setError] = useState("");
+  const answer = ctx.events.find((e) => e.seq > ev.seq && e.body.type === "brain.check.answered" && e.body.entry === b.entry);
+  const took = answer?.body.type === "brain.check.answered" ? answer.body.take : null;
+  const check: RuleCheck = { how: b.how!, pattern: b.pattern ?? "", ...(b.only?.length ? { only: b.only } : {}), ...(b.except?.length ? { except: b.except } : {}) };
+  const go = async (path: string, body: unknown) => {
+    setBusy(true);
+    setError("");
+    try {
+      await api(ctx.identity, `${path}?repo=${encodeURIComponent(b.repo)}&id=${encodeURIComponent(b.entry)}`, { method: "POST", body: JSON.stringify(body) });
+      setEditing(false);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className={cn("rule-offer", took !== null && "answered")} role="group" aria-label="A rule offered">
+      <div className="rule-offer-head">
+        <ShieldCheckIcon className="size-3.5 shrink-0" />
+        <span className="rule-offer-title">{took === true ? `Kept as a rule for ${b.repoName}` : took === false ? "Not kept as a rule" : `Make this a rule for ${b.repoName}?`}</span>
+        {took === null && !editing && (
+          <span className="rule-offer-acts">
+            <button type="button" className="btn ghost small" disabled={busy || !!ctx.replaying} onClick={() => void go("/api/brain/check", { take: false })}>
+              No
+            </button>
+            <button type="button" className="btn ghost small" disabled={busy || !!ctx.replaying} onClick={() => setEditing(true)}>
+              Edit
+            </button>
+            <button type="button" className="btn primary small" disabled={busy || !!ctx.replaying} onClick={() => void go("/api/brain/check", { take: true })}>
+              Keep it
+            </button>
+          </span>
+        )}
+        <span className="cp-stamp">
+          <Stamp ev={ev} />
+        </span>
+      </div>
+      {editing ? (
+        <RuleForm start={{ text: b.why, ...check }} busy={busy} saveWord="Keep the rule" onCancel={() => setEditing(false)} onSave={(r) => void go("/api/brain/rule", r)} />
+      ) : (
+        <div className="rule-offer-body">
+          <span className="rule-offer-rule">
+            <RuleText text={b.why} />
+          </span>
+          {took !== false && (
+            <span className="rule-offer-how">
+              {took === true ? "Every agent's change there is checked: " : "Checked on every change, in every session and teammate: "}
+              <RuleHow check={check} />
+            </span>
+          )}
+        </div>
+      )}
+      {error && <p className="rule-offer-error">{error}</p>}
+    </div>
   );
 }
 
@@ -2622,13 +2710,13 @@ function HubCard({ ev, ctx }: { ev: Ev<"hub.planned">; ctx: Ctx }) {
               </div>
               <span className="hub-task-tool">
                 {planned && owner ? (
-                  <select className="own-select" value={tool ?? ""} aria-label={`Tool for ${t.title}`} onChange={(e) => setTools({ ...tools, [t.id]: e.target.value as EngineTool })}>
-                    {b.tools.map((x) => (
-                      <option key={x} value={x}>
-                        {ENGINE_NAMES[x]}
-                      </option>
-                    ))}
-                  </select>
+                  <Picker<EngineTool | "">
+                    className="small-pick"
+                    value={tool ?? ""}
+                    label={`Tool for ${t.title}`}
+                    onChange={(x) => x && setTools({ ...tools, [t.id]: x })}
+                    options={b.tools.map((x) => ({ value: x, label: ENGINE_NAMES[x], mark: <EngineMark tool={x} size={13} /> }))}
+                  />
                 ) : (
                   <span className="hub-tool-name">
                     <EngineMark tool={tool ?? ""} size={13} /> {tool ? ENGINE_NAMES[tool] : ""}
@@ -2965,6 +3053,81 @@ function ChatMessage({ ev, ctx }: { ev: Ev<"chat">; ctx: Ctx }) {
 }
 
 /**
+ * Words selected in the chat, quoted into the message box (Arun, 2026-11-03, after Orca's "Quote"): a small button over the
+ * selection puts them in as a quote, kept above whatever is already typed, and turns the box to the agent that wrote them, so
+ * "this part, but…" goes to the right one. Only in the feed, and never over a text field's own selection.
+ */
+function QuoteSelection({ onQuote }: { onQuote: (text: string, lane: string | null) => void }) {
+  const [at, setAt] = useState<{ x: number; y: number; text: string; lane: string | null } | null>(null);
+  // Where it sits, to tell its own column of the chat from another open beside it (a split): each quotes only its own.
+  const anchor = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    const read = () => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !sel.rangeCount) return setAt(null);
+      const range = sel.getRangeAt(0);
+      const node = range.commonAncestorContainer;
+      const el = (node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement) as Element | null;
+      const row = el?.closest(".feed-item");
+      const text = sel.toString().trim();
+      if (!row || !text || el?.closest("textarea, input, [contenteditable='true']")) return setAt(null);
+      const column = anchor.current?.closest(".composer-dock")?.parentElement;
+      if (column && !column.contains(row)) return setAt(null);
+      const r = range.getBoundingClientRect();
+      if (!r.width && !r.height) return setAt(null);
+      setAt({ x: Math.min(Math.max(r.left + r.width / 2, 48), innerWidth - 48), y: Math.max(r.top, 44), text: text.slice(0, 4000), lane: row.getAttribute("data-lane") });
+    };
+    // After the pointer or a shift-arrow lets go, once the selection has settled; gone as soon as it is.
+    const settle = () => setTimeout(read, 0);
+    const gone = () => {
+      const s = window.getSelection();
+      if (!s || s.isCollapsed) setAt(null);
+    };
+    const hide = () => setAt(null);
+    document.addEventListener("mouseup", settle);
+    document.addEventListener("keyup", settle);
+    document.addEventListener("selectionchange", gone);
+    addEventListener("scroll", hide, true);
+    return () => {
+      document.removeEventListener("mouseup", settle);
+      document.removeEventListener("keyup", settle);
+      document.removeEventListener("selectionchange", gone);
+      removeEventListener("scroll", hide, true);
+    };
+  }, []);
+  const quote = at && (
+    <button
+      type="button"
+      className="quote-pop"
+      style={{ left: at.x, top: at.y }}
+      // Pressed without taking the selection away first.
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => {
+        onQuote(at.text, at.lane);
+        setAt(null);
+        window.getSelection()?.removeAllRanges();
+      }}
+    >
+      <Icon name="message" size={13} />
+      Quote
+    </button>
+  );
+  return (
+    <span ref={anchor} hidden>
+      {quote && createPortal(quote, document.body)}
+    </span>
+  );
+}
+
+/** The quote, as Markdown, above what is already in the box. */
+function quoteIntoComposer(text: string) {
+  const el = document.getElementById("composer-input") as HTMLTextAreaElement | null;
+  const quote = `${text.split(/\r?\n/).map((l) => `> ${l}`.trimEnd()).join("\n")}\n\n`;
+  const had = el?.value.trim() ?? "";
+  prefillComposer(had ? `${quote}${had}` : quote);
+}
+
+/**
  * A right-click on something a person said: the same things its buttons under it do, and a couple more (Arun, 2026-10-24:
  * "also be able to right click on the input chats too"). Words selected in it can be copied on their own.
  */
@@ -3156,44 +3319,6 @@ function SendToFace({ state, lane, toPeople, name, more }: { state: SessionState
 }
 
 /**
- * Above the box, what is waiting to be looked at, from every agent, until it is committed or undone (Arun, 2026-11-03, the change
- * card mockup; Cursor's and Zed's bar over the input): how many files and whose, Review all, and Commit (the Changes panel, its
- * message box in hand).
- */
-function WaitingChanges({ state, onOpen }: { state: SessionState; onOpen: (tab: "files") => void }) {
-  const by = Object.entries(state.diffs)
-    .map(([id, d]) => ({ id, n: didChange(d.files) ? d.files.length : 0 }))
-    .filter((x) => x.n > 0);
-  // Each file once: two teammates in one repository both list what is changed there.
-  const total = new Set(by.flatMap((x) => state.diffs[x.id]!.files.map((f) => `${f.repo ?? state.engines[x.id]?.root ?? state.engines[x.id]?.cwd ?? x.id}\0${f.path}`))).size;
-  if (!total) return null;
-  const working = by.some((x) => runOf(state, x.id).status === "running");
-  const commit = () => {
-    onOpen("files");
-    // The panel draws first; then its message box, which drafts the message as it is pressed.
-    setTimeout(() => document.querySelector<HTMLTextAreaElement>(".ship-dock .sd-msg")?.focus(), 120);
-  };
-  return (
-    <div className="waiting-changes" role="status">
-      {working && <StateRing state="working" />}
-      <span className="wc-text">
-        <b>
-          {total} file{total === 1 ? "" : "s"}
-        </b>{" "}
-        waiting for review
-        {by.length > 1 && <span className="wc-who"> · {by.map((x) => `${laneLabel(state, x.id)} ${x.n}`).join(", ")}</span>}
-      </span>
-      <button type="button" className="cc-btn quiet" onClick={commit}>
-        Commit…
-      </button>
-      <button type="button" className="cc-btn" onClick={() => onOpen("files")}>
-        Review{by.length > 1 ? " all" : ""}
-      </button>
-    </div>
-  );
-}
-
-/**
  * What a turn itself changed, out of the lane's diff as it ended (the folder against its base, every earlier turn in it): a file
  * whose patch is the one already logged before the turn began is the earlier turns' work, and left off its card. The log keeps a
  * patch it has seen as a reference to the change set that first held it (DiffFile.at), so an unchanged file says so by that.
@@ -3319,7 +3444,10 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   // Commands still failing when the run stopped; one that failed and then passed is not one.
   const stillFailing = item.ended ? failingCommands(msgs, ctx.results) : [];
   const via = reviewVia(ctx.state, ctx.me, lane);
-  const tests = item.ended ? testsIn(msgs.flatMap((m) => m.body.toolCalls), (id) => (ctx.results.has(id) ? commandFailed(ctx.results.get(id)!.body) : null)) : null;
+  const ran = item.ended ? testsIn(msgs.flatMap((m) => m.body.toolCalls), (id) => (ctx.results.has(id) ? commandFailed(ctx.results.get(id)!.body) : null)) : null;
+  // Its failures against the commit its copy started from, once Friday has worked that out (baseline.ts, app.ts testsAfterRun).
+  const based = ran?.status === "fail" && item.ended ? ctx.events.findLast((e) => e.body.type === "tests.base" && e.body.run === item.ended!.seq && (e.lane ?? MAIN_LANE) === lane) : undefined;
+  const tests = ran && based?.body.type === "tests.base" ? { ...ran, base: { pre: based.body.pre, fresh: based.body.fresh, ...(based.body.whole !== undefined ? { whole: based.body.whole } : {}) } } : ran;
 
   // A teammate speaks as its face (Teammates.tsx), not its tool's mark.
   let mate: React.ReactNode = null;
@@ -4046,6 +4174,31 @@ function SignedOutNote({ ctx, lane, latest }: { ctx: Ctx; lane: string; latest: 
 }
 
 /**
+ * Continue, where a task stopped: the agent picks up where it left off rather than being sent the whole message again, which
+ * redid what was done (Arun, 2026-11-03, after Orca's Continue). The coding tools keep their conversation, so "carry on" is
+ * enough. Only on the lane's latest stop, while nothing has been said or started on that lane since: once anyone here continues,
+ * or moves on, it goes for everyone. Not for someone who only watches.
+ */
+function CarryOn({ ctx, lane, seq }: { ctx: Ctx; lane: string; seq: number }) {
+  const [sent, setSent] = useState(false);
+  // A stop is a person's (pause, cancel) or a run that ended on an error; the turn's own end just after a person's stop is part of it.
+  const stops = (e: SessionEvent) => (e.lane ?? MAIN_LANE) === lane && (e.body.type === "run.pause" || e.body.type === "run.cancel" || (e.body.type === "run.ended" && e.body.outcome === "error"));
+  const latest = ctx.events.findLast(stops)?.seq === seq;
+  const since = ctx.events.some((e) => e.seq > seq && (((e.lane ?? MAIN_LANE) === lane && (e.body.type === "instruction" || e.body.type === "run.started" || e.body.type === "run.resume")) || (e.body.type === "instruction" && e.body.handoff?.fromLane === lane)));
+  if (ctx.me.role === "viewer" || !latest || since || runOf(ctx.state, lane).status === "running") return null;
+  const go = async () => {
+    setSent(true);
+    const r = await ctx.send({ type: "instruct", text: "[session] Carry on where you left off.", ...(lane !== MAIN_LANE ? { lane } : {}) });
+    if (!r.ok) (setSent(false), ctx.notify(r.error ?? "Couldn't send that. Try once more."));
+  };
+  return (
+    <button type="button" className="btn small stop-again" disabled={sent} onClick={() => void go()} title="Picks up where it stopped, with what it already did">
+      {sent ? "Continuing…" : "Continue"}
+    </button>
+  );
+}
+
+/**
  * The message an agent stopped on, sent again with one press (2026-11-02 walk-through: a tool that quit as it started left
  * the error and nothing to do but type the message out again). Only on the lane's last stop, and only until something else
  * was said on that lane: by then the person has moved on, or the work was handed to another agent.
@@ -4056,6 +4209,11 @@ function StoppedAgain({ ctx, lane, seq }: { ctx: Ctx; lane: string; seq: number 
   const since = ctx.events.some((e) => e.seq > seq && e.body.type === "instruction" && ((e.lane ?? MAIN_LANE) === lane || e.body.handoff?.fromLane === lane));
   const asked = ctx.events.findLast((e) => e.seq < seq && e.body.type === "instruction" && (e.lane ?? MAIN_LANE) === lane);
   const again = asked?.body.type === "instruction" ? asked.body.text.trim() : "";
+  // It had done some of the work before it stopped: carried on from there, not started over (Arun, 2026-11-03, after Orca's
+  // Continue). Sending the whole message again redid what was done; a tool that quit as it started has nothing to carry on.
+  const began = ctx.events.findLast((e) => e.seq < seq && e.body.type === "run.started" && (e.lane ?? MAIN_LANE) === lane)?.seq ?? seq;
+  const worked = ctx.events.some((e) => e.seq > began && e.seq < seq && (e.lane ?? MAIN_LANE) === lane && e.body.type === "agent.message" && e.body.toolCalls.length > 0);
+  if (worked) return <CarryOn ctx={ctx} lane={lane} seq={seq} />;
   if (!latest || since || !again || runOf(ctx.state, lane).status === "running") return null;
   const tryAgain = async () => {
     setSent(true);
@@ -4966,6 +5124,35 @@ export function answerRights(state: SessionState, me: { id: string; role: Member
   };
 }
 
+/**
+ * A permission request once answered: one quiet line where the card was, saying who said what to which command, and when
+ * (Arun, 2026-11-03, after Orca's resolution receipts). The card used to go, so nothing in the chat said a command had been let
+ * through, or by whom; in a session several people drive, that is the line people look for.
+ */
+function ApprovalReceipt({ ask, said, ctx }: { ask: Ev<"engine.approval">; said: Ev<"instruction">; ctx: Ctx }) {
+  const b = ask.body;
+  const yes = !!said.body.approval?.approve;
+  const by = said.actor.id === ctx.me.id ? "You" : said.actor.name.split(/\s+/)[0];
+  const agent = agentNameFor(ctx.state, ask.lane ?? MAIN_LANE);
+  const what =
+    b.scope !== "commands" ? null
+    : b.items.length === 1 ? <code>{b.items[0]}</code>
+    : <span title={b.items.join("\n")}>{b.items.length} commands</span>;
+  return (
+    <Notice ev={said} icon={yes ? ShieldCheckIcon : ShieldXIcon}>
+      {what ? (
+        <>
+          {by} {yes ? "let" : "didn't let"} {agent} run {what}
+        </>
+      ) : (
+        <>
+          {by} {yes ? "let" : "didn't let"} {agent} {b.live ? "go on" : "change things"}
+        </>
+      )}
+    </Notice>
+  );
+}
+
 function PermissionCard({ ev, ctx }: { ev: Ev<"engine.approval">; ctx: Ctx }) {
   const { state, me, send } = ctx;
   const b = ev.body;
@@ -4973,6 +5160,8 @@ function PermissionCard({ ev, ctx }: { ev: Ev<"engine.approval">; ctx: Ctx }) {
   const { waiting, mayDrive, allowedKinds, may, viaInstruct, hostWait } = answerRights(state, me, lane, b);
   const who = agentNameFor(state, lane);
   const [busy, setBusy] = useState(false);
+  const said = waiting ? undefined : ctx.events.find((e): e is Ev<"instruction"> => e.body.type === "instruction" && e.body.approval?.id === b.id);
+  if (said) return <ApprovalReceipt ask={ev} said={said} ctx={ctx} />;
   const answer = async (approve: boolean) => {
     if (approve && hostWait) return;
     setBusy(true);
@@ -4997,23 +5186,35 @@ function PermissionCard({ ev, ctx }: { ev: Ev<"engine.approval">; ctx: Ctx }) {
     >
       <div className="apv-head">
         <Icon name="shield" size={14} />
-        <span>
-          {who} {b.scope === "commands" ? (b.items.length === 1 ? "wants to run a command" : `wants to run ${b.items.length} commands`) : b.live ? "is asking before it goes on" : "was stopped from changing things"}
-        </span>
+        {/* A teammate's go-ahead (guardrails.ts): which of the few things it asks before, as a tag, its reason under the item. */}
+        {b.guard ? (
+          <span>
+            {who} asks first <span className="apv-tag" data-guard={b.guard}>{GO_AHEAD_WORDS[b.guard]}</span>
+          </span>
+        ) : (
+          <span>
+            {who} {b.scope === "commands" ? (b.items.length === 1 ? "wants to run a command" : `wants to run ${b.items.length} commands`) : b.live ? "is asking before it goes on" : "was stopped from changing things"}
+          </span>
+        )}
         <span className="apv-stamp">
           <Stamp ev={ev} />
         </span>
       </div>
-      <ul className="apv-items">
-        {b.items.map((i) => (
-          <li key={i}>
-            <code>{i}</code>
-            {b.scope === "commands" && <span className="apv-kind">{CLASS_LABEL[headlineClass(i)].label}</span>}
-          </li>
-        ))}
-      </ul>
-      {b.why && <p className="apv-note">{b.why}</p>}
-      {b.scope === "turn" && !b.live && <p className="apv-note">{b.tool ? ENGINE_NAMES[b.tool] : "This tool"} can't ask about one thing at a time, so a yes lets it try the whole turn again with permission to change files and run commands.</p>}
+      {/* Compact (Arun, 2026-11-03: "desing these more compact and better"): the command, its reason beside it and the answers
+          on one line, wrapping under it only where there isn't room. A go-ahead's tag already says what kind it is. */}
+      <div className="apv-body">
+        <div className="apv-main">
+          <ul className="apv-items">
+            {b.items.map((i) => (
+              <li key={i}>
+                <code>{i}</code>
+                {b.scope === "commands" && !b.guard && <span className="apv-kind">{CLASS_LABEL[headlineClass(i)].label}</span>}
+              </li>
+            ))}
+          </ul>
+          {b.why && <p className="apv-note">{b.guard ? b.why.replace(/^[^:]+:\s*/, "") : b.why}</p>}
+          {b.scope === "turn" && !b.live && <p className="apv-note">{b.tool ? ENGINE_NAMES[b.tool] : "This tool"} can't ask about one thing at a time, so a yes lets it try the whole turn again with permission to change files and run commands.</p>}
+        </div>
       {waiting &&
         (may ? (
           <div className="apv-actions">
@@ -5061,6 +5262,7 @@ function PermissionCard({ ev, ctx }: { ev: Ev<"engine.approval">; ctx: Ctx }) {
             {me.role === "editor" && allowedKinds.length > 0 && b.scope === "commands" && " You can answer commands of the kinds the owner allowed, but not this one."}
           </p>
         ))}
+      </div>
     </div>
   );
 }
@@ -5342,10 +5544,12 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
       );
     }
     case "brain.check.proposed":
-      return <CheckOffer ev={ev as Ev<"brain.check.proposed">} ctx={ctx} />;
+      return b.how ? <RuleOffer ev={ev as Ev<"brain.check.proposed">} ctx={ctx} /> : <CheckOffer ev={ev as Ev<"brain.check.proposed">} ctx={ctx} />;
     case "brain.check.answered": {
       const offer = ctx.events.findLast((e) => e.seq < ev.seq && e.body.type === "brain.check.proposed" && e.body.entry === b.entry);
       const command = offer?.body.type === "brain.check.proposed" ? offer.body.command : "the check";
+      // A rule's answer is said on its own card (RuleOffer), where it was offered: no second line for it.
+      if (offer?.body.type === "brain.check.proposed" && offer.body.how) return null;
       return (
         <Notice ev={ev} icon={b.take ? ShieldCheckIcon : XIcon} tone="control">
           {b.take ? (
@@ -5537,6 +5741,7 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
       return (
         <Notice ev={ev} icon={SquareIcon}>
           {who} stopped {ev.lane && ev.lane !== MAIN_LANE ? `${agentNameFor(ctx.state, ev.lane)}'s` : "the agent's"} task
+          <CarryOn ctx={ctx} lane={ev.lane ?? MAIN_LANE} seq={ev.seq} />
         </Notice>
       );
     case "run.resume":
@@ -5908,7 +6113,7 @@ function PlanApproval({ ctx, events, lane }: { ctx: Ctx; events: SessionEvent[];
             {steps.map((t, i) => (
               <li key={`${i}-${t}`} className={unticked.has(i) ? "unticked" : ""}>
                 {may ? (
-                  <input type="checkbox" className="plan-step-tick" checked={!unticked.has(i)} aria-label={`Step ${i + 1}: ${unticked.has(i) ? "left out" : "approved"}`} title={unticked.has(i) ? "Left out of what it may do" : "Untick to leave this step out"} onChange={() => tick(i)} />
+                  <Check className="plan-step-tick" checked={!unticked.has(i)} label={`Step ${i + 1}: ${unticked.has(i) ? "left out" : "approved"}`} title={unticked.has(i) ? "Left out of what it may do" : "Untick to leave this step out"} onChange={() => tick(i)} />
                 ) : (
                   <span className="plan-step-n">{i + 1}</span>
                 )}
@@ -6854,8 +7059,9 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
   // What is in the box, so an empty message can't be sent — by the button or
   // by Enter, which checks the button's disabled state before submitting.
   const [typed, setTyped] = useState("");
-  // What was being typed, kept per session for this tab, so switching away and back doesn't lose it. Not saved until it has
-  // been read back: the empty box on mount used to delete it before the effect below could restore it.
+  // What was being typed, kept per session on this computer, so switching away and back, or quitting Friday, doesn't lose it
+  // (Arun, 2026-11-03, after Orca's drafts: it was this tab's only, gone with the app). Not saved until it has been read back:
+  // the empty box on mount used to delete it before the effect below could restore it.
   const draftKey = `mpa.draft.${sid}`;
   const draftRead = useRef(false);
   // Kept once typing pauses rather than on every key (a synchronous storage write the key waited on), and whatever is still
@@ -6866,8 +7072,8 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
     saveDraft.current = () => {
       saveDraft.current = null;
       try {
-        if (typed) sessionStorage.setItem(draftKey, typed);
-        else sessionStorage.removeItem(draftKey);
+        if (typed) localStorage.setItem(draftKey, typed);
+        else (localStorage.removeItem(draftKey), sessionStorage.removeItem(draftKey));
       } catch {
         /* nothing kept: the box still works */
       }
@@ -6894,8 +7100,8 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
       const k = `mpa.startWith.${sid}`;
       left = sessionStorage.getItem(k) ?? "";
       if (left) sessionStorage.removeItem(k);
-      // Otherwise what was left half-typed here.
-      else left = sessionStorage.getItem(`mpa.draft.${sid}`) ?? "";
+      // Otherwise what was left half-typed here (this tab's, from before drafts outlived it).
+      else left = localStorage.getItem(`mpa.draft.${sid}`) ?? sessionStorage.getItem(`mpa.draft.${sid}`) ?? "";
     } catch {
       /* nothing kept, nothing to pick up */
     }
@@ -7303,7 +7509,8 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
       {/* The box and the list that opens above it, so the list sits on the box's own edge and never over what is typed. */}
       <div className="composer-box">
       {shortcuts.popover}
-      {!state.options.work && ctx.onOpen && <WaitingChanges state={state} onOpen={ctx.onOpen} />}
+      {/* No "N files waiting for review" bar over the box (Arun, 2026-11-03: "get rid of this"): each reply's own change card and
+          the Changes panel say what changed. */}
       <DropOverlay on={dragging} to={agentNameFor(state, lane)} />
       <PromptInput
         onSubmit={onSubmit}

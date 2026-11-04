@@ -998,3 +998,138 @@ html .tm-row[data-active="true"] { background: var(--sel-bg, var(--hover-strong)
 .tt-gist > .tt-more { margin: 0 0 0 2px; }
 .tt-body > .tt-more { align-self: flex-start; }
 
+
+/* Budget and hours (TeammateBudget.tsx): a label column wide enough never to wrap, Friday's own controls on one line each. */
+.tm-budget .tb-row { display: grid; grid-template-columns: 112px minmax(0, 1fr); column-gap: 14px; row-gap: 6px; align-items: center; padding: 6px 0; }
+.tm-budget .tb-label { color: var(--ink-2); font-size: 13px; font-weight: 500; white-space: nowrap; }
+.tm-budget .tb-ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.tm-budget .tb-help, .tm-budget .tb-days { grid-column: 2; }
+.tm-budget .tb-help { color: var(--text-muted); font-size: 12px; line-height: 1.4; }
+.tm-budget .tb-or, .tm-budget .tb-state { color: var(--text-muted); font-size: 13px; }
+.tm-budget .tb-pick { min-width: 172px; justify-content: space-between; }
+.tm-budget .tb-usd { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; border: 1px solid var(--border-strong, var(--border)); border-radius: 8px; background: var(--card); color: var(--text-muted); font-size: 13px; }
+.tm-budget .tb-usd:focus-within { border-color: var(--border-focus); }
+.tm-budget .tb-usd input { width: 56px; height: 100%; padding: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-variant-numeric: tabular-nums; }
+.tm-budget .tb-usd.off { opacity: .5; }
+.tm-budget .tb-seg { display: inline-flex; padding: 2px; border-radius: 8px; background: color-mix(in srgb, var(--ink) 6%, transparent); }
+.tm-budget .tb-seg button { min-width: 52px; height: 28px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); font: 500 12.5px var(--font); font-variant-numeric: tabular-nums; cursor: pointer; }
+.tm-budget .tb-seg button:hover { color: var(--ink); }
+.tm-budget .tb-seg button.on { background: var(--card); color: var(--ink); box-shadow: 0 0 0 .5px color-mix(in srgb, var(--ink) 14%, transparent), 0 1px 2px rgb(0 0 0 / .08); }
+html.dark .tm-budget .tb-seg button.on { background: color-mix(in srgb, var(--ink) 13%, var(--bg)); box-shadow: none; }
+.tm-budget .tb-seg button:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 0; }
+@media (max-width: 560px) { .tm-budget .tb-row { grid-template-columns: 1fr; } .tm-budget .tb-help, .tm-budget .tb-days { grid-column: 1; } }
+
+/* Pick a look (Teammates.tsx): a grid of faces under the name, each a round tile; "More" deals twelve new ones. */
+.tm-look-acts { display: inline-flex; gap: 2px; }
+.tm-looks { display: grid; grid-template-columns: repeat(auto-fill, minmax(56px, 1fr)); gap: 6px; margin: -4px 0 4px; padding: 10px; border: 1px solid var(--border); border-radius: 12px; background: color-mix(in srgb, var(--ink) 2%, var(--card)); }
+.tm-look { display: grid; place-items: center; height: 56px; padding: 0; border: 1px solid transparent; border-radius: 12px; background: transparent; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out), border-color var(--t-hover) var(--ease-out); }
+.tm-look:hover { background: var(--hover); }
+.tm-look[aria-checked="true"] { border-color: var(--border-strong, var(--border)); background: var(--card); }
+.tm-look:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.tm-look-more { gap: 2px; align-content: center; color: var(--text-muted); font-size: 11.5px; }
+.tm-look-more:hover { color: var(--ink); }
+
+/* Sidebar B (Teammates.tsx SidebarTeammates, Arun 2026-11-03): faces across the top like contacts, the needs-you bar, one list. */
+/* A grid of contacts, as many to a line as the sidebar holds, wrapping onto the next: every face in view, none cut at the edge. */
+.cv-faces { display: grid; grid-template-columns: repeat(auto-fill, minmax(42px, 1fr)); gap: 2px; padding: 2px 0 6px; }
+.cv-face { display: grid; justify-items: center; gap: 5px; min-width: 0; padding: 6px 0 5px; border: 0; border-radius: 12px; background: transparent; color: var(--ink-2); font: 500 11.5px/1.2 var(--font); cursor: pointer; scroll-snap-align: start; transition: background-color var(--t-hover) var(--ease-out); }
+.cv-face:hover { background: var(--hover); }
+.cv-face[data-active="true"] { background: var(--hover-strong); color: var(--ink); }
+.cv-face:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
+.cv-face-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-add-ring { display: grid; place-items: center; width: 30px; height: 30px; margin: 2px; border: 1.5px dashed var(--border-strong, var(--border)); border-radius: 50%; color: var(--text-muted); transition: color var(--t-hover) var(--ease-out), border-color var(--t-hover) var(--ease-out); }
+.cv-face-add { color: var(--text-muted); }
+.cv-face-add:hover .cv-add-ring { color: var(--ink); border-color: var(--text-muted); }
+.cv-needbar { display: flex; align-items: center; gap: 8px; width: 100%; height: 34px; margin: 0 0 2px; padding: 0 10px 0 11px; border: 0; border-radius: 10px; background: color-mix(in srgb, var(--amber) 12%, transparent); color: var(--amber); font: 13px var(--font); text-align: left; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out); }
+.cv-needbar:hover { background: color-mix(in srgb, var(--amber) 18%, transparent); }
+.cv-needbar:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.cv-needbar b { flex: none; font-weight: 600; }
+.cv-needdot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--amber); }
+.cv-needwho { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--text-muted); text-overflow: ellipsis; white-space: nowrap; }
+.cv-needchev { flex: none; transition: transform var(--t-move) var(--ease-out); }
+.cv-needchev[data-open] { transform: rotate(90deg); }
+.cv-needs { display: grid; gap: 1px; padding: 2px 0 6px; }
+.cv-head { display: flex; align-items: center; justify-content: space-between; height: 28px; margin-top: 6px; padding: 0 2px 0 10px; color: var(--text-muted); font: 500 12px var(--font); }
+.cv-head .cv-plus { width: 24px; height: 24px; border-radius: 7px; }
+.cv-list { display: flex; flex-direction: column; gap: 1px; }
+.cv-meta { display: flex; flex: none; flex-direction: column; align-items: flex-end; gap: 4px; margin-left: auto; padding-left: 6px; }
+.cv-time { color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { .cv-needchev { transition: none; } }
+.tm-side:has(> .cv-faces) { gap: 4px; }
+.tm-row-wrap:hover .cv-meta, .tm-row-wrap:focus-within .cv-meta { visibility: hidden; }
+.cv-needs .tm-row { min-width: 0; }
+.cv-needs .tm-text { flex: 1 1 auto; min-width: 0; }
+.cv-needs .tm-name, .cv-needs .tm-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* A face's state as a badge on the top right of its head (Teammates.tsx Face; Arun 2026-11-03, "Soft depth"): a disc in the state's
+   colour, tuned per theme, a white sign (dark on amber), a faint light from above, a hairline edge and a cut-out of the ground it
+   sits on, so it reads on a face of any colour. */
+:root { --badge-work: #3b82f6; --badge-need: #f5a524; --badge-done: #22a861; --badge-stop: #e5484d; }
+html.dark { --badge-work: #4d8eff; --badge-need: #f7b23b; --badge-done: #2fbf71; --badge-stop: #f0585d; }
+.tm-face-wrap { position: relative; }
+.tm-badge { position: absolute; z-index: 2; top: calc(var(--b) * -0.22); right: calc(var(--b) * -0.26); display: grid; place-items: center; width: var(--b); height: var(--b); border-radius: 50%; color: #fff; line-height: 0; pointer-events: none;
+  background-image: linear-gradient(180deg, rgb(255 255 255 / .22), rgb(255 255 255 / 0) 60%);
+  box-shadow: 0 0 0 2px var(--pr-ground, var(--sidebar, var(--bg))), inset 0 0 0 .5px rgb(0 0 0 / .18), 0 1px 2px rgb(0 0 0 / .22); }
+.tm-badge[data-state="working"] { background-color: var(--badge-work); }
+.tm-badge[data-state="needs"] { background-color: var(--badge-need); color: #2a1a00; }
+.tm-badge[data-state="done"] { background-color: var(--badge-done); animation: tm-badge-in .24s cubic-bezier(.3, 1.4, .5, 1); }
+.tm-badge:is([data-state="error"], [data-state="limited"]) { background-color: var(--badge-stop); }
+.tm-badge-dots { display: flex; gap: calc(var(--b) * .08); }
+.tm-badge-dots i { width: calc(var(--b) * .15); height: calc(var(--b) * .15); min-width: 2px; min-height: 2px; border-radius: 50%; background: currentColor; animation: tm-badge-dot 1.2s infinite ease-in-out; }
+.tm-badge-dots i:nth-child(2) { animation-delay: .15s; }
+.tm-badge-dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes tm-badge-dot { 0%, 60%, 100% { opacity: .5; transform: translateY(0); } 30% { opacity: 1; transform: translateY(calc(var(--b) * -.07)); } }
+@keyframes tm-badge-in { from { transform: scale(.4); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .tm-badge-dots i, .tm-badge { animation: none !important; } }
+.tm-row:hover .tm-badge, .cv-face:hover .tm-badge { --pr-ground: var(--hover); }
+.tm-row[data-active="true"] .tm-badge, .cv-face[data-active="true"] .tm-badge { --pr-ground: var(--hover-strong); }
+/* Room faces overlap: only the first's mark shows, so three marks don't pile onto one small tile. */
+.tm-room-face + .tm-room-face .tm-badge { display: none; }
+
+/* The board as one list by what each task needs (TeamBoard.tsx; Arun, 2026-11-03: "i like this tbh"): a bar of how far the round
+   has got, then needs you, doing, to do and done, each task a row. */
+.tm-bl-sum { display: flex; align-items: center; gap: 12px; }
+.tm-bl-sum b { color: var(--ink); font-weight: 500; }
+.tm-bl-bar { display: flex; flex: none; gap: 2px; width: 120px; height: 6px; overflow: hidden; border-radius: 99px; background: color-mix(in srgb, var(--ink) 8%, transparent); }
+.tm-bl-bar i { display: block; height: 100%; }
+.tm-bl-bar [data-col="done"], .tm-bl-dot[data-col="done"] { background: var(--green); }
+.tm-bl-bar [data-col="needs"], .tm-bl-dot[data-col="needs"] { background: var(--amber); }
+.tm-bl-bar [data-col="doing"], .tm-bl-dot[data-col="doing"] { background: var(--live); }
+.tm-bl-bar [data-col="todo"] { background: color-mix(in srgb, var(--ink) 24%, transparent); }
+.tm-bl { display: flex; flex-direction: column; gap: 18px; min-height: 0; overflow: auto; overscroll-behavior: contain; margin: 0 -4px; padding: 2px 4px 4px; }
+.tm-bl-group { display: flex; flex-direction: column; }
+.tm-bl-head { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; padding: 0 2px; color: var(--ink-2); font-size: 12.5px; font-weight: 600; }
+.tm-bl-head b { color: var(--text-muted); font-weight: 500; font-variant-numeric: tabular-nums; }
+.tm-bl-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; }
+.tm-bl-dot[data-col="todo"] { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--ink) 35%, transparent); }
+.tm-bl-fold { margin-left: auto; padding: 2px 4px; border: 0; border-radius: 6px; background: none; color: var(--text-muted); font: inherit; font-weight: 500; cursor: pointer; }
+.tm-bl-fold:hover { color: var(--ink); }
+.tm-bl-row { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 10px; border-radius: 10px; animation: tm-rise var(--t-move) var(--ease-out) both; }
+.tm-bl-row + .tm-bl-row { border-top: 1px solid var(--border); border-radius: 0; }
+.tm-bl-row:hover .tm-kb-more, .tm-bl-row:focus-within .tm-kb-more { opacity: 1; }
+.tm-bl-group[data-col="needs"] .tm-bl-row { border: 1px solid color-mix(in srgb, var(--amber) 35%, var(--border)); border-radius: 12px; background: color-mix(in srgb, var(--amber) 5%, var(--card)); }
+.tm-bl-group[data-col="needs"] .tm-bl-row + .tm-bl-row { margin-top: 6px; }
+@media (prefers-reduced-motion: reduce) { .tm-bl-row { animation: none; } }
+.tm-bl-main { min-width: 0; }
+.tm-bl-title { display: flex; align-items: baseline; gap: 7px; margin: 0; min-width: 0; color: var(--ink); font-size: 13.5px; font-weight: 500; line-height: 20px; white-space: nowrap; }
+.tm-bl-name { flex: none; color: var(--ink-2); font-weight: 600; }
+.tm-bl-name::after { content: "·"; margin-left: 7px; color: var(--faint); font-weight: 400; }
+.tm-bl-kind { flex: none; align-self: center; padding: 0 6px; border-radius: 5px; background: color-mix(in srgb, var(--st-review) 15%, transparent); color: var(--st-review); font-size: 11px; font-weight: 600; line-height: 18px; }
+.tm-bl-words { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tm-bl-group[data-col="done"] .tm-bl-words { color: var(--ink-2); }
+.tm-bl-line { margin: 1px 0 0; overflow: hidden; color: var(--text-muted); font-size: 12.5px; line-height: 18px; white-space: nowrap; text-overflow: ellipsis; }
+.tm-bl-line[data-col="needs"] { color: var(--amber); }
+.tm-bl-line[data-col="doing"] { color: var(--ink-2); }
+.tm-bl-dots { display: inline-flex; gap: 2px; margin-right: 6px; vertical-align: 2px; }
+.tm-bl-dots i { width: 3px; height: 3px; border-radius: 50%; background: var(--live); animation: tm-bl-dot 1.2s infinite; }
+.tm-bl-dots i:nth-child(2) { animation-delay: .15s; } .tm-bl-dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes tm-bl-dot { 0%, 60%, 100% { opacity: .35; } 30% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .tm-bl-dots i { animation: none; opacity: .8; } }
+.tm-bl-side { display: flex; align-items: center; gap: 8px; }
+.tm-bl-side .tm-kb-more { margin: 0; }
+.tm-bl-side .pf-row-btn { padding: 0; }
+.tm-bl-chip { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 6px; background: color-mix(in srgb, var(--ink) 6%, transparent); color: var(--text-muted); font-size: 11.5px; font-weight: 500; white-space: nowrap; }
+@media (max-width: 640px) {
+  .tm-bl-row { grid-template-columns: 30px minmax(0, 1fr); }
+  .tm-bl-side { grid-column: 2; flex-wrap: wrap; }
+}

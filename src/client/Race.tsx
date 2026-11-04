@@ -11,7 +11,7 @@ import { DiffView } from "./DiffView.js";
 import { hostApi, useMachine } from "./local.js";
 import { ShipDialog } from "./Ship.js";
 import type { Identity } from "./storage.js";
-import { useDismiss } from "./ui.js";
+import { Picker, useDismiss } from "./ui.js";
 import type { Send } from "./useSession.js";
 
 /**
@@ -117,25 +117,12 @@ export function RaceDialog({ state, me, identity, sid, invite, send, onClose, so
       <div className="race-racer" key={i}>
         <label className="field">
           <span>Agent {LETTERS[i]}</span>
-          <select value={r.tool} onChange={(e) => setRacer(i, { tool: e.target.value as Racer, model: "" })}>
-            {options.map((o) => (
-              <option key={o} value={o}>
-                {label(o)}
-              </option>
-            ))}
-          </select>
+          <Picker<Racer> value={r.tool} label={`Agent ${LETTERS[i]}`} onChange={(tool) => setRacer(i, { tool, model: "" })} options={options.map((o) => ({ value: o, label: label(o) }))} />
         </label>
         {models.length > 0 && (
           <label className="field">
             <span>Model</span>
-            <select value={r.model} onChange={(e) => setRacer(i, { model: e.target.value })}>
-              <option value="">Its default</option>
-              {models.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
+            <Picker value={r.model} label="Model" onChange={(model) => setRacer(i, { model })} options={[{ value: "", label: "Its default" }, ...models.map((m) => ({ value: m.id, label: m.label }))]} />
           </label>
         )}
         {racers.length > 2 && (

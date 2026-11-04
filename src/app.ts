@@ -20,6 +20,10 @@ import { readRepo as readFolder } from "./runner/repo-read.js";
 import { readFailed } from "./project-rules.js";
 import { parseRepo } from "./runner/repo.js";
 import { Runner } from "./runner/runner.js";
+import { joinCommand, joinScript, joinSshResult, SSH_HOST, sshConfigHosts } from "./local/add-computer.js";
+import { copyIncluded } from "./runner/git.js";
+import { setupStack, stackFor } from "./runner/stack.js";
+import { folderOwnDb } from "./runner/environment.js";
 import { recentReposCached } from "./runner/workspace.js";
 import { overlapsAcross, plannedOverlapsFor } from "./collisions.js";
 import { EFFORT_LEVELS, ENGINE_NAMES, engineName, ENGINE_TOOLS, isEngineEffort, MAIN_LANE, toolList, type EngineMode, type EngineTool, type IssueRef, type Role, SESSION_GONE } from "./types.js";
@@ -45,6 +49,9 @@ import { Hubs } from "./hubs.js";
 import type { Limits } from "./runner/limits.js";
 import type { MachineTool, SessionOptionsPatch } from "./types.js";
 import type { ToolOption, ToolWindow } from "./routing.js";
+import { breaches as ruleBreaches, breachText, draftRule, DRAFT_SYSTEM, globsOf, parseDraft, STANDING, type RuleCheck } from "./rules.js";
+import { baselineOf, commandKey, compare, failingTests, onlyPre, preNote, type Baseline } from "./baseline.js";
+import { commandFailed, TEST_CMD } from "./receipt.js";
 import { AFTER_RUN_TRIES, BRIEF_BUDGET, BrainRegistry, clipText, correctionOf, extractLessons, pickBrief, repoKeyOf, repoNameOf, type BrainEntry, type BrainKind } from "./brain.js";
 import { MIN_TOOL_CALLS, transcriptOf } from "./decision-log.js";
 import { runawayIn } from "./runaway.js";
@@ -75,7 +82,6 @@ import { rankOf, searchEvents, titleMatches, wordsOf } from "./session-search.js
 import { pointBridge } from "./client/point.js";
 import type { Attachment, Thinking } from "./types.js";
 import { laneName, SessionCore, type Command } from "./session/core.js";
-import { demoPrompt } from "./team-demo.js";
 import { buildDigest } from "./session/digest.js";
 import { can, canDriveLane, driverOf, pendingFor, project, roleOf, runOf, type SessionState } from "./session/projection.js";
 import { SessionStore, WorkspaceClosing } from "./session/store.js";
@@ -114,7 +120,7 @@ import { boardBusy } from "./session/projection.js";
 import type { MateNote } from "./engine/hub.js";
 import type { MateRun, TeamAway } from "./teammates.js";
 import type { TeamBrief } from "./types.js";
-import { execFile as execFileCb } from "node:child_process";
+import { execFile as execFileCb, spawn as spawnChild } from "node:child_process";
 import { homedir as osHome, hostname, tmpdir as osTmp } from "node:os";
 import { TeamWorkflows } from "./team-workflows.js";
 import { localSkills, skillsHttp, type SkillsScope } from "./team-skills.js";
@@ -364,6 +370,8 @@ export async function createApp(o: AppOptions) {
     })().catch((e) => closingOr("[threads]", e));
     if (o.decisionLog) void learnFromRun(sid, lane).catch((e) => console.error("[brain]", e));
     if (o.decisionLog) void checkAfterRun(sid, lane).catch((e) => closingOr("[checks]", e));
+    // Its own failing tests, against the commit its copy started from: which were already failing there (baseline.ts).
+    void testsAfterRun(sid, lane).catch((e) => closingOr("[baseline]", e));
     // A hub's task, or the main lane's conflict work for one (hubs.ts): the hub moves on.
     void hubs.onRunEnded(sid, lane).catch((e) => closingOr("[hub]", e));
     // A question another agent asked this one, answered with what it said last (agent-mesh.ts).
@@ -416,6 +424,54 @@ export async function createApp(o: AppOptions) {
       return key ? burn.burn(key) : null;
     },
     once: async (key) => (await redis.set(`${o.prefix}${key}`, "1", "EX", 86_400, "NX")) === "OK",
+  };
+  /**
+   * A teammate's go-ahead (guardrails.ts; Arun, 2026-11-03). Away, it is answered at once: the teammate skips that step, keeps a
+   * message as a draft, notes it for the morning brief and carries on ("Skip it, carry on"). Asked in work nobody started by
+   * writing (a check-in, a wake, another teammate), it waits half an hour, then counts as a no: silence is never a yes. Asked in
+   * a turn the person started, it waits for them. Three no's in a row on one teammate stop its task (Hermes' and Codex's breaker).
+   */
+  const goAheads = new Map<string, { sid: string; lane: string; timer?: ReturnType<typeof setTimeout> }>();
+  const goAheadNos = new Map<string, number>();
+  const AWAY_SKIP = "The person is away, so this waits for them: don't do it now. If it was a message, keep it as a draft in your folder. Note what you skipped, and why, for their morning brief, then carry on with the rest of your work.";
+  const NOBODY_ANSWERED = "Nobody answered in half an hour, so the answer is no for now: don't do it. Note what you would have done, and why, for the person's brief, then carry on with the rest.";
+  const answerGoAhead = (sid: string, lane: string, id: string, text: string) => store.append(sid, FRIDAY, { type: "instruction", text, interrupt: false, approval: { id, approve: false } }, { lane });
+  const crewGoAhead = async (sid: string, ev: SessionEvent) => {
+    if (ev.body.type !== "engine.approval" || !teammates) return;
+    const lane = ev.lane ?? MAIN_LANE;
+    const id = ev.body.id;
+    goAheads.set(id, { sid, lane });
+    if (await teammates.away()) return void (await answerGoAhead(sid, lane, id, AWAY_SKIP));
+    const events = await store.events(sid);
+    const started = events.findLast((e) => (e.lane ?? MAIN_LANE) === lane && e.body.type === "run.started");
+    const sb = started?.body;
+    const cause = sb?.type === "run.started" ? events.find((e) => e.seq === sb.causedBy) : undefined;
+    if (cause?.actor.kind === "human") return;
+    const timer = setTimeout(() => {
+      void (async () => {
+        goAheads.delete(id);
+        const st = await store.state(sid).catch(() => null);
+        if (st?.approvals[lane]?.id === id) await answerGoAhead(sid, lane, id, NOBODY_ANSWERED);
+      })().catch((e) => console.error("[go-ahead]", e));
+    }, 30 * 60_000);
+    timer.unref?.();
+    goAheads.set(id, { sid, lane, timer });
+  };
+  const goAheadAnswered = async (sid: string, ev: SessionEvent) => {
+    if (ev.body.type !== "instruction" || !ev.body.approval) return;
+    const g = goAheads.get(ev.body.approval.id);
+    if (!g) return;
+    clearTimeout(g.timer);
+    goAheads.delete(ev.body.approval.id);
+    const key = `${sid}:${g.lane}`;
+    // Only a person's no counts toward stopping it: Friday's own (away, unanswered) are no verdict on the work.
+    if (ev.actor.kind !== "human") return;
+    if (ev.body.approval.approve) return void goAheadNos.delete(key);
+    const nos = (goAheadNos.get(key) ?? 0) + 1;
+    goAheadNos.set(key, nos);
+    if (nos < 3) return;
+    goAheadNos.delete(key);
+    await store.append(sid, FRIDAY, { type: "run.pause" }, { lane: g.lane });
   };
   /** A run's record as it ends, what revises it later, each turn's tokens toward its plan's burn rate, and a message queued behind a busy tool. */
   const noteRun = async (sid: string, ev: SessionEvent) => {
@@ -492,6 +548,8 @@ export async function createApp(o: AppOptions) {
     if (usage && ev.body.type === "session.created") void usage.sessionStarted(ev.body.options?.team ? "crew" : ev.body.options?.work ? "work" : "code").catch(() => {});
     if (usage && ev.body.type === "run.ended" && ev.body.outcome === "done" && ev.actor.kind === "agent") void usage.once("first_turn").catch(() => {});
     teamHear?.(sid, ev as SessionEvent);
+    // A person's correction that reads as a standing rule: offered as one (rules.ts).
+    if (o.decisionLog && ev.body.type === "instruction" && ev.actor.kind === "human") void offerRule(sid, ev).catch((e) => closingOr("[rules]", e));
     workflows?.hear(sid, ev as SessionEvent);
     // Every edition's: the open-source one runs automations too, and with this left out of it its runs stayed "Running" for good
     // and "An agent finishes" never fired (2026-10-27 QA).
@@ -511,6 +569,10 @@ export async function createApp(o: AppOptions) {
       })().catch((e) => console.error("[overlap]", e));
     }
     if (ev.body.type === "tool.result" && ev.body.isError && (ev.body.name === "shell" || ev.body.name === "run_command")) void guardRunaway(sid, ev.lane ?? MAIN_LANE).catch((e) => console.error("[runaway]", e));
+    // A teammate's go-ahead (guardrails.ts): skipped at once while the person is away, given up after a while when no one is
+    // watching, and three no's in a row stop the task.
+    if (ev.body.type === "engine.approval" && ev.body.guard) void crewGoAhead(sid, ev as SessionEvent).catch((e) => console.error("[go-ahead]", e));
+    if (ev.body.type === "instruction" && ev.body.approval && goAheads.has(ev.body.approval.id)) void goAheadAnswered(sid, ev as SessionEvent).catch((e) => console.error("[go-ahead]", e));
     // A board task settled: what its tool is good at learns from it (strengths.ts).
     if (ev.body.type === "board.reviewed" || ev.body.type === "board.finished") void mesh.learnSkill(sid, ev.body).catch((e) => closingOr("[strengths]", e));
     // Forecasts and routing's learning (forecast.ts): a run's record, what revises it, tokens toward its plan's burn rate, and a
@@ -856,7 +918,11 @@ export async function createApp(o: AppOptions) {
     return entry;
   }
 
-  /** The checks people added for the repo `lane` works in (brain.ts), each counting its runs; none where learning is off. */
+  /**
+   * The checks people added for the repo `lane` works in (brain.ts), each counting its runs; none where learning is off. The
+   * repo's rules read off the change (rules.ts) come first, all in one: they cost nothing to check, and what breaks them goes
+   * back to the agent in one message with every line.
+   */
   async function repoChecksFor(sid: string, lane: string): Promise<RepoCheck[]> {
     const state = await store.state(sid);
     const ws = workspaceOf(state);
@@ -865,7 +931,182 @@ export async function createApp(o: AppOptions) {
     if (!(await brain.enabled())) return [];
     const repo = await repoFor(sid, lane, state);
     if (!repo) return [];
-    return (await brain.checks(repo.key)).map((c) => ({ command: c.command, why: c.why, ran: (failed: boolean) => brain.checkRan(repo.key, c.id, failed) }));
+    const rules = await brain.rules(repo.key);
+    const judged: RepoCheck[] = rules.length
+      ? [
+          {
+            command: `the ${rules.length === 1 ? "rule" : `${rules.length} rules`} kept for ${repo.name}`,
+            judge: async () => {
+              const { files, commands } = changeOf(await store.events(sid), lane);
+              const found = rules.flatMap((r) => {
+                const b = ruleBreaches(r.check, files, commands);
+                return b.length ? [{ rule: r.rule, check: r.check, breaches: b, id: r.id }] : [];
+              });
+              for (const r of rules) await brain.checkRan(repo.key, r.id, found.some((f) => f.id === r.id)).catch(() => undefined);
+              return found.length ? breachText(found) : null;
+            },
+          },
+        ]
+      : [];
+    return [...judged, ...(await brain.checks(repo.key)).map((c) => ({ command: c.command, why: c.why, ran: (failed: boolean) => brain.checkRan(repo.key, c.id, failed) }))];
+  }
+
+  /** What a rule reads on `lane` (rules.ts): the files its copy has changed, with their patches, and the commands its last run ran. */
+  function changeOf(events: SessionEvent[], lane: string): { files: Extract<EventBody, { type: "agent.diff" }>["files"]; commands: string[] } {
+    const onLane = (e: SessionEvent) => (e.lane ?? MAIN_LANE) === lane;
+    const diff = events.findLast((e) => onLane(e) && e.body.type === "agent.diff");
+    const start = events.findLast((e) => onLane(e) && e.body.type === "run.started");
+    const commands: string[] = [];
+    for (const e of events) {
+      if (e.seq < (start?.seq ?? 0) || !onLane(e) || e.body.type !== "agent.message") continue;
+      for (const c of e.body.toolCalls) {
+        if (c.name !== "run_command" && c.name !== "shell") continue;
+        try {
+          const command = String((JSON.parse(c.arguments || "{}") as { command?: unknown }).command ?? "").trim();
+          if (command) commands.push(command);
+        } catch {
+          // Not a command it ran.
+        }
+      }
+    }
+    return { files: diff?.body.type === "agent.diff" ? diff.body.files : [], commands };
+  }
+
+  /**
+   * A person's correction, kept (rules.ts; Arun, 2026-11-03: "Rules that stick"): when what they told an agent reads as a standing
+   * rule ("use pnpm, not npm", "no console.log", "never edit generated/"), a rule is drafted from their words, or by a model when
+   * the words alone don't make it plain, and offered in the session under what they said. Kept, every agent's change in the repo
+   * is checked against it from then on, in every session and teammate. Nothing is offered twice for the same rule.
+   */
+  async function offerRule(sid: string, ev: { seq: number; lane: string; actor: { kind: string; name: string }; body: EventBody }): Promise<void> {
+    const b = ev.body;
+    if (b.type !== "instruction" || ev.actor.kind !== "human" || b.handoff || b.peer || b.mesh || b.approval || b.keepGoing || b.check || b.via) return;
+    const text = b.text.trim();
+    if (text.length < 8 || text.length > 600 || text.startsWith("/")) return;
+    let draft = draftRule(text);
+    if (!draft && !STANDING.test(text)) return;
+    const state = await store.state(sid);
+    const ws = workspaceOf(state);
+    if (!ws) return;
+    const brain = tenant(ws).brain;
+    if (!(await brain.enabled())) return;
+    const lane = ev.lane ?? MAIN_LANE;
+    const repo = await repoFor(sid, lane, state);
+    if (!repo) return;
+    if (!draft) {
+      const reader = await learnerFor(state, lane);
+      if (!reader) return;
+      const done = await reader.llm.complete({ system: DRAFT_SYSTEM, messages: [{ role: "user", content: text }], tools: [], signal: AbortSignal.timeout(90_000), reasoningEffort: "low", ...(reader.model ? { model: reader.model } : {}) }).catch(() => null);
+      draft = done ? parseDraft(done.text) : null;
+      if (!draft) return;
+    }
+    const entry = await brain.offerRule(repo.key, repo.name, { text: draft.rule, check: draft.check }, { tool: "person", name: ev.actor.name, sid, ...(state.title ? { title: state.title } : {}) }, { sid, lane });
+    if (!entry?.check) return;
+    const c: RuleCheck = draft.check;
+    await store.append(sid, FRIDAY, { type: "brain.check.proposed", repo: repo.key, repoName: repo.name, entry: entry.id, command: entry.check.command, why: entry.text, times: 1, how: c.how, pattern: c.pattern, ...(c.only?.length ? { only: c.only } : {}), ...(c.except?.length ? { except: c.except } : {}), said: ev.seq }, { lane });
+  }
+
+  /**
+   * Already failing at the start (baseline.ts; Arun, 2026-11-03: "Was it already broken?"): what `command` came to at the commit
+   * `lane`'s copy started from, run there once in a throwaway copy of its own and kept for the repo by the files that commit holds,
+   * so every session, lane and teammate starting from the same code shares one run. Null when it can't be said: no repo, no base
+   * yet, a machine that can't run it (Manual, an older runner, gone). One run at a time per command and code; a copy that
+   * couldn't be set up is tried again after an hour.
+   */
+  const baseRuns = new Map<string, Promise<Baseline | null>>();
+  async function baselineFor(sid: string, lane: string, command: string): Promise<Baseline | null> {
+    if (!mesh.repo) return null;
+    const state = await store.state(sid);
+    const repo = await repoFor(sid, lane, state);
+    if (!repo) return null;
+    const events = await store.events(sid);
+    const diff = events.findLast((e) => (e.lane ?? MAIN_LANE) === lane && e.body.type === "agent.diff");
+    const base = diff?.body.type === "agent.diff" ? diff.body.base : "";
+    if (!/^[0-9a-f]{7,40}$/i.test(base)) return null;
+    let tree = "";
+    try {
+      tree = (JSON.parse((await mesh.repo(sid, lane, { op: "baseline", query: "tree", ref: base } as RepoCall).catch(() => null)) ?? "{}") as { tree?: string }).tree ?? "";
+    } catch {
+      return null;
+    }
+    if (!tree) return null;
+    const cmd = commandKey(command);
+    const key = `${o.prefix}baseline:${workspaceOf(state) ?? "-"}:${repo.key}`;
+    const field = `${tree}\n${cmd}`;
+    const had = await redis.hget(key, field);
+    if (had) {
+      try {
+        const b = JSON.parse(had) as Baseline;
+        if (!b.setup || Date.now() - b.at < 3_600_000) return b;
+      } catch {
+        // A kept one that can't be read is worked out again.
+      }
+    }
+    const fly = `${key}\n${field}`;
+    const going = baseRuns.get(fly);
+    if (going) return going;
+    const run = (async () => {
+      // Another node working it out already: nothing to say yet.
+      if (!(await redis.set(`${fly}:run`, "1", "EX", 900, "NX"))) return null;
+      const out = await mesh.repo!(sid, lane, { op: "baseline", command: cmd, ref: base, timeoutSec: CHECK_SECONDS } as RepoCall).catch(() => null);
+      await redis.del(`${fly}:run`);
+      // Gone, or a runner too old to know the op: nothing kept, asked again next time.
+      if (out === null || out === "Unknown request.") return null;
+      const b = baselineOf(cmd, base, out);
+      await redis.hset(key, field, JSON.stringify(b));
+      // The newest few dozen per repo: main moves on, and an old starting point is seldom asked about again.
+      if ((await redis.hlen(key)) > 40) {
+        const all = Object.entries(await redis.hgetall(key)).map(([f, v]) => [f, (() => { try { return (JSON.parse(v) as Baseline).at; } catch { return 0; } })()] as const);
+        const old = all.sort((a, b) => a[1] - b[1]).slice(0, all.length - 30).map(([f]) => f);
+        if (old.length) await redis.hdel(key, ...old);
+      }
+      return b;
+    })().finally(() => baseRuns.delete(fly));
+    baseRuns.set(fly, run);
+    return run;
+  }
+
+  /**
+   * After a run whose own tests still failed when it ended: the last of them, against the commit its copy started from, said in
+   * the session (tests.base) for its card and its proof, and told to the agent on its next turn (baseNote) so it doesn't chase
+   * what was already broken. Once per run, whichever node sees it end.
+   */
+  async function testsAfterRun(sid: string, lane: string): Promise<void> {
+    const events = await store.events(sid);
+    const onLane = (e: SessionEvent) => (e.lane ?? MAIN_LANE) === lane;
+    const end = events.findLast((e) => onLane(e) && e.body.type === "run.ended");
+    if (!end) return;
+    const start = events.findLast((e) => e.seq < end.seq && onLane(e) && e.body.type === "run.started");
+    const work = events.filter((e) => e.seq > (start?.seq ?? 0) && e.seq <= end.seq && onLane(e));
+    const results = new Map(work.flatMap((e) => (e.body.type === "tool.result" ? [[e.body.callId, e.body] as const] : [])));
+    // Each test command's last attempt: one that failed and was then fixed is no failure.
+    const last = new Map<string, { failed: boolean; output: string }>();
+    for (const e of work) {
+      if (e.body.type !== "agent.message") continue;
+      for (const c of e.body.toolCalls) {
+        if (c.name !== "run_command" && c.name !== "shell") continue;
+        let command = "";
+        try {
+          command = String((JSON.parse(c.arguments || "{}") as { command?: unknown }).command ?? "").trim();
+        } catch {
+          continue;
+        }
+        const r = results.get(c.id);
+        const failed = r ? commandFailed(r) : null;
+        if (!command || !TEST_CMD.test(command) || failed === null || !r) continue;
+        last.delete(commandKey(command));
+        last.set(commandKey(command), { failed, output: r.output });
+      }
+    }
+    const failing = [...last.entries()].filter(([, v]) => v.failed);
+    if (!failing.length) return;
+    if (!(await redis.set(`${o.prefix}tests-base:${sid}:${end.seq}`, "1", "EX", 3600, "NX"))) return;
+    const [command, run] = failing.at(-1)!;
+    const b = await baselineFor(sid, lane, command);
+    if (!b) return;
+    const vs = compare(failingTests(run.output), b);
+    if (!vs) return;
+    await store.append(sid, FRIDAY, { type: "tests.base", run: end.seq, command, base: b.base, pre: vs.pre, fresh: vs.fresh, ...(vs.whole !== undefined ? { whole: vs.whole } : {}) }, { lane });
   }
 
   /**
@@ -894,13 +1135,27 @@ export async function createApp(o: AppOptions) {
     const since = now.findLast((e) => onLane(e) && e.body.type === "instruction" && e.actor.kind === "human")?.seq ?? 0;
     const tries = now.filter((e) => e.seq > since && onLane(e) && e.body.type === "instruction" && !!e.body.check).length;
     for (const c of checks) {
+      // The repo's rules read off the change: what breaks them goes back in one message (rules.ts).
+      if (c.judge) {
+        const broke = await c.judge().catch(() => null);
+        if (!broke) continue;
+        if (tries >= AFTER_RUN_TRIES) return;
+        const sent = await store.append(sid, FRIDAY, { type: "instruction", text: broke, interrupt: false, check: c.command }, { lane });
+        if (sent.ok) void bus.wake(sid, lane);
+        return;
+      }
       const out = await mesh.repo(sid, lane, { op: "shell", command: c.command, timeoutSec: CHECK_SECONDS } as RepoCall).catch((e: Error) => `Couldn't run it: ${e.message}`);
-      const verdict = checkVerdict(out);
+      let verdict = checkVerdict(out);
       if (verdict === "skipped") continue;
+      // A test check whose every failure was already there at the commit the copy started from isn't this change's (baseline.ts).
+      const was = verdict === "failed" && TEST_CMD.test(c.command) ? await baselineFor(sid, lane, c.command).catch(() => null) : null;
+      const vs = was ? compare(failingTests(out ?? ""), was) : null;
+      if (onlyPre(vs)) verdict = "passed";
       await c.ran?.(verdict === "failed").catch(() => undefined);
       if (verdict === "passed") continue;
       if (tries >= AFTER_RUN_TRIES) return;
-      const text = `[Friday] Friday ran \`${c.command}\` after your change, and it failed:\n\n${clipText(out ?? "", 3000)}\n\nThis check was added because agents kept getting this wrong here: ${c.why}\n\nFix it, then end your turn with a short report. It runs again when you do.`;
+      const pre = vs?.pre.length && was ? `\n\n${preNote(vs, c.command, was.base)}` : "";
+      const text = `[Friday] Friday ran \`${c.command}\` after your change, and it failed:\n\n${clipText(out ?? "", 3000)}${pre}\n\nThis check was added because agents kept getting this wrong here: ${c.why}\n\nFix it, then end your turn with a short report. It runs again when you do.`;
       const sent = await store.append(sid, FRIDAY, { type: "instruction", text, interrupt: false, check: c.command }, { lane });
       if (sent.ok) void bus.wake(sid, lane);
       return;
@@ -1425,7 +1680,10 @@ export async function createApp(o: AppOptions) {
       const has = (await git(top, ["branch", "--list", copy.branch]).catch(() => "")).trim();
       const made = await git(top, has ? ["worktree", "add", "-q", copy.path, copy.branch] : ["worktree", "add", "-q", "-b", copy.branch, copy.path, "HEAD"]).then(() => true, (e: Error) => (console.error(`[teammates] ${t.name}'s copy of ${repo}: ${e.message}`), false));
       if (!made) return null;
-    }
+      // What git leaves out that its app needs (.env), and its own ports and database (stack.ts), as a lane's copy gets.
+      const env = await copyIncluded(top, copy.path).catch(() => [] as string[]);
+      await setupStack(top, copy.path, env, { ownDb: folderOwnDb(top) }).catch(() => undefined);
+    } else if (!stackFor(copy.path)) await setupStack(top, copy.path, [], { ownDb: folderOwnDb(top) }).catch(() => undefined);
     copies.set(t.id, copy);
     return copy;
   };
@@ -3022,6 +3280,7 @@ export async function createApp(o: AppOptions) {
   core.board = mesh;
   // A finished board task's checks run in its agent's own folder, on its machine (AgentMesh.runChecks).
   mesh.repo = async (sid, lane, req) => (await hub.readRepo(sid, req, lane))?.output ?? null;
+  mesh.baseline = (sid, lane, command) => baselineFor(sid, lane, command);
   // A proof's picture, taken by the teammate's runner (team-proof.ts), kept as a file of its session.
   mesh.proofFiles = async (sid, data, type) => (await files.save(sid, { name: `proof.${type.split("/")[1] === "jpeg" ? "jpg" : type.split("/")[1]}`, type, data, uploadedBy: "friday" })).id;
   mesh.usage = (sid, lane) => hub.usage(sid, lane);
@@ -3768,28 +4027,6 @@ export async function createApp(o: AppOptions) {
     }
 
     /**
-     * The team demo's first message (team-demo.ts), once its agents are in: the first agent is made the lead, and asked to split
-     * the sample project's job on the board, naming the others as the session does. Two agents at least, or there is no team
-     * to show (Arun, 2026-10-30: "a first run that shows the team").
-     */
-    const demoRoute = url.pathname.match(/^\/api\/sessions\/([\w-]+)\/team-demo$/);
-    if (demoRoute && req.method === "POST") {
-      const sid = demoRoute[1]!;
-      const inv = verifyInvite(o.secret, url.searchParams.get("invite"));
-      if (!inv || inv.sid !== sid) return json(res, 403, { error: "Invalid invite for this session" });
-      const user = await identity(req);
-      if (!user) return json(res, 401, { error: "Missing user identity" });
-      const state = await store.state(sid);
-      const lanes = [MAIN_LANE, ...state.lanes.map((l) => l.id)].filter((l) => state.engines[l]?.tool);
-      if (lanes.length < 2) return json(res, 400, { error: "Only one agent joined, so there's no team to show yet." });
-      const who = { id: user.id, name: user.name };
-      const lead = await core.handle(sid, who, { type: "lead.set", lane: MAIN_LANE });
-      if (!lead.ok) return json(res, 400, { error: lead.error ?? "Couldn't make the first agent the lead." });
-      const r = await core.handle(sid, who, { type: "instruct", text: demoPrompt(lanes.map((l) => laneName(state, l))) });
-      return r.ok ? json(res, 201, { seq: r.seq }) : json(res, 400, { error: r.error ?? "Could not send that." });
-    }
-
-    /**
      * A whole folder, sent as one archive and unpacked as the session's working
      * copy, so all of it arrives rather than however many files a request per
      * file managed to carry.
@@ -3979,6 +4216,22 @@ export async function createApp(o: AppOptions) {
         if (url.pathname === "/api/brain/check" && id && req.method === "POST") {
           const b = await readJson(req);
           return json(res, 200, { entry: await answerCheck(ctx.workspace.id, ctx.me, repo, id, b.take === true) });
+        }
+        // A rule written or changed by a person (rules.ts): kept at once; one offered in a session is answered there too.
+        if (url.pathname === "/api/brain/rule" && req.method === "POST") {
+          const b = await readJson(req);
+          const how = b.how === "lines" || b.how === "runs" || b.how === "paths" ? b.how : null;
+          if (!how) return json(res, 400, { error: "How should it be checked?" });
+          const list = (v: unknown) => (typeof v === "string" ? globsOf(v) : Array.isArray(v) ? v.filter((g): g is string => typeof g === "string").map((g) => g.trim()).filter(Boolean).slice(0, 20) : []);
+          const name = (await brain.repos()).find((r) => r.key === repo)?.name ?? repoNameOf(repo);
+          const entry = await brain.putRule(repo, name, { ...(id ? { id } : {}), text: String(b.text ?? ""), check: { how, pattern: str(b.pattern, 300), only: list(b.only), except: list(b.except) } }, ctx.me);
+          const at = entry.check?.sid;
+          if (id && at && (await store.exists(at))) {
+            const events = await store.events(at);
+            const offer = events.findLast((e) => e.body.type === "brain.check.proposed" && e.body.entry === id);
+            if (offer && !events.some((e) => e.seq > offer.seq && e.body.type === "brain.check.answered" && e.body.entry === id)) await store.append(at, { id: ctx.me.id, name: ctx.me.name, kind: "human" }, { type: "brain.check.answered", entry: id, take: true }, { lane: offer.lane ?? MAIN_LANE });
+          }
+          return json(res, 200, { entry });
         }
         if (url.pathname === "/api/brain/entry" && id && req.method === "DELETE") {
           await brain.remove(repo, id);
@@ -5088,6 +5341,31 @@ export async function createApp(o: AppOptions) {
       };
       if (req.method === "GET" && url.pathname === "/api/computers") return json(res, 200, await mine());
       if (req.method === "POST" && url.pathname === "/api/computers/code") return json(res, 200, phone ? await phone.pairCode("computer") : { error: "Friday here can't take other computers." });
+      // An extra machine without the app (add-computer.ts): the hosts in this person's ~/.ssh/config, to pick from.
+      if (req.method === "GET" && url.pathname === "/api/computers/hosts") return json(res, 200, { hosts: sshConfigHosts(await readFile(path.join(osHome(), ".ssh", "config"), "utf8").catch(() => "")).slice(0, 100) });
+      // Added over SSH (Friday installs and starts it there as a service, paired with a fresh code) or with one command to paste.
+      if (req.method === "POST" && url.pathname === "/api/computers/add") {
+        if (!phone) return json(res, 400, { error: "Friday here can't take other computers." });
+        const b = (await readJson(req)) as { how?: unknown; host?: unknown };
+        const host = typeof b.host === "string" ? b.host.trim() : "";
+        if (b.how === "ssh" && !SSH_HOST.test(host)) return json(res, 400, { error: "That isn't a host ssh can take: a name from your ~/.ssh/config, a host name, or user@host." });
+        const made = (await phone.pairCode("computer")) as { link?: string; until?: number; error?: string };
+        if (!made.link) return json(res, 400, { error: made.error ?? "Couldn't make a code for it." });
+        const link = made.link;
+        if (b.how !== "ssh") return json(res, 200, { link, until: made.until, ...joinCommand(link) });
+        const ran = await new Promise<{ code: number | null; out: string }>((resolve) => {
+          const child = spawnChild("ssh", ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "--", host, "sh -s"], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+          let out = "";
+          const take = (d: Buffer) => void (out = (out + d.toString("utf8")).slice(-20_000));
+          child.stdout.on("data", take);
+          child.stderr.on("data", take);
+          const timer = setTimeout(() => child.kill("SIGTERM"), 15 * 60_000);
+          child.on("error", (e: Error) => (clearTimeout(timer), resolve({ code: null, out: `${out}\n${e.message}` })));
+          child.on("close", (code: number | null) => (clearTimeout(timer), resolve({ code, out })));
+          child.stdin.end(joinScript(link, host));
+        });
+        return json(res, 200, joinSshResult(ran.code, ran.out, host));
+      }
       if (url.pathname === "/api/computers/join" && join) {
         if (req.method === "POST") {
           const b = (await readJson(req)) as { link?: unknown };

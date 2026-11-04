@@ -21,7 +21,7 @@ export function initialsFaces(): boolean {
 }
 
 /** A look is its teammate's name, or that name with a shuffle's "-2" or "-k3x9q" after it (Teammates.tsx distinctLook). */
-const nameOf = (seed: string) => seed.replace(/(-[a-z0-9]{1,5})+$/, "").trim() || "Friday";
+const nameOf = (seed: string) => seed.replace(/^v2:/, "").replace(/(-[a-z0-9]{1,5})+$/, "").trim() || "Friday";
 
 /** "Nova" N, "Ada Park" AP. */
 export function initialsOf(seed: string): string {

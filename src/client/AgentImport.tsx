@@ -7,6 +7,7 @@ import { api } from "./api.js";
 import { EngineMark } from "./BrandMarks.js";
 import { hostApi } from "./local.js";
 import { loadRecentFolders, type Identity } from "./storage.js";
+import { Check } from "./ui.js";
 
 /**
  * Bring in agents from your own Claude Code, Cursor and Codex.
@@ -106,7 +107,7 @@ export function AgentImport({ identity, existing, onClose, onDone }: { identity:
                   {list.map((f) => (
                     <li key={f.key}>
                       <label className={`si-row ${picked.has(f.key) ? "on" : ""}`}>
-                        <input type="checkbox" checked={picked.has(f.key)} onChange={() => toggle(f.key)} />
+                        <Check checked={picked.has(f.key)} onChange={() => toggle(f.key)} />
                         <span className="si-text">
                           <span className="si-name">
                             {f.name}

@@ -153,7 +153,15 @@ export interface Working {
   what: string;
   /** The coding tool the first of them runs on, for its mark beside its name; none for Friday Code. */
   tool?: EngineTool;
+  /** When the liveliest of them was last heard from (projection.ts heardAt), for "no update in 14m" once it has gone quiet. */
+  heardAt?: number;
 }
+
+/** When a lane's agent was last heard from: its last event, or when its run began, whichever is later. */
+export const heardOf = (state: SessionState, lane: string): number | undefined => {
+  const at = Math.max(state.heardAt?.[lane] ?? 0, runOf(state, lane).sinceAt ?? 0);
+  return at || undefined;
+};
 
 export function workingIn(state: SessionState): Working | null {
   const live: string[] = [];
@@ -168,7 +176,9 @@ export function workingIn(state: SessionState): Working | null {
     add(id, state.lanes.find((l) => l.id === id)?.name ?? "a lane");
   }
   if (!live.length) return null;
-  return { sid: state.id, lanes: live.length, what: live.join(", "), ...(tool ? { tool } : {}) };
+  const lanesLive = [...(state.run.status === "running" ? [MAIN_LANE] : []), ...Object.entries(state.laneRuns).filter(([, r]) => r.status === "running").map(([id]) => id)];
+  const heard = Math.max(0, ...lanesLive.map((l) => heardOf(state, l) ?? 0));
+  return { sid: state.id, lanes: live.length, what: live.join(", "), ...(tool ? { tool } : {}), ...(heard ? { heardAt: heard } : {}) };
 }
 
 /**
@@ -179,8 +189,11 @@ export function workingIn(state: SessionState): Working | null {
 export type CrewState = "needs" | "working" | "failed" | "offline" | "done" | "short" | "stopped" | "idle";
 export interface Crew {
   sid: string;
-  /** `plan`: "3 of 5", where it stopped with its plan short ("short"). */
-  agents: { lane: string; name: string; tool?: EngineTool; state: CrewState; plan?: string }[];
+  /**
+   * `plan`: "3 of 5", where it stopped with its plan short ("short"). While it works, `doing` is its latest step and `heardAt` when it
+   * last said anything; stopped on an error, `why` is the error's first line.
+   */
+  agents: { lane: string; name: string; tool?: EngineTool; state: CrewState; plan?: string; doing?: { name: string; target?: string }; heardAt?: number; why?: string }[];
 }
 /** The most agents a row shows. */
 const CREW_MAX = 6;
@@ -198,7 +211,10 @@ export function crewOf(state: SessionState): Crew | null {
     const plan = state.planDone?.[lane];
     const short = !!plan && plan.done < plan.of;
     const st: CrewState = state.openQuestions[lane] || state.approvals?.[lane] || run.status === "waiting_for_human" ? "needs" : run.status === "running" ? "working" : run.status === "error" && !carriedOn(state, lane) ? "failed" : run.status === "error" ? "idle" : engine?.tool && !engine.online ? "offline" : state.stopped?.[lane] !== undefined ? "stopped" : ran && short ? "short" : ran ? "done" : "idle";
-    return { lane, name: laneName(state, lane), ...(engine?.tool ? { tool: engine.tool } : {}), state: st, ...(st === "short" ? { plan: `${plan!.done} of ${plan!.of}` } : {}) };
+    const doing = st === "working" ? state.doing?.[lane] : undefined;
+    const heard = st === "working" ? heardOf(state, lane) : undefined;
+    const why = st === "failed" ? run.error?.trim().split(/\r?\n/)[0]?.slice(0, 160) : undefined;
+    return { lane, name: laneName(state, lane), ...(engine?.tool ? { tool: engine.tool } : {}), state: st, ...(st === "short" ? { plan: `${plan!.done} of ${plan!.of}` } : {}), ...(doing ? { doing } : {}), ...(heard ? { heardAt: heard } : {}), ...(why ? { why } : {}) };
   });
   return agents.length ? { sid: state.id, agents: agents.slice(0, CREW_MAX) } : null;
 }

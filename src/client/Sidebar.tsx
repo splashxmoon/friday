@@ -34,11 +34,13 @@ import type { SessionSummary } from "../board.js";
 import { EngineMark, FridayMark } from "./BrandMarks.js";
 import { isRawError, stoppedLine } from "../activity-line.js";
 import { ENGINE_NAMES, type EngineTool } from "../types.js";
+import { doingWords, QUIET_AFTER_MS, quietFor } from "../step-words.js";
+import { useSettledOrder } from "./sidebar-order.js";
 import { shortcut } from "./Shortcuts.js";
-import { isWorkSid, SidebarWorkSwitch, useWorkMode, useWorkSessions, workListed } from "./WorkMode.js";
+import { CodeCrewToggle, isWorkSid, useWorkSessions } from "./WorkMode.js";
 import { isTeamSid, newTeammate, SidebarTeammates, useTeam, useTeamNow, useTeamTab } from "./Teammates.js";
 import { byDay } from "./sidebar-days.js";
-import { byState, StateRing, useFlip, type Presence } from "./presence.js";
+import { byState, StateRing, useFlip, useNow, type Presence } from "./presence.js";
 import { api } from "./api.js";
 import { markUnread, useUnread } from "./unread.js";
 import { noticeDue, UsageNotice, useUsageSharing } from "./UsageSharing.js";
@@ -283,8 +285,18 @@ const stoppedShort = (crew: Crew | null | undefined, working: unknown): boolean 
  * spinning circle ring thing to the right of the tab session title name"): the turning ring while its agents work, amber while
  * it waits on you, red when a run failed. A quiet session has none, so the ones at work stand out.
  */
-function SessionRing({ state, crew, working, title, unread = false, stopped = false }: { state: "needs" | "working" | "idle"; crew: Crew | null; working: Working | null; title?: string | undefined; /** Its agents finished while you were elsewhere (unread.ts). */ unread?: boolean; /** What waits on you is a run that stopped on an error: the red ring, as everywhere a stop shows. */ stopped?: boolean }) {
+function SessionRing({ state, crew, working, title, unread = false, stopped = false, quiet }: { state: "needs" | "working" | "idle"; crew: Crew | null; working: Working | null; title?: string | undefined; /** Its agents finished while you were elsewhere (unread.ts). */ unread?: boolean; /** What waits on you is a run that stopped on an error: the red ring, as everywhere a stop shows. */ stopped?: boolean; /** Its agents are working but haven't been heard from in a while: how long, for the dashed ring's tip. */ quiet?: string | undefined }) {
   const a = crew?.agents ?? [];
+  // Working, but nothing heard for a while: a still, dashed ring in place of the turning one, so it doesn't pass for busy (Orca's
+  // "unconfirmed", Arun 2026-11-03). Never a check: silence isn't done.
+  if (state === "working" && quiet)
+    return (
+      <span className="state-ring sb-quiet" role="img" aria-label={`No update in ${quiet}`} title={`Working, but no update in ${quiet}`}>
+        <svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+          <circle cx="6" cy="6" r="4.6" strokeDasharray="2.2 1.9" />
+        </svg>
+      </span>
+    );
   const pr: Presence | null = state === "needs" ? (stopped && !working ? "error" : "needs") : state === "working" ? "working" : a.some((x) => x.state === "failed") ? "error" : null;
   // Finished: a small green check where the ring turned (Arun, 2026-11-03: "add something to show that it was finished"), lit
   // while you haven't opened it since, quieter once you have.
@@ -301,18 +313,34 @@ function SessionRing({ state, crew, working, title, unread = false, stopped = fa
 }
 
 const CREW_WORD: Record<CrewState, string> = { needs: "needs you", working: "working", failed: "stopped", offline: "offline", done: "done", short: "stopped early", stopped: "stopped", idle: "ready" };
-function CrewLine({ crew }: { crew: Crew }) {
+/** A working agent unheard for QUIET_AFTER_MS: said as quiet, never as working or done (step-words.ts). */
+const isQuiet = (x: { state: CrewState; heardAt?: number }, now: number) => x.state === "working" && !!x.heardAt && now - x.heardAt > QUIET_AFTER_MS;
+/** A session whose every working agent has gone quiet: its ring is the dashed one, and it sorts after those at work. */
+export const crewQuiet = (crew: Crew | null | undefined, now: number): boolean => {
+  const w = crew?.agents.filter((x) => x.state === "working") ?? [];
+  return w.length > 0 && w.every((x) => isQuiet(x, now));
+};
+
+/**
+ * The line under a session's name, the most telling thing first (Arun, 2026-11-03, after Orca's row line): who stopped and why,
+ * who has gone quiet and for how long, what the one at work is doing this minute ("Codex · Editing Sidebar.tsx"), then how the
+ * agents stand. Said agent first, so a line cut short keeps who and loses the detail. What needs you is the row's own line (ChatRow).
+ */
+function CrewLine({ crew, now }: { crew: Crew; now: number }) {
   const a = crew.agents;
   const short = (n: string, tool?: EngineTool) => agentWord(n.replace(/^[^']+'s /, ""), tool);
   const of = (st: CrewState) => a.filter((x) => x.state === st);
-  const working = of("working");
+  const working = of("working").filter((x) => !isQuiet(x, now));
+  const quiet = of("working").filter((x) => isQuiet(x, now));
   const failed = of("failed");
   // Stopped short of its plan, among several agents too: the row sits under Needs you, so its line says why, never "ready"
   // (Arun, 2026-10-29: "Yes, fix them"; "2 agents · ready" under Needs you).
   const early = of("short");
   const words =
-    working.length > 1 ? "working"
-    : working.length ? `${short(working[0]!.name, working[0]!.tool)} working`
+    failed.length && failed[0]!.why ? (/^Stopped/.test(stoppedLine(failed[0]!.why)) ? `${short(failed[0]!.name, failed[0]!.tool)} · ${stoppedLine(failed[0]!.why)}` : `${short(failed[0]!.name, failed[0]!.tool)} stopped: ${stoppedLine(failed[0]!.why)}`)
+    : working.length > 1 ? "working"
+    : working.length ? `${short(working[0]!.name, working[0]!.tool)} · ${working[0]!.doing ? doingWords(working[0]!.doing) : "working"}`
+    : quiet.length ? `${short(quiet[0]!.name, quiet[0]!.tool)} · no update in ${quietFor(quiet[0]!.heardAt!, now)}`
     : failed.length ? `${short(failed[0]!.name, failed[0]!.tool)} stopped`
     : a.every((x) => x.state === "offline") ? "Offline"
     : a.length === 1 ? `${short(a[0]!.name, a[0]!.tool)} · ${a[0]!.plan ? `stopped at ${a[0]!.plan}` : CREW_WORD[a[0]!.state]}`
@@ -331,7 +359,7 @@ function CrewLine({ crew }: { crew: Crew }) {
           {working.length > 5 && <span className="sb-crew-more">+{working.length - 5}</span>}
         </span>
       )}
-      <span className={`truncate sb-crew-words${working.length ? " working" : failed.length ? " failed" : of("short").length ? " needs" : ""}`}>{words}</span>
+      <span className={`truncate sb-crew-words${failed.length && failed[0]!.why ? " failed" : working.length ? " working" : quiet.length ? " quiet" : failed.length ? " failed" : of("short").length ? " needs" : ""}`}>{words}</span>
     </span>
   );
 }
@@ -344,7 +372,8 @@ function Head({ p }: { p: SidebarProps }) {
   let label = agents ? "New agent" : "New session";
   let kbd = !agents;
   // On the Team tab (Teammates.tsx) the button adds a teammate.
-  if (useTeamTab()[0]) [onNew, label, kbd] = [newTeammate, "New teammate", false];
+  const crewTab = useTeamTab()[0];
+  if (crewTab) [onNew, label, kbd] = [newTeammate, "New teammate", false];
   return (
     <div className="flex shrink-0 flex-col gap-2 px-1">
       {/* In the local edition this row is only the search button, which the desktop app moves into its header: there it goes. */}
@@ -369,8 +398,10 @@ function Head({ p }: { p: SidebarProps }) {
           </Tooltip>
         )}
       </div>
-      {isLocal() && !agents && <SidebarWorkSwitch working={p.attention.working.keys()} needs={p.attention.items.map((i) => i.sid)} />}
-      <button
+      {/* Code or Crew: in the desktop app it is in the window's bar (WindowNav), in a browser here. */}
+      {isLocal() && !agents && !window.fridayDesktop && <CodeCrewToggle className="in-sidebar" working={p.attention.working.keys()} needs={p.attention.items.map((i) => i.sid)} />}
+      {/* Not in the Crew: its faces end with their own Add (Teammates.tsx, Sidebar B). */}
+      {!crewTab && <button
         type="button"
         onClick={onNew}
         className="sb-new group flex h-9 w-full items-center gap-2 rounded-lg border border-sidebar-border bg-[var(--card)] px-3 text-[13px] font-medium text-sidebar-accent-foreground shadow-xs outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring"
@@ -378,7 +409,7 @@ function Head({ p }: { p: SidebarProps }) {
         <PlusIcon className="size-4 text-[var(--text-muted)] group-hover:text-sidebar-accent-foreground" />
         {label}
         {kbd && <span className="dass-kbd">{shortcut("⌘K")}</span>}
-      </button>
+      </button>}
     </div>
   );
 }
@@ -469,28 +500,20 @@ function Foot({ p }: { p: SidebarProps }) {
           controls under them. */}
       {/* One row (Arun, 2026-10-26: "in a row together, the profile thing can just be the circle"): you, as your avatar, then
           the places, then the theme and settings. Your name and plan are in the menu the avatar opens. */}
-      <div className="sb-dock">
+      <div className="sb-dock sb-tray">
         {/* No account on your own computer, so no avatar and its menu (Arun, 2026-10-26: "get rid of the profile button"). */}
         <PlaceIcons p={p} />
         <UpdateRailButton />
-        {/* In the open-source edition, with no profile menu, the theme and Settings stay in the dock; the hosted service has them in the menu. */}
-        {isLocal() && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button type="button" className="dass-rail-btn size-8" aria-label={`Switch to ${nextLook} mode`} onClick={switchLook}>
-                {/* The places' own icon set and size, so the row reads as one (Arun, 2026-10-26). */}
-                <Icon name={nextLook === "light" ? "sun" : "moon"} size={19} />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top">Switch to {nextLook}</TooltipContent>
-          </Tooltip>
-        )}
+        {/* In the open-source edition, with no profile menu, Settings stays in the dock, alone at its right end, apart from the
+            places. No light and dark button beside it (Arun, 2026-11-03: "rework the bottom of the side bar with all of the
+            buttons... we need to work with space too"): Settings and ⌘K have it. The hosted service has both in the menu. */}
+        {isLocal() && <span className="sb-tray-sep" aria-hidden="true" />}
         {/* Send feedback lives in Settings › About, not here (Arun, 2026-11-01: "add the send feed back button out of the side bar
             and into the settings page... for open source"). */}
         {isLocal() && (
           <Tooltip>
             <TooltipTrigger asChild>
-              <button type="button" className="dass-rail-btn size-8" data-active={p.view === "settings"} aria-label="Settings" onClick={p.onOpenSettings}>
+              <button type="button" className="dass-rail-btn sb-dock-settings size-8" data-active={p.view === "settings"} aria-label="Settings" onClick={p.onOpenSettings}>
                 <Icon name="settings" size={19} />
               </button>
             </TooltipTrigger>
@@ -669,16 +692,15 @@ function SessionsList({ p }: { p: SidebarProps }) {
   const merged = new Set([...p.attention.prs].filter(([, pr]) => pr.merged || mergedUrls.has(pr.url)).map(([sid]) => sid));
   // The sessions this list shows.
   let listed = p.recents;
-  const [workMode] = useWorkMode();
   let teamTab = false;
   teamTab = useTeamTab()[0];
   // Kept fresh on every tab, so the team's session stays out of Code's list and its robots show wherever it is open.
   useTeam(p.identityForApi);
-  const work = useWorkSessions(p.identityForApi);
+  // Which sessions are Work ones, still told apart for what deleting one does (deleteBody).
+  useWorkSessions(p.identityForApi);
   // The hosted service's Crew: its sessions (your own Crew room and the rooms) kept out of Code's list.
-  // Not until the Work sessions are known: before, every Work session read as a coding one and showed under Code (the 2026-10-28
-  // critique: Code's list showed "Open-source launch posts").
-  if (isLocal()) listed = p.recents.filter((r) => workListed() && work.has(r.sid) === workMode && !isTeamSid(r.sid));
+  // Every session but a Crew room, Work ones made before Work was taken out included (Arun, 2026-11-03).
+  if (isLocal()) listed = p.recents.filter((r) => !isTeamSid(r.sid));
   const beds = buckets(
     [...listed].sort((a, b) => b.openedAt - a.openedAt),
     { needs: new Set(p.attention.items.map((i) => i.sid)), working: new Set(p.attention.working.keys()), merged },
@@ -690,7 +712,6 @@ function SessionsList({ p }: { p: SidebarProps }) {
   const [pointerIn, setPointerIn] = useState(false);
   const flip = useFlip<HTMLDivElement>();
   const [focusIn, setFocusIn] = useState(false);
-  const heldIds = useRef<string[]>([]);
   // Needs you, then working, then the rest, within each group (owner call D); a row that moves slides there (useFlip).
   const shortIds = beds.active.filter((r) => stoppedShort(p.attention.crews.get(r.sid), p.attention.working.get(r.sid))).map((r) => r.sid);
   const needSet = new Set([...p.attention.items.map((i) => i.sid), ...shortIds]);
@@ -700,10 +721,15 @@ function SessionsList({ p }: { p: SidebarProps }) {
   const doneHeld = useRef<{ sid: string | null; done: boolean }>({ sid: null, done: false });
   if (doneHeld.current.sid !== p.activeSid) doneHeld.current = { sid: p.activeSid, done: !!p.activeSid && unreadNow.has(p.activeSid) };
   const isDone = (sid: string) => unreadNow.has(sid) || (doneHeld.current.done && sid === doneHeld.current.sid);
-  const activeIds = byState(beds.active, (r) => (needSet.has(r.sid) ? "needs" : p.attention.working.has(r.sid) ? "working" : isDone(r.sid) ? "done" : null)).map((r) => r.sid);
-  const had = new Set(heldIds.current);
-  const orderIds = pointerIn || focusIn ? [...activeIds.filter((id) => !had.has(id)), ...heldIds.current.filter((id) => activeIds.includes(id))] : activeIds;
-  heldIds.current = orderIds;
+  // Needs you, finished and unread, working, gone quiet (working, nothing heard in a while: crewQuiet), then the rest. Within each,
+  // the one that came to stand so most recently first (Orca's smart sort, Arun 2026-11-03): a turn that just started over one
+  // that has run an hour, the latest to finish over the earlier. The rest, by when you last opened them.
+  const stateOf = (r: RecentSession) => (needSet.has(r.sid) ? "needs" : p.attention.working.has(r.sid) ? (crewQuiet(p.attention.crews.get(r.sid), now) ? "quiet" : "working") : isDone(r.sid) ? "done" : null);
+  const keyOf = (r: RecentSession) => (stateOf(r) ? (p.attention.since.get(r.sid) ?? r.openedAt) : r.openedAt);
+  const activeIds = byState([...beds.active].sort((a, b) => keyOf(b) - keyOf(a)), stateOf).map((r) => r.sid);
+  // Held while the pointer or keyboard is in the list, so the row under them doesn't move; a burst of changes moves the rows once,
+  // a moment after (sidebar-order.ts). New and gone rows come and go at once.
+  const orderIds = useSettledOrder(activeIds, pointerIn || focusIn);
   const byId = new Map(beds.active.map((r) => [r.sid, r]));
   const sorted = orderIds.map((id) => byId.get(id)!);
   const projectIds = new Set(p.projects.map((x) => x.id));
@@ -1232,6 +1258,9 @@ function ChatRow({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [ctx, setCtx] = useState<{ x: number; y: number } | null>(null);
+  // Ticks a minute at a time, for "no update in 14m" and when a quiet agent's ring turns dashed.
+  const now = useNow(30_000);
+  const quietRing = working && !needs && crewQuiet(crew, now) && working.heardAt ? quietFor(working.heardAt, now) : undefined;
   const who = preview ? (preview.by === me ? "You" : preview.by.split(/\s+/)[0]) : "";
   const short = !needs && stoppedShort(crew, working);
   const state = needs || short ? "needs" : working ? "working" : "idle";
@@ -1287,7 +1316,7 @@ function ChatRow({
       {ctx && <ContextMenu at={ctx} items={menu} onClose={() => setCtx(null)} />}
       <div className="flex min-w-0 items-center gap-2">
         {renaming ? <InlineEdit value={label} onSave={onRename} onCancel={onCancelRename} /> : <span className="dass-row-title">{label}{unread && <span className="sr-only">, new since you looked</span>}</span>}
-        {!renaming && <SessionRing state={state} crew={crew} working={working} unread={unread} stopped={needs?.kind === "stopped"} title={needs ? `${needs.kind === "stopped" ? "" : "Needs you: "}${shortPaths(needs.detail ?? needs.text)}` : working ? `Working now: ${working.what}` : undefined} />}
+        {!renaming && <SessionRing state={state} crew={crew} working={working} unread={unread} stopped={needs?.kind === "stopped"} quiet={quietRing} title={needs ? `${needs.kind === "stopped" ? "" : "Needs you: "}${shortPaths(needs.detail ?? needs.text)}` : working ? `Working now: ${working.what}` : undefined} />}
         {/* No count beside the ring (Arun, 2026-11-03: "get rid of the 3 next to the ring"): the line under the name says "3 working". */}
         <span className="sb-row-gap" aria-hidden="true" />
         {!compact && <SessionPrBadge urls={prs} />}
@@ -1322,7 +1351,7 @@ function ChatRow({
           ) : needs ? (
             <span className="truncate text-[var(--ink)]">{withCode(shortPaths(isRawError(needs.text) ? (needs.kind === "stopped" ? stoppedLine(needs.text) : "Needs you") : needs.text))}</span>
           ) : compact && !short ? null : crew ? (
-            <CrewLine crew={crew} />
+            <CrewLine crew={crew} now={now} />
           ) : summary ? (
             <>
               <span className={`truncate ${summary.column === "working" ? "text-[var(--ink-2)]" : ""}`}>

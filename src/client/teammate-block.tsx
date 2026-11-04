@@ -12,7 +12,7 @@ import { memo, useId } from "react";
 
 // The colours and the pick of a free one, shared with the server (teammate-look.ts).
 import { teamColour } from "../teammate-look.js";
-export { TEAM_COLOURS, teamColour, distinctLook } from "../teammate-look.js";
+export { TEAM_COLOURS, ALL_COLOURS, teamColour, distinctLook, isV2 } from "../teammate-look.js";
 
 const hash = (seed: string) => [...seed].reduce((h, c) => (Math.imul(h, 31) + c.charCodeAt(0)) >>> 0, 2166136261);
 

@@ -8,6 +8,7 @@ import type { Look } from "./handoff-ui.js";
 import { shortTokens } from "../tool-usage.js";
 import { Shine } from "./shine.js";
 import { stepsSummary } from "../step-summary.js";
+import { Check } from "./ui.js";
 
 /**
  * The pieces an agent's response is drawn with.
@@ -841,8 +842,7 @@ export function HandoffComposer({
           <legend className="rsp-ho-label">goes with it</legend>
           {carried.map((c, i) => (
             <label key={i} className="ho-carry-row">
-              <input
-                type="checkbox"
+              <Check
                 checked={!off.has(i)}
                 onChange={() =>
                   setOff((cur) => {

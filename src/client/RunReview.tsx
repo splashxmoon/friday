@@ -21,6 +21,17 @@ import type { Send } from "./useSession.js";
 export interface TestRun {
   status: "pass" | "fail";
   command: string;
+  /** Its failures against the commit the copy started from (baseline.ts, tests.base), once Friday has worked that out. */
+  base?: { pre: string[]; fresh: string[]; whole?: boolean };
+}
+
+/** The chip's words for a failed run, told apart from what was failing before it began (baseline.ts). */
+export function failedWords(t: TestRun): { text: string; pre: boolean; title: string } {
+  const b = t.base;
+  if (!b || (!b.pre.length && !b.whole)) return { text: "Tests failed", pre: false, title: t.command };
+  const was = b.pre.length ? `Failing before this change too:\n${b.pre.slice(0, 12).join("\n")}${b.pre.length > 12 ? "\n…" : ""}` : "It fails before this change too.";
+  if (!b.fresh.length) return { text: b.pre.length ? `Tests: only the ${b.pre.length} failing before` : "Tests: failing before too", pre: true, title: `${t.command}\n\n${was}` };
+  return { text: `Tests failed · ${b.fresh.length} new, ${b.pre.length} from before`, pre: false, title: `${t.command}\n\nNew:\n${b.fresh.slice(0, 12).join("\n")}\n\n${was}` };
 }
 
 type CallLike = { id: string; name: string; arguments: string };
@@ -457,11 +468,22 @@ export function ReviewCard({
           </b>
           {adds > 0 && <span className="diff-add">+{adds}</span>}
           {dels > 0 && <span className="diff-del">−{dels}</span>}
-          {tests && (
-            <span className={`cc-tests ${tests.status}`} title={tests.command}>
-              {tests.status === "pass" ? "Tests passed" : "Tests failed"}
-            </span>
-          )}
+          {tests &&
+            (tests.status === "pass" ? (
+              <span className="cc-tests pass" title={tests.command}>
+                Tests passed
+              </span>
+            ) : (
+              // Told apart from failures that were there before the run began (baseline.ts): only new ones count against it.
+              (() => {
+                const w = failedWords(tests);
+                return (
+                  <span className={`cc-tests ${w.pre ? "pre" : "fail"}`} title={w.title}>
+                    {w.text}
+                  </span>
+                );
+              })()
+            ))}
           {/* Folded, what wants looking at is still said on its line, so folding never hides a warning. */}
           {folded && (receipt?.flags.length || second?.findings?.length) ? <span className="cc-warn">{(receipt?.flags.length ?? 0) + (second?.findings?.length ?? 0)} to look at</span> : null}
         </button>

@@ -3,6 +3,9 @@ import { ENGINE_TOOLS, TOOL_INFO, type EngineTool } from "../types.js";
 /** The four most people have: shown first while it isn't known yet what a computer has, or when it has none of them. */
 export const FIRST_TOOLS: EngineTool[] = ["claude", "codex", "cursor", "copilot"];
 
+/** The welcome's five (Arun, 2026-11-03: OpenCode and Devin in it), with any other tool here that is ready to run. */
+export const WELCOME_TOOLS: EngineTool[] = ["claude", "codex", "cursor", "devin", "opencode"];
+
 /**
  * The tools on this computer, then the rest, which every list folds behind a "more" row: fourteen rows of mostly "not installed"
  * buried the three somebody has. `installed` is null while it isn't known; `keep` is one that stays up top whatever (the one chosen).

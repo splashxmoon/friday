@@ -8,7 +8,7 @@ import { previewCommand, previewStatusLive, startPreview } from "./preview.js";
 import { iosCommand, iosRun, iosStatus } from "./ios.js";
 import { describeEnvironment, folderVars } from "./environment.js";
 import { killTree, NON_INTERACTIVE, readBackground, shellLine, startBackground, stopBackground } from "./background.js";
-import { applyPatch, branchesOf, checkpoint, commitAll, compareOf, diffTrees, discardFiles, gitDiffOf, logOf, prFailures, prFeedback, prStatusJson, publish, pullOf, remoteOf, restore, showOf, stageFiles, statusOf, switchTo, unstageFiles } from "./git.js";
+import { applyPatch, baseCopy, treeOf, branchesOf, checkpoint, commitAll, compareOf, diffTrees, discardFiles, gitDiffOf, logOf, prFailures, prFeedback, prStatusJson, publish, pullOf, remoteOf, restore, showOf, stageFiles, statusOf, switchTo, unstageFiles, dropBaseCopy } from "./git.js";
 
 /**
  * Reading the folder a coding agent is working in, for everyone else.
@@ -88,7 +88,7 @@ const envNames = (text: string) => [...envVars(text).values()].map((n) => `${n}=
 
 export type RepoOp = RepoCall["op"];
 /** What each op needs the host to have allowed. Anything above it is refused. */
-const NEEDS: Record<RepoOp, EngineMode> = { tree: "plan", read: "plan", search: "plan", write: "edits", edit: "edits", shell: "full", checkpoint: "edits", restore: "edits", commit: "edits", publish: "full", remote: "plan", branches: "plan", switch: "edits", prcomments: "plan", prstatus: "plan", prchecks: "plan", preview: "full", ios: "full", environment: "plan", context: "plan", bgstart: "full", bgread: "plan", bgstop: "plan", diff: "plan", commands: "plan", terminal: "plan", apply: "edits", status: "plan", log: "plan", show: "plan", gitdiff: "plan", compare: "plan", stage: "edits", unstage: "edits", hunk: "edits", discard: "edits", pull: "edits" };
+const NEEDS: Record<RepoOp, EngineMode> = { tree: "plan", read: "plan", search: "plan", write: "edits", edit: "edits", shell: "full", baseline: "full", checkpoint: "edits", restore: "edits", commit: "edits", publish: "full", remote: "plan", branches: "plan", switch: "edits", prcomments: "plan", prstatus: "plan", prchecks: "plan", preview: "full", ios: "full", environment: "plan", context: "plan", bgstart: "full", bgread: "plan", bgstop: "plan", diff: "plan", commands: "plan", terminal: "plan", apply: "edits", status: "plan", log: "plan", show: "plan", gitdiff: "plan", compare: "plan", stage: "edits", unstage: "edits", hunk: "edits", discard: "edits", pull: "edits" };
 const RANK: Record<EngineMode, number> = { plan: 0, edits: 1, full: 2 };
 
 export interface RepoRequest extends RepoCall {
@@ -246,7 +246,31 @@ export async function readRepo(root: string, req: RepoRequest): Promise<string> 
       return JSON.stringify({ error: (e as Error).message });
     }
   }
+  // With `query` "tree": only the tree `ref` holds, so a baseline is found by the files it ran on, not by which snapshot.
+  if (req.op === "baseline" && req.query === "tree") return JSON.stringify({ tree: await treeOf(base, req.ref ?? "") });
+  if (req.op === "baseline") return baseline(base, req.command ?? "", req.ref ?? "", req.timeoutSec);
   return shell(base, req.command ?? "", !!req.isolate, req.timeoutSec);
+}
+
+/**
+ * A command run as the folder's repo stood at `ref` (baseline.ts): in a throwaway copy of its own at that commit, never in the
+ * folder itself, which may have an agent working in it. Answered as the shell op is, so its transcript reads the same; a copy
+ * that couldn't be made says so in words, which is read as "couldn't tell".
+ */
+async function baseline(base: string, command: string, ref: string, timeoutSec?: number): Promise<string> {
+  if (!command.trim()) return "Give a command to run.";
+  if (!/^[0-9a-f]{7,40}$/i.test(ref)) return "Give the commit to run it at.";
+  let copy: Awaited<ReturnType<typeof baseCopy>>;
+  try {
+    copy = await baseCopy(base, ref);
+  } catch (e) {
+    return `Couldn't make a copy at ${ref.slice(0, 7)}: ${(e as Error).message.split("\n")[0]}`;
+  }
+  try {
+    return await shell(copy.dir, command, false, timeoutSec);
+  } finally {
+    await dropBaseCopy(copy);
+  }
 }
 
 const MODE_WORDS: Record<EngineMode, string> = { plan: "Plan", edits: "Manual", full: "Auto" };

@@ -5,6 +5,7 @@ import { Icon } from "./icons.js";
 import { commitPaths } from "../shepherd.js";
 import { scriptsIn, type Script } from "./Problems.js";
 import type { Send } from "./useSession.js";
+import { Check } from "./ui.js";
 
 /**
  * From the changes to a pull request, docked at the foot of the Changes panel (Arun, 2026-11-03: the Changes panel "like this",
@@ -324,13 +325,12 @@ export function ShipFlow({ state, me, sid, invite, send, lane, events }: { state
             <div className="ship-files">
               {files.map((f) => (
                 <label key={f.path} className={`ship-file ${leave.has(f.path) ? "out" : ""}`}>
-                  <input
-                    type="checkbox"
+                  <Check
                     checked={!leave.has(f.path)}
-                    onChange={(e) =>
+                    onChange={(on) =>
                       setLeave((all) => {
                         const next = new Set(all);
-                        if (e.target.checked) next.delete(f.path);
+                        if (on) next.delete(f.path);
                         else next.add(f.path);
                         return next;
                       })
@@ -356,12 +356,12 @@ export function ShipFlow({ state, me, sid, invite, send, lane, events }: { state
             {hasRemote ? (
               <div className="ship-options">
                 <label className="check-row">
-                  <input type="checkbox" checked={push || pr} disabled={pr && !!remote?.github} onChange={(e) => setPush(e.target.checked)} />
+                  <Check checked={push || pr} disabled={pr && !!remote?.github} onChange={(on) => setPush(on)} />
                   Push to {remote?.github ?? "origin"}
                 </label>
                 {remote?.github && (
                   <label className="check-row">
-                    <input type="checkbox" checked={pr} onChange={(e) => setPr(e.target.checked)} />
+                    <Check checked={pr} onChange={(on) => setPr(on)} />
                     Open a pull request
                   </label>
                 )}

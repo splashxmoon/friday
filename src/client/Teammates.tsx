@@ -30,7 +30,7 @@ import { ALL } from "./agentNav.js";
 import { EngineMark } from "./BrandMarks.js";
 import { installedOn } from "./local.js";
 import { WorkspaceCard } from "./Workspace.js";
-import { ContextMenu, useConfirm, type MenuItem } from "./ui.js";
+import { ContextMenu, MenuButton, Picker, relTime, useConfirm, type MenuItem } from "./ui.js";
 import { useComputers } from "./Computers.js";
 import type { Identity, RecentSession } from "./storage.js";
 import type { Attention } from "../attention.js";
@@ -43,7 +43,6 @@ import { ANSWER, mediaText } from "./AnswerParts.js";
 import { EVERYONE, mentionsIn, namedIn, namesEveryone } from "./teammate-mentions.js";
 import { threadsOf, type ThreadState } from "./team-threads.js";
 import { gist, isFridayNote, plainLine, withoutFridayNotes } from "./team-room.js";
-import { RailTip } from "./rail-tip.js";
 import { Avatar } from "./icons.js";
 import { createPortal } from "react-dom";
 import { ACCESS, backupFor, sayMate, type MateSays } from "./team-status.js";
@@ -103,6 +102,8 @@ export interface Team {
   working?: number;
   waiting?: number;
   doing?: Record<string, string>;
+  /** The Crew room's last words, as a room's are. */
+  last?: { by: string; text: string; at: number } | null;
 }
 
 /** The teammate on a lane, in the team or in any of its rooms. */
@@ -1483,11 +1484,12 @@ export const statusLine = (m: TeammateView): string => mateStatus(m).line;
  * is identity only: no ring.
  */
 const PRESENCE: Record<TeammateView["status"], Presence> = { working: "working", waiting: "needs", idle: "idle", offline: "asleep", limited: "error", stopped: "error" };
-/** When each face (by its seed) last finished a run, seen as the team moved from working to idle (refreshTeam): its check shows 8s. */
+/** When each face (by its seed) last finished a run, seen as the team moved from working to idle (refreshTeam): its check shows a while. */
 const doneAt = new Map<string, number>();
 /** When each face started working, as first seen: its elapsed time counts from here. */
 const workingSince = new Map<string, number>();
-const DONE_FOR = 8_000;
+// Ten minutes, long enough to see on looking back at the crew, short enough that a check means "just now" (2026-11-03).
+const DONE_FOR = 10 * 60_000;
 /** When each face (by its seed) was stopped by the person (Stop all, Stop): going idle then is no finish, and gets no check. */
 const stoppedAt = new Map<string, number>();
 export function markStopped(mates: Pick<TeammateView, "look" | "name">[]): void {
@@ -1510,6 +1512,7 @@ function noteStates(was: Team | null, now: Team): void {
 /** Since when a teammate has been working, as this window has seen it, or null. */
 export const workingSinceOf = (m: Pick<TeammateView, "look" | "name" | "status">): number | null => (m.status === "working" ? (workingSince.get(m.look ?? m.name) ?? null) : null);
 export const presenceOf = (status: TeammateView["status"] | undefined): Presence => PRESENCE[status ?? "idle"];
+const STATE_WORD: Partial<Record<Presence, string>> = { working: "working", needs: "needs you", error: "stopped", limited: "out of usage", done: "just finished", queued: "waiting its turn" };
 export const Face = memo(function Face({ seed, size, status, label, lead }: { seed: string; size: number; status?: TeammateView["status"]; /** Said to a screen reader; none when the name is beside it. */ label?: string; /** Leads where it is shown: a crown. */ lead?: boolean }) {
   const finished = status === "idle" ? doneAt.get(seed) : undefined;
   const done = finished !== undefined && Date.now() - finished < DONE_FOR;
@@ -1521,12 +1524,44 @@ export const Face = memo(function Face({ seed, size, status, label, lead }: { se
   }, [done, finished]);
   const blink = useBlink(status === "working" && !initialsFaces());
   const eyes: Eyes = status === "offline" ? "closed" : blink ? "blink" : "open";
+  const state = done ? "done" : presenceOf(status);
+  // How it stands as a badge on the top right of its head (Arun, 2026-11-03, picked "solid badges", then "2 · Soft depth" of three
+  // finishes): a disc in the state's colour with a white sign, a faint light from above and a cut-out of the ground round it, so it
+  // sits cleanly on a face of any colour. Bouncing dots at work, ? waiting on you, ! stopped, ✓ just finished; nothing at rest, and
+  // asleep its eyes are shut.
+  const b = Math.max(12, Math.round(size * 0.4));
+  const sign = Math.round(b * 0.72);
   return (
-    <PresenceRing state={done ? "done" : presenceOf(status)} size={size} className="tm-face-wrap" {...(label ? { label } : {})}>
+    <PresenceRing state="idle" size={size} className="tm-face-wrap" {...(label ? { label: `${label}${state === "idle" || state === "asleep" ? "" : `, ${STATE_WORD[state]}`}` } : {})}>
       <span className="tm-face-in" data-lead={lead ? "true" : undefined} aria-hidden="true">
-        {initialsFaces() ? <Initials seed={seed} size={size} /> : <BlobFace seed={seed} size={size} eyes={eyes} breathing={status === "working"} />}
+        {initialsFaces() ? <Initials seed={seed} size={size} /> : <BlobFace seed={seed} size={size} eyes={eyes} breathing={status === "working"} crowned={lead} />}
         {lead && <Crown />}
       </span>
+      {state !== "idle" && state !== "asleep" && (
+        <span className="tm-badge" data-state={state} style={{ "--b": `${b}px` } as CSSProperties} aria-hidden="true">
+          {state === "working" ? (
+            <span className="tm-badge-dots">
+              <i />
+              <i />
+              <i />
+            </span>
+          ) : state === "needs" ? (
+            <svg viewBox="0 0 12 12" width={sign} height={sign} fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round">
+              <path d="M4.4 4.5a1.7 1.7 0 1 1 2.6 1.4c-.6.4-1 .8-1 1.5" />
+              <circle cx="6" cy="9.6" r=".35" fill="currentColor" strokeWidth="1" />
+            </svg>
+          ) : state === "done" ? (
+            <svg viewBox="0 0 12 12" width={sign} height={sign} fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m3.3 6.3 1.9 1.9 3.6-4.2" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 12 12" width={sign} height={sign} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <path d="M6 3.2v3.6" />
+              <circle cx="6" cy="9.2" r=".4" fill="currentColor" strokeWidth="1" />
+            </svg>
+          )}
+        </span>
+      )}
     </PresenceRing>
   );
 });
@@ -1615,6 +1650,8 @@ export function SidebarTeammates({ identity, onOpen, activeSid, needs = [] }: { 
     </button>
   );
   const [roomMenu, setRoomMenu] = useState<{ r: RoomView; x: number; y: number } | null>(null);
+  // What waits on you, folded to its one bar until opened (Sidebar B).
+  const [needsOpen, setNeedsOpen] = useState(false);
   // Right-click anywhere else in the Team tab: the Team room's row or the space around the rows.
   const [panelMenu, setPanelMenu] = useState<{ x: number; y: number; room?: boolean } | null>(null);
   // A room being made (true) or changed.
@@ -1768,6 +1805,52 @@ export function SidebarTeammates({ identity, onOpen, activeSid, needs = [] }: { 
   const teamNeeds = needs.filter((it) => isTeamSid(it.sid));
   // What people in the workspace asked of the person's teammates, first in Needs you: a press opens the card (CrewHosted.tsx).
   let askRows: ReactNode[] = [];
+  const needRows = teamNeeds.slice(0, Math.max(0, 6 - askRows.length)).map((it) => {
+    const m = it.lane ? mateOn(it.lane) : null;
+    const where = t.rooms?.find((r) => r.sid === it.sid);
+    return (
+      <button
+        key={`${it.sid}:${it.seq}`}
+        type="button"
+        className="tm-row tm-need"
+        onClick={() => (where ? openRoom(where, onOpen) : openTeammate(t, null, onOpen), it.lane && focusAgent(it.sid, it.lane))}
+      >
+        {m ? <Face seed={m.look ?? m.name} size={24} status={it.kind === "stopped" ? "stopped" : "waiting"} /> : <PresenceRing state={it.kind === "stopped" ? "error" : "needs"} size={24}><span className="tm-face-none" /></PresenceRing>}
+        <span className="tm-text">
+          <span className="tm-name">
+            {m?.name ?? it.agent ?? "A teammate"}
+            {/* A no-break space: the row is a flex line, which drops a plain one at the tag's start ("Nova· Launch week"). */}
+            {where ? <span className="tm-where-tag">{"\u00a0· "}{where.name}</span> : null}
+          </span>
+          {/* A short status in words, never a tool's raw error (Arun, 2026-10-29: "node:internal/modules/cjs/loader:1…" read
+              as a needs-you line); the error is on hover here and in full in the chat. */}
+          <span className={`tm-sub ${it.kind === "stopped" ? "s-stopped" : "s-waiting"}`} title={it.detail}>{isRawError(it.text) ? (it.kind === "stopped" ? stoppedLine(it.text) : "Needs you") : m ? ((x) => x.charAt(0).toUpperCase() + x.slice(1))(it.text.replace(`${m.name} asks: `, "").replace(`${m.name} wants to `, "Wants to ")) : it.text}</span>
+        </span>
+        <span className="sr-only">Needs you</span>
+      </button>
+    );
+  });
+  // Waiting on you without an item of its own here (the room open is left out of the attention list): counted all the same.
+  const waitingMates = mates.filter((m) => m.status === "waiting" && !teamNeeds.some((it) => it.lane === m.lane));
+  const needCount = teamNeeds.length + askRows.length + waitingMates.length;
+  const needNames = [...new Set([...teamNeeds.map((it) => (it.lane ? (mateOn(it.lane)?.name ?? it.agent) : it.agent) ?? ""), ...waitingMates.map((m) => m.name)].filter(Boolean))].join(" · ");
+  // The list after the Crew room: its rooms, then its teammates (Arun, 2026-11-03: "make sure rooms are above the teammates"), each
+  // with those waiting on you first, then those at work, then the latest.
+  // A teammate waiting on you says what for, in its own words (its question, the command it wants to run).
+  const askOf = (m: TeammateView) => {
+    const it = teamNeeds.find((x) => x.lane === m.lane);
+    // Its own name is right above: "Mira asks: which page…" is said as "Which page…".
+    const said = it ? (isRawError(it.text) ? (it.kind === "stopped" ? stoppedLine(it.text) : "Needs you") : it.text.replace(`${m.name} asks: `, "").replace(`${m.name} wants to `, "Wants to ")) : undefined;
+    return said ? said.charAt(0).toUpperCase() + said.slice(1) : undefined;
+  };
+  type Conv = { kind: "room"; r: RoomView; rank: number; at: number } | { kind: "mate"; m: TeammateView; rank: number; at: number; ask?: string };
+  const convs: Conv[] = [
+    ...rooms.map((r): Conv => ({ kind: "room", r, rank: r.waiting ? 0 : r.working ? 1 : 2, at: r.last?.at ?? 0 })),
+    ...mates.map((m): Conv => {
+      const ask = askOf(m);
+      return { kind: "mate", m, rank: m.status === "waiting" || ask ? 0 : m.status === "working" ? 1 : 2, at: m.lastAt ?? 0, ...(ask ? { ask } : {}) };
+    }),
+  ].sort((a, b) => Number(a.kind === "mate") - Number(b.kind === "mate") || a.rank - b.rank || b.at - a.at);
   return (
     <section
       className="tm-side"
@@ -1784,125 +1867,133 @@ export function SidebarTeammates({ identity, onOpen, activeSid, needs = [] }: { 
           {failed}
         </p>
       )}
-      {/* What waits on the person, across the Team room and every room, a press from the chat it is in (OpenBot's home list). */}
-      {teamNeeds.length + askRows.length > 0 && (
-        <div className="tm-tray tm-tray-needs">
-          <div className="tm-side-head">{trayHead("needs", "Needs you", teamNeeds.length + askRows.length)}</div>
-          {!shut.includes("needs") && askRows.slice(0, 6)}
-          {!shut.includes("needs") && teamNeeds
-            .slice(0, Math.max(0, 6 - askRows.length))
-            .map((it) => {
-              const m = it.lane ? mateOn(it.lane) : null;
-              const where = t.rooms?.find((r) => r.sid === it.sid);
-              return (
-                <button
-                  key={`${it.sid}:${it.seq}`}
-                  type="button"
-                  className="tm-row tm-need"
-                  onClick={() => (where ? openRoom(where, onOpen) : openTeammate(t, null, onOpen), it.lane && focusAgent(it.sid, it.lane))}
-                >
-                  {m ? <Face seed={m.look ?? m.name} size={24} status={it.kind === "stopped" ? "stopped" : "waiting"} /> : <PresenceRing state={it.kind === "stopped" ? "error" : "needs"} size={24}><span className="tm-face-none" /></PresenceRing>}
-                  <span className="tm-text">
-                    <span className="tm-name">
-                      {m?.name ?? it.agent ?? "A teammate"}
-                      {/* A no-break space: the row is a flex line, which drops a plain one at the tag's start ("Nova· Launch week"). */}
-                      {where ? <span className="tm-where-tag">{"\u00a0· "}{where.name}</span> : null}
-                    </span>
-                    {/* A short status in words, never a tool's raw error (Arun, 2026-10-29: "node:internal/modules/cjs/loader:1…" read
-                        as a needs-you line); the error is on hover here and in full in the chat. */}
-                    <span className={`tm-sub ${it.kind === "stopped" ? "s-stopped" : "s-waiting"}`} title={it.detail}>{isRawError(it.text) ? (it.kind === "stopped" ? stoppedLine(it.text) : "Needs you") : it.text}</span>
-                  </span>
-                  <span className="sr-only">Needs you</span>
-                </button>
-              );
-            })}
-        </div>
-      )}
-      {/* Trays: each group its own raised panel, its name and action inside it, its rows inset (Arun, 2026-10-27: "use this as a
-          design inspo for like how our components should look like"). The Team room heads the rooms. */}
-      <div className="tm-tray" ref={flipRooms}>
-      <div className="tm-side-head">
-        {trayHead("rooms", "Rooms", rooms.length + 1)}
-        <button type="button" className="tm-add" onClick={() => setRooming(true)} aria-label="New room" title="New room: some of your teammates, on one thing">
-          <PlusIcon className="size-3.5" />
-        </button>
-      </div>
-      {!shut.includes("rooms") && <>
-      <button
-        type="button"
-        className="tm-row tm-room"
-        data-active={inView(null) ? "true" : undefined}
-        onClick={() => openTeammate(t, null, onOpen)}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          setPanelMenu({ x: e.clientX, y: e.clientY, room: true });
-        }}
-      >
-        <span className={`tm-room-mark${own.length ? "" : " empty"}`} aria-hidden="true">
-          {/* No one in it yet: the room's own mark, not an empty slot (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL"). */}
-          {own.length ? <RoomFaces seeds={byState(own, (m) => (m.status === "waiting" ? "needs" : m.status)).slice(0, 3).map((m) => m.look ?? m.name)} states={byState(own, (m) => (m.status === "waiting" ? "needs" : m.status)).slice(0, 3).map((m) => m.status)} size={28} off={own.every((m) => m.status === "offline")} /> : <UsersIcon className="size-4" />}
-        </span>
-        <span className="tm-text">
-          <span className={teamFresh ? "tm-name tm-unread" : "tm-name"}>Crew room</span>
-          {/* Its own: who works in the Team room itself, not in another room (workingInTeamRoom; 2026-10-27 audit). */}
-          <span className="tm-sub">{!own.length ? "Where your teammates work together" : t.waiting ? `${t.waiting} need${t.waiting === 1 ? "s" : ""} you · ${own.length} in the crew` : `${teamBusy ? `${teamBusy} working · ` : ""}${own.length} in the crew`}</span>
-        </span>
-        {/* Its faces carry who works and who needs you; only "new since you looked" is a dot (2026-10-29 direction: the blue dot goes). */}
-        {!t.waiting && !teamBusy && teamFresh ? <span className="tm-dot" data-state="new" aria-label="New since you looked" /> : null}
-      </button>
-      {byState(rooms, (r) => (r.waiting ? "needs" : r.working ? "working" : null)).map((r) => (
-        <RoomRow key={r.id} r={r} t={t} here={activeSid === r.sid} onOpen={onOpen} onMenu={(x, y) => setRoomMenu({ r, x, y })} />
-      ))}
-      {/* A room to make: one quiet "+" row that shows on hover or focus (2026-10-29 direction §9.2), not a dashed card. */}
-      {t.teammates.length > 1 && (
-        <button type="button" className="tm-row tm-add-row" onClick={() => setRooming(true)} title="A few teammates on one thing, apart from the rest">
-          <PlusIcon className="size-3.5" aria-hidden="true" />
-          <span className="tm-name">New room</span>
-        </button>
-      )}
-      </>}
-      </div>
-      <div className="tm-tray" ref={flip}>
-      <div className="tm-side-head">
-        {trayHead("mates", "Teammates", t.teammates.length, `Up to ${MAX} teammates`)}
+      {/* Sidebar B (Arun, 2026-11-03, picked from two, after OpenBot, Grok Bot and Hermes' bot mode): the crew's faces across the top
+          like contacts, what waits on you as one bar that opens to the list, then one list of conversations, the Crew room first and
+          the rest by who needs you, who is working, then the latest. */}
+      <div className="cv-faces" role="list" aria-label="Your crew">
+        {mates.map((m) => (
+          <button
+            key={m.id}
+            type="button"
+            role="listitem"
+            className="cv-face"
+            data-active={inView(m.lane) ? "true" : undefined}
+            onClick={() => pick(m)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setMenu({ m, x: e.clientX, y: e.clientY });
+            }}
+            title={`${m.name} · ${statusLine(m)}`}
+          >
+            <Face seed={m.look ?? m.name} size={30} status={m.status} lead={m.lane === t.lead} />
+            <span className="cv-face-name">{m.name}</span>
+          </button>
+        ))}
         {own.length < MAX && (
-          <button type="button" className="tm-add" onClick={() => setAdding(true)} aria-label="New teammate" title="New teammate">
-            <PlusIcon className="size-3.5" />
+          <button type="button" role="listitem" className="cv-face cv-face-add" onClick={() => setAdding(true)} title="New teammate: a name, a role and one of your coding tools">
+            <span className="cv-add-ring" aria-hidden="true">
+              <PlusIcon className="size-4" />
+            </span>
+            <span className="cv-face-name">{t.teammates.length ? "Add" : "New"}</span>
           </button>
         )}
       </div>
-      {!shut.includes("mates") && mates.map((m) => (
-        <div key={m.id} className="tm-row-wrap" data-flip={m.id}>
-        <button
-          type="button"
-          className="tm-row"
-          data-active={inView(m.lane) ? "true" : undefined}
-          onClick={() => pick(m)}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            setMenu({ m, x: e.clientX, y: e.clientY });
-          }}
-          // How it stands, in full: the line under its name is cut short once its queue's count is beside it (2026-10-27 audit).
-          title={`${m.name} · ${statusLine(m)}${m.role ? ` · ${m.role.split("\n")[0]}` : ""}`}
-        >
-          <Face seed={m.look ?? m.name} size={24} status={m.status} lead={m.lane === t.lead} />
-          <span className="tm-text">
-            <span className="tm-name">{m.name}</span>
-            <span className={`tm-sub s-${mateStatus(m).state}`}>{subOf(m)}</span>
-          </span>
-          {workingSinceOf(m) !== null && <span className="tm-elapsed">{elapsed(workingSinceOf(m)!, now)}</span>}
-          {/* Counted across every chat it has, the Team room's and each room's, and said so: a chat shows its own lane's only
-              (2026-10-27 audit: "4" beside Juno, 2 in her chat). */}
-          {m.queued > 0 && m.status !== "idle" && <span className="tm-queued" title={queuedTitle(m)} aria-label={queuedTitle(m)}>{m.queued}</span>}
-        </button>
-        <RowMore label={`More for ${m.name}`} open={menu?.m.id === m.id} onOpen={(x, y) => setMenu({ m, x, y })} />
-        </div>
-      ))}
-      {!t.teammates.length && !shut.includes("mates") && (
-        <button type="button" className="tm-empty" onClick={() => setAdding(true)}>
-          Add your first teammate: a name, a role and one of your coding tools.
+      {needCount > 0 && (
+        <button type="button" className="cv-needbar" aria-expanded={needsOpen} onClick={() => setNeedsOpen((o) => !o)}>
+          <span className="cv-needdot" aria-hidden="true" />
+          <b>
+            {needCount} need{needCount === 1 ? "s" : ""} you
+          </b>
+          <span className="cv-needwho">{needNames}</span>
+          <ChevronRightIcon className="cv-needchev size-3.5" data-open={needsOpen || undefined} aria-hidden />
         </button>
       )}
+      {needCount > 0 && needsOpen && (
+        <div className="cv-needs">
+          {askRows.slice(0, 6)}
+          {needRows}
+          {waitingMates.map((m) => (
+            <button key={m.id} type="button" className="tm-row tm-need" onClick={() => pick(m)}>
+              <Face seed={m.look ?? m.name} size={24} status="waiting" />
+              <span className="tm-text">
+                <span className="tm-name">{m.name}</span>
+                <span className="tm-sub s-waiting">{statusLine(m).replace(/^Needs you: /, "")}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="cv-head">
+        <span>Conversations</span>
+        <MenuButton
+          className="cv-plus"
+          icon="plus"
+          label="New conversation"
+          compact
+          items={() => [
+            { label: "New room…", icon: "users", sub: "A few teammates on one thing", onSelect: () => setRooming(true), disabled: t.teammates.length < 2 },
+            { label: "New teammate…", icon: "plus", sub: "A name, a role and a coding tool", onSelect: () => setAdding(true), disabled: own.length >= MAX },
+          ]}
+        />
+      </div>
+      <div className="cv-list" ref={flip}>
+        <button
+          type="button"
+          className="tm-row tm-room"
+          data-active={inView(null) ? "true" : undefined}
+          onClick={() => openTeammate(t, null, onOpen)}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            setPanelMenu({ x: e.clientX, y: e.clientY, room: true });
+          }}
+        >
+          <span className={`tm-room-mark${own.length ? "" : " empty"}`} aria-hidden="true">
+            {own.length ? <RoomFaces seeds={byState(own, (m) => (m.status === "waiting" ? "needs" : m.status)).slice(0, 3).map((m) => m.look ?? m.name)} states={byState(own, (m) => (m.status === "waiting" ? "needs" : m.status)).slice(0, 3).map((m) => m.status)} size={28} off={own.every((m) => m.status === "offline")} /> : <UsersIcon className="size-4" />}
+          </span>
+          <span className="tm-text">
+            <span className={teamFresh ? "tm-name tm-unread" : "tm-name"}>Crew room</span>
+            <span className={`tm-sub${t.waiting ? " s-waiting" : teamBusy ? " s-working" : ""}`}>{!own.length ? "Where your teammates work together" : t.waiting ? `${t.waiting} need${t.waiting === 1 ? "s" : ""} you` : teamBusy ? `${teamBusy} working` : t.last ? `${t.last.by.replace(/^[^']+'s /, "")}: ${t.last.text.replace(/\s+/g, " ")}` : `${own.length} in the crew`}</span>
+          </span>
+          <span className="cv-meta">
+            {t.last && <span className="cv-time">{relTime(t.last.at)}</span>}
+            {!t.waiting && !teamBusy && teamFresh ? <span className="tm-dot" data-state="new" aria-label="New since you looked" /> : null}
+          </span>
+        </button>
+        {convs.map((c) =>
+          c.kind === "room" ? (
+            <RoomRow key={c.r.id} r={c.r} t={t} here={activeSid === c.r.sid} onOpen={onOpen} onMenu={(x, y) => setRoomMenu({ r: c.r, x, y })} />
+          ) : (
+            <div key={c.m.id} className="tm-row-wrap" data-flip={c.m.id}>
+              <button
+                type="button"
+                className="tm-row"
+                data-active={inView(c.m.lane) ? "true" : undefined}
+                onClick={() => pick(c.m)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setMenu({ m: c.m, x: e.clientX, y: e.clientY });
+                }}
+                title={`${c.m.name} · ${statusLine(c.m)}${c.m.role ? ` · ${c.m.role.split("\n")[0]}` : ""}`}
+              >
+                <Face seed={c.m.look ?? c.m.name} size={28} status={c.m.status} lead={c.m.lane === t.lead} />
+                <span className="tm-text">
+                  <span className="tm-name">{c.m.name}</span>
+                  <span className={`tm-sub s-${mateStatus(c.m).state}`}>{c.ask ?? subOf(c.m).replace(/^Needs you: /, "")}</span>
+                </span>
+                <span className="cv-meta">
+                  {workingSinceOf(c.m) !== null ? <span className="cv-time">{elapsed(workingSinceOf(c.m)!, now)}</span> : c.m.lastAt ? <span className="cv-time">{relTime(c.m.lastAt)}</span> : null}
+                  {c.m.queued > 0 && c.m.status !== "idle" && <span className="tm-queued" title={queuedTitle(c.m)} aria-label={queuedTitle(c.m)}>{c.m.queued}</span>}
+                </span>
+              </button>
+              <RowMore label={`More for ${c.m.name}`} open={menu?.m.id === c.m.id} onOpen={(x, y) => setMenu({ m: c.m, x, y })} />
+            </div>
+          ),
+        )}
+        {!t.teammates.length && (
+          <button type="button" className="tm-empty" onClick={() => setAdding(true)}>
+            Add your first teammate: a name, a role and one of your coding tools.
+          </button>
+        )}
       </div>
       {menu && <ContextMenu at={menu} items={() => itemsOf(menu.m)} onClose={() => setMenu(null)} />}
       {roomMenu && <ContextMenu at={roomMenu} items={() => roomItems(roomMenu.r)} onClose={() => setRoomMenu(null)} />}
@@ -2020,9 +2111,13 @@ function RoomRow({ r, t, here, onOpen, onMenu }: { r: RoomView; t: Team; here: b
       </span>
       <span className="tm-text">
         <span className={fresh ? "tm-name tm-unread" : "tm-name"}>{r.name}</span>
-        <span className="tm-sub">{r.waiting ? `${r.waiting} need${r.waiting === 1 ? "s" : ""} you` : r.working ? `${r.working} working · ${who.map((m) => m.name).join(", ")}` : who.map((m) => m.name).join(", ") || "Nobody in it yet"}</span>
+        {/* Quiet, its last words, who said them first, as a conversation list has them (Sidebar B, 2026-11-03). */}
+        <span className={`tm-sub${r.waiting ? " s-waiting" : r.working ? " s-working" : ""}`}>{r.waiting ? `${r.waiting} need${r.waiting === 1 ? "s" : ""} you` : r.working ? `${r.working} working · ${who.map((m) => m.name).join(", ")}` : r.last ? `${r.last.by.replace(/^[^']+'s /, "")}: ${r.last.text.replace(/\s+/g, " ")}` : who.map((m) => m.name).join(", ") || "Nobody in it yet"}</span>
       </span>
-      {!(r.waiting > 0 || r.working > 0) && fresh ? <span className="tm-dot" data-state="new" aria-label="New since you looked" /> : null}
+      <span className="cv-meta">
+        {r.last && <span className="cv-time">{relTime(r.last.at)}</span>}
+        {!(r.waiting > 0 || r.working > 0) && fresh ? <span className="tm-dot" data-state="new" aria-label="New since you looked" /> : null}
+      </span>
     </button>
     <RowMore label={`More for ${r.name}`} open={false} onOpen={onMenu} />
     </div>
@@ -2307,7 +2402,12 @@ export function TeammateDialog({ identity, editing, onClose, inline }: { identit
   const [shuffled, setShuffled] = useState<string | null>(editing ? (editing.look ?? editing.name) : null);
   // In a colour of its own: none of the rest of the team's, while one is free (teammate-block.tsx distinctLook).
   const others = (team?.teammates ?? []).filter((m) => m.id !== editing?.id).map((m) => m.look ?? m.name);
-  const look = shuffled ?? distinctLook(name.trim() || "Friday", others);
+  // A new one's from the second set of faces, with more shapes and colours (teammate-face.tsx "v2:"); one being edited keeps its own.
+  const look = shuffled ?? distinctLook(`v2:${name.trim() || "Friday"}`, others);
+  // A few to choose from, as a grid under its name (Arun, 2026-11-03: "add more mascot designs and colors too"); new ones on "More".
+  const [picking, setPicking] = useState(false);
+  const [deal, setDeal] = useState(0);
+  const choices = useMemo(() => Array.from({ length: 12 }, (_, i) => `v2:${name.trim() || "Friday"}-${(deal * 12 + i).toString(36)}${Math.random().toString(36).slice(2, 4)}`), [deal, picking]); // eslint-disable-line react-hooks/exhaustive-deps
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   // What is wrong with the name, said on its field and the field focused, not at the dialog's foot below the fold (2026-10-27
@@ -2445,10 +2545,15 @@ export function TeammateDialog({ identity, editing, onClose, inline }: { identit
             <div className="tm-field tm-id-name">
               <div className="tm-id-label">
                 <label htmlFor={`${uid}-name`}>Name</label>
-                <button type="button" className="tm-shuffle" onClick={() => setShuffled(distinctLook(`${name.trim() || "Friday"}-${Math.random().toString(36).slice(2, 7)}`, [...others, look]))} title="Another look for it">
-                  <ShuffleIcon className="size-3.5" />
-                  Shuffle look
-                </button>
+                <span className="tm-look-acts">
+                  <button type="button" className="tm-shuffle" aria-expanded={picking} onClick={() => setPicking((p) => !p)} title="Choose its face">
+                    Pick a look
+                  </button>
+                  <button type="button" className="tm-shuffle" onClick={() => setShuffled(distinctLook(`v2:${name.trim() || "Friday"}-${Math.random().toString(36).slice(2, 7)}`, [...others, look]))} title="Another look for it">
+                    <ShuffleIcon className="size-3.5" />
+                    Shuffle
+                  </button>
+                </span>
               </div>
               {/* Not focused on a teammate's Settings tab, where it scrolled their header away (QA, 2026-10-28). */}
               <Input ref={nameField} id={`${uid}-name`} autoFocus={!inline} value={name} maxLength={40} placeholder="A name, like Rio" aria-invalid={!!nameErr} aria-describedby={nameErr ? `${uid}-name-err` : keptName !== name.trim() ? `${uid}-name-kept` : undefined} onChange={(e) => (setName(e.target.value), setNameErr(""))} />
@@ -2467,6 +2572,19 @@ export function TeammateDialog({ identity, editing, onClose, inline }: { identit
               )}
             </div>
           </div>
+          {picking && (
+            <div className="tm-looks" role="radiogroup" aria-label="Its face">
+              {choices.map((s) => (
+                <button key={s} type="button" role="radio" aria-checked={s === look} className="tm-look" onClick={() => (setShuffled(s), setPicking(false))} title="This face">
+                  <Robot seed={s} size={40} status="idle" />
+                </button>
+              ))}
+              <button type="button" className="tm-look tm-look-more" onClick={() => setDeal((d) => d + 1)} title="Twelve more">
+                <ShuffleIcon className="size-4" />
+                <span>More</span>
+              </button>
+            </div>
+          )}
           <label className="tm-field">
             <span>Role</span>
             {/* An example, plainly one, naming nobody on the team (2026-10-27 audit: it read as filled in, and named Kit). */}
@@ -2510,17 +2628,14 @@ export function TeammateDialog({ identity, editing, onClose, inline }: { identit
                 <label className="tm-row-field">
                   <span className="tm-row-label">Backup</span>
                   <span className="tm-row-input">
-                    <select className="tm-select" value={backup === (tool === "claude" ? "codex" : "claude") ? "" : backup} onChange={(e) => setBackup(e.target.value as EngineTool | "")}>
-                      <option value="">{ENGINE_NAMES[tool === "claude" ? "codex" : "claude"]} (automatic)</option>
-                      {/* Not again under its own name: "Codex (automatic)" and "Codex" were two choices of one thing (QA, 2026-10-28). */}
-                      {tools
-                        .filter((x) => x !== tool && x !== (tool === "claude" ? "codex" : "claude"))
-                        .map((x) => (
-                          <option key={x} value={x}>
-                            {ENGINE_NAMES[x]}
-                          </option>
-                        ))}
-                    </select>
+                    {/* Not again under its own name: "Codex (automatic)" and "Codex" were two choices of one thing (QA, 2026-10-28). */}
+                    <Picker<EngineTool | "">
+                      className="tm-select"
+                      value={backup === (tool === "claude" ? "codex" : "claude") ? "" : backup}
+                      label="Backup"
+                      onChange={setBackup}
+                      options={[{ value: "", label: `${ENGINE_NAMES[tool === "claude" ? "codex" : "claude"]} (automatic)` }, ...tools.filter((x) => x !== tool && x !== (tool === "claude" ? "codex" : "claude")).map((x) => ({ value: x, label: ENGINE_NAMES[x] }))]}
+                    />
                     <small>Out of usage, they carry on with this, and go back to {ENGINE_NAMES[tool]} when its limit lifts.</small>
                   </span>
                 </label>
@@ -2538,15 +2653,7 @@ export function TeammateDialog({ identity, editing, onClose, inline }: { identit
             <label className="tm-row-field">
               <span className="tm-row-label">Runs on</span>
               <span className="tm-row-input">
-                <select className="tm-select" value={machine} onChange={(e) => setMachine(e.target.value)}>
-                  <option value="">This computer</option>
-                  {computers.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.label}
-                    </option>
-                  ))}
-                  {machine && !computers.some((c) => c.id === machine) && <option value={machine}>Your other computer (not connected now)</option>}
-                </select>
+                <Picker className="tm-select" value={machine} label="Runs on" onChange={setMachine} options={[{ value: "", label: "This computer" }, ...computers.map((c) => ({ value: c.id, label: c.label })), ...(machine && !computers.some((c) => c.id === machine) ? [{ value: machine, label: "Your other computer", hint: "not connected now" }] : [])]} />
                 <small>{machine ? `Its coding tool, its own folder (~/Friday/teammates/${name.trim() || "Name"}) and the folders it works in are on that computer.` : "Its coding tool and its folders are on this computer."}</small>
               </span>
             </label>
@@ -2573,12 +2680,7 @@ export function TeammateDialog({ identity, editing, onClose, inline }: { identit
               <div key={c.id} className="tm-checkin">
                 <Input value={c.text} maxLength={2000} placeholder="What to ask it" aria-invalid={!!checkErr && checkAt === i} aria-describedby={checkErr && checkAt === i ? `${uid}-checkin-err` : undefined} onChange={(e) => (putCheckIn(i, { text: e.target.value }), setCheckErr(""))} aria-label="What it is asked" />
                 <div className="tm-checkin-when">
-                  <select className="tm-select" value={c.every} aria-label="How often" onChange={(e) => putCheckIn(i, { every: e.target.value as CheckIn["every"] })}>
-                    <option value="hourly">Every hour</option>
-                    <option value="daily">Every day</option>
-                    <option value="weekdays">Every weekday</option>
-                    <option value="weekly">Every week</option>
-                  </select>
+                  <Picker<CheckIn["every"]> className="tm-select" value={c.every} label="How often" onChange={(every) => putCheckIn(i, { every })} options={[{ value: "hourly", label: "Every hour" }, { value: "daily", label: "Every day" }, { value: "weekdays", label: "Every weekday" }, { value: "weekly", label: "Every week" }]} />
                   {c.every === "weekly" && (
                     <span className="tm-days" role="group" aria-label="Days">
                       {["S", "M", "T", "W", "T", "F", "S"].map((d, n) => (
@@ -2769,52 +2871,6 @@ function StarterTeam({ identity, onDone }: { identity: Identity; onDone: () => v
         </span>
       )}
     </span>
-  );
-}
-
-/**
- * The team on the narrow rail (SideRail.tsx), when the sidebar is folded: the Team room and each room as Friday's mark in its
- * members' colours, then each teammate's face as it stands (Arun, 2026-10-27: the OpenBot gap "a narrow-window sidebar").
- */
-export function TeamRailItems({ onOpen, activeSid }: { onOpen: (r: RecentSession) => void; activeSid: string | null }) {
-  useTeamVersion();
-  const t = team;
-  if (!t) return null;
-  const inIt = (ids: string[]) => ids.flatMap((id) => t.teammates.filter((m) => m.id === id));
-  const working = workingInTeamRoom(t);
-  // The person's own: each opens its chat in their Crew room (someone else's is asked from the sidebar).
-  const own = ownOf(t);
-  // A room's line: who is in it, and how many of them are at work.
-  const roomSub = (who: TeammateView[], busy: number) => `${busy ? `${busy} working · ` : ""}${who.map((m) => m.name).join(", ") || "Nobody yet"}`;
-  return (
-    <>
-      {/* Who works in the Team room itself (workingInTeamRoom; 2026-10-27 audit). */}
-      <RailTip label="Crew room" sub={own.length ? `${working ? `${working} working · ` : ""}${own.length} in the crew` : "Where your teammates work together"}>
-        <button type="button" className="rail-item" data-active={activeSid === t.sid ? "true" : undefined} aria-label="Crew room" onClick={() => openTeammate(t, null, onOpen)}>
-          {own.length ? <RoomFaces seeds={own.slice(0, 3).map((m) => m.look ?? m.name)} size={26} off={own.every((m) => m.status === "offline")} /> : <UsersIcon className="size-4" />}
-        </button>
-      </RailTip>
-      {(t.rooms ?? []).map((r) => {
-        const who = inIt(Object.keys(r.lanes));
-        return (
-          <RailTip key={r.id} label={r.name} sub={roomSub(who, r.working)}>
-            <button type="button" className="rail-item" data-active={activeSid === r.sid ? "true" : undefined} aria-label={`Room: ${r.name}`} onClick={() => openRoom(r, onOpen)}>
-              <RoomFaces seeds={who.slice(0, 3).map((m) => m.look ?? m.name)} size={26} off={who.length > 0 && who.every((m) => m.status === "offline")} />
-            </button>
-          </RailTip>
-        );
-      })}
-      {own.length > 0 && <span className="rail-sep" aria-hidden="true" />}
-      {own.map((m) => (
-        // Its tool once: a line that names it already ("On Codex · …", "Claude Code out of usage") isn't given it again in front
-        // (2026-10-27 audit).
-        <RailTip key={m.id} label={`${m.name}${m.lane === t.lead ? " · leads" : ""}`} sub={statusLine(m).includes(toolName(m.tool)) ? statusLine(m) : `${toolName(m.tool)} · ${statusLine(m)}`}>
-          <button type="button" className="rail-item" aria-label={`${m.name}: ${statusLine(m)}`} onClick={() => openTeammate(t, m.lane, onOpen)}>
-            <Face seed={m.look ?? m.name} size={24} status={m.status} lead={m.lane === t.lead} />
-          </button>
-        </RailTip>
-      ))}
-    </>
   );
 }
 
@@ -3168,15 +3224,14 @@ export function LocalAccount({ identity, tool, value, onChange }: { identity: Id
     <label className="tm-row-field">
       <span className="tm-row-label">Account</span>
       <span className="tm-row-input">
-        <select className="tm-select" value={at} onChange={(e) => onChange(e.target.value === "default" ? "" : e.target.value)}>
-          {accounts.map((a) => (
-            <option key={a.id} value={a.id} disabled={a.loggedIn === false && a.id !== value}>
-              {a.label}
-              {a.loggedIn === false ? " (signed out)" : a.out ? " (out of usage now)" : ""}
-            </option>
-          ))}
-          {at === "?" && <option value="?">An account no longer on this computer</option>}
-        </select>
+        <Picker
+          className="tm-select"
+          value={at}
+          label="Account"
+          placeholder="Its tool's own sign-in"
+          onChange={(v) => onChange(v === "default" ? "" : v)}
+          options={[...accounts.map((a) => ({ value: a.id, label: a.label, ...(a.loggedIn === false ? { hint: "signed out", ...(a.id !== value ? { disabled: true } : {}) } : a.out ? { hint: "out of usage now" } : {}) })), ...(at === "?" ? [{ value: "?", label: "An account no longer on this computer" }] : [])]}
+        />
         <small>It always runs as this one, and never moves to another account by itself.</small>
       </span>
     </label>

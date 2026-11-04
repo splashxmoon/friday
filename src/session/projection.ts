@@ -131,6 +131,13 @@ export interface SessionState {
   /** The agent that leads the others (lead.set), if one does. */
   lead?: string | null;
   laneRuns: Record<string, { status: RunStatus; sinceSeq: number; sinceAt?: number; error?: string }>;
+  /**
+   * When each lane's agent was last heard from: any event it sent for that lane. A run going with nothing heard for
+   * a long while is said as quiet, never as done (Orca's honest decay, Arun 2026-11-03). Absent on a state kept before it was.
+   */
+  heardAt?: Record<string, number>;
+  /** What each lane's agent is doing right now: its latest tool call while its run goes, as a verb and what it touches (step-words.ts). */
+  doing?: Record<string, { name: string; target?: string }>;
   /** When each lane's last turn finished well, by seq: an idle agent that has done something, not one that never ran. */
   finished?: Record<string, number>;
   /** Each lane whose last turn somebody stopped (run.pause), by seq, until its next turn starts: "stopped", not "done". */
@@ -706,7 +713,11 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
     const next = { status, sinceSeq: ev.seq, sinceAt: ev.ts, ...(error ? { error } : {}) };
     if (lane === MAIN_LANE) s.run = next;
     else s.laneRuns[lane] = next;
+    // A new run, or one that ended, is doing nothing yet.
+    if (s.doing) delete s.doing[lane];
   };
+  // Only the agent itself: the system's own events (a machine coming online, a setting) would make a stuck agent look alive.
+  if (ev.actor.kind === "agent") (s.heardAt ??= {})[lane] = ev.ts;
 
   switch (b.type) {
     case "session.moved":
@@ -1237,6 +1248,11 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       break;
     }
     case "agent.message":
+      // Its latest call is what it is doing now, until its next one or its run ends.
+      {
+        const last = b.toolCalls.at(-1);
+        if (last) (s.doing ??= {})[lane] = callDoing(last);
+      }
       // A revised plan is a different plan: what people said of the old one doesn't carry over.
       if (b.toolCalls.some((c) => c.name === "update_plan")) delete s.planReviews[lane];
       // The files a plan names are what the agent means to change: kept, so an overlap with another agent shows before it writes.
@@ -1267,6 +1283,20 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
 
 const PR_URL = /https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/;
 /** A pull request a tool call just opened: `gh pr create` ends on its link alone; a GitHub tool's create_pull_request says it. */
+/** A tool call as what it touches, for "Editing Sidebar.tsx" on a row: the file, command, pattern or address it names, short. */
+export function callDoing(call: { name: string; arguments: string }): { name: string; target?: string } {
+  let args: Record<string, unknown> = {};
+  try {
+    const v = JSON.parse(call.arguments) as unknown;
+    if (v && typeof v === "object") args = v as Record<string, unknown>;
+  } catch {
+    // Arguments still being written, or not JSON: the verb alone.
+  }
+  const pick = ["path", "file_path", "command", "pattern", "query", "url", "name"].map((k) => args[k]).find((v): v is string => typeof v === "string" && !!v.trim());
+  const target = pick?.trim().split(/\r?\n/)[0]!.slice(0, 120);
+  return { name: call.name.slice(0, 60), ...(target ? { target } : {}) };
+}
+
 export function openedPr(name: string, output: string, isError: boolean): string | null {
   if (isError || !output.includes("github.com/")) return null;
   if (/create_?pull_?request/i.test(name)) return PR_URL.exec(output)?.[0] ?? null;

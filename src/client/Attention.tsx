@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { teamAttention, teamDoneTitle, useTeam, useTeamTab } from "./Teammates.js";
-import { isWorkSid, useWorkMode } from "./WorkMode.js";
+import { teamAttention, teamDoneTitle, useTeam } from "./Teammates.js";
 import { shortPaths } from "./shortPaths.js";
 import { createPortal } from "react-dom";
 import type { Attention, Crew, Preview, SessionPr, Working } from "../attention.js";
@@ -367,13 +366,7 @@ export function WaitingOnYou({ identity, items, recents, onOpen, viewing }: { id
   }, [open]);
   // Everything still waiting elsewhere, which the header's pill counts as the sidebar does; dismissing a toast hides that toast,
   // not the wait (2026-10-27 audit: the pill went for good once its item was dismissed, while the sidebar still said "Needs you 1").
-  let here = (_sid: string) => true;
-  // In Work, Work's waits; in Code, Code's: the other place's are its dot on the sidebar's switch. "1 waiting on you" in Work was a
-  // Code session's question (QA, 2026-10-28; Arun: "TEST EVERYTHING… EVERY INTERACTION"). Crew keeps them all.
-  const [workOn] = useWorkMode();
-  const [crewOn] = useTeamTab();
-  const inWork = viewing ? isWorkSid(viewing) : workOn;
-  if (!crewOn) here = (sid) => isWorkSid(sid) === inWork;
+  const here = (_sid: string) => true;
   const counted = items.filter((it) => it.sid !== viewing && here(it.sid) && !done.has(keyOf(it)) && recents.some((r) => r.sid === it.sid));
   const inHeader = !!viewing && !!slot;
   // The toasts in the corner leave out what was dismissed; the list the pill opens, asked for, has them all.

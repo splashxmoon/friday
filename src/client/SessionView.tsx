@@ -4,7 +4,6 @@ import { openInPreview } from "./previewBus.js";
 import { pictureSession } from "./LiveBlock.js";
 import { WorkBar, WorkRail } from "./WorkRail.js";
 import { isWorkSid, markWorkSession, useWorkMode, WorkNote } from "./WorkMode.js";
-import { isTeamDemo, TeamGuide } from "./TeamDemo.js";
 import { SessionMenu } from "./SessionMenu.js";
 import { EmptyState } from "@/components/dass/EmptyState";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
@@ -50,7 +49,7 @@ import { md } from "./markdown.js";
 /** This session's workspace, Solo or Team (Team.tsx): the hosted Friday's question. Every session in the local edition is Solo. */
 const sessionWorkspace: { useSessionPlan: (sid: string, invite?: string, member?: string) => SessionPlan | null } = { useSessionPlan: () => null };
 import type { Identity, RecentSession, RepoUse } from "./storage.js";
-import { ActionNote, InlineEdit, MenuButton, Segmented, SessionSkeleton, ShownText, Switch, inBand, isTyping, useConfirm, useDismiss, type MenuItem } from "./ui.js";
+import { Check, ActionNote, InlineEdit, MenuButton, Segmented, SessionSkeleton, ShownText, Switch, inBand, isTyping, useConfirm, useDismiss, type MenuItem } from "./ui.js";
 import { useSession, type Send } from "./useSession.js";
 import type { Focus } from "../focus.js";
 import { CLASS_LABEL, COMMAND_CLASSES, type CommandClass } from "../command-class.js";
@@ -1003,8 +1002,6 @@ export function SessionView({
             return <Activity {...activityProps} headSlot={headTabs ? agentsSlot : null} />;
           })()}
         </div>
-        {/* The team demo's guide, beside its chat: each moment pointed out as it happens (TeamDemo.tsx). */}
-        {!replaying && !state.options.work && !state.options.team && isTeamDemo(sid, state.title) && <TeamGuide sid={sid} state={state} events={s.events} />}
         {state.options.work && <WorkRail state={state} events={s.events} sid={sid} invite={invite} away={bench} send={send} onBrowser={() => onOpen("preview")} onBrowse={(url) => (onOpen("preview"), openInPreview(url, sid, "auto"))} />}
         <BenchOrHistory
           bench={bench}
@@ -1898,7 +1895,7 @@ function ApproveRules({ state, send }: { state: SessionState; send: Send }) {
           {COMMAND_CLASSES.map((c) => (
             <li key={c}>
               <label className={CLASS_LABEL[c].careful ? "careful" : ""}>
-                <input type="checkbox" checked={on.has(c)} onChange={() => toggle(c)} />
+                <Check checked={on.has(c)} onChange={() => toggle(c)} />
                 <span className="approve-text">
                   <span className="approve-name">{CLASS_LABEL[c].label}</span>
                   <span className="approve-hint">{CLASS_LABEL[c].hint}</span>

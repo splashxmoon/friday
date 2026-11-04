@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Icon } from "./icons.js";
 import type { RecentSession } from "./storage.js";
-import { askTeamDemo, isTeamDemo } from "./TeamDemo.js";
 import { isTeamSid, newTeammate, setTeamTab, useTeamNow } from "./Teammates.js";
 import "./getting-started.css";
 
@@ -38,11 +37,10 @@ const focusBox = () => document.querySelector<HTMLTextAreaElement>(".composer-ca
 export function GettingStarted({ recents, onPickFolder }: { recents: RecentSession[]; /** Opens the box's folder picker. */ onPickFolder: () => void }) {
   const t = useTeamNow();
   const [hidden, setHidden] = useState(() => read(HIDDEN));
-  const own = recents.filter((r) => !isTeamSid(r.sid) && !isTeamDemo(r.sid, r.title));
+  const own = recents.filter((r) => !isTeamSid(r.sid));
   const steps = [
     { id: "task", title: "Give an agent its first task", body: "Describe a change in the box above. It works in a folder of its own until you pick one.", done: own.length > 0, act: "Write it", run: focusBox },
     { id: "folder", title: "Point it at your own project", body: "Pick a folder or repo, and the agent works on your real code, on a branch of its own.", done: read(OWN_FOLDER), act: "Pick a folder", run: onPickFolder },
-    { id: "team", title: "Watch your agents work as a team", body: "Two agents split a small job, tell each other what changed and check each other's work.", done: recents.some((r) => isTeamDemo(r.sid, r.title)), act: "Watch", run: askTeamDemo },
     { id: "mate", title: "Add a teammate who stays", body: "A name, a role and a coding tool: it keeps its memory and works through its queue while you're away.", done: !!t?.teammates.length, act: "Add", run: () => (setTeamTab(true), setTimeout(newTeammate, 50)) },
   ];
   const done = steps.filter((s) => s.done).length;

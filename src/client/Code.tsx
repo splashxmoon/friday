@@ -27,9 +27,8 @@ import { branchName, branchRef, FolderBranchPick, type FolderBranch } from "./Br
 import type { ResumeLink } from "./resume-link.js";
 import { issueBranch, parseIssueUrl, parsePrLink, withIssue, withPr, type Issue, type Pr } from "../github-issue.js";
 import { isTeamSid } from "./Teammates.js";
-import { leaveWorkNote, markWorkSession, startTeammate, teammateOf, useWorkMode, useWorkSessions, WORK_LINES, WORK_MODE_BLURB, WORK_PLACEHOLDER, WorkField, WorkStarters, workListed } from "./WorkMode.js";
+import { leaveWorkNote, markWorkSession, startTeammate, teammateOf, useWorkMode, WORK_LINES, WORK_MODE_BLURB, WORK_PLACEHOLDER, WorkField, WorkStarters } from "./WorkMode.js";
 import { CircleDotIcon, GitPullRequestIcon } from "lucide-react";
-import { isTeamDemo, runTeamDemo, TeamDemoOffer, useDemoTeam } from "./TeamDemo.js";
 import { DailyBriefCard, openBrief } from "./DailyBrief.js";
 import { GoalsCard } from "./Goals.js";
 import { ReadyCard } from "./ReadyCard.js";
@@ -424,8 +423,6 @@ export function Code({
   }, [work]);
   const ready = ENGINE_TOOLS.filter((t) => machine.tools.some((x) => x.tool === t && x.path && x.loggedIn !== false && !x.unavailable));
   const mate = work ? teammateOf(engine, ready) : null;
-  // "Right now" under the box lists the sessions of the kind being started, as the sidebar does.
-  const workSids = useWorkSessions(identity);
   // The folders beside it the coding tool may work in too, once changed here (see AlsoWorksIn); null keeps those kept for the folder.
   const [dirs, setDirs] = useState<string[] | null>(null);
   useEffect(() => setDirs(null), [folder?.path]);
@@ -535,35 +532,9 @@ export function Code({
     onStart(sid, invite);
   };
 
-  // The team demo (TeamDemo.tsx): asked for from setup's last step, the offer under the box, or Settings › About. Started here,
-  // where the computer's tools are known, each step said under the box as it goes, and opened once the lead has its job.
-  const demoTeam = useDemoTeam(machine);
-  // Asked for while the computer is still being looked at (just opened from Settings): started once it has said what it has.
-  const demoWaits = useRef(false);
-  useEffect(() => {
-    if (machine.mode !== "checking" && demoWaits.current) (demoWaits.current = false), startDemo();
-  }, [machine.mode]); // eslint-disable-line react-hooks/exhaustive-deps
-  const startDemo = () => {
-    if (busy) return;
-    if (machine.mode === "checking") return void (demoWaits.current = true);
-    if (demoTeam.length < 2) return void (setErr("Sign in to a coding tool first: the demo runs your own agents."), window.dispatchEvent(new Event("friday:setup")));
-    setBusy(true);
-    setErr("");
-    runTeamDemo(identity, demoTeam, setAttachNote).then(
-      (r) => started(r.sid, r.invite),
-      (e: Error) => (setErr(e.message), setAttachNote(""), setBusy(false)),
-    );
-  };
-  // The listener is added once; it calls the start of the render it is heard in.
-  const startDemoNow = useRef(startDemo);
-  startDemoNow.current = startDemo;
-  useEffect(() => {
-    const go = () => startDemoNow.current();
-    addEventListener("friday:team-demo", go);
-    return () => removeEventListener("friday:team-demo", go);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  // Offered under the box while nobody has a session of their own yet: the demo's own don't count, so it is there again after.
-  const firstRun = !recents.some((r) => !isTeamDemo(r.sid, r.title) && !isTeamSid(r.sid));
+
+  // A first visit: nobody has a session of their own yet (the Crew room is Friday's).
+  const firstRun = !recents.some((r) => !isTeamSid(r.sid));
 
   // What each coding agent's row says about the computer it would run on. Nothing is ruled out before a machine has told us what it has.
   const toolState = (t: EngineTool) => {
@@ -1246,9 +1217,6 @@ export function Code({
       {attachNote && (busy || !(hasMachine && folder)) && <p className="muted small attach-note">{attachNote}</p>}
       {(err || (nudged && blockedWhy)) && <p role="alert" className="error">{err || blockedWhy}</p>}
 
-      {/* The first thing to try once a coding tool works: the person's own agents working as a team on a sample (TeamDemo.tsx). */}
-      {/* On someone's own computer the demo is a step of Getting started, below: offered twice, it was two cards saying one thing. */}
-      {!work && !isLocal() && hasMachine && firstRun && !busy && !goal.trim() && <TeamDemoOffer team={demoTeam} busy={busy} onGo={startDemo} />}
 
       {/* The sample runs Friday's own agent: Team's, or on Solo the person's own model. */}
 
@@ -1269,7 +1237,7 @@ export function Code({
       <HomeActivity
         identity={identity}
         recents={
-          isLocal() ? (work && !workListed() ? [] : recents.filter((r) => workSids.has(r.sid) === work && !isTeamSid(r.sid))) : // never a Crew room, as the sidebar (Sidebar.tsx); in Work, nothing until the Work sessions are known (a Code task listed under Work's "Right now", the 2026-10-28 critique)
+          isLocal() ? recents.filter((r) => !isTeamSid(r.sid)) : // never a Crew room, as the sidebar (Sidebar.tsx); in Work, nothing until the Work sessions are known (a Code task listed under Work's "Right now", the 2026-10-28 critique)
           recents
         }
         onOpen={onStart}

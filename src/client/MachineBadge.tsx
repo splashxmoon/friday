@@ -13,9 +13,8 @@ const link: { useAutoLink: () => "idle" | "trying" | "ok" | "failed"; useAutoLin
 };
 import { EngineMark } from "./BrandMarks.js";
 import { openOutside } from "./openOutside.js";
-import { ENGINE_INFO, FIRST_TOOLS, installStep, osOf, splitTools } from "./engines.js";
+import { ENGINE_INFO, installStep, osOf, splitTools, WELCOME_TOOLS } from "./engines.js";
 import { Icon } from "./icons.js";
-import { useWorkMode } from "./WorkMode.js";
 import { NoMachine, hostApi, machineRefusal, type LocalTool, type MachineState } from "./local.js";
 import type { Identity } from "./storage.js";
 import { MenuButton, MoreTools, useDismiss } from "./ui.js";
@@ -40,9 +39,7 @@ type Acting = "out" | "switch" | "in";
 export function MachineBadge({ identity, machine, refresh, inline = false, welcome = false }: { identity: Identity; machine: MachineState; refresh: () => void; /** Always shown, compact, with no pill to open it: the new-session page's corner. */ inline?: boolean; /** In the welcome (Setup.tsx): the well-known tools always listed, ready ones first, and no line about where it runs. */ welcome?: boolean }) {
   const [open, setOpen] = useState(false);
   // What stays here, said for the kind of work in front of you (w1 #4: "The code, the terminal and your coding tool" in Work).
-  let topLine = "The code, the terminal and your coding tool stay here. Nothing is uploaded.";
-  const [workOn] = useWorkMode();
-  if (workOn) topLine = "Your folders, your files and your coding tools stay on this computer. Nothing is uploaded.";
+  const topLine = "The code, the terminal and your coding tool stay here. Nothing is uploaded.";
   const [step, setStep] = useState<Step>("idle");
   const [err, setErr] = useState("");
   const [signInUrl, setSignInUrl] = useState("");
@@ -97,7 +94,9 @@ export function MachineBadge({ identity, machine, refresh, inline = false, welco
   // "this is the first impression of our app"): Claude Code under "14 more" told someone without it nothing.
   if (welcome) {
     const rank = (t: EngineTool) => { const f = tools.find((x) => x.tool === t); return !f ? 2 : f.loggedIn === false ? 1 : 0; };
-    const first = ENGINE_TOOLS.filter((t) => shown.here.includes(t) || FIRST_TOOLS.includes(t)).sort((a, b) => rank(a) - rank(b));
+    // Five people know, and any other here that is signed in: one not signed in, or whose sign-in can't be told, waits under
+    // "more" (Arun, 2026-11-03: OpenCode and Devin in the five, not Muse Code and GitHub Copilot).
+    const first = ENGINE_TOOLS.filter((t) => WELCOME_TOOLS.includes(t) || tools.some((x) => x.tool === t && x.loggedIn === true)).sort((a, b) => rank(a) - rank(b));
     shown = { here: first, away: ENGINE_TOOLS.filter((t) => !first.includes(t)) };
   }
   const needsSignIn = tools.find((t) => t.loggedIn === false);

@@ -23,7 +23,7 @@ import { Textarea } from "@/components/ui/textarea";
 import type { SessionEvent } from "../types.js";
 import type { SessionState } from "../session/projection.js";
 import { api } from "./api.js";
-import { useConfirm } from "./ui.js";
+import { Picker, useConfirm } from "./ui.js";
 import type { Identity } from "./storage.js";
 import type { Send } from "./useSession.js";
 import { nextAt, nextEight, setAway, setPaused, setSelfRun, stopAll, untilOf } from "./team-api.js";
@@ -432,14 +432,7 @@ function SelfRunSwitch({ identity, sid, notify, embedded }: { identity: Identity
             <div className="tm-selfrun-budget">
               <label>
                 <span>Budget</span>
-                <select className="tm-select" value={tokens} aria-label="The run's budget" onChange={(e) => setTokens(Number(e.target.value))}>
-                  {RUN_BUDGETS.map((n) => (
-                    <option key={n} value={n}>
-                      {n / 1_000_000}M tokens{n === DEFAULT_RUN_TOKENS ? " (a night's work)" : ""}
-                    </option>
-                  ))}
-                  <option value={0}>No budget</option>
-                </select>
+                <Picker className="tm-select" value={tokens} label="The run's budget" onChange={setTokens} options={[...RUN_BUDGETS.map((n) => ({ value: n, label: `${n / 1_000_000}M tokens`, ...(n === DEFAULT_RUN_TOKENS ? { hint: "a night's work" } : {}) })), { value: 0, label: "No budget" }]} />
               </label>
               <label>
                 <span>Ends at</span>

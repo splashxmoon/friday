@@ -1,5 +1,6 @@
 import { realpathSync } from "node:fs";
 import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { GO_AHEAD_WORDS, guardTool, type GoAhead, type GuardPlace, type Verdict } from "../guardrails.js";
 import { createHash, randomUUID } from "node:crypto";
 import { homedir, hostname, tmpdir } from "node:os";
 import path from "node:path";
@@ -139,7 +140,7 @@ type ServerMsg =
   /** A message for the turn running now, to read at its next step (Parser.steer); answered with `steer.result`. */
   | { kind: "steer"; id: string; text: string }
   /** A person's answer to what the tool is waiting on mid-turn (an `engine.approval` sent `live`). */
-  | { kind: "approval"; id: string; approve: boolean }
+  | { kind: "approval"; id: string; approve: boolean; /** Friday's own answer (a teammate's go-ahead while the person is away, or left unanswered): what to tell the tool. */ note?: string }
   /** Someone else in the session asking to read the folder this runner opened. */
   | ({ kind: "repo"; id: string } & Omit<RepoRequest, "mode">)
   | { kind: "released" }
@@ -1064,6 +1065,8 @@ export class Runner {
       ...(thinks ? { effort: thinks } : {}),
       ...(mcp.length ? { mcp } : {}),
       ...(ask ? { ask: true } : {}),
+      // A teammate at full access is held to the go-ahead list (guardrails.ts; Arun, 2026-11-03).
+      ...(this.opts.keepAs && mode === "full" ? { guarded: true } : {}),
       ...(this.acpMcp.length || (this.friday && acpTool) ? { acpMcp: [...this.acpMcp, ...(this.friday && acpTool ? [acpEntry(this.friday.spec)] : [])] } : {}),
       ...(this.friday ? { friday: this.friday.spec } : {}),
       ...(this.skipFlags.size ? { skip: [...this.skipFlags] } : {}),
@@ -1390,7 +1393,7 @@ export class Runner {
       if (!asked) return void this.adopted?.onMessage(m);
       this.live.delete(m.id);
       if (asked.reply) asked.reply(m.approve);
-      else this.warm?.answer(asked.requestId, m.approve, asked.input, "The person driving said no to that. Don't try to get round it: do it another way, or ask them what they would rather.");
+      else this.warm?.answer(asked.requestId, m.approve, asked.input, m.note ?? "The person driving said no to that. Don't try to get round it: do it another way, or ask them what they would rather.");
       this.log(`${m.approve ? "allowed" : "refused"} what it asked (${m.id})`);
       // The next one it asked meanwhile, now that this one is answered.
       const next = this.waitingAsks.shift();
@@ -1879,14 +1882,21 @@ ${prompt}`;
    * at a time, so a second card replaced the first, and the first could then never be answered: these wait their turn and
    * are put one after another, each once the one before is answered.
    */
-  private readonly waitingAsks: { scope: "commands" | "turn"; item: string; why?: string; requestId: string; input: Record<string, unknown>; reply?: (allow: boolean) => void }[] = [];
+  private readonly waitingAsks: { scope: "commands" | "turn"; item: string; why?: string; guard?: GoAhead; requestId: string; input: Record<string, unknown>; reply?: (allow: boolean) => void }[] = [];
+
+  /** Where a teammate works, for its go-ahead list: its own folder or copy, and the projects it was given. */
+  private guardPlace(): GuardPlace {
+    const cwd = this.opts.cwd;
+    const mine = !!this.opts.copyOf || /[\\/]Friday[\\/]teammates[\\/]/.test(cwd);
+    return { own: mine ? [cwd] : [], given: [...(mine ? [] : [cwd]), ...(this.opts.copyOf ? [this.opts.copyOf] : []), ...(this.opts.dirs ?? [])], home: homedir(), cwd };
+  }
 
   /** Put an ask to the session as its card. */
   private putAsk(a: (typeof this.waitingAsks)[number]): void {
     const id = randomUUID().slice(0, 8);
     this.live.set(id, { requestId: a.requestId, input: a.input, ...(a.reply ? { reply: a.reply } : {}) });
     this.askedLive.add(a.item);
-    this.send({ kind: "event", body: { type: "engine.approval", id, scope: a.scope, items: [a.item], live: true, ...(a.why ? { why: a.why } : {}) } });
+    this.send({ kind: "event", body: { type: "engine.approval", id, scope: a.scope, items: [a.item], live: true, ...(a.why ? { why: a.why } : {}), ...(a.guard ? { guard: a.guard } : {}) } });
   }
   /** How the turn now running is stopped, for a tool that has a way of its own (see Parser.cancel). */
   private cancelTurn: (() => void) | null = null;
@@ -1930,6 +1940,22 @@ ${prompt}`;
         // Auto: nobody is asked, so what the tool would have asked about goes ahead, as for a person who always says yes. A
         // question for the person (Claude Code's AskUserQuestion) is the one thing not answered for them.
         if (this.mode === "full") {
+          // A teammate is held to the go-ahead list (guardrails.ts): most of what it does runs, a few things are asked of the
+          // person, and the floor is refused outright with the reason, so it does it another way.
+          const v: Verdict = this.opts.keepAs && out.tool !== "AskUserQuestion" ? guardTool(out.tool, out.input, this.guardPlace()) : { kind: "run" };
+          if (v.kind === "never") {
+            if (out.reply) out.reply(false);
+            else this.warm?.answer(out.requestId, false, out.input, `${v.why} A teammate never does this, whoever asks. Do it another way, or tell the person what you needed and why.`);
+            this.log(`${this.label}: refused (never): ${v.why}`);
+            break;
+          }
+          if (v.kind === "ask") {
+            const { scope, item } = askedItem(out.tool, out.input);
+            const ask = { scope, item: item || out.tool, why: `${GO_AHEAD_WORDS[v.tag]}: ${v.why}`, guard: v.tag, requestId: out.requestId, input: out.input, ...(out.reply ? { reply: out.reply } : {}) };
+            if (this.live.size) this.waitingAsks.push(ask);
+            else this.putAsk(ask);
+            break;
+          }
           const allow = out.tool !== "AskUserQuestion";
           if (out.reply) out.reply(allow);
           else this.warm?.answer(out.requestId, allow, out.input, DECIDE_YOURSELF);

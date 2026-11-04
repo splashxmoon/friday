@@ -13,6 +13,7 @@ import { AgentsHub } from "./AgentsHub.js";
 import { hostApi } from "./local.js";
 import { PreviewPanel, useBackgroundTasks, usePreviewInfo } from "./Preview.js";
 import { TasksPanel } from "./Tasks.js";
+import { UsagePanel } from "./UsagePanel.js";
 import { isLocal } from "./edition.js";
 import { RulesPanel } from "./RulesPanel.js";
 import { commandsIn, TerminalPanel } from "./Terminal.js";
@@ -48,7 +49,7 @@ export const TAB_LABEL: Record<Tab, string> = {
 // header's tabs say who is there and how each stands, and a tab or panel kept from before opens as Tasks.
 const GONE: ReadonlySet<Tab> = new Set<Tab>(["agents", "rules"]);
 const offered = (t: string): t is Tab => t in TAB_LABEL && !GONE.has(t as Tab);
-const PANEL_ORDER: Tab[] = (["overview", "files", "git", "terminal", "preview", "tree", "usage"] as Tab[]).filter((t) => t !== "usage" || !isLocal());
+const PANEL_ORDER: Tab[] = ["overview", "files", "git", "terminal", "preview", "tree", "usage"];
 /** What each panel holds, under its name in the card. */
 
 const PANEL_SAYS: Record<Tab, string> = {
@@ -889,6 +890,8 @@ export function Workbench({
           }}
         />
       );
+    // Each agent's share of the session, in the open-source edition too, with no allowance above it (Arun, 2026-11-03: "Per-agent cost").
+    if (which === "usage") return <UsagePanel state={state} events={events} identity={identity} solo={headless || isLocal()} />;
     if (which === "rules") return <RulesPanel state={state} sid={sid} invite={invite} me={me} send={send} {...(lane ? { lane } : {})} />;
     if (which === "tree") return <TreePanel state={state} events={laneEvents} {...(lane ? { lane } : {})} sid={sid} invite={invite} onClose={onClose} bare send={send} me={me} jump={jump} />;
     if (which === "git") return <GitPanel state={state} sid={sid} invite={invite} send={send} me={me} {...(lane ? { lane } : {})} />;

@@ -67,7 +67,6 @@
 .ready-said { margin: 0 0 6px; color: var(--text-muted); font-size: 12.5px; }
 .ready-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .ready-row { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 10px; }
-.ready-row:hover { background: var(--hover); }
 .ready-mark { display: grid; flex: none; place-items: center; width: 26px; height: 26px; border-radius: 8px; background: var(--hover); position: relative; }
 .ready-mark::after { content: ""; position: absolute; right: -2px; bottom: -2px; width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--panel, var(--bg)); background: var(--faint); }
 .ready-row[data-proof="ok"] .ready-mark::after { background: var(--green, #3fb27f); }

@@ -74,7 +74,7 @@ export class JoinHub {
   private retry: ReturnType<typeof setTimeout> | undefined;
   private readonly runners = new Map<string, Runner>();
 
-  constructor(private o: { kv: JoinKV; name: string; log?: (line: string) => void }) {}
+  constructor(private o: { kv: JoinKV; name: string; log?: (line: string) => void; /** Turned away or removed there for good (a machine added as a service stops then, rather than trying forever). */ onGone?: () => void }) {}
 
   private async saved(): Promise<Hub | null> {
     const raw = await this.o.kv.get(KEY);
@@ -166,9 +166,11 @@ export class JoinHub {
         } catch (e) {
           // Turned away for good (removed on the other computer): said, and not tried again until it is paired again.
           const code = (e as { code?: number }).code;
-          if (code === 4001 || code === 4003) {
+          // Its device forgotten there (removed in its Settings): the listener turns the token away before the socket opens, a 401.
+          if (code === 4001 || code === 4003 || /server response: 40[13]\b/.test((e as Error).message)) {
             this.error = `${h.name} doesn't take this computer any more. Pair it again from its Settings › Your computers.`;
             this.stopped = true;
+            this.o.onGone?.();
             return;
           }
           continue;
@@ -185,7 +187,10 @@ export class JoinHub {
         this.connectedAt = null;
         this.address = undefined;
         // Removed there: its listener refuses this token from now on, and the next try says so.
-        if (code === 4002) this.error = `${h.name} removed this computer.`;
+        if (code === 4002) {
+          this.error = `${h.name} removed this computer.`;
+          this.o.onGone?.();
+        }
         break;
       }
       if (this.stopped) return;

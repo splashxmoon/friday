@@ -102,6 +102,11 @@ export interface TurnSpec {
    * stream-json input, the only way it can be answered: see WarmClaude).
    */
   ask?: boolean;
+  /**
+   * A teammate's turn at full access, held to the go-ahead list (guardrails.ts): what Auto would let through unasked (its shell, its
+   * folder's MCP servers, the browser) is asked of the runner instead, which lets it run, asks the person, or refuses it.
+   */
+  guarded?: boolean;
   /** Claude Code's MCP servers for this folder (see claudeMcpServers), which Auto lets it use. */
   mcp?: string[];
   /**
@@ -501,7 +506,7 @@ export const claude: Adapter = {
     // Claude in Chrome, the person's own browser with their sign-ins, when its extension is there: in a Work session, and in
     // every session of a build with FRIDAY_MINE set (local/start.ts); in Auto its tools run unasked, as the web's do.
     ...(withChrome(t) ? ["--chrome"] : []),
-    ...(withChrome(t) && t.mode === "full" && claudeMode(t) !== "auto" ? ["--allowedTools", "mcp__claude-in-chrome"] : []),
+    ...(withChrome(t) && t.mode === "full" && claudeMode(t) !== "auto" && !t.guarded ? ["--allowedTools", "mcp__claude-in-chrome"] : []),
     // Folders beside its own, one flag each: the flag takes several, and a value of its own never swallows the next flag.
     ...(t.dirs ?? []).flatMap((d) => ["--add-dir", d]),
     // What needs a yes is asked as a control_request on stdout, and the turn waits for the answer on stdin.
@@ -511,7 +516,10 @@ export const claude: Adapter = {
     // A yes to a whole turn (asked when it was refused the web or an MCP tool) gives that turn what Auto has, and the MCP
     // tools it was refused by name.
     // Auto also lets it use the MCP servers set up for this folder, each allowed by server, as its own permission rules name them.
-    ...(t.mode === "full" || t.grant?.scope === "turn"
+    // A teammate's (guarded): only the web's reading tools unasked; its shell and its connectors go through the runner's go-ahead list.
+    ...(t.mode === "full" && t.guarded
+      ? ["--allowedTools", ...AUTO_TOOLS.filter((x) => !SHELL_TOOLS.includes(x))]
+      : t.mode === "full" || t.grant?.scope === "turn"
       ? ["--allowedTools", ...AUTO_TOOLS, ...(t.mode === "full" ? (t.mcp ?? []).map((s) => `mcp__${s}`) : []), ...(t.grant?.scope === "turn" ? t.grant.items.filter((i) => MCP_TOOL.test(i)) : [])]
       : t.grant?.scope === "commands"
         ? ["--allowedTools", ...t.grant.items.flatMap((c) => SHELL_TOOLS.map((s) => `${s}(${c})`))]
@@ -925,7 +933,8 @@ function appPolicy(t: TurnSpec): { sandboxPolicy: Record<string, unknown>; appro
   // Auto asks too, and Friday answers yes itself (see `approval` in `codex`): Codex stays in its sandbox until something needs
   // more, then goes beyond it as it would for a person who always approves. With "never" a command that needed more (a global
   // install, a cache outside the folder) just failed in Auto, with nobody to ask (Arun, 2026-10-18).
-  return { sandboxPolicy, approvalPolicy: t.mode === "full" || (t.ask && !writes) ? "on-request" : "never" };
+  // A teammate's (guarded): Codex asks before anything it doesn't know to be safe, and the runner answers by the go-ahead list.
+  return { sandboxPolicy, approvalPolicy: t.mode === "full" && t.guarded ? "untrusted" : t.mode === "full" || (t.ask && !writes) ? "on-request" : "never" };
 }
 
 /** Settings the session adds to Codex's own, as `-c` overrides ahead of the subcommand. */

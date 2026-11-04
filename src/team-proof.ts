@@ -27,6 +27,8 @@ export interface ProofCheck {
   by: "friday" | "self";
   /** What a failed one printed, cut short. */
   output?: string;
+  /** Tests that failed but were already failing at the commit the copy started from (baseline.ts): passed for all that. */
+  pre?: number;
 }
 
 export interface ProofFile {
@@ -133,7 +135,7 @@ function proofIn(events: readonly SessionEvent[], s: Stretch): Proof {
   for (const c of receipt.commands) if (CHECK_CMD.test(c.command)) self.set(c.command, { command: c.command, ok: c.ok, by: "self" });
   // Friday's own check of a board task, run in its folder once it was handed in: the one that counts, so first.
   const checked = s.task ? after.findLast((e) => e.body.type === "board.checked" && e.body.id === s.task) : undefined;
-  const friday: ProofCheck[] = checked?.body.type === "board.checked" ? [{ command: checked.body.command, ok: checked.body.ok, by: "friday", ...(checked.body.skipped ? { skipped: true } : {}), ...(!checked.body.ok && !checked.body.skipped ? { output: checked.body.output.slice(-600) } : {}) }] : [];
+  const friday: ProofCheck[] = checked?.body.type === "board.checked" ? [{ command: checked.body.command, ok: checked.body.ok, by: "friday", ...(checked.body.skipped ? { skipped: true } : {}), ...(checked.body.pre?.length ? { pre: checked.body.pre.length } : {}), ...(!checked.body.ok && !checked.body.skipped ? { output: checked.body.output.slice(-600) } : {}) }] : [];
   const checks = [...friday, ...[...self.values()].filter((c) => c.command !== friday[0]?.command).slice(-4)];
   // Its review: the last it posted for this task, or, for a run of its own, the last it posted in the run with no task named.
   const posted = after.findLast((e) => e.body.type === "proof.posted" && laneOfEvent(e) === s.lane && (s.task ? e.body.id === s.task : !e.body.id));

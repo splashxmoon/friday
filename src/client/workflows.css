@@ -131,21 +131,64 @@
 .wf-alongside:focus-visible { outline: none; box-shadow: var(--dass-ring); }
 .wf-alongside:disabled { display: none; }
 
-/* A card: a tray, its kind on it, its body inset. */
-/* A card on the canvas: --surface, a hairline, 12px; its kind on it and its body on the same ground, nothing inset. */
-.wf-node { position: relative; display: flex; flex-direction: column; width: 244px; padding: 0; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--card); color: var(--ink); cursor: pointer; user-select: none; outline: none; box-shadow: none; transition: border-color var(--t-hover) var(--ease-out), box-shadow var(--t-hover) var(--ease-out); }
+/* A card on the canvas (Arun, 2026-11-03: "design ther workflow cards better"): who does it and its place in the order across
+   the top, what it does under, lifted a little off the dotted ground. 248px a step, 224px the trigger and Then: Canvas's STEP_W
+   and END_W. */
+.wf-node { position: relative; display: flex; flex-direction: column; width: 248px; padding: 0; border: 1px solid var(--border); border-radius: 14px; background: var(--card); color: var(--ink); cursor: pointer; user-select: none; outline: none; box-shadow: 0 1px 2px rgb(0 0 0 / .04), 0 10px 24px -16px rgb(0 0 0 / .22); transition: border-color var(--t-hover) var(--ease-out), box-shadow var(--t-hover) var(--ease-out), transform var(--t-hover) var(--ease-out); }
 .wf-node:hover { border-color: var(--border-strong); }
 .wf-node:focus-visible { box-shadow: var(--dass-ring); }
-.wf-node.sel { border-color: var(--ink-2); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink) 10%, transparent); }
+.wf-node.sel { border-color: var(--ink-2); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink) 10%, transparent), 0 10px 24px -16px rgb(0 0 0 / .22); }
 .wf-node.flag:not(.sel) { border-color: color-mix(in srgb, var(--red) 45%, var(--tray-edge)); }
 .wf-node[data-run="claimed"], .wf-node[data-run="review"] { border-color: var(--border-strong); }
-.wf-node-trigger, .wf-node-outcomes { width: 216px; }
-.wf-node-head { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 4px 10px 0 12px; }
-.wf-node-kind { color: var(--text-muted); font-size: 12px; font-weight: 500; }
-.wf-node-body { display: flex; flex-direction: column; gap: 10px; padding: 6px 12px 12px; border-radius: 0; background: none; box-shadow: none; }
+.wf-node-trigger, .wf-node-outcomes { width: 224px; }
+.wf-node-in { display: flex; flex-direction: column; gap: 10px; padding: 12px; }
+.wf-node-top { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.wf-node-top .wf-who-text { flex: 1; }
+.wf-node-body { display: flex; flex-direction: column; gap: 10px; }
+.wf-kind { color: var(--text-muted); font-size: 11.5px; font-weight: 500; line-height: 16px; }
+.wf-who-name.wrap { overflow: visible; white-space: normal; line-height: 17px; }
+/* Its place in the order: a number; a check's with its shield, your OK's with a hand. */
+.wf-num { display: inline-flex; flex: none; align-self: flex-start; align-items: center; justify-content: center; gap: 3px; min-width: 22px; height: 22px; padding: 0 7px; border-radius: 999px; background: color-mix(in srgb, var(--ink) 6%, transparent); color: var(--text-muted); font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.wf-num.check { background: color-mix(in srgb, var(--violet) 13%, transparent); color: var(--violet); }
+.wf-num.ok { background: color-mix(in srgb, var(--amber) 15%, transparent); color: var(--amber); }
+.wf-tile { display: grid; flex: none; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: color-mix(in srgb, var(--ink) 7%, transparent); color: var(--ink-2); }
+.wf-tile.ok { border-radius: 999px; background: color-mix(in srgb, var(--amber) 15%, transparent); color: var(--amber); }
+.wf-tile.then { background: color-mix(in srgb, var(--live) 13%, transparent); color: var(--live); }
+.wf-if { padding-top: 9px; border-top: 1px solid var(--border); color: var(--text-muted); }
 .wf-node-run { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 12px; }
 .wf-node[data-run="claimed"] .wf-node-run, .wf-node[data-run="review"] .wf-node-run { color: var(--ink-2); }
 .wf-node[data-run="blocked"] .wf-node-run { color: var(--red); }
+
+/* The free canvas: each card where it sits, a port on each side its wires meet, solid hairline wires between, the wires of
+   the card open drawn darker. */
+.wf-flow.free { display: block; padding: 0; }
+.wf-flow.free .wf-node { position: absolute; z-index: 1; }
+.wf-flow.free .wf-node::before, .wf-flow.free .wf-node::after { content: ""; position: absolute; top: 50%; width: 9px; height: 9px; margin-top: -4.5px; border: 1.5px solid color-mix(in srgb, var(--ink) 32%, var(--card)); border-radius: 999px; background: var(--card); pointer-events: none; }
+.wf-flow.free .wf-node::before { left: -5.5px; }
+.wf-flow.free .wf-node::after { right: -5.5px; }
+.wf-flow.free .wf-node-trigger::before, .wf-flow.free .wf-node-outcomes::after { display: none; }
+.wf-flow.free .wf-node.sel::before, .wf-flow.free .wf-node.sel::after { border-color: var(--ink-2); }
+.wf-flow.free .wf-wires path { stroke: color-mix(in srgb, var(--ink) 22%, transparent); stroke-width: 1.5; stroke-dasharray: none; stroke-linecap: round; transition: stroke var(--t-hover) var(--ease-out); }
+.wf-flow.free .wf-wires path.on { stroke: color-mix(in srgb, var(--ink) 58%, transparent); }
+.wf-flow.free .wf-wires path.live { stroke: var(--live); stroke-dasharray: 5 6; }
+/* A card held: lifted under the pointer, its wires with it; what it lands on marked. */
+.wf-node.held { z-index: 20 !important; cursor: grabbing; pointer-events: none; border-color: var(--border-strong); box-shadow: var(--shadow-pop); transform: scale(1.015); transition: none; }
+.wf-flow.free .wf-node.drop-on { border-color: var(--ink-2); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink) 12%, transparent); }
+.wf-flow.free .wf-node.drop-on::after { content: "Run alongside"; top: auto; right: auto; bottom: -30px; left: 50%; width: auto; height: 22px; margin: 0; padding: 0 9px; transform: translateX(-50%); border: 1px solid var(--ink-2); background: var(--ink); color: var(--bg); font-size: 11.5px; font-weight: 500; line-height: 20px; white-space: nowrap; }
+/* The "+" on the wires between two columns. */
+.wf-gap.free { position: absolute; z-index: 3; width: 40px; height: 40px; margin: -20px 0 0 -20px; align-self: auto; }
+.wf-gap.free .wf-plus { width: 22px; height: 22px; background: var(--card); box-shadow: 0 1px 2px rgb(0 0 0 / .06); }
+.wf-gap.free .wf-plus:hover:not(:disabled) { transform: scale(1.12); }
+.wf-gap.free.drop-on::before { display: none; }
+.wf-gap.free.drop-on .wf-plus { opacity: 1; transform: scale(1.35); border-color: var(--ink); background: var(--ink); color: var(--bg); }
+.wf-gap.first.free { width: auto; height: auto; margin: 0; padding: 0; transform: translate(-50%, -50%); }
+.wf-alongside.free { right: auto; height: 28px; opacity: 0; transition: opacity var(--dass-fast, 120ms) ease .25s, color var(--dass-fast, 120ms) ease, border-color var(--dass-fast, 120ms) ease; }
+.wf-alongside.free.on, .wf-alongside.free:focus-visible { opacity: 1; transition-delay: 0s; }
+/* A send-back's loop: dashed, quieter than the wires, its words on a pill where it bottoms out. */
+.wf-flow.free .wf-wires path.back { stroke: color-mix(in srgb, var(--ink) 34%, transparent); stroke-width: 1.4; stroke-dasharray: 4 5; }
+.wf-flow.free .wf-wires path.back.on { stroke: var(--ink-2); }
+.wf-flow.free .wf-wires .wf-back-head { stroke: color-mix(in srgb, var(--ink) 45%, transparent); stroke-width: 1.4; }
+.wf-loop { position: absolute; z-index: 2; display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px; transform: translate(-50%, -50%); border: 1px solid var(--border); border-radius: 999px; background: var(--bg); color: var(--text-muted); font-size: 11.5px; font-weight: 500; white-space: nowrap; font-variant-numeric: tabular-nums; pointer-events: none; }
 
 .wf-trigger { display: flex; align-items: center; gap: 10px; }
 .wf-trigger-tile { display: grid; flex: none; place-items: center; width: 32px; height: 32px; border-radius: var(--r-md); background: color-mix(in srgb, var(--ink) 7%, transparent); color: var(--ink-2); }
@@ -160,7 +203,7 @@
 .wf-who { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .wf-who-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .wf-who-name { overflow: hidden; color: var(--ink); font-size: 13px; font-weight: 600; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
-.wf-does { display: -webkit-box; margin: 0; overflow: hidden; color: var(--ink-2); font-size: 13px; line-height: 1.45; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.wf-does { display: -webkit-box; margin: 0; overflow: hidden; color: var(--ink); font-size: 13px; line-height: 1.45; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
 .wf-does.muted { color: var(--red); }
 .wf-owns { display: flex; flex-wrap: wrap; gap: 4px; }
 .wf-own { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; height: 22px; padding: 0 7px; border-radius: 7px; background: color-mix(in srgb, var(--ink) 6%, transparent); color: var(--ink-2); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

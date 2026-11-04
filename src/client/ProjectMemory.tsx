@@ -4,6 +4,7 @@ import { api } from "./api.js";
 import { Icon } from "./icons.js";
 import type { Identity } from "./storage.js";
 import { Segmented, Switch, relTime, useConfirm } from "./ui.js";
+import { RuleForm, RuleHow, type RuleDraft } from "./RuleForm.js";
 
 const KINDS: [BrainKind, string][] = [
   ["decision", "Decision"],
@@ -25,6 +26,8 @@ export function ProjectMemory({ identity }: { identity: Identity }) {
   const [entries, setEntries] = useState<BrainEntry[] | null>(null);
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const [draft, setDraft] = useState<{ text: string; kind: BrainKind }>({ text: "", kind: "decision" });
+  /** A rule being written (`new`) or put right (its entry's id), on the open repo (rules.ts). */
+  const [rule, setRule] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [ask, confirmUI] = useConfirm();
   const load = () => void api<{ enabled: boolean; repos: BrainRepo[] }>(identity, "/api/brain").then(setState, (e: Error) => setError(e.message));
@@ -49,6 +52,7 @@ export function ProjectMemory({ identity }: { identity: Identity }) {
   const sorted = [...(entries ?? [])].filter((e) => !e.retired).sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || Number(b.kind === "correction") - Number(a.kind === "correction") || b.uses - a.uses || b.at - a.at);
   const retired = (entries ?? []).filter((e) => e.retired).sort((a, b) => b.retired!.at - a.retired!.at);
   const check = (repo: string, e: BrainEntry, take: boolean) => void act(() => api(identity, `/api/brain/check?${q(repo, `&id=${e.id}`)}`, { method: "POST", body: JSON.stringify({ take }) }));
+  const putRule = (repo: string, id: string | null, r: RuleDraft) => void act(() => api(identity, `/api/brain/rule?${q(repo, id ? `&id=${id}` : "")}`, { method: "POST", body: JSON.stringify(r) })).then((ok) => ok && setRule(null));
   return (
     <div className="settings-block set-card mem-card brain-card">
       {confirmUI}
@@ -100,7 +104,12 @@ export function ProjectMemory({ identity }: { identity: Identity }) {
                         {e.from.title ? ` in “${e.from.title}”` : ""} · {relTime(e.at) === "now" ? "just now" : `${relTime(e.at)} ago`}
                         {e.uses ? ` · told ${e.uses} time${e.uses === 1 ? "" : "s"}` : ""}
                       </div>
-                      {e.kind === "correction" && <Proof e={e} onCheck={(take) => check(r.key, e, take)} />}
+                      {e.kind === "correction" &&
+                        (rule === e.id && e.check?.how && e.check.how !== "command" ? (
+                          <RuleForm start={{ text: e.text, how: e.check.how, pattern: e.check.pattern ?? "", ...(e.check.only ? { only: e.check.only } : {}), ...(e.check.except ? { except: e.check.except } : {}) }} onCancel={() => setRule(null)} onSave={(d) => putRule(r.key, e.id, d)} />
+                        ) : (
+                          <Proof e={e} onCheck={(take) => check(r.key, e, take)} onEdit={() => setRule(e.id)} />
+                        ))}
                       <span className="brain-acts">
                         <button type="button" className={`icon-btn tiny${e.pinned ? " on" : ""}`} aria-pressed={!!e.pinned} aria-label={e.pinned ? "Unpin" : "Pin: never dropped"} title={e.pinned ? "Pinned: never dropped" : "Pin: never dropped"} onClick={() => void act(() => api(identity, `/api/brain/entry?${q(r.key, `&id=${e.id}`)}`, { method: "PATCH", body: JSON.stringify({ pinned: !e.pinned }) }))}>
                           <Icon name="flag" size={13} />
@@ -135,6 +144,14 @@ export function ProjectMemory({ identity }: { identity: Identity }) {
                       ))}
                     </details>
                   )}
+                  {/* A rule every change here is checked for (rules.ts), written by hand. */}
+                  {rule === "new" ? (
+                    <RuleForm start={{ text: "", how: "lines", pattern: "" }} onCancel={() => setRule(null)} onSave={(d) => putRule(r.key, null, d)} saveWord="Add the rule" />
+                  ) : (
+                    <button type="button" className="btn ghost small brain-add-rule" onClick={() => setRule("new")}>
+                      <Icon name="plus" size={13} /> Add a rule every change is checked for
+                    </button>
+                  )}
                   <form
                     className="mem-add brain-add"
                     onSubmit={(ev) => {
@@ -167,10 +184,42 @@ export function ProjectMemory({ identity }: { identity: Identity }) {
  * Whether a correction is holding: how often the mistake was corrected, how often agents have been told since without it coming
  * back, and the check behind it when there is one (how often it ran and caught it), with the one thing to do about it.
  */
-function Proof({ e, onCheck }: { e: BrainEntry; onCheck: (take: boolean) => void }) {
+function Proof({ e, onCheck, onEdit }: { e: BrainEntry; onCheck: (take: boolean) => void; onEdit: () => void }) {
   const seen = e.seen ?? 1;
   const since = Math.max(0, e.uses - (e.usesAtSeen ?? 0));
   const c = e.check;
+  // A rule read off the change (rules.ts): how it is checked, how often it caught something, and its own few things to do.
+  if (c?.how && c.how !== "command" && c.pattern) {
+    return (
+      <div className="brain-proof">
+        <span>
+          {c.state === "added" ? "Every change is checked" : c.state === "declined" ? "Not checked" : "Offered as a rule"}: <RuleHow check={{ how: c.how, pattern: c.pattern, ...(c.only ? { only: c.only } : {}), ...(c.except ? { except: c.except } : {}) }} />
+          {c.state === "added" && c.runs ? ` · ${c.runs} change${c.runs === 1 ? "" : "s"} checked, caught ${c.caught ?? 0}` : ""}
+        </span>
+        {c.state === "proposed" && (
+          <button type="button" className="btn primary small" onClick={() => onCheck(true)}>
+            Keep it
+          </button>
+        )}
+        <button type="button" className="btn ghost small" onClick={onEdit}>
+          Edit
+        </button>
+        {c.state === "added" ? (
+          <button type="button" className="btn ghost small" onClick={() => onCheck(false)}>
+            Turn off
+          </button>
+        ) : c.state === "declined" ? (
+          <button type="button" className="btn ghost small" onClick={() => onCheck(true)}>
+            Turn on
+          </button>
+        ) : (
+          <button type="button" className="btn ghost small" onClick={() => onCheck(false)}>
+            No
+          </button>
+        )}
+      </div>
+    );
+  }
   return (
     <div className="brain-proof">
       <span>

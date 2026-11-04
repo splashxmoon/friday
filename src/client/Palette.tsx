@@ -278,9 +278,8 @@ export function baseActions(p: {
     // Each to the automations it names, not to whichever of the two the page showed last.
     { id: "automations", label: "Coding tool automations", icon: "zap", group: "Go to", run: () => (setAutomationsView("coding"), p.goto("automations")) },
     { id: "workflows", label: "Crew workflows", icon: "zap", group: "Go to", run: openWorkflows },
-    // The sidebar's Code, Work and Crew from the keyboard (Arun, 2026-10-28: "iron everything and ensure we are good").
+    // Code and Crew from the keyboard (Arun, 2026-10-28: "iron everything and ensure we are good").
     { id: "place-code", label: "Switch to Code", icon: "code", group: "Go to", run: () => choosePlace("code") },
-    { id: "place-work", label: "Switch to Work", icon: "pencil", group: "Go to", run: () => choosePlace("work") },
     { id: "place-team", label: "Switch to Crew", icon: "users", group: "Go to", run: () => choosePlace("team") },
     ...(p.local ? [] : [{ id: "agents", label: "Saved agents", icon: "agent" as const, group: "Go to", run: () => p.goto("agents") }]),
     { id: "usage", label: "Usage", icon: "usage", group: "Go to", run: () => p.goto("usage") },

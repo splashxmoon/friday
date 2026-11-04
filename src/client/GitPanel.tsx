@@ -8,7 +8,7 @@ import { hunksOf } from "./git-hunks.js";
 import { Icon } from "./icons.js";
 import { patchLines } from "./patchLines.js";
 import { ShipDialog } from "./Ship.js";
-import { relTime, useConfirm } from "./ui.js";
+import { Picker, relTime, useConfirm } from "./ui.js";
 import type { Send } from "./useSession.js";
 
 /**
@@ -265,14 +265,7 @@ export function GitPanel({ state, sid, invite, send, me, lane }: { state: Sessio
       <header className="gitp-head">
         {others.length > 0 && (
           <label className="gitp-dir" title="Which folder: the agent's own, or one it also works in">
-            <select value={dir} aria-label="Which folder" onChange={(e) => setDir(e.target.value)}>
-              <option value="">{(engine?.cwd ?? "This folder").split(/[\\/]/).filter(Boolean).pop()}</option>
-              {others.map((d) => (
-                <option key={d} value={d}>
-                  {d.split(/[\\/]/).filter(Boolean).pop()}
-                </option>
-              ))}
-            </select>
+            <Picker value={dir} label="Which folder" onChange={setDir} options={[{ value: "", label: (engine?.cwd ?? "This folder").split(/[\\/]/).filter(Boolean).pop() ?? "This folder" }, ...others.map((d) => ({ value: d, label: d.split(/[\\/]/).filter(Boolean).pop() ?? d, sub: d }))]} />
           </label>
         )}
         <BranchButton sid={sid} invite={invite} send={send} lane={laneId} branch={branch} idle={state.run.status !== "running"} />

@@ -1,3 +1,4 @@
+import { baseNote } from "../baseline.js";
 import { ownPlan, refusal, whoseWork } from "../own-plan.js";
 import { slowly } from "../slow.js";
 import { closeSaying } from "../heartbeat.js";
@@ -1001,7 +1002,7 @@ class LaneHost {
     else if (b.type === "instruction" && b.interrupt) why = `${ev.actor.name} interrupted with a new instruction`;
     if (why && this.turn) (this.stopSent = true), this.sendRaw({ kind: "stop", reason: why });
     // An answer to something the tool is waiting on right now goes to it there and then, and is not a new turn.
-    if (b.type === "instruction" && b.approval && this.live.delete(b.approval.id)) return void this.answerLive(ev.seq, b.approval);
+    if (b.type === "instruction" && b.approval && this.live.delete(b.approval.id)) return void this.answerLive(ev.seq, b.approval, ev.actor.kind === "system" ? b.text : undefined);
     if (b.type === "instruction" && b.approval && this.answered.has(b.approval.id)) {
       void this.append({ type: "instructions.delivered", seqs: [ev.seq] }).catch((e) => console.error("[engine] delivered:", e));
       return;
@@ -1055,12 +1056,12 @@ class LaneHost {
     return e.actor.id !== this.info.hostId;
   }
 
-  private async answerLive(seq: number, a: { id: string; approve: boolean }): Promise<void> {
+  private async answerLive(seq: number, a: { id: string; approve: boolean }, note?: string): Promise<void> {
     this.answered.add(a.id);
     // Delivered before the tool hears it: the turn can end the moment it does, and the queue would then take the answer for
     // an instruction and start another turn with it.
     await this.append({ type: "instructions.delivered", seqs: [seq] }).catch((e) => console.error("[engine] delivered:", e));
-    this.sendRaw({ kind: "approval", id: a.id, approve: a.approve });
+    this.sendRaw({ kind: "approval", id: a.id, approve: a.approve, ...(note ? { note } : {}) });
   }
 
   /** Work through the lane's queue, one CLI turn at a time. */
@@ -1163,7 +1164,7 @@ class LaneHost {
       }
 
       const updates = unreadPosts(state, this.lane);
-      const turn = promptFor(events, pending, updates, leadBrief(state, this.lane), [backNote(state, events, this.lane), newNotes(events, this.lane)].filter(Boolean).join("\n\n"));
+      const turn = promptFor(events, pending, updates, leadBrief(state, this.lane), [backNote(state, events, this.lane), newNotes(events, this.lane), baseNote(events, this.lane)].filter(Boolean).join("\n\n"));
       if (updates.length) void this.append({ type: "mesh.read", upTo: updates.at(-1)!.seq }).catch((e) => console.error("[engine] read:", e));
       const { attachments } = turn;
       // One of the tool's own commands ("/compact", "/prompts:review"), sent alone: offered to the runner as typed too, since
@@ -1902,7 +1903,8 @@ function cleanBody(raw: unknown): EventBody | null {
       .filter(Boolean);
     if (!items.length || typeof b.id !== "string") return null;
     const why = s(b.why, 300);
-    return { type: "engine.approval", id: s(b.id, 40), scope: b.scope === "commands" ? "commands" : "turn", items, ...(b.live === true ? { live: true } : {}), ...(why ? { why } : {}) };
+    const guard = typeof b.guard === "string" && /^(outside|ship|delete|money|keys|computer|takeover)$/.test(b.guard) ? (b.guard as "outside") : undefined;
+    return { type: "engine.approval", id: s(b.id, 40), scope: b.scope === "commands" ? "commands" : "turn", items, ...(b.live === true ? { live: true } : {}), ...(why ? { why } : {}), ...(guard ? { guard } : {}) };
   }
   if (b.type === "agent.usage") {
     // A turn's tokens; anything past a few million in one turn is not a count worth keeping.

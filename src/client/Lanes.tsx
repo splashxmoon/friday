@@ -7,7 +7,7 @@ import { Icon, type IconName } from "./icons.js";
 import { agentLook, laneLabel, tintOfEngine } from "./handoff-ui.js";
 import type { Identity } from "./storage.js";
 import { hostApi, useMachine } from "./local.js";
-import { MenuButton, MoreTools, useConfirm, useDismiss, type MenuItem } from "./ui.js";
+import { Picker, MenuButton, MoreTools, useConfirm, useDismiss, type MenuItem } from "./ui.js";
 import { splitTools } from "./engines.js";
 import { startTeam } from "./edition.js";
 import { Dialog } from "./AgentDialogs.js";
@@ -461,14 +461,7 @@ function ManageLanes({
                 </label>
                 <label className="lane-field">
                   <span>Agent</span>
-                  <select value={agentId} onChange={(e) => setAgentId(e.target.value)}>
-                    <option value="">Default agent</option>
-                    {agents.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.name}
-                      </option>
-                    ))}
-                  </select>
+                  <Picker value={agentId} label="Agent" onChange={setAgentId} options={[{ value: "", label: "Default agent" }, ...agents.map((a) => ({ value: a.id, label: a.name }))]} />
                   <small>What it knows and which tools it can use.</small>
                 </label>
               </>
@@ -477,20 +470,12 @@ function ManageLanes({
                 <h3 className="lanes-h">Who drives it, and when does it run?</h3>
                 <label className="lane-field">
                   <span>Who drives it</span>
-                  <select value={control} onChange={(e) => setControl(e.target.value as LaneControl["kind"])}>
-                    <option value="open">{CONTROL_LABEL.open}</option>
-                    <option value="role">{CONTROL_LABEL.role}</option>
-                    <option value="standing">{CONTROL_LABEL.standing}</option>
-                  </select>
+                  <Picker<LaneControl["kind"]> value={control} label="Who drives it" onChange={setControl} options={(["open", "role", "standing"] as const).map((k) => ({ value: k, label: CONTROL_LABEL[k] }))} />
                   <small>An agent nobody drives can still run, if it has a trigger.</small>
                 </label>
                 <label className="lane-field">
                   <span>When it runs</span>
-                  <select value={trigger} onChange={(e) => setTrigger(e.target.value as LaneTrigger["kind"])}>
-                    <option value="manual">{TRIGGER_LABEL.manual}</option>
-                    <option value="lane-finished">{TRIGGER_LABEL["lane-finished"]}</option>
-                    <option value="question">{TRIGGER_LABEL.question}</option>
-                  </select>
+                  <Picker<LaneTrigger["kind"]> value={trigger} label="When it runs" onChange={setTrigger} options={(["manual", "lane-finished", "question"] as const).map((k) => ({ value: k, label: TRIGGER_LABEL[k] }))} />
                   <small>Agents that start on a trigger wait at least 5s between runs.</small>
                 </label>
               </>
@@ -605,23 +590,11 @@ function AgentOnTool({ state, agents, send, own, onClose }: { state: SessionStat
         <>
           <label className="field">
             <span>Agent</span>
-            <select value={agentId} onChange={(e) => setAgentId(e.target.value)}>
-              {free.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name || "Untitled agent"}
-                </option>
-              ))}
-            </select>
+            <Picker value={agentId} label="Agent" onChange={setAgentId} options={free.map((a) => ({ value: a.id, label: a.name || "Untitled agent" }))} />
           </label>
           <label className="field">
             <span>Run it on</span>
-            <select value={tool} onChange={(e) => setTool(e.target.value as EngineTool)}>
-              {ENGINE_TOOLS.map((t) => (
-                <option key={t} value={t}>
-                  {ENGINE_NAMES[t]}
-                </option>
-              ))}
-            </select>
+            <Picker<EngineTool> value={tool} label="Run it on" onChange={setTool} options={ENGINE_TOOLS.map((t) => ({ value: t, label: ENGINE_NAMES[t] }))} />
           </label>
         </>
       )}
