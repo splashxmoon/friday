@@ -1,7 +1,7 @@
 // Already failing at the start (src/baseline.ts; Arun, 2026-11-03: "Was it already broken?").
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, lstatSync, readdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -86,7 +86,8 @@ test("the runner runs a command where the repo stood at a commit, in a copy of i
   assert.equal(await treeOf(repo, first), g("rev-parse", `${first}^{tree}`));
   const copy = await baseCopy(repo, first);
   try {
-    assert.equal(execFileSync("cat", ["a.txt"], { cwd: copy.dir, encoding: "utf8" }), "one\n", "the file as it stood at the commit");
+    // As git checks it out here: CRLF on Windows (core.autocrlf), as in the person's own checkout.
+    assert.equal(readFileSync(path.join(copy.dir, "a.txt"), "utf8").replace(/\r\n/g, "\n"), "one\n", "the file as it stood at the commit");
     assert.ok(lstatSync(path.join(copy.top, "node_modules")).isSymbolicLink(), "dependencies linked, not installed");
     assert.ok(existsSync(path.join(copy.top, ".env")), "its .env copied in");
   } finally {
