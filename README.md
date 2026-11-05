@@ -64,26 +64,26 @@ No API keys and no new plan: Friday drives the coding tools signed in on your co
 <table>
   <tr>
     <td align="center" width="120"><img src="docs/assets/tools/claude.svg" width="32" height="32" alt="" /><br /><sub>Claude Code</sub></td>
-    <td align="center" width="120"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/tools/codex-dark.svg" /><img src="docs/assets/tools/codex-light.svg" width="32" height="32" alt="" /></picture><br /><sub>Codex</sub></td>
-    <td align="center" width="120"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/tools/cursor-dark.svg" /><img src="docs/assets/tools/cursor-light.svg" width="32" height="32" alt="" /></picture><br /><sub>Cursor</sub></td>
-    <td align="center" width="120"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/tools/copilot-dark.svg" /><img src="docs/assets/tools/copilot-light.svg" width="32" height="32" alt="" /></picture><br /><sub>GitHub Copilot</sub></td>
+    <td align="center" width="120"><img src="docs/assets/tools/codex.svg" width="32" height="32" alt="" /><br /><sub>Codex</sub></td>
+    <td align="center" width="120"><img src="docs/assets/tools/cursor.svg" width="32" height="32" alt="" /><br /><sub>Cursor</sub></td>
+    <td align="center" width="120"><img src="docs/assets/tools/copilot.svg" width="32" height="32" alt="" /><br /><sub>GitHub Copilot</sub></td>
     <td align="center" width="120"><img src="docs/assets/tools/gemini.svg" width="32" height="32" alt="" /><br /><sub>Gemini CLI</sub></td>
-    <td align="center" width="120"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/tools/opencode-dark.svg" /><img src="docs/assets/tools/opencode-light.svg" width="32" height="32" alt="" /></picture><br /><sub>OpenCode</sub></td>
+    <td align="center" width="120"><img src="docs/assets/tools/opencode.svg" width="32" height="32" alt="" /><br /><sub>OpenCode</sub></td>
   </tr>
   <tr>
     <td align="center" width="120"><img src="docs/assets/tools/devin.svg" width="32" height="32" alt="" /><br /><sub>Devin</sub></td>
     <td align="center" width="120"><img src="docs/assets/tools/junie.svg" width="32" height="32" alt="" /><br /><sub>Junie</sub></td>
     <td align="center" width="120"><img src="docs/assets/tools/kiro.svg" width="32" height="32" alt="" /><br /><sub>Kiro</sub></td>
-    <td align="center" width="120"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/tools/droid-dark.svg" /><img src="docs/assets/tools/droid-light.svg" width="32" height="32" alt="" /></picture><br /><sub>Factory Droid</sub></td>
-    <td align="center" width="120"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/tools/grok-dark.svg" /><img src="docs/assets/tools/grok-light.svg" width="32" height="32" alt="" /></picture><br /><sub>Grok Build</sub></td>
-    <td align="center" width="120"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/tools/cline-dark.svg" /><img src="docs/assets/tools/cline-light.svg" width="32" height="32" alt="" /></picture><br /><sub>Cline</sub></td>
+    <td align="center" width="120"><img src="docs/assets/tools/droid.svg" width="32" height="32" alt="" /><br /><sub>Factory Droid</sub></td>
+    <td align="center" width="120"><img src="docs/assets/tools/grok.svg" width="32" height="32" alt="" /><br /><sub>Grok Build</sub></td>
+    <td align="center" width="120"><img src="docs/assets/tools/cline.svg" width="32" height="32" alt="" /><br /><sub>Cline</sub></td>
   </tr>
   <tr>
-    <td align="center" width="120"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/tools/kilo-dark.svg" /><img src="docs/assets/tools/kilo-light.svg" width="32" height="32" alt="" /></picture><br /><sub>Kilo</sub></td>
+    <td align="center" width="120"><img src="docs/assets/tools/kilo.svg" width="32" height="32" alt="" /><br /><sub>Kilo</sub></td>
     <td align="center" width="120"><img src="docs/assets/tools/amp.svg" width="32" height="32" alt="" /><br /><sub>Amp</sub></td>
-    <td align="center" width="120"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/tools/muse-dark.svg" /><img src="docs/assets/tools/muse-light.svg" width="32" height="32" alt="" /></picture><br /><sub>Muse Code</sub></td>
-    <td align="center" width="120"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/tools/qwen-dark.svg" /><img src="docs/assets/tools/qwen-light.svg" width="32" height="32" alt="" /></picture><br /><sub>Qwen Code</sub></td>
-    <td align="center" width="120"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/tools/acp-dark.svg" /><img src="docs/assets/tools/acp-light.svg" width="32" height="32" alt="" /></picture><br /><sub>Any ACP agent</sub></td>
+    <td align="center" width="120"><img src="docs/assets/tools/muse.svg" width="32" height="32" alt="" /><br /><sub>Muse Code</sub></td>
+    <td align="center" width="120"><img src="docs/assets/tools/qwen.svg" width="32" height="32" alt="" /><br /><sub>Qwen Code</sub></td>
+    <td align="center" width="120"><img src="docs/assets/tools/acp.svg" width="32" height="32" alt="" /><br /><sub>Any ACP agent</sub></td>
   </tr>
 </table>
 
