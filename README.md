@@ -5,22 +5,9 @@
 <h1 align="center">Friday</h1>
 
 <p align="center">
-  <strong>Run multiple coding agents together, locally.</strong><br/>
-  Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot and more split the work on one repo, message each other as they go, and keep going when one hits its usage limit. You review everything before it ships.
+  <strong>Your coding agents, working together as one team.</strong><br/>
+  Claude Code, Codex, Cursor and 13 more talk to each other, split the work and check each other's work. Free, open source, on your own computer.
 </p>
-
-<p align="center">
-  <a href="#get-started-in-five-minutes">Get started</a> ·
-  <a href="#how-it-works">How it works</a> ·
-  <a href="#your-agents-working-as-a-team">Agents as a team</a> ·
-  <a href="#crew-ai-teammates-that-keep-going">Crew</a> ·
-  <a href="#features">Features</a> ·
-  <a href="#automations">Automations</a> ·
-  <a href="#privacy">Privacy</a> ·
-  <a href="#faq">FAQ</a>
-</p>
-
-<p align="center"><sub>If Friday saves you time, a star helps other developers find it.</sub></p>
 
 <p align="center">
   <a href="https://github.com/splashxmoon/friday/stargazers"><img src="https://img.shields.io/github/stars/splashxmoon/friday?style=flat&label=%E2%98%85&color=08C" alt="GitHub stars" /></a>
@@ -37,111 +24,82 @@
   <br/>or, with Node.js 22: <code>npx github:splashxmoon/friday</code>
 </p>
 
-- **Uses the tools you already have.** No API keys and no extra plan: Friday drives the coding tools signed in on your computer.
-- **Runs on your machine.** No account and no model of its own. Your code stays where it is; the only thing sent to us is a few anonymous usage counts you can turn off.
-- **Keeps the work moving.** When one agent runs out of usage, the agent best placed to finish picks up where it stopped.
-
-Want to help? [Good first issues](https://github.com/splashxmoon/friday/labels/good%20first%20issue) · [CONTRIBUTING.md](CONTRIBUTING.md)
-
 <p align="center">
   <img src="docs/assets/demo.gif" alt="A demo of Friday on a sample project: six coding agents share one session. Cursor tells Codex a route moved, Claude Code runs out of usage and Friday hands its task to Codex, which reruns the tests and finishes with changes ready to review" width="960" />
 </p>
 
-<p align="center">
-  <img src="docs/assets/hero.png" alt="Friday's home screen: five sessions and ten agents at work, Claude Code and Codex side by side in the sidebar and under Right now" width="960" />
-</p>
+Think of it as a group chat and a task board for your AI coding agents.
 
-Works with the subscriptions you already have. If a coding tool is installed and signed in on your computer, Friday can drive it:
+- **They talk.** Agents message each other as they work: a heads-up about a rename, a question, the answer. You see every message.
+- **They split the work.** One agent turns the job into a shared task board; the others pick up the parts that suit them, each in its own copy of your repo, so nobody overwrites anybody.
+- **They check each other.** A finished task is checked by another agent (a different model when one is free), then you read the diff, leave notes on any line, and commit.
 
-<p>
-  <kbd><img src="https://www.google.com/s2/favicons?domain=claude.ai&sz=64" width="14" valign="middle" alt="" /> Claude Code</kbd>
-  <kbd><img src="https://www.google.com/s2/favicons?domain=openai.com&sz=64" width="14" valign="middle" alt="" /> Codex</kbd>
-  <kbd><img src="https://www.google.com/s2/favicons?domain=cursor.com&sz=64" width="14" valign="middle" alt="" /> Cursor</kbd>
-  <kbd><img src="https://www.google.com/s2/favicons?domain=github.com&sz=64" width="14" valign="middle" alt="" /> GitHub Copilot</kbd>
-  <kbd><img src="https://www.google.com/s2/favicons?domain=opencode.ai&sz=64" width="14" valign="middle" alt="" /> OpenCode</kbd>
-  <kbd><img src="https://www.google.com/s2/favicons?domain=gemini.google.com&sz=64" width="14" valign="middle" alt="" /> Gemini CLI</kbd>
-  <kbd><img src="https://www.google.com/s2/favicons?domain=devin.ai&sz=64" width="14" valign="middle" alt="" /> Devin</kbd>
-  <kbd><img src="https://www.google.com/s2/favicons?domain=jetbrains.com&sz=64" width="14" valign="middle" alt="" /> Junie</kbd>
-  <kbd><img src="https://www.google.com/s2/favicons?domain=kiro.dev&sz=64" width="14" valign="middle" alt="" /> Kiro</kbd>
-  <kbd><img src="https://www.google.com/s2/favicons?domain=factory.ai&sz=64" width="14" valign="middle" alt="" /> Factory Droid</kbd>
-  <kbd><img src="https://www.google.com/s2/favicons?domain=x.ai&sz=64" width="14" valign="middle" alt="" /> Grok Build</kbd>
-  <kbd><img src="https://www.google.com/s2/favicons?domain=cline.bot&sz=64" width="14" valign="middle" alt="" /> Cline</kbd>
-  <kbd><img src="https://www.google.com/s2/favicons?domain=kilo.ai&sz=64" width="14" valign="middle" alt="" /> Kilo</kbd>
-  <kbd><img src="https://www.google.com/s2/favicons?domain=ampcode.com&sz=64" width="14" valign="middle" alt="" /> Amp</kbd>
-  <kbd><img src="https://www.google.com/s2/favicons?domain=meta.ai&sz=64" width="14" valign="middle" alt="" /> Muse Code</kbd>
-  <kbd><img src="https://www.google.com/s2/favicons?domain=qwen.ai&sz=64" width="14" valign="middle" alt="" /> Qwen Code</kbd>
-  <kbd>Any ACP agent</kbd>
-</p>
-
-## Why Friday
-
-Most of us use one AI coding tool at a time. It hits its usage limit halfway through a task, gets stuck on one approach, and works alone, while the other tools you already pay for sit idle. Friday puts them in one workspace on your computer: they split the job, check each other's work, and carry on for each other, so the work keeps moving and you stay in charge of what ships.
-
-## How it works
-
-1. **Point a session at your repo.** Friday finds the coding tools installed and signed in on your computer.
-2. **Add one or more agents.** Each can work in its own copy of the repo (a Git worktree), so they never overwrite each other.
-3. **Give the session the job.** One agent splits it into tasks on a shared board; the others take the ones that suit them.
-4. **They work together.** Agents message each other as they go. Every finished task has its tests run, and another agent reviews any change the tests don't settle.
-5. **Nothing stalls on a limit.** If an agent runs out of usage, its task moves to the next best agent with a record of what the first did and changed.
-6. **You review, then ship.** Read every change, send notes back on any line, then commit or open a pull request.
-
-## Get started in five minutes
-
-1. **Sign in to one coding tool** you already use, for example `claude auth login` or `codex login` ([the full list](#install)).
-2. **Install Friday:** download the app for [Mac (Apple silicon)](https://github.com/splashxmoon/friday/releases/latest/download/Friday-arm64.dmg), [Windows](https://github.com/splashxmoon/friday/releases/latest/download/Friday-Setup.exe) or [Linux](https://github.com/splashxmoon/friday/releases/latest/download/Friday-x86_64.AppImage), or run `npx github:splashxmoon/friday` with Node.js 22.
-3. **Open it.** Friday lists the tools it found and which are signed in.
-4. **Start a session** in your repo and give it a task.
-5. **Review what it changed** and keep what you like.
-
-One tool is enough to start. Add a second agent to the session when you want them to split the work.
-
-## Your agents, working as a team
-
-Friday doesn't just run your coding tools next to each other: it lets them work together. One agent can split a job into a **task board**; the others pick up the tasks that suit them, each in its own files, and every finished task is checked before it counts as done: its tests run, and another agent reviews it unless they already passed on a small change. Along the way they **message each other** directly: a heads-up about a rename, a question one of them waits on, an answer that comes back. You see every message as it happens.
-
-<p align="center">
-  <img src="docs/assets/agents-in-session.png" alt="One session with three agents at work: Claude Code on the checkout, Codex writing its tests, and a second Claude Code keeping the old cart working, each in its own copy of the repository" width="960" />
-</p>
-
-An agent you add to a session can work in its own copy of the repository, so three of them can change the same project at once without stepping on each other.
+And when one agent runs out of usage, another picks up its task with a record of what was done.
 
 <table>
 <tr>
-<td width="50%"><img src="docs/assets/task-board.png" alt="Claude Code's task board: the price maths moved and checked, Gemini on the tests, Cursor on the checkout page, the changelog waiting on them" /></td>
 <td width="50%"><img src="docs/assets/agents-talk.png" alt="Codex telling Cursor about a rename, and Gemini asking Claude Code whether a discount comes off before or after tax" /></td>
+<td width="50%"><img src="docs/assets/task-board.png" alt="Claude Code's task board: the price maths moved and checked, Gemini on the tests, Cursor on the checkout page, the changelog waiting on them" /></td>
 </tr>
 <tr>
-<td width="50%" valign="top"><sub><b>A shared task board.</b> Claude Code split the work; Codex moved the price maths into <code>totals.ts</code> and Claude Code checked it; Gemini is on the tests and Cursor on the checkout page; the changelog waits for all three.</sub></td>
-<td width="50%" valign="top"><sub><b>Agents talking.</b> Codex tells Cursor what it renamed before Cursor trips over it; Gemini asks Claude Code whether a discount comes off before or after tax, and goes on with the answer.</sub></td>
+<td width="50%" valign="top"><sub><b>They talk.</b> Codex tells Cursor what it renamed; Gemini asks Claude Code whether a discount comes off before or after tax.</sub></td>
+<td width="50%" valign="top"><sub><b>They split the work.</b> Claude Code splits the job; each task is checked before it counts as done.</sub></td>
 </tr>
 </table>
 
-## Crew: AI teammates that keep going
+## Get started in five minutes
 
-Pick **Crew** to keep AI teammates on your computer. Each has a name, a role, a memory and a folder of its own, and runs on one of your coding tools. Give the crew a goal and the lead plans it, hands out the parts on a board and tells you what got done; or `@` a teammate to give it a task yourself.
+1. **Sign in to one coding tool** you already use, for example `claude auth login` or `codex login`.
+2. **Install Friday** with a download link above, or run `npx github:splashxmoon/friday` with Node.js 22.
+3. **Open it.** Friday lists the coding tools it found on your computer.
+4. **Start a session** in your repo and give it a job.
+5. **Review what changed** and keep what you like.
 
-- **Rooms** for a project, with the teammates you pick, and side threads on any message.
-- **Away until a time:** teammates decide for themselves and note what they assumed, and a brief is waiting when you're back. The desktop app keeps your computer awake while there's work in hand, so leave it on power.
-- **Usage limits handled:** a teammate whose tool runs out carries on with its backup tool, and switches back at the reset.
-- **Access you set** per teammate (Read only, Ask before changes, Full access), and Stop all or Pause whenever you like.
-- **Workflows:** a crew's automations drawn as steps, each run posting a board in a room.
+One agent is enough to start. Add a second when you want them to split the work.
 
-<p align="center">
-  <img src="docs/assets/crew.png" alt="The Crew room: Maya gives the crew a goal, Nova the lead plans it and posts a board, Kit has fixed the bugs and Nova is checking them, and Juno is writing the release notes" width="960" />
+## Works with the agents you already pay for
+
+No API keys and no new plan: Friday drives the coding tools signed in on your computer.
+
+<p>
+  <kbd>Claude Code</kbd> <kbd>Codex</kbd> <kbd>Cursor</kbd> <kbd>GitHub Copilot</kbd> <kbd>Gemini CLI</kbd> <kbd>OpenCode</kbd> <kbd>Devin</kbd> <kbd>Junie</kbd> <kbd>Kiro</kbd> <kbd>Factory Droid</kbd> <kbd>Grok Build</kbd> <kbd>Cline</kbd> <kbd>Kilo</kbd> <kbd>Amp</kbd> <kbd>Muse Code</kbd> <kbd>Qwen Code</kbd> <kbd>Any ACP agent</kbd>
 </p>
 
-## "So what's the catch?"
+## Free, and on your computer
 
-There isn't one. Friday on your own computer is free and MIT licensed. It has no account and no model of its own: the work runs on your coding tools, on their own plans. The only thing that comes back to us is a few anonymous usage counts, listed under [Privacy](#privacy), and you can turn them off.
+Friday is MIT licensed, has no account and no model of its own, and listens on `127.0.0.1` only. Your code, prompts and files never come to us. The only thing it sends is a few anonymous usage counts, which you can turn off ([what exactly](#privacy)). What we sell is [Friday Team](https://www.tryfridaywork.com), the hosted version for several people in one session.
 
-What we sell is [Friday Team](https://www.tryfridaywork.com), the hosted version, for when several people work in the same session: steering one agent together, reviewing each other's changes, and sharing what the agents did.
+## More
 
-## Install
+<details>
+<summary><b>Crew: AI teammates with memory</b></summary>
 
-> [!IMPORTANT]
->
-> Install and sign in to at least one coding tool first. Friday finds every one on your computer and can sign the rest in from its setup screen.
+Keep AI teammates on your computer, each with a name, a role, a memory and its own folder, on one of your coding tools. Give the crew a goal and the lead plans it on a board, or `@` one of them. Rooms with side threads, access per teammate (Read only, Ask before changes, Full access), Away until a time (teammates note their assumptions and a brief waits for you; it works while your computer stays on and Friday is running), a backup tool when one runs out, and workflows drawn as steps.
+
+<img src="docs/assets/crew.png" alt="The Crew room: Maya gives the crew a goal, Nova the lead plans it and posts a board, Kit has fixed the bugs and Nova is checking them, and Juno is writing the release notes" width="960" />
+</details>
+
+<details>
+<summary><b>Rules, project memory and safety</b></summary>
+
+- **Rules that stick:** tell an agent "never touch the migrations" once and Friday offers it as a rule every agent's later work is checked against.
+- **Was it already broken?** A failing test is rerun on the code from before the agent started, so old failures are marked as old.
+- **Project memory:** corrections are kept per repo, and every agent that starts there is told them first.
+- **Careful by default:** before a command that deletes, deploys, publishes or installs, Don't is the main button. Secrets (API keys, tokens, webhook URLs) are hidden in the chat and the Git panel.
+</details>
+
+<details>
+<summary><b>Automations, Git and everything else</b></summary>
+
+- **Automations:** on a schedule, a webhook, or when another session finishes; one tool or several splitting the work; ends in a pull request for you to review.
+- **Git built in:** stage by hunk, commit, push, open a PR.
+- **Friday Code:** Friday's own agent, on an API key of yours or a local model (Ollama, LM Studio).
+- **Let other agents use Friday:** Claude Code, Codex or any MCP client on your computer can start Friday sessions and hand them work (`claude mcp add friday --scope user -- node ~/.friday/outside-mcp.mjs`).
+- Live feed, rewind, dev-server preview, terminal, ⌘K for everything, themes, notifications.
+</details>
+
+<details>
+<summary><b>Install details: every tool's install and sign-in, Homebrew, settings</b></summary>
 
 ### Supported Tools and Installation
 
@@ -213,111 +171,10 @@ npm start
 | `PORT` | `4321` | Where Friday listens, on this computer only. |
 | `FRIDAY_HOME` | `~/.friday` | Where it keeps your sessions and settings. |
 | `--no-open` | | Start without opening the browser. |
+</details>
 
-## Features
-
-<table>
-<tr>
-<td width="50%" valign="middle">
-
-### Every coding tool, one place
-
-Friday finds the coding tools on your computer and whether each is signed in. Pick one per task, or let Auto choose by the job and by how much of each tool's usage is left.
-
-</td>
-<td width="50%"><img src="docs/assets/tools.png" alt="Six coding tools Friday found on this computer, each signed in and ready" /></td>
-</tr>
-<tr>
-<td width="50%" valign="middle">
-
-### Never stuck on a usage limit
-
-Each tool's remaining usage in view where Friday can read it, with a link to the tool's own usage page where it can't. When one runs out mid-task, the task moves to the agent best placed to finish it, with a record of what the first did and changed, instead of starting over. Friday never switches your accounts for you: it tells you which other one is signed in, and you choose.
-
-</td>
-<td width="50%"><img src="docs/assets/usage.png" alt="Each coding tool's remaining usage, at a glance" /></td>
-</tr>
-<tr>
-<td width="50%" valign="middle">
-
-### Review before anything ships
-
-Every run ends in a change set you read before you keep it. Leave notes on a line or a range and send them back to the agent; see which lines it wrote and which you did.
-
-</td>
-<td width="50%"><img src="docs/assets/notes.png" alt="A note on two changed lines, about to go back to the agent" /></td>
-</tr>
-<tr>
-<td width="50%" valign="middle">
-
-### Git, built in
-
-Stage by file or by hunk, commit, pull, push, and open a pull request, stacked on another one if you are building in steps. Start any session on the branch you choose.
-
-</td>
-<td width="50%"><img src="docs/assets/git-panel.png" alt="The Git panel: staged files, changes by hunk, and a commit button" /></td>
-</tr>
-<tr>
-<td width="50%" valign="middle">
-
-### Pick the branch, or start a new one
-
-Point a session at a folder, choose the branch it works on, or have it start a new branch from any other. Friday won't switch a folder with uncommitted work out from under you.
-
-</td>
-<td width="50%"><img src="docs/assets/branches.png" alt="Choosing which branch a new branch starts from" /></td>
-</tr>
-</table>
-
-## Automations
-
-Hand your coding tools the jobs that come round again. An automation reads like a sentence: **when** (on a schedule, when its webhook is called, when an agent finishes or fails in a session, or only when you press Run now), **who** (a coding tool, or several that split the work on a board), **where** (a folder, worked on in its own copy so yours stays put), **what** it does, and **then** (open a pull request, tell you). Each run is a session of its own you can open, read and review like any other, and a daily cap keeps a busy trigger in check.
-
-## Project memory: agents that learn from being corrected
-
-When a run finishes, the coding tool that did it (Claude Code on its small, fast model) reads it once more for what the next agent in that repository should know: a decision and why, a pitfall and its fix, a convention. When you correct an agent, the run that fixes it is kept as a correction, and every agent that starts in that repository afterwards is told it first, whichever tool it is. If the same mistake comes back after agents were told, Friday offers a command that would catch it (one that only reads or tests), and once you add it, runs it after every change there and sends a failure back to the agent. A lesson no agent has needed in 60 days, or one a run found out of date, is retired. Read, edit, pin or bring back lessons, or turn learning off, in Settings › Memory. It all stays in Friday's folder on your computer.
-
-<p align="center">
-  <img src="docs/assets/automations.png" alt="The Automations page: a webhook that triages new issues, a weekday flaky-test sweep with Claude Code leading Codex, and a nightly dependency bump with Codex" width="960" />
-</p>
-
-## Let other agents use Friday
-
-Friday is also a place your other agents hand work to. Claude Code, Codex, Cursor, or anything else that speaks MCP, on the same computer, can start Friday sessions, tell their agents what to do, wait for them, read what they did and answer what they ask. Each session shows which agent started it and what it said.
-
-Open **Settings › Let other agents use Friday** for the line for each agent, with Copy, and Add for Claude Code and Codex, which runs that agent's own `mcp add` in a Terminal window. For Claude Code it looks like this:
-
-```sh
-claude mcp add friday --scope user -- node ~/.friday/outside-mcp.mjs
-```
-
-or, from a clone or with npx, `claude mcp add friday --scope user -- npx -y github:splashxmoon/friday mcp`. Friday has to be open for the tools to work. Then ask your agent to hand something to Friday.
-
-| Tool | What it does |
-| --- | --- |
-| `list_sessions` | Your sessions, latest first, with their agents and anything waiting on you |
-| `start_session` | A new Code session with a task, in a folder or repo (its own copy, unless asked), on a coding tool you name or the one Friday picks (`auto`) |
-| `send_message` | Tell an agent in a session something, or leave a note for the people in it |
-| `read_session` | Each agent's status, what is waiting on you, and the latest messages |
-| `wait_for_idle` | Wait until the agents are done or one needs you, with a timeout |
-| `answer` | Yes or no to a permission request, or an answer to a question |
-| `list_teammates`, `ask_teammate` | Your Crew, and a question for one of them |
-
-Only agents on this computer, running as you, can use it. Friday still listens on `127.0.0.1` only; each call carries a key kept in Friday's own folder (`outside-token`, readable by you alone), which the script reads when it calls, so the key never goes into the agent's own settings. A web page can't use it either: Friday turns away any request a page sends.
-
-## And everything else you'd expect
-
-- **Friday Code**, Friday's own agent, on a model of yours: an API key from OpenAI, Anthropic, Google and others, or a model on your computer with Ollama or LM Studio, added in Settings › Your models.
-- **A live feed** of every message, command and file change, with approvals when a tool asks before running something, and **rewind** to take a turn back.
-- **Your dev server previewed** beside the session, and a terminal you can search.
-- **Open a session's folder** in your editor, Finder or terminal, and ⌘-click a file name to open it at the line.
-- **Keyboard first:** ⌘K for everything, ⌘⌥1–9 and Ctrl+Tab between sessions, ⌘⇧U for the next one waiting on you, ↑ for what you asked before.
-- **Themes:** a gallery of twelve, or make your own from a few colours and save or share it as a file.
-- **Skills and saved commands** shared across your tools, and a session saved as Markdown in one click.
-- **Sessions that pick up by themselves** after a restart, and notifications (with a dock badge) that open the session they're about.
-- **Agents that stay stopped:** put one on hold and nothing nudges or wakes it until you say so.
-
-## Privacy
+<details>
+<summary id="privacy"><b>Privacy: exactly what's sent</b></summary>
 
 Friday listens on `127.0.0.1` only, so nothing else on your network can reach it, and it answers only its own page: a request from any other site, or from a page being previewed, is refused. What it keeps is one folder on your computer, readable only by you.
 
@@ -332,23 +189,10 @@ It has no account, and your code, prompts and files never come to us. What it do
 Never: prompts, code, file names or paths, repository names, email addresses, accounts or sign-ins, or anything a tool writes. Friday asks about the counts in its welcome the first time it opens (or in a note in the sidebar, if you skip the welcome), and sends nothing before you answer. To turn them off, use Settings › Data & backup › Share anonymous usage, or set `FRIDAY_NO_TELEMETRY=1` or `DO_NOT_TRACK=1` where Friday runs.
 
 It talks to GitHub for the pull requests, issues and skills you ask it about. Each tool's remaining usage comes from the tool itself wherever it can: Claude Code's from what it reports as it runs (its sign-in is never read), Codex's from its own app server, Copilot's through your GitHub CLI. Cursor keeps none on your computer, so Friday makes the request Cursor's own CLI makes, to Cursor's server and nowhere else. Friday never switches the account a tool is signed in with. A model you add in Settings › Your models is called from your computer, and its key is kept there and sent only to that model's own server. The desktop app also asks GitHub for a newer release while it's open (when it starts, when you come back to it, and every ten minutes), downloads it from there, and installs it when you restart (`FRIDAY_NO_UPDATE_CHECK=1` turns that off).
+</details>
 
-## Developing
-
-```bash
-npm install
-npm run typecheck
-npm test
-npm run build:css    # after changing styles
-npm run desktop      # build the desktop app and open it
-npm run desktop:dist # package installers for this computer into release/
-```
-
-Pushing a `v*` tag builds the installers for every platform on GitHub Actions and publishes them as a release ([release.yml](.github/workflows/release.yml)).
-
-Issues and pull requests are welcome: [CONTRIBUTING.md](CONTRIBUTING.md) says how. For anything large, open an issue first so we can talk it through.
-
-## FAQ
+<details>
+<summary><b>FAQ</b></summary>
 
 **How do I run Claude Code and Codex at the same time on one project?**
 Start a session in your repository with one of them, then add the other from the session's agent bar. Each can work in its own copy of the repository (a Git worktree), so they don't overwrite each other, and Friday keeps them talking.
@@ -378,14 +222,17 @@ Friday is free and MIT licensed. The work runs on each tool's own plan and sign-
 Its task goes to the agent best placed to finish it, with a record of what the first did and changed, so the work keeps going.
 
 **Can it run my agents while I'm not there?**
-Yes: an [automation](#automations) starts a coding tool on a schedule, from a webhook, or when another session finishes, and opens a pull request for you to review. Friday has to be running for it to start; you choose whether a run missed while the computer was off happens when it's back.
+Yes: an automation starts a coding tool on a schedule, from a webhook, or when another session finishes, and opens a pull request for you to review. Friday has to be running for it to start; you choose whether a run missed while the computer was off happens when it's back.
 
 **Does my code leave my computer?**
 Not through Friday. It runs on `127.0.0.1` with no account; your coding tools talk to their own providers as they always do. The only things Friday sends us are the anonymous usage counts under [Privacy](#privacy), which never include code, and you can turn them off.
+</details>
 
----
+## Contributing
 
-If Friday saves you time, a ⭐ helps other people find it.
+Issues and pull requests are welcome: [good first issues](https://github.com/splashxmoon/friday/labels/good%20first%20issue) · [CONTRIBUTING.md](CONTRIBUTING.md). To build it: `npm install`, `npm test`, `npm run desktop`.
+
+If Friday saves you time, a ⭐ helps other developers find it.
 
 ## License
 
