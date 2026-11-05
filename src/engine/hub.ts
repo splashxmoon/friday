@@ -102,9 +102,9 @@ function steerable(b: Extract<EventBody, { type: "instruction" }>): boolean {
 
 /**
  * How far a turn carrying anyone else's message may go on the host's computer (Security R2, R3): a teammate's, a
- * hand-off's, another agent's, or an app's posted as the host. As far as the host's own unless the host held others to Edits
- * (Auto is Auto for everyone's messages by default); Plan when the host picked Plan by hand. The runner holds the turn to the
- * lower of this and its own mode.
+ * hand-off's, another agent's, or an app's posted as the host. Edits unless the host raised it for that lane (Arun,
+ * 2026-11-04: files may change, commands need the host's OK); Plan when the host picked Plan by hand; raised, as far as the
+ * host's own. The runner holds the turn to the lower of this and its own mode.
  */
 export function othersCap(handMode: EngineMode | undefined, othersFull: boolean): EngineMode | undefined {
   if (othersFull) return handMode;
@@ -499,7 +499,7 @@ export class EngineHub {
     return this.hosts.get(`${sid}|${lane}`)?.windows ?? [];
   }
 
-  async readRepo(sid: string, req: RepoCall, lane?: string, by?: string): Promise<{ output: string; where?: { host: string; cwd: string; branch?: string } } | null> {
+  async readRepo(sid: string, req: RepoCall, lane?: string, by?: string, forPerson?: string | null): Promise<{ output: string; where?: { host: string; cwd: string; branch?: string } } | null> {
     let host = lane ? this.hosts.get(`${sid}|${lane}`) : undefined;
     // A tool's own commands are that lane's tool's: another machine's would be another tool's.
     if (!host && req.op === "commands") return null;
@@ -528,11 +528,14 @@ export class EngineHub {
       if (host.info.mode === "edits" && ASKED.has(call.op)) return { output: hostOnlyYes(host.info.hostName) };
       delete call.approved;
     }
-    // A person who isn't the host, on a computer whose host held others to Edits (lane.othersFull off, Security R2): a command,
+    // A person who isn't the host, on a computer whose host hasn't raised others' reach (lane.othersFull, Security R2): a command,
     // push, preview or background job they press for goes no further than a message of theirs to that tool would. It went
     // straight to the machine at the host's own mode (2026-11-04 security review).
-    if (by !== undefined && by !== host.info.hostId && !call.approved) {
-      const cap = othersCap(host.info.handMode, (await this.store.state(sid)).othersFull?.[host.lane] !== false);
+    // `forPerson`: whose turn an agent's own call is part of (Friday's agent working for somebody), held the same way; null is a
+    // turn nobody is behind, which isn't the host's either. It decides only this, never which machine may be borrowed (`by`).
+    const asker = by ?? (forPerson === undefined ? undefined : (forPerson ?? ""));
+    if (asker !== undefined && asker !== host.info.hostId && !call.approved) {
+      const cap = othersCap(host.info.handMode, (await this.store.state(sid)).othersFull?.[host.lane] === true);
       if (cap && (OWN_YES.has(call.op) || (cap === "plan" && WRITES.has(call.op)))) return { output: heldForOthers(host.info.hostName, cap) };
     }
     const busy = WRITES.has(call.op) && host.info.mode !== "plan" ? await this.takePen(sid, lane ?? MAIN_LANE, host.lane, host.info, call.op === "apply", by) : null;
@@ -1145,7 +1148,7 @@ class LaneHost {
     // Somebody else's work never reaches a tool on its host's own plan mid-turn either: the queue says no to it (drain).
     if (ownPlan(state.engines[this.lane]) && refusal(state.engines[this.lane], whoseWork(await this.store.events(this.sid), ev))) return void this.pump();
     const capped = this.turnCap !== undefined;
-    if (!capped && this.othersMessage(ev, state) && othersCap(this.info.handMode, state.othersFull?.[this.lane] !== false) !== undefined) return void this.pump();
+    if (!capped && this.othersMessage(ev, state) && othersCap(this.info.handMode, state.othersFull?.[this.lane] === true) !== undefined) return void this.pump();
     const events = await this.store.events(this.sid);
     // On hold, finishing the turn it was told to stop: another agent's message waits for the person, as in drain (held.ts).
     if (!runnableQueue(events, this.lane, [ev.seq]).length) return void this.pump();
@@ -1381,7 +1384,7 @@ class LaneHost {
       const now = runOf(await this.store.state(this.sid), this.lane).status;
       // A Stop (the agent left idle) drops the turn with its task; whatever was queued meanwhile is the next turn.
       if (this.closed || now !== "running") continue;
-      const cap = others ? othersCap(this.info.handMode, state.othersFull?.[this.lane] !== false) : undefined;
+      const cap = others ? othersCap(this.info.handMode, state.othersFull?.[this.lane] === true) : undefined;
       // A conversation grown long is compacted first, by the tool's own /compact, as a turn of its own: the turn that follows,
       // and every one after, re-reads a summary instead of everything so far. Not before one of the tool's own commands, which
       // may be /compact itself. One that fails is not tried again on this connection; the turn goes ahead either way.

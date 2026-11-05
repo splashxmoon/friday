@@ -155,3 +155,13 @@ export function cleanClasses(raw: unknown): CommandClass[] {
   if (!Array.isArray(raw)) return [];
   return COMMAND_CLASSES.filter((c) => raw.includes(c));
 }
+
+/**
+ * The riskiest kind among these commands that a person should look at before saying yes, if any. Needs you suggests "Don't" for
+ * it, and every place that asks (the session's card, the toast, the Agents hub) makes "Don't" the main button for it, so the one
+ * an Enter or a quick click lands on is the safer one (2026-11-04 QA).
+ */
+export function carefulClass(items: readonly string[]): CommandClass | undefined {
+  const classes = new Set<CommandClass>(items.flatMap((c) => classesOf(c)));
+  return (["destructive", "deploy", "publish", "install", "other"] as const).find((c) => classes.has(c));
+}

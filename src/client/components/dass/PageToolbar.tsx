@@ -9,7 +9,9 @@ import { cn } from "@/lib/utils";
 export function PageToolbar({ left, children, className }: { left?: ReactNode; children?: ReactNode; className?: string }) {
   return (
     <div className={cn("dass-toolbar flex min-h-8 flex-wrap items-center gap-2", className)}>
-      {left && <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">{left}</div>}
+      {/* At least 12rem before what is on the right moves to a line of its own: on a phone the search shrank to nothing under the
+          right side's words, drawn over each other (2026-11-04 QA, the Team library). */}
+      {left && <div className="flex min-w-0 flex-[1_1_12rem] flex-wrap items-center gap-2">{left}</div>}
       {children && <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2">{children}</div>}
     </div>
   );

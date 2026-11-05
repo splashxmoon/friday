@@ -2100,6 +2100,8 @@ select { cursor: pointer; }
 /* The 3px ring is redundant next to the border lift above. */
 .prompt [data-slot="input-group"]:focus-within { --tw-ring-shadow: 0 0 #0000; }
 .prompt [data-slot="input-group"] :focus-visible { outline: none; }
+/* That is for the text, whose ring is the box's own: the pills in it keep one, or Tab landed on them unseen (2026-11-04 QA, WCAG 2.4.7). */
+:is(.composer-bar, .prompt [data-slot="input-group"]) :is(.menu-pill, .agent-pill, .cw-drop, .send-to):focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
 .prompt [data-slot="input-group"] textarea {
   padding: 9px 14px 2px;
   min-height: 38px;
@@ -2715,6 +2717,8 @@ select { cursor: pointer; }
 .machine-line .link-btn,
 .auth-line .link-btn { font-size: 12px; }
 .machine-line .engine-dot { flex: none; }
+/* The name beside its dot, its words wrapping there, not the whole line dropped under the dot on a phone (2026-11-04 QA). */
+.machine-line .machine-name { flex: 1 1 12em; min-width: 0; }
 
 /* the repo this session is working in */
 .repo-chip { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 320px; padding: 2px 9px; border-radius: var(--r-pill); background: var(--card-2); color: var(--ink-2); font-size: 12px; white-space: nowrap; flex: none; }
@@ -9561,6 +9565,8 @@ html .shell:not(.with-panel) .main { margin-left: 0 !important; border-left: 1px
   html:not(.desktop) .win-nav { display: flex; position: fixed; top: 6px; left: 8px; z-index: 46; }
   html:not(.desktop) .win-nav button:not(.win-nav-panel) { display: none; }
   html:not(.desktop) .win-nav .win-nav-panel { margin-left: 0; width: 32px; height: 32px; background: var(--bg-elev, var(--bg)); border: 1px solid var(--border); }
+  /* That button is the one: the wide window's own (.nav-open) stood 2px off it, two boxes stacked (2026-11-04 QA). */
+  html:not(.desktop) .shell > .nav-open { display: none; }
   html:not(.desktop) .shell > .main { margin-top: 44px !important; }
   .sb-panel { left: 0; top: 0; width: min(var(--panel-w), calc(100vw - 24px)); background: var(--sidebar); }
   html .shell .sb-panel .sb-panel-inner.dass-panel.dass-panel.dass-panel { width: 100% !important; }
@@ -9571,6 +9577,9 @@ html .shell:not(.with-panel) .main { margin-left: 0 !important; border-left: 1px
    stacked (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL"). Pages with no top bar keep the strip. */
 @media (max-width: 560px) {
   html:not(.desktop) .shell:has(> .main > .session-view > .topbar:first-child) > .main { margin-top: 0 !important; }
+  /* Who is here says its number alone, "● 3", the words kept for a screen reader: "3 online" left the title ~95px, "Test sess…"
+     (2026-11-04 QA). */
+  .pb-roster :is(.pb-word, .pb-off) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   html:not(.desktop) .shell:has(> .main > .session-view > .topbar:first-child) > .win-nav { top: 12px; }
   /* Clear of the list's button (8px in, 32px wide) and no more; the title keeps room for a word or two, and the header's own
      controls give way first: "1 waiting on you" says only its count (2026-10-29: the Crew room's title was crushed to "C."
@@ -9798,6 +9807,7 @@ html .shell .sb-panel .sb-panel-inner.dass-panel.dass-panel.dass-panel { padding
 .amp-tool:disabled { opacity: 1; }
 /* The pill: one line that ends in "…" rather than running off a narrow composer with a long typed model name. */
 .agent-pill.model-choice { max-width: 100%; min-width: 0; }
+.agent-pill.model-choice > .menu-pill-caret { flex: none; }
 .amp-pill-text { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .amp-pill-text .model-pill-sep, .prompt .model-choice .amp-pill-text .model-pill-sep { margin: 0 5px; }
 .amp-pill-text .menu-pill-mark { display: inline-grid; vertical-align: -2px; margin-right: 4px; }
@@ -10265,7 +10275,9 @@ html .shell.with-panel .main { border-color: var(--border) !important; }
 .btn:not(.primary):not(.ghost, .destructive, .dark, .on):hover:not(:disabled), [data-slot="button"][data-variant="outline"]:hover { background-color: var(--hover); }
 /* The chosen tab or segment: the same lit chip as the sidebar's. */
 [data-slot="tabs-trigger"][data-state="active"], .segmented button.on, .amp-seg button[aria-pressed="true"], [data-slot="toggle-group-item"][data-state="on"] {
-  background: var(--hover-strong) !important; box-shadow: none !important; /* selection is a fill (2026-10-29 direction §5) */
+  /* Selection is a fill (2026-10-29 direction §5); its shadow goes below, but not while it has the focus: here it took the
+     focus ring off the chosen tab or segment, the one Tab lands on (2026-11-04 QA, WCAG 2.4.7). */
+  background: var(--hover-strong) !important;
 }
 
 /* 3. Cards: one step off the page, and a little further when pointed at. */
@@ -10767,6 +10779,7 @@ html.desktop-mac[data-band="session"]:not(.bench-docked) #band-left { right: cal
 .cd-sum-row:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
 .cd-sum-k { font-size: 12px; color: var(--text-muted); }
 .cd-sum-v { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cd-sum-v > svg { flex: none; }
 .cd-sum-sub { font-weight: 400; font-size: 13px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; }
 .cd-sum-change { font-size: 13px; color: var(--text-muted); }
 .cd-sum-row:hover .cd-sum-change { color: var(--ink); }

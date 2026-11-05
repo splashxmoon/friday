@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { slowly } from "../slow.js";
 import type { Redis } from "ioredis";
 import { MAIN_LANE, type ActorRef, type EventBody, type Member, type SessionEvent, type SessionOptionsPatch } from "../types.js";
@@ -184,6 +185,9 @@ function trimmedEvent(e: SessionEvent): SessionEvent {
 const READ_BATCH = 1000;
 /** How long the mark of how far a log was checked for secrets is kept: longer than any log stays in Redis idle. */
 const SHIELDED_MS = 30 * 24 * 60 * 60 * 1000;
+/** How long a server's word that somebody is here lasts unless it says it again (SessionStore.presenceTtlMs). */
+const PRESENCE_TTL_MS = 60_000;
+const DROP_IF_SAME = `if redis.call("HGET", KEYS[1], ARGV[1]) == ARGV[2] then return redis.call("HDEL", KEYS[1], ARGV[1]) end return 0`;
 /** What closes a lane's stream on the page (useSession streamsAfter), and so its held text (bus.ts). */
 const ENDS_STREAM = new Set(["agent.message", "run.ended", "run.pause", "run.cancel"]);
 
@@ -736,16 +740,75 @@ export class SessionStore {
     await this.append(sid, { id: m.id, name: m.name, kind: "human" }, { type: "member.joined", role: m.role });
   }
 
+  /**
+   * Who is here is each server's own count of its open sockets, kept in Redis under the server's name with a time to live
+   * (`user|server` -> `count:until`). The server says it again every third of that time and as Redis comes back
+   * (refreshPresence), so Redis restarting empty loses nobody for more than a moment, and a server that died stops counting
+   * its people once the time is up instead of keeping them here for good. Counted here, not in Redis, so it can be said again.
+   */
+  presenceTtlMs = PRESENCE_TTL_MS;
+  /** This server's name in the presence hash. */
+  private readonly node = randomUUID().slice(0, 12);
+  /** This server's open sockets: session -> person -> how many. */
+  private here = new Map<string, Map<string, number>>();
+
   async presenceChange(sid: string, userId: string, delta: 1 | -1): Promise<number> {
+    let mine = this.here.get(sid);
+    if (!mine) this.here.set(sid, (mine = new Map()));
+    const n = Math.max(0, (mine.get(userId) ?? 0) + delta);
+    if (n) mine.set(userId, n);
+    else mine.delete(userId);
+    if (!mine.size) this.here.delete(sid);
+    try {
+      await this.writePresence(sid, userId, n);
+    } catch (e) {
+      // A join that wasn't counted is not one: its socket is closed and never counted down. A leave stays counted down here,
+      // the socket is gone; the next refresh says so.
+      if (delta === 1) {
+        const m = this.here.get(sid);
+        const left = (m?.get(userId) ?? 0) - 1;
+        if (m && left > 0) m.set(userId, left);
+        else if (m) (m.delete(userId), m.size || this.here.delete(sid));
+      }
+      throw e;
+    }
+    return (await this.presence(sid))[userId] ?? 0;
+  }
+
+  private async writePresence(sid: string, userId: string, n: number): Promise<void> {
     const k = this.keys(sid).presence;
-    const n = await this.redis.hincrby(k, userId, delta);
-    if (n <= 0) await this.redis.hdel(k, userId);
-    return Math.max(n, 0);
+    const field = `${userId}|${this.node}`;
+    if (!n) return void (await this.redis.hdel(k, field));
+    // The hash as a whole lasts as long as some server keeps saying somebody is here.
+    await Promise.all([this.redis.hset(k, field, `${n}:${Date.now() + this.presenceTtlMs}`), this.redis.pexpire(k, this.presenceTtlMs)]);
+  }
+
+  /** Says again who this server has open, with a fresh time to live: on a timer, and as Redis comes back (app.ts). */
+  async refreshPresence(): Promise<void> {
+    const writes: Promise<void>[] = [];
+    for (const [sid, mine] of this.here) for (const [userId, n] of mine) writes.push(this.writePresence(sid, userId, n));
+    await Promise.all(writes);
   }
 
   async presence(sid: string): Promise<Record<string, number>> {
-    const h = await this.redis.hgetall(this.keys(sid).presence);
-    return Object.fromEntries(Object.entries(h).map(([id, n]) => [id, Number(n)]));
+    const k = this.keys(sid).presence;
+    const h = await this.redis.hgetall(k);
+    const now = Date.now();
+    const out: Record<string, number> = {};
+    for (const [field, v] of Object.entries(h)) {
+      // A field with no server in it was counted by a server from before: nothing says it again, so it is not taken as here.
+      const i = field.lastIndexOf("|");
+      const c = v.indexOf(":");
+      if (i <= 0 || c <= 0) continue;
+      const n = Number(v.slice(0, c));
+      if (Number(v.slice(c + 1)) < now) {
+        // Its server stopped saying it. Gone only if it is still the same value: its server may have just said it again.
+        void this.redis.eval(DROP_IF_SAME, 1, k, field, v).catch(() => {});
+        continue;
+      }
+      if (n > 0) out[field.slice(0, i)] = (out[field.slice(0, i)] ?? 0) + n;
+    }
+    return out;
   }
 
   async getSeen(sid: string, userId: string): Promise<number> {

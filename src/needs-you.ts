@@ -2,7 +2,7 @@ import type { Redis } from "ioredis";
 import type { LLM } from "./agent/llm.js";
 import { attentionIn, type Attention } from "./attention.js";
 import { askReply, parseChoices, type Ask } from "./ask-parse.js";
-import { CLASS_LABEL, classesOf, type CommandClass } from "./command-class.js";
+import { CLASS_LABEL, carefulClass, classesOf, type CommandClass } from "./command-class.js";
 import { limitHit } from "./limit-reset.js";
 import { stillLimited } from "./limited.js";
 import { markOf, rankNeeds, type Blocks, type Need, type NeedChoice, type NeedMark, type Suggestion } from "./needs-rank.js";
@@ -151,7 +151,7 @@ function heldUp(state: SessionState, ids: string[]): number {
 /** A command's approval, by its riskiest part: safe kinds run by rule, careful ones are a "Don't" with the risk named. */
 export function approvalRule(items: string[]): Suggestion {
   const classes = new Set<CommandClass>(items.flatMap((c) => classesOf(c)));
-  const careful = (["destructive", "deploy", "publish", "install", "other"] as const).find((c) => classes.has(c));
+  const careful = carefulClass(items);
   if (careful) return { answer: "no", reason: `${CLASS_LABEL[careful].label}: ${CLASS_LABEL[careful].hint}. Look at it in the session first.`, by: "rule" };
   const said: Partial<Record<CommandClass, string>> = { read: "It only reads: nothing changes.", checks: "It runs the checks: nothing changes.", build: "It builds the project.", git: "Git on this computer only: nothing leaves it." };
   const top = (["git", "build", "checks", "read"] as const).find((c) => classes.has(c)) ?? "read";

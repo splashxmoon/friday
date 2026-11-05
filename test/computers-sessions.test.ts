@@ -49,6 +49,7 @@ async function hub(t: test.TestContext) {
     const asked: { method: string; params: Record<string, unknown> }[] = [];
     const sock = new WebSocket(`${ws}/link`, { headers: { "x-friday-via": "computer", "x-friday-device": id, "x-friday-device-name": encodeURIComponent("Mac mini"), "x-friday-device-address": "192.168.1.20" } });
     open.push(sock);
+    sock.on("error", () => {});
     await new Promise((r) => sock.once("open", r));
     const linked = new Promise((r) => sock.on("message", (raw) => JSON.parse(String(raw)).kind === "linked" && r(null)));
     sock.on("message", (raw) => {
@@ -81,6 +82,10 @@ test("a session's agent on another computer comes back there when that computer 
   const runner = new WebSocket(`${h.ws}/runner?session=${sid}&token=${encodeURIComponent(actor)}&invite=${encodeURIComponent(signInvite("s", sid, "owner"))}&tool=claude&cwd=${encodeURIComponent("/home/maya/code/billing")}&machine=mini&os=linux&mode=full`, {
     headers: { "x-friday-via": "computer", "x-friday-device": MINI },
   });
+  // Open on this side too before it is dropped: the server can count it attached first, and ending a socket still opening threw
+  // "WebSocket was closed before the connection was established" on CI's slower Mac and Windows (2026-11-04).
+  runner.on("error", () => {});
+  await new Promise((r) => runner.once("open", r));
   await h.until(async () => !!(await h.app.store.state(sid)).engines[MAIN_LANE]?.online, "the runner to attach");
   assert.equal((await h.app.store.state(sid)).engines[MAIN_LANE]?.computer, MINI);
 
@@ -138,6 +143,7 @@ test("a terminal on another computer goes to that computer's shells, and closes 
   const h = await hub(t);
   const mini = await h.computer();
   const term = new WebSocket(`${h.ws}/term?machine=${MINI}`);
+  term.on("error", () => {});
   const got: Record<string, unknown>[] = [];
   term.on("message", (raw) => got.push(JSON.parse(String(raw))));
   await h.until(() => got.some((m) => m.op === "ready"), "the terminal to be ready");

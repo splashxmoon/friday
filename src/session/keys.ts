@@ -6,7 +6,7 @@ export function sessionKeys(prefix: string, sid: string) {
     events: `${base}:events`, // LIST of JSON events; seq = 1-based index
     control: `${base}:control`, // HASH driver:<lane>, driverName:<lane>, epoch:<lane>
     members: `${base}:members`, // HASH userId -> {name, role}
-    presence: `${base}:presence`, // HASH userId -> open connection count
+    presence: `${base}:presence`, // HASH "userId|server" -> "count:until", each server's open connections (store.presence)
     seen: `${base}:seen`, // HASH userId -> last seq acknowledged
     runner: `${base}:runner`, // STRING lease (main lane); per-lane via runnerFor
     runnerFor: (lane: string) => `${base}:runner:${lane}`, // one lease per lane, so lanes run at once

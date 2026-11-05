@@ -614,8 +614,9 @@ export function SessionView({
     const mayStop = driving || who.role === "owner";
     const list: Action[] = [];
     const act = (id: string, label: string, icon: IconName, run: () => void, hint?: string) => list.push({ id: `s-${id}`, label, icon, group: "This session", run, ...(hint ? { hint } : {}) });
-    if (driving) act("release", "Release control", "hand", () => send({ type: "control.yield" }));
-    else if (can(st, who.id, "control")) act("take", st.driver ? "Request control" : "Take control", "hand", () => send({ type: st.driver ? "control.request" : "control.claim" }));
+    // The open-source edition has one person: nobody to hand the wheel to or take it from, so no commands about it (2026-11-04 QA).
+    if (!isLocal() && driving) act("release", "Release control", "hand", () => send({ type: "control.yield" }));
+    else if (!isLocal() && can(st, who.id, "control")) act("take", st.driver ? "Request control" : "Take control", "hand", () => send({ type: st.driver ? "control.request" : "control.claim" }));
     if (st.run.status === "running" && mayStop) act("pause", "Stop the agent's task", "pause", () => send({ type: "run.pause" }));
     if (st.run.status === "paused" && mayStop) act("resume", "Resume the agent", "play", () => send({ type: "run.resume" }));
     for (const v of VIEWS) act(`open-${v.tab}`, `Open ${v.label}`, v.icon, () => (setTab(v.tab), setBench(true)));
@@ -1154,7 +1155,10 @@ function PresenceBar({ presence, state, me, events, send, follow }: { presence: 
             <>Following {following.name.split(/\s+/)[0]}</>
           ) : (
             <>
-              {online} online{people.length > online ? <span className="pb-off"> · {people.length - online} away</span> : null}
+              {/* On a phone the number alone shows, and the words stay for a screen reader: the title beside it needs the room. */}
+              {online}
+              <span className="pb-word"> online</span>
+              {people.length > online ? <span className="pb-off"> · {people.length - online} away</span> : null}
             </>
           )}
         </button>

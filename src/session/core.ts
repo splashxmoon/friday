@@ -1026,9 +1026,11 @@ export class SessionCore {
         if (!ask || ask.id !== cmd.id) return fail("That request was already answered, or isn't waiting any more.");
         // Nobody driving and you could: you answer without taking the wheel (answering a card is not steering).
         const iDrive = laneDriver?.id === m.id || (!laneDriver && canDriveLane(state, m.id, lane));
-        // The host of the Manual machine it would run on answers for it, driving or not: nobody else can say yes there.
+        // The host of the machine it would run on answers for it, driving or not, where only their yes counts: a Manual machine,
+        // or one holding others' commands for its host's OK (lane.othersFull not raised; Arun, 2026-11-04).
         const machine = liveMachine(state, lane) ?? state.engines[lane];
-        const myMachine = machine?.mode === "edits" && machine.hostId === m.id;
+        const machineLane = machine && Object.keys(state.engines).find((k) => state.engines[k] === machine);
+        const myMachine = !!machine && machine.hostId === m.id && (machine.mode === "edits" || !(machineLane && state.othersFull?.[machineLane] === true));
         if (!iDrive && !owner && !myMachine) {
           const allowedKinds = role === "editor" ? state.options.approve.editor : [];
           if (!allowedKinds.length) return deny("answer for an agent you're not driving");

@@ -218,7 +218,7 @@ export const WORK_PLACEHOLDER = "A thread from this video, a week of posts, a sc
 export const WORK_MODE_BLURB: Record<EngineMode, string> = {
   plan: "Reads and suggests. Saves nothing.",
   edits: "Writes and saves pieces, and asks before anything else.",
-  full: "Works without asking. Anyone driving this session can.",
+  full: "Works without asking.",
 };
 
 /**

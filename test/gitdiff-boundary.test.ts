@@ -17,16 +17,20 @@ let top = "";
 let repo = "";
 let secret = "";
 const plan = { mode: "plan" as const };
+const win = process.platform === "win32";
 
 before(async () => {
   top = await mkdtemp(path.join(tmpdir(), "friday-gitdiff-"));
   repo = path.join(top, "repo");
   secret = path.join(top, "secret.txt");
-  await mkdir(path.join(repo, ":"), { recursive: true });
-  await writeFile(path.join(repo, ":", "k"), "x\n");
+  // Windows can't have a folder named ":", nor make a link without rights: those two ways out are Mac and Linux ones.
+  if (!win) {
+    await mkdir(path.join(repo, ":"), { recursive: true });
+    await writeFile(path.join(repo, ":", "k"), "x\n");
+  } else await mkdir(repo, { recursive: true });
   await writeFile(secret, "TOP-SECRET\n");
   execFileSync("git", ["init", "-q"], { cwd: repo });
-  await symlink("..", path.join(repo, "up"));
+  if (!win) await symlink("..", path.join(repo, "up"));
   await writeFile(path.join(repo, "id_rsa"), "PRIVATE-KEY\n");
   await writeFile(path.join(repo, "new.txt"), "hello\n");
 });
@@ -36,7 +40,8 @@ const diff = async (p: string) => JSON.stringify(JSON.parse(await readRepo(repo,
 
 test("an untracked file's diff never reads outside the folder or a key file", async () => {
   const depth = repo.split(path.sep).length + 2;
-  for (const p of [`:/${"../".repeat(depth)}${secret.slice(1)}`, secret, "up/secret.txt", ":(top)up/secret.txt"]) {
+  const ways = win ? [secret] : [`:/${"../".repeat(depth)}${secret.slice(1)}`, secret, "up/secret.txt", ":(top)up/secret.txt"];
+  for (const p of ways) {
     assert.doesNotMatch(await diff(p), /TOP-SECRET/, p);
   }
   assert.doesNotMatch(await diff("id_rsa"), /PRIVATE-KEY/);

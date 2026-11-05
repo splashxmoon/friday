@@ -25,6 +25,7 @@ import { ownModelParts } from "../own-model-id.js";
 import { isAuto, routeFriday, taskTier } from "../routing.js";
 import type { Learned } from "../route-learning.js";
 import type { AgentMesh } from "../agent-mesh.js";
+import { taskOwner } from "../own-plan.js";
 import { toolSchemas, useSkillTool, type AgentTool } from "./tools.js";
 
 const AGENT: ActorRef = { id: "agent", name: "Agent", kind: "agent" };
@@ -133,7 +134,8 @@ export interface RuntimeOptions {
    * than fail.
    */
   /** `lane` picks that lane's own folder when it has one, as a racing lane does. */
-  readRepo?: (sid: string, req: RepoCall, lane?: string) => Promise<{ output: string; where?: { host: string; cwd: string; branch?: string } }>;
+  /** `forPerson`: whose turn a tool call is part of, so another person's computer holds it as theirs (hub.readRepo). */
+  readRepo?: (sid: string, req: RepoCall, lane?: string, by?: string, forPerson?: string | null) => Promise<{ output: string; where?: { host: string; cwd: string; branch?: string } }>;
   /**
    * The workspace's allowance. Asked before each model call and told what the
    * call cost afterwards. Absent means no metering, which is what tests and a
@@ -357,7 +359,11 @@ export class AgentRuntime {
   private async commandGate(sid: string, lane: string, command: string): Promise<{ go: true; approved?: true; approvedBy?: string } | { go: false; output: string; endTurn?: boolean }> {
     const state = await this.store.state(sid);
     const where = repoWhere(state, lane);
-    if (!where || where.uploaded || where.mode !== "edits") return { go: true };
+    if (!where || where.uploaded) return { go: true };
+    // On somebody else's computer, a turn for anyone but its host asks as a Manual machine does, unless the host raised others'
+    // reach there (Arun, 2026-11-04: commands need the host's OK); hub.readRepo refuses it otherwise.
+    const others = !!where.hostId && where.mode !== "edits" && (await this.turnFor(sid, lane)) !== where.hostId && !(where.lane && state.othersFull?.[where.lane] === true);
+    if (where.mode !== "edits" && !others) return { go: true };
     // A yes given in advance: the driver allowed this command earlier in the session. That list is the owners' say-so,
     // which stands for the host's only when the host is an owner; any other host is asked (see hub.readRepo).
     if (allowedCommand(state, command) && where.hostId && roleOf(state, where.hostId) === "owner") return { go: true, approved: true, approvedBy: where.hostId };
@@ -379,6 +385,11 @@ export class AgentRuntime {
     return { go: false, output: "That command needs a person's approval first, and I've asked. Stop here: if they say yes it is run for you as soon as their answer arrives, and its output is the next thing you see. Don't run it again yourself.", endTurn: true };
   }
 
+  /** The person this lane's turn is for (own-plan.ts taskOwner): who asked, followed back through agents and hand-offs; null for nobody. */
+  private async turnFor(sid: string, lane: string): Promise<string | null> {
+    return taskOwner(await this.store.events(sid), lane, Number.MAX_SAFE_INTEGER);
+  }
+
   /**
    * The folder and the command gate for one tool call. A yes the gate found goes with the command as who gave it, so a
    * Manual machine runs it only when that was its host (hub.readRepo). runApproved's re-run passes the answerer this way.
@@ -386,7 +397,7 @@ export class AgentRuntime {
   private repoTools(sid: string, lane: string) {
     let by: string | undefined;
     return {
-      readRepo: (req: RepoCall) => this.opts.readRepo!(sid, req.approved ? { ...req, approvedBy: by } : req, lane),
+      readRepo: async (req: RepoCall) => this.opts.readRepo!(sid, req.approved ? { ...req, approvedBy: by } : req, lane, undefined, await this.turnFor(sid, lane)),
       commandGate: async (command: string) => {
         const gate = await this.commandGate(sid, lane, command);
         by = gate.go ? gate.approvedBy : undefined;
@@ -1257,12 +1268,13 @@ function batcher(send: (t: string) => void) {
  * hub.readRepo follows to pick where a command goes, so the machine whose
  * mode decides the tools and the approvals is the machine that runs them.
  */
-export function repoWhere(state: SessionState, lane?: string): { cwd: string; branch?: string; host: string; hostId?: string; mode: EngineMode; uploaded?: boolean; offline?: boolean; shell?: string } | undefined {
+export function repoWhere(state: SessionState, lane?: string): { cwd: string; branch?: string; host: string; hostId?: string; lane?: string; mode: EngineMode; uploaded?: boolean; offline?: boolean; shell?: string } | undefined {
   const own = lane ? state.engines[lane] : undefined;
   // Like hub.readRepo: another lane's machine only when it may be borrowed, never a teammate's own coding tool.
   const online = liveMachine(state, lane);
   const e = online ?? own ?? Object.values(state.engines).find((x) => mayBorrow(state, lane ?? MAIN_LANE, x));
-  if (e) return { cwd: e.cwd, ...(e.branch ? { branch: e.branch } : {}), host: e.hostName, hostId: e.hostId, mode: e.mode, ...(e.shell ? { shell: e.shell } : {}), ...(online ? {} : { offline: true }) };
+  const at = e && Object.keys(state.engines).find((k) => state.engines[k] === e);
+  if (e) return { cwd: e.cwd, ...(e.branch ? { branch: e.branch } : {}), host: e.hostName, hostId: e.hostId, ...(at ? { lane: at } : {}), mode: e.mode, ...(e.shell ? { shell: e.shell } : {}), ...(online ? {} : { offline: true }) };
   // An upload's shell is the deployment's to switch on, not a host's.
   return state.upload ? { cwd: state.upload.name, host: "this session", mode: uploadsMayRun() ? "full" : "edits", uploaded: true } : undefined;
 }

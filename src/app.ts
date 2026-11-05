@@ -21,7 +21,7 @@ import { readFailed } from "./project-rules.js";
 import { parseRepo } from "./runner/repo.js";
 import { Runner } from "./runner/runner.js";
 import { joinCommand, joinScript, joinSshResult, logTailScript, SSH_HOST, sshConfigHosts } from "./local/add-computer.js";
-import { copyIncluded } from "./runner/git.js";
+import { copyIncluded, worktreeChange } from "./runner/git.js";
 import { setupStack, stackFor } from "./runner/stack.js";
 import { folderOwnDb } from "./runner/environment.js";
 import { recentReposCached } from "./runner/workspace.js";
@@ -290,6 +290,8 @@ export interface AppOptions {
   llm: LLM;
   tools?: AgentTool[];
   driverGraceMs: number;
+  /** How long a server's word that somebody is here lasts unless said again (SessionStore.presenceTtlMs); tests pass a short one. */
+  presenceTtlMs?: number;
   /** Where attachments are stored. */
   dataDir?: string;
   /**
@@ -367,6 +369,18 @@ export async function createApp(o: AppOptions) {
   }
   const archive = null;
   const store = new SessionStore(redis, o.prefix, undefined, archive);
+  if (o.presenceTtlMs) store.presenceTtlMs = o.presenceTtlMs;
+  // Who is here, said again by this server before its word runs out, and at once when Redis comes back: one that restarted
+  // empty had everyone still connected shown away (and pushed to) until they reconnected (SessionStore.refreshPresence).
+  const sayHere = () => void store.refreshPresence().catch((e) => console.error("[presence]", (e as Error).message));
+  const presenceLoop = setInterval(sayHere, store.presenceTtlMs / 3);
+  let redisLost = false;
+  rawRedis.on("close", () => (redisLost = true));
+  rawRedis.on("ready", () => {
+    if (!redisLost) return;
+    redisLost = false;
+    sayHere();
+  });
   /** A write that landed after Redis was closed (the app shutting down) is nothing to report; anything else is. */
   const closingOr = (where: string, e: unknown) => {
     if (!/Connection is closed/i.test(String(e))) console.error(where, e);
@@ -832,8 +846,8 @@ export async function createApp(o: AppOptions) {
   const linkRefusal = (link: "yes" | "no" | "anon" | "other"): string | null =>
     link === "anon" ? "Sign in to use the linked machine." : link === "other" ? "This machine is linked to another account. Sign in as that account, or link it again from this one." : null;
 
-  const openFolder = async (sid: string, req: RepoCall, lane?: string, by?: string): Promise<{ output: string; where?: { host: string; cwd: string; branch?: string } }> => {
-    const live = await hub.readRepo(sid, req, lane, by);
+  const openFolder = async (sid: string, req: RepoCall, lane?: string, by?: string, forPerson?: string | null): Promise<{ output: string; where?: { host: string; cwd: string; branch?: string } }> => {
+    const live = await hub.readRepo(sid, req, lane, by, forPerson);
     if (live) return live;
     // An uploaded folder is on Friday's server, nobody's own machine: its .env shows names only, to everyone.
     const { person: _person, personId: _personId, ...shared } = req;
@@ -1773,11 +1787,12 @@ export async function createApp(o: AppOptions) {
     const held = !(await there(copy.path)) ? worktreeHolding(await git(top, ["worktree", "list", "--porcelain"]).catch(() => ""), copy.branch) : null;
     if (held && path.resolve(held) !== path.resolve(copy.path) && path.resolve(held) !== path.resolve(top)) {
       if (await there(held)) copy.path = held;
-      else await git(top, ["worktree", "prune"]).catch(() => "");
+      else await worktreeChange(top, ["prune"], 120_000).catch(() => "");
     }
     if (!(await there(copy.path))) {
       const has = (await git(top, ["branch", "--list", copy.branch]).catch(() => "")).trim();
-      const made = await git(top, has ? ["worktree", "add", "-q", copy.path, copy.branch] : ["worktree", "add", "-q", "-b", copy.branch, copy.path, "HEAD"]).then(() => true, (e: Error) => (console.error(`[teammates] ${t.name}'s copy of ${repo}: ${e.message}`), false));
+      // In git.ts's line of worktree changes for this repo: two teammates' copies made at once, or beside a lane's, failed one.
+      const made = await worktreeChange(top, has ? ["add", "-q", copy.path, copy.branch] : ["add", "-q", "-b", copy.branch, copy.path, "HEAD"], 120_000).then(() => true, (e: Error) => (console.error(`[teammates] ${t.name}'s copy of ${repo}: ${e.message}`), false));
       if (!made) return null;
       // What git leaves out that its app needs (.env), and its own ports and database (stack.ts), as a lane's copy gets.
       const env = await copyIncluded(top, copy.path).catch(() => [] as string[]);
@@ -6346,6 +6361,7 @@ export async function createApp(o: AppOptions) {
     async close() {
       unlistenBurn();
       closing = true;
+      clearInterval(presenceLoop);
       clearTimeout(usageFirst);
       clearInterval(usageLoop);
       clearInterval(shepherdLoop);

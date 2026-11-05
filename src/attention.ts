@@ -1,4 +1,5 @@
 import { stoppedLine } from "./activity-line.js";
+import { carefulClass } from "./command-class.js";
 import { carriedOn, limitHit } from "./limit-reset.js";
 import { laneName } from "./session/core.js";
 import { driverOf, questionsTo, requestsTo, roleOf, runOf, type SessionState } from "./session/projection.js";
@@ -35,6 +36,8 @@ export interface Attention {
   approval?: string;
   /** What the approval is for: a command to run says "Run it", anything else "Let it", as the card in the session does. */
   command?: boolean;
+  /** A command to look at before saying yes (command-class.ts carefulClass): "Don't" is the main button wherever it is asked. */
+  careful?: true;
   /** A stopped run's own error, when `text` says it in plain words instead: shown on hover, and in full in the session. */
   detail?: string;
 }
@@ -81,7 +84,7 @@ export function attentionIn(state: SessionState, meId: string): Attention[] {
       const first = ask.items[0] ? `\`${ask.items[0].length > 80 ? `${ask.items[0].slice(0, 79)}…` : ask.items[0]}\`` : "";
       const more = ask.items.length > 1 ? ` and ${ask.items.length - 1} more` : "";
       const text = ask.scope === "commands" && first ? `${agentName(state, lane)} wants to run ${first}${more}` : `${agentName(state, lane)} is asking before it goes on`;
-      out.push({ ...of("approval", text, ask.seq, lane), approval: ask.id, ...(ask.scope === "commands" ? { command: true } : {}) });
+      out.push({ ...of("approval", text, ask.seq, lane), approval: ask.id, ...(ask.scope === "commands" ? { command: true, ...(carefulClass(ask.items) ? { careful: true as const } : {}) } : {}) });
       continue;
     }
     const run = runOf(state, lane);

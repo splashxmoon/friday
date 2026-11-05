@@ -128,7 +128,7 @@ const MODE_NAME: Record<EngineMode, string> = { plan: "Plan", edits: "Manual", f
 const MODE_BLURB: Record<EngineMode, string> = {
   plan: "Reads and proposes, and asks before it runs a command. Changes nothing.",
   edits: "Edits files, and asks before it runs a command.",
-  full: "Runs commands without asking. Anyone driving this session can.",
+  full: "Runs commands without asking.",
 };
 
 /**

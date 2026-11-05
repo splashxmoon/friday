@@ -251,9 +251,9 @@ export interface SessionState {
    */
   terminals?: Record<string, { by: string; at: number }>;
   /**
-   * How far others' messages may go on each lane (`lane.othersFull`): false where its host held them to Edits, absent or true
-   * as far as the host's own, Auto included. Auto is Auto for everyone's messages unless the host says otherwise (Arun,
-   * 2026-10-23: "auto mode should auto approve everything"); it used to be held to Edits unless the host opened it up.
+   * How far others' messages may go on each lane (`lane.othersFull`): true where its host raised them to run as far as the
+   * host's own mode, Auto included; absent or false, no further than Edits: files may change, commands need the host's OK
+   * (Arun, 2026-11-04, reversing 2026-10-23's "Auto for everyone"). A new host on the lane starts from Edits again.
    */
   othersFull?: Record<string, boolean>;
   /** The agents' messages to each other (agent-mesh.ts): whether that is paused, and every ask with its answer. Missing from a state cached before it. */

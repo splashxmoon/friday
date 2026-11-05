@@ -183,7 +183,7 @@ export function OwnModelsSection({ identity, workspace }: { identity: Identity; 
           <div className="set-text">
             <div className="set-label">Use your own key, or a model on this computer</div>
             <div className="muted small">
-              Friday Code runs on it: pick Friday Code beside your coding tools when you start a session. Keys are kept on this computer and sent only to the model's own server.
+              Friday Code runs on it: once you have one, pick Friday Code in the message box when you start a session, as that session's agent. A session's other agents are your coding tools. Keys are kept on this computer and sent only to the model's own server.
             </div>
           </div>
           {!draft && (

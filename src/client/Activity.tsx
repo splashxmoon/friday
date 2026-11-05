@@ -187,7 +187,7 @@ import type { AgentView } from "../agents.js";
 import { RaceCard } from "./Race.js";
 import { askIosPreview, isLocalUrl, lookOf, openInPreview, pageAppears, servedUrlIn } from "./previewBus.js";
 import { latestTests, prefillComposer, ReviewCard, secondReviewOf, testsIn } from "./RunReview.js";
-import { CLASS_LABEL, headlineClass, mayApprove } from "../command-class.js";
+import { CLASS_LABEL, carefulClass, headlineClass, mayApprove } from "../command-class.js";
 import { checkpointsByMessage, isRedo, isSetAside, reversedBy, rewindImpact, rewindsIn, undoneRuns, type Rewind } from "../rewind.js";
 import { Check, ContextMenu, MenuButton, Picker, useConfirm, type MenuItem, relTime } from "./ui.js";
 import { RuleForm, RuleHow, RuleText } from "./RuleForm.js";
@@ -354,7 +354,7 @@ interface Ctx {
   echo: (text: string, lane: string) => () => void;
   /** Open the panel that holds what a run produced. */
   onOpen?: (what: "files" | "tree" | "preview") => void;
-  /** Where the newest commit and undo sit in the log, so a review card knows if it was answered. */
+  /** Where the newest commit sits in the log. */
   lastCommitSeq: number;
   /** The last time a separate copy's work was brought into its folder. */
   lastApplySeq: number;
@@ -1466,9 +1466,9 @@ export function Activity({
       clearInterval(timer);
     };
   }, [watching, lastCommitSeq]); // eslint-disable-line react-hooks/exhaustive-deps
-  const lastRestoreSeq = events.findLast((e) => e.body.type === "folder.restored")?.seq ?? 0;
   const rewinds = useMemo(() => rewindsIn(events), [events]);
   const checkpoints = useMemo(() => checkpointsByMessage(events), [events]);
+  const lastRestoreSeq = events.findLast((e) => e.body.type === "folder.restored")?.seq ?? 0;
   const undone = useMemo(() => undoneRuns(events), [events]);
   // The same object until something it holds changes. Made fresh on every draw, it was new on every frame of streamed
   // text, so every run block and notice in the feed redrew (and re-read every tool call) sixty times a second.
@@ -2599,7 +2599,7 @@ function ImportedNotice({ ev }: { ev: Ev<"session.imported"> }) {
   return (
     <>
       <Notice ev={ev} icon={HistoryIcon} tone="control">
-        {b.fork ? `Forked from “${title}” with its last ${n} messages; from here it goes its own way. ` : `Brought in “${title}”: ${which} messages of an earlier ${ENGINE_NAMES[b.tool]} conversation, for every agent here. `}
+        {b.fork ? `Forked from “${title}” with its last ${n === 1 ? "message" : `${n} messages`}; from here it goes its own way. ` : `Brought in “${title}”: ${which} messages of an earlier ${ENGINE_NAMES[b.tool]} conversation, for every agent here. `}
         {/* A button that looks like one, with the way it opens (2026-10-27 audit: it read as plain text). */}
         <button type="button" className="btn ghost small imported-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
           {open ? "Hide them" : "Show them"}
@@ -5550,6 +5550,7 @@ function PermissionCard({ ev, ctx }: { ev: Ev<"engine.approval">; ctx: Ctx }) {
   const b = ev.body;
   const lane = ev.lane ?? MAIN_LANE;
   const { waiting, mayDrive, allowedKinds, may, viaInstruct, hostWait } = answerRights(state, me, lane, b);
+  const careful = b.scope === "commands" && !!carefulClass(b.items);
   const who = agentNameFor(state, lane);
   const [busy, setBusy] = useState(false);
   const said = waiting ? undefined : ctx.events.find((e): e is Ev<"instruction"> => e.body.type === "instruction" && e.body.approval?.id === b.id);
@@ -5613,8 +5614,9 @@ function PermissionCard({ ev, ctx }: { ev: Ev<"engine.approval">; ctx: Ctx }) {
         </div>
       {waiting &&
         (may ? (
-          <div className="apv-actions">
-            <button type="button" className="btn small" disabled={busy} title="Don't run it (D while the card has focus)" aria-keyshortcuts="D" onClick={() => void answer(false)}>
+          <div className="apv-actions" data-careful={careful ? "" : undefined}>
+            {/* A command to look at first (an rm, a deploy, a push): "Don't" is the main button, as Needs you suggests (2026-11-04 QA). */}
+            <button type="button" className={`btn small${careful ? " primary" : ""}`} disabled={busy} title="Don't run it (D while the card has focus)" aria-keyshortcuts="D" onClick={() => void answer(false)}>
               Don't
             </button>
             {/* The allow list is the session's settings, which only an owner changes: offered to them alone, and the command is let
@@ -5647,7 +5649,7 @@ function PermissionCard({ ev, ctx }: { ev: Ev<"engine.approval">; ctx: Ctx }) {
                 Waiting for {hostWait} to say yes: it's {hostWait}'s computer, in Manual.
               </span>
             ) : (
-              <button type="button" className="btn primary small" disabled={busy} title={`${b.scope === "commands" ? "Run it once" : "Let it go ahead"} (A while the card has focus)`} aria-keyshortcuts="A" onClick={() => void answer(true)}>
+              <button type="button" className={`btn small${careful ? "" : " primary"}`} disabled={busy} title={`${b.scope === "commands" ? "Run it once" : "Let it go ahead"} (A while the card has focus)`} aria-keyshortcuts="A" onClick={() => void answer(true)}>
                 {b.scope === "commands" ? "Run it" : "Let it"}
               </button>
             )}
@@ -5906,7 +5908,7 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
     case "lane.othersFull":
       return (
         <Notice ev={ev} icon={SettingsIcon} tone="control">
-          {b.on ? `${who} let everyone's messages run this agent as far as their own on their computer` : `${who} set others' messages to run this agent no further than Edits on their computer`}
+          {b.on ? `${who} let others' messages run commands on their computer without asking, as far as their own` : `${who} set others' messages to change files only on their computer, with commands needing their OK`}
         </Notice>
       );
     case "lane.effort":
@@ -7336,7 +7338,7 @@ function ReachPill({ ctx, lane }: { ctx: Ctx; lane: string }) {
     );
   }
   const running = runOf(ctx.state, lane).status === "running";
-  const othersFull = state.othersFull?.[lane] !== false;
+  const othersFull = state.othersFull?.[lane] === true;
   const setOthers = async (on: boolean) => {
     if (on === othersFull) return;
     const r = await ctx.send({ type: "lane.othersFull", lane, on });
@@ -7377,12 +7379,13 @@ function ReachPill({ ctx, lane }: { ctx: Ctx; lane: string }) {
           if (state.options.work) sub = WORK_MODE_BLURB[r.id];
           return { label: r.label, sub, checked: r.id === now.id, onSelect: () => void set(r.id) };
         }),
-        // Whose messages may run it how far on this computer (Security R2, R3): anyone else's, an app's included, stops at Edits
-        // unless the host opens it up.
+        // Whose messages may run it how far on this computer (Security R2, R3): anyone else's, an app's and another person's agent
+        // included, stops at Edits unless the host raises it (Arun, 2026-11-04). Said plainly, since raising it lets other people
+        // run commands on this computer.
         { heading: "Others' messages on your computer" },
         // By the mode's own name, Manual, not "Edits" (QA, 2026-10-28); in Work, in its words.
         { label: "Up to Manual", sub: othersSub, checked: !othersFull, onSelect: () => void setOthers(false) },
-        { label: "As far as yours", sub: "Their messages run in the mode you picked, Auto included.", checked: othersFull, onSelect: () => void setOthers(true) },
+        { label: "As far as yours", sub: "Teammates, their agents and apps can run commands on this computer without asking you, in the mode you picked.", checked: othersFull, onSelect: () => void setOthers(true) },
       ]}
       above
     />

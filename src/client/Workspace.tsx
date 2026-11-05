@@ -710,7 +710,7 @@ function Browser({ identity, path, filter = "", onOpen, onUse, onBack }: { ident
 const MODE_PILL: Record<EngineMode, { text: string; tone: string; why: string }> = {
   plan: { text: "Plan", tone: "calm", why: "Reads and proposes, and asks before it runs a command. Changes nothing." },
   edits: { text: "Manual", tone: "calm", why: "Edits files, and asks before it runs a command." },
-  full: { text: "Auto", tone: "warn", why: "Runs commands without asking. Anyone driving this session can. Narrow it inside the session." },
+  full: { text: "Auto", tone: "warn", why: "Runs commands without asking. Narrow it inside the session." },
 };
 
 /** What continuing a conversation does with it, wherever that is offered. */

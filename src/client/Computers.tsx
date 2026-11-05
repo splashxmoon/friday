@@ -247,7 +247,7 @@ export function ComputersSettings() {
       <div className="set-row">
         <div className="set-text">
           <div className="set-label">Your computers</div>
-          <div className="muted small">Run coding tools and teammates on your other computers from here, over Wi-Fi or Tailscale. Nothing goes through Friday's servers.</div>
+          <div className="muted small">Run coding tools and teammates on your other computers from here, straight to them over Wi-Fi or Tailscale.</div>
         </div>
         {!how && (
           <button type="button" className="btn small" onClick={() => void add("ssh")}>

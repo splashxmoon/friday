@@ -128,3 +128,8 @@ test("an agent not signed in says so plainly, and once another agent carried its
   [a] = hubOf(project("s", events), events, "ada").agents;
   assert.equal(a!.status, "ready", "carried on: not stopped");
 });
+
+test("a done agent's line is its answer's words, without the Markdown marks (tab names and tips read it out)", () => {
+  const done = [...session(), ev({ type: "agent.message", text: "## Done: I added a **Notes** section to `README.md`.\n\n- Read it", toolCalls: [] }), ev({ type: "run.ended", outcome: "done" })];
+  assert.equal(hubOf(project("s", done), done).agents[0]!.line, "Done: I added a Notes section to README.md.");
+});

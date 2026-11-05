@@ -35,7 +35,8 @@ const laneName = (s: SessionState, id: string) => (id === MAIN_LANE ? "Main" : (
 const MODES: { id: EngineMode; label: string; blurb: string }[] = [
   { id: "plan", label: "Plan", blurb: "Reads and proposes, and asks before it runs a command. Changes nothing." },
   { id: "edits", label: "Manual", blurb: "Edits files, and asks you before it runs a command." },
-  { id: "full", label: "Auto", blurb: "Edits and runs commands without asking. Anyone driving this agent can." },
+  // One person in the open-source edition: nobody else drives (2026-11-04 QA).
+  { id: "full", label: "Auto", blurb: "Edits and runs commands without asking." },
 ];
 /** Codex and Cursor cannot ask about one command at a time, so Manual asks once for the whole turn. */
 const blurbFor = (m: { id: EngineMode; blurb: string }, tool: string) => (m.id === "edits" && (tool === "codex" || tool === "cursor") ? "Asks you before any turn that changes something." : m.blurb);
@@ -389,14 +390,17 @@ export function ConnectDialog({
               <h3>Which agent should do the work?</h3>
               <div className="cd-tools" role="radiogroup" aria-label="Coding agent">
                 {/* First, because it needs nothing: a folder and Friday's own agent
-                    is the path for someone who has no CLI installed at all. */}
-                <button type="button" role="radio" aria-checked={tool === ""} className={`cd-tool ${tool === "" ? "on" : ""}`} onClick={() => setTool("")}>
-                  <span className="cd-tool-icon">
-                    <EngineMark tool="" size={18} />
-                  </span>
-                  <span className="cd-tool-name">Friday Code</span>
-                  <span className="cd-pill ok">Always ready</span>
-                </button>
+                    is the path for someone who has no CLI installed at all. Not in the open-source edition, which has no agent
+                    of its own: offered there as "Always ready", it said so only at the last step (2026-11-04 QA). */}
+                {!isLocal() && (
+                  <button type="button" role="radio" aria-checked={tool === ""} className={`cd-tool ${tool === "" ? "on" : ""}`} onClick={() => setTool("")}>
+                    <span className="cd-tool-icon">
+                      <EngineMark tool="" size={18} />
+                    </span>
+                    <span className="cd-tool-name">Friday Code</span>
+                    <span className="cd-pill ok">Always ready</span>
+                  </button>
+                )}
                 {[...tools.here, ...(moreTools ? tools.away : [])].map((t) => {
                   const st = stateOf(t);
                   return (

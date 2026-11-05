@@ -1,6 +1,7 @@
 import { shortTokens } from "../tool-usage.js";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { LimitRing } from "./LimitRing.js";
+import { carefulClass } from "../command-class.js";
 import { hubOf, type AgentStatus, type HubAgent, type HubCheck } from "../agents-hub.js";
 import { teamHubAgents } from "./Teammates.js";
 import { ACCESS } from "./team-status.js";
@@ -217,6 +218,7 @@ function AgentCard({ a, state, me, send, now, limit, mayDrive }: { a: HubAgent; 
   const s = STATUS[a.status];
   const [ask, confirmUI] = useConfirm();
   const focus = () => window.dispatchEvent(new CustomEvent("friday:focus-lane", { detail: { lane: a.lane } }));
+  const careful = a.ask?.scope === "commands" && !!carefulClass(a.ask.items);
   const answer = (approve: boolean) =>
     void send({ type: "instruct", ...laneArg(a.lane), text: approve ? (a.ask!.scope === "commands" ? "Yes, run it." : "Yes, go ahead.") : "No, don't.", approval: { id: a.ask!.id, approve }, quiet: true });
   // Plan progress when it has a plan; otherwise full when it finished, empty when it hasn't started, moving while it works.
@@ -315,10 +317,10 @@ function AgentCard({ a, state, me, send, now, limit, mayDrive }: { a: HubAgent; 
       {mayDrive && a.ask && (
         <div className="hub-ask" onClick={(e) => e.stopPropagation()}>
           <code title={a.ask.items.join("\n")}>{a.ask.items[0] ?? "a command"}</code>
-          <button type="button" className="btn small" onClick={() => answer(false)}>
+          <button type="button" className={`btn small${careful ? " primary" : ""}`} onClick={() => answer(false)}>
             Don't
           </button>
-          <button type="button" className="btn primary small" onClick={() => answer(true)}>
+          <button type="button" className={`btn small${careful ? "" : " primary"}`} onClick={() => answer(true)}>
             {a.ask.scope === "commands" ? "Run it" : "Allow"}
           </button>
         </div>

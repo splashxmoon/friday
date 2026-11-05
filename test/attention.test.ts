@@ -280,3 +280,13 @@ test("several questions are said as the first and how many more", () => {
   apply(s, ev(42, { type: "run.ended", outcome: "done" }));
   assert.equal(attentionIn(s, ME)[0]!.text, "Which port? (and 2 more)");
 });
+
+// Every place that asks makes the safer answer the main button when Needs you would suggest it (2026-11-04 QA: the toast and the
+// session's card made "Run it" the main button for `rm -rf build`, while Needs you suggested "Don't").
+test("a command to look at first is marked careful; one that only reads is not", () => {
+  const ask = (items: string[]) => session({ approvals: { main: { id: "k", seq: 30, scope: "commands", items } } } as Partial<SessionState>);
+  const [risky] = attentionIn(ask(["rm -rf build"]), ME);
+  assert.equal(risky?.careful, true);
+  const [safe] = attentionIn(ask(["ls -la"]), ME);
+  assert.equal(safe?.careful, undefined);
+});

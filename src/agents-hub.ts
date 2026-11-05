@@ -1,5 +1,6 @@
 import { describeCall, doingNow, stoppedLine } from "./activity-line.js";
 import { laneLabel, latestPlan } from "./left-off.js";
+import { plainLine } from "./client/work-outputs.js";
 import { carriedOn, clockUntil, limitHit, signedOut } from "./limit-reset.js";
 import { limitedLanes } from "./limited.js";
 import { commandFailed, TEST_CMD } from "./receipt.js";
@@ -213,7 +214,8 @@ export function hubOf(state: SessionState, events: SessionEvent[], meId = ""): {
     // stopped (Arun, 2026-10-28: "iron everything and ensure we are good": Progress read a red "Stopped" over work Codex had done).
     if (r?.outcome === "error" && signedOut(r.error)) return carriedOn(state, lane) ? { ...rest, status: "ready", line: "Not signed in · its work carried on" } : { ...rest, status: "failed", line: "Not signed in on its computer" };
     if (r?.outcome === "error") return limitHit(r.error) ? { ...rest, status: "ready", line: "Usage back · ready for a task" } : { ...rest, status: "failed", line: clip(stoppedLine(r.error), 60) };
-    if (r?.outcome === "done") return { ...rest, status: "done", line: clip(r.answer || "Done", 60) };
+    // Its words, not its Markdown: the line is a tab's name and tip, read out as "star star Notes star star" before (2026-11-04 QA).
+    if (r?.outcome === "done") return { ...rest, status: "done", line: clip(plainLine(r.answer) || "Done", 60) };
     return { ...rest, status: "ready", line: "Ready for a task" };
   });
 

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { endTools, spawnCli } from "../src/runner/spawn-cli.js";
 
@@ -24,7 +25,8 @@ const gone = async (pid: number, ms: number) => {
 };
 
 test("a tool that ignores Ctrl-C doesn't outlive the process that started it", { timeout: 30_000 }, async (t) => {
-  const mod = path.resolve("src/runner/spawn-cli.ts");
+  // A file URL: on Windows a plain D:\... path is read as a URL with the scheme "d:" and the import fails (2026-11-04 public CI).
+  const mod = pathToFileURL(path.resolve("src/runner/spawn-cli.ts")).href;
   // Stands in for the runner: starts a tool, tells it to stop as a runner does (Ctrl-C), and exits soon after.
   const runner = `
     const { spawnCli } = await import(${JSON.stringify(mod)});

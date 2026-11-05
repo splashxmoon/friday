@@ -259,7 +259,7 @@ function ManageLanes({
         <div className="pop-head">
           <div>
             <h2>Agents</h2>
-            <p className="muted small lanes-sub">Everyone here shares one folder and one log. Add agents to work side by side.</p>
+            <p className="muted small lanes-sub">The agents here share one folder and one log. Add agents to work side by side.</p>
           </div>
           <div className="lanes-head-actions">
             <button className="icon-btn tiny" aria-label="Close" onClick={onClose}>

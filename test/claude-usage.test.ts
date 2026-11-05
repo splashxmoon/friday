@@ -56,9 +56,11 @@ process.env.FRIDAY_CLAUDE_BIN = fake;
 
 const { CLAUDE_ASK, askClaudeUsage, claudeResetText, claudeUsageFrom, claudeUsageText, noteClaudeEvent, noteClaudeStarting, readLimits } = await import("../src/runner/limits.js");
 const { accountDir } = await import("../src/runner/accounts.js");
-CLAUDE_ASK.everyMs = 400;
-CLAUDE_ASK.backOffMs = 1200;
-CLAUDE_ASK.probeMs = 1500;
+// Wide enough that a slow machine starting the stand-in Claude Code (CI's Mac takes over 400 ms) stays inside one window: at 400 ms
+// the first ask had outlived its own window, so the next read asked again (2026-11-04 public CI, macOS).
+CLAUDE_ASK.everyMs = 1600;
+CLAUDE_ASK.backOffMs = 4800;
+CLAUDE_ASK.probeMs = 6000;
 CLAUDE_ASK.startingMs = 300;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

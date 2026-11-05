@@ -75,6 +75,34 @@ async function toplevel(cwd: string): Promise<string> {
   return root;
 }
 
+/**
+ * `git worktree add`, one at a time per repository. Git reads every worktree of the repository as it adds one, and one being
+ * added that moment has no commondir yet: "fatal: failed to read .git/worktrees/…/commondir" failed two in 120 adds made eight
+ * at a time (a lane's copy beside the spare it starts, two tools brought to a folder at once, the storage sweep test).
+ * Keyed by the repository's shared .git, which every worktree of it has in common, and kept once git has said it.
+ */
+const adding = new Map<string, Promise<unknown>>();
+const commonDirs = new Map<string, string>();
+function worktreeAdd(root: string, args: string[], timeout = 0): Promise<string> {
+  return worktreeChange(root, ["add", ...args], timeout);
+}
+/**
+ * `git worktree <args>` in the same per-repository line as every add: a teammate's copy (app.ts copyFor) is made there too, and
+ * so is the `worktree prune` before it, which could otherwise take a worktree another add has half made.
+ */
+export async function worktreeChange(root: string, args: string[], timeout = 0): Promise<string> {
+  let key = commonDirs.get(root);
+  if (!key) {
+    key = (await git(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]).catch(() => root)).trim() || root;
+    commonDirs.set(root, key);
+  }
+  const k = key;
+  const run = (adding.get(k) ?? Promise.resolve()).catch(() => {}).then(() => git(root, ["worktree", ...args], [0], timeout));
+  adding.set(k, run);
+  void run.catch(() => {}).then(() => void (adding.get(k) === run && adding.delete(k)));
+  return run;
+}
+
 export interface RepoInfo {
   root: string;
   /** What diffs are taken against: the commit checked out when the runner attached. */
@@ -383,8 +411,8 @@ export async function addWorktree(cwd: string, name?: string, carry = false, on?
   const id = spare?.id ?? randomUUID().slice(0, 8);
   const dir = spare?.dir ?? (own ? path.join(worktreeRoot(), `${slug(path.basename(root)) || "repo"}-${id}`) : path.join(tmpdir(), `friday-race-${id}`));
   const branch = on?.branch ?? (own ? `friday/${own}-${id}` : `friday/race-${id}`);
-  if (on) await git(root, on.base ? ["worktree", "add", "-q", "-b", on.branch, dir, on.base] : ["worktree", "add", "-q", dir, on.branch], [0], 120_000);
-  else if (!spare) await git(root, ["worktree", "add", "-q", "-b", branch, dir, "HEAD"]);
+  if (on) await worktreeAdd(root, on.base ? ["-q", "-b", on.branch, dir, on.base] : ["-q", dir, on.branch], 120_000);
+  else if (!spare) await worktreeAdd(root, ["-q", "-b", branch, dir, "HEAD"]);
   if (carry) {
     const { tree } = await snapshotTree(root);
     await git(dir, ["read-tree", "-m", "-u", "HEAD", tree]);
@@ -474,7 +502,7 @@ function topUpSpares(root: string): Promise<void> {
     const id = randomUUID().slice(0, 8);
     const s: Spare = { id, dir: path.join(worktreeRoot(), `${slug(path.basename(root)) || "repo"}-${id}`), head: "" };
     s.head = (await git(root, ["rev-parse", "HEAD"])).trim();
-    await git(root, ["worktree", "add", "-q", "-b", `${SPARE_BRANCH}${id}`, s.dir, s.head]);
+    await worktreeAdd(root, ["-q", "-b", `${SPARE_BRANCH}${id}`, s.dir, s.head]);
     if (epoch !== spareEpoch) return dropSpare(root, s);
     s.timer = setTimeout(() => {
       const list = spares.get(root) ?? [];
@@ -672,7 +700,7 @@ const DEP_DIRS = ["node_modules", ".venv", "venv"];
 export async function baseCopy(cwd: string, ref: string): Promise<{ dir: string; top: string; links: string[] }> {
   const root = await toplevel(cwd);
   const top = path.join(tmpdir(), `friday-base-${randomUUID().slice(0, 8)}`);
-  await git(root, ["worktree", "add", "-q", "--detach", top, ref], [0], 120_000);
+  await worktreeAdd(root, ["-q", "--detach", top, ref], 120_000);
   const links: string[] = [];
   const link = async (rel: string) => {
     const from = path.join(root, rel);

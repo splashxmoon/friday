@@ -72,6 +72,11 @@ export class Bus {
   /** The SUBSCRIBE still waiting on Redis, by channel. */
   private subscribing = new Map<string, Promise<void>>();
   private wakeHandlers = new Set<(sid: string, lane: string) => void>();
+  /**
+   * Channels let go whose UNSUBSCRIBE failed (Redis was down). ioredis still has them in its own list and subscribes them again
+   * as it reconnects, so the server would be sent their traffic for good: they are let go again once it has.
+   */
+  private letGo = new Set<string>();
 
   constructor(
     private pub: Redis,
@@ -92,6 +97,16 @@ export class Bus {
       const msg = JSON.parse(raw) as BusMessage;
       for (const h of set) h(msg, raw);
     });
+    // After ioredis's own SUBSCRIBEs, which it sends in the same tick it says it is ready.
+    sub.on("ready", () => setImmediate(() => this.unsubscribeLetGo()));
+  }
+
+  private unsubscribeLetGo(): void {
+    for (const ch of this.letGo) {
+      this.letGo.delete(ch);
+      if (this.handlers.has(ch)) continue;
+      this.sub.unsubscribe(ch).catch(() => void (this.handlers.has(ch) || this.letGo.add(ch)));
+    }
   }
 
   async start(): Promise<void> {
@@ -124,7 +139,10 @@ export class Bus {
       set.delete(h);
       if (set.size === 0 && this.handlers.get(ch) === set) {
         this.handlers.delete(ch);
-        await this.sub.unsubscribe(ch);
+        await this.sub.unsubscribe(ch).catch((e) => {
+          this.letGo.add(ch);
+          throw e;
+        });
       }
     };
   }
@@ -159,7 +177,11 @@ export class Bus {
 
   /** Ask whichever node can take the lane's runner lease to run its agent. */
   async wake(sid: string, lane: string = MAIN_LANE): Promise<void> {
-    await this.pub.publish(wakeChannel(this.prefix), `${sid}|${lane}`);
+    // Sent without waiting from most places (`void bus.wake`): one that can't go, Redis down or this server closing, is said
+    // here and never thrown, or it was an unhandled rejection. A wake is a nudge; the lane's work is in the log for the next.
+    await this.pub.publish(wakeChannel(this.prefix), `${sid}|${lane}`).catch((e: Error) => {
+      if (!/Connection is closed/i.test(e.message)) console.error("[wake]", e.message);
+    });
   }
 
   onWake(h: (sid: string, lane: string) => void): void {

@@ -129,7 +129,7 @@ function Bring({ identity, onSetup }: { identity: Identity; onSetup: (lane: stri
             })}
             <MoreTools open={more} count={away.length} onToggle={() => setMore((v) => !v)} className="model-pop-row" />
           </div>
-          <p className="model-pop-note">It runs on your computer under your own account, as an agent of its own that only you drive. Everyone here can watch it work.</p>
+          <p className="model-pop-note">It runs on your computer under your own account, as an agent of its own.</p>
         </div>
       </div>,
       document.body,

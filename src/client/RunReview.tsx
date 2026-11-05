@@ -449,7 +449,9 @@ export function ReviewCard({
     redraw((n) => n + 1);
   };
   const shown = more ? files : files.slice(0, PEEK);
-  const outcome = applied ? `Brought into ${into}` : committed ? "Committed" : undone ? "Undone" : "";
+  // A run that stands undone had its changes taken back, so a commit made after the undo isn't its: "Undone" before "Committed"
+  // (2026-11-04 QA: a commit after an undo marked the undone run Committed).
+  const outcome = applied ? `Brought into ${into}` : undone ? "Undone" : committed ? "Committed" : "";
   // The whole card folds to its head (Arun, 2026-11-03: "make the whole thing is fully collapsable too", "make sure this is closed
   // on default"): folded to begin with, its line of facts and its two buttons, and opened with a press on that line.
   const cardKey = `${sid}:${lane}:${endSeq}`;
