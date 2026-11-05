@@ -70,7 +70,7 @@ export const SECTIONS: SectionDef[] = [
     group: "This computer",
     icon: "plug",
     blurb: "The computer your coding agents run on, and the tools on it.",
-    keywords: "computer machine connect link claude code codex cursor sign in install account folder runner acp github git ssh keep awake phone iphone mobile tailscale other computers",
+    keywords: "computer machine connect link claude code codex cursor sign in install account folder runner acp github git ssh keep awake tailscale other computers",
   },
   {
     id: "own-models",

@@ -90,7 +90,14 @@ jobs:
           elif [ "$RUNNER_OS" = "Windows" ] && [ -n "$WIN_CERT" ]; then
             export WIN_CSC_LINK="$WIN_CERT" WIN_CSC_KEY_PASSWORD="$WIN_CERT_PASSWORD"
           fi
-          npm run desktop:dist -- "${args[@]}"
+          # Stapling the notarization ticket asks Apple's servers, which drop the connection now and then ("The network
+          # connection was lost", error 68: v0.2.11 and v0.2.12 both failed on it once). The build is tried up to three times.
+          for try in 1 2 3; do
+            npm run desktop:dist -- "${args[@]}" && break
+            [ "$try" = 3 ] && exit 1
+            echo "::warning::The build failed (try $try of 3); trying again in 30 s."
+            sleep 30
+          done
 
       # The Linux app as it ships, tried before it's attached: its terminal binary loads in its own Electron and runs a command,
       # and the AppImage starts and answers. 0.2.6's stopped before its window opened, with no binary (build/pty-arch.cjs).

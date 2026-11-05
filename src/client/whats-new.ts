@@ -15,12 +15,12 @@ export interface WhatsNewNotes {
 }
 
 export const WHATS_NEW: WhatsNewNotes = {
-  version: "0.2.12",
-  summary: "Friday tidies up after itself when it quits, keeps secrets out of sight, reaches your phone, and stays quick in long sessions.",
+  version: "0.2.13",
+  summary: "Friday tidies up after itself when it quits, keeps secrets out of sight, gets a second look from another model, and stays quick in long sessions.",
   items: [
-    { icon: "phone", title: "Alerts on your phone", line: "When an agent needs you, Friday can tell an ntfy topic or any webhook." },
     { icon: "stop", title: "Nothing left running", line: "Coding tools, commands and terminals end when Friday quits, even a force-quit." },
     { icon: "shield", title: "Secrets stay hidden", line: "Tokens and webhook URLs are hidden in the chat, the Git panel and its diffs." },
+    { icon: "eye", title: "A second look", line: "A board task is checked by an agent on another coding tool, so a different model looks." },
     { icon: "zap", title: "Long sessions stay quick", line: "The chat draws its newest items first, so a 20,000-event session stays smooth." },
   ],
 };

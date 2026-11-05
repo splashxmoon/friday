@@ -3,7 +3,6 @@ import { GitHubConnect } from "./GitHubConnect.js";
 import { MachineBadge } from "./MachineBadge.js";
 import { pickedMachine, useMachine } from "./local.js";
 import { KeepAwakeRow } from "./KeepAwake.js";
-import { PhoneSettings } from "./PhoneSettings.js";
 import { ComputersSettings } from "./Computers.js";
 import { isLocal } from "./edition.js";
 import type { Identity } from "./storage.js";
@@ -24,8 +23,8 @@ export function ComputerSection({ identity }: { identity: Identity }) {
       </div>
       {/* Where new sessions start: this computer, or a machine of yours that stays on, so agents keep running when this one shuts. */}
       <KeepAwakeRow />
-      {/* Your phone, on this computer's network or Tailscale (PhoneSettings.tsx): the open-source edition's way to answer from it. */}
-      {isLocal() && machine.mode === "local" && <PhoneSettings />}
+      {/* No phone pairing on this computer's Friday: there is no open-source phone app yet (Arun, 2026-11-04: "WE DONT HAVE AN APP FOR
+          OPEN SOURCE YET SO GET RID OF IT"). PhoneSettings.tsx stays for when there is. */}
       {/* Your other computers, linked to this one's Friday, and this one used from another's (Computers.tsx). */}
       {isLocal() && <ComputersSettings />}
       {/* GitHub belongs to the computer too: the login its clones, pushes and pull requests use. */}

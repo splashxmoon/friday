@@ -513,38 +513,6 @@ export function NotificationsTab({ identity }: { identity: Identity }) {
   const [perm, setPerm] = useState<NotificationPermission>(
     supported ? Notification.permission : "denied",
   );
-  // One URL: each new thing waiting on you is posted there, window open or not (notify-hook.ts).
-  const [hook, setHook] = useState("");
-  const [saved, setSaved] = useState("");
-  const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
-  useEffect(() => {
-    api<{ url: string }>(identity, "/api/me/notify")
-      // A URL typed or pasted before this read came back is kept: a slow read wiped it (e2e/local-notify.spec.ts).
-      .then((r) => (setHook((typed) => typed || r.url), setSaved(r.url)))
-      .catch(() => {});
-  }, [identity]);
-  const saveHook = async () => {
-    try {
-      const r = await api<{ url: string }>(identity, "/api/me/notify", {
-        method: "PUT",
-        body: JSON.stringify({ url: hook.trim() }),
-      });
-      setSaved(r.url);
-      setHook(r.url);
-      setNote({ ok: true, text: r.url ? "Saved." : "Off." });
-    } catch (e) {
-      setNote({ ok: false, text: (e as Error).message });
-    }
-  };
-  const testHook = async () => {
-    setNote({ ok: true, text: "Sending…" });
-    try {
-      await api(identity, "/api/me/notify/test", { method: "POST" });
-      setNote({ ok: true, text: "Sent. Check the channel." });
-    } catch (e) {
-      setNote({ ok: false, text: (e as Error).message });
-    }
-  };
   return (
     <section className="flex flex-col gap-5">
       <SettingsGroup title="On this device">
@@ -626,40 +594,6 @@ export function NotificationsTab({ identity }: { identity: Identity }) {
               {perm === "granted" ? "Allowed" : "Blocked"}
             </StateBadge>
           )}
-        </Row>
-      </SettingsGroup>
-      <SettingsGroup title="Elsewhere">
-        <Row
-          stack
-          label="Also send to your phone or a chat"
-          hint={
-            saved
-              ? "Each question, approval, stopped run and finished run is posted there: the session's name, why, and its first words. A command an agent asks to run is left out."
-              : "Paste an ntfy topic (the ntfy app on your phone, https://ntfy.sh/your-topic) or a chat's incoming-webhook URL. Nothing is sent until you do."
-          }
-        >
-          <div className="flex items-center gap-2">
-            <Input
-              className="h-8 min-w-0 flex-1 font-mono text-[13px]"
-              type="url"
-              placeholder="https://ntfy.sh/your-topic"
-              value={hook}
-              spellCheck={false}
-              aria-label="Webhook URL"
-              onChange={(e) => setHook(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && void saveHook()}
-            />
-            {saved && (
-              <Button variant="outline" size="sm" onClick={() => void testHook()}>
-                Send a test
-              </Button>
-            )}
-            <Button size="sm" disabled={hook.trim() === saved} onClick={() => void saveHook()}>
-              Save
-            </Button>
-          </div>
-          <Note>{note?.ok ? note.text : ""}</Note>
-          <Note ok={false}>{note && !note.ok ? note.text : ""}</Note>
         </Row>
       </SettingsGroup>
     </section>

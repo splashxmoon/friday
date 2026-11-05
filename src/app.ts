@@ -5461,25 +5461,6 @@ export async function createApp(o: AppOptions) {
     }
 
 
-    // Where "needs you" is posted for this person: an ntfy topic, a chat's incoming webhook, any URL that takes a POST, or nothing.
-    if (url.pathname === "/api/me/notify" || url.pathname === "/api/me/notify/test") {
-      const me = await identity(req);
-      if (!me) return json(res, 401, { error: "Not signed in." });
-      if (req.method === "GET") return json(res, 200, { url: await hooks.get(me.id) });
-      if (req.method === "PUT" && url.pathname === "/api/me/notify") {
-        const given = String((await readJson(req)).url ?? "").trim();
-        if (given && !hookUrlOk(given)) return json(res, 400, { error: "That needs to be an https link (ntfy topics and chat webhooks are)." });
-        await hooks.set(me.id, given);
-        return json(res, 200, { url: given });
-      }
-      if (req.method === "POST" && url.pathname === "/api/me/notify/test") {
-        const target = await hooks.get(me.id);
-        if (!target) return json(res, 400, { error: "Save a webhook URL first." });
-        const ok = await postHook(target, hookPayload({ title: "Friday", kind: "question", text: "This is a test. Replies to it go nowhere." }, o.local ? "" : (o.appUrl || `http://localhost:${o.port}`).replace(/\/+$/, "")));
-        return ok ? json(res, 200, { ok: true }) : json(res, 502, { error: "The webhook didn't accept the post. Check the URL." });
-      }
-      return json(res, 405, { error: "Method not allowed." });
-    }
 
     // Your phone (local/phone.ts), from this computer's own page only: whether it may connect, a code to pair one, and the phones paired.
     const phone = o.local?.phone;

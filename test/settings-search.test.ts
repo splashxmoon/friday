@@ -19,7 +19,9 @@ test("every thing on a Settings page is found by its own word (audit e2e, Arun 2
   for (const q of ["GitHub", "SSH", "ACP", "Other ACP agent"]) assert.ok(ids(q).includes("computer"), q);
   for (const q of ["welcome", "what's new", "What's new"]) assert.deepEqual(ids(q), ["about"], q);
   assert.deepEqual(ids("heatmap"), ["usage-limits"]);
-  // Only the open-source edition has the phone, Tailscale and Send feedback rows: the hosted one finds nothing for them.
-  for (const q of ["phone", "iPhone", "Tailscale"]) assert.deepEqual(ids(q), ["computer"], q);
+  // Only the open-source edition has the Tailscale and Send feedback rows: the hosted one finds nothing for them. Neither has a
+  // phone row: the open-source app has no phone app to pair yet (Arun, 2026-11-04).
+  for (const q of ["phone", "iPhone"]) assert.deepEqual(ids(q), [], q);
+  assert.deepEqual(ids("Tailscale"), ["computer"], "Tailscale");
   assert.deepEqual(ids("feedback"), ["about"]);
 });

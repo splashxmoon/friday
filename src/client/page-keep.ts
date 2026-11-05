@@ -12,13 +12,20 @@ const OURS = /^(mpa|friday)\./;
 const PASSING = new Set(["mpa.chunkReloadAt", "mpa.reloadedFor"]);
 /** Set on an address once it has kept or taken the settings: one without it is new. */
 const MARK = "friday.pageKept";
+/**
+ * When this address last kept its settings (or took the kept copy): an address Friday comes back to takes a copy kept after that.
+ * Without it, Friday on another port for a while (4321 taken) and then on 4321 again went back to what 4321 had before: the settings
+ * changed meanwhile were lost and What's new, put away there, showed again (2026-11-04 update check).
+ */
+const KEPT_AT = "friday.pageKeptAt";
+const own = (k: string) => OURS.test(k) && !PASSING.has(k) && k !== MARK && k !== KEPT_AT;
 
 function ours(): Record<string, string> {
   const out: Record<string, string> = {};
   try {
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
-      if (!k || !OURS.test(k) || PASSING.has(k) || k === MARK) continue;
+      if (!k || !own(k)) continue;
       const v = localStorage.getItem(k);
       if (v !== null && v.length <= 200_000) out[k] = v;
     }
@@ -28,19 +35,31 @@ function ours(): Record<string, string> {
   return out;
 }
 
+/** What to do with the kept copy as a page opens: nothing, fill in what this address lacks, or take the copy's values over its own. */
+export function keptPlan(here: { origin: string; marked: boolean; keptAt: number }, page: { origin: string; at?: number; keys: Record<string, string> } | null): "none" | "fill" | "take" {
+  if (!page || page.origin === here.origin || !Object.keys(page.keys).length) return "none";
+  // An address that has never kept anything: the copy, under whatever it set before this was kept.
+  if (!here.marked) return "fill";
+  // One that has, coming back after another kept a newer copy (Friday was on another port meanwhile): the newer copy.
+  return (page.at ?? 0) > here.keptAt ? "take" : "none";
+}
+
 /**
- * Before the page draws: on an address that has never kept anything, the copy kept beside the data, then the page again with it.
- * True when it is loading again.
+ * Before the page draws: the copy kept beside the data, on an address that has never kept anything or whose own is older, then the
+ * page again with it. True when it is loading again.
  */
 export async function takeKeptPage(): Promise<boolean> {
   try {
-    if (localStorage.getItem(MARK)) return false;
+    const marked = !!localStorage.getItem(MARK);
     const r = await fetch("/api/local/page", { headers: { "x-friday-local": "1" }, signal: AbortSignal.timeout(2500) });
-    const page = r.ok ? ((await r.json()) as { page: { origin: string; keys: Record<string, string> } | null }).page : null;
+    const page = r.ok ? ((await r.json()) as { page: { origin: string; at?: number; keys: Record<string, string> } | null }).page : null;
+    const plan = keptPlan({ origin: location.origin, marked, keptAt: Number(localStorage.getItem(KEPT_AT)) || 0 }, page);
     localStorage.setItem(MARK, location.origin);
-    if (!page || page.origin === location.origin || !Object.keys(page.keys).length) return false;
+    if (plan === "none" || !page) return false;
     // A page that has set things of its own here already (it ran before this was kept) keeps them; the rest come from the copy.
-    for (const [k, v] of Object.entries(page.keys)) if (localStorage.getItem(k) === null) localStorage.setItem(k, v);
+    // Taking a newer copy, its values win.
+    for (const [k, v] of Object.entries(page.keys)) if (plan === "take" || localStorage.getItem(k) === null) localStorage.setItem(k, v);
+    localStorage.setItem(KEPT_AT, String(page.at ?? Date.now()));
     location.reload();
     return true;
   } catch {
@@ -57,7 +76,7 @@ const SOON_MS = 300;
  */
 export function onOwnChange(storage: Storage, changed: () => void): () => void {
   const { setItem, removeItem, clear } = storage;
-  const mine = (k: unknown) => typeof k === "string" && OURS.test(k) && !PASSING.has(k) && k !== MARK;
+  const mine = (k: unknown) => typeof k === "string" && own(k);
   storage.setItem = function (k: string, v: string) {
     setItem.call(this, k, v);
     if (mine(k)) changed();
@@ -91,6 +110,7 @@ export function keepPage(): void {
     last = body;
     try {
       localStorage.setItem(MARK, location.origin);
+      localStorage.setItem(KEPT_AT, String(Date.now()));
     } catch {
       // Storage blocked.
     }

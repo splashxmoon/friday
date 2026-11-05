@@ -228,8 +228,33 @@ export const statusLineIn = (sid: string, lane: string, m: TeammateView): string
 /** The teammates in a session as the box sees them: each with its lane in that session. */
 const here = (sid: string): TeammateView[] => matesIn(sid).map(({ lane, m }) => ({ ...m, lane }));
 
+/**
+ * Every Crew session this page has seen (the team's, its teammates' and its rooms'), kept across reloads: until the team's first
+ * read lands, at startup, Code's list had nothing to tell a Crew room by and showed them all; and a room that left the team's
+ * lists kept its row in Code (Arun, 2026-11-04: "WHY ARE CREW SESSIONS APPEARING IN THE CODE SESSIONS SIDE BAR").
+ */
+const CREW_SIDS = "friday.crew.sids";
+const crewSeen: Set<string> = (() => {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(CREW_SIDS) ?? "[]") as string[]);
+  } catch {
+    return new Set<string>();
+  }
+})();
+const noteCrewSids = (t: Team) => {
+  const before = crewSeen.size;
+  for (const sid of [t.sid, ...(t.hidden ?? []), ...(t.rooms ?? []).map((r) => r.sid)]) if (sid) crewSeen.add(sid);
+  if (crewSeen.size === before) return;
+  try {
+    localStorage.setItem(CREW_SIDS, JSON.stringify([...crewSeen]));
+  } catch {
+    /* a convenience: the team's own read still tells them apart once it lands */
+  }
+};
+
 /** Whether a session is the team's: the sidebar leaves them all out of the sessions list. */
-export const isTeamSid = (sid: string) => !!team && (team.sid === sid || (team.hidden ?? []).includes(sid));
+export const isTeamSid = (sid: string) =>
+  crewSeen.has(sid) || (!!team && (team.sid === sid || (team.hidden ?? []).includes(sid) || (team.rooms ?? []).some((r) => r.sid === sid)));
 
 // One copy of the team for the whole page: the sidebar, the home page and the dialogs all read it, and any change re-reads it.
 let team: Team | null = null;
@@ -315,6 +340,7 @@ export async function refreshTeam(identity: Identity): Promise<Team | null> {
     if (team?.away?.until && !got.away?.until) void briefReady(identity, team.away.since ?? Date.now() - 12 * 3600_000, got.sid);
     noteStates(team, got);
     team = got;
+    noteCrewSids(got);
     pruneSeen([got.sid, ...(got.rooms ?? []).map((r) => r.sid)]);
   } catch {
     // Not this build, or the server not up yet: nothing shows (and the sidebar stops showing it loading).
