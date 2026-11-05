@@ -17,7 +17,7 @@ import { heldByPerson } from "./held.js";
 import { nearLimit, type ToolWindow } from "./routing.js";
 import { KIND_WORDS, skillOf, strongAt, taskKind, type Skills, type TaskKind } from "./strengths.js";
 import { laneName } from "./session/core.js";
-import { boardBusy, canDriveLane, driverOf, laneOf, meshOf, pendingFor, readyTasks, runOf, unreadPosts, type BoardTask, type MeshAsk, type MeshPost, type SessionState } from "./session/projection.js";
+import { boardBusy, canDriveLane, driverOf, folderMates, laneOf, meshOf, ownChanges, pendingFor, readyTasks, runOf, unreadPosts, type BoardTask, type MeshAsk, type MeshPost, type SessionState } from "./session/projection.js";
 import type { SessionStore } from "./session/store.js";
 import { engineName, MAIN_LANE, type ActorRef, type BoardTaskDef, type EngineMode, type EventBody, type MeshNote, type RepoCall, type SessionEvent } from "./types.js";
 import { BROWSER_TOOL, browserCall, browserDriver } from "./browser-driver.js";
@@ -1092,7 +1092,8 @@ export class AgentMesh {
     if (!(await this.store.exists(sid))) return;
     const state = await this.store.state(sid);
     if (!Object.keys(state.holds ?? {}).length && !state.board?.tasks.some((t) => t.status === "claimed" && t.owns.length)) return;
-    const files = state.diffs[lane]?.files ?? [];
+    // Its own changes: in a folder it shares with others, the diff is theirs too, and their own board files aren't its to stop.
+    const files = ownChanges(state, lane);
     const hits = files.flatMap((f) => heldBy(state, lane, f.path).map((h) => ({ path: f.path, h })));
     const fresh = hits.filter(({ path, h }) => !this.heldTold.has(`${sid}|${lane}|${path}|${h.lane}|${h.seq}`));
     if (!fresh.length) return;
@@ -1222,7 +1223,10 @@ export class AgentMesh {
     // The board itself may send to the lane that posted it: with nobody else free, the poster reviews the work, and its brief
     // comes "from" that same lane. An agent can't message itself, so only the board's own messages get this.
     const self = req.system && req.toLane === from;
-    const found: Resolved = self ? { ok: true, to: from, how: "named" } : resolveTarget(state, from, req.to, text, (id) => !refusal(id));
+    // Friday's own messages (the board's hand-outs, reviews, rework, a carried-on task) go to the lane they name, never to whoever
+    // goes by that name: by name, four Claude Codes were one "Claude Code", and every task went to the first of them.
+    const exact = req.system && !!req.toLane && lanesOf(state).includes(req.toLane);
+    const found: Resolved = self || exact ? { ok: true, to: req.toLane!, how: "named" } : resolveTarget(state, from, req.to, text, (id) => !refusal(id));
     if (!found.ok) return { ok: false, error: found.error.replace(/hand (this|work) (off )?to/g, "message").replace(/hand off to/g, "message") };
     // A message goes to the agent named, never to a best guess at who fits: a guessed handoff is still the work moving, a guessed
     // message is words in the wrong agent's turn.
@@ -1565,7 +1569,8 @@ export class AgentMesh {
     // A coding tool reports what it changed when its turn ends (runner.ts reportDiff), so one finishing its task mid-turn read
     // "no files changed", and its work went through as "Nothing changed to check" with no second agent's look (the team demo,
     // Arun, 2026-10-30: "a first run that shows the team"). Its folder is asked instead.
-    if (/\bno files changed\b/.test(facts) && this.repo && state.engines[doer]?.tool && runOf(state, doer).status === "running") {
+    // Not in a folder it shares with other agents: its git status there is all of theirs.
+    if (/\bno files changed\b/.test(facts) && this.repo && state.engines[doer]?.tool && runOf(state, doer).status === "running" && !folderMates(state, doer).length) {
       const out = await this.repo(sid, doer, { op: "shell", command: "git status --porcelain --untracked-files=all", timeoutSec: 30 } as RepoCall).catch(() => null);
       const files = shellLines(out).map((l) => l.replace(/^\S+\s+/, ""));
       if (files.length) facts = facts.replace("no files changed", `${files.length} file${files.length === 1 ? "" : "s"} changed in its folder: ${files.slice(0, 8).join(", ")}${files.length > 8 ? `, and ${files.length - 8} more` : ""}`);
@@ -1643,7 +1648,7 @@ export class AgentMesh {
       const why = c.why ? `This check was added because agents kept getting this wrong: ${c.why}\n\n` : "";
       const pre = vs?.pre.length ? `\n\nOnly these failures are new: ${vs.fresh.join(", ")}. ${vs.pre.length === 1 ? "The other one" : `The other ${vs.pre.length}`} already failed at the commit your copy started from (${vs.pre.slice(0, 6).join(", ")}${vs.pre.length > 6 ? "…" : ""}), so leave ${vs.pre.length === 1 ? "it" : "them"} unless you're asked.` : "";
       const text = broke ? `Friday checked your change to "${after.title}" against this repo's rules, and it breaks one:\n\n${broke.replace(/^\[Friday\] /, "")}` : `Friday ran \`${c.command}\` in your folder after you finished "${after.title}", and it failed:\n\n${clip(out ?? "", 3000)}${pre}\n\n${why}Fix it, then end your turn with a short report as before. It runs again when you do.`;
-      await this.send(sid, state.board!.fromLane, { to: after.name ?? laneName(state, lane), text, kind: "task", board: id, system: true });
+      await this.send(sid, state.board!.fromLane, { to: after.name ?? laneName(state, lane), toLane: lane, text, kind: "task", board: id, system: true });
       return false;
     }
     return true;
@@ -1662,7 +1667,7 @@ export class AgentMesh {
     const holder = t.status === "claimed" ? t.lane : t.status === "review" ? (t.reviewer?.lane ?? t.lane) : undefined;
     const stop = async (why: string) => {
       if (!holder) return;
-      await this.send(sid, b.fromLane, { to: laneName(state, holder), text: `${actor.name} ${why} the board task "${t.title}". Stop working on it and leave its files as they are; don't call finish_task for it.`, kind: "tell", system: true }).catch(() => undefined);
+      await this.send(sid, b.fromLane, { to: laneName(state, holder), toLane: holder, text: `${actor.name} ${why} the board task "${t.title}". Stop working on it and leave its files as they are; don't call finish_task for it.`, kind: "tell", system: true }).catch(() => undefined);
     };
     if (req.action === "cancel") {
       if (t.status === "done" || t.status === "cancelled") return { ok: false, error: "It's already finished." };
@@ -1681,7 +1686,7 @@ export class AgentMesh {
       if (t.status !== "done" && t.status !== "review") return { ok: false, error: "Only a finished task can be sent back." };
       if (!t.lane) return { ok: false, error: "Nobody did it to send it back to." };
       await this.store.append(sid, actor, { type: "board.reviewed", id: t.id, lane: "", name: actor.name, ok: false, note: req.note?.trim().slice(0, 2000) || "Have another look." }, { lane: t.lane });
-      await this.send(sid, b.fromLane, { to: t.name ?? laneName(state, t.lane), text: `${actor.name} sent "${t.title}" back to you:\n${req.note?.trim() || "Have another look."}\n\nFix it, then end your turn with a short report as before.`, kind: "task", board: t.id, system: true });
+      await this.send(sid, b.fromLane, { to: t.name ?? laneName(state, t.lane), toLane: t.lane, text: `${actor.name} sent "${t.title}" back to you:\n${req.note?.trim() || "Have another look."}\n\nFix it, then end your turn with a short report as before.`, kind: "task", board: t.id, system: true });
     }
     this.live.add(sid);
     await this.dispatch(sid);
@@ -1865,7 +1870,7 @@ export class AgentMesh {
     // Its own tests ran in its folder and passed, on a small change: a second agent reading it again cost the team about 7s and
     // 250k tokens a task in the benchmark (scripts/bench/REPORT-team.md) and found nothing tests hadn't (Arun, 2026-10-24: "skip
     // the cross-review when a task's own tests passed and its change is small"). A typecheck alone isn't its tests.
-    const lines = t.lane ? (state.diffs[t.lane]?.files ?? []).reduce((n, f) => n + f.additions + f.deletions, 0) : 0;
+    const lines = t.lane ? ownChanges(state, t.lane).reduce((n, f) => n + f.additions + f.deletions, 0) : 0;
     const tested = !!t.checks?.ok && !t.checks.skipped && !t.checks.running && TEST_CMD.test(t.checks.command);
     const small = tested && lines > 0 && lines <= SMALL_CHANGE ? `Its tests passed (${t.checks!.command}) on a small change (${lines} lines), so it goes through without a second agent's check.` : "";
     const nothing = /\bno files changed\b/.test(t.report ?? "") ? "Nothing changed to check." : !checkers.length ? "No other agent here to check it." : small;
@@ -2034,7 +2039,7 @@ export class AgentMesh {
       }
       const name = laneName(state, pick.to);
       // Sent first, claimed once it went: a task that couldn't reach that agent stays on the board for someone else.
-      const r = await this.send(sid, state.board!.fromLane, { to: name, text: taskBrief(state, pick.t), kind: "task", board: pick.t.id, system: true });
+      const r = await this.send(sid, state.board!.fromLane, { to: name, toLane: pick.to, text: taskBrief(state, pick.t), kind: "task", board: pick.t.id, system: true });
       if (!r.ok) {
         // Nobody else free takes it meanwhile? It may still go to this one through whoever can let it (boardRefused).
         if (!free.some((l) => l !== pick!.to && !skip.has(l) && may(pick!.t, l))) await this.boardRefused?.(sid, pick.t, pick.to, r.error).catch(() => false);
@@ -2108,7 +2113,7 @@ export class AgentMesh {
       await this.reportBoard(sid, true);
       return;
     }
-    await this.send(sid, state.board!.fromLane, { to: t.name ?? laneName(state, t.lane), text: `${t.review?.by ?? "The reviewer"} checked your work on "${t.title}" and found:\n${t.review?.note ?? ""}\n\nFix it, then end your turn with a short report as before.`, kind: "task", board: id, system: true });
+    await this.send(sid, state.board!.fromLane, { to: t.name ?? laneName(state, t.lane), ...(t.lane ? { toLane: t.lane } : {}), text: `${t.review?.by ?? "The reviewer"} checked your work on "${t.title}" and found:\n${t.review?.note ?? ""}\n\nFix it, then end your turn with a short report as before.`, kind: "task", board: id, system: true });
   }
 
   /** After a task moved: tell the poster if the board is through, and hand out what that freed up. */
@@ -2187,9 +2192,10 @@ export class AgentMesh {
     const queued = pendingFor(state, lane).filter((q) => m.msgs.includes(q));
     const work = new Set(m.work ?? []);
     const msgs = queued.filter((q) => !work.has(q));
-    const mine = new Set((state.diffs[lane]?.files ?? []).map((f) => f.path));
+    // Each agent's own changes: in one folder shared by several, every diff is the same, and every file read as everyone's.
+    const mine = new Set(ownChanges(state, lane).map((f) => f.path));
     const overlaps = [...mine].flatMap((p) => {
-      const others = lanesOf(state).filter((l) => l !== lane && state.diffs[l]?.files.some((f) => f.path === p));
+      const others = lanesOf(state).filter((l) => l !== lane && ownChanges(state, l).some((f) => f.path === p));
       return others.length ? [{ path: p, with: others.map((l) => laneName(state, l)) }] : [];
     });
     const read = m.readUpTo?.[lane] ?? 0;
@@ -2433,7 +2439,7 @@ ${task}`,
       ]
         .filter(Boolean)
         .join("\n\n");
-      const r = await this.send(sid, ask.fromLane, { to: laneName(state, t.id), text: brief, kind: "task", system: true, carriedFrom: lane });
+      const r = await this.send(sid, ask.fromLane, { to: laneName(state, t.id), toLane: t.id, text: brief, kind: "task", system: true, carriedFrom: lane });
       if (!r.ok) continue;
       return `${ask.toName} ran out of usage partway through (it is ${outOfUsage(state, out, Date.now())}), so Friday gave the task to ${r.toName}: ${t.why}. It carries on from what ${ask.toName} did, and its report comes to you as any task's does.`;
     }
@@ -2546,7 +2552,10 @@ const BLOCKED = /\b(?:i'?m|i am|i was|i've been|i have been|i remain|it'?s|it is
 export function factsOf(state: SessionState, events: SessionEvent[], lane: string, got: SessionEvent, end: SessionEvent): string {
   const inRun = events.filter((e) => e.seq > got.seq && e.seq <= end.seq && (e.lane ?? MAIN_LANE) === lane);
   const lastDiff = inRun.findLast((e) => e.body.type === "agent.diff");
-  const files = lastDiff?.body.type === "agent.diff" ? lastDiff.body.files : (state.diffs[lane]?.files ?? []);
+  // In a folder other agents share, only what this one wrote: the diff there is all of theirs (ownChanges).
+  const own = new Set(ownChanges(state, lane).map((f) => f.path));
+  const shared = folderMates(state, lane).length > 0;
+  const files = (lastDiff?.body.type === "agent.diff" ? lastDiff.body.files : (state.diffs[lane]?.files ?? [])).filter((f) => !shared || own.has(f.path));
   const calls = new Map<string, string>();
   const checks: string[] = [];
   for (const e of inRun) {

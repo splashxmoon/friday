@@ -65,6 +65,7 @@ export const SHORTCUTS: { title: string; keys: [string[], string][] }[] = [
       // ⌃ on a Mac and Alt elsewhere (SessionView agentKeys); they were answered to and listed nowhere (2026-11-02 review).
       [[IS_MAC ? "⌃" : "⌥", "1", "–", "9"], "Bring up one agent (0 for all of them)"],
       [["⌘", "J"], "The next thing an agent is waiting on you for"],
+      [["⌘", "'"], "Quote the words selected in the chat in your message"],
     ],
   },
   {
@@ -75,6 +76,7 @@ export const SHORTCUTS: { title: string; keys: [string[], string][] }[] = [
       [["@", "…"], "Mention a person (tells them)"],
       [["#", "…"], "Point to a file"],
       [["↑"], "In an empty box, bring back what you asked before"],
+      [["⌫"], "In an empty box, take the last quote off"],
       [["↵"], "Send"],
       [["⇧", "↵"], "New line"],
     ],
@@ -167,6 +169,7 @@ export function mcpCommands(connections: { name: string; enabled: boolean; statu
 export function savedCommands(list: { name: string; hint: string; text: string; scope: "personal" | "workspace" }[]): SlashCommand[] {
   return list.map((c) => ({ name: c.name, icon: "zap" as IconName, hint: `${c.scope === "workspace" ? "Team" : "Yours"} · ${c.hint}`, text: c.text }));
 }
+
 
 export interface SavedCommandRow {
   id: string;

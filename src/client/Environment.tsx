@@ -232,7 +232,7 @@ function Panel({ anchor, close, state, me, sid, invite, identity, lane, onOpen }
             {/* Nothing answers "Connect this computer" in the local edition's browser (2026-10-28 QA). */}
             {(window.fridayDesktop || !isLocal()) && (
               <button type="button" className="link-btn" onClick={() => (window.fridayDesktop ? openSettings("computer") : connectThisComputer())}>
-                {window.fridayDesktop ? "Open Computer & coding tools" : "Connect this computer"}
+                {window.fridayDesktop ? "Open Settings › Computer" : "Connect this computer"}
               </button>
             )}
           </li>

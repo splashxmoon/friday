@@ -810,7 +810,7 @@ export function SessionView({
   return (
     <AgentsContext.Provider value={agentsHere}>
     <FocusContext.Provider value={focusValue}>
-    <div className={`session-view${focus ? " focus" : ""}`}>
+    <div className={`session-view${focus ? " focus" : ""}`} data-slot="session">
       <TopBar
         {...(headTabs || headRail ? { agentsSlot: setAgentsSlot } : {})}
         sessionPlan={sessionPlan}
@@ -1436,7 +1436,7 @@ function TopBar({
 
   const left = (
       <div className={`tb-left${focus ? " focus" : ""}`}>
-        <div className="tb-title">
+        <div className="tb-title" data-slot="session.title">
         {editing ? (
           <InlineEdit
             className="title-edit"
@@ -1498,13 +1498,13 @@ function TopBar({
         )}
         </div>
         )}
-        {agentsSlot && <div className="tb-agents" ref={tabsRef} />}
+        {agentsSlot && <div className="tb-agents" data-slot="session.agents" ref={tabsRef} />}
       </div>
   );
   const right = (
     <>
       {strip}
-      <div className="tb-right">
+      <div className="tb-right" data-slot="session.actions">
         {/* Who is here, and the people panel, are Team's: on Solo you work alone (sharing to viewers is to be worked out). */}
         {/* On Solo nobody else works here, but a watch link can bring viewers: a quiet eye and a count, only while somebody is watching. */}
         {/* People watching through the viewer link without an account are counted here too, on every plan, as "someone watching". */}
@@ -1592,12 +1592,15 @@ function TopBar({
       const left = document.getElementById("band-left");
       const right = document.getElementById("band-slot");
       setBand(left && right ? { left, right } : null);
+      // The header's slot (data-slot): in the window's band, its two halves are it.
+      for (const el of [left, right]) el?.setAttribute("data-slot", "session.header");
       // Tells the window's stylesheet where the page should start while this header is up there.
       document.documentElement.dataset.band = "session";
     });
     return () => {
       off();
       delete document.documentElement.dataset.band;
+      for (const id of ["band-left", "band-slot"]) document.getElementById(id)?.removeAttribute("data-slot");
     };
   }, []);
   if (band) {
@@ -1609,7 +1612,7 @@ function TopBar({
     );
   }
   return (
-    <header className="topbar">
+    <header className="topbar" data-slot="session.header">
       {left}
       {right}
     </header>

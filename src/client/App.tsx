@@ -293,7 +293,7 @@ export function App() {
   const [skills, setSkills] = useState<SkillView[]>([]);
   const [collections, setCollections] = useState<CollectionView[]>([]);
   /** What a skill picked on the Skills page hands to the next new session. */
-  const [preset, setPreset] = useState<{ brief?: string; grants?: SkillTemplate["grants"]; shepherd?: boolean; repo?: string; tool?: EngineTool } | null>(null);
+  const [preset, setPreset] = useState<{ brief?: string; grants?: SkillTemplate["grants"]; shepherd?: boolean; repo?: string; tool?: EngineTool; folder?: string } | null>(null);
   // A prompt link (prompt-link.ts): its task goes in the box, its repo and tool with it, and the address is tidied so a reload
   // doesn't fill the box again over what was typed since.
   // Signed out, the link waits: kept for this tab through the sign-in round trip (which comes back to a bare address), and the

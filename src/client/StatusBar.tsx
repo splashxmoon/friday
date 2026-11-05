@@ -128,7 +128,7 @@ export function StatusBar({ state, events, me, where, environment, slot, onChang
     }
 
   return (
-    <footer className="status-bar session-bar" aria-label="Session status">
+    <footer className="status-bar session-bar" aria-label="Session status" data-slot="session.foot">
       <div className="stb-start">
         {/* The detail in the title too: a narrow bar cuts it short, and hovering still shows it whole. */}
         {/* The state on the agent's own mark, as everywhere (presence.tsx; DIRECTION.md §9.6): the turning ring while it works, amber

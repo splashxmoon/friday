@@ -64,13 +64,23 @@ export const SECTIONS: SectionDef[] = [
     blurb: "What your agents learned in each repository.",
     keywords: "memory project lessons learned corrections checks brain remember forget",
   },
+  // "Computer & coding tools" was one page; now the computer and the tools on it are two (Arun, 2026-11-04: "split up the coding
+  // tools and computer in the settings into two seperate tabs"). Old links to "computer" land on the computer, "tools" on the tools.
   {
     id: "computer",
-    label: "Computer & coding tools",
+    label: "Computer",
     group: "This computer",
-    icon: "plug",
-    blurb: "The computer your coding agents run on, and the tools on it.",
-    keywords: "computer machine connect link claude code codex cursor sign in install account folder runner acp github git ssh keep awake tailscale other computers",
+    icon: "server",
+    blurb: "The computer your coding agents run on, and the GitHub login they use.",
+    keywords: "computer machine connect connected link folder runner github git ssh pull request repos keep awake sleep tailscale other computers wi-fi paste",
+  },
+  {
+    id: "coding-tools",
+    label: "Coding tools",
+    group: "This computer",
+    icon: "code",
+    blurb: "The coding tools on this computer, and the accounts each one uses.",
+    keywords: "coding tools tool claude code codex cursor copilot opencode devin junie kiro droid amp muse sign in sign out install account accounts login acp other agent command fewer more",
   },
   {
     id: "own-models",
@@ -134,7 +144,7 @@ export function settingsSection(id: string | null | undefined): string {
     team: "members",
     people: "members",
     machine: "computer",
-    tools: "computer",
+    tools: "coding-tools",
   };
   const s = aliases[id ?? ""] ?? id ?? "";
   return SECTIONS.some((x) => x.id === s) ? s : "appearance";

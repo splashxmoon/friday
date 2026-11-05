@@ -4,6 +4,9 @@ import { hostApi } from "./local.js";
 import { openOutside } from "./openOutside.js";
 import type { Identity } from "./storage.js";
 import { ConfirmDialog, Skeleton, type Confirmation } from "./ui.js";
+import { CopyMark } from "./SettingsOutside.js";
+import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 /**
  * Connecting this computer to GitHub, from wherever GitHub is needed.
@@ -36,6 +39,37 @@ const SOURCE: Record<NonNullable<GithubStatus["source"]>, string> = {
   git: "through git's saved login",
   friday: "connected in Friday",
 };
+/** The same, leading Settings › Computer's GitHub row. */
+const SIGNED_IN: Record<NonNullable<GithubStatus["source"]>, string> = {
+  env: "Signed in from GITHUB_TOKEN",
+  gh: "Signed in with the GitHub CLI",
+  git: "Signed in with git's saved login",
+  friday: "Signed in from Friday",
+};
+
+/**
+ * Signing out of a login the GitHub CLI holds: Friday can't take it off, so the button says how, with the command to copy, where
+ * the row used to end in "Sign out with gh auth logout" as words (Arun, 2026-11-04: "design this better").
+ */
+function SignOutGh() {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button type="button" variant="outline" size="sm">
+          Sign out…
+        </Button>
+      </PopoverTrigger>
+      {/* Opened on the words, not on Copy: focus on Copy showed its tooltip over the popover's edge. Tab goes to Copy. */}
+      <PopoverContent align="end" className="w-[300px] p-3" tabIndex={-1} onOpenAutoFocus={(e) => (e.preventDefault(), (e.currentTarget as HTMLElement | null)?.focus())}>
+        <p className="m-0 text-[13px] leading-snug text-[var(--ink-2)]">The GitHub CLI holds this login. To sign out, run this in a terminal:</p>
+        <div className="mt-2.5 flex items-center gap-2">
+          <code className="min-w-0 flex-1 truncate rounded-md border border-[var(--border)] bg-[var(--card-2)] px-2 py-1 font-mono text-[12px] text-[var(--ink)]">gh auth logout</code>
+          <CopyMark text="gh auth logout" label="the command" />
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 export function useGithub(identity: Identity, enabled = true) {
   const [status, setStatus] = useState<GithubStatus | null>(null);
@@ -68,7 +102,7 @@ export function useGithub(identity: Identity, enabled = true) {
  * `empty`: drawn as a page's empty state (a mark, a heading, a line and the buttons, centred), for a page that has nothing to
  * show until GitHub is connected. The same states and buttons as the card.
  */
-export function GitHubConnect({ identity, onChange, compact, why, empty, bare }: { identity: Identity; onChange?: () => void; compact?: boolean; why?: string; empty?: boolean; /** Only the buttons (and a pending code or an error): for a place that already heads it "Connect GitHub" itself, like Setup's step (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL"; it showed the heading twice). */ bare?: boolean }) {
+export function GitHubConnect({ identity, onChange, compact, why, empty, bare, row }: { identity: Identity; onChange?: () => void; compact?: boolean; why?: string; empty?: boolean; /** Signed in, one row of Settings › Computer's GitHub group: the face, @login, how and what uses it, and a quiet action. */ row?: boolean; /** Only the buttons (and a pending code or an error): for a place that already heads it "Connect GitHub" itself, like Setup's step (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL"; it showed the heading twice). */ bare?: boolean }) {
   const { status, error, read, setStatus, setError } = useGithub(identity);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -132,6 +166,39 @@ export function GitHubConnect({ identity, onChange, compact, why, empty, bare }:
       <div className={`gh-connect ${compact ? "compact" : ""}`} aria-busy>
         <Skeleton w="40%" h={13} />
         <Skeleton w="70%" h={11} />
+      </div>
+    );
+  }
+
+  if (status?.connected && row) {
+    const how = status.source ? SIGNED_IN[status.source] : "Signed in";
+    return (
+      <div className="set-mark-row" data-set-row="">
+        {status.avatar ? (
+          <img className="set-mark round" src={status.avatar} alt="" />
+        ) : (
+          <span className="set-mark round" aria-hidden>
+            <GitHubMark size={16} />
+          </span>
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[13px] font-medium text-[var(--ink)]">@{status.login}</div>
+          <div className="mt-0.5 text-[13px] leading-snug text-[var(--text-muted)]">{how}. Pull requests, clones and pushes here use it.</div>
+        </div>
+        <div className="ml-3 flex shrink-0 items-center gap-2">
+          {status.managed ? (
+            <Button type="button" variant="outline" size="sm" onClick={disconnect}>
+              Disconnect
+            </Button>
+          ) : status.source === "gh" ? (
+            <SignOutGh />
+          ) : status.source === "git" ? (
+            <span className="text-[13px] text-[var(--text-muted)]" title="This login was set up outside Friday, so it's removed the same way">
+              Managed by git
+            </span>
+          ) : null}
+        </div>
+        {dialog}
       </div>
     );
   }

@@ -30,6 +30,7 @@ watchChunkErrors();
 // Pickers and menus over a dialog scroll (scroll-free.ts).
 freeScrollInPopups();
 
+
 createRoot(document.getElementById("root")!, {
   onUncaughtError: (error, info) => {
     if (reloadForChunk(error)) return;

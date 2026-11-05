@@ -22,7 +22,7 @@ import {
   NotificationsTab,
   ShortcutsTab,
 } from "./SettingsPrefs.js";
-import { ComputerSection } from "./SettingsComputer.js";
+import { CodingToolsSection, ComputerSection } from "./SettingsComputer.js";
 import { OutsideAgentsSection } from "./SettingsOutside.js";
 import type { WorkspaceUsage } from "./workspace-types.js";
 import { isLocal, planLimits, planNow, startTeam } from "./edition.js";
@@ -263,6 +263,7 @@ export function SettingsPage({
             {current.id === "shortcuts" && <ShortcutsTab />}
             {current.id === "memory" && <ProjectMemory identity={identity} />}
             {current.id === "computer" && <ComputerSection identity={identity} />}
+            {current.id === "coding-tools" && <CodingToolsSection identity={identity} />}
             {current.id === "own-models" && <OwnModelsSection identity={identity} workspace={workspace} />}
             {current.id === "outside-agents" && <OutsideAgentsSection identity={identity} />}
             {current.id === "data" && <DataTab />}

@@ -291,10 +291,14 @@ body[style*="pointer-events: none"] > .amp { pointer-events: auto; }
 /* What a message quotes: a bar at its left, the words after it below (audit CREW-21). */
 .tm-quote { display: block; margin: 0 0 6px; padding: 0 0 0 10px; border-left: 2px solid var(--border-strong); color: var(--ink-2); white-space: pre-wrap; }
 /* The box holding a quote until it is sent: a chip over the words, as an attachment is, with its x (audit CREW-21). */
-.composer-quote { display: inline-flex; align-items: center; gap: 6px; max-width: min(100%, 520px); height: 28px; padding: 0 4px 0 10px; border-left: 2px solid var(--border-strong); border-radius: 0 var(--r-md) var(--r-md) 0; background: var(--hover); color: var(--ink-2); font-size: 13px; }
+/* The quotes over the box, a line each (Activity.tsx Composer): a grid, so the box footer's rules for its first child (flex: 1, wrap)
+   can't stretch a chip across the box or wrap its × out under it; three lines high at most, then it scrolls (2026-11-04). */
+.composer-quotes { display: grid; justify-items: start; gap: 4px; width: 100%; min-width: 0; max-height: 92px; overflow-y: auto; overscroll-behavior: contain; }
+.composer-quote { display: inline-flex; flex-wrap: nowrap; align-items: center; gap: 6px; max-width: min(100%, 560px); min-width: 0; height: 28px; padding: 0 4px 0 10px; border-left: 2px solid var(--border-strong); border-radius: 0 var(--r-md) var(--r-md) 0; background: var(--hover); color: var(--ink-2); font-size: 13px; }
 .composer-quote-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.composer-quote-x { display: grid; flex: none; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); cursor: pointer; }
-.composer-quote-x:hover { background: var(--hover-strong); color: var(--ink); }
+.composer-quotes .composer-quote button.composer-quote-x { display: grid; flex: none; place-items: center; width: 20px; min-width: 20px; height: 20px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); cursor: pointer; }
+.composer-quotes .composer-quote button.composer-quote-x:hover { background: var(--hover-strong); color: var(--ink); }
+.composer-quotes .composer-quote button.composer-quote-x:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
 
 /* @everyone in the @ list: the first few faces together. */
 .tm-pick-all { display: inline-flex; width: auto; min-width: 20px; }

@@ -3,10 +3,12 @@ import { MenuButton, Picker, relTime, Segmented } from "./ui.js";
 import { pickMachine, pickedMachine } from "./local.js";
 import { Icon } from "./icons.js";
 import { CopyMark } from "./SettingsOutside.js";
+import { SettingsGroup, SettingsRow } from "@/components/dass";
+import { Button } from "@/components/ui/button";
 
 /**
  * Your other computers, for the open-source edition (Arun, 2026-10-30: "lets also add support for multi machine for coding and
- * crew"). Settings › Computer & coding tools › Your computers: add one with a link to paste in its Friday, see which are linked
+ * crew"). Settings › Computer › Your computers: add one with a link to paste in its Friday, see which are linked
  * now, take one away; and on another computer, paste that link to use it from here (local/computers.ts, local/join.ts).
  * The new session's box says which computer it runs on once there is more than one (ComputerPill).
  */
@@ -107,7 +109,7 @@ export function ComputerPill({ here = "This computer", onPick }: { here?: string
   );
 }
 
-/** Settings › Computer & coding tools › Your computers. */
+/** Settings › Computer › Your computers. */
 /** How a computer is added (add-computer.ts): over SSH, with one command pasted there, or in its own Friday app. */
 type AddHow = "ssh" | "command" | "app";
 const ADD_HOW: [AddHow, string][] = [
@@ -243,18 +245,15 @@ export function ComputersSettings() {
   const tools = (c: LinkedComputer) => c.tools.filter((t) => t.loggedIn === true).map((t) => t.name);
 
   return (
-    <div className="set-card computers-set">
-      <div className="set-row">
-        <div className="set-text">
-          <div className="set-label">Your computers</div>
-          <div className="muted small">Run coding tools and teammates on your other computers from here, straight to them over Wi-Fi or Tailscale.</div>
-        </div>
+    // One group of Settings › Computer: your others, and this one used from another's (Arun, 2026-11-04: "design this better").
+    <SettingsGroup title="Other computers" className="computers-set">
+      <SettingsRow label="Your computers" hint="Run agents on your other computers over Wi-Fi or Tailscale.">
         {!how && (
-          <button type="button" className="btn small" onClick={() => void add("ssh")}>
+          <Button type="button" variant="outline" size="sm" onClick={() => void add("ssh")}>
             Add a computer
-          </button>
+          </Button>
         )}
-      </div>
+      </SettingsRow>
       {/* Three ways in (add-computer.ts): a machine Friday reaches over SSH is set up from here; any other takes one command, or
           the link in its own Friday app. */}
       {how && (
@@ -299,7 +298,7 @@ export function ComputersSettings() {
       {link && how === "app" && (
         <div className="computers-link">
           <ol className="computers-steps small">
-            <li>On the other computer, open Friday › Settings › Computer & coding tools.</li>
+            <li>On the other computer, open Friday › Settings › Computer.</li>
             <li>Under Your computers, paste this link where it says “Use this computer from another Friday”.</li>
           </ol>
           <div className="computers-link-row">
@@ -365,11 +364,10 @@ export function ComputersSettings() {
         </div>
       )}
       <div className="computers-join">
-        <div className="set-row">
-          <div className="set-text">
-            <div className="set-label">{hub ? `Used from ${hub.name}` : "Use this computer from another Friday"}</div>
-            <div className="muted small">
-              {hub ? (
+        <SettingsRow
+          label={hub ? `Used from ${hub.name}` : "Use this computer from another Friday"}
+          hint={
+              hub ? (
                 <span className="computers-status">
                   <span className={`computers-dot ${hub.connected ? "on" : ""}`} aria-hidden />
                   <span>
@@ -379,22 +377,22 @@ export function ComputersSettings() {
                   </span>
                 </span>
               ) : (
-                "Let your main computer's Friday run agents and teammates here. Copy the link from Add a computer there, then paste it here."
-              )}
-            </div>
-          </div>
+                "Paste the link from Add a computer on your main computer."
+              )
+          }
+        >
           {hub ? (
-            <button type="button" className="btn small" onClick={() => void (hub.problem?.repair ? leave().then(() => setTyping(true)) : leave())}>
+            <Button type="button" variant="outline" size="sm" onClick={() => void (hub.problem?.repair ? leave().then(() => setTyping(true)) : leave())}>
               {hub.problem?.repair ? "Pair again" : "Stop"}
-            </button>
+            </Button>
           ) : (
             !typing && (
-              <button type="button" className="btn small" disabled={busy} onClick={() => void fromClipboard()}>
+              <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void fromClipboard()}>
                 {busy ? "Connecting…" : "Paste link"}
-              </button>
+              </Button>
             )
           )}
-        </div>
+        </SettingsRow>
         {!hub && typing && (
           <div className="computers-paste">
             <input className="input" autoFocus placeholder="friday://computer?…" value={paste} onChange={(e) => setPaste(e.target.value)} onKeyDown={(e) => (e.key === "Enter" && paste.trim() ? void join() : e.key === "Escape" ? setTyping(false) : undefined)} aria-label="Link from the other computer" spellCheck={false} />
@@ -406,6 +404,6 @@ export function ComputersSettings() {
       </div>
       {/* Said once: a removal there is already the line under "Used from". */}
       {(error || state.error || (state.joined?.error && state.joined.error !== hub?.problem?.said)) && <p className="phone-error small">{error || (state.joined?.error !== hub?.problem?.said ? state.joined?.error : "") || state.error}</p>}
-    </div>
+    </SettingsGroup>
   );
 }

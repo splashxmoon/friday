@@ -324,6 +324,42 @@ export function splitQuote(text: string): { quote: string; rest: string } | null
   return quote ? { quote, rest: text.slice(m[0].length).replace(/^\s+/, "") } : null;
 }
 
+/** Every quote a sent message starts with, in order, each its own "> " block, and the words after them (quoted twice, 2026-11-04). */
+export function splitQuotes(text: string): { quotes: string[]; rest: string } {
+  const quotes: string[] = [];
+  let rest = text;
+  for (let q = splitQuote(rest); q; q = splitQuote(rest)) quotes.push(q.quote), (rest = q.rest);
+  return { quotes, rest };
+}
+
+/** The quotes held over the box, then the words typed under them: each quote its own block, one blank line between each. */
+export const withQuotes = (quotes: readonly string[], text: string): string => [...quotes.map(quoteBlock), text.trim()].filter(Boolean).join("\n\n");
+
+/**
+ * Words selected in a message, as they read (QuoteSelection, Activity.tsx): each piece of text the selection covers, in order, with
+ * the block it sits in and whether that keeps its spaces (code). A new block is a new line and the spaces Markdown's source put
+ * between inline pieces are one space; the browser's own Selection.toString() broke a line at every file chip and inline mark,
+ * so "Update README.md with the new numbers" was quoted as three lines (Arun, 2026-11-04: "fixing the thing … when you click quote").
+ */
+export function selectedText(pieces: readonly { text: string; block: unknown; pre?: boolean }[]): string {
+  let out = "";
+  let last: unknown = undefined;
+  for (const p of pieces) {
+    let t = p.pre ? p.text : p.text.replace(/\s+/g, " ");
+    if (!t) continue;
+    if (last !== undefined && p.block !== last && !out.endsWith("\n")) out += "\n";
+    if (!p.pre && (out === "" || out.endsWith("\n"))) t = t.replace(/^ +/, "");
+    else if (!p.pre && t.startsWith(" ") && out.endsWith(" ")) t = t.slice(1);
+    out += t;
+    last = p.block;
+  }
+  return out
+    .split("\n")
+    .map((l) => l.trimEnd())
+    .join("\n")
+    .replace(/^\n+|\s+$/g, "");
+}
+
 /** A board a crew workflow posted (team-workflow-model.ts workflowTasks): Friday's, its tasks marked as the workflow's steps. */
 export const isWorkflowBoard = (e: SessionEvent): boolean => e.body.type === "board.posted" && (e.body.tasks ?? []).some((t) => typeof t?.detail === "string" && t.detail.includes('[Workflow "'));
 

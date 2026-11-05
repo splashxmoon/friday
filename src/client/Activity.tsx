@@ -32,6 +32,7 @@ import { GitMergeIcon,
   SearchIcon,
   SendIcon,
   TerminalIcon,
+  QuoteIcon,
   Undo2Icon,
   FlagIcon,
   UnplugIcon,
@@ -157,12 +158,12 @@ import { CheckInLine, HandoffLine, FoldersGiven, TeammateChanged, FridayLine, te
 import { WorkflowAsks } from "./WorkflowAsks.js";
 import { useRoomRuns, WorkflowRunCard } from "./WorkflowRunCard.js";
 import { threadsOf } from "./team-threads.js";
-import { isLive, isPersonsWord, isWaiting, isWorkflowBoard, leadAnswers, nudgedRepeats, quoteBlock, queuedFor, roomAsks, roomRunKind, switchedAfter, turnsFor, workflowChatter, type LeadInfo } from "./team-room.js";
+import { isLive, isPersonsWord, isWaiting, isWorkflowBoard, leadAnswers, nudgedRepeats, queuedFor, roomAsks, roomRunKind, selectedText, splitQuote, splitQuotes, switchedAfter, turnsFor, withQuotes, workflowChatter, type LeadInfo } from "./team-room.js";
 import { AGENT_DRAG, catchUpIndex, firstUnread, maxColumns, unreadByLane } from "./agentNav.js";
 import { followTarget, openingTarget } from "./follow-target.js";
 import { carried, carriedFrom } from "./carried.js";
 import { reviewText, type LineComment } from "./review.js";
-import { savedCommands, useSavedCommands, useShortcuts } from "./Shortcuts.js";
+import { savedCommands, shortcut, useSavedCommands, useShortcuts } from "./Shortcuts.js";
 import { CommandsDialog } from "./CommandsDialog.js";
 import { HandoffBar, HandoffCard, HandoffComposer, type HandoffMore, type HandoffTarget, RunMeta, StepGroup, Thinking as ThinkingView, Working, stepFor, type FileChange, type Step } from "./Response.js";
 import { DiffView, type DiffLine, type DiffMode } from "./DiffView.js";
@@ -350,8 +351,15 @@ interface Ctx {
   notify: (m: string) => void;
   /** Who you are to your own machine, for asking it to change what it allows. */
   identity: Identity;
-  /** Show a message of your own before the server has echoed it back. Returns how to take it back, if it never arrives. */
-  echo: (text: string, lane: string) => () => void;
+  /**
+   * Show a message of your own before the server has echoed it back, and, when it starts the lane's agent (`starts`), that agent's
+   * reply already thinking under it. Returns how to take both back, if it never arrives.
+   */
+  echo: (text: string, lane: string, starts?: boolean) => () => void;
+  /** Words from the chat into this column's message box as a quote, the box turned to `from`, the agent that wrote them. */
+  quote: (text: string, from: string | null) => void;
+  /** This column's box, while it is there: what quote() puts a quote in, and "Edit and send again" puts a sent one's back in. */
+  quoteBox: { current: QuoteBox | null };
   /** Open the panel that holds what a run produced. */
   onOpen?: (what: "files" | "tree" | "preview") => void;
   /** Where the newest commit sits in the log. */
@@ -763,7 +771,8 @@ export function group(events: SessionEvent[], streaming: boolean | ReadonlySet<s
   for (const lane of live) {
     const run = runs.get(lane);
     if (run) run.streaming = true;
-    else items.push({ kind: "run", lane, key: -1 - n++, messages: [], diffs: [], ended: null, streaming: true, decided: [], asked: [] });
+    // When it started, so its live line can time it before it has said anything ("Thinking · 3s").
+    else items.push({ kind: "run", lane, key: -1 - n++, messages: [], diffs: [], ended: null, streaming: true, startedTs: startedAt.get(lane), decided: [], asked: [] });
   }
   // A run whose change set is the same as the last one shown on its lane changed nothing itself: credited to the run that did.
   const shownSet = new Map<string, { by: RunItem; ev: Ev<"agent.diff"> }>();
@@ -1147,11 +1156,39 @@ export function Activity({
   // moment it appeared, on the first one's echo.
   const lastSeq = useRef(0);
   lastSeq.current = events.at(-1)?.seq ?? 0;
-  const echo = useCallback((text: string, lane: string) => {
+  /**
+   * The replies on their way: an instruction that starts an idle agent shows its reply at once, "Thinking" with its clock running,
+   * before the server has the instruction, let alone a start from its runner (Arun, 2026-11-04: "there should be something there
+   * instantly from the coding agent to make the user feel like that the app is fast which it is"). Each gives way to the reply
+   * the server's start draws, which looks the same and keeps its clock (liveSince), or goes after half a minute without one.
+   */
+  const [expected, setExpected] = useState<{ id: number; lane: string; at: number; after: number }[]>([]);
+  const echo = useCallback((text: string, lane: string, starts = false) => {
     const id = Date.now() + Math.random();
     setPending((p) => [...p, { id, text, lane, after: lastSeq.current }]);
-    return () => setPending((p) => p.filter((x) => x.id !== id));
-  }, []);
+    if (starts) {
+      const at = Date.now();
+      sentAt.set(`${sid}|${lane}`, at);
+      setExpected((x) => [...x.filter((e) => e.lane !== lane), { id, lane, at, after: lastSeq.current }]);
+      setTimeout(() => setExpected((x) => x.filter((e) => e.id !== id)), 30_000);
+    }
+    return () => {
+      setPending((p) => p.filter((x) => x.id !== id));
+      setExpected((x) => x.filter((e) => e.id !== id));
+    };
+  }, [sid]);
+  /** Whether the lane's own reply has taken over from the one drawn as it was sent: its run started, or is already over. */
+  const startedSince = (lane: string, after: number) => {
+    if (runOf(state, lane).status === "running") return true;
+    for (let i = events.length - 1; i >= 0 && events[i]!.seq > after; i--) {
+      const e = events[i]!;
+      if ((e.lane ?? MAIN_LANE) === lane && (e.body.type === "run.started" || e.body.type === "run.ended" || e.body.type === "agent.message")) return true;
+    }
+    return false;
+  };
+  useEffect(() => {
+    if (expected.length && expected.some((e) => startedSince(e.lane, e.after))) setExpected((x) => x.filter((e) => !startedSince(e.lane, e.after)));
+  }, [events]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!pending.length) return;
     // A suggestion is echoed back as one too, and the log keeps the first 8000 characters of a long message (a pasted log).
@@ -1470,12 +1507,16 @@ export function Activity({
   const checkpoints = useMemo(() => checkpointsByMessage(events), [events]);
   const lastRestoreSeq = events.findLast((e) => e.body.type === "folder.restored")?.seq ?? 0;
   const undone = useMemo(() => undoneRuns(events), [events]);
+  // A quote goes to this column's own box, not to every box open (a split has one a column; a window event reached them all).
+  const quoteBox = useRef<QuoteBox | null>(null);
+  const quoteTo = useRef<(text: string, from: string | null) => void>(() => {});
+  const quote = useCallback((text: string, from: string | null) => quoteTo.current(text, from), []);
   // The same object until something it holds changes. Made fresh on every draw, it was new on every frame of streamed
   // text, so every run block and notice in the feed redrew (and re-read every tool call) sixty times a second.
   // `state` is changed in place by each event, which changes `events` too, so `events` stands for both.
   const ctx: Ctx = useMemo(
-    () => ({ me, plan, ...(solo ? { solo } : {}), ...(soloSure ? { soloSure } : {}), connections, state, ...index, send, sid, invite, notify, identity, echo, lastCommitSeq, lastApplySeq, lastRestoreSeq, undone, rewinds, checkpoints, events, ...(onOpen ? { onOpen } : {}), ...(onConnect ? { onConnect } : {}), ...(agents ? { agents } : {}), ...(presence ? { presence } : {}), ...(replayLink ? { replayLink } : {}), ...(replaying ? { replaying } : {}) }),
-    [me, plan, solo, soloSure, connections, state, index, send, sid, invite, notify, identity, echo, lastCommitSeq, lastApplySeq, lastRestoreSeq, undone, rewinds, checkpoints, events, onOpen, onConnect, agents, presence, replayLink, replaying],
+    () => ({ me, plan, ...(solo ? { solo } : {}), ...(soloSure ? { soloSure } : {}), connections, state, ...index, send, sid, invite, notify, identity, echo, quote, quoteBox, lastCommitSeq, lastApplySeq, lastRestoreSeq, undone, rewinds, checkpoints, events, ...(onOpen ? { onOpen } : {}), ...(onConnect ? { onConnect } : {}), ...(agents ? { agents } : {}), ...(presence ? { presence } : {}), ...(replayLink ? { replayLink } : {}), ...(replaying ? { replaying } : {}) }),
+    [me, plan, solo, soloSure, connections, state, index, send, sid, invite, notify, identity, echo, quote, quoteBox, lastCommitSeq, lastApplySeq, lastRestoreSeq, undone, rewinds, checkpoints, events, onOpen, onConnect, agents, presence, replayLink, replaying],
   );
   // "Reconnect" from an agent's card in the Agents hub: the same start this view's own Reconnect makes.
   const ctxRef = useRef(ctx);
@@ -1638,6 +1679,13 @@ export function Activity({
     return () => void (gone = true);
   }, [autoNative, sid, tuiLane, retry]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Quoted words turn the box to the agent that wrote them, so "this part, but…" goes to the right one (QuoteSelection).
+  quoteTo.current = (text, from) => {
+    const known = !!from && (from === MAIN_LANE || state.lanes.some((l) => l.id === from));
+    if (known && !pin && from !== target) (pick(from), laneFilter !== ALL && setLaneFilter(from));
+    requestAnimationFrame(() => quoteBox.current?.add(text));
+  };
+
   return (
     <PatchSource.Provider value={patchSource}>
     <section
@@ -1695,7 +1743,7 @@ export function Activity({
       {/* One agent on Solo has nothing to switch between and no one else's messages to filter out: no bar for it. Except in the
           local edition, where the bar's + is how a second agent joins, and a team of agents is the point. */}
       {!pin && bar && (filter !== "all" || lanes.length > 0 || startingNow.length > 0 || needs.length > 0 || (!solo && events.length > 15) || (isLocal() && Object.keys(state.engines).length > 0)) && inHead(
-      <div className={`feed-toolbar${headSlot ? " in-head" : ""}`}>
+      <div className={`feed-toolbar${headSlot ? " in-head" : ""}`} data-slot="session.agents">
         {(
           <div className="lane-tabs-wrap">
           <div className={`lane-tabs${tabsOver ? " over" : ""}`} ref={tabsEl} role="tablist" aria-label="Filter by agent" onKeyDown={tabListKeys}>
@@ -1737,7 +1785,7 @@ export function Activity({
                   )}
                   <span className="lane-tab-text">
                     <span className="lane-tab-name">
-                      {who?.name ?? name}
+                      <TabName name={who?.name ?? name} />
                       {/* Whose it is, beside the name in the header, which has no line under it to say so; never on the ring. */}
                       {headSlot && who?.owner && <span className="lane-tab-who" aria-hidden="true">{initials(who.owner)}</span>}
                       {/* Out of usage: when it is back, after its name, its mark dimmed and no ring, which read as a spinner (audit CODE-23 B). */}
@@ -1994,7 +2042,7 @@ export function Activity({
         />
       ) : (
       // A scroller per teammate tab: its Settings or Activity opens at its top, its Chat at the newest (audit CREW-11, 2026-11-04).
-      <Conversation key={`${laneFilter}|${filter}|${mateTab}`} className="min-h-0 flex-1" initial="instant" onFollow={setFollowing} {...(mateTab !== "chat" ? { openAt: ".tm-page" } : agentUnreadAt !== -1 ? { openAt: "[data-catchup]" } : {})}>
+      <Conversation key={`${laneFilter}|${filter}|${mateTab}`} data-slot="session.feed" className="min-h-0 flex-1" initial="instant" onFollow={setFollowing} {...(mateTab !== "chat" ? { openAt: ".tm-page" } : agentUnreadAt !== -1 ? { openAt: "[data-catchup]" } : {})}>
         <ConversationContent className="mx-auto w-full max-w-[var(--read-w,860px)] gap-5 px-6 py-5">
           {state.options.team && laneFilter !== ALL && <TeammateHeader lane={laneFilter} identity={ctx.identity} notify={ctx.notify} {...(state.engines[laneFilter]?.branch ? { branch: state.engines[laneFilter]!.branch! } : {})} />}
           {state.options.team && <ThreadHost sid={sid} events={events} send={(c) => send(c as never)} meId={me.id} />}
@@ -2077,6 +2125,12 @@ export function Activity({
               </div>
             </div>
           ))}
+          {/* The reply it starts, already thinking, until the server's start draws the same reply in its place. */}
+          {expected
+            .filter((e) => (laneFilter === ALL || laneFilter === e.lane) && filter !== "team" && !startedSince(e.lane, e.after))
+            .map((e) => (
+              <PendingRun key={e.id} ctx={ctx} lane={e.lane} since={e.at} />
+            ))}
           {/* The end: what it came to, in a line and in numbers, with the recording a press away. */}
           {merged && !pin && (
             <div className="feed-merged" role="status">
@@ -2115,7 +2169,7 @@ export function Activity({
           not what anybody reading it would expect. */}
       {/* Not under a teammate's Activity, Settings and the like: a box and its plans over a form (audit CREW-29). */}
       {!replaying && !tuiOn && mateTab === "chat" && (
-        <div className="composer-dock">
+        <div className="composer-dock" data-slot="session.box">
           <RaceCard state={state} me={me} events={events} identity={identity} sid={sid} invite={invite} send={send} />
           {/* Away or paused, said over every team chat's box with the one press that ends it (TeamControls.tsx). */}
           {state.options.team && <TeamBanner identity={identity} notify={ctx.notify} />}
@@ -2143,15 +2197,7 @@ export function Activity({
           {/* ⌘F in this chat (ChatFind.tsx). */}
           <ChatFind primary={!secondary} />
           {/* Words selected in the chat, quoted into the box and sent to whoever wrote them (QuoteSelection). */}
-          {me.role !== "viewer" && (
-            <QuoteSelection
-              onQuote={(text, from) => {
-                const known = !!from && (from === MAIN_LANE || state.lanes.some((l) => l.id === from));
-                if (known && !pin && from !== target) (pick(from), laneFilter !== ALL && setLaneFilter(from));
-                requestAnimationFrame(() => quoteIntoComposer(text));
-              }}
-            />
-          )}
+          {me.role !== "viewer" && <QuoteSelection onQuote={quote} />}
           <Composer ctx={ctx} lane={target} locked={!!pin} onLane={(l) => (pick(l), laneFilter !== ALL && setLaneFilter(l))} onPin={() => setPinning(true)} events={events} plan={<LivePlan events={events} state={state} {...(pin ? { lane: pin } : {})} team={!secondary && boardHere} {...(me.role !== "viewer" ? { control: (id: string, action: TaskAction, to?: string) => void send({ type: "board.task", id, action, ...(to ? { to } : {}) }).then((r) => !r.ok && ctx.notify(r.error ?? "Couldn't change that task.")) } : {})} />} />
           {/* Under the box: the way back through the session on the left, and what the agent's context has cost on the right, under send.
               In the Focus layout both live in the status bar along the window's foot instead. */}
@@ -2217,6 +2263,32 @@ export function Activity({
  * One row of the feed: drawn again with the rest while it is near the view, and, once its turn is over, left as it last was
  * while it is far from it (feed-near.ts). A turn still going always draws, wherever it is.
  */
+/**
+ * An agent's reply, drawn the moment the person sends what starts it: its mark, its name and "Thinking" with its clock running,
+ * as the reply the server's start draws (RunBlock) looks before it has anything to say, so one gives way to the other unseen.
+ */
+function PendingRun({ ctx, lane, since }: { ctx: Ctx; lane: string; since: number }) {
+  const tool = ctx.state.engines[lane]?.tool;
+  const extra = ctx.state.lanes.some((l) => l.id === lane);
+  return (
+    <div className={extra ? "feed-item agent-lane" : "feed-item"} data-lane={lane} data-pending-run="" style={extra ? ({ "--tint": agentLook(ctx.state, lane).tint } as React.CSSProperties) : undefined}>
+      <div className="rsp">
+        <span className="rsp-avatar" aria-hidden>
+          {tool ? <EngineMark tool={tool} size={15} /> : <Mascot mood={runMood({ active: true, outcome: undefined, failing: 0 })} size={26} />}
+        </span>
+        <div className="rsp-main">
+          <div className="rsp-head">
+            <span className="rsp-who">{agentNameFor(ctx.state, lane)}</span>
+          </div>
+          <div className="rsp-live">
+            <Working label="Thinking" since={since} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FeedRow({ settled, children, ...div }: React.HTMLAttributes<HTMLDivElement> & { settled: boolean; "data-seq": number; "data-lane": string }) {
   const ref = useRef<HTMLDivElement>(null);
   const near = useNear(ref);
@@ -2960,6 +3032,25 @@ export const waitsOnPerson = (state: SessionState, lane: string): boolean => run
 const queueHolds = (state: SessionState, lane: string): boolean =>
   runOf(state, lane).status !== "idle" || (!!state.engines[lane]?.tool && !state.engines[lane]!.online) || !!state.approvals?.[lane];
 
+/** A sent message's quotes, each with a bar at its left (teammates.css .tm-quote), and the words after them (team-room.ts splitQuote). */
+function QuotedText({ text }: { text: string }) {
+  const q = splitQuote(text);
+  if (!q) return <>{text}</>;
+  return (
+    <span className="tm-sent-text">
+      <span className="tm-quote">{q.quote}</span>
+      {q.rest && <QuotedText text={q.rest} />}
+    </span>
+  );
+}
+
+/** "Edit and send again" on a message that quoted: its quotes back over the box as chips, its own words in the box. */
+function sendAgain(ctx: Ctx, text: string) {
+  const { quotes, rest } = splitQuotes(text);
+  if (quotes.length && ctx.quoteBox.current) ctx.quoteBox.current.set(quotes);
+  prefillComposer(quotes.length && ctx.quoteBox.current ? rest : text);
+}
+
 function HumanMessage({ ev, ctx }: { ev: Ev<"instruction"> | Ev<"suggestion">; ctx: Ctx }) {
   const { me, state, delivered, send } = ctx;
   const [ask, confirmUI] = useConfirm();
@@ -2995,6 +3086,8 @@ function HumanMessage({ ev, ctx }: { ev: Ev<"instruction"> | Ev<"suggestion">; c
   let shown: ReactNode = b.text;
   // In a team, each @Name in what was sent stays its teammate's pill (Arun, 2026-10-27: "make sure the tag is still there").
   if (state.options.team) shown = <MentionText sid={ctx.sid} text={b.text} />;
+  // A quote it starts with, drawn as the room draws it: in a session it was sent as "> " lines and shown as them.
+  else if (splitQuote(b.text)) shown = <QuotedText text={b.text} />;
   if (b.type === "instruction" && b.handoff) {
     const h = b.handoff;
     const status = pendingFor(state, ev.lane ?? MAIN_LANE).includes(ev.seq) ? "queued" : delivered.has(ev.seq) ? `${h.toName} picked this up` : "";
@@ -3044,7 +3137,7 @@ function HumanMessage({ ev, ctx }: { ev: Ev<"instruction"> | Ev<"suggestion">; c
   // A team's message is never the start of a new coding session: no Fork on it (Arun, 2026-10-28: the critique's "no 'Fork a new
   // session' on team messages").
   if (state.options.team) forks = false;
-  can.current = () => ({ ...(forks ? { fork } : {}), again: () => prefillComposer(b.text), ...(mayRewind ? { rewind } : {}) });
+  can.current = () => ({ ...(forks ? { fork } : {}), again: () => sendAgain(ctx, b.text), ...(mayRewind ? { rewind } : {}) });
 
   // Going back to before this message: its files, and the agent's memory of what followed. Only where there is a checkpoint to go to,
   // only while nothing is running, and only for who can undo. A coding tool keeps its own conversation, which Friday can't wind back:
@@ -3063,7 +3156,7 @@ function HumanMessage({ ev, ctx }: { ev: Ev<"instruction"> | Ev<"suggestion">; c
         onConfirm: async () => {
           const r = await send({ type: "folder.restore", sha: checkpoint!, lane: said, rewindTo: ev.seq });
           if (!r.ok) return ctx.notify(r.error ?? "Couldn't restore. The folder may have moved on since; check the Changes panel, then try again.");
-          if (b.type === "instruction") prefillComposer(b.text);
+          if (b.type === "instruction") sendAgain(ctx, b.text);
         },
       });
     const n = rewindImpact(ctx.events, ev.seq);
@@ -3076,7 +3169,7 @@ function HumanMessage({ ev, ctx }: { ev: Ev<"instruction"> | Ev<"suggestion">; c
       onConfirm: async () => {
         const r = await send({ type: "folder.restore", sha: checkpoint!, lane: said, rewindTo: ev.seq });
         if (!r.ok) return ctx.notify(r.error ?? "Couldn't rewind. The folder may have moved on since; check the Changes panel, then try again.");
-        if (b.type === "instruction") prefillComposer(b.text);
+        if (b.type === "instruction") sendAgain(ctx, b.text);
       },
     });
   };
@@ -3091,7 +3184,7 @@ function HumanMessage({ ev, ctx }: { ev: Ev<"instruction"> | Ev<"suggestion">; c
           <>
             <span className="pulse-dot" /> {queuedText ?? (state.engines[said]?.tool && !state.engines[said]!.online ? `Queued until ${ENGINE_NAMES[state.engines[said]!.tool!]} reconnects` : "Queued for the agent's next step")}
             {/* Still waiting, in a team chat: change it or take it back before it is read (Arun, 2026-10-28: the critique's "queued messages get Edit and Cancel"). */}
-            {state.options.team && mine && <QueuedActions seqs={(copies ?? [{ lane: said, seq: ev.seq }]).filter((c) => stillPending(state, c.lane, delivered).includes(c.seq))} send={send} onEdit={() => prefillComposer(b.text)} />}
+            {state.options.team && mine && <QueuedActions seqs={(copies ?? [{ lane: said, seq: ev.seq }]).filter((c) => stillPending(state, c.lane, delivered).includes(c.seq))} send={send} onEdit={() => sendAgain(ctx, b.text)} />}
           </>
         )}
         {status === "seen" && receipt && (
@@ -3206,46 +3299,102 @@ function ChatMessage({ ev, ctx }: { ev: Ev<"chat">; ctx: Ctx }) {
   );
 }
 
+/** A column's message box, to the quotes held over it (Composer): one more, or a sent message's own put back. */
+interface QuoteBox {
+  add: (text: string) => void;
+  set: (quotes: string[]) => void;
+}
+
+/** ⌘' (Ctrl+' on Windows and Linux) quotes what is selected in the chat, as Mail's "quote" key: nothing else in Friday takes it. */
+export const QUOTE_KEY = "⌘'";
+const isQuoteKey = (e: KeyboardEvent): boolean => (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (e.key === "'" || e.code === "Quote");
+
 /**
- * Words selected in the chat, quoted into the message box (Arun, 2026-11-03, after Orca's "Quote"): a small button over the
- * selection puts them in as a quote, kept above whatever is already typed, and turns the box to the agent that wrote them, so
- * "this part, but…" goes to the right one. Only in the feed, and never over a text field's own selection.
+ * What a selection in a message says, as it reads: a line per block, one space between inline pieces, a file chip as its path,
+ * nothing from a button, a code block's head or anything hidden (team-room.ts selectedText).
+ */
+function rangeText(range: Range, row: Element): string {
+  const root = range.commonAncestorContainer;
+  const walk = document.createTreeWalker(root.nodeType === Node.ELEMENT_NODE ? root : (root.parentNode ?? root), NodeFilter.SHOW_TEXT);
+  const pieces: { text: string; block: unknown; pre?: boolean }[] = [];
+  for (let n = walk.nextNode() as Text | null; n; n = walk.nextNode() as Text | null) {
+    if (!range.intersectsNode(n)) continue;
+    const el = n.parentElement;
+    if (!el || !el.getClientRects().length) continue;
+    const skip = el.closest(".ans-code-head, .file-chip-title, [aria-hidden='true'], .sr-only, svg, button:not(.file-chip)");
+    if (skip && row.contains(skip)) continue;
+    const from = n === range.startContainer ? range.startOffset : 0;
+    const to = n === range.endContainer ? range.endOffset : n.data.length;
+    // Its block: the nearest box that is not inside an inline one (a file chip is inline-flex, its path a block within it).
+    const chain: Element[] = [];
+    for (let e: Element | null = el; e && e !== row; e = e.parentElement) chain.push(e);
+    chain.push(row);
+    let lastInline = -1;
+    chain.forEach((e, i) => getComputedStyle(e).display.startsWith("inline") && (lastInline = i));
+    pieces.push({ text: n.data.slice(from, to), block: chain[lastInline + 1] ?? row, pre: getComputedStyle(el).whiteSpace.startsWith("pre") });
+  }
+  return selectedText(pieces) || range.toString().trim();
+}
+
+/**
+ * Words selected in the chat, quoted into the message box (Arun, 2026-11-03, after Orca's "Quote"): a small button by the
+ * selection, or ⌘', puts them in as a quote, kept above whatever is already typed, and turns the box to the agent that wrote them,
+ * so "this part, but…" goes to the right one. Only in the feed, and never over a text field's own selection; Escape puts it away.
  */
 function QuoteSelection({ onQuote }: { onQuote: (text: string, lane: string | null) => void }) {
   const [at, setAt] = useState<{ x: number; y: number; text: string; lane: string | null } | null>(null);
   // Where it sits, to tell its own column of the chat from another open beside it (a split): each quotes only its own.
   const anchor = useRef<HTMLSpanElement>(null);
+  const quoteNow = useRef(onQuote);
+  quoteNow.current = onQuote;
   useEffect(() => {
-    const read = () => {
+    /** The selection, when it is in one message of this column's chat: its words, where, and whose. */
+    const selected = () => {
       const sel = window.getSelection();
-      if (!sel || sel.isCollapsed || !sel.rangeCount) return setAt(null);
+      if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
       const range = sel.getRangeAt(0);
       const node = range.commonAncestorContainer;
       const el = (node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement) as Element | null;
       const row = el?.closest(".feed-item");
-      const text = sel.toString().trim();
-      if (!row || !text || el?.closest("textarea, input, [contenteditable='true']")) return setAt(null);
+      if (!row || el?.closest("textarea, input, [contenteditable='true']")) return null;
       const column = anchor.current?.closest(".composer-dock")?.parentElement;
-      if (column && !column.contains(row)) return setAt(null);
+      if (column && !column.contains(row)) return null;
+      const text = rangeText(range, row);
       const r = range.getBoundingClientRect();
-      if (!r.width && !r.height) return setAt(null);
+      if (!text || (!r.width && !r.height)) return null;
       // Under the selection, clear of the name and time over it (audit CREW-38, 2026-11-04).
-      setAt({ x: Math.min(Math.max(r.left + r.width / 2, 48), innerWidth - 48), y: Math.min(r.bottom, innerHeight - 40), text: text.slice(0, 4000), lane: row.getAttribute("data-lane") });
+      return { x: Math.min(Math.max(r.left + r.width / 2, 64), innerWidth - 64), y: Math.min(r.bottom, innerHeight - 40), text: text.slice(0, 4000), lane: row.getAttribute("data-lane") };
     };
+    // Put away with Escape, it stays away until the selection changes: the key's own keyup brought it straight back.
+    let hushed = false;
+    const read = () => setAt(hushed ? null : selected());
     // After the pointer or a shift-arrow lets go, once the selection has settled; gone as soon as it is.
     const settle = () => setTimeout(read, 0);
     const gone = () => {
+      hushed = false;
       const s = window.getSelection();
       if (!s || s.isCollapsed) setAt(null);
     };
     const hide = () => setAt(null);
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape") return (hushed = true), setAt(null);
+      if (!isQuoteKey(e)) return;
+      const got = selected();
+      if (!got) return;
+      e.preventDefault();
+      quoteNow.current(got.text, got.lane);
+      setAt(null);
+      window.getSelection()?.removeAllRanges();
+    };
     document.addEventListener("mouseup", settle);
     document.addEventListener("keyup", settle);
+    document.addEventListener("keydown", key);
     document.addEventListener("selectionchange", gone);
     addEventListener("scroll", hide, true);
     return () => {
       document.removeEventListener("mouseup", settle);
       document.removeEventListener("keyup", settle);
+      document.removeEventListener("keydown", key);
       document.removeEventListener("selectionchange", gone);
       removeEventListener("scroll", hide, true);
     };
@@ -3255,6 +3404,7 @@ function QuoteSelection({ onQuote }: { onQuote: (text: string, lane: string | nu
       type="button"
       className="quote-pop"
       style={{ left: at.x, top: at.y }}
+      title={`Quote it in your message (${shortcut(QUOTE_KEY)})`}
       // Pressed without taking the selection away first.
       onMouseDown={(e) => e.preventDefault()}
       onClick={() => {
@@ -3263,8 +3413,9 @@ function QuoteSelection({ onQuote }: { onQuote: (text: string, lane: string | nu
         window.getSelection()?.removeAllRanges();
       }}
     >
-      <Icon name="message" size={13} />
+      <QuoteIcon className="size-3.5" aria-hidden />
       Quote
+      <kbd className="quote-pop-key">{shortcut(QUOTE_KEY)}</kbd>
     </button>
   );
   return (
@@ -3272,15 +3423,6 @@ function QuoteSelection({ onQuote }: { onQuote: (text: string, lane: string | nu
       {quote && createPortal(quote, document.body)}
     </span>
   );
-}
-
-/**
- * The quote, held by the box as a chip over what is typed and sent ahead of it as Markdown (audit CREW-21, 2026-11-04): pasted in
- * as "> " lines it sat in the box as raw marks and went with blank lines around it.
- */
-function quoteIntoComposer(text: string) {
-  dispatchEvent(new CustomEvent("friday:quote", { detail: text.trim() }));
-  document.getElementById("composer-input")?.focus();
 }
 
 /**
@@ -3497,10 +3639,43 @@ const CHECK = /\b(test|tests|pytest|jest|vitest|mocha|tsc|lint|eslint|ruff|mypy|
  * What one lane's agent is writing right now. The only part of the feed that redraws for each word: it listens to its own
  * lane's stream, so neither the run block around it, nor any other row or lane, redraws while the words arrive.
  */
-export function LiveStream({ sid, lane }: { sid: string; lane: string }) {
-  const s = useLaneStream(sid, lane);
-  if (s?.reasoning && !s.text) return <ThinkingView text={s.reasoning} live />;
-  return s?.text ? <LiveAnswer text={s.text} /> : null;
+export function LiveStream({ sid, lane, since }: { sid: string; lane: string; /** When the turn started, for the thinking line to time; absent when the line under the reply already times it. */ since?: number }) {
+  // Ten times a second at most: the thinking's one line and the answer's last piece, not sixty Markdown passes a second.
+  const s = useLaneStream(sid, lane, 100);
+  const key = `${sid}|${lane}`;
+  const [open, setOpen] = useState(() => thinkingOpen.has(key));
+  if (s?.reasoning && !s.text) {
+    const toggle = () => {
+      if (open) thinkingOpen.delete(key);
+      else thinkingOpen.add(key);
+      setOpen(!open);
+    };
+    return <ThinkingView text={s.reasoning} {...(since !== undefined ? { since } : {})} open={open} onToggle={toggle} />;
+  }
+  if (!s?.text) return null;
+  // Thinking and answer in one message (a tool that logs them together): the thinking folds as the answer starts.
+  return (
+    <>
+      {s.reasoning.trim() && <StepGroup steps={[]} thought={s.reasoning.trim()} live={false} />}
+      <LiveAnswer text={s.text} />
+    </>
+  );
+}
+
+/** The lanes whose live thinking the person opened, by session: the next stretch of thinking there opens too. */
+const thinkingOpen = new Set<string>();
+
+/**
+ * When each lane's last instruction was sent from this page, by session: its reply is timed from the press, so the clock in the
+ * reply drawn as it is sent (PendingRun) and the one in the reply the server's start draws carry on as one.
+ */
+const sentAt = new Map<string, number>();
+/** When a working turn's clock starts: the press that sent it, when that is what started it, else the run's own start. */
+function liveSince(sid: string, lane: string, started: number | undefined): number | undefined {
+  const sent = sentAt.get(`${sid}|${lane}`);
+  if (sent === undefined) return started;
+  if (started === undefined) return Date.now() - sent < 120_000 ? sent : undefined;
+  return sent <= started + 1500 && started - sent < 120_000 ? sent : started;
 }
 
 /** Finished pieces of a streaming answer: drawn once each, and not looked at again while the rest arrives. */
@@ -3615,6 +3790,8 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   if (ctx.state.options.team) [mate, look] = teamReply(lane, active, mate);
   // About how long is left while it works (runForecast.ts): asked before the folded return, so the hooks run in the same order.
   const forecast = useRunForecast(ctx.identity, ctx.state, ctx.events, lane, active, ctx.me.id, ctx.replaying);
+  // When its live clock starts: the press that sent it, when this page sent it.
+  const since = active ? liveSince(ctx.sid, lane, item.startedTs ?? msgs[0]?.ts) : undefined;
   // An older run: the facts that decide whether to open it, on one line. Before the steps, the receipt and the hand-off are
   // worked out, since none of them are shown: a long session is mostly folded runs.
   if (folded && !unfolded) {
@@ -3659,11 +3836,13 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
    * timeline — a line per step, a verb and what it touched.
    */
   const steps: Step[] = [];
-  type Work = { kind: "work"; id: string; thought: string; secs: number; steps: Step[] };
+  type Work = { kind: "work"; id: string; steps: Step[] };
+  /** A stretch of thinking, as its own line in the reply: "Thought for 12s", which opens to what it thought. */
+  type Think = { kind: "think"; key: string; thought: string; secs: number };
   type Say = { kind: "say"; key: string; note: string };
   /** Subagents it sent off, as one card where it sent them (Subagents.tsx), not as steps among its reads and commands. */
   type Subs = { kind: "subs"; key: string; rows: SubagentRow[] };
-  const blocks: (Work | Say | Subs)[] = [];
+  const blocks: (Work | Think | Say | Subs)[] = [];
   // The tool's own record of each subagent this run started: where it stands, what kind it is, what it came back with.
   // Up to its end, or to what closed it: a block cut short without an end (a restart) claimed every later subagent as its own.
   const runEnd = item.ended?.seq ?? item.closedSeq ?? Infinity;
@@ -3698,24 +3877,30 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
       ...(t?.steps ? { steps: t.steps } : {}),
     };
   };
-  // The reasoning and the tool calls it led to fold together behind one
-  // chevron — they are the working-out, not the answer. What the model
-  // actually says stays outside and plain, because that is what people came
-  // to read. A "say" closes whatever work was open, so the next reasoning or
-  // tool call starts a fresh fold rather than joining one that already ended.
+  // The thinking and the tool calls are the working-out, not the answer, so each folds to a line: a stretch of thinking to
+  // "Thought for 12s", the steps it led to to "Read README.md, ran a command", in the order they happened, the way Claude
+  // shows them (Arun, 2026-11-04: "show the thinking process"). What the model actually says stays outside and plain, because
+  // that is what people came to read. A "say" closes whatever work was open, so the next tool call starts a fresh fold rather
+  // than joining one that already ended; a thought does too.
   let work: Work | null = null;
+  /** What it thought since it last said something: what a step's "why" is asked against. */
+  let thinking = "";
   msgs.forEach((m, i) => {
     const b = m.body;
     const thought = reasoningText(b.reasoning);
     const note = b.text && m !== finalMsg && m !== loginLine ? b.text : "";
     if (thought) {
-      if (!work) {
-        work = { kind: "work", id: `${m.seq}-work`, thought: "", secs: 0, steps: [] };
-        blocks.push(work);
-      }
-      const since = i > 0 ? msgs[i - 1]!.ts : item.startedTs;
-      work.thought = work.thought ? `${work.thought}\n\n${thought}` : thought;
-      work.secs += since ? Math.round((m.ts - since) / 1000) : 0;
+      // Timed from what came before it: the run's start, the last message, or the last of its steps coming back, so a
+      // command's own time isn't counted as thinking.
+      const prev = i > 0 ? msgs[i - 1]! : null;
+      const since = prev ? Math.max(prev.ts, ...prev.body.toolCalls.map((c) => ctx.results.get(c.id)?.ts ?? 0)) : item.startedTs;
+      const secs = since ? Math.max(0, Math.round((m.ts - since) / 1000)) : 0;
+      const open = blocks.at(-1);
+      // Thinking logged in pieces with nothing between them is one stretch of it.
+      if (open?.kind === "think") (open.thought = `${open.thought}\n\n${thought}`), (open.secs += secs);
+      else blocks.push({ kind: "think", key: `${m.seq}-think`, thought, secs });
+      thinking = thinking ? `${thinking}\n\n${thought}` : thought;
+      work = null;
     }
     for (const call of b.toolCalls) {
       const args = argsOf(call);
@@ -3748,14 +3933,15 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
       step.onAsk = () => prefillComposer(`Explain why you ${d.verb.toLowerCase()}${d.target ? ` ${d.target}` : ""} in your last run, in two or three sentences. Don't change anything.`);
       steps.push(step);
       if (!work) {
-        work = { kind: "work", id: `${m.seq}-work`, thought: "", secs: 0, steps: [] };
+        work = { kind: "work", id: `${m.seq}-work`, steps: [] };
         blocks.push(work);
       }
       work.steps.push(step);
-      if (work.thought) step.thought = work.thought;
+      if (thinking) step.thought = thinking;
     }
     if (note) {
       work = null;
+      thinking = "";
       blocks.push({ kind: "say", key: `${m.seq}-say`, note });
     }
   });
@@ -3944,14 +4130,17 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   // A turn with its change card says what it changed there only: "1 file changed" in this line as well was a third telling
   // (audit CODE-12 A, Arun 2026-11-04). The status bar keeps the session's total.
   const carded = !!item.ended && turnFiles.length > 0 && !ctx.state.options.work;
-  const runLog = blocks.some((x) => x.kind === "work") ? (
+  // Live, timed from the press as the line before it was; done, from the run's own start.
+  const metaStart = since ?? item.startedTs ?? msgs[0]?.ts;
+  const runLog = blocks.some((x) => x.kind === "work" || x.kind === "think") ? (
     <RunMeta
       forecast={forecast}
       files={carded ? [] : changed}
       tokensApart={usedApart}
       live={active}
+      doing={typing === "answering" ? "Writing" : "Working"}
       onFile={onChanged}
-      {...(item.startedTs ?? msgs[0]?.ts ? { startedAt: item.startedTs ?? msgs[0]!.ts } : {})}
+      {...(metaStart ? { startedAt: metaStart } : {})}
       {...(item.ended ? { endedAt: item.ended.ts } : item.closedTs ? { endedAt: item.closedTs } : {})}
       tokens={used}
       {...compactedBefore(ctx.events, lane, item)}
@@ -4084,8 +4273,10 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
           </div>
         ) : x.kind === "subs" ? (
           <Subagents key={x.key} rows={x.rows} />
+        ) : x.kind === "think" ? (
+          <StepGroup key={x.key} steps={[]} thought={x.thought} thoughtSecs={x.secs} live={false} />
         ) : (
-          <StepGroup key={x.id} steps={x.steps} thought={x.thought} thoughtSecs={x.secs} live={active && i === blocks.length - 1} />
+          <StepGroup key={x.id} steps={x.steps} live={active && i === blocks.length - 1} />
         ),
       )}
 
@@ -4093,13 +4284,15 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
           reply was its name over nothing until its first step (Arun, 2026-10-30: "there needs to be a visual thing in the chat to
           show that the claude is working"). Once it has steps, their own live line ("Working · 9s") says it. A teammate says it in
           its head instead. */}
+      {/* Timed from the press that sent it ("Thinking · 3s"), so it is moving from the first moment (Arun, 2026-11-04: "there
+          should be something there instantly from the coding agent"). Its thinking, as it streams, takes this line's place. */}
       {active && !mate && !runLog && (!typing || typing === "waiting") && !waitsOnPerson(ctx.state, lane) && (
         <div className="rsp-live">
-          <Working label={blocks.length ? "Working" : "Thinking"} />
+          <Working label={blocks.length ? "Working" : "Thinking"} {...(since !== undefined ? { since } : {})} />
           {forecast && <span className="rsp-live-fc">{forecast}</span>}
         </div>
       )}
-      {typing && typing !== "waiting" && <LiveStream sid={ctx.sid} lane={lane} />}
+      {typing && typing !== "waiting" && <LiveStream sid={ctx.sid} lane={lane} {...(!runLog && since !== undefined ? { since } : {})} />}
       {verdict && finalMsg && (
         <span className={`rsp-verdict ${verdict.tone}`} title={tests?.command ?? "No test command ran in this run"}>
           <Icon name={verdict.tone === "pass" ? "check" : verdict.tone === "fail" ? "x" : "help"} size={12} /> {verdict.text}
@@ -4113,6 +4306,20 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
           showActions={!active}
           copyText={finalMsg.body.text}
           onCopy={copy}
+          // The whole answer as a quote, as it reads, a press beside Copy (Arun, 2026-11-04: "make clicking quote easier too").
+          {...(ctx.me.role !== "viewer"
+            ? {
+                onQuote: (from: HTMLElement) => {
+                  const row = from.closest(".feed-item");
+                  const body = row?.querySelector(".rsp-answer");
+                  if (!row || !body) return;
+                  const all = document.createRange();
+                  all.selectNodeContents(body);
+                  const words = rangeText(all, row);
+                  if (words) ctx.quote(words.length > 4000 ? `${words.slice(0, 4000).trimEnd()}…` : words, lane);
+                },
+              }
+            : {})}
           feedback={(() => {
             const r = ctx.state.reactions[finalMsg.seq]?.[ctx.me.id];
             return r ? (r.up ? "up" : "down") : null;
@@ -7662,6 +7869,7 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
   }, [sid]);
   const hasFolder = !!state.upload || !!liveMachine(state, lane);
   const saved = useSavedCommands();
+  let slashSaved = savedCommands(saved.commands);
   const [managing, setManaging] = useState(false);
   // Picking a session from the team's library to hand this agent as context (TeamLibrary.tsx).
   const [picking, setPicking] = useState(false);
@@ -7689,7 +7897,7 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
   let teamSlash = {};
   // "/" in a team chat offers the team's own commands (team-commands.ts), not its teammate's coding tool's (Arun, 2026-10-28).
   if (state.options.team) teamSlash = { only: TEAM_COMMANDS, tool: undefined, onManage: undefined };
-  const shortcuts = useShortcuts({ textarea, sid, invite, people, agents, ...(onLane && pickPoints ? { onAgent: (id: string) => id !== "*" && onLane(id) } : {}), commands: !toPeople, files: hasFolder && !toPeople, connections: state.options.mcp ? ctx.connections : [], saved: savedCommands(saved.commands), onManage: () => setManaging(true), lane, ...(laneTool ? { tool: ENGINE_NAMES[laneTool] } : {}), ...teamSlash });
+  const shortcuts = useShortcuts({ textarea, sid, invite, people, agents, ...(onLane && pickPoints ? { onAgent: (id: string) => id !== "*" && onLane(id) } : {}), commands: !toPeople, files: hasFolder && !toPeople, connections: state.options.mcp ? ctx.connections : [], saved: slashSaved, onManage: () => setManaging(true), lane, ...(laneTool ? { tool: ENGINE_NAMES[laneTool] } : {}), ...teamSlash });
   // Set while a Friday lane asked for from this menu is still being created.
   const wantFriday = useRef(false);
   // A saved agent was just added from the Agents menu: point at its lane when it arrives, so the next
@@ -7939,21 +8147,54 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
   if (state.options.team) boxLabel = inView !== ALL ? `Message ${name}` : `Message the crew${sid === teamSidNow() ? "" : ` in ${state.title}`}`;
   /** Where ↑ has got to in your past asks; -1 while the box holds your own text. */
   const askAt = useRef(-1);
-  // Words quoted from the chat (QuoteSelection), held as a chip over the box until sent or taken off (audit CREW-21).
-  const [quote, setQuote] = useState<string | null>(null);
+  // Words quoted from the chat (QuoteSelection, an answer's Quote), each held as a chip over the box until sent or taken off
+  // (audit CREW-21). Several at once: a second quote put the first away without a word. Kept as the draft is, so leaving the
+  // session no longer took the quote from under the words typed about it (Arun, 2026-11-04: "fixing the thing … when you click quote").
+  const quotesKey = `mpa.quotes.${sid}${locked ? `.${lane}` : ""}`;
+  const [quotes, setQuotes] = useState<string[]>(() => {
+    try {
+      const kept: unknown = JSON.parse(localStorage.getItem(quotesKey) ?? "[]");
+      return Array.isArray(kept) ? kept.filter((q): q is string => typeof q === "string" && !!q.trim()).slice(0, 8) : [];
+    } catch {
+      return [];
+    }
+  });
   useEffect(() => {
-    const on = (e: Event) => setQuote(String((e as CustomEvent<string>).detail ?? "") || null);
-    addEventListener("friday:quote", on);
-    return () => removeEventListener("friday:quote", on);
-  }, []);
+    try {
+      if (quotes.length) localStorage.setItem(quotesKey, JSON.stringify(quotes));
+      else localStorage.removeItem(quotesKey);
+    } catch {
+      // Storage refused: the quotes live as long as the box does.
+    }
+  }, [quotes, quotesKey]);
+  // This column's box is where its quotes go (Activity quote()): the words in, the caret after what is typed, ready for "but…".
+  useEffect(() => {
+    const box: QuoteBox = {
+      add: (text) => {
+        const t = text.trim();
+        if (!t) return;
+        setQuotes((qs) => (qs.includes(t) ? qs : [...qs, t].slice(-8)));
+        const el = textarea.current;
+        if (el) (el.focus(), el.setSelectionRange(el.value.length, el.value.length));
+      },
+      set: (qs) => setQuotes(qs.map((q) => q.trim()).filter(Boolean).slice(0, 8)),
+    };
+    ctx.quoteBox.current = box;
+    return () => {
+      if (ctx.quoteBox.current === box) ctx.quoteBox.current = null;
+    };
+  }, [ctx.quoteBox]);
   const onSubmit = async (msg: PromptInputMessage) => {
     // The box empties as it sends: what draws its @names under it goes with it (put back with the words if it fails).
     if (state.options.team) setTyped("");
     let text = msg.text.trim();
     // A team's own "/" command does what it says here, or becomes the words it stands for (team-commands.ts).
     if (state.options.team && text.startsWith("/")) { const said = await runTeamCommand(text, { identity: ctx.identity, notify, sid }); if (said === null) return; text = said; }
-    // The quote held over the box goes first, as Markdown, one blank line before the words (team-room.ts quoteBlock).
-    if (quote && text) (text = `${quoteBlock(quote)}\n\n${text}`), setQuote(null);
+    // The quotes held over the box go first, as Markdown, one blank line after each (team-room.ts withQuotes). They come off the box
+    // once it has gone, and back on if it didn't: a message put back in the box went back as raw "> " lines, its chip gone.
+    const own = text;
+    const held = text ? quotes : [];
+    if (held.length) text = withQuotes(held, text);
     const now = interruptNext.current;
     interruptNext.current = false;
     // An aside goes to the people, whoever may steer: watchers can talk too.
@@ -7969,6 +8210,7 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
         notify(r.error ?? "That didn't send. It's back in the box: try again.");
         throw new Error("aside not sent");
       }
+      if (held.length) setQuotes((qs) => qs.filter((q) => !held.includes(q)));
       setTyped(textarea.current?.value ?? "");
       return;
     }
@@ -7978,7 +8220,7 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
       notify("Pick one of your coding tools in the agent menu first: there is nothing to run this on yet.");
       throw new Error("no agent to run it");
     }
-    rememberAsk(text);
+    rememberAsk(own);
     askAt.current = -1;
     // The shield would hide a typed key from the agent too, so it doesn't go: it stays in the box and the notice says why.
     // Thrown, so the box keeps its attachments.
@@ -7990,17 +8232,22 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
     // Yours, on screen, now. Uploading two hundred files takes a while and the
     // round trip is never instant; a message box that empties into nothing is
     // the moment people press send again.
-    const unecho = text ? ctx.echo(text, lane) : () => {};
+    // An agent with nothing running, here to take it, starts on it: its reply shows at once under the message, thinking.
+    const engine = state.engines[lane];
+    const starts = (mode === "drive" || mode === "claim") && !running && !state.options.team && !state.terminals?.[lane] && (!engine?.tool || engine.online);
+    const unecho = text ? ctx.echo(text, lane, starts) : () => {};
+    if (held.length) setQuotes((qs) => qs.filter((q) => !held.includes(q)));
     // A message that didn't go goes back in the box, rather than leaving "Sending…" on screen and the words nowhere. Ahead of
     // anything typed since, never over it. Thrown after, so the box keeps its attachments for the retry.
     const putBack = (why: string): never => {
       unecho();
       const el = textarea.current;
-      if (el && text) {
-        el.value = el.value.trim() ? `${text}\n${el.value}` : text;
+      if (el && own) {
+        el.value = el.value.trim() ? `${own}\n${el.value}` : own;
         setTyped(el.value);
         el.focus();
       }
+      if (held.length) setQuotes((qs) => [...held, ...qs.filter((q) => !held.includes(q))]);
       notify(why);
       throw new Error(why);
     };
@@ -8021,7 +8268,7 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
       const handoff = carry ? { handoff: { fromLane: carry.fromLane, fromName: carry.fromName, toName, reason: `You switched from ${carry.fromName} to ${toName} here.`, carried: [] } } : {};
       let toLanes = [lane];
       // In a crew "@Kit …" goes to Kit, and "@Kit and @Nova …" to both, wherever the box points (Teammates.tsx).
-      if (state.options.team) toLanes = teammatesNamed(sid, text, lane);
+      if (state.options.team) toLanes = teammatesNamed(sid, own, lane);
       if (!toLanes.length) return putBack("Nobody is in this room yet. Add a teammate to it from its menu at the top.");
       // Someone else's teammates asked here, through their keepers (CrewHosted.tsx), each "Scout (Sam Rivera)".
       const asked: string[] = [];
@@ -8089,13 +8336,29 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
         className={cn("prompt", mode === "suggest" && "prompt-suggest")}
       >
         <PromptInputHeader>
-          {quote && (
-            <span className="composer-quote">
-              <span className="composer-quote-text">{quote}</span>
-              <button type="button" className="composer-quote-x" aria-label="Take the quote off" title="Take the quote off" onClick={() => setQuote(null)}>
-                <XIcon className="size-3" />
-              </button>
-            </span>
+          {/* Each quote a line of its own, as wide as its words, its × at its end; the whole of it on hover. A list of them stops at
+              three lines' height and scrolls (2026-11-04: the footer's rules stretched a chip across the box, and wrapped a long
+              one's × out under it, over the words typed). */}
+          {quotes.length > 0 && (
+            <div className="composer-quotes" role="list" aria-label={quotes.length === 1 ? "Quoted in your message" : `${quotes.length} quotes in your message`}>
+              {quotes.map((q, i) => (
+                <span key={q} className="composer-quote" role="listitem" title={q.length > 600 ? `${q.slice(0, 600)}…` : q}>
+                  <span className="composer-quote-text">{q.replace(/\s+/g, " ")}</span>
+                  <button
+                    type="button"
+                    className="composer-quote-x"
+                    aria-label="Take the quote off"
+                    title="Take the quote off"
+                    onClick={() => {
+                      setQuotes((qs) => qs.filter((_, j) => j !== i));
+                      textarea.current?.focus();
+                    }}
+                  >
+                    <XIcon className="size-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
           )}
           <PromptInputAttachments>{(f) => <PromptInputAttachment data={f} />}</PromptInputAttachments>
         </PromptInputHeader>
@@ -8120,6 +8383,12 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
             onKeyDown={(e) => {
               // A list of commands or files that is open takes the arrows, Enter and Escape.
               if (shortcuts.onKeyDown(e)) return;
+              // ⌫ in an empty box takes the last quote off, as it would an attachment's chip.
+              if (e.key === "Backspace" && quotes.length && !e.currentTarget.value && !e.metaKey && !e.ctrlKey && !e.altKey) {
+                e.preventDefault();
+                setQuotes((qs) => qs.slice(0, -1));
+                return;
+              }
               // ↑ in an empty box: what you asked before (askHistory.ts).
               if (walkAsks(e, e.currentTarget, askAt, prefillComposer)) return;
               // ⌘↵ sends past a running step instead of queueing behind it.
@@ -8135,7 +8404,7 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
           />
         </PromptInputBody>
         <PromptInputFooter>
-          <PromptInputTools>
+          <PromptInputTools data-slot="box.pills">
             {canUpload && (
               <PromptInputActionMenu>
                 <PromptInputActionMenuTrigger aria-label="Add files" title="Add files or photos">
@@ -8368,3 +8637,19 @@ function FlowBrief({ run, sid, fallback }: { run: string; sid: string; fallback:
   const runs = useRoomRuns(sid);
   return runs.some((r) => r.run === run) ? null : <>{fallback}</>;
 }
+
+/**
+ * An agent's name on its tab, its number kept in sight when the tab is too narrow for all of it: four Claude Codes at 1210 read
+ * "Claude Code…" three times over, and which was which was gone (Arun, 2026-11-04). The words before it give way instead.
+ */
+export function TabName({ name }: { name: string }) {
+  const m = /^(.*\S) (\d+)$/.exec(name);
+  if (!m) return <>{name}</>;
+  return (
+    <>
+      <span className="lane-tab-base">{m[1]}</span>
+      <span className="lane-tab-num">{` ${m[2]}`}</span>
+    </>
+  );
+}
+

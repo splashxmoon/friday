@@ -193,6 +193,11 @@ export interface SessionState {
    */
   intents?: Record<string, { paths: string[]; seq: number }>;
   /**
+   * The files each coding tool wrote itself, by its own edit and write calls, as it said them: in a folder two agents share, the
+   * folder's diff is everyone's, and this is what tells whose a change is (ownChanges). Cleared with the claims.
+   */
+  wrote?: Record<string, string[]>;
+  /**
    * Each lane's latest plan, counted: its steps and how many are finished (completed or cancelled), so a list of sessions can say
    * "stopped at 3 of 5" as the Work rail does, not "done" over a plan left short (QA, 2026-10-28; Arun: "TEST EVERYTHING").
    */
@@ -367,6 +372,80 @@ export function givenName(s: SessionState, lane: string): string | null {
   if (!own) return null;
   const tool = s.engines[lane]?.tool;
   return tool && own.toLowerCase() === engineName(tool).toLowerCase() ? null : own;
+}
+
+const folderKey = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "");
+
+/** The other agents working in this lane's very folder on its computer: a folder shared by choice, not a copy each. */
+export function folderMates(s: SessionState, lane: string): string[] {
+  const e = s.engines[lane];
+  if (!e?.cwd) return [];
+  return Object.entries(s.engines).filter(([id, o]) => id !== lane && o.online && !!o.cwd && o.hostId === e.hostId && folderKey(o.cwd) === folderKey(e.cwd)).map(([id]) => id);
+}
+
+/**
+ * What this agent changed. In a folder of its own, its folder's diff. In one it shares with other agents the diff is all of
+ * theirs at once, so it is the files in it this agent wrote itself: with four Claude Codes in one folder, each was told it had
+ * changed the files the other three's board tasks owned, to stop and ask them, and each report claimed everyone's work.
+ */
+export function ownChanges(s: SessionState, lane: string): DiffFile[] {
+  const files = s.diffs[lane]?.files ?? [];
+  if (!files.length || !folderMates(s, lane).length) return files;
+  const root = folderKey(s.engines[lane]!.cwd);
+  const wrote = new Set((s.wrote?.[lane] ?? []).map((p) => {
+    const k = folderKey(p);
+    return k.startsWith(root + "/") ? k.slice(root.length + 1) : k;
+  }));
+  return files.filter((f) => wrote.has(folderKey(f.path)));
+}
+
+/** A lane's own name, before two of a kind are told apart: what it was named, else its saved agent's or its tool's. */
+function ownLaneName(s: SessionState, lane: string): string {
+  if (lane === MAIN_LANE) return s.mainName?.trim() || (s.options.agent?.name ?? (s.engines[MAIN_LANE]?.tool ? engineName(s.engines[MAIN_LANE]!.tool!) : "Main"));
+  const l = s.lanes.find((x) => x.id === lane);
+  const e = s.engines[lane];
+  return l?.name ?? (e?.tool ? engineName(e.tool) : lane);
+}
+
+/**
+ * Every lane's name as the session shows it and the agents are told it: two of a kind are "Claude Code" and "Claude Code 2",
+ * skipping a number another lane already goes by. The server named every Claude Code in a session "Claude Code" while the tabs
+ * said "Claude Code 2", "Claude Code 3", so an agent naming one reached the first of them, a lead's two reviews both went to the
+ * busy one, and the board's own hand-outs, which went by name too, gave the others' tasks to it (Arun, 2026-11-04: "multiple
+ * coding agents like more than two cant work together").
+ */
+export function laneNames(s: SessionState): Map<string, string> {
+  const ids = [MAIN_LANE, ...s.lanes.map((l) => l.id)];
+  const own = ids.map((id) => ownLaneName(s, id));
+  const taken = new Set(own.map((n) => n.toLowerCase()));
+  const seen = new Map<string, number>();
+  const out = new Map<string, string>();
+  ids.forEach((id, i) => {
+    const base = own[i]!;
+    const key = base.toLowerCase();
+    const n = (seen.get(key) ?? 0) + 1;
+    seen.set(key, n);
+    if (n === 1) return void out.set(id, base);
+    let k = n;
+    while (taken.has(`${base} ${k}`.toLowerCase())) k++;
+    taken.add(`${base} ${k}`.toLowerCase());
+    out.set(id, `${base} ${k}`);
+  });
+  return out;
+}
+
+/** One lane's name, as laneNames gives it. */
+export function uniqueLaneName(s: SessionState, lane: string): string {
+  return laneNames(s).get(lane) ?? ownLaneName(s, lane);
+}
+
+/** A name for a new lane that no lane here goes by yet: "Claude Code 3" beside "Claude Code" and "Claude Code 2". */
+export function freshLaneName(s: SessionState, name: string): string {
+  const taken = new Set([...laneNames(s).values()].map((n) => n.toLowerCase()));
+  if (!taken.has(name.toLowerCase())) return name;
+  let k = 2;
+  while (taken.has(`${name} ${k}`.toLowerCase())) k++;
+  return `${name} ${k}`;
 }
 
 /** The session's agent messaging, whether or not it has started. */
@@ -1084,6 +1163,7 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
     case "folder.restored":
       s.claims = [];
       s.intents = {};
+      if (s.wrote) s.wrote = {};
       // A commit to a new branch moves the folder onto it: the header, the review card, the next commit's suggestion and a
       // hand-off all read the branch from here, and kept the old one, so every commit after offered yet another new branch.
       if (b.type === "folder.committed" && b.prUrl && !b.error && s.pr?.url !== b.prUrl) s.pr = { url: b.prUrl, ...(b.base ? { base: b.base } : {}) };
@@ -1269,6 +1349,20 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       }
       // A revised plan is a different plan: what people said of the old one doesn't carry over.
       if (b.toolCalls.some((c) => c.name === "update_plan")) delete s.planReviews[lane];
+      // What it wrote by its own hand, for telling its changes from another's in a folder they share.
+      for (const c of b.toolCalls) {
+        if (c.name !== "edit" && c.name !== "write") continue;
+        let at = "";
+        try {
+          at = String((JSON.parse(c.arguments) as { path?: unknown }).path ?? "");
+        } catch {
+          continue;
+        }
+        if (!at) continue;
+        const mine = ((s.wrote ??= {})[lane] ??= []);
+        if (!mine.includes(at)) mine.push(at);
+        if (mine.length > 400) mine.shift();
+      }
       // The files a plan names are what the agent means to change: kept, so an overlap with another agent shows before it writes.
       {
         const plan = b.toolCalls.filter((c) => c.name === "update_plan" || c.name === "todo" || c.name === "TodoWrite");

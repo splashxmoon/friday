@@ -342,7 +342,7 @@ export class OutsideAgents {
       if (folder && !at.dir) return fail(`There's no folder at ${folder} on this computer. Give its full path.`);
       const mode: EngineMode = arg("mode") === "plan" || arg("mode") === "edits" ? (arg("mode") as EngineMode) : "full";
       const tool = asked && asked !== "auto" ? (asked as EngineTool) : await this.d.pickTool(me.id, prompt);
-      if (!tool) return fail("No coding tool is ready on this computer. Set one up in Friday (Settings, Computer & coding tools), or name one with tool.");
+      if (!tool) return fail("No coding tool is ready on this computer. Set one up in Friday (Settings › Coding tools), or name one with tool.");
       if (await this.limited(`starts:${me.id}`, STARTS_PER_HOUR, 3600)) return fail(`Outside agents have started ${STARTS_PER_HOUR} sessions in the last hour. Wait, or send_message to one already going.`);
       const title = (arg("title") || titleOf(prompt) || "From an outside agent").slice(0, 120);
       const sid = randomBytes(6).toString("base64url");

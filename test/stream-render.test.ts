@@ -68,6 +68,7 @@ test("200 deltas into one lane redraw only that lane's words: not the session, i
   assert.ok(before.main >= 1 && before.seo >= 1, "both lanes are drawn");
 
   let said = "## Plan\n\n";
+  const t0 = performance.now();
   await act(async () => {
     for (let i = 0; i < 199; i++) {
       const piece = i % 10 === 9 ? "\n\n" : `word${i} `;
@@ -76,12 +77,16 @@ test("200 deltas into one lane redraw only that lane's words: not the session, i
       if (i % 4 === 3) await frame();
     }
     await frame();
+    // The last words wait for the lane's next tenth of a second (LiveStream draws at most ten times a second).
+    await new Promise((r) => setTimeout(r, 130));
   });
+  const took = performance.now() - t0;
   assert.equal(counts.session, before.session, "the session view (and so the feed) did not redraw");
   assert.equal(counts.row, before.row, "no feed row redrew");
   assert.equal(counts.seo, before.seo, "the other lane did not redraw");
-  assert.ok(counts.main - before.main >= 40, `the streaming lane redrew a frame at a time (${counts.main - before.main})`);
-  assert.ok(counts.main - before.main <= 60, "once a frame, not once a delta");
+  const redrew = counts.main - before.main;
+  assert.ok(redrew >= 1, "the streaming lane redrew");
+  assert.ok(redrew <= Math.ceil(took / 100) + 2, `at most ten times a second, not once a delta or a frame (${redrew} in ${Math.round(took)} ms)`);
   const text = el.all("lane-main")[0]!.textContent;
   assert.match(text, /^Plan/);
   assert.match(text, /word198/, "every word is on screen");

@@ -3153,6 +3153,15 @@ svg.lucide { stroke-width: 1.5; } /* DIRECTION.md §6: Lucide at 1.5 (2026-10-29
 .rsp-think-body { margin-top: 6px; padding-left: 12px; border-left: 1px solid var(--border-strong); max-height: 180px; overflow-y: auto; white-space: pre-wrap; font-size: 13px; line-height: 20px; color: var(--text-muted); scrollbar-width: none; }
 .rsp-think-body::-webkit-scrollbar { display: none; }
 .rsp-think-body.tail { max-height: 100px; -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 22px); mask-image: linear-gradient(to bottom, transparent 0, #000 22px); }
+/* While it thinks (Response.tsx Thinking): the reply's live line, "Thinking · 4s", with the newest sentence after it on one line,
+   opening to the whole of it; a quiet line in the steps' family, the same height as the line it takes over from. */
+.rsp-think.live { margin-top: 6px; }
+.rsp-think.live .rsp-think-head { display: flex; width: 100%; min-width: 0; color: var(--text-muted); font-weight: 400; text-align: left; }
+.rsp-think.live .rsp-think-head:hover .rsp-think-peek { color: var(--text-muted); }
+.rsp-think.live .rsp-working { flex: none; }
+.rsp-think-peek { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--faint); font-size: 13px; transition: color .12s ease; }
+.rsp-think.live .rsp-think-body.tail { max-height: 160px; }
+.rsp-elapsed { font-variant-numeric: tabular-nums; }
 
 /* The timeline */
 .rsp-tl-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 2px 0; border: 0; background: none; color: var(--text-muted); font: 500 14px/20px var(--font); text-align: left; cursor: pointer; }
@@ -7205,6 +7214,25 @@ button.ao-row { gap: 12px; }
 .danger-text { color: var(--red); }
 .settings-page .settings-danger { padding-top: 16px; }
 .set-computer { padding: 16px 18px; }
+/* Settings › Computer as groups of rows (Arun, 2026-11-04: "design this better"): a row led by a mark (this computer, a GitHub
+   face) with its name and a line under it, and a quiet state word, a dot and a word, on the right. */
+.set-mark-row { display: flex; align-items: center; gap: 12px; padding: 14px 0; }
+.set-mark { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: 1px solid var(--border); border-radius: 8px; background: var(--hover); color: var(--ink-2); }
+.set-mark.round { border-radius: 50%; object-fit: cover; }
+img.set-mark { border-color: transparent; }
+.set-state { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; color: var(--text-muted); white-space: nowrap; }
+.set-state::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+.set-state.on { color: var(--st-done); }
+.set-state.warn { color: var(--st-queued); }
+.set-state:is(.on, .warn)::before { background: currentColor; }
+/* Its other computers' group: the group draws the lines between its parts, so theirs go. */
+.computers-set :is(.computers-list, .computers-join, .computers-add, .computers-link, .computers-remove) { border-top: 0; }
+/* Signed out of GitHub, the sign-in row in the group's type. */
+.set-gh .gh-connect.compact { padding: 14px 0; }
+.set-gh .gh-mark { width: 32px; height: 32px; }
+.set-gh .gh-mark svg { width: 16px; height: 16px; }
+.set-gh .gh-body { gap: 2px; }
+.set-gh .gh-title { font-size: 13px; font-weight: 500; }
 
 /* Joining a workspace from an invite link. */
 .modal.join-ws { width: min(420px, 92vw); padding: 26px 26px 20px; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
@@ -11728,6 +11756,10 @@ html.desktop [data-slot="dialog-content"] { top: calc(50% + 20px); max-height: c
 .feed-toolbar.in-head .lane-tab > :not(.lane-tab-text) { flex: none; }
 .feed-toolbar.in-head .lane-tab-text { overflow: hidden; }
 .feed-toolbar.in-head .lane-tab-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A numbered name keeps its number when the tab narrows ("Claude Co… 3"): the words before it give way. */
+.feed-toolbar .lane-tab .lane-tab-name:has(> .lane-tab-num) { display: flex; min-width: 0; }
+.feed-toolbar .lane-tab .lane-tab-base { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.feed-toolbar .lane-tab .lane-tab-num { flex: none; white-space: pre; }
 /* An agent's tab shows where the keyboard is, as the rest of the header does: inside its edge, so the row's clip never cuts it. */
 .feed-toolbar .lane-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 /* A narrow side panel: Review changes' badges wrap under its title rather than running under "Committed". */
@@ -12786,9 +12818,11 @@ html.dark .dass-panel .sb-dock.sb-tray { box-shadow: none !important; }
 .sb-crew-words.quiet { color: var(--text-muted); }
 
 /* Quote, over words selected in the chat (Activity.tsx QuoteSelection): a small dark pill just above the selection. */
-.quote-pop { position: fixed; z-index: 90; display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px 0 8px; border: 0; border-radius: 8px; background: var(--ink); color: var(--bg); font: 500 12.5px/1 var(--font); box-shadow: 0 4px 14px rgb(0 0 0 / .18); transform: translate(-50%, 6px); cursor: pointer; animation: quote-in .12s var(--ease-out, ease-out); }
+.quote-pop { position: fixed; z-index: 90; display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 4px 0 8px; border: 0; border-radius: 8px; background: var(--ink); color: var(--bg); font: 500 12.5px/1 var(--font); box-shadow: 0 4px 14px rgb(0 0 0 / .18); transform: translate(-50%, 6px); cursor: pointer; animation: quote-in .12s var(--ease-out, ease-out); }
 .quote-pop:hover { background: color-mix(in srgb, var(--ink) 86%, var(--bg)); }
 .quote-pop:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+/* Its key, quiet beside the word, so the next quote can be a keystroke (Activity.tsx QUOTE_KEY). */
+.quote-pop-key { margin-left: 3px; padding: 0 4px; border-radius: 4px; background: color-mix(in srgb, var(--bg) 18%, transparent); color: color-mix(in srgb, var(--bg) 78%, var(--ink)); font: 500 12px/18px var(--font); }
 @keyframes quote-in { from { opacity: 0; transform: translate(-50%, 2px); } }
 @media (prefers-reduced-motion: reduce) { .quote-pop { animation: none; } }
 

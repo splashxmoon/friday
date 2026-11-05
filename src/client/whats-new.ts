@@ -15,13 +15,13 @@ export interface WhatsNewNotes {
 }
 
 export const WHATS_NEW: WhatsNewNotes = {
-  version: "0.2.14",
-  summary: "Friday tidies up after itself when it quits, keeps secrets out of sight, gets a second look from another model, and stays quick in long sessions.",
+  version: "0.2.15",
+  summary: "Bigger teams of agents work together, you see an agent think the moment you send, and quoting is quick.",
   items: [
-    { icon: "stop", title: "Nothing left running", line: "Coding tools, commands and terminals end when Friday quits, even a force-quit." },
-    { icon: "shield", title: "Secrets stay hidden", line: "Tokens and webhook URLs are hidden in the chat, the Git panel and its diffs." },
-    { icon: "eye", title: "A second look", line: "A board task is checked by an agent on another coding tool, so a different model looks." },
-    { icon: "zap", title: "Long sessions stay quick", line: "The chat draws its newest items first, so a 20,000-event session stays smooth." },
+    { icon: "users", title: "Agents, as a team", line: "Three, four or more agents each get a name of their own, and work of their own." },
+    { icon: "bulb", title: "Thinking, live", line: "The moment you send, watch the agent think, then fold it into \"Thought for 7s\"." },
+    { icon: "message", title: "Quote anything", line: "Select part of a reply and press ⌘' (Ctrl+'), or Quote under an answer." },
+    { icon: "settings", title: "Settings, tidied", line: "Computer and Coding tools are pages of their own, and calmer." },
   ],
 };
 

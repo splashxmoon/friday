@@ -1,6 +1,6 @@
 import { engineName, MAIN_LANE, type DiffFile, type EventBody, type SessionEvent } from "./types.js";
 import { laneName } from "./session/core.js";
-import type { SessionState } from "./session/projection.js";
+import { runOf, type SessionState } from "./session/projection.js";
 
 /**
  * The thinking behind passing work between agents, kept apart from the plumbing so it can be read, and tested, on
@@ -65,6 +65,10 @@ export function resolveTarget(state: SessionState, from: string, query: string, 
   if (exact) return { ok: true, to: exact, how: "named" };
   // A guess never lands on a lane this run may not hand work to; naming one exactly gets the reason why not.
   const ids = all.filter(may);
+  // Its own name is never someone else's: a lead that is "Claude Code" naming "Claude Code" meant one of the others, and which
+  // one is for it to say, with who is free to pick from.
+  const named = (list: string[]) => list.map((id) => `"${laneName(state, id)}" (${runOf(state, id).status === "running" ? "working" : "free"})`).join(", ");
+  if (q && laneName(state, from).toLowerCase() === q) return { ok: false, error: `"${query}" is you. Name one of the others exactly: ${named(ids.length ? ids : all) || "there are none"}.` };
 
   if (q) {
     const parts = q.split(/[^a-z0-9]+/).filter((p) => p.length >= 3);
@@ -74,7 +78,7 @@ export function resolveTarget(state: SessionState, from: string, query: string, 
     });
     if (partial.length === 1) return { ok: true, to: partial[0]!, how: "matched" };
     if (partial.length > 1) {
-      return { ok: false, error: `"${query}" could mean ${partial.map((id) => `"${laneName(state, id)}"`).join(" or ")}. Say which.` };
+      return { ok: false, error: `"${query}" could mean any of ${named(partial)}. Say which, by its exact name.` };
     }
   }
 

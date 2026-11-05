@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentView } from "../agents.js";
 import { can, canDriveLane, driverOf, runOf, type SessionState } from "../session/projection.js";
-import { engineName, ENGINE_NAMES, ENGINE_TOOLS, MAIN_LANE, type EngineTool, type LaneControl, type LaneTrigger, type Member } from "../types.js";
+import { engineName, ENGINE_NAMES, ENGINE_TOOLS, MAIN_LANE, SESSION_LANES, type EngineTool, type LaneControl, type LaneTrigger, type Member } from "../types.js";
 import { EngineMark } from "./BrandMarks.js";
 import { Icon, type IconName } from "./icons.js";
 import { agentLook, laneLabel, tintOfEngine } from "./handoff-ui.js";
@@ -14,8 +14,8 @@ import { Dialog } from "./AgentDialogs.js";
 import { raceBase } from "./Race.js";
 import type { Send } from "./useSession.js";
 
-/** The most lanes one session can run, as the server enforces it. */
-const MAX_LANES = 6;
+/** The most lanes one session can run, as the server enforces it: it said 6 while the server takes 12 (SESSION_LANES). */
+const MAX_LANES = SESSION_LANES;
 
 const CONTROL_LABEL: Record<LaneControl["kind"], string> = {
   open: "Anyone who can steer",
@@ -134,7 +134,9 @@ export function Lanes({
         : { label: "Friday Code", icon: "agent", onSelect: () => send({ type: "lane.add", name: "Friday", control: { kind: "open" }, trigger: { kind: "manual" } }) };
       // On Solo your coding tools come first, and Friday Code sits under them, greyed: it is Team's.
       if (!solo) rows.push(friday);
-      for (const t of ENGINE_TOOLS) rows.push({ label: ENGINE_NAMES[t], mark: <EngineMark tool={t} size={14} />, onSelect: () => onConnect(t) });
+      // Full, it says so here rather than in a setup that opens only to be refused.
+      const full = lanes.length >= MAX_LANES;
+      for (const t of ENGINE_TOOLS) rows.push({ label: ENGINE_NAMES[t], mark: <EngineMark tool={t} size={14} />, ...(full ? { hint: `${MAX_LANES} is the most`, disabled: true } : {}), onSelect: () => onConnect(t) });
       // The tools first, a line each; the rest after them, a line each too, with no second lines to read through.
       const more: MenuItem[] = [
         // Two agents on one task, each in a copy of its own; needs a connected git folder.
@@ -166,7 +168,7 @@ export function Lanes({
         rows.push({ label: "Run a saved agent…", icon: "agent", onSelect: () => setOnTool(true) });
       }
       rows.push({ heading: "Bring your own" });
-      for (const t of ENGINE_TOOLS) rows.push({ label: `My ${ENGINE_NAMES[t]}`, mark: <EngineMark tool={t} size={14} />, hint: "your account", onSelect: () => onConnect(t) });
+      for (const t of ENGINE_TOOLS) rows.push({ label: `My ${ENGINE_NAMES[t]}`, mark: <EngineMark tool={t} size={14} />, hint: lanes.length >= MAX_LANES ? `${MAX_LANES} is the most` : "your account", disabled: lanes.length >= MAX_LANES, onSelect: () => onConnect(t) });
     }
     return rows;
   };

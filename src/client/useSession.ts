@@ -80,16 +80,39 @@ const shapeOf = (s: Streams) =>
     .map(([lane, x]) => `${lane}:${x.text ? "t" : ""}${x.reasoning ? "r" : ""}`)
     .join();
 
-/** What one lane's agent is typing right now, redrawn a frame at a time on its own. */
-export function useLaneStream(sid: string, lane: string): Streams[string] | undefined {
+/**
+ * What one lane's agent is typing right now, redrawn on its own: a frame at a time, or at most once every `every` ms. Its words
+ * and thinking arrive every frame, and a long answer drawn as Markdown sixty times a second kept the feed busy for nothing a
+ * reader could follow (Arun, 2026-11-04: thinking shown as it streams, the feed smooth). The stream closing is drawn at once,
+ * in the same frame as the message that closes it, so the two are never on screen together.
+ */
+export function useLaneStream(sid: string, lane: string, every = 0): Streams[string] | undefined {
   const subscribe = useCallback(
     (cb: () => void) => {
-      const subs = typingOf(sid).subs;
-      const set = subs.get(lane) ?? new Set();
-      subs.set(lane, set.add(cb));
-      return () => void set.delete(cb);
+      const t = typingOf(sid);
+      let last = 0;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const fire = () => {
+        timer = undefined;
+        last = performance.now();
+        cb();
+      };
+      const held = !every
+        ? cb
+        : () => {
+            if (!t.streams[lane]) return (clearTimeout(timer), fire());
+            const wait = every - (performance.now() - last);
+            if (wait <= 0) return (clearTimeout(timer), fire());
+            timer ??= setTimeout(fire, wait);
+          };
+      const set = t.subs.get(lane) ?? new Set();
+      t.subs.set(lane, set.add(held));
+      return () => {
+        clearTimeout(timer);
+        set.delete(held);
+      };
     },
-    [sid, lane],
+    [sid, lane, every],
   );
   return useSyncExternalStore(subscribe, () => typingOf(sid).streams[lane]);
 }

@@ -1,7 +1,7 @@
 import { refusal } from "../own-plan.js";
 import { randomBytes } from "node:crypto";
 import { engineName, ENGINE_TOOLS, SESSION_LANES, hostOnlyYes, isEngineEffort, effortLevelsOf, liveMachine, MAIN_LANE, type EngineEffort, type EngineTool, type ActorRef, type AgentSnapshot, type Attachment, type ControlMode, type EventBody, type Lane, type LaneControl, type LaneTrigger, type LinkRole, type PolicyPatch, type Role, type Handoff, type RepoCall, type SessionOptionsPatch, type Thinking, EFFORT_LEVELS } from "../types.js";
-import { canDriveLane, driverOf, laneHeld, laneOf, meshOf, mergeOptions, pendingFor, roleOf, runOf, signoffStatus, type SessionState, effortResets } from "./projection.js";
+import { canDriveLane, driverOf, freshLaneName, laneHeld, laneOf, meshOf, mergeOptions, pendingFor, roleOf, runOf, signoffStatus, uniqueLaneName, type SessionState, effortResets } from "./projection.js";
 import type { AppendGuard, AppendResult, SessionStore } from "./store.js";
 type PipelineDef = never;
 import { prBodyFor } from "../pr-body.js";
@@ -1193,8 +1193,11 @@ export class SessionCore {
         // so it takes nothing from anybody else's lane.
         const mayOwn = cmd.own === true && allowed("control");
         if (roleOf(state, m.id) !== "owner" && !mayOwn) return fail("Only an owner can add an agent.");
-        const name = clean(cmd.name).slice(0, 40);
-        if (!name) return fail("Give the agent a name.");
+        const asked = clean(cmd.name).slice(0, 40);
+        if (!asked) return fail("Give the agent a name.");
+        // A second Claude Code is "Claude Code 2" from the start, and keeps it: numbered only where it is shown, it became "Claude
+        // Code 2" when one before it left, and what the board and the agents had said of it by name went to another.
+        const name = freshLaneName(state, asked).slice(0, 44);
         if (state.lanes.length >= SESSION_LANES) return fail(`A session runs up to ${SESSION_LANES} agents beside the main one, and this one has them all.`);
         // The plan limits Friday's own agents, which cost us something, whoever adds them. Someone's own coding tools run on their machine, any number.
         if (!cmd.engine) {
@@ -1374,11 +1377,9 @@ function cleanPolicy(p: PolicyPatch): PolicyPatch | null {
 
 /** A lane's display name, the way the room sees it. */
 export function laneName(state: SessionState, laneId: string): string {
-  // "Main", as the lane tabs call it: a second lane is often also Friday, and "Friday → Friday" says nothing.
-  if (laneId === MAIN_LANE) return state.mainName?.trim() || (state.options.agent?.name ?? (state.engines[MAIN_LANE]?.tool ? engineName(state.engines[MAIN_LANE]!.tool!) : "Main"));
-  const l = state.lanes.find((x) => x.id === laneId);
-  const e = state.engines[laneId];
-  return l?.name ?? (e?.tool ? engineName(e.tool) : laneId);
+  // "Main", as the lane tabs call it: a second lane is often also Friday, and "Friday → Friday" says nothing. Two of a kind are
+  // told apart as the tabs tell them ("Claude Code 2"), so naming one reaches that one (uniqueLaneName).
+  return uniqueLaneName(state, laneId);
 }
 
 /** Only a real other lane, a stated reason, and a handful of short carried lines. */

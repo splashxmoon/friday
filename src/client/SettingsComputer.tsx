@@ -1,4 +1,4 @@
-import { Facts } from "@/components/dass";
+import { Facts, SettingsGroup } from "@/components/dass";
 import { GitHubConnect } from "./GitHubConnect.js";
 import { MachineBadge } from "./MachineBadge.js";
 import { pickedMachine, useMachine } from "./local.js";
@@ -7,47 +7,52 @@ import { ComputersSettings } from "./Computers.js";
 import { isLocal } from "./edition.js";
 import type { Identity } from "./storage.js";
 
-// ── This computer › Computer & coding tools ──────────────────────────
+// ── This computer › Computer, and Coding tools ──────────────────────────
+// One page until Arun asked for two (2026-11-04): the computer (where agents run, keeping it awake, your other computers, its
+// GitHub login), and the coding tools on it (each one's sign-in, accounts and install, Other ACP agent).
 
 /**
- * The computer Friday's coding agents run on, and the coding tools on it: the same panel the new-session page shows, here
- * so somebody can sign in to Codex or change account without starting a session to find it.
+ * The coding tools on the computer Friday's agents run on: the same list the new-session page shows, here so somebody can sign
+ * in to Codex or change account without starting a session to find it.
  */
-export function ComputerSection({ identity }: { identity: Identity }) {
+export function CodingToolsSection({ identity }: { identity: Identity }) {
   const { state: machine, refresh } = useMachine(identity);
-  const desktop = typeof window !== "undefined" && !!window.fridayDesktop;
   return (
     <section className="flex flex-col gap-5">
       <div className="set-card set-computer">
-        <MachineBadge identity={identity} machine={machine} refresh={refresh} inline />
+        <MachineBadge identity={identity} machine={machine} refresh={refresh} inline part="tools" />
       </div>
+      <Facts className="px-0.5" items={[{ term: "What runs here", detail: "Your own coding tools, under your own logins. Friday never sees their keys or meters them." }]} />
+    </section>
+  );
+}
+
+/**
+ * The computer Friday's coding agents run on: this one (whether it is connected, keeping it awake), your other computers, and
+ * GitHub, as titled groups of rows like every other Settings page (Arun, 2026-11-04: "design this better": a lone status strip,
+ * three cards in three styles and a fact line on its own).
+ */
+export function ComputerSection({ identity }: { identity: Identity }) {
+  const { state: machine, refresh } = useMachine(identity);
+  return (
+    <section className="flex flex-col gap-5">
+      {/* Its name, system and how it stays connected, its state or the one thing to do; then keeping it awake (desktop app only). */}
+      <SettingsGroup title="This computer">
+        <MachineBadge identity={identity} machine={machine} refresh={refresh} inline part="computer" />
+        <KeepAwakeRow row />
+      </SettingsGroup>
       {/* Where new sessions start: this computer, or a machine of yours that stays on, so agents keep running when this one shuts. */}
-      <KeepAwakeRow />
       {/* No phone pairing on this computer's Friday: there is no open-source phone app yet (Arun, 2026-11-04: "WE DONT HAVE AN APP FOR
           OPEN SOURCE YET SO GET RID OF IT"). PhoneSettings.tsx stays for when there is. */}
       {/* Your other computers, linked to this one's Friday, and this one used from another's (Computers.tsx). */}
       {isLocal() && <ComputersSettings />}
       {/* GitHub belongs to the computer too: the login its clones, pushes and pull requests use. */}
       {(machine.mode === "local" || machine.mode === "linked") && (
-        <div className="set-card set-github">
-          <GitHubConnect identity={identity} compact />
-        </div>
+        <SettingsGroup title="GitHub" className="set-gh">
+          <GitHubConnect identity={identity} compact row />
+        </SettingsGroup>
       )}
-      <Facts
-        className="px-0.5"
-        items={[
-          { term: "What runs here", detail: "Your own coding tools, under your own logins. Friday never sees their keys or meters them." },
-          ...(isLocal() ? [] : [{ term: "Friday's agent", detail: "Works in folders this computer lends it, with the files, terminal and preview shown in the session." }]),
-          {
-            term: desktop ? "This app" : "In a browser",
-            detail: desktop
-              ? "Connects this computer by itself when it starts."
-              : machine.mode === "local"
-                ? "Reaches the runner on this computer directly. The desktop app does the same and keeps it connected for you."
-                : "Connect this computer with one command in a terminal (Connect this computer, above), or open Friday in the desktop app, which connects it by itself.",
-          },
-        ]}
-      />
+      {!isLocal() && <Facts className="px-0.5" items={[{ term: "Friday's agent", detail: "Works in folders this computer lends it, with the files, terminal and preview shown in the session." }]} />}
     </section>
   );
 }

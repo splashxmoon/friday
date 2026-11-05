@@ -6,11 +6,13 @@ import {
   ChevronDown,
   Copy,
   RotateCcw,
+  Quote,
   ThumbsDown,
   ThumbsUp,
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
+  type MouseEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -39,6 +41,8 @@ export interface StreamingResponseProps {
   /** Overrides the built-in clipboard action. */
   onCopy?: () => void | Promise<void>;
   onRetry?: () => void;
+  /** A Quote action beside Copy: the response's words into the message box as a quote. Given the button pressed. */
+  onQuote?: (from: HTMLElement) => void;
   /** Optional sources shown as a compact footer disclosure after streaming. */
   sources?: CitationItem[];
   sourcesOpen?: boolean;
@@ -69,7 +73,7 @@ function ResponseAction({
 }: {
   label: string;
   active?: boolean;
-  onClick: () => void;
+  onClick: (e: MouseEvent<HTMLButtonElement>) => void;
   children: ReactNode;
 }) {
   const reduce = useReducedMotion() ?? false;
@@ -99,6 +103,7 @@ export function StreamingResponse({
   copyText,
   onCopy,
   onRetry,
+  onQuote,
   sources = [],
   sourcesOpen,
   defaultSourcesOpen = false,
@@ -201,6 +206,11 @@ export function StreamingResponse({
                   ) : (
                     <Copy className="size-3.5" />
                   )}
+                </ResponseAction>
+              ) : null}
+              {onQuote ? (
+                <ResponseAction label="Quote in your message" onClick={(e) => onQuote(e.currentTarget)}>
+                  <Quote className="size-3.5" />
                 </ResponseAction>
               ) : null}
               {onRetry ? (

@@ -173,7 +173,7 @@ export function Code({
   defaults?: { model?: string };
   /** A brief carried over from the Skills page, Code Review or a prompt link, dropped into the box. `shepherd`: Friday sees its pull
    *  request through once it starts. `repo` and `tool` come with a prompt link (prompt-link.ts). */
-  preset?: { brief?: string; shepherd?: boolean; repo?: string; tool?: EngineTool } | null;
+  preset?: { brief?: string; shepherd?: boolean; repo?: string; tool?: EngineTool; /** A folder on this computer to start in. */ folder?: string } | null;
   onPresetUsed?: () => void;
   /** An agent picked on the Agents page runs this session. */
   initialAgentId?: string;
@@ -438,6 +438,18 @@ export function Code({
   // A pull request, an issue or a prompt link names its repo: a copy already on this computer is picked for it, so nobody has to
   // go and find it. When there is none, the link's repo is offered to clone (below the box).
   const linkRepo = preset?.repo ?? "";
+  // A folder on this computer the preset names (a session started in a folder, as Arun's own build does): picked once this
+  // computer can say what it is. Kept from the first draw, as the preset itself is cleared once read.
+  const presetFolder = useRef(preset?.folder);
+  useEffect(() => {
+    const p = presetFolder.current;
+    if (!p || !hasMachine || !isLocal()) return;
+    presetFolder.current = undefined;
+    void hostApi<{ folder: FolderInfo }>(identity, `/api/runner/describe?path=${encodeURIComponent(p)}`).then(
+      (r) => r.folder && setPicked({ folder: r.folder }),
+      () => {},
+    );
+  }, [hasMachine]); // eslint-disable-line react-hooks/exhaustive-deps
   const wantRepo = pr?.repo ?? issue?.repo ?? linkRepo;
   const [repoMissing, setRepoMissing] = useState("");
   useEffect(() => {

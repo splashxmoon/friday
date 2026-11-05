@@ -1,11 +1,25 @@
 import { useEffect, useState } from "react";
-import { aboutTime, estimate, taskOf } from "../forecast.js";
+import { aboutTime, estimate, taskOf, type Estimate } from "../forecast.js";
 import type { SessionState } from "../session/projection.js";
 import { MAIN_LANE, type SessionEvent } from "../types.js";
 import { forecastOf, idOf, readHistory, windowsOf } from "./limitHistory.js";
 import { repoOfEngine, useRouting } from "./RouteWhy.js";
 import type { Identity } from "./storage.js";
 import { useToolLimits } from "./toolLimits.js";
+
+/**
+ * How long a turn like this one takes, said plainly, or nothing: "~4 min left" while it is ahead of the runs here like it, and
+ * "usually ~2 min" once it is past that, so it never counts below zero. Only from real runs: a tier's typical time with nothing
+ * measured here, or a handful of runs leaning on it, was a guess ("~9 min left" on a first turn that took 20 seconds), and "longer than runs like it", said when it
+ * ran past one, read as a phrase cut off (Arun, 2026-11-04: "it just looks stuck").
+ */
+export function forecastWords(e: Estimate, startedAt: number, now: number): string {
+  // A few runs are mostly the level above them (PRIOR in forecast.ts): a first turn's 13 seconds still read "~8 min left", and
+  // five of them "~3 min". From ten, what was measured here outweighs it.
+  if (e.basis === "typical" || e.runs < 10) return "";
+  const left = startedAt + e.ms - now;
+  return left >= 90_000 ? `${aboutTime(left)} left` : `usually ${aboutTime(e.ms)}`;
+}
 
 /**
  * The small line on a running turn (Arun, 2026-10-31): about how long is left, from the runs here like it (forecast.ts), and,
@@ -33,10 +47,8 @@ export function useRunForecast(identity: Identity, state: SessionState, events: 
   const bits: string[] = [];
   if (text) {
     const repo = repoOfEngine(engine);
-    const e = estimate(routing.records, { tool: engine.tool, ...taskOf(text), ...(repo ? { repo } : {}) }, now);
-    const left = startedAt + e.ms - now;
-    // Past its forecast: said once, plainly, rather than a countdown below zero.
-    bits.push(left >= 90_000 ? `${aboutTime(left)} left` : "longer than runs like it");
+    const words = forecastWords(estimate(routing.records, { tool: engine.tool, ...taskOf(text), ...(repo ? { repo } : {}) }, now), startedAt, now);
+    if (words) bits.push(words);
   }
   if (engine.hostId === me) {
     const history = readHistory();

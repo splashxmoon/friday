@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { engineName, ENGINE_TOOLS, MAIN_LANE, TOOL_INFO, type EngineTool } from "../types.js";
-import { runOf, type SessionState } from "../session/projection.js";
+import { runOf, uniqueLaneName, type SessionState } from "../session/projection.js";
 import { EngineMark } from "./AgentSwitch.js";
 import { AgentMark, Icon, type IconName } from "./icons.js";
 import { teammateMark } from "./Teammates.js";
@@ -32,14 +32,6 @@ const FRIDAY_TINT = "var(--ink)";
 export const tintOfColor = (color: string): string => AGENT_TINT[color] ?? AGENT_TINT.indigo!;
 export const tintOfEngine = (tool: EngineTool): string => TOOL_INFO[tool].tint;
 
-/** The lane's name as the session shows it: the same rule the server names a handoff's two ends by. */
-function baseLabel(state: SessionState, id: string): string {
-  if (id === MAIN_LANE) return state.mainName ?? state.options.agent?.name ?? (state.engines[MAIN_LANE]?.tool ? engineName(state.engines[MAIN_LANE]!.tool!) : "Main");
-  const l = state.lanes.find((x) => x.id === id);
-  const e = state.engines[id];
-  return l?.name ?? (e?.tool ? engineName(e.tool) : id);
-}
-
 /** An agent's name; two of the same tool are "Claude Code" and "Claude Code 2", so a tab, a speaker line or a handoff can tell them apart. */
 /**
  * What a hand-off's card shows as its task: the task itself, not the brief Friday wrapped it in for the agent taking it ("Carry
@@ -53,10 +45,8 @@ export function handoffTaskText(text: string): string {
 }
 
 export function laneLabel(state: SessionState, id: string): string {
-  const base = baseLabel(state, id);
-  const same = [MAIN_LANE, ...state.lanes.map((l) => l.id)].filter((x) => baseLabel(state, x) === base);
-  const at = same.indexOf(id);
-  return at > 0 ? `${base} ${at + 1}` : base;
+  // The server's own rule (uniqueLaneName), so the name on a tab is the one the agents are told and reach it by.
+  return uniqueLaneName(state, id);
 }
 
 /** A handoff records its two ends by name; this finds the lane a name belongs to, if it still exists. */

@@ -24,50 +24,80 @@ import { plainLine } from "./team-room.js";
 
 // ── working ────────────────────────────────────────────────────────────
 
-/** The answer's live line in its header ("Working", "Thinking", "Waiting on you"): a nine-cell matrix and a label that shines while it waits. */
-export function Working({ label }: { label: string }) {
+/**
+ * The answer's live line ("Thinking · 3s", "Working"): a nine-cell matrix and a label that shines while it waits, with how long
+ * it has been at it when `since` is given, so a turn that hasn't said anything yet still visibly moves (Arun, 2026-11-04: "right
+ * now it just looks stuck").
+ */
+export function Working({ label, since }: { label: string; since?: number }) {
   return (
     <span className="rsp-working" role="status">
       <Orb variant="S3" size={14} label={label} />
-      <Shine>{label}</Shine>
+      <Shine>
+        {label}
+        {since !== undefined && <Elapsed since={since} />}
+      </Shine>
     </span>
   );
 }
 
+/**
+ * " · 4s" since `since`, ticking on the second it turns over: only this text redraws, and two of them timing the same start
+ * (the reply drawn as it is sent, then the server's) read the same at the same moment, so one replacing the other doesn't jump.
+ * Nothing for the first second.
+ */
+export function Elapsed({ since }: { since: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout>;
+    const tick = () => {
+      const at = Date.now();
+      setNow(at);
+      t = setTimeout(tick, 1000 - ((at - since) % 1000) + 5);
+    };
+    t = setTimeout(tick, 1000 - ((Date.now() - since) % 1000) + 5);
+    return () => clearTimeout(t);
+  }, [since]);
+  return now - since < 1000 ? null : <span className="rsp-elapsed"> · {span(now - since)}</span>;
+}
 
 // ── thinking ───────────────────────────────────────────────────────────
 
+/** The newest sentence of what it is thinking, as far as it has been written, for the one line a folded thought shows. */
+export function latestThought(text: string, max = 140): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  if (!flat) return "";
+  // The sentence still being written, unless it has only a word or two yet: then the one before it as well, so the line isn't
+  // a lone "The" for a moment between sentences.
+  const parts = flat.split(/(?<=[.!?:])\s+(?=[A-Z0-9`"'(])/);
+  let line = parts.at(-1)!;
+  if (line.length < 24 && parts.length > 1) line = `${parts.at(-2)} ${line}`;
+  return line.length > max ? `…${line.slice(line.length - max).replace(/^\S*\s/, "")}` : line;
+}
+
 /**
- * What the model thought, folded into one line once it is done.
- *
- * While it streams, the newest sentences show in a short window that fades at
- * the top, so the reader sees it moving without the page jumping. Once the
- * answer starts it folds to "Thought for 4s", which opens back up on a click.
+ * What the model is thinking, while it thinks: the live line ("Thinking · 4s", timed when no other line under the reply is
+ * timing it) with the newest sentence after it, which opens to the whole of it as it streams, the newest lines in a short
+ * window that fades at the top. Once it is done thinking the reply shows it as "Thought for 12s", folded (StepGroup).
  */
-export function Thinking({ text, live, seconds }: { text: string; live: boolean; seconds?: number }) {
-  const [open, setOpen] = useState(false);
+export function Thinking({ text, since, open, onToggle }: { text: string; since?: number; open: boolean; onToggle: () => void }) {
   const view = useRef<HTMLDivElement>(null);
+  const bodyId = useId();
   useEffect(() => {
-    if (live && view.current) view.current.scrollTop = view.current.scrollHeight;
-  }, [text, live]);
-  const expanded = live || open;
+    if (open && view.current) view.current.scrollTop = view.current.scrollHeight;
+  }, [text, open]);
+  const peek = latestThought(text);
   return (
-    <div className={`rsp-think ${live ? "live" : ""}`}>
-      <button type="button" className="rsp-think-head" aria-expanded={expanded} onClick={live ? undefined : () => setOpen(!open)} disabled={live}>
-        {live ? (
-          <Shine>Thinking…</Shine>
-        ) : (
-          <span className="rsp-think-label">
-            <span className="rsp-think-verb">Thought</span>
-            {seconds && seconds > 0 ? ` for ${seconds < 60 ? `${seconds}s` : `${Math.round(seconds / 60)}m`}` : ""}
-          </span>
-        )}
-        {!live && <span className="rsp-caret" aria-hidden />}
+    <div className={`rsp-think live${open ? " open" : ""}`}>
+      <button type="button" className="rsp-think-head" aria-expanded={open} aria-controls={bodyId} data-tip={open ? "Hide the thinking" : "Show the thinking"} onClick={onToggle}>
+        <Working label="Thinking" {...(since !== undefined ? { since } : {})} />
+        {!open && peek && <span className="rsp-think-peek">{peek}</span>}
+        <span className={`rsp-caret side ${open ? "open" : ""}`} aria-hidden />
       </button>
-      <div className={`rsp-fold ${expanded ? "open" : ""}`}>
+      <div id={bodyId} className={`rsp-fold ${open ? "open" : ""}`} inert={!open}>
         <div className="rsp-fold-inner">
-          <div ref={view} className={`rsp-think-body ${live ? "tail" : ""}`}>
-            {text}
+          <div ref={view} className="rsp-think-body tail">
+            {text.trim()}
           </div>
         </div>
       </div>
@@ -396,7 +426,7 @@ export function RunLog({
  * their places above (StepGroup). "N files changed" opens the changes; the files aren't listed here as well, where a run
  * of sixty filled the screen with chips that said less than the Diff panel does (Arun, 2026-10-18).
  */
-export function RunMeta({ files, live, onFile, startedAt, endedAt, tokens, compacted, waiting = false, forecast, tokensApart = false, quietWait = false }: { /** Waiting on a card that says how long itself (a permission card): no "Waiting for an answer" line too (audit CODE-21 A). */ quietWait?: boolean; /** The tokens are said on the reply's own icon row (audit CODE-11 B): not here as well. */ tokensApart?: boolean; files: FileChange[]; live: boolean; onFile?: () => void; startedAt?: number; endedAt?: number; tokens?: number; /** The conversation's size before Friday had it compacted for this run. */ compacted?: number; /** Its turn waits on a person (a question, a permission): not working. */ waiting?: boolean; /** While it works: about how long is left, and when its window fills at this pace (runForecast.ts). */ forecast?: string }) {
+export function RunMeta({ files, live, onFile, startedAt, endedAt, tokens, compacted, waiting = false, forecast, tokensApart = false, quietWait = false, doing = "Working" }: { /** What it is at while it works: "Writing" once its answer streams. */ doing?: string; /** Waiting on a card that says how long itself (a permission card): no "Waiting for an answer" line too (audit CODE-21 A). */ quietWait?: boolean; /** The tokens are said on the reply's own icon row (audit CODE-11 B): not here as well. */ tokensApart?: boolean; files: FileChange[]; live: boolean; onFile?: () => void; startedAt?: number; endedAt?: number; tokens?: number; /** The conversation's size before Friday had it compacted for this run. */ compacted?: number; /** Its turn waits on a person (a question, a permission): not working. */ waiting?: boolean; /** While it works: about how long is left, and when its window fills at this pace (runForecast.ts). */ forecast?: string }) {
   // The clock only runs while there is something to time.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -410,7 +440,7 @@ export function RunMeta({ files, live, onFile, startedAt, endedAt, tokens, compa
   const elapsed = startedAt && (live || took >= 1000) ? span(took) : "";
   // Waiting on a person says so: "Working · 32m" under a turn stopped on a question contradicted the bar's "Waiting for you"
   // (2026-10-27 audit).
-  const time = live && waiting && quietWait ? "" : live ? `${waiting ? "Waiting for an answer" : "Working"}${elapsed ? ` · ${elapsed}` : ""}${forecast && !waiting ? ` · ${forecast}` : ""}` : elapsed ? `Worked for ${elapsed}` : "";
+  const time = live && waiting && quietWait ? "" : live ? `${waiting ? "Waiting for an answer" : doing}${elapsed ? ` · ${elapsed}` : ""}${forecast && !waiting ? ` · ${forecast}` : ""}` : elapsed ? `Worked for ${elapsed}` : "";
   const changed = files.length ? `${files.length} file${files.length === 1 ? "" : "s"} changed` : "";
   const used = tokens && !tokensApart ? `${shortTokens(tokens)} tokens` : "";
   const trimmed = compacted ? `conversation compacted from ${shortTokens(compacted)}` : "";

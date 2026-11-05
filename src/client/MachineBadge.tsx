@@ -19,6 +19,7 @@ import { Icon } from "./icons.js";
 import { NoMachine, hostApi, machineRefusal, type LocalTool, type MachineState } from "./local.js";
 import type { Identity } from "./storage.js";
 import { MenuButton, MoreTools, useDismiss } from "./ui.js";
+import { Button } from "@/components/ui/button";
 
 /**
  * This computer, and whether Friday can work on it.
@@ -37,7 +38,7 @@ type Step = "idle" | "linking" | "signing";
 /** What is happening to one tool's sign-in. */
 type Acting = "out" | "switch" | "in";
 
-export function MachineBadge({ identity, machine, refresh, inline = false, welcome = false }: { identity: Identity; machine: MachineState; refresh: () => void; /** Always shown, compact, with no pill to open it: the new-session page's corner. */ inline?: boolean; /** In the welcome (Setup.tsx): the well-known tools always listed, ready ones first, and no line about where it runs. */ welcome?: boolean }) {
+export function MachineBadge({ identity, machine, refresh, inline = false, welcome = false, part }: { identity: Identity; machine: MachineState; refresh: () => void; /** Always shown, compact, with no pill to open it: the new-session page's corner. */ inline?: boolean; /** In the welcome (Setup.tsx): the well-known tools always listed, ready ones first, and no line about where it runs. */ welcome?: boolean; /** Inline, one half only: the computer (Settings › Computer), or the tools on it (Settings › Coding tools). */ part?: "computer" | "tools" }) {
   const [open, setOpen] = useState(false);
   // What stays here, said for the kind of work in front of you (w1 #4: "The code, the terminal and your coding tool" in Work).
   const topLine = "The code, the terminal and your coding tool stay here. Nothing is uploaded.";
@@ -251,10 +252,72 @@ export function MachineBadge({ identity, machine, refresh, inline = false, welco
         ? { tone: "warn", text: `Sign in to ${needsSignIn.name}` }
         : { tone: "warn", text: "No coding tools found" };
 
+  // Settings › Computer: this computer as the first row of its group, named, with its system and how it stays connected under
+  // the name, and its state, or the one thing to do, on the right (Arun, 2026-11-04: "design this better": a lone status strip
+  // over three cards in three styles, and a fact line on its own at the foot).
+  if (inline && part === "computer") {
+    const app = typeof window !== "undefined" && !!window.fridayDesktop;
+    const os = machine.machine?.platform ? { mac: "macOS", windows: "Windows", linux: "Linux" }[osOf(machine.machine.platform)] : "";
+    const linking = step === "linking" || connecting;
+    const how =
+      machine.mode === "checking"
+        ? ""
+        : here
+          ? app
+            ? "Connects by itself when Friday starts"
+            : machine.mode === "local"
+              ? "This browser reaches it directly. The desktop app keeps it connected for you."
+              : "Linked to your Friday"
+          : linking
+            ? "There's nothing to do. It's ready in a moment."
+            : isLocal()
+              ? "Friday's runner here isn't answering. It comes back by itself; Retry looks now."
+              : desktop
+                ? "Until it is, Friday can't open its folders or run anything here."
+                : "Connect it below, or open the desktop app, which connects it by itself.";
+    return (
+      <div className="set-mark-row" data-set-row="" role="group" aria-label="This computer">
+        <span className="set-mark" aria-hidden>
+          <Icon name="server" size={16} />
+        </span>
+        <div className="min-w-0 flex-1">
+          {/* Its name once it answers; until then, what is happening, said once: not "This computer" again under the group's title. */}
+          <div className="truncate text-[13px] font-medium text-[var(--ink)]" title={here && machine.home ? machine.home : undefined}>
+            {here ? machine.machine?.name || "This computer" : machine.mode === "checking" ? "Looking for this computer…" : linking ? "Connecting…" : isLocal() ? "Reconnecting…" : "Not connected"}
+          </div>
+          {how && <div className="mt-0.5 text-[13px] leading-snug text-[var(--text-muted)]">{[here ? os : "", how].filter(Boolean).join(" · ")}</div>}
+          {autoError && (connecting || auto === "failed") && <p className="mt-1 mb-0 text-[13px] text-[var(--text-muted)]">Last try didn’t work: {autoError}</p>}
+          {err && (
+            <p className="mt-1 mb-0 text-[13px] text-[var(--red)]" role="alert">
+              {err}
+            </p>
+          )}
+        </div>
+        <div className="ml-3 flex shrink-0 items-center gap-3">
+          {here ? (
+            <span className="set-state on">Connected</span>
+          ) : machine.mode === "checking" || linking ? (
+            <span className="spinner" aria-hidden />
+          ) : desktop ? (
+            <Button type="button" variant="outline" size="sm" onClick={() => void connect()}>
+              <Icon name="plug" size={13} />
+              {auto === "failed" ? "Try again" : "Connect this computer"}
+            </Button>
+          ) : (
+            <Button type="button" variant="outline" size="sm" title="Looks again for a computer running the Friday desktop app" onClick={refresh}>
+              <Icon name="refresh" size={13} /> Retry
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   if (inline)
     return (
-      <section className={`mb-inline ${look.tone}${welcome ? " mb-welcome" : ""}`} aria-label="Coding tools on this computer">
-        {!(welcome && here) && <div className="mb-where">
+      <section className={`mb-inline ${look.tone}${welcome ? " mb-welcome" : ""}`} aria-label={part === "computer" ? "This computer" : "Coding tools on this computer"}>
+        {/* Settings › Coding tools says where only while there is no computer to list the tools of: Computer says it once. */}
+        {!(welcome && here) && !(part === "tools" && here) && <div className="mb-where">
           {machine.mode === "checking" || step !== "idle" || connecting ? <span className="spinner" /> : <span className={`mb-dot ${look.tone}`} aria-hidden />}
           <span className="mb-where-text" title={here && machine.home ? machine.home : undefined}>
             {machine.mode === "checking" ? "Looking for your computer…" : here ? "Connected" : look.text}
@@ -266,7 +329,7 @@ export function MachineBadge({ identity, machine, refresh, inline = false, welco
             </span>
           )}
         </div>}
-        {here ? (
+        {here && part === "computer" ? null : here ? (
           <ul className="mb-tools">
             {[...shown.here, ...(moreTools ? shown.away : [])].map((tool) => (
               <ToolRow

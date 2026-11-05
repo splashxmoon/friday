@@ -184,7 +184,8 @@ export async function startLocal(o: { home?: string; port?: number; /** A link f
     // Project memory (brain.ts): each finished run read by the coding tool that did it, on this computer, for what it taught.
     decisionLog: true,
     dataDir: path.join(home, "uploads"),
-    local: { redis: kv.redis, sub: kv.sub, user: { id: "local", name }, phone, outside, join },
+    local: { redis: kv.redis, sub: kv.sub, user: { id: "local", name }, phone, outside, join,
+    },
   });
   // Turned on before, so on again: the phone stays connected through a restart.
   void phone.resume();

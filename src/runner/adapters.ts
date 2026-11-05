@@ -490,13 +490,18 @@ export const claude: Adapter = {
   login: ["auth", "login"],
   logout: ["auth", "logout"],
   status: { args: ["auth", "status", "--json"] },
-  optional: ["--chrome"],
+  optional: ["--chrome", "--thinking-display"],
   args: (t) => [
     "-p",
     "--output-format",
     "stream-json",
     "--verbose",
     "--include-partial-messages",
+    // Its thinking as words (summarized), streamed as thinking_delta: left to its default, Claude Code asks for the thinking
+    // withheld unless the person's own settings turn summaries on, and a turn showed "Thinking" over nothing until its first
+    // step (Arun, 2026-11-04: "show the thinking process because right now it just looks stuck"). A version from before the
+    // flag refuses it, and its turns run without from then on (Adapter.optional).
+    ...(offered(t, "--thinking-display") ? ["--thinking-display", "summarized"] : []),
     // No --bare: that skips the user's own login, which is the whole point.
     ...(t.model ? ["--model", t.model] : []),
     // A flag of the process, so the kept one (keyed on its arguments) starts again for the next turn when it changes.

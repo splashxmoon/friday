@@ -37,7 +37,9 @@ import { isWorkSid } from "./WorkMode.js";
  * "what has this thing done to my machine?", and answering it needs a
  * sentence, not four panels to cross-reference.
  */
-export type Tab = "agents" | "overview" | "tree" | "files" | "git" | "terminal" | "preview" | "usage" | "rules";
+export type Tab =
+  | "agents" | "overview" | "tree" | "files" | "git" | "terminal" | "preview" | "usage" | "rules"
+  ;
 
 export const TAB_LABEL: Record<Tab, string> = {
   agents: "Agents", overview: "Tasks", tree: "Tree", files: "Changes", git: "Git", terminal: "Terminal", preview: "Preview", usage: "Usage", rules: "Rules",
@@ -357,7 +359,7 @@ export function Workbench({
       localStorage.setItem(tabsKey, JSON.stringify(trimmed));
     } catch {}
   };
-  const tabs = openTabs.includes(tab) ? openTabs : [...openTabs, tab];
+  let tabs = openTabs.includes(tab) ? openTabs : [...openTabs, tab];
   useEffect(() => {
     if (!openTabs.includes(tab)) keepTabs([...openTabs, tab]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -686,6 +688,7 @@ export function Workbench({
       ref={aside}
       hidden={!open}
       className={`doc-panel bench-panel ${headless ? "headless" : ""} ${over ? "over" : ""} ${full || cover ? "full" : ""}`}
+      data-slot="session.panel"
       style={full || cover ? undefined : { width: shown }}
       aria-label="Workbench"
       // Escape hands the row back to the chat, but only once nothing nearer wants it: a terminal's own program, a field with
@@ -729,9 +732,12 @@ export function Workbench({
               Panels
             </span>
           ) : onPicker ? (
-            <div className="bench-tabrow" role="tablist" aria-label="Open panels" ref={tabRow}>
+            <div className="bench-tabrow" role="tablist" aria-label="Open panels" ref={tabRow} data-slot="panel.tabs">
               {tabs.map((t) => (
-                <span key={t} className={`bench-tab${t === tab ? " on" : ""}`}>
+                <span
+                  key={t}
+                  className={`bench-tab${t === tab ? " on" : ""}`}
+                >
                   {t === tab ? (
                     // The name of the one showing is a menu of every panel: the one picked takes its place (Arun, 2026-10-24:
                     // "whichever one the user selects ... will replace the panel screen they are on").
@@ -755,7 +761,8 @@ export function Workbench({
                       <span className="bench-tab-name">{TAB_LABEL[t]}</span>
                     </button>
                   )}
-                  {tabs.length > 1 && (
+                  {tabs.length > 1 &&
+                    (
                     <button type="button" className="bench-tab-x" aria-label={`Close ${TAB_LABEL[t]}`} title={`Close ${TAB_LABEL[t]}`} onClick={() => closeTab(t)}>
                       <Icon name="x" size={11} />
                     </button>
