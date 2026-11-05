@@ -214,20 +214,27 @@ export function rereadRouting(next?: Routing): void {
 // Another workspace, another record of how its runs went (App.tsx switches in place): forgotten once, before the pickers ask again.
 if (typeof window !== "undefined") window.addEventListener("friday:workspace-switched", () => rereadRouting());
 
+/**
+ * The routing read, shared by everything showing it. Signed out (a recording or watch link's page) there is no workspace to
+ * ask, and the ask was a 401 in the console: nothing learnt yet, without asking.
+ */
+export function readRouting(identity: Identity): Promise<Routing> {
+  if (!identity.id) return Promise.resolve(NOTHING);
+  if (Date.now() - routingAt > ROUTING_FRESH_MS) routingRead = null;
+  if (!routingRead) {
+    routingAt = Date.now();
+    routingRead = api<Routing>(identity, "/api/routing").then((r) => ({ ...NOTHING, ...r }), () => NOTHING);
+  }
+  return routingRead;
+}
+
 export function useRouting(identity: Identity, off = false): Routing {
   const [routing, setRouting] = useState<Routing>(NOTHING);
   useEffect(() => {
     // `off`: no workspace to ask (a recording's page), which reads as nothing learnt yet.
     if (off) return;
     let live = true;
-    const read = () => {
-      if (Date.now() - routingAt > ROUTING_FRESH_MS) routingRead = null;
-      if (!routingRead) {
-        routingAt = Date.now();
-        routingRead = api<Routing>(identity, "/api/routing").then((r) => ({ ...NOTHING, ...r }), () => NOTHING);
-      }
-      void routingRead.then((r) => live && setRouting(r));
-    };
+    const read = () => void readRouting(identity).then((r) => live && setRouting(r));
     read();
     routingListeners.add(read);
     return () => {

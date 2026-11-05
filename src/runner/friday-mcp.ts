@@ -1,6 +1,7 @@
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { randomBytes } from "node:crypto";
+import { rmSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -48,8 +49,12 @@ interface Handler {
  * on a response that says nothing for five minutes, and an ask may wait fifteen.
  */
 export const SHIM = `// Friday's MCP server for a coding tool in a Friday session. Written by Friday's runner; safe to delete.
+import { readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
-const base = process.env.FRIDAY_MESH_URL || "";
+// Where this runner answers: in a file only this person can read (FRIDAY_MESH_FILE), or, for a tool that passes its own
+// environment on (Cursor), FRIDAY_MESH_URL.
+let base = process.env.FRIDAY_MESH_URL || "";
+if (!base && process.env.FRIDAY_MESH_FILE) { try { base = readFileSync(process.env.FRIDAY_MESH_FILE, "utf8").trim(); } catch {} }
 const out = (m) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", ...m }) + "\\n");
 const live = new Map();
 async function post(where, body, signal) {
@@ -175,14 +180,30 @@ async function answer(req: http.IncomingMessage, res: http.ServerResponse): Prom
  * Open this runner's way in, and say how its tool starts the server. `node` is the Node to run the script with (see
  * nodeForScripts); the desktop app's own binary runs it as Node only when told to.
  */
-export async function openFridayMcp(handler: Handler, node: string): Promise<{ spec: FridayMcp; close(): void }> {
+export async function openFridayMcp(handler: Handler, node: string): Promise<{ spec: FridayMcp; url: string; close(): void }> {
   const [port, file] = await Promise.all([serve(), ensureShim()]);
   const token = randomBytes(18).toString("base64url");
+  const url = `http://127.0.0.1:${port}/mesh/${token}`;
+  // The URL, token and all, in a file only this person can read, and the config names the file: a tool's MCP config goes on its
+  // command line (Claude's --mcp-config, Codex's -c), where another account on the computer reads it with ps and could then
+  // call the agents' tools as this lane (2026-11-04 security review).
+  const dir = path.join(stateDir(), "mesh");
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  const urlFile = path.join(dir, `${randomBytes(9).toString("hex")}.url`);
+  await writeFile(urlFile, url, { mode: 0o600 });
   handlers.set(token, handler);
   const asNode: Record<string, string> = process.versions.electron && node === process.execPath ? { ELECTRON_RUN_AS_NODE: "1" } : {};
   return {
-    spec: { command: node, args: [file], env: { FRIDAY_MESH_URL: `http://127.0.0.1:${port}/mesh/${token}`, ...asNode } },
-    close: () => void handlers.delete(token),
+    spec: { command: node, args: [file], env: { FRIDAY_MESH_FILE: urlFile, ...asNode } },
+    url,
+    close: () => {
+      handlers.delete(token);
+      try {
+        rmSync(urlFile, { force: true });
+      } catch {
+        // Already gone with its folder: nothing to read it from.
+      }
+    },
   };
 }
 

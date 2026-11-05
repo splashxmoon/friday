@@ -6,6 +6,7 @@ import { EngineMark } from "./BrandMarks.js";
 import { TaskMark, type TaskMarkState } from "./TaskMark.js";
 import { duration, type SubTask } from "./Tasks.js";
 import { Shine } from "./shine.js";
+import { revealSeq } from "./feed-window.js";
 
 /**
  * The subagents a coding tool sent off during a run (Claude Code's Task/Agent, Codex's spawned agents, Cursor's tasks), as one
@@ -183,6 +184,7 @@ export function Subagents({ rows }: { rows: SubagentRow[] }) {
 
 /** Scrolls the conversation to the reply that sent a subagent off, and lets it flash, as the Jump menu does. */
 function jumpTo(seq: number) {
+  revealSeq(seq);
   let best: HTMLElement | null = null;
   let bestSeq = 0;
   for (const el of document.querySelectorAll<HTMLElement>("[data-seq]")) {

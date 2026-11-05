@@ -39,8 +39,7 @@ import { distinctLook, teamColour as mascotColour } from "./teammate-block.js";
 import { BlobFace, Crown, type Eyes } from "./teammate-face.js";
 import { Initials, initialsFaces } from "./teammate-initials.js";
 import { byState, elapsed, PresenceRing, useBlink, useFlip, useNow, type Presence } from "./presence.js";
-import { MessageResponse } from "@/components/ai-elements/message";
-import { ANSWER, mediaText } from "./AnswerParts.js";
+import { LazyAnswer } from "./lazy-answer.js";
 import { EVERYONE, mentionsIn, namedIn, namesEveryone } from "./teammate-mentions.js";
 import { threadsOf, type ThreadState } from "./team-threads.js";
 import { gist, isFridayNote, plainLine, splitQuote, withoutFridayNotes } from "./team-room.js";
@@ -1217,7 +1216,7 @@ function Bubble({ text, tone, whole }: { text: string; tone?: string; /** Never 
   return (
     <div className={long && !open ? "tt-bubble clamped" : "tt-bubble"} style={tone ? ({ "--c": tone } as CSSProperties) : undefined}>
       <div className="tt-rich">
-        <MessageResponse {...ANSWER}>{mediaText(text.trim())}</MessageResponse>
+        <LazyAnswer text={text.trim()} />
       </div>
       {long && (
         <button type="button" className="tt-more" onClick={() => setOpen(!open)}>
@@ -3047,7 +3046,7 @@ function ThreadPanel({ sid, root, lane, events, send, onClose, meId }: { sid: st
           <b>{agent ? (mate?.name ?? e.actor.name) : e.actor.id === meId ? "You" : e.actor.name}</b>
           <span>{agoShort(e.ts)}</span>
         </span>
-        <div className="tt-thread-text">{agent ? <MessageResponse {...ANSWER}>{mediaText(said(e).trim())}</MessageResponse> : said(e)}</div>
+        <div className="tt-thread-text">{agent ? <LazyAnswer text={said(e).trim()} /> : said(e)}</div>
       </div>
     );
   };

@@ -1234,6 +1234,13 @@ function PresenceBar({ presence, state, me, events, send, follow }: { presence: 
                 </div>
               );
             })}
+            {/* Alone here, the owner is shown the way to bring someone in: the invite links were only behind the header's unlabelled
+                people icon, and one session in four ever had a second person (FEEDBACK.md theme 5; 2026-11-04 UX pass). */}
+            {me.role === "owner" && people.length === 1 && (
+              <button type="button" className="pb-handover pb-invite" onClick={() => (setRoster(false), dispatchEvent(new CustomEvent("friday:open-people")))}>
+                <Icon name="link" size={13} /> Invite someone to watch or steer
+              </button>
+            )}
           </div>
         )}
       </span>

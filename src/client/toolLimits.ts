@@ -49,23 +49,28 @@ function warn(wins: ReturnType<typeof windowsOf>): void {
 
 /** Ask the computer again, unless a reading is fresh or already on its way. */
 export function refreshToolLimits(identity: Identity, force = false): void {
+  // Signed out (a recording or watch link's page) there is no computer of theirs to ask: the ask was a 403 in the console.
+  if (!identity.id) return;
   if (asking || (!force && current && current.limits !== null && Date.now() - current.at < FRESH_MS)) return;
-  asking = hostApi<Limits>(identity, "/api/runner/usage")
+  // No computer: say so, but keep a reading that came from one before for anything already showing it.
+  const none = () => void (current = current?.limits && current.limits !== "none" ? { ...current, at: Date.now() } : { at: Date.now(), limits: "none" });
+  asking = hostApi<Limits | { linked: false }>(identity, "/api/runner/usage")
     .then(
       (l) => {
-        current = { at: Date.now(), limits: l };
+        // The server's quiet "no machine is linked" (app.ts, /api/runner/), not a reading.
+        if ((l as { linked?: boolean } | null)?.linked === false) return none();
+        current = { at: Date.now(), limits: l as Limits };
         // Kept for the Usage hub's pace and forecast, and checked for a five-hour window that just passed 80%.
         const before = readHistory();
-        recordReading(l);
-        warn(crossedEighty(before, windowsOf(l)));
+        recordReading(l as Limits);
+        warn(crossedEighty(before, windowsOf(l as Limits)));
         try {
           localStorage.setItem(KEY, JSON.stringify(current));
         } catch {
           /* kept for this visit only */
         }
       },
-      // No computer: say so, but keep a reading that came from one before for anything already showing it.
-      () => void (current = current?.limits && current.limits !== "none" ? { ...current, at: Date.now() } : { at: Date.now(), limits: "none" }),
+      none,
     )
     .finally(() => {
       asking = null;

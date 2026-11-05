@@ -15,6 +15,9 @@ import { feedbackUrl, osName } from "../feedback.js";
 import { registerBrowser } from "./desktop-browser.js";
 import { registerTerminal, stopTerminals } from "../desktop-terminal.js";
 import { registerUpdates } from "../desktop-update.js";
+import { killTools } from "../runner/spawn-cli.js";
+import { watchBorrowed } from "./borrowed.js";
+import { isOwnUrl } from "./own-url.js";
 import { startLocal, type Started } from "./start.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -134,7 +137,8 @@ function open(url: string) {
   // The window is Friday's, whatever a page calls itself.
   win.on("page-title-updated", (e) => e.preventDefault());
   // Friday's own pages stay in the window; anything else (GitHub, a docs link, Friday Team) opens in the browser.
-  const own = (u: string) => u.startsWith(url);
+  // Whichever Friday the window is on now: the one it opened on may have been replaced (begin, below).
+  const own = (u: string) => !!friday && isOwnUrl(u, friday.url);
   win.webContents.setWindowOpenHandler(({ url: u }) => {
     if (!own(u) && /^https?:/.test(u)) void shell.openExternal(u);
     return { action: "deny" };
@@ -179,7 +183,48 @@ function lockPreview(): void {
 
 /** A request from Friday's own page in one of its windows, never a previewed site or a page it was sent to. */
 const fromApp = (e: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent): boolean =>
-  !!friday && !!BrowserWindow.fromWebContents(e.sender) && (e.senderFrame?.url ?? e.sender.getURL()).startsWith(friday.url);
+  !!friday && !!BrowserWindow.fromWebContents(e.sender) && isOwnUrl(e.senderFrame?.url ?? e.sender.getURL(), friday.url);
+
+/** Waits for a process to be gone, `ms` at most. */
+async function exited(pid: number | undefined, ms: number): Promise<void> {
+  const alive = () => {
+    try {
+      return !!pid && process.kill(pid, 0);
+    } catch {
+      return false;
+    }
+  };
+  for (const end = Date.now() + ms; alive() && Date.now() < end; ) await new Promise((r) => setTimeout(r, 200));
+}
+
+/**
+ * Friday started for this app, or the one already running on this folder (the terminal edition's) borrowed. A borrowed one is
+ * watched: when it stops, this app starts its own and the window goes to it, instead of staying on an address nothing answers.
+ */
+async function begin(): Promise<boolean> {
+  // Friday not starting (its folder can't be written, a disk full) left an app with no window and nothing to say why.
+  try {
+    friday = await startLocal();
+  } catch (e) {
+    dialog.showErrorBox("Friday couldn't start", e instanceof Error ? e.message : String(e));
+    app.exit(1);
+    return false;
+  }
+  if (!friday.already) return true;
+  const pid = friday.pid;
+  // Started once its process is gone (ten seconds at most): it stops answering before it has written what it keeps, and
+  // starting on the folder before then would read it without the last of it.
+  watchBorrowed(friday.url, () =>
+    void exited(pid, 10_000)
+      .then(begin)
+      .then((ok) => {
+        if (!ok || !friday) return;
+        if (win && !win.isDestroyed()) void win.loadURL(friday.url);
+        else open(friday.url);
+      }),
+  );
+  return true;
+}
 
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
@@ -219,7 +264,7 @@ else {
     if (process.platform === "darwin") Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: "appMenu" }, { role: "editMenu" }, { role: "viewMenu" }, { role: "windowMenu" }, help]));
     lockPreview();
     await loginPath;
-    friday = await startLocal();
+    if (!(await begin()) || !friday) return;
     open(friday.url);
     app.on("activate", () => friday && open(friday.url));
     // Updates as the product app has them (desktop-update.ts): checked in the background, downloaded, and offered once ready.
@@ -238,6 +283,10 @@ else {
     e.preventDefault();
     stopTerminals();
     for (const w of BrowserWindow.getAllWindows()) w.destroy();
-    void Promise.race([friday.close(), new Promise((r) => setTimeout(r, 5000))]).finally(() => app.exit(0));
+    // A coding tool still running when the five seconds are up is killed: it would outlive the app (spawn-cli.ts).
+    void Promise.race([friday.close(), new Promise((r) => setTimeout(r, 5000))]).finally(() => {
+      killTools();
+      app.exit(0);
+    });
   });
 }

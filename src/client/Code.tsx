@@ -1299,8 +1299,9 @@ export function Code({
 
       {/* The sample runs Friday's own agent: Team's, or on Solo the person's own model. */}
 
-      {/* Someone new on their own computer: the four things that show what Friday is for, one press each (GettingStarted.tsx). */}
-      {isLocal() && !work && <GettingStarted recents={recents} onPickFolder={() => setTimeout(() => document.querySelector<HTMLButtonElement>(".cw-drop")?.click(), 0)} />}
+      {/* Someone new: the things that show what Friday is for, one press each (GettingStarted.tsx). In both editions, the hosted
+          service following the local build (Arun, 2026-11-04); "Since you left" below still says what happened while away. */}
+      {!work && <GettingStarted recents={recents} onPickFolder={() => setTimeout(() => document.querySelector<HTMLButtonElement>(".cw-drop")?.click(), 0)} />}
       {/* The morning brief or evening wrap-up across everything, then what happened in each session while you were away. */}
       <DailyBriefCard />
       {/* Every goal you set, at risk first (goals.ts). */}

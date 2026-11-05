@@ -133,7 +133,9 @@ type ServerMsg =
    * `system`: what the lane's next turn will be told besides its instruction, so the CLI can be started before it comes.
    * `effort`: the lane's level (see laneEffort), so that CLI is started with the flag the first turn will carry.
    */
-  | { kind: "attached"; lane: string; laneName: string; imported?: boolean; system?: string; effort?: string }
+  | { kind: "attached"; lane: string; laneName: string; imported?: boolean; system?: string; effort?: string; /** This server acknowledges turn ends (`turn.ack`): keep each until it does. */ acks?: boolean }
+  /** A turn's end the server has heard: it needn't be said again after a reconnect. */
+  | { kind: "turn.ack"; id: string }
   /** An approval carries what was asked, read back from the log: the runner that asked may not be the one that hears the answer. */
   /** `command`: the message as typed when it is a lone `/command`, which the tool's own (see ownCommand) is used as instead. */
   | { kind: "turn"; id: string; prompt: string; system: string; attachments?: Attachment[]; approval?: { id: string; approve: boolean; scope?: "commands" | "turn"; items?: string[] }; command?: string; /** The model an Auto lane runs this turn on (routing.ts), and how hard it thinks, for a tool that takes that. */ model?: string; effort?: string; /** The most this turn may do: someone other than the host's, on a lane switched automatically (capMode). */ mode?: EngineMode; /** This turn starts a run: take its checkpoint before the tool hears it, and say it (see turnCheckpoint). */ checkpoint?: boolean; /** Handed back after a dropped connection: the turn a runner before this one may still have running (see adopt). */ again?: boolean }
@@ -201,6 +203,16 @@ const SETUP_NOTICE = /"method"\s*:\s*"(?:thread\/(?:started|loaded|name)|account
 
 /** How long a turn cut off by a dropped connection is kept running for the runner that reconnects to take on (see keepTurn). */
 export const KEEP_TURN_MS = 5 * 60_000;
+
+/**
+ * Whether what a kept turn says while the connection is down is kept for the runner back. Streamed text is capped (a chatty tool
+ * through a five-minute drop), the rest more loosely, and the turn's end always: dropped, the turn taken on never ended, and the
+ * lane read "running" with nothing left to end it.
+ */
+export function keepWhileDown(outbox: unknown[], m: unknown): boolean {
+  const kind = (m as { kind?: unknown }).kind;
+  return kind === "turn.end" || outbox.length < (kind === "delta" ? 20_000 : 40_000);
+}
 /**
  * What `connect` (the desktop app's link) exits with when the server ends it for good, read by desktop/main.ts:
  * 0, unlinked by its owner; 3, the link token was refused (expired, or forgotten), so the app forgets it and makes a new one;
@@ -420,6 +432,8 @@ export async function stayAttached(first: Runner, onRunner: (r: Runner) => void 
     // The turn the one before kept going through the drop is this one's to take on (Runner.adopt): the runner holding it, past
     // any attempt in between that never got connected.
     next.prev = runner.holdsKept() || !runner.prev ? runner : runner.prev;
+    // The turn ends the server hasn't acknowledged, said again by the runner back.
+    next.unacked = runner.unacked;
     runner = next;
     onRunner(next);
     try {
@@ -494,7 +508,7 @@ export class Runner {
   /** The project's MCP servers, for a tool spoken to over ACP (see mcp-servers.ts): read as the lane opens and before each turn. */
   private acpMcp: AcpMcpServer[] = [];
   /** Friday's own MCP server for this lane's tool, through which it talks to the other agents in the session (friday-mcp.ts). */
-  private friday: { spec: FridayMcp; close(): void } | null = null;
+  private friday: { spec: FridayMcp; url: string; close(): void } | null = null;
   /** Its calls the server hasn't answered yet, by id. */
   private meshWaits = new Map<string, (r: MeshAnswer) => void>();
   /** Turns already started again once after their tool hung (hung.ts): a second hang ends the turn. */
@@ -703,7 +717,9 @@ export class Runner {
       ...(o.newLane ? { newLane: o.newLane } : {}),
       ...(o.resumeId ? { resumeId: o.resumeId, resumeTitle: o.resumeTitle ?? "", resumeMessages: String(o.resumeMessages ?? 0), ...(o.resumeTool ? { resumeTool: o.resumeTool } : {}) } : {}),
       // A run's checkpoint is taken here, as its first turn is handed to the tool, rather than asked for first (turnCheckpoint).
-      caps: "checkpoint,steer",
+      caps: "checkpoint,steer,ended",
+      // Turns ended on a connection that went before the server acknowledged their end: said first, so it doesn't run them again.
+      ...(this.unacked.size ? { ended: JSON.stringify([...this.unacked.values()].slice(-5)) } : {}),
     });
     // Stopped while it was still finding its CLI or reading the folder: it never connects.
     if (this.stopped) throw new RunnerError("Runner stopped by its host", 1000);
@@ -738,6 +754,9 @@ export class Runner {
         }
         if (m.kind === "attached") {
           attached = true;
+          this.acked = !!m.acks;
+          // An older server never acknowledges: nothing is kept for it, and nothing it never asked for is said again.
+          if (!this.acked) this.unacked.clear();
           this.lane = m.lane;
           this.laneName = m.laneName;
           imported = !!m.imported;
@@ -761,7 +780,9 @@ export class Runner {
         // Cut off mid-turn by a drop that reconnecting fixes (a server restarting, the network): the tool keeps working, for the
         // runner that reconnects to take on (keepTurn, adopt). Anything else stops it, as before.
         const turnId = this.cap?.id;
-        if (attached && turnId && this.child && !this.stopped && !this.stopping && !FINAL.has(code)) this.keepTurn(turnId);
+        // A turn this runner took on from the one before it (adopt) is kept the same way: its tool is that runner's child, not
+        // this one's, and dropped here the next runner started a second tool beside it on the same conversation and folder.
+        if (attached && turnId && (this.child || this.adopted) && !this.stopped && !this.stopping && !FINAL.has(code)) this.keepTurn(turnId);
         else {
           this.killChild();
           // The snapshot was ours and only for this run; the folder it describes
@@ -1116,7 +1137,7 @@ export class Runner {
   private spawnOptions(extra?: Record<string, string>) {
     // The folder's own variables (Environment, environment.ts) under the tool's own launch settings and what this turn adds.
     // FRIDAY_MESH_URL too, for an MCP server the tool starts from its own config with what it inherits (Cursor's; see friday-mcp.ts).
-    const mesh = this.friday ? { FRIDAY_MESH_URL: this.friday.spec.env.FRIDAY_MESH_URL! } : {};
+    const mesh = this.friday ? { FRIDAY_MESH_URL: this.friday.url } : {};
     // The account it runs as goes over everything else: a CLAUDE_CONFIG_DIR in the folder's variables would sign it in as another.
     return { cwd: this.opts.cwd, env: { ...childEnv(), ...folderVars(this.opts.cwd), ...this.launch.env, ...mesh, ...extra, ...accountEnv(this.opts.tool, this.account?.id) } };
   }
@@ -1236,9 +1257,26 @@ export class Runner {
 
   private send(m: unknown): void {
     if (this.handOn) return this.handOn(m);
-    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(m));
-    else if (this.kept && this.kept.outbox.length < 20_000) this.kept.outbox.push(m);
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(m));
+      // Kept until the server acknowledges it: written into a connection that died without either side noticing yet, it is lost,
+      // and the server would put the turn back and run the whole task again once this machine is back (see `ended` in start).
+      // Not one that goes to a kept turn's outbox (below): the runner back takes that turn on and says its end itself (adopt).
+      const end = m as { kind?: unknown; id?: unknown; outcome?: unknown; error?: unknown };
+      if (this.acked && end.kind === "turn.end" && typeof end.id === "string") {
+        this.unacked.set(end.id, { id: end.id, outcome: String(end.outcome ?? "done"), ...(typeof end.error === "string" ? { error: end.error.slice(0, 300) } : {}) });
+        for (const k of [...this.unacked.keys()].slice(0, -5)) this.unacked.delete(k);
+      }
+    } else if (this.kept && keepWhileDown(this.kept.outbox, m)) this.kept.outbox.push(m);
   }
+
+  /**
+   * Turn ends sent and not yet acknowledged, by turn id: the newest few. One Map along a lane's reconnects (stayAttached hands it
+   * to the next runner), so the runner back says them in its hello.
+   */
+  unacked = new Map<string, { id: string; outcome: string; error?: string }>();
+  /** Whether the server this runner is attached to acknowledges turn ends (said in "attached"). */
+  private acked = false;
 
   /** Cut off mid-turn: the turn goes on, what it says is kept, and it is stopped after all if nobody takes it on in time. */
   private keepTurn(id: string): void {
@@ -1299,6 +1337,7 @@ export class Runner {
   }
 
   private onMessage(m: ServerMsg): void {
+    if (m.kind === "turn.ack") return void this.unacked.delete(m.id);
     // The `/` commands of this lane's tool, for the composer: this runner's to answer, not the folder's.
     if (m.kind === "repo" && m.op === "context") {
       void this.toolContext().then(
@@ -2029,7 +2068,9 @@ ${prompt}`;
     // Always, a CLI or not: a turn still getting ready (a download, the snapshot, a tool warming up) checks it before starting
     // one, and without it a dropped connection let that turn start a CLI nobody could see or stop.
     this.interrupt();
-    // Only ever called as this runner ends: a kept Claude Code or ACP tool goes with it.
+    // Only ever called as this runner ends: a kept Claude Code or ACP tool goes with it, and so does a turn it took on from the
+    // runner before it, whose tool is that runner's child.
+    this.adopted?.stop();
     this.warm?.close();
     this.acp?.close();
     this.next.close();

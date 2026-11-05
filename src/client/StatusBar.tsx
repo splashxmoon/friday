@@ -158,7 +158,7 @@ export function StatusBar({ state, events, me, where, environment, slot, onChang
             <span className="stb-del">−{del}</span>
           </button>
         ) : (
-          <span className="stb-item stb-quiet">No changes yet</span>
+          <span className="stb-item stb-quiet">{events.some((ev) => ev.body.type === "folder.committed") ? "All committed" : "No changes yet"}</span>
         )}
         {/* The Jump menu and the context gauge, drawn here by the chat (see `under` in Activity). */}
         <span className="stb-slot" ref={slot} />

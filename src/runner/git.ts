@@ -4,12 +4,14 @@ import { access, copyFile, lstat, mkdir, mkdtemp, readdir, readFile, realpath, r
 import { lstatSync as fsLstatSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
+import nodePath from "node:path";
 import type { DiffFile } from "../types.js";
 import { mergeFeedback, parsePrUrl, type PrComment } from "../pr-feedback.js";
 import { failedChecks, tailLog, type CheckFailure } from "../pr-checks.js";
 import { authEnv } from "./github.js";
 import { releaseStack, setupStack } from "./stack.js";
 import { folderOwnDb } from "./environment.js";
+import { contains } from "../folder-key.js";
 
 /** git's id for the empty tree: a base for repositories with no commits yet. */
 export const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
@@ -42,7 +44,9 @@ const at = (cwd: string, shadow?: Shadow): string[] => (shadow ? ["--git-dir", s
  * adds 70 characters to the repository's own path, and in a deep folder git refused to write it: no checkpoint, so no undo.
  * Git for Windows reads this; everywhere else it is an unknown key that git ignores.
  */
-const LONG = ["-c", "core.longpaths=true", "-c", "core.quotePath=false"];
+// core.fsmonitor off: git runs its value as a command on every status and add, so a repository's config could make Friday's
+// own checkpoint or commit run anything (2026-11-04 security review). It only makes status faster where it is set.
+const LONG = ["-c", "core.longpaths=true", "-c", "core.quotePath=false", "-c", "core.fsmonitor=false"];
 // quotePath: a file name past ASCII as it is. Quoted and octal-escaped, `café.ts` came back as `"b/caf\303\251.ts"`, which
 // the Diff panel showed as such and no later pathspec matched, so the file couldn't be committed from the app.
 
@@ -1851,6 +1855,20 @@ export async function showOf(cwd: string, sha: string): Promise<ChangeSet> {
   return capDiff(splitPatch(await git(root, ["show", "--no-color", "--no-ext-diff", "-M", "--format=", sha, "--"])));
 }
 
+/**
+ * Whether an untracked file the Git panel asks about may be read whole: a plain relative path, really inside the repository
+ * (a link out of it doesn't count), and not a key file or a .env. A `:/` or `:(top)` pathspec gets past git's own "outside
+ * repository" check, and an absolute path was read as given, so a viewer could read any file on the server or the host's
+ * computer (2026-11-04 security review).
+ */
+async function untrackedReadable(root: string, rel: string): Promise<boolean> {
+  if (!rel || rel.startsWith(":") || nodePath.isAbsolute(rel) || rel.includes("\0")) return false;
+  const full = nodePath.resolve(root, rel);
+  if (!contains(root, full)) return false;
+  const names = [nodePath.basename(full), nodePath.basename(await realpath(full).catch(() => full))];
+  return !names.some((n) => /^\.env(\..+)?$/i.test(n) && !/^\.env\.(example|sample|template)$/i.test(n)) && !names.some((n) => /(\.pem|\.key)$|^id_rsa|^id_ed25519|^\.(npmrc|pypirc|netrc)$/i.test(n));
+}
+
 /** The working files against the index, or (`staged`) the index against HEAD, for one file or all: what the Git panel stages by hunk. */
 export async function gitDiffOf(cwd: string, staged: boolean, path?: string): Promise<ChangeSet> {
   const root = await toplevel(cwd);
@@ -1860,8 +1878,8 @@ export async function gitDiffOf(cwd: string, staged: boolean, path?: string): Pr
   // An untracked file has no diff: shown as wholly new, so it can be read and staged like the rest.
   if (!staged && path) {
     const tracked = await git(root, ["ls-files", "--error-unmatch", "--", path]).then(() => true, () => false);
-    if (!tracked && !files.length) {
-      const text = await readFile(path.startsWith("/") ? path : `${root}/${path}`, "utf8").catch(() => "");
+    if (!tracked && !files.length && (await untrackedReadable(root, path))) {
+      const text = await readFile(nodePath.resolve(root, path), "utf8").catch(() => "");
       const lines = text.split("\n");
       if (text.endsWith("\n")) lines.pop();
       const patch = `diff --git a/${path} b/${path}\nnew file mode 100644\n--- /dev/null\n+++ b/${path}\n@@ -0,0 +1,${lines.length} @@\n${lines.map((l) => `+${l}`).join("\n")}\n`;

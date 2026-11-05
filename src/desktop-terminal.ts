@@ -16,9 +16,13 @@ import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { shellEnv } from "./runner/adapters.js";
+import type { Owned } from "./runner/owned.js";
+import { ending, watched } from "./runner/terminals.js";
 
 interface Shell {
   pty: IPty;
+  /** It and what runs in it, ended as Friday quits (runner/owned.ts). */
+  tree: { all: Owned; off: () => void };
   cwd: string;
   /** The window that owns it: only that window may drive or be told about it. */
   windowId: number;
@@ -61,6 +65,7 @@ function killShell(id: string): void {
   const shell = shells.get(id);
   if (!shell) return;
   shells.delete(id);
+  ending(shell.tree);
   try {
     shell.pty.kill();
   } catch {
@@ -122,7 +127,7 @@ export function registerTerminal(fromApp: (e: Electron.IpcMainInvokeEvent | Elec
         // terminal comes up blank. ConPTY is Windows' own and needs none.
         useConpty: true,
       });
-      const shell: Shell = { pty, cwd, windowId: w.id, out: "" };
+      const shell: Shell = { pty, cwd, windowId: w.id, out: "", tree: watched(pty.pid, () => pty.kill()) };
       shells.set(id, shell);
       bindToWindow(w);
       pty.onData((data) => {
@@ -133,6 +138,8 @@ export function registerTerminal(fromApp: (e: Electron.IpcMainInvokeEvent | Elec
         // Only if it is still this id's shell: one we replaced on purpose has
         // no business announcing itself into its successor's screen.
         if (shells.get(id)?.pty !== pty) return;
+        // Exited by itself (`exit`): what it left running, the person left running.
+        shell.tree.off();
         shells.delete(id);
         if (!w.isDestroyed()) w.webContents.send("friday:pty-exit", id, exitCode);
       });

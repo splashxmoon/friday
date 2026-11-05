@@ -5655,8 +5655,11 @@ html[data-band="page"] .main:not(:has(> .home)) { padding-top: var(--band); box-
 /* ── orientation: the state line, the pinned goal, the jump flash, the unread line ── */
 /* Under the box: Jump on the left with the compass as its mark, the context gauge on the right under the send button. */
 .composer-under { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 13px 0 6px; }
+/* The goal for the agent the box is aimed at, beside its context ring (GoalPill, moved out of the box's row of pills). */
+.composer-under-end { display: inline-flex; align-items: center; gap: 6px; }
+:is(.composer-under, .stb-slot) .goal-pill { gap: 6px; }
 :is(.composer-under, .stb-slot) .menu-pill { height: 28px; padding: 0 9px 0 8px; border-radius: var(--r-pill); background: transparent; border: 1px solid transparent; color: var(--text-muted); font-size: 13px; }
-:is(.composer-under, .stb-slot) .menu-pill::before { content: ""; width: 14px; height: 14px; margin-right: 6px; background: currentColor; -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='10'/><polygon points='16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76'/></svg>") center / contain no-repeat; mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='10'/><polygon points='16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76'/></svg>") center / contain no-repeat; }
+:is(.composer-under, .stb-slot) .menu-pill:not(.goal-pill)::before { content: ""; width: 14px; height: 14px; margin-right: 6px; background: currentColor; -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='10'/><polygon points='16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76'/></svg>") center / contain no-repeat; mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='10'/><polygon points='16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76'/></svg>") center / contain no-repeat; }
 :is(.composer-under, .stb-slot) .menu-pill:hover, :is(.composer-under, .stb-slot) .menu-pill.on { color: var(--ink); background: var(--hover); }
 .composer-under .ctx-gauge { width: 28px; height: 28px; }
 .feed-unread { display: flex; align-items: center; gap: 10px; margin: 2px 0 10px; color: var(--amber); font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; }
@@ -11118,8 +11121,10 @@ html .shell.with-panel .main { border-top-left-radius: 0 !important; }
 .rsp-diff-hand { color: var(--accent) !important; background: color-mix(in srgb, var(--accent) 10%, transparent) !important; border-color: color-mix(in srgb, var(--accent) 45%, var(--border)) !important; }
 
 /* ── Files from the folders the agent also works in, grouped (multi-repo) ──────────────────── */
-.diff-repo + .diff-repo { margin-top: 10px; }
-.diff-repo-head { margin: 0 0 4px; display: flex; align-items: center; gap: 6px; font: 600 12px var(--font); letter-spacing: 0.04em; text-transform: none; color: var(--ink-2); padding: 0 2px; }
+.diff-repo + .diff-repo { margin-top: 16px; }
+/* A folder's name and its agents' chips, on a row of their own: the chips are 22px tall, so the row is held at 26px with air above
+   and below, rather than pressing into the file card under it (Arun's screenshot, 2026-11-04: "fix this spacing"). */
+.diff-repo-head { margin: 6px 0 8px; min-height: 26px; display: flex; align-items: center; gap: 6px; font: 600 12px var(--font); letter-spacing: 0.04em; text-transform: none; color: var(--ink-2); padding: 0 4px; }
 .diff-repo-head .muted { font-weight: 500; letter-spacing: 0; }
 /* Whose changes are in the folder, on Everyone: each name opens that agent's own. */
 .ch-who { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: auto; letter-spacing: 0; }
@@ -13001,3 +13006,5 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover { opacity: .8; }
 /* The open row's steps, under it and in from its face, on a thin rule. */
 .plan-steps { grid-column: 2 / -1; margin: 2px 0 6px 0; padding-left: 4px; border-left: 1px solid var(--border); }
 .plan-steps li { min-height: 30px; }
+/* "Invite someone to watch or steer", at the foot of who is here when the owner is alone (SessionView PresenceBar). */
+.pb-handover.pb-invite { margin: 4px 0 0; border-bottom: 0; border-top: 1px solid var(--border); border-radius: 0 0 8px 8px; }

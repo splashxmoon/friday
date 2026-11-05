@@ -5,6 +5,7 @@ import { createInterface } from "node:readline";
 import { PassThrough, Writable } from "node:stream";
 import type { AcpKept } from "./adapters.js";
 import { mcpForAgent, type AcpMcpServer } from "./mcp-servers.js";
+import { own as listOwned } from "./owned.js";
 
 /**
  * Starting a coding CLI.
@@ -59,10 +60,16 @@ class NotStarted extends EventEmitter {
   }
 }
 
+// Every CLI started here is listed until it exits, to be ended as Friday quits (owned.ts): stopping one sends Ctrl-C, then
+// SIGTERM at 4 s and SIGKILL at 8 s (runner.ts interrupt), and Friday quitting doesn't wait that long.
+export { endTools, killTools } from "./owned.js";
+
 /** Start a CLI. Its output, exit and errors arrive as a child process's do, a failure to start included: it never throws. */
 export function spawnCli(command: string, args: string[], opts: CliSpawnOptions = {}): CliProcess {
   try {
     const child = spawn(command, args, { cwd: opts.cwd, env: opts.env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+    const off = listOwned({ alive: () => child.exitCode === null && child.signalCode === null, signal: (sig) => void child.kill(sig) });
+    child.once("exit", off);
     if (process.platform === "win32") {
       // A CLI started through a wrapper (Kilo's npm script starts kilo.exe) left its real process running when only the wrapper
       // was ended, and a sign-in check that timed out left one more behind on every look. On Windows the whole tree goes. Not

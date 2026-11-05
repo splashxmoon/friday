@@ -44,6 +44,10 @@ const KEYED: RegExp[] = [
   /\b(re_)[A-Za-z0-9_]{24,}/g, // Resend
   /\b(SG\.)[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}/g, // SendGrid
   /\b(eyJ)[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, // JWTs, Supabase keys among them
+  /\b(fw_[a-z]{2,8}_)[A-Za-z0-9_-]{30,}/g, // Friday's own API tokens (oauth-server.ts)
+  /(hooks\.[a-z0-9.-]+\/services\/)[A-Za-z0-9/_-]{20,}/g, // A chat's incoming webhook (hooks.<service>/services/…): the URL is the credential
+  /(discord(?:app)?\.com\/api\/webhooks\/)[0-9]+\/[A-Za-z0-9_-]{30,}/g, // and Discord's
+  /\b([Bb]earer\s+)[A-Za-z0-9._~+/=-]{16,}/g, // A bearer token of no known shape, as an Authorization header or curl -H prints it
 ];
 
 /** A private key, whole. */
@@ -65,7 +69,7 @@ const REFERENCE = /^(?:process\.env|os\.environ|import\.meta|env\.|config\.|sett
  * superset of the patterns: one added above is added here too (secrets.test.ts checks every pattern's examples).
  */
 const MAYBE =
-  /sk-|rk_|gh[pousr]_|github_pat_|glpat-|xox[abposr]-|_(?:live|test)_|whsec_|AIza|AKIA|ASIA|phx_|npm_|hf_|gsk_|xai-|re_|SG\.|eyJ|PRIVATE KEY|:\/\/[^\s/@]*:[^\s/@]*@|secret|token|passw|passphrase|api[_-]?key|access[_-]?key|private[_-]?key|auth[_-]?key|credential/i;
+  /sk-|rk_|gh[pousr]_|github_pat_|glpat-|xox[abposr]-|_(?:live|test)_|whsec_|AIza|AKIA|ASIA|phx_|npm_|hf_|gsk_|xai-|re_|SG\.|eyJ|fw_|hooks\.|discord|bearer|PRIVATE KEY|:\/\/[^\s/@]*:[^\s/@]*@|secret|token|passw|passphrase|api[_-]?key|access[_-]?key|private[_-]?key|auth[_-]?key|credential/i;
 
 /** The text with every secret it holds hidden, and how many there were. */
 export function hideSecrets(text: string): { text: string; hidden: number } {

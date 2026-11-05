@@ -5,6 +5,10 @@ import path from "node:path";
 import { test } from "node:test";
 import { skillsNote } from "../src/runner/shared-skills.js";
 
+// Claude Code's plugins are found through CLAUDE_CONFIG_DIR when it is set, as it is in a Claude Code session with a config folder
+// of its own: run from one, these tests read that session's real plugins instead of the made-up home's.
+delete process.env.CLAUDE_CONFIG_DIR;
+
 /** A skill folder with its SKILL.md. */
 async function skill(dir: string, folder: string, header: string) {
   await mkdir(path.join(dir, folder), { recursive: true });

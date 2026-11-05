@@ -522,6 +522,12 @@ export function group(events: SessionEvent[], streaming: boolean | ReadonlySet<s
   /** Each lane's open run, and the one that just finished (for anything still arriving from it). */
   const runs = new Map<string, RunItem>();
   const lasts = new Map<string, RunItem>();
+  /** Each run's block by the seq of the end that closed it, for an end that later corrects that one (run.ended `replaces`). */
+  const endedBy = new Map<number, RunItem>();
+  /** A run's end shown on its own (its run had no block), by seq, for the same. */
+  const endNotes = new Map<number, Extract<Item, { kind: "event" }>>();
+  /** Notices taken out of the feed once it is built (their run's real end was no failure). */
+  const gone = new Set<Item>();
   /** Taken as a lane's run started; belongs to the block its first step opens. */
   const checkpoints = new Map<string, RunItem["checkpoint"]>();
   const startedAt = new Map<string, number>();
@@ -674,9 +680,25 @@ export function group(events: SessionEvent[], streaming: boolean | ReadonlySet<s
       continue;
     }
     if (t === "run.ended") {
+      // How the run really ended, learned after its end was written as a dropped connection: said in that run's block instead.
+      const corrects = (ev as Ev<"run.ended">).body.replaces;
+      const was = corrects ? endedBy.get(corrects) : undefined;
+      if (was) {
+        was.ended = ev as Ev<"run.ended">;
+        endedBy.set(ev.seq, was);
+        continue;
+      }
+      // One whose run had no block (nothing it said arrived): its notice says the real end, or goes when that was no failure.
+      const note = corrects ? endNotes.get(corrects) : undefined;
+      if (note) {
+        if ((ev as Ev<"run.ended">).body.outcome === "error") (note.ev = ev), endNotes.set(ev.seq, note);
+        else gone.add(note);
+        continue;
+      }
       const run = runs.get(lane);
       if (run) {
         run.ended = ev as Ev<"run.ended">;
+        endedBy.set(ev.seq, run);
         lasts.set(lane, run);
         runs.delete(lane);
         continue;
@@ -726,6 +748,7 @@ export function group(events: SessionEvent[], streaming: boolean | ReadonlySet<s
     } else looseAt.delete(lane);
     const item: Item = { kind: "event", ev };
     if (stopped) stopNote.set(lane, item);
+    if (t === "run.ended") endNotes.set(ev.seq, item);
     items.push(item);
   }
   // A turn stopped before its first message said anything: what it had written goes above the stop's note, where it was cut.
@@ -767,14 +790,14 @@ export function group(events: SessionEvent[], streaming: boolean | ReadonlySet<s
       shownSet.set(it.lane, { by: it, ev: last });
     }
   }
-  return items;
+  return gone.size ? items.filter((it) => !gone.has(it)) : items;
 }
 
-/** The Jump menu under the box is the hosted service's: Arun's build and the open-source edition go without it (2026-11-04: "get rid of this for my local and open source builds"). Its keys (g d, g q…) stay. */
+/** No Jump menu under the box, in any edition (2026-11-04: "get rid of this for my local and open source builds", then the hosted service to follow the local build). Its keys (g d, g q…) stay. */
 const JUMP_MENU = false;
 
 /** How many of the feed's newest items are drawn; the rest wait behind "Show earlier" (see `start` in Activity). */
-const FEED_WINDOW = 100;
+export const FEED_WINDOW = 100;
 
 /** Scroll the feed to the item that holds this point in the log, and let it flash once. */
 export function jumpTo(seq: number, again = true): void {
@@ -2167,11 +2190,17 @@ export function Activity({
             // Nor Work's: a context ring is coding chrome, and hidden it still carried its "Context: not reported yet" (Arun,
             // 2026-10-28: "iron everything and ensure we are good").
             if (state.options.work) gauge = null;
-            if (under) return createPortal(<>{jumpMenu}{gauge}</>, under);
+            // The goal for the agent the box is aimed at, beside its context ring rather than in the box's own row of pills, where it
+            // crowded the agent and model (Arun, 2026-11-04: "move the goal button somewhere else… properly placed and accessible").
+            const goal: ReactNode = null;
+            if (under) return createPortal(<>{jumpMenu}{goal}{gauge}</>, under);
             return (
               <div className="composer-under">
                 {jumpMenu ?? <span />}
-                {gauge}
+                <span className="composer-under-end">
+                  {goal}
+                  {gauge}
+                </span>
               </div>
             );
           })()}
@@ -3585,7 +3614,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   // In a team a reply reads as a group chat (Teammates.tsx): its mascot, moving while it works, its name in its colour, bubbles.
   if (ctx.state.options.team) [mate, look] = teamReply(lane, active, mate);
   // About how long is left while it works (runForecast.ts): asked before the folded return, so the hooks run in the same order.
-  const forecast = useRunForecast(ctx.identity, ctx.state, ctx.events, lane, active, ctx.me.id);
+  const forecast = useRunForecast(ctx.identity, ctx.state, ctx.events, lane, active, ctx.me.id, ctx.replaying);
   // An older run: the facts that decide whether to open it, on one line. Before the steps, the receipt and the hand-off are
   // worked out, since none of them are shown: a long session is mostly folded runs.
   if (folded && !unfolded) {

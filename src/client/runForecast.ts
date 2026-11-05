@@ -12,9 +12,9 @@ import { useToolLimits } from "./toolLimits.js";
  * for the person's own coding tool, when its window fills at the pace this computer's readings show (limitHistory.ts), if
  * that comes before it would start over. Empty when there is nothing to say.
  */
-export function useRunForecast(identity: Identity, state: SessionState, events: SessionEvent[], lane: string, active: boolean, me: string): string {
-  const routing = useRouting(identity);
-  const limits = useToolLimits(identity);
+export function useRunForecast(identity: Identity, state: SessionState, events: SessionEvent[], lane: string, active: boolean, me: string, /** A recording's page: nothing of anyone's to ask. */ off = false): string {
+  const routing = useRouting(identity, off);
+  const limits = useToolLimits(identity, off);
   // A minute's resolution is plenty for "~20 min left".
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {

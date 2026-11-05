@@ -111,6 +111,9 @@ export function heatmap(days: Day[], today = new Date()): { day: string; turns: 
 }
 
 /** The longest run of days in a row with any work, and the run that is still going. */
+/** The word under a number in the year's line: "1 turn", "2 turns" (a first day's home screen read "1 turns · 1 active days"). */
+export const statWord = (n: number, word: string): string => (n === 1 ? word : `${word}s`);
+
 export function streaks(cells: { turns: number }[]): { longest: number; current: number } {
   let longest = 0;
   let run = 0;
@@ -276,8 +279,8 @@ export function HomeActivity({ identity, recents, onOpen, onBoard }: { identity:
             <div className="ha-foot">
               <dl className="ha-stats">
                 {/* The plural follows the count, the streak said short: "1 active day · 1-day streak" (audit REST-31, Arun 2026-11-04). */}
-                <div><dd>{total.toLocaleString()}</dd><dt>{total === 1 ? "turn" : "turns"}</dt></div>
-                <div><dd>{active}</dd><dt>{active === 1 ? "active day" : "active days"}</dt></div>
+                <div><dd>{total.toLocaleString()}</dd><dt>{statWord(total, "turn")}</dt></div>
+                <div><dd>{active}</dd><dt>{statWord(active, "active day")}</dt></div>
                 <div><dd>{longest}-day</dd><dt>{current > 1 && current === longest ? "streak, still going" : "streak"}</dt></div>
                 {busiest && <div><dd>{busiest}s</dd><dt>busiest</dt></div>}
               </dl>

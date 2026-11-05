@@ -112,6 +112,12 @@ export interface Lane {
   trigger: LaneTrigger;
   /** Made for somebody's own coding tool, which runs on their machine: a plan's limit on Friday's agents does not count it. */
   engine?: boolean;
+  /**
+   * Set by the projection, never taken from an event: a lane its maker named only themself on (a lane an editor adds is theirs
+   * alone, core.ts lane.add). Their name on it came from their role, so made a viewer they stop driving it; a person an owner
+   * named keeps the lane whatever their role, since the owner chose them (canDriveLane).
+   */
+  selfNamed?: true;
 }
 
 /** How hard the model thinks before answering. Maps to OpenRouter's reasoning effort. */
@@ -1049,17 +1055,19 @@ export type EventBody =
       /** Every file went back to the checkpoint, not only what its run changed: a coding tool's rewind, whose conversation stays. */
       whole?: true;
     }
-  | { type: "run.ended"; outcome: "done" | "waiting" | "error"; error?: string; /** Cut off by a lost connection, its turn put back to carry on when the machine is back: not a failure of the work. */ cut?: true; /** A checkpoint of where the run left the folder, so its undo puts back only what it changed. */ after?: string }
+  | { type: "run.ended"; outcome: "done" | "waiting" | "error"; error?: string; /** Cut off by a lost connection, its turn put back to carry on when the machine is back: not a failure of the work. */ cut?: true; /** A checkpoint of where the run left the folder, so its undo puts back only what it changed. */ after?: string; /** The seq of an earlier end of this run that this one corrects: written as cut off by a lost connection, learned later to have ended this way (EngineHub.settleEnded). */ replaces?: number }
   // The moment queued instructions entered the agent's context. Instructions
   // are placed in the context here, not at the position they were sent, so the
   // log records exactly what the agent knew at each step.
-  | { type: "instructions.delivered"; seqs: number[] }
+  // `turn`: the id of the turn they were handed to the tool in, so a server after one that crashed knows which turn it puts back.
+  | { type: "instructions.delivered"; seqs: number[]; turn?: string }
   /**
    * A coding tool's machine dropped in the middle of a turn (a lost connection, a server restart): what it was working on waits
    * again, first in line, for when it is back. `steer`: no drop, a message handed to the turn running that its tool couldn't take
-   * then (Codex run as `codex exec`, a turn past its last step), so it waits for the next turn like any other.
+   * then (Codex run as `codex exec`, a turn past its last step), so it waits for the next turn like any other. `turn`: the id of
+   * the turn a dropped connection cut them from, so a runner back that finished it can say so (EngineHub.settleEnded).
    */
-  | { type: "instructions.requeued"; seqs: number[]; steer?: true }
+  | { type: "instructions.requeued"; seqs: number[]; steer?: true; turn?: string }
   | {
       type: "agent.message";
       text: string;

@@ -43,8 +43,13 @@ export function readyIn(state: SessionState): ReadyItem[] {
     if (!d.files.length) continue;
     const run = runOf(state, lane);
     if (run.status === "running") continue;
-    const name = lane === MAIN_LANE ? (state.mainName ?? "Main") : (state.lanes.find((l) => l.id === lane)?.name ?? lane);
     const tool = state.engines[lane]?.tool;
+    // By the name the session shows it under: the main agent was "Main" here, a name it has nowhere else ("Main's changes" over
+    // Claude Code's work on the home screen, 2026-11-04 UX pass).
+    const name =
+      lane === MAIN_LANE
+        ? state.mainName?.trim() || state.options.agent?.name || (tool ? ENGINE_NAMES[tool] : "Friday Code")
+        : (state.lanes.find((l) => l.id === lane)?.name ?? (tool ? ENGINE_NAMES[tool] : lane));
     // The newest board task of this lane that is done or being checked: what this work was.
     const task = [...(state.board?.tasks ?? [])].reverse().find((t) => t.lane === lane && (t.status === "done" || t.status === "review"));
     if (!task && state.board?.tasks.length) continue;

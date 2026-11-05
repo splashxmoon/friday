@@ -4,6 +4,7 @@ import { Icon, type IconName } from "./icons.js";
 import { EngineMark } from "./BrandMarks.js";
 import type { RecentSession } from "./storage.js";
 import { MenuButton, relTime, useDismiss } from "./ui.js";
+import { revealSeq } from "./feed-window.js";
 
 /**
  * Search, in its own window: sessions by their titles and by everything said in them.
@@ -44,6 +45,7 @@ export function jumpWhenShown(sid: string, seq: number, within = 8000): void {
     if (Date.now() - arrived < 300) return void setTimeout(tryJump, 150);
     let best: HTMLElement | null = null;
     let bestSeq = 0;
+    revealSeq(seq);
     for (const el of document.querySelectorAll<HTMLElement>("[data-seq]")) {
       const n = Number(el.dataset.seq);
       if (n <= seq && n > bestSeq) [best, bestSeq] = [el, n];

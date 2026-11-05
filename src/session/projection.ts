@@ -649,8 +649,10 @@ export function canDriveLane(s: SessionState, userId: string, laneId: string): b
     // where the owner turned control off for editors is driven by nobody but the owner.
     case "role":
       return role === "owner" || (role === lane.control.role && can(s, userId, "control"));
+    // Named people, as named: an owner may give a viewer one lane to drive. A lane someone named only themself on came with their
+    // role, though, so made a viewer they stop driving it (a demoted editor kept the wheel of their own coding tool's lane).
     case "people":
-      return role === "owner" || lane.control.people.includes(userId);
+      return role === "owner" || (lane.control.people.includes(userId) && !(lane.selfNamed && role === "viewer"));
     // Nobody drives a standing lane; it wakes on triggers and takes no instructions.
     case "standing":
       return false;
@@ -868,9 +870,13 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
     case "folder.uploaded":
       s.upload = { files: (s.upload?.files ?? 0) + b.files, name: s.upload?.name ?? b.name };
       break;
-    case "lane.added":
-      addLane(s, b.lane, ev.seq);
+    case "lane.added": {
+      const { selfNamed: _ignored, ...lane } = b.lane;
+      const c = lane.control;
+      const self = c.kind === "people" && c.people.length === 1 && c.people[0] === ev.actor.id && s.members[ev.actor.id]?.role !== "owner";
+      addLane(s, self ? { ...lane, selfNamed: true } : lane, ev.seq);
       break;
+    }
     // A crew's lanes are already wired to each other by the time they get
     // here; folding them is folding several lane.added at one seq.
     case "crew.applied":

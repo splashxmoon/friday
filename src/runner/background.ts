@@ -4,6 +4,7 @@ import path from "node:path";
 import { childEnv } from "./adapters.js";
 import { folderVars } from "./environment.js";
 import { NO_PROMPT } from "./git.js";
+import { own } from "./owned.js";
 
 /**
  * Commands that keep running while the agent carries on: a test watcher, a build in watch mode, a worker, a log tail.
@@ -46,6 +47,11 @@ const LOG_LINES = 400;
 const LINE_CAP = 600;
 /** Per folder: enough for a server, a watcher and a build, few enough that nothing is lost track of. */
 export const MAX_RUNNING = 5;
+/**
+ * Finished ones kept per folder to read back, newest first. Each holds up to LOG_LINES of output, and nothing let go of them
+ * before (forgetFinished was never called), so a runner up for days kept every command its agents ever started.
+ */
+export const KEEP_FINISHED = 15;
 
 const key = (cwd: string, id: string) => `${path.resolve(cwd)}\0${id}`;
 
@@ -144,7 +150,24 @@ export async function startBackground(cwd: string, command: string, opts: { sett
     detached: !win,
     stdio: ["ignore", "pipe", "pipe"],
   });
+  // Ended as Friday quits, what it started included, while anything in its group is left (owned.ts): the exit hook below sees
+  // only a leader still running, and a desktop app's main process quits without it.
+  if (child.pid) {
+    const pid = child.pid;
+    const alive = () => {
+      if (process.platform === "win32") return child.exitCode === null && child.signalCode === null;
+      try {
+        return process.kill(-pid, 0);
+      } catch {
+        return false;
+      }
+    };
+    const off = own({ alive, signal: (sig) => killTree(child, sig) });
+    child.once("close", () => !alive() && off());
+  }
   const id = `bg${++counter}`;
+  const done = [...entries].filter(([, x]) => x.info.cwd === base && !x.info.running).sort(([, a], [, b]) => b.info.startedAt - a.info.startedAt);
+  for (const [k] of done.slice(KEEP_FINISHED)) entries.delete(k);
   const e: Entry = { info: { id, cwd: base, command: cmd, startedAt: Date.now(), running: true, log: [] }, child, lines: 0 };
   entries.set(key(base, id), e);
   child.stdout?.setEncoding("utf8").on("data", (d: string) => push(e, d));

@@ -79,6 +79,16 @@ test("a task's review goes to an agent on the same computer first; one elsewhere
   );
   assert.equal(pickReviewer(state, "doer", ["far", "near"]), "near", "the one that can open the folder");
   assert.equal(pickReviewer(state, "doer", ["far"]), "far", "else whoever is free");
+  const more = project("s", at([
+    [{ type: "session.created", title: "s", ownerId: "u", ownerName: "Arun" } as EventBody, undefined],
+    [{ type: "engine.attached", engine: { tool: "codex", cwd: "/Users/arun/a", hostId: "arun", hostName: "Arun", mode: "full" } } as EventBody, "doer"],
+    [{ type: "engine.attached", engine: { tool: "codex", cwd: "/Users/arun/b", hostId: "arun", hostName: "Arun", mode: "full" } } as EventBody, "twin"],
+    [{ type: "engine.attached", engine: { tool: "claude", cwd: "/Users/arun/c", hostId: "arun", hostName: "Arun", mode: "full" } } as EventBody, "other"],
+    [{ type: "engine.attached", engine: { tool: "cursor", cwd: "/Users/arokia/d", hostId: "arokia", hostName: "Arokia", mode: "full" } } as EventBody, "away"],
+  ]));
+  assert.equal(pickReviewer(more, "doer", ["twin", "away", "other"]), "other", "on this computer, another tool than the one that did it");
+  assert.equal(pickReviewer(more, "doer", ["twin", "away"]), "twin", "being able to open the folder comes before another tool");
+  assert.equal(pickReviewer(more, "doer", ["away"]), "away");
   assert.equal(awayDiff(state, "doer", "near"), "", "it can read the folder itself");
   const brief = awayDiff(state, "doer", "far");
   assert.match(brief, /scripts\/run\.sh \(modified, \+2 -1\)/);

@@ -53,6 +53,18 @@ function within(root: string, rel: string): string | null {
 }
 
 /**
+ * Whether a path is in git's own folder (`.git`, as a folder or a worktree's file), by the name asked for and where it really
+ * is. Never written: git runs what its config and hooks say (core.fsmonitor, a pre-commit hook), so a write there turned a
+ * machine that only lets files change into one that runs any command at Friday's next git call (2026-11-04 security review).
+ * Windows drops a name's trailing dots and spaces, so `.git.` is `.git` there.
+ */
+function inGitDir(root: string, full: string): boolean {
+  const segs = [...path.relative(root, full).split(path.sep), ...folderKey(full).slice(folderKey(root).length).split("/")];
+  return segs.some((s) => s.toLowerCase().replace(/[. ]+$/, "") === ".git");
+}
+const GIT_DIR = "That's git's own folder: Friday's agent changes the project's files, never git's settings or hooks.";
+
+/**
  * Secrets stay secret by default. A `.env` shows which variables it sets,
  * never their values; key files and package-registry logins aren't read at
  * all. Coding CLIs on the host's machine are their own business.
@@ -445,6 +457,7 @@ async function write(base: string, rel: string, content: string): Promise<string
   const file = within(base, rel);
   if (!file) return "That path is outside the folder this agent is working in.";
   if (!rel.trim()) return "Which file?";
+  if (inGitDir(base, file)) return GIT_DIR;
   if (credentials(file)) return CREDS_WORDS;
   if (content.length > MAX_WRITE) return `That's ${content.length} characters; write at most ${MAX_WRITE} in one go.`;
   const before = await readFile(file, "utf8").catch(() => null);
@@ -466,6 +479,7 @@ async function write(base: string, rel: string, content: string): Promise<string
 async function edit(base: string, rel: string, find: string, replace: string): Promise<string> {
   const file = within(base, rel);
   if (!file) return "That path is outside the folder this agent is working in.";
+  if (inGitDir(base, file)) return GIT_DIR;
   if (credentials(file)) return CREDS_WORDS;
   // Whether find matched would answer yes or no about a hidden value, one guessed character at a time.
   if (secretEnv(file)) return envHands(rel);

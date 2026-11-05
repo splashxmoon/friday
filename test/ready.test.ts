@@ -58,3 +58,14 @@ test("in a room with a board, a teammate's changes count only with a task done o
   assert.equal(readyIn(open).length, 0, "changes with no finished task are work in progress");
   assert.equal(readyIn(done)[0]?.task, "Cut the trailer");
 });
+
+test("work is named for the agent as the session shows it, never the main lane's inner name", () => {
+  const diff = { base: "b0", seq: 3, files: [file("README.md", 4, 0)] };
+  const base = { id: "r3", title: "Add a notes section", lanes: [{ id: "l2", name: "Claude Code 2" }], engines: { [MAIN_LANE]: { tool: "claude" } }, diffs: { [MAIN_LANE]: diff, l2: diff }, laneRuns: {}, members: {}, options: {}, run: { status: "idle" } } as unknown as Parameters<typeof readyIn>[0];
+  const [main, second] = readyIn(base);
+  assert.equal(main?.who, "Claude Code", "the home screen said “Main's changes” over Claude Code's work");
+  assert.equal(second?.who, "Claude Code 2");
+  assert.equal(main?.where, "Add a notes section");
+  assert.equal(readyIn({ ...base, mainName: "Ada" } as typeof base)[0]?.who, "Ada", "a name somebody gave it comes first");
+  assert.equal(readyIn({ ...base, engines: {} } as typeof base)[0]?.who, "Friday Code", "no coding tool: Friday's own agent");
+});

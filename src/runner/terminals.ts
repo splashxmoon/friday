@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import path from "node:path";
 import { shellEnv } from "./adapters.js";
+import { own, processTree, type Owned } from "./owned.js";
 
 /**
  * Real shells on a linked machine, for a browser to draw (the Terminal panel, without the desktop app).
@@ -30,6 +31,7 @@ export type TermOut =
   | { kind: "term"; op: "exit"; owner: string; id: string; code: number };
 
 interface Pty {
+  pid?: number;
   write(d: string): void;
   resize(cols: number, rows: number): void;
   kill(): void;
@@ -40,6 +42,8 @@ type PtySpawn = (file: string, args: string[], opts: Record<string, unknown>) =>
 
 interface Shell {
   pty: Pty;
+  /** It and what runs in it, ended as Friday quits (owned.ts). */
+  tree?: { all: Owned; off: () => void };
   owner: string;
   cwd: string;
   out: string;
@@ -137,20 +141,49 @@ function pipeShell(cwd: string): Pty {
       }
     },
     resize() {},
+    ...(child.pid ? { pid: child.pid } : {}),
     kill: () => void child.kill(),
     onData: (f) => void (onData = f),
     onExit: (f) => void child.on("close", (code) => f({ exitCode: code ?? 0 })),
   };
 }
 
+/** A shell and what runs in it, listed to be ended as Friday quits (owned.ts). */
+export function watched(pid: number, kill: () => void): { all: Owned; off: () => void } {
+  const all = processTree(pid, kill);
+  return { all, off: own(all) };
+}
+
+/**
+ * A shell being closed: what runs in it is told so too (a hangup, as a terminal window closing does), and it stays listed until
+ * all of it is gone, so Friday quitting ends a job that ignored the hangup. Seen now, while the shell is still its parent.
+ */
+export function ending(tree: { all: Owned; off: () => void } | undefined): void {
+  if (!tree) return;
+  tree.all.signal("SIGHUP");
+  setTimeout(() => !tree.all.alive() && tree.off(), 10_000).unref();
+}
+
 export class Terminals {
   private shells = new Map<string, Shell>();
+  /**
+   * Shells still opening (the pty module loading, which the first time is an install of half a minute), by id: a second ask for
+   * the same one waits for the first, and a drop, kill or stopAll meanwhile marks it off. Before, a page closed while its shell
+   * was opening left that shell running with nobody to close it, and a page asking twice opened two and lost one.
+   */
+  private opening = new Map<string, { owner: string; off: boolean; done: Promise<void> }>();
 
   constructor(private send: (m: TermOut) => void) {}
 
   handle(m: TermIn): void {
-    if (m.op === "start") void this.start(m);
-    else if (m.op === "drop") {
+    if (m.op === "start") {
+      const before = this.opening.get(m.id);
+      const ticket = { owner: m.owner, off: false, done: Promise.resolve() };
+      ticket.done = (before?.done ?? Promise.resolve()).then(() => this.start(m, ticket));
+      this.opening.set(m.id, ticket);
+      void ticket.done.finally(() => this.opening.get(m.id) === ticket && this.opening.delete(m.id));
+    } else if (m.op === "drop") {
+      for (const o of this.opening.values()) if (o.owner === m.owner) o.off = true;
       for (const [id, s] of this.shells) if (s.owner === m.owner) this.kill(id);
     } else {
       const s = this.shells.get(m.id);
@@ -164,9 +197,14 @@ export class Terminals {
         }
       } else if (m.op === "kill") this.kill(m.id);
     }
+    if (m.op === "kill") {
+      const o = this.opening.get(m.id);
+      if (o?.owner === m.owner) o.off = true;
+    }
   }
 
   stopAll(): void {
+    for (const o of this.opening.values()) o.off = true;
     for (const id of [...this.shells.keys()]) this.kill(id);
   }
 
@@ -174,6 +212,7 @@ export class Terminals {
     const s = this.shells.get(id);
     if (!s) return;
     this.shells.delete(id);
+    ending(s.tree);
     try {
       s.pty.kill();
     } catch {
@@ -181,7 +220,7 @@ export class Terminals {
     }
   }
 
-  private async start(m: Extract<TermIn, { op: "start" }>): Promise<void> {
+  private async start(m: Extract<TermIn, { op: "start" }>, ticket: { off: boolean }): Promise<void> {
     const reply = (result: Extract<TermOut, { op: "started" }>["result"]) => this.send({ kind: "term", op: "started", owner: m.owner, req: m.req, result });
     if (!m.id) return reply({ ok: false, error: "That terminal has no id." });
     const cwd = usable(m.cwd ?? "") ?? homedir();
@@ -203,11 +242,13 @@ export class Terminals {
     }
     const early: string[] = [];
     const spawn = await loadPty((t) => early.push(t));
+    // Closed while it was opening: nothing is started for a page that is gone.
+    if (ticket.off) return reply({ ok: false, error: "That terminal was closed before it opened." });
     try {
       const pty = spawn
         ? spawn(file, args, { name: "xterm-256color", cols, rows, cwd, env: { ...shellEnv(), TERM: "xterm-256color" }, useConpty: true })
         : pipeShell(cwd);
-      const shell: Shell = { pty, owner: m.owner, cwd, out: early.join("") };
+      const shell: Shell = { pty, owner: m.owner, cwd, out: early.join(""), ...(pty.pid ? { tree: watched(pty.pid, () => pty.kill()) } : {}) };
       this.shells.set(m.id, shell);
       pty.onData((data) => {
         shell.out = shell.out.length + data.length > KEEP ? (shell.out + data).slice(-KEEP) : shell.out + data;
@@ -215,6 +256,8 @@ export class Terminals {
       });
       pty.onExit(({ exitCode }) => {
         if (this.shells.get(m.id)?.pty !== pty) return;
+        // Exited by itself (`exit`): what it left running, the person left running.
+        shell.tree?.off();
         this.shells.delete(m.id);
         this.send({ kind: "term", op: "exit", owner: m.owner, id: m.id, code: exitCode });
       });

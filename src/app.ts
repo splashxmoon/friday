@@ -32,6 +32,7 @@ import { Redis } from "ioredis";
 import { ops } from "./ops.js";
 import { WebSocket, WebSocketServer } from "ws";
 import { fetchIssue, fetchPr, issueRef, parseIssueUrl, parsePrLink, prRef } from "./github-issue.js";
+import { hookPayload, hookUrlOk, NotifyHooks, postHook } from "./notify-hook.js";
 import { AutomationStore, cleanAutomation, describeWhen, describeWho, dueAutomation, promptFor as automationPrompt, WAIT_FOR_COMPUTER_MS, type Automation, type AutomationRun } from "./automations.js";
 import { ProviderError, type LLM } from "./agent/llm.js";
 import { OwnModelLLM } from "./agent/own-model.js";
@@ -400,8 +401,18 @@ export async function createApp(o: AppOptions) {
       .catch(() => {})
       .then(() => resyncs.forEach((r) => r()));
   });
+  /**
+   * "Needs you", posted to whoever set a webhook, in both editions: on this computer's it is how a phone hears that an agent
+   * asked something while the laptop sat in another room. Every event is looked at once it is written, and only the event that
+   * started something waiting on a person with a hook is posted: the seq check keeps a question from being sent again on
+   * every later event while it is still open.
+   */
+  const hooks = new NotifyHooks(redis, o.prefix);
+  await hooks.load();
   // Signed at the version its link has now, so "Replace link" also stops an owner link someone copied (admit). An owner's is the editor link's.
   const linkToken = (sid: string, state: SessionState, role: Role) => signInvite(o.secret, sid, role, state.links[role === "owner" ? "editor" : role].version);
+  // A post from this computer's edition carries no link: its address answers only here, and the post is read on a phone.
+  const hookLink = (_sid: string, _state: SessionState) => "";
 
   const guardRunaway = async (sid: string, lane: string) => {
     const [state, events] = await Promise.all([store.state(sid), store.events(sid)]);
@@ -618,6 +629,32 @@ export async function createApp(o: AppOptions) {
         if (d?.id && !((on[d.id] ?? 0) > 0)) scheduleHandoff(sid, d.id, lane);
       }).catch(() => {});
     }
+    if (!hooks.any) return;
+    void (async () => {
+      const state = await store.state(sid);
+      for (const [id, m] of Object.entries(state.members)) {
+        if (m.removed || !hooks.has(id) || id === ev.actor.id) continue;
+        const item = attentionIn(state, id).find((i) => i.seq === ev.seq);
+        if (!item) continue;
+        const url = await hooks.get(id);
+        if (url) void postHook(url, hookPayload(item, hookLink(sid, state)));
+      }
+      // A run that finished is not waiting on anyone, but the person who set it going wants to know: the driver, or the owner.
+      if (ev.body.type === "run.ended" && ev.body.outcome === "done") {
+        const who = state.driver?.id || state.ownerId;
+        const m = state.members[who];
+        if (who && m && !m.removed && hooks.has(who)) {
+          const lane = ev.lane === MAIN_LANE ? "" : (state.lanes.find((l) => l.id === ev.lane)?.name ?? "");
+          const url = await hooks.get(who);
+          if (url) {
+            // The overnight note: the agent's last words and the one thing to do first, so the post can be read without opening anything.
+            const said = "", next = "";
+            const text = `${lane ? `${lane} finished its run` : "The run finished"}${said ? `: ${said}` : ""}${next ? `\nStart with: ${next}` : ""}`;
+            void postHook(url, hookPayload({ title: state.title, kind: "done", text }, hookLink(sid, state)));
+          }
+        }
+      }
+    })().catch((err) => console.error("[notify-hook]", err));
   };
   await bus.start();
   const files = new FileStore(o.dataDir ?? process.env.DATA_DIR ?? path.join(process.cwd(), "data", "uploads"));
@@ -2416,48 +2453,51 @@ export async function createApp(o: AppOptions) {
       const runs = await teammates.selfRuns();
       if (!Object.keys(runs).length) return;
       const places = await placesNow();
-      for (const [sid, sr] of Object.entries(runs)) {
-        const place = places.find((p) => p.sid === sid);
-        if (!place) {
-          await teammates.setSelfRun(sid, null);
-          continue;
-        }
-        const [state, events] = await Promise.all([store.state(sid).catch(() => null), store.events(sid).catch(() => null)]);
-        if (!state || !events) continue;
-        const lanes = Object.values(place.lanes);
-        // Its budget spent or its end time come (team-budget.ts): it stops, saying which. Turns under way finish.
-        const over = runOver(sr, events, lanes, now);
-        if (over) {
-          await selfRunOff(sid, over, undefined, true);
-          continue;
-        }
-        for (const lane of lanes) {
-          const ask = state.approvals[lane];
-          if (!ask || !(await redis.set(`${o.prefix}selfrun-approved:${sid}:${ask.id}`, "1", "EX", 86_400, "NX"))) continue;
-          // As Friday, not the person: the room runs on its own, at full access.
-          const r = await store.append(sid, FRIDAY_SAYS, { type: "instruction", text: "[Friday] Approved: this room runs on its own, at full access.", interrupt: false, approval: { id: ask.id, approve: true }, hop: 1 }, { lane });
-          if (r.ok) void bus.wake(sid, lane);
-        }
-        const busy = lanes.some((l) => {
-          const st = runOf(state, l).status;
-          return st === "running" || st === "waiting_for_human" || !!state.approvals[l] || runnableQueue(events, l, pendingFor(state, l)).length > 0;
-        });
-        if (busy || Object.values(state.resumes ?? {}).some((r) => r.at > now - 5 * 60_000 && r.at <= now + 10 * 60_000)) continue;
-        const lead = await leadIn(sid);
-        if (!lead || !state.engines[lead]?.online) continue;
-        const quietSince = Math.max(events.findLast((e) => e.body.type === "run.ended")?.ts ?? 0, sr.since);
-        if (now - quietSince < QUIET_MS) continue;
-        const key = `${o.prefix}selfrun-nudge:${sid}`;
-        const had = JSON.parse((await redis.get(key)) ?? "null") as { at: number; seq: number; stalls: number } | null;
-        if (had && had.at >= sr.since && now - had.at < NUDGE_GAP_MS) continue;
-        const stalls = had && had.at >= sr.since && !movedSince(events, had.seq) ? had.stalls + 1 : 0;
-        if (stalls >= STALL_NUDGES) {
-          await selfRunOff(sid, `It stopped getting anywhere: ${STALL_NUDGES} nudges in a row and nothing changed.`);
-          continue;
-        }
-        await redis.set(key, JSON.stringify({ at: now, seq: state.lastSeq, stalls }), "EX", 7 * 86_400);
-        await tellTeammate(sid, lead, selfRunNudge(sr.goal, boardLine(state)), { hop: 1 });
+      // Each room on its own: one that fails here (a store blip, a room half taken away) is said and skipped, and the rooms after
+      // it, and the rest of the clock (repump, pruneTold), still go.
+      for (const [sid, sr] of Object.entries(runs)) await selfRunOnce(sid, sr, places, now).catch((e) => closingOr(`[teammates] running on its own in ${sid}:`, e));
+    };
+    const selfRunOnce = async (sid: string, sr: Awaited<ReturnType<typeof teammates.selfRuns>>[string], places: Awaited<ReturnType<typeof placesNow>>, now: number): Promise<void> => {
+      const place = places.find((p) => p.sid === sid);
+      if (!place) {
+        await teammates.setSelfRun(sid, null);
+        return;
       }
+      const [state, events] = await Promise.all([store.state(sid).catch(() => null), store.events(sid).catch(() => null)]);
+      if (!state || !events) return;
+      const lanes = Object.values(place.lanes);
+      // Its budget spent or its end time come (team-budget.ts): it stops, saying which. Turns under way finish.
+      const over = runOver(sr, events, lanes, now);
+      if (over) {
+        await selfRunOff(sid, over, undefined, true);
+        return;
+      }
+      for (const lane of lanes) {
+        const ask = state.approvals[lane];
+        if (!ask || !(await redis.set(`${o.prefix}selfrun-approved:${sid}:${ask.id}`, "1", "EX", 86_400, "NX"))) continue;
+        // As Friday, not the person: the room runs on its own, at full access.
+        const r = await store.append(sid, FRIDAY_SAYS, { type: "instruction", text: "[Friday] Approved: this room runs on its own, at full access.", interrupt: false, approval: { id: ask.id, approve: true }, hop: 1 }, { lane });
+        if (r.ok) void bus.wake(sid, lane);
+      }
+      const busy = lanes.some((l) => {
+        const st = runOf(state, l).status;
+        return st === "running" || st === "waiting_for_human" || !!state.approvals[l] || runnableQueue(events, l, pendingFor(state, l)).length > 0;
+      });
+      if (busy || Object.values(state.resumes ?? {}).some((r) => r.at > now - 5 * 60_000 && r.at <= now + 10 * 60_000)) return;
+      const lead = await leadIn(sid);
+      if (!lead || !state.engines[lead]?.online) return;
+      const quietSince = Math.max(events.findLast((e) => e.body.type === "run.ended")?.ts ?? 0, sr.since);
+      if (now - quietSince < QUIET_MS) return;
+      const key = `${o.prefix}selfrun-nudge:${sid}`;
+      const had = JSON.parse((await redis.get(key)) ?? "null") as { at: number; seq: number; stalls: number } | null;
+      if (had && had.at >= sr.since && now - had.at < NUDGE_GAP_MS) return;
+      const stalls = had && had.at >= sr.since && !movedSince(events, had.seq) ? had.stalls + 1 : 0;
+      if (stalls >= STALL_NUDGES) {
+        await selfRunOff(sid, `It stopped getting anywhere: ${STALL_NUDGES} nudges in a row and nothing changed.`);
+        return;
+      }
+      await redis.set(key, JSON.stringify({ at: now, seq: state.lastSeq, stalls }), "EX", 7 * 86_400);
+      await tellTeammate(sid, lead, selfRunNudge(sr.goal, boardLine(state)), { hop: 1 });
     };
 
     selfRunOn = async (sid, goal, by, budget) => {
@@ -2560,7 +2600,7 @@ export async function createApp(o: AppOptions) {
           }
         }
       }
-      await runSelfRuns(now);
+      await runSelfRuns(now).catch((e) => closingOr("[teammates] running on its own:", e));
       await repump();
       mesh.pruneTold(now);
       for (const [k, at] of retried) if (!at.some((x) => now - x < 30 * 60_000)) retried.delete(k);
@@ -3867,7 +3907,8 @@ export async function createApp(o: AppOptions) {
       if ("error" in picked) return json(res, picked.status, { error: picked.error });
       const token = picked.token ?? str(req.headers["x-friday-link"], 200);
       const onThisMachine = !picked.token && isOwnMachine(req) && req.headers["x-friday-local"] === "1";
-      const useLink = !!token && links.connected(token) && (!onThisMachine || req.headers["x-friday-prefer"] === "link");
+      // The link must be this person's own (a picked machine already is): someone else's token reads someone else's computer.
+      const useLink = !!token && (picked.token ? links.connected(token) : (await linkedFor(req, token)) === "yes") && (!onThisMachine || req.headers["x-friday-prefer"] === "link");
       // A preview running here needs no machine at all, which is the whole
       // point of it: the folder was uploaded precisely because there isn't one.
       const here = req.headers["x-friday-here"] === "1";
@@ -3929,7 +3970,10 @@ export async function createApp(o: AppOptions) {
         // "Is a machine linked?" is a question with an answer, not a refusal: a signed-in person with none gets "no", so the
         // page's look at the machine stops counting as a permission failure. Everything else stays refused: anyone signed
         // out, a link that is another account's, and every call that would actually run something.
-        if (method === "tools" && link === "no" && !picked.token && (await identity(req))) return json(res, 200, { linked: false, tools: [], home: "" });
+        // The same for the other looks the page takes as it opens, before the "tools" answer has told it there is no machine:
+        // the coding tools' usage and the person's own models, each "none" (2026-11-04, two 403s in the console on every load).
+        if (link === "no" && !picked.token && ["tools", "usage", "models.own.list"].includes(method) && (await identity(req)))
+          return json(res, 200, method === "tools" ? { linked: false, tools: [], home: "" } : method === "usage" ? { linked: false } : { linked: false, models: [] });
         return json(res, 403, { error: linkRefusal(link) ?? `No machine is connected. Link yours to run ${toolList()}.` });
       }
       // With both available, the person chooses; otherwise there's one answer.
@@ -5324,7 +5368,7 @@ export async function createApp(o: AppOptions) {
       if (op === "branches") await noteBranch(sid, str(url.searchParams.get("lane") ?? "", 40) || undefined, r.output).catch(() => {});
       // A file that couldn't be read is an error, not a file whose text is the reason: an editor would offer to save it.
       if (op === "read" && raw && readFailed(r.output)) return json(res, 200, { error: r.output });
-      return json(res, 200, { output: viewer && op === "read" ? hideSecrets(r.output).text : r.output, ...(r.where ? { where: r.where } : {}), ...(r.stale ? { stale: r.stale } : {}) });
+      return json(res, 200, { output: viewer ? shieldedOutput(r.output) : r.output, ...(r.where ? { where: r.where } : {}), ...(r.stale ? { stale: r.stale } : {}) });
     }
 
 
@@ -5417,6 +5461,25 @@ export async function createApp(o: AppOptions) {
     }
 
 
+    // Where "needs you" is posted for this person: an ntfy topic, a chat's incoming webhook, any URL that takes a POST, or nothing.
+    if (url.pathname === "/api/me/notify" || url.pathname === "/api/me/notify/test") {
+      const me = await identity(req);
+      if (!me) return json(res, 401, { error: "Not signed in." });
+      if (req.method === "GET") return json(res, 200, { url: await hooks.get(me.id) });
+      if (req.method === "PUT" && url.pathname === "/api/me/notify") {
+        const given = String((await readJson(req)).url ?? "").trim();
+        if (given && !hookUrlOk(given)) return json(res, 400, { error: "That needs to be an https link (ntfy topics and chat webhooks are)." });
+        await hooks.set(me.id, given);
+        return json(res, 200, { url: given });
+      }
+      if (req.method === "POST" && url.pathname === "/api/me/notify/test") {
+        const target = await hooks.get(me.id);
+        if (!target) return json(res, 400, { error: "Save a webhook URL first." });
+        const ok = await postHook(target, hookPayload({ title: "Friday", kind: "question", text: "This is a test. Replies to it go nowhere." }, o.local ? "" : (o.appUrl || `http://localhost:${o.port}`).replace(/\/+$/, "")));
+        return ok ? json(res, 200, { ok: true }) : json(res, 502, { error: "The webhook didn't accept the post. Check the URL." });
+      }
+      return json(res, 405, { error: "Method not allowed." });
+    }
 
     // Your phone (local/phone.ts), from this computer's own page only: whether it may connect, a code to pair one, and the phones paired.
     const phone = o.local?.phone;
@@ -5632,7 +5695,9 @@ export async function createApp(o: AppOptions) {
 
 
     // Developing (hot), the bundle as it is now, rebuilt after a change; otherwise the one built at start.
-    const asset = req.method === "GET" ? (hot.on ? ((await bundleClient()).get(url.pathname) ?? hotChunks.get(url.pathname)) : bundle.get(url.pathname)) : undefined;
+    // HEAD as well, answered like GET without the body (sendAsset): uptime checks and link checkers ask that way.
+    const read = req.method === "GET" || req.method === "HEAD";
+    const asset = read ? (hot.on ? ((await bundleClient()).get(url.pathname) ?? hotChunks.get(url.pathname)) : bundle.get(url.pathname)) : undefined;
     if (asset) {
       const hashed = url.pathname.startsWith("/chunks/") || url.pathname.startsWith("/assets/");
       // The entry files keep their names between builds, so they revalidate (a "not modified" when nothing changed); the hashed ones never change.
@@ -5642,7 +5707,7 @@ export async function createApp(o: AppOptions) {
     if (req.method === "GET" && hotStream(req, res)) return;
     // An address under /api that no route answered is a missing API, not a page of the app (Testing API-4).
     if (url.pathname.startsWith("/api/")) return json(res, 404, { error: "Not found" });
-    if (req.method === "GET") return serveStatic(req, url.pathname, res);
+    if (read) return serveStatic(req, url.pathname, res);
     json(res, 404, { error: "Not found" });
   }
 
@@ -5690,6 +5755,8 @@ export async function createApp(o: AppOptions) {
   // laptop that went to sleep.
   // A browser's terminals on one of its owner's machines (registry termOpen, src/runner/terminals.ts).
   const termWss = new WebSocketServer({ noServer: true, maxPayload: 4 << 20 });
+  /** How much may wait to go to one page before it is cut off (see `behind` below); FRIDAY_SLOW_PAGE_MB for a test. */
+  const slowPageBytes = (Number(process.env.FRIDAY_SLOW_PAGE_MB) || 64) * 1024 * 1024;
   // Your other computers' links (the open-source edition, over a home network or Tailscale) are asked every 10s, not 25: one
   // frozen there read "connected" here for 60-75s (2026-11-04 linking test). Two rounds missed still end it, and a round this
   // server itself was late for still counts against nobody (heartbeat), so a busy moment here is no false alarm.
@@ -5780,6 +5847,8 @@ export async function createApp(o: AppOptions) {
 
   ops.gauge("runners", () => runnerWss.clients.size);
   ops.gauge("links", () => linkWss.clients.size);
+  // Who those runners act as, and the browser terminals open on people's machines: each kept until its socket closes.
+  ops.gauge("runners.signedIn", () => runnersOnline.size);
   runnerWss.on("connection", (ws, req) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     const q = (k: string, n: number) => (url.searchParams.get(k) ?? "").trim().slice(0, n);
@@ -5794,6 +5863,8 @@ export async function createApp(o: AppOptions) {
         if (!account) return closeSaying(ws, 4001, "This runner has no permission to act in that session. Start it from Friday again.");
         me.id = account.id;
         me.name = account.name;
+        // Gone while its account was read: its close went by before the line below listens for it, and it would be kept for good.
+        if (ws.readyState === WebSocket.CLOSED) return;
         runnersOnline.set(ws, account.id);
         ws.on("close", () => runnersOnline.delete(ws));
         const why = await admit(sid, verifyInvite(o.secret, url.searchParams.get("invite")), me);
@@ -5829,6 +5900,7 @@ export async function createApp(o: AppOptions) {
           resumeMessages: Number(q("resumeMessages", 10)) || 0,
           resumeTool: q("resumeTool", 20) || undefined,
           caps: q("caps", 100),
+          ended: q("ended", 2000) || undefined,
         }));
         slowly(`a runner attaching to ${sid}`, attaching);
       })().catch((err) => {
@@ -5905,7 +5977,19 @@ export async function createApp(o: AppOptions) {
     const tok = verifySession(o.secret, readCookie(req.headers.cookie, SESSION_COOKIE));
     const me: Member = { id: "", name: "", role: "viewer" };
 
-    const send = (m: unknown) => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify(m));
+    /**
+     * A page this far behind on what it has been sent is cut off rather than written to: everything sent to a page that has
+     * stopped reading waited in this server's memory, without end, and its own pings kept the heartbeat from ever dropping it.
+     * Cut off, it reconnects with what it holds (`since`) and is sent the rest from the log. Well over any hello (a page asks
+     * for a tail or `since`, and the longest session's whole log was 33 MB), so only a page that is not reading meets it.
+     */
+    const behind = () => {
+      if (ws.bufferedAmount <= slowPageBytes) return false;
+      console.warn(`[ws] cut off a page in ${sid} that stopped reading (${Math.round(ws.bufferedAmount / 1048576)} MB waiting)`);
+      ws.terminate();
+      return true;
+    };
+    const send = (m: unknown) => ws.readyState === WebSocket.OPEN && !behind() && ws.send(JSON.stringify(m));
     let unsub: (() => Promise<void>) | null = null;
     let joined = false;
     let live = false;
@@ -5919,7 +6003,7 @@ export async function createApp(o: AppOptions) {
     let deltaUpTo = 0;
     const buffered: [BusMessage, string][] = [];
     // A bus message goes on as it was published, already the shape the page reads, not stringified again for every socket.
-    const pass = (raw: string) => ws.readyState === WebSocket.OPEN && ws.send(raw);
+    const pass = (raw: string) => ws.readyState === WebSocket.OPEN && !behind() && ws.send(raw);
 
     const pushInvites = async () => {
       const st = await store.state(sid);
@@ -5973,6 +6057,8 @@ export async function createApp(o: AppOptions) {
       if (!account) reject(4001, "Sign in to join this session.");
       me.id = account!.id;
       me.name = account!.name;
+      // Gone while its account was read: its close has been handled already, and would never take it out of these again.
+      if (ws.readyState === WebSocket.CLOSED) throw new Error("rejected");
       online.set(ws, me.id);
       watching.set(ws, sid);
       const why = await admit(sid, inv, me);
@@ -6074,6 +6160,8 @@ export async function createApp(o: AppOptions) {
       } catch {
         return send({ kind: "result", ok: false, error: "Malformed message" });
       }
+      // `null` is JSON too: read as a message it threw, and threw again where the error was being answered, so nothing was.
+      if (!msg || typeof msg !== "object") return send({ kind: "result", ok: false, error: "Malformed message" });
       try {
         // The page asking whether its socket still leads anywhere (see useSession).
         if (msg.type === "ping") return send({ kind: "pong" });
@@ -6370,6 +6458,18 @@ export async function mapLimit<T, R>(items: readonly T[], n: number, fn: (item: 
     }),
   );
   return out;
+}
+
+/**
+ * A repository read as a viewer gets it: secrets hidden in a file's text and in the Git panel's diffs, commits and comparisons
+ * alike (it was the file read only, so a viewer read a committed key in a diff). JSON is hidden value by value, so it stays JSON.
+ */
+function shieldedOutput(output: string): string {
+  try {
+    return JSON.stringify(hideSecretsIn(JSON.parse(output) as unknown));
+  } catch {
+    return hideSecrets(output).text;
+  }
 }
 
 const str = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");

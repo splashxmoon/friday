@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, powerMonitor } from "electron";
 import pkg from "electron-updater";
+import { stallGuard } from "./update-stall.js";
 
 /**
  * Keeping the app up to date: the product app (desktop/main.ts) and the open-source one (src/local/desktop.ts) alike, each from
@@ -45,12 +46,33 @@ const FIRST = 5_000;
 const MIN_GAP = 60_000;
 /** After a failed check (offline, a hiccup) the next try is soon, not in ten minutes. */
 const RETRY = 2 * 60_000;
+/**
+ * A check or download with no sign of life this long has stalled: electron-updater asks through Electron's net, where its socket
+ * timeout never applies, and a download cut off by sleep or a network change sat at "downloading" for good. check() returns
+ * early while it does, so no newer version was ever looked for again until the app restarted.
+ */
+const STALL = 3 * 60_000;
 
 let state: UpdateState = { stage: "idle", current: app.getVersion() };
 let offered = "";
 let lastCheck = 0;
 let timer: NodeJS.Timeout | null = null;
 let retry: NodeJS.Timeout | null = null;
+/** The running download's, to end it when it stalls. */
+let token: { cancel(): void } | null = null;
+
+/** Look again in a couple of minutes, not the full interval. */
+function later(): void {
+  if (retry) clearTimeout(retry);
+  retry = setTimeout(() => check(), RETRY);
+}
+
+const stall = stallGuard(STALL, () => {
+  token?.cancel();
+  token = null;
+  set({ stage: "idle", percent: undefined, error: "The update stopped downloading. Friday tries again in a few minutes." });
+  later();
+});
 
 // Not a screenshot's offscreen window (capture.ts), which can't show a dialog or hear the state.
 const windows = () => BrowserWindow.getAllWindows().filter((w) => !w.webContents.isOffscreen());
@@ -110,7 +132,15 @@ export function check(): UpdateState {
   if (state.stage === "checking" || state.stage === "downloading" || state.stage === "ready") return state;
   lastCheck = Date.now();
   set({ stage: "checking" });
-  void autoUpdater.checkForUpdates().catch((e: Error) => set({ stage: "error", error: e.message }));
+  stall.poke();
+  void autoUpdater
+    .checkForUpdates()
+    .then((r) => {
+      token = r?.cancellationToken ?? null;
+      // Ended by the stall guard, it rejects; any other failure is the "error" event's to report.
+      void r?.downloadPromise?.catch(() => {});
+    })
+    .catch((e: Error) => (stall.stop(), set({ stage: "error", error: e.message })));
   return state;
 }
 
@@ -158,15 +188,17 @@ export function registerUpdates(): void {
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.logger = null;
 
-  autoUpdater.on("checking-for-update", () => set({ stage: "checking" }));
-  autoUpdater.on("update-available", (info: { version: string }) => set({ stage: "available", version: info.version }));
-  autoUpdater.on("update-not-available", () => set({ stage: "current", version: undefined, error: undefined }));
-  autoUpdater.on("download-progress", (p: { percent: number }) => set({ stage: "downloading", percent: Math.round(p.percent) }));
+  autoUpdater.on("checking-for-update", () => (stall.poke(), set({ stage: "checking" })));
+  autoUpdater.on("update-available", (info: { version: string }) => (stall.poke(), set({ stage: "available", version: info.version })));
+  autoUpdater.on("update-not-available", () => (stall.stop(), set({ stage: "current", version: undefined, error: undefined })));
+  autoUpdater.on("download-progress", (p: { percent: number }) => (stall.poke(), set({ stage: "downloading", percent: Math.round(p.percent) })));
   autoUpdater.on("update-downloaded", (info: { version: string }) => {
+    stall.stop();
+    token = null;
     set({ stage: "ready", version: info.version, percent: 100 });
     void offer(info.version);
   });
-  autoUpdater.on("error", (e: Error) => set({ stage: "error", error: plainly(e.message) }));
+  autoUpdater.on("error", (e: Error) => (stall.stop(), set({ stage: "error", error: plainly(e.message) })));
 
   setTimeout(() => check(), FIRST);
   timer = setInterval(() => check(), EVERY);
@@ -177,11 +209,9 @@ export function registerUpdates(): void {
   app.on("browser-window-focus", soon);
   powerMonitor.on("resume", () => setTimeout(soon, 3_000));
   // A failed check tries again shortly instead of waiting out the full interval.
-  autoUpdater.on("error", () => {
-    if (retry) clearTimeout(retry);
-    retry = setTimeout(() => check(), RETRY);
-  });
+  autoUpdater.on("error", later);
   app.on("before-quit", () => {
+    stall.stop();
     if (timer) clearInterval(timer);
     if (retry) clearTimeout(retry);
   });

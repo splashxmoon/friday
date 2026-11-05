@@ -70,7 +70,13 @@ interface Pending {
 
 const pending = new Map<string, Pending>();
 
-export function startLogin(key: string, argv: string[], opts: { env?: NodeJS.ProcessEnv; waitMs?: number } = {}): Promise<{ url?: string; command: string; pid?: number }> {
+/**
+ * How long a sign-in waits for its code before it is ended. A tool's sign-in code expires well within this; one nobody finished
+ * (the page closed, the person went off) used to hold its CLI open on the machine for as long as the runner ran.
+ */
+export const LOGIN_TTL_MS = 20 * 60_000;
+
+export function startLogin(key: string, argv: string[], opts: { env?: NodeJS.ProcessEnv; waitMs?: number; expireMs?: number } = {}): Promise<{ url?: string; command: string; pid?: number }> {
   const [cmd, ...args] = argv;
   const quote = (s: string) => (process.platform === "win32" ? (/[\s"]/.test(s) ? `"${s}"` : s) : `'${s.replace(/'/g, `'\''`)}'`);
   const command = argv.map(quote).join(" ");
@@ -86,6 +92,12 @@ export function startLogin(key: string, argv: string[], opts: { env?: NodeJS.Pro
     }
     const held: Pending = { child, out: "", code: null };
     pending.set(key, held);
+    const expiry = setTimeout(() => {
+      if (pending.get(key) === held) cancelLogin(key);
+      else if (held.code === null) child.kill();
+    }, opts.expireMs ?? LOGIN_TTL_MS);
+    expiry.unref?.();
+    child.once("exit", () => clearTimeout(expiry));
     let done = false;
     const finish = (url?: string) => {
       if (done) return;

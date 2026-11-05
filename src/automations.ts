@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import type { Redis } from "ioredis";
 import { describeSchedule, dueSlotSince, validateSchedule, type AgentSchedule } from "./agents.js";
 import { ENGINE_NAMES, ENGINE_TOOLS, type EngineMode, type EngineTool } from "./types.js";
+import { untrusted, UNTRUSTED_NOTE } from "./untrusted.js";
 
 /**
  * Automations: the coding tools working on their own (Arun, 2026-10-23: "get rid of the agents tab page and replace it with
@@ -133,11 +134,18 @@ export function describeWho(h: AutomationWho): string {
   return h.team.length ? `${name} leading ${h.team.map((t) => ENGINE_NAMES[t]).join(" and ")}` : name;
 }
 
-/** What started a run, filled into what it was told to do: {{event}} where it says, else after it. */
+/**
+ * What started a run, filled into what it was told to do: {{event}} where it says, else after it. What a webhook posts, and
+ * what an agent said in a watched session, are whoever could write them (a public repo's issue, a CI log, a page an agent
+ * read), and the run starts in its owner's mode with nobody watching: fenced as material, never as orders (untrusted.ts).
+ * Run now's words are the owner's own.
+ */
 export function promptFor(a: Automation, event: string): string {
   const base = a.does.trim() || "Do what you were set up to do.";
-  const told = base.includes("{{event}}") ? base.replaceAll("{{event}}", event) : event ? `${base}\n\nWhat started this run:\n${event}` : base;
-  const parts = [`[Friday] This is an automation, “${a.name}”, running ${describeWhen(a.when)}. Nobody is watching it start: do the work, then finish with a short summary of what you did and anything a person should check.`, told];
+  const outside = !!event && (a.when.kind === "webhook" || a.when.kind === "session");
+  const said = outside ? untrusted("what started this run", event) : event;
+  const told = base.includes("{{event}}") ? base.replaceAll("{{event}}", () => said) : event ? `${base}\n\nWhat started this run:\n${said}` : base;
+  const parts = [`[Friday] This is an automation, “${a.name}”, running ${describeWhen(a.when)}. Nobody is watching it start: do the work, then finish with a short summary of what you did and anything a person should check.`, told, ...(outside ? [UNTRUSTED_NOTE] : [])];
   if (a.then.pr) parts.push("When you're done and the change works, commit it on a new branch and open a pull request with a short description (gh pr create). If there is nothing to change, say so instead.");
   if (a.who.team.length) parts.push("You lead the agents in this session: split the work onto the shared board so they start on it at once, do your own piece, then check it all fits.");
   return parts.join("\n\n");

@@ -35,6 +35,7 @@ const pages = {
   review: () => import("./CodeReview.js"),
   needs: () => import("./NeedsYou.js"),
   usage: () => import("./UsagePage.js"),
+  settings: () => import("./Settings.js"),
 };
 /** A page's code by its rail name (Agents is the studio), asked for ahead of opening it: by the warm-up below, and as the pointer or focus reaches its button in the rail. */
 const warmPage = (view: string) => void pages[(view === "agents" ? "studio" : view) as keyof typeof pages]?.().catch(() => {});
@@ -55,7 +56,9 @@ const NeedsYouPage = lazy(() => pages.needs().then((m) => ({ default: m.NeedsYou
 import { WindowNav } from "./WindowNav.js";
 import { askToShowDiff } from "./focusDiff.js";
 import { AgentForm } from "./AgentDialogs.js";
-import { SettingsPage, settingsSection } from "./Settings.js";
+// Settings' sections by name are all the app's start needs of Settings; the page loads when opened (or warmed, as the others).
+import { settingsSection } from "./settings-sections.js";
+const SettingsPage = lazy(() => pages.settings().then((m) => ({ default: m.SettingsPage })));
 import { chooseTheme } from "./prefs.js";
 import { applyTheme, readTheme } from "./theme.js";
 const UsagePage = lazy(() => pages.usage().then((m) => ({ default: m.UsagePage })));

@@ -20,6 +20,7 @@ import type { Send } from "./useSession.js";
 import { AlsoWorksIn, WorkspacePill, type Picked } from "./Workspace.js";
 import { BranchButton } from "./Branches.js";
 import { ShipFlow } from "./ShipFlow.js";
+import { isLocal } from "./edition.js";
 
 /**
  * Bring your own coding agent: the session's view of lanes that run on
@@ -324,7 +325,10 @@ export function ConnectDialog({
             <h2>{existing ? "Reconnect this agent" : "Work on code on your computer"}</h2>
             <p>
               {tool
-                ? "It runs on your computer, under your own login. Friday never sees a key, and everyone here can watch and steer it."
+                ? // Nobody else is here in the open-source edition: "everyone here can watch and steer it" promised a room it hasn't.
+                  isLocal()
+                  ? "It runs on your computer, under your own login. Friday never sees a key."
+                  : "It runs on your computer, under your own login. Friday never sees a key, and everyone here can watch and steer it."
                 : "Your computer lends the folder and Friday Code works in it, with the files, terminal and preview shown here. Nothing to install."}
             </p>
           </div>
@@ -822,8 +826,18 @@ export function FilesPanel({
             <span className="dp-empty-icon">
               <Icon name="file" size={18} />
             </span>
-            <b>No changes yet</b>
-            <span>When an agent changes files, each one shows up here to read, comment on and tick off, with the way to commit them below.</span>
+            {/* After a commit, "No changes yet" read as if nothing had been done: the commits are listed just below. */}
+            {events.some((ev) => ev.body.type === "folder.committed") ? (
+              <>
+                <b>All committed</b>
+                <span>Everything the agents changed is in the commits below. New changes show up here.</span>
+              </>
+            ) : (
+              <>
+                <b>No changes yet</b>
+                <span>When an agent changes files, each one shows up here to read, comment on and tick off, with the way to commit them below.</span>
+              </>
+            )}
           </div>
         )}
         <Commits events={events} />

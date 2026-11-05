@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { SECTIONS } from "./Settings.js";
+import { SECTIONS } from "./settings-sections.js";
 import { Avatar, Icon, type IconName } from "./icons.js";
 import type { RecentSession } from "./storage.js";
 import { shortcut } from "./Shortcuts.js";

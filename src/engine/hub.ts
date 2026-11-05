@@ -47,6 +47,7 @@ import {
   type EngineTool,
   type EventBody,
   type Member,
+  type MeshNote,
   type RepoCall,
   type RouteTier,
   type SessionEvent,
@@ -206,6 +207,30 @@ export interface RunnerParams {
    * before handing its tool the turn, and says it (see drain); without it the hub asks for one first and waits, as before.
    */
   caps?: string;
+  /**
+   * Turns its runner ended whose end this server never acknowledged (`turn.ack`), as JSON: [{ id, outcome, error? }]. A link that
+   * died without either side noticing yet took the end with it; said here, the turn it was cut from isn't run again (settleEnded).
+   */
+  ended?: string;
+}
+
+/** A turn's end its runner says it sent and this server didn't acknowledge, read from RunnerParams.ended. */
+export type EndedTurn = { id: string; outcome: "done" | "stopped" | "error"; error?: string };
+
+export function parseEnded(raw: string | undefined): EndedTurn[] {
+  if (!raw) return [];
+  try {
+    const list = JSON.parse(raw) as unknown;
+    if (!Array.isArray(list)) return [];
+    return list.slice(0, 5).flatMap((x): EndedTurn[] => {
+      const o = x as Record<string, unknown>;
+      if (typeof o?.id !== "string" || !/^[\w-]{1,40}$/.test(o.id)) return [];
+      const outcome = o.outcome === "stopped" || o.outcome === "error" ? o.outcome : "done";
+      return [{ id: o.id, outcome, ...(typeof o.error === "string" ? { error: o.error.slice(0, 2000) } : {}) }];
+    });
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -239,16 +264,24 @@ function neverRan(events: SessionEvent[], lane: string): boolean {
  * run still marked running these are the turn that was under way.
  */
 export function cutTurn(events: SessionEvent[], lane: string): number[] {
+  return cutTurnOf(events, lane).seqs;
+}
+
+/** cutTurn, with the id of the turn they were handed to the tool in when the log has it (instructions.delivered `turn`). */
+export function cutTurnOf(events: SessionEvent[], lane: string): { seqs: number[]; turn?: string } {
   const mine = events.filter((e) => (e.lane ?? MAIN_LANE) === lane);
   const start = mine.findLastIndex((e) => e.body.type === "run.started");
-  if (start < 0) return [];
+  if (start < 0) return { seqs: [] };
   // A message handed to the turn and put back because it couldn't take it isn't the turn: the one before it is.
   const notTaken = (e: SessionEvent, j: number) => e.body.type === "instructions.delivered" && mine.slice(j + 1).some((x) => x.body.type === "instructions.requeued" && x.body.steer && e.body.type === "instructions.delivered" && e.body.seqs.every((q) => x.body.type === "instructions.requeued" && x.body.seqs.includes(q)));
   const i = mine.findLastIndex((e, j) => j >= start && e.body.type === "instructions.delivered" && !notTaken(e, j));
-  if (i < 0) return [];
+  if (i < 0) return { seqs: [] };
   const d = mine[i]!.body;
-  if (mine.slice(i + 1).some(dropped)) return [];
-  return d.type === "instructions.delivered" ? d.seqs : [];
+  if (mine.slice(i + 1).some(dropped)) return { seqs: [] };
+  // The turn they went in: this delivery's, or the turn's own delivery before a message handed to it mid-turn (a steer).
+  const own = mine.slice(start, i + 1).findLast((e) => e.body.type === "instructions.delivered" && !!e.body.turn);
+  const turn = own?.body.type === "instructions.delivered" ? own.body.turn : undefined;
+  return d.type === "instructions.delivered" ? { seqs: d.seqs, ...(turn ? { turn } : {}) } : { seqs: [] };
 }
 
 /**
@@ -292,6 +325,10 @@ export function shouldCompact(events: SessionEvent[], lane: string, tool: Engine
 /** The calls that change a folder: a lane making one takes the pen on that folder (see EngineHub.writer). Reads never wait. */
 /** What a Manual machine runs only on a yes (see readRepo in runner/repo-read.ts). */
 const ASKED = new Set<RepoCall["op"]>(["shell", "bgstart", "publish", "preview"]);
+/** What runs a command on the machine without the host's yes: never for others on a computer held to Edits. */
+const OWN_YES = new Set<RepoCall["op"]>(["shell", "bgstart", "publish", "preview", "ios", "baseline"]);
+const heldForOthers = (host: string, cap: EngineMode) =>
+  `${host} holds others to ${cap === "plan" ? "Plan" : "Edits"} on their computer, so only ${host} can ${cap === "plan" ? "change files or " : ""}run commands there.`;
 const WRITES = new Set<RepoCall["op"]>(["write", "edit", "shell", "bgstart", "restore", "commit", "switch", "apply"]);
 /** A pen whose lane never ends a run is given back after this long without a change. */
 const PEN_TTL_S = 30 * 60;
@@ -410,8 +447,9 @@ export class EngineHub {
         // working on was marked delivered and lost with it, so the run ended and the task with it (Arun, 2026-10-23: most
         // failed runs were this). It goes back to the front of the queue here, as a clean shutdown would have put it.
         events ??= await this.store.events(sid);
-        const cut = cutTurn(events, lane);
-        if (cut.length) await this.store.append(sid, agent, { type: "instructions.requeued", seqs: cut }, { lane });
+        // With the turn's id, as a clean close puts it back: a runner back that finished that turn says so (settleEnded).
+        const cut = cutTurnOf(events, lane);
+        if (cut.seqs.length) await this.store.append(sid, agent, { type: "instructions.requeued", seqs: cut.seqs, ...(cut.turn ? { turn: cut.turn } : {}) }, { lane });
         // The same machine back: the run carries on, given its turn again, rather than ending for somebody to send it on.
         if (self) continue;
         await this.store.append(sid, agent, { type: "run.ended", outcome: "error", error: `${agent.name} lost its connection when the server restarted. It carries on from where it was when it reconnects.`, cut: true }, { lane });
@@ -489,6 +527,13 @@ export class EngineHub {
     if (call.approved && approvedBy !== host.info.hostId) {
       if (host.info.mode === "edits" && ASKED.has(call.op)) return { output: hostOnlyYes(host.info.hostName) };
       delete call.approved;
+    }
+    // A person who isn't the host, on a computer whose host held others to Edits (lane.othersFull off, Security R2): a command,
+    // push, preview or background job they press for goes no further than a message of theirs to that tool would. It went
+    // straight to the machine at the host's own mode (2026-11-04 security review).
+    if (by !== undefined && by !== host.info.hostId && !call.approved) {
+      const cap = othersCap(host.info.handMode, (await this.store.state(sid)).othersFull?.[host.lane] !== false);
+      if (cap && (OWN_YES.has(call.op) || (cap === "plan" && WRITES.has(call.op)))) return { output: heldForOthers(host.info.hostName, cap) };
     }
     const busy = WRITES.has(call.op) && host.info.mode !== "plan" ? await this.takePen(sid, lane ?? MAIN_LANE, host.lane, host.info, call.op === "apply", by) : null;
     if (busy) return { output: busy };
@@ -576,12 +621,15 @@ export class EngineHub {
   attach(ws: WebSocket, p: RunnerParams): Promise<void> {
     // ponytail: one at a time per server process; two servers admitting at the same moment can still both pass. A lock in
     // the store, if that is ever seen.
-    const made = { lane: "" };
+    const made: { lane: string; attaching?: string; attachedAt?: number } = { lane: "" };
     const turn = (this.attaching.get(p.sid) ?? Promise.resolve()).then(() =>
-      this.admit(ws, p, made).catch(async (err) => {
-        await this.unmake(p, made);
-        throw err;
-      }),
+      this.admit(ws, p, made)
+        .catch(async (err) => {
+          await this.unmake(p, made);
+          throw err;
+        })
+        // Attaching only while admit runs: held now, or gone whichever way it left (a socket gone meanwhile, a refusal, a throw).
+        .finally(() => made.attaching && this.lanesAttaching.get(made.attaching) === made.attachedAt && this.lanesAttaching.delete(made.attaching)),
     );
     const settled = turn.catch(() => {});
     this.attaching.set(p.sid, settled);
@@ -600,7 +648,7 @@ export class EngineHub {
     if (lane) await this.store.append(p.sid, { id: p.me.id, name: p.me.name, kind: "human" }, { type: "lane.removed", laneId: lane }).catch(() => {});
   }
 
-  private async admit(ws: WebSocket, p: RunnerParams, made: { lane: string }): Promise<void> {
+  private async admit(ws: WebSocket, p: RunnerParams, made: { lane: string; attaching?: string; attachedAt?: number }): Promise<void> {
     const reject = async (code: number, why: string) => {
       await this.unmake(p, made);
       // Said as well as closed with: the hosted server's proxy drops a close's code and reason (see closeSaying).
@@ -697,12 +745,15 @@ export class EngineHub {
 
     const key = `${p.sid}|${lane}`;
     // Attaching from here until its runner is held, or it gives up: a while at most, whichever way it leaves.
-    this.lanesAttaching.set(key, Date.now());
+    made.attaching = key;
+    made.attachedAt = Date.now();
+    this.lanesAttaching.set(key, made.attachedAt);
     // Gone while all that was being decided: nothing is attached, nothing is announced, and whatever has the lane keeps it.
     if (ws.readyState !== WebSocket.OPEN) return;
     // The same host reconnecting (or attaching again) replaces its old runner, with the code that tells it not to come
     // back: a runner that reconnects by itself would otherwise take the lane straight back from the one that replaced it.
-    this.hosts.get(key)?.close("replaced", 4009);
+    // Waited on: what it puts back in the queue is in the log before a turn its runner says it finished is settled (settleEnded).
+    await this.hosts.get(key)?.close("replaced", 4009);
     const info: EngineInfo = {
       ...(tool ? { tool } : {}),
       hostId: p.me.id,
@@ -742,10 +793,19 @@ export class EngineHub {
     const events = await this.store.events(p.sid);
     const imported = !!resumeId && events.some((e) => e.body.type === "session.imported" && e.body.sourceId === resumeId);
     const host = new LaneHost(p.sid, lane, r.seq, info, ws, this.store, this.bus, () => {
-      if (this.hosts.get(key) === host) (this.hosts.delete(key), this.droppedAt.set(key, Date.now()));
+      if (this.hosts.get(key) !== host) return;
+      this.hosts.delete(key);
+      // Read by reap only within the grace a short drop gets: let go of after it, or a server up for weeks keeps every lane ever dropped.
+      const at = Date.now();
+      this.droppedAt.set(key, at);
+      setTimeout(() => this.droppedAt.get(key) === at && this.droppedAt.delete(key), offlineGraceMs() + 5_000).unref?.();
     }, resumeId && from && !imported ? { id: resumeId, title: (p.resumeTitle || "an earlier session").slice(0, 120), tool: from } : null, this.brief ? (l, task) => this.brief!(p.sid, l, task) : null, this.learned);
     host.selfCheckpoint = (p.caps ?? "").split(",").includes("checkpoint");
     host.steers = (p.caps ?? "").split(",").includes("steer");
+    host.acks = (p.caps ?? "").split(",").includes("ended");
+    // Settled before the host listens: a message arriving meanwhile would otherwise start the turn again first.
+    const ended = host.acks ? parseEnded(p.ended) : [];
+    if (ended.length) await this.settleEnded(p.sid, lane, ended, host).catch((e) => console.error("[engine] ended:", e));
     host.mesh = this.mesh;
     host.teammate = this.teammate ? () => this.teammate!(p.sid, lane) : null;
     host.teamPaused = this.teamPaused ? (people, running) => this.teamPaused!(p.sid, lane, people, running) : null;
@@ -761,8 +821,30 @@ export class EngineHub {
     const effort = effortReset ? undefined : laneEffort(state, lane, tool);
     const attached: Record<string, unknown> = { kind: "attached", lane, laneName, ...(imported ? { imported: true } : {}), ...(system ? { system } : {}), ...(effort ? { effort } : {}) };
     if (host.work) attached.work = true;
+    // Told that this server acknowledges turn ends, so the runner keeps each until it is (an older server never says so).
+    if (host.acks) attached.acks = true;
     host.sendRaw(attached);
+    for (const t of ended) host.sendRaw({ kind: "turn.ack", id: t.id });
     void host.pump();
+  }
+
+  /**
+   * Turns the runner coming back finished before its old connection went, whose ends were lost with that connection: the
+   * instructions put back in the queue when the turn was cut (instructions.requeued with its id) are taken out again, as
+   * delivered, so the task isn't run a second time, and an error it ended on ends the run as it would have. One whose
+   * instructions were already given out again, or were never put back, is left as it is.
+   */
+  private async settleEnded(sid: string, lane: string, ended: EndedTurn[], host: LaneHost): Promise<void> {
+    const [state, events] = await Promise.all([this.store.state(sid), this.store.events(sid)]);
+    const pending = pendingFor(state, lane);
+    for (const t of ended) {
+      const back = events.findLast((e) => (e.lane ?? MAIN_LANE) === lane && e.body.type === "instructions.requeued" && e.body.turn === t.id);
+      if (back?.body.type !== "instructions.requeued") continue;
+      const seqs = back.body.seqs.filter((q) => pending.includes(q));
+      if (!seqs.length) continue;
+      console.log(`[engine] ${host.actorName} finished turn ${t.id} before its connection went: not running it again`);
+      await host.endedElsewhere(seqs, t, back.seq);
+    }
   }
 
   /**
@@ -929,6 +1011,32 @@ class LaneHost {
     }
   }
 
+  /** Its runner keeps each turn's end until this server acknowledges it (`turn.ack`), and says the unacknowledged ones when back. */
+  acks = false;
+  /** Whether the turn running now is a compaction Friday asked for, not the instructions it carries (see drain). */
+  private compacting = false;
+
+  get actorName(): string {
+    return this.actor.name;
+  }
+
+  /** A turn of this lane its runner finished on a connection that went before its end arrived: its instructions taken as done. */
+  async endedElsewhere(seqs: number[], t: EndedTurn, requeuedAt: number): Promise<void> {
+    await this.append({ type: "instructions.delivered", seqs });
+    const error = (t.error ?? "The coding agent failed.").slice(0, 2000);
+    if (runOf(await this.store.state(this.sid), this.lane).status === "running") {
+      if (t.outcome === "error") await this.append({ type: "run.ended", outcome: "error", error });
+      return;
+    }
+    // Ended meanwhile as cut off by the lost connection (a restart's reap, or the grace running out): it didn't stop there, it
+    // finished, and the run says how, in place of that (Arun, 2026-11-04: states that lie are to be fixed). A person's stop is
+    // already said by its own event.
+    const events = await this.store.events(this.sid);
+    const cut = events.findLast((e) => e.seq > requeuedAt && (e.lane ?? MAIN_LANE) === this.lane && e.body.type === "run.ended");
+    if (cut?.body.type !== "run.ended" || !cut.body.cut || t.outcome === "stopped") return;
+    await this.append({ type: "run.ended", outcome: t.outcome, replaces: cut.seq, ...(t.outcome === "error" ? { error } : {}) });
+  }
+
   async start(): Promise<void> {
     this.unsub = await this.bus.subscribe(this.sid, (m) => this.onBus(m));
     this.ws.on("message", (raw) => this.onRunner(raw));
@@ -1037,7 +1145,7 @@ class LaneHost {
     // Somebody else's work never reaches a tool on its host's own plan mid-turn either: the queue says no to it (drain).
     if (ownPlan(state.engines[this.lane]) && refusal(state.engines[this.lane], whoseWork(await this.store.events(this.sid), ev))) return void this.pump();
     const capped = this.turnCap !== undefined;
-    if (!capped && this.othersMessage(ev) && othersCap(this.info.handMode, state.othersFull?.[this.lane] !== false) !== undefined) return void this.pump();
+    if (!capped && this.othersMessage(ev, state) && othersCap(this.info.handMode, state.othersFull?.[this.lane] !== false) !== undefined) return void this.pump();
     const events = await this.store.events(this.sid);
     // On hold, finishing the turn it was told to stop: another agent's message waits for the person, as in drain (held.ts).
     if (!runnableQueue(events, this.lane, [ev.seq]).length) return void this.pump();
@@ -1061,11 +1169,23 @@ class LaneHost {
   }
 
   /** Whether a message is anyone's but the host's own (othersIn in drain, for one message). */
-  private othersMessage(e: SessionEvent): boolean {
+  private othersMessage(e: SessionEvent, state: SessionState): boolean {
     if (e.body.type !== "instruction") return true;
     if (e.body.handoff || e.body.peer || e.body.via) return true;
-    if (e.body.mesh) return e.body.mesh.by?.id !== this.info.hostId;
+    if (e.body.mesh) return this.meshFromOthers(state, e.body.mesh);
     return e.actor.id !== this.info.hostId;
+  }
+
+  /**
+   * Whether another agent's message is somebody else's: the person behind the run it belongs to (mesh.by) isn't this host, or
+   * the agent that wrote it works on another person's computer. An answer to the host's own ask was stamped with the host
+   * (mesh.by is the asker's), so another person's agent, or a page it read, wrote words that ran as the host's own, past
+   * "hold others to Edits" (2026-11-04 security review).
+   */
+  private meshFromOthers(state: SessionState, mesh: MeshNote): boolean {
+    if (mesh.by?.id !== this.info.hostId) return true;
+    const from = mesh.fromLane ? state.engines[mesh.fromLane] : undefined;
+    return !!from?.hostId && from.hostId !== this.info.hostId;
   }
 
   private async answerLive(seq: number, a: { id: string; approve: boolean }, note?: string): Promise<void> {
@@ -1152,6 +1272,9 @@ class LaneHost {
       }
       // A run starting takes a checkpoint before the CLI touches anything, so it can be undone. A runner that takes it itself
       // does so as it hands its tool the turn, beside its own setup, and says it then (onRunner): nothing is waited on here.
+      // The turn's id, made now so it goes in the log with what it delivers: a server after this one, if this one crashes, knows
+      // which turn it puts back (cutTurnOf), and a runner that finished it can say so.
+      const turnId = randomUUID().slice(0, 8);
       if (run.status !== "running") {
         // Anyone else's is asked for now. A machine in plan mode or a folder outside git answers with a sentence, not an
         // id, and that run simply has no undo.
@@ -1163,7 +1286,7 @@ class LaneHost {
         if (!this.selfCheckpoint && pendingFor(await this.store.state(this.sid), this.lane).join() !== pending.join()) continue;
         const checkpoint = /^[0-9a-f]{40}$/.test(sha) ? sha : undefined;
         // The start and what it delivers in one write, in that order: both under the epoch guard, or neither.
-        const start: EventBody[] = [{ type: "run.started", causedBy: pending[0]!, ...(checkpoint ? { checkpoint } : {}) }, { type: "instructions.delivered", seqs: pending }];
+        const start: EventBody[] = [{ type: "run.started", causedBy: pending[0]!, ...(checkpoint ? { checkpoint } : {}) }, { type: "instructions.delivered", seqs: pending, turn: turnId }];
         if (!(await this.store.appendAll(this.sid, this.actor, start, { ...guard, lane: this.lane })).ok) continue;
         // Owed until a turn of this run reaches the runner.
         this.owesCheckpoint = this.selfCheckpoint;
@@ -1172,7 +1295,7 @@ class LaneHost {
         // with no checkpoint, and the runner never hands its tool a turn on a link that is gone. Asked again then, so the run
         // keeps its undo; never once a turn of this run went through, since a checkpoint after its edits would undo nothing.
         if (this.selfCheckpoint) this.owesCheckpoint = neverRan(events, this.lane);
-        if (!(await this.append({ type: "instructions.delivered", seqs: pending }, guard)).ok) continue;
+        if (!(await this.append({ type: "instructions.delivered", seqs: pending, turn: turnId }, guard)).ok) continue;
       }
 
       const updates = unreadPosts(state, this.lane);
@@ -1244,7 +1367,7 @@ class LaneHost {
           // the host's agent): the host's own request, passed along, so it runs in the mode the host picked. Auto asked for
           // every command a lead's task brought, on the host's own agents (Arun, 2026-10-23: "why auto mode is asking me for
           // approval"). A run a teammate started, or nobody, is still somebody else's (mesh.by is the person behind it).
-          if (e.body.mesh) return e.body.mesh.by?.id !== this.info.hostId;
+          if (e.body.mesh) return this.meshFromOthers(state, e.body.mesh);
           if (e.actor.id !== this.info.hostId) return true;
           if (!e.body.approval || depth > 8) return false;
           const id = e.body.approval.id;
@@ -1268,7 +1391,8 @@ class LaneHost {
         await this.append({ type: "context.compacted", tool: this.info.tool!, ...long }).catch((e) => console.error("[engine] compact:", e));
         this.toldBefore.clear();
         this.modeTold = "code";
-        const c = await this.runTurn("/compact", [], note, undefined, "/compact", model, undefined, cap, false);
+        this.compacting = true;
+        const c = await this.runTurn("/compact", [], note, undefined, "/compact", model, undefined, cap, false).finally(() => (this.compacting = false));
         this.inFlight = null;
         if (this.closed || (c.outcome === "error" && this.requeued)) return;
         if (c.outcome === "error") {
@@ -1297,7 +1421,7 @@ class LaneHost {
       // Every instruction of it handed back after a dropped connection: the turn its runner may still have running, to take on
       // where it got to rather than start again (runner adopt).
       const again = pending.every((q) => events.some((e) => dropped(e) && e.body.type === "instructions.requeued" && e.body.seqs.includes(q)));
-      let end = await this.runTurn(prompt, [...(attachments ?? [])], note, approval && { ...approval, ...asked }, command, model, effort, cap, this.owesCheckpoint, again);
+      let end = await this.runTurn(prompt, [...(attachments ?? [])], note, approval && { ...approval, ...asked }, command, model, effort, cap, this.owesCheckpoint, again, turnId);
       // A coding tool that lost its earlier conversation (a resume that failed) starts a fresh one at once and does the same turn
       // there, told where the session stands, rather than stopping until a person writes again: the runner has already dropped
       // the dead id (Arun, 2026-10-29: "Agent stopped: Codex couldn't find its earlier conversation, so the next instruction
@@ -1307,7 +1431,10 @@ class LaneHost {
         console.log(`[engine] ${this.actor.name} lost its conversation; carrying the turn on in a fresh one`);
         const fresh = buildCatchUp(state, events, pending, this.lane);
         const told = await this.systemNote(await this.store.events(this.sid));
-        end = await this.runTurn(withShieldNote(`${fresh}${prompt}`), [...(attachments ?? [])], told, approval && { ...approval, ...asked }, command, model, effort, cap, this.owesCheckpoint, false);
+        // Under the same turn's id: it is the same turn, carried on, and the id in the log (instructions.delivered) is the one a
+        // server after a crash puts it back under, so a runner that finished it, and says so, isn't given it again (settleEnded).
+        // The first attempt's end is over on both sides by now (heard and acknowledged), so the id is free to be used again.
+        end = await this.runTurn(withShieldNote(`${fresh}${prompt}`), [...(attachments ?? [])], told, approval && { ...approval, ...asked }, command, model, effort, cap, this.owesCheckpoint, false, turnId);
       }
       this.inFlight = null;
       if (end.outcome === "error" && this.requeued) return;
@@ -1408,9 +1535,9 @@ class LaneHost {
     return [system, "", `You are working as the agent "${agent.name}". Follow its instructions for everything you do in this session:`, agent.instructions.trim()].join("\n");
   }
 
-  private runTurn(prompt: string, attachments: Attachment[], system: string = SYSTEM_NOTE, approval?: { id: string; approve: boolean; scope?: "commands" | "turn"; items?: string[] }, command?: string, model?: string, effort?: string, mode?: EngineMode, checkpoint?: boolean, again?: boolean): Promise<TurnEnd> {
+  private runTurn(prompt: string, attachments: Attachment[], system: string = SYSTEM_NOTE, approval?: { id: string; approve: boolean; scope?: "commands" | "turn"; items?: string[] }, command?: string, model?: string, effort?: string, mode?: EngineMode, checkpoint?: boolean, again?: boolean, turnId?: string): Promise<TurnEnd> {
     if (this.closed) return Promise.resolve({ outcome: "error", error: `${this.actor.name} disconnected.` });
-    const id = randomUUID().slice(0, 8);
+    const id = turnId ?? randomUUID().slice(0, 8);
     if (checkpoint) {
       this.owesCheckpoint = false;
       this.checkpointFor = id;
@@ -1604,8 +1731,13 @@ class LaneHost {
       if (body && (this.turn || body.type === "agent.diff")) void this.record(body).catch((e) => console.error("[engine] append:", e));
     } else if (m.kind === "steer.result" && typeof m.id === "string") {
       void this.steered(m.id, (m as { ok?: unknown }).ok === true);
+    } else if (m.kind === "turn.end" && this.acks && typeof m.id === "string" && !(this.turn && m.id === this.turn.id)) {
+      // An end for a turn that is over already (said again after a reconnect, or one this server let go of): nothing to do but
+      // say it was heard, so the runner stops keeping it.
+      this.sendRaw({ kind: "turn.ack", id: m.id });
     } else if (m.kind === "turn.end" && this.turn && m.id === this.turn.id) {
       const t = this.turn;
+      if (this.acks) this.sendRaw({ kind: "turn.ack", id: m.id });
       this.turn = null;
       // Before the run's end, which follows from this: the run's last change set is in the log ahead of it.
       this.logHeldDiff();
@@ -1748,7 +1880,9 @@ class LaneHost {
      */
     const cut = this.turn && DROPPED.has(reason) ? this.inFlight : null;
     if (cut?.length) {
-      await this.append({ type: "instructions.requeued", seqs: cut }).catch((e) => console.error("[engine] requeue:", e));
+      // With the turn's id, unless it was a compaction: a runner back that finished it says so, and it isn't run again (settleEnded).
+      const turn = this.turn && !this.compacting ? { turn: this.turn.id } : {};
+      await this.append({ type: "instructions.requeued", seqs: cut, ...turn }).catch((e) => console.error("[engine] requeue:", e));
       this.requeued = reason !== "shutdown";
     }
     this.turn?.resolve({ outcome: "error", error: reason === "shutdown" ? `The server restarted in the middle of ${this.actor.name}'s turn. It picks this up again when it reconnects.` : `${this.actor.name} disconnected in the middle of a turn.` });

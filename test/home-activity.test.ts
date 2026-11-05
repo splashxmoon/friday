@@ -29,3 +29,9 @@ test("the year is the grid's days: one sent from past its end neither shows the 
   assert.equal(flat.at(-1)!.level, 4, "today, the grid's busiest, is darkest");
   assert.equal(heatmap([{ day: "2026-10-28", turns: 9 }], today).flat().reduce((n, c) => n + c.turns, 0), 0, "nothing to show");
 });
+
+test("the year's numbers say one turn and one active day, not \"1 turns · 1 active days\"", async () => {
+  const { statWord } = await import("../src/client/HomeActivity.js");
+  assert.equal(`1 ${statWord(1, "turn")} · 1 ${statWord(1, "active day")}`, "1 turn · 1 active day");
+  assert.equal(`${statWord(0, "turn")} · ${statWord(12, "active day")}`, "turns · active days");
+});

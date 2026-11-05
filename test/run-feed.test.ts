@@ -442,3 +442,19 @@ test("a queued message that was edited is drawn once, as it is now", () => {
   // Taken back for good is still said.
   assert.deepEqual(shown([ev(1, said("Never mind")), ev(2, { type: "instruction.withdrawn", seq: 1 })]), ["Never mind"]);
 });
+
+test("a run written as cut off by a lost connection, then learned to have finished, reads as finished", () => {
+  const cut: EventBody = { type: "run.ended", outcome: "error", error: "Ada's Claude Code lost its connection when the server restarted.", cut: true };
+  // Its block: what it said arrived, then its end was written as a dropped connection; the machine back, the real end corrects it.
+  const items = group([ev(1, { type: "run.started", causedBy: 0 } as EventBody), ev(2, { type: "agent.message", text: "Committed the fix.", toolCalls: [] }), ev(3, cut), ev(4, { type: "engine.attached" } as EventBody), ev(5, { type: "run.ended", outcome: "done", replaces: 3 })], false);
+  const runs = items.filter((it) => it.kind === "run");
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0]!.kind === "run" && runs[0]!.ended?.body.outcome, "done", "its block ends as done");
+  // No block (nothing it said arrived): the stop's notice goes, or says the real error.
+  const alone = group([ev(1, { type: "run.started", causedBy: 0 } as EventBody), ev(3, cut), ev(5, { type: "run.ended", outcome: "done", replaces: 3 })], false);
+  assert.ok(!alone.some((it) => it.kind === "event" && it.ev.body.type === "run.ended"), "no stop shown for a run that finished");
+  const failed = group([ev(1, { type: "run.started", causedBy: 0 } as EventBody), ev(3, cut), ev(5, { type: "run.ended", outcome: "error", error: "Out of usage", replaces: 3 })], false);
+  const shown = failed.filter((it) => it.kind === "event" && it.ev.body.type === "run.ended");
+  assert.equal(shown.length, 1);
+  assert.equal(shown[0]!.kind === "event" && shown[0]!.ev.body.type === "run.ended" && shown[0]!.ev.body.error, "Out of usage", "its real error, once");
+});

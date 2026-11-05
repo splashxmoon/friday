@@ -10,6 +10,7 @@ import { NO_MODELS } from "./no-models.js";
 import { outsideToken, writeOutsideShim } from "./outside-mcp.js";
 import { PhoneAccess } from "./phone.js";
 import { JoinHub } from "./join.js";
+import { endTools } from "../runner/spawn-cli.js";
 
 /**
  * Starting Friday on this computer, for the command (main.ts) and the desktop app (desktop.ts) alike.
@@ -24,27 +25,47 @@ export interface Started {
   home: string;
   /** Another Friday was already running on this folder: this is its address, and nothing was started. */
   already?: boolean;
+  /** That other Friday's process, when `already`. */
+  pid?: number;
   /** Whether the computer should be kept awake: the team works while the person is away (app.ts teammates). */
   awake?: () => Promise<boolean>;
   close(): Promise<void>;
 }
 
-/** A port on 127.0.0.1 that nothing is listening on: the one asked for when it is free, else whatever the system gives. */
+/** Whether something answers on this address and port. */
+function answers(host: string, port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const c = net.connect({ host, port });
+    const done = (yes: boolean) => (c.destroy(), resolve(yes));
+    c.setTimeout(500, () => done(false));
+    c.once("connect", () => done(true));
+    c.once("error", () => done(false));
+  });
+}
+
+/**
+ * A port on 127.0.0.1 that nothing is listening on: the one asked for when it is free, else whatever the system gives.
+ * Free means nothing answers there either, at 127.0.0.1 or ::1: a Mac lets 127.0.0.1 be bound beside a server on ::1 or on
+ * every address, and 4321 is also Astro's dev server's, on "localhost" (::1). Friday then shared its port, and its previews
+ * at http://localhost:4321 reached the other server.
+ */
 export function freePort(preferred: number): Promise<number> {
-  const tryPort = (port: number) =>
-    new Promise<number | null>((resolve) => {
-      const s = net.createServer();
-      s.once("error", () => resolve(null));
-      s.listen(port, "127.0.0.1", () => {
-        const got = (s.address() as net.AddressInfo).port;
-        s.close(() => resolve(got));
-      });
-    });
+  const tryPort = async (port: number) =>
+    port > 0 && (await Promise.all([answers("127.0.0.1", port), answers("::1", port)])).some(Boolean)
+      ? null
+      : new Promise<number | null>((resolve) => {
+          const s = net.createServer();
+          s.once("error", () => resolve(null));
+          s.listen(port, "127.0.0.1", () => {
+            const got = (s.address() as net.AddressInfo).port;
+            s.close(() => resolve(got));
+          });
+        });
   return tryPort(preferred).then((p) => p ?? tryPort(0).then((q) => q ?? preferred));
 }
 
 /** The Friday already running on this folder, if its address still answers as Friday. */
-async function runningOn(home: string): Promise<string | null> {
+async function runningOn(home: string): Promise<{ url: string; pid: number } | null> {
   const file = path.join(home, "running.json");
   if (!existsSync(file)) return null;
   try {
@@ -52,7 +73,7 @@ async function runningOn(home: string): Promise<string | null> {
     if (!url || !pid) return null;
     process.kill(pid, 0);
     const r = await fetch(`${url}/api/info`, { signal: AbortSignal.timeout(1500) });
-    return r.ok ? url : null;
+    return r.ok ? { url, pid } : null;
   } catch {
     return null;
   }
@@ -112,13 +133,15 @@ export async function startLocal(o: { home?: string; port?: number; /** A link f
   process.env.FRIDAY_EDITION = "local";
   const home = path.resolve(o.home || process.env.FRIDAY_HOME || path.join(os.homedir(), ".friday"));
   const running = await runningOn(home);
-  if (running) return { url: running, home, already: true, close: async () => {} };
+  if (running) return { url: running.url, pid: running.pid, home, already: true, close: async () => {} };
 
   const kv = await localKV(home);
   /** The key Friday signs its own links with, made once for this computer and kept beside the data. */
   const secretFile = path.join(home, "secret");
-  const secret = existsSync(secretFile) ? readFileSync(secretFile, "utf8").trim() : randomBytes(32).toString("base64url");
-  if (!existsSync(secretFile)) writeFileSync(secretFile, secret, { mode: 0o600 });
+  // One cut short (the computer went off as it was first written) is made again: an empty key would sign everything.
+  const kept = existsSync(secretFile) ? readFileSync(secretFile, "utf8").trim() : "";
+  const secret = kept.length >= 16 ? kept : randomBytes(32).toString("base64url");
+  if (secret !== kept) writeFileSync(secretFile, secret, { mode: 0o600 });
   // The name git has for the person ("Maya Chen"), else their login: the page said "Good morning, mchen" (2026-11-02 walk-through).
   const name = (() => {
     try {
@@ -189,6 +212,8 @@ export async function startLocal(o: { home?: string; port?: number; /** A link f
         await phone.stop().catch(() => {});
         join.stop();
         await app.close().catch(() => {});
+        // The coding tools told to stop, given three seconds to, then killed: none outlives Friday (spawn-cli.ts endTools).
+        await endTools(3000);
         await kv.close();
       })()),
   };

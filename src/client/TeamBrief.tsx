@@ -17,6 +17,7 @@ import { plainLine } from "./team-room.js";
 import { timeOf } from "./team-status.js";
 import { ProofToggle } from "./ProofCard.js";
 import { base, Face, mateOn, refreshTeam, useTeamNow, type Team } from "./Teammates.js";
+import { revealSeq } from "./feed-window.js";
 
 /** When the person last had the Team room open, by session, on this computer: "since you left" starts there. */
 const LEFT = "friday.team.left";
@@ -49,6 +50,7 @@ function jump(t: Team | null, sid: string, seq: number | undefined, lane: string
   setTimeout(() => {
     let best: HTMLElement | null = null;
     let at = -1;
+    revealSeq(seq);
     for (const el of document.querySelectorAll<HTMLElement>("[data-seq]")) {
       const n = Number(el.dataset.seq);
       if (n <= seq && n > at) (best = el), (at = n);

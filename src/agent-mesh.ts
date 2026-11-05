@@ -2628,11 +2628,17 @@ export function unheardEnd(events: readonly SessionEvent[], id: string, lane: st
   return null;
 }
 
-/** The reviewer for a task: a free agent on the computer the work is on if there is one, else the first free one. */
+/**
+ * The reviewer for a task: a free agent on the computer the work is on first (it can open the folder), and among those, one on
+ * another coding tool than the one that did it, since a second tool's model misses different things than the first (gap report
+ * 2026-11-04: rivals ship a reviewer on another model by default). Otherwise the free ones in the order given (most usage left first).
+ */
 export function pickReviewer(state: SessionState, doer: string, free: readonly string[]): string {
   const others = free.filter((l) => l !== doer);
   const host = state.engines[doer]?.hostId;
-  return others.find((l) => !!host && state.engines[l]?.hostId === host) ?? others[0]!;
+  const tool = state.engines[doer]?.tool ?? "friday";
+  const rank = (l: string) => (host && state.engines[l]?.hostId === host ? 0 : 2) + ((state.engines[l]?.tool ?? "friday") === tool ? 1 : 0);
+  return others.reduce((best, l) => (rank(l) < rank(best) ? l : best), others[0]!);
 }
 
 /**
