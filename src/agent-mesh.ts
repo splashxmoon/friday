@@ -1293,7 +1293,10 @@ export class AgentMesh {
     // agent: it starts a chain rather than lengthening one. Counted on, a long session's board reached the cap by its own hand-offs
     // and an agent answering its reviewer was turned away as "the 5th agent in a row" (Arun, 2026-10-24: C2 couldn't reply to
     // Codex's review of t1, nor tell Chat with me what t2 needed).
-    const mesh: MeshNote = { id, kind: req.kind, fromLane: from, fromName: laneName(state, from), toName, hop: req.system ? 1 : hop + 1, by: person, ...(req.board ? { board: req.board } : {}), ...(req.review ? { review: true } : {}), ...(req.carriedFrom ? { carriedFrom: req.carriedFrom } : {}), ...(req.team ? { team: req.team } : {}) };
+    // The board's own hand-outs, reviews and rework are the board's, as its reports are: with the lead picked to review, its card read
+    // "Claude Code → Claude Code · Review" (2026-11-05 release check). Replies still go back to the lane that posted the board.
+    const boardSays = !!req.system && !!req.board;
+    const mesh: MeshNote = { id, kind: req.kind, fromLane: from, fromName: boardSays ? "The board" : laneName(state, from), toName, hop: req.system ? 1 : hop + 1, by: person, ...(req.board ? { board: req.board } : {}), ...(req.review ? { review: true } : {}), ...(req.carriedFrom ? { carriedFrom: req.carriedFrom } : {}), ...(req.team ? { team: req.team } : {}) };
     // A board task's title alone, so the page shows it without the brief (Board task "t1": …).
     if (req.board) mesh.title = state.board?.tasks.find((t) => t.id === req.board)?.title;
     // Whether it is on hold, read before this message is logged: the store's events are its live list, so once another read
@@ -2230,7 +2233,9 @@ export class AgentMesh {
         x.m.kind === "ask"
           ? `${x.m.fromName} asks (id ${x.m.id}, waiting for your answer: reply_to_agent):\n${x.text}`
           : x.m.kind === "task"
-            ? `${x.m.fromName}, the lead, assigned you this task (your report at the end of it goes back to it):\n${x.text}`
+            ? x.m.board
+              ? `${x.m.review ? "The board asks you to review this" : "The board gave you this task"} (your report at the end of it goes back to it):\n${x.text}`
+              : `${x.m.fromName}, the lead, assigned you this task (your report at the end of it goes back to it):\n${x.text}`
             : x.m.kind === "reply"
               ? `${x.m.fromName} ${x.m.ofTask ? "finished the task you assigned and reports" : "answered your earlier question"}:\n${x.text}`
               : `${x.m.fromName} says:\n${x.text}`,
