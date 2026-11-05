@@ -42,6 +42,8 @@ npm test -- test/acp.test.ts
 
 If the tool speaks the Agent Client Protocol (ACP), its adapter is a short `acp({...})` call: see `kilo`, `opencode` or `grok` in `src/runner/adapters.ts`. Add its name to `EngineTool` and an entry to `TOOL_INFO` in `src/types.ts`, then run `npm run typecheck`: it lists every other place that needs an entry. Add a test next to `test/acp.test.ts` that feeds the adapter a few of the tool's own lines.
 
+For tools that do not speak ACP (such as Claude Code, Codex, or Cursor), see [`docs/adding-a-coding-tool.md`](docs/adding-a-coding-tool.md) for a walkthrough of the `Adapter` interface, starting turns, output parsing, authentication lifecycle, and permission modes.
+
 ## Good first issues
 
 Look for the [good first issue](https://github.com/splashxmoon/friday/labels/good%20first%20issue) label. Say in the issue that you are taking one, so two people don't do the same work.
