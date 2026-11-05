@@ -5,7 +5,7 @@
  * (teammates.css hides the feed after a page on another tab).
  *
  */
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { FileIcon, FolderGit2Icon, GitPullRequestIcon, PlusIcon, RefreshCwIcon, ShieldIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -23,7 +23,8 @@ import { describeCheckIn } from "../teammate-checkins.js";
 import { SkillsPanel } from "./CrewSkills.js";
 import { base, Face, foldersOf, markOf, mateOn, mateStatus, modelLabel, refreshTeam, short, TeammateDialog, TeammateFolderCard, toolName, useTeamNow, workingSinceOf, type Team } from "./Teammates.js";
 
-export type MateTab = "chat" | "activity" | "results" | "skills" | "memory" | "settings";
+import { setMateTab, useMateTab, type MateTab } from "./mate-tab.js";
+export { setMateTab, useMateTab, type MateTab };
 const TABS: { id: MateTab; label: string }[] = [
   { id: "chat", label: "Chat" },
   { id: "activity", label: "Activity" },
@@ -32,19 +33,6 @@ const TABS: { id: MateTab; label: string }[] = [
   { id: "memory", label: "Memory" },
   { id: "settings", label: "Settings" },
 ];
-
-/** Which tab each teammate's page is on, for this visit: back on Chat when the page is next opened fresh. */
-const tabs = new Map<string, MateTab>();
-const watchers = new Set<() => void>();
-let tabsVersion = 0;
-export const setMateTab = (lane: string, tab: MateTab) => (tabs.set(lane, tab), tabsVersion++, watchers.forEach((f) => f()));
-export const useMateTab = (lane: string): MateTab => {
-  useSyncExternalStore(
-    (f) => (watchers.add(f), () => void watchers.delete(f)),
-    () => tabsVersion,
-  );
-  return tabs.get(lane) ?? "chat";
-};
 
 /** "40m", "1h 5m": minutes as the page says them. */
 // Under half a minute is "<1m", never "0m" (2026-10-28 QA).

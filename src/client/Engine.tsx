@@ -781,7 +781,7 @@ export function FilesPanel({
           ))}
         </div>
       )}
-      <div className="doc-scroll">
+      <div className="doc-scroll files-scroll">
         {d && d.files.length ? (
           <>
             <div className="files-bar dp-sum">

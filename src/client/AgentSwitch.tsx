@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Plan } from "../plan-types.js";
-import { AgentModelPicker, type EffortChoice } from "./AgentModelPicker.js";
+import { AgentModelPicker, type AccountChoice, type EffortChoice } from "./AgentModelPicker.js";
 import { createPortal } from "react-dom";
 import { can, runOf, type SessionState } from "../session/projection.js";
 import { ENGINE_NAMES, ENGINE_TOOLS, MAIN_LANE, type EngineTool, type Member, type SessionEvent, type Thinking } from "../types.js";
@@ -30,6 +30,8 @@ import { splitTools } from "./engines.js";
 export { EngineMark };
 
 type SwitchProps = {
+  /** My tool's accounts, when it has more than one here: the picker's Account row. */
+  accounts?: AccountChoice | null;
   state: SessionState;
   me: Member;
   identity: Identity;
@@ -159,7 +161,7 @@ function Bring({ identity, onSetup }: { identity: Identity; onSetup: (lane: stri
   );
 }
 
-function Switch({ state, me, identity, sid, invite, lane, events = [], notify, onSetup, plan, onFridayModel, onThinking, effort, modelOnly = false }: SwitchProps) {
+function Switch({ state, me, identity, sid, invite, lane, events = [], notify, onSetup, plan, onFridayModel, onThinking, effort, modelOnly = false, accounts = null }: SwitchProps) {
   const engine = state.engines[lane];
   const current: EngineTool | "" = engine?.tool ?? "";
   const { state: machine } = useMachine(identity);
@@ -252,6 +254,7 @@ function Switch({ state, me, identity, sid, invite, lane, events = [], notify, o
       onThinking={onThinking}
       effort={effort ?? null}
       modelOnly={modelOnly}
+      accounts={accounts}
     />
   );
 }

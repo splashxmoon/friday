@@ -13,6 +13,7 @@ import { MAC_CSS, THEME_WATCH, WIN_CSS } from "../desktop-chrome.js";
 import { registerNative } from "../desktop-native.js";
 import { feedbackUrl, osName } from "../feedback.js";
 import { registerBrowser } from "./desktop-browser.js";
+import { registerScreen } from "../desktop-screen.js";
 import { registerTerminal, stopTerminals } from "../desktop-terminal.js";
 import { registerUpdates } from "../desktop-update.js";
 import { killTools } from "../runner/spawn-cli.js";
@@ -240,6 +241,7 @@ else {
   registerTerminal(fromApp);
   // "Open in" your editor, file manager or terminal, and the dock's count of what waits on you (desktop-native.ts).
   registerNative(fromApp);
+  registerScreen(); // computer use's screen, bar and permissions, for the runner in this process (desktop-screen.ts)
   registerBrowser(() => win, fromApp, () => friday?.url ?? null); // the agents' browser tool, on the session's Browser panel (desktop-browser.ts)
   // The page's light or dark choice (preload.ts setTheme): the window buttons and background follow it where the OS draws them.
   ipcMain.on("friday:theme", (e, theme: unknown, choice: unknown) => {

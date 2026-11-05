@@ -1108,8 +1108,10 @@ export function App() {
     };
     return [
       { label: "Duplicate", icon: "copy", onSelect: () => void done(async () => setAgentSel(((await api<{ agent: AgentView }>(identity, `/api/agents/${a.id}/duplicate`, { method: "POST" })).agent.id))) },
+      // Its maker left the workspace: an admin may make it theirs (app.ts stewardOf).
+      ...(a.mayManage ? [{ label: "Take over", icon: "user" as const, onSelect: () => void done(() => api(identity, `/api/agents/${a.id}/takeover`, { method: "POST" })) }] : []),
       { heading: "" },
-      a.access === "owner"
+      a.access === "owner" || a.mayManage
         ? {
             label: "Delete",
             icon: "trash",

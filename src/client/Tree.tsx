@@ -522,16 +522,14 @@ function FileView({
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [editing, setEditing] = useState(true);
-  // A Markdown file opens as a page, its source a switch away (MarkdownDoc.tsx); its edits stay when switching back and forth.
+  // A Markdown file opens as a page (MarkdownDoc.tsx), with no Formatted/Edit switch over it (Arun, 2026-11-05: "get rid of this").
   const markdown = /\.(md|markdown|mdx)$/i.test(path);
-  const [formatted, setFormatted] = useState(true);
 
   // Another file starts fresh. Said while drawing: an effect would also run each time a kept Tree is shown again.
   const [viewOf, setViewOf] = useState(path);
   if (viewOf !== path) {
     setViewOf(path);
     setEditing(true);
-    setFormatted(true);
     setText(null);
     setErr("");
   }
@@ -581,22 +579,10 @@ function FileView({
   }
 
   const value = draft ?? text ?? "";
-  const asPage = markdown && formatted && text !== null;
+  const asPage = markdown && text !== null;
   return (
     <div className={`tree-open${asPage ? " as-page" : ""}`}>
       {err && <p className="error small">{err}</p>}
-      {markdown && text !== null && (
-        <div className="md-bar">
-        <div className="md-switch" role="tablist" aria-label="Show this file">
-          <button type="button" role="tab" aria-selected={formatted} className={formatted ? "on" : ""} onClick={() => setFormatted(true)}>
-            Formatted
-          </button>
-          <button type="button" role="tab" aria-selected={!formatted} className={formatted ? "" : "on"} onClick={() => setFormatted(false)}>
-            {canEdit && send ? "Edit" : "Source"}
-          </button>
-        </div>
-        </div>
-      )}
       {asPage ? (
         <div className="md-page">
           <MarkdownDoc text={value} path={path} />

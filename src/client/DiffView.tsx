@@ -350,11 +350,11 @@ export function DiffView({
                   return (
                     <div key={l.id}>
                       <div className={`${styles.diffRow} ${styles[kind]} ${hunk ? "rsp-hunk" : ""} rsp-row rsp-line ${kind}${noted(l)}`} {...(hunk ? {} : here(l))} {...handTitle(l)}>
-                        <span className={`${styles.ln} ${styles.old} rsp-ln-old`}>
+                        {/* One column of numbers, the file's as it is now (Arun, 2026-11-05): a removed line has none. */}
+                        <span className={`${styles.ln} ${styles.new} rsp-ln-new`}>
                           {!hunk && commentButton(l)}
-                          {l.oldLine ?? ""}
+                          {l.newLine ?? ""}
                         </span>
-                        <span className={`${styles.ln} ${styles.new} rsp-ln-new`}>{l.newLine ?? ""}</span>
                         <span className={`${styles.sign} rsp-sign`}>{l.type === "added" ? "+" : l.type === "removed" ? "-" : ""}</span>
                         <code>{hunk ? l.content : code(l)}</code>
                         {!hunk && <Watchers who={watchersOf(focus.others, path, l.newLine ?? l.oldLine ?? 0)} />}

@@ -16,8 +16,9 @@ import type { DesktopUpdate } from "./Workspace.js";
  * It draws nothing outside the desktop app, where there is no app to update.
  */
 
+// What changed, on the website's changelog (Arun, 2026-11-05), not GitHub's list of installers.
+const RELEASES = "https://www.tryfridaywork.com/changelog";
 // Public, unlike the code: installers are what a download page is for.
-const RELEASES = "https://github.com/splashxmoon/friday-releases/releases/latest";
 const DOWNLOAD = "https://www.tryfridaywork.com/download";
 
 const SAY: Record<DesktopUpdate["stage"], (s: DesktopUpdate) => string> = {

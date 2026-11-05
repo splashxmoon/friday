@@ -7,8 +7,7 @@ import "./work.css";
 /**
  * A Markdown file read as a page, the way Work sessions showed their documents and Claude shows one (Arun, 2026-11-03: "if you
  * open a .md file it will appear like it did in the work sessions before, nicely designed and formatted"): the same prose type,
- * measure and spacing (work.css .work-prose), headings you can link to, links that open where they point. Its source is a
- * switch away in the file panel (Tree.tsx FileView).
+ * measure and spacing (work.css .work-prose), headings you can link to, links that open where they point.
  */
 export function MarkdownDoc({ text, path }: { text: string; path: string }) {
   const parts = {

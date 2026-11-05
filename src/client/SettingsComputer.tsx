@@ -3,6 +3,7 @@ import { GitHubConnect } from "./GitHubConnect.js";
 import { MachineBadge } from "./MachineBadge.js";
 import { pickedMachine, useMachine } from "./local.js";
 import { KeepAwakeRow } from "./KeepAwake.js";
+import { ComputerUseRow } from "./ComputerUse.js";
 import { ComputersSettings } from "./Computers.js";
 import { isLocal } from "./edition.js";
 import type { Identity } from "./storage.js";
@@ -40,6 +41,8 @@ export function ComputerSection({ identity }: { identity: Identity }) {
       <SettingsGroup title="This computer">
         <MachineBadge identity={identity} machine={machine} refresh={refresh} inline part="computer" />
         <KeepAwakeRow row />
+        {/* Computer use: agents seeing the screen and using the mouse and keyboard here, off until turned on (ComputerUse.tsx). */}
+        {machine.mode === "local" && <ComputerUseRow identity={identity} />}
       </SettingsGroup>
       {/* Where new sessions start: this computer, or a machine of yours that stays on, so agents keep running when this one shuts. */}
       {/* No phone pairing on this computer's Friday: there is no open-source phone app yet (Arun, 2026-11-04: "WE DONT HAVE AN APP FOR

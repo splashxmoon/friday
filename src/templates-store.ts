@@ -54,6 +54,21 @@ export class TemplateRegistry {
     return t;
   }
 
+  /** Taken over by `to`: an admin's, for a template its maker shared and then left the workspace with (app.ts stewardOf). */
+  async takeOver(id: string, to: { id: string; name: string }): Promise<PromptTemplate> {
+    const v = await this.redis.hget(this.key, id);
+    if (!v) throw new TemplateError(404, "That template is already gone.");
+    const t: PromptTemplate = { ...(JSON.parse(v) as PromptTemplate), ownerId: to.id, ownerName: to.name };
+    await this.redis.hset(this.key, id, JSON.stringify(t));
+    return t;
+  }
+
+  /** The template, as stored, or null. */
+  async get(id: string): Promise<PromptTemplate | null> {
+    const v = await this.redis.hget(this.key, id);
+    return v ? (JSON.parse(v) as PromptTemplate) : null;
+  }
+
   async remove(userId: string, id: string): Promise<void> {
     const v = await this.redis.hget(this.key, id);
     if (!v) throw new TemplateError(404, "That template is already gone.");

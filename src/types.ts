@@ -968,7 +968,8 @@ export type EventBody =
   | { type: "account.switched"; from: { id: string; label: string }; to: { id: string; label: string }; until?: number; tool?: EngineTool }
   | { type: "member.joined"; role: Role }
   | { type: "member.role_changed"; userId: string; name: string; role: Role }
-  | { type: "member.removed"; userId: string; name: string }
+  /** `workspace`: taken out because they are no longer in the session's workspace (offboard.ts), not by the session's owner. */
+  | { type: "member.removed"; userId: string; name: string; workspace?: true }
   | { type: "link.updated"; role: LinkRole; enabled: boolean; version: number }
   // Human → agent. Only the driver can append these.
   | { type: "instruction"; text: string; interrupt: boolean; /** The people it @-mentions, by id (mentions.ts). */ mentions?: string[]; fromSuggestion?: number; attachments?: Attachment[]; handoff?: Handoff; /** A message from another session's agent (peers.ts). */ peer?: PeerNote; /** A message from another agent in this session (agent-mesh.ts). */ mesh?: MeshNote; /** Answers an `engine.approval`: the driver said yes or no to it. */ approval?: { id: string; approve: boolean }; /** An edit of a message still queued: this one takes its place in the queue, and that one is taken back. */ replaces?: number; /** Friday telling a coding tool whose turn ended short of its task to carry on (keep-going.ts). */ keepGoing?: true; /** A reply in a side thread on an earlier message (by its seq): its answer stays in the thread, not the room's main flow. */ thread?: { root: number }; /** Posted by an app on the person's behalf (Friday's token API or MCP, `sessions:write`), not typed by them: capped like a teammate's (Security R3). */ via?: "api"; /** Friday's own message carrying on what agents set going (a wake, a carry-on): how many agent-to-agent steps led to it, so the turn it starts counts on from there rather than from nothing (agent-mesh behindRun). */ hop?: number; /** A turn of its own: never handed to a turn under way, since its answer is read from the turn it starts. */ ownTurn?: true; /** Friday's: a check the project added (brain.ts) failed after this agent's change; the command. */ check?: string }
@@ -991,6 +992,9 @@ export type EventBody =
       why?: string;
       /** A teammate's go-ahead (guardrails.ts): which of the things it asks before, for the card's tag and Away mode's answer. */
       guard?: "outside" | "ship" | "delete" | "money" | "keys" | "computer" | "takeover";
+      /** Only its machine's host may say yes, as a person: nobody else in the session, and none of Friday's own yeses (a room
+       *  running on its own, commands allowed in advance). Using that person's screen, mouse and keyboard (computer.ts). */
+      hostsOwn?: boolean;
     }
   // Anyone allowed to suggest who isn't driving. Never reaches the agent unless promoted.
   | { type: "suggestion"; text: string; mentions?: string[]; attachments?: Attachment[]; /** Raised at one step of a run: the tool call it is about, and the step's label. */ at?: { call: string; step: string } }
@@ -1030,7 +1034,7 @@ export type EventBody =
    */
   | { type: "run.checkpoint"; checkpoint: string }
   /** Somebody committed the session's changes, and perhaps pushed them and opened a pull request. */
-  | { type: "folder.committed"; sha: string; branch: string; message: string; files: number; pushed?: boolean; prUrl?: string; prCreated?: boolean; /** What the pull request merges into, when it was opened: the default branch, or the one below it in a stack. */ base?: string; error?: string }
+  | { type: "folder.committed"; sha: string; branch: string; message: string; files: number; pushed?: boolean; prUrl?: string; prCreated?: boolean; /** Not pushed, and the folder has no remote to push to: the commit is only on this computer. */ local?: boolean; /** What the pull request merges into, when it was opened: the default branch, or the one below it in a stack. */ base?: string; error?: string }
   /** The folder's git worked by hand from the Git panel: changes thrown away, or the branch pulled. Staging is said nowhere: it changes no file. */
   | { type: "folder.git"; action: "discard" | "pull"; paths?: string[]; note?: string }
   /** The folder moved to another branch. */
@@ -1158,7 +1162,11 @@ export type EventBody =
    * "disconnected" keeps the lane reserved, so work waits for the host to come
    * back. "released" hands the lane back to Friday's own agent.
    */
-  | { type: "engine.detached"; reason: "disconnected" | "released"; tool?: EngineTool }
+  /**
+   * `removed`: its host was taken out of the session (`workspace`: because they left or were removed from its workspace), so
+   * their computer works in it no more; the runner is closed for good (4003).
+   */
+  | { type: "engine.detached"; reason: "disconnected" | "released" | "removed"; tool?: EngineTool; workspace?: true }
   /** What the CLI changed in its folder since it attached, taken with git after each turn. */
   /**
    * A run's failing tests against the commit its copy started from (baseline.ts), worked out once it ended: `pre` were already

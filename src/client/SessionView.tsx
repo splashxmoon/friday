@@ -1,4 +1,5 @@
 import { StateRing } from "./presence.js";
+import { dragEnds } from "./drag-end.js";
 import { isLocal, ownModel, planLimits, type SessionPlan } from "./edition.js";
 import { sessionComputer, useSessionMachine } from "./local.js";
 import { openInPreview } from "./previewBus.js";
@@ -973,7 +974,10 @@ export function SessionView({
                                 let frame = 0;
                                 let moved = false;
                                 document.body.classList.add("resizing", "resizing-x");
+                                // Ends however the pointer goes, released over the preview's page or outside the window too (drag-end.ts).
+                                const held = dragEnds(e, () => up());
                                 const move = (ev: PointerEvent) => {
+                                  if (!held.live(ev)) return;
                                   x = ev.clientX;
                                   moved = true;
                                   frame ||= requestAnimationFrame(() => {
@@ -988,12 +992,12 @@ export function SessionView({
                                   if (moved) setWidths(resizeAt(ws, at - 1, ((x - box.left) / box.width) * 100, split.length > 2 ? 18 : 25));
                                   document.body.classList.remove("resizing", "resizing-x");
                                   removeEventListener("pointermove", move);
-                                  removeEventListener("pointerup", up);
-                                  removeEventListener("pointercancel", up);
+                                  removeEventListener("pointerup", held.stop);
+                                  removeEventListener("pointercancel", held.stop);
                                 };
                                 addEventListener("pointermove", move);
-                                addEventListener("pointerup", up);
-                                addEventListener("pointercancel", up);
+                                addEventListener("pointerup", held.stop);
+                                addEventListener("pointercancel", held.stop);
                               }}
                             />,
                           ]

@@ -39,3 +39,28 @@ test("a commit, a command and a push for a lane go to that lane's own folder", a
   await core.handle("s1", ada, { type: "folder.run", command: "npm test" });
   assert.deepEqual(seen.map((s) => `${s.op}:${s.lane}`), ["shell:main"], "no lane means the main one");
 });
+
+test("a commit that isn't pushed records whether the folder has anywhere to push it", async (t) => {
+  const redis = new Redis(process.env.REDIS_URL ?? "redis://127.0.0.1:6379");
+  const prefix = `mpatest:${Math.random().toString(36).slice(2, 10)}:`;
+  t.after(async () => {
+    const keys = await redis.keys(`${prefix}*`);
+    if (keys.length) await redis.del(...keys);
+    redis.disconnect();
+  });
+  const store = new SessionStore(redis, prefix);
+  let remote: { url?: string } = {};
+  const folder = async (_sid: string, req: { op: string }) => {
+    if (req.op === "commit") return { output: JSON.stringify({ sha: "c".repeat(40), branch: "friday/x", files: 1 }) };
+    if (req.op === "remote") return { output: JSON.stringify(remote) };
+    return { output: "" };
+  };
+  const core = new SessionCore(store, () => {}, undefined, undefined, undefined, folder as never);
+  await store.create("s2", "t", { ...ada, role: "owner" }, {}, "w");
+  const committed = async () => (await store.events("s2")).findLast((e) => e.body.type === "folder.committed")!.body as { local?: boolean };
+  assert.equal((await core.handle("s2", ada, { type: "folder.commit", message: "One" })).ok, true);
+  assert.equal((await committed()).local, true, "no remote: only on this computer");
+  remote = { url: "git@github.com:acme/app.git" };
+  await core.handle("s2", ada, { type: "folder.commit", message: "Two" });
+  assert.equal((await committed()).local, undefined, "a remote to push to: nothing said");
+});

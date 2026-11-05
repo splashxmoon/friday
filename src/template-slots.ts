@@ -27,6 +27,10 @@ export interface PromptTemplate {
   team?: boolean;
   /** Whether everyone in the workspace sees it, or only the person who saved it. */
   shared?: boolean;
+  /** Its owner shared it and then left the workspace (app.ts markLeft). */
+  ownerLeft?: true;
+  /** This person, an admin, may delete or take it over (app.ts stewardOf). */
+  mayManage?: true;
   ownerId?: string;
   ownerName?: string;
   /** Saved from a session: the agent it ran and the commands allowed in advance come along with the prompt. */

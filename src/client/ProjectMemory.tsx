@@ -21,7 +21,8 @@ const KIND_NAME: Record<BrainKind, string> = { correction: "Correction", decisio
  * so it is never dropped, forgets one, or adds one (org memory, 2026-10-31: "a wrong or outdated memory corrected").
  */
 export function ProjectMemory({ identity }: { identity: Identity }) {
-  const [state, setState] = useState<{ enabled: boolean; repos: BrainRepo[] } | null>(null);
+  // `mayToggle`: whether this person may turn learning off or on for the workspace (its admins and owners); absent on your own computer, where it is yours.
+  const [state, setState] = useState<{ enabled: boolean; repos: BrainRepo[]; mayToggle?: boolean } | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [entries, setEntries] = useState<BrainEntry[] | null>(null);
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
@@ -30,7 +31,7 @@ export function ProjectMemory({ identity }: { identity: Identity }) {
   const [rule, setRule] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [ask, confirmUI] = useConfirm();
-  const load = () => void api<{ enabled: boolean; repos: BrainRepo[] }>(identity, "/api/brain").then(setState, (e: Error) => setError(e.message));
+  const load = () => void api<{ enabled: boolean; repos: BrainRepo[]; mayToggle?: boolean }>(identity, "/api/brain").then(setState, (e: Error) => setError(e.message));
   useEffect(load, []); // eslint-disable-line react-hooks/exhaustive-deps
   const q = (repo: string, more = "") => `repo=${encodeURIComponent(repo)}${more}`;
   const loadRepo = (repo: string) => void api<{ entries: BrainEntry[] }>(identity, `/api/brain/entries?${q(repo)}`).then((r) => setEntries(r.entries), (e: Error) => setError(e.message));
@@ -63,9 +64,10 @@ export function ProjectMemory({ identity }: { identity: Identity }) {
             {state.enabled
               ? "What agents learned working on each repository: decisions, pitfalls and their fixes, conventions. Every agent starting on one, in any tool, is told what bears on its task. Agents add to it as they work; put anything wrong right here."
               : "Agents learn nothing from their runs, and nobody is briefed. What is listed is kept until you delete it."}
+            {state.mayToggle === false && " Only admins and owners turn learning off or on."}
           </div>
         </div>
-        <Switch label="Learn from every run" on={state.enabled} onChange={(on) => void act(() => api(identity, "/api/brain/settings", { method: "POST", body: JSON.stringify({ enabled: on }) }))} />
+        <Switch label="Learn from every run" on={state.enabled} disabled={state.mayToggle === false} onChange={(on) => void act(() => api(identity, "/api/brain/settings", { method: "POST", body: JSON.stringify({ enabled: on }) }))} />
       </div>
       {state.repos.length === 0 ? (
         <p className="mem-empty">Nothing learned yet. It fills in as agents finish work in a repository.</p>

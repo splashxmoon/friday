@@ -7,7 +7,7 @@
  *
  */
 import { leaving } from "./leave-guard.js";
-import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
+import { lazy, memo, Suspense, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
 import { ArrowUpIcon, CheckIcon, ChevronRightIcon, CopyIcon, EllipsisIcon, EyeIcon, HandIcon, ZapIcon, MessageSquareIcon, MessageSquareReplyIcon, UsersIcon, Settings2Icon, FolderGit2Icon, PlusIcon, ShuffleIcon, TriangleAlertIcon, UserPlusIcon, XIcon } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -47,13 +47,15 @@ import { Avatar } from "./icons.js";
 import { createPortal } from "react-dom";
 import { ACCESS, backupFor, sayMate, type MateSays } from "./team-status.js";
 import { boardTitle, plainError, readSince, type Away } from "./team-api.js";
-import { SinceYouLeft } from "./TeamBrief.js";
-import { prefillComposer } from "./RunReview.js";
+// The team brief and a teammate's own page load when shown, not with the app (test/client-bundle.test.ts).
+const SinceYouLeft = lazy(() => import("./TeamBrief.js").then((m) => ({ default: m.SinceYouLeft })));
+import { prefillComposer } from "./prefill.js";
 import { notificationsOn } from "./prefs.js";
-import { TeammatePage, useMateTab } from "./TeammatePage.js";
+import { useMateTab } from "./mate-tab.js";
+const TeammatePage = lazy(() => import("./TeammatePage.js").then((m) => ({ default: m.TeammatePage })));
 import { BudgetFields } from "./TeammateBudget.js";
 import type { MateBudget, RunBudget } from "../team-budget.js";
-import { SaveAsSkill } from "./CrewSkills.js";
+const SaveAsSkill = lazy(() => import("./CrewSkills.js").then((m) => ({ default: m.SaveAsSkill })));
 import "./teammates.css";
 
 /** A team's size (teammates.ts MAX_TEAMMATES). */
@@ -923,7 +925,9 @@ export function RoomsNow({ sid, identity, empty }: { sid: string; onOpen?: (r: R
   if (!t || t.sid !== sid || !ownOf(t).length) return null;
   return (
     <>
-      <SinceYouLeft sid={sid} {...(identity ? { identity } : {})} fallback={null} />
+      <Suspense fallback={null}>
+        <SinceYouLeft sid={sid} {...(identity ? { identity } : {})} fallback={null} />
+      </Suspense>
       {empty && <FirstGoal t={t} />}
     </>
   );
@@ -1202,7 +1206,7 @@ export function TeamRun({ sid, lane, active, doing, said, outcome, changed, stam
           </button>
           {thread}
           {said && !active && <CopyText text={said} />}
-          {said && !active && !["error", "cancelled", "limited", "switched", "waiting"].includes(outcome ?? "") && <SaveAsSkill sid={sid} lane={lane} />}
+          {said && !active && !["error", "cancelled", "limited", "switched", "waiting"].includes(outcome ?? "") && <Suspense fallback={null}><SaveAsSkill sid={sid} lane={lane} /></Suspense>}
         </div>
       </div>
     </div>
@@ -1427,7 +1431,11 @@ export function useTeamNow(): Team | null {
 // A function, not the import itself: the two files import each other, and a const taken from one still loading is not there yet.
 export { useMateTab };
 export function TeammateHeader(p: { lane: string; identity?: Identity; notify?: (m: string) => void; branch?: string }) {
-  return <TeammatePage {...p} />;
+  return (
+    <Suspense fallback={null}>
+      <TeammatePage {...p} />
+    </Suspense>
+  );
 }
 
 /** The team session as a recent session, to open it the way the sidebar opens any other. */

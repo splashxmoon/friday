@@ -1,4 +1,6 @@
+import { SmartphoneIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type PointerEvent } from "react";
+import { EmptyState } from "@/components/dass/EmptyState";
 import type { IosBuild, IosInput, IosStatus } from "../runner/ios.js";
 import { uploadFile } from "./api.js";
 import { Icon } from "./icons.js";
@@ -334,10 +336,12 @@ export function IosPreview({
         <button type="button" className="btn ghost small" onClick={() => void look()}>Check again</button>
       </div>
     );
+  // Nothing to run: the panel's empty state, a drawing and a line, with no paragraph under it (Arun, 2026-11-05). It looks again
+  // every few seconds, so an app made meanwhile shows without a button.
   if (status && !status.projects.length)
     return (
-      <div className="preview-note ios-note">
-        <p className="muted small">No Xcode project or workspace in this folder{elsewhere.length ? ", or in the folders the agents are working in" : ""}. Open a folder with an .xcodeproj or .xcworkspace to run its app here.</p>
+      <div className="ios-empty">
+        <EmptyState small icon={<SmartphoneIcon />} title="No iOS app in this folder" />
       </div>
     );
 

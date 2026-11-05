@@ -11,6 +11,7 @@
  * is one press away. Its bar along the foot (WorkBar) says the same at a glance.
  *
  */
+import { dragEnds } from "./drag-end.js";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import type { HubAgent } from "../agents-hub.js";
 import { pendingFor, type SessionState } from "../session/projection.js";
@@ -403,7 +404,10 @@ export function WorkRail({ state, events, sid, invite, away, onBrowser, onBrowse
     let next = widths[which];
     let frame = 0;
     document.body.classList.add("resizing", "resizing-x");
+    // Ends however the pointer goes, released over the preview's page or outside the window too (drag-end.ts).
+    const held = dragEnds(e, () => up());
     const move = (ev: PointerEvent) => {
+      if (!held.live(ev)) return;
       next = width(el, right - ev.clientX);
       frame ||= requestAnimationFrame(() => {
         frame = 0;
@@ -414,8 +418,8 @@ export function WorkRail({ state, events, sid, invite, away, onBrowser, onBrowse
       if (frame) cancelAnimationFrame(frame);
       document.body.classList.remove("resizing", "resizing-x");
       removeEventListener("pointermove", move);
-      removeEventListener("pointerup", up);
-      removeEventListener("pointercancel", up);
+      removeEventListener("pointerup", held.stop);
+      removeEventListener("pointercancel", held.stop);
       setWidths((w) => {
         const kept = { ...w, [which]: next };
         try {
@@ -427,8 +431,8 @@ export function WorkRail({ state, events, sid, invite, away, onBrowser, onBrowse
       });
     };
     addEventListener("pointermove", move);
-    addEventListener("pointerup", up);
-    addEventListener("pointercancel", up);
+    addEventListener("pointerup", held.stop);
+    addEventListener("pointercancel", held.stop);
   };
   const plan = useMemo(() => latestPlan(events, state, agents), [events, state, agents]);
   const working = agents.filter((a) => a.status === "working");

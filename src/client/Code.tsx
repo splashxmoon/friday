@@ -15,7 +15,7 @@ import { HomeActivity } from "./HomeActivity.js";
 import { MachineBadge } from "./MachineBadge.js";
 import type { Identity, RecentSession } from "./storage.js";
 import { InBand, MenuButton, Switch, useDismiss } from "./ui.js";
-import { AccountPill, preferredAccount } from "./Accounts.js";
+import { preferredAccount, useAccountChoice } from "./Accounts.js";
 import { EngineMark } from "./BrandMarks.js";
 import { savedCommands, useSavedCommands, useShortcuts } from "./Shortcuts.js";
 import { AgentModelPicker } from "./AgentModelPicker.js";
@@ -410,6 +410,8 @@ export function Code({
   // Friday Code is the default now, so there is nothing to fall back from:
   // the composer already opens on the agent that can always run.
   const tool = engine ? (machine.tools.find((t) => t.tool === engine) ?? null) : null;
+  // Which of its accounts, for a tool with more than one here: a row of the agent picker (design D), not a pill of its own.
+  const accountChoice = useAccountChoice(identity, tool ?? undefined, account, setAccount);
   // Which coding model suits what is being typed, and why, shown in the agent picker (useRouteHint): a suggestion only.
   const route = useRouteHint(
     identity,
@@ -1203,9 +1205,9 @@ export function Code({
               machineName={machine.machine?.name}
               // It's your tool on your plan, so every level is yours to pick here.
               effort={effortLevels.length ? { now: effort, options: effortLevels.map((e) => ({ value: e, label: ENGINE_EFFORT_INFO[e].label, title: ENGINE_EFFORT_INFO[e].blurb })), set: setEffort } : null}
+              accounts={accountChoice}
             />
             {/* Which of its accounts, for a tool with more than one on the computer: each with how much of it is used. */}
-            {engine && tool?.accounts && tool.accounts.length > 1 && <AccountPill identity={identity} tool={tool} value={account} onChange={setAccount} />}
             {/* What the agent may do without asking: read and propose, ask before it runs a command, or run freely. Applies to whichever agent is chosen. */}
             <MenuButton
               className="agent-pill mode-pill"

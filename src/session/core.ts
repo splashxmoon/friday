@@ -214,7 +214,7 @@ export class SessionCore {
     /** How many agents beyond the main one this workspace's plan runs side by side; the plan's, not the session's. */
     private laneCap: (workspaceId: string) => Promise<number> = async () => 6,
     /** A read-only recording link for a session, when its viewer link is on; the app signs it. */
-    private replayLink: (sid: string, state: SessionState) => string | undefined = () => undefined,
+    private replayLink: (sid: string, state: SessionState) => string | undefined | Promise<string | undefined> = () => undefined,
     /** Whether a workspace is on Team, where people other than a session's owner work in it; on Solo they watch. */
     private team: (workspaceId: string) => Promise<boolean> = async () => true,
   ) {}
@@ -226,12 +226,25 @@ export class SessionCore {
   repoVisibility: ((slug: string) => Promise<"public" | "private" | null>) | null = null;
 
   /**
+   * Set by the app: whether a rule above the session keeps everyone else's messages to Edits on every host's computer, whatever
+   * a host raised for a lane (lane.othersFull). Unset, each host decides alone.
+   */
+  othersHeld: ((state: SessionState) => Promise<boolean>) | null = null;
+
+  /** Whether others' messages on this lane may go as far as its host's own mode: the host raised it, and nothing holds it lower. */
+  async othersRaised(state: SessionState, lane: string): Promise<boolean> {
+    if (state.othersFull?.[lane] !== true) return false;
+    // A rule that can't be read holds it at Edits: the safe side of a host's computer.
+    return !(await (this.othersHeld?.(state) ?? Promise.resolve(false)).catch(() => true));
+  }
+
+  /**
    * The recording link for a pull request's body (Security APP-3). The link reads the whole session, so it goes only where
    * the readers are the repository's own people: a private repository, or any repository once the owner turned it on for
    * this session (prReplay). A public one, or one whose visibility can't be told, gets none.
    */
   private async replayForPr(sid: string, state: SessionState, folderAt: (req: RepoCall) => Promise<{ output: string }>): Promise<string | undefined> {
-    const link = this.replayLink(sid, state);
+    const link = await this.replayLink(sid, state);
     if (!link || state.options.prReplay) return link;
     const remote = parseJson<{ github?: string | null }>((await folderAt({ op: "remote" }).catch(() => ({ output: "" }))).output);
     const seen = remote?.github && this.repoVisibility ? await this.repoVisibility(remote.github).catch(() => null) : null;
@@ -254,7 +267,7 @@ export class SessionCore {
    * It used to look only at the main agent, so somebody removed from a session (or made a viewer) who was driving a second agent kept
    * it: their lane then waited on a person who could no longer answer, and nobody else could claim it short of an owner's takeover.
    */
-  async releaseWheels(sid: string, state: SessionState, userId: string, reason: "removed" | "revoked", lost: (lane: string) => boolean) {
+  async releaseWheels(sid: string, state: SessionState, userId: string, reason: "removed" | "revoked", lost: (lane: string) => boolean, opts: { workspace?: boolean } = {}) {
     for (const l of [MAIN_LANE, ...state.lanes.map((x) => x.id)]) {
       if (!lost(l)) continue;
       if (driverOf(state, l)?.id === userId) {
@@ -264,7 +277,10 @@ export class SessionCore {
       // carrying out what teammates asked, on a machine whose owner was no longer part of the session.
       const engine = state.engines[l];
       if (engine?.hostId === userId) {
-        await this.store.append(sid, SYSTEM, { type: "engine.detached", reason: "released", ...(engine.tool ? { tool: engine.tool } : {}) }, { lane: l });
+        // Taken out of the session (or its workspace, offboard.ts): said as that, not as the lane handed back to Friday Code, and
+        // their runner is closed for good. Made a viewer: handed back, as before.
+        const why = reason === "removed" ? { reason: "removed" as const, ...(opts.workspace ? { workspace: true as const } : {}) } : { reason: "released" as const };
+        await this.store.append(sid, SYSTEM, { type: "engine.detached", ...why, ...(engine.tool ? { tool: engine.tool } : {}) }, { lane: l });
       }
     }
   }
@@ -764,6 +780,12 @@ export class SessionCore {
             if (cmd.pr && !p.prCreated) body.error = `Pushed, but the pull request couldn't be opened from here${p.prError ? `: ${p.prError}` : ""}.${p.prUrl ? " The link opens GitHub's page to do it." : ""}`;
           } else body.error = p?.error ?? (!p && said ? said.slice(0, 500) : "Committed, but it couldn't be pushed.");
         }
+        // Not pushed: whether it could be, so the board says what's true ("Push it to share it" to a folder with no remote was a
+        // dead end; 2026-11-04 UX pass).
+        if (!body.pushed) {
+          const r = parseJson<{ url?: string }>((await folderAt({ op: "remote", ...(dir ? { dir } : {}) }).catch(() => ({ output: "" }))).output);
+          if (r && !r.url) body.local = true;
+        }
         const a = await append(body);
         return a.ok ? ok(a.seq) : fail("Committed, but it couldn't be recorded.");
       }
@@ -1030,7 +1052,7 @@ export class SessionCore {
         // or one holding others' commands for its host's OK (lane.othersFull not raised; Arun, 2026-11-04).
         const machine = liveMachine(state, lane) ?? state.engines[lane];
         const machineLane = machine && Object.keys(state.engines).find((k) => state.engines[k] === machine);
-        const myMachine = !!machine && machine.hostId === m.id && (machine.mode === "edits" || !(machineLane && state.othersFull?.[machineLane] === true));
+        const myMachine = !!machine && machine.hostId === m.id && (machine.mode === "edits" || !(machineLane && (await this.othersRaised(state, machineLane))));
         if (!iDrive && !owner && !myMachine) {
           const allowedKinds = role === "editor" ? state.options.approve.editor : [];
           if (!allowedKinds.length) return deny("answer for an agent you're not driving");
@@ -1039,6 +1061,9 @@ export class SessionCore {
           if (blocked) return fail(`You can approve ${allowedKinds.length === 1 ? "that kind" : "those kinds"} of command, but this one is ${CLASS_LABEL[headlineClass(blocked)].label.toLowerCase()}. ${laneDriver?.name ?? "The driver"} or an owner needs to answer it.`);
         }
         const approve = cmd.approve === true;
+        // Their computer (computer.ts): only its host lets an agent use it, whoever owns or drives the session.
+        const host = state.engines[lane];
+        if (approve && ask.hostsOwn && host?.hostId !== m.id) return fail(`Only ${host?.hostName ?? "the computer's owner"} can let an agent use their computer.`);
         const notYours = approve ? hostsYes(state, lane, m.id) : null;
         if (notYours) return fail(notYours);
         const answered = `answered:${sid}:${ask.id}`;
@@ -1242,6 +1267,7 @@ export class SessionCore {
         // The host's computer, the host's say: nobody else may open it up to everyone's messages, owners included.
         const host = state.engines[lane]?.hostId;
         if (!host || host !== m.id) return fail("Only the person whose computer this agent runs on can change this.");
+        // A workspace that keeps teammates' messages to Edits (workspace-policy.ts): lowering is always the host's, raising isn't.
         const r = await append({ type: "lane.othersFull", on: cmd.on === true });
         return r.ok ? ok(r.seq) : fail("Could not change it.");
       }

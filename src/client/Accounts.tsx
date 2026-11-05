@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { AccountUsage } from "../runner/limits.js";
+import type { AccountChoice } from "./AgentModelPicker.js";
 import { ENGINE_NAMES, type EngineTool } from "../types.js";
 import { Icon } from "./icons.js";
 import { hostApi, type LocalTool } from "./local.js";
@@ -80,38 +81,6 @@ function standing(a: Row): { tone: "done" | "queued" | "blocked" | "quiet"; text
   return { tone: "done", text: "Ready" };
 }
 
-/** A usage window's name: "5 hours", "This week", or what the tool calls it. */
-function windowName(w: AccountUsage["windows"][number]): string {
-  // A model's own weekly limit says which ("Weekly · Fable" is "Fable, week"), apart from the week for everything.
-  const model = /^weekly\s*·\s*(.+)$/i.exec(w.label ?? "")?.[1];
-  if (model) return `${model}, week`;
-  if (w.windowMinutes === 300) return "5 hours";
-  if (w.windowMinutes === 10080) return "This week";
-  return w.label || (w.windowMinutes ? `${Math.round(w.windowMinutes / 60)} hours` : "Usage");
-}
-
-/** How much of each window is used, a thin bar each with when it resets: the two that matter at a glance. */
-function UsageBars({ u }: { u: AccountUsage | undefined }) {
-  const windows = (u?.windows ?? []).filter((w) => w.usedPercent !== null).slice(0, 3);
-  if (!windows.length) return null;
-  return (
-    <span className="acct-usage">
-      {windows.map((w, i) => {
-        const pct = Math.max(0, Math.min(100, Math.round(w.usedPercent!)));
-        const tone = pct >= 90 ? "hot" : pct >= 70 ? "warm" : "";
-        return (
-          <span key={i} className={`acct-bar ${tone}`} title={w.resetsAt ? `Resets ${clock(w.resetsAt * 1000)}` : undefined}>
-            <span className="acct-bar-name">{windowName(w)}</span>
-            <span className="acct-bar-track" aria-hidden="true">
-              <span style={{ width: `${pct}%` }} />
-            </span>
-            <span className="acct-bar-pct">{pct}%</span>
-          </span>
-        );
-      })}
-    </span>
-  );
-}
 
 /** Its usage for a tool, when the computer said. */
 function useAccountUsage(identity: Identity, tool: EngineTool): AccountUsage[] | undefined {
@@ -153,6 +122,8 @@ function AddAccount({ identity, tool, taken, onAdded, onCancel }: { identity: Id
       setBusy(false);
     }
   };
+  // One line: its name, ready typed (a suggestion, selected so typing replaces it), and Sign in; under it, in one quiet line, what
+  // happens and whose it may be (Arun, 2026-11-05: the card had a title, a labelled field with a name menu and two notes).
   return (
     <form
       className="acct-add"
@@ -161,58 +132,32 @@ function AddAccount({ identity, tool, taken, onAdded, onCancel }: { identity: Id
         void add();
       }}
     >
-      <p className="acct-add-title">Add a {name} account</p>
-      {/* One field for its name: typed, or picked from a few in the dropdown at its end. */}
-      <label className="acct-field">
-        <span className="acct-field-label">Name</span>
-        <span className="acct-combo">
-          <input
-            className="acct-combo-input"
-            autoFocus
-            value={label}
-            maxLength={40}
-            placeholder="Work, Personal…"
-            aria-label="Name for the account"
-            onChange={(e) => setLabel(e.target.value)}
-            onKeyDown={(e) => e.key === "Escape" && (e.preventDefault(), onCancel())}
-          />
-          {free.length > 0 && (
-            <MenuButton
-              className="icon-btn tiny acct-combo-pick"
-              label="Pick a name"
-              icon="chevronDown"
-              end
-              compact
-              width={180}
-              items={() => [{ heading: "Name it" }, ...free.map((n) => ({ label: n, checked: label === n, onSelect: () => setLabel(n) }))]}
-            />
-          )}
-        </span>
-      </label>
-      <p className="acct-add-note">
-        <Icon name="external" size={12} />
-        {tool === "codex"
-          ? "Codex's sign-in opens on this computer. Sign in with the other ChatGPT account; your current one stays signed in."
-          : `${name} opens its sign-in in your browser. Sign in with the other account; your current one stays signed in.`}
-      </p>
-      {/* A seat is one person's (Arun, 2026-11-02: "we should have these guardrails in place btw … for friday team"): Anthropic's
-          Team seats are "assigned to one named individual, and only that person may use it", and OpenAI's business seats the same. */}
-      <p className="acct-add-note">
-        <Icon name="user" size={12} />
-        {tool === "codex"
-          ? "Only an account that's yours: a ChatGPT Business or Enterprise seat is for the person it's assigned to, not a teammate's to borrow."
-          : "Only an account that's yours: a Claude Team or Enterprise seat is for the person it's assigned to, not a teammate's to borrow."}
-      </p>
-      {err && <p role="alert" className="error small">{err}</p>}
-      <div className="acct-add-actions">
+      <div className="acct-add-line">
+        <input
+          className="acct-add-name"
+          autoFocus
+          onFocus={(e) => e.currentTarget.select()}
+          value={label}
+          maxLength={40}
+          placeholder="Work, Personal…"
+          aria-label={`Name for the new ${name} account`}
+          onChange={(e) => setLabel(e.target.value)}
+          onKeyDown={(e) => e.key === "Escape" && (e.preventDefault(), onCancel())}
+        />
         <button type="button" className="btn ghost small" onClick={onCancel}>
           Cancel
         </button>
         <button type="submit" className="btn primary small" disabled={!label.trim() || busy}>
-          {busy ? <span className="spinner" /> : null}
-          Sign in to {label.trim() || "it"}
+          {busy ? <span className="spinner tiny" /> : null}
+          Sign in
         </button>
       </div>
+      {/* A seat is one person's (Arun, 2026-11-02: "we should have these guardrails in place btw … for friday team"): Anthropic's
+          Team seats are "assigned to one named individual, and only that person may use it", and OpenAI's business seats the same. */}
+      <p className="acct-add-note">
+        {tool === "codex" ? "Codex's sign-in opens here, for the other ChatGPT account." : `${name}'s sign-in opens in your browser, for the other account.`} Only accounts that are yours.
+      </p>
+      {err && <p role="alert" className="error small">{err}</p>}
     </form>
   );
 }
@@ -260,20 +205,10 @@ export function AccountList({ identity, tool, onChanged }: { identity: Identity;
   useEffect(() => {
     if (done) setSigning(null);
   }, [done]);
-  // One line, folded (Arun, 2026-10-25: "design this better maybe make it collapseable"): who is signed in and where they
-  // stand, opening to the accounts themselves. Open by itself while something needs doing (a sign-in, an account on its way).
-  const needs = rows.some((a) => a.loggedIn === false);
-  const [opened, setOpened] = useState<boolean | null>(null);
   if (!ACCOUNT_TOOLS.includes(tool.tool) || !tool.path) return null;
-  const open = opened ?? (needs || adding || !!signing);
   const name = ENGINE_NAMES[tool.tool];
   const pick = rows.find((a) => a.id === preferred) ?? rows[0]!;
-  const summary = (() => {
-    const u = usage?.find((x) => x.id === pick.id);
-    if (rows.length === 1) return [pick.label, u?.plan, pick.out ? standing(pick).text : tightest(u)].filter(Boolean).join(" · ");
-    const out = rows.filter((a) => a.out).length;
-    return [`New sessions: ${pick.label}`, out ? `${out} out of usage` : ""].filter(Boolean).join(" · ");
-  })();
+  const many = rows.length > 1;
 
   const call = async (id: string, path: string, body: Record<string, unknown>, after?: (r: Login) => void) => {
     setBusy(id);
@@ -297,35 +232,64 @@ export function AccountList({ identity, tool, onChanged }: { identity: Identity;
     setRenaming(null);
     if (l && l !== rows.find((a) => a.id === id)?.label) void call(id, "/api/runner/accounts.rename", { id, label: l });
   };
+  const menu = (a: Row) => () => [
+    { heading: a.label },
+    many && { label: "Use for new sessions", checked: a.id === pick.id, disabled: a.loggedIn === false, sub: a.loggedIn === false ? "Sign in to it first" : undefined, onSelect: () => setPreferred(tool.tool, a.id) },
+    many && { label: "Rename", icon: "pencil" as const, onSelect: () => setRenaming({ id: a.id, label: a.label }) },
+    !many && { label: `Add a second ${name} account`, icon: "plus" as const, onSelect: () => setAdding(true) },
+    a.loggedIn !== false && { label: "Sign in again", icon: "refresh" as const, sub: "To switch it to another login", onSelect: () => void signIn(a.id) },
+    a.id === "default" ? { label: `Sign out of ${name}`, icon: "logout" as const, danger: true, onSelect: () => setConfirm(a.id) } : { label: "Remove", icon: "trash" as const, sub: "From this computer: its conversations stay", danger: true, onSelect: () => setConfirm(a.id) },
+  ];
+  /** Where it stands, as one quiet word on its line: Back 3 PM, Signed out, or how much of its fullest window is used. */
+  const status = (a: Row) => {
+    const st = standing(a);
+    if (st.text !== "Ready") return <span className={`acct-st st-${st.tone}`}>{st.text}</span>;
+    const t = tightest(usage?.find((x) => x.id === a.id));
+    return t ? <span className="acct-st">{t}</span> : null;
+  };
+  const confirmLine = (a: Row) => (
+    <p className="acct-confirm">
+      {a.id === "default" ? `Signs ${name} out on this computer, for everything that uses it, not just Friday.` : `Signs ${a.label} out and takes it off this computer. Its conversations stay.`}
+      <span className="acct-confirm-acts">
+        <button type="button" className="btn ghost small" onClick={() => setConfirm("")}>
+          Keep
+        </button>
+        <button type="button" className="btn destructive small" disabled={busy === a.id} onClick={() => void (a.id === "default" ? signOut(a.id) : remove(a.id))}>
+          {a.id === "default" ? "Sign out" : "Remove"}
+        </button>
+      </span>
+    </p>
+  );
 
+  /*
+   * In the tool's row, as its other rows have their actions: "+ Account", quiet, and with one account its ⋯ (Arun, 2026-11-05:
+   * "redesign this better for adding multiple accounts"; it was a "Main" line that folded open into a card, inside the tool's
+   * card, saying "Main, Claude Code's own sign-in" again, with a dashed button). With more than one, each is a line under the
+   * tool, flat, as a session is in the sidebar (Dass: state before chrome): its initial, its name, Default on the one new
+   * sessions use, and where it stands in one quiet word; its ⋯ shows on pointing at it.
+   */
   return (
-    <div className={`acct${open ? " open" : ""}`}>
-      <button type="button" className="acct-sum" aria-expanded={open} title={open ? "Fold the accounts away" : `${name}'s accounts on this computer`} onClick={() => setOpened(!open)}>
-        <span className="acct-sum-marks" aria-hidden>
-          {rows.slice(0, 3).map((a, i) => (
-            <span key={a.id} className={`acct-mark${a.loggedIn === false || a.out ? " dim" : ""}`} data-i={i % 4}>
-              {a.label.trim()[0]?.toUpperCase() ?? "?"}
-            </span>
-          ))}
+    <>
+      {!adding && (
+        <span className="acct-tool-acts">
+          <button type="button" className="acct-add-btn" title={`Add ${many ? "another" : "a second"} ${name} account: a sign-in of its own, kept apart`} onClick={() => setAdding(true)}>
+            <Icon name="plus" size={12} />
+            Account
+          </button>
+          {!many && <MenuButton className="icon-btn tiny acct-menu" label={`${name}: more`} icon="more" end compact width={260} items={() => menu(rows[0]!)().filter(Boolean) as never} />}
         </span>
-        <span className="acct-sum-text">{summary}</span>
-        {needs && !open && <span className="acct-state st-blocked">Needs you</span>}
-        <Icon name={open ? "chevronUp" : "chevronDown"} size={12} />
-      </button>
-      {open && (
-        <ul className="acct-list" aria-label={`${name} accounts`}>
-          {rows.map((a, i) => {
-            const u = usage?.find((x) => x.id === a.id);
-            const st = standing(a);
-            const isPick = rows.length > 1 && a.id === pick.id;
-            const who = [u?.email, u?.plan].filter(Boolean).join(" · ") || (a.id === "default" ? `${name}'s own sign-in` : "Its own sign-in, kept apart");
-            return (
-              <li key={a.id} className={`acct-row${isPick ? " pick" : ""}`}>
-                <span className="acct-mark" data-i={i % 4} aria-hidden>
-                  {a.label.trim()[0]?.toUpperCase() ?? "?"}
-                </span>
-                <span className="acct-id">
-                  <span className="acct-name-line">
+      )}
+      {(many || adding || signing || confirm || err) && (
+        <div className="acct">
+          {many && (
+            <ul className="acct-lines" aria-label={`${name} accounts`}>
+              {rows.map((a, i) => {
+                const u = usage?.find((x) => x.id === a.id);
+                return (
+                  <li key={a.id} className={`acct-line${a.id === pick.id ? " pick" : ""}${confirm === a.id ? " confirming" : ""}`}>
+                    <span className={`acct-mark${a.loggedIn === false || a.out ? " dim" : ""}`} data-i={i % 4} aria-hidden>
+                      {a.label.trim()[0]?.toUpperCase() ?? "?"}
+                    </span>
                     {renaming?.id === a.id ? (
                       <input
                         className="acct-rename"
@@ -341,86 +305,46 @@ export function AccountList({ identity, tool, onChanged }: { identity: Identity;
                         }}
                       />
                     ) : (
-                      <span className="acct-label">{a.label}</span>
+                      <span className="acct-label" title={[u?.email, u?.plan].filter(Boolean).join(" · ") || undefined}>
+                        {a.label}
+                      </span>
                     )}
-                    {isPick && <span className="acct-default">New sessions</span>}
-                    {st.text !== "Ready" && <span className={`acct-state st-${st.tone}`}>{st.text}</span>}
-                  </span>
-                  {signing?.id === a.id ? <Pending login={signing.login} tool={tool.tool} /> : confirm === a.id ? null : <span className="acct-sub">{who}</span>}
-                  {signing?.id !== a.id && confirm !== a.id && a.loggedIn !== false && <UsageBars u={u} />}
-                </span>
-                <span className="acct-act">
-                  {confirm === a.id ? (
-                    <>
-                      <button type="button" className="btn ghost small" onClick={() => setConfirm("")}>
-                        Keep
-                      </button>
-                      <button type="button" className="btn destructive small" disabled={busy === a.id} onClick={() => void (a.id === "default" ? signOut(a.id) : remove(a.id))}>
-                        {a.id === "default" ? "Sign out" : "Remove"}
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      {a.loggedIn === false && signing?.id !== a.id && (
+                    {a.id === pick.id && <span className="acct-default" title="New sessions use this account">Default</span>}
+                    <span className="acct-end">
+                      {signing?.id === a.id ? null : status(a)}
+                      {a.loggedIn === false && signing?.id !== a.id ? (
                         <button type="button" className="btn primary small" disabled={busy === a.id} onClick={() => void signIn(a.id)}>
                           Sign in
                         </button>
-                      )}
-                      <MenuButton
-                        className="icon-btn tiny acct-menu"
-                        label={`${a.label}: more`}
-                        icon="more"
-                        end
-                        compact
-                        width={260}
-                        items={() => [
-                          { heading: a.label },
-                          rows.length > 1 && { label: "Use for new sessions", checked: a.id === pick.id, disabled: a.loggedIn === false, sub: a.loggedIn === false ? "Sign in to it first" : undefined, onSelect: () => setPreferred(tool.tool, a.id) },
-                          { label: "Rename", icon: "pencil", onSelect: () => setRenaming({ id: a.id, label: a.label }) },
-                          a.loggedIn !== false && { label: "Sign in again", icon: "refresh", sub: "To switch it to another login", onSelect: () => void signIn(a.id) },
-                          a.id === "default" ? { label: `Sign out of ${name}`, icon: "logout", danger: true, onSelect: () => setConfirm(a.id) } : { label: "Remove", icon: "trash", sub: "From this computer: its conversations stay", danger: true, onSelect: () => setConfirm(a.id) },
-                        ]}
-                      />
-                    </>
-                  )}
-                </span>
-                {confirm === a.id && (
-                  <p className="acct-confirm">
-                    {a.id === "default"
-                      ? `Signs ${name} out on this computer, for everything that uses it, not just Friday.`
-                      : `Signs ${a.label} out and takes it off this computer. Its conversations stay.`}
-                  </p>
-                )}
-              </li>
-            );
-          })}
-          {adding ? (
-            <li className="acct-row acct-row-add">
-              <AddAccount
-                identity={identity}
-                tool={tool.tool}
-                taken={rows.map((a) => a.label)}
-                onCancel={() => setAdding(false)}
-                onAdded={(id, login) => {
-                  setAdding(false);
-                  setSigning({ id, login });
-                  onChanged();
-                }}
-              />
-            </li>
-          ) : (
-            <li>
-              <button type="button" className="acct-more" onClick={() => setAdding(true)}>
-                <Icon name="plus" size={13} />
-                Add {rows.length > 1 ? "another" : "a second"} {name} account
-              </button>
-            </li>
+                      ) : null}
+                      <MenuButton className="icon-btn tiny acct-menu" label={`${a.label}: more`} icon="more" end compact width={260} items={() => menu(a)().filter(Boolean) as never} />
+                    </span>
+                    {signing?.id === a.id && <Pending login={signing.login} tool={tool.tool} />}
+                    {confirm === a.id && confirmLine(a)}
+                  </li>
+                );
+              })}
+            </ul>
           )}
-          {rows.length > 1 && <li className="acct-foot">Friday never switches accounts by itself. Pick another for one session in the message box.</li>}
-        </ul>
+          {!many && signing && <Pending login={signing.login} tool={tool.tool} />}
+          {!many && confirm && confirmLine(rows[0]!)}
+          {adding && (
+            <AddAccount
+              identity={identity}
+              tool={tool.tool}
+              taken={rows.map((a) => a.label)}
+              onCancel={() => setAdding(false)}
+              onAdded={(id, login) => {
+                setAdding(false);
+                setSigning({ id, login });
+                onChanged();
+              }}
+            />
+          )}
+          {err && <p role="alert" className="error small">{err}</p>}
+        </div>
       )}
-      {err && <p role="alert" className="error small">{err}</p>}
-    </div>
+    </>
   );
 }
 
@@ -491,12 +415,51 @@ export function AccountPicker({ identity, tool, value, onChange, onChanged }: { 
 }
 
 /** The same choice as a pill in the composer, beside the agent and its model: the one new sessions use, until another is picked. */
-export function AccountPill({ identity, tool, value, onChange }: { identity: Identity; tool: LocalTool; value: string; onChange: (id: string) => void }) {
+/**
+ * A tool's accounts as the agent picker's Account row lists them (AgentModelPicker, design D, Arun 2026-11-05): each with how much
+ * of it is used, or until when it's out, the one new sessions use marked. Null for a tool with one account here.
+ */
+export function useAccountChoice(identity: Identity, tool: LocalTool | undefined, value: string, onChange: (id: string) => void, o: { disabled?: string; running?: boolean } = {}): AccountChoice | null {
+  const usage = useAccountUsage(identity, tool?.tool ?? "claude");
+  const accounts = tool?.accounts ?? [];
+  const preferred = usePreferredAccount(tool?.tool, accounts);
+  if (!tool || accounts.length < 2) return null;
+  const current = value || preferred;
+  return {
+    now: current,
+    set: onChange,
+    ...(o.disabled ? { disabled: o.disabled } : {}),
+    ...(o.running ? { note: "It carries on the same conversation there." } : {}),
+    rows: accounts.map((a) => {
+      const u = usage?.find((x) => x.id === a.id);
+      const out = (a.out && !(a.outUntil && a.outUntil <= Date.now())) || (u?.out && !(u.outUntil && u.outUntil <= Date.now()));
+      const until = a.outUntil ?? u?.outUntil;
+      const w = u?.windows.filter((x) => x.usedPercent !== null).sort((x, y) => y.usedPercent! - x.usedPercent!)[0];
+      return {
+        id: a.id,
+        label: a.label,
+        ...(a.id === preferred ? { main: true } : {}),
+        ...(u?.email ? { email: u.email } : {}),
+        ...(out ? { out: true, note: until ? `Out until ${clock(until)}` : "Out of usage" } : a.loggedIn === false ? { off: true, note: "Signed out" } : w ? { used: w.usedPercent! / 100, note: `${Math.round(w.usedPercent!)}% ${(w.label ?? "").toLowerCase()}`.trim() } : {}),
+      };
+    }),
+  };
+}
+
+export function AccountPill({ identity, tool, value, onChange, disabled, running = false }: { identity: Identity; tool: LocalTool; value: string; onChange: (id: string) => void; /** Why it can't be changed now, said on the pill. */ disabled?: string; /** On an agent already at work: picking another moves it there, its conversation with it. */ running?: boolean }) {
   const usage = useAccountUsage(identity, tool.tool);
   const accounts = tool.accounts ?? [];
   const preferred = usePreferredAccount(tool.tool, accounts);
   const current = value || preferred;
   const now = accounts.find((a) => a.id === current);
+  // Not now (mid-run, or moving): the same pill, still, saying why.
+  if (disabled)
+    return (
+      <button type="button" className={`menu-pill agent-pill account-pill${now?.out ? " out" : ""}`} aria-label={`${ENGINE_NAMES[tool.tool]} account`} title={disabled} disabled>
+        <span>{now?.label ?? "Main"}</span>
+        <Icon name="chevronDown" size={13} className="menu-pill-caret" />
+      </button>
+    );
   return (
     <MenuButton
       className={`agent-pill account-pill${now?.out ? " out" : ""}`}
@@ -505,13 +468,31 @@ export function AccountPill({ identity, tool, value, onChange }: { identity: Ide
       width={300}
       above
       items={() => [
-        { heading: `${ENGINE_NAMES[tool.tool]} account for this session` },
+        { heading: running ? `Move ${ENGINE_NAMES[tool.tool]} to another account` : `${ENGINE_NAMES[tool.tool]} account for this session` },
         ...accounts.map((a) => {
           const u = usage?.find((x) => x.id === a.id);
-          const note = a.out ? `Out of usage${a.outUntil ? ` until ${clock(a.outUntil)}` : ""}` : a.loggedIn === false ? "Signed out: sign in from your computer's tools" : tightest(u);
+          // Out as either reading says: the computer's look and its limits are read apart, and either can be the newer.
+          const out = (a.out && !(a.outUntil && a.outUntil <= Date.now())) || (u?.out && !(u.outUntil && u.outUntil <= Date.now()));
+          const until = a.outUntil ?? u?.outUntil;
+          const note = out ? `Out of usage${until ? ` until ${clock(until)}` : ""}` : a.loggedIn === false ? "Signed out: sign in from your computer's tools" : tightest(u);
           return { label: a.label, hint: a.id === preferred ? "Default" : undefined, sub: [u?.email, note].filter(Boolean).join(" · ") || undefined, checked: current === a.id, disabled: a.loggedIn === false, onSelect: () => onChange(a.id) };
         }),
+        ...(running ? [{ heading: "It carries on the same conversation there." }] : []),
       ]}
     />
   );
+}
+
+/** Out of usage now, as this computer last said: until its time, and one whose time has passed is back. */
+const outNow = (a: Row, now = Date.now()) => !!a.out && !(a.outUntil && a.outUntil <= now);
+
+/**
+ * The account to offer an agent that ran out on `current`: the next one after it, in turn, that is signed in and isn't out
+ * itself, as runner/accounts.ts nextAccount picks it for the run's own message. Only ever offered: the person presses it.
+ */
+export function nextFreeAccount(rows: Row[] | undefined, current: string, now = Date.now()): Row | null {
+  if (!rows || rows.length < 2) return null;
+  const at = rows.findIndex((a) => a.id === current);
+  const order = [...rows.slice(at + 1), ...rows.slice(0, Math.max(0, at))];
+  return order.find((a) => a.id !== current && a.loggedIn !== false && !outNow(a, now)) ?? null;
 }

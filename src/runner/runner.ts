@@ -17,7 +17,8 @@ import { isTerminalTool, shellLine, terminalArgs } from "./terminal-line.js";
 import { dialOptions, getBytes } from "./dial.js";
 import { readRepo, type RepoRequest } from "./repo-read.js";
 import { noteClaudeStarting, readLimits } from "./limits.js";
-import { accountEnv, DEFAULT_ACCOUNT, getAccount, hasAccounts, isOut, listAccounts, markOut, nextAccount, prepareAccountDir, type ToolAccount } from "./accounts.js";
+import { act, canShowBar, computerUseOn, onStopAsked, OS_NAME, sayUsing, type ComputerAct, type Screen } from "./computer.js";
+import { accountEnv, DEFAULT_ACCOUNT, getAccount, hasAccounts, isOut, listAccounts, markBack, markOut, nextAccount, prepareAccountDir, type ToolAccount } from "./accounts.js";
 import { usesApiKey } from "./api-key.js";
 import { limitHit } from "../limit-reset.js";
 import { shellName } from "./background.js";
@@ -875,6 +876,8 @@ export class Runner {
       // checks the ask and says what to capture.
       const call = async (name: string, args: Record<string, unknown>, signal: AbortSignal): Promise<MeshAnswer> => {
         const r = await this.meshAsk(name, args, signal);
+        // computer: checked by the server, done here, on this computer (computer.ts).
+        if (r.computer) return this.computerTurn(r.computer, signal);
         if (!r.capture || !canScreenshot()) return r;
         const shot = await screenshot(r.capture, signal);
         if (name !== "post_proof") return shot;
@@ -884,10 +887,122 @@ export class Runner {
         await this.meshAsk("__proof_shot", { data: img.data, mimeType: img.mimeType, width: r.capture.width, height: r.capture.height }, signal);
         return { content: [img, { type: "text", text: r.output ?? "Proof kept." }] };
       };
-      this.friday = await openFridayMcp({ tools: () => this.meshAsk("__list", canScreenshot() ? { screenshot: true } : {}), call }, await nodeForScripts());
+      // The computer tool only where its owner turned computer use on, said with the OS for its description (computer.ts).
+      const tools = async () => {
+        const os = canShowBar() && (await computerUseOn()) ? OS_NAME[process.platform] : undefined;
+        return this.meshAsk("__list", { ...(canScreenshot() ? { screenshot: true } : {}), ...(os ? { computer: os } : {}) });
+      };
+      onStopAsked((key) => {
+        if (key !== this.usingKey) return;
+        this.log("stopped from the bar on the screen: it may not use the computer again without asking");
+        this.computerOk = false;
+        this.lastScreen = null;
+        this.computerStop?.abort();
+        this.usingDone();
+        this.interrupt();
+      });
+      this.friday = await openFridayMcp({ tools, call }, await nodeForScripts());
       if (this.opts.tool === "cursor") await ensureCursorEntry(this.friday.spec).catch(() => {});
     } catch (e) {
       this.log(`The tools for talking to the other agents couldn't be set up: ${(e as Error).message}`);
+    }
+  }
+
+  /** Allowed to use this computer, by the person, for this runner's time on the lane: asked once (computerTurn). A teammate's
+   *  yes lasts its turn: a crew can run for days on its own. */
+  private computerOk = false;
+  /** Said no to this turn: it isn't asked again until the next (an agent told what's on screen to keep asking can't). */
+  private computerNo = false;
+  /** The ask on the screen now, which every call waits on rather than putting up another. */
+  private computerAsking: Promise<boolean> | null = null;
+  /** Stops what is being done on the screen now: the bar's Stop, the setting turned off. */
+  private computerStop: AbortController | null = null;
+  /** The last screenshot an agent was given: its points are read against it. */
+  private lastScreen: Screen | null = null;
+  private usingTimer: NodeJS.Timeout | null = null;
+  /** Actions under way on this lane: the bar stays while any is, and goes a few seconds after the last. */
+  private acting = 0;
+  private usingDone(): void {
+    if (this.usingTimer) clearTimeout(this.usingTimer);
+    this.usingTimer = null;
+    sayUsing(this.usingKey, null);
+  }
+  /** This lane on the desktop app's bar: its session and lane, as lanes of two sessions can share an id. */
+  private get usingKey(): string {
+    return `${this.opts.session}|${this.lane}`;
+  }
+  /** A new turn: a no is forgotten, and a teammate asks again. */
+  private computerTurnStarts(): void {
+    this.computerNo = false;
+    // Its card went with the turn before (asks are cleared as a turn starts): the next call puts up another.
+    this.computerAsking = null;
+    if (this.opts.keepAs) this.computerOk = false;
+  }
+
+  /**
+   * One computer action asked by this lane's tool and allowed by the server (agent-mesh.ts computerAsk): off unless this computer's
+   * owner turned it on; asked of them in the feed the first time this runner's agent wants it; then done, with the bar on the screen
+   * saying who is using the computer while it does, gone a few seconds after the last action.
+   */
+  private async computerTurn(a: ComputerAct, signal: AbortSignal): Promise<MeshAnswer> {
+    if (!(await computerUseOn())) {
+      // Off takes back every yes: turned on again, it asks again.
+      this.computerOk = false;
+      return { output: "Computer use is off on this computer: its owner turns it on in Friday's Settings › Computer.", isError: true };
+    }
+    // The bar, with Stop, is what the person is promised: no desktop app here (a runner on its own), no computer use.
+    if (!canShowBar()) return { output: "Computer use needs Friday's desktop app open on this computer, to show the person the bar with Stop while you use it.", isError: true };
+    // Plan and Edits change nothing outside the folder; a computer can do anything a person can.
+    if (this.mode !== "full") return { output: `This agent is in ${this.mode === "plan" ? "Plan" : "Edits"} mode${this.cap?.mode ? " for this turn" : ""}, so it may not use the computer. Do it another way, or ask the person to switch it to Auto.`, isError: true };
+    if (this.computerNo) return { output: "The person said no to you using their computer for this. Don't ask again: do it another way, or ask them what they'd rather.", isError: true };
+    if (!this.computerOk) {
+      // Answered whenever it is, even after this call gave up waiting: their yes still counts for the next.
+      this.computerAsking ??= new Promise<boolean>((resolve) => {
+        const ask = {
+          scope: "turn" as const,
+          item: "Use this computer: see the screen, move the mouse and type",
+          why: `${this.label} wants to see your screen and use your mouse and keyboard ${this.opts.keepAs ? "for this task" : "in this session"}. A bar on the screen shows while it does, with Stop.`,
+          hostsOwn: true,
+          requestId: randomUUID(),
+          input: {},
+          reply: (yes: boolean) => {
+            this.computerAsking = null;
+            if (yes) this.computerOk = true;
+            else this.computerNo = true;
+            this.lastScreen = null;
+            this.log(yes ? "allowed to use this computer" : "refused the computer");
+            resolve(yes);
+          },
+        };
+        if (this.live.size) this.waitingAsks.push(ask);
+        else this.putAsk(ask);
+      });
+      const asked = this.computerAsking;
+      const yes = await new Promise<boolean | null>((resolve) => {
+        void asked.then(resolve);
+        signal.addEventListener("abort", () => resolve(null), { once: true });
+      });
+      if (yes === null) return { output: "The person hasn't answered yet, and this call was stopped. Their answer is still asked for in the session.", isError: true };
+      if (!yes) return { output: "The person said no to you using their computer for this. Don't ask again: do it another way, or ask them what they'd rather.", isError: true };
+    }
+    if (signal.aborted) return { output: "Stopped.", isError: true };
+    if (this.usingTimer) clearTimeout(this.usingTimer);
+    this.usingTimer = null;
+    sayUsing(this.usingKey, this.label);
+    this.acting++;
+    const stop = (this.computerStop ??= new AbortController());
+    const both = AbortSignal.any([signal, stop.signal]);
+    try {
+      const { answer, screen } = await act(a, this.lastScreen, both);
+      if (stop.signal.aborted) return { output: "The person pressed Stop on the bar: you may not use the computer again without asking.", isError: true };
+      if (screen) this.lastScreen = screen;
+      return answer;
+    } finally {
+      if (--this.acting === 0) {
+        if (this.computerStop === stop) this.computerStop = null;
+        if (this.usingTimer) clearTimeout(this.usingTimer);
+        this.usingTimer = setTimeout(() => this.usingDone(), 6000);
+      }
     }
   }
 
@@ -1554,6 +1669,7 @@ ${prompt}`;
     this.live.clear();
     this.waitingAsks.length = 0;
     this.askedLive.clear();
+    this.computerTurnStarts();
     this.log(`turn ${m.id}: ${m.prompt.split("\n")[0]!.slice(0, 100)}`);
     const argv = [...this.launch.prefix, ...adapter.args(spec)];
     // An ACP tool kept from the last turn, or started as the lane opened, takes it once it is ready: a first instruction sent the
@@ -1832,6 +1948,9 @@ ${prompt}`;
     this.send({ kind: "turn.end", id: m.id, outcome, ...(error ? { error } : {}) });
     // One line: the tool's whole report (a stack trace) is in the session's feed; app.log had it in full for every failed turn.
     this.log(`turn ${m.id} ${outcome}${error ? `: ${errorHead(error)}` : ""}`);
+    // A turn that went through on an account marked out: it has room again (its limit lifted early, or was raised), and isn't
+    // said to be out until its old time any more, here or in the account menus.
+    if (outcome === "done" && this.account && hasAccounts(this.opts.tool)) void markBack(this.opts.tool, this.account.id).catch(() => {});
     this.shareLimits();
     this.contextAfterTurn();
     // The next turn's process, started now as that turn will most likely start it (this one's model, effort and mode, the
@@ -1923,7 +2042,7 @@ ${prompt}`;
    * at a time, so a second card replaced the first, and the first could then never be answered: these wait their turn and
    * are put one after another, each once the one before is answered.
    */
-  private readonly waitingAsks: { scope: "commands" | "turn"; item: string; why?: string; guard?: GoAhead; requestId: string; input: Record<string, unknown>; reply?: (allow: boolean) => void }[] = [];
+  private readonly waitingAsks: { scope: "commands" | "turn"; item: string; why?: string; guard?: GoAhead; hostsOwn?: boolean; requestId: string; input: Record<string, unknown>; reply?: (allow: boolean) => void }[] = [];
 
   /** Where a teammate works, for its go-ahead list: its own folder or copy, and the projects it was given. */
   private guardPlace(): GuardPlace {
@@ -1937,7 +2056,7 @@ ${prompt}`;
     const id = randomUUID().slice(0, 8);
     this.live.set(id, { requestId: a.requestId, input: a.input, ...(a.reply ? { reply: a.reply } : {}) });
     this.askedLive.add(a.item);
-    this.send({ kind: "event", body: { type: "engine.approval", id, scope: a.scope, items: [a.item], live: true, ...(a.why ? { why: a.why } : {}), ...(a.guard ? { guard: a.guard } : {}) } });
+    this.send({ kind: "event", body: { type: "engine.approval", id, scope: a.scope, items: [a.item], live: true, ...(a.why ? { why: a.why } : {}), ...(a.guard ? { guard: a.guard } : {}), ...(a.hostsOwn ? { hostsOwn: true } : {}) } });
   }
   /** How the turn now running is stopped, for a tool that has a way of its own (see Parser.cancel). */
   private cancelTurn: (() => void) | null = null;

@@ -1,4 +1,5 @@
 import { ChevronRightIcon, FolderGit2Icon, PlusIcon, SearchIcon, SettingsIcon, LogOutIcon, MoonIcon, SunIcon, XIcon } from "lucide-react";
+import { dragEnds } from "./drag-end.js";
 import { SessionPrBadge } from "./SessionPrs.js";
 import { useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -217,7 +218,10 @@ function PanelResize() {
         // A drag once it has moved 3px: a click, or each half of a double-click, leaves the width as it is, so the double-click lands
         // on the handle and resets it (audit REST-4, Arun 2026-11-04: each click took 4px off and the double-click missed).
         let dragging = false;
+        // Ends however the pointer goes, released over the preview's page or outside the window too (drag-end.ts).
+        const held = dragEnds(e, () => up());
         const move = (ev: PointerEvent) => {
+          if (!held.live(ev)) return;
           x = ev.clientX;
           if (!dragging && Math.abs(x - from) < 3) return;
           if (!dragging) document.body.classList.add("resizing", "resizing-x", "resizing-panel");
@@ -232,12 +236,12 @@ function PanelResize() {
           if (dragging) setPanelWidth(x - left);
           document.body.classList.remove("resizing", "resizing-x", "resizing-panel");
           removeEventListener("pointermove", move);
-          removeEventListener("pointerup", up);
-          removeEventListener("pointercancel", up);
+          removeEventListener("pointerup", held.stop);
+          removeEventListener("pointercancel", held.stop);
         };
         addEventListener("pointermove", move);
-        addEventListener("pointerup", up);
-        addEventListener("pointercancel", up);
+        addEventListener("pointerup", held.stop);
+        addEventListener("pointercancel", held.stop);
       }}
     />
   );

@@ -3,7 +3,7 @@ import type { ToolContext } from "../runner/context-report.js";
 import { PatchSource } from "./patchSource.js";
 import { ENGINE_MODEL_INFO, ENGINE_NAMES, ENGINE_TOOLS, MAIN_LANE, TOOL_INFO, type EngineTool, type SessionEvent } from "../types.js";
 import { clockUntil } from "../limit-reset.js";
-import type { Limits } from "../runner/limits.js";
+import type { AccountUsage, Limits } from "../runner/limits.js";
 import { EngineMark } from "./BrandMarks.js";
 import { Icon } from "./icons.js";
 import { hostApi } from "./local.js";
@@ -63,7 +63,7 @@ import { useToolLimits, type Read } from "./toolLimits.js";
  * which window it is, the five hours or the week, and `account` whose, so the ring finds its own by what it is rather than by a
  * label that has an account's name in front of it with more than one account (2026-10-27 audit).
  */
-type Row = { label: string; used: number | null; resets: string; text?: string; win?: "5h" | "week" | "out"; account?: string };
+type Row = { label: string; used: number | null; resets: string; text?: string; win?: "5h" | "week" | "out"; account?: string; /** Said beside its label: "Most room", on the account with the most left. */ tag?: string };
 
 /** Which window a limit is, by what its tool calls it or by its length. */
 const winOf = (kind: string | null | undefined, minutes: number | null | undefined): Row["win"] =>
@@ -86,6 +86,54 @@ function row(label: string, usedPct: number | null, resetsAt: number | null, sta
   if (usedPct === null && status === "rejected") return { label, used: 100, resets, text: "Out of usage" };
   if (usedPct === null && status === "allowed") return { label, used: null, resets, text: "Under the limit" };
   return { label, used: usedPct === null ? null : Math.max(0, Math.min(100, usedPct)), resets };
+}
+
+/** One account of a tool, as the Usage page's card and the glance show it: its windows (labelled by window alone), in order. */
+export type AccountCard = { id: string; label: string; email?: string | null; plan: string | null; rows: Row[]; /** "Most room", on the one with the most left. */ tag?: string };
+
+/** What to call one of an account's windows: "5h", "Weekly", a model's own week by its model ("Weekly · Fable"). */
+const windowName = (w: { kind: string; windowMinutes: number | null; label?: string }) =>
+  SHORT[w.kind] ?? (w.kind.startsWith("seven_day_") && w.label ? w.label : w.windowMinutes ? shortWindow(w.windowMinutes) : (w.label ?? "Limit"));
+
+/**
+ * A tool's accounts on this computer, in the order they next refill, as T3 Code orders them: one out by when it comes back,
+ * the rest by their five-hour window's reset, else their soonest; never-read ones last, in their own order. The one with the
+ * most left is tagged when there's another to tell it from (one read too and fuller, or one out); a tie has no "most". Null for
+ * a tool with one account here.
+ */
+export function accountCards(limits: Read, t: "claude" | "codex"): AccountCard[] | null {
+  const list = limits && limits !== "none" ? limits.accounts?.[t] : undefined;
+  if (!list?.length) return null;
+  const now = Date.now();
+  const outNow = (a: AccountUsage) => !!a.out && !(a.outUntil && a.outUntil <= now);
+  // Windows still running: one whose reset has passed started over, and its figure is from before (row).
+  const live = (a: AccountUsage) => a.windows.filter((w) => !(w.resetsAt && w.resetsAt * 1000 <= now));
+  const refill = (a: AccountUsage) => {
+    if (outNow(a)) return a.outUntil ?? Infinity;
+    const ahead = live(a).filter((w) => w.resetsAt);
+    const w = ahead.find((x) => winOf(x.kind, x.windowMinutes) === "5h") ?? ahead.sort((x, y) => x.resetsAt! - y.resetsAt!)[0];
+    return w ? w.resetsAt! * 1000 : Infinity;
+  };
+  // How full its fullest window is, of those read; null when none is.
+  const fullest = (a: AccountUsage) => {
+    const used = live(a).map((w) => (w.usedPercent === null && w.status === "rejected" ? 100 : w.usedPercent)).filter((n): n is number => n !== null);
+    return used.length ? Math.max(...used) : null;
+  };
+  const all = [...list].sort((x, y) => refill(x) - refill(y));
+  const read = all.filter((a) => !outNow(a) && fullest(a) !== null).sort((x, y) => fullest(x)! - fullest(y)!);
+  const roomy = read[0] && fullest(read[0])! < 100 && (read.length > 1 ? fullest(read[0])! < fullest(read[1]!)! : all.some(outNow)) ? read[0].id : null;
+  return all.map((a): AccountCard => {
+    // Out until a time that has passed is back: a reading kept from then (this page's cache too) no longer says it is out
+    // (2026-10-27 audit: "Out until 3:00 PM" stood red after three).
+    const back = !!a.outUntil && a.outUntil <= now;
+    const rows: Row[] =
+      a.out && !back
+        ? [{ label: "", used: 100, resets: "", text: a.outUntil ? `Out until ${clockUntil(a.outUntil)}` : "Out of usage", win: "out" }]
+        : a.windows.length
+          ? a.windows.map((w) => ({ ...row(windowName(w), w.usedPercent, w.resetsAt, w.status), win: winOf(w.kind, w.windowMinutes) }))
+          : [{ label: "", used: null, resets: "", text: a.out && back ? `Back since ${new Date(a.outUntil!).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : (a.why ?? "No reading yet") }];
+    return { id: a.id, label: a.label, ...(a.email ? { email: a.email } : {}), plan: a.plan, rows, ...(a.id === roomy ? { tag: "Most room" } : {}) };
+  });
 }
 
 /** What each tool's glance says, from one reading of this computer. */
@@ -128,19 +176,14 @@ export function glanceOf(limits: Read): Record<EngineTool, Glance> {
   ) as Partial<Record<EngineTool, Glance>>;
   /**
    * A tool with more than one account on the computer (runner/accounts.ts): each account's windows, under its name, so both are
-   * seen at once and the one a lane runs on can be told from the other. One out of usage says until when instead.
+   * seen at once and the one a lane runs on can be told from the other (accountCards, flattened). One out says until when instead.
    */
   const byAccount = (t: "claude" | "codex"): Row[] | null => {
-    const all = got?.accounts?.[t];
-    if (!all?.length) return null;
-    return all.flatMap((a): Row[] => {
-      // Out until a time that has passed is back: a reading kept from then (this page's cache too) no longer says it is out
-      // (2026-10-27 audit: "Out until 3:00 PM" stood red after three).
-      const back = !!a.outUntil && a.outUntil <= Date.now();
-      if (a.out && !back) return [{ label: a.label, used: 100, resets: "", text: a.outUntil ? `Out until ${clockUntil(a.outUntil)}` : "Out of usage", win: "out", account: a.id }];
-      if (a.windows.length) return a.windows.map((w) => ({ ...row(`${a.label} · ${SHORT[w.kind] ?? (w.windowMinutes ? shortWindow(w.windowMinutes) : (w.label ?? "Limit"))}`, w.usedPercent, w.resetsAt, w.status), win: winOf(w.kind, w.windowMinutes), account: a.id }));
-      return [{ label: a.label, used: null, resets: "", text: a.out && back ? `Back since ${new Date(a.outUntil!).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : (a.why ?? "No reading yet"), account: a.id }];
-    });
+    const cards = accountCards(limits, t);
+    if (!cards) return null;
+    return cards.flatMap((c) =>
+      c.rows.map((r, i): Row => ({ ...r, label: r.label ? `${c.label} · ${r.label}` : c.label, account: c.id, ...(i === 0 && c.tag ? { tag: c.tag } : {}) })),
+    );
   };
   const claudeAccounts = byAccount("claude");
   const codexAccounts = byAccount("codex");
@@ -197,6 +240,7 @@ function ToolGlance({ tool, g, bare = false }: { tool: EngineTool; g: Glance; /*
                 line, a wider "100% used" pushed the reset time under it in that row only. */}
             <div className="lg-line">
               <span className="lg-label">{r.label}</span>
+              {r.tag && <span className="lg-tag">{r.tag}</span>}
               <span className="lg-used">{r.text ?? (r.used === null ? "—" : `${Math.round(r.used)}% used`)}</span>
             </div>
             {!r.text && (
@@ -227,6 +271,32 @@ function ToolGlance({ tool, g, bare = false }: { tool: EngineTool; g: Glance; /*
       )}
       {g.note && g.rows.length > 0 && <p className="lg-note">{g.note}</p>}
     </section>
+  );
+}
+
+/**
+ * A tool's accounts on this computer as the Usage page shows them (T3 Code's Usage › Limits has a bar per account): a card each,
+ * in the order they refill (accountCards), who it is, its plan and its windows, and the one with the most room said.
+ */
+export function AccountCardsView({ limits, tool, className = "" }: { limits: Read; tool: "claude" | "codex"; className?: string }) {
+  const cards = accountCards(limits, tool);
+  if (!cards) return null;
+  return (
+    <>
+      {cards.map((c) => (
+        <section key={c.id} className={`lh-acct ${className}`} aria-label={`${c.label} account`}>
+          <header className="lh-acct-head">
+            <b>{c.label}</b>
+            {c.tag && <span className="lg-tag">{c.tag}</span>}
+            {c.plan && <span className="lg-plan">{c.plan}</span>}
+          </header>
+          {c.email && <div className="lh-acct-who">{c.email}</div>}
+          <div className="lg-glance lg-one">
+            <ToolGlance tool={tool} g={{ rows: c.rows }} bare />
+          </div>
+        </section>
+      ))}
+    </>
   );
 }
 

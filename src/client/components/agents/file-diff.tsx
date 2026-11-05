@@ -272,7 +272,7 @@ export function FileDiff({
                       <AgentCodeLine
                         code={line.content}
                         tokens={tokens?.[index]}
-                        className="min-w-0 whitespace-pre px-1.5"
+                        className="min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere] px-1.5"
                       />
                     </div>
                     {annotations?.[line.id]}

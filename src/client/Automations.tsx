@@ -35,6 +35,8 @@ type View = Omit<Automation, "when"> & {
   when: Automation["when"] | { kind: "webhook"; url?: string };
   says: { when: string; who: string };
   mine: boolean;
+  /** Paused because its owner left the workspace: this person, an admin, may hand it on or delete it. */
+  mayHand?: boolean;
   runs: AutomationRun[];
   today: number;
 };
@@ -209,6 +211,36 @@ export function AutomationsPage({
     void load();
   };
 
+  // An automation whose owner left the workspace (offboard.ts), paused: an admin hands it to someone here, or deletes it. The
+  // hosted service's only: the open-source edition has no workspace to leave, so none is ever paused there.
+  const [people, setPeople] = useState<{ id: string; name: string }[]>([]);
+  const anyToHand = !!list?.some((a) => a.mayHand);
+  useEffect(() => {
+    if (!anyToHand) return;
+    void api<{ members: { accountId: string; name: string }[] }>(identity, "/api/workspace/members").then((r) => setPeople(r.members.map((m) => ({ id: m.accountId, name: m.name }))), () => {});
+  }, [anyToHand, identity]);
+  const handOn = async (a: View, to: string) => {
+    setBusy(a.id);
+    try {
+      await api(identity, `/api/automations/${a.id}/hand`, { method: "POST", body: JSON.stringify({ to }) });
+      await load();
+    } catch (e) {
+      setFailed((e as Error).message);
+    } finally {
+      setBusy("");
+    }
+  };
+  const removeOthers = (a: View) =>
+    ask({
+      title: `Delete ${a.name}?`,
+      body: `It was ${a.paused?.person.name ?? a.ownerName}'s. The sessions its runs started stay where they are.`,
+      action: "Delete automation",
+      onConfirm: async () => {
+        await api(identity, `/api/automations/${a.id}`, { method: "DELETE" });
+        await load();
+      },
+    });
+
   // The sidebar's Automations, pressed while an automation is open, is the way back to the list.
   useEffect(() => {
     const again = (e: Event) => (e as CustomEvent).detail === "automations" && setEditing(null);
@@ -296,7 +328,18 @@ export function AutomationsPage({
         ) : (
           <ul className="grid gap-2" aria-label="Your automations">
             {list.map((a) => (
-              <Row key={a.id} a={a} busy={busy === a.id} onEdit={() => setEditing({ id: a.id, draft: toDraft(a) })} onRun={() => void runNow(a)} onToggle={(on) => void setOn(a, on)} onOpen={onOpen} />
+              <Row
+                key={a.id}
+                a={a}
+                busy={busy === a.id}
+                onEdit={() => setEditing({ id: a.id, draft: toDraft(a) })}
+                onRun={() => void runNow(a)}
+                onToggle={(on) => void setOn(a, on)}
+                onOpen={onOpen}
+                handTo={a.mayHand ? (to) => void handOn(a, to) : undefined}
+                onDelete={a.mayHand ? () => removeOthers(a) : undefined}
+                people={people}
+              />
             ))}
           </ul>
         )}
@@ -395,14 +438,39 @@ function WhoMark({ tool, size = 15 }: { tool: EngineTool | "friday"; size?: numb
   return tool === "friday" ? <FridayMark size={size} /> : <EngineMark tool={tool} size={size} />;
 }
 
-function Row({ a, busy, onEdit, onRun, onToggle, onOpen }: { a: View; busy: boolean; onEdit: () => void; onRun: () => void; onToggle: (on: boolean) => void; onOpen: (sid: string, invite: string) => void }) {
+/** Why an automation's owner is no longer in the workspace, after their name. */
+const PAUSED_WHY: Record<NonNullable<Automation["paused"]>["why"], string> = { removed: "was removed from the workspace", left: "left the workspace", deleted: "deleted their account" };
+
+function Row({
+  a,
+  busy,
+  onEdit,
+  onRun,
+  onToggle,
+  onOpen,
+  handTo,
+  onDelete,
+  people = [],
+}: {
+  a: View;
+  busy: boolean;
+  onEdit: () => void;
+  onRun: () => void;
+  onToggle: (on: boolean) => void;
+  onOpen: (sid: string, invite: string) => void;
+  handTo?: (to: string) => void;
+  onDelete?: () => void;
+  people?: { id: string; name: string }[];
+}) {
   const last = a.runs[0];
   return (
-    <li className={cn("auto-row", !a.on && "opacity-70")}>
-      <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[var(--hover)]">
+    // An automation that is off reads dimmed, its controls not: a paused one's Hand to and Delete are what an admin is there for.
+    // min-w-0: in the list's grid a long line used to widen the row past a phone's screen and push those controls off it.
+    <li className="auto-row min-w-0">
+      <span className={cn("grid size-8 shrink-0 place-items-center rounded-lg bg-[var(--hover)]", !a.on && "opacity-70")}>
         <WhoMark tool={a.who.tool} />
       </span>
-      <button type="button" className="min-w-0 flex-1 text-left focus-visible:outline-none" onClick={onEdit} aria-label={`Edit ${a.name}`}>
+      <button type="button" className={cn("min-w-0 flex-1 text-left focus-visible:outline-none", !a.on && "opacity-70")} onClick={onEdit} aria-label={`Edit ${a.name}`}>
         <span className="flex min-w-0 items-center gap-2">
           <span className="truncate text-[14px] font-medium">{a.name}</span>
           <WhenChip when={a.when} />
@@ -413,6 +481,12 @@ function Row({ a, busy, onEdit, onRun, onToggle, onOpen }: { a: View; busy: bool
           {a.who.tool !== "friday" ? ` · ${a.folder ? a.folder.split(/[\\/]/).filter(Boolean).at(-1) : "a new folder each run"}` : ""}
           {a.mine ? "" : ` · ${a.ownerName}'s`}
         </span>
+        {/* Why it is off, when its owner is no longer in the workspace (offboard.ts). */}
+        {a.paused && (
+          <span className="mt-0.5 block truncate text-[12px] text-[var(--text-muted)]" title={`Paused · ${a.paused.person.name} ${PAUSED_WHY[a.paused.why]}`}>
+            Paused · {a.paused.person.name} {PAUSED_WHY[a.paused.why]}
+          </span>
+        )}
       </button>
       {last && (
         <button
@@ -425,6 +499,27 @@ function Row({ a, busy, onEdit, onRun, onToggle, onOpen }: { a: View; busy: bool
           <TaskMark state={runMark(last.status)} />
           {RUN_WORD[last.status]} · {relTime(last.at)}
         </button>
+      )}
+      {handTo && (
+        <Select value="" onValueChange={(to) => to && handTo(to)} disabled={busy}>
+          <SelectTrigger size="sm" className="h-8 w-auto shrink-0 gap-1 text-[13px]" aria-label={`Hand ${a.name} to someone`}>
+            <SelectValue placeholder="Hand to…" />
+          </SelectTrigger>
+          <SelectContent align="end">
+            {people.map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {p.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+      {onDelete && (
+        <Tip label="Delete it">
+          <Button variant="ghost" size="icon-sm" aria-label={`Delete ${a.name}`} disabled={busy} onClick={onDelete}>
+            <Trash2Icon />
+          </Button>
+        </Tip>
       )}
       {a.mine && (
         <>

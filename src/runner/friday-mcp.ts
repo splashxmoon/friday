@@ -32,6 +32,8 @@ export interface MeshAnswer {
   content?: unknown[];
   /** From the server: a page for this runner to capture (agent-mesh.ts's PreviewCapture, screenshot.ts). */
   capture?: { url: string; width: number; height: number; fullPage: boolean };
+  /** From the server: an action for this runner to do on its computer (agent-mesh.ts computerAsk, computer.ts). */
+  computer?: import("./computer.js").ComputerAct;
 }
 
 interface Handler {

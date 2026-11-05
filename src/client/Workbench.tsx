@@ -1,4 +1,5 @@
 import { iosFolders } from "./ios-folders.js";
+import { dragEnds } from "./drag-end.js";
 import { Activity as Keep, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import type { SessionState } from "../session/projection.js";
 import type { Member, SessionEvent } from "../types.js";
@@ -744,11 +745,12 @@ export function Workbench({
                     <MenuButton
                       className="bench-here bench-here-btn"
                       label="Switch this panel"
-                      width={280}
+                      width={200}
                       items={() => [
+                        // Names only, no line under each (Arun, 2026-11-05: "get rid of the secondary text").
                         { heading: "Show here instead" },
-                        ...order.map((p) => ({ label: TAB_LABEL[p], icon: TAB_ICON[p], sub: PANEL_SAYS[p], checked: p === tab, onSelect: () => swapTab(p) })),
-                        onHistory && { label: "History", icon: "clock" as const, sub: "Wind the session back to any point", onSelect: onHistory },
+                        ...order.map((p) => ({ label: TAB_LABEL[p], icon: TAB_ICON[p], checked: p === tab, onSelect: () => swapTab(p) })),
+                        onHistory && { label: "History", icon: "clock" as const, onSelect: onHistory },
                       ]}
                     >
                       <Icon name={TAB_ICON[t]} size={13} />
@@ -774,11 +776,11 @@ export function Workbench({
                 className="bench-add"
                 icon="plus"
                 label="Open another panel"
-                width={280}
+                width={200}
                 items={() => [
                   { heading: "Open in a new tab" },
-                  ...order.map((p) => ({ label: TAB_LABEL[p], icon: TAB_ICON[p], sub: PANEL_SAYS[p], checked: tabs.includes(p), onSelect: () => addTab(p) })),
-                  onHistory && { label: "History", icon: "clock" as const, sub: "Wind the session back to any point", onSelect: onHistory },
+                  ...order.map((p) => ({ label: TAB_LABEL[p], icon: TAB_ICON[p], checked: tabs.includes(p), onSelect: () => addTab(p) })),
+                  onHistory && { label: "History", icon: "clock" as const, onSelect: onHistory },
                 ]}
               />
             </div>
@@ -1170,11 +1172,13 @@ function drag(
 ): void {
   e.preventDefault();
   const grip = e.currentTarget as HTMLElement;
-  grip.setPointerCapture(e.pointerId);
   document.body.classList.add("resizing", `resizing-${axis}`);
   let cur = from;
   let frame = 0;
+  // Ends however the pointer goes (drag-end.ts): a capture lost or a release unheard left the seam following the pointer.
+  const held = dragEnds(e, () => up());
   const move = (ev: PointerEvent) => {
+    if (!held.live(ev)) return;
     cur = at(ev);
     frame ||= requestAnimationFrame(() => {
       frame = 0;
@@ -1183,13 +1187,13 @@ function drag(
   };
   const up = () => {
     grip.removeEventListener("pointermove", move);
-    grip.removeEventListener("pointerup", up);
-    grip.removeEventListener("pointercancel", up);
+    grip.removeEventListener("pointerup", held.stop);
+    grip.removeEventListener("pointercancel", held.stop);
     if (frame) cancelAnimationFrame(frame);
     document.body.classList.remove("resizing", `resizing-${axis}`);
     commit(cur);
   };
   grip.addEventListener("pointermove", move);
-  grip.addEventListener("pointerup", up);
-  grip.addEventListener("pointercancel", up);
+  grip.addEventListener("pointerup", held.stop);
+  grip.addEventListener("pointercancel", held.stop);
 }

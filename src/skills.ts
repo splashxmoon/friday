@@ -322,6 +322,18 @@ export class SkillRegistry {
     await this.redis.hdel(this.key, id);
   }
 
+  /**
+   * Taken over by `to`: an admin's, for something its maker shared and then left the workspace with (app.ts stewardOf decides
+   * who may). Theirs from now on, as if they had made it; who may use it is as it was.
+   */
+  async takeOver(id: string, to: Person): Promise<SkillView> {
+    const s = await this.get(id);
+    if (!s) throw new AgentError(404, "Skill not found.");
+    const next: SkillDef = { ...s, ownerId: to.id, ownerName: to.name, updatedAt: Date.now() };
+    await this.redis.hset(this.key, id, JSON.stringify(next));
+    return { ...next, access: "owner" };
+  }
+
   /** Decline a skill shared with you: it leaves your list and nobody else's. */
   async leaveShared(user: Person, id: string): Promise<void> {
     const s = await this.get(id);

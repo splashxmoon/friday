@@ -94,7 +94,7 @@ export function CommandsDialog({ commands, me, seed, onClose, onChanged }: { com
                       <span className="cmds-item-name">/{c.name}</span>
                       <span className="cmds-item-meta">
                         {c.scope === "workspace" ? "Everyone" : "Just you"}
-                        {!mine && ` · ${c.ownerName}`}
+                        {!mine && ` · ${c.ownerName}${c.ownerLeft ? ", who left" : ""}`}
                       </span>
                     </div>
                     <div className="cmds-item-text">{c.text}</div>

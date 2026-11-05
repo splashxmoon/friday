@@ -12,23 +12,24 @@
 .diffStat .del { color: #dc2626; }
 .diffBody {
   position: relative;
-  margin: 0 -16px -16px; overflow-x: auto; overflow-y: hidden;
+  margin: 0 -16px -16px; overflow-x: hidden; overflow-y: hidden;
   padding: 4px 0; font-size: 13px; line-height: 20px;
   scrollbar-width: none; -ms-overflow-style: none;
 }
 .diffBody::-webkit-scrollbar { display: none; }
-.diffLines { position: relative; width: max-content; min-width: 100%; }
-/* full-height gutter divider at the line-number edge (32px + 32px).
+/* Long lines wrap inside the card, so a file reads whole without scrolling sideways (Arun, 2026-11-05). */
+.diffLines { position: relative; width: 100%; min-width: 0; }
+/* full-height gutter divider at the line-number edge (40px).
    Lives on the inner track so it stays aligned while the body scrolls. */
-.diffLines::before { content: ""; position: absolute; top: 0; bottom: 0; left: 64px; width: 0.5px; background: #e6e8eb; z-index: 1; pointer-events: none; }
+.diffLines::before { content: ""; position: absolute; top: 0; bottom: 0; left: 40px; width: 0.5px; background: #e6e8eb; z-index: 1; pointer-events: none; }
 .diffRow {
   position: relative;
-  display: grid; grid-template-columns: 32px 32px 18px 1fr; align-items: stretch;
+  display: grid; grid-template-columns: 40px 18px minmax(0, 1fr); align-items: stretch;
 }
 .diffRow .ln, .diffRow .sign { user-select: none; color: var(--faint); font-size: 12px; }
 .diffRow .ln { text-align: right; padding: 0 7px; }
 .diffRow .sign { text-align: center; }
-.diffRow code { white-space: pre; padding: 0 12px 0 8px; color: var(--text-muted); }
+.diffRow code { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 12px 0 8px; color: var(--text-muted); }
 /* left accent bar: solid green for additions, red hatch for deletions */
 .diffRow.add::before, .diffRow.del::before {
   content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 3px;

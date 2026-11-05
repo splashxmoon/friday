@@ -15,13 +15,13 @@ export interface WhatsNewNotes {
 }
 
 export const WHATS_NEW: WhatsNewNotes = {
-  version: "0.2.15",
-  summary: "Bigger teams of agents work together, you see an agent think the moment you send, and quoting is quick.",
+  version: "0.2.16",
+  summary: "Agents can use your computer when you say so, and picking who works, on which account, is one small card.",
   items: [
-    { icon: "users", title: "Agents, as a team", line: "Three, four or more agents each get a name of their own, and work of their own." },
-    { icon: "bulb", title: "Thinking, live", line: "The moment you send, watch the agent think, then fold it into \"Thought for 7s\"." },
-    { icon: "message", title: "Quote anything", line: "Select part of a reply and press ⌘' (Ctrl+'), or Quote under an answer." },
-    { icon: "settings", title: "Settings, tidied", line: "Computer and Coding tools are pages of their own, and calmer." },
+    { icon: "pointer", title: "Agents use your computer", line: "Turn it on in Settings › Computer. You say yes first, and Stop on the bar stops it." },
+    { icon: "agent", title: "A new agent picker", line: "Tool, account and model in one card, and a meter you drag for effort." },
+    { icon: "key", title: "All your accounts", line: "Move an agent to another Claude Code or Codex account in one press." },
+    { icon: "code", title: "Diffs you can read", line: "Long lines wrap across the whole panel, with one column of line numbers." },
   ],
 };
 

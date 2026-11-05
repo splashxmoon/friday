@@ -24,6 +24,8 @@ export interface WorkspaceUsage {
   recent?: { base: number; frontier: number; day: string }[];
   /** What a new session opens on (Settings › Agent defaults). */
   defaults?: { model?: string; thinking?: "fast" | "balanced" | "deep"; review?: boolean; planFirst?: boolean; webSearch?: boolean; runCap?: number };
+  /** Its rules for every session in it (Settings › Workspace › Sharing and safety; workspace-policy.ts). */
+  policy?: { links?: "anyone" | "workspace"; watch?: boolean; othersFull?: "host" | "never" };
   /** Your role here. Only an owner can pay for the workspace. */
   role?: "owner" | "admin" | "member" | null;
   /** Where payment stands. `enabled` is false on a deployment with no payment provider. */

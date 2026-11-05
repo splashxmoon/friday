@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactElement } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactElement } from "react";
+import { dragEnds } from "./drag-end.js";
 import { isOwnModel } from "../own-model-id.js";
 import { ownName, useOwnModels } from "./ownModelStore.js";
 import { ENGINE_NAMES, ENGINE_TOOLS, type EngineEffort, type EngineTool, type Thinking } from "../types.js";
@@ -52,6 +53,17 @@ export interface EffortChoice {
   onLocked?: (title: string) => void;
 }
 
+/** Which of a tool's accounts it runs as, for a tool with more than one here (Accounts.tsx useAccountChoice): the Account row. */
+export interface AccountChoice {
+  rows: { id: string; label: string; email?: string; note?: string; used?: number; out?: boolean; off?: boolean; main?: boolean }[];
+  now: string;
+  set: (id: string) => void;
+  /** Why it can't be changed now (a run going), said on the row. */
+  disabled?: string;
+  /** Said under the list: what picking another does. */
+  note?: string;
+}
+
 /**
  * Who does the work, and on which model: one control, because they are one decision.
  *
@@ -81,7 +93,10 @@ export function AgentModelPicker({
   ownOnly,
   own: ownGiven,
   modelOnly = false,
+  accounts = null,
 }: {
+  /** The tool's accounts, when it has more than one here: a row of their own (design D). */
+  accounts?: AccountChoice | null;
   /**
    * The pill as the second half of the box's "agent | model (reasoning)" (Arun, 2026-11-03: "it needs to be compact maybe like it
    * can be like the coding agent | model (reasoning level)"): the model and, in brackets, how hard it thinks; the agent is the
@@ -139,6 +154,8 @@ export function AgentModelPicker({
   const efforts = engine && effort?.options.length ? effort : null;
   const effortText = efforts?.now ? (efforts.options.find((o) => o.value === efforts.now)?.label ?? "") : "";
   const third = !!reasoning || !!efforts;
+  // Which account it runs as, on the pill, when it has more than one: "Claude Code · Work · Opus 5.5".
+  const accountText = engine && accounts ? (accounts.rows.find((a) => a.id === accounts.now)?.label ?? "") : "";
 
   return (
     <>
@@ -149,7 +166,7 @@ export function AgentModelPicker({
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label="Who does the work, and which model"
-        title={[agentName, modelText, reasoning, effortText].filter(Boolean).join(" · ")}
+        title={[agentName, accountText, modelText, reasoning, effortText].filter(Boolean).join(" · ")}
         onClick={() => setOpen((v) => !v)}
       >
         {modelOnly ? (
@@ -158,6 +175,12 @@ export function AgentModelPicker({
               <span className="menu-pill-mark" aria-hidden>
                 <VendorMark vendor={frontierVendor} size={14} />
               </span>
+            )}
+            {accountText && (
+              <>
+                {accountText}
+                <span className="model-pill-sep">·</span>
+              </>
             )}
             {modelText || (engine ? "Default model" : "Auto")}
             {(reasoning || effortText) && <span className="amp-pill-level"> ({reasoning || effortText})</span>}
@@ -171,6 +194,12 @@ export function AgentModelPicker({
             (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL"). */}
         <span className="amp-pill-text">
         {agentName}
+        {accountText && (
+          <>
+            <span className="model-pill-sep">·</span>
+            {accountText}
+          </>
+        )}
         {(modelText || reasoning || effortText) && (
           <>
             <span className="model-pill-sep">·</span>
@@ -207,14 +236,18 @@ export function AgentModelPicker({
     const [typing, setTyping] = useState(false);
     const [q, setQ] = useState("");
     const [others, setOthers] = useState(false);
+    // Design D (Arun, 2026-11-05: "i kinda like D"): the choices as rows, Tool, Account, Model, one open at a time; the model's
+    // first, as the one changed most. Effort is always shown, as a row of its own.
+    const [row, setRow] = useState<"tool" | "account" | "model">("model");
     const list = useRef<HTMLDivElement>(null);
     // What this computer has is known once any tool is known to be missing; until then the usual four come first.
     const { here, away } = splitTools(ENGINE_TOOLS.some((t) => toolState(t).absent) ? (t) => !toolState(t).absent : null, engine);
     // The chosen model's row has the keyboard when the picker opens, so arrows and Enter work at once.
     useEffect(() => {
+      if (row !== "model") return;
       const t = setTimeout(() => (list.current?.querySelector<HTMLElement>('[data-row][aria-checked="true"]') ?? list.current?.querySelector<HTMLElement>("[data-row]"))?.focus(), 30);
       return () => clearTimeout(t);
-    }, []);
+    }, [row]);
     // Another tool's list starts at its top: it kept the last one's scroll, and Codex opened on its last rows, Default out of view.
     useEffect(() => {
       if (list.current) list.current.scrollTop = 0;
@@ -232,7 +265,7 @@ export function AgentModelPicker({
     // Upward: this hangs off the composer, near the bottom of the window. One size whichever tool is chosen.
     // From the model half of the box, the models alone: the agent is picked beside it (Arun, 2026-11-03: "we should only be able
     // to change the model and not the tool").
-    const place = placeCard(r, modelOnly ? 364 : 560, { want: modelOnly ? 400 : 440, min: 240, prefer: "above", cover: true });
+    const place = placeCard(r, 340, { want: 380, min: 220, prefer: "above", cover: true });
     // Opened from a dialog (a teammate's Runs on), it keeps inside the dialog's edges: it hung about 45px past its right (Arun,
     // 2026-10-29: the verification's "the teammate dialog's model picker pokes past the dialog's right edge").
     const box = btn.current?.closest('[data-slot="dialog-content"]')?.getBoundingClientRect();
@@ -304,7 +337,7 @@ export function AgentModelPicker({
           </span>
           <span className="amp-tool-text">
             <span className="amp-tool-name">{label}</span>
-            <span className="amp-tool-word">{word}</span>
+            {!(ready && key !== "friday") && <span className="amp-tool-word">{word}</span>}
           </span>
           {best && <span className="amp-best">{route!.bestForValue ? "Best value" : "Best"}</span>}
         </button>
@@ -352,7 +385,8 @@ export function AgentModelPicker({
               {name}
               {best && <span className="amp-best">{bestForValue(id) ? "Best value" : "Best"}</span>}
             </span>
-            {(allowed ? meta : fridaySide.proName) && <span className="amp-model-meta">{allowed ? meta : fridaySide.proName}</span>}
+            {/* Names only (Arun, 2026-11-05: "get rid of the scondary text"): a row says more only when it can't be picked. */}
+            {!allowed && fridaySide.proName && <span className="amp-model-meta">{fridaySide.proName}</span>}
           </span>
           {oddsOf(id)}
           {on && <Icon name="check" size={14} className="amp-check" />}
@@ -371,82 +405,97 @@ export function AgentModelPicker({
     };
 
     const cliMark = engine ? <EngineMark tool={engine} size={14} /> : null;
-    const friday = toolRow("friday", fridayName, <EngineMark tool="" size={18} />, locked ? { disabled: false, hint: "Team" } : solo ? { disabled: false, hint: "Your model" } : null, !engine, pickFriday);
+    const friday = toolRow("friday", fridayName, <EngineMark tool="" size={16} />, locked ? { disabled: false, hint: "Team" } : solo ? { disabled: false, hint: "Your model" } : null, !engine, () => (pickFriday(), setRow("model")));
     const modelCount = engine ? cliModels.length + 1 : own.length + (solo ? 0 : fridaySide.catalogSize);
 
-    /**
-     * The levels are one stop for Tab, and the arrows move the choice along them, as a radio group's do: six separate stops
-     * stood between the tools and the search (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL"). Locked
-     * levels are passed over.
-     */
-    const segKeys = (e: ReactKeyboardEvent<HTMLDivElement>) => {
-      const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
-      if (!step && e.key !== "Home" && e.key !== "End") return;
-      e.preventDefault();
-      e.stopPropagation();
-      const all = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]:not([data-locked="true"])')];
-      if (!all.length) return;
-      const at = all.indexOf(document.activeElement as HTMLButtonElement);
-      const to = e.key === "Home" ? 0 : e.key === "End" ? all.length - 1 : (Math.max(0, at) + step + all.length) % all.length;
-      all[to]!.focus();
-      all[to]!.click();
-    };
-    // How hard it works: Friday Code's reasoning, or a coding tool's effort, as one switch over the models.
+    // How hard it works: Friday Code's reasoning, or a coding tool's effort, as a meter dragged along its levels (Arun,
+    // 2026-11-05: "make this into a draggable meter thing").
     const power =
       efforts ? (
-        <div className="amp-power" role="radiogroup" aria-label={`${ENGINE_NAMES[engine as EngineTool]} effort`}>
-          <span className="amp-power-label" title="Higher effort thinks longer and uses more of the tool's plan.">Effort</span>
-          <div className="amp-seg" onKeyDown={segKeys}>
-            <button type="button" role="radio" aria-checked={efforts.now === null} tabIndex={efforts.now === null ? 0 : -1} data-on={efforts.now === null} title="The tool's own default." onClick={() => efforts.set(null)}>
-              Auto
-            </button>
-            {efforts.options.map((o) => (
-              <button key={o.value} type="button" role="radio" aria-checked={efforts.now === o.value} tabIndex={efforts.now === o.value ? 0 : -1} data-on={efforts.now === o.value} data-locked={!!o.locked} title={o.title} onClick={() => (o.locked ? efforts.onLocked?.(o.title) : efforts.set(o.value))}>
-                {o.label}
-              </button>
-            ))}
-          </div>
-        </div>
+        <StepMeter
+          label="Effort"
+          title="Higher effort thinks longer and uses more of the tool's plan."
+          steps={[{ label: "Auto", title: "The tool's own default." }, ...efforts.options.map((o) => ({ label: o.label, title: o.title, ...(o.locked ? { locked: true } : {}) }))]}
+          at={efforts.now === null ? 0 : 1 + Math.max(0, efforts.options.findIndex((o) => o.value === efforts.now))}
+          onPick={(i) => {
+            if (i === 0) return efforts.set(null);
+            const o = efforts.options[i - 1]!;
+            if (o.locked) efforts.onLocked?.(o.title);
+            else efforts.set(o.value);
+          }}
+        />
       ) : null; // A tool with no levels to pick has no row: the models start higher, in the same size of card.
 
-    return floating(
-      <div ref={pop} className={`amp${modelOnly ? " models-only" : ""}`} style={{ ...place, height: place.maxHeight }} role="dialog" aria-label={modelOnly ? "Model" : "Agent and model"}>
-        {/* Which tool: the ones this computer has first, Friday Code with them (after them on Solo), the rest folded away. */}
-        {!modelOnly && <div className="amp-tools" role="group" aria-label={machineName ? `Tools on ${machineName}` : "Tools"}>
-          <div className="amp-col-label">Who works</div>
-          {here.map((t) => toolRow(t, ENGINE_NAMES[t], <EngineMark tool={t} size={18} />, toolState(t), engine === t, () => onEngine(t)))}
-          {(own.length > 0 || ownOnly) && friday}
-          {away.length > 0 && (
-            <>
-              <button type="button" className="amp-more" aria-expanded={others || away.includes(engine as EngineTool)} onClick={() => setOthers((v) => !v)}>
-                <Icon name={others || away.includes(engine as EngineTool) ? "chevronDown" : "chevronRight"} size={12} />
-                Other tools <span className="amp-more-n">{away.length}</span>
-              </button>
-              {(others || away.includes(engine as EngineTool)) && away.map((t) => toolRow(t, ENGINE_NAMES[t], <EngineMark tool={t} size={18} />, toolState(t), engine === t, () => onEngine(t)))}
-            </>
-          )}
-        </div>}
+    const pickTool = (t: EngineTool) => (onEngine(t), setRow("model"));
+    const acct = accounts?.rows.find((a) => a.id === accounts.now);
+    const dot = (a: { out?: boolean; off?: boolean }) => <i className={`ampd-dot${a.out ? " out" : a.off ? " off" : ""}`} aria-hidden />;
+    /** One of the rows: what it is, what it's set to, and a caret; pressed, it opens under itself and the others close. */
+    const head = (key: "tool" | "account" | "model", label: string, value: ReactElement, hint = "", disabled = "") => (
+      <button type="button" className="ampd-row" data-open={row === key} aria-expanded={row === key} disabled={!!disabled} title={disabled || undefined} onClick={() => setRow(row === key && key !== "model" ? "model" : key)}>
+        <span className="ampd-k">{label}</span>
+        <span className="ampd-v">{value}</span>
+        {hint && <span className="ampd-hint">{hint}</span>}
+        <Icon name={row === key ? "chevronDown" : "chevronRight"} size={13} className="ampd-caret" />
+      </button>
+    );
+    const summary = [!modelOnly ? agentName : "", acct?.label ?? "", modelText || "Default", reasoning || effortText || (efforts ? "Auto" : "")].filter(Boolean).join(" · ");
 
-        <div className="amp-main" onKeyDown={walk}>
-          {/* No name over the column (Arun, 2026-10-26: "get rid of the tool text above the effort section"): the tool is the one
-              picked on the left. Only Smart routing's meter, when it chose. */}
-          {route && (
-            <div className="amp-head">
-              <span className="amp-route" title={route.why}>
-                <TierMeter tier={route.tier} />
-              </span>
-              {/* How long it should take on this tool, and how much of its window (forecast.ts). */}
-              {engine && route.forecasts[engine as EngineTool] && <span className="amp-forecast">{route.forecasts[engine as EngineTool]}</span>}
-            </div>
-          )}
-          {power}
-          {/* Always there, so the list starts at the same place for every tool. */}
-          {modelCount > 0 && (
-            <div className="amp-search">
-              <Icon name="search" size={13} />
-              <input data-search value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search models" aria-label="Search models" spellCheck={false} />
-            </div>
-          )}
+    return floating(
+      <div ref={pop} className={`amp ampd${modelOnly ? " models-only" : ""}`} style={place} role="dialog" aria-label={modelOnly ? "Model" : "Agent and model"}>
+        {!modelOnly && head("tool", "Tool", <><EngineMark tool={engine} size={14} /> {agentName}</>)}
+        {!modelOnly && row === "tool" && (
+          <div className="ampd-opts amp-tools" role="group" aria-label={machineName ? `Tools on ${machineName}` : "Tools"}>
+            {here.map((t) => toolRow(t, ENGINE_NAMES[t], <EngineMark tool={t} size={16} />, toolState(t), engine === t, () => pickTool(t)))}
+            {(own.length > 0 || ownOnly) && friday}
+            {away.length > 0 && (
+              <>
+                <button type="button" className="amp-more" aria-expanded={others || away.includes(engine as EngineTool)} onClick={() => setOthers((v) => !v)}>
+                  <Icon name={others || away.includes(engine as EngineTool) ? "chevronDown" : "chevronRight"} size={12} />
+                  Other tools <span className="amp-more-n">{away.length}</span>
+                </button>
+                {(others || away.includes(engine as EngineTool)) && away.map((t) => toolRow(t, ENGINE_NAMES[t], <EngineMark tool={t} size={16} />, toolState(t), engine === t, () => pickTool(t)))}
+              </>
+            )}
+          </div>
+        )}
+        {accounts && engine && head("account", "Account", <>{acct && dot(acct)}{acct?.label ?? "Main"}</>, acct?.note ?? "", accounts.disabled)}
+        {accounts && engine && row === "account" && (
+          <div className="ampd-opts" role="radiogroup" aria-label={`${ENGINE_NAMES[engine]} account`}>
+            {accounts.rows.map((a) => (
+              <button key={a.id} type="button" role="radio" aria-checked={a.id === accounts.now} className="ampd-opt" data-on={a.id === accounts.now} disabled={!!a.off} title={a.email} onClick={() => (a.id !== accounts.now && accounts.set(a.id), setRow("model"))}>
+                {dot(a)}
+                <span className="ampd-opt-name">{a.label}</span>
+                {a.main && <span className="ampd-tag">Default</span>}
+                <span className={`ampd-opt-note${a.out ? " out" : ""}`}>
+                  {typeof a.used === "number" && (
+                    <span className="ampd-bar" aria-hidden>
+                      <i style={{ width: `${Math.max(2, Math.min(100, a.used * 100))}%` }} />
+                    </span>
+                  )}
+                  {a.note}
+                </span>
+              </button>
+            ))}
+            {accounts.note && <p className="ampd-note">{accounts.note}</p>}
+          </div>
+        )}
+        {head("model", "Model", <>{!engine && frontierVendor && <VendorMark vendor={frontierVendor} size={14} />}{modelText || "Default"}</>)}
+        {row === "model" && (
+          <div className="ampd-models amp-main" onKeyDown={walk}>
+            {route && (
+              <div className="amp-head">
+                <span className="amp-route" title={route.why}>
+                  <TierMeter tier={route.tier} />
+                </span>
+                {engine && route.forecasts[engine as EngineTool] && <span className="amp-forecast">{route.forecasts[engine as EngineTool]}</span>}
+              </div>
+            )}
+            {modelCount > 6 && (
+              <div className="amp-search">
+                <Icon name="search" size={13} />
+                <input data-search value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search models" aria-label="Search models" spellCheck={false} />
+              </div>
+            )}
           <div ref={list} className="amp-models" role="menu" aria-label="Models">
             {!engine ? (
               <>
@@ -464,7 +513,7 @@ export function AgentModelPicker({
               </>
             ) : (
               <>
-                {group(null, [modelRow("", "Default", `Whatever ${ENGINE_NAMES[engine]} is set to use`, !model, cliMark!, true, false, "default")])}
+                {/* No Default or Smart routing section (Arun, 2026-11-05): the tool's own models only. */}
                 {(() => {
                   const out: ReactElement[] = [];
                   let label: string | null = null;
@@ -475,6 +524,7 @@ export function AgentModelPicker({
                     rows = [];
                   };
                   for (const m of cliModels) {
+                    if (m.id === "auto") continue;
                     if ((m.group ?? null) !== label) {
                       flush();
                       label = m.group ?? null;
@@ -512,12 +562,118 @@ export function AgentModelPicker({
               </>
             )}
           </div>
-          <div className="amp-foot" aria-hidden>
-            <kbd>↑</kbd>
-            <kbd>↓</kbd> move <kbd>↵</kbd> choose <kbd>esc</kbd> close
           </div>
+        )}
+        {power && <div className="ampd-power">{power}</div>}
+        <div className="ampd-foot" title={summary}>
+          {summary}
         </div>
       </div>,
     );
   }
+}
+
+/**
+ * A level picked by dragging along a meter (Arun, 2026-11-05: "make this into a draggable meter thing", then design 7 of the
+ * mockups): a rounded track whose dark fill grows from the left under a round handle, a dot at each level, and the levels named
+ * under it to press. The handle follows the pointer and settles on the nearest level when let go; the arrows, Home and End step
+ * along. A locked level is a dim name the handle passes over.
+ */
+function StepMeter({ label, title, steps, at, onPick }: { label: string; title?: string; steps: { label: string; title?: string; locked?: boolean }[]; at: number; onPick: (i: number) => void }) {
+  const track = useRef<HTMLDivElement>(null);
+  // Where the handle is while it's held, from 0 to 1; null when it rests on its level.
+  const [held, setHeld] = useState<number | null>(null);
+  const last = Math.max(1, steps.length - 1);
+  const frac = held ?? at / last;
+  const shown = held === null ? at : Math.round(held * last);
+  const open = (i: number) => !steps[i]?.locked;
+  /** The track's length the handle travels: inside its 4px rim, less the handle's own 24px. */
+  const along = (f: number) => `calc(${f} * (100% - 20px))`;
+  const fracAt = (x: number) => {
+    const r = track.current!.getBoundingClientRect();
+    return Math.min(1, Math.max(0, (x - r.left - 10) / Math.max(1, r.width - 20)));
+  };
+  /** The nearest level to a place on the track that may be picked. */
+  const nearest = (f: number) => {
+    const want = f * last;
+    let best = at;
+    let gap = Infinity;
+    steps.forEach((_, i) => open(i) && Math.abs(i - want) < gap && ((gap = Math.abs(i - want)), (best = i)));
+    return best;
+  };
+  const pick = (i: number) => i !== at && open(i) && onPick(i);
+  const down = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const el = e.currentTarget;
+    el.focus();
+    let f = fracAt(e.clientX);
+    setHeld(f);
+    // Settled where it's let go; it ends however the pointer goes (drag-end.ts).
+    const held2 = dragEnds(e, () => {
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", held2.stop);
+      el.removeEventListener("pointercancel", held2.stop);
+      setHeld(null);
+      pick(nearest(f));
+    });
+    const move = (ev: PointerEvent) => {
+      if (!held2.live(ev)) return;
+      f = fracAt(ev.clientX);
+      setHeld(f);
+    };
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", held2.stop);
+    el.addEventListener("pointercancel", held2.stop);
+  };
+  /** The arrows step to the next level that may be picked; Home and End to the first and last. */
+  const key = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    const ok = steps.map((_, i) => i).filter(open);
+    const to =
+      e.key === "Home" ? ok[0]
+      : e.key === "End" ? ok.at(-1)
+      : e.key === "ArrowRight" || e.key === "ArrowUp" ? ok.find((i) => i > at)
+      : e.key === "ArrowLeft" || e.key === "ArrowDown" ? ok.findLast((i) => i < at)
+      : null;
+    if (to === null) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (to !== undefined) pick(to);
+  };
+  return (
+    <div className="amp-meter-box">
+      <div className="amp-meter-head">
+        <span className="amp-power-label" title={title}>
+          {label}
+        </span>
+        <span className="amp-meter-value">{steps[shown]?.label}</span>
+      </div>
+      <div
+        ref={track}
+        className="amp-meter"
+        role="slider"
+        tabIndex={0}
+        aria-label={label}
+        aria-valuemin={0}
+        aria-valuemax={last}
+        aria-valuenow={shown}
+        aria-valuetext={steps[shown]?.label}
+        data-held={held !== null}
+        title={steps[shown]?.title}
+        onPointerDown={down}
+        onKeyDown={key}
+      >
+        {steps.map((s, i) => i > 0 && <span key={s.label} className="amp-meter-dot" data-locked={!!s.locked} style={{ left: `calc(10px + ${along(i / last)})` }} aria-hidden />)}
+        <span className="amp-meter-fill" style={{ width: `calc(14px + ${along(frac)})` }} aria-hidden />
+        <span className="amp-meter-thumb" style={{ left: `calc(3px + ${along(frac)})` }} aria-hidden />
+      </div>
+      <div className="amp-meter-names" aria-hidden>
+        {steps.map((s, i) => (
+          <button key={s.label} type="button" tabIndex={-1} data-on={i === shown} data-locked={!!s.locked} title={s.title} onClick={() => pick(i)}>
+            {s.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }

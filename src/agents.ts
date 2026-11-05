@@ -94,7 +94,8 @@ export interface AgentDef {
   version: number;
 }
 
-export type AgentView = AgentDef & { access: "owner" | "shared" };
+/** `ownerLeft`: its owner shared it and then left the workspace (app.ts markLeft): kept, as made by someone who left. */
+export type AgentView = AgentDef & { access: "owner" | "shared"; ownerLeft?: true; /** This person, an admin, may edit, delete or take it over (app.ts stewardOf). */ mayManage?: true };
 export type AgentInput = Partial<Pick<AgentDef, "name" | "description" | "instructions" | "icon" | "color" | "tools" | "skills" | "model" | "sharing" | "memory" | "channels" | "subagents" | "helpers" | "triggers">> & {
   /** Null (or `every: "manual"`) turns the schedule off; absent leaves it as it was. */
   schedule?: (Partial<AgentSchedule> & { every?: string }) | null;
@@ -280,6 +281,18 @@ export class AgentRegistry {
   async remove(user: Person, id: string): Promise<void> {
     await this.owned(user, id);
     await this.redis.hdel(this.key, id);
+  }
+
+  /**
+   * Taken over by `to`: an admin's, for something its maker shared and then left the workspace with (app.ts stewardOf decides
+   * who may). Theirs from now on, as if they had made it; who may use it is as it was.
+   */
+  async takeOver(id: string, to: Person): Promise<AgentView> {
+    const a = await this.get(id);
+    if (!a) throw new AgentError(404, "Agent not found.");
+    const next: AgentDef = { ...a, ownerId: to.id, ownerName: to.name, updatedAt: Date.now(), version: a.version + 1 };
+    await this.put(next);
+    return { ...next, access: "owner" };
   }
 
   /**

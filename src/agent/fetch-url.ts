@@ -1,5 +1,6 @@
-import { lookup } from "node:dns/promises";
+import dns, { type LookupAddress } from "node:dns";
 import { isIP } from "node:net";
+import { Agent, fetch as pinnedFetch } from "undici";
 
 /**
  * Reading a page the team linked to.
@@ -52,14 +53,38 @@ function isPrivate(ip: string): boolean {
   );
 }
 
-async function resolvesPublicly(host: string): Promise<string | null> {
-  const literal = isIP(host);
-  if (literal) return isPrivate(host) ? "that address is on a private network" : null;
-  const addrs = await lookup(host, { all: true }).catch(() => []);
-  if (!addrs.length) return "that host doesn't resolve";
-  // Every answer, not just the first: a name that resolves to one public and
-  // one private address is a rebinding attempt, not a coincidence.
-  return addrs.some((a) => isPrivate(a.address)) ? "that host resolves to a private network address" : null;
+/** An address written into the URL itself: connected to as it is, with no lookup, so it is checked here. Names are checked as they are looked up (below). */
+function literalProblem(host: string): string | null {
+  return isIP(host) && isPrivate(host) ? "that address is on a private network" : null;
+}
+
+const PRIVATE_NAME = "that host resolves to a private network address";
+const NO_NAME = "that host doesn't resolve";
+
+/**
+ * The one lookup a connection makes, checked: every address it answers must be public, and the connection goes to the address
+ * checked. Checking a name and then letting the connection look it up again was DNS rebinding's way in: a name with a short
+ * TTL answered a public address to the check and 127.0.0.1 or 169.254.169.254 to the connection (2026-11-04 security review).
+ * Every answer, not just the first: a name that resolves to one public and one private address is a rebinding attempt.
+ */
+function checkedLookup(host: string, opts: dns.LookupOptions, cb: (err: NodeJS.ErrnoException | null, address: string | LookupAddress[], family?: number) => void): void {
+  dns.lookup(host, { ...opts, all: true }, (err, found) => {
+    const all = (found ?? []) as LookupAddress[];
+    if (err || !all.length) return cb(Object.assign(new Error(`${host}: ${NO_NAME}`), { code: "ENOTFOUND" }), "");
+    if (all.some((a) => isPrivate(a.address))) return cb(Object.assign(new Error(`${host}: ${PRIVATE_NAME}`), { code: "EPRIVATE" }), "");
+    if (opts.all) cb(null, all);
+    else cb(null, all[0]!.address, all[0]!.family);
+  });
+}
+const pinned = new Agent({ connect: { lookup: checkedLookup as never } });
+
+/** Why a connection made through `pinned` was refused, in words, when it was the address that refused it. */
+function refusedFor(e: unknown): string | null {
+  for (let c = e as { code?: string; cause?: unknown } | undefined, i = 0; c && i < 5; c = c.cause as typeof c, i++) {
+    if (c.code === "EPRIVATE") return PRIVATE_NAME;
+    if (c.code === "ENOTFOUND") return NO_NAME;
+  }
+  return null;
 }
 
 /** Tags whose contents are markup or code, not the page's words. */
@@ -89,16 +114,20 @@ export async function fetchUrl(raw: string, signal: AbortSignal): Promise<string
   const trail: string[] = [];
   for (let hop = 0; hop <= MAX_HOPS; hop++) {
     if (url.protocol !== "https:" && url.protocol !== "http:") return `Only http and https can be fetched, not ${url.protocol.replace(":", "")}.`;
-    const bad = await resolvesPublicly(url.hostname.replace(/^\[|\]$/g, ""));
+    const bad = literalProblem(url.hostname.replace(/^\[|\]$/g, ""));
     if (bad) return `Can't fetch ${url.hostname}: ${bad}.`;
 
     const timer = AbortSignal.timeout(TIMEOUT_MS);
-    const res = await fetch(url, {
+    const res = await pinnedFetch(url, {
       redirect: "manual",
       signal: AbortSignal.any([signal, timer]),
       headers: { "user-agent": "FridayBot/1.0 (+https://friday.app)", accept: "text/html,text/plain,application/json;q=0.9,*/*;q=0.5" },
+      dispatcher: pinned,
     }).catch((e: Error) => e);
-    if (res instanceof Error) return `Couldn't reach ${url.hostname}: ${res.message}`;
+    if (res instanceof Error) {
+      const why = refusedFor(res);
+      return why ? `Can't fetch ${url.hostname}: ${why}.` : `Couldn't reach ${url.hostname}: ${res.message}`;
+    }
 
     const location = res.headers.get("location");
     if (res.status >= 300 && res.status < 400 && location) {
@@ -133,13 +162,19 @@ export async function publicUrlProblem(raw: string | URL): Promise<string | null
     return "that isn't a URL";
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") return `only http and https, not ${url.protocol.replace(":", "")}`;
-  return resolvesPublicly(url.hostname.replace(/^\[|\]$/g, ""));
+  const literal = literalProblem(url.hostname.replace(/^\[|\]$/g, ""));
+  if (literal || isIP(url.hostname.replace(/^\[|\]$/g, ""))) return literal;
+  // A name: looked up here to say why up front. The connection itself (publicFetch, fetchUrl) checks its own lookup again.
+  const all = await dns.promises.lookup(url.hostname, { all: true }).catch(() => []);
+  if (!all.length) return NO_NAME;
+  return all.some((a) => isPrivate(a.address)) ? PRIVATE_NAME : null;
 }
 
 /**
  * fetch, for addresses a person or a remote server chose: each hop is checked as fetchUrl checks it, so a URL, a redirect,
  * or an OAuth server named in another server's metadata cannot point Friday's server at its own private network (Security
- * AUDIT APP-2). What it doesn't stop: a name that resolves differently between the check and the connection.
+ * AUDIT APP-2). The connection goes to the address its own lookup checked (checkedLookup), so a name that resolves
+ * differently between a check and the connection doesn't get through either.
  */
 /**
  * The request to send after a redirect, as fetch itself would: a 303, or a 301/302 after a POST, becomes a GET with no body,
@@ -161,9 +196,13 @@ export const publicFetch: typeof fetch = async (input, init) => {
   let url = new URL(input instanceof Request ? input.url : String(input));
   let opts: RequestInit = input instanceof Request ? { method: input.method, headers: input.headers, body: input.body ? await input.arrayBuffer() : undefined, signal: input.signal, ...init } : { ...init };
   for (let hop = 0; hop <= MAX_HOPS; hop++) {
-    const bad = await publicUrlProblem(url);
+    if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error(`Can't reach ${url.href}: only http and https.`);
+    const bad = literalProblem(url.hostname.replace(/^\[|\]$/g, ""));
     if (bad) throw new Error(`Can't reach ${url.hostname}: ${bad}.`);
-    const res = await fetch(url, { ...opts, redirect: "manual" });
+    const res = (await pinnedFetch(url, { ...(opts as object), redirect: "manual", dispatcher: pinned }).catch((e: Error) => {
+      const why = refusedFor(e);
+      throw why ? new Error(`Can't reach ${url.hostname}: ${why}.`) : e;
+    })) as unknown as Response;
     const location = res.headers.get("location");
     if (res.status < 300 || res.status >= 400 || !location || init?.redirect === "manual") return res;
     await res.body?.cancel().catch(() => {});

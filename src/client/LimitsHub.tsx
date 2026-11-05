@@ -32,6 +32,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { EmptyState, SettingsGroup, SettingsRow, StatTile, StateBadge, surface } from "@/components/dass";
 import { LimitRing } from "./LimitRing.js";
+import { AccountCardsView } from "./gauge.js";
 
 /**
  * The coding tools' limits as one place to plan the day from: each tool's five-hour and weekly windows as rings, the pace
@@ -197,6 +198,7 @@ export function LimitsHub({ read }: { read: Read }) {
       </div>
     );
   };
+  const accountTools = (["claude", "codex"] as const).filter((t) => (limits.accounts?.[t]?.length ?? 0) > 1);
   // One tool alone: its week beside its card, not under a void the width of two more cards (audit REST-9, Arun 2026-11-04).
   const single = tools.length === 1 && fives.length === 1 && fives[0]!.tool === tools[0];
 
@@ -226,6 +228,28 @@ export function LimitsHub({ read }: { read: Read }) {
         })}
         {single && heat(fives[0]!)}
       </div>
+
+      {/* More than one account of a tool here (runner/accounts.ts): each one's windows, the next to refill first. */}
+      {accountTools.length > 0 && (
+        <section className="flex flex-col gap-2.5" aria-label="Your accounts">
+          <div className="lh-section-head">
+            <h3 className="m-0 text-[13px] font-semibold text-[var(--ink)]">Your accounts</h3>
+            <span className="text-[12px] text-[var(--text-muted)]">In the order they refill. Friday never moves an agent between them by itself.</span>
+          </div>
+          {accountTools.map((t) => (
+            <section key={t} className="flex flex-col gap-2" aria-label={`${ENGINE_NAMES[t]} accounts`}>
+              <header className="flex items-center gap-2 text-[13px] text-[var(--ink-2)]">
+                <EngineMark tool={t} size={14} />
+                <b className="font-semibold text-[var(--ink)]">{ENGINE_NAMES[t]}</b>
+                <span className="text-[var(--text-muted)]">{limits.accounts![t]!.length} accounts</span>
+              </header>
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-3">
+                <AccountCardsView limits={read} tool={t} className={cn(surface, "flex flex-col gap-2 p-4")} />
+              </div>
+            </section>
+          ))}
+        </section>
+      )}
 
       <div className="grid grid-cols-3 gap-3 max-md:grid-cols-1">
         <StatTile

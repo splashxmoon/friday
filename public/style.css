@@ -807,6 +807,14 @@ body > [data-float] { pointer-events: auto; z-index: 1100; }
 .confirm-icon { display: grid; place-items: center; width: 20px; height: 20px; flex: none; color: var(--text-muted); }
 .modal.confirm.danger .confirm-icon { color: var(--red); }
 .confirm-body { margin: 12px 0 0; font-size: 14px; line-height: 1.5; color: var(--ink-2); }
+/* Removing someone from a workspace, or leaving it (OffboardDialog): what happens to what was theirs, one plain line each, asked
+   before and said after in the same dialog. A quiet dot per line; it scrolls on its own if it runs long. */
+.modal.confirm.offboard { width: min(460px, 100%); }
+.offboard-list { margin: 14px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; font-size: 13px; line-height: 1.45; color: var(--ink-2); max-height: min(50vh, 360px); overflow-y: auto; }
+.offboard-list li { position: relative; padding-left: 14px; }
+.offboard-list li::before { content: ""; position: absolute; left: 2px; top: .62em; width: 4px; height: 4px; border-radius: 50%; background: var(--text-muted); }
+.offboard-list li.offboard-wait::before { display: none; }
+.offboard-wait span { display: block; height: 10px; margin-top: 4px; border-radius: 6px; background: var(--hover); }
 .btn.destructive { background: var(--red-solid); border-color: var(--red-solid); color: #fff; }
 /* The background has to be restated: `.btn:hover` matches with the same
    specificity and would otherwise repaint this in the neutral hover fill,
@@ -1930,6 +1938,9 @@ body.resizing-x .bench-panel { transition: none; }
 /* A slide is a fixed frame, so an overfull slide looks overfull here too —
    which is the whole point of showing a deck as a deck. */
 .doc-scroll.deck { padding: 16px 20px 28px; display: flex; flex-direction: column; gap: 14px; }
+/* Changes: the diffs use the panel's whole width, with a small gutter (Arun, 2026-11-05). */
+.doc-scroll.files-scroll { padding: 4px 8px 20px; }
+.files-scroll .dp-tools { margin: 0 -8px; padding: 8px; }
 .slide {
   position: relative; display: flex; align-items: flex-start;
   aspect-ratio: 16 / 9; min-height: 170px; padding: 22px 24px;
@@ -7042,11 +7053,8 @@ html.desktop:not(.desktop-mac) .home-tools { top: 5px; right: calc(var(--band-ri
 .mb-inline .mb-tool.out .mb-tool-state::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .mb-inline .mb-tool > * { grid-column: 1 / -1; }
 .mb-inline .mb-tool > .mb-tool-line { grid-column: 1; grid-row: 1; }
-.mb-inline .mb-tool > .mb-tool-go, .mb-inline .mb-tool > .mb-tool-more, .mb-inline .mb-tool > .acct > .acct-sum { grid-column: 2; grid-row: 1; }
-.mb-inline .mb-tool > .acct { display: contents; }
-.mb-inline .mb-tool > .acct > :not(.acct-sum) { grid-column: 1 / -1; }
-.mb-inline .mb-tool .acct-sum { width: auto; max-width: 240px; min-height: 28px; border-color: var(--border); }
-.mb-inline .mb-tool .acct-list { margin: 0; }
+.mb-inline .mb-tool > .mb-tool-go, .mb-inline .mb-tool > .mb-tool-more, .mb-inline .mb-tool > .acct-tool-acts { grid-column: 2; grid-row: 1; }
+.mb-inline .mb-tool > .acct { grid-column: 1 / -1; }
 .mb-inline .mb-more .more-tools { padding: 9px 12px; border-radius: 0; font-size: 12px; }
 /* Left to right: a path cut from its start lost its leading slash ("Users/arundass/"). */
 .mb-inline .mb-path { direction: ltr; }
@@ -7554,6 +7562,12 @@ img.set-mark { border-color: transparent; }
 /* Label and use on one line each, never broken mid-word; when a long label ("Cursor models") and the reset don't both fit, the reset drops under, still on the right. */
 .lg-line { display: flex; align-items: baseline; gap: 8px; padding: 0 2px 6px; }
 .lg-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 13px; font-weight: 600; color: var(--ink); white-space: nowrap; }
+/* The Usage page's card for one account of a tool (gauge.tsx AccountCardsView). */
+.lh-acct-head { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px; color: var(--ink); }
+.lh-acct-head > b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.lh-acct-head > .lg-plan { margin-left: auto; }
+.lh-acct-who { margin-top: -4px; font-size: 12px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lg-tag { flex: none; padding: 0 6px; border-radius: 999px; font-size: 11px; font-weight: 600; line-height: 17px; color: var(--st-done); background: color-mix(in srgb, var(--st-done) 13%, transparent); white-space: nowrap; }
 .lg-used { flex: none; margin-left: auto; font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .lg-reset { padding: 5px 2px 0; font-size: 12px; color: var(--faint); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .lg-bar { height: 6px; border-radius: 999px; background: var(--card-2); overflow: hidden; }
@@ -9310,6 +9324,7 @@ html.desktop :is(#band-left, #band-slot) :is(.popover, [role="dialog"], [role="m
 .ios-tools-rule { width: 1px; height: 18px; margin: 0 4px; background: var(--border-strong); }
 .ios-log { max-height: 200px; overflow: auto; margin: 0; font-size: 12px; }
 .ios-note { gap: 10px; }
+.ios-empty { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
 
 /* Mac, a session with its side panel docked (Arun, 2026-10-18): the panel runs up to the top of the window, above the page's
    top edge, as a column of its own; the header's buttons sit just before it and the title ends before them. The panel says
@@ -10578,6 +10593,42 @@ html:not(.desktop) .shell:not(.with-panel) #main { padding-left: 44px; }
 .acct-bar-pct { text-align: right; }
 .acct-menu { width: 24px; height: 24px; color: var(--faint); }
 .acct-menu:hover, .acct-menu.on { color: var(--ink); background: var(--hover); }
+/* The computer's list, redesigned (Arun, 2026-11-05: "redesign this better for adding multiple accounts"): no card inside the
+   tool's card. "+ Account" sits in the tool's row with its other actions; more than one account is a line each under the tool,
+   lined up with its name (its mark is 30px, then 10px), flat as the sidebar's rows; the adding is one line in the same place. */
+.acct-tool-acts { display: flex; align-items: center; gap: 2px; margin-left: auto; flex: none; }
+.acct-add-btn { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border: 0; border-radius: 7px; background: none; color: var(--text-muted); font: 500 12px var(--font); cursor: pointer; transition: color var(--dass-fast, .12s), background-color var(--dass-fast, .12s); }
+.acct-add-btn:hover { color: var(--ink); background: var(--hover); }
+.acct-add-btn:focus-visible { outline: none; box-shadow: var(--dass-ring, 0 0 0 2px var(--accent)); }
+/* Lined up with the tool's name, mark under mark-less name: in Settings past its 30px mark, in the computer's card past its 20px one. */
+.mb-tool .acct { gap: 4px; margin: 0; padding-left: 32px; }
+.mb-card .mb-tool .acct { flex-basis: 100%; margin-left: 0; padding-left: 29px; }
+.acct-lines { display: flex; flex-direction: column; margin: 0 0 0 -6px; padding: 0; list-style: none; }
+.acct-line { display: flex; align-items: center; flex-wrap: wrap; gap: 0 8px; min-height: 30px; padding: 3px 4px 3px 6px; border-radius: 7px; transition: background-color var(--dass-fast, .12s); }
+.acct-line:hover { background: var(--hover); }
+.acct-line .acct-mark { width: 18px; height: 18px; border-radius: 5px; font-size: 11px; }
+.acct-line .acct-mark.dim { opacity: .5; }
+.acct-line .acct-label { flex: 0 1 auto; }
+.acct-line .acct-default { padding: 0 6px; font-size: 11px; line-height: 16px; }
+.acct-end { display: flex; align-items: center; gap: 6px; margin-left: auto; flex: none; }
+.acct-st { font-size: 12px; color: var(--text-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.acct-st.st-queued { color: var(--st-queued); }
+.acct-st.st-blocked { color: var(--st-blocked); }
+.acct-end .btn.small { height: 22px; padding: 0 8px; font-size: 12px; }
+/* Its ⋯ shows on pointing at its line (Dass: hover reveals actions), and stays while its menu is open or it has focus. */
+.acct-line .acct-menu { opacity: 0; transition: opacity var(--dass-fast, .12s); }
+.acct-line:hover .acct-menu, .acct-line .acct-menu:focus-visible, .acct-line .acct-menu.on { opacity: 1; }
+.acct-line .acct-pending, .acct-line .acct-confirm { flex-basis: 100%; padding: 2px 0 4px 26px; }
+.acct-confirm { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+.acct-confirm-acts { display: flex; gap: 6px; margin-left: auto; }
+.acct-confirm-acts .btn.small { height: 24px; padding: 0 9px; font-size: 12px; }
+.mb-tool .acct-add { gap: 5px; padding: 2px 0 4px; border: 0; }
+.acct-add-line { display: flex; align-items: center; gap: 6px; }
+.acct-add-name { flex: 1; min-width: 0; height: 28px; padding: 0 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--ink); font: 13px var(--font); outline: none; transition: border-color var(--dass-fast, .12s), box-shadow var(--dass-fast, .12s); }
+.acct-add-name:focus { border-color: var(--ink); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink) 10%, transparent); }
+.acct-add-name::placeholder { color: var(--faint); }
+.acct-add-line .btn.small { height: 28px; padding: 0 11px; font-size: 12px; }
+.mb-tool .acct-add-note { display: block; font-size: 12px; line-height: 1.45; color: var(--text-muted); }
 li.acct-foot { padding: 6px 8px 2px; line-height: 1.45; }
 .account-pill.out { color: var(--st-queued); }
 @media (prefers-reduced-motion: reduce) { .acct-bar-track > span { transition: none; } }
@@ -12301,6 +12352,10 @@ body:has(.wf-inspector) .wy-toasts.at-rest { right: calc(16px + 340px + 12px); }
 .term-tool .term-shell { flex: 1; min-height: 0; }
 .in-terminal-note { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); color: var(--text-muted); }
 .in-terminal-note > span { flex: 1; min-width: 0; color: var(--text-muted); }
+/* My agent stays on its account after the default changed (Activity.tsx AccountDefaultNote): said once, with the move beside it. */
+.acct-moved { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin: 0 0 6px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); font-size: 13px; color: var(--text-muted); }
+.acct-moved > span { flex: 1; min-width: 200px; }
+.acct-moved > span b { color: var(--ink); font-weight: 600; }
 .in-terminal-note > .link-btn { flex: none; color: var(--ink-2); }
 /* Chat or Terminal for one agent, in the session's header (Terminal.tsx ViewToggle), and the agent's own screen in the chat's place. */
 .view-toggle { display: inline-grid; flex: none; place-items: center; width: 24px; height: 24px; margin-left: 4px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--faint); cursor: pointer; }
@@ -12841,13 +12896,6 @@ html.dark .dass-panel .sb-dock.sb-tray { box-shadow: none !important; }
    switch at its right, as the panel's other bars sit (Arun, 2026-11-03: "fix this", the switch and page were flush with the edge),
    then the page on the panel's own ground, its text a step brighter than the Work reader's, which read faint in a narrow panel. */
 .tree-open.as-page { display: flex; flex-direction: column; min-height: 0; }
-.md-bar { display: flex; flex: none; align-items: center; justify-content: flex-end; min-height: 38px; padding: 5px 10px; border-bottom: 1px solid var(--border); }
-.md-switch { display: inline-flex; gap: 2px; padding: 2px; border-radius: 8px; background: color-mix(in srgb, var(--ink) 6%, transparent); }
-.md-switch button { height: 24px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); font: 500 12px var(--font); cursor: pointer; }
-.md-switch button:hover { color: var(--ink); }
-.md-switch button.on { background: var(--card); color: var(--ink); box-shadow: 0 0 0 .5px color-mix(in srgb, var(--ink) 14%, transparent), 0 1px 2px rgb(0 0 0 / .06); }
-html.dark .md-switch button.on { background: color-mix(in srgb, var(--ink) 13%, var(--bg)); box-shadow: none; }
-.md-switch button:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 0; }
 .md-page { flex: 1 1 auto; min-height: 0; overflow: auto; container-type: inline-size; }
 /* Sized to the panel, not fixed (Arun, 2026-11-03: "make sure everything is able to dynamically adjust based on the panel size and
    in full screen too"): the reading column grows with the panel up to a comfortable measure, the type a step with it, and a table
@@ -13055,3 +13103,96 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover { opacity: .8; }
 .plan-steps li { min-height: 30px; }
 /* "Invite someone to watch or steer", at the foot of who is here when the owner is alone (SessionView PresenceBar). */
 .pb-handover.pb-invite { margin: 4px 0 0; border-bottom: 0; border-top: 1px solid var(--border); border-radius: 0 0 8px 8px; }
+/* "Friday can see it through…", the quiet line under a commit that opened a pull request (Activity.tsx, folder.committed). */
+.cp-offer { display: block; margin-top: 8px; color: var(--text-muted); }
+.cp-offer .link-btn { margin-left: 6px; }
+/* A commit line's actions: one row after its words that wraps as a row, each wrapped line starting at the text's own edge. */
+.cp-acts { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; margin-left: 8px; }
+
+/* Settings › Computer's computer-use row (ComputerUse.tsx): what the system still needs, a line each, amber as anything waiting on you. */
+.cu-needs { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; margin-top: 6px; }
+.cu-need { display: flex; gap: 6px; color: var(--st-queued); }
+.cu-need::before { content: ""; flex: none; width: 6px; height: 6px; margin-top: 6px; border-radius: 50%; background: currentColor; }
+.cu-need.error { color: var(--st-blocked); }
+
+/* The folders an agent works in besides its own, in the box (Activity.tsx): quiet chips, a folder's name and a way to take it back. */
+.box-dirs { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; }
+.box-dir { display: inline-flex; align-items: center; gap: 4px; height: 24px; max-width: 180px; padding: 0 8px; border-radius: 6px; background: var(--hover); color: var(--ink-2); font-size: 12px; }
+.box-dir:has(.box-dir-x) { padding-right: 3px; }
+.box-dir svg { flex: none; color: var(--text-muted); }
+.box-dir-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.box-dir-x { display: grid; place-items: center; flex: none; width: 18px; height: 18px; border: 0; border-radius: 4px; background: none; color: var(--text-muted); cursor: pointer; }
+.box-dir-x:hover { background: color-mix(in srgb, var(--ink) 10%, transparent); color: var(--ink); }
+.box-dir-x:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 0; }
+
+/* The agent picker as rows (AgentModelPicker, design D, Arun 2026-11-05): Tool, Account, Model, one open at a time, Effort always
+   there, and what it comes to in one line at the foot. Calm: colour only for an account's state. */
+.amp.ampd { display: flex; flex-direction: column; padding: 6px; gap: 1px; }
+.ampd-row { display: flex; align-items: center; gap: 10px; flex: none; height: 38px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font: 13px var(--font); text-align: left; cursor: pointer; }
+.ampd-row:hover:not(:disabled) { background: var(--hover); }
+.ampd-row[data-open="true"] { background: var(--hover); }
+.ampd-row:disabled { cursor: default; color: var(--text-muted); }
+.ampd-row:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
+.ampd-k { width: 54px; flex: none; font-size: 12px; color: var(--text-muted); }
+.ampd-v { display: flex; align-items: center; gap: 7px; flex: 1; min-width: 0; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ampd-hint { flex: none; max-width: 40%; font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ampd-caret { flex: none; color: var(--faint); }
+.ampd-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--green, #3fb67b); }
+.ampd-dot.out { background: var(--red); }
+.ampd-dot.off { background: var(--faint); }
+/* The open row's choices across the panel's width, with even space either side (Arun, 2026-11-05). */
+.ampd-opts { display: flex; flex-direction: column; gap: 1px; flex: none; max-height: 220px; overflow-y: auto; margin: 2px 0 4px; padding: 0 4px; border: 0; background: none; }
+.ampd-opts.amp-tools { border-right: 0; background: none; padding: 0 4px; }
+.ampd .amp-tool { padding: 5px 8px; gap: 10px; }
+.ampd .amp-tool-mark { width: 22px; height: 22px; border-radius: 6px; }
+.ampd .amp-tool-text { flex-direction: row; align-items: baseline; gap: 8px; flex: 1; }
+.ampd .amp-tool-word { margin-left: auto; }
+.ampd-opt { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; color: var(--ink-2); font: 13px var(--font); text-align: left; cursor: pointer; }
+.ampd-opt:hover:not(:disabled), .ampd-opt:focus-visible { background: var(--hover); color: var(--ink); outline: none; }
+.ampd-opt[data-on="true"] { background: var(--surface-selected); color: var(--ink); }
+.ampd-opt:disabled { cursor: default; opacity: .6; }
+.ampd-opt-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ampd-tag { flex: none; font-size: 11px; color: var(--text-muted); }
+.ampd-opt-note { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; flex: none; font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.ampd-opt-note.out { color: var(--red); }
+.ampd-bar { display: inline-block; width: 44px; height: 4px; border-radius: 2px; overflow: hidden; background: color-mix(in srgb, var(--ink) 12%, transparent); }
+.ampd-bar i { display: block; height: 4px; background: var(--text-muted); }
+.ampd-note { margin: 4px 8px 2px; font-size: 12px; color: var(--text-muted); }
+.ampd-models { flex: 1; min-height: 0; display: flex; flex-direction: column; padding-top: 4px; }
+.ampd .amp-head { min-height: 0; padding: 4px 10px 6px; }
+.ampd .amp-search { flex: none; margin: 2px 4px 6px; height: 32px; padding: 0 10px; }
+.ampd .amp-head, .ampd-row, .ampd-power, .ampd-foot { flex-shrink: 0; }
+.ampd .amp-search input { font-size: 13px; }
+.ampd .amp-models { border-top: 0; padding: 0 0 4px; }
+.ampd .amp-group { padding-top: 2px; }
+.ampd .amp-model { padding: 5px 10px; }
+.ampd .amp-model-text { flex-direction: row; align-items: baseline; gap: 8px; }
+.ampd .amp-model-name { flex: none; }
+.ampd .amp-model-meta { flex: 1; min-width: 0; text-align: right; }
+.ampd-power { flex: none; border-top: 1px solid var(--border); margin-top: 2px; padding-top: 6px; }
+/* The level's name as far from the right edge as "Effort" is from the left (Arun, 2026-11-05). */
+.ampd .amp-power { flex-direction: row; align-items: center; gap: 10px; padding: 0 10px; }
+.ampd .amp-seg { padding: 2px; }
+.ampd .amp-power-label { width: 54px; }
+.ampd .amp-seg button { flex: 1 1 auto; height: 24px; padding: 0 4px; }
+.ampd-foot { flex: none; margin-top: 6px; padding: 7px 10px 3px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Effort as a meter you drag (AgentModelPicker StepMeter, Arun 2026-11-05: design 7 of the mockups): a rounded track whose dark
+   fill grows under a round handle, a dot for each level, and the levels named under it. Ink only, as the rest of the picker. */
+.amp-meter-box { display: flex; flex-direction: column; gap: 6px; padding: 2px 10px 0; }
+.amp-meter-head { display: flex; align-items: baseline; justify-content: space-between; }
+.amp-meter-value { font-size: 12px; font-weight: 600; color: var(--ink); }
+.amp-meter { position: relative; height: 20px; border-radius: 10px; background: var(--hover); box-shadow: inset 0 0 0 1px var(--border); cursor: grab; touch-action: none; outline: none; }
+.amp-meter[data-held="true"] { cursor: grabbing; }
+.amp-meter:focus-visible { box-shadow: inset 0 0 0 1px var(--border), 0 0 0 3px color-mix(in srgb, var(--border-focus) 45%, transparent); }
+.amp-meter-dot { position: absolute; top: 50%; width: 3px; height: 3px; margin: -1.5px 0 0 -1.5px; border-radius: 50%; background: color-mix(in srgb, var(--ink) 22%, transparent); pointer-events: none; }
+.amp-meter-dot[data-locked="true"] { opacity: .4; }
+.amp-meter-fill { position: absolute; left: 3px; top: 3px; bottom: 3px; border-radius: 7px; background: var(--ink); pointer-events: none; transition: width .18s var(--dass-ease, ease); }
+.amp-meter-thumb { position: absolute; top: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--card); box-shadow: 0 1px 3px rgb(0 0 0 / .25), 0 0 0 1px rgb(0 0 0 / .04); pointer-events: none; transition: left .18s var(--dass-ease, ease); }
+.amp-meter[data-held="true"] .amp-meter-fill, .amp-meter[data-held="true"] .amp-meter-thumb { transition: none; }
+.amp-meter-names { display: flex; margin: 0 -6px; }
+.amp-meter-names button { flex: 1; padding: 0 0 2px; border: 0; background: none; font: 500 10.5px var(--font); color: var(--text-muted); text-align: center; cursor: pointer; }
+.amp-meter-names button:hover { color: var(--ink); }
+.amp-meter-names button[data-on="true"] { color: var(--ink); font-weight: 600; }
+.amp-meter-names button[data-locked="true"] { opacity: .45; cursor: default; }
+@media (prefers-reduced-motion: reduce) { .amp-meter-fill, .amp-meter-thumb { transition: none; } }

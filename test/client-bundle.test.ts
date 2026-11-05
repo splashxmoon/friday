@@ -51,7 +51,7 @@ async function loads(edition: "hosted" | "local"): Promise<{ first: Load; sessio
 }
 
 // Each loads with the session screen (or later), never with the app itself.
-const LATER = [/node_modules\/streamdown\//, /node_modules\/parse5\//, /node_modules\/marked\//, /node_modules\/framer-motion\//, /node_modules\/katex\//, /node_modules\/@codemirror\//, /src\/client\/AnswerParts\.tsx$/, /src\/client\/Activity\.tsx$/, /src\/client\/Settings\.tsx$/, /node_modules\/qrcode-generator\//];
+const LATER = [/node_modules\/streamdown\//, /node_modules\/parse5\//, /node_modules\/marked\//, /node_modules\/framer-motion\//, /node_modules\/katex\//, /node_modules\/@codemirror\//, /src\/client\/AnswerParts\.tsx$/, /src\/client\/Activity\.tsx$/, /src\/client\/Settings\.tsx$/, /node_modules\/qrcode-generator\//, /src\/client\/(TeammatePage|TeamBrief|CrewSkills|RunReview)\.tsx$/];
 
 for (const edition of ["hosted", "local"] as const) {
   test(`${edition}: the first load has no answer rendering, motion, editor or Settings page in it, a session's has no CodeMirror, and both stay under budget`, async (t) => {
@@ -59,8 +59,9 @@ for (const edition of ["hosted", "local"] as const) {
     const { kb, modules } = first;
     t.diagnostic(`app.js first load: ${kb.toFixed(1)} KB brotli, ${modules.length} modules; with the session screen ${session.kb.toFixed(1)} KB`);
     for (const re of LATER) assert.deepEqual(modules.filter((m) => re.test(m)).slice(0, 3), [], `${re} is in app.js's first load: import it lazily (see lazy-answer.tsx)`);
-    // Brotli at the build's quality 11 (src/pack-built.ts). Nov 4 2026, merged with build/e2e-hardening: 435 KB hosted, 434 KB local (663 KB before). Raise it only on purpose.
-    assert.ok(kb < 460, `app.js and its static imports are ${kb.toFixed(0)} KB brotli, over the 460 KB budget`);
+    // Brotli at the build's quality 11 (src/pack-built.ts). Nov 5 2026: 427 KB hosted and local (443 before the teammate page, team
+    // brief, skills and run review left it). Raise it only on purpose.
+    assert.ok(kb < 445, `app.js and its static imports are ${kb.toFixed(0)} KB brotli, over the 445 KB budget`);
     // A session link waits on the session screen too: CodeMirror (~150 KB packed) loads with the first file opened, not here
     // (mirror-editor.tsx). Nov 4 2026, merged with build/e2e-hardening: 890 KB hosted (1,048 KB before; Oct 22: 710 KB).
     assert.deepEqual(session.modules.filter((m) => /node_modules\/@codemirror\//.test(m)).slice(0, 3), [], "CodeMirror is in the session screen's first load: keep it in mirror-editor.tsx, loaded lazily");

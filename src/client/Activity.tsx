@@ -137,7 +137,7 @@ import { RouteWhy, RoutedForecast, costMark, useLearned } from "./RouteWhy.js";
 import { useRunForecast } from "./runForecast.js";
 import { forValue, rankTools, taskTier } from "../routing.js";
 import { glanceOf } from "./gauge.js";
-import { useToolLimits } from "./toolLimits.js";
+import { refreshToolLimits, useToolLimits } from "./toolLimits.js";
 import { ApprovalCard } from "@/components/aicss/ApprovalCard";
 import { askProse, askReply, parseChoices, type Ask } from "./ask-choices.js";
 import { ASK_FOCUS } from "./Attention.js";
@@ -177,7 +177,7 @@ import { stepKind } from "../run-strip.js";
 import { webSourcesIn, webUrl } from "../web-sources.js";
 import { Mascot, runMood } from "./Mascot.js";
 import { AgentSwitch, EngineMark, switchesAgent } from "./AgentSwitch.js";
-import type { EffortChoice } from "./AgentModelPicker.js";
+import type { AccountChoice, EffortChoice } from "./AgentModelPicker.js";
 import { friday, handBackWhenDone, handingBack, hasShells, InTerminalNote, LaneTui, openLaneTerminal, preferFriday, TERMINAL_TOOLS, useTuiView, warmLaneTerminal } from "./Terminal.js";
 import { runnableQueue } from "../held.js";
 import { FridayTui } from "./Tui.js";
@@ -193,7 +193,8 @@ import { checkpointsByMessage, isRedo, isSetAside, reversedBy, rewindImpact, rew
 import { Check, ContextMenu, MenuButton, Picker, useConfirm, type MenuItem, relTime } from "./ui.js";
 import { RuleForm, RuleHow, RuleText } from "./RuleForm.js";
 import type { RuleCheck } from "../rules.js";
-import { hostApi, installedOn } from "./local.js";
+import { hostApi, installedOn, useMachine } from "./local.js";
+import { AccountPill, nextFreeAccount, useAccountChoice, usePreferredAccount } from "./Accounts.js";
 import { WORK_MODE_BLURB } from "./WorkMode.js";
 import { openOutside } from "./openOutside.js";
 import { modeOf, reachFor, reachForHandoff, reachForMessage, REACH_NAME, revertTo, settle, type Reach } from "./smartReach.js";
@@ -2507,6 +2508,9 @@ function SystemAsk({ ev }: { ev: Ev<"instruction"> }) {
 /** A stop square, filled, in the event's own colour: a stop marker, never an empty box (audit CODE-22 A). */
 const StopFilled = ((props: React.ComponentProps<typeof SquareIcon>) => <SquareIcon {...props} fill="currentColor" strokeWidth={0} className={cn(props.className, "stop-filled")} />) as unknown as LucideIcon;
 
+/** The seq of the newest commit that opened a pull request: the one a "see it through" offer goes on. */
+const newestPr = (events: SessionEvent[]): number | undefined => events.findLast((e) => e.body.type === "folder.committed" && !!e.body.prUrl && !!e.body.prCreated)?.seq;
+
 function Notice({ ev, icon: I, tone = "", children }: { ev: SessionEvent; icon: LucideIcon; tone?: string; children: ReactNode }) {
   return (
     <Checkpoint className={cn("cp-notice", tone)}>
@@ -3110,6 +3114,8 @@ function HumanMessage({ ev, ctx }: { ev: Ev<"instruction"> | Ev<"suggestion">; c
   let toWhom = "to agent";
   // In a team, by name: "You to agent" over a message to Kit (2026-10-27 audit).
   if (state.options.team) toWhom = `to ${sentTo || agentNameFor(state, ev.lane ?? MAIN_LANE)}`;
+  // With several agents in a session, which one it went to: "You to agent" told two Claude Codes apart by nothing (2026-11-04 UX pass).
+  else if (state.lanes.length > 0) toWhom = `to ${agentNameFor(state, ev.lane ?? MAIN_LANE)}`;
   const atts = b.attachments ?? [];
   // Whose lane this was said to: its driver, its queue. The main lane's are only the main lane's.
   const said = ev.lane ?? MAIN_LANE;
@@ -4791,6 +4797,25 @@ function LimitNote({ ctx, lane, resetsAt, canSteer, pass = null }: { ctx: Ctx; l
   const due = ctx.state.resumes?.[lane];
   const tool = ctx.state.engines[lane]?.tool;
   const who = tool ? ENGINE_NAMES[tool] : agentNameFor(ctx.state, lane);
+  // Another of its tool's accounts here with room, on the open-source app, for my own agent: carrying on there, the same
+  // conversation, is one press (T3 Code and Orca offer the switch at a limit; neither switches by itself, nor does Friday).
+  // Not on Friday or Friday Team, where a seat is one person's and the run's own message doesn't suggest it either (runner.ts).
+  const accts = useLaneAccounts(ctx, lane, canSteer && isLocal());
+  const [moving, setMoving] = useState(false);
+  const other = canSteer && isLocal() && accts ? nextFreeAccount(accts.accounts, accts.current) : null;
+  const moveBtn = other && (
+    <button
+      type="button"
+      className="btn small primary"
+      disabled={moving}
+      onClick={() => {
+        setMoving(true);
+        void moveLaneAccount(ctx, lane, other, true).finally(() => setMoving(false));
+      }}
+    >
+      Continue on {other.label}
+    </button>
+  );
   const send = async (cmd: Record<string, unknown>) => {
     const r = await ctx.send(cmd);
     if (!r.ok) ctx.notify(r.error ?? "Couldn't do that. Try again.");
@@ -4808,7 +4833,7 @@ function LimitNote({ ctx, lane, resetsAt, canSteer, pass = null }: { ctx: Ctx; l
       </div>
     );
   const passBtn = pass && (
-    <button type="button" className="btn small primary" onClick={pass.go}>
+    <button type="button" className={other ? "btn small" : "btn small primary"} onClick={pass.go}>
       <span className="limit-pass-mark" aria-hidden>
         {pass.mark}
       </span>
@@ -4824,7 +4849,7 @@ function LimitNote({ ctx, lane, resetsAt, canSteer, pass = null }: { ctx: Ctx; l
           <span>
             Out of usage until <b>{clockTime(until!)}</b>. Carries on by itself then
             {due.by !== ctx.me.id ? `, as ${due.byName.split(/\s+/)[0]} set it` : ""}
-            {pass ? <>, or pass it to {pass.name} now.</> : "."}
+            {other ? <>, or continue on your {other.label} account now.</> : pass ? <>, or pass it to {pass.name} now.</> : "."}
           </span>
         </div>
         {canSteer && (
@@ -4833,6 +4858,7 @@ function LimitNote({ ctx, lane, resetsAt, canSteer, pass = null }: { ctx: Ctx; l
               Don't carry on
             </button>
             {passBtn}
+            {moveBtn}
           </div>
         )}
       </div>
@@ -4849,10 +4875,10 @@ function LimitNote({ ctx, lane, resetsAt, canSteer, pass = null }: { ctx: Ctx; l
             </>
           ) : resetsAt ? (
             <>
-              Out of usage until <b>{clockTime(resetsAt)}</b>. {pass ? `Pass it to ${pass.name} now, or have it carry on then.` : isLocal() ? "Hand the work to another agent, have it carry on here then, or sign it in as another account." : "Hand the work to another of your agents, have it carry on here then, or add extra usage or credits to its account."}
+              Out of usage until <b>{clockTime(resetsAt)}</b>. {other ? `Continue on your ${other.label} account now${pass ? `, pass it to ${pass.name}` : ""}, or have it carry on then.` : pass ? `Pass it to ${pass.name} now, or have it carry on then.` : isLocal() ? "Hand the work to another agent, have it carry on here then, or sign it in as another account." : "Hand the work to another of your agents, have it carry on here then, or add extra usage or credits to its account."}
             </>
           ) : (
-            <>Out of usage on its account. {pass ? `Pass it to ${pass.name} now, or have it try again in an hour.` : isLocal() ? "Hand the work to another agent, have it try again in an hour, or sign it in as another account." : "Hand the work to another of your agents, have it try again in an hour, or add extra usage or credits to its account."}</>
+            <>Out of usage on its account. {other ? `Continue on your ${other.label} account now${pass ? `, pass it to ${pass.name}` : ""}, or have it try again in an hour.` : pass ? `Pass it to ${pass.name} now, or have it try again in an hour.` : isLocal() ? "Hand the work to another agent, have it try again in an hour, or sign it in as another account." : "Hand the work to another of your agents, have it try again in an hour, or add extra usage or credits to its account."}</>
           )}
         </span>
       </div>
@@ -4860,7 +4886,7 @@ function LimitNote({ ctx, lane, resetsAt, canSteer, pass = null }: { ctx: Ctx; l
         <div className="limit-actions">
           <button
             type="button"
-            className={pass && !back ? "rsp-text-btn limit-dont" : "btn small"}
+            className={(pass || other) && !back ? "rsp-text-btn limit-dont" : "btn small"}
             onClick={() =>
               void send(back ? { type: "instruct", lane, text: "Carry on with the task where you left off; don't start over." } : { type: "resume.at", lane, at: resetsAt ?? Date.now() + 3_600_000 })
             }
@@ -4868,6 +4894,7 @@ function LimitNote({ ctx, lane, resetsAt, canSteer, pass = null }: { ctx: Ctx; l
             {back ? "Carry on now" : resetsAt ? `Carry on at ${clockTime(resetsAt)}` : "Try again in an hour"}
           </button>
           {!back && passBtn}
+          {!back && moveBtn}
         </div>
       )}
     </div>
@@ -6001,61 +6028,89 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
           )}
         </Notice>
       );
-    case "folder.committed":
+    case "folder.committed": {
+      const lane = ev.lane ?? MAIN_LANE;
+      const pr = b.prUrl && b.prCreated;
+      const minds = me.role === "owner" || driverOf(state, lane)?.id === me.id;
+      const seeing = !!pr && state.shepherd?.prUrl === b.prUrl;
+      // The PR just opened is when seeing it through matters, so it is offered in words, on the newest one, to whoever may push
+      // (gap report 2026-11-04: as the third of four equal buttons, its meaning in a tooltip, nobody found it).
+      const offer = !!pr && !b.error && !seeing && !state.pr?.merged && newestPr(ctx.events) === ev.seq && minds;
+      // Pulling in review comments and fixing failing checks are what seeing it through does, round after round: offered or on,
+      // they would be two more buttons saying the same (Arun, 2026-11-04: the line was crowded). Once at a time, they stay in the
+      // Changes panel's dock; here they show only where seeing it through isn't on the table.
+      const manual = !!pr && !offer && !seeing && canDriveLane(state, me.id, lane);
       return (
         <Notice ev={ev} icon={CheckIcon} tone={b.error ? "danger" : "control"}>
           {who} committed {b.files} file{b.files === 1 ? "" : "s"}
           {b.branch ? ` to ${b.branch}` : ""}: “{b.message.split("\n")[0]}”
           {b.prUrl && b.base && !/^(main|master|trunk|develop)$/.test(b.base) ? ` · stacked on ${b.base}` : ""}
           {b.pushed && !b.prUrl && " · pushed"}
-          {b.prUrl && (
-            <a className="link-btn cp-action" href={b.prUrl} target="_blank" rel="noreferrer">
-              {b.prCreated ? "Open pull request" : "Create pull request"}
-            </a>
-          )}
-          {b.prUrl && b.prCreated && canDriveLane(state, me.id, ev.lane ?? MAIN_LANE) && (
-            <button
-              type="button"
-              className="link-btn cp-action"
-              title="Read what reviewers wrote on the pull request and give it to the agent"
-              onClick={async () => {
-                const r = await ctx.send({ type: "pr.feedback", lane: ev.lane ?? MAIN_LANE });
-                ctx.notify(r.ok ? "Review comments sent to the agent." : (r.error ?? "Couldn't read the pull request."));
-              }}
-            >
-              Pull in review comments
-            </button>
-          )}
-          {b.prUrl && b.prCreated && (me.role === "owner" || driverOf(state, ev.lane ?? MAIN_LANE)?.id === me.id) && (
-            <button
-              type="button"
-              className="link-btn cp-action"
-              title={state.shepherd?.prUrl === b.prUrl ? "Stop watching the pull request; nothing more is pushed" : "Friday watches the pull request, hands red checks and new review comments to the agent, and pushes the fixes until it merges"}
-              onClick={async () => {
-                const on = state.shepherd?.prUrl !== b.prUrl;
-                const r = await ctx.send({ type: "pr.shepherd", on, lane: ev.lane ?? MAIN_LANE });
-                if (!r.ok) ctx.notify(r.error ?? "Couldn't hand the pull request over.");
-              }}
-            >
-              {state.shepherd?.prUrl === b.prUrl ? "Stop seeing it through" : "See it through to merge"}
-            </button>
-          )}
-          {b.prUrl && b.prCreated && canDriveLane(state, me.id, ev.lane ?? MAIN_LANE) && (
-            <button
-              type="button"
-              className="link-btn cp-action"
-              title="Read the logs of the checks that failed on the pull request and give them to the agent"
-              onClick={async () => {
-                const r = await ctx.send({ type: "pr.checks", lane: ev.lane ?? MAIN_LANE });
-                ctx.notify(r.ok ? "The failing checks are with the agent." : (r.error ?? "Couldn't read the checks. Make sure gh is signed in on the connected machine, then try again."));
-              }}
-            >
-              Fix the failing checks
-            </button>
-          )}
           {b.error && ` · not pushed: ${b.error}`}
+          {b.prUrl && (
+            <span className="cp-acts">
+              <a className="link-btn" href={b.prUrl} target="_blank" rel="noreferrer">
+                {b.prCreated ? "Open pull request" : "Create pull request"}
+              </a>
+              {manual && (
+                <button
+                  type="button"
+                  className="link-btn"
+                  title="Read what reviewers wrote on the pull request and give it to the agent"
+                  onClick={async () => {
+                    const r = await ctx.send({ type: "pr.feedback", lane });
+                    ctx.notify(r.ok ? "Review comments sent to the agent." : (r.error ?? "Couldn't read the pull request."));
+                  }}
+                >
+                  Pull in review comments
+                </button>
+              )}
+              {manual && (
+                <button
+                  type="button"
+                  className="link-btn"
+                  title="Read the logs of the checks that failed on the pull request and give them to the agent"
+                  onClick={async () => {
+                    const r = await ctx.send({ type: "pr.checks", lane });
+                    ctx.notify(r.ok ? "The failing checks are with the agent." : (r.error ?? "Couldn't read the checks. Make sure gh is signed in on the connected machine, then try again."));
+                  }}
+                >
+                  Fix the failing checks
+                </button>
+              )}
+              {seeing && minds && (
+                <button
+                  type="button"
+                  className="link-btn"
+                  title="Stop watching the pull request; nothing more is pushed"
+                  onClick={async () => {
+                    const r = await ctx.send({ type: "pr.shepherd", on: false, lane });
+                    if (!r.ok) ctx.notify(r.error ?? "Couldn't stop it.");
+                  }}
+                >
+                  Stop seeing it through
+                </button>
+              )}
+            </span>
+          )}
+          {offer && (
+            <span className="cp-offer">
+              Friday can see this PR through to merge: failing checks and review comments go to {agentNameFor(state, lane)}.
+              <button
+                type="button"
+                className="link-btn"
+                onClick={async () => {
+                  const r = await ctx.send({ type: "pr.shepherd", on: true, lane });
+                  if (!r.ok) ctx.notify(r.error ?? "Couldn't hand the pull request over.");
+                }}
+              >
+                See it through to merge
+              </button>
+            </span>
+          )}
         </Notice>
       );
+    }
     case "review.started":
     case "review.done":
       // Said on the change it is about, on the review card, not as a line of its own.
@@ -6504,6 +6559,16 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
             {who} handed the lane back to Friday Code
           </Notice>
         );
+      // Its host taken out of the session, or out of its workspace: their computer works here no more (core.releaseWheels).
+      if (b.reason === "removed") {
+        const host = ev.lane ? (ctx.events.findLast((x) => x.seq < ev.seq && x.body.type === "engine.attached" && (x.lane ?? MAIN_LANE) === (ev.lane ?? MAIN_LANE))?.body as { engine?: { hostName?: string } } | undefined)?.engine?.hostName : undefined;
+        const name = host ?? "Its host";
+        return (
+          <Notice ev={ev} icon={UnplugIcon} tone="control">
+            {name}'s {tool} left this session: {name} {b.workspace ? "is no longer in this workspace" : "was removed from it"}. Nothing more runs on their computer here.
+          </Notice>
+        );
+      }
       // Said only while it is still away. A tool comes back by itself after a drop, is brought back as its computer links
       // (app.ts reattach) or as the session opens, and "went offline" kept in the feed after that read as the tool being gone
       // (Arun, 2026-10-25: "the coding tool disconnected text").
@@ -7545,7 +7610,10 @@ function ReachPill({ ctx, lane }: { ctx: Ctx; lane: string }) {
     );
   }
   const running = runOf(ctx.state, lane).status === "running";
-  const othersFull = state.othersFull?.[lane] === true;
+  // The session's workspace may keep everyone's messages to Manual on every member's computer (the server's hello says so): then
+  // that is what holds, whatever this lane was raised to, and raising it isn't offered.
+  const held = (me as Member & { othersHeld?: boolean }).othersHeld === true;
+  const othersFull = !held && state.othersFull?.[lane] === true;
   const setOthers = async (on: boolean) => {
     if (on === othersFull) return;
     const r = await ctx.send({ type: "lane.othersFull", lane, on });
@@ -7592,10 +7660,155 @@ function ReachPill({ ctx, lane }: { ctx: Ctx; lane: string }) {
         { heading: "Others' messages on your computer" },
         // By the mode's own name, Manual, not "Edits" (QA, 2026-10-28); in Work, in its words.
         { label: "Up to Manual", sub: othersSub, checked: !othersFull, onSelect: () => void setOthers(false) },
-        { label: "As far as yours", sub: "Teammates, their agents and apps can run commands on this computer without asking you, in the mode you picked.", checked: othersFull, onSelect: () => void setOthers(true) },
+        held
+          ? { label: "As far as yours", sub: "This workspace keeps teammates' messages to Manual. An admin can change that in Settings.", disabled: true, onSelect: () => {} }
+          : { label: "As far as yours", sub: "Teammates, their agents and apps can run commands on this computer without asking you, in the mode you picked.", checked: othersFull, onSelect: () => void setOthers(true) },
       ]}
       above
     />
+  );
+}
+
+/**
+ * My own agent moved to another of its tool's accounts on this computer: its runner started again on the same lane and folder as
+ * that account, as a model change is, carrying on the same conversation (its transcript is in the folder every account shares,
+ * runner/accounts.ts). What T3 Code does per thread and Orca per session. Always the person's press, never Friday's (Arun,
+ * 2026-10-27: "i do not want my account banned"). `carryOn`: the run that ran out goes on where it stopped, and a carry-on set
+ * for when the limit lifts is called off, as it has no reason to wait now.
+ */
+async function moveLaneAccount(ctx: Ctx, lane: string, to: { id: string; label: string }, carryOn: boolean): Promise<boolean> {
+  const e = ctx.state.engines[lane];
+  if (!e?.tool) return false;
+  try {
+    if (carryOn && ctx.state.resumes?.[lane]) await ctx.send({ type: "resume.cancel", lane });
+    await hostApi(ctx.identity, "/api/runner/start", {
+      method: "POST",
+      body: JSON.stringify({ sid: ctx.sid, invite: ctx.invite, tool: e.tool, cwd: e.cwd, mode: modeOf(e), ...(e.handMode ? { handMode: e.handMode } : {}), lane, ...(e.model ? { model: e.model } : {}), account: to.id, ...(e.copyOf ? { copyOf: e.copyOf } : {}), ...(e.shared ? { share: true } : {}) }),
+    });
+    if (carryOn) {
+      const r = await ctx.send({ type: "instruct", lane, text: "Carry on with the task where you left off; don't start over." });
+      if (!r.ok) ctx.notify(r.error ?? `It's on ${to.label} now. Ask it to carry on.`);
+    }
+    ctx.notify(`${ENGINE_NAMES[e.tool]} runs as your ${to.label} account now${carryOn ? ", carrying on" : ""}`);
+    return true;
+  } catch (err) {
+    ctx.notify(`Couldn't move it to ${to.label}: ${(err as Error).message}`);
+    return false;
+  }
+}
+
+/** When the accounts were last looked at again for an agent that ran out (useLaneAccounts): once a half-minute, however many notes ask. */
+let accountsLookedAt = 0;
+
+/**
+ * My own agent's tool here with more than one account, as this computer says: what the account controls below need. `fresh`:
+ * an agent just ran out, so the computer's accounts and their limits are looked at again, or the one that ran out still read as
+ * it did before (its menu said "34% session" of an account out of usage).
+ */
+function useLaneAccounts(ctx: Ctx, lane: string, fresh = false) {
+  const { state: machine, refresh } = useMachine(ctx.identity);
+  useEffect(() => {
+    if (!fresh || Date.now() - accountsLookedAt < 30_000) return;
+    accountsLookedAt = Date.now();
+    refresh();
+    refreshToolLimits(ctx.identity, true);
+  }, [fresh]); // eslint-disable-line react-hooks/exhaustive-deps
+  const e = ctx.state.engines[lane];
+  const tool = e?.tool ? machine.tools.find((t) => t.tool === e.tool) : undefined;
+  // Mine, here, between people's sessions only: a crew's teammate keeps its account on its own record (Teammates.tsx).
+  const ok = !!e?.tool && !!tool?.accounts && tool.accounts.length > 1 && e.hostId === ctx.me.id && e.online && !ctx.state.options.team;
+  return ok ? { tool: tool!, accounts: tool!.accounts!, current: e!.account?.id ?? "default" } : null;
+}
+
+/** Which account my agent runs as, as the picker's Account row (design D): picked, it moves there between runs, its conversation kept. */
+function useLaneAccountChoice(ctx: Ctx, lane: string): AccountChoice | null {
+  const got = useLaneAccounts(ctx, lane);
+  const [busy, setBusy] = useState(false);
+  const running = runOf(ctx.state, lane).status === "running";
+  return useAccountChoice(
+    ctx.identity,
+    got?.tool,
+    got?.current ?? "",
+    (id) => {
+      const to = got?.accounts.find((a) => a.id === id);
+      if (!got || !to || id === got.current || busy || running) return;
+      setBusy(true);
+      void moveLaneAccount(ctx, lane, to, false).finally(() => setBusy(false));
+    },
+    { running: true, ...(running ? { disabled: "Let the run finish, or stop it, before moving it to another account" } : busy ? { disabled: "Moving it…" } : {}) },
+  );
+}
+
+/** Which account my agent runs as, in its message box beside its model: picked, it moves there between runs. */
+function LaneAccountPill({ ctx, lane }: { ctx: Ctx; lane: string }) {
+  const got = useLaneAccounts(ctx, lane);
+  const [busy, setBusy] = useState(false);
+  if (!got) return null;
+  const running = runOf(ctx.state, lane).status === "running";
+  return (
+    <AccountPill
+      identity={ctx.identity}
+      tool={got.tool}
+      value={got.current}
+      running
+      {...(running ? { disabled: "Let the run finish, or stop it, before moving it to another account" } : busy ? { disabled: "Moving it…" } : {})}
+      onChange={(id) => {
+        const to = got.accounts.find((a) => a.id === id);
+        if (!to || id === got.current || busy) return;
+        setBusy(true);
+        void moveLaneAccount(ctx, lane, to, false).finally(() => setBusy(false));
+      }}
+    />
+  );
+}
+
+/**
+ * The account new sessions use changed while my agent runs as another (Orca's "Account switched: restart this session to use
+ * X. It stays on the previous account until you do"): it stays where it is until I move it, and says so once, with the move one
+ * press away. Only after a change made while this is open, never for an agent started on another account on purpose.
+ */
+function AccountDefaultNote({ ctx, lane }: { ctx: Ctx; lane: string }) {
+  const got = useLaneAccounts(ctx, lane);
+  const tool = got?.tool.tool;
+  const preferred = usePreferredAccount(tool, got?.accounts);
+  const [changed, setChanged] = useState(false);
+  const [kept, setKept] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!tool) return;
+    const key = `mpa.account.default.${tool}`;
+    const mark = () => setChanged(true);
+    const other = (e: StorageEvent) => e.key === key && setChanged(true);
+    addEventListener("friday-account-default", mark);
+    addEventListener("storage", other);
+    return () => (removeEventListener("friday-account-default", mark), removeEventListener("storage", other));
+  }, [tool]);
+  if (!got || !changed || preferred === got.current || kept === preferred) return null;
+  const to = got.accounts.find((a) => a.id === preferred);
+  const from = got.accounts.find((a) => a.id === got.current);
+  if (!to || to.loggedIn === false) return null;
+  const running = runOf(ctx.state, lane).status === "running";
+  return (
+    <div className="acct-moved" role="status">
+      <span>
+        New sessions use your <b>{to.label}</b> account now. {ENGINE_NAMES[got.tool.tool]} here stays on {from?.label ?? "Main"} until you move it.
+      </span>
+      <button type="button" className="rsp-text-btn" onClick={() => setKept(preferred)}>
+        Keep {from?.label ?? "Main"}
+      </button>
+      <button
+        type="button"
+        className="btn small"
+        disabled={running || busy}
+        title={running ? "Let the run finish, or stop it, first" : undefined}
+        onClick={() => {
+          setBusy(true);
+          void moveLaneAccount(ctx, lane, to, false).then((ok) => ok && setKept(preferred)).finally(() => setBusy(false));
+        }}
+      >
+        Move to {to.label}
+      </button>
+    </div>
   );
 }
 
@@ -7950,15 +8163,36 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
   // folders, to the coding sessions while in the chat too"): its own coding tool on this computer, from its next message on.
   const desktopApp = typeof window !== "undefined" ? window.fridayDesktop : undefined;
   const myTool = !!state.engines[lane]?.tool && state.engines[lane]!.hostId === me.id && !!desktopApp?.pickFolder;
+  const laneAccounts = useLaneAccountChoice(ctx, lane);
+  // The folders it has been given, shown in the box as chips you can take back (Arun, 2026-11-05: "add something to show that the
+  // folder was uploaded"): a toast that went was the only sign.
+  const [dirs, setDirs] = useState<string[]>([]);
+  const folderName = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() || p;
+  const askDirs = async (body: Record<string, string> = {}) => {
+    const r = await hostApi<{ dirs?: string[] }>(ctx.identity, "/api/runner/dirs", { method: "POST", body: JSON.stringify({ sid, lane, ...body }) });
+    setDirs(r.dirs ?? []);
+  };
+  useEffect(() => {
+    setDirs([]);
+    if (myTool) void askDirs().catch(() => setDirs([]));
+  }, [sid, lane, myTool]); // eslint-disable-line react-hooks/exhaustive-deps
   const addFolder = async () => {
     const p = await desktopApp?.pickFolder();
     if (!p) return;
-    const name = p.split(/[\\/]/).filter(Boolean).pop() || p;
+    const name = folderName(p);
     try {
-      await hostApi(ctx.identity, "/api/runner/dirs", { method: "POST", body: JSON.stringify({ sid, lane, add: p }) });
+      await askDirs({ add: p });
       notify(`${agentNameFor(state, lane)} can work in ${name} too, from your next message.`);
     } catch (e) {
       notify(`Couldn't add ${name}: ${(e as Error).message}`);
+    }
+  };
+  const dropFolder = async (p: string) => {
+    try {
+      await askDirs({ remove: p });
+      notify(`${agentNameFor(state, lane)} won't work in ${folderName(p)} from your next message.`);
+    } catch (e) {
+      notify(`Couldn't take ${folderName(p)} away: ${(e as Error).message}`);
     }
   };
   const uploadFolder = async (list: FileList | null) => {
@@ -8043,13 +8277,15 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
       // Where it stands first, as the header's tabs say it: at work, asking you something, or whose it is.
       const asks = state.openQuestions[id]?.question;
       const said = stuck || (asks ? `Asks: ${asks.length > 26 ? `${asks.slice(0, 25)}…` : asks}` : run.status === "running" ? "Working" : "");
-      const whose = d?.id === me.id ? "Yours" : d ? `${d.name.split(/\s+/)[0]} is driving` : "Free to take";
+      // Your own says nothing of whose it is (Arun, 2026-11-05: "get rid of the yours secondary text"); somebody else's says who.
+      const whose = d?.id === me.id ? "" : d ? `${d.name.split(/\s+/)[0]} is driving` : "Free to take";
+      const sub = said ? (run.status === "running" && !stuck && !asks && whose ? `Working · ${whose}` : said) : whose;
       return {
         label: targetName(id),
         mark: <EngineMark tool={state.engines[id]?.tool ?? ""} size={15} />,
         after: <StateRing state={sendRing(state, id)} />,
         checked: !toPeople && id === lane,
-        sub: said ? (run.status === "running" && !stuck && !asks ? `Working · ${whose}` : said) : whose,
+        ...(sub ? { sub } : {}),
         onSelect: () => (setToPeople(false), onLane?.(id)),
       };
     }),
@@ -8297,6 +8533,7 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
     <div className={cn("composer", `mode-${mode === "claim" ? "drive" : mode}`, toPeople && "to-people")}>
       {/* Out in a terminal (Terminal.tsx laneTerminal): what is sent waits, and this says so before it is typed, not after. */}
       {state.terminals?.[lane] && <InTerminalNote sid={sid} invite={invite} lane={lane} tool={state.engines[lane]?.tool} mine={state.engines[lane]?.hostId === me.id} />}
+      <AccountDefaultNote ctx={ctx} lane={lane} />
       {/* The one-row box is the rooms' (Arun: "ONLY REDESIGN FOR THE ROOM INPUT CHAT"); a teammate's own chat keeps the session's box (Arun, 2026-10-28). */}
       {state.options.team && inView === ALL && <span className="team-box-mark" hidden />}
       <div className="composer-caption">
@@ -8436,6 +8673,27 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
                 </PromptInputActionMenuContent>
               </PromptInputActionMenu>
             )}
+            {/* What it has to work on besides its own folder: the folders added, and a folder uploaded to the session. */}
+            {((myTool && dirs.length > 0) || (noMachine && state.upload)) && (
+              <span className="box-dirs" aria-label="Folders it works in">
+                {noMachine && state.upload && (
+                  <span className="box-dir" title={`${state.upload.files} file${state.upload.files === 1 ? "" : "s"} uploaded to this session`}>
+                    <Icon name="folder" size={12} />
+                    <span className="box-dir-name">{state.upload.name}</span>
+                  </span>
+                )}
+                {myTool &&
+                  dirs.map((d) => (
+                    <span key={d} className="box-dir" title={d}>
+                      <Icon name="folder" size={12} />
+                      <span className="box-dir-name">{folderName(d)}</span>
+                      <button type="button" className="box-dir-x" aria-label={`Stop working in ${folderName(d)}`} title="Take this folder away" onClick={() => void dropFolder(d)}>
+                        <Icon name="x" size={10} />
+                      </button>
+                    </span>
+                  ))}
+              </span>
+            )}
             {giving && <TeammateFolderCard identity={ctx.identity} lane={lane} trigger={textarea.current} onClose={() => setGiving(false)} notify={notify} />}
             {canUpload && (
               <input
@@ -8486,10 +8744,14 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
                 onFridayModel={(id) => send({ type: "settings.update", model: id })}
                 onThinking={(t) => send({ type: "settings.update", thinking: t })}
                 effort={effortChoice({ state, me, lane, send, notify })}
+                accounts={laneAccounts}
                 {...(ctx.onConnect ? { onSetup: ctx.onConnect } : {})}
               />
             )}
             {mode !== "view" && !toPeople && !agentAndModelAreOne && !(state.options.team && mode === "suggest") && <LaneModelPill ctx={ctx} lane={lane} />}
+            {/* Which of its accounts it runs as, for my own tool with more than one here (runner/accounts.ts). */}
+            {/* In the picker's Account row when the picker is here (design D); its own pill otherwise. */}
+            {mode !== "view" && !toPeople && !toolPick && <LaneAccountPill ctx={ctx} lane={lane} />}
             {/* Model and reasoning in one control, the same one the new session screen uses. Friday's models are for Friday Code: driving
                 somebody's own Claude Code, Codex or Cursor, the model is theirs, and this pill would show a choice that changed nothing. */}
               </span>

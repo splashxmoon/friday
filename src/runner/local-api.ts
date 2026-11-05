@@ -1,3 +1,4 @@
+import { computerAllow, computerStatus, setComputerUse } from "./computer.js";
 import { readLimits } from "./limits.js";
 import { findApp, forgetLoginStatus, loginStatusQuick } from "./adapters.js";
 import { mkdir, mkdtemp, open, rm, rmdir, stat, writeFile } from "node:fs/promises";
@@ -305,6 +306,14 @@ export async function callHost(method: string, params: Record<string, unknown> =
     }
     case "folders":
       return { home, cloneRoot: defaultCloneRoot(), recent: await recentReposCached() };
+    // Computer use on this computer (computer.ts): off until its owner turns it on, and what the system still needs for it.
+    case "computerUse":
+      return computerStatus();
+    case "computerUse.set":
+      await setComputerUse(params.on === true);
+      return computerStatus();
+    case "computerUse.allow":
+      return computerAllow();
     // Kept awake between turns for `ms` (the server renewing it while its person is away, or a room of theirs runs on its own):
     // said on the busy line the desktop app keeps the computer awake by.
     case "awake": {

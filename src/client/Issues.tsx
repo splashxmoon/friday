@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { CircleDotIcon, ExternalLinkIcon, MessageSquareIcon, SearchIcon, XIcon } from "lucide-react";
-import { issueBrief, issueMatches, issueStanding, type GithubIssues, type InboxIssue, type LinearIssues } from "../issues.js";
+import { issueBrief, issueMatches, type GithubIssues, type InboxIssue, type LinearIssues } from "../issues.js";
 import { api } from "./api.js";
 import { isLocal } from "./edition.js";
 import { machineError } from "./GitHubConnect.js";
@@ -167,14 +167,14 @@ function SourceMark({ source }: { source: InboxIssue["source"] }) {
   );
 }
 
+/** An issue's labels, as quiet chips: their names, not GitHub's colours (colour is for state here, docs/dass-design-language.md). */
 function Labels({ labels, max = 4, className }: { labels: InboxIssue["labels"]; max?: number; className?: string }) {
   if (!labels.length) return null;
   return (
-    <span className={cn("flex min-w-0 flex-wrap items-center gap-1", className)}>
+    <span className={cn("flex min-w-0 flex-wrap items-center gap-1.5", className)}>
       {labels.slice(0, max).map((l) => (
-        <span key={l.name} className="inline-flex max-w-[140px] items-center gap-1 truncate rounded-full border border-[var(--border)] px-1.5 py-px text-[12px] text-[var(--ink-2)]" title={l.name}>
-          <span className="size-2 shrink-0 rounded-full" style={{ background: l.color ?? "var(--text-muted)" }} />
-          <span className="truncate">{l.name}</span>
+        <span key={l.name} className="inline-flex h-[22px] max-w-[180px] items-center truncate rounded-md bg-[var(--hover)] px-2 text-[12px] text-[var(--ink-2)]" title={l.name}>
+          {l.name}
         </span>
       ))}
       {labels.length > max && <span className="text-[12px] text-[var(--text-muted)]">+{labels.length - max}</span>}
@@ -182,52 +182,73 @@ function Labels({ labels, max = 4, className }: { labels: InboxIssue["labels"]; 
   );
 }
 
+/**
+ * One issue in the list: its title, and one quiet line under it (where, who, its comments, when). Its labels are on its page, not
+ * here: two rows of pills under every title made the list hard to read (Arun, 2026-11-05: "design this better").
+ */
 function IssueRow({ issue: i, on, working, onPick }: { issue: InboxIssue; on: boolean; working: boolean; onPick: () => void }) {
   const root = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (on) root.current?.scrollIntoView({ block: "nearest" });
   }, [on]);
-  const standing = issueStanding(i);
+  const where = i.source === "github" && i.repo ? `${i.repo.split("/")[1]} #${i.number}` : i.ref;
+  const linearState = i.source === "linear" ? [i.state, i.priority && i.priorityLabel && i.priorityLabel !== "No priority" ? i.priorityLabel : ""].filter(Boolean).join(" · ") : i.milestone;
   return (
     <button
       ref={root}
       type="button"
       aria-current={on || undefined}
       onClick={onPick}
-      className="flex w-full min-w-0 flex-col gap-1 rounded-lg px-2.5 py-2 text-left transition-colors duration-[var(--dass-fast)] hover:bg-[var(--hover)] aria-[current=true]:bg-[var(--hover)] aria-[current=true]:shadow-[inset_0_0_0_1px_var(--border)]"
+      className="flex w-full min-w-0 items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors duration-[var(--dass-fast)] hover:bg-[var(--hover)] aria-[current=true]:bg-[var(--hover)]"
     >
-      <span className="flex min-w-0 items-start gap-2">
-        <Dot state={working ? "working" : i.stateType === "started" ? "needs" : "idle"} className="mt-[5px]" title={working ? "In a session" : i.state} />
-        <span className="line-clamp-2 min-w-0 flex-1 text-[13px] leading-snug font-medium text-[var(--ink)]">{i.title}</span>
-      </span>
-      <span className="flex min-w-0 items-center gap-1.5 pl-[21px] text-[12px] text-[var(--text-muted)]">
-        <SourceMark source={i.source} />
-        <span className="truncate">
-          {i.source === "github" && i.repo ? `${i.repo.split("/")[1]} #${i.number}` : i.ref}
-          {i.author ? ` · ${i.author}` : ""}
+      <Dot state={working ? "working" : i.stateType === "started" ? "needs" : "idle"} className="mt-[6px]" title={working ? "In a session" : i.state} />
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="line-clamp-2 text-[13px] leading-[18px] font-medium text-[var(--ink)]">{i.title}</span>
+        <span className="flex min-w-0 items-center gap-1.5 text-[12px] leading-[18px] text-[var(--text-muted)]">
+          {working ? <span className="shrink-0 font-medium text-[var(--dass-live)]">Friday is on it</span> : null}
+          <span className="min-w-0 truncate">
+            {working ? " · " : ""}
+            {where}
+            {i.author ? ` · ${i.author}` : ""}
+            {linearState ? ` · ${linearState}` : ""}
+          </span>
+          {i.comments ? (
+            <span className="inline-flex shrink-0 items-center gap-1 tabular-nums" title={`${i.comments} comment${i.comments === 1 ? "" : "s"}`}>
+              <MessageSquareIcon className="size-3" aria-hidden />
+              {i.comments}
+            </span>
+          ) : null}
+          <span className="ml-auto shrink-0 tabular-nums">{i.updatedAt ? relTime(Date.parse(i.updatedAt)) : ""}</span>
         </span>
-        <span className="ml-auto shrink-0 tabular-nums">{i.updatedAt ? relTime(Date.parse(i.updatedAt)) : ""}</span>
       </span>
-      {(standing || working || i.labels.length > 0) && (
-        <span className="flex min-w-0 items-center gap-2 pl-[21px]">
-          <span className={cn("min-w-0 truncate text-[12px] font-medium", working ? "text-[var(--dass-live)]" : "text-[var(--text-muted)]")}>{working ? "Friday is on it" : standing}</span>
-          <Labels labels={i.labels} max={2} className="ml-auto justify-end" />
-        </span>
-      )}
     </button>
   );
 }
 
+/**
+ * The issue picked, read as a page: its title with Start work beside it (the one action), one quiet line of facts, its labels, and
+ * what it says at a reading width, with no heading over it.
+ */
 function IssuePane({ issue: i, started, onWork }: { issue: InboxIssue; started?: Started[string]; onWork: () => void }) {
   const body = i.body.trim();
+  const facts = [
+    i.state && i.source === "linear" ? i.state : "",
+    i.priorityLabel && i.priority ? i.priorityLabel : "",
+    i.milestone ?? "",
+    i.assignees?.length ? `assigned to ${i.assignees.join(", ")}` : "",
+    i.updatedAt ? `updated ${relTime(Date.parse(i.updatedAt))}` : "",
+  ].filter(Boolean);
   return (
-    <div className="flex flex-col gap-6 px-1 pt-1 pb-8">
-      <header className="flex flex-col gap-3">
-        <div className="flex items-start gap-3">
-          <h2 className="m-0 min-w-0 flex-1 text-[20px] leading-tight font-semibold tracking-[-0.015em] text-[var(--ink)]" title={i.title}>
-            {i.title}
-          </h2>
-          <div className="flex shrink-0 items-center gap-1">
+    <article className="flex max-w-[720px] flex-col gap-5 px-1 pt-1 pb-10">
+      <header className="flex flex-col gap-2.5">
+        <div className="flex items-start gap-4">
+          <h2 className="m-0 min-w-0 flex-1 text-[20px] leading-[28px] font-semibold tracking-[-0.015em] text-pretty text-[var(--ink)]">{i.title}</h2>
+          <div className="flex shrink-0 items-center gap-1 pt-0.5">
+            <Tip label={i.source === "linear" ? "Open in Linear" : "Open on GitHub"} keys="G">
+              <Button variant="ghost" size="icon-sm" aria-label={i.source === "linear" ? "Open in Linear" : "Open on GitHub"} className="text-[var(--text-muted)] hover:text-[var(--ink)]" onClick={() => openOutside(i.url)}>
+                <ExternalLinkIcon />
+              </Button>
+            </Tip>
             {started ? (
               <Button size="sm" className="h-8 text-[13px]" onClick={() => (location.href = started.link)}>
                 Open the session
@@ -239,45 +260,45 @@ function IssuePane({ issue: i, started, onWork }: { issue: InboxIssue; started?:
                 </Button>
               </Tip>
             )}
-            <Tip label={i.source === "linear" ? "Open in Linear" : "Open on GitHub"} keys="G">
-              <Button variant="ghost" size="icon-sm" aria-label={i.source === "linear" ? "Open in Linear" : "Open on GitHub"} className="text-[var(--text-muted)] hover:text-[var(--ink)]" onClick={() => openOutside(i.url)}>
-                <ExternalLinkIcon />
-              </Button>
-            </Tip>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[13px] text-[var(--text-muted)]">
-          <span className="inline-flex items-center gap-1.5">
-            <SourceMark source={i.source} /> {i.ref}
-          </span>
+        <p className="m-0 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px] leading-[20px] text-[var(--text-muted)]">
+          <SourceMark source={i.source} />
+          <span className="text-[var(--ink-2)]">{i.ref}</span>
           {i.author && (
-            <span className="inline-flex items-center gap-1.5 text-[var(--ink-2)]">
-              {i.avatar && <img className="size-4 rounded-full" src={i.avatar} alt="" />}
-              {i.author}
-            </span>
+            <>
+              <span aria-hidden>·</span>
+              <span className="inline-flex items-center gap-1.5">
+                {i.avatar && <img className="size-4 rounded-full" src={i.avatar} alt="" />}
+                {i.author}
+              </span>
+            </>
           )}
-          {i.state && <span>{i.state}</span>}
-          {i.priorityLabel && i.priority ? <span>{i.priorityLabel}</span> : null}
-          {i.milestone && <span>{i.milestone}</span>}
-          {i.assignees && i.assignees.length > 0 && <span title="Assigned to">→ {i.assignees.join(", ")}</span>}
           {i.comments ? (
-            <span className="inline-flex items-center gap-1">
-              <MessageSquareIcon className="size-3.5" /> {i.comments}
-            </span>
+            <>
+              <span aria-hidden>·</span>
+              <span className="inline-flex items-center gap-1 tabular-nums">
+                <MessageSquareIcon className="size-3.5" aria-hidden /> {i.comments} comment{i.comments === 1 ? "" : "s"}
+              </span>
+            </>
           ) : null}
-          {i.updatedAt && <span title={new Date(i.updatedAt).toLocaleString()}>updated {relTime(Date.parse(i.updatedAt))}</span>}
-          <Labels labels={i.labels} max={8} />
-        </div>
+          {facts.map((f) => (
+            <span key={f} className="contents">
+              <span aria-hidden>·</span>
+              <span title={f.startsWith("updated") && i.updatedAt ? new Date(i.updatedAt).toLocaleString() : undefined}>{f}</span>
+            </span>
+          ))}
+        </p>
+        <Labels labels={i.labels} max={8} />
         {started && (
-          <p className="m-0 rounded-lg border border-[var(--border)] bg-[var(--panel)] px-3 py-2 text-[13px] text-[var(--ink-2)]">
-            <span className="text-[var(--dass-live)]">Friday is on it</span> in “{started.title || "a session"}”.
+          <p className="m-0 text-[13px] text-[var(--ink-2)]">
+            <span className="font-medium text-[var(--dass-live)]">Friday is on it</span> in “{started.title || "a session"}”.
           </p>
         )}
       </header>
-      <section className="flex flex-col gap-3">
-        <h3 className="m-0 text-[13px] font-semibold text-[var(--ink)]">What it says</h3>
-        {body ? <div className="md text-[14px]" dangerouslySetInnerHTML={{ __html: md(body) }} /> : <p className="m-0 text-[13px] text-[var(--text-muted)]">Just the title.</p>}
-      </section>
-    </div>
+      <div className="border-t border-[var(--border)] pt-5">
+        {body ? <div className="md max-w-[68ch] text-[14px] leading-[22px]" dangerouslySetInnerHTML={{ __html: md(body) }} /> : <p className="m-0 text-[13px] text-[var(--text-muted)]">Just the title.</p>}
+      </div>
+    </article>
   );
 }

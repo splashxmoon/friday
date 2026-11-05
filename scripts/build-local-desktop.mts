@@ -7,6 +7,7 @@
  *   npm run desktop:dist   build, then package installers into release/ (electron-builder)
  */
 import { build } from "esbuild";
+import { copyFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -44,4 +45,20 @@ await build({
   external: ["electron"],
   logLevel: "warning",
 });
+// Linux: npm leaves the terminal's binary in the module's prebuilds/, under Node's names, and Electron looks in build/Release, so
+// `npm run desktop` stopped before its window opened. Its own Linux binary (the same Node-API file under every name) is put
+// there, as packing does for a release (build/pty-arch.cjs).
+if (process.platform === "linux") {
+  const pty = path.join(root, "node_modules", "@homebridge", "node-pty-prebuilt-multiarch");
+  const release = path.join(pty, "build", "Release", "pty.node");
+  const from = path.join(pty, "prebuilds", `linux-${process.arch === "arm" ? "arm" : process.arch}`);
+  if (!existsSync(release) && existsSync(from)) {
+    const names = readdirSync(from).filter((f) => /^node\.abi\d+\.node$/.test(f)).sort();
+    const name = names.includes(`node.abi${process.versions.modules}.node`) ? `node.abi${process.versions.modules}.node` : names.at(-1);
+    if (name) {
+      mkdirSync(path.dirname(release), { recursive: true });
+      copyFileSync(path.join(from, name), release);
+    }
+  }
+}
 console.log("Desktop build ready in dist/");

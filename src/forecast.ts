@@ -91,6 +91,17 @@ export function estimate(records: RunRecord[], q: { tool: string; model?: string
   return { ms: Math.round(ms), tokens: tokens === null ? null : Math.round(tokens), runs: deepest.length, basis };
 }
 
+/**
+ * The line on a running turn: about how long is left, from the runs here like it. With none yet (a first run on a new install)
+ * the estimate is only the typical figure, so nothing is said rather than a guess read as a measurement (2026-11-04 UX pass:
+ * "~5 min left" over a ten-second README edit). Past its forecast, said once, plainly, rather than a countdown below zero.
+ */
+export function timeLeft(e: Estimate, startedAt: number, now: number): string {
+  if (e.basis === "typical" || !e.runs) return "";
+  const left = startedAt + e.ms - now;
+  return left >= 90_000 ? `${aboutTime(left)} left` : "longer than runs like it";
+}
+
 /** A time as a forecast reads: "~5 min", "~40 min", "~1.5 h". */
 export function aboutTime(ms: number): string {
   const min = ms / 60_000;

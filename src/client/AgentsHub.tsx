@@ -109,8 +109,11 @@ export function AgentsHub({
       <div className="hub-agents">
         {hub.agents.map((a) => {
           const g = a.tool ? glance[a.tool] : undefined;
-          // The limit nearest to running out is the one to show.
-          const limit = g?.rows.filter((r) => r.used !== null).sort((x, y) => (y.used ?? 0) - (x.used ?? 0))[0];
+          // The limit nearest to running out is the one to show, of the account the agent runs as where its tool has more than one
+          // here: another account's fuller window isn't this agent's.
+          const acct = state.engines[a.lane]?.account?.id ?? "default";
+          const own = g?.rows.some((r) => r.account) ? g.rows.filter((r) => r.account === acct) : g?.rows;
+          const limit = own?.filter((r) => r.used !== null).sort((x, y) => (y.used ?? 0) - (x.used ?? 0))[0];
           return <AgentCard key={a.lane} a={a} state={state} me={me} send={send} now={now} limit={limit ? { label: limit.label, used: limit.used!, resets: limit.resets } : null} mayDrive={mayDrive(a.lane)} />;
         })}
         {addAgent && (

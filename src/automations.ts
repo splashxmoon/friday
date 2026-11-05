@@ -55,6 +55,11 @@ export interface Automation {
   updated?: number;
   /** From a saved agent's schedule, moved here when Agents became Automations. */
   from?: string;
+  /**
+   * Turned off because its owner is no longer in the workspace (offboard.ts): whose it was, who removed them (themself, when they
+   * left), why and when. Kept until an admin hands it on or deletes it, or its owner, back in, turns it on again.
+   */
+  paused?: { person: { id: string; name: string }; by: { id: string; name: string }; why: "removed" | "left" | "deleted"; at: number };
 }
 
 export type RunStatus = "starting" | "running" | "done" | "failed" | "waiting" | "skipped";

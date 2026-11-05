@@ -9,7 +9,7 @@ import { PHONE_PAGE, phoneLog, phonePage } from "./phone-log.js";
 import { lightener } from "./session/patches.js";
 import { EARLIER_PIECE, slowly } from "./slow.js";
 import { packJson, shellFor, shellRoute, withVary, type ShellRoute } from "./fast-load.js";
-import { readdirSync, statSync, watch } from "node:fs";
+import { readdirSync, readFileSync, statSync, watch } from "node:fs";
 import { readdir, readFile, rm, stat } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
@@ -161,24 +161,32 @@ const packed = new Map<string, Promise<{ out: Buffer; etag: string }>>();
  * Which build a bundled file came from, for its key in `packed`: a hot rebuild makes new files under the same names (app.js),
  * and keyed by path alone the first build's app.js was served beside the new build's chunks, which 404'd (2026-10-19).
  */
-const bodyIds = new WeakMap<Uint8Array, number>();
+const bodyIds = new WeakMap<object, number>();
 let nextBodyId = 0;
-const bodyId = (b: Uint8Array): number => {
+const bodyId = (b: object): number => {
   let id = bodyIds.get(b);
   if (id === undefined) bodyIds.set(b, (id = ++nextBodyId));
   return id;
 };
 
-/** `br`: the file already packed at the build (scripts/build-desktop.ts), smaller than packing it here would make it. */
-export async function sendAsset(req: http.IncomingMessage, res: http.ServerResponse, key: string, body: Uint8Array, type: string, cache: string, br?: Uint8Array) {
-  const buf = Buffer.from(body.buffer, body.byteOffset, body.byteLength);
+/**
+ * `br`: the file already packed at the build (scripts/build-desktop.ts), smaller than packing it here would make it. `body` may be
+ * a reader with its `size`, for a file whose packed copy is all that is kept in memory (loadPrebuilt): read only for a browser
+ * that can't take Brotli, once per file and encoding.
+ */
+export async function sendAsset(req: http.IncomingMessage, res: http.ServerResponse, key: string, body: Uint8Array | (() => Uint8Array), type: string, cache: string, br?: Uint8Array, size?: number) {
+  const raw = () => {
+    const b = typeof body === "function" ? body() : body;
+    return Buffer.from(b.buffer, b.byteOffset, b.byteLength);
+  };
+  const length = typeof body === "function" ? (size ?? raw().length) : body.byteLength;
   const accept = String(req.headers["accept-encoding"] ?? "");
-  const enc = COMPRESSIBLE.test(type) && buf.length > 1024 ? (/\bbr\b/.test(accept) ? "br" : /\bgzip\b/.test(accept) ? "gzip" : "") : "";
+  const enc = COMPRESSIBLE.test(type) && length > 1024 ? (/\bbr\b/.test(accept) ? "br" : /\bgzip\b/.test(accept) ? "gzip" : "") : "";
   const id = `${key}|${enc}`;
   let entry = packed.get(id);
   if (!entry) {
     entry = (async () => {
-      const out = enc === "br" && br ? Buffer.from(br.buffer, br.byteOffset, br.byteLength) : enc === "br" ? await compressors.br(buf, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 9, [zlibConstants.BROTLI_PARAM_SIZE_HINT]: buf.length } }) : enc === "gzip" ? await compressors.gzip(buf, { level: 9 }) : buf;
+      const out = enc === "br" && br ? Buffer.from(br.buffer, br.byteOffset, br.byteLength) : enc === "br" ? await compressors.br(raw(), { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 9, [zlibConstants.BROTLI_PARAM_SIZE_HINT]: length } }) : enc === "gzip" ? await compressors.gzip(raw(), { level: 9 }) : raw();
       return { out, etag: `"${createHash("sha1").update(out).digest("base64url").slice(0, 22)}"` };
     })();
     packed.set(id, entry);
@@ -197,7 +205,10 @@ export async function sendAsset(req: http.IncomingMessage, res: http.ServerRespo
 // Built once per process, in memory, code-split so heavy pieces (syntax
 // highlighting, math) load only when used. A packaged desktop build points
 // CLIENT_DIR at a prebuilt copy instead.
-type Bundle = Map<string, { body: Uint8Array; type: string; br?: Uint8Array }>;
+/** A file of the client: its bytes, or (a prebuilt file with a packed copy) a reader for them and their size. */
+type Asset = { body: Uint8Array | (() => Uint8Array); size?: number; type: string; br?: Uint8Array };
+type Bundle = Map<string, Asset>;
+const bodyOf = (a: Asset): Uint8Array => (typeof a.body === "function" ? a.body() : a.body);
 let clientBundle: Promise<Bundle> | null = null;
 
 /** A real listing from a folder, as opposed to a sentence about why there isn't one. */
@@ -213,7 +224,7 @@ const READ_OPS = new Set(["tree", "read", "branches", "remote", "commands", "env
  * for that build's chunks afterwards, and with several people saving at once they were gone, so the page came up blank
  * (2026-10-19). A hashed chunk never changes, so keeping it is always right.
  */
-const hotChunks = new Map<string, { body: Uint8Array; type: string; br?: Uint8Array }>();
+const hotChunks = new Map<string, Asset>();
 
 export function bundleClient(): Promise<Bundle> {
   if (!clientBundle) build = null;
@@ -239,7 +250,7 @@ export function buildId(): Promise<string> {
     const b = await bundleClient();
     const h = createHash("sha1");
     // Every file whose name stays the same between builds (app.js, app.css): a hashed chunk only changes when one of these does.
-    for (const [name, a] of [...b].sort(([x], [y]) => x.localeCompare(y))) if (!name.startsWith("/chunks/") && !name.startsWith("/assets/")) h.update(name).update(a.body);
+    for (const [name, a] of [...b].sort(([x], [y]) => x.localeCompare(y))) if (!name.startsWith("/chunks/") && !name.startsWith("/assets/")) h.update(name).update(bodyOf(a));
     for (const css of ["style.css", "tailwind.css"]) h.update(await readFile(path.join(PUBLIC_DIR, css)).catch(() => Buffer.alloc(0)));
     return h.digest("base64url").slice(0, 12);
   })();
@@ -260,23 +271,32 @@ async function buildClient(): Promise<Bundle> {
   return out;
 }
 
-/** A built client on disk: each file, with its Brotli copy (`<file>.br`, made by the build) beside it when there is one. */
+/**
+ * A built client on disk: each file, with its Brotli copy (`<file>.br`, made by the build) beside it when there is one.
+ *
+ * A hashed chunk with a packed copy keeps only that copy in memory, its own bytes read from disk if a browser that can't take
+ * Brotli asks: the whole client held twice was 22 MB of every server's memory (18 MB of it the unpacked scripts nearly nobody
+ * is sent). The entry files (app.js and the like) stay whole: the build's fingerprint and the page's preloads read them.
+ */
 export async function loadPrebuilt(dir: string): Promise<Bundle> {
   const out: Bundle = new Map();
   const packedCopies = new Map<string, Uint8Array>();
+  const files = new Map<string, string>();
   const walk = async (d: string) => {
     for (const e of await readdir(d, { withFileTypes: true })) {
       const p = path.join(d, e.name);
       const rel = "/" + path.relative(dir, p).split(path.sep).join("/");
       if (e.isDirectory()) await walk(p);
       else if (rel.endsWith(".br")) packedCopies.set(rel.slice(0, -3), await readFile(p));
-      else out.set(rel, { body: await readFile(p), type: TYPES[path.extname(p)] ?? "application/octet-stream" });
+      else files.set(rel, p);
     }
   };
   await walk(dir);
-  for (const [rel, br] of packedCopies) {
-    const f = out.get(rel);
-    if (f) f.br = br;
+  for (const [rel, p] of files) {
+    const type = TYPES[path.extname(p)] ?? "application/octet-stream";
+    const br = packedCopies.get(rel);
+    if (br && rel.startsWith("/chunks/")) out.set(rel, { body: () => readFileSync(p), size: (await stat(p)).size, type, br });
+    else out.set(rel, { body: await readFile(p), type, ...(br ? { br } : {}) });
   }
   if (!out.has("/app.css")) out.set("/app.css", { body: new Uint8Array(), type: TYPES[".css"]! });
   return out;
@@ -427,6 +447,7 @@ export async function createApp(o: AppOptions) {
   const linkToken = (sid: string, state: SessionState, role: Role) => signInvite(o.secret, sid, role, state.links[role === "owner" ? "editor" : role].version);
   // A post from this computer's edition carries no link: its address answers only here, and the post is read on a phone.
   const hookLink = (_sid: string, _state: SessionState) => "";
+  const watchOn = async (_state: SessionState) => true;
 
   const guardRunaway = async (sid: string, lane: string) => {
     const [state, events] = await Promise.all([store.state(sid), store.events(sid)]);
@@ -1469,6 +1490,8 @@ export async function createApp(o: AppOptions) {
     async () => false,
   );
   const hub = new EngineHub(store, bus, core);
+  // A workspace that keeps teammates' messages to Edits on every member's computer (workspace-policy.ts), whatever a host raised:
+  // the session core refuses raising past it and the hub holds every turn, steer and pressed command there.
   // On your own computer there is one Friday: lanes a previous run of it held are gone with it (EngineHub.sole).
   if (o.local) hub.sole = true;
   // On someone's own computer, each of their sessions is looked over once the last run's leases are gone: a lane its runner left
@@ -2489,7 +2512,8 @@ export async function createApp(o: AppOptions) {
       }
       for (const lane of lanes) {
         const ask = state.approvals[lane];
-        if (!ask || !(await redis.set(`${o.prefix}selfrun-approved:${sid}:${ask.id}`, "1", "EX", 86_400, "NX"))) continue;
+        // Never somebody's computer (hostsOwn): that is theirs to allow, room on its own or not.
+        if (!ask || ask.hostsOwn || !(await redis.set(`${o.prefix}selfrun-approved:${sid}:${ask.id}`, "1", "EX", 86_400, "NX"))) continue;
         // As Friday, not the person: the room runs on its own, at full access.
         const r = await store.append(sid, FRIDAY_SAYS, { type: "instruction", text: "[Friday] Approved: this room runs on its own, at full access.", interrupt: false, approval: { id: ask.id, approve: true }, hop: 1 }, { lane });
         if (r.ok) void bus.wake(sid, lane);
@@ -3100,6 +3124,7 @@ export async function createApp(o: AppOptions) {
     const set = async (change: Partial<AutomationRun>) => (run = (await automations.updateRun(ws, a.id, run.id, change)) ?? { ...run, ...change });
     try {
       // On someone's own computer (the open-source edition, or run from here), there are no accounts and no Friday agent to run.
+      // Taken out of the workspace, its owner no longer runs its agent, its connected tools or its plan, by hook, schedule or Run now.
       const tool = a.who.tool;
       if ((tool as string) === "friday") throw new Error("Automations here run your coding tools. Pick one of them instead."); // as string: kept wide for the lines below
       if (tool !== "friday" && !computerHere(a.ownerId)) {
@@ -4326,7 +4351,8 @@ export async function createApp(o: AppOptions) {
 
 
     // The project brain (brain.ts): what the workspace has learned per repo, for its page. Anyone in the workspace reads and
-    // tends it, as they would a team wiki; the repo is a query parameter, since its key has slashes in it.
+    // tends it, as they would a team wiki; the repo is a query parameter, since its key has slashes in it. Turning learning off
+    // or on is the whole workspace's, so it is an admin's or owner's (Arun, 2026-11-04); members see whether it is on.
     if (url.pathname === "/api/brain" || url.pathname.startsWith("/api/brain/")) {
       const ctx = await context(req);
       if (!ctx) return json(res, 401, { error: "Sign in first." });
@@ -4334,9 +4360,12 @@ export async function createApp(o: AppOptions) {
       const repo = str(url.searchParams.get("repo"), 300);
       const kind = (v: unknown) => (["correction", "decision", "pitfall", "convention", "fact"].includes(String(v)) ? (String(v) as BrainKind) : undefined);
       try {
-        if (req.method === "GET" && url.pathname === "/api/brain") return json(res, 200, { enabled: await brain.enabled(), repos: await brain.repos() });
+        let mayToggle = true;
+        if (req.method === "GET" && url.pathname === "/api/brain") return json(res, 200, { enabled: await brain.enabled(), repos: await brain.repos(), ...(o.local ? {} : { mayToggle }) });
         if (req.method === "POST" && url.pathname === "/api/brain/settings") {
+          if (!mayToggle) return json(res, 403, { error: "Only the workspace's admins and owners turn learning off or on." });
           const b = await readJson(req);
+          const was = await brain.enabled();
           await brain.setEnabled(b.enabled !== false);
           return json(res, 200, { enabled: b.enabled !== false });
         }
@@ -4451,14 +4480,25 @@ export async function createApp(o: AppOptions) {
         }
         if (req.method === "POST" && url.pathname === "/api/skills") return json(res, 201, { skill: await t.skills.create(user, await readJson(req)) });
 
-        const m = url.pathname.match(/^\/api\/skills\/([\w-]+)(\/leave)?$/);
+        const m = url.pathname.match(/^\/api\/skills\/([\w-]+)(\/leave|\/takeover)?$/);
+        // One its maker shared and then left with: an admin's to edit, delete or take over (stewardOf).
+        let as: { id: string; name: string } | null = null;
+        let item: { id?: string; name?: string } | null = null;
+        if (m && req.method === "POST" && m[2] === "/takeover") {
+          if (!as) return json(res, 403, { error: "Only a workspace admin can take over something its maker left with." });
+          const skill = await t.skills.takeOver(m[1]!, user);
+          return json(res, 200, { skill });
+        }
         if (m && req.method === "POST" && m[2]) {
           await t.skills.leaveShared(user, m[1]!);
           return json(res, 200, { ok: true });
         }
-        if (m && req.method === "PATCH" && !m[2]) return json(res, 200, { skill: await t.skills.update(user, m[1]!, await readJson(req)) });
+        if (m && req.method === "PATCH" && !m[2]) {
+          const skill = await t.skills.update(as ?? user, m[1]!, await readJson(req));
+          return json(res, 200, { skill });
+        }
         if (m && req.method === "DELETE" && !m[2]) {
-          await t.skills.remove(user, m[1]!);
+          await t.skills.remove(as ?? user, m[1]!);
           return json(res, 200, { ok: true });
         }
         return json(res, 404, { error: "Not found" });
@@ -4794,11 +4834,15 @@ export async function createApp(o: AppOptions) {
       const ws = ctx.workspace.id;
       const me = ctx.me;
       const base = (o.appUrl || selfUrl).replace(/\/+$/, "");
+      let admin: Promise<boolean> | null = null;
+      const isAdmin = () => (admin ??= Promise.resolve(false));
       const view = async (a: Automation) => ({
         ...a,
         when: a.when.kind === "webhook" ? { kind: "webhook", ...(a.ownerId === me.id ? { url: `${base}/api/hooks/automation/${ws}/${a.id}?key=${a.when.secret}` } : {}) } : a.when,
         says: { when: describeWhen(a.when), who: describeWho(a.who) },
         mine: a.ownerId === me.id,
+        // Paused because its owner left (offboard.ts): whether this person, an admin, may hand it on or delete it.
+        ...(a.paused && a.ownerId !== me.id ? { mayHand: await isAdmin() } : {}),
         runs: await automations.runs(ws, a.id, 6),
         today: await automations.runsToday(ws, a.id),
       });
@@ -4819,7 +4863,7 @@ export async function createApp(o: AppOptions) {
           await automations.put(ws, made);
           return json(res, 201, { automation: await view(made) });
         }
-        const one = url.pathname.match(/^\/api\/automations\/([\w-]{4,40})(\/run|\/runs)?$/);
+        const one = url.pathname.match(/^\/api\/automations\/([\w-]{4,40})(\/run|\/runs|\/hand)?$/);
         if (!one) return json(res, 404, { error: "Not found" });
         const a = await automations.get(ws, one[1]!);
         if (!a) return json(res, 404, { error: "That automation isn't there any more." });
@@ -4832,6 +4876,8 @@ export async function createApp(o: AppOptions) {
         }
         if (req.method === "PATCH" && !one[2]) {
           const next: Automation = { ...a, ...(await inSession(cleanAutomation(await readJson(req), a))) };
+          // Its owner, back in the workspace, turning it on again: no longer paused for having left.
+          if (next.on && next.paused) delete next.paused;
           await automations.put(ws, next, a);
           return json(res, 200, { automation: await view(next) });
         }
@@ -5697,7 +5743,7 @@ export async function createApp(o: AppOptions) {
     if (asset) {
       const hashed = url.pathname.startsWith("/chunks/") || url.pathname.startsWith("/assets/");
       // The entry files keep their names between builds, so they revalidate (a "not modified" when nothing changed); the hashed ones never change.
-      return sendAsset(req, res, `${url.pathname}#${bodyId(asset.body)}`, asset.body, asset.type, hashed ? "public, max-age=31536000, immutable" : "no-cache", asset.br);
+      return sendAsset(req, res, `${url.pathname}#${bodyId(asset)}`, asset.body, asset.type, hashed ? "public, max-age=31536000, immutable" : "no-cache", asset.br, asset.size);
     }
 
     if (req.method === "GET" && hotStream(req, res)) return;
@@ -5708,12 +5754,13 @@ export async function createApp(o: AppOptions) {
   }
 
   /** Links for the roles whose link is currently enabled, at the current version. */
-  function invitesFor(sid: string, state: SessionState) {
+  /** `watch`: whether the recording link is handed out too (watchOn: the workspace may have turned watching without an account off). */
+  function invitesFor(sid: string, state: SessionState, watch = true) {
     return {
       ...(state.links.editor.enabled ? { editor: signInvite(o.secret, sid, "editor", state.links.editor.version) } : {}),
       ...(state.links.viewer.enabled ? { viewer: signInvite(o.secret, sid, "viewer", state.links.viewer.version) } : {}),
       // The recording goes with the viewer link: same reach, no seat.
-      ...(state.links.viewer.enabled ? { replay: signReplay(o.secret, sid, state.links.viewer.version) } : {}),
+      ...(state.links.viewer.enabled && watch ? { replay: signReplay(o.secret, sid, state.links.viewer.version) } : {}),
     };
   }
   const mayInvite = (state: SessionState, userId: string) => can(state, userId, "invite");
@@ -6003,7 +6050,7 @@ export async function createApp(o: AppOptions) {
 
     const pushInvites = async () => {
       const st = await store.state(sid);
-      send({ kind: "invites", invites: mayInvite(st, me.id) ? invitesFor(sid, st) : null });
+      send({ kind: "invites", invites: mayInvite(st, me.id) ? invitesFor(sid, st, await watchOn(st)) : null });
     };
 
     const sendEvent = (event: SessionEvent, raw: string) => {
@@ -6099,7 +6146,9 @@ export async function createApp(o: AppOptions) {
       const built = performance.now();
       send({
         kind: "hello",
-        you: { ...me, role: roleOf(state, me.id) ?? me.role },
+        // Whether a rule above the session holds others' messages to Manual on every host's computer (SessionCore.othersHeld):
+        // a host's agent menu then says so, rather than offering a raise that would be refused.
+        you: { ...me, role: roleOf(state, me.id) ?? me.role, ...((await core.othersHeld?.(state).catch(() => false)) ? { othersHeld: true } : {}) },
         state,
         events: log,
         ...(partial ? { since } : {}),
@@ -6107,7 +6156,7 @@ export async function createApp(o: AppOptions) {
         digest,
         // How far this person had read, so a first visit can be told from a return.
         seenSeq: seen,
-        invites: mayInvite(state, me.id) ? invitesFor(sid, state) : undefined,
+        invites: mayInvite(state, me.id) ? invitesFor(sid, state, await watchOn(state)) : undefined,
       });
       slowly(`hello for ${sid}`, opened, { built: built - opened, sent: performance.now() - built, events: log.length });
       if (cut) earlierBefore = from[cut]!.seq;
@@ -6578,7 +6627,7 @@ async function preloadsFor(entry: string): Promise<string[]> {
     const js = bundle.get(file);
     if (!js) return;
     // `import{a}from"./x.js"` and `import"./x.js"`, never `import("./x.js")`.
-    for (const m of Buffer.from(js.body).toString("utf8").matchAll(/\bimport\s*(?:[\w$*{][^;"'()]*?\bfrom\s*)?["'](\.{1,2}\/[^"']+\.js)["']/g)) {
+    for (const m of Buffer.from(bodyOf(js)).toString("utf8").matchAll(/\bimport\s*(?:[\w$*{][^;"'()]*?\bfrom\s*)?["'](\.{1,2}\/[^"']+\.js)["']/g)) {
       const dep = new URL(m[1]!, `http://x${file}`).pathname;
       // Only the bundle's own: the crew demo's sample code sits in a chunk as text, and its `import { fmt } from "./money.js"`
       // was named in the page, three 404s on every load (2026-11-02 crew walk-through).

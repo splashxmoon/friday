@@ -151,7 +151,7 @@ export interface SessionState {
   lanePending: Record<string, number[]>;
   /** What each lane has asked permission for and not yet been answered: an instruction in that lane, with or without an answer, ends the wait. */
   /** What each lane's agent is asking permission for. `live`: asked mid-turn, the tool waiting on the answer there and then. */
-  approvals: Record<string, { id: string; seq: number; tool?: EngineTool; scope: "commands" | "turn"; items: string[]; live?: boolean }>;
+  approvals: Record<string, { id: string; seq: number; tool?: EngineTool; scope: "commands" | "turn"; items: string[]; live?: boolean; hostsOwn?: boolean }>;
   /** Instructions sent but not yet delivered into the agent's context. */
   pendingInstructions: number[];
   /** Instructions taken back while they were still queued. */
@@ -836,13 +836,15 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       s.links[b.role] = { enabled: b.enabled, version: b.version };
       break;
     case "engine.approval":
-      s.approvals[lane] = { id: b.id, seq: ev.seq, ...(b.tool ? { tool: b.tool } : {}), scope: b.scope, items: b.items, ...(b.live ? { live: true } : {}) };
+      s.approvals[lane] = { id: b.id, seq: ev.seq, ...(b.tool ? { tool: b.tool } : {}), scope: b.scope, items: b.items, ...(b.live ? { live: true } : {}), ...(b.hostsOwn ? { hostsOwn: true } : {}) };
       break;
     case "instruction": {
       // A live ask (the tool waiting mid-turn) stays until it is answered or the turn is interrupted. A message written
       // meanwhile waits for the turn like any queued one: clearing the ask hid its card while the tool went on waiting for an
       // answer nobody could give any more, and the lane never moved again.
-      if (!s.approvals[lane]?.live || b.approval || b.interrupt) delete s.approvals[lane];
+      // A yes only the host may give (hostsOwn: their computer), from anyone else, answers nothing: the card stays for them.
+      const notTheirs = !!b.approval?.approve && !!s.approvals[lane]?.hostsOwn && !(ev.actor.kind === "human" && ev.actor.id === s.engines[lane]?.hostId);
+      if (!notTheirs && (!s.approvals[lane]?.live || b.approval || b.interrupt)) delete s.approvals[lane];
       delete s.resumes[lane];
       delete s.asks[lane];
       // A person writing to the agent has taken it from there: a wake Friday set by itself is no longer its next step.
@@ -1127,7 +1129,7 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       // A tool waiting mid-turn on an answer went with its connection; its card kept offering a yes nothing could act on.
       if (s.approvals[lane]?.live) delete s.approvals[lane];
       // Handed back to Friday Code, which has its own thinking setting: the pinned effort goes with the tool.
-      if (b.reason === "released") {
+      if (b.reason === "released" || b.reason === "removed") {
         delete s.engines[lane];
         if (s.efforts) delete s.efforts[lane];
         // Handed back to Friday Code: nothing of the tool's is open anywhere for this lane any more.

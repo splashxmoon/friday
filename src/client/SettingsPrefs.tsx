@@ -778,7 +778,8 @@ function ShareAnalytics() {
   );
 }
 
-const RELEASES = "https://github.com/splashxmoon/friday-releases/releases";
+// The website's changelog, written for people, not GitHub's list of installers (Arun, 2026-11-05).
+const RELEASES = "https://www.tryfridaywork.com/changelog";
 
 export function AboutTab({ onReplayTour }: { onReplayTour?: () => void }) {
   // Outside the desktop app (which says its version and updates itself, AppUpdate) the version is the server's own: the page

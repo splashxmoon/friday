@@ -535,7 +535,7 @@ export class EngineHub {
     // turn nobody is behind, which isn't the host's either. It decides only this, never which machine may be borrowed (`by`).
     const asker = by ?? (forPerson === undefined ? undefined : (forPerson ?? ""));
     if (asker !== undefined && asker !== host.info.hostId && !call.approved) {
-      const cap = othersCap(host.info.handMode, (await this.store.state(sid)).othersFull?.[host.lane] === true);
+      const cap = othersCap(host.info.handMode, await this.core.othersRaised(await this.store.state(sid), host.lane));
       if (cap && (OWN_YES.has(call.op) || (cap === "plan" && WRITES.has(call.op)))) return { output: heldForOthers(host.info.hostName, cap) };
     }
     const busy = WRITES.has(call.op) && host.info.mode !== "plan" ? await this.takePen(sid, lane ?? MAIN_LANE, host.lane, host.info, call.op === "apply", by) : null;
@@ -812,6 +812,7 @@ export class EngineHub {
     host.mesh = this.mesh;
     host.teammate = this.teammate ? () => this.teammate!(p.sid, lane) : null;
     host.teamPaused = this.teamPaused ? (people, running) => this.teamPaused!(p.sid, lane, people, running) : null;
+    host.othersRaised = (st) => this.core.othersRaised(st, lane);
     // What its first turn will be told besides the instruction, so its CLI can be started before that turn comes.
     const system = tool ? await host.systemNote(events) : undefined;
     this.hosts.set(key, host);
@@ -913,6 +914,8 @@ class LaneHost {
   private compactFailed = false;
   /** Approvals the tool is waiting on in the turn now running (see `engine.approval`'s `live`): their answers go straight to it. */
   private readonly live = new Set<string>();
+  /** Asks only the host's own yes answers (engine.approval hostsOwn). */
+  private readonly hostsOwn = new Set<string>();
   /** Live asks already answered: a second answer to one (two people pressing at once) is not a new turn with permission. */
   private readonly answered = new Set<string>();
   /** Each tool's tokens and what hand-offs carried, for the Usage page (see tool-usage.ts). */
@@ -1016,6 +1019,8 @@ class LaneHost {
 
   /** Its runner keeps each turn's end until this server acknowledges it (`turn.ack`), and says the unacknowledged ones when back. */
   acks = false;
+  /** Whether others' messages here may go as far as the host's own mode (SessionCore.othersRaised, set by the hub as it attaches). */
+  othersRaised: (state: SessionState) => Promise<boolean> = async (state) => state.othersFull?.[this.lane] === true;
   /** Whether the turn running now is a compaction Friday asked for, not the instructions it carries (see drain). */
   private compacting = false;
 
@@ -1115,6 +1120,8 @@ class LaneHost {
     if (b.type === "mesh.paused" && !b.on) return void this.pump();
     if ((ev.lane ?? MAIN_LANE) !== this.lane) return;
     if (b.type === "engine.detached" && b.reason === "released") return void this.close("released", 4000);
+    // Its host taken out of the session or its workspace (core.releaseWheels): closed for good, so the runner doesn't come back.
+    if (b.type === "engine.detached" && b.reason === "removed") return void this.close("removed", 4003);
     if (b.type === "engine.attached" && ev.seq > this.attachedSeq) return void this.close("replaced", 4009);
     // Same preemption rules as Friday Code. A CLI can't take new input
     // mid-turn, so an interrupt stops the turn and the next one carries it.
@@ -1125,6 +1132,11 @@ class LaneHost {
     else if (b.type === "instruction" && b.interrupt) why = `${ev.actor.name} interrupted with a new instruction`;
     if (why && this.turn) (this.stopSent = true), this.sendRaw({ kind: "stop", reason: why });
     // An answer to something the tool is waiting on right now goes to it there and then, and is not a new turn.
+    // A yes only its host may give (hostsOwn: their computer), from anyone or anything else, is no answer: the ask waits for them.
+    if (b.type === "instruction" && b.approval?.approve && this.hostsOwn.has(b.approval.id) && !(ev.actor.kind === "human" && ev.actor.id === this.info.hostId)) {
+      void this.append({ type: "instructions.delivered", seqs: [ev.seq] }).catch((e) => console.error("[engine] delivered:", e));
+      return;
+    }
     if (b.type === "instruction" && b.approval && this.live.delete(b.approval.id)) return void this.answerLive(ev.seq, b.approval, ev.actor.kind === "system" ? b.text : undefined);
     if (b.type === "instruction" && b.approval && this.answered.has(b.approval.id)) {
       void this.append({ type: "instructions.delivered", seqs: [ev.seq] }).catch((e) => console.error("[engine] delivered:", e));
@@ -1148,7 +1160,7 @@ class LaneHost {
     // Somebody else's work never reaches a tool on its host's own plan mid-turn either: the queue says no to it (drain).
     if (ownPlan(state.engines[this.lane]) && refusal(state.engines[this.lane], whoseWork(await this.store.events(this.sid), ev))) return void this.pump();
     const capped = this.turnCap !== undefined;
-    if (!capped && this.othersMessage(ev, state) && othersCap(this.info.handMode, state.othersFull?.[this.lane] === true) !== undefined) return void this.pump();
+    if (!capped && this.othersMessage(ev, state) && othersCap(this.info.handMode, await this.othersRaised(state)) !== undefined) return void this.pump();
     const events = await this.store.events(this.sid);
     // On hold, finishing the turn it was told to stop: another agent's message waits for the person, as in drain (held.ts).
     if (!runnableQueue(events, this.lane, [ev.seq]).length) return void this.pump();
@@ -1384,7 +1396,7 @@ class LaneHost {
       const now = runOf(await this.store.state(this.sid), this.lane).status;
       // A Stop (the agent left idle) drops the turn with its task; whatever was queued meanwhile is the next turn.
       if (this.closed || now !== "running") continue;
-      const cap = others ? othersCap(this.info.handMode, state.othersFull?.[this.lane] === true) : undefined;
+      const cap = others ? othersCap(this.info.handMode, await this.othersRaised(state)) : undefined;
       // A conversation grown long is compacted first, by the tool's own /compact, as a turn of its own: the turn that follows,
       // and every one after, re-reads a summary instead of everything so far. Not before one of the tool's own commands, which
       // may be /compact itself. One that fails is not tried again on this connection; the turn goes ahead either way.
@@ -1720,6 +1732,7 @@ class LaneHost {
       // The lane runs as that account from here: a reconnect says so again, and until then this is what attaches say.
       if (body?.type === "account.switched") this.info = { ...this.info, account: body.to };
       if (body?.type === "engine.approval" && body.live && this.turn) this.live.add(body.id);
+      if (body?.type === "engine.approval" && body.hostsOwn) this.hostsOwn.add(body.id);
       // A runner sends the whole change set every second or so while its tool edits, and only the last one of a turn is
       // ever read again. Mid-turn it goes to the room live and is kept here, then logged once as the turn ends. One that
       // names a file the log doesn't have for this lane yet is logged at once, so other lanes hear of the file now.
@@ -1769,14 +1782,19 @@ class LaneHost {
     if (!mesh) return this.sendRaw({ kind: "mesh.result", id, output: "Agents can't reach each other from here.", isError: true });
     // A runner that can take preview_screenshot's picture says so as it lists them (runner/screenshot.ts).
     // A crew's room's tools have the roster tool too (agent-mesh.ts listingFor).
-    if (tool === "__list") return this.sendRaw({ kind: "mesh.result", id, ...(await mesh.listingFor(this.sid, !!args && typeof args === "object" && (args as { screenshot?: unknown }).screenshot === true)) });
+    // A runner whose computer's owner turned computer use on says so, with its OS (runner/computer.ts).
+    if (tool === "__list") {
+      const a = (args && typeof args === "object" ? args : {}) as { screenshot?: unknown; computer?: unknown };
+      const os = typeof a.computer === "string" && ["macOS", "Windows", "Linux"].includes(a.computer) ? a.computer : undefined;
+      return this.sendRaw({ kind: "mesh.result", id, ...(await mesh.listingFor(this.sid, a.screenshot === true, os)) });
+    }
     if (tool === "__list") return this.sendRaw({ kind: "mesh.result", id, ...meshListing(!!args && typeof args === "object" && (args as { screenshot?: unknown }).screenshot === true) });
     const stop = new AbortController();
     this.meshCalls.set(id, stop);
     try {
       const a = args && typeof args === "object" && !Array.isArray(args) ? (args as Record<string, unknown>) : {};
       const r = await mesh.call(this.sid, this.lane, typeof tool === "string" ? tool.slice(0, 80) : "", a, stop.signal);
-      const result: Record<string, unknown> = { kind: "mesh.result", id, output: r.output, ...(r.isError ? { isError: true } : {}), ...(r.capture ? { capture: r.capture } : {}) };
+      const result: Record<string, unknown> = { kind: "mesh.result", id, output: r.output, ...(r.isError ? { isError: true } : {}), ...(r.capture ? { capture: r.capture } : {}), ...(r.computer ? { computer: r.computer } : {}) };
       if (r.content) result.content = r.content;
       this.sendRaw(result);
     } finally {
@@ -2053,7 +2071,7 @@ function cleanBody(raw: unknown): EventBody | null {
     if (!items.length || typeof b.id !== "string") return null;
     const why = s(b.why, 300);
     const guard = typeof b.guard === "string" && /^(outside|ship|delete|money|keys|computer|takeover)$/.test(b.guard) ? (b.guard as "outside") : undefined;
-    return { type: "engine.approval", id: s(b.id, 40), scope: b.scope === "commands" ? "commands" : "turn", items, ...(b.live === true ? { live: true } : {}), ...(why ? { why } : {}), ...(guard ? { guard } : {}) };
+    return { type: "engine.approval", id: s(b.id, 40), scope: b.scope === "commands" ? "commands" : "turn", items, ...(b.live === true ? { live: true } : {}), ...(why ? { why } : {}), ...(guard ? { guard } : {}), ...(b.hostsOwn === true ? { hostsOwn: true } : {}) };
   }
   if (b.type === "agent.usage") {
     // A turn's tokens; anything past a few million in one turn is not a count worth keeping.

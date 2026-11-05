@@ -25,6 +25,8 @@ export interface SavedCommand {
   scope: CommandScope;
   ownerId: string;
   ownerName: string;
+  /** Its owner shared it and then left the workspace (app.ts markLeft). */
+  ownerLeft?: true;
   at: number;
 }
 

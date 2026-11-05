@@ -4,7 +4,7 @@ import { shortTokens, USAGE_TOOLS, type CarriedEntry, type Tokens, type UsageDay
 import { EngineMark } from "./BrandMarks.js";
 import { FridayMark } from "./icons.js";
 import { hostApi, useMachine } from "./local.js";
-import { useToolLimits } from "./toolLimits.js";
+import { refreshToolLimits, useToolLimits } from "./toolLimits.js";
 import type { Identity } from "./storage.js";
 import { ENGINE_NAMES, toolList } from "../types.js";
 import { Skeleton, SkeletonCards, SkeletonRows, barHeight, relTime } from "./ui.js";
@@ -74,6 +74,9 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
   const [tries, setTries] = useState(0);
   // From the shared reading (toolLimits.ts): shown at once, refreshed behind.
   const read = useToolLimits(identity);
+  // The page that says it all reads them fresh as it opens: a reading from minutes ago said an account was out after a run on it
+  // had gone through.
+  useEffect(() => refreshToolLimits(identity, true), []); // eslint-disable-line react-hooks/exhaustive-deps
   const limits = read && read !== "none" ? read : null;
   const [hover, setHover] = useState<number | null>(null);
   // The coding tools on this computer: the table lists those and any that did work in the range, not all sixteen Friday knows,

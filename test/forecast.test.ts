@@ -305,3 +305,13 @@ test("better odds are said as odds; learning from another benchmark table (a mod
   assert.deepEqual(learnedView(stale, {}, NOW), []);
   assert.deepEqual(learnedFrom(stale, {}, "all", NOW), {});
 });
+
+test("a running turn's time left comes only from runs here like it: none yet, nothing said", async () => {
+  const { timeLeft } = await import("../src/forecast.js");
+  const start = 1_000_000;
+  // A first run on a new install: the typical figure is a guess, and "~5 min left" over a ten-second edit read as a fact.
+  assert.equal(timeLeft({ ms: 300_000, tokens: null, runs: 0, basis: "typical" }, start, start), "");
+  assert.equal(timeLeft({ ms: 300_000, tokens: null, runs: 0, basis: "typical" }, start, start + 400_000), "");
+  assert.equal(timeLeft({ ms: 600_000, tokens: 9000, runs: 4, basis: "workspace" }, start, start), "~10 min left");
+  assert.equal(timeLeft({ ms: 600_000, tokens: 9000, runs: 4, basis: "repo" }, start, start + 590_000), "longer than runs like it");
+});

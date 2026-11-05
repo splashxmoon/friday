@@ -282,7 +282,7 @@ export function boardCards(state: SessionState, events: SessionEvent[], meId: st
     } else if (commitBody) {
       column = "ready";
       status = commitBody.pushed ? "Pushed" : "Committed";
-      detail = commitBody.pushed ? "Open a pull request to ship it" : "Push it to share it";
+      detail = commitBody.pushed ? "Open a pull request to ship it" : commitBody.local ? "Only on this computer: the folder has no remote" : "Push it to share it";
     }
     // Yours exactly when the Needs you page lists it. Out of usage with nothing waiting on anybody (Friday carries it on when the
     // limit lifts, or another agent took it): not a card in Needs you.

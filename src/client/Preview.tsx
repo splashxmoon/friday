@@ -1091,10 +1091,8 @@ export function PreviewPanel({
                 </div>
               ) : (
                 <div className="preview-note">
-                  <p className="muted small">Run this project and watch it here, or type an address above. Friday only starts scripts the project already declares.</p>
                   <div className="preview-starts">
                     {starts()}
-                    {options && !options.scripts.length && !options.static && <p className="muted small">No dev/start/preview script in package.json, and no index.html to serve.</p>}
                   </div>
                 </div>
               ))}

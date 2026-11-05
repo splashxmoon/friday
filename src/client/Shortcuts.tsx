@@ -179,6 +179,8 @@ export interface SavedCommandRow {
   scope: "personal" | "workspace";
   ownerId: string;
   ownerName: string;
+  /** Its owner shared it and then left the workspace. */
+  ownerLeft?: true;
 }
 
 /** The commands this person can run, read once and again whenever the manager changes them. */
