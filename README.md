@@ -61,9 +61,31 @@ One agent is enough to start. Add a second when you want them to split the work.
 
 No API keys and no new plan: Friday drives the coding tools signed in on your computer.
 
-<p>
-  <kbd>Claude Code</kbd> <kbd>Codex</kbd> <kbd>Cursor</kbd> <kbd>GitHub Copilot</kbd> <kbd>Gemini CLI</kbd> <kbd>OpenCode</kbd> <kbd>Devin</kbd> <kbd>Junie</kbd> <kbd>Kiro</kbd> <kbd>Factory Droid</kbd> <kbd>Grok Build</kbd> <kbd>Cline</kbd> <kbd>Kilo</kbd> <kbd>Amp</kbd> <kbd>Muse Code</kbd> <kbd>Qwen Code</kbd> <kbd>Any ACP agent</kbd>
-</p>
+<table>
+  <tr>
+    <td align="center" width="120"><img src="docs/assets/tools/claude.svg" width="32" height="32" alt="" /><br /><sub>Claude Code</sub></td>
+    <td align="center" width="120"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/tools/codex-dark.svg" /><img src="docs/assets/tools/codex-light.svg" width="32" height="32" alt="" /></picture><br /><sub>Codex</sub></td>
+    <td align="center" width="120"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/tools/cursor-dark.svg" /><img src="docs/assets/tools/cursor-light.svg" width="32" height="32" alt="" /></picture><br /><sub>Cursor</sub></td>
+    <td align="center" width="120"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/tools/copilot-dark.svg" /><img src="docs/assets/tools/copilot-light.svg" width="32" height="32" alt="" /></picture><br /><sub>GitHub Copilot</sub></td>
+    <td align="center" width="120"><img src="docs/assets/tools/gemini.svg" width="32" height="32" alt="" /><br /><sub>Gemini CLI</sub></td>
+    <td align="center" width="120"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/tools/opencode-dark.svg" /><img src="docs/assets/tools/opencode-light.svg" width="32" height="32" alt="" /></picture><br /><sub>OpenCode</sub></td>
+  </tr>
+  <tr>
+    <td align="center" width="120"><img src="docs/assets/tools/devin.svg" width="32" height="32" alt="" /><br /><sub>Devin</sub></td>
+    <td align="center" width="120"><img src="docs/assets/tools/junie.svg" width="32" height="32" alt="" /><br /><sub>Junie</sub></td>
+    <td align="center" width="120"><img src="docs/assets/tools/kiro.svg" width="32" height="32" alt="" /><br /><sub>Kiro</sub></td>
+    <td align="center" width="120"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/tools/droid-dark.svg" /><img src="docs/assets/tools/droid-light.svg" width="32" height="32" alt="" /></picture><br /><sub>Factory Droid</sub></td>
+    <td align="center" width="120"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/tools/grok-dark.svg" /><img src="docs/assets/tools/grok-light.svg" width="32" height="32" alt="" /></picture><br /><sub>Grok Build</sub></td>
+    <td align="center" width="120"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/tools/cline-dark.svg" /><img src="docs/assets/tools/cline-light.svg" width="32" height="32" alt="" /></picture><br /><sub>Cline</sub></td>
+  </tr>
+  <tr>
+    <td align="center" width="120"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/tools/kilo-dark.svg" /><img src="docs/assets/tools/kilo-light.svg" width="32" height="32" alt="" /></picture><br /><sub>Kilo</sub></td>
+    <td align="center" width="120"><img src="docs/assets/tools/amp.svg" width="32" height="32" alt="" /><br /><sub>Amp</sub></td>
+    <td align="center" width="120"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/tools/muse-dark.svg" /><img src="docs/assets/tools/muse-light.svg" width="32" height="32" alt="" /></picture><br /><sub>Muse Code</sub></td>
+    <td align="center" width="120"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/tools/qwen-dark.svg" /><img src="docs/assets/tools/qwen-light.svg" width="32" height="32" alt="" /></picture><br /><sub>Qwen Code</sub></td>
+    <td align="center" width="120"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/tools/acp-dark.svg" /><img src="docs/assets/tools/acp-light.svg" width="32" height="32" alt="" /></picture><br /><sub>Any ACP agent</sub></td>
+  </tr>
+</table>
 
 ## Free, and on your computer
 
