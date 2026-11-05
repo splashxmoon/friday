@@ -15,7 +15,7 @@ export interface WhatsNewNotes {
 }
 
 export const WHATS_NEW: WhatsNewNotes = {
-  version: "0.2.13",
+  version: "0.2.14",
   summary: "Friday tidies up after itself when it quits, keeps secrets out of sight, gets a second look from another model, and stays quick in long sessions.",
   items: [
     { icon: "stop", title: "Nothing left running", line: "Coding tools, commands and terminals end when Friday quits, even a force-quit." },
