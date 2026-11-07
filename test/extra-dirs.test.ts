@@ -22,7 +22,7 @@ after(() => rm(dir, { recursive: true, force: true, maxRetries: 5 }));
 const spec = (s: Partial<TurnSpec> = {}): TurnSpec => ({ prompt: "Look at this", resumeId: null, mode: "edits", system: "Standing note", ...s });
 const dirs = ["/work/shared", "/work/docs"];
 
-test("Claude Code, Copilot and Gemini are started with the other folders as their own flags; Cursor and the rest take none", () => {
+test("Claude Code, Copilot, Gemini and Antigravity are started with the other folders as their own flags; Cursor and the rest take none", () => {
   const claude = ADAPTERS.claude.args(spec({ dirs }));
   assert.deepEqual(claude.slice(claude.indexOf("--add-dir"), claude.indexOf("--add-dir") + 4), ["--add-dir", "/work/shared", "--add-dir", "/work/docs"]);
   assert.ok(!ADAPTERS.claude.args(spec()).includes("--add-dir"), "none given, no flag");
@@ -31,11 +31,13 @@ test("Claude Code, Copilot and Gemini are started with the other folders as thei
   assert.deepEqual(copilot.slice(-4), ["--add-dir", "/work/shared", "--add-dir", "/work/docs"]);
   assert.deepEqual(ADAPTERS.gemini.args(spec({ dirs })), ["--acp", "--include-directories", "/work/shared,/work/docs"]);
   assert.deepEqual(ADAPTERS.gemini.args(spec()), ["--acp"]);
+  assert.deepEqual(ADAPTERS.antigravity.args(spec({ dirs })), ["acp", "--add-dir", "/work/shared", "--add-dir", "/work/docs"]);
+  assert.deepEqual(ADAPTERS.antigravity.args(spec()), ["acp"]);
 
   assert.deepEqual(ADAPTERS.cursor.args(spec({ dirs })), ADAPTERS.cursor.args(spec()), "Cursor has no such flag");
   const own = Object.values(ADAPTERS).filter((a) => a.dirs).map((a) => a.tool);
   // Muse Code takes them too, as the workspace roots of each turn (turn/start), not as a flag (test/muse-adapter.test.ts).
-  assert.deepEqual(own.sort(), ["claude", "codex", "copilot", "gemini", "muse"]);
+  assert.deepEqual(own.sort(), ["antigravity", "claude", "codex", "copilot", "gemini", "muse"]);
   assert.ok(codexExec.dirs);
 });
 

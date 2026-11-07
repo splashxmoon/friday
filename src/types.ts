@@ -199,7 +199,7 @@ export type SessionOptionsPatch = Partial<Omit<SessionOptions, "policy">> & { po
  * holds a key for these: the CLI runs on the host's machine, under their login,
  * and a small runner relays the session to it.
  */
-export type EngineTool = "claude" | "codex" | "cursor" | "copilot" | "opencode" | "gemini" | "devin" | "junie" | "kiro" | "droid" | "grok" | "cline" | "kilo" | "amp" | "muse" | "qwen" | "acp";
+export type EngineTool = "claude" | "codex" | "cursor" | "copilot" | "opencode" | "gemini" | "antigravity" | "devin" | "junie" | "kiro" | "droid" | "grok" | "cline" | "kilo" | "amp" | "muse" | "qwen" | "acp";
 
 /** What a person sees about a coding tool before and after it is on their machine. Its runner side is in runner/adapters.ts. */
 export interface ToolInfo {
@@ -246,6 +246,15 @@ export const TOOL_INFO: Record<EngineTool, ToolInfo> = {
     note: "Runs on ChatGPT, GitHub Copilot or OpenCode Zen. Claude plans can't be used in it.",
   },
   gemini: { name: "Gemini CLI", blurb: "Google's coding agent", docs: "https://geminicli.com/docs/", install: { npm: "@google/gemini-cli" }, tint: "#4285f4", note: "Needs a Gemini API key, Vertex AI or Gemini Code Assist: Google AI plans moved to Antigravity." },
+  // Google's newer coding agent, over its ACP server (`agy acp`, 1.5 and later), where Google AI plans now run.
+  antigravity: {
+    name: "Antigravity CLI",
+    blurb: "Google Antigravity's coding agent",
+    docs: "https://antigravity.google/docs/cli/acp/",
+    install: { windows: "irm https://antigravity.google/cli/install.ps1 | iex", unix: "curl -fsSL https://antigravity.google/cli/install.sh | bash" },
+    tint: "#3186ff",
+    note: "Runs on a Google AI plan (free, Pro or Ultra), Gemini Enterprise or a Gemini API key.",
+  },
   devin: {
     name: "Devin",
     blurb: "Cognition's coding agent",
@@ -476,6 +485,8 @@ export const ENGINE_MODEL_INFO: Record<EngineTool, EngineModelInfo[]> = {
   // The rest take whatever model name their own docs give, typed in the picker: their lists depend on the account.
   opencode: [],
   gemini: [],
+  // Its model picker over ACP lists what the account offers, read from its first turn.
+  antigravity: [],
   devin: [],
   junie: [],
   kiro: [],

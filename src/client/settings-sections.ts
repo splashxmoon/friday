@@ -80,7 +80,7 @@ export const SECTIONS: SectionDef[] = [
     group: "This computer",
     icon: "code",
     blurb: "The coding tools on this computer, and the accounts each one uses.",
-    keywords: "coding tools tool claude code codex cursor copilot opencode devin junie kiro droid amp muse sign in sign out install account accounts login acp other agent command fewer more",
+    keywords: "coding tools tool claude code codex cursor copilot opencode antigravity agy devin junie kiro droid amp muse sign in sign out install account accounts login acp other agent command fewer more",
   },
   {
     id: "own-models",

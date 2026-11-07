@@ -5,7 +5,8 @@ import { driverOf, type SessionState } from "../session/projection.js";
 import { MAIN_LANE, type Member } from "../types.js";
 import { argsOf } from "./args.js";
 import { Icon } from "./icons.js";
-import { useConfirm } from "./ui.js";
+import { MenuButton, useConfirm } from "./ui.js";
+import { ShipDialog, type Dest } from "./Ship.js";
 import type { Send } from "./useSession.js";
 import { prefillComposer } from "./prefill.js";
 export { prefillComposer };
@@ -369,6 +370,7 @@ export function ReviewCard({
   lastRestoreSeq,
   undone: undoneRun,
   undo,
+  invite,
   second,
   via,
   notify,
@@ -409,6 +411,8 @@ export function ReviewCard({
   const [applying, setApplying] = useState(false);
   const [applyErr, setApplyErr] = useState("");
   const [more, setMore] = useState(false);
+  /** The commit dialog, open at where the commit goes. */
+  const [ship, setShip] = useState<Dest | null>(null);
   const [, redraw] = useState(0);
   const [ask, confirmUI] = useConfirm();
   const adds = files.reduce((n, f) => n + f.additions, 0);
@@ -416,6 +420,16 @@ export function ReviewCard({
   const committed = lastCommitSeq > endSeq;
   const undone = undoneRun ?? lastRestoreSeq > endSeq;
   const may = me.role === "owner" || driverOf(state, lane)?.id === me.id;
+  const eng = state.engines[lane];
+  const canPush = !!eng?.online && eng.mode !== "plan";
+  const confirmUndo = () =>
+    ask({
+      title: "Undo this turn's changes?",
+      body: "The files it changed go back to how they were before it started. You can redo it from the activity feed.",
+      action: "Undo",
+      danger: false,
+      onConfirm: undo!,
+    });
   // Working in a separate copy: the work is brought into the person's folder with Apply, and that is what this card offers first.
   const copyOf = state.engines[lane]?.copyOf;
   const into = copyOf?.split(/[\\/]/).filter(Boolean).pop() ?? "your folder";
@@ -483,40 +497,66 @@ export function ReviewCard({
         </button>
         <span className="cc-sp" />
         {outcome ? (
-          <span className="cc-outcome">
-            {!undone && <Icon name="check" size={13} />} {outcome}
-          </span>
-        ) : (
           <>
-            {undo && (
-              <button
-                type="button"
-                className="cc-btn quiet"
-                title="Put these files back as they were before this turn"
-                onClick={() =>
-                  ask({
-                    title: "Undo this turn's changes?",
-                    body: "The files it changed go back to how they were before it started. You can redo it from the activity feed.",
-                    action: "Undo",
-                    danger: false,
-                    onConfirm: undo,
-                  })
-                }
-              >
-                <Icon name="rewind" size={13} /> Undo
-              </button>
-            )}
-            {copyOf && (
-              <button type="button" className="cc-btn" disabled={!may || applying} title={may ? `Bring these changes into ${into}` : "Only the driver or an owner can bring changes over"} onClick={() => void apply()}>
-                {applying ? "Applying…" : `Apply to ${into}`}
+            <span className="cc-outcome">
+              {!undone && <Icon name="check" size={13} />} {outcome}
+            </span>
+            {onReview && (
+              <button type="button" className="cc-btn line" title="Read them in the Changes panel" onClick={() => onReview()}>
+                Review
               </button>
             )}
           </>
-        )}
-        {onReview && (
-          <button type="button" className={`cc-btn${copyOf && !outcome ? " quiet" : ""}`} title="Read them in the Changes panel, and commit them there" onClick={() => onReview()}>
-            Review
-          </button>
+        ) : copyOf ? (
+          <>
+            {undo && (
+              <button type="button" className="cc-btn quiet" title="Put these files back as they were before this turn" onClick={confirmUndo}>
+                <Icon name="rewind" size={13} /> Undo
+              </button>
+            )}
+            <button type="button" className="cc-btn pri" disabled={!may || applying} title={may ? `Bring these changes into ${into}` : "Only the driver or an owner can bring changes over"} onClick={() => void apply()}>
+              {applying ? "Applying…" : `Apply to ${into}`}
+            </button>
+            {onReview && (
+              <button type="button" className="cc-btn line" title="Read them in the Changes panel" onClick={() => onReview()}>
+                Review
+              </button>
+            )}
+          </>
+        ) : (
+          <>
+            {/* Review B (Arun, 2026-11-05: "commit menu B"): Ask for changes, then Commit with the other ways to commit and Undo under its arrow. */}
+            <button type="button" className="cc-btn line" title="Tell the agent what to change" onClick={() => prefillComposer("")}>
+              Ask for changes
+            </button>
+            {may ? (
+              <span className="cc-split">
+                <button type="button" className="cc-btn pri" title="Commit these changes" onClick={() => setShip("here")}>
+                  <Icon name="commit" size={13} /> Commit
+                </button>
+                <MenuButton
+                  end
+                  label="More ways to commit"
+                  className="cc-btn pri cc-split-more"
+                  items={() => [
+                    { label: "Commit", icon: "commit", onSelect: () => setShip("here") },
+                    canPush && { label: "Commit and push", icon: "arrowUp", onSelect: () => setShip("push") },
+                    canPush && { label: "Commit and open a pull request", icon: "gitPullRequest", onSelect: () => setShip("pr") },
+                    !!onReview && { label: "Open in Changes", icon: "file", onSelect: () => onReview!() },
+                    !!undo && { label: "Undo this turn's changes", icon: "rewind", danger: true, onSelect: confirmUndo },
+                  ]}
+                >
+                  <Icon name="chevronDown" size={13} />
+                </MenuButton>
+              </span>
+            ) : (
+              onReview && (
+                <button type="button" className="cc-btn" title="Read them in the Changes panel" onClick={() => onReview()}>
+                  Review
+                </button>
+              )
+            )}
+          </>
         )}
       </div>
       {!folded && (
@@ -573,8 +613,28 @@ export function ReviewCard({
           </li>
         )}
       </ul>
+      {!outcome && (!tests || (!second && state.lanes.length > 0)) && (
+        <div className="cc-foot">
+          {!tests && (
+            <span>
+              <Icon name="clock" size={13} /> Tests haven't run on these changes
+            </span>
+          )}
+          {!second && state.lanes.length > 0 && (
+            <span>
+              <Icon name="eye" size={13} /> Not checked by another agent
+            </span>
+          )}
+          {!tests && (
+            <button type="button" className="cc-btn line" title="Put a request to run the tests in the message box" onClick={() => prefillComposer(followUps(files.length, null, false)[0]?.text ?? "Run the project's tests.")}>
+              Ask it to run them
+            </button>
+          )}
+        </div>
+      )}
         </>
       )}
+      {ship && <ShipDialog state={state} sid={sid} invite={invite ?? ""} send={send} lane={lane} start={ship} {...(receipt ? { receipt } : {})} onClose={() => setShip(null)} />}
       {applyErr && (
         <p role="alert" className="error cc-err">
           {applyErr}

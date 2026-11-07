@@ -6,7 +6,7 @@ import { homedir, hostname, tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { ENGINE_NAMES, ENGINE_TOOLS, TOOL_INFO, toolList, type EngineMode, type EngineTool } from "../types.js";
-import { ADAPTERS, childEnv, findBin, formatCommandLine, isClaudeAppBundled, launcher, loginStatus, readCustomAcp, runCli, saveCustomAcp } from "./adapters.js";
+import { ADAPTERS, ANTIGRAVITY_MODELS, antigravityModels, childEnv, findBin, formatCommandLine, isClaudeAppBundled, launcher, loginStatus, readCustomAcp, runCli, saveCustomAcp } from "./adapters.js";
 import { discoverAgentFiles, parseModelList } from "./agent-files.js";
 import { addWorktree, branchesOf, dropSpares, dropWorktree, primeSpares, remoteBranchesOf, repoInfo, startRepo, worktreeState } from "./git.js";
 import { listCliSessions } from "./imports.js";
@@ -844,6 +844,15 @@ export async function callHost(method: string, params: Record<string, unknown> =
       // Cursor's list is per-account and long enough to ask it for. A tool spoken to over ACP lists its own as a conversation
       // opens, and the last list it gave is what the picker offers (see knownModels); Claude Code's, Codex's and Amp's are in it already.
       const tool = str(params.tool, 20);
+      // Antigravity's before its first conversation here: `agy models`, as its ACP option names them (Arun, 2026-11-06: "make sure
+      // models can be selected"). Its own list over ACP is kept from then on.
+      if (tool === "antigravity") {
+        const known = await knownModels("antigravity");
+        if (known.length) return { models: known };
+        const bin = await findBin("antigravity");
+        const r = bin ? await runCli(bin, ANTIGRAVITY_MODELS, 15_000).catch(() => null) : null;
+        return { models: r && r.code === 0 ? antigravityModels(r.out) : [] };
+      }
       if (tool !== "cursor") return { models: (ENGINE_TOOLS as string[]).includes(tool) && ADAPTERS[tool as EngineTool].interactive && !ADAPTERS[tool as EngineTool].dialect ? await knownModels(tool as EngineTool) : [] };
       const bin = await findBin("cursor");
       if (!bin) return { models: [] };

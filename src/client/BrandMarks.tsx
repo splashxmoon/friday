@@ -98,6 +98,11 @@ export function GeminiMark({ size = 16, className }: MarkProps) {
   return <img className={className} src="/marks/gemini.svg" width={size} height={size} alt="Gemini" style={{ flex: "none", display: "block" }} />;
 }
 
+/** Antigravity's mark is blurred shapes behind a mask too, so it arrives the same way: Google's own artwork, as a file. */
+export function AntigravityMark({ size = 16, className }: MarkProps) {
+  return <img className={className} src="/marks/antigravity.svg" width={size} height={size} alt="Antigravity" style={{ flex: "none", display: "block" }} />;
+}
+
 /** The mark for a vendor as the catalogue names it, or nothing for one we have no mark for. */
 /**
  * Friday's own model.
@@ -198,6 +203,7 @@ export function EngineMark({ tool, size = 15, className }: { tool: EngineTool | 
   if (tool === "droid") return <FactoryIcon size={size} className={className} aria-label={ENGINE_NAMES.droid} style={{ flex: "none" }} />;
   // Muse Code has no mark in an open set either: an infinity sign, Meta's own shape, in the text colour.
   if (tool === "muse") return <InfinityIcon size={size} className={className} aria-label={ENGINE_NAMES.muse} style={{ flex: "none" }} />;
+  if (tool === "antigravity") return <AntigravityMark size={size} className={className} />;
   if (tool === "qwen") return <BotIcon size={size} className={className} role="img" aria-label={ENGINE_NAMES.qwen} style={{ flex: "none" }} />;
   if (tool === "acp") return <BotIcon size={size} className={className} aria-label={ENGINE_NAMES.acp} style={{ flex: "none" }} />;
   if (tool && TOOL_PATHS[tool]) return <PathMark d={TOOL_PATHS[tool]!} label={ENGINE_NAMES[tool]} size={size} className={className} />;

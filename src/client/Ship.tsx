@@ -61,7 +61,7 @@ export function shipChecks(receipt: Receipt | undefined, pr: boolean, message: s
   ];
 }
 
-export function ShipDialog({ state, sid, invite, send, lane, onClose, receipt, dir }: { state: SessionState; sid: string; invite: string; send: Send; lane: string; onClose: () => void; /** The run's receipt, for the checklist. */ receipt?: Receipt; /** Commit in one of the folders the agent also works in (the Git panel's pick), not the lane's own. */ dir?: string }) {
+export function ShipDialog({ state, sid, invite, send, lane, onClose, receipt, dir, start }: { state: SessionState; sid: string; invite: string; send: Send; lane: string; onClose: () => void; /** The run's receipt, for the checklist. */ receipt?: Receipt; /** Commit in one of the folders the agent also works in (the Git panel's pick), not the lane's own. */ dir?: string; /** Where the commit goes to begin with (a review card's "Commit and push"), when the folder allows it; else the furthest it allows. */ start?: Dest }) {
   const ref = useRef<HTMLFormElement>(null);
   useDismiss(ref, onClose);
   const engine = state.engines[lane] ?? Object.values(state.engines)[0];
@@ -108,7 +108,8 @@ export function ShipDialog({ state, sid, invite, send, lane, onClose, receipt, d
       .then((d) => {
         if (!live) return;
         setRemote(d.remote ?? {});
-        setDest(canPush && d.remote?.url ? (d.remote.github ? "pr" : "push") : "here");
+        const furthest: Dest = canPush && d.remote?.url ? (d.remote.github ? "pr" : "push") : "here";
+        setDest(start === "here" ? "here" : start === "push" && canPush && d.remote?.url ? "push" : start === "pr" && furthest === "pr" ? "pr" : furthest);
         setMessage((m) => m || d.message || "");
         setBranch((b) => b || (onBranch ? "" : (d.branch ?? "")));
       })
@@ -314,5 +315,5 @@ export function ShipDialog({ state, sid, invite, send, lane, onClose, receipt, d
   );
 }
 
-type Dest = "here" | "push" | "pr" | "stack";
+export type Dest = "here" | "push" | "pr" | "stack";
 const STATUS: Record<DiffFile["status"], string> = { added: "Added", modified: "Modified", deleted: "Deleted", renamed: "Renamed" };

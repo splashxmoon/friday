@@ -9,8 +9,8 @@ import { ModelNameInput, useEngineModelInfo } from "./EngineModelPill.js";
 import { Icon } from "./icons.js";
 import type { Identity } from "./storage.js";
 import { planLimits, startTeam } from "./edition.js";
-import { floating, placeCard, uiZoom, useDismiss } from "./ui.js";
-import { splitTools } from "./engines.js";
+import { floating, placeCard, Switch, uiZoom, useDismiss } from "./ui.js";
+import { splitTools, toolOrder } from "./engines.js";
 import { TierMeter, costMark, type RouteHint } from "./RouteWhy.js";
 import { forValue } from "../routing.js";
 
@@ -240,8 +240,15 @@ export function AgentModelPicker({
     // first, as the one changed most. Effort is always shown, as a row of its own.
     const [row, setRow] = useState<"tool" | "account" | "model">("model");
     const list = useRef<HTMLDivElement>(null);
-    // What this computer has is known once any tool is known to be missing; until then the usual four come first.
-    const { here, away } = splitTools(ENGINE_TOOLS.some((t) => toolState(t).absent) ? (t) => !toolState(t).absent : null, engine);
+    // What this computer has is known once any tool is known to be missing; until then the usual four come first. Ready ones on
+    // top, then those not set up, as Settings lists them (Arun, 2026-11-06: "the ones installed should be at the top").
+    const split = splitTools(ENGINE_TOOLS.some((t) => toolState(t).absent) ? (t) => !toolState(t).absent : null, engine);
+    const order = toolOrder((t) => {
+      const s = toolState(t);
+      return s.absent ? "absent" : s.ready === false ? "signed out" : "ready";
+    });
+    const here = [...split.here].sort(order);
+    const away = [...split.away].sort(order);
     // The chosen model's row has the keyboard when the picker opens, so arrows and Enter work at once.
     useEffect(() => {
       if (row !== "model") return;
@@ -426,6 +433,18 @@ export function AgentModelPicker({
         />
       ) : null; // A tool with no levels to pick has no row: the models start higher, in the same size of card.
 
+    // Smart routing as a switch of its own, for a tool that has it (Arun, 2026-11-06: "make sure you can toggle on and off the smart
+    // routing too"): the model list is the tool's own models only (2026-11-05), so it had no way back on once a model was picked.
+    // On, Friday picks the model for each message; off, the tool's own default until a model is picked, which turns it off too.
+    // At the foot, where the line repeating the choices was ("move the smart routing to the bottom… and get rid of text").
+    const smart = engine ? cliModels.find((m) => m.id === "auto") : undefined;
+    const routing = smart ? (
+      <div className="ampd-route" title={smart.blurb}>
+        <span className="ampd-route-name">Smart routing</span>
+        <Switch on={model === "auto"} label="Smart routing" onChange={(on) => onModel(on ? "auto" : "")} />
+      </div>
+    ) : null;
+
     const pickTool = (t: EngineTool) => (onEngine(t), setRow("model"));
     const acct = accounts?.rows.find((a) => a.id === accounts.now);
     const dot = (a: { out?: boolean; off?: boolean }) => <i className={`ampd-dot${a.out ? " out" : a.off ? " off" : ""}`} aria-hidden />;
@@ -438,7 +457,6 @@ export function AgentModelPicker({
         <Icon name={row === key ? "chevronDown" : "chevronRight"} size={13} className="ampd-caret" />
       </button>
     );
-    const summary = [!modelOnly ? agentName : "", acct?.label ?? "", modelText || "Default", reasoning || effortText || (efforts ? "Auto" : "")].filter(Boolean).join(" · ");
 
     return floating(
       <div ref={pop} className={`amp ampd${modelOnly ? " models-only" : ""}`} style={place} role="dialog" aria-label={modelOnly ? "Model" : "Agent and model"}>
@@ -565,9 +583,7 @@ export function AgentModelPicker({
           </div>
         )}
         {power && <div className="ampd-power">{power}</div>}
-        <div className="ampd-foot" title={summary}>
-          {summary}
-        </div>
+        {routing}
       </div>,
     );
   }

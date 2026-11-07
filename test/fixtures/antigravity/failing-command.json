@@ -1,0 +1,790 @@
+[
+ {
+  "direction": "out",
+  "frame": {
+   "jsonrpc": "2.0",
+   "id": 0,
+   "method": "initialize",
+   "params": {
+    "protocolVersion": 1,
+    "clientCapabilities": {
+     "fs": {
+      "readTextFile": false,
+      "writeTextFile": false
+     },
+     "terminal": false
+    },
+    "clientInfo": {
+     "name": "friday",
+     "title": "Friday",
+     "version": "1"
+    }
+   }
+  }
+ },
+ {
+  "direction": "in",
+  "frame": {
+   "jsonrpc": "2.0",
+   "result": {
+    "protocolVersion": 1,
+    "agentCapabilities": {
+     "loadSession": true,
+     "load_session": true,
+     "promptCapabilities": {
+      "image": true,
+      "audio": false,
+      "embeddedContext": true
+     },
+     "sessionCapabilities": {
+      "resume": {},
+      "close": {},
+      "load": {},
+      "list": {},
+      "additionalDirectories": {}
+     },
+     "session_capabilities": {
+      "resume": {},
+      "close": {},
+      "load": {},
+      "list": {},
+      "additionalDirectories": {}
+     },
+     "auth": {
+      "logout": {}
+     },
+     "_meta": {
+      "antigravity": {
+       "tier": true,
+       "systemPrompt": {
+        "append": true
+       }
+      }
+     }
+    },
+    "agentInfo": {
+     "name": "Antigravity ACP Server",
+     "version": "1.5.2"
+    },
+    "authMethods": [
+     {
+      "id": "oauth-personal",
+      "name": "Log in with Google",
+      "description": "Log in with your Google account"
+     },
+     {
+      "id": "oauth-business",
+      "name": "Log in with Gemini Enterprise",
+      "description": "Log in with your Gemini Enterprise account"
+     },
+     {
+      "id": "gemini-api-key",
+      "name": "Gemini API key",
+      "description": "Use an API key with Gemini Developer API"
+     },
+     {
+      "id": "agent-platform",
+      "name": "Gemini Enterprise Agent Platform",
+      "description": "Use Gemini Enterprise Agent Platform (formerly Vertex AI) with Application Default Credentials"
+     }
+    ]
+   },
+   "id": 0
+  }
+ },
+ {
+  "direction": "out",
+  "frame": {
+   "jsonrpc": "2.0",
+   "id": 1,
+   "method": "session/new",
+   "params": {
+    "cwd": "/work/repo",
+    "mcpServers": []
+   }
+  }
+ },
+ {
+  "direction": "in",
+  "frame": {
+   "jsonrpc": "2.0",
+   "result": {
+    "sessionId": "530f63bd-a943-4b7d-901c-9a03e00e8691",
+    "models": {
+     "availableModels": [
+      {
+       "modelId": "gemini-3.8-flash-high",
+       "name": "Gemini 3.8 Flash (High)"
+      },
+      {
+       "modelId": "gemini-3.8-flash-medium",
+       "name": "Gemini 3.8 Flash (Medium)"
+      },
+      {
+       "modelId": "gemini-3.8-flash-low",
+       "name": "Gemini 3.8 Flash (Low)"
+      },
+      {
+       "modelId": "claude-sonnet-4-6",
+       "name": "Claude Sonnet 4.6 (Thinking)"
+      },
+      {
+       "modelId": "claude-opus-4-6-thinking",
+       "name": "Claude Opus 4.6 (Thinking)"
+      },
+      {
+       "modelId": "gpt-oss-120b-medium",
+       "name": "GPT-OSS 120B (Medium)"
+      }
+     ],
+     "currentModelId": "gemini-3.8-flash-high"
+    },
+    "modes": {
+     "currentModeId": "default",
+     "availableModes": [
+      {
+       "id": "default",
+       "name": "Default",
+       "description": "Ask before edits and commands, per your permission settings."
+      },
+      {
+       "id": "accept-edits",
+       "name": "Accept edits",
+       "description": "Approve file edits in the workspace without asking."
+      },
+      {
+       "id": "plan",
+       "name": "Plan",
+       "description": "Plan carefully before executing a task."
+      }
+     ]
+    },
+    "configOptions": [
+     {
+      "id": "model",
+      "name": "Model",
+      "category": "model",
+      "type": "select",
+      "currentValue": "gemini-3.8-flash",
+      "options": [
+       {
+        "value": "gemini-3.8-flash",
+        "name": "Gemini 3.8 Flash"
+       },
+       {
+        "value": "claude-sonnet-4-6",
+        "name": "Claude Sonnet 4.6 (Thinking)"
+       },
+       {
+        "value": "claude-opus-4-6-thinking",
+        "name": "Claude Opus 4.6 (Thinking)"
+       },
+       {
+        "value": "gpt-oss-120b-medium",
+        "name": "GPT-OSS 120B (Medium)"
+       }
+      ]
+     },
+     {
+      "id": "thought_level",
+      "name": "Thinking Level",
+      "category": "thought_level",
+      "type": "select",
+      "currentValue": "high",
+      "options": [
+       {
+        "value": "low",
+        "name": "Low"
+       },
+       {
+        "value": "medium",
+        "name": "Medium"
+       },
+       {
+        "value": "high",
+        "name": "High"
+       }
+      ]
+     },
+     {
+      "id": "mode",
+      "name": "Mode",
+      "category": "mode",
+      "type": "select",
+      "currentValue": "default",
+      "options": [
+       {
+        "value": "default",
+        "name": "Default",
+        "description": "Ask before edits and commands, per your permission settings."
+       },
+       {
+        "value": "accept-edits",
+        "name": "Accept edits",
+        "description": "Approve file edits in the workspace without asking."
+       },
+       {
+        "value": "plan",
+        "name": "Plan",
+        "description": "Plan carefully before executing a task."
+       }
+      ]
+     }
+    ],
+    "_meta": {
+     "antigravity": {
+      "tier": {
+       "name": "Antigravity Starter Quota",
+       "id": "free-tier",
+       "upgradeUri": "https://antigravity.google/g1-upgrade"
+      }
+     }
+    }
+   },
+   "id": 1
+  }
+ },
+ {
+  "direction": "out",
+  "frame": {
+   "jsonrpc": "2.0",
+   "id": 2,
+   "method": "session/set_config_option",
+   "params": {
+    "sessionId": "530f63bd-a943-4b7d-901c-9a03e00e8691",
+    "configId": "thought_level",
+    "value": "low"
+   }
+  }
+ },
+ {
+  "direction": "in",
+  "frame": {
+   "jsonrpc": "2.0",
+   "result": {
+    "configOptions": [
+     {
+      "id": "model",
+      "name": "Model",
+      "category": "model",
+      "type": "select",
+      "currentValue": "gemini-3.8-flash",
+      "options": [
+       {
+        "value": "gemini-3.8-flash",
+        "name": "Gemini 3.8 Flash"
+       },
+       {
+        "value": "claude-sonnet-4-6",
+        "name": "Claude Sonnet 4.6 (Thinking)"
+       },
+       {
+        "value": "claude-opus-4-6-thinking",
+        "name": "Claude Opus 4.6 (Thinking)"
+       },
+       {
+        "value": "gpt-oss-120b-medium",
+        "name": "GPT-OSS 120B (Medium)"
+       }
+      ]
+     },
+     {
+      "id": "thought_level",
+      "name": "Thinking Level",
+      "category": "thought_level",
+      "type": "select",
+      "currentValue": "low",
+      "options": [
+       {
+        "value": "low",
+        "name": "Low"
+       },
+       {
+        "value": "medium",
+        "name": "Medium"
+       },
+       {
+        "value": "high",
+        "name": "High"
+       }
+      ]
+     },
+     {
+      "id": "mode",
+      "name": "Mode",
+      "category": "mode",
+      "type": "select",
+      "currentValue": "default",
+      "options": [
+       {
+        "value": "default",
+        "name": "Default",
+        "description": "Ask before edits and commands, per your permission settings."
+       },
+       {
+        "value": "accept-edits",
+        "name": "Accept edits",
+        "description": "Approve file edits in the workspace without asking."
+       },
+       {
+        "value": "plan",
+        "name": "Plan",
+        "description": "Plan carefully before executing a task."
+       }
+      ]
+     }
+    ]
+   },
+   "id": 2
+  }
+ },
+ {
+  "direction": "out",
+  "frame": {
+   "jsonrpc": "2.0",
+   "id": 3,
+   "method": "session/prompt",
+   "params": {
+    "sessionId": "530f63bd-a943-4b7d-901c-9a03e00e8691",
+    "prompt": [
+     {
+      "type": "text",
+      "text": "Work only in this temporary repository. Keep your answer brief.\n\n[Friday] The message:\nRun exactly this shell command once: ls /no-such-dir-friday \u2014 then reply with just its exit code as a number."
+     }
+    ]
+   }
+  }
+ },
+ {
+  "direction": "in",
+  "frame": {
+   "jsonrpc": "2.0",
+   "method": "session/update",
+   "params": {
+    "sessionId": "530f63bd-a943-4b7d-901c-9a03e00e8691",
+    "update": {
+     "sessionUpdate": "config_option_update",
+     "configOptions": [
+      {
+       "id": "model",
+       "name": "Model",
+       "category": "model",
+       "type": "select",
+       "currentValue": "gemini-3.8-flash",
+       "options": [
+        {
+         "value": "gemini-3.8-flash",
+         "name": "Gemini 3.8 Flash"
+        },
+        {
+         "value": "claude-sonnet-4-6",
+         "name": "Claude Sonnet 4.6 (Thinking)"
+        },
+        {
+         "value": "claude-opus-4-6-thinking",
+         "name": "Claude Opus 4.6 (Thinking)"
+        },
+        {
+         "value": "gpt-oss-120b-medium",
+         "name": "GPT-OSS 120B (Medium)"
+        }
+       ]
+      },
+      {
+       "id": "thought_level",
+       "name": "Thinking Level",
+       "category": "thought_level",
+       "type": "select",
+       "currentValue": "low",
+       "options": [
+        {
+         "value": "low",
+         "name": "Low"
+        },
+        {
+         "value": "medium",
+         "name": "Medium"
+        },
+        {
+         "value": "high",
+         "name": "High"
+        }
+       ]
+      },
+      {
+       "id": "mode",
+       "name": "Mode",
+       "category": "mode",
+       "type": "select",
+       "currentValue": "default",
+       "options": [
+        {
+         "value": "default",
+         "name": "Default",
+         "description": "Ask before edits and commands, per your permission settings."
+        },
+        {
+         "value": "accept-edits",
+         "name": "Accept edits",
+         "description": "Approve file edits in the workspace without asking."
+        },
+        {
+         "value": "plan",
+         "name": "Plan",
+         "description": "Plan carefully before executing a task."
+        }
+       ]
+      }
+     ]
+    }
+   }
+  }
+ },
+ {
+  "direction": "in",
+  "frame": {
+   "jsonrpc": "2.0",
+   "method": "session/update",
+   "params": {
+    "sessionId": "530f63bd-a943-4b7d-901c-9a03e00e8691",
+    "update": {
+     "sessionUpdate": "available_commands_update",
+     "availableCommands": [
+      {
+       "name": "goal",
+       "description": "Run until the specified goal is completely finished."
+      },
+      {
+       "name": "compact",
+       "description": "Compact the conversation now (summarize history to free up the context window)."
+      },
+      {
+       "name": "schedule",
+       "description": "Run an instruction on a recurring schedule or as a one-time timer."
+      },
+      {
+       "name": "browser",
+       "description": "Invoke a browser agent for web tasks."
+      },
+      {
+       "name": "plan",
+       "description": "Plan carefully before executing a task."
+      },
+      {
+       "name": "grill-me",
+       "description": "Interview me to align on a plan."
+      },
+      {
+       "name": "learn",
+       "description": "Reflect on recent successes or corrections to capture reusable skills or rules."
+      },
+      {
+       "name": "agy-customizations",
+       "description": "Comprehensive guide and reference for the Antigravity Customization System. Use to explain how customizations work, their loading priority, discovery mechanisms, and to guide the creation of skills, rules, plugins, hooks, and MCP servers."
+      },
+      {
+       "name": "antigravity-guide",
+       "description": "Provides a comprehensive guide, quick reference, and sitemap for Google Antigravity (AGY), including the Antigravity CLI (agy), Antigravity 2.0, Antigravity IDE, Python SDK, slash commands, keybindings, and customizations (skills, rules, MCP, sidecars). Activate this skill when the user asks questions about how to use, configure, or customize Antigravity, AGY, the agy CLI, the Antigravity IDE, or Antigravity 2.0."
+      }
+     ]
+    }
+   }
+  }
+ },
+ {
+  "direction": "in",
+  "frame": {
+   "jsonrpc": "2.0",
+   "method": "session/update",
+   "params": {
+    "sessionId": "530f63bd-a943-4b7d-901c-9a03e00e8691",
+    "update": {
+     "sessionUpdate": "available_commands_update",
+     "availableCommands": [
+      {
+       "name": "goal",
+       "description": "Run until the specified goal is completely finished."
+      },
+      {
+       "name": "compact",
+       "description": "Compact the conversation now (summarize history to free up the context window)."
+      },
+      {
+       "name": "schedule",
+       "description": "Run an instruction on a recurring schedule or as a one-time timer."
+      },
+      {
+       "name": "browser",
+       "description": "Invoke a browser agent for web tasks."
+      },
+      {
+       "name": "plan",
+       "description": "Plan carefully before executing a task."
+      },
+      {
+       "name": "grill-me",
+       "description": "Interview me to align on a plan."
+      },
+      {
+       "name": "learn",
+       "description": "Reflect on recent successes or corrections to capture reusable skills or rules."
+      },
+      {
+       "name": "agy-customizations",
+       "description": "Comprehensive guide and reference for the Antigravity Customization System. Use to explain how customizations work, their loading priority, discovery mechanisms, and to guide the creation of skills, rules, plugins, hooks, and MCP servers."
+      },
+      {
+       "name": "antigravity-guide",
+       "description": "Provides a comprehensive guide, quick reference, and sitemap for Google Antigravity (AGY), including the Antigravity CLI (agy), Antigravity 2.0, Antigravity IDE, Python SDK, slash commands, keybindings, and customizations (skills, rules, MCP, sidecars). Activate this skill when the user asks questions about how to use, configure, or customize Antigravity, AGY, the agy CLI, the Antigravity IDE, or Antigravity 2.0."
+      }
+     ]
+    }
+   }
+  }
+ },
+ {
+  "direction": "in",
+  "frame": {
+   "jsonrpc": "2.0",
+   "method": "session/update",
+   "params": {
+    "sessionId": "530f63bd-a943-4b7d-901c-9a03e00e8691",
+    "update": {
+     "sessionUpdate": "user_message_chunk",
+     "content": {
+      "type": "text",
+      "text": "Work only in this temporary repository. Keep your answer brief.\n\n[Friday] The message:\nRun exactly this shell command once: ls /no-such-dir-friday \u2014 then reply with just its exit code as a number."
+     }
+    }
+   }
+  }
+ },
+ {
+  "direction": "in",
+  "frame": {
+   "jsonrpc": "2.0",
+   "method": "session/update",
+   "params": {
+    "sessionId": "530f63bd-a943-4b7d-901c-9a03e00e8691",
+    "update": {
+     "sessionUpdate": "session_info_update",
+     "title": "Shell Command Exit Code Test"
+    }
+   }
+  }
+ },
+ {
+  "direction": "in",
+  "frame": {
+   "jsonrpc": "2.0",
+   "method": "session/update",
+   "params": {
+    "sessionId": "530f63bd-a943-4b7d-901c-9a03e00e8691",
+    "update": {
+     "sessionUpdate": "tool_call",
+     "toolCallId": "call_13342898579337515882",
+     "name": "run_command",
+     "args": {
+      "CommandLine": "ls /no-such-dir-friday",
+      "WaitMsBeforeAsync": 5000,
+      "toolSummary": "Run ls command"
+     },
+     "status": "in_progress",
+     "kind": "execute",
+     "title": "ls /no-such-dir-friday",
+     "rawInput": {
+      "CommandLine": "ls /no-such-dir-friday",
+      "WaitMsBeforeAsync": 5000,
+      "toolSummary": "Run ls command"
+     }
+    }
+   }
+  }
+ },
+ {
+  "direction": "in",
+  "frame": {
+   "jsonrpc": "2.0",
+   "method": "session/update",
+   "params": {
+    "sessionId": "530f63bd-a943-4b7d-901c-9a03e00e8691",
+    "update": {
+     "sessionUpdate": "tool_call_update",
+     "toolCallId": "call_13342898579337515882",
+     "name": "run_command",
+     "args": {
+      "CommandLine": "ls /no-such-dir-friday",
+      "WaitMsBeforeAsync": 5000,
+      "toolSummary": "Run ls command"
+     },
+     "status": "pending",
+     "kind": "execute",
+     "title": "ls /no-such-dir-friday",
+     "rawInput": {
+      "CommandLine": "ls /no-such-dir-friday",
+      "WaitMsBeforeAsync": 5000,
+      "toolSummary": "Run ls command"
+     }
+    }
+   }
+  }
+ },
+ {
+  "direction": "in",
+  "frame": {
+   "jsonrpc": "2.0",
+   "method": "session/request_permission",
+   "params": {
+    "sessionId": "530f63bd-a943-4b7d-901c-9a03e00e8691",
+    "toolCall": {
+     "sessionUpdate": "tool_call",
+     "toolCallId": "call_13342898579337515882",
+     "name": "run_command",
+     "args": {
+      "CommandLine": "ls /no-such-dir-friday",
+      "WaitMsBeforeAsync": 5000,
+      "toolSummary": "Run ls command"
+     },
+     "status": "pending",
+     "kind": "execute",
+     "title": "ls /no-such-dir-friday",
+     "rawInput": {
+      "CommandLine": "ls /no-such-dir-friday",
+      "WaitMsBeforeAsync": 5000,
+      "toolSummary": "Run ls command"
+     }
+    },
+    "options": [
+     {
+      "optionId": "allow",
+      "name": "Allow",
+      "kind": "allow_once"
+     },
+     {
+      "optionId": "deny",
+      "name": "Deny",
+      "kind": "reject_once"
+     }
+    ]
+   },
+   "id": "1"
+  }
+ },
+ {
+  "direction": "out",
+  "frame": {
+   "jsonrpc": "2.0",
+   "id": "1",
+   "result": {
+    "outcome": {
+     "outcome": "selected",
+     "optionId": "allow"
+    }
+   }
+  }
+ },
+ {
+  "direction": "in",
+  "frame": {
+   "jsonrpc": "2.0",
+   "method": "session/update",
+   "params": {
+    "sessionId": "530f63bd-a943-4b7d-901c-9a03e00e8691",
+    "update": {
+     "sessionUpdate": "tool_call_update",
+     "toolCallId": "call_13342898579337515882",
+     "name": "run_command",
+     "args": {
+      "CommandLine": "ls /no-such-dir-friday",
+      "WaitMsBeforeAsync": 5000,
+      "toolSummary": "Run ls command"
+     },
+     "status": "in_progress",
+     "kind": "execute",
+     "title": "ls /no-such-dir-friday",
+     "rawInput": {
+      "CommandLine": "ls /no-such-dir-friday",
+      "WaitMsBeforeAsync": 5000,
+      "toolSummary": "Run ls command"
+     }
+    }
+   }
+  }
+ },
+ {
+  "direction": "in",
+  "frame": {
+   "jsonrpc": "2.0",
+   "method": "session/update",
+   "params": {
+    "sessionId": "530f63bd-a943-4b7d-901c-9a03e00e8691",
+    "update": {
+     "sessionUpdate": "tool_call_update",
+     "toolCallId": "call_13342898579337515882",
+     "name": "run_command",
+     "args": {
+      "CommandLine": "ls /no-such-dir-friday",
+      "WaitMsBeforeAsync": 5000,
+      "toolSummary": "Run ls command"
+     },
+     "status": "completed",
+     "kind": "execute",
+     "title": "ls /no-such-dir-friday",
+     "rawInput": {
+      "CommandLine": "ls /no-such-dir-friday",
+      "WaitMsBeforeAsync": 5000,
+      "toolSummary": "Run ls command"
+     },
+     "rawOutput": {
+      "output": "Command exited with code 1.\n\nCommand output:\nls: /no-such-dir-friday: No such file or directory\r\n",
+      "exit_code": 1
+     },
+     "content": [
+      {
+       "type": "content",
+       "content": {
+        "type": "text",
+        "text": "Command exited with code 1.\n\nCommand output:\nls: /no-such-dir-friday: No such file or directory\r\n"
+       }
+      }
+     ]
+    }
+   }
+  }
+ },
+ {
+  "direction": "in",
+  "frame": {
+   "jsonrpc": "2.0",
+   "method": "session/update",
+   "params": {
+    "sessionId": "530f63bd-a943-4b7d-901c-9a03e00e8691",
+    "update": {
+     "sessionUpdate": "agent_message_chunk",
+     "content": {
+      "type": "text",
+      "text": "1"
+     }
+    }
+   }
+  }
+ },
+ {
+  "direction": "in",
+  "frame": {
+   "jsonrpc": "2.0",
+   "result": {
+    "stopReason": "end_turn",
+    "usage": {
+     "inputTokens": 14185,
+     "outputTokens": 44,
+     "cachedReadTokens": 0,
+     "cachedWriteTokens": 0,
+     "thoughtTokens": 0,
+     "totalTokens": 14229
+    }
+   },
+   "id": 3
+  }
+ }
+]

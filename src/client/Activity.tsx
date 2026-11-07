@@ -62,6 +62,7 @@ import { attributionFor, byHand, handWord, type Attribution } from "../attributi
 import { useNear } from "./feed-near.js";
 import { GoalPill } from "./GoalPill.js";
 import { useFocus } from "./focusStore.js";
+import { HuddleCard, huddlesIn, type HuddleInfo } from "./Huddle.js";
 import { AgentTalkCard, AgentUpdateCard, BoardCard, MeshPauseCard, MeshPauseText, teamTasks, type TaskAction } from "./AgentTalk.js";
 import { showDiff } from "./focusDiff.js";
 import { argsOf } from "./args.js";
@@ -346,6 +347,8 @@ interface Ctx {
   results: Map<string, Ev<"tool.result">>;
   questions: Map<string, Ev<"agent.question">>;
   delivered: Set<number>;
+  /** Agents' talk folded into huddles (Huddle.tsx), by each message's seq, for what is on screen. Absent in a crew's room. */
+  huddles?: Map<number, HuddleInfo>;
   send: Send;
   sid: string;
   invite: string;
@@ -1515,9 +1518,11 @@ export function Activity({
   // The same object until something it holds changes. Made fresh on every draw, it was new on every frame of streamed
   // text, so every run block and notice in the feed redrew (and re-read every tool call) sixty times a second.
   // `state` is changed in place by each event, which changes `events` too, so `events` stands for both.
+  // Two agents' messages to each other since the person last wrote, as one card at the latest (Huddle.tsx); a crew's room keeps its own talk.
+  const huddles = useMemo(() => (state.options.team ? undefined : huddlesIn(events, (e) => laneFilter === ALL || (e.lane ?? MAIN_LANE) === laneFilter)), [events, laneFilter, state.options.team]);
   const ctx: Ctx = useMemo(
-    () => ({ me, plan, ...(solo ? { solo } : {}), ...(soloSure ? { soloSure } : {}), connections, state, ...index, send, sid, invite, notify, identity, echo, quote, quoteBox, lastCommitSeq, lastApplySeq, lastRestoreSeq, undone, rewinds, checkpoints, events, ...(onOpen ? { onOpen } : {}), ...(onConnect ? { onConnect } : {}), ...(agents ? { agents } : {}), ...(presence ? { presence } : {}), ...(replayLink ? { replayLink } : {}), ...(replaying ? { replaying } : {}) }),
-    [me, plan, solo, soloSure, connections, state, index, send, sid, invite, notify, identity, echo, quote, quoteBox, lastCommitSeq, lastApplySeq, lastRestoreSeq, undone, rewinds, checkpoints, events, onOpen, onConnect, agents, presence, replayLink, replaying],
+    () => ({ me, plan, ...(solo ? { solo } : {}), ...(soloSure ? { soloSure } : {}), connections, state, ...index, ...(huddles ? { huddles } : {}), send, sid, invite, notify, identity, echo, quote, quoteBox, lastCommitSeq, lastApplySeq, lastRestoreSeq, undone, rewinds, checkpoints, events, ...(onOpen ? { onOpen } : {}), ...(onConnect ? { onConnect } : {}), ...(agents ? { agents } : {}), ...(presence ? { presence } : {}), ...(replayLink ? { replayLink } : {}), ...(replaying ? { replaying } : {}) }),
+    [me, plan, solo, soloSure, connections, state, index, huddles, send, sid, invite, notify, identity, echo, quote, quoteBox, lastCommitSeq, lastApplySeq, lastRestoreSeq, undone, rewinds, checkpoints, events, onOpen, onConnect, agents, presence, replayLink, replaying],
   );
   // "Reconnect" from an agent's card in the Agents hub: the same start this view's own Reconnect makes.
   const ctxRef = useRef(ctx);
@@ -5919,6 +5924,8 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
         // A message to the team (message_team) is one card with everyone it went to, under the first of its copies.
         const copies = b.mesh.team ? ctx.events.filter((e) => e.body.type === "instruction" && e.body.mesh?.team === b.mesh!.team) : [];
         if (copies.length > 1 && copies[0]!.seq !== ev.seq) return null;
+        const h = !b.mesh.team ? ctx.huddles?.get(ev.seq) : undefined;
+        if (h) return h.anchor === ev.seq ? <HuddleCard h={h} state={state} delivered={ctx.delivered} events={ctx.events} /> : null;
         const team = copies.length > 1 ? copies.map((e) => (e.body.type === "instruction" ? (e.body.mesh?.toName ?? "") : "")) : undefined;
         return <AgentTalkCard ev={ev} state={state} me={me} send={ctx.send} notify={ctx.notify} delivered={ctx.delivered} stamp={<Stamp ev={ev} />} {...(team ? { team } : {})} events={ctx.events} />;
       }

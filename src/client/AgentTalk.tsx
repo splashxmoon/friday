@@ -19,7 +19,7 @@ import { boardReportText } from "./team-room.js";
  */
 
 /** A message's words, cut to a few lines with the rest a press away: a full report pasted back can fill the screen. */
-function Clamped({ text }: { text: string }) {
+export function Clamped({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
   const long = text.length > 320 || text.split("\n").length > 4;
   return (

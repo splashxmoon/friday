@@ -1,4 +1,4 @@
-import { ENGINE_TOOLS, TOOL_INFO, type EngineTool } from "../types.js";
+import { ENGINE_NAMES, ENGINE_TOOLS, TOOL_INFO, type EngineTool } from "../types.js";
 
 /** The four most people have: shown first while it isn't known yet what a computer has, or when it has none of them. */
 export const FIRST_TOOLS: EngineTool[] = ["claude", "codex", "cursor", "copilot"];
@@ -10,6 +10,17 @@ export const WELCOME_TOOLS: EngineTool[] = ["claude", "codex", "cursor", "devin"
  * The tools on this computer, then the rest, which every list folds behind a "more" row: fourteen rows of mostly "not installed"
  * buried the three somebody has. `installed` is null while it isn't known; `keep` is one that stays up top whatever (the one chosen).
  */
+/**
+ * One order for the coding tools wherever they are listed: ready to use, then on this computer and not signed in, then not on it,
+ * A to Z within each, any other ACP agent last. Settings and the welcome (audit REST-24, Arun 2026-11-04: the two listed the same
+ * tools in different orders), and the agent picker (Arun, 2026-11-06: "the ones installed should be at the top").
+ */
+export function toolOrder(stateOf: (t: EngineTool) => "ready" | "signed out" | "absent"): (a: EngineTool, b: EngineTool) => number {
+  const RANK = { ready: 0, "signed out": 1, absent: 2 } as const;
+  const rank = (t: EngineTool) => (t === "acp" ? 3 : RANK[stateOf(t)]);
+  return (a, b) => rank(a) - rank(b) || ENGINE_NAMES[a].localeCompare(ENGINE_NAMES[b]);
+}
+
 export function splitTools(installed: ((t: EngineTool) => boolean) | null, keep?: EngineTool | ""): { here: EngineTool[]; away: EngineTool[] } {
   let here = ENGINE_TOOLS.filter((t) => t === keep || (installed ? installed(t) : FIRST_TOOLS.includes(t)));
   if (!here.length) here = FIRST_TOOLS;

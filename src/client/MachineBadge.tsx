@@ -14,7 +14,7 @@ const link: { useAutoLink: () => "idle" | "trying" | "ok" | "failed"; useAutoLin
 import { EngineMark } from "./BrandMarks.js";
 import { isLocal } from "./edition.js";
 import { openOutside } from "./openOutside.js";
-import { ENGINE_INFO, installStep, osOf, splitTools } from "./engines.js";
+import { ENGINE_INFO, installStep, osOf, splitTools, toolOrder } from "./engines.js";
 import { Icon } from "./icons.js";
 import { NoMachine, hostApi, machineRefusal, type LocalTool, type MachineState } from "./local.js";
 import type { Identity } from "./storage.js";
@@ -92,13 +92,12 @@ export function MachineBadge({ identity, machine, refresh, inline = false, welco
   // The installed ones up top. The one whose install line is open stays where it was clicked: one opened from the tools folded
   // away stays among them, not moved up the list as its form opens (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
   let shown = splitTools(here ? (t) => tools.some((x) => x.tool === t) : null, moreTools ? "" : installing);
-  // One order, in the welcome and in Settings alike: signed in, then installed and signed out, then not installed, A to Z within
-  // each, any other ACP agent last (audit REST-24, Arun 2026-11-04: the two listed the same tools in different orders).
-  const rank = (t: EngineTool) => {
+  // One order, in the welcome, Settings and the agent picker alike (toolOrder).
+  const order = toolOrder((t) => {
     const f = tools.find((x) => x.tool === t);
-    return t === "acp" ? 3 : !f ? 2 : f.loggedIn === false ? 1 : 0;
-  };
-  const inOrder = (list: EngineTool[]) => [...list].sort((a, b) => rank(a) - rank(b) || ENGINE_NAMES[a].localeCompare(ENGINE_NAMES[b]));
+    return !f ? "absent" : f.loggedIn === false ? "signed out" : "ready";
+  });
+  const inOrder = (list: EngineTool[]) => [...list].sort(order);
   shown = { here: inOrder(shown.here), away: inOrder(shown.away) };
   const needsSignIn = tools.find((t) => t.loggedIn === false);
 

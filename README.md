@@ -68,17 +68,18 @@ No API keys and no new plan: Friday drives the coding tools signed in on your co
     <td align="center" width="120"><img src="docs/assets/tools/cursor.svg" width="32" height="32" alt="" /><br /><sub>Cursor</sub></td>
     <td align="center" width="120"><img src="docs/assets/tools/copilot.svg" width="32" height="32" alt="" /><br /><sub>GitHub Copilot</sub></td>
     <td align="center" width="120"><img src="docs/assets/tools/gemini.svg" width="32" height="32" alt="" /><br /><sub>Gemini CLI</sub></td>
-    <td align="center" width="120"><img src="docs/assets/tools/opencode.svg" width="32" height="32" alt="" /><br /><sub>OpenCode</sub></td>
+    <td align="center" width="120"><img src="docs/assets/tools/antigravity.svg" width="32" height="32" alt="" /><br /><sub>Antigravity CLI</sub></td>
   </tr>
   <tr>
+    <td align="center" width="120"><img src="docs/assets/tools/opencode.svg" width="32" height="32" alt="" /><br /><sub>OpenCode</sub></td>
     <td align="center" width="120"><img src="docs/assets/tools/devin.svg" width="32" height="32" alt="" /><br /><sub>Devin</sub></td>
     <td align="center" width="120"><img src="docs/assets/tools/junie.svg" width="32" height="32" alt="" /><br /><sub>Junie</sub></td>
     <td align="center" width="120"><img src="docs/assets/tools/kiro.svg" width="32" height="32" alt="" /><br /><sub>Kiro</sub></td>
     <td align="center" width="120"><img src="docs/assets/tools/droid.svg" width="32" height="32" alt="" /><br /><sub>Factory Droid</sub></td>
     <td align="center" width="120"><img src="docs/assets/tools/grok.svg" width="32" height="32" alt="" /><br /><sub>Grok Build</sub></td>
-    <td align="center" width="120"><img src="docs/assets/tools/cline.svg" width="32" height="32" alt="" /><br /><sub>Cline</sub></td>
   </tr>
   <tr>
+    <td align="center" width="120"><img src="docs/assets/tools/cline.svg" width="32" height="32" alt="" /><br /><sub>Cline</sub></td>
     <td align="center" width="120"><img src="docs/assets/tools/kilo.svg" width="32" height="32" alt="" /><br /><sub>Kilo</sub></td>
     <td align="center" width="120"><img src="docs/assets/tools/amp.svg" width="32" height="32" alt="" /><br /><sub>Amp</sub></td>
     <td align="center" width="120"><img src="docs/assets/tools/muse.svg" width="32" height="32" alt="" /><br /><sub>Muse Code</sub></td>
@@ -134,6 +135,7 @@ Keep AI teammates on your computer, each with a name, a role, a memory and its o
 | **Cursor** | **Windows:** `irm 'https://cursor.com/install?win32=true' \| iex`<br /> **Mac/Linux:** `curl https://cursor.com/install -fsS \| bash` | `cursor-agent login` |
 | **GitHub Copilot** | `npm install -g @github/copilot` | `copilot login` |
 | **Gemini CLI** | `npm install -g @google/gemini-cli` | run `gemini` once and sign in |
+| **Antigravity CLI** | **Windows:** `irm https://antigravity.google/cli/install.ps1 \| iex`<br>**Mac/Linux:** `curl -fsSL https://antigravity.google/cli/install.sh \| bash` | run `agy` once and sign in |
 | **OpenCode** | `npm install -g opencode-ai` | `opencode auth login` |
 | **Devin** | **Windows** `irm https://static.devin.ai/cli/setup.ps1 \| iex` <br> **Mac/Linux** `curl -fsSL https://cli.devin.ai/install.sh \| bash` | `devin auth login` |
 | **Junie** | **Windows** `irm https://junie.jetbrains.com/install.ps1 \| iex` <br> **Mac/Linux** `curl -fsSL https://junie.jetbrains.com/install.sh \| bash` | Signs in on its own first screen |
@@ -235,7 +237,7 @@ No. Friday runs on your computer at `127.0.0.1`, with no account, and the work r
 Friday only uses the tools it finds. Its setup screen shows which are installed and signed in, and can sign the rest in for you.
 
 **Which coding agents does it support?**
-Claude Code, Codex, Cursor, GitHub Copilot, Gemini CLI, OpenCode, Devin CLI, Junie, Kiro, Factory Droid, Grok Build, Cline, Kilo Code, Amp, Muse Code, and any agent that speaks the Agent Client Protocol (ACP).
+Claude Code, Codex, Cursor, GitHub Copilot, Gemini CLI, Antigravity CLI, OpenCode, Devin CLI, Junie, Kiro, Factory Droid, Grok Build, Cline, Kilo Code, Amp, Muse Code, and any agent that speaks the Agent Client Protocol (ACP).
 
 **Does it cost anything, or use my API keys?**
 Friday is free and MIT licensed. The work runs on each tool's own plan and sign-in, so there are no keys to paste and nothing extra to pay. If you'd like Friday Code, Friday's own agent, too, give it a key of yours or a model on your computer in Settings › Your models: then it runs on that.

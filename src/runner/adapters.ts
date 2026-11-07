@@ -2,7 +2,7 @@ import { noteClaudeEvent } from "./limits.js";
 import { access, mkdir, readdir, readFile, realpath, unlink, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { createRequire } from "node:module";
-import { homedir } from "node:os";
+import { devNull, homedir } from "node:os";
 import path from "node:path";
 import { ENGINE_EFFORTS, ENGINE_NAMES, type AgentTaskStatus, type EngineEffort, type EngineMode, type EngineTool, type ToolCall } from "../types.js";
 import { testFailedInChain } from "../receipt.js";
@@ -1557,7 +1557,7 @@ function acpCard(tc: AcpCall): { name: string; args: Record<string, unknown> } {
   // Copilot's apply_patch hands over the patch itself, whose first `*** Update File:` line names the file.
   const patched = /^\*\*\* (?:Update|Add|Delete) File: (.+)$/m.exec(str(tc.rawInput))?.[1]?.trim() ?? "";
   const files: any[] = Array.isArray(raw.files) ? raw.files : [];
-  const where = tc.locations?.[0]?.path || str(raw.path) || str(raw.file_path) || str(raw.filePath) || str(raw.fileName) || str(files[0]?.path) || patched;
+  const where = tc.locations?.[0]?.path || str(raw.path) || str(raw.Path) || str(raw.file_path) || str(raw.filePath) || str(raw.fileName) || str(files[0]?.path) || patched;
   // Cline's commands come as a list.
   const commands = Array.isArray(raw.commands) ? (raw.commands as unknown[]).map(String).join("\n") : "";
   const diff = tc.content?.find((c) => c?.type === "diff");
@@ -1565,7 +1565,7 @@ function acpCard(tc: AcpCall): { name: string; args: Record<string, unknown> } {
   const kind = tc.kind === "read" && raw.pattern && !where ? "search" : (tc.kind ?? "");
   switch (ACP_CARD[kind]) {
     case "shell":
-      return { name: "shell", args: { command: codexCommand(str(raw.command) || str(raw.cmd) || commands || title), ...(raw.description ? { description: raw.description } : {}) } };
+      return { name: "shell", args: { command: codexCommand(str(raw.command) || str(raw.cmd) || str(raw.CommandLine) || commands || title), ...(raw.description ? { description: raw.description } : {}) } };
     case "edit":
       return diff && diff.oldText == null ? { name: "write", args: { path: str(diff.path) || where, content: cut(str(diff.newText), 2000) } } : { name: "edit", args: { path: where || str(diff?.path) || title } };
     case "read":
@@ -1597,10 +1597,19 @@ function acpOutput(tc: AcpCall): string {
   return JSON.stringify(r);
 }
 
-/** A command's exit code where the tool only says it in words (Copilot: "<shellId: 0 completed with exit code 1>"). */
+/**
+ * A command's exit code where the tool only says it in words: Copilot's "<shellId: 0 completed with exit code 1>", Antigravity's
+ * "Command exited with code 1." (1.5.2, beside a `completed` status).
+ */
 const saidExit = (output: string): number | null => {
-  const m = /completed with exit code (-?\d+)/.exec(output);
+  const m = /(?:completed with exit code|exited with code) (-?\d+)/.exec(output);
   return m ? Number(m[1]) : null;
+};
+/** Its exit code as a number of its own where the tool gives one (Antigravity's rawOutput `exit_code`), else in its words. */
+const exitOf = (tc: AcpCall, said: string): number | null => {
+  const r = tc.rawOutput && typeof tc.rawOutput === "object" ? (tc.rawOutput as Record<string, unknown>) : {};
+  const n = r.exit_code ?? r.exitCode;
+  return typeof n === "number" ? n : saidExit(said);
 };
 
 /** Each of Friday's effort levels by the words a tool may use for it, in its `thought_level` option's values or names. */
@@ -1794,7 +1803,9 @@ function acp(p: AcpProfile): Adapter {
         if (!known) return [{ kind: "delta", channel: "reasoning", text: `\n${name} doesn't offer “${turn.model}” here, so it uses ${str(opt.currentValue) || "its own choice"}.\n` }, ...effortStep(res)];
         ask("session/set_config_option", { sessionId: sid, configId: opt.id, value: known.id }, (r) => {
           if (r.result?.configOptions) keep({ configOptions: r.result.configOptions });
-          return effortStep(r.result ?? res);
+          // Its answer holds the options, not the modes: the conversation's modes still decide Plan (a Plan turn with a model
+          // picked went on in the agent's default mode).
+          return effortStep({ ...res, ...r.result });
         });
         return [];
       };
@@ -1821,7 +1832,7 @@ function acp(p: AcpProfile): Adapter {
         if (str(opt.currentValue) === to) return [...said, ...mode(res)];
         ask("session/set_config_option", { sessionId: sid, configId: opt.id, value: to }, (r) => {
           if (r.result?.configOptions) keep({ configOptions: r.result.configOptions });
-          return mode(r.result ?? res);
+          return mode({ ...res, ...r.result });
         });
         return said;
       };
@@ -1917,7 +1928,7 @@ function acp(p: AcpProfile): Adapter {
               const said = acpOutput(tc);
               const shell = card.name === "shell";
               const refused = (Array.isArray(tc.rawOutput) ? tc.rawOutput : [tc.rawOutput]).some((x: any) => x?.success === false);
-              out.push(result(id, card.name, said, tc.status === "failed" || refused || (shell && (testFailedInChain(str(card.args.command), said) || (saidExit(said) ?? 0) !== 0))));
+              out.push(result(id, card.name, said, tc.status === "failed" || refused || (shell && (testFailedInChain(str(card.args.command), said) || (exitOf(tc, said) ?? 0) !== 0))));
             }
             return out;
           }
@@ -2095,6 +2106,69 @@ export const gemini: Adapter = acp({
   modelAtStart: true,
   dirs: true,
 });
+
+/**
+ * Antigravity CLI over its ACP server, `agy acp` (1.5.0 and later), as its docs have editors start it. Checked on 1.5.2: its model,
+ * thinking level (low, medium, high) and mode (default, accept-edits, plan; never an auto one) are its session's options over
+ * ACP, picked like any ACP tool's, so `agy acp` takes no --model. It asks before it runs a command or changes a file unless its
+ * own permission rules say otherwise, and Friday answers by the mode; it is never started with --dangerously-skip-permissions.
+ * Its modes are found by name, as for the other ACP tools.
+ *
+ * It signs in as it starts (the browser on this computer, a link and a code over SSH) and keeps the sign-in in the system
+ * keychain. `agy models` says which: it lists the account's models, or "Please sign in to view available models".
+ * It has no command to sign out with: that is its own /logout.
+ */
+export const antigravity: Adapter = acp({
+  tool: "antigravity",
+  bins: ["agy"],
+  login: [],
+  logout: [],
+  status: (bin) => antigravitySignedIn(bin),
+  // The folders beside its own, as its --add-dir adds them to its workspace.
+  args: (t) => ["acp", ...(t.dirs ?? []).flatMap((d) => ["--add-dir", d])],
+  dirs: true,
+});
+
+/** `agy models`, with its log sent nowhere: a log file of its own was left for every look. */
+export const ANTIGRAVITY_MODELS = ["--log-file", devNull, "models"];
+
+/**
+ * Whether Antigravity is signed in, as `agy models` answers (1.5.2): the account's models, or "Please sign in to view available
+ * models". It reads its own sign-in from the keychain, opens no browser, and Friday reads no token. Anything else it says (no
+ * network, say) is unknown, not signed out.
+ */
+export async function antigravitySignedIn(bin: string): Promise<boolean | null> {
+  const r = await runCli(bin, ANTIGRAVITY_MODELS, 15_000).catch(() => null);
+  if (!r || r.code === -1) return null;
+  if (/please sign in|not (?:logged|signed) in/i.test(r.out)) return false;
+  return r.code === 0 && antigravityModels(r.out).length ? true : null;
+}
+
+/**
+ * The models `agy models` lists, as its ACP model option names them. It lists a model once for each thinking level it has
+ * ("gemini-3.8-flash-high", "…-medium", "…-low"), where the option has the model once ("gemini-3.8-flash") and the level as an
+ * option of its own; a model listed once keeps its name ("gpt-oss-120b-medium"). For the picker before its first conversation,
+ * after which the list it gave over ACP is kept (runner knownModels).
+ */
+export function antigravityModels(out: string): { id: string; label: string }[] {
+  const LEVEL = /-(?:low|medium|high|xhigh|max)$/i;
+  const rows = out
+    .split(/\r?\n/)
+    .map((l) => /^(\S+)\t(.+)$/.exec(l.trim()))
+    .filter((m): m is RegExpExecArray => !!m)
+    .map((m) => ({ id: m[1]!, label: m[2]!.trim() }));
+  const levels = new Map<string, number>();
+  for (const r of rows) if (LEVEL.test(r.id)) levels.set(r.id.replace(LEVEL, ""), (levels.get(r.id.replace(LEVEL, "")) ?? 0) + 1);
+  const list: { id: string; label: string }[] = [];
+  for (const r of rows) {
+    const base = r.id.replace(LEVEL, "");
+    const one = base !== r.id && (levels.get(base) ?? 0) > 1;
+    const id = one ? base : r.id;
+    if (list.some((m) => m.id === id)) continue;
+    list.push({ id, label: one ? r.label.replace(/\s*\((?:low|medium|high|extra high|x-?high|max)\)$/i, "") : r.label });
+  }
+  return list;
+}
 
 // Junie signs in on its own welcome screen, and has no command that says whether it is.
 export const junie: Adapter = acp({
@@ -2632,7 +2706,7 @@ export const muse: Adapter = {
   },
 };
 
-export const ADAPTERS: Record<EngineTool, Adapter> = { claude, codex, cursor, copilot, opencode, gemini, qwen, devin, junie, kiro, droid, grok, cline, kilo, amp, muse, acp: custom };
+export const ADAPTERS: Record<EngineTool, Adapter> = { claude, codex, cursor, copilot, opencode, gemini, antigravity, qwen, devin, junie, kiro, droid, grok, cline, kilo, amp, muse, acp: custom };
 
 // ── finding the executables ──────────────────────────────────────────
 
@@ -2657,9 +2731,10 @@ function extraDirs(): string[] {
       path.join(h, ".cursor", "bin"),
       // Where Cursor's command-line agent installs itself on Windows.
       path.join(local, "cursor-agent"),
-      // Devin's and Kiro's own installers: on PATH only for programs started after them, so Friday looks here itself.
+      // Devin's, Kiro's and Antigravity CLI's own installers: on PATH only for programs started after them, so Friday looks here itself.
       path.join(local, "devin", "cli", "bin"),
       path.join(local, "Kiro-Cli"),
+      path.join(local, "agy", "bin"),
     ];
   }
   return [
