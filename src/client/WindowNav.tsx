@@ -5,8 +5,8 @@ import { CodeCrewToggle } from "./WorkMode.js";
  * The chat list's button, Search, and Code or Crew, beside the Mac window's own buttons.
  *
  * The window has no title bar, so what would sit there lives on the page. No back and forward (Arun, 2026-11-03: "get rid of the
- * arrows"): the sidebar and ⌘K reach every page. In their place the open-source edition's switch between Code and Crew, in reach
- * whether the sidebar is open or not. Shown in the desktop app, on Mac and Windows alike (the styles key off its classes);
+ * arrows"): the sidebar and ⌘K reach every page. In their place the open-source edition's switch between Code and Crew, shown
+ * while the sidebar is open. Shown in the desktop app, on Mac and Windows alike (the styles key off its classes);
  * elsewhere the page has the browser's own.
  */
 export function WindowNav({ open, onToggle, what = "sessions", working, needs }: { open: boolean; onToggle: () => void; what?: "sessions" | "agents"; working?: Iterable<string>; needs?: Iterable<string> }) {
@@ -23,8 +23,9 @@ export function WindowNav({ open, onToggle, what = "sessions", working, needs }:
       <button type="button" aria-label="Search" title={`Search (${find})`} onClick={() => window.dispatchEvent(new Event("friday:search"))}>
         <Icon name="search" size={16} />
       </button>
-      {/* Both editions (Arun, 2026-11-04: "add this for production btw"). */}
-      {window.fridayDesktop && <CodeCrewToggle className="in-bar" working={working} needs={needs} />}
+      {/* Both editions (Arun, 2026-11-04: "add this for production btw"); only while the sidebar is open, since it switches what
+          the sidebar lists (Arun, 2026-11-08: "only appear when the side bar is open"). */}
+      {window.fridayDesktop && open && <CodeCrewToggle className="in-bar" working={working} needs={needs} />}
     </div>
   );
 }

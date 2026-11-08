@@ -1,5 +1,5 @@
-import { ChevronRightIcon, CloudDownloadIcon, CornerLeftUpIcon, FolderGit2Icon, FolderIcon, FolderOpenIcon, FolderSearchIcon, HistoryIcon, LockIcon, SearchIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
+import { ChevronRightIcon, ClockIcon, CloudDownloadIcon, CornerDownLeftIcon, CornerLeftUpIcon, FolderGit2Icon, FolderIcon, FolderOpenIcon, FolderSearchIcon, GitBranchIcon, HistoryIcon, LayersIcon, LockIcon, SearchIcon } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { CliSession, CliSessionList } from "../runner/imports.js";
 import { parseRepo } from "../runner/repo.js";
@@ -13,7 +13,7 @@ import { GitHubConnect } from "./GitHubConnect.js";
 import { hostApi, installedOn, type MachineMode } from "./local.js";
 import { resumeProblem, type ResumeLink } from "./resume-link.js";
 import { splitTools } from "./engines.js";
-import { loadRecentFolders, saveRecentFolder, type Identity } from "./storage.js";
+import { loadRecentFolderTimes, loadRecentFolders, saveRecentFolder, type Identity } from "./storage.js";
 import { placeCard, relTime, useDismiss } from "./ui.js";
 
 /**
@@ -306,11 +306,17 @@ export function WorkspaceCard({
   const [drag, setDrag] = useState(false);
   /** The repository whose other worktrees are shown under it. */
   const [worktreesOf, setWorktreesOf] = useState<string | null>(null);
+  /** The source the list shows; while a name is typed every source is searched, unless one is picked (`scoped`). */
+  const [source, setSource] = useState<PickSource>("recent");
+  const [scoped, setScoped] = useState<PickSource | null>(null);
   const desktop = typeof window !== "undefined" ? window.fridayDesktop : undefined;
 
   // Above the trigger, like the composer's other cards (Arun, 2026-10-20): with Home's box now near the top, "below where
   // there is room" had it dropping down over the page. Below only when there is no room above.
-  const place = placeCard(trigger?.getBoundingClientRect(), 460, { want: 520, min: 240, prefer });
+  // Opened from the folder tray under the box, it lines up with the tray: its left and right edges on the tray's (Arun,
+  // 2026-11-08: "it should start and end from the left and right side of the new folder section").
+  const tray = only !== "sessions" ? (trigger?.closest(".composer-below") as HTMLElement | null) : null;
+  const place = placeCard((tray ?? trigger)?.getBoundingClientRect(), tray ? tray.getBoundingClientRect().width : only === "sessions" ? 460 : 680, { want: 520, min: 240, prefer, gap: 8 });
 
   const choose = (folder: FolderInfo, session?: CliSession) => {
     saveRecentFolder(folder.path);
@@ -391,7 +397,7 @@ export function WorkspaceCard({
     // Nothing set while the query isn't a path in the folder picker: a state set from this effect on every key, null over null,
     // ran a render of its own after each one, and fast typing stacked them past React's limit (#185) and lost keys (audit CODE-3,
     // Arun 2026-11-04). The rows below show only the answer for the query as it is now (typedRows), so an old one is never seen.
-    if (!plain || !looksLikePath) return;
+    if (!looksLikePath) return;
     const cut = query.search(/[\\/][^\\/]*$/);
     const parent = cut >= 0 ? query.slice(0, cut + 1) : query;
     const part = cut >= 0 ? query.slice(cut + 1).toLowerCase() : "";
@@ -408,7 +414,7 @@ export function WorkspaceCard({
       live = false;
       clearTimeout(t);
     };
-  }, [plain, looksLikePath, query, identity]);
+  }, [looksLikePath, query, identity]);
   const typedRows = typed && typed.q === query ? typed.entries : [];
 
   // Enter picks the obvious thing: clone what was pasted, use a typed path, or take the first row.
@@ -419,6 +425,48 @@ export function WorkspaceCard({
     if (sessions[0]) return void byPath(sessions[0].cwd, sessions[0]);
     if (repo) return void clone(query);
   };
+
+  const sessionsBlock = (
+    <>
+      {(
+        <ScrollTabs className="ws-tabs" label="Whose sessions" active={view}>
+          {[...tabs.here, ...(moreTabs ? tabs.away : [])].map((t) => (
+            <button key={t} type="button" role="tab" aria-selected={view === t} className={`ws-tab ${view === t ? "on" : ""}`} onClick={() => setView(t)}>
+              <EngineMark tool={t} size={14} />
+              {ENGINE_NAMES[t]}
+            </button>
+          ))}
+          {tabs.away.length > 0 && (
+            <button type="button" className="ws-tab more" aria-expanded={moreTabs} onClick={() => setMoreTabs((v) => !v)}>
+              {moreTabs ? "Fewer" : `+${tabs.away.length}`}
+            </button>
+          )}
+        </ScrollTabs>
+      )}
+      {data.sessions !== null && sessions.length === 0 && (
+        // What the machine said about it, which knows the difference between none, none it can read, and none that can be continued.
+        <p className="ws-empty">{query ? `No ${ENGINE_NAMES[view]} session matches “${query}”.` : (data.sessions.notes[view] ?? `No ${ENGINE_NAMES[view]} sessions on this machine yet.`)}</p>
+      )}
+      {sessions.length > 0 && (
+        <Section label={`Continue a ${ENGINE_NAMES[view]} session`}>
+          {sessions.slice(0, 6).map((s) => (
+            <Row
+              key={`${s.tool}-${s.id}`}
+              icon={busy === s.cwd ? <span className="spinner" /> : <HistoryIcon className="size-4" />}
+              title={s.title}
+              // A transcript too long to read whole has no count worth showing: the part that was read says nothing about the rest.
+              // No count is known for a session the tool itself listed (over ACP): it is left out rather than said as none.
+              // The folder by a person's name for it: "Scratch folder", not "scratch-2026-11-03-c0317b" (Arun's e2e pass, 2026-11-04).
+              sub={[folderName({ name: s.cwd.split(/[\\/]/).filter(Boolean).pop() ?? s.cwd, path: s.cwd }), s.approx ? "long session" : s.messages ? `${s.messages} message${s.messages === 1 ? "" : "s"}` : "", relTime(s.updatedAt)].filter(Boolean).join(" · ")}
+              active={resume?.id === s.id}
+              onClick={() => void byPath(s.cwd, s)}
+            />
+          ))}
+        </Section>
+      )}
+
+    </>
+  );
 
   const body = browsing ? (
     <Browser identity={identity} path={browsing} filter={q.trim().startsWith("/") || q.trim().startsWith("~") ? "" : q.trim()} onOpen={(p) => (setQ(""), setBrowsing(p))} onUse={(f) => choose(f)} onBack={() => setBrowsing(null)} />
@@ -439,42 +487,7 @@ export function WorkspaceCard({
         <Row key={f.path} icon={busy === f.path ? <span className="spinner" /> : <FolderIcon className="size-4" />} title={f.name} sub={shortPath(f.path)} onClick={() => choose(f)} />
       ))}
 
-      {only !== "repos" && (
-        <ScrollTabs className="ws-tabs" label="Whose sessions" active={view}>
-          {[...tabs.here, ...(moreTabs ? tabs.away : [])].map((t) => (
-            <button key={t} type="button" role="tab" aria-selected={view === t} className={`ws-tab ${view === t ? "on" : ""}`} onClick={() => setView(t)}>
-              <EngineMark tool={t} size={14} />
-              {ENGINE_NAMES[t]}
-            </button>
-          ))}
-          {tabs.away.length > 0 && (
-            <button type="button" className="ws-tab more" aria-expanded={moreTabs} onClick={() => setMoreTabs((v) => !v)}>
-              {moreTabs ? "Fewer" : `+${tabs.away.length}`}
-            </button>
-          )}
-        </ScrollTabs>
-      )}
-      {only !== "repos" && data.sessions !== null && sessions.length === 0 && (
-        // What the machine said about it, which knows the difference between none, none it can read, and none that can be continued.
-        <p className="ws-empty">{query ? `No ${ENGINE_NAMES[view]} session matches “${query}”.` : (data.sessions.notes[view] ?? `No ${ENGINE_NAMES[view]} sessions on this machine yet.`)}</p>
-      )}
-      {only !== "repos" && sessions.length > 0 && (
-        <Section label={`Continue a ${ENGINE_NAMES[view]} session`}>
-          {sessions.slice(0, 6).map((s) => (
-            <Row
-              key={`${s.tool}-${s.id}`}
-              icon={busy === s.cwd ? <span className="spinner" /> : <HistoryIcon className="size-4" />}
-              title={s.title}
-              // A transcript too long to read whole has no count worth showing: the part that was read says nothing about the rest.
-              // No count is known for a session the tool itself listed (over ACP): it is left out rather than said as none.
-              // The folder by a person's name for it: "Scratch folder", not "scratch-2026-11-03-c0317b" (Arun's e2e pass, 2026-11-04).
-              sub={[folderName({ name: s.cwd.split(/[\\/]/).filter(Boolean).pop() ?? s.cwd, path: s.cwd }), s.approx ? "long session" : s.messages ? `${s.messages} message${s.messages === 1 ? "" : "s"}` : "", relTime(s.updatedAt)].filter(Boolean).join(" · ")}
-              active={resume?.id === s.id}
-              onClick={() => void byPath(s.cwd, s)}
-            />
-          ))}
-        </Section>
-      )}
+      {only !== "repos" && sessionsBlock}
 
       {only !== "sessions" && !(plain && looksLikePath && recent.length === 0) && (
         <>
@@ -551,7 +564,9 @@ export function WorkspaceCard({
     </div>
   );
 
-  return createPortal(
+  const sessionsCard =
+    only === "sessions"
+      ? createPortal(
     <div
       ref={ref}
       data-owned-floating
@@ -615,8 +630,414 @@ export function WorkspaceCard({
       </div>
     </div>,
     document.body,
+  )
+      : null;
+
+  // ── The picker (Arun, 2026-11-08: B with A's rows): where the code is, by source on the left, each folder as a row on the
+  // right that says what it is (a repository's branch, where it lives, when it was last picked). Continuing a CLI's past
+  // conversation keeps its own card, above.
+  const all = data.recent ?? [];
+  const groups = ranked(byRepo(all, plain), plain);
+  const times = loadRecentFolderTimes();
+  const stored = loadRecentFolders();
+  const usedAt = (g: { f: FolderInfo; more: FolderInfo[] }) => {
+    const paths = [g.f.path, ...g.more.map((x) => x.path)];
+    const at = Math.max(0, ...paths.map((p) => times[p] ?? 0));
+    return at || g.f.mtime || 0;
+  };
+  const storedAt = (g: { f: FolderInfo; more: FolderInfo[] }) => {
+    const i = [g.f.path, ...g.more.map((x) => x.path)].map((p) => stored.indexOf(p)).filter((i) => i >= 0);
+    return i.length ? Math.min(...i) : Infinity;
+  };
+  // Recent: the ones picked here, last first, then what was worked in most lately; six at most.
+  const recentGroups = [...groups].sort((a, b) => storedAt(a) - storedAt(b) || usedAt(b) - usedAt(a)).slice(0, 6);
+  const repoGroups = plain ? [] : groups.filter((g) => g.f.isRepo);
+  const worktreeList = plain ? [] : all.filter((f) => f.isRepo && inWorktrees(f.path));
+  const folderGroups = groups.filter((g) => plain || !g.f.isRepo);
+  const ghRepos = data.github?.repos ?? [];
+  const SOURCES: { id: PickSource; label: string; icon: ReactNode }[] = [
+    { id: "recent", label: "Recent", icon: <ClockIcon className="size-3.5" /> },
+    ...(plain
+      ? []
+      : ([
+          { id: "repos", label: "Repos", icon: <GitBranchIcon className="size-3.5" /> },
+          { id: "worktrees", label: "Worktrees", icon: <LayersIcon className="size-3.5" /> },
+        ] as const)),
+    { id: "folders", label: "Folders", icon: <FolderIcon className="size-3.5" /> },
+    ...(plain ? [] : ([{ id: "github", label: "GitHub", icon: <CloudDownloadIcon className="size-3.5" /> }] as const)),
+    // The card opened from a folder pill with no `only` offers a past conversation to continue too, as it did.
+    ...(!onlyAsked && !plain ? ([{ id: "sessions", label: "Sessions", icon: <HistoryIcon className="size-3.5" /> }] as const) : []),
+  ];
+
+  const parentOf = (p: string) => p.replace(/[\\/]+$/, "").replace(/[\\/][^\\/]+$/, "") || p;
+  const where = (f: FolderInfo) => scratchSub(f) ?? (plain ? shortPath(f.path, data.home) : shortPath(parentOf(f.path), data.home));
+  const has = (f: FolderInfo) => match(f.name) || match(f.path) || (!!f.branch && match(f.branch));
+  const groupItem = (g: { f: FolderInfo; more: FolderInfo[] }, src: PickSource, when?: number): PickItem[] => {
+    const f = g.f;
+    const open = worktreesOf === f.path && src !== "recent" && !query;
+    const copies = g.more.some((x) => inWorktrees(x.path)) ? "worktree" : "copy";
+    const extra = g.more.length ? ` · ${g.more.length} ${copies === "worktree" ? (g.more.length === 1 ? "worktree" : "worktrees") : g.more.length === 1 ? "copy" : "copies"}` : "";
+    const head: PickItem = {
+      key: `${src}:${f.path}`,
+      kind: f.isRepo && !plain ? "repo" : "folder",
+      title: data.home && f.path.replace(/[\\/]+$/, "") === data.home.replace(/[\\/]+$/, "") ? "Home" : folderName(f),
+      ...(f.isRepo && !plain && f.branch ? { branch: f.branch } : {}),
+      sub: (data.home && f.path.replace(/[\\/]+$/, "") === data.home.replace(/[\\/]+$/, "") ? "~" : where(f)) + extra,
+      ...(when ? { when: relTime(when) } : {}),
+      busy: busy === f.path,
+      run: () => choose(f),
+      ...(g.more.length && src === "repos" && !query ? { toggle: { open, label: `${g.more.length} other ${copies === "worktree" ? (g.more.length === 1 ? "worktree" : "worktrees") : g.more.length === 1 ? "copy" : "copies"} of ${folderName(f)}`, run: () => setWorktreesOf(open ? null : f.path) } } : {}),
+    };
+    const inner: PickItem[] = open
+      ? g.more.map((x) => ({ key: `${src}:${x.path}`, kind: "worktree", nested: true, title: x.branch ?? folderName(x), ...(x.branch ? { branch: x.branch, title: "" } : {}), sub: shortPath(x.path, data.home), busy: busy === x.path, run: () => choose(x) }))
+      : [];
+    return [head, ...inner];
+  };
+  const worktreeItem = (f: FolderInfo): PickItem => ({ key: `wt:${f.path}`, kind: "worktree", title: folderName(f).replace(/-[0-9a-f]{8}$/, ""), ...(f.branch ? { branch: f.branch } : {}), sub: shortPath(f.path, data.home), busy: busy === f.path, run: () => choose(f) });
+  const ghItem = (r: GithubRepo): PickItem => ({ key: `gh:${r.slug}`, kind: "github", title: r.slug, sub: r.description || "Clone into ~/Friday", lock: r.private, ...(r.updatedAt ? { when: relTime(Date.parse(r.updatedAt)) } : {}), busy: busy === r.slug, verb: "Clone", run: () => void clone(r.slug) });
+
+  // What each source holds, or, while a name is typed, how many of it match.
+  const searching = !!query && !looksLikePath && !repo;
+  const per: Record<PickSource, PickItem[]> = {
+    recent: recentGroups.filter((g) => !searching || has(g.f) || g.more.some(has)).flatMap((g) => groupItem(g, "recent", usedAt(g) || undefined)),
+    repos: repoGroups.filter((g) => !searching || has(g.f) || g.more.some(has)).flatMap((g) => groupItem(g, "repos")),
+    worktrees: worktreeList.filter((f) => !searching || has(f)).map(worktreeItem),
+    folders: folderGroups.filter((g) => !searching || has(g.f)).flatMap((g) => groupItem(g, "folders")),
+    github: ghRepos.filter((r) => !searching || match(r.slug) || match(r.description)).map(ghItem),
+    sessions: [],
+  };
+  const count = (s: PickSource) => (s === "recent" ? (searching ? per.recent.length : recentGroups.length) : s === "repos" ? (searching ? per.repos.length : repoGroups.length) : s === "folders" ? (searching ? per.folders.length : folderGroups.length) : s === "sessions" ? null : per[s].length);
+
+  const sections: { label: string; right?: ReactNode; items: PickItem[]; /** One source's list: no heading, the rail says it. */ bare?: boolean }[] = [];
+  if (repo) sections.push({ label: "Clone", items: [{ key: "clone", kind: "github", title: `Clone ${repo.slug ?? repo.name}`, sub: data.github?.available === false && data.github.installed === false ? "with git" : "into ~/Friday", busy: busy === query, verb: "Clone", run: () => void clone(query) }] });
+  if (looksLikePath) {
+    const cut = query.search(/[\\/][^\\/]*$/);
+    const parent = cut >= 0 ? query.slice(0, cut + 1) : query;
+    sections.push({
+      label: `In ${parent.replace(/[\\/]$/, "") || parent}`,
+      right: (
+        <span className="wsp-hint">
+          <kbd>tab</kbd> completes
+        </span>
+      ),
+      items: [
+        ...typedRows.map((f): PickItem => ({ key: `path:${f.path}`, kind: f.isRepo && !plain ? "repo" : "folder", title: f.name, ...(f.isRepo && !plain && f.branch ? { branch: f.branch } : {}), sub: shortPath(f.path, data.home), busy: busy === f.path, complete: shortPath(f.path, data.home), run: () => choose(f) })),
+        // The path as typed, for a folder the list can't show (a hidden one, or one typed whole).
+        { key: "use", kind: "use", title: `Use ${query.split(/[\\/]/).filter(Boolean).pop() ?? query}`, sub: shortPath(query), busy: busy === query, run: () => void byPath(query) },
+      ],
+    });
+  } else if (searching && !scoped) {
+    // A name searches every source at once, the recent ones first; a folder already listed isn't listed again under another.
+    const seen = new Set<string>();
+    const once = (items: PickItem[]) => items.filter((i) => {
+      const p = i.key.slice(i.key.indexOf(":") + 1);
+      return !seen.has(p) && !!seen.add(p);
+    });
+    for (const s of SOURCES) if (s.id !== "sessions") {
+      const items = once(per[s.id]);
+      if (items.length) sections.push({ label: s.id === "recent" ? `Best matches for “${query}”` : s.label, items: s.id === "github" ? items.slice(0, 12) : items.slice(0, 20) });
+    }
+  } else if (source !== "sessions") {
+    const items = source === "github" ? per.github.slice(0, query ? 40 : 30) : per[source];
+    const label = source === "recent" ? (plain ? "Recent folders" : "Recent") : source === "repos" ? "Repos on this computer" : source === "worktrees" ? "Worktrees" : source === "folders" ? (plain ? "Your folders" : "Folders") : data.github?.account ? `${data.github.account} on GitHub` : "GitHub";
+    const right = source === "recent" ? "Last used first" : source === "github" ? (data.github?.available ? "Clones into ~/Friday" : "") : source === "worktrees" ? "Each on its own branch" : "";
+    sections.push({ label, ...(right ? { right: <span className="wsp-hint">{right}</span> } : {}), items, bare: true });
+  }
+  const flat = sections.flatMap((s) => s.items);
+  const [sel, setSel] = useState(0);
+  const at = Math.min(sel, Math.max(0, flat.length - 1));
+  const list = useRef<HTMLDivElement>(null);
+  // A new list starts at its first row.
+  useEffect(() => setSel(0), [query, source, scoped]);
+  useEffect(() => {
+    list.current?.querySelector<HTMLElement>(`[data-idx="${at}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [at]);
+  const cycle = (dir: 1 | -1) => {
+    const ids = SOURCES.map((s) => s.id);
+    const from = ids.indexOf(scoped ?? source);
+    const next = ids[(from + dir + ids.length) % ids.length]!;
+    setBrowsing(null);
+    if (searching) setScoped(next);
+    else setSource(next);
+  };
+  const pickSource = (s: PickSource) => {
+    setBrowsing(null);
+    if (searching) setScoped(scoped === s ? null : s);
+    else setSource(s);
+  };
+  const keys = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Escape") return (e.preventDefault(), onClose());
+    if (browsing) {
+      if (e.key === "Enter") e.preventDefault();
+      return;
+    }
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (flat.length) setSel((at + (e.key === "ArrowDown" ? 1 : -1) + flat.length) % flat.length);
+      return;
+    }
+    if (e.key === "Tab") {
+      e.preventDefault();
+      // A path completes like a terminal; anything else steps to the next source.
+      const done = looksLikePath ? flat[at]?.complete : undefined;
+      if (done) return setQ(`${done}/`);
+      return cycle(e.shiftKey ? -1 : 1);
+    }
+    if (e.key === "ArrowRight" && flat[at]?.toggle && !flat[at]!.toggle!.open && (e.currentTarget.selectionStart ?? 0) >= e.currentTarget.value.length) {
+      e.preventDefault();
+      return flat[at]!.toggle!.run();
+    }
+    if (e.key === "ArrowLeft" && flat[at]?.toggle?.open && (e.currentTarget.selectionStart ?? 0) >= e.currentTarget.value.length) {
+      e.preventDefault();
+      return flat[at]!.toggle!.run();
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (flat[at]) flat[at]!.run();
+      else enter();
+    }
+  };
+  // No source is "on" while browsing, typing a path or a repo's address: the list is none of them.
+  const railOn = browsing || looksLikePath || repo ? null : searching ? scoped : source;
+  let idx = 0;
+  const listBody =
+    browsing ? (
+      <Browser identity={identity} path={browsing} filter={q.trim().startsWith("/") || q.trim().startsWith("~") ? "" : q.trim()} onOpen={(p) => (setQ(""), setBrowsing(p))} onUse={(f) => choose(f)} onBack={() => setBrowsing(null)} />
+    ) : source === "sessions" && !searching ? (
+      <div className="ws-scroll">{sessionsBlock}</div>
+    ) : (
+      <div className="wsp-list" ref={list}>
+        {err && <p className="ws-note error">{err}</p>}
+        {data.recent === null && source !== "github" && !looksLikePath && (
+          <p className="wsp-empty">
+            <span className="spinner tiny" /> Looking for your folders…
+          </p>
+        )}
+        {sections.map((s) => (
+          <div key={s.label} className={`wsp-section${s.bare ? " bare" : ""}`}>
+            {!s.bare && (
+              <div className="wsp-head">
+                <span>{s.label}</span>
+                {s.right}
+              </div>
+            )}
+            {s.items.map((it) => {
+              const i = idx++;
+              return <PickRow key={it.key} item={it} idx={i} on={i === at} query={searching ? query : ""} onHover={() => setSel(i)} />;
+            })}
+          </div>
+        ))}
+        {/* What each source says when it has nothing, in its own words. */}
+        {!flat.length && data.recent !== null && !looksLikePath && !repo && (
+          <p className="wsp-empty">
+            {searching
+              ? scoped
+                ? `No ${SOURCES.find((x) => x.id === scoped)?.label.toLowerCase()} match “${query}”.`
+                : `Nothing called “${query}” in your folders${plain ? "" : ", repos or GitHub"}. Type its path, or browse to it.`
+              : source === "repos"
+                ? "No git repos found in your usual code folders."
+                : source === "worktrees"
+                  ? "No worktrees yet. Friday makes one when a session works on its own branch."
+                  : source === "folders"
+                    ? plain
+                      ? "No folders yet. Browse to one, or type its path."
+                      : "No plain folders yet: every one here is a repo."
+                    : source === "github"
+                      ? data.github === null
+                        ? "Asking GitHub…"
+                        : data.github.available
+                          ? "No repos on this account."
+                          : ""
+                      : plain
+                        ? "No folders yet. Browse to one, or type its path."
+                        : "Nothing picked yet. Your repos are one source down."}
+          </p>
+        )}
+        {source === "github" && !searching && data.github && !data.github.available && (
+          <div className="ws-gh-cta">
+            <GitHubConnect
+              identity={identity}
+              compact
+              why="Pick from your repos and clone them here."
+              onChange={() => {
+                cache.delete("github");
+                setNonce((x) => x + 1);
+              }}
+            />
+          </div>
+        )}
+        {source === "github" && !searching && ghRepos.length > 30 && <p className="wsp-empty">{ghRepos.length - 30} more. Type to narrow.</p>}
+      </div>
+    );
+
+  if (sessionsCard) return sessionsCard;
+  return createPortal(
+    <div
+      ref={ref}
+      data-owned-floating
+      className={`ws-card wsp ${drag ? "drag" : ""}`}
+      role="dialog"
+      aria-label={plain ? "Choose a folder" : "Choose where the agent works"}
+      style={place}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setDrag(true);
+      }}
+      onDragLeave={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && setDrag(false)}
+      onDrop={(e) => void onDrop(e)}
+    >
+      <div className="ws-search wsp-search">
+        <SearchIcon className="size-4 shrink-0 opacity-60" />
+        <input
+          autoFocus
+          value={q}
+          onChange={(e) => {
+            setQ(e.target.value);
+            if (!e.target.value.trim()) setScoped(null);
+          }}
+          onKeyDown={keys}
+          placeholder={browsing ? "Find a folder in here, or type a path" : plain ? "Find a folder, or type its path" : "Search folders and repos, or type a path"}
+          spellCheck={false}
+          aria-label={plain ? "Find a folder" : "Search repos"}
+          aria-controls={undefined}
+        />
+        <kbd className="wsp-kbd" aria-hidden>
+          esc
+        </kbd>
+      </div>
+      <div className="wsp-body">
+        <nav className="wsp-rail" aria-label="Where to look">
+          <div className="wsp-sources" role="tablist" aria-orientation="vertical">
+            {SOURCES.map((s) => {
+              const n = count(s.id);
+              const faded = searching && !scoped && n === 0;
+              return (
+                <button key={s.id} type="button" role="tab" aria-selected={railOn === s.id} tabIndex={-1} className={`wsp-src${railOn === s.id ? " on" : ""}${faded ? " faded" : ""}`} onClick={() => pickSource(s.id)}>
+                  {s.icon}
+                  <span>{s.label}</span>
+                  {n !== null && (s.id !== "github" || data.github?.available) && <span className="wsp-n">{data.recent === null && s.id !== "github" ? "" : n}</span>}
+                </button>
+              );
+            })}
+          </div>
+        </nav>
+        <div className="wsp-main">{listBody}</div>
+      </div>
+      {/* Always in sight, whatever the window's height: the ways to a folder that isn't listed, then the keys. */}
+      <div className="wsp-foot">
+        <button type="button" className="wsp-foot-btn" onClick={() => (setQ(""), setBrowsing(browsing ? null : "~"))} title="Go through the folders on this computer, here" aria-pressed={!!browsing}>
+          <FolderSearchIcon className="size-3.5" />
+          {desktop ? "Browse here…" : "Browse…"}
+        </button>
+        {desktop && (
+          <button
+            type="button"
+            className="wsp-foot-btn"
+            title={`Pick a folder in ${systemPicker(desktop.platform)}`}
+            onClick={async () => {
+              const p = await desktop.pickFolder();
+              if (p) await byPath(p);
+            }}
+          >
+            <FolderOpenIcon className="size-3.5" />
+            {desktop.platform === "darwin" ? "Choose in Finder…" : desktop.platform === "win32" ? "Choose in Explorer…" : "Choose folder…"}
+          </button>
+        )}
+        <span className="wsp-drop">or drop one here</span>
+        <span className="wsp-keys" aria-hidden>
+          <span>
+            <kbd>↑</kbd>
+            <kbd>↓</kbd>
+          </span>
+          <span>
+            <kbd>tab</kbd> {looksLikePath ? "complete" : "source"}
+          </span>
+          <span>
+            <kbd>↵</kbd> {flat[at]?.verb === "Clone" ? "clone" : "open"}
+          </span>
+        </span>
+      </div>
+      {drag && (
+        <div className="wsp-dropzone" aria-hidden>
+          <FolderIcon className="size-7" strokeWidth={1.5} />
+          <b>Drop to work in this folder</b>
+        </div>
+      )}
+    </div>,
+    document.body,
   );
 }
+
+type PickSource = "recent" | "repos" | "worktrees" | "folders" | "github" | "sessions";
+interface PickItem {
+  key: string;
+  kind: "repo" | "folder" | "worktree" | "github" | "use";
+  title: string;
+  branch?: string;
+  sub: string;
+  when?: string;
+  lock?: boolean;
+  nested?: boolean;
+  busy?: boolean;
+  /** What Enter does, said on the chosen row: "Open", or "Clone" for a repo on GitHub. */
+  verb?: string;
+  /** A path row: what Tab fills the search with. */
+  complete?: string;
+  toggle?: { open: boolean; label: string; run: () => void };
+  run: () => void;
+}
+
+/** A part of a name that matches what is typed, marked. */
+function marked(text: string, q: string): ReactNode {
+  if (!q) return text;
+  const i = text.toLowerCase().indexOf(q.toLowerCase());
+  if (i < 0) return text;
+  return (
+    <>
+      {text.slice(0, i)}
+      <mark className="wsp-hit">{text.slice(i, i + q.length)}</mark>
+      {text.slice(i + q.length)}
+    </>
+  );
+}
+
+/** One folder: what it is (its tile), its name and branch, where it lives, and when it was last picked or what Enter does. */
+function PickRow({ item, idx, on, query, onHover }: { item: PickItem; idx: number; on: boolean; query: string; onHover: () => void }) {
+  const tile = item.busy ? <span className="spinner" /> : item.kind === "repo" ? <GitBranchIcon className="size-3.5" /> : item.kind === "worktree" ? <LayersIcon className="size-3.5" /> : item.kind === "github" ? <CloudDownloadIcon className="size-3.5" /> : item.kind === "use" ? <CornerDownLeftIcon className="size-3.5" /> : <FolderIcon className="size-3.5" />;
+  return (
+    <div className={`wsp-item${item.nested ? " nested" : ""}${item.toggle ? " has-toggle" : ""}`}>
+      <button type="button" aria-current={on ? "true" : undefined} data-idx={idx} className={`wsp-row${on ? " on" : ""}${item.kind === "use" ? " use" : ""}`} onMouseMove={on ? undefined : onHover} onClick={item.run}>
+        {!item.nested && <span className="wsp-tile">{tile}</span>}
+        <span className="wsp-text">
+          <span className="wsp-line">
+            {item.title && <span className="wsp-name">{marked(item.title, query)}</span>}
+            {item.branch && (
+              <span className="wsp-branch" title={item.branch}>
+                <GitBranchIcon className="size-3" />
+                <span>{marked(item.branch, query)}</span>
+              </span>
+            )}
+            {item.lock && <LockIcon className="size-3 shrink-0 opacity-60" aria-label="Private" />}
+          </span>
+          <span className="wsp-sub">{item.sub}</span>
+        </span>
+        {on ? (
+          <span className="wsp-open" aria-hidden>
+            {item.verb ?? "Open"} <CornerDownLeftIcon className="size-3" />
+          </span>
+        ) : (
+          item.when && <span className="wsp-when">{item.when}</span>
+        )}
+      </button>
+      {item.toggle && (
+        <button type="button" className="wsp-toggle" aria-expanded={item.toggle.open} aria-label={item.toggle.open ? `Hide the ${item.toggle.label}` : `Show the ${item.toggle.label}`} title={item.toggle.label} onClick={item.toggle.run}>
+          <ChevronRightIcon className="size-3.5" />
+        </button>
+      )}
+    </div>
+  );
+}
+
 
 /** The system's own folder window, by name, for the desktop app's "Choose in …" button. */
 function systemPicker(platform: string | undefined): string {

@@ -1090,7 +1090,7 @@ export function Code({
             // Kept as it was sent while the session is being made: an edit now would not be what the agent is given.
             readOnly={busy}
             onPaste={pasteAttach(files, setFiles, setAttachNote)}
-            rows={3}
+            rows={2}
             placeholder={placeholder}
             value={goal}
             onChange={(e) => {
@@ -1145,41 +1145,6 @@ export function Code({
                 ...(work ? { plain: true } : {}), // In Work, folders: no repos, GitHub or clone (w1 #3).
               }}
             />
-            {/* Where it works, as a plain text dropdown in the box's footer beside who works and how (DIRECTION.md §9.5, as Synara
-                does): the picker of folders behind it, and the line that said "No folder picked: … Choose a folder" under the box
-                is its title now. Picked, the cross beside it takes it off again. */}
-            {hasMachine && (
-              <span className="cw-where">
-                {folder ? (
-                  <FolderPill identity={identity} folder={folder} dirs={dirs} onDirs={setDirs} branch={branchChoice} onChangeFolder={(from) => window.dispatchEvent(new CustomEvent(PICK_FOLDER, { detail: { from } }))} />
-                ) : (
-                <button
-                  type="button"
-                  className="cw-drop"
-                  aria-label="Choose a folder"
-                  title={
-                    noFolderLine === "work"
-                        ? "Your pieces are saved in a new folder. Choose one."
-                        : files.some((f) => f.folder)
-                          ? // A folder's copy attached is not a folder picked (2026-10-28 QA).
-                            `${toolName || "The agent"} starts in a new project folder, with your copy of “${files.find((f) => f.folder)!.folder}” attached to the message. Choose a folder to work in it instead.`
-                          : `No folder picked: ${toolName || "the agent"} starts in a new project folder. Choose one.`
-                  }
-                  onClick={(e) => window.dispatchEvent(new CustomEvent(PICK_FOLDER, { detail: { from: e.currentTarget } }))}
-                >
-                  <Icon name="folder" size={13} />
-                  {/* "New folder" in Code too: Friday makes one, and "No folder" read as something missing (2026-11-01, the first run). */}
-                  <span className="cw-drop-text">New folder</span>
-                  <Icon name="chevronDown" size={12} className="menu-pill-caret" />
-                </button>
-                )}
-                {folder && (
-                  <button type="button" className="cw-clear" aria-label={picked?.resume ? "Remove this session and folder" : "Remove this folder"} title="Remove this folder" onClick={() => (setPicked(null), setBranch(""), setNewBranch(true), setPickBranch(""))}>
-                    <Icon name="x" size={12} />
-                  </button>
-                )}
-              </span>
-            )}
             {/* On Solo a saved agent rides on the coding tool: said here, and taken off with the cross. */}
             {solo && agentId && agents.some((a) => a.id === agentId) && (
               <button type="button" className="menu-pill agent-pill solo-agent" title="Its instructions go to your coding tool. Click to run without it." onClick={() => setAgentId("")}>
@@ -1240,6 +1205,44 @@ export function Code({
           </div>
         </div>
       </form>
+        {/* Where it works, on a thin card of its own under the box (Arun, 2026-11-08: "add a rounded card thing below, thin but
+            good size under the input chat where the new folder button thing will go"): the picker of folders behind it, the line
+            that said "No folder picked: … Choose a folder" its title. Picked, the cross beside it takes it off again. */}
+        {hasMachine && (
+          <div className="composer-below">
+            <span className="cw-where">
+              {folder ? (
+                <FolderPill identity={identity} folder={folder} dirs={dirs} onDirs={setDirs} branch={branchChoice} onChangeFolder={(from) => window.dispatchEvent(new CustomEvent(PICK_FOLDER, { detail: { from } }))} />
+              ) : (
+              <button
+                type="button"
+                className="cw-drop"
+                aria-label="Choose a folder"
+                title={
+                  noFolderLine === "work"
+                      ? "Your pieces are saved in a new folder. Choose one."
+                      : files.some((f) => f.folder)
+                        ? // A folder's copy attached is not a folder picked (2026-10-28 QA).
+                          `${toolName || "The agent"} starts in a new project folder, with your copy of “${files.find((f) => f.folder)!.folder}” attached to the message. Choose a folder to work in it instead.`
+                        : `No folder picked: ${toolName || "the agent"} starts in a new project folder. Choose one.`
+                }
+                onClick={(e) => window.dispatchEvent(new CustomEvent(PICK_FOLDER, { detail: { from: e.currentTarget } }))}
+              >
+                <Icon name="folder" size={13} />
+                {/* "New folder" in Code too: Friday makes one, and "No folder" read as something missing (2026-11-01, the first run). */}
+                <span className="cw-drop-text">New folder</span>
+                <Icon name="chevronDown" size={12} className="menu-pill-caret" />
+              </button>
+              )}
+              {folder && (
+                <button type="button" className="cw-clear" aria-label={picked?.resume ? "Remove this session and folder" : "Remove this folder"} title="Remove this folder" onClick={() => (setPicked(null), setBranch(""), setNewBranch(true), setPickBranch(""))}>
+                  <Icon name="x" size={12} />
+                </button>
+              )}
+            </span>
+            {!folder && <span className="composer-below-note">{work ? "Your pieces are saved in a new folder" : `${toolName || "The agent"} starts in a new project folder`}</span>}
+          </div>
+        )}
       {work && <WorkStarters off={!!goal.trim() || busy} onPick={(t) => (setGoal(t), requestAnimationFrame(() => input.current?.focus()))} />}
 
       {(engine || folder || picked) && !(hasMachine && folder && !(engine && tool && (!tool.path || tool.loggedIn === false))) && (

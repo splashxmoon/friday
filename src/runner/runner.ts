@@ -948,7 +948,7 @@ export class Runner {
     if (!(await computerUseOn())) {
       // Off takes back every yes: turned on again, it asks again.
       this.computerOk = false;
-      return { output: "Computer use is off on this computer: its owner turns it on in Friday's Settings › Computer.", isError: true };
+      return { output: "Computer use is off on this computer: its owner turns it on in Friday's Settings › Permissions.", isError: true };
     }
     // The bar, with Stop, is what the person is promised: no desktop app here (a runner on its own), no computer use.
     if (!canShowBar()) return { output: "Computer use needs Friday's desktop app open on this computer, to show the person the bar with Stop while you use it.", isError: true };

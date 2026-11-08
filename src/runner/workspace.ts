@@ -131,7 +131,23 @@ export async function describe(dir: string): Promise<FolderInfo> {
     if (origin) info.remote = gitValue(origin[1]!).replace(/\/\/[^/@]+@/, "//");
     // The index is rewritten on most git activity, so it tracks "last worked on".
     info.mtime = (await stat(path.join(git, "index")).catch(() => s)).mtimeMs;
-  } else info.mtime = s.mtimeMs;
+  } else {
+    // A worktree: its .git is a file pointing at its own folder in the repository's .git, where its HEAD is; the origin is the
+    // repository's (commondir). Without this the folder picker named a worktree by its folder, not its branch (2026-11-08).
+    info.mtime = s.mtimeMs;
+    const pointer = (await readFile(git, "utf8").catch(() => "")).match(/^gitdir:\s*(.+)$/m)?.[1]?.trim();
+    if (pointer) {
+      const own = path.resolve(dir, pointer);
+      const head = await readFile(path.join(own, "HEAD"), "utf8").catch(() => "");
+      const m = head.match(/^ref: refs\/heads\/(.+)$/m);
+      info.branch = m ? m[1]!.trim() : head.trim().slice(0, 7) || undefined;
+      const common = path.resolve(own, (await readFile(path.join(own, "commondir"), "utf8").catch(() => "../..")).trim());
+      const config = await readFile(path.join(common, "config"), "utf8").catch(() => "");
+      const origin = config.match(/\[remote "origin"\][^[]*?url\s*=\s*([^\n]+)/);
+      if (origin) info.remote = gitValue(origin[1]!).replace(/\/\/[^/@]+@/, "//");
+      info.mtime = (await stat(path.join(own, "index")).catch(() => s)).mtimeMs;
+    }
+  }
   return info;
 }
 

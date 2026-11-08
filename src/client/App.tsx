@@ -8,7 +8,7 @@ import { BuildWatch } from "./BuildWatch.js";
 import type { Role } from "../types.js";
 import { lazy, Suspense, type ComponentProps, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { isNarrow } from "./narrow.js";
-import { readTabNow, setTeamTab, TeamHome, useTeamTab } from "./Teammates.js";
+import { readTabNow, setTeamTab, TeamHome, TeammateDialog, useTeamTab } from "./Teammates.js";
 import { choosePlace, usePlaceFollows, usePlaceLeaves, useWorkSessions } from "./WorkMode.js";
 import { openWorkflows, useAutomationsView, useWorkflowNotices } from "./team-workflow-view.js";
 import type { AgentView, PersonListing } from "../agents.js";
@@ -116,7 +116,9 @@ type Route =
   /** Everything waiting on you, ranked, with Friday's suggested answers (NeedsYou.tsx). */
   | { kind: "needs" }
   | { kind: "settings"; section: string }
-  | { kind: "usage" };
+  | { kind: "usage" }
+  /** A new teammate for the Crew, on a page of its own rather than a dialog (Teammates.tsx TeammateDialog, `page`). */
+  | { kind: "new-teammate" };
 
 function readRoute(): Route {
   return parseRoute(location.search);
@@ -139,6 +141,7 @@ function parseRoute(search: string): Route {
   if (p.get("view") === "needs") return { kind: "needs" };
   if (p.get("view") === "settings") return { kind: "settings", section: settingsSection(p.get("section")) };
   if (p.get("view") === "usage") return { kind: "usage" };
+  if (p.get("view") === "new-teammate") return { kind: "new-teammate" };
   if (p.get("view") === "quick") return { kind: "quick" };
   const sid = p.get("session");
   const invite = p.get("invite");
@@ -174,6 +177,7 @@ function routeUrl(r: Route): string {
   if (r.kind === "needs") return "/?view=needs";
   if (r.kind === "settings") return `/?view=settings&section=${encodeURIComponent(r.section)}`;
   if (r.kind === "usage") return "/?view=usage";
+  if (r.kind === "new-teammate") return "/?view=new-teammate";
   if (r.kind === "quick") return "/?view=quick";
   if (r.kind === "session") return `/?session=${encodeURIComponent(r.sid)}&invite=${encodeURIComponent(r.invite)}`;
   const q = new URLSearchParams();
@@ -751,7 +755,7 @@ export function App() {
       if (r.kind !== "session" && parseRoute(location.search).kind === r.kind) dispatchEvent(new CustomEvent("friday:same-page", { detail: r.kind }));
       history.pushState(null, "", routeUrl(r));
       setRoute(r);
-      if (r.kind !== "session") document.title = r.kind === "connections" ? "Connections · Friday" : r.kind === "agents" ? "Saved agents · Friday" : r.kind === "automations" ? "Automations · Friday" : r.kind === "settings" ? "Settings · Friday" : r.kind === "usage" ? "Usage · Friday" : r.kind === "review" ? "Code Review · Friday" : r.kind === "needs" ? "Needs you · Friday" : r.kind === "board" ? "Agent Board · Friday" : r.kind === "library" ? "Library · Friday" : r.kind === "people" ? "People · Friday" : (r.kind as string) === "crew" ? "Crew · Friday" : "Friday";
+      if (r.kind !== "session") document.title = r.kind === "connections" ? "Connections · Friday" : r.kind === "agents" ? "Saved agents · Friday" : r.kind === "automations" ? "Automations · Friday" : r.kind === "settings" ? "Settings · Friday" : r.kind === "usage" ? "Usage · Friday" : r.kind === "new-teammate" ? "New teammate · Friday" : r.kind === "review" ? "Code Review · Friday" : r.kind === "needs" ? "Needs you · Friday" : r.kind === "board" ? "Agent Board · Friday" : r.kind === "library" ? "Library · Friday" : r.kind === "people" ? "People · Friday" : (r.kind as string) === "crew" ? "Crew · Friday" : "Friday";
       if (isNarrow(innerWidth)) setLayout({ sidebarCollapsed: true });
     },
     [setLayout],
@@ -796,9 +800,13 @@ export function App() {
     // The Usage page, from anywhere (the home page's "tokens saved" line).
     const usage = () => navigate({ kind: "usage" });
     addEventListener("friday:usage", usage);
+    // The New teammate page, from anywhere (the Crew's New teammate, Getting started's Add): with the Crew in the sidebar.
+    const mate = () => (setTeamTab(true, { stay: true }), navigate({ kind: "new-teammate" }));
+    addEventListener("friday:new-teammate", mate);
     return () => {
       removeEventListener("friday:settings", on);
       removeEventListener("friday:usage", usage);
+      removeEventListener("friday:new-teammate", mate);
     };
   }, [navigate]);
   // A quick prompt from the floating window (desktop/quick.ts): into the session that is open, or a new one, as an ordinary
@@ -1092,8 +1100,9 @@ export function App() {
   // Which sessions are which, read from the server here whatever shows: with the sidebar folded nothing else asked (2026-10-28).
   useWorkSessions(identity);
   usePlaceFollows(activeSid);
-  // Automations is each place's own (the Crew's are its workflows) and the hosted Crew page turns the place itself, so both stay.
-  usePlaceLeaves(activeSid, () => navigate({ kind: "home" }), !["home", "session", "automations", "crew"].includes(route.kind));
+  // Automations is each place's own (the Crew's are its workflows) and the hosted Crew page turns the place itself, so both stay;
+  // so does the New teammate page, which turns to the Crew as it opens.
+  usePlaceLeaves(activeSid, () => navigate({ kind: "home" }), !["home", "session", "automations", "crew", "new-teammate"].includes(route.kind));
   const inChat = route.kind === "home" || route.kind === "session";
   const inAgents = route.kind === "agents";
   // "new" is the builder with nothing yet; with no agents at all it is the only page there is.
@@ -1194,7 +1203,7 @@ export function App() {
   // Every full page sits under the window's band the same way, so they are all the same height: Usage and Settings were
   // left out, and stood 40px taller than the pages beside them.
   let crewWorkflows = false;
-  const fullBleed = crewWorkflows || route.kind === "agents" || route.kind === "automations" || route.kind === "connections" || route.kind === "people" || route.kind === "library" || route.kind === "board" || route.kind === "review" || route.kind === "needs" || route.kind === "usage" || route.kind === "settings";
+  const fullBleed = crewWorkflows || route.kind === "agents" || route.kind === "automations" || route.kind === "connections" || route.kind === "people" || route.kind === "library" || route.kind === "board" || route.kind === "review" || route.kind === "needs" || route.kind === "usage" || route.kind === "new-teammate" || route.kind === "settings";
   useLayoutEffect(() => {
     if (!fullBleed) return;
     // When the band comes, not only if it is there as this opens: after a reload it came later, and the page stood 12px lower.
@@ -1261,7 +1270,8 @@ export function App() {
           onImportAgents={() => setImportingAgents(true)}
           agentMenu={agentMenu}
           activeSid={activeSid}
-          view={route.kind}
+          // The New teammate page is the Crew's: the sidebar stays as it is on the Crew's home.
+          view={route.kind === "new-teammate" ? "home" : route.kind}
           draftProject={route.kind === "home" ? route.projectId : undefined}
           onNew={(projectId) => navigate({ kind: "home", projectId })}
           onOpen={(r) => navigate({ kind: "session", sid: r.sid, invite: r.invite })}
@@ -1409,6 +1419,9 @@ export function App() {
           />
         ) : route.kind === "usage" ? (
           <UsagePage identity={identity} solo={planLimits(planNow(workspace)).fridayAgent === "none"} />
+        ) : route.kind === "new-teammate" ? (
+          // Cancel goes back to the Crew room, where a new teammate is asked for.
+          <TeammateDialog page identity={identity} editing={null} onClose={() => (setTeamTab(true), navigate({ kind: "home" }))} />
         ) : null}
         </Suspense>
       </main>

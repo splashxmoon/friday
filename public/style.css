@@ -2553,6 +2553,85 @@ select { cursor: pointer; }
 /* one card: search over your repos, GitHub and sessions to continue */
 .ws-card { position: fixed; z-index: 60; display: flex; flex-direction: column; max-height: min(520px, 70vh); border-radius: 14px; border: 1px solid var(--border-strong); background: var(--card); box-shadow: 0 18px 50px rgba(0, 0, 0, .45); overflow: hidden; }
 .ws-card.drag { border-color: var(--accent); }
+/* The folder picker (Arun, 2026-11-08: B with A's rows): the sources on the left, every folder as a row that says what it is. */
+.wsp { height: 500px; border-radius: 14px; display: flex; flex-direction: column; overflow: hidden; }
+.wsp.drag { border-color: var(--border-strong); }
+.wsp-search { gap: 10px; height: 48px; padding: 0 14px 0 16px; }
+.wsp-search input::placeholder { color: var(--faint); }
+.wsp kbd { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 5px; border: 1px solid var(--border-strong); background: var(--hover); color: var(--text-muted); font: 500 10.5px/1 var(--font); }
+.wsp-kbd { flex: none; }
+.wsp-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 178px minmax(0, 1fr); }
+.wsp-rail { display: flex; flex-direction: column; min-height: 0; padding: 8px; border-right: 1px solid var(--border); overflow-y: auto; scrollbar-width: none; }
+.wsp-sources { display: flex; flex-direction: column; gap: 2px; }
+.wsp-src { display: flex; align-items: center; gap: 9px; width: 100%; height: 34px; padding: 0 10px; border: 0; border-radius: 8px; background: none; color: var(--ink-2); font: 500 13px/1 var(--font); text-align: left; cursor: pointer; transition: background-color var(--t-hover, .12s) var(--ease-out), color var(--t-hover, .12s) var(--ease-out); }
+.wsp-src > svg { flex: none; color: var(--text-muted); }
+.wsp-src > span:not(.wsp-n) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wsp-src:hover { background: var(--hover); color: var(--ink); }
+.wsp-src.on, .wsp-src[aria-pressed="true"] { background: var(--hover-strong, var(--card-2)); color: var(--ink); font-weight: 600; }
+.wsp-src.on > svg { color: var(--ink); }
+.wsp-src.faded { color: var(--faint); }
+.wsp-src.faded > svg { opacity: .6; }
+.wsp-src:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
+.wsp-n { margin-left: auto; color: var(--faint); font-size: 12px; font-weight: 400; font-variant-numeric: tabular-nums; }
+.wsp-drop { padding: 4px 10px 2px; color: var(--faint); font-size: 11.5px; }
+.wsp-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.wsp-main > .ws-scroll, .wsp-main > .ws-crumb { flex: none; }
+.wsp-main > .ws-scroll:last-child { flex: 1; }
+.wsp-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 0 8px; scrollbar-width: thin; }
+.wsp-section + .wsp-section { margin-top: 4px; }
+.wsp-section.bare { padding-top: 6px; }
+.wsp-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 16px 6px; background: var(--card); color: var(--text-muted); font-size: 11.5px; font-weight: 500; letter-spacing: .01em; }
+.wsp-hint { display: inline-flex; align-items: center; gap: 5px; color: var(--faint); font-weight: 400; }
+.wsp-item { position: relative; margin: 0 6px; }
+.wsp-item.nested { margin-left: 32px; }
+.wsp-item.nested::before { content: ""; position: absolute; left: 0; top: -2px; bottom: -2px; width: 1px; background: var(--border-strong); }
+.wsp-row { display: flex; align-items: center; gap: 11px; width: 100%; min-height: 48px; padding: 6px 10px; border: 0; border-radius: 9px; background: none; color: var(--ink); text-align: left; cursor: pointer; transition: background-color .1s var(--ease-out); }
+.wsp-item.nested .wsp-row { min-height: 42px; padding-left: 14px; border-radius: 0 9px 9px 0; }
+.wsp-item.has-toggle .wsp-row { padding-right: 40px; }
+.wsp-row.on { background: var(--hover-strong, var(--card-2)); }
+.wsp-row:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
+.wsp-row.use { min-height: 42px; margin-top: 4px; box-shadow: inset 0 0 0 1px var(--border); border: 1px dashed transparent; }
+.wsp-row.use .wsp-tile { border-style: dashed; }
+.wsp-tile { display: grid; place-items: center; width: 28px; height: 28px; flex: none; border-radius: 8px; background: var(--hover); color: var(--ink-2); }
+.wsp-row.on .wsp-tile { background: var(--card); color: var(--ink); }
+.wsp-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.wsp-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.wsp-name { min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; font-weight: 600; }
+.wsp-branch { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 220px; flex: 0 1 auto; height: 20px; padding: 0 7px; border-radius: 6px; background: var(--hover); color: var(--ink-2); font: 11px/1 var(--mono); }
+.wsp-branch > svg { flex: none; color: var(--text-muted); }
+.wsp-branch > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wsp-sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 12px; }
+.wsp-when { flex: none; color: var(--faint); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wsp-open { flex: none; display: inline-flex; align-items: center; gap: 5px; color: var(--text-muted); font-size: 11.5px; }
+.wsp-toggle { position: absolute; top: 50%; right: 8px; display: grid; place-items: center; width: 26px; height: 26px; margin-top: -13px; border: 0; border-radius: 7px; background: none; color: var(--text-muted); cursor: pointer; }
+.wsp-toggle:hover { background: var(--hover-strong, var(--hover)); color: var(--ink); }
+.wsp-toggle svg { transition: transform .14s var(--ease-out); }
+.wsp-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
+.wsp-item.has-toggle .wsp-open { margin-right: 4px; }
+.wsp-hit { background: none; color: inherit; box-shadow: inset 0 -2px 0 color-mix(in oklab, var(--ink) 55%, transparent); }
+.wsp-empty { display: flex; align-items: center; gap: 8px; margin: 12px 16px; color: var(--text-muted); font-size: 13px; line-height: 19px; text-wrap: pretty; }
+.wsp .ws-gh-cta { padding: 4px 12px 8px; }
+.wsp-foot { flex: none; display: flex; align-items: center; gap: 2px; height: 44px; padding: 0 12px 0 8px; border-top: 1px solid var(--border); color: var(--faint); font-size: 11.5px; white-space: nowrap; overflow: hidden; }
+.wsp-foot-btn { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 10px; border: 0; border-radius: 8px; background: none; color: var(--ink-2); font: 500 12.5px/1 var(--font); cursor: pointer; }
+.wsp-foot-btn > svg { color: var(--text-muted); }
+.wsp-foot-btn:hover, .wsp-foot-btn[aria-pressed="true"] { background: var(--hover); color: var(--ink); }
+.wsp-foot-btn:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
+.wsp-foot .wsp-drop { padding: 0 0 0 6px; }
+.wsp-keys { margin-left: auto; display: inline-flex; align-items: center; gap: 12px; }
+.wsp-keys > span { display: inline-flex; align-items: center; gap: 4px; }
+.wsp-foot > span { display: inline-flex; align-items: center; gap: 5px; }
+.wsp-dropzone { position: absolute; inset: 8px; z-index: 3; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; border: 1.5px dashed var(--ink-2); border-radius: 10px; background: color-mix(in oklab, var(--card) 92%, transparent); color: var(--ink-2); font-size: 15px; pointer-events: none; }
+.wsp-dropzone b { color: var(--ink); font-weight: 600; }
+.wsp { position: fixed; }
+@media (max-width: 560px) {
+  .wsp { height: min(520px, calc(100dvh - 24px)); }
+  .wsp-body { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+  .wsp-rail { flex-direction: row; gap: 4px; padding: 6px 8px; border-right: 0; border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
+  .wsp-sources { flex-direction: row; gap: 4px; }
+  .wsp-src { width: auto; flex: none; height: 30px; padding: 0 10px; }
+  .wsp-drop, .wsp-keys { display: none; }
+  .wsp-branch { max-width: 140px; }
+}
 .ws-search { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
 .ws-search input { flex: 1; min-width: 0; border: 0; background: none; color: var(--ink); font-size: 14px; outline: none; }
 .ws-scroll { flex: 1; overflow-y: auto; padding: 6px; }
@@ -2752,7 +2831,12 @@ select { cursor: pointer; }
 /* One icon weight for the whole app. The vendored ai-elements components draw
    with lucide, which strokes at 2; everything else is the house set at 1.8, and
    side by side in the composer the difference read as two different toolbars. */
-svg.lucide { stroke-width: 1.5; } /* DIRECTION.md §6: Lucide at 1.5 (2026-10-29) */
+svg.lucide { stroke-width: 1.4px; } /* DIRECTION.md §6: Lucide at 1.5 (2026-10-29); in screen pixels since 2026-11-08 (below) */
+/* Icons drawn crisp (Arun, 2026-11-08: "not looking grainy… nicer and clearer"): every line the same width on screen whatever
+   the icon's size, instead of 1.5 units of 24 shrinking to 0.8px at 13px and smearing across two pixels. */
+:is(svg.lucide, svg.fi) :is(path, circle, rect, line, polyline, polygon, ellipse) { vector-effect: non-scaling-stroke; }
+:is(svg.lucide, svg.fi) { shape-rendering: geometricPrecision; flex-shrink: 0; }
+svg.fi { stroke-width: var(--fi-sw, 1.4px); }
 
 /* ── the tree ────────────────────────────────────────────────────────
    The folder as it is on the machine, with what the session knows drawn on
@@ -8377,6 +8461,75 @@ html:not(.dark) .ctx-gauge .ctx-ring circle:first-child { stroke-opacity: .32; }
 .lh-more-n { text-align: right; font-variant-numeric: tabular-nums; }
 
 /* What the plan costs, at the foot of its card. */
+/* Usage, design C (Arun, 2026-11-08: "easy to glance at and full understand"): a card per tool, said as one number, what is left
+   of the window it meets first; under it every window on one scale. Colour only says state: amber from 70%, red from 90%. */
+.lh-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 14px; }
+.lh-card { display: flex; flex-direction: column; gap: 18px; min-width: 0; padding: 20px 22px 16px; border-radius: var(--r-xl); background: var(--card); box-shadow: inset 0 0 0 1px var(--border); }
+.lh-card[data-level="hot"] { box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--red) 38%, var(--border)); }
+.lh-card .num, .lh-sum .num, .us-act .num, .lh-read { font-variant-numeric: tabular-nums; }
+.lh-card-head { display: flex; align-items: center; gap: 9px; min-width: 0; font-size: 14px; color: var(--ink); }
+.lh-card-head > svg, .lh-card-head > span:first-child { flex: none; }
+.lh-card-head > b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.lh-roomy { flex: none; display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px; border-radius: var(--r-pill); background: color-mix(in oklab, var(--ready) 13%, transparent); color: var(--ready); font-size: 11.5px; font-weight: 500; }
+.lh-roomy::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.lh-card-plan { flex: none; margin-left: auto; color: var(--text-muted); font-size: 12px; font-weight: 500; }
+.lh-hero { display: flex; flex-direction: column; gap: 4px; }
+.lh-hero p { margin: 0; }
+.lh-hero-n { display: flex; align-items: baseline; gap: 7px; }
+.lh-hero-big { color: var(--ink); font: 600 44px/48px var(--font); letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+.lh-hero-big.warm { color: var(--amber); }
+.lh-hero-big.hot { color: var(--red); }
+.lh-hero-unit { color: var(--text-muted); font-size: 14px; font-weight: 500; }
+.lh-hero-of { margin-top: 4px !important; color: var(--ink-2); font-size: 13px; line-height: 19px; text-wrap: pretty; }
+.lh-hero-pace { color: var(--text-muted); font-size: 12.5px; line-height: 18px; text-wrap: pretty; }
+.lh-hero-pace.warn { color: var(--amber); }
+.lh-hero-pace.hot { color: var(--red); }
+.lh-wrows { list-style: none; margin: 0; padding: 14px 0 0; display: flex; flex-direction: column; gap: 11px; border-top: 1px solid var(--border); }
+.lh-wrow { display: grid; grid-template-columns: minmax(64px, auto) minmax(48px, 1fr) 38px 50px; align-items: center; gap: 10px; font-size: 12.5px; }
+.lh-wrow.bare { display: block; margin-top: 10px; }
+.lh-wrow-name { color: var(--ink-2); white-space: nowrap; }
+.lh-wrow-n { color: var(--ink); font-weight: 500; text-align: right; font-variant-numeric: tabular-nums; }
+.lh-wrow-n.warm { color: var(--amber); } .lh-wrow-n.hot { color: var(--red); }
+.lh-wrow-in { color: var(--text-muted); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.lh-meter { position: relative; display: block; height: 6px; border-radius: 99px; background: var(--chart-track, color-mix(in oklab, var(--ink) 9%, transparent)); }
+.lh-meter-fill { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--ink-2); transition: width .5s var(--ease-out); }
+.lh-meter-fill.warm { background: var(--amber); } .lh-meter-fill.hot { background: var(--red); }
+.lh-meter-tick { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; border-radius: 2px; background: var(--ink); }
+.lh-key { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 12px; }
+.lh-key i { width: 2px; height: 12px; border-radius: 2px; background: var(--ink); }
+.lh-top { display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-height: 28px; }
+.lh-read { color: var(--text-muted); font-size: 12px; }
+/* The one line under the cards: the plans together, whether one could be smaller, and the alert. */
+.lh-sum { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-radius: var(--r-xl); background: var(--card); box-shadow: inset 0 0 0 1px var(--border); }
+.lh-sum-cell { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 14px 20px 15px; }
+.lh-sum-cell + .lh-sum-cell { box-shadow: inset 1px 0 0 var(--border); }
+.lh-sum-k { color: var(--text-muted); font-size: 12px; }
+.lh-sum-v { color: var(--ink); font-size: 14px; font-weight: 600; }
+.lh-sum-s { color: var(--text-muted); font-size: 12px; line-height: 17px; text-wrap: pretty; }
+.lh-sum-switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; }
+@media (max-width: 760px) { .lh-sum { grid-template-columns: 1fr; } .lh-sum-cell + .lh-sum-cell { box-shadow: inset 0 1px 0 var(--border); } }
+/* Tokens: the figures on the left, which also say each colour, and the days on the right. */
+.us-act { display: grid; grid-template-columns: 250px minmax(0, 1fr); }
+.us-act-side { display: flex; flex-direction: column; gap: 20px; padding: 20px 22px; box-shadow: inset -1px 0 0 var(--border); }
+.us-act-total { display: flex; flex-direction: column; gap: 3px; }
+.us-k { color: var(--text-muted); font-size: 12px; }
+.us-big { color: var(--ink); font: 600 30px/34px var(--font); letter-spacing: -.02em; }
+.us-s { color: var(--text-muted); font-size: 12.5px; }
+.us-split { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.us-split li { display: flex; flex-direction: column; gap: 5px; }
+.us-split-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12.5px; }
+.us-split-name { display: inline-flex; align-items: center; gap: 7px; min-width: 0; color: var(--ink-2); }
+.us-split-name .key { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.us-split-row b { color: var(--ink); font-weight: 500; }
+.us-split-track { position: relative; display: block; height: 4px; border-radius: 99px; background: color-mix(in oklab, var(--ink) 8%, transparent); overflow: hidden; }
+.us-split-track .usage-part { position: absolute; inset: 0 auto 0 0; border-radius: inherit; }
+.us-facts { margin: 0; display: flex; flex-direction: column; gap: 8px; padding-top: 16px; border-top: 1px solid var(--border); }
+.us-facts div { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; }
+.us-facts dt { color: var(--text-muted); }
+.us-facts dd { margin: 0; color: var(--ink); font-weight: 500; }
+.us-act-chart { min-width: 0; padding: 20px 22px 14px; }
+.us-act-chart .usage-chart.tools { height: 100%; min-height: 220px; }
+@media (max-width: 760px) { .us-act { grid-template-columns: 1fr; } .us-act-side { box-shadow: inset 0 -1px 0 var(--border); } }
 .lh-cost { display: flex; align-items: center; gap: 8px; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border); font-size: 13px; }
 .lh-cost-n { color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums; }
 .lh-cost-src { color: var(--faint); font-size: 12px; }
@@ -8688,7 +8841,8 @@ html:not(.dark) .bd-dot.working, html:not(.dark) .bd-status.working i, html:not(
 .lh-heat-day { color: var(--text-muted); font-size: 12px; }
 .lh-heat-hour { color: var(--text-muted); font-size: 12px; }
 .lh-hcell { display: block; aspect-ratio: 1; border-radius: 3px; background: var(--track); }
-.lh-hcell.ok { background: var(--lvl-ok); } .lh-hcell.warm { background: var(--lvl-warn); } .lh-hcell.hot { background: var(--lvl-hot); }
+/* The same colours as the cards above: grey with room (lighter the less used), amber from 70%, red from 90% (Arun, 2026-11-08). */
+.lh-hcell.ok { background: var(--ink-2); } .lh-hcell.warm { background: var(--amber); } .lh-hcell.hot { background: var(--red); }
 .lh-legend .lh-hcell { width: 10px; height: 10px; aspect-ratio: auto; display: inline-block; vertical-align: middle; }
 /* The contribution graph: small, dense cells like GitHub's, the numbers beside it. */
 .ha-grid-wrap { flex-direction: row; align-items: flex-start; gap: 28px; padding: 16px 18px; }
@@ -12028,7 +12182,7 @@ html.reduce-motion :is([data-slot$="-content"], [data-slot$="-overlay"], .quick,
 .home .composer-above .route-pill.on .route-pill-state { color: var(--ready); }
 /* The box: the card, its foot a row of plain text dropdowns (folder, who works, what it may do) and the one primary button. */
 .home .composer-card .composer-inner { padding: 4px 6px 6px !important; }
-.home .composer-card .composer-inner textarea { min-height: 72px; padding: 12px 8px 4px !important; font-size: 15px; line-height: 22px; }
+.home .composer-card .composer-inner textarea { min-height: 52px; padding: 12px 8px 4px !important; font-size: 15px; line-height: 22px; }
 .home .composer-bar { gap: 2px; min-height: 32px; }
 .home .composer-bar :is(.menu-pill, .agent-pill, .cw-drop) { height: 28px; padding: 0 8px; gap: 6px; border: 0 !important; border-radius: var(--r-md); background: transparent !important; color: var(--ink-3); font: 500 13px/18px var(--font); box-shadow: none; transition: color var(--t-hover) var(--ease-out), background-color var(--t-hover) var(--ease-out); }
 .home .composer-bar :is(.menu-pill, .agent-pill, .cw-drop):is(:hover, .on, [aria-expanded="true"]) { background: var(--surface-hover) !important; color: var(--ink); }
@@ -12037,6 +12191,18 @@ html.reduce-motion :is([data-slot$="-content"], [data-slot$="-overlay"], .quick,
 .home .composer-bar .model-choice .menu-pill-mark { margin-right: 0; }
 .home .composer-bar .cm-anchor .icon-btn { width: 28px; height: 28px; border-radius: var(--r-md); color: var(--ink-3); }
 .home .composer-bar .cm-anchor .icon-btn:hover { color: var(--ink); background: var(--surface-hover); }
+/* Where it works: a thin tray hung from the box's foot (Arun, 2026-11-08: "make it be connected to the input chat but make the
+   ends of it curved a little"; then "connect where the input box finished curving and at the bottom of it where it is now flat"):
+   inset by the box's corner radius, so its sides drop from where the box's curve ends, and its own foot is rounded. */
+.composer-card:has(+ .composer-below) { position: relative; z-index: 1; }
+.composer-below { display: flex; align-items: center; gap: 10px; box-sizing: border-box; width: calc(min(656px, 100%) - 2 * var(--r-lg)); min-height: 40px; margin: -1px auto 0; padding: 1px 10px 0 4px; border: 1px solid var(--border-strong); border-top: 0; border-radius: 0 0 var(--r-lg) var(--r-lg); background: color-mix(in oklab, var(--card), var(--ink) 3%); }
+.composer-below .cw-drop { height: 28px; padding: 0 8px; gap: 6px; border: 0; border-radius: var(--r-md); background: transparent; color: var(--ink-2); font: 500 13px/18px var(--font); transition: color var(--t-hover) var(--ease-out), background-color var(--t-hover) var(--ease-out); }
+.composer-below .cw-drop:is(:hover, [aria-expanded="true"]) { background: var(--surface-hover); color: var(--ink); }
+.composer-below .cw-drop:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.composer-below .menu-pill-caret { color: var(--ink-4); }
+.composer-below .cw-drop:hover .menu-pill-caret { color: var(--ink-3); }
+.composer-below-note { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--ink-4); }
+@media (max-width: 520px) { .composer-below-note { display: none; } }
 .cw-where { position: relative; display: inline-flex; align-items: center; min-width: 0; }
 .cw-drop { display: inline-flex; align-items: center; min-width: 0; max-width: 220px; cursor: pointer; }
 .cw-drop > svg:first-child { flex: none; color: var(--ink-3); }
@@ -13288,3 +13454,13 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover { opacity: .8; }
 .amp-meter-names button[data-on="true"] { color: var(--ink); font-weight: 600; }
 .amp-meter-names button[data-locked="true"] { opacity: .45; cursor: default; }
 @media (prefers-reduced-motion: reduce) { .amp-meter-fill, .amp-meter-thumb { transition: none; } }
+/* Settings › Coding tools (Arun, 2026-11-08: "utilize the height of this too"): the tools here, each signed-in one with how much
+   of its limit is left, then every other tool Friday works with, listed open with what it is and Install. */
+.mb-tool-left { color: var(--text-muted); }
+.mb-away { display: flex; flex-direction: column; gap: 10px; margin-top: 22px; }
+.mb-away-head h3 { margin: 0; color: var(--ink); font-size: 13px; font-weight: 600; }
+.mb-away-head p { margin: 2px 0 0; color: var(--text-muted); font-size: 12px; line-height: 17px; }
+.set-computer .mb-inline .mb-tool-name { font-size: 13px; }
+.set-computer .mb-inline .mb-tool { min-height: 48px; }
+/* In Settings the lists run their full length: the page scrolls, not a 319px box inside it. */
+.set-computer .mb-inline:not(.mb-welcome) .mb-tools { max-height: none; overflow: visible; }

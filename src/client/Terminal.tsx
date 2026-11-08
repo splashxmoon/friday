@@ -244,8 +244,8 @@ export function TerminalPanel({
       ) : (
         <p className="muted small term-note">
           {window.fridayDesktop
-            ? "A live terminal opens here once this computer is connected in Settings › Computer."
-            : "A live terminal opens in the desktop app, or here through a computer you've connected in Settings › Computer."}{" "}
+            ? "A live terminal opens here once this computer is connected in Settings › This computer."
+            : "A live terminal opens in the desktop app, or here through a computer you've connected in Settings › This computer."}{" "}
           {/* The way to it, not only where it is (Arun, 2026-10-24: UX gaps). */}
           <button type="button" className="link-btn" onClick={() => (window.fridayDesktop ? openSettings("computer") : connectThisComputer())}>
             {window.fridayDesktop ? "Open it" : "Connect this computer"}

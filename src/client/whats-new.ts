@@ -15,13 +15,13 @@ export interface WhatsNewNotes {
 }
 
 export const WHATS_NEW: WhatsNewNotes = {
-  version: "0.2.18",
-  summary: "Run on another of your computers from the new-session page, a calmer Code Review with a real guided tour, and an Agent Board you answer from.",
+  version: "0.2.19",
+  summary: "A folder picker that finds things fast, Usage you take in at a glance, Settings sorted the way you look for them, and sharper icons.",
   items: [
-    { icon: "server", title: "Runs on, above the box", line: "Pick this computer or another of yours, or add one, right where you start." },
-    { icon: "gitPullRequest", title: "Code Review, said once", line: "One card says what stands before the merge, with each fix beside it." },
-    { icon: "compass", title: "A real guided tour", line: "Each file in the order to read it, with its diff and what your agents found." },
-    { icon: "board", title: "Answer from the board", line: "What waits on you is across the top: answer it there, and the agent carries on." },
+    { icon: "folder", title: "A faster folder picker", line: "Recent, repos, worktrees, folders and GitHub side by side; type a name or a path." },
+    { icon: "usage", title: "Usage at a glance", line: "Each tool as one number: what's left, when it resets, and where your pace ends." },
+    { icon: "settings", title: "Settings, sorted", line: "Grouped by what you came to change: agents, computers, connections, privacy, help." },
+    { icon: "users", title: "New teammate, a page", line: "Make a teammate on a page of its own, with a card that fills in as you type." },
   ],
 };
 

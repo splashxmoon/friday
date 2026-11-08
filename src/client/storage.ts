@@ -87,7 +87,19 @@ export function loadRecentFolders(): string[] {
   return Array.isArray(v) ? v.filter((p) => typeof p === "string") : [];
 }
 
-export const saveRecentFolder = (p: string) => set("mpa.folders", JSON.stringify([p, ...loadRecentFolders().filter((x) => x !== p)].slice(0, 12)));
+/** When each recent folder was last picked (ms), beside the list itself so a list saved before this keeps working. */
+export function loadRecentFolderTimes(): Record<string, number> {
+  const v = getJson<Record<string, number>>("mpa.folderTimes", {});
+  return v && typeof v === "object" && !Array.isArray(v) ? v : {};
+}
+
+export const saveRecentFolder = (p: string) => {
+  const list = [p, ...loadRecentFolders().filter((x) => x !== p)].slice(0, 12);
+  set("mpa.folders", JSON.stringify(list));
+  // The times of the folders still listed, this one now: the folder picker's Recent says when each was used.
+  const times = loadRecentFolderTimes();
+  set("mpa.folderTimes", JSON.stringify(Object.fromEntries(list.map((x) => [x, x === p ? Date.now() : times[x]]).filter(([, t]) => typeof t === "number"))));
+};
 
 export function loadRecents(): RecentSession[] {
   const v = getJson<RecentSession[]>("mpa.sessions", []);

@@ -860,8 +860,8 @@ export async function createApp(o: AppOptions) {
     if (!id) return {};
     const who = await identity(req);
     const m = who ? await links.machineToken(who.id, id) : null;
-    if (!m) return { error: "That machine isn't one of yours any more. Pick another in Settings › Computer.", status: 403 };
-    if (!links.connected(m.token)) return { error: `${m.label} isn't connected. Start Friday's runner on it again, or pick another machine in Settings › Computer.`, status: 503 };
+    if (!m) return { error: "That machine isn't one of yours any more. Pick another in Settings › This computer.", status: 403 };
+    if (!links.connected(m.token)) return { error: `${m.label} isn't connected. Start Friday's runner on it again, or pick another machine in Settings › This computer.`, status: 503 };
     return { token: m.token };
   };
   const linkRefusal = (link: "yes" | "no" | "anon" | "other"): string | null =>

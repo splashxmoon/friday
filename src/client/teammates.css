@@ -1177,3 +1177,42 @@ html.dark { --badge-work: #4d8eff; --badge-need: #f7b23b; --badge-done: #2fbf71;
 .tm-wait-face:first-child { margin-left: 0; }
 .tm-wait-face:hover { position: relative; z-index: 1; transform: translateY(-1px); }
 .tm-wait-face:focus-visible { outline: 2px solid var(--focus-ring, var(--ink)); outline-offset: 1px; }
+
+/* The New teammate page (TeammateDialog `page`; Arun, 2026-11-08: "make the crew teammate creator thing into a page instead of a
+   modal pop up"): a heading, the form as one card, and beside it the teammate as the crew will meet them, following the form. */
+/* No padding under the page: the foot's sticky edge is the window's bottom, not 60px above it with the form showing through. */
+.page.conns-page.tm-page { padding-bottom: 0; }
+.tm-page-wrap { max-width: 1040px; margin: 0 auto; padding-bottom: 40px; }
+.tm-page-head { display: flex; flex-direction: column; gap: 6px; margin-bottom: 24px; }
+.tm-page-back { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; height: 26px; margin: 0 0 6px -8px; padding: 0 8px; border: 0; border-radius: var(--r-md); background: none; color: var(--text-muted); font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer; transition: color 120ms ease, background-color 120ms ease; }
+.tm-page-back:hover { background: var(--hover); color: var(--ink); }
+.tm-page-back:focus-visible { outline: 2px solid var(--border-focus, var(--ink)); outline-offset: 1px; }
+.tm-page-head h1 { margin: 0; color: var(--ink); font-size: 24px; font-weight: 600; line-height: 30px; letter-spacing: -0.01em; }
+.tm-page-head p { max-width: 64ch; margin: 0; color: var(--text-muted); font-size: 13.5px; line-height: 1.5; }
+.tm-page-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 24px; align-items: start; }
+.tm-form-page { gap: 22px; padding: 26px 28px 0; border: 1px solid var(--border); border-radius: var(--r-xl); background: var(--card); }
+.tm-page-foot { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; gap: 12px; margin: 2px -28px 0; padding: 14px 28px 14px; border-top: 1px solid var(--border); border-radius: 0 0 var(--r-xl) var(--r-xl); background: var(--card); }
+.tm-page-foot-acts { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.tm-card { position: sticky; top: 0; display: flex; flex-direction: column; gap: 16px; padding: 22px; border: 1px solid var(--border); border-radius: var(--r-xl); background: var(--card); }
+.tm-card-face { display: grid; place-items: center; width: 88px; height: 88px; border-radius: var(--r-lg); background: var(--bg); box-shadow: inset 0 0 0 1px var(--border); }
+.tm-card-who { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.tm-card-who b { overflow: hidden; color: var(--ink); font-size: 17px; font-weight: 600; line-height: 22px; text-overflow: ellipsis; white-space: nowrap; }
+.tm-card-who p { display: -webkit-box; margin: 0; overflow: hidden; color: var(--ink-2); font-size: 13px; line-height: 19px; -webkit-box-orient: vertical; -webkit-line-clamp: 4; }
+.tm-card-who .tm-card-none { color: var(--text-muted); font-weight: 400; }
+.tm-card-facts { display: flex; flex-direction: column; margin: 0; border-top: 1px solid var(--border); }
+.tm-card-facts > div { display: flex; flex-direction: column; gap: 2px; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 13px; line-height: 18px; }
+.tm-card-facts dt { color: var(--text-muted); font-size: 12px; }
+.tm-card-facts dd { min-width: 0; margin: 0; color: var(--ink); }
+.tm-card-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 12px; }
+.tm-card-path span { font-family: var(--font); color: var(--text-muted); }
+.tm-card-note { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+/* Narrow: the teammate over the form, a row of its own. */
+@media (max-width: 900px) {
+  .tm-page-grid { grid-template-columns: minmax(0, 1fr); }
+  .tm-card { position: static; order: -1; display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 4px 14px; padding: 16px; }
+  .tm-card-face { grid-row: span 2; width: 64px; height: 64px; }
+  .tm-card-facts, .tm-card-note { display: none; }
+  .tm-form-page { padding: 20px 18px 0; }
+  .tm-page-foot { margin: 2px -18px 0; padding: 12px 18px; }
+}
+@media (max-width: 640px) { .page.conns-page.tm-page { padding-bottom: 0 !important; } }

@@ -16,30 +16,45 @@ test("every thing on a Settings page is found by its own word (audit e2e, Arun 2
   const { sectionsMatching, SECTIONS } = await import("../src/client/Settings.js");
   const ids = (q: string) => sectionsMatching(SECTIONS, q).map((s) => s.id);
   for (const q of ["accent", "layout", "Session layout"]) assert.deepEqual(ids(q), ["appearance"], q);
-  // The computer and its coding tools are two sections (Arun, 2026-11-04): each word finds the one it is on, and only that one.
-  for (const q of ["GitHub", "SSH", "keep awake"]) assert.ok(ids(q).includes("computer") && !ids(q).includes("coding-tools"), q);
+  // Each thing is found on the tab it is on, and only there (Arun, 2026-11-08: categories a user finds things by).
+  assert.ok(ids("keep awake").includes("computer") && !ids("keep awake").includes("coding-tools"), "keep awake");
+  assert.equal(ids("GitHub")[0], "github", "GitHub"); // and, with a team, Slack & issues (GitHub issues start work)
+  assert.ok(ids("SSH").includes("other-computers"), "SSH");
   for (const q of ["ACP", "Other ACP agent", "sign in", "Codex", "Fewer coding tools"]) assert.ok(ids(q).includes("coding-tools") && !ids(q).includes("computer"), q);
-  for (const q of ["welcome", "what's new", "What's new"]) assert.deepEqual(ids(q), ["about"], q);
+  for (const q of ["what's new", "What's new", "release notes"]) assert.deepEqual(ids(q), ["updates"], q);
+  assert.deepEqual(ids("welcome"), ["help"]);
+  for (const q of ["analytics", "telemetry"]) assert.deepEqual(ids(q), ["privacy"], q);
+  for (const q of ["screen", "mouse"]) assert.deepEqual(ids(q), ["permissions"], q);
+  assert.deepEqual(ids("export"), ["data"]);
   assert.deepEqual(ids("heatmap"), ["usage-limits"]);
   // Only the open-source edition has the Tailscale and Send feedback rows: the hosted one finds nothing for them. Neither has a
   // phone row: the open-source app has no phone app to pair yet (Arun, 2026-11-04).
   for (const q of ["phone", "iPhone"]) assert.deepEqual(ids(q), [], q);
-  assert.deepEqual(ids("Tailscale"), ["computer"], "Tailscale");
-  assert.deepEqual(ids("feedback"), ["about"]);
+  assert.deepEqual(ids("Tailscale"), ["other-computers"], "Tailscale");
+  assert.deepEqual(ids("feedback"), ["help"]);
   // Widgets and slash commands find nothing in the hosted and public editions; Arun's own build has a section for them,
   // found by what it changes.
   let custom: string[] = [];
   for (const q of ["mods", "widget", "slash commands"]) assert.deepEqual(ids(q), custom, q);
 });
 
-test("old links to the computer's page land on the right half of it (Arun, 2026-11-04: two sections)", async () => {
+test("old links land on the tab that holds them now, and the tabs are grouped by what you come to change (Arun, 2026-11-08)", async () => {
   const { settingsSection, SECTIONS } = await import("../src/client/Settings.js");
+  const { GROUPS } = await import("../src/client/settings-sections.js");
   assert.equal(settingsSection("computer"), "computer");
   assert.equal(settingsSection("machine"), "computer");
   assert.equal(settingsSection("tools"), "coding-tools");
-  assert.equal(settingsSection("coding-tools"), "coding-tools");
-  const at = (id: string) => SECTIONS.findIndex((s) => s.id === id);
-  assert.equal(at("coding-tools"), at("computer") + 1, "Coding tools sits right under Computer");
-  assert.deepEqual([SECTIONS[at("computer")]!.label, SECTIONS[at("coding-tools")]!.label], ["Computer", "Coding tools"]);
-  assert.equal(SECTIONS[at("coding-tools")]!.group, "This computer");
+  assert.equal(settingsSection("about"), "updates");
+  assert.equal(settingsSection("data"), "data");
+  assert.deepEqual(GROUPS, ["General", "Agents", "Computers", "Connections", "Workspace", "Privacy & data", "Help"]);
+  const of = (id: string) => SECTIONS.find((s) => s.id === id)!;
+  assert.deepEqual([of("computer").label, of("computer").group], ["This computer", "Computers"]);
+  assert.equal(of("other-computers").group, "Computers");
+  for (const id of ["coding-tools", "own-models", "memory", "permissions", "usage-limits"]) assert.equal(of(id).group, "Agents", id);
+  for (const id of ["github", "outside-agents"]) assert.equal(of(id).group, "Connections", id);
+  for (const id of ["privacy", "data"]) assert.equal(of(id).group, "Privacy & data", id);
+  for (const id of ["updates", "help"]) assert.equal(of(id).group, "Help", id);
+  // A group's tabs sit together, in the order the groups are listed.
+  const order = SECTIONS.map((s) => GROUPS.indexOf(s.group));
+  assert.deepEqual(order, [...order].sort((a, b) => a - b), "tabs in group order");
 });

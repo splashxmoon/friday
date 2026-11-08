@@ -8,10 +8,10 @@ import { refreshToolLimits, useToolLimits } from "./toolLimits.js";
 import type { Identity } from "./storage.js";
 import { ENGINE_NAMES, toolList } from "../types.js";
 import { Skeleton, SkeletonCards, SkeletonRows, barHeight, relTime } from "./ui.js";
-import { ArrowRightIcon, ArrowRightLeftIcon, ChartColumnIcon, CircleAlertIcon } from "lucide-react";
+import { ArrowRightIcon, ArrowRightLeftIcon, ChartColumnIcon, CircleAlertIcon, RefreshCwIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Choice, EmptyState, PageHeader, SectionHeader, StatTile, surface } from "@/components/dass";
+import { Choice, EmptyState, PageHeader, SectionHeader, surface } from "@/components/dass";
 import { LimitsHub } from "./LimitsHub.js";
 import { RoutingLearned } from "./RoutingLearned.js";
 
@@ -60,6 +60,19 @@ function Mark({ tool }: { tool: UsageTool }) {
   return tool === "friday" ? <FridayMark size={16} /> : <EngineMark tool={tool} size={16} />;
 }
 
+/** The newest of a reading's windows: when the limits on the page were read. */
+function newestReading(l: Limits): number {
+  const all = [...(l.claudeWindows ?? []), ...(l.codexWindows ?? []), ...(l.codex ? [l.codex] : []), ...(l.cursor?.windows ?? []), ...(l.copilot?.windows ?? []), ...Object.values(l.tools ?? {}).flatMap((a) => a?.windows ?? [])];
+  return all.reduce((n, w) => Math.max(n, w.at ?? 0), 0);
+}
+/** "just now", "2 min ago", "at 3:04 PM". */
+function readAgo(at: number, now: number): string {
+  const s = Math.max(0, Math.round((now - at) / 1000));
+  if (s < 45) return "just now";
+  if (s < 3600) return `${Math.max(1, Math.round(s / 60))} min ago`;
+  return `at ${new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+}
+
 /** "Jun 4", for a day key. */
 const dayName = (d: string) => new Date(`${d}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 
@@ -78,6 +91,21 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
   // had gone through.
   useEffect(() => refreshToolLimits(identity, true), []); // eslint-disable-line react-hooks/exhaustive-deps
   const limits = read && read !== "none" ? read : null;
+  // When the newest of the readings was taken, said beside Refresh; the clock moves it on.
+  const readAt = limits ? newestReading(limits) : 0;
+  const [clock, setClock] = useState(Date.now);
+  useEffect(() => {
+    const t = setInterval(() => setClock(Date.now()), 15_000);
+    return () => clearInterval(t);
+  }, []);
+  // Refresh shows it is reading until a new reading lands, or for a few seconds when nothing changes.
+  const [rereading, setRereading] = useState(false);
+  useEffect(() => setRereading(false), [read]);
+  useEffect(() => {
+    if (!rereading) return;
+    const t = setTimeout(() => setRereading(false), 6000);
+    return () => clearTimeout(t);
+  }, [rereading]);
   const [hover, setHover] = useState<number | null>(null);
   // The coding tools on this computer: the table lists those and any that did work in the range, not all sixteen Friday knows,
   // most of them dashes (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
@@ -132,18 +160,19 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
   return (
     <div className="page conns-page usage-page px-6!">
       <div className="flex flex-col gap-10">
-        <PageHeader
-          className="mb-0"
-          title="Usage"
-          subtitle={solo ? "Your coding tools' limits right now, and the tokens they have used." : "Your coding tools' limits right now, and the tokens every agent in this workspace has used."}
-        />
-
-        <section aria-label="Limits">
-          <SectionHeader title="Limits" description="Read from the coding tools on this computer, every two minutes." />
+        <PageHeader className="mb-0" title="Usage" />
+        {/* No heading over the cards (Arun, 2026-11-08: "get rid of this"): the page opens on them. When they were read and a way
+            to read them again stay, small, at the top right; what the thin line on a bar means is in its hover. */}
+        <section aria-label="Limits" className="flex flex-col gap-3">
+          <div className="lh-top">
+            {readAt > 0 && <span className="lh-read num">Read {readAgo(readAt, clock)}</span>}
+            <Button variant="ghost" size="xs" className="text-[var(--text-muted)]" disabled={rereading} onClick={() => (setRereading(true), refreshToolLimits(identity, true))} aria-label="Read the limits again">
+              <RefreshCwIcon className={cn("size-3.5", rereading && "animate-spin")} />
+              {rereading ? "Reading…" : "Refresh"}
+            </Button>
+          </div>
           <LimitsHub read={read} />
         </section>
-
-        <RoutingLearned identity={identity} />
 
         <section aria-label="Activity" className="flex flex-col gap-6">
           <SectionHeader
@@ -176,29 +205,49 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-3 gap-3 max-md:grid-cols-1">
-                <StatTile label="Tokens used" value={shortTokens(total)} sub={`Read fresh and written, in ${turns} turn${turns === 1 ? "" : "s"} across ${used.length} agent${used.length === 1 ? "" : "s"}`} />
-                <StatTile
-                  label="Tokens saved · estimate"
-                  value={saved ? `≈${shortTokens(saved)}` : "—"}
-                  sub={totals.carried.count ? `Across ${totals.carried.count} hand-off${totals.carried.count === 1 ? "" : "s"} between agents` : "None yet: it starts at the first hand-off"}
-                />
-                <StatTile
-                  label="Read from a cache"
-                  value={cached + fresh ? `${Math.round((cached / (cached + fresh)) * 100)}%` : "—"}
-                  sub={cached ? `${shortTokens(cached)} read back, cheaper and faster than reading it fresh` : "Cheaper and faster than reading it fresh"}
-                />
-              </div>
-
-              <div>
-                <h3 className="mt-0 mb-2 text-[13px] font-semibold text-[var(--ink)]">Each day, by agent</h3>
-                {total === 0 ? (
-                  <EmptyState small icon={<ChartColumnIcon />} title="Nothing counted in this range" className="py-8">
-                    {solo ? "" : "Friday's own agent is counted from its next step; "}
-                    {toolList("and")} {solo ? "are counted " : ""}from their next turn on a computer running Friday 0.1.32 or later.
-                  </EmptyState>
-                ) : (
-                  <div className={cn(surface, "px-4 py-4")}>
+              {total === 0 ? (
+                <EmptyState small icon={<ChartColumnIcon />} title="Nothing counted in this range" className="py-8">
+                  {solo ? "" : "Friday's own agent is counted from its next step; "}
+                  {toolList("and")} {solo ? "are counted " : ""}from their next turn on a computer running Friday 0.1.32 or later.
+                </EmptyState>
+              ) : (
+                <div className={cn(surface, "us-act")}>
+                  <div className="us-act-side">
+                    <div className="us-act-total">
+                      <span className="us-k">Used</span>
+                      <span className="us-big num">{shortTokens(total)}</span>
+                      <span className="us-s num">
+                        {turns.toLocaleString()} turn{turns === 1 ? "" : "s"}, read fresh and written
+                      </span>
+                    </div>
+                    <ul className="us-split" aria-label="Tokens by agent">
+                      {[...used].sort((a, b) => sum(totals.by[b]) - sum(totals.by[a])).map((t) => (
+                        <li key={t}>
+                          <span className="us-split-row">
+                            <span className="us-split-name">
+                              <i className={`key tool-${t}`} />
+                              {NAMES[t]}
+                            </span>
+                            <b className="num">{shortTokens(sum(totals.by[t]))}</b>
+                          </span>
+                          <span className="us-split-track">
+                            <i className={`usage-part tool-${t}`} style={{ width: `${Math.max(1.5, (sum(totals.by[t]) / total) * 100)}%` }} />
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    <dl className="us-facts">
+                      <div title="When an agent joins or takes over, what the work so far cost, minus what was handed over: an estimate">
+                        <dt>Saved by {totals.carried.count} hand-off{totals.carried.count === 1 ? "" : "s"}</dt>
+                        <dd className="num">{saved ? `≈${shortTokens(saved)}` : "—"}</dd>
+                      </div>
+                      <div title={cached ? `${shortTokens(cached)} read back, cheaper and faster than reading it fresh` : "Cheaper and faster than reading it fresh"}>
+                        <dt>Read from a cache</dt>
+                        <dd className="num">{cached + fresh ? `${Math.round((cached / (cached + fresh)) * 100)}%` : "—"}</dd>
+                      </div>
+                    </dl>
+                  </div>
+                  <div className="us-act-chart">
                     <div className="usage-chart tools" role="img" aria-label={`Tokens used each day over ${days.length} days, by agent`} onMouseLeave={() => setHover(null)}>
                       {days.map((d, i) => {
                         const all = dayTotal(d);
@@ -208,7 +257,7 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
                               {/* Top to bottom in the column; the first tool sits on the baseline. */}
                               {[...USAGE_TOOLS].reverse().map((t) => (d.tools[t] ? <span key={t} className={`usage-part tool-${t}`} style={{ flexGrow: sum(d.tools[t]!) }} /> : null))}
                             </div>
-                            <span className="usage-tick">{(days.length - 1 - i) % every === 0 ? tick(d.day) : " "}</span>
+                            <span className="usage-tick">{(days.length - 1 - i) % every === 0 ? (i === days.length - 1 ? "Today" : tick(d.day)) : " "}</span>
                           </div>
                         );
                       })}
@@ -225,23 +274,15 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
                         </div>
                       )}
                     </div>
-                    <div className="usage-legend">
-                      {used.map((t) => (
-                        <span key={t}>
-                          <i className={`key tool-${t}`} /> {NAMES[t]} · {shortTokens(sum(totals.by[t]))}
-                        </span>
-                      ))}
-                      <span className="usage-legend-total">Hover a day for its numbers</span>
-                    </div>
                   </div>
-                )}
-              </div>
+                </div>
+              )}
 
               <div>
                 <h3 className="mt-0 mb-2 text-[13px] font-semibold text-[var(--ink)]">By agent</h3>
                 {/* scroll-x-cue: a narrow window scrolls the table sideways, and a shade at the cut edge says so (style.css). */}
                 <div className={cn(surface, "scroll-x-cue overflow-x-auto")}>
-                  <div className="min-w-[640px]" role="table" aria-label="Tokens by agent">
+                  <div className="min-w-[560px]" role="table" aria-label="Tokens by agent">
                     <div className={cn(ROW, "border-b border-[var(--border)] py-2 text-[12px] font-medium text-[var(--text-muted)]")} role="row">
                       <span role="columnheader">Agent</span>
                       <span role="columnheader" className="text-right">Turns</span>
@@ -249,7 +290,6 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
                       <span role="columnheader" className="text-right">From cache</span>
                       <span role="columnheader" className="text-right">Written</span>
                       <span role="columnheader" className="text-right" title="Read fresh and written: what is read from the cache isn't counted">Used</span>
-                      <span role="columnheader">Its limit now</span>
                     </div>
                     {USAGE_TOOLS.filter((t) => totals.by[t].turns > 0 || (t === "friday" ? !solo : installed.has(t) || !installed.size)).map((t) => {
                       const x = totals.by[t];
@@ -263,9 +303,6 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
                           <span role="cell" className="text-right">{x.turns ? shortTokens(x.cached) : "—"}</span>
                           <span role="cell" className="text-right">{x.turns ? shortTokens(x.output) : "—"}</span>
                           <span role="cell" className={cn("text-right", x.turns && "font-semibold text-[var(--ink)]")}>{x.turns ? shortTokens(sum(x)) : "—"}</span>
-                          <span role="cell" className="truncate text-[13px] text-[var(--text-muted)]">
-                            {solo && t === "friday" ? "—" : limitNow(t, limits)}
-                          </span>
                         </div>
                       );
                     })}
@@ -304,6 +341,8 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
                 )}
               </div>
 
+              <RoutingLearned identity={identity} />
+
               <p className="m-0 max-w-[80ch] text-[12px] leading-relaxed text-[var(--text-muted)]">
                 Counted from what each tool reports at the end of every turn: its tokens, not what they cost.{" "}
                 {solo
@@ -318,34 +357,5 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
   );
 }
 
-/** The by-agent table's columns: the agent, five figures, and its limit now. */
-// The limit column stands a little apart from Total: a right-aligned number met left-aligned words 12px away, as one phrase
-// ("494k Not known yet") (Arun, 2026-10-28: "a look for like the little details and designs… for the whole app too").
-const ROW = "grid grid-cols-[minmax(150px,1.5fr)_repeat(5,minmax(64px,1fr))_minmax(130px,1.4fr)] items-center gap-3 px-4 [&>:last-child]:pl-4";
-
-/** A tool's own limit as it stands, from the computer it runs on: the fullest of its windows. */
-function limitNow(tool: UsageTool, limits: Limits | null): string {
-  if (tool === "friday") return "Settings › Usage";
-  if (!limits) return "No computer connected";
-  if (tool === "copilot") {
-    const used = (limits.copilot?.windows ?? []).map((w) => (w.resetsAt && w.resetsAt * 1000 <= Date.now() ? 0 : w.usedPercent)).filter((u): u is number => u !== null);
-    return used.length ? `${Math.round(Math.max(...used))}% used` : limits.copilot ? "Not known yet" : "Not reported";
-  }
-  if (tool === "codex" || tool === "cursor") {
-    const ws = tool === "codex" ? (limits.codexWindows?.length ? limits.codexWindows : limits.codex ? [{ usedPercent: limits.codex.usedPercent, resetsAt: limits.codex.resetsAt }] : []) : (limits.cursor?.windows ?? []);
-    // A window whose reset has passed has started over.
-    const used = ws.map((w) => (w.resetsAt && w.resetsAt * 1000 <= Date.now() ? 0 : w.usedPercent)).filter((u): u is number => u !== null);
-    return used.length ? `${Math.round(Math.max(...used))}% used` : tool === "cursor" && !limits.cursor ? "Not reported" : "Not known yet";
-  }
-  if (tool !== "claude") {
-    // The other tools (tool-limits.ts): the fullest of their windows, else the credits left, else that nothing is reported.
-    const a = limits.tools?.[tool];
-    if (!a) return "Not reported";
-    const used = a.windows.map((w) => (w.resetsAt && w.resetsAt * 1000 <= Date.now() ? 0 : w.usedPercent)).filter((u): u is number => u !== null);
-    return used.length ? `${Math.round(Math.max(...used))}% used` : a.balanceUsd !== undefined ? `$${a.balanceUsd.toFixed(2)} left` : "Not reported";
-  }
-  const w = limits.claudeWindows.filter((x) => x.utilization !== null).sort((a, b) => b.utilization! - a.utilization!)[0];
-  // Said in words: the internal kind ("five_hour") showed through when a window came without a label.
-  const WORDS: Record<string, string> = { five_hour: "5 hours", seven_day: "the week", seven_day_opus: "the week (Opus)", seven_day_sonnet: "the week (Sonnet)" };
-  return w ? `${Math.round(w.utilization! * 100)}% of ${w.label ?? WORDS[w.kind ?? ""] ?? "its window"}` : "Not known yet";
-}
+/** The by-agent table's columns: the agent and five figures. Its limit is on its card at the top of the page, said once. */
+const ROW = "grid grid-cols-[minmax(150px,1.6fr)_repeat(5,minmax(64px,1fr))] items-center gap-3 px-4";

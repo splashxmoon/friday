@@ -112,7 +112,8 @@ function FolderMenuCard({ folder, extra, branch, trigger, onChangeFolder, onClos
     branch.onNew(false);
   };
 
-  const place = placeCard(trigger?.getBoundingClientRect(), 300, { want: 320, min: 200, prefer: "above" });
+  // Under the box, on its own card, it drops down rather than over the box (Arun, 2026-11-08).
+  const place = placeCard(trigger?.getBoundingClientRect(), 300, { want: 320, min: 200, prefer: trigger?.closest(".composer-below") ? "below" : "above" });
   return createPortal(
     <div ref={ref} className="fmenu surface" role="dialog" aria-label="Where it works" style={{ ...place, position: "fixed", right: "auto" }} onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), onClose())}>
       <div className="fmenu-scroll">

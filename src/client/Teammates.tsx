@@ -8,7 +8,7 @@
  */
 import { leaving } from "./leave-guard.js";
 import { lazy, memo, Suspense, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
-import { ArrowUpIcon, CheckIcon, ChevronRightIcon, CopyIcon, EllipsisIcon, EyeIcon, HandIcon, ZapIcon, MessageSquareIcon, MessageSquareReplyIcon, UsersIcon, Settings2Icon, FolderGit2Icon, PlusIcon, ShuffleIcon, TriangleAlertIcon, UserPlusIcon, XIcon } from "lucide-react";
+import { ArrowLeftIcon, ArrowUpIcon, CheckIcon, ChevronRightIcon, CopyIcon, EllipsisIcon, EyeIcon, HandIcon, ZapIcon, MessageSquareIcon, MessageSquareReplyIcon, UsersIcon, Settings2Icon, FolderGit2Icon, PlusIcon, ShuffleIcon, TriangleAlertIcon, UserPlusIcon, XIcon } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -307,10 +307,11 @@ export function useTeamTab(): [boolean, (on: boolean) => void] {
 /** Whether the Crew is the place on screen. */
 export const readTabNow = (): boolean => readTab();
 
-export function setTeamTab(on: boolean): void {
+/** `stay`: turned on for a page of the Crew's own (New teammate), which stays on screen rather than giving way to its room. */
+export function setTeamTab(on: boolean, { stay = false }: { stay?: boolean } = {}): void {
   // Leaving the Crew with unsaved work on screen (a workflow's builder) asks first (leave-guard.ts).
   if (!on && readTab() && leaving(() => setTeamTab(on))) return;
-  openOnShow = on;
+  openOnShow = on && !stay;
   try {
     localStorage.setItem(TAB, on ? "1" : "0");
   } catch {
@@ -319,7 +320,7 @@ export function setTeamTab(on: boolean): void {
   dispatchEvent(new Event("friday:team-tab"));
 }
 
-/** Opens the New teammate dialog from anywhere (the sidebar's New teammate button). */
+/** Opens the New teammate page from anywhere (the sidebar's New teammate button): App.tsx turns to it. */
 export const newTeammate = () => dispatchEvent(new Event("friday:new-teammate"));
 
 /** Asks for the team again now (after a change, or when told something moved). */
@@ -1716,7 +1717,6 @@ export function SidebarTeammates({ identity, onOpen, activeSid, needs = [], mark
   const focused = useFocusedAgent(t?.sid ?? "");
   // The person's own models, read once for the page, so a teammate on one is named by it (modelLabel) wherever it shows.
   useOwnModels(identity);
-  const [adding, setAdding] = useState(false);
   const [menu, setMenu] = useState<{ m: TeammateView; x: number; y: number } | null>(null);
   const [editing, setEditing] = useState<TeammateView | null>(null);
   // Someone else's teammate being asked, and an ask of one of yours being answered (CrewHosted.tsx).
@@ -1768,11 +1768,6 @@ export function SidebarTeammates({ identity, onOpen, activeSid, needs = [], mark
     const why = n.problem ?? n.line.replace(/^Offline(?: · )?/, "");
     say(n.status === "offline" ? `${m.name} is still offline${why ? `: ${why}` : ""}.` : `${m.name} is back${n.tool === "friday" ? "" : ` on ${toolName(n.tool)}`}.`, n.status !== "offline");
   };
-  useEffect(() => {
-    const add = () => setAdding(true);
-    addEventListener("friday:new-teammate", add);
-    return () => removeEventListener("friday:new-teammate", add);
-  }, []);
   // A room taken away from its own header: back to the Team room.
   useEffect(() => {
     const back = () => team && openTeammate(team, null, onOpen);
@@ -1961,7 +1956,7 @@ export function SidebarTeammates({ identity, onOpen, activeSid, needs = [], mark
           </button>
         ))}
         {own.length < MAX && (
-          <button type="button" role="listitem" className="cv-face cv-face-add" onClick={() => setAdding(true)} title="New teammate: a name, a role and one of your coding tools">
+          <button type="button" role="listitem" className="cv-face cv-face-add" onClick={newTeammate} title="New teammate: a name, a role and one of your coding tools">
             <span className="cv-add-ring" aria-hidden="true">
               <PlusIcon className="size-4" />
             </span>
@@ -1980,7 +1975,7 @@ export function SidebarTeammates({ identity, onOpen, activeSid, needs = [], mark
           compact
           items={() => [
             { label: "New room…", icon: "users", sub: "A few teammates on one thing", onSelect: () => setRooming(true), disabled: t.teammates.length < 2 },
-            { label: "New teammate…", icon: "plus", sub: "A name, a role and a coding tool", onSelect: () => setAdding(true), disabled: own.length >= MAX },
+            { label: "New teammate…", icon: "plus", sub: "A name, a role and a coding tool", onSelect: newTeammate, disabled: own.length >= MAX },
           ]}
         />
       </div>
@@ -2046,7 +2041,7 @@ export function SidebarTeammates({ identity, onOpen, activeSid, needs = [], mark
           at={panelMenu}
           items={() => [
             ...(panelMenu.room ? [{ label: "Open the Crew room", icon: "users" as const, onSelect: () => openTeammate(t, null, onOpen) }] : []),
-            { label: "New teammate…", icon: "plus", onSelect: () => setAdding(true) },
+            { label: "New teammate…", icon: "plus", onSelect: newTeammate },
             ...(t.teammates.length ? [{ label: "New room…", icon: "users" as const, onSelect: () => setRooming(true) }] : []),
             // Asked first: it cuts short whatever each of them is doing (2026-10-27 audit: it ran at once).
             ...(panelMenu.room
@@ -2069,7 +2064,7 @@ export function SidebarTeammates({ identity, onOpen, activeSid, needs = [], mark
         />
       )}
       {rooming && <RoomDialog identity={identity} team={t} editing={rooming === true ? null : rooming} onClose={() => setRooming(null)} onMade={(r) => openRoom(r, onOpen)} />}
-      {(adding || editing) && <TeammateDialog identity={identity} editing={editing} onClose={() => (setAdding(false), setEditing(null))} />}
+      {editing && <TeammateDialog identity={identity} editing={editing} onClose={() => setEditing(null)} />}
     </section>
   );
 }
@@ -2388,7 +2383,16 @@ const keepForPicker = (e: Event) => {
 };
 
 /** New teammate, or one changed: its robot and name, its role, the coding tool it runs on, and where it works. */
-export function TeammateDialog({ identity, editing, onClose, inline }: { identity: Identity; editing: TeammateView | null; onClose: () => void; /** Drawn in place, as a teammate's Settings tab (TeammatePage.tsx), not as a dialog. */ inline?: boolean }) {
+export function TeammateDialog({ identity, editing, onClose, inline, page }: {
+  identity: Identity;
+  editing: TeammateView | null;
+  onClose: () => void;
+  /** Drawn in place, as a teammate's Settings tab (TeammatePage.tsx), not as a dialog. */
+  inline?: boolean;
+  /** A page of its own, the New teammate page (App.tsx; Arun, 2026-11-08: "make the crew teammate creator thing into a page
+   *  instead of a modal pop up"): its heading, the form, and beside it the teammate as the crew will see them. */
+  page?: boolean;
+}) {
   const installed = installedOn(identity);
   const tools = useMemo(() => {
     const all = ENGINE_TOOLS.filter((x) => !installed || installed(x));
@@ -2515,8 +2519,18 @@ export function TeammateDialog({ identity, editing, onClose, inline }: { identit
       const all = project.trim() && !projects.includes(project.trim()) ? [...projects, project.trim()] : projects;
       let body: Record<string, unknown> = { name, role, tool, model, effort: effort ?? "", backup, checkins, budget, look, mode, projects: all, machine, account: tool === "friday" || machine ? "" : account, ...(editing ? {} : folder.trim() ? { folder } : {}) };
       // Its folder is made for it on the keeper's computer; the account is the one picked there.
-      const r = await api<{ restartLater?: string[] }>(identity, editing ? `/api/teammates/${editing.id}` : "/api/teammates", { method: editing ? "PATCH" : "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json" } });
-      await refreshTeam(identity);
+      const r = await api<{ restartLater?: string[]; made?: string; teammates?: TeammateView[] }>(identity, editing ? `/api/teammates/${editing.id}` : "/api/teammates", { method: editing ? "PATCH" : "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json" } });
+      const now = await refreshTeam(identity);
+      if (page && !editing) {
+        // From the page, straight to them: the Crew, on the new teammate's own room. The server names the one it made (hosted) or
+        // answers with the crew, the new one last (this computer's).
+        const all = now?.teammates ?? r.teammates ?? [];
+        const made = all.find((m) => m.id === r.made) ?? all.findLast((m) => m.name === keptName) ?? all.at(-1);
+        setTeamTab(true);
+        if (now && made) openTeammate(now, made.lane, (room) => dispatchEvent(new CustomEvent("friday:open-session", { detail: { sid: room.sid, invite: room.invite } })));
+        else onClose();
+        return;
+      }
       // Busy somewhere: the change waits for that run's end there, and says so rather than cutting it short.
       const when = r.restartLater?.length ? `It applies in ${listNames(r.restartLater)} once their turn there ends.` : "";
       setLater(when);
@@ -2560,12 +2574,13 @@ export function TeammateDialog({ identity, editing, onClose, inline }: { identit
     setSaved(false);
     (e.currentTarget.parentElement?.querySelector(`[data-mode="${next}"]`) as HTMLElement | null)?.focus();
   };
+  const about = editing ? "Changes apply from their next turn." : isLocal() ? "They work on your computer with your own coding tool or model, keep a folder of their own, and remember their conversation." : "They work on your computer with your own coding tool and plan, keep a folder of their own there, and remember their conversation. Everyone in the workspace sees them.";
   const form = (
-        <form onSubmit={(e) => void save(e)} className={inline ? "tm-form tm-form-inline" : "tm-form"} onChange={() => setSaved(false)}>
-          {!inline && (
+        <form onSubmit={(e) => void save(e)} className={inline ? "tm-form tm-form-inline" : page ? "tm-form tm-form-page" : "tm-form"} onChange={() => setSaved(false)}>
+          {!inline && !page && (
           <DialogHeader>
             <DialogTitle>{editing ? `Edit ${editing.name}` : "New teammate"}</DialogTitle>
-            <DialogDescription>{editing ? "Changes apply from their next turn." : isLocal() ? "They work on your computer with your own coding tool or model, keep a folder of their own, and remember their conversation." : "They work on your computer with your own coding tool and plan, keep a folder of their own there, and remember their conversation. Everyone in the workspace sees them."}</DialogDescription>
+            <DialogDescription>{about}</DialogDescription>
           </DialogHeader>
           )}
           {!editing && (
@@ -2829,6 +2844,19 @@ export function TeammateDialog({ identity, editing, onClose, inline }: { identit
                 {busy ? "Saving…" : "Save changes"}
               </Button>
             </div>
+          ) : page ? (
+            // In sight at the page's foot however far down the form is scrolled.
+            <div className="tm-page-foot">
+              {!editing && !(team && ownOf(team).length) && <StarterTeam identity={identity} onDone={onClose} />}
+              <span className="tm-page-foot-acts">
+                <Button type="button" variant="ghost" onClick={onClose}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={busy || !name.trim()}>
+                  {busy ? "Adding…" : "Add teammate"}
+                </Button>
+              </span>
+            </div>
           ) : (
           <DialogFooter className="tm-dialog-foot">
             {!editing && !(team && ownOf(team).length) && <StarterTeam identity={identity} onDone={onClose} />}
@@ -2843,12 +2871,72 @@ export function TeammateDialog({ identity, editing, onClose, inline }: { identit
         </form>
   );
   if (inline) return form;
+  if (page) return (
+    <div className="page conns-page tm-page">
+      <div className="tm-page-wrap">
+        <header className="tm-page-head">
+          <button type="button" className="tm-page-back" onClick={onClose}>
+            <ArrowLeftIcon className="size-3.5" />
+            Crew
+          </button>
+          <h1>New teammate</h1>
+          <p>{about}</p>
+        </header>
+        <div className="tm-page-grid">
+          {form}
+          <MateCard look={look} name={name.trim()} role={role.trim()} tool={tool} model={model} mode={mode} checkins={checkins} folder={folder.trim() || `~/Friday/teammates/${keptName || "Name"}`} projects={projects.length} />
+        </div>
+      </div>
+    </div>
+  );
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="tm-dialog max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain sm:max-w-[540px]" onInteractOutside={keepForPicker} onFocusOutside={keepForPicker}>
         {form}
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * The teammate being made, as the crew will meet them: their face, name and role, and in a few lines what they work through, how
+ * far they may go, when they check in and where they work. Beside the New teammate page's form, following it as it is filled.
+ */
+function MateCard({ look, name, role, tool, model, mode, checkins, folder, projects }: { look: string; name: string; role: string; tool: MateTool; model: string; mode: EngineMode; checkins: CheckIn[]; folder: string; projects: number }) {
+  const EVERY: Record<CheckIn["every"], string> = { hourly: "every hour", daily: "every day", weekdays: "every weekday", weekly: "every week" };
+  const first = checkins[0];
+  return (
+    <aside className="tm-card" aria-label="Your new teammate">
+      <div className="tm-card-face">
+        <Robot seed={look} tool={markOf(tool)} size={64} status="idle" />
+      </div>
+      <div className="tm-card-who">
+        <b className={name ? "" : "tm-card-none"}>{name || "Their name"}</b>
+        <p className={role ? "" : "tm-card-none"}>{role || "Their role: what they do, read with every turn."}</p>
+      </div>
+      <dl className="tm-card-facts">
+        <div>
+          <dt>Works through</dt>
+          <dd>{tool === "friday" ? (model ? modelLabel(tool, model) : "One of your models") : `${toolName(tool)}${model ? ` · ${modelLabel(tool, model)}` : ""}`}</dd>
+        </div>
+        <div>
+          <dt>Access</dt>
+          <dd>{ACCESS[mode].label}</dd>
+        </div>
+        <div>
+          <dt>Check-ins</dt>
+          <dd>{first ? `${EVERY[first.every]}${first.every === "hourly" ? "" : ` at ${first.at}`}${checkins.length > 1 ? `, +${checkins.length - 1}` : ""}` : "None"}</dd>
+        </div>
+        <div>
+          <dt>Folder</dt>
+          <dd className="tm-card-path" title={folder}>
+            {folder}
+            {projects > 0 && <span>, +{projects} project{projects === 1 ? "" : "s"}</span>}
+          </dd>
+        </div>
+      </dl>
+      <p className="tm-card-note">They keep their own memory and work through their queue while you're away.</p>
+    </aside>
   );
 }
 

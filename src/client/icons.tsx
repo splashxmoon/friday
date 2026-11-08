@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import type { ReactNode } from "react";
 
 const paths = {
@@ -375,13 +376,16 @@ export function Icon({
 }) {
   return (
     <svg
-      className={className}
+      className={className ? `fi ${className}` : "fi"}
       width={size}
       height={size}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth={strokeWidth}
+      // A line is the same width on screen whatever the icon's size (style.css .fi): 1.5 of 24 units drew 0.8px at 13px, a
+      // smear across two pixels that read grainy (Arun, 2026-11-08: "make sure the svg icons… are not looking grainy").
+      // A variable, not an inline stroke-width, so a stylesheet's own width for a particular icon still wins.
+      style={{ "--fi-sw": `${(1.4 * strokeWidth) / 1.5}px` } as CSSProperties}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"

@@ -10,7 +10,7 @@ import type { Identity } from "./storage.js";
  * mac, windows and linux"): one row of Settings › Computer's "This computer" group, off until turned on. Under it, while on, what
  * the system still needs (macOS's Screen Recording and Accessibility, Linux's xdotool), with the one press that asks for it.
  */
-export function ComputerUseRow({ identity }: { identity: Identity }) {
+export function ComputerUseRow({ identity, flush = false }: { identity: Identity; /** Its own group (Settings › Permissions), not under This computer's row: no indent. */ flush?: boolean }) {
   const [s, setS] = useState<ComputerStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -33,7 +33,7 @@ export function ComputerUseRow({ identity }: { identity: Identity }) {
   };
   return (
     <SettingsRow
-      className="pl-11"
+      className={flush ? undefined : "pl-11"}
       label="Let agents use this computer"
       hint={
         <>

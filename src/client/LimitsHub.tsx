@@ -30,8 +30,7 @@ import { PlugIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { EmptyState, SettingsGroup, SettingsRow, StatTile, StateBadge, surface } from "@/components/dass";
-import { LimitRing } from "./LimitRing.js";
+import { EmptyState, surface } from "@/components/dass";
 import { AccountCardsView } from "./gauge.js";
 
 /**
@@ -66,17 +65,109 @@ function paceLine(w: Win, f: Forecast | null, now: number): string {
   return f.atReset !== null ? `At this pace, ${f.atReset}% when it resets` : `${Math.round(f.perHour)}% an hour`;
 }
 
-function WindowView({ w, history, now }: { w: Win; history: History; now: number }) {
+/** A window's name in a few words: "5-hour", "Week", "Opus week", "Month". */
+function shortName(w: Win): string {
+  if (isFiveHour(w)) return "5-hour";
+  if (isWeekly(w)) {
+    const of = w.label.replace(/^Weekly\s*·?\s*/i, "").trim();
+    return of ? `${of[0]!.toUpperCase()}${of.slice(1)} week` : "Week";
+  }
+  if (w.minutes && w.minutes >= 40_000) return "Month";
+  return w.label;
+}
+/** The same, as said in a sentence: "of its 5 hours", "of its week". */
+function ofName(w: Win): string {
+  if (isFiveHour(w)) return "5 hours";
+  const n = shortName(w);
+  return n === "Week" || n === "Month" ? n.toLowerCase() : n;
+}
+const resetWhen = (w: Win) => (w.resetsAt ? (isFiveHour(w) ? clock(w.resetsAt) : `${day(w.resetsAt)} ${clock(w.resetsAt)}`) : "");
+/** Where this pace ends on the bar: full before it resets, or where it lands; nothing until there are readings to tell. */
+function paceAt(w: Win, f: Forecast | null): number | null {
+  if (!f || w.used >= 100) return null;
+  const at = f.fullAt ? 100 : f.atReset;
+  return at !== null && at > w.used + 1 ? Math.min(100, at) : null;
+}
+
+/** One window as a bar on the card: its name, how full, where the pace ends, and how long until it resets. */
+function WinBar({ w, history, now, bare }: { w: Win; history: History; now: number; /** The card's only window: the bar alone under its figure. */ bare?: boolean }) {
   const f = forecastOf(w, history[idOf(w)] ?? [], now);
+  const tick = paceAt(w, f);
+  const used = Math.round(w.used);
+  const name = shortName(w);
+  const tip = `${name}: ${used}% used${w.resetsAt ? `, resets ${resetWhen(w)} (in ${until(w.resetsAt, now)})` : ""}. ${paceLine(w, f, now)}.`;
+  const meter = (
+    <span className="lh-meter" role="meter" aria-label={`${name} used`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={used} aria-valuetext={tip}>
+      <i className={`lh-meter-fill ${level(w.used)}`} style={{ width: `${Math.min(100, w.used)}%` }} />
+      {tick !== null && <i className="lh-meter-tick" style={{ left: `${tick}%` }} />}
+    </span>
+  );
+  if (bare) return <div className="lh-wrow bare" title={tip}>{meter}</div>;
   return (
-    <div className="lh-win">
-      <LimitRing used={w.used} label={`${w.label === "5h" ? "5-hour" : w.label} limit`} />
-      <div className="lh-win-text">
-        <span className="lh-win-label">{w.label === "5h" ? "5-hour" : w.label}</span>
-        <span className="lh-win-reset">{w.resetsAt ? `Resets ${isFiveHour(w) ? `at ${clock(w.resetsAt)}` : `${day(w.resetsAt)} ${clock(w.resetsAt)}`} · in ${until(w.resetsAt, now)}` : "Reset time not reported"}</span>
-        <span className={`lh-win-pace ${f?.fullAt ? "warn" : ""}`}>{paceLine(w, f, now)}</span>
-      </div>
-    </div>
+    <li className="lh-wrow" title={tip}>
+      <span className="lh-wrow-name">{name}</span>
+      {meter}
+      <span className={`lh-wrow-n ${level(w.used)}`}>{used}%</span>
+      <span className="lh-wrow-in">{w.resetsAt ? until(w.resetsAt, now) : "—"}</span>
+    </li>
+  );
+}
+
+/**
+ * A tool, said as one number: what is left of the window it will run out of first, when that resets and where its pace ends,
+ * then each of its windows on the same scale (Arun, 2026-11-08: "easy to glance at and fully understand", design C).
+ */
+function ToolCard({ tool, wins, plan, note, roomy, history, now, cost, onCost }: { tool: EngineTool; wins: Win[]; plan: string | null; note: string; roomy: boolean; history: History; now: number; cost: number | undefined; onCost: (usd: number | null) => void }) {
+  // The five-hour first, then the week, then the rest (a model's own week, a month's allowance): the same order on every card.
+  const order = [...wins.filter(isFiveHour), ...wins.filter((w) => isWeekly(w) && !isFiveHour(w)), ...wins.filter((w) => !isFiveHour(w) && !isWeekly(w))];
+  // The one it meets first: the fullest; between two as full, the one that resets later holds it up longer.
+  const hero = [...order].sort((a, b) => b.used - a.used || (b.resetsAt ?? 0) - (a.resetsAt ?? 0))[0];
+  const f = hero ? forecastOf(hero, history[idOf(hero)] ?? [], now) : null;
+  const out = !!hero && hero.used >= 100;
+  const lv = hero ? level(hero.used) : "ok";
+  return (
+    <section className="lh-card" data-level={hero ? lv : undefined} aria-label={ENGINE_NAMES[tool]}>
+      <header className="lh-card-head">
+        <EngineMark tool={tool} size={16} />
+        <b>{ENGINE_NAMES[tool]}</b>
+        {roomy && (
+          <span className="lh-roomy" title="Of your coding tools, the one with the most of its 5 hours left">
+            Most room
+          </span>
+        )}
+        {plan && <span className="lh-card-plan">{plan}</span>}
+      </header>
+      {hero ? (
+        <div className="lh-hero">
+          <p className="lh-hero-n">
+            <span className={`lh-hero-big ${lv}`}>{out ? "Out" : `${Math.max(0, Math.round(100 - hero.used))}%`}</span>
+            <span className="lh-hero-unit">{out ? (hero.resetsAt ? `until ${resetWhen(hero)}` : "for now") : "left"}</span>
+          </p>
+          <p className="lh-hero-of">
+            of its {ofName(hero)}
+            {hero.resetsAt ? (
+              <>
+                {" "}· resets {resetWhen(hero)}, <span className="num">in {until(hero.resetsAt, now)}</span>
+              </>
+            ) : (
+              " · reset time not reported"
+            )}
+          </p>
+          <p className={cn("lh-hero-pace", f?.fullAt && "warn", out && "hot")}>{out ? "It picks up again when the window resets." : paceLine(hero, f, now)}</p>
+          {order.length === 1 && <WinBar w={hero} history={history} now={now} bare />}
+        </div>
+      ) : (
+        <p className="lh-none">{note}</p>
+      )}
+      {order.length > 1 && (
+        <ul className="lh-wrows" aria-label={`${ENGINE_NAMES[tool]}'s limits`}>
+          {order.map((w) => (
+            <WinBar key={idOf(w)} w={w} history={history} now={now} />
+          ))}
+        </ul>
+      )}
+      <CostLine tool={tool} plan={plan} cost={cost} onCost={onCost} />
+    </section>
   );
 }
 
@@ -111,7 +202,7 @@ function CostLine({ tool, plan, cost, onCost }: { tool: EngineTool; plan: string
       <span className="lh-cost-n">{usd === undefined ? "Cost unknown" : `$${usd % 1 ? usd.toFixed(2) : usd} / month`}</span>
       <span className="lh-cost-src">{cost !== undefined ? "your figure" : list ? `${list.tier} list price` : ""}</span>
       <Button variant="ghost" size="xs" className="ml-auto text-[var(--text-muted)]" onClick={() => (setText(usd !== undefined ? String(usd) : ""), setEditing(true))}>
-        {usd === undefined ? "Add" : "Edit"}
+        {usd === undefined ? "Add price" : "Edit"}
       </Button>
     </div>
   );
@@ -205,27 +296,21 @@ export function LimitsHub({ read }: { read: Read }) {
   return (
     <div className="flex flex-col gap-5">
       {/* No chips over the cards: the same percentages and resets were said three and four times (audit REST-11, Arun 2026-11-04). */}
-      <div className={single ? "grid grid-cols-[minmax(300px,1fr)_minmax(0,2fr)] items-start gap-3 max-md:grid-cols-1" : "grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-3"}>
-        {tools.map((t) => {
-          const mine = wins.filter((w) => w.tool === t);
-          // Every window as the same ring, with when it resets and where its pace leads: the five-hour first, then the week,
-          // then the rest (a model's own week, a month's allowance). The same shape on every card.
-          const rings = [...mine.filter(isFiveHour), ...mine.filter((w) => isWeekly(w) && !isFiveHour(w)), ...mine.filter((w) => !isFiveHour(w) && !isWeekly(w))];
-          const plan = planOf(t, limits);
-          return (
-            <section key={t} className={cn(surface, "flex flex-col gap-3.5 p-4")} aria-label={ENGINE_NAMES[t]}>
-              <header className="flex items-center gap-2.5">
-                <span className="grid size-7 shrink-0 place-items-center rounded-lg border border-[var(--border)] bg-[var(--card)]">
-                  <EngineMark tool={t} size={15} />
-                </span>
-                <b className="text-[14px] font-semibold text-[var(--ink)]">{ENGINE_NAMES[t]}</b>
-                {plan && <StateBadge className="ml-auto">{plan}</StateBadge>}
-              </header>
-              {rings.length ? rings.map((w) => <WindowView key={idOf(w)} w={w} history={history} now={now} />) : <p className="m-0 text-[13px] text-[var(--text-muted)]">{mine.length ? "" : t === "claude" && claudeSaid.length ? (claudeSaid.some((w) => w.status === "rejected") ? "Out of usage for now: its limit was reached." : "Under the limit. Claude Code said so without a figure for how much is used.") : "No limits reported on this plan"}</p>}
-              <CostLine tool={t} plan={plan} cost={costs[t]} onCost={(v) => setCosts(saveCost(t, v))} />
-            </section>
-          );
-        })}
+      <div className={single ? "grid grid-cols-[minmax(300px,1fr)_minmax(0,2fr)] items-start gap-3 max-md:grid-cols-1" : "lh-cards"}>
+        {tools.map((t) => (
+          <ToolCard
+            key={t}
+            tool={t}
+            wins={wins.filter((w) => w.tool === t)}
+            plan={planOf(t, limits)}
+            note={t === "claude" && claudeSaid.length ? (claudeSaid.some((w) => w.status === "rejected") ? "Out of usage for now: its limit was reached." : "Under its limit. Claude Code said so without a figure for how much is used.") : "No limits reported on this plan."}
+            roomy={room?.tool === t}
+            history={history}
+            now={now}
+            cost={costs[t]}
+            onCost={(v) => setCosts(saveCost(t, v))}
+          />
+        ))}
         {single && heat(fives[0]!)}
       </div>
 
@@ -251,34 +336,34 @@ export function LimitsHub({ read }: { read: Read }) {
         </section>
       )}
 
-      <div className="grid grid-cols-3 gap-3 max-md:grid-cols-1">
-        <StatTile
-          label="Most room right now"
-          value={
-            room ? (
-              <span className="flex items-center gap-2 text-[18px]">
-                <EngineMark tool={room.tool} size={16} /> {ENGINE_NAMES[room.tool]}
-              </span>
-            ) : (
-              "—"
-            )
-          }
-          sub={room ? `${room.left}% of its 5 hours left` : "Needs two tools with a 5-hour limit to compare."}
-        />
-        <StatTile label="Plans, a month" value={spend ? `$${spend % 1 ? spend.toFixed(2) : spend}` : "—"} sub={`List prices as of ${PRICES_CHECKED} unless you set your own`} />
-        <StatTile
-          label="Plan size"
-          value={hints.length ? "Could be smaller" : "—"}
-          sub={
-            hints.length
+      {/* What the cards don't each say, on one line: what the plans cost together, whether one could be smaller, and the alert. */}
+      <div className="lh-sum">
+        <div className="lh-sum-cell">
+          <span className="lh-sum-k">Plans</span>
+          <span className="lh-sum-v num">{spend ? `$${spend % 1 ? spend.toFixed(2) : spend} a month` : "Not known"}</span>
+          <span className="lh-sum-s">List prices as of {PRICES_CHECKED}, unless you set your own on a card.</span>
+        </div>
+        <div className="lh-sum-cell">
+          <span className="lh-sum-k">Plan size</span>
+          <span className="lh-sum-v">{hints.length ? (hints.length === 1 ? "One could be smaller" : `${hints.length} could be smaller`) : "Each one fits"}</span>
+          <span className="lh-sum-s">
+            {hints.length
               ? hints.map((h) => (
                   <span key={h.tool} className="block">
-                    <b className="font-medium text-[var(--ink-2)]">{ENGINE_NAMES[h.tool]}</b> is on pace for {h.pace}% of its week: {h.tier} at ${h.usd} a month may be enough (now ${h.now}).
+                    {ENGINE_NAMES[h.tool]} is on pace for {h.pace}% of its week: {h.tier} at ${h.usd} a month may do (now ${h.now}).
                   </span>
                 ))
-              : "Each plan fits how much you use it, or it's too early in the week to tell."
-          }
-        />
+              : "For how much you use it, or too early in the week to tell."}
+          </span>
+        </div>
+        <div className="lh-sum-cell">
+          <span className="lh-sum-k">Alert</span>
+          <label className="lh-sum-v lh-sum-switch">
+            <span>When a 5-hour limit passes 80%</span>
+            <Switch aria-label="Tell me when a 5-hour limit passes 80%" checked={alerts} onCheckedChange={(v) => (setAlerts(v), chooseLimitAlerts(v))} />
+          </label>
+          <span className="lh-sum-s">{notificationsOn() ? "One notification per window, with when it resets." : "Notifications are off in Settings › Notifications, so nothing will show."}</span>
+        </div>
       </div>
 
       {fives.length > 0 && !single && (
@@ -295,14 +380,6 @@ export function LimitsHub({ read }: { read: Read }) {
         </section>
       )}
 
-      <SettingsGroup>
-        <SettingsRow
-          label="Tell me when a 5-hour limit passes 80%"
-          hint={notificationsOn() ? "One notification per window, with when it resets." : "Notifications are off in Settings › Notifications, so nothing will show."}
-        >
-          <Switch aria-label="Tell me when a 5-hour limit passes 80%" checked={alerts} onCheckedChange={(v) => (setAlerts(v), chooseLimitAlerts(v))} />
-        </SettingsRow>
-      </SettingsGroup>
     </div>
   );
 }

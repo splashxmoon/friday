@@ -128,11 +128,11 @@ export function SettingsPage({
           "usage",
           "models",
           ...(workspace?.personal !== false ? ["members"] : []),
-          ...(isLocal() ? [] : ["outside-agents"]),
+          ...(isLocal() ? [] : ["outside-agents", "other-computers"]),
         ]
       : isLocal()
         ? []
-        : ["outside-agents"],
+        : ["outside-agents", "other-computers"],
   );
   const sections = SECTIONS.filter((s) => !hidden.has(s.id));
   const current = sections.find((s) => s.id === section) ?? sections[0]!;
@@ -263,11 +263,16 @@ export function SettingsPage({
             {current.id === "shortcuts" && <ShortcutsTab />}
             {current.id === "memory" && <ProjectMemory identity={identity} />}
             {current.id === "computer" && <ComputerSection identity={identity} />}
+            {current.id === "other-computers" && <ComputerSection identity={identity} part="others" />}
+            {current.id === "github" && <ComputerSection identity={identity} part="github" />}
+            {current.id === "permissions" && <ComputerSection identity={identity} part="permissions" />}
             {current.id === "coding-tools" && <CodingToolsSection identity={identity} />}
             {current.id === "own-models" && <OwnModelsSection identity={identity} workspace={workspace} />}
             {current.id === "outside-agents" && <OutsideAgentsSection identity={identity} />}
-            {current.id === "data" && <DataTab />}
-            {current.id === "about" && <AboutTab onReplayTour={() => window.dispatchEvent(new Event("friday:tour"))} />}
+            {current.id === "privacy" && <DataTab part="privacy" />}
+            {current.id === "data" && <DataTab part="backup" />}
+            {current.id === "updates" && <AboutTab part="updates" />}
+            {current.id === "help" && <AboutTab part="help" onReplayTour={() => window.dispatchEvent(new Event("friday:tour"))} />}
           </div>
         )}
       </div>

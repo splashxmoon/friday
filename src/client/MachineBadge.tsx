@@ -19,6 +19,8 @@ import { Icon } from "./icons.js";
 import { NoMachine, hostApi, machineRefusal, type LocalTool, type MachineState } from "./local.js";
 import type { Identity } from "./storage.js";
 import { MenuButton, MoreTools, useDismiss } from "./ui.js";
+import { useToolLimits } from "./toolLimits.js";
+import { isFiveHour, isWeekly, windowsOf } from "./limitHistory.js";
 import { Button } from "@/components/ui/button";
 
 /**
@@ -91,7 +93,8 @@ export function MachineBadge({ identity, machine, refresh, inline = false, welco
   };
   // The installed ones up top. The one whose install line is open stays where it was clicked: one opened from the tools folded
   // away stays among them, not moved up the list as its form opens (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
-  let shown = splitTools(here ? (t) => tools.some((x) => x.tool === t) : null, moreTools ? "" : installing);
+  // Settings › Coding tools lists the ones not here in the open (below), so one being installed stays where it is.
+  let shown = splitTools(here ? (t) => tools.some((x) => x.tool === t) : null, moreTools || part === "tools" ? "" : installing);
   // One order, in the welcome, Settings and the agent picker alike (toolOrder).
   const order = toolOrder((t) => {
     const f = tools.find((x) => x.tool === t);
@@ -239,6 +242,17 @@ export function MachineBadge({ identity, machine, refresh, inline = false, welco
     refresh();
   };
 
+  // Settings › Coding tools: each signed-in tool says how much of its limit is left, from the same reading the Usage page has
+  // (Arun, 2026-11-08: "utilize the height of this too").
+  const limitsRead = useToolLimits(identity, part !== "tools");
+  const left = (tool: EngineTool): string | undefined => {
+    const w = windowsOf(limitsRead).filter((x) => x.tool === tool).sort((a, b) => b.used - a.used)[0];
+    if (!w) return undefined;
+    if (w.used >= 100) return "out until it resets";
+    const of = isFiveHour(w) ? "5 hours" : isWeekly(w) ? "week" : w.minutes && w.minutes >= 40_000 ? "month" : w.label.toLowerCase();
+    return `${Math.round(100 - w.used)}% of its ${of} left`;
+  };
+
   // Ready means installed and not known to be signed out. Any one is enough to
   // work with; how many there are is the useful thing to say.
   const ready = tools.filter((t) => t.loggedIn !== false);
@@ -328,7 +342,62 @@ export function MachineBadge({ identity, machine, refresh, inline = false, welco
             </span>
           )}
         </div>}
-        {here && part === "computer" ? null : here ? (
+        {here && part === "computer" ? null : here && part === "tools" ? (
+          <>
+            <ul className="mb-tools">
+              {shown.here.map((tool) => (
+                <ToolRow
+                  {...(part === "tools" ? { settings: true, left: left(tool) } : {})}
+                  key={tool}
+                  tool={tool}
+                  found={tools.find((x) => x.tool === tool) ?? machine.tools.find((x) => x.tool === tool) ?? null}
+                  accounts={ACCOUNT_TOOLS.includes(tool) ? <AccountList identity={identity} tool={tools.find((x) => x.tool === tool) ?? machine.tools.find((x) => x.tool === tool) ?? { tool, name: "", path: null, loggedIn: null, source: null }} onChanged={refresh} /> : undefined}
+                  busy={step === "signing" && acting?.tool !== tool}
+                  acting={acting?.tool === tool ? acting.what : null}
+                  justIn={justIn === tool}
+                  {...(signInUrl && signInTool === tool ? { loginUrl: signInUrl } : {})}
+                  installing={installing === tool}
+                  onInstall={() => setInstalling(installing === tool ? "" : tool)}
+                  onRunInstall={() => hostApi<{ opened: boolean; command: string }>(identity, "/api/runner/install", { method: "POST", body: JSON.stringify({ tool }) })}
+                  onSignIn={() => void signIn(tool)}
+                  onSignOut={(thenIn) => void signOut(tool, thenIn)}
+                  onCancel={() => cancelSignIn(tool)}
+                  {...(tool === "acp" ? { acpLine, acpNote, onSetCommand: setCommand } : {})}
+                />
+              ))}
+            </ul>
+            {shown.away.length > 0 && (
+              <section className="mb-away" aria-label="More coding tools">
+                <header className="mb-away-head">
+                  <h3>More coding tools</h3>
+                  <p>Friday works with these too. Install one, and it's listed above, ready to sign in.</p>
+                </header>
+                <ul className="mb-tools">
+                  {shown.away.map((tool) => (
+                    <ToolRow
+                      {...(part === "tools" ? { settings: true, left: left(tool) } : {})}
+                      key={tool}
+                      tool={tool}
+                      found={tools.find((x) => x.tool === tool) ?? machine.tools.find((x) => x.tool === tool) ?? null}
+                      accounts={ACCOUNT_TOOLS.includes(tool) ? <AccountList identity={identity} tool={tools.find((x) => x.tool === tool) ?? machine.tools.find((x) => x.tool === tool) ?? { tool, name: "", path: null, loggedIn: null, source: null }} onChanged={refresh} /> : undefined}
+                      busy={step === "signing" && acting?.tool !== tool}
+                      acting={acting?.tool === tool ? acting.what : null}
+                      justIn={justIn === tool}
+                      {...(signInUrl && signInTool === tool ? { loginUrl: signInUrl } : {})}
+                      installing={installing === tool}
+                      onInstall={() => setInstalling(installing === tool ? "" : tool)}
+                      onRunInstall={() => hostApi<{ opened: boolean; command: string }>(identity, "/api/runner/install", { method: "POST", body: JSON.stringify({ tool }) })}
+                      onSignIn={() => void signIn(tool)}
+                      onSignOut={(thenIn) => void signOut(tool, thenIn)}
+                      onCancel={() => cancelSignIn(tool)}
+                      {...(tool === "acp" ? { acpLine, acpNote, onSetCommand: setCommand } : {})}
+                    />
+                  ))}
+                </ul>
+              </section>
+            )}
+          </>
+        ) : here ? (
           <ul className="mb-tools">
             {[...shown.here, ...(moreTools ? shown.away : [])].map((tool) => (
               <ToolRow
@@ -534,7 +603,13 @@ function ToolRow({
   acpNote,
   onSetCommand,
   accounts,
+  settings = false,
+  left,
 }: {
+  /** Settings › Coding tools: a tool not here says what it is, under its name, in place of "Not installed". */
+  settings?: boolean;
+  /** How much of its limit is left, said after "Signed in". */
+  left?: string | undefined;
   tool: EngineTool;
   found: LocalTool | null;
   busy: boolean;
@@ -615,7 +690,8 @@ function ToolRow({
           <span className="mb-tool-name">{name}</span>
           <span className="mb-tool-state" title={state === "missing" ? (found?.app ? `${name} is installed, but Friday needs its command-line agent` : info.blurb) : state === "unavailable" ? found?.unavailable : undefined}>
             {acting && <span className="spinner tiny" aria-hidden />}
-            {state === "missing" && !acting ? (custom ? "Not set up" : found?.app ? "Needs its command-line agent" : "Not installed") : word}
+            {state === "missing" && !acting ? (custom ? (settings ? "Any agent that speaks ACP, by its command" : "Not set up") : found?.app ? "Needs its command-line agent" : settings ? info.blurb : "Not installed") : word}
+            {state === "in" && !acting && !justIn && left && <span className="mb-tool-left"> · {left}</span>}
           </span>
         </span>
       </span>

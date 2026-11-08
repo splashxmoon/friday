@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Icon } from "./icons.js";
 import type { RecentSession } from "./storage.js";
-import { isTeamSid, newTeammate, setTeamTab, useTeamNow } from "./Teammates.js";
+import { isTeamSid, newTeammate, useTeamNow } from "./Teammates.js";
 import "./getting-started.css";
 
 /**
@@ -41,7 +41,7 @@ export function GettingStarted({ recents, onPickFolder }: { recents: RecentSessi
   const steps = [
     { id: "task", title: "Give an agent its first task", body: "Describe a change in the box above. It works in a folder of its own until you pick one.", done: own.length > 0, act: "Write it", run: focusBox },
     { id: "folder", title: "Point it at your own project", body: "Pick a folder or repo, and the agent works on your real code, on a branch of its own.", done: read(OWN_FOLDER), act: "Pick a folder", run: onPickFolder },
-    { id: "mate", title: "Add a teammate who stays", body: "A name, a role and a coding tool: it keeps its memory and works through its queue while you're away.", done: !!t?.teammates.length, act: "Add", run: () => (setTeamTab(true), setTimeout(newTeammate, 50)) },
+    { id: "mate", title: "Add a teammate who stays", body: "A name, a role and a coding tool: it keeps its memory and works through its queue while you're away.", done: !!t?.teammates.length, act: "Add", run: newTeammate },
   ];
   const done = steps.filter((s) => s.done).length;
   if (hidden || done === steps.length) return null;

@@ -611,7 +611,7 @@ export function ShortcutsTab() {
   );
 }
 
-export function DataTab() {
+export function DataTab({ part = "backup" }: { part?: "backup" | "privacy" } = {}) {
   const file = useRef<HTMLInputElement>(null);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
   // Reset says what it did beside its own button, with Undo there and focused, rather than a card away.
@@ -652,6 +652,9 @@ export function DataTab() {
     if (file.current) file.current.value = "";
   };
 
+  // Privacy is its own tab now (Arun, 2026-11-08): nobody looks for the analytics switch under "backup".
+  if (part === "privacy")
+    return <section className="flex flex-col gap-5">{isLocal() ? <UsageSharingSetting /> : <ShareAnalytics />}</section>;
   return (
     <section className="flex flex-col gap-5">
       <SettingsGroup title="Your settings file">
@@ -681,8 +684,6 @@ export function DataTab() {
       </SettingsGroup>
       <Note>{note?.ok ? note.text : ""}</Note>
       <Note ok={false}>{note && !note.ok ? note.text : ""}</Note>
-      {/* The hosted edition's analytics by account; the open-source edition's anonymous counts by install (UsageSharing.tsx). */}
-      {isLocal() ? <UsageSharingSetting /> : <ShareAnalytics />}
       {/* Reset can be taken back, so it asks nothing first: one press, and Undo on the line that says it happened. */}
       <SettingsGroup title="Start over">
         <Row
@@ -781,7 +782,7 @@ function ShareAnalytics() {
 // The website's changelog, written for people, not GitHub's list of installers (Arun, 2026-11-05).
 const RELEASES = "https://www.tryfridaywork.com/changelog";
 
-export function AboutTab({ onReplayTour }: { onReplayTour?: () => void }) {
+export function AboutTab({ onReplayTour, part = "updates" }: { onReplayTour?: () => void; part?: "updates" | "help" }) {
   // Outside the desktop app (which says its version and updates itself, AppUpdate) the version is the server's own: the page
   // said "Updates" and showed none (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
   const app = typeof window !== "undefined" && !!window.fridayDesktop?.update;
@@ -793,16 +794,33 @@ export function AboutTab({ onReplayTour }: { onReplayTour?: () => void }) {
       .then((b: { version?: string } | null) => setVersion(b?.version ?? ""))
       .catch(() => {});
   }, [app]);
+  if (part === "updates")
+    return (
+      <section className="flex flex-col gap-5">
+        <AppUpdate />
+        {!app && version && (
+          <SettingsGroup title="Version">
+            <Row label={`Friday ${version}`} hint={isLocal() ? "Running on this computer. A newer one comes with the desktop app, which updates itself, or with git pull where you run it from source." : "The version this page is served from. The desktop app updates itself."} />
+          </SettingsGroup>
+        )}
+        <SettingsGroup title="What changed">
+          <Row label="Release notes" hint="What changed in each version.">
+            {isLocal() && (
+              <Button variant="outline" size="sm" onClick={() => window.dispatchEvent(new Event("friday:whats-new"))}>
+                What's new
+              </Button>
+            )}
+            <Button variant="outline" size="sm" onClick={() => openOutside(RELEASES)}>
+              Release notes <ExternalLinkIcon />
+            </Button>
+          </Row>
+        </SettingsGroup>
+      </section>
+    );
   return (
     <section className="flex flex-col gap-5">
-      <AppUpdate />
-      {!app && version && (
-        <SettingsGroup title="Version">
-          <Row label={`Friday ${version}`} hint={isLocal() ? "Running on this computer. A newer one comes with the desktop app, which updates itself, or with git pull where you run it from source. Release notes, below, say what each one changed." : "The version this page is served from. The desktop app updates itself."} />
-        </SettingsGroup>
-      )}
       {/* Things to do are buttons on the right of a row, not dimmer text in the value column beside "A browser". */}
-      <SettingsGroup title="Learn">
+      <SettingsGroup title="Getting started">
         {/* The open-source edition has no tour: only setting up this computer again. */}
         <Row
           label={isLocal() ? "Setup" : "Guided tour"}
@@ -817,16 +835,8 @@ export function AboutTab({ onReplayTour }: { onReplayTour?: () => void }) {
             </Button>
           )}
         </Row>
-        <Row label="Release notes" hint="What changed in each version.">
-          {isLocal() && (
-            <Button variant="outline" size="sm" onClick={() => window.dispatchEvent(new Event("friday:whats-new"))}>
-              What's new
-            </Button>
-          )}
-          <Button variant="outline" size="sm" onClick={() => openOutside(RELEASES)}>
-            Release notes <ExternalLinkIcon />
-          </Button>
-        </Row>
+      </SettingsGroup>
+      <SettingsGroup title="Feedback">
         {/* Both editions (Arun, 2026-11-04: the hosted service follows the open-source edition's design). */}
         <Row label="Send feedback" hint="Something broken, or something you'd like: a GitHub issue, with this version and system filled in.">
           <Button variant="outline" size="sm" onClick={() => void sendFeedback()}>
