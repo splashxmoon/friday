@@ -30,6 +30,30 @@ function ref(url: string) {
   return { ...r, route: `/repos/${r.owner}/${r.repo}/pulls/${r.number}`, repoRoute: `/repos/${r.owner}/${r.repo}` };
 }
 
+/** One file of a pull request with its diff, as GitHub gives it: `patch` is missing for a binary file or one too big to show. */
+export interface PrFile {
+  path: string;
+  status: string;
+  additions: number;
+  deletions: number;
+  patch?: string;
+}
+
+/**
+ * A pull request's files with their diffs, for Code Review's guided tour (Arun, 2026-11-07: "fix the guided tour it is bugged
+ * and poorly designed"): the tour walked file names alone. Three pages of GitHub's hundred at most, and each patch cut at 60 KB.
+ */
+export async function prFiles(p: { url: string }): Promise<{ files: PrFile[] }> {
+  const r = ref(p.url);
+  const files: PrFile[] = [];
+  for (let page = 1; page <= 3; page++) {
+    const got = await githubRest<{ filename: string; status: string; additions: number; deletions: number; patch?: string }[]>("GET", `${r.route}/files?per_page=100&page=${page}`);
+    for (const f of got) files.push({ path: f.filename, status: f.status, additions: f.additions, deletions: f.deletions, ...(f.patch ? { patch: f.patch.slice(0, 60_000) } : {}) });
+    if (got.length < 100) break;
+  }
+  return { files };
+}
+
 export async function prAct(p: { url: string; action: PrAction; method?: string; body?: string; head?: string; id?: string; comments?: DraftComment[] }): Promise<{ ok: true; note?: string; url?: string }> {
   const r = ref(p.url);
   switch (p.action) {

@@ -9,7 +9,7 @@ import { AttachButton, AttachedRow, DropOverlay, PICK_FOLDER, attach, droppedFil
 import { Icon, type IconName } from "./icons.js";
 import { rememberAsk, walkAsks } from "./askHistory.js";
 import { NoMachine, connectThisComputer, hostApi, useMachine } from "./local.js";
-import { ComputerPill } from "./Computers.js";
+import { RunsOn } from "./Computers.js";
 import { HeroTitle } from "./HeroTitle.js";
 import { HomeActivity } from "./HomeActivity.js";
 import { MachineBadge } from "./MachineBadge.js";
@@ -927,6 +927,9 @@ export function Code({
       <div className="composer-above">
         {/* Smart routing is the tool's model "Smart" (AgentModelPicker), said on its pill: "Claude Code · Smart" (Arun, 2026-11-04,
             design A: nothing over the box). */}
+        {/* Which computer it runs on, on its own line above the box (Computers.tsx RunsOn; Arun, 2026-11-07: "Move the machine
+            selector to above the input chat"): its folders and tools are the ones the box offers. */}
+        {isLocal() && <RunsOn onPick={() => (setPicked(null), setBranch(""), setNewBranch(true), setPickBranch(""))} />}
       </div>
       <form
         className="composer-card"
@@ -1145,8 +1148,6 @@ export function Code({
             {/* Where it works, as a plain text dropdown in the box's footer beside who works and how (DIRECTION.md §9.5, as Synara
                 does): the picker of folders behind it, and the line that said "No folder picked: … Choose a folder" under the box
                 is its title now. Picked, the cross beside it takes it off again. */}
-            {/* Which computer it runs on, once you have another linked (Computers.tsx): its folders and tools are the ones offered. */}
-            {isLocal() && <ComputerPill onPick={() => (setPicked(null), setBranch(""), setNewBranch(true), setPickBranch(""))} />}
             {hasMachine && (
               <span className="cw-where">
                 {folder ? (

@@ -1385,6 +1385,7 @@ export function App() {
               else navigate({ kind: "needs" });
             }}
             onNew={() => toNewSession()}
+            onReview={() => navigate({ kind: "review" })}
           />
         ) : route.kind === "review" ? (
           <CodeReview

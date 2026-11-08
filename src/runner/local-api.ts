@@ -24,7 +24,7 @@ import { cancelLogin, finishLogin, openInTerminal, startLogin } from "./terminal
 import { accountEnv, addAccount, DEFAULT_ACCOUNT, getAccount, hasAccounts, isOut, listAccounts, removeAccount, renameAccount, type AccountTool } from "./accounts.js";
 import { browse, cloneRepo, defaultCloneRoot, describe, findByName, ghBin, githubRepos, issues, pullRequests, recentReposCached, teamPullRequests } from "./workspace.js";
 import { githubCancel, githubConnect, githubDisconnect, githubStatus } from "./github.js";
-import { githubItem, localRepo, prAct, prReview, type DraftComment, type PrAction } from "./pr-actions.js";
+import { githubItem, localRepo, prAct, prFiles, prReview, type DraftComment, type PrAction } from "./pr-actions.js";
 import { savedDirs, startDirs } from "./extra-dirs.js";
 import { readRepo } from "./repo-read.js";
 import { addOwnModels, detectLocal, discoverModels, listOwnModels, ownComplete, ownVision, removeOwnModel, saveOwnModel, testOwnModel } from "./own-models.js";
@@ -91,6 +91,8 @@ export const HOST_METHODS = [
   "issues",
   "pr.act",
   "pr.review",
+  // A pull request's files with their diffs, for Code Review's guided tour.
+  "pr.files",
   "github.status",
   "github.connect",
   "github.cancel",
@@ -369,6 +371,8 @@ export async function callHost(method: string, params: Record<string, unknown> =
         id: str(params.id, 100),
         comments: (Array.isArray(params.comments) ? params.comments : []).slice(0, 30).map((c: Record<string, unknown>) => ({ path: str(c?.path, 300), body: str(c?.body, 4000), ...(Number(c?.line) > 0 ? { line: Math.floor(Number(c.line)) } : {}) }) as DraftComment),
       });
+    case "pr.files":
+      return prFiles({ url: str(params.url, 300) });
     case "pr.review":
       return prReview({ url: str(params.url, 300), tool: str(params.tool, 20), model: str(params.model, 60) || undefined });
     case "github.status":

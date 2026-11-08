@@ -21,7 +21,7 @@ import { CheckIcon, ChevronDownIcon, EllipsisIcon, ExternalLinkIcon, FolderIcon,
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -283,7 +283,9 @@ export function CodeReview({
 
   return (
     // The whole width: 24px either side, the list growing a little on wide windows and the pull request taking the rest.
-    <div className={`page conns-page review-page ${ready ? "inbox" : ""} px-6! max-[640px]:px-4!`}>
+    // The list and the open pull request run closer to the window's edges, the pane's scroll bar at the right edge (Arun,
+    // 2026-11-07: "there is still some space here, utilize it", "reduce the same on the left side as well slightly").
+    <div className={`page conns-page review-page ${ready ? "inbox pr-0! pl-3!" : "px-6!"} max-[640px]:px-4!`}>
       <div className="page-inner">
         <PageHeader
           className="mb-0 shrink-0"
@@ -451,7 +453,7 @@ export function CodeReview({
         {confirm && <ConfirmDialog confirmation={confirm} onClose={() => setConfirm(null)} />}
         {ready && (
           // As in a session: who you are on GitHub and whether it's checking on the left, the keys on the right.
-          <footer className="status-bar rv-status mx-[-24px]! max-[640px]:mx-[-16px]!" aria-label="Code Review status">
+          <footer className={cn("status-bar rv-status max-[640px]:mx-[-16px]!", ready ? "mr-0! ml-[-12px]!" : "mx-[-24px]!")} aria-label="Code Review status">
             <div className="stb-start">
               <span className="stb-item stb-quiet">
                 <GitPullRequestIcon className="size-3.5" /> @{prs!.account ?? "you"} on GitHub
@@ -495,6 +497,7 @@ type Ctx = {
 type Tone = "ok" | "bad" | "warn" | "wait" | "muted";
 const DAY = 86_400_000;
 const FIX_WORD = { checks: "Checks failing", conflicts: "Conflicts", comments: "Comments to address", behind: "Behind its base" } as const;
+const FIX_SHORT = { checks: "Checks", conflicts: "Conflicts", comments: "Comments", behind: "Behind" } as const;
 
 /** Where a pull request stands, in a few words, for its line in the queue. */
 function standing(pr: PullRequest, kind: Kind): { text: string; tone: Tone } {
@@ -504,7 +507,8 @@ function standing(pr: PullRequest, kind: Kind): { text: string; tone: Tone } {
     return d >= 1 ? { text: `Waiting ${d}d on you`, tone: d >= 2 ? "warn" : "wait" } : { text: "Asked for your review", tone: "wait" };
   }
   if (kind === "ready") return { text: "Ready to merge", tone: "ok" };
-  if (kind === "fix") return { text: fixesOf(pr).map((f) => FIX_WORD[f]).join(" · ") || "Needs a fix", tone: "bad" };
+  // Short, under a "Needs a fix" heading, and said once: the row used to say it twice, in words and again in a pill.
+  if (kind === "fix") return { text: fixesOf(pr).map((f, i) => (i ? FIX_SHORT[f].toLowerCase() : FIX_SHORT[f])).join(", ") || "Needs a fix", tone: "bad" };
   if (kind === "draft") return { text: "Draft", tone: "muted" };
   if (kind === "merged") return { text: `Merged ${relTime(Date.parse(pr.mergedAt ?? pr.updatedAt))}`, tone: "muted" };
   if (kind === "team") {
@@ -546,34 +550,32 @@ function QueueItem({ pr, kind, on, working, risk, onPick }: { pr: PullRequest; k
   const st = standing(pr, kind);
   const others = kind === "review" || kind === "team";
   const dot = dotOf(st.tone, kind, working);
-  // State first: the dot and where it stands, then the title, then where it lives and who made it.
+  // Two lines (Arun, 2026-11-07, code review design A): the title, then where it lives, its size and where it stands, once.
+  // What makes it worth a careful look is in its tooltip and the open pull request, no longer a second pill on the row.
   return (
     <button
       ref={root}
       type="button"
       aria-current={on || undefined}
       onClick={onPick}
-      className="flex w-full min-w-0 flex-col gap-1 rounded-lg px-2.5 py-2 text-left transition-colors duration-[var(--dass-fast)] hover:bg-[var(--hover)] aria-[current=true]:bg-[var(--hover)] aria-[current=true]:shadow-[inset_0_0_0_1px_var(--border)]"
+      title={risk && !risk.quick && risk.reasons.length ? `Worth a careful look: ${risk.reasons.join(", ")}` : undefined}
+      className="flex w-full min-w-0 flex-col gap-1.5 rounded-lg px-2.5 py-2 text-left transition-colors duration-[var(--dass-fast)] hover:bg-[var(--hover)] aria-[current=true]:bg-[var(--hover)] aria-[current=true]:shadow-[inset_0_0_0_1px_var(--border)]"
     >
-      <span className="flex min-w-0 items-start gap-2">
-        <Dot state={dot} className="mt-[5px]" />
-        <span className="line-clamp-2 min-w-0 flex-1 text-[13px] leading-snug font-medium text-[var(--ink)]">{pr.title}</span>
-        <Diff add={pr.additions} del={pr.deletions} className="mt-px" />
-      </span>
-      <span className="flex min-w-0 items-center gap-1.5 pl-[21px] text-[12px] text-[var(--text-muted)]">
-        {others && pr.avatar && <img className="size-3.5 rounded-full" src={pr.avatar} alt="" />}
-        <span className="truncate">
+      <span className="line-clamp-2 min-w-0 text-[13px] leading-snug font-medium text-[var(--ink)]">{pr.title}</span>
+      <span className="flex min-w-0 items-center gap-2 text-[12px] text-[var(--text-muted)]">
+        {others && pr.avatar && <img className="size-3.5 shrink-0 rounded-full" src={pr.avatar} alt="" />}
+        {/* Where it lives keeps its words; a long status gives way first (2026-11-07 release walk: "edge…" beside "Checks,
+            conflicts, comments"). */}
+        <span className="max-w-[55%] min-w-0 shrink-0 truncate">
           {pr.repo.split("/")[1]} #{pr.number}
           {others && pr.author ? ` · ${pr.author}` : ""}
           {pr.base && !/^(main|master|trunk|develop)$/.test(pr.base) ? ` · stacked on ${pr.base}` : ""}
         </span>
-      </span>
-      <span className="flex min-w-0 items-center gap-2 pl-[21px]">
-        <span className={cn("min-w-0 flex-1 truncate text-[12px] font-medium", TONE_TEXT[dotOf(st.tone, kind)])} title={`${sizeOf(pr)} change: ${pr.additions + pr.deletions} lines`}>
-          {st.text}
-          {working?.shepherd && <span className="text-[var(--dass-live)]"> · Friday is on it</span>}
+        <Diff add={pr.additions} del={pr.deletions} />
+        <span className={cn("ml-auto inline-flex min-w-0 items-center gap-1.5 font-medium", TONE_TEXT[dot])} title={`${working?.shepherd ? "Friday is on it" : st.text} · ${sizeOf(pr)} change: ${pr.additions + pr.deletions} lines`}>
+          <Dot state={dot} className="shrink-0" />
+          <span className="truncate">{working?.shepherd ? "Friday is on it" : st.text}</span>
         </span>
-        {risk && !risk.quick && <RiskChip risk={risk} />}
       </span>
     </button>
   );
@@ -687,9 +689,11 @@ function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: 
   const merged = kind === "merged";
   const others = kind === "review" || kind === "team";
   const session = ctx.sessionFor.get(pr.url);
-  const fixes = fixesOf(pr);
+  const files = pr.files ?? [];
   // Why it is where it is in the queue, weightiest first: the paths it touches, its tests and checks, what a reviewer found.
   const risks = kind === "merged" ? risksOf(pr) : (risk?.reasons ?? risksOf(pr));
+  // Of those, what the rest of the page doesn't say already: its size is beside the title, its checks in the card.
+  const looks = risks.filter((r) => !/check|conflict|\b(lines|files)\b/i.test(r));
   const quiet = (p: Promise<unknown>) => void p.catch(() => {});
 
   const act = async (action: string, extra: Record<string, unknown> = {}) => {
@@ -764,12 +768,9 @@ function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: 
         </Button>
       </Tip>,
     );
-  if (kind === "fix" || kind === "waiting") {
-    if (fixes.includes("behind")) buttons.push(quietBtn("b", busy === "update_branch" ? "Updating…" : "Update branch", () => quiet(act("update_branch")), { disabled: !!busy }));
-    if (fixes.includes("checks")) buttons.push(quietBtn("c", "Fix checks", () => ctx.onWork(briefs.checks(pr))));
-    if (fixes.includes("conflicts")) buttons.push(quietBtn("x", "Resolve conflicts", () => ctx.onWork(briefs.conflicts(pr))));
-    if (fixes.includes("comments")) buttons.push(quietBtn("r", "Address comments", () => ctx.onWork(briefs.comments(pr))));
-    if (kind === "fix" && !session?.shepherd)
+  // Each fix is on its own line in the card below (MergeRows), beside what it fixes; the card's one button sees it all through.
+  if (kind === "fix") {
+    if (!session?.shepherd)
       buttons.push(
         <Tip key="t" label="A session fixes what's blocking it, then Friday keeps handing new red checks and review comments to the agent until it merges">
           <Button size="sm" className="h-8 text-[13px]" onClick={() => ctx.onWork(briefs.through(pr), { shepherd: true })}>
@@ -786,7 +787,6 @@ function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: 
     );
   if (kind === "team") buttons.push(quietBtn("s", "Review in a session", () => ctx.onWork(briefs.review(pr))));
 
-  const files = pr.files ?? [];
   const risky = new Set(files.filter((f) => risksOf({ files: [f] }).length).map((f) => f.path));
   const nextDot: DotState = kind === "review" ? "needs" : next.tone === "bad" ? "bad" : next.tone === "ok" ? "done" : "idle";
 
@@ -810,75 +810,82 @@ function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: 
             </Tip>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[13px] text-[var(--text-muted)]">
-          <span>
-            {pr.repo} #{pr.number}
-          </span>
-          {pr.author && (
-            <span className="inline-flex items-center gap-1.5 text-[var(--ink-2)]">
-              {pr.avatar && <img className="size-4 rounded-full" src={pr.avatar} alt="" />}
-              {pr.author}
-            </span>
-          )}
-          {pr.branch && (
-            <span className="inline-flex min-w-0 items-center gap-1 font-mono text-[12px]" title={`${pr.branch} into ${pr.base || "its base"}`}>
-              <GitBranchIcon className="size-3.5 shrink-0" />
-              <span className="truncate">
-                {pr.branch}
-                {pr.base ? ` → ${pr.base}` : ""}
+        {/* One quiet line of what it is (design A): where, who, which branch, its size, and what makes it worth a careful look.
+            The size and the paths it touches were a row of chips, one of them the failing checks the card says already. */}
+        <p className="m-0 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-[var(--text-muted)]">
+          {[
+            <span key="n">
+              {pr.repo} #{pr.number}
+            </span>,
+            pr.author && (
+              <span key="a" className="inline-flex items-center gap-1.5 text-[var(--ink-2)]">
+                {pr.avatar && <img className="size-4 rounded-full" src={pr.avatar} alt="" />}
+                {pr.author}
               </span>
-            </span>
-          )}
-          <Diff add={pr.additions} del={pr.deletions} />
-          <span>updated {relTime(Date.parse(pr.updatedAt))}</span>
-        </div>
-        {(session || risks.length > 0) && (
+            ),
+            pr.branch && (
+              <span key="b" className="inline-flex min-w-0 items-center gap-1 font-mono text-[12px]" title={`${pr.branch} into ${pr.base || "its base"}`}>
+                <GitBranchIcon className="size-3.5 shrink-0" />
+                <span className="truncate">
+                  {pr.branch}
+                  {pr.base ? ` → ${pr.base}` : ""}
+                </span>
+              </span>
+            ),
+            <span key="d" className="inline-flex items-center gap-1.5">
+              <Diff add={pr.additions} del={pr.deletions} />
+              {(pr.changedFiles ?? files.length) > 0 && `in ${pr.changedFiles ?? files.length} file${(pr.changedFiles ?? files.length) === 1 ? "" : "s"}`}
+            </span>,
+            looks.length > 0 && (
+              <span key="r" className="text-[var(--ink-2)]" title="Worth a careful look">
+                {looks.map((r, i) => (i ? r.charAt(0).toLowerCase() + r.slice(1) : r)).join(", ")}
+              </span>
+            ),
+            <span key="u">updated {relTime(Date.parse(pr.updatedAt))}</span>,
+          ]
+            .filter(Boolean)
+            .flatMap((n, i) => (i ? [<span key={`s${i}`} aria-hidden className="text-[var(--ink-4,var(--text-muted))]">·</span>, n] : [n]))}
+        </p>
+        {session && (
           <div className="flex flex-wrap items-center gap-1.5">
-            {session && (
-              <Button
-                variant="outline"
-                size="xs"
-                className={cn(
-                  "h-6 gap-1.5 rounded-md border-[var(--border)] bg-transparent px-2 text-[12px] font-medium text-[var(--ink-2)] shadow-none dark:bg-transparent",
-                  session.shepherd && "border-transparent bg-[color-mix(in_srgb,var(--dass-live)_14%,transparent)] text-[var(--dass-live)] hover:text-[var(--dass-live)] dark:bg-[color-mix(in_srgb,var(--dass-live)_14%,transparent)]",
-                )}
-                onClick={() => ctx.onOpen?.(session.sid)}
-                title={`Open “${session.title}”`}
-              >
-                {session.shepherd ? <Dot state="working" /> : session.tool ? <EngineMark tool={session.tool} size={12} /> : <Icon name="agent" size={12} />}
-                {session.shepherd ? `Friday is seeing it through · ${session.shepherd}` : session.pr?.url === pr.url ? `Made in a session by ${session.agent}` : `Being worked on by ${session.agent}`}
-              </Button>
-            )}
-            {risks.map((r) => (
-              <Badge
-                key={r}
-                variant="outline"
-                className={cn("h-6 gap-1 rounded-md border-[var(--border)] px-2 text-[12px] font-medium text-[var(--ink-2)]", risk?.level === "high" && r === risk.top && "border-[color-mix(in_srgb,var(--red)_40%,var(--border))] text-[var(--red)]")}
-                title="Worth a careful look"
-              >
-                <ShieldIcon /> {r}
-              </Badge>
-            ))}
+            <Button
+              variant="outline"
+              size="xs"
+              className={cn(
+                "h-6 gap-1.5 rounded-md border-[var(--border)] bg-transparent px-2 text-[12px] font-medium text-[var(--ink-2)] shadow-none dark:bg-transparent",
+                session.shepherd && "border-transparent bg-[color-mix(in_srgb,var(--dass-live)_14%,transparent)] text-[var(--dass-live)] hover:text-[var(--dass-live)] dark:bg-[color-mix(in_srgb,var(--dass-live)_14%,transparent)]",
+              )}
+              onClick={() => ctx.onOpen?.(session.sid)}
+              title={`Open “${session.title}”`}
+            >
+              {session.shepherd ? <Dot state="working" /> : session.tool ? <EngineMark tool={session.tool} size={12} /> : <Icon name="agent" size={12} />}
+              {session.shepherd ? `Friday is seeing it through · ${session.shepherd}` : session.pr?.url === pr.url ? `Made in a session by ${session.agent}` : `Being worked on by ${session.agent}`}
+            </Button>
           </div>
         )}
       </header>
 
-      <div
+      {/* What stands between it and merging, said once (Arun, 2026-11-07, code review design A): a heading, the one action
+          that moves it forward, and a line for each of checks, review and merging with its own fix beside it. It was a card, then
+          three boxes, then the failing check again, each saying the same failure. */}
+      <section
+        aria-label={next.title}
         className={cn(
-          "tray flex flex-col gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4",
+          "tray flex flex-col rounded-xl border border-[var(--border)] bg-[var(--card)]",
           nextDot === "needs" && "border-[color-mix(in_srgb,var(--dass-needs)_40%,var(--border))]",
           nextDot === "bad" && "border-[color-mix(in_srgb,var(--red)_35%,var(--border))]",
         )}
       >
-        <div className="flex items-start gap-2.5">
-          <Dot state={nextDot} className="mt-[6px]" />
-          <div className="flex min-w-0 flex-col gap-1">
-            <b className="text-[14px] font-semibold text-[var(--ink)]">{next.title}</b>
-            <span className="text-[13px] leading-relaxed text-[var(--text-muted)]">{next.body}</span>
+        <div className="flex flex-col gap-1 p-4">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <Dot state={nextDot} />
+            <b className="min-w-0 flex-1 text-[14px] font-semibold text-[var(--ink)]">{next.title}</b>
+            {!asking && buttons.length > 0 && <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-1.5">{buttons}</div>}
           </div>
+          {next.body && <span className="pl-[21px] text-[13px] leading-relaxed text-[var(--text-muted)]">{next.body}</span>}
         </div>
-        {asking ? (
-          <div className="flex flex-col gap-2 pl-[21px]">
+        {asking && (
+          <div className="flex flex-col gap-2 px-4 pb-4 pl-[37px]">
             <Textarea className="min-h-20 border-[var(--border)] bg-[var(--bg)] text-[13px] md:text-[13px]" rows={3} autoFocus value={changes} placeholder="What should change before this merges" onChange={(e) => setChanges(e.target.value)} />
             <div className="flex justify-end gap-1.5">
               {quietBtn("cancel", "Cancel", () => setAsking(false))}
@@ -887,33 +894,35 @@ function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: 
               </Button>
             </div>
           </div>
-        ) : (
-          buttons.length > 0 && <div className="flex flex-wrap items-center justify-end gap-1.5">{buttons}</div>
         )}
+        {!merged && <MergeRows pr={pr} mine={!others} ctx={ctx} act={act} busy={busy} />}
         {note && (
-          <p className={cn("m-0 pl-[21px] text-[13px]", note.bad ? "text-[var(--red)]" : "text-[var(--text-muted)]")} role={note.bad ? "alert" : "status"}>
+          <p className={cn("m-0 border-t border-[var(--border)] px-4 py-2.5 text-[13px]", note.bad ? "text-[var(--red)]" : "text-[var(--text-muted)]")} role={note.bad ? "alert" : "status"}>
             {note.text}
           </p>
         )}
-      </div>
+      </section>
 
-      {!merged && <Checklist pr={pr} mine={!others} ctx={ctx} act={act} />}
-      {!merged && <AgentReview pr={pr} ctx={ctx} mine={!others} act={act} />}
-
-      {files.length > 0 && (
-        <Section
-          title="Files changed"
-          meta={
-            <>
-              {pr.changedFiles ?? files.length}
-              {" · "}
-              <button type="button" className="link-btn" onClick={() => setTour(true)}>
-                Guided tour
-              </button>
-            </>
-          }
-        >
-          {tour && <ReviewTour pr={pr} files={files} onClose={() => setTour(false)} />}
+      {(files.length > 0 || !merged) && (
+        <section className="flex flex-col gap-3">
+          {/* The change itself is the page's body; your agents' review is a small control over it, its findings under it. */}
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <h3 className="m-0 text-[13px] font-semibold text-[var(--ink)]">Files changed</h3>
+            {files.length > 0 && (
+              <span className="text-[12px] text-[var(--text-muted)]">
+                {pr.changedFiles ?? files.length}
+                {" · "}
+                <button type="button" className="link-btn" onClick={() => setTour(true)}>
+                  Guided tour
+                </button>
+              </span>
+            )}
+            {!merged && <ReviewControl pr={pr} ctx={ctx} />}
+          </div>
+          {!merged && <AgentReview pr={pr} ctx={ctx} mine={!others} act={act} />}
+          {tour && <ReviewTour identity={ctx.identity} pr={pr} files={files} onClose={() => setTour(false)} />}
+          {/* The tour walks the files in its own place; the list is back when it ends. */}
+          {files.length > 0 && !tour && (
           <ul className="tray m-0 flex list-none flex-col divide-y divide-[var(--border)] rounded-xl border border-[var(--border)] p-0">
             {files.slice(0, 20).map((f) => (
               <li key={f.path} className="flex min-w-0 items-center gap-2.5 px-3 py-2 text-[13px]" title={f.path}>
@@ -931,12 +940,13 @@ function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: 
               </li>
             ))}
           </ul>
-          {(pr.changedFiles ?? files.length) > 20 && (
+          )}
+          {!tour && (pr.changedFiles ?? files.length) > 20 && (
             <Button variant="link" size="sm" className="h-auto self-start p-0 text-[13px]" onClick={() => openOutside(`${pr.url}/files`)}>
               {(pr.changedFiles ?? files.length) - 20} more on GitHub
             </Button>
           )}
-        </Section>
+        </section>
       )}
       {confirm && <ConfirmDialog confirmation={confirm} onClose={() => setConfirm(null)} />}
     </div>
@@ -950,10 +960,12 @@ function nextStep(pr: PullRequest, kind: Kind): { title: string; body: string; t
     const d = Math.floor(waitedMs(pr) / DAY);
     return { title: "Your review", body: `${pr.author || "Someone"} asked for your review${d >= 1 ? ` ${shortDuration(waitedMs(pr))} ago` : ""}. Read the change below, or have your agents read it first, then approve it or ask for changes.`, tone: d >= 2 ? "warn" : "wait" };
   }
-  if (kind === "ready") return { title: "Ready to merge", body: "Checks pass, it's approved and it merges cleanly.", tone: "ok" };
+  // The lines under the heading say each part (MergeRows), so a sentence saying them again is left out.
+  if (kind === "ready") return { title: "Ready to merge", body: "", tone: "ok" };
   if (kind === "fix") {
     const f = fixesOf(pr);
-    return { title: f.length > 1 ? `${f.length} things to fix before it can merge` : "One thing to fix before it can merge", body: `${f.map((x, i) => (i ? FIX_WORD[x].toLowerCase() : FIX_WORD[x])).join(", ")}. Fix each in a session, or let Friday see it through: it keeps fixing new red checks and comments until it merges.`, tone: "bad" };
+    const n = ["One thing", "Two things", "Three things", "Four things"][f.length - 1] ?? `${f.length} things`;
+    return { title: `${n} before it can merge`, body: `Fix ${f.length > 1 ? "each" : "it"} below, or let Friday see it through: it keeps fixing new red checks and comments until it merges.`, tone: "bad" };
   }
   if (kind === "draft") return { title: "Still a draft", body: "Nobody is asked to review it yet. Mark it ready when it is.", tone: "muted" };
   if (kind === "merged") return { title: "Merged", body: `Went into ${pr.base || "its base branch"} ${relTime(Date.parse(pr.mergedAt ?? pr.updatedAt))}.`, tone: "muted" };
@@ -961,103 +973,151 @@ function nextStep(pr: PullRequest, kind: Kind): { title: string; body: string; t
     const who = (pr.requested ?? []).map((r) => r.login);
     return { title: `${pr.author || "A teammate"}'s pull request`, body: who.length ? `Waiting on a review from ${who.join(", ")}.` : "Nobody is asked to review it.", tone: "muted" };
   }
-  return { title: "Nothing for you to do yet", body: s.checks === "wait" ? "Its checks are still running." : s.review === "wait" ? "It's waiting for someone to review it." : pr.mergeState === "behind" ? "It's behind its base branch: update it to merge." : "GitHub is still working out whether it merges cleanly.", tone: "wait" };
+  return { title: pr.mergeState === "behind" && s.checks !== "wait" && s.review !== "wait" ? "Behind its base branch" : "Nothing for you to do yet", body: "", tone: "wait" };
 }
 
-const STEP_WORD: Record<"checks" | "review" | "merge", Record<Mark, string>> = {
-  checks: { ok: "All checks pass", bad: "Checks are failing", wait: "Checks are running", skip: "No checks on this repo" },
-  review: { ok: "Approved", bad: "Changes were requested", wait: "Waiting for a review", skip: "No review needed" },
-  merge: { ok: "Merges cleanly", bad: "Conflicts with its base branch", wait: "Merge check pending", skip: "" },
-};
+/** A part's state as a small round mark: filled when done, red when it stops the merge, dashed while it waits. */
+function StepMark({ mark }: { mark: Mark }) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "grid size-4 shrink-0 place-items-center rounded-full [&_svg]:size-2.5",
+        mark === "ok" && "bg-[var(--ink)] text-[var(--bg)]",
+        mark === "bad" && "bg-[var(--red)] text-white",
+        mark === "wait" && "border-[1.5px] border-dashed border-[var(--border-strong)]",
+        mark === "skip" && "border-[1.5px] border-[var(--border)]",
+      )}
+    >
+      {mark === "ok" ? <CheckIcon strokeWidth={3} /> : mark === "bad" ? <XIcon strokeWidth={3} /> : null}
+    </span>
+  );
+}
 
-/** The three things between a pull request and merging, top to bottom, with what is wrong under the one that is. */
-function Checklist({ pr, mine, ctx, act }: { pr: PullRequest; mine: boolean; ctx: Ctx; act: (action: string, extra?: Record<string, unknown>) => Promise<void> }) {
+const REVIEW_WORD: Record<Mark, string> = { ok: "approved", bad: "changes were requested", wait: "waiting for a review", skip: "none needed on this repo" };
+
+/**
+ * Checks, review and merging, a line each under the card's heading (code review design A): what each one is now, the failing
+ * checks by name, and the fix for it beside it, for your own pull requests: Re-run and Fix in a session, Address comments,
+ * Resolve conflicts, Update branch.
+ */
+function MergeRows({ pr, mine, ctx, act, busy }: { pr: PullRequest; mine: boolean; ctx: Ctx; act: (action: string, extra?: Record<string, unknown>) => Promise<void>; busy: string }) {
   const s = stepsOf(pr);
   const failing = pr.failing ?? [];
+  const failed = failing.filter((c) => c.state === "failing");
+  const base = pr.base || "its base branch";
+  const behind = pr.mergeState === "behind" && pr.mergeable !== false;
+  const unresolved = pr.unresolved ?? 0;
   const quiet = (p: Promise<unknown>) => void p.catch(() => {});
-  const mergeWord = pr.mergeState === "behind" && pr.mergeable !== false ? "Behind its base branch" : STEP_WORD.merge[s.merge];
-  // The three steps in a row, read left to right like any progress; what is wrong with one is said under the row.
-  const step = (k: "checks" | "review" | "merge", label: string) => (
-    <li
-      className={cn(
-        "flex min-w-0 items-center gap-2.5 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-[13px] font-medium text-[var(--ink)]",
-        s[k] === "bad" && "border-[color-mix(in_srgb,var(--red)_40%,var(--border))]",
-        s[k] === "skip" && "text-[var(--text-muted)]",
-      )}
-      aria-label={`${k}: ${label}`}
-    >
-      <span
-        aria-hidden
-        className={cn(
-          "grid size-[18px] shrink-0 place-items-center rounded-full [&_svg]:size-3",
-          s[k] === "ok" && "bg-[var(--ink)] text-[var(--bg)]",
-          s[k] === "bad" && "bg-[var(--red)] text-white",
-          s[k] === "wait" && "border-[1.5px] border-dashed border-[var(--border-strong)]",
-          s[k] === "skip" && "border-[1.5px] border-[var(--border)]",
-        )}
-      >
-        {s[k] === "ok" ? <CheckIcon strokeWidth={3} /> : s[k] === "bad" ? <XIcon strokeWidth={3} /> : null}
-      </span>
-      <span className="min-w-0 truncate">{label}</span>
-    </li>
+  const link = (key: string, label: string, onClick: () => void, disabled = false) => (
+    <Button key={key} variant="link" size="sm" disabled={disabled} className="h-auto p-0 text-[13px] font-medium text-[var(--ink-2)] hover:text-[var(--ink)]" onClick={onClick}>
+      {label}
+    </Button>
   );
-  const checksDetail =
-    failing.length > 0 && (
-      <>
-        <ul className="m-0 flex list-none flex-col gap-1 p-0">
-          {failing.slice(0, 8).map((c) => (
-            <li key={c.name + c.url} className="flex items-center gap-2 text-[13px]">
-              <Dot state={c.state === "failing" ? "bad" : "idle"} />
-              {c.url ? (
-                <Button variant="link" size="sm" className="h-auto p-0 text-[13px] font-medium text-[var(--ink)]" onClick={() => openOutside(c.url)}>
-                  {c.name}
-                </Button>
-              ) : (
-                <span className="font-medium text-[var(--ink)]">{c.name}</span>
-              )}
-              <span className="ml-auto text-[12px] text-[var(--text-muted)]">{c.state === "failing" ? "failed" : "running"}</span>
-            </li>
-          ))}
-        </ul>
-        {mine && failing.some((c) => c.state === "failing") && (
-          <div className="flex flex-wrap gap-1.5">
-            <Button variant="outline" size="sm" className="h-7 border-[var(--border)] bg-[var(--bg)] text-[12px] shadow-none" onClick={() => quiet(act("rerun"))}>
-              Re-run failed
-            </Button>
-            <Button variant="outline" size="sm" className="h-7 border-[var(--border)] bg-[var(--bg)] text-[12px] shadow-none" onClick={() => ctx.onWork(briefs.checks(pr))}>
-              Fix in a session
-            </Button>
-          </div>
+  const named = (cs: typeof failing) =>
+    cs.slice(0, 3).map((c, i) => (
+      <span key={c.name + c.url}>
+        {i ? ", " : ""}
+        {c.url ? (
+          <button type="button" className="link-btn text-[var(--ink-2)]" onClick={() => openOutside(c.url)}>
+            {c.name}
+          </button>
+        ) : (
+          c.name
         )}
-      </>
-    );
+      </span>
+    ));
+  const rows: { key: string; mark: Mark; name: string; detail: ReactNode; actions: ReactNode[] }[] = [
+    {
+      key: "checks",
+      mark: s.checks,
+      name: "Checks",
+      detail: s.checks === "bad" && failed.length ? <>{named(failed)}{failed.length > 3 ? ` and ${failed.length - 3} more` : ""} failed</> : s.checks === "wait" ? failing.length ? <>{named(failing)} running</> : "running" : s.checks === "ok" ? "all pass" : s.checks === "bad" ? "failing" : "none on this repo",
+      actions: mine && failed.length ? [link("rerun", busy === "rerun" ? "Re-running…" : "Re-run", () => quiet(act("rerun")), !!busy), link("fix", "Fix in a session", () => ctx.onWork(briefs.checks(pr)))] : [],
+    },
+    {
+      key: "review",
+      mark: s.review,
+      name: "Review",
+      detail: `${REVIEW_WORD[s.review]}${unresolved ? `, ${unresolved} comment thread${unresolved === 1 ? "" : "s"} open` : ""}`,
+      actions: mine && unresolved ? [link("comments", "Address comments", () => ctx.onWork(briefs.comments(pr)))] : [],
+    },
+    {
+      key: "merge",
+      mark: behind && s.merge !== "bad" ? "wait" : s.merge,
+      name: s.merge === "bad" ? "Conflicts" : "Merge",
+      detail: s.merge === "bad" ? `with ${base}` : behind ? `behind ${base}` : s.merge === "ok" ? `merges cleanly into ${base}` : "GitHub is still checking",
+      actions: !mine ? [] : s.merge === "bad" ? [link("conflicts", "Resolve conflicts", () => ctx.onWork(briefs.conflicts(pr)))] : behind ? [link("update", busy === "update_branch" ? "Updating…" : "Update branch", () => quiet(act("update_branch")), !!busy)] : [],
+    },
+  ];
   return (
-    <Section title="Before it can merge">
-      <ol className="m-0 grid list-none grid-cols-1 gap-2 p-0 sm:grid-cols-3">
-        {step("checks", STEP_WORD.checks[s.checks])}
-        {step("review", STEP_WORD.review[s.review])}
-        {step("merge", mergeWord)}
-      </ol>
-      {checksDetail && <div className="flex flex-col gap-2.5 px-1">{checksDetail}</div>}
-      {(pr.unresolved ?? 0) > 0 && (
-        <p className="m-0 px-1 text-[13px] text-[var(--text-muted)]">
-          {pr.unresolved} unresolved comment thread{pr.unresolved === 1 ? "" : "s"}
-        </p>
-      )}
-    </Section>
+    <ul className="m-0 flex list-none flex-col border-t border-[var(--border)] p-0" aria-label="Before it can merge">
+      {rows.map((r) => (
+        <li key={r.key} className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-[var(--border)] px-4 py-2.5 text-[13px] last:border-b-0">
+          <StepMark mark={r.mark} />
+          <span className="min-w-0 flex-1 basis-48">
+            <span className="font-medium text-[var(--ink)]">{r.name}</span>
+            <span className="text-[var(--text-muted)]"> · {r.detail}</span>
+          </span>
+          {r.actions.length > 0 && <span className="ml-auto flex shrink-0 items-center gap-3">{r.actions}</span>}
+        </li>
+      ))}
+    </ul>
   );
 }
 
 const SEV: Record<ReviewFinding["severity"], string> = { high: "High", medium: "Medium", low: "Low" };
 
+/**
+ * Agent review as a small control over the files (code review design A): which of your coding tools read it, and Run. Your own
+ * coding tools read the change against the repo's rules and say what would break or isn't safe; more than one show where they
+ * agree. What they found is under it (AgentReview).
+ */
+function ReviewControl({ pr, ctx }: { pr: PullRequest; ctx: Ctx }) {
+  useReviews();
+  const run = reviews.get(pr.url);
+  const tools = ENGINE_TOOLS.filter((t) => ctx.tools.includes(t));
+  const [picked, setPicked] = useState<EngineTool[]>(() => (run?.results.length ? run.results.map((r) => r.tool) : tools.slice(0, 1)));
+  if (!tools.length) return null;
+  const asked = run ? run.results.length + Object.keys(run.errors).length + run.running.length : 0;
+  const label = picked.length > 1 ? `${picked.length} agents` : picked.length ? ENGINE_NAMES[picked[0]!] : "Pick an agent";
+  return (
+    <div className="ml-auto flex items-center gap-1">
+      <span className="mr-0.5 text-[12px] text-[var(--text-muted)]" title="Your own coding tools read the change against the repo's rules and say what would break or isn't safe. Pick more than one to see where they agree.">
+        Agent review
+      </span>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="sm" className="h-7 gap-1.5 px-2 text-[12px] font-medium text-[var(--ink-2)]" aria-label={`Agent review by ${picked.map((t) => ENGINE_NAMES[t]).join(" and ") || "nobody yet"}. Choose which`}>
+            {picked.length === 1 && <EngineMark tool={picked[0]!} size={12} />}
+            {label}
+            <ChevronDownIcon className="size-3" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {tools.map((t) => (
+            <DropdownMenuCheckboxItem key={t} checked={picked.includes(t)} onSelect={(e) => e.preventDefault()} onCheckedChange={() => setPicked((p) => (p.includes(t) ? p.filter((x) => x !== t) : [...p, t]))}>
+              <EngineMark tool={t} size={12} /> {ENGINE_NAMES[t]}
+            </DropdownMenuCheckboxItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Tip label="Have your agents read it" keys="R">
+        <Button variant="outline" size="sm" className="h-7 border-[var(--border)] bg-[var(--bg)] text-[12px] shadow-none" disabled={!picked.length || !!run?.running.length} onClick={() => void runReview(ctx.identity, pr, picked)}>
+          {run?.running.length ? <Dot state="working" /> : null}
+          {run?.running.length ? `Reading… ${asked - run.running.length}/${asked}` : run ? "Review again" : "Run"}
+        </Button>
+      </Tip>
+    </div>
+  );
+}
+
+/** What your agents found, under the files' heading: only once a review has run. */
 function AgentReview({ pr, ctx, mine, act }: { pr: PullRequest; ctx: Ctx; mine: boolean; act: (action: string, extra?: Record<string, unknown>) => Promise<void> }) {
   useReviews();
   const run = reviews.get(pr.url);
-  const [picked, setPicked] = useState<EngineTool[]>(() => (run?.results.length ? run.results.map((r) => r.tool) : ctx.tools.slice(0, 1)));
-  const tools = ENGINE_TOOLS.filter((t) => ctx.tools.includes(t));
   const merged = useMemo(() => (run ? mergeFindings(run.results) : []), [run]);
   const agreed = merged.filter((f) => f.by.length > 1).length;
-  const asked = run ? run.results.length + Object.keys(run.errors).length + run.running.length : 0;
   const stale = !!run && !!pr.head && !!run.head && run.head !== pr.head && !run.running.length;
   const names = (ts: EngineTool[]) => ts.map((t) => ENGINE_NAMES[t]).join(" and ");
   const quiet = (p: Promise<unknown>) => void p.catch(() => {});
@@ -1070,6 +1130,7 @@ function AgentReview({ pr, ctx, mine, act }: { pr: PullRequest; ctx: Ctx; mine: 
     );
   const done = !!run && !run.running.length && run.results.length > 0;
   const muted = "m-0 text-[13px] leading-relaxed text-[var(--text-muted)]";
+  if (!run || !ctx.tools.length) return null;
 
   return (
     <Section
@@ -1083,30 +1144,6 @@ function AgentReview({ pr, ctx, mine, act }: { pr: PullRequest; ctx: Ctx; mine: 
         )
       }
     >
-      {!tools.length ? (
-        <p className={muted}>Install or sign in to Claude Code, Codex or Cursor on this computer to have them review pull requests.</p>
-      ) : (
-        <>
-          {!run && <p className={muted}>Your own coding tools read the change against the repo's rules and say what would break or isn't safe. Pick more than one to see where they agree.</p>}
-          <div className="flex flex-wrap items-center gap-1.5">
-            {tools.map((t) => (
-              <ToolChip key={t} tool={t} on={picked.includes(t)} onClick={() => setPicked((p) => (p.includes(t) ? p.filter((x) => x !== t) : [...p, t]))} />
-            ))}
-            <Tip label="Have your agents read it" keys="R">
-              <Button
-                variant={run ? "outline" : "default"}
-                size="sm"
-                className={cn("ml-auto h-8 text-[13px]", run && "border-[var(--border)] bg-[var(--bg)] shadow-none")}
-                disabled={!picked.length || !!run?.running.length}
-                onClick={() => void runReview(ctx.identity, pr, picked)}
-              >
-                {run?.running.length ? <Dot state="working" /> : null}
-                {run?.running.length ? `Reading… ${asked - run.running.length}/${asked}` : run ? "Review again" : picked.length > 1 ? `Review with ${picked.length} agents` : "Run agent review"}
-              </Button>
-            </Tip>
-          </div>
-        </>
-      )}
       {run?.running.length ? (
         <p className={muted}>
           Your own {names(run.running)} {run.running.length > 1 ? "are" : "is"} reading the change. This takes a minute or two.

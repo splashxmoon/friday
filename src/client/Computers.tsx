@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { MenuButton, Picker, relTime, Segmented } from "./ui.js";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { MenuButton, Picker, relTime, Segmented, useDismiss } from "./ui.js";
 import { pickMachine, pickedMachine } from "./local.js";
 import { Icon } from "./icons.js";
 import { CopyMark } from "./SettingsOutside.js";
@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
  * Your other computers, for the open-source edition (Arun, 2026-10-30: "lets also add support for multi machine for coding and
  * crew"). Settings › Computer › Your computers: add one with a link to paste in its Friday, see which are linked
  * now, take one away; and on another computer, paste that link to use it from here (local/computers.ts, local/join.ts).
- * The new session's box says which computer it runs on once there is more than one (ComputerPill).
+ * The new-session page says which computer it runs on, on its own line above the box (RunsOn).
  */
 
 export interface LinkedComputer {
@@ -67,45 +67,118 @@ export function useComputers(every = 8_000): { id: string; label: string; detail
   return list;
 }
 
+/** When a computer was last here, as "Runs on" says it: "just now", "2h ago", "on Nov 3". */
+export function lastSeen(seen: number): string {
+  const r = relTime(seen);
+  return r === "now" ? "just now" : /^\d+[mhd]$/.test(r) ? `${r} ago` : `on ${r}`;
+}
+
 /**
- * Where a new session runs: this computer, or one of your others linked now. Shown only once there is another; the pick is this
- * browser's (local.ts pickMachine), so the folders and tools offered beside it are that computer's. `onPick`: the folder picked
- * was the other computer's, so it goes.
+ * The line under a computer's name in "Runs on": what stops it taking work (a problem only pairing again fixes, or not being
+ * connected and since when), else the coding tools signed in there, and an older or newer Friday there than here.
  */
-export function ComputerPill({ here = "This computer", onPick }: { here?: string; onPick?: () => void }) {
-  const computers = useComputers();
+export function computerLine(c: Pick<LinkedComputer, "connected" | "seen" | "tools" | "problem" | "version">, here?: string): string {
+  if (c.problem) return c.problem;
+  if (!c.connected) return `Not connected · last seen ${lastSeen(c.seen)}`;
+  const ready = c.tools.filter((t) => t.loggedIn === true).map((t) => t.name);
+  const tools = ready.length ? ready.join(", ") : "No coding tool signed in";
+  return c.version && here && c.version !== here ? `${tools} · Friday ${c.version} there` : tools;
+}
+
+/**
+ * Where a new session runs, on its own line above the box (Arun, 2026-11-07: "Move the machine selector to above the input
+ * chat", design B on the "Run on another computer" canvas). Always there in the open-source edition, so running on another of
+ * your computers can be found before one is added: "Runs on This computer", and its menu offers Add a computer… in place, the
+ * way Settings › Computer › Your computers does. Every computer paired is listed: connected ones with the coding tools signed
+ * in there, the rest greyed with when they were last seen. The pick is this browser's (local.ts pickMachine), so the folders and
+ * tools offered in the box are that computer's. `onPick`: the folder picked was the other computer's, so it goes.
+ */
+export function RunsOn({ onPick }: { onPick?: () => void }) {
+  const [state, setState] = useState<State | null>(null);
   const [on, setOn] = useState(pickedMachine);
+  const [adding, setAdding] = useState(false);
+  /** A computer picked that isn't connected now, so the work runs here: said beside the line until another is picked. */
+  const [fellBack, setFellBack] = useState("");
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    let gone = false;
+    const read = () => void call<State>("/api/computers").then((r) => !gone && setState(r), () => {});
+    read();
+    const t = setInterval(read, 8_000);
+    return () => ((gone = true), clearInterval(t));
+  }, [n]);
   useEffect(() => {
     const sync = () => setOn(pickedMachine());
     addEventListener("friday:machine", sync);
     return () => removeEventListener("friday:machine", sync);
   }, []);
-  // The one picked went away (removed, or not linked now): back to this computer, rather than every start failing there. Also
-  // when it was the only one: the page went on asking its tools of it, a red "Forbidden" in the console every few seconds.
+  // The one picked is gone or not connected now: back to this computer, said beside the line, rather than every start failing
+  // there (and the page asking its tools of it, a red "Forbidden" in the console every few seconds).
   useEffect(() => {
-    if (on && computers.read && !computers.some((c) => c.id === on)) pickMachine("");
-  }, [on, computers]);
-  if (!computers.length && !on) return null;
+    if (!on || !state) return;
+    const c = state.computers.find((x) => x.id === on);
+    if (c?.connected) return;
+    pickMachine("");
+    if (c) setFellBack(c.name);
+  }, [on, state]);
+  const computers = state?.computers ?? [];
   const current = computers.find((c) => c.id === on);
   const choose = (id: string) => {
+    setFellBack("");
     if (id === on) return;
     pickMachine(id);
     onPick?.();
   };
   return (
-    <MenuButton
-      className="cw-drop cw-computer"
-      label={`Runs on ${current?.label ?? here}. Choose another computer`}
-      text={current?.label ?? here}
-      mark={<Icon name="server" size={13} />}
-      above
-      width={260}
-      items={() => [
-        { heading: "Runs on" },
-        { label: here, icon: "server", checked: !on, onSelect: () => choose("") },
-        ...computers.map((c) => ({ label: c.label, ...(c.detail ? { sub: c.detail } : {}), icon: "server" as const, checked: c.id === on, live: true, onSelect: () => choose(c.id) })),
-      ]}
-    />
+    <div className="cw-runs-on">
+      <span className="cw-runs-label">Runs on</span>
+      <MenuButton
+        className="cw-drop cw-computer"
+        label={`Runs on ${current?.name ?? "this computer"}. Choose another computer`}
+        text={current?.name ?? "This computer"}
+        mark={<Icon name="server" size={13} />}
+        width={320}
+        items={() => [
+          { heading: "Runs on" },
+          { label: "This computer", icon: "server", checked: !on, onSelect: () => choose("") },
+          ...computers.map((c) => ({
+            label: c.name,
+            sub: computerLine(c, state?.version),
+            title: [c.detail, versions(c.version, state?.version)].filter(Boolean).join(" · "),
+            icon: "server" as const,
+            checked: c.id === on,
+            live: c.connected,
+            disabled: !c.connected,
+            onSelect: () => choose(c.id),
+          })),
+          { label: "Add a computer…", sub: "Over SSH, a command, or its Friday app", icon: "plus", onSelect: () => setAdding(true) },
+        ]}
+      />
+      {fellBack && <span className="cw-runs-note">{fellBack} isn't connected, so this runs here.</span>}
+      {adding && <AddComputer onClose={() => (setAdding(false), setN((x) => x + 1))} />}
+    </div>
+  );
+}
+
+/** Runs on › Add a computer…: Settings' own way of adding one, in a dialog over the new-session page. */
+function AddComputer({ onClose }: { onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useDismiss(ref, onClose);
+  return (
+    <div className="overlay">
+      <div ref={ref} className="modal runs-add" role="dialog" aria-modal="true" aria-label="Add a computer">
+        <div className="pop-head">
+          <div>
+            <h2>Add a computer</h2>
+            <p className="muted small">Run agents on another of your computers, over Wi-Fi or Tailscale.</p>
+          </div>
+          <button className="icon-btn tiny" type="button" aria-label="Close" onClick={onClose}>
+            <Icon name="x" size={14} />
+          </button>
+        </div>
+        <ComputersSettings adding onDone={onClose} />
+      </div>
+    </div>
   );
 }
 
@@ -118,7 +191,7 @@ const ADD_HOW: [AddHow, string][] = [
   ["app", "Its Friday app"],
 ];
 
-export function ComputersSettings() {
+export function ComputersSettings({ adding = false, onDone }: { /** Opened from Runs on › Add a computer: only the adding, started at once. */ adding?: boolean; onDone?: () => void } = {}) {
   const [state, setState] = useState<State | null>(null);
   const [link, setLink] = useState<{ link: string; until: number; unix?: string; windows?: string } | null>(null);
   /** Adding one: how, the host typed or picked, the hosts in ~/.ssh/config, and how setting it up went. */
@@ -158,6 +231,14 @@ export function ComputersSettings() {
     const t = setTimeout(() => setLink(null), Math.max(0, link.until - Date.now()));
     return () => clearTimeout(t);
   }, [link]);
+  // Opened to add one (RunsOn): straight to its first way, as Settings' Add a computer button does, once the list is read.
+  const started = useRef(false);
+  const addNow = useRef<(way: AddHow) => void>(() => {});
+  useEffect(() => {
+    if (!adding || !state || started.current) return;
+    started.current = true;
+    addNow.current("ssh");
+  }, [adding, state]);
   if (!state) return null;
 
   // A code for the way picked: one command to paste there, or the link its Friday app takes. Over SSH makes its own when it runs.
@@ -178,6 +259,7 @@ export function ComputersSettings() {
       setError((e as Error).message);
     }
   };
+  addNow.current = (way) => void add(way);
   const overSsh = async () => {
     setSetting({ busy: true, said: `Setting up ${host}: installing Friday there and starting it. This can take a few minutes.` });
     try {
@@ -199,6 +281,7 @@ export function ComputersSettings() {
     setLink(null);
     setLinked("");
     setSetting({ busy: false });
+    onDone?.();
   };
   // Removed at once when nothing runs there; otherwise what does is said first, with its teammates offered a move to this one.
   const remove = async (c: LinkedComputer, move?: boolean) => {
@@ -246,14 +329,16 @@ export function ComputersSettings() {
 
   return (
     // One group of Settings › Computer: your others, and this one used from another's (Arun, 2026-11-04: "design this better").
-    <SettingsGroup title="Other computers" className="computers-set">
-      <SettingsRow label="Your computers" hint="Run agents on your other computers over Wi-Fi or Tailscale.">
-        {!how && (
-          <Button type="button" variant="outline" size="sm" onClick={() => void add("ssh")}>
-            Add a computer
-          </Button>
-        )}
-      </SettingsRow>
+    <Group adding={adding}>
+      {!adding && (
+        <SettingsRow label="Your computers" hint="Run agents on your other computers over Wi-Fi or Tailscale.">
+          {!how && (
+            <Button type="button" variant="outline" size="sm" onClick={() => void add("ssh")}>
+              Add a computer
+            </Button>
+          )}
+        </SettingsRow>
+      )}
       {/* Three ways in (add-computer.ts): a machine Friday reaches over SSH is set up from here; any other takes one command, or
           the link in its own Friday app. */}
       {how && (
@@ -363,7 +448,7 @@ export function ComputersSettings() {
           </div>
         </div>
       )}
-      <div className="computers-join">
+      {!adding && <div className="computers-join">
         <SettingsRow
           label={hub ? `Used from ${hub.name}` : "Use this computer from another Friday"}
           hint={
@@ -401,9 +486,14 @@ export function ComputersSettings() {
             </button>
           </div>
         )}
-      </div>
+      </div>}
       {/* Said once: a removal there is already the line under "Used from". */}
       {(error || state.error || (state.joined?.error && state.joined.error !== hub?.problem?.said)) && <p className="phone-error small">{error || (state.joined?.error !== hub?.problem?.said ? state.joined?.error : "") || state.error}</p>}
-    </SettingsGroup>
+    </Group>
   );
+}
+
+/** Settings' group, or, adding from Runs on, just its contents inside the dialog that has its own title. */
+function Group({ adding, children }: { adding: boolean; children: ReactNode }) {
+  return adding ? <div className="computers-set computers-adding">{children}</div> : <SettingsGroup title="Other computers" className="computers-set">{children}</SettingsGroup>;
 }

@@ -15,13 +15,13 @@ export interface WhatsNewNotes {
 }
 
 export const WHATS_NEW: WhatsNewNotes = {
-  version: "0.2.17",
-  summary: "Antigravity CLI joins the coding tools, agents' talk folds into huddles, and the change card and agent picker get simpler.",
+  version: "0.2.18",
+  summary: "Run on another of your computers from the new-session page, a calmer Code Review with a real guided tour, and an Agent Board you answer from.",
   items: [
-    { icon: "zap", title: "Antigravity CLI", line: "Google's coding agent, on your Google account, with its own models in the picker." },
-    { icon: "chat", title: "Agents talk in huddles", line: "Two agents' messages fold into one card that says whose move it is." },
-    { icon: "gitCommit", title: "A clearer change card", line: "Ask for changes, or Commit, with push and pull request under its arrow." },
-    { icon: "agent", title: "Smart routing, on or off", line: "One switch in the agent picker, and the tools ready here listed first." },
+    { icon: "server", title: "Runs on, above the box", line: "Pick this computer or another of yours, or add one, right where you start." },
+    { icon: "gitPullRequest", title: "Code Review, said once", line: "One card says what stands before the merge, with each fix beside it." },
+    { icon: "compass", title: "A real guided tour", line: "Each file in the order to read it, with its diff and what your agents found." },
+    { icon: "board", title: "Answer from the board", line: "What waits on you is across the top: answer it there, and the agent carries on." },
   ],
 };
 

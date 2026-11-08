@@ -8448,6 +8448,9 @@ html:not(.dark) .ctx-gauge .ctx-ring circle:first-child { stroke-opacity: .32; }
 .review-page.inbox .page-inner { display: flex; flex-direction: column; }
 .review-page .page-head h1 { font-size: 22px; letter-spacing: -.015em; }
 .rv-split { gap: 0; grid-template-columns: minmax(300px, 360px) minmax(0, 1fr); }
+/* The open pull request runs to the window's edge, its scroll bar there, rather than stopping a page margin short with the
+   bar floating in the gap (Arun, 2026-11-07: "there is still some space here, utilize it"). */
+.review-page.inbox .rv-pane { padding-right: 10px; scrollbar-gutter: stable; }
 .rv-queue { border: 0; border-radius: var(--r-xl); background: var(--panel); box-shadow: inset 0 0 0 1px var(--border); }
 .rv-pane { border: 0; border-radius: 0; background: none; }
 .rv-pane-inner { gap: 26px; max-width: 900px; padding: 6px 12px 40px 36px; animation: rv-in .18s var(--ease-out); }
@@ -11689,6 +11692,8 @@ html:not(.dark) .subs-pop { box-shadow: 0 16px 40px -16px rgb(0 0 0 / .18); }
 .rv-queue { border-radius: 0 !important; background: transparent !important; box-shadow: none !important; border: 0 !important; }
 .rv-queue-tools { border-bottom: 0 !important; }
 .rv-queue > .rv-queue-list { margin: 0; padding: 0 !important; border-radius: 0; background: transparent; }
+/* Room under the search row's hairline, so the first pull request (picked, with its fill) doesn't sit on the line (Arun, 2026-11-07). */
+.rv-queue > .rv-queue-list { padding-top: 8px !important; }
 
 :is(.auto-intro, .auto-tpl, .set-card) { border-radius: var(--tray-r) !important; background: var(--tray) !important; border: 1px solid var(--tray-edge) !important; box-shadow: none !important; }
 .auto-tpl:hover { border-color: var(--border-strong) !important; }
@@ -12556,7 +12561,18 @@ body.resizing-panel { cursor: col-resize; user-select: none; }
 /* One input for both of Your computers' fields, the SSH host's and the pasted link's: the host's text sat on its border (audit REST-18). */
 .computers-paste .input, .computers-add-row .input.computers-host { flex: 1; min-width: 0; height: 30px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg); color: var(--ink); font: 13px var(--font); }
 .computers-paste .input:focus, .computers-add-row .input.computers-host:focus { border-color: var(--border-focus, var(--ink-2)); outline: none; }
-.cw-computer { max-width: 180px; }
+.cw-computer { max-width: 220px; }
+/* Runs on, on its own line above the new-session box (Computers.tsx RunsOn; Arun, 2026-11-07): a quiet label, the computer as a
+   pill like the box's own, and a note when the one picked isn't connected. */
+.cw-runs-on { display: flex; align-items: center; gap: 4px; min-width: 0; flex-wrap: wrap; }
+.cw-runs-label { padding: 0 2px 0 4px; color: var(--ink-3); font-size: 13px; white-space: nowrap; }
+.cw-runs-on .menu-pill { height: 28px; padding: 0 8px; border: 0; background: transparent; color: var(--ink-2); font-size: 13px; font-weight: 500; }
+.cw-runs-on .menu-pill:hover, .cw-runs-on .menu-pill.on { background: var(--surface-hover); color: var(--ink); }
+.cw-runs-note { padding-left: 6px; color: var(--ink-3); font-size: 12px; }
+.runs-add { width: min(620px, 100%); }
+.runs-add .pop-head p { margin: 4px 0 0; font-weight: 400; color: var(--ink-3); line-height: 1.5; }
+.runs-add .pop-head { margin-bottom: 14px; }
+.runs-add .computers-adding { display: flex; flex-direction: column; gap: 12px; }
 /* A coding tool's screen opening, or why it couldn't (Activity.tsx): in the screen's own place, not Friday's view instead. */
 .lane-tui-wait { align-items: center; justify-content: center; gap: 10px; text-align: center; }
 .lane-tui-wait p { max-width: 520px; margin: 0; padding: 0 24px; }
