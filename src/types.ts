@@ -454,19 +454,21 @@ export interface EngineModelInfo {
  * people type any id their CLI knows, and an empty choice is the CLI's default.
  */
 export const ENGINE_MODEL_INFO: Record<EngineTool, EngineModelInfo[]> = {
-  // As Claude Code's own model menu lists them (October 2026): the four latest by alias, then the earlier versions it still runs.
+  // As Claude Code's own model menu lists them (November 2026, Claude Code 2.1.321): the four latest by alias, then the earlier
+  // versions it still runs. Its `fable` became Fable 5.2 in 2.1.321; an older Claude Code still runs Fable 5.1 by that name.
   claude: [
     // Friday picks for each message (routing.ts): Haiku, Sonnet or Opus, from how hard it reads and how much of the limits is left.
     // "Smart", not "Auto": beside the Auto mode pill, "Claude Code · Auto" read as two of one thing (Arun, 2026-10-28: "iron
     // everything and ensure we are good").
     { group: "Smart routing", id: "auto", label: "Smart", blurb: "Haiku, Sonnet or Opus, picked for each message" },
     { group: "Latest", id: "opus", label: "Opus 5.5", blurb: "Complex reasoning and big pieces of work." },
-    { group: "Latest", id: "fable", label: "Fable 5.1", blurb: "Most capable. For the longest, hardest tasks." },
+    { group: "Latest", id: "fable", label: "Fable 5.2", blurb: "Most capable. For the longest, hardest tasks." },
     { group: "Latest", id: "sonnet", label: "Sonnet 5.5", blurb: "Everyday work at a good pace." },
     { group: "Latest", id: "haiku", label: "Haiku 5.5", blurb: "Fast and light, for simple tasks." },
     { group: "More models", id: "claude-haiku-4-5", label: "Haiku 4.5", blurb: "claude-haiku-4-5" },
     { group: "More models", id: "claude-sonnet-5", label: "Sonnet 5", blurb: "claude-sonnet-5" },
     { group: "More models", id: "claude-opus-5", label: "Opus 5", blurb: "claude-opus-5" },
+    { group: "More models", id: "claude-fable-5-1", label: "Fable 5.1", blurb: "claude-fable-5-1" },
     { group: "More models", id: "claude-fable-5", label: "Fable 5", blurb: "claude-fable-5" },
     { group: "More models", id: "claude-opus-4-8", label: "Opus 4.8", blurb: "claude-opus-4-8" },
     { group: "More models", id: "claude-opus-4-7", label: "Opus 4.7", blurb: "claude-opus-4-7" },

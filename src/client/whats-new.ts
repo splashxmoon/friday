@@ -15,13 +15,12 @@ export interface WhatsNewNotes {
 }
 
 export const WHATS_NEW: WhatsNewNotes = {
-  version: "0.2.19",
-  summary: "A folder picker that finds things fast, Usage you take in at a glance, Settings sorted the way you look for them, and sharper icons.",
+  version: "0.2.20",
+  summary: "Claude Fable 5.2 in the model menu, a commit box that stays out of the way, and panel tabs you can close cleanly.",
   items: [
-    { icon: "folder", title: "A faster folder picker", line: "Recent, repos, worktrees, folders and GitHub side by side; type a name or a path." },
-    { icon: "usage", title: "Usage at a glance", line: "Each tool as one number: what's left, when it resets, and where your pace ends." },
-    { icon: "settings", title: "Settings, sorted", line: "Grouped by what you came to change: agents, computers, connections, privacy, help." },
-    { icon: "users", title: "New teammate, a page", line: "Make a teammate on a page of its own, with a card that fills in as you type." },
+    { icon: "zap", title: "Claude Fable 5.2", line: "Anthropic's newest and most capable, at $8 in and $40 out per million tokens." },
+    { icon: "gitCommit", title: "A tidier commit box", line: "Folded to one line under your changes until you open it to commit." },
+    { icon: "sidePanel", title: "Cleaner panel tabs", line: "On a narrow tab the close button sits beside its icon, not on top of it." },
   ],
 };
 

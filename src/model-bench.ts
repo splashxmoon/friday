@@ -32,8 +32,10 @@ export const BENCH: Record<string, Bench> = {
   "claude:opus": { solve: 0.899, cost: 1.34, inPrice: 4 },
   "claude:sonnet": { solve: 0.813, cost: 0.48, inPrice: 2 },
   "claude:haiku": { solve: 0.648, cost: 0.05, inPrice: 0.1 },
-  // Below Opus on SWE-bench Pro at more than twice its cost, and capped at half the week on Max: never picked for anyone.
-  "claude:fable": { solve: 0.812, cost: 2.98, inPrice: 10 },
+  // Fable 5.2 (2026-11-09) at its $8 in: Fable 5.1's cost per task scaled to the new price, and Fable 5.1's SWE-bench Pro until
+  // 5.2's is published (its launch post gives FrontierSWE v2 instead: 69.9% to Opus 5.5's 62.3%). Twice Opus's price, and capped
+  // at half the week: still never picked for anyone.
+  "claude:fable": { solve: 0.812, cost: 2.38, inPrice: 8, est: true },
   // Codex, at its default effort (medium). No SWE-bench Pro for any GPT-6 model: Terminal-Bench 4 58.2 / 57.7 / 16.4.
   "codex:gpt-6.1-sol": { solve: 0.8, cost: 0.21, inPrice: 2, est: true },
   "codex:gpt-6-astra": { solve: 0.79, cost: 1.14, inPrice: 10, est: true },

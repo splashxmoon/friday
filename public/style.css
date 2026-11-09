@@ -12048,11 +12048,11 @@ html.desktop [data-slot="dialog-content"] { top: calc(50% + 20px); max-height: c
 .bench-tab-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .bench-tabrow[data-compact] .bench-tab:not(.on) .bench-tab-name { max-width: 0; }
 .bench-tabrow[data-compact] .bench-tab:not(.on) .bench-tab-btn { gap: 0; padding: 0 9px; }
-/* A tab not showing keeps no room for its ×, hidden until it is pointed at: the × then lies over the end of its name, so the
-   names don't shorten for a button nobody sees. */
+/* A tab not showing keeps no room for its ×, hidden until it is pointed at: then the tab opens to make room for it beside the
+   icon. Laid over the tab, it hid most of a shortened tab's icon (Arun, 2026-11-09: "the x mark covering most of the icon"). */
 .bench-tab:not(.on) .bench-tab-btn { padding-right: 9px; }
-.bench-tab:not(.on) .bench-tab-x { position: absolute; top: 5px; right: 3px; margin: 0; background: color-mix(in srgb, var(--ink) 9%, var(--panel)); }
-.bench-tab:not(.on) .bench-tab-x:hover { background: color-mix(in srgb, var(--ink) 16%, var(--panel)); }
+.bench-tab:not(.on) .bench-tab-x { width: 0; margin: 0; overflow: hidden; transition: width .12s var(--ease-out), margin .12s var(--ease-out); }
+.bench-tab:not(.on):hover .bench-tab-x, .bench-tab:not(.on) .bench-tab-x:focus-visible { width: 18px; margin: 0 5px 0 -4px; }
 .bench-tabrow[data-more-after] { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); }
 .bench-tabrow[data-more-before] { -webkit-mask-image: linear-gradient(90deg, transparent, #000 28px); mask-image: linear-gradient(90deg, transparent, #000 28px); }
 .bench-tabrow[data-more-before][data-more-after] { -webkit-mask-image: linear-gradient(90deg, transparent, #000 28px, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
@@ -12993,6 +12993,15 @@ html.desktop:not(.desktop-mac) .drop-overlay { top: 48px; }
 .sd-act:hover:not(:disabled) { background: color-mix(in srgb, var(--ink) 14%, transparent); }
 .sd-act:disabled { opacity: .5; cursor: default; }
 .sd-commit { display: flex; flex-direction: column; gap: 8px; }
+/* Folded, the commit box is one line: what goes in and where, opened by pressing it (Arun, 2026-11-09: "taking up a good amount
+   of space"). Open, the same line heads it and folds it again. */
+.sd-fold { display: flex; align-items: center; gap: 6px; width: 100%; height: 32px; padding: 0 10px 0 8px; border: 1px solid var(--border); border-radius: 9px; background: none; color: var(--text-muted); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.sd-fold:hover { background: var(--hover); color: var(--ink); }
+.sd-fold:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
+.sd-fold b { color: var(--ink); font-weight: 600; }
+.sd-fold > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-commit.open .sd-fold { height: 22px; padding: 0 2px; border: 0; }
+.sd-commit.open .sd-fold:hover { background: none; }
 .sd-msg { width: 100%; min-height: 56px; resize: vertical; padding: 9px 11px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg); color: var(--ink); font: inherit; font-size: 13px; line-height: 1.45; }
 .sd-msg:focus { outline: none; border-color: color-mix(in srgb, var(--ink) 30%, transparent); }
 .sd-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }

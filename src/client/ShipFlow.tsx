@@ -46,6 +46,9 @@ export function ShipFlow({ state, me, sid, invite, send, lane, events }: { state
   // Somebody started to commit (the message box pressed): the message is drafted and where it pushes is asked, once.
   const [open, setOpen] = useState(false);
   const [details, setDetails] = useState(false);
+  // The commit box starts folded to one line; opening it is what starts drafting the message (`open`).
+  const [unfolded, setUnfolded] = useState(false);
+  const msgBox = useRef<HTMLTextAreaElement>(null);
 
   // 1. Review: which files go in.
   const [leave, setLeave] = useState<Set<string>>(new Set());
@@ -291,92 +294,119 @@ export function ShipFlow({ state, me, sid, invite, send, lane, events }: { state
         </div>
       )}
 
-      <div className="sd-commit">
-        <textarea
-          className="sd-msg"
-          rows={3}
-          value={message}
-          aria-label="Commit message"
-          placeholder={drafting ? "Writing a message from the changes…" : "Commit message"}
-          onFocus={() => setOpen(true)}
-          onChange={(e) => setMessage(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && canCommit) void commit();
+      <div className={`sd-commit${unfolded ? " open" : ""}`}>
+        <button
+          type="button"
+          className="sd-fold"
+          aria-expanded={unfolded}
+          aria-label={unfolded ? "Fold the commit box" : "Write a commit"}
+          onClick={() => {
+            setUnfolded((v) => !v);
+            if (!unfolded) {
+              setOpen(true);
+              requestAnimationFrame(() => msgBox.current?.focus());
+            }
           }}
-        />
-        <div className="sd-row">
-          <button type="button" className="sd-where" aria-expanded={details} onClick={() => setDetails((v) => !v)} title="Which files go in, the branch, and where it pushes">
-            {taking.length === files.length ? `${files.length} file${files.length === 1 ? "" : "s"}` : `${taking.length} of ${files.length} files`}
-            {(branch.trim() || engine?.branch) && <> · {branch.trim() || engine?.branch}</>}
-            <Icon name={details ? "chevronDown" : "chevronRight"} size={12} />
-          </button>
-          <button
-            type="button"
-            className="sd-go"
-            disabled={!canCommit}
-            title={!message.trim() ? "Write a message first" : blocked || undefined}
-            onClick={() => (message.trim() ? void commit() : setOpen(true))}
-          >
-            {busy ? "Committing…" : go} <kbd>⌘↵</kbd>
-          </button>
-        </div>
-        {details && (
-          <div className="sd-details">
-            <div className="ship-files">
-              {files.map((f) => (
-                <label key={f.path} className={`ship-file ${leave.has(f.path) ? "out" : ""}`}>
-                  <Check
-                    checked={!leave.has(f.path)}
-                    onChange={(on) =>
-                      setLeave((all) => {
-                        const next = new Set(all);
-                        if (on) next.delete(f.path);
-                        else next.add(f.path);
-                        return next;
-                      })
-                    }
-                  />
-                  {/* Cut short from the left (direction: rtl), so the whole path is in the tooltip; <bdi> keeps a leading dot where it belongs. */}
-                  <span className="ship-file-path" title={f.path}>
-                    <bdi>{f.path}</bdi>
-                  </span>
-                  <span className="ship-file-counts">
-                    {f.additions > 0 && <span className="diff-add">+{f.additions}</span>}
-                    {f.deletions > 0 && <span className="diff-del">−{f.deletions}</span>}
-                  </span>
-                </label>
-              ))}
-            </div>
-            {leave.size > 0 && <p className="sd-note">The {leave.size} left out stay in the folder, uncommitted.</p>}
-            <label className="field">
-              Branch
-              <input value={branch} onChange={(e) => setBranch(e.target.value)} placeholder={engine?.branch ?? "current branch"} spellCheck={false} />
-              <em className="muted small">{branch.trim() && branch.trim() !== engine?.branch ? "Created if it doesn't exist, and switched to." : "Commits to the branch the folder is on."}</em>
-            </label>
-            {hasRemote ? (
-              <div className="ship-options">
-                <label className="check-row">
-                  <Check checked={push || pr} disabled={pr && !!remote?.github} onChange={(on) => setPush(on)} />
-                  Push to {remote?.github ?? "origin"}
-                </label>
-                {remote?.github && (
-                  <label className="check-row">
-                    <Check checked={pr} onChange={(on) => setPr(on)} />
-                    Open a pull request
-                  </label>
-                )}
-              </div>
-            ) : (
-              pushNote && <p className="sd-note">{pushNote}</p>
-            )}
+        >
+          <Icon name={unfolded ? "chevronDown" : "chevronRight"} size={12} />
+          <b>Commit</b>
+          {!unfolded && (
+            <span>
+              · {taking.length === files.length ? `${files.length} file${files.length === 1 ? "" : "s"}` : `${taking.length} of ${files.length} files`}
+              {(branch.trim() || engine?.branch) && <> on {branch.trim() || engine?.branch}</>}
+            </span>
+          )}
+        </button>
+        {unfolded && (
+          <>
+          <textarea
+            ref={msgBox}
+            className="sd-msg"
+            rows={3}
+            value={message}
+            aria-label="Commit message"
+            placeholder={drafting ? "Writing a message from the changes…" : "Commit message"}
+            onFocus={() => setOpen(true)}
+            onChange={(e) => setMessage(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && canCommit) void commit();
+            }}
+          />
+          <div className="sd-row">
+            <button type="button" className="sd-where" aria-expanded={details} onClick={() => setDetails((v) => !v)} title="Which files go in, the branch, and where it pushes">
+              {taking.length === files.length ? `${files.length} file${files.length === 1 ? "" : "s"}` : `${taking.length} of ${files.length} files`}
+              {(branch.trim() || engine?.branch) && <> · {branch.trim() || engine?.branch}</>}
+              <Icon name={details ? "chevronDown" : "chevronRight"} size={12} />
+            </button>
+            <button
+              type="button"
+              className="sd-go"
+              disabled={!canCommit}
+              title={!message.trim() ? "Write a message first" : blocked || undefined}
+              onClick={() => (message.trim() ? void commit() : setOpen(true))}
+            >
+              {busy ? "Committing…" : go} <kbd>⌘↵</kbd>
+            </button>
           </div>
-        )}
-        {error ? (
-          <p className="error small" role="alert">
-            {error}
-          </p>
-        ) : (
-          blocked && message.trim() && <p className="sd-note">{blocked}</p>
+          {details && (
+            <div className="sd-details">
+              <div className="ship-files">
+                {files.map((f) => (
+                  <label key={f.path} className={`ship-file ${leave.has(f.path) ? "out" : ""}`}>
+                    <Check
+                      checked={!leave.has(f.path)}
+                      onChange={(on) =>
+                        setLeave((all) => {
+                          const next = new Set(all);
+                          if (on) next.delete(f.path);
+                          else next.add(f.path);
+                          return next;
+                        })
+                      }
+                    />
+                    {/* Cut short from the left (direction: rtl), so the whole path is in the tooltip; <bdi> keeps a leading dot where it belongs. */}
+                    <span className="ship-file-path" title={f.path}>
+                      <bdi>{f.path}</bdi>
+                    </span>
+                    <span className="ship-file-counts">
+                      {f.additions > 0 && <span className="diff-add">+{f.additions}</span>}
+                      {f.deletions > 0 && <span className="diff-del">−{f.deletions}</span>}
+                    </span>
+                  </label>
+                ))}
+              </div>
+              {leave.size > 0 && <p className="sd-note">The {leave.size} left out stay in the folder, uncommitted.</p>}
+              <label className="field">
+                Branch
+                <input value={branch} onChange={(e) => setBranch(e.target.value)} placeholder={engine?.branch ?? "current branch"} spellCheck={false} />
+                <em className="muted small">{branch.trim() && branch.trim() !== engine?.branch ? "Created if it doesn't exist, and switched to." : "Commits to the branch the folder is on."}</em>
+              </label>
+              {hasRemote ? (
+                <div className="ship-options">
+                  <label className="check-row">
+                    <Check checked={push || pr} disabled={pr && !!remote?.github} onChange={(on) => setPush(on)} />
+                    Push to {remote?.github ?? "origin"}
+                  </label>
+                  {remote?.github && (
+                    <label className="check-row">
+                      <Check checked={pr} onChange={(on) => setPr(on)} />
+                      Open a pull request
+                    </label>
+                  )}
+                </div>
+              ) : (
+                pushNote && <p className="sd-note">{pushNote}</p>
+              )}
+            </div>
+          )}
+          {error ? (
+            <p className="error small" role="alert">
+              {error}
+            </p>
+          ) : (
+            blocked && message.trim() && <p className="sd-note">{blocked}</p>
+          )}
+          </>
         )}
       </div>
     </section>

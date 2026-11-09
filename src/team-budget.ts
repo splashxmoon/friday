@@ -203,11 +203,12 @@ export function spentOn(events: readonly SessionEvent[], lane: string, from: num
 
 /**
  * Dollars per million tokens, in and out, of the models Friday knows a list price for: Anthropic's API prices (as of
- * 2026-10-06), by Claude Code's aliases and ids. On a subscription this is what the work would have cost on the API, the only
+ * 2026-11-09), by Claude Code's aliases and ids. On a subscription this is what the work would have cost on the API, the only
  * dollar figure there is. Smart routing, a tool's own default and every other tool: not known, so no dollar cap applies.
  */
 const PRICES: Record<string, [number, number]> = {
-  fable: [10, 50],
+  fable: [8, 40],
+  "claude-fable-5-2": [8, 40],
   "claude-fable-5-1": [10, 50],
   "claude-fable-5": [10, 50],
   opus: [4, 20],
