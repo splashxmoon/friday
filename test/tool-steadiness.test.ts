@@ -31,9 +31,11 @@ test("a slow sign-in check still running is waited on, not started a second time
 
 test("agy goes without an inherited Gemini or Google key, unless its own settings pick a key provider", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "friday-agy-home-"));
-  const was = process.env.HOME;
+  // The home folder as Node finds it: HOME, and on Windows USERPROFILE.
+  const was = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
   try {
     process.env.HOME = home;
+    process.env.USERPROFILE = home;
     const env = { PATH: "/usr/bin", GEMINI_API_KEY: "g", GOOGLE_API_KEY: "k", google_api_key: "lower", GOOGLE_CLOUD_PROJECT: "p" };
     assert.equal(agyOwnKeys(home), false, "no settings: its own Google sign-in");
     assert.deepEqual(toolEnv("antigravity", env), { PATH: "/usr/bin", GOOGLE_CLOUD_PROJECT: "p" });
@@ -48,7 +50,8 @@ test("agy goes without an inherited Gemini or Google key, unless its own setting
     await writeFile(settings, "{ not json");
     assert.equal(agyOwnKeys(home), true, "unreadable: may name one, so nothing is taken away");
   } finally {
-    process.env.HOME = was;
+    for (const [k, v] of Object.entries(was)) if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
     await rm(home, { recursive: true, force: true });
   }
 });
