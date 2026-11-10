@@ -44,6 +44,15 @@ export const SECTIONS: SectionDef[] = [
       "Only when something waits on you: a question, a finished run, a failure. Banners come while Friday's window is hidden; the chime, if you want it, either way.",
     keywords: "alerts away banner chime sound permission",
   },
+  // Voice input (VoiceSettings.tsx): the open-source edition's for now (Settings.tsx hides it elsewhere).
+  {
+    id: "voice",
+    label: "Voice",
+    group: "General",
+    icon: "mic",
+    blurb: "Talk instead of typing, in any box where you tell an agent what to do.",
+    keywords: "voice microphone mic talk speak speech dictate dictation transcribe whisper hold tap option alt space shortcut language send when you stop own key offline",
+  },
   {
     id: "shortcuts",
     label: "Shortcuts",
@@ -189,9 +198,12 @@ export function sectionsMatching<
 >(list: T[], query: string): T[] {
   const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return list;
+  // A word is found where a word of the section's starts with it: "mic" finds "microphone", and "phone" doesn't (the open-source
+  // edition, with no phone row, listed Voice for it).
+  const starts = (text: string, w: string) => new RegExp(`(?:^|[^\\p{L}\\p{N}])${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "u").test(text);
   const scored = list.map((s) => {
     const text = `${s.label} ${s.group} ${s.blurb} ${s.keywords}`.toLowerCase();
-    return { s, n: words.filter((w) => text.includes(w)).length };
+    return { s, n: words.filter((w) => starts(text, w)).length };
   });
   const best = Math.max(...scored.map((x) => x.n));
   return best ? scored.filter((x) => x.n === best).map((x) => x.s) : [];

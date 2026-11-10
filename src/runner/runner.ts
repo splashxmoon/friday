@@ -9,7 +9,7 @@ import { createInterface } from "node:readline";
 import WebSocket from "ws";
 import { clock, closingSaid, keepAlive } from "../heartbeat.js";
 import { CLI_ID, ENGINE_NAMES, isEngineEffort, type Attachment, type EngineMode, type EngineTool, type ToolCommand, type DiffFile } from "../types.js";
-import { ADAPTERS, DECIDE_YOURSELF, PLAN_REFUSES, askedItem, childEnv, claudeMcpServers, claudePictures, imageType, codexExec, findBin, launcher, loginStatusCached, loginStatusQuick, tooLongForArgv, withDirs, type Adapter, type AdapterOut, type Launch, type TurnSpec } from "./adapters.js";
+import { ADAPTERS, DECIDE_YOURSELF, PLAN_REFUSES, askedItem, childEnv, claudeMcpServers, claudePictures, imageType, codexExec, findBin, launcher, loginStatusCached, loginStatusQuick, tooLongForArgv, toolEnv, withDirs, type Adapter, type AdapterOut, type Launch, type TurnSpec } from "./adapters.js";
 import { folderVars } from "./environment.js";
 import { applyCopy, baseAfterCommit, checkpoint, diffSince, diffTrees, dropShadow, reposInside, fetchBranch, repoInfo, sameTree, sessionBase, setSessionBase, shadowSnapshot, switchBranch, trackBranch, warmSnapshot, type RepoInfo, type Shadow } from "./git.js";
 import { hasCliTranscript, readCliTranscript } from "./imports.js";
@@ -279,6 +279,10 @@ function rememberCommands(tool: EngineTool, list: ToolCommand[]): void {
  */
 const acpModels = new Map<EngineTool, { id: string; label: string }[]>();
 const acpModelsFile = (tool: EngineTool) => path.join(process.env.FRIDAY_STATE_DIR || path.join(homedir(), ".friday"), `${tool}-models.json`);
+/** When a tool's kept list was last written (its file), for looking again once it is old (local-api `models`). 0 when never. */
+export async function knownModelsAt(tool: EngineTool): Promise<number> {
+  return (await stat(acpModelsFile(tool)).catch(() => null))?.mtimeMs ?? 0;
+}
 export async function knownModels(tool: EngineTool): Promise<{ id: string; label: string }[]> {
   const known = acpModels.get(tool);
   if (known) return known;
@@ -318,7 +322,7 @@ export function builtinOf(text: string): { command: NonNullable<TurnSpec["comman
 export const busyElsewhere = (error: string): boolean =>
   /(?:thread\/resume|session\/load) failed/.test(error) && /in use|already (?:open|loaded|running|active|attached|subscribed)|locked|busy|another (?:process|client|session)/i.test(error);
 
-function rememberModels(tool: EngineTool, list: { id: string; label: string }[]): void {
+export function rememberModels(tool: EngineTool, list: { id: string; label: string }[]): void {
   if (!list.length || JSON.stringify(acpModels.get(tool)) === JSON.stringify(list)) return;
   acpModels.set(tool, list);
   const file = acpModelsFile(tool);
@@ -1254,7 +1258,8 @@ export class Runner {
     // FRIDAY_MESH_URL too, for an MCP server the tool starts from its own config with what it inherits (Cursor's; see friday-mcp.ts).
     const mesh = this.friday ? { FRIDAY_MESH_URL: this.friday.url } : {};
     // The account it runs as goes over everything else: a CLAUDE_CONFIG_DIR in the folder's variables would sign it in as another.
-    return { cwd: this.opts.cwd, env: { ...childEnv(), ...folderVars(this.opts.cwd), ...this.launch.env, ...mesh, ...extra, ...accountEnv(this.opts.tool, this.account?.id) } };
+    const env = { ...childEnv(), ...folderVars(this.opts.cwd), ...this.launch.env, ...mesh, ...extra, ...accountEnv(this.opts.tool, this.account?.id) };
+    return { cwd: this.opts.cwd, env: this.opts.tool ? toolEnv(this.opts.tool, env) : env };
   }
 
   private dirtyRefusal(branch: string): RunnerError {

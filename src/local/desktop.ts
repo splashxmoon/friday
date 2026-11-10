@@ -7,7 +7,7 @@ import { execFile } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, session, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, session, shell, systemPreferences } from "electron";
 import { powerSaveBlocker } from "electron";
 import { MAC_CSS, THEME_WATCH, WIN_CSS } from "../desktop-chrome.js";
 import { registerNative } from "../desktop-native.js";
@@ -182,6 +182,28 @@ function lockPreview(): void {
   });
 }
 
+/**
+ * The microphone, for voice input (client/voice.ts): Friday's own page may have it, sound only, never a camera; macOS asks the person
+ * the first time (NSMicrophoneUsageDescription, scripts/oss-export.mts). A preview never may: it has its own jar, locked above
+ * (lockPreview). Every other permission goes to Friday's own page alone.
+ */
+function allowMicrophone(): void {
+  const s = session.defaultSession;
+  const ours = (u: string) => !!friday && isOwnUrl(u, friday.url);
+  s.setPermissionRequestHandler((_w, permission, cb, details) => {
+    // Anything else, for Friday's own page only: a page the window was sent to elsewhere gets nothing it asks for.
+    if (permission !== "media") return cb(ours(details.requestingUrl));
+    const kinds = (details as { mediaTypes?: string[] }).mediaTypes ?? [];
+    if (!ours(details.requestingUrl) || !kinds.length || kinds.some((k) => k !== "audio")) return cb(false);
+    if (process.platform !== "darwin") return cb(true);
+    const now = systemPreferences.getMediaAccessStatus("microphone");
+    if (now === "granted") return cb(true);
+    if (now !== "not-determined") return cb(false);
+    void systemPreferences.askForMediaAccess("microphone").then(cb, () => cb(false));
+  });
+  s.setPermissionCheckHandler((_w, permission, origin, details) => permission !== "media" || (ours(origin) && (details as { mediaType?: string }).mediaType !== "video"));
+}
+
 /** A request from Friday's own page in one of its windows, never a previewed site or a page it was sent to. */
 const fromApp = (e: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent): boolean =>
   !!friday && !!BrowserWindow.fromWebContents(e.sender) && isOwnUrl(e.senderFrame?.url ?? e.sender.getURL(), friday.url);
@@ -265,6 +287,7 @@ else {
     const help = { role: "help" as const, submenu: [{ label: "Send Feedback…", click: () => void shell.openExternal(feedbackUrl({ version: app.getVersion(), os: osName(process.platform), app: true })) }] };
     if (process.platform === "darwin") Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: "appMenu" }, { role: "editMenu" }, { role: "viewMenu" }, { role: "windowMenu" }, help]));
     lockPreview();
+    allowMicrophone();
     await loginPath;
     if (!(await begin()) || !friday) return;
     open(friday.url);

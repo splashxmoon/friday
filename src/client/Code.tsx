@@ -34,6 +34,7 @@ import { CircleDotIcon, GitPullRequestIcon } from "lucide-react";
 import { DailyBriefCard, openBrief } from "./DailyBrief.js";
 import { GoalsCard } from "./Goals.js";
 import { GettingStarted, markOwnFolder } from "./GettingStarted.js";
+import { useVoice, VoiceBar, VoiceButton, VoiceLive } from "./VoiceMic.js";
 
 // The message box is this page's state, so every keystroke draws the page again. These take nothing that changes as you type,
 // so they are left as they were. The template shelf is not among them: it is given what is in the box.
@@ -791,6 +792,17 @@ export function Code({
       if (made) void api(identity, "/api/sessions/mine/forget", { method: "POST", body: JSON.stringify({ sid: made }) }).catch(() => {});
     }
   };
+  // Voice input (VoiceMic.tsx): the mic before the arrow, ⌥ Space held in the box. The folder and branch picked tell Whisper the
+  // words to expect.
+  const voice = useVoice({
+    box: input,
+    onText: (v) => {
+      setGoal(v);
+      requestAnimationFrame(() => input.current && grow(input.current));
+    },
+    send: () => void submit(),
+    context: () => ({ ...(folder?.name ? { repo: folder.name } : {}), ...(folder?.branch ? { branch: folder.branch } : {}) }),
+  });
 
   useEffect(() => {
     if (again) void submit();
@@ -1100,7 +1112,10 @@ export function Code({
             }}
             onClick={shortcuts.sync}
             onBlur={shortcuts.close}
+            onKeyUp={voice.keyUp}
             onKeyDown={(e) => {
+              // ⌥ Space to talk, and Esc while it listens (VoiceMic.tsx).
+              if (!busy && voice.keyDown(e)) return;
               // A list of commands, tools or files that is open takes the arrows, Enter and Escape.
               if (shortcuts.onKeyDown(e)) return;
               // ↑ in an empty box: what you asked before, in any session.
@@ -1111,6 +1126,7 @@ export function Code({
               }
             }}
           />
+          <VoiceLive v={voice} />
           {dirtyOn !== null && (
             <div className="cw-dirty" role="alert">
               <span className="cw-dirty-text">
@@ -1124,7 +1140,9 @@ export function Code({
               </button>
             </div>
           )}
-          <div className="composer-bar">
+          <div className="composer-bar" data-voice={voice.phase.kind !== "idle" ? "" : undefined}>
+            {/* While voice has something to say, it has the bar's left side (VoiceMic.tsx). */}
+            <VoiceBar v={voice} />
             {/* One control for everything a run starts from: files, a folder
                 you hand over, and the code already on your computer. A folder
                 is a folder whoever works in it — a CLI opens it, and Friday's
@@ -1192,6 +1210,7 @@ export function Code({
                 })),
               ]}
             />
+            {!busy && <VoiceButton v={voice} kind="home" />}
             <button
               className="send"
               type="submit"

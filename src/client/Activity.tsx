@@ -213,6 +213,7 @@ import { SUBAGENT_CALL, Subagents, subagentRowOf, subagentState, type SubagentRo
 import { subTasksIn } from "./Tasks.js";
 import type { Plan } from "../plan-types.js";
 import type { McpPublic } from "../mcp-types.js";
+import { useVoice, VoiceBar, VoiceButton, VoiceLive } from "./VoiceMic.js";
 
 // The activity section, built from AI Elements: the team's messages are chat
 // bubbles, each agent run is a chain of thought whose steps hold the tool
@@ -8118,6 +8119,22 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
   // "/" in a team chat offers the team's own commands (team-commands.ts), not its teammate's coding tool's (Arun, 2026-10-28).
   if (state.options.team) teamSlash = { only: TEAM_COMMANDS, tool: undefined, onManage: undefined };
   const shortcuts = useShortcuts({ textarea, sid, invite, people, agents, ...(onLane && pickPoints ? { onAgent: (id: string) => id !== "*" && onLane(id) } : {}), commands: !toPeople, files: hasFolder && !toPeople, connections: state.options.mcp ? ctx.connections : [], saved: slashSaved, onManage: () => setManaging(true), lane, ...(laneTool ? { tool: ENGINE_NAMES[laneTool] } : {}), ...teamSlash });
+  // Voice input (VoiceMic.tsx): the mic before Send, ⌥ Space held in the box, the words put in at the caret. The repo and branch
+  // this agent works on tell Whisper the words to expect.
+  const voice = useVoice({
+    box: textarea,
+    onText: (v) => {
+      if (textarea.current) textarea.current.value = v;
+      setTyped(v);
+      setKeyNotice(false);
+    },
+    send: () => textarea.current?.form?.requestSubmit(),
+    context: () => {
+      const e = state.engines[lane];
+      const repo = (e?.repo ?? e?.cwd ?? "").split(/[\\/]/).filter(Boolean).pop();
+      return { ...(repo ? { repo } : {}), ...(e?.branch ? { branch: e.branch } : {}) };
+    },
+  });
   // Set while a Friday lane asked for from this menu is still being created.
   const wantFriday = useRef(false);
   // A saved agent was just added from the Agents menu: point at its lane when it arrives, so the next
@@ -8624,7 +8641,10 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
             }}
             onClick={shortcuts.sync}
             onBlur={shortcuts.close}
+            onKeyUp={voice.keyUp}
             onKeyDown={(e) => {
+              // ⌥ Space to talk, and Esc while it listens (VoiceMic.tsx).
+              if (voice.keyDown(e)) return;
               // A list of commands or files that is open takes the arrows, Enter and Escape.
               if (shortcuts.onKeyDown(e)) return;
               // ⌫ in an empty box takes the last quote off, as it would an attachment's chip.
@@ -8646,8 +8666,11 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
               }
             }}
           />
+          <VoiceLive v={voice} />
         </PromptInputBody>
-        <PromptInputFooter>
+        <PromptInputFooter data-voice={voice.phase.kind !== "idle" ? "" : undefined}>
+          {/* While voice has something to say (listening, its download, a line on what happened), it has the footer's left side. */}
+          <VoiceBar v={voice} />
           <PromptInputTools data-slot="box.pills">
             {canUpload && (
               <PromptInputActionMenu>
@@ -8791,6 +8814,7 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
                 ]}
               />
             )}
+            {(mode !== "view" || toPeople) && <VoiceButton v={voice} kind="prompt" />}
             {stopMode ? (
               <PromptInputSubmit
                 type="button"

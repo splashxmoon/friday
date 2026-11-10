@@ -11,7 +11,14 @@ import { currentMachine, linkToken } from "./local.js";
 type TermApi = NonNullable<NonNullable<Window["fridayDesktop"]>["terminal"]>;
 type Started = Awaited<ReturnType<TermApi["start"]>>;
 
-let conn: { machine: string; ws: WebSocket; open: Promise<void> } | null = null;
+type Conn = { machine: string; ws: WebSocket; open: Promise<void>; reqs: Set<string> };
+let conn: Conn | null = null;
+/**
+ * This computer's own shells, for a page with no desktop app (`/term?machine=here`, open-source edition): a coding tool's
+ * sign-in under its row in Settings. A connection of its own, so it never closes the panel's to another computer, nor the panel's
+ * closing it; its end is not a drop the panel restarts its shells for.
+ */
+let hereConn: Conn | null = null;
 const waiting = new Map<string, (r: Started) => void>();
 const dataFns = new Set<(id: string, data: string) => void>();
 const exitFns = new Set<(id: string, code: number) => void>();
@@ -25,11 +32,14 @@ export function onTermDrop(fn: () => void): () => void {
   dropFns.add(fn);
   return () => void dropFns.delete(fn);
 }
-let reqs = 0;
+let reqCount = 0;
 
-function socket(machine: string): { ws: WebSocket; open: Promise<void> } {
-  if (conn && conn.machine === machine && conn.ws.readyState <= WebSocket.OPEN) return conn;
-  conn?.ws.close();
+function socket(machine: string): Conn {
+  const here = machine === "here";
+  const was = here ? hereConn : conn;
+  if (was && was.machine === machine && was.ws.readyState <= WebSocket.OPEN) return was;
+  if (!here) conn?.ws.close();
+  const reqs = new Set<string>();
   const ws = new WebSocket(`${location.origin.replace(/^http/, "ws")}/term?machine=${encodeURIComponent(machine)}`);
   let up = false;
   const open = new Promise<void>((resolve, reject) => {
@@ -48,22 +58,29 @@ function socket(machine: string): { ws: WebSocket; open: Promise<void> } {
     if (m.op === "started" && m.req) {
       waiting.get(m.req)?.(m.result ?? { ok: false, error: "No answer." });
       waiting.delete(m.req);
+      reqs.delete(m.req);
     } else if (m.op === "data" && m.id && typeof m.data === "string") for (const f of dataFns) f(m.id, m.data);
     else if (m.op === "exit" && m.id) for (const f of exitFns) f(m.id, m.code ?? 0);
   });
   ws.addEventListener("close", (e) => {
-    // Every terminal still waiting to start is told why, rather than spinning; the next start opens a new connection.
-    for (const [req, f] of waiting) {
-      f({ ok: false, error: e.reason || "The connection to the machine closed." });
+    // Every terminal still waiting to start on it is told why, rather than spinning; the next start opens a new connection.
+    for (const req of reqs) {
+      waiting.get(req)?.({ ok: false, error: e.reason || "The connection to the machine closed." });
       waiting.delete(req);
+    }
+    if (here) {
+      if (hereConn?.ws === ws) hereConn = null;
+      return;
     }
     // Only the connection in use: one closed because another machine was picked is not a drop.
     if (conn?.ws !== ws) return;
     conn = null;
     if (up) for (const f of dropFns) f();
   });
-  conn = { machine, ws, open };
-  return conn;
+  const made = { machine, ws, open, reqs };
+  if (here) hereConn = made;
+  else conn = made;
+  return made;
 }
 
 const send = (machine: string, m: Record<string, unknown>) => {
@@ -80,7 +97,8 @@ function remote(machine: string): TermApi {
       } catch (e) {
         return { ok: false, error: (e as Error).message };
       }
-      const req = String(++reqs);
+      const req = String(++reqCount);
+      c.reqs.add(req);
       const answer = new Promise<Started>((resolve) => waiting.set(req, resolve));
       c.ws.send(JSON.stringify({ op: "start", req, ...opts }));
       return answer;
@@ -97,6 +115,11 @@ function remote(machine: string): TermApi {
  * The terminals the panel draws: the picked always-on (or browser-connected) machine's, over Friday; otherwise the desktop
  * app's own. None in a browser with no machine picked.
  */
+/** This computer's own shells: the desktop app's, else (the open-source edition in a browser) over its own Friday. */
+export function hereTerminalApi(): TermApi {
+  return window.fridayDesktop?.terminal ?? remote("here");
+}
+
 export function terminalApi(): TermApi | undefined {
   if (typeof window === "undefined") return undefined;
   // The open session's computer when it runs on another of yours (local.ts currentMachine), else the one picked.

@@ -6,11 +6,14 @@ import { homedir, hostname, tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { ENGINE_NAMES, ENGINE_TOOLS, TOOL_INFO, toolList, type EngineMode, type EngineTool } from "../types.js";
-import { ADAPTERS, ANTIGRAVITY_MODELS, antigravityModels, childEnv, findBin, formatCommandLine, isClaudeAppBundled, launcher, loginStatus, readCustomAcp, runCli, saveCustomAcp } from "./adapters.js";
+import { ADAPTERS, ANTIGRAVITY_MODELS, antigravityModels, childEnv, findBin, formatCommandLine, isClaudeAppBundled, launcher, loginStatus, noteSignInStarted, readCustomAcp, runCli, saveCustomAcp } from "./adapters.js";
 import { discoverAgentFiles, parseModelList } from "./agent-files.js";
 import { addWorktree, branchesOf, dropSpares, dropWorktree, primeSpares, remoteBranchesOf, repoInfo, startRepo, worktreeState } from "./git.js";
 import { listCliSessions } from "./imports.js";
-import { holdAwake, knownModels, Runner, stayAttached } from "./runner.js";
+import { installFromRegistry, registryRows } from "./acp-registry.js";
+import { acpSignInState, callbackFromElsewhere, cancelAcpSignIn, forgetProof, settleSignIn, startAcpSignIn } from "./acp-signin.js";
+import { grouped, listModels, openConversation } from "./model-lists.js";
+import { holdAwake, knownModels, knownModelsAt, rememberModels, Runner, stayAttached } from "./runner.js";
 import { askCli } from "./ask.js";
 import { findWork, shownFile, workKind, workType } from "../work-files.js";
 import { installSkill } from "./tool-commands.js";
@@ -20,7 +23,7 @@ import { fetchPreview, previewOptions, previewStatusLive, startPreview, stopPrev
 import { iosInput, iosRun, iosScreen, iosStatus, iosStop, type IosInput } from "./ios.js";
 import { iosLiveUrl } from "./ios-live.js";
 import { folderSetup, saveEnvironment } from "./environment.js";
-import { cancelLogin, finishLogin, openInTerminal, startLogin } from "./terminal.js";
+import { cancelLogin, finishLogin, openInTerminal, shellLine, startLogin } from "./terminal.js";
 import { accountEnv, addAccount, DEFAULT_ACCOUNT, getAccount, hasAccounts, isOut, listAccounts, removeAccount, renameAccount, type AccountTool } from "./accounts.js";
 import { browse, cloneRepo, defaultCloneRoot, describe, findByName, ghBin, githubRepos, issues, pullRequests, recentReposCached, teamPullRequests } from "./workspace.js";
 import { githubCancel, githubConnect, githubDisconnect, githubStatus } from "./github.js";
@@ -112,9 +115,17 @@ export const HOST_METHODS = [
   "sessions",
   "acp.get",
   "acp.set",
+  // "Other ACP agent" picked from the ACP registry: its list, and one installed into Friday's own folder (acp-registry.ts).
+  "acp.registry",
+  "acp.install",
   "login",
   "login.code",
   "login.cancel",
+  // Where a sign-in Friday is carrying out stands (Antigravity's, agy-signin.ts), for the page waiting on it.
+  "login.state",
+  "login.verify",
+  // A browser sign-in finished on another device: the address its browser ended on (acp-signin.ts callbackFromElsewhere).
+  "login.callback",
   "logout",
   // More than one account of Claude Code or Codex on this computer (accounts.ts).
   "accounts",
@@ -271,6 +282,9 @@ async function accountRows(tool: AccountTool, bin: string, always = false): Prom
     ),
   };
 }
+
+/** When each tool's kept model list was last looked at again (see `models`): at most once in ten minutes. */
+const lookedAgain = new Map<string, number>();
 
 export async function callHost(method: string, params: Record<string, unknown> = {}, ctx: HostContext): Promise<unknown> {
   const home = homedir();
@@ -466,6 +480,13 @@ export async function callHost(method: string, params: Record<string, unknown> =
       const set = await saveCustomAcp(str(params.line, 1000));
       return { ok: true, found: set ? !!(await findBin("acp")) : false };
     }
+    case "acp.registry":
+      return { agents: await registryRows() };
+    case "acp.install": {
+      const got = await installFromRegistry(str(params.id, 64));
+      const set = await saveCustomAcp(got.line);
+      return { ok: true, line: got.line, name: got.name, version: got.version, found: set ? !!(await findBin("acp")) : false };
+    }
     case "login": {
       const tool = str(params.tool, 20) as EngineTool;
       if (!ENGINE_TOOLS.includes(tool)) throw new Error("Unknown coding agent.");
@@ -474,11 +495,28 @@ export async function callHost(method: string, params: Record<string, unknown> =
       // Signing in to one of its accounts (accounts.ts) is the same sign-in, pointed at that account's folder.
       const account = await accountParam(tool, params.account);
       const env = accountEnv(tool, account);
+      noteSignInStarted(tool);
+      const a = ADAPTERS[tool];
+      // A sign-in run in a terminal: inside Friday, in its own terminal under the tool's row, when the page can draw one on this
+      // computer (the line to type, its shell ending with it, so its end says it is over), or a terminal window of its own.
+      // `verify`: once it is over, a conversation proves it (login.verify).
+      const inTerminal = async (run: string[], vars: Record<string, string>) =>
+        params.inApp === true
+          ? { inApp: true, line: shellLine(run, vars, process.platform, undefined, true), command: shellLine(run, vars), verify: true }
+          : { ...(await openInTerminal(run, vars)), verify: true };
+      // A tool spoken to over ACP with no login command of its own (and Antigravity) signs in by the ways it says it has
+      // (acp-signin.ts): a sign-in it does itself, its page handed to the page, or its own terminal sign-in.
+      if (a.interactive && !a.dialect && !a.perTurn && !account && (!a.login.length || tool === "antigravity")) {
+        const r = await startAcpSignIn(tool, bin);
+        if ("terminal" in r) return inTerminal(r.terminal.argv, { ...env, ...r.terminal.env });
+        if (!("fixed" in r) && !("fallback" in r)) return { ...(r.url ? { url: r.url } : {}), ...(r.open ? { open: true } : {}), command: [a.bins[0], ...a.login].join(" "), opened: true, browser: true };
+      }
       const how = await launcher(bin);
-      const argv = [how.command, ...how.prefix, ...ADAPTERS[tool].login];
+      const argv = [how.command, ...how.prefix, ...a.login];
+      const terminal = () => inTerminal(argv, env);
       // The tools spoken to over ACP sign in their own ways (a device code typed on the vendor's site, a choice of provider, the
       // tool itself asking as it starts), none of them a code pasted back here: their own terminal shows whatever they ask.
-      if (ADAPTERS[tool].interactive || !ADAPTERS[tool].login.length) return openInTerminal(argv, env);
+      if (ADAPTERS[tool].interactive || !ADAPTERS[tool].login.length) return terminal();
       // A sign-in is a web page, so hand back the link. Only if the CLI
       // prints none does this fall back to opening a terminal.
       const started = await startLogin(loginKey(tool, account), argv, { env: { ...childEnv(), ...how.env, ...env } });
@@ -487,7 +525,7 @@ export async function callHost(method: string, params: Record<string, unknown> =
       // here is the second browser people were getting — and the sign-in stays
       // running until "login.code" hands it what they pasted.
       if (started.url) return { url: started.url, command: started.command, opened: true, needsCode: true };
-      return openInTerminal(argv, env);
+      return terminal();
     }
     // A coding tool's install line, run in a Terminal window of the person's own when they press Run in Terminal beside it:
     // the line is the tool's own, looked up here by the tool's name, never one the page sends (Arun, 2026-10-30: the first
@@ -515,8 +553,38 @@ export async function callHost(method: string, params: Record<string, unknown> =
       const bin = await findBin(tool);
       return { ok: true, loggedIn: bin ? await loginStatus(tool, bin, account) : null };
     }
+    case "login.state": {
+      const tool = str(params.tool, 20) as EngineTool;
+      return { state: ENGINE_TOOLS.includes(tool) ? acpSignInState(tool) : null };
+    }
+    // A sign-in that ran in a terminal is over: proven by a conversation that opens, for a tool spoken to over ACP (T3 Code's
+    // way), and by the tool's own check for the others.
+    case "login.verify": {
+      const tool = str(params.tool, 20) as EngineTool;
+      if (!ENGINE_TOOLS.includes(tool)) throw new Error("Unknown coding agent.");
+      const bin = await findBin(tool);
+      if (!bin) throw new Error(`${ENGINE_NAMES[tool]} isn't installed on this machine.`);
+      forgetLoginStatus();
+      const a = ADAPTERS[tool];
+      if (!a.interactive || a.dialect || a.perTurn) {
+        const now = await loginStatus(tool, bin);
+        return now === false ? { ok: false, error: `${ENGINE_NAMES[tool]} still says it isn't signed in.` } : { ok: true };
+      }
+      const r = await openConversation(tool, bin, 45_000);
+      const error = r.ok ? undefined : `${ENGINE_NAMES[tool]} didn't open a conversation after signing in: ${r.error}`;
+      settleSignIn(tool, r.ok, error);
+      if (r.models.length) rememberModels(tool, r.models);
+      return r.ok ? { ok: true } : { ok: false, error };
+    }
+    case "login.callback": {
+      const tool = str(params.tool, 20) as EngineTool;
+      if (!ENGINE_TOOLS.includes(tool)) throw new Error("Unknown coding agent.");
+      await callbackFromElsewhere(tool, str(params.url, 8_000));
+      return { ok: true };
+    }
     case "login.cancel": {
       const tool = str(params.tool, 20) as EngineTool;
+      if (ENGINE_TOOLS.includes(tool)) cancelAcpSignIn(tool);
       if (ENGINE_TOOLS.includes(tool)) cancelLogin(loginKey(tool, await accountParam(tool, params.account).catch(() => undefined)));
       return { ok: true };
     }
@@ -525,6 +593,7 @@ export async function callHost(method: string, params: Record<string, unknown> =
     // not just Friday's — which is why the UI asks first.
     case "logout": {
       forgetLoginStatus();
+      forgetProof(str(params.tool, 20) as EngineTool);
       const tool = str(params.tool, 20) as EngineTool;
       if (!ENGINE_TOOLS.includes(tool)) throw new Error("Unknown coding agent.");
       const bin = await findBin(tool);
@@ -854,10 +923,31 @@ export async function callHost(method: string, params: Record<string, unknown> =
         const known = await knownModels("antigravity");
         if (known.length) return { models: known };
         const bin = await findBin("antigravity");
-        const r = bin ? await runCli(bin, ANTIGRAVITY_MODELS, 15_000).catch(() => null) : null;
+        const r = bin ? await runCli(bin, ANTIGRAVITY_MODELS, 15_000, {}, "antigravity").catch(() => null) : null;
         return { models: r && r.code === 0 ? antigravityModels(r.out) : [] };
       }
-      if (tool !== "cursor") return { models: (ENGINE_TOOLS as string[]).includes(tool) && ADAPTERS[tool as EngineTool].interactive && !ADAPTERS[tool as EngineTool].dialect ? await knownModels(tool as EngineTool) : [] };
+      if (tool !== "cursor") {
+        if (!(ENGINE_TOOLS as string[]).includes(tool) || !ADAPTERS[tool as EngineTool].interactive || ADAPTERS[tool as EngineTool].dialect) return { models: [] };
+        // The list its last conversation gave, or, before it has had one here, the tool asked (model-lists.ts): kept as a
+        // conversation's would be, and replaced by the one its next conversation gives.
+        const known = await knownModels(tool as EngineTool);
+        if (known.length) {
+          // Kept, and looked at again once it is ten minutes old (as Orca does), so a model the account gained or lost shows
+          // without waiting for a conversation: in the background, the names it had kept where the ids are the same.
+          if (Date.now() - Math.max(await knownModelsAt(tool as EngineTool), lookedAgain.get(tool) ?? 0) > 600_000) {
+            lookedAgain.set(tool, Date.now());
+            void listModels(tool as EngineTool).then((fresh) => {
+              if (!fresh.length) return;
+              const had = new Map(known.map((m) => [m.id, m.label]));
+              rememberModels(tool as EngineTool, fresh.map(({ id, label }) => ({ id, label: had.get(id) ?? label })));
+            });
+          }
+          return { models: grouped(known) };
+        }
+        const listed = await listModels(tool as EngineTool);
+        if (listed.length) rememberModels(tool as EngineTool, listed.map(({ id, label }) => ({ id, label })));
+        return { models: listed };
+      }
       const bin = await findBin("cursor");
       if (!bin) return { models: [] };
       for (const args of [["models"], ["--list-models"]]) {

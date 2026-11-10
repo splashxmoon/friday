@@ -11,7 +11,7 @@ const state = (claimed: string): SessionState =>
     holds: { alpha: { paths: [claimed], seq: 7 } },
   }) as unknown as SessionState;
 
-test("S2 file custody recognizes an equivalent in-root alias from a persisted claim", () => {
+test("a claim saved under another spelling of the same file still holds it, and a path out of the project holds nothing", () => {
   const held = state("src/../src/a.ts");
   assert.deepEqual(heldBy(held, "beta", "src/a.ts").map((x) => x.lane), ["alpha"]);
   assert.deepEqual(heldBy(held, "beta", "./src/a.ts").map((x) => x.lane), ["alpha"]);
@@ -19,7 +19,7 @@ test("S2 file custody recognizes an equivalent in-root alias from a persisted cl
   assert.deepEqual(heldBy(held, "beta", "../src/a.ts"), [], "outside-root claims have no custody");
 });
 
-test("S2 directory custody includes in-root aliases but not unrelated paths", () => {
+test("a folder claimed under another spelling holds what is in it, and nothing beside it", () => {
   const held = state("src/tmp/../components/");
   assert.deepEqual(heldBy(held, "beta", "src/components/button.ts").map((x) => x.lane), ["alpha"]);
   assert.deepEqual(heldBy(held, "beta", "src/other/button.ts"), []);

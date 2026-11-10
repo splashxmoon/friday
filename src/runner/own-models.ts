@@ -206,6 +206,24 @@ function unreachable(base: string, e: Error & { cause?: { code?: string } }): Er
 /** Whether a call failed before any server answered: refused, not found, timed out on the way. */
 export const noAnswer = (e: unknown): e is Error & { cause?: { code?: string } } => e instanceof Error && (/^fetch failed$/i.test(e.message) || /^(ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ECONNRESET|ETIMEDOUT|EHOSTUNREACH|UND_ERR_\w+)$/.test(String((e as { cause?: { code?: string } }).cause?.code ?? "")));
 
+/**
+ * The server's own words for why it refused, as ": “…”" (or nothing), so a refusal can be acted on ("invalid x-api-key", "credit
+ * balance is too low") rather than guessed at from a number. Never with a key in them: the callers redact, as a careless server
+ * says it back.
+ */
+async function reasonOf(r: Response): Promise<string> {
+  const said = await r.text().catch(() => "");
+  let why = "";
+  try {
+    const j = JSON.parse(said) as { error?: { message?: string } | string; message?: string; detail?: string };
+    why = String((typeof j.error === "object" ? j.error?.message : j.error) ?? j.message ?? j.detail ?? "");
+  } catch {
+    why = /^\s*</.test(said) ? "" : said;
+  }
+  why = why.replace(/\s+/g, " ").trim().slice(0, 200);
+  return why ? `: “${why}”` : "";
+}
+
 export async function discoverModels(p: { baseUrl: string; apiKey?: string; id?: string }): Promise<{ models: string[] }> {
   const had = p.id ? (await load()).find((m) => m.id === p.id) : undefined;
   const base = cleanUrl(p.baseUrl || had?.baseUrl || "");
@@ -220,18 +238,7 @@ export async function discoverModels(p: { baseUrl: string; apiKey?: string; id?:
     throw redacted(unreachable(base, e), key);
   });
   if (!r.ok) {
-    // The server's own words for why, so a refusal can be acted on ("invalid x-api-key", "credit balance is too low") rather than
-    // guessed at from a number. Never with the key in them: a careless server says it back.
-    const said = await r.text().catch(() => "");
-    let why = "";
-    try {
-      const j = JSON.parse(said) as { error?: { message?: string } | string; message?: string; detail?: string };
-      why = String((typeof j.error === "object" ? j.error?.message : j.error) ?? j.message ?? j.detail ?? "");
-    } catch {
-      why = /^\s*</.test(said) ? "" : said;
-    }
-    why = why.replace(/\s+/g, " ").trim().slice(0, 200);
-    const reason = why ? `: “${why}”` : "";
+    const reason = await reasonOf(r);
     if (r.status === 401 || r.status === 403) throw redacted(new Error(`That server didn't accept the key${reason}.`), key);
     throw redacted(new Error(`That server answered ${r.status} for its model list${reason}. You can still type the model's name.`), key);
   }
@@ -299,6 +306,38 @@ export async function ownComplete(
 export async function ownVision(p: { id: string }): Promise<{ vision: boolean }> {
   const m = (await load()).find((x) => x.id === p.id);
   return { vision: !!m && seesImages(m) };
+}
+
+/**
+ * Speech made into words on one of your own servers (voice input's "With your own key", client/voice.ts): the recording, sent to
+ * the OpenAI-compatible /audio/transcriptions of the server a saved model is on, with that model's key, and the text back.
+ * OpenAI, Groq and the servers people run themselves all answer it. The key goes to that server only and never to the page; the
+ * audio goes nowhere else.
+ */
+export async function ownTranscribe(p: { id: string; model: string; audio: Uint8Array; type: string; language?: string; prompt?: string }): Promise<{ text: string }> {
+  const m = await find(p.id);
+  const base = cleanUrl(m.baseUrl);
+  const model = p.model.trim().slice(0, 200);
+  if (!model) throw new Error("Pick the speech model in Settings › General › Voice.");
+  const form = new FormData();
+  form.set("file", new Blob([new Uint8Array(p.audio)], { type: p.type || "audio/wav" }), p.type === "audio/webm" ? "speech.webm" : "speech.wav");
+  form.set("model", model);
+  form.set("response_format", "json");
+  if (p.language && /^[a-z]{2,3}$/.test(p.language)) form.set("language", p.language);
+  // What came before, for the words a coding session uses (Whisper reads a prompt as the text before this): its last part.
+  if (p.prompt?.trim()) form.set("prompt", p.prompt.trim().slice(-800));
+  // Never followed elsewhere: a redirect to another host would carry the key there.
+  const r = await fetch(`${base}/audio/transcriptions`, { method: "POST", headers: m.apiKey ? { Authorization: `Bearer ${m.apiKey}` } : {}, body: form, redirect: "error", signal: AbortSignal.timeout(120_000) }).catch((e: Error & { cause?: { code?: string } }) => {
+    throw redacted(noAnswer(e) ? unreachable(base, e) : e, m.apiKey);
+  });
+  if (!r.ok) {
+    const reason = await reasonOf(r);
+    if (r.status === 401 || r.status === 403) throw redacted(new Error(`${m.name}'s server didn't accept the key${reason}.`), m.apiKey);
+    if (r.status === 404) throw redacted(new Error(`${m.name}'s server has no speech-to-text${reason}. Pick another in Settings › General › Voice.`), m.apiKey);
+    throw redacted(new Error(`${m.name}'s server answered ${r.status}${reason}.`), m.apiKey);
+  }
+  const j = (await r.json().catch(() => ({}))) as { text?: unknown };
+  return { text: typeof j.text === "string" ? j.text.trim() : "" };
 }
 
 /** Does it answer? A short question, with how long it took. */

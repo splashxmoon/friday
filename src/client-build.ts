@@ -28,7 +28,8 @@ export function clientBuildOptions(outdir: string, write: boolean): BuildOptions
     // replay.js: a recording or watch link's page on its own, a fraction of app.js and its chunks (src/fast-load.ts, shellRoute).
     // The open-source edition (FRIDAY_EDITION=local, src/local/main.ts) is the app alone, from its own entry.
     entryPoints:
-      { app: path.join(here, "client", "local-main.tsx") },
+      // And voice input's worker (voice-worker.ts): Whisper on this computer, loaded only when the mic is first pressed.
+      { app: path.join(here, "client", "local-main.tsx"), "voice-worker": path.join(here, "client", "voice-worker.ts") },
     bundle: true,
     format: "esm",
     splitting: true,

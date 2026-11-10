@@ -190,6 +190,8 @@ const paths = {
   pause: <path d="M9 5v14M15 5v14" />,
   play: <path d="M7 5v14l11-7Z" />,
   stop: <rect x="6" y="6" width="12" height="12" rx="2" />,
+  // Voice input's button in the box (VoiceMic.tsx).
+  mic: <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3ZM5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" />,
   hand: <path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V12M11 11V4.5a1.5 1.5 0 0 1 3 0V11M14 11V6.5a1.5 1.5 0 0 1 3 0V14a7 7 0 0 1-7 7h-.5a6 6 0 0 1-4.9-2.5L2.5 14a1.5 1.5 0 0 1 2.4-1.8L8 15" />,
   zap: <path d="M13 3 5 13h6l-1 8 8-10h-6Z" />,
   flag: <path d="M5 21V4a1 1 0 0 1 1-1h11.5a.5.5 0 0 1 .4.8L15 8l2.9 4.2a.5.5 0 0 1-.4.8H5" />,

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { ACCOUNT_TOOLS, AccountList } from "./Accounts.js";
 import { ENGINE_NAMES, ENGINE_TOOLS, type EngineTool } from "../types.js";
 
@@ -18,10 +18,20 @@ import { ENGINE_INFO, installStep, osOf, splitTools, toolOrder } from "./engines
 import { Icon } from "./icons.js";
 import { NoMachine, hostApi, machineRefusal, type LocalTool, type MachineState } from "./local.js";
 import type { Identity } from "./storage.js";
-import { MenuButton, MoreTools, useDismiss } from "./ui.js";
+import { floating, MenuButton, MoreTools, useDismiss } from "./ui.js";
+import { openSettings } from "./openSettings.js";
 import { useToolLimits } from "./toolLimits.js";
 import { isFiveHour, isWeekly, windowsOf } from "./limitHistory.js";
 import { Button } from "@/components/ui/button";
+
+// What a waiting sign-in says under its row, loaded only while one waits (SignInNotes.tsx).
+const TerminalSignIn = lazy(() => import("./SignInNotes.js").then((m) => ({ default: m.TerminalSignIn })));
+const ShellSignIn = lazy(() => import("./SignInNotes.js").then((m) => ({ default: m.ShellSignIn })));
+const PageSignIn = lazy(() => import("./SignInNotes.js").then((m) => ({ default: m.PageSignIn })));
+const endSignInShell = (id: string) => void import("./Terminal.js").then((m) => m.endSignInShell(id));
+// The ACP registry's agents, for "Other ACP agent": its own chunk, loaded when that form opens.
+const RegistryPicker = lazy(() => import("./RegistryPicker.js").then((m) => ({ default: m.RegistryPicker })));
+type RegistryRow = import("./RegistryPicker.js").RegistryRow;
 
 /**
  * This computer, and whether Friday can work on it.
@@ -40,6 +50,14 @@ type Step = "idle" | "linking" | "signing";
 /** What is happening to one tool's sign-in. */
 type Acting = "out" | "switch" | "in";
 
+/**
+ * Whether a sign-in someone started is over: nothing on this computer needs one any more, or the tool they signed in to (by a page
+ * or in a terminal window) is signed in, having been seen signed out first (a refresh that hasn't caught up reads "still in").
+ */
+export function signInFinished(o: { needsSignIn: boolean; waiting: boolean; sawSignedOut: boolean; pending: boolean | null | undefined }): boolean {
+  return !o.needsSignIn || (o.waiting && o.sawSignedOut && o.pending !== undefined && o.pending !== false);
+}
+
 export function MachineBadge({ identity, machine, refresh, inline = false, welcome = false, part }: { identity: Identity; machine: MachineState; refresh: () => void; /** Always shown, compact, with no pill to open it: the new-session page's corner. */ inline?: boolean; /** In the welcome (Setup.tsx): the well-known tools always listed, ready ones first, and no line about where it runs. */ welcome?: boolean; /** Inline, one half only: the computer (Settings › Computer), or the tools on it (Settings › Coding tools). */ part?: "computer" | "tools" }) {
   const [open, setOpen] = useState(false);
   // What stays here, said for the kind of work in front of you (w1 #4: "The code, the terminal and your coding tool" in Work).
@@ -48,6 +66,15 @@ export function MachineBadge({ identity, machine, refresh, inline = false, welco
   const [err, setErr] = useState("");
   const [signInUrl, setSignInUrl] = useState("");
   const [signInTool, setSignInTool] = useState("");
+  /** A sign-in that opened in a terminal window (the tools that sign in as they start): the command it runs, to run by hand too. */
+  const [signInCmd, setSignInCmd] = useState("");
+  /** A sign-in Friday is carrying out with the tool, in the browser (Antigravity's, runner agy-signin.ts): its link may come later. */
+  const [signInBrowser, setSignInBrowser] = useState(false);
+  /** A sign-in running in a shell of Friday's own under the tool's row (the desktop app): its shell, and the line typed into it. */
+  const [signInShell, setSignInShell] = useState<{ id: string; line: string } | null>(null);
+  /** A terminal sign-in to prove once it is over (runner login.verify), and that proof under way. */
+  const [signInVerify, setSignInVerify] = useState(false);
+  const [checking, setChecking] = useState(false);
   const sawSignedOut = useRef(false);
   /** The tool being signed out, switched or signed in, said on its own row while it happens. */
   const [acting, setActing] = useState<{ tool: EngineTool; what: Acting } | null>(null);
@@ -61,8 +88,6 @@ export function MachineBadge({ identity, machine, refresh, inline = false, welco
   const auto = link.useAutoLink();
   const autoError = link.useAutoLinkError();
   const btn = useRef<HTMLButtonElement>(null);
-  const card = useRef<HTMLDivElement>(null);
-  useDismiss(card, () => setOpen(false), btn.current);
 
   const desktop = typeof window !== "undefined" && !!window.fridayDesktop?.link;
   const here = machine.mode === "local" || machine.mode === "linked";
@@ -90,6 +115,19 @@ export function MachineBadge({ identity, machine, refresh, inline = false, welco
     } catch (e) {
       setAcpNote(`Couldn't save that: ${(e as Error).message}`);
     }
+  };
+  // "Other ACP agent" picked from the ACP registry: installed into Friday's own folder on this computer and set as its command
+  // (runner acp-registry.ts), after T3 Code, which installs any agent the registry lists.
+  const registry = {
+    load: () => hostApi<{ agents: RegistryRow[] }>(identity, "/api/runner/acp.registry", { method: "POST", body: "{}" }).then((r) => r.agents),
+    add: async (id: string) => {
+      setErr("");
+      setAcpNote("");
+      const r = await hostApi<{ ok: boolean; line: string; name: string; version: string; found?: boolean }>(identity, "/api/runner/acp.install", { method: "POST", body: JSON.stringify({ id }) });
+      setAcpLine(r.line);
+      refresh();
+      setAcpNote(`${r.name} ${r.version} is installed and set. Sign in to it from its row if it asks.`);
+    },
   };
   // The installed ones up top. The one whose install line is open stays where it was clicked: one opened from the tools folded
   // away stays among them, not moved up the list as its form opens (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
@@ -158,18 +196,64 @@ export function MachineBadge({ identity, machine, refresh, inline = false, welco
     // still signed out, Codex finishing used to leave "Finish signing in to Codex" and its spinner up for good.
     // Only after it was seen signed out first: switching account signs out and then in, and a refresh that has not caught
     // up yet would otherwise read "still signed in" as "finished".
+    // A sign-in in a terminal window waits on its own tool the same way: it waited on every tool being signed in, so with Claude
+    // Code still signed out, Antigravity's row said "Opening the sign-in…" for good after it had signed in (splashxmoon/friday#21).
+    const waiting = !!signInUrl || !!signInCmd || signInBrowser || !!signInShell;
     const pending = tools.find((t) => t.tool === signInTool);
-    if (!signInUrl) sawSignedOut.current = false;
+    if (!waiting) sawSignedOut.current = false;
     else if (pending?.loggedIn === false) sawSignedOut.current = true;
-    if (!needsSignIn || (signInUrl && sawSignedOut.current && pending && pending.loggedIn !== false)) {
-      if (signInUrl && pending?.loggedIn) setJustIn(pending.tool);
+    if (signInFinished({ needsSignIn: !!needsSignIn, waiting, sawSignedOut: sawSignedOut.current, pending: pending?.loggedIn })) {
+      // A terminal sign-in the tool's own check now says is done is proven as well, by a conversation that opens (verify).
+      if (waiting && pending?.loggedIn && signInVerify) {
+        sawSignedOut.current = false;
+        return void verify(pending.tool);
+      }
+      if (waiting && pending?.loggedIn) setJustIn(pending.tool);
       sawSignedOut.current = false;
       setSignInUrl("");
+      setSignInCmd("");
+      setSignInBrowser(false);
+      setSignInShell(null);
+      setSignInVerify(false);
       setSignInTool("");
       setActing((a) => (a?.what === "in" ? null : a));
       setStep((s) => (s === "signing" ? "idle" : s));
     }
-  }, [here, needsSignIn, signInUrl, signInTool, tools.map((t) => `${t.tool}:${t.loggedIn}`).join()]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [here, needsSignIn, signInUrl, signInCmd, signInBrowser, !!signInShell, signInTool, tools.map((t) => `${t.tool}:${t.loggedIn}`).join()]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A sign-in Friday carries out with the tool (Antigravity's): its link, once the tool prints it, and a failure said on the row
+  // rather than a wait that never ends. Signed in still comes from the tool's own check, as for every other sign-in.
+  useEffect(() => {
+    if (!signInBrowser || !signInTool) return;
+    let on = true;
+    const look = () =>
+      void hostApi<{ state: { phase: string; url?: string; error?: string } | null }>(identity, "/api/runner/login.state", { method: "POST", body: JSON.stringify({ tool: signInTool }) }).then(
+        ({ state }) => {
+          if (!on || !state) return;
+          if (state.url) setSignInUrl((u) => u || state.url!);
+          if (state.phase === "done") refresh();
+          if (state.phase === "failed") {
+            setErr(state.error || "The sign-in didn't finish. Try again.");
+            setSignInUrl("");
+            setSignInBrowser(false);
+            setSignInTool("");
+            setActing(null);
+            setStep("idle");
+          }
+        },
+        () => {},
+      );
+    look();
+    const t = setInterval(look, 2000);
+    return () => {
+      on = false;
+      clearInterval(t);
+    };
+  }, [signInBrowser, signInTool]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A sign-in's own shell goes when the sign-in is over, finished or given up on, and when this card goes.
+  const shellId = signInShell?.id;
+  useEffect(() => (shellId ? () => endSignInShell(shellId) : undefined), [shellId]);
 
   /** The desktop app links itself: find or make a token, hand it over, let it run. Through linkNow, so it waits on signing out. */
   const connect = async () => {
@@ -186,21 +270,41 @@ export function MachineBadge({ identity, machine, refresh, inline = false, welco
   };
 
   /** The one part nobody can do for them. */
-  const signIn = async (tool: EngineTool) => {
+  const signIn = async (tool: EngineTool, outside = false) => {
     setStep("signing");
     setActing({ tool, what: "in" });
     setErr("");
+    setSignInShell(null);
+    setSignInCmd("");
     try {
-      const r = await hostApi<{ opened?: boolean; command: string; url?: string }>(identity, "/api/runner/login", {
+      // On this computer in the desktop app, a sign-in that needs a terminal runs in one of Friday's own, under the row.
+      // In the desktop app its own shells, and in the open-source edition in a browser this computer's, over its own Friday.
+      const inApp = !outside && machine.mode === "local" && (!!window.fridayDesktop?.terminal || isLocal());
+      const r = await hostApi<{ opened?: boolean; command: string; url?: string; browser?: boolean; open?: boolean; inApp?: boolean; line?: string; verify?: boolean }>(identity, "/api/runner/login", {
         method: "POST",
-        body: JSON.stringify({ tool }),
+        body: JSON.stringify({ tool, ...(inApp ? { inApp: true } : {}) }),
       });
-      if (r.url) {
+      setSignInVerify(!!r.verify);
+      if (r.inApp && r.line) {
+        setSignInShell({ id: `signin-${tool}-${Date.now().toString(36)}`, line: r.line });
+        setSignInTool(tool);
+      } else if (r.browser) {
+        // Friday is signing in with the tool itself, which opened its page in the browser: nothing to open from here. Unless the
+        // tool asked Friday to open it (ACP's URL elicitation): then once, here.
+        if (r.open && r.url) openOutside(r.url);
+        setSignInUrl(r.url ?? "");
+        setSignInBrowser(true);
+        setSignInTool(tool);
+      } else if (r.url) {
         // Not opened from here: the CLI opens the page itself, and doing it
         // again is a second tab for one sign-in.
         setSignInUrl(r.url);
         setSignInTool(tool);
-      } else if (!r.opened) {
+      } else if (r.opened) {
+        // A terminal window opened with it: waited on as a page is, with the command there to run by hand if no window shows.
+        setSignInCmd(r.command);
+        setSignInTool(tool);
+      } else {
         setErr(`Run this on that computer to sign in: ${r.command}`);
         setActing(null);
         setStep("idle");
@@ -236,10 +340,44 @@ export function MachineBadge({ identity, machine, refresh, inline = false, welco
   const cancelSignIn = (tool: EngineTool) => {
     void hostApi(identity, "/api/runner/login.cancel", { method: "POST", body: JSON.stringify({ tool }) }).catch(() => {});
     setSignInUrl("");
+    setSignInCmd("");
+    setSignInBrowser(false);
+    setSignInShell(null);
+    setSignInVerify(false);
     setSignInTool("");
     setActing(null);
     setStep("idle");
     refresh();
+  };
+
+  /** The address a browser on another device ended on, for the computer where the tool waits (runner login.callback). */
+  const pasteBack = (tool: EngineTool, url: string) => hostApi(identity, "/api/runner/login.callback", { method: "POST", body: JSON.stringify({ tool, url }) }).then(() => {});
+
+  /**
+   * A sign-in run in a terminal is over (its shell ended, or the person says so): proven by a conversation that opens, for a tool
+   * spoken to over ACP, as T3 Code proves it. Signed in, or what the tool said, on its row.
+   */
+  const verify = async (tool: EngineTool) => {
+    if (checking) return;
+    setChecking(true);
+    setSignInShell(null);
+    try {
+      const r = await hostApi<{ ok: boolean; error?: string }>(identity, "/api/runner/login.verify", { method: "POST", body: JSON.stringify({ tool }) });
+      if (r.ok) setJustIn(tool);
+      else setErr(r.error ?? "The sign-in didn't take. Try again.");
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setChecking(false);
+      setSignInUrl("");
+      setSignInCmd("");
+      setSignInBrowser(false);
+      setSignInVerify(false);
+      setSignInTool("");
+      setActing(null);
+      setStep("idle");
+      refresh();
+    }
   };
 
   // Settings › Coding tools: each signed-in tool says how much of its limit is left, from the same reading the Usage page has
@@ -356,13 +494,19 @@ export function MachineBadge({ identity, machine, refresh, inline = false, welco
                   acting={acting?.tool === tool ? acting.what : null}
                   justIn={justIn === tool}
                   {...(signInUrl && signInTool === tool ? { loginUrl: signInUrl } : {})}
+                  {...(signInCmd && signInTool === tool ? { loginCmd: signInCmd } : {})}
+                  {...(signInBrowser && signInTool === tool ? { loginPage: true } : {})}
+                  {...(signInShell && signInTool === tool ? { loginShell: signInShell, onOutside: () => void signIn(tool, true), onShellEnd: () => void verify(tool) } : {})}
+                  {...(signInTool === tool && signInVerify && signInCmd ? { onDone: () => void verify(tool) } : {})}
+                  {...(signInTool === tool && signInBrowser ? { onPaste: (url: string) => pasteBack(tool, url) } : {})}
+                  {...(checking && signInTool === tool ? { checking: true } : {})}
                   installing={installing === tool}
                   onInstall={() => setInstalling(installing === tool ? "" : tool)}
                   onRunInstall={() => hostApi<{ opened: boolean; command: string }>(identity, "/api/runner/install", { method: "POST", body: JSON.stringify({ tool }) })}
                   onSignIn={() => void signIn(tool)}
                   onSignOut={(thenIn) => void signOut(tool, thenIn)}
                   onCancel={() => cancelSignIn(tool)}
-                  {...(tool === "acp" ? { acpLine, acpNote, onSetCommand: setCommand } : {})}
+                  {...(tool === "acp" ? { acpLine, acpNote, onSetCommand: setCommand, registry } : {})}
                 />
               ))}
             </ul>
@@ -384,13 +528,19 @@ export function MachineBadge({ identity, machine, refresh, inline = false, welco
                       acting={acting?.tool === tool ? acting.what : null}
                       justIn={justIn === tool}
                       {...(signInUrl && signInTool === tool ? { loginUrl: signInUrl } : {})}
+                  {...(signInCmd && signInTool === tool ? { loginCmd: signInCmd } : {})}
+                  {...(signInBrowser && signInTool === tool ? { loginPage: true } : {})}
+                  {...(signInShell && signInTool === tool ? { loginShell: signInShell, onOutside: () => void signIn(tool, true), onShellEnd: () => void verify(tool) } : {})}
+                  {...(signInTool === tool && signInVerify && signInCmd ? { onDone: () => void verify(tool) } : {})}
+                  {...(signInTool === tool && signInBrowser ? { onPaste: (url: string) => pasteBack(tool, url) } : {})}
+                  {...(checking && signInTool === tool ? { checking: true } : {})}
                       installing={installing === tool}
                       onInstall={() => setInstalling(installing === tool ? "" : tool)}
                       onRunInstall={() => hostApi<{ opened: boolean; command: string }>(identity, "/api/runner/install", { method: "POST", body: JSON.stringify({ tool }) })}
                       onSignIn={() => void signIn(tool)}
                       onSignOut={(thenIn) => void signOut(tool, thenIn)}
                       onCancel={() => cancelSignIn(tool)}
-                      {...(tool === "acp" ? { acpLine, acpNote, onSetCommand: setCommand } : {})}
+                      {...(tool === "acp" ? { acpLine, acpNote, onSetCommand: setCommand, registry } : {})}
                     />
                   ))}
                 </ul>
@@ -409,13 +559,19 @@ export function MachineBadge({ identity, machine, refresh, inline = false, welco
                 acting={acting?.tool === tool ? acting.what : null}
                 justIn={justIn === tool}
                 {...(signInUrl && signInTool === tool ? { loginUrl: signInUrl } : {})}
+                  {...(signInCmd && signInTool === tool ? { loginCmd: signInCmd } : {})}
+                  {...(signInBrowser && signInTool === tool ? { loginPage: true } : {})}
+                  {...(signInShell && signInTool === tool ? { loginShell: signInShell, onOutside: () => void signIn(tool, true), onShellEnd: () => void verify(tool) } : {})}
+                  {...(signInTool === tool && signInVerify && signInCmd ? { onDone: () => void verify(tool) } : {})}
+                  {...(signInTool === tool && signInBrowser ? { onPaste: (url: string) => pasteBack(tool, url) } : {})}
+                  {...(checking && signInTool === tool ? { checking: true } : {})}
                 installing={installing === tool}
                 onInstall={() => setInstalling(installing === tool ? "" : tool)}
                 onRunInstall={() => hostApi<{ opened: boolean; command: string }>(identity, "/api/runner/install", { method: "POST", body: JSON.stringify({ tool }) })}
                 onSignIn={() => void signIn(tool)}
                 onSignOut={(thenIn) => void signOut(tool, thenIn)}
                 onCancel={() => cancelSignIn(tool)}
-                {...(tool === "acp" ? { acpLine, acpNote, onSetCommand: setCommand } : {})}
+                {...(tool === "acp" ? { acpLine, acpNote, onSetCommand: setCommand, registry } : {})}
               />
             ))}
             <li className="mb-more">
@@ -471,89 +627,161 @@ export function MachineBadge({ identity, machine, refresh, inline = false, welco
         <Icon name="chevronDown" size={12} />
       </button>
 
-      {open && (
-        <div ref={card} className="mb-card surface" role="dialog" aria-label="Your computer">
-          <header className="mb-top">
-            <h3>Your computer</h3>
-            <p>{topLine}</p>
-          </header>
+      {open &&
+        floating(
+          // A modal, centred over a dimmed page, where it was a dropdown under the pill (Arun, 2026-11-10: "can we make this into a
+          // modal pop up instead of a dropdown.... properly designed"): room for every tool's row, its sign-in under it, and a
+          // way to Settings, with the page behind it still. Esc, the close button or a press outside closes it.
+          <div className="overlay mb-overlay">
+            <ToolsModal onClose={() => setOpen(false)} trigger={btn.current}>
+              <header className="mb-modal-head">
+                <div className="mb-modal-titles">
+                  <h2 id="mb-modal-title">{here ? "Coding tools" : "Your computer"}</h2>
+                  {here ? (
+                    <p className="mb-modal-where" title={machine.home || undefined}>
+                      <span className="mb-dot on" aria-hidden />
+                      <span className="mb-where-text">Connected</span>
+                      {machine.machine?.name && <span className="mb-where-name">· {machine.machine.name}</span>}
+                    </p>
+                  ) : null}
+                </div>
+                <button type="button" className="icon-btn tiny" aria-label="Close" onClick={() => setOpen(false)}>
+                  <Icon name="x" size={15} />
+                </button>
+              </header>
+              <p className="mb-modal-lead">{topLine}</p>
 
-          {!here ? (
-            <section className="mb-body">
+              <div className="mb-modal-body">
+                {!here ? (
+                  <section className="mb-body">
               {desktop ? (
-                <>
-                  <p className="mb-lead">
-                    {connecting
-                      ? "Connecting this computer now — you don’t need to do anything. This card updates the moment it’s ready."
-                      : "Friday isn’t connected to this computer yet, so it can’t open your folders or run anything."}
-                  </p>
-                  {autoError && (connecting || auto === "failed") && <p className="mb-fail">Last try didn’t work: {autoError}</p>}
-                  <ul className="mb-preview" aria-label="Coding tools Friday can work with">
-                    {shown.here.map((t) => (
-                      <li key={t}>
-                        <EngineMark tool={t} size={16} />
-                        <span>{ENGINE_NAMES[t]}</span>
-                      </li>
-                    ))}
-                    {shown.away.length > 0 && <li className="muted">and {shown.away.length} more</li>}
-                  </ul>
-                  <button type="button" className="btn primary mb-go" disabled={step === "linking" || connecting} onClick={() => void connect()}>
-                    {step === "linking" || connecting ? <span className="spinner" /> : <Icon name="plug" size={15} />}
-                    {step === "linking" || connecting ? "Connecting…" : auto === "failed" ? "Try again" : "Connect this computer"}
-                  </button>
-                  <p className="mb-fine">Friday then finds whichever of these you already have and are signed in to. It never holds a key for any of them.</p>
-                </>
-              ) : (
-                <NoMachine className="mb-lead" />
-              )}
-            </section>
-          ) : (
-            <section className="mb-body">
-              <div className="mb-where">
-                <span className="mb-dot on" aria-hidden />
-                {/* The computer by its name first, its folder on hover (audit REST-16, Arun 2026-11-04: a raw path led the card). */}
-                <span className="mb-where-text" title={machine.home || undefined}>
-                  Connected
-                </span>
-                {machine.machine?.name && (
-                  <span className="mb-where-name" title={machine.home || undefined}>
-                    · {machine.machine.name}
-                  </span>
+                      <>
+                        <p className="mb-lead">
+                          {connecting
+                            ? "Connecting this computer now — you don’t need to do anything. This card updates the moment it’s ready."
+                            : "Friday isn’t connected to this computer yet, so it can’t open your folders or run anything."}
+                        </p>
+                        {autoError && (connecting || auto === "failed") && <p className="mb-fail">Last try didn’t work: {autoError}</p>}
+                        <ul className="mb-preview" aria-label="Coding tools Friday can work with">
+                          {shown.here.map((t) => (
+                            <li key={t}>
+                              <EngineMark tool={t} size={16} />
+                              <span>{ENGINE_NAMES[t]}</span>
+                            </li>
+                          ))}
+                          {shown.away.length > 0 && <li className="muted">and {shown.away.length} more</li>}
+                        </ul>
+                        <button type="button" className="btn primary mb-go" disabled={step === "linking" || connecting} onClick={() => void connect()}>
+                          {step === "linking" || connecting ? <span className="spinner" /> : <Icon name="plug" size={15} />}
+                          {step === "linking" || connecting ? "Connecting…" : auto === "failed" ? "Try again" : "Connect this computer"}
+                        </button>
+                        <p className="mb-fine">Friday then finds whichever of these you already have and are signed in to. It never holds a key for any of them.</p>
+                      </>
+                    ) : (
+                      <NoMachine className="mb-lead" />
+                    )}
+                  </section>
+                ) : (
+                  <>
+                    <section className="mb-modal-group" aria-labelledby="mb-here-title">
+                      <h3 id="mb-here-title" className="mb-modal-label">
+                        On this computer <span className="mb-modal-count">{shown.here.length}</span>
+                      </h3>
+                      <ul className="mb-tools">
+                  {shown.here.map((tool) => (
+                        <ToolRow
+                            key={tool}
+                            tool={tool}
+                            found={tools.find((x) => x.tool === tool) ?? machine.tools.find((x) => x.tool === tool) ?? null}
+                        accounts={ACCOUNT_TOOLS.includes(tool) ? <AccountList identity={identity} tool={tools.find((x) => x.tool === tool) ?? machine.tools.find((x) => x.tool === tool) ?? { tool, name: "", path: null, loggedIn: null, source: null }} onChanged={refresh} /> : undefined}
+                            busy={step === "signing" && acting?.tool !== tool}
+                            acting={acting?.tool === tool ? acting.what : null}
+                            justIn={justIn === tool}
+                            {...(signInUrl && signInTool === tool ? { loginUrl: signInUrl } : {})}
+                          {...(signInCmd && signInTool === tool ? { loginCmd: signInCmd } : {})}
+                          {...(signInBrowser && signInTool === tool ? { loginPage: true } : {})}
+                          {...(signInShell && signInTool === tool ? { loginShell: signInShell, onOutside: () => void signIn(tool, true), onShellEnd: () => void verify(tool) } : {})}
+                          {...(signInTool === tool && signInVerify && signInCmd ? { onDone: () => void verify(tool) } : {})}
+                          {...(signInTool === tool && signInBrowser ? { onPaste: (url: string) => pasteBack(tool, url) } : {})}
+                          {...(checking && signInTool === tool ? { checking: true } : {})}
+                            installing={installing === tool}
+                            onInstall={() => setInstalling(installing === tool ? "" : tool)}
+                            onSignIn={() => void signIn(tool)}
+                            onSignOut={(thenIn) => void signOut(tool, thenIn)}
+                            onCancel={() => cancelSignIn(tool)}
+                            {...(tool === "acp" ? { acpLine, acpNote, onSetCommand: setCommand, registry } : {})}
+                          />
+                      ))}
+                      </ul>
+                    </section>
+                    {shown.away.length > 0 && (
+                      <section className="mb-modal-group" aria-label="More coding tools">
+                        <button type="button" className="mb-modal-label mb-modal-toggle" aria-expanded={moreTools} onClick={() => setMoreTools((v) => !v)}>
+                          <span>
+                            More coding tools <span className="mb-modal-count">{shown.away.length}</span>
+                          </span>
+                          {!moreTools && (
+                            <span className="mb-modal-peek" aria-hidden>
+                              {shown.away.slice(0, 8).map((t) => (
+                                <EngineMark key={t} tool={t} size={13} />
+                              ))}
+                            </span>
+                          )}
+                          <Icon name="chevronDown" size={13} className={moreTools ? "mb-modal-caret open" : "mb-modal-caret"} />
+                        </button>
+                        {moreTools && (
+                          <ul className="mb-tools">
+                  {shown.away.map((tool) => (
+                            <ToolRow
+                                key={tool}
+                                tool={tool}
+                                found={tools.find((x) => x.tool === tool) ?? machine.tools.find((x) => x.tool === tool) ?? null}
+                            accounts={ACCOUNT_TOOLS.includes(tool) ? <AccountList identity={identity} tool={tools.find((x) => x.tool === tool) ?? machine.tools.find((x) => x.tool === tool) ?? { tool, name: "", path: null, loggedIn: null, source: null }} onChanged={refresh} /> : undefined}
+                                busy={step === "signing" && acting?.tool !== tool}
+                                acting={acting?.tool === tool ? acting.what : null}
+                                justIn={justIn === tool}
+                                {...(signInUrl && signInTool === tool ? { loginUrl: signInUrl } : {})}
+                              {...(signInCmd && signInTool === tool ? { loginCmd: signInCmd } : {})}
+                              {...(signInBrowser && signInTool === tool ? { loginPage: true } : {})}
+                              {...(signInShell && signInTool === tool ? { loginShell: signInShell, onOutside: () => void signIn(tool, true), onShellEnd: () => void verify(tool) } : {})}
+                              {...(signInTool === tool && signInVerify && signInCmd ? { onDone: () => void verify(tool) } : {})}
+                              {...(signInTool === tool && signInBrowser ? { onPaste: (url: string) => pasteBack(tool, url) } : {})}
+                              {...(checking && signInTool === tool ? { checking: true } : {})}
+                                installing={installing === tool}
+                                onInstall={() => setInstalling(installing === tool ? "" : tool)}
+                                onSignIn={() => void signIn(tool)}
+                                onSignOut={(thenIn) => void signOut(tool, thenIn)}
+                                onCancel={() => cancelSignIn(tool)}
+                                {...(tool === "acp" ? { acpLine, acpNote, onSetCommand: setCommand, registry } : {})}
+                              />
+                          ))}
+                          </ul>
+                        )}
+                      </section>
+                    )}
+                  </>
                 )}
               </div>
 
-              {/* The ones here, then the rest one click away: the ones not here yet are what a person may have come to install,
-                  and with fourteen of them they buried the few somebody has. */}
-              <ul className="mb-tools">
-                {[...shown.here, ...(moreTools ? shown.away : [])].map((tool) => (
-                  <ToolRow
-                    key={tool}
-                    tool={tool}
-                    found={tools.find((x) => x.tool === tool) ?? machine.tools.find((x) => x.tool === tool) ?? null}
-                accounts={ACCOUNT_TOOLS.includes(tool) ? <AccountList identity={identity} tool={tools.find((x) => x.tool === tool) ?? machine.tools.find((x) => x.tool === tool) ?? { tool, name: "", path: null, loggedIn: null, source: null }} onChanged={refresh} /> : undefined}
-                    busy={step === "signing" && acting?.tool !== tool}
-                    acting={acting?.tool === tool ? acting.what : null}
-                    justIn={justIn === tool}
-                    {...(signInUrl && signInTool === tool ? { loginUrl: signInUrl } : {})}
-                    installing={installing === tool}
-                    onInstall={() => setInstalling(installing === tool ? "" : tool)}
-                    onSignIn={() => void signIn(tool)}
-                    onSignOut={(thenIn) => void signOut(tool, thenIn)}
-                    onCancel={() => cancelSignIn(tool)}
-                    {...(tool === "acp" ? { acpLine, acpNote, onSetCommand: setCommand } : {})}
-                  />
-                ))}
-                <li className="mb-more">
-                  <MoreTools open={moreTools} count={shown.away.length} onToggle={() => setMoreTools((v) => !v)} />
-                </li>
-              </ul>
-
-            </section>
-          )}
-
-          {err && <p className="mb-err">{err}</p>}
-        </div>
-      )}
+              {err && <p className="mb-err">{err}</p>}
+              {here && (
+                <footer className="mb-modal-foot">
+                  <span>Friday uses your own sign-ins, and never holds a key.</span>
+                  <button
+                    type="button"
+                    className="link-btn"
+                    onClick={() => {
+                      setOpen(false);
+                      openSettings("coding-tools");
+                    }}
+                  >
+                    Open in Settings
+                  </button>
+                </footer>
+              )}
+            </ToolsModal>
+          </div>,
+        )}
     </div>
   );
 }
@@ -593,6 +821,14 @@ function ToolRow({
   acting = null,
   justIn = false,
   loginUrl,
+  loginCmd,
+  loginPage = false,
+  loginShell,
+  onOutside,
+  onShellEnd,
+  onDone,
+  onPaste,
+  checking = false,
   installing,
   onInstall,
   onRunInstall,
@@ -602,6 +838,7 @@ function ToolRow({
   acpLine,
   acpNote,
   onSetCommand,
+  registry,
   accounts,
   settings = false,
   left,
@@ -619,6 +856,22 @@ function ToolRow({
   justIn?: boolean;
   /** The sign-in page the CLI opened, while it waits for the person to finish there. */
   loginUrl?: string;
+  /** The sign-in command a terminal window was opened with, while it waits for the person to finish there. */
+  loginCmd?: string;
+  /** A sign-in in the browser that Friday is carrying out with the tool (Antigravity's), its link in `loginUrl` once known. */
+  loginPage?: boolean;
+  /** A sign-in running in a shell of Friday's own, drawn under the row. */
+  loginShell?: { id: string; line: string };
+  /** The same sign-in in a terminal window of its own instead. */
+  onOutside?: () => void;
+  /** Its shell ended: the sign-in's command is over, to be proven. */
+  onShellEnd?: () => void;
+  /** "Done" for a sign-in in a terminal window: proven when pressed. */
+  onDone?: () => void;
+  /** A browser sign-in finished on another device: the address its browser ended on, sent to the computer. */
+  onPaste?: (url: string) => Promise<void>;
+  /** The sign-in being proven by a conversation that opens. */
+  checking?: boolean;
   installing: boolean;
   onInstall: () => void;
   /** Run its install line in a Terminal window here (runner install), and what that came to. */
@@ -631,6 +884,8 @@ function ToolRow({
   /** What the last save of it came to, when there is something to say. */
   acpNote?: string;
   onSetCommand?: (line: string) => Promise<void>;
+  /** The ACP registry's agents, and one of them installed and set. */
+  registry?: { load: () => Promise<RegistryRow[]>; add: (id: string) => Promise<void> };
   /** Its accounts on the computer, for Claude Code and Codex (Accounts.tsx), under its row. */
   accounts?: ReactNode;
 }) {
@@ -657,15 +912,20 @@ function ToolRow({
   const install = step.command;
   const name = ENGINE_NAMES[tool];
   const state = !found?.path ? "missing" : found.unavailable ? "unavailable" : found.loggedIn === false ? "out" : found.loggedIn ? "in" : "unknown";
-  const word =
-    acting === "out"
+  const word = checking
+    ? "Checking the sign-in…"
+    : acting === "out"
       ? "Signing out…"
       : acting === "switch"
         ? "Signing out, then back in…"
         : acting === "in"
-          ? loginUrl
+          ? loginUrl || loginPage
             ? "Finish in the page that opened"
-            : "Opening the sign-in…"
+            : loginShell
+              ? "Finish signing in below"
+              : loginCmd
+              ? "Finish in the terminal that opened"
+              : "Opening the sign-in…"
           : justIn
             ? "Signed in ✓"
             : state === "missing"
@@ -713,6 +973,12 @@ function ToolRow({
         <button type="button" className="btn primary small mb-tool-go" disabled={busy} onClick={onSignIn}>
           Sign in
         </button>
+      ) : state === "unknown" && !custom ? (
+        // Installed, its sign-in something it doesn't let Friday check (Gemini CLI without its Google file, Qwen, Droid): a sign-in
+        // offered all the same, quieter, since it may not need one, and proven by a conversation that opens once it's done.
+        <button type="button" className="btn ghost small mb-tool-go" disabled={busy} onClick={onSignIn}>
+          Sign in
+        </button>
       ) : state === "in" && !accounts ? (
         // Changing account is rare and reaches past Friday, so it is a small menu, not a button. A tool with accounts of its own
         // (Claude Code, Codex) has each one's sign-in and sign-out on its own row below instead, so nothing opens over its name.
@@ -731,13 +997,13 @@ function ToolRow({
       ) : null}
 
       {state === "in" && !acting && accounts}
-      {loginUrl && (
-        <p className="mb-login">
-          Sign in to {name} in the page that opened, and this updates by itself.{" "}
-          <button type="button" className="link-btn" onClick={() => openOutside(loginUrl)}>
-            Open it again
-          </button>
-        </p>
+      {(loginCmd || loginShell || loginUrl || loginPage) && (
+        // Only while a sign-in waits, so its own chunk (SignInNotes.tsx), loaded then: the first screen doesn't carry it.
+        <Suspense fallback={null}>
+          {loginCmd && !loginUrl && <TerminalSignIn name={name} command={loginCmd} {...(onDone ? { onDone } : {})} />}
+          {loginShell && <ShellSignIn name={name} shell={loginShell} {...(onOutside ? { onOutside } : {})} {...(onShellEnd ? { onEnd: onShellEnd } : {})} />}
+          {(loginUrl || loginPage) && <PageSignIn name={name} url={loginUrl ?? ""} ours={loginPage} {...(onPaste ? { onPaste } : {})} />}
+        </Suspense>
       )}
 
       {installing && custom && (
@@ -749,7 +1015,12 @@ function ToolRow({
             void onSetCommand?.(line).finally(() => setSaving(false));
           }}
         >
-          <p>The command that starts it in ACP mode, as its docs or the ACP registry give it. Install the agent first.</p>
+          {registry && (
+            <Suspense fallback={null}>
+              <RegistryPicker registry={registry} />
+            </Suspense>
+          )}
+          <p>Or the command that starts it in ACP mode, as its docs give it. Install the agent first.</p>
           <input className="mb-acp-input" value={line} onChange={(e) => setLine(e.target.value)} placeholder="qwen --acp" spellCheck={false} aria-label="Command that starts the agent" />
           <p className="mb-cmd-needs">For example: qwen --acp · goose acp · vibe-acp · auggie --acp</p>
           {acpNote && (
@@ -825,5 +1096,22 @@ function ToolRow({
         </div>
       )}
     </li>
+  );
+}
+
+
+
+/**
+ * The tools' modal itself, mounted only while open, so that it closes on Esc or a press outside, takes the keyboard's focus as it
+ * opens, keeps Tab inside, and hands focus back to the pill as it closes (useDismiss). A dismiss set up on the badge itself ran
+ * before there was anything to focus.
+ */
+function ToolsModal({ onClose, trigger, children }: { onClose: () => void; trigger: HTMLElement | null; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useDismiss(ref, onClose, trigger);
+  return (
+    <div ref={ref} className="modal mb-modal" role="dialog" aria-modal="true" aria-labelledby="mb-modal-title">
+      {children}
+    </div>
   );
 }

@@ -15,12 +15,13 @@ export interface WhatsNewNotes {
 }
 
 export const WHATS_NEW: WhatsNewNotes = {
-  version: "0.2.20",
-  summary: "Claude Fable 5.2 in the model menu, a commit box that stays out of the way, and panel tabs you can close cleanly.",
+  version: "0.2.21",
+  summary: "Talk instead of typing, sign in to any coding tool from Friday, and pick a model before the first chat.",
   items: [
-    { icon: "zap", title: "Claude Fable 5.2", line: "Anthropic's newest and most capable, at $8 in and $40 out per million tokens." },
-    { icon: "gitCommit", title: "A tidier commit box", line: "Folded to one line under your changes until you open it to commit." },
-    { icon: "sidePanel", title: "Cleaner panel tabs", line: "On a narrow tab the close button sits beside its icon, not on top of it." },
+    { icon: "mic", title: "Voice input", line: "Press the mic or hold its shortcut. Your words are made into text on this computer." },
+    { icon: "key", title: "Sign in from Friday", line: "Each tool signs in its own way, in Friday's terminal or its page, and Friday checks it took." },
+    { icon: "grid", title: "Models from the start", line: "Kilo, OpenCode and the rest list their models before a first chat, free ones first." },
+    { icon: "plug", title: "Any ACP agent", line: "Add one from the ACP registry: installed in Friday's own folder, its download checked." },
   ],
 };
 

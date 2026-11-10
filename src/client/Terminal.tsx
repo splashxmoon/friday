@@ -1,5 +1,5 @@
 // xterm styles the grid it draws; the panel styles everything around it.
-import { laneTerminalApi, onTermDrop, terminalApi } from "./remoteTerminal.js";
+import { hereTerminalApi, laneTerminalApi, onTermDrop, terminalApi } from "./remoteTerminal.js";
 
 /**
  * Where shells come from: the desktop app's own (window.fridayDesktop.terminal), or the hosted Friday's way to a shell on another
@@ -412,7 +412,7 @@ function forgetScreen(id: string): void {
  * draw and shouldn't carry the code for one.
  */
 /** `run`: a line typed into a new shell once it starts (a coding tool on its conversation, laneTerminal); not into one it finds still running. */
-function LocalShell({ id, cwd, run, onOutput, onOpenFile }: { id: string; cwd?: string; run?: string; onOutput: (text: string) => void; onOpenFile?: (path: string, line?: number) => void }) {
+function LocalShell({ id, cwd, run, afterPrompt = false, onOutput, onOpenFile }: { id: string; cwd?: string; run?: string; /** `run` typed once the shell has printed its prompt (or after two seconds), not ahead of it: typed ahead, the shell echoed the line twice, before its prompt and after. */ afterPrompt?: boolean; onOutput: (text: string) => void; onOpenFile?: (path: string, line?: number) => void }) {
   const host = useRef<HTMLDivElement>(null);
   const [err, setErr] = useState("");
   const termRef = useRef<import("@xterm/xterm").Terminal | null>(null);
@@ -583,7 +583,23 @@ function LocalShell({ id, cwd, run, onOutput, onOpenFile }: { id: string; cwd?: 
       }
       for (const d of early) term.write(d);
       drawn = true;
-      if (run && !r.resumed) api.write(id, `${run}\r`);
+      if (run && !r.resumed) {
+        if (!afterPrompt || printed.current) api.write(id, `${run}\r`);
+        else {
+          let typed = false;
+          const type = () => {
+            if (typed || dead) return;
+            typed = true;
+            clearTimeout(late);
+            off();
+            api.write(id, `${run}\r`);
+          };
+          // The prompt: the shell's first output, and a moment for the rest of the line to arrive.
+          const off = api.onData((which) => which === id && setTimeout(type, 150));
+          const late = setTimeout(type, 2000);
+          stop.push(() => (clearTimeout(late), off()));
+        }
+      }
       term.focus();
     })();
 
@@ -600,6 +616,26 @@ function LocalShell({ id, cwd, run, onOutput, onOpenFile }: { id: string; cwd?: 
       <div ref={host} className="term-shell-host" />
     </div>
   );
+}
+
+/**
+ * A coding tool's sign-in, run in a shell of Friday's own under its row in Settings › Coding tools, rather than in a terminal window
+ * that could open hidden or behind others (splashxmoon/friday#21; Arun, 2026-11-10: "Build all four", after T3 Code, whose
+ * sign-ins run in its own page). This computer's shell (the desktop app's), whatever computer a session open elsewhere is on.
+ */
+export function SignInShell({ id, run, onEnd }: { id: string; run: string; /** Its shell ended: the sign-in's command is over (its line ends the shell with it). */ onEnd?: () => void }) {
+  const api = useMemo(() => (typeof window !== "undefined" ? hereTerminalApi() : undefined), []);
+  if (api) laneShells.set(id, api);
+  const ended = useRef(onEnd);
+  ended.current = onEnd;
+  useEffect(() => (api ? api.onExit((which) => which === id && ended.current?.()) : undefined), [api, id]);
+  return api ? <LocalShell id={id} run={run} afterPrompt onOutput={() => {}} /> : null;
+}
+/** Its shell ended once the sign-in is over, finished or given up on. */
+export function endSignInShell(id: string): void {
+  shellFor(id)?.kill(id);
+  laneShells.delete(id);
+  forgetScreen(id);
 }
 
 /** A file named in a shell's output, with its line: `src/a.ts:12:3`, `./b.py:4`, `C:\x\y.cs(12,3)`, or a bare `name.ext`. */

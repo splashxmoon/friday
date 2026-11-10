@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode, type R
 import { treeFiles } from "./treeFiles.js";
 import type { ToolCommand } from "../types.js";
 import { Icon, type IconName } from "./icons.js";
+import { isLocal } from "./edition.js";
 
 /**
  * `/` for a command and `@` for a file, in the session composer.
@@ -95,11 +96,18 @@ export const SHORTCUTS: { title: string; keys: [string[], string][] }[] = [
   },
 ];
 
+/**
+ * Voice input's key (VoiceMic.tsx), in the open-source edition: ⌥ Space on a Mac, Ctrl+Shift+Space where Alt+Space opens the
+ * window menu. Added as the list is drawn, not as this file loads: a chunk can load before the edition is said (local-edition.ts).
+ */
+const TALK: [string[], string] = [IS_MAC ? ["⌥", "Space"] : ["⌃", "⇧", "Space"], "Talk instead of typing (hold, or tap: Settings › Voice)"];
+const shortcutGroups = () => (isLocal() ? SHORTCUTS.map((g) => (g.title === "Message box" ? { ...g, keys: [...g.keys.slice(0, 4), TALK, ...g.keys.slice(4)] } : g)) : SHORTCUTS);
+
 /** The list, as the "?" sheet and Settings › Shortcuts both show it: one source, so the two can't drift apart. */
 export function ShortcutList() {
   return (
     <div className="kbd-groups">
-      {SHORTCUTS.map((g) => (
+      {shortcutGroups().map((g) => (
         <section key={g.title} className="kbd-group" aria-labelledby={`kbd-${g.title.replace(/\W+/g, "-")}`}>
           <h3 className="kbd-group-title" id={`kbd-${g.title.replace(/\W+/g, "-")}`}>
             {g.title}

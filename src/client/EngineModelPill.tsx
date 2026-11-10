@@ -20,6 +20,8 @@ import { InlineEdit, MenuButton, type MenuItem } from "./ui.js";
  * (Copilot, Gemini CLI, OpenCode, Droid…) list theirs as a conversation opens,
  * and the computer they run on remembers the last list, which is asked for the
  * same way: before, the picker had nothing for them but a box to type a name.
+ * Before a tool's first conversation on that computer, the tool itself is asked
+ * (runner/model-lists.ts), so the list is there from the start.
  */
 const live = new Map<string, EngineModelInfo[]>();
 /** The tools whose list is in the picker already, and so not asked for. */
@@ -32,9 +34,10 @@ export function useEngineModelInfo(tool: EngineTool, identity?: Identity): Engin
     setAsked(live.get(tool) ?? null);
     if (LISTED.includes(tool) || !identity || live.has(tool)) return;
     let on = true;
-    hostApi<{ models: { id: string; label: string }[] }>(identity, "/api/runner/models", { method: "POST", body: JSON.stringify({ tool }) }).then(
+    hostApi<{ models: { id: string; label: string; group?: string }[] }>(identity, "/api/runner/models", { method: "POST", body: JSON.stringify({ tool }) }).then(
       (r) => {
-        const theirs = r.models.map((m) => ({ id: m.id, label: m.label, blurb: m.id }));
+        // A long list comes grouped, free models first (Kilo's 322).
+        const theirs = r.models.map((m) => ({ id: m.id, label: m.label, blurb: m.id, ...(m.group ? { group: m.group } : {}) }));
         if (!theirs.length) return;
         // Auto, where the short list has it, stays first.
         const list = [...ENGINE_MODEL_INFO[tool].filter((m) => m.id === "auto" && !theirs.some((x) => x.id === "auto")), ...theirs];

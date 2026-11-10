@@ -15,6 +15,7 @@ import { Hint, Skeleton, SkeletonLines, barHeight } from "./ui.js";
 import { EngineMark } from "./BrandMarks.js";
 import { ProjectMemory } from "./ProjectMemory.js";
 import { OwnModelsSection } from "./OwnModels.js";
+import { VoiceSection } from "./VoiceSettings.js";
 import {
   AboutTab,
   AppearanceTab,
@@ -128,11 +129,11 @@ export function SettingsPage({
           "usage",
           "models",
           ...(workspace?.personal !== false ? ["members"] : []),
-          ...(isLocal() ? [] : ["outside-agents", "other-computers"]),
+          ...(isLocal() ? [] : ["outside-agents", "other-computers", "voice"]),
         ]
       : isLocal()
         ? []
-        : ["outside-agents", "other-computers"],
+        : ["outside-agents", "other-computers", "voice"],
   );
   const sections = SECTIONS.filter((s) => !hidden.has(s.id));
   const current = sections.find((s) => s.id === section) ?? sections[0]!;
@@ -260,6 +261,7 @@ export function SettingsPage({
             {current.id === "profile" && <AccountTab identity={identity} me={me} onRename={onRename} solo={solo} />}
             {current.id === "appearance" && <AppearanceTab />}
             {current.id === "notifications" && <NotificationsTab identity={identity} />}
+            {current.id === "voice" && <VoiceSection identity={identity} />}
             {current.id === "shortcuts" && <ShortcutsTab />}
             {current.id === "memory" && <ProjectMemory identity={identity} />}
             {current.id === "computer" && <ComputerSection identity={identity} />}

@@ -1,4 +1,5 @@
 import { noteClaudeEvent } from "./limits.js";
+import { acpSignInState, wasProven } from "./acp-signin.js";
 import { access, mkdir, readdir, readFile, realpath, unlink, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { createRequire } from "node:module";
@@ -1519,6 +1520,12 @@ interface AcpProfile {
   dirs?: boolean;
   env?: Adapter["env"];
   unavailable?: Adapter["unavailable"];
+  /**
+   * While an instruction waits for its answer, a blank line to the tool every half second: for a tool whose own child process
+   * inherits its stdin and sits reading it until a line comes (Kilo on Windows, Kilo-Org/kilocode#10768: its `git config` on every
+   * model request, fixed in their open #15374). ACP readers skip a blank line, and the one it unblocks takes it.
+   */
+  nudge?: () => boolean;
   explain?(error: string): string;
 }
 
@@ -1634,6 +1641,21 @@ export function effortOptions(options: { id: string; name: string }[]): Partial<
 const choices = (options: unknown): { id: string; name: string }[] =>
   (Array.isArray(options) ? options : []).flatMap((o: any) => (Array.isArray(o?.options) ? o.options : [o])).map((o: any) => ({ id: str(o?.value), name: str(o?.name) }));
 
+/** A conversation's models: by its `model` option (ACP's config options), or the older `models` list beside it. */
+export interface ModelMenu {
+  /** The `model` option, when it has one: set by `session/set_config_option`. Without it, by `session/set_model`. */
+  opt?: { id: string };
+  list: { id: string; name: string }[];
+  current: string;
+}
+export function modelMenu(res: any): ModelMenu | null {
+  const opt = (Array.isArray(res?.configOptions) ? res.configOptions : []).find((o: any) => o?.category === "model" && o.type === "select");
+  if (opt) return { opt: { id: str(opt.id) }, list: choices(opt.options), current: str(opt.currentValue) };
+  const old = res?.models;
+  if (!old || !Array.isArray(old.availableModels) || !old.availableModels.length) return null;
+  return { list: old.availableModels.map((m: any) => ({ id: str(m?.modelId ?? m?.id), name: str(m?.name) })).filter((m: { id: string }) => m.id), current: str(old.currentModelId) };
+}
+
 function acp(p: AcpProfile): Adapter {
   const name = ENGINE_NAMES[p.tool];
   return {
@@ -1736,7 +1758,20 @@ function acp(p: AcpProfile): Adapter {
         return out;
       };
       const prompt = (): AdapterOut[] => {
+        let nudging: ReturnType<typeof setInterval> | undefined;
+        if (p.nudge?.()) {
+          nudging = setInterval(() => {
+            if (over) return clearInterval(nudging);
+            try {
+              wire.write("\n");
+            } catch {
+              clearInterval(nudging);
+            }
+          }, 500);
+          nudging.unref?.();
+        }
         ask("session/prompt", { sessionId: sid, prompt: blocks() }, (r) => {
+          clearInterval(nudging);
           if (r.error) return failed("The turn failed", r.error);
           // Tools count input two ways: Copilot's holds what was read from a cache (its total is input plus output), OpenCode's
           // doesn't (input, cache reads and output add up to its total). Its own total says which; the thinking is in output.
@@ -1785,27 +1820,40 @@ function acp(p: AcpProfile): Adapter {
         });
         return [];
       };
-      /** The model picked in Friday, by the tool's `model` option, for a tool that doesn't take one as it starts. One it doesn't know is said, and the turn goes on with its own. */
+      /**
+       * The model picked in Friday, by the tool's `model` option, for a tool that doesn't take one as it starts. A tool that has no
+       * such option may still list its models the older way, as `models` beside the conversation it opened, and take one by
+       * `session/set_model` (as T3 Code and Orca read them both). One it doesn't know is said, and the turn goes on with its own.
+       */
       const model = (res: any): AdapterOut[] => {
-        const opt = (Array.isArray(res?.configOptions) ? res.configOptions : []).find((o: any) => o?.category === "model" && o.type === "select");
+        const menu = modelMenu(res);
         // What it offers, for the model picker, once a turn: Friday's own list for these tools is empty, since it depends on the account.
-        const offers = listedModels ? [] : choices(opt?.options).filter((c) => c.id);
+        const offers = listedModels || !menu ? [] : menu.list.filter((c) => c.id);
         if (offers.length) {
           listedModels = true;
-          return [{ kind: "models", list: offers.map((c) => ({ id: c.id, label: c.name || c.id })) }, ...pickModel(res, opt)];
+          return [{ kind: "models", list: offers.map((c) => ({ id: c.id, label: c.name || c.id })) }, ...pickModel(res, menu)];
         }
-        return pickModel(res, opt);
+        return pickModel(res, menu);
       };
       let listedModels = false;
-      const pickModel = (res: any, opt: any): AdapterOut[] => {
-        if (p.modelAtStart || !turn.model || !opt || str(opt.currentValue) === turn.model) return effortStep(res);
-        const known = choices(opt.options).find((c) => c.id === turn.model || c.name.toLowerCase() === turn.model!.toLowerCase());
-        if (!known) return [{ kind: "delta", channel: "reasoning", text: `\n${name} doesn't offer “${turn.model}” here, so it uses ${str(opt.currentValue) || "its own choice"}.\n` }, ...effortStep(res)];
-        ask("session/set_config_option", { sessionId: sid, configId: opt.id, value: known.id }, (r) => {
-          if (r.result?.configOptions) keep({ configOptions: r.result.configOptions });
-          // Its answer holds the options, not the modes: the conversation's modes still decide Plan (a Plan turn with a model
-          // picked went on in the agent's default mode).
-          return effortStep({ ...res, ...r.result });
+      const pickModel = (res: any, menu: ModelMenu | null): AdapterOut[] => {
+        if (p.modelAtStart || !turn.model || !menu || menu.current === turn.model) return effortStep(res);
+        const known = menu.list.find((c) => c.id === turn.model || c.name.toLowerCase() === turn.model!.toLowerCase());
+        if (!known) return [{ kind: "delta", channel: "reasoning", text: `\n${name} doesn't offer “${turn.model}” here, so it uses ${menu.current || "its own choice"}.\n` }, ...effortStep(res)];
+        if (known.id === menu.current) return effortStep(res);
+        if (menu.opt) {
+          ask("session/set_config_option", { sessionId: sid, configId: menu.opt.id, value: known.id }, (r) => {
+            if (r.result?.configOptions) keep({ configOptions: r.result.configOptions });
+            // Its answer holds the options, not the modes: the conversation's modes still decide Plan (a Plan turn with a model
+            // picked went on in the agent's default mode).
+            return effortStep({ ...res, ...r.result });
+          });
+          return [];
+        }
+        ask("session/set_model", { sessionId: sid, modelId: known.id }, (r) => {
+          if (r.error) return [{ kind: "delta", channel: "reasoning", text: `\n${name} didn't take “${known.name || known.id}”, so it uses ${menu.current || "its own choice"}.\n` }, ...effortStep(res)];
+          keep({ models: { ...res.models, currentModelId: known.id } });
+          return effortStep({ ...res, models: { ...res.models, currentModelId: known.id } });
         });
         return [];
       };
@@ -2058,8 +2106,10 @@ export const opencode: Adapter = acp({
   env: (t): Record<string, string> => (t.mode === "full" ? {} : { OPENCODE_PERMISSION: JSON.stringify(openCodeRules(t.mode)) }),
 });
 
-// Kilo asks before a command by itself, and its plan mode only reads. On Windows its ACP server opens a conversation and then
-// never answers an instruction (7.8.8, signed in or not, on its free models too): said, rather than a turn that hangs.
+// Kilo asks before a command by itself, and its plan mode only reads. On Windows its ACP server opened a conversation and then never
+// answered an instruction (7.8.8 to 7.8.28): every model request runs `git config` with Kilo's stdin, and on Windows that git
+// waits for a line from it (Kilo-Org/kilocode#10768, their fix #15374 not yet merged). A blank line while the instruction waits
+// lets it on (the nudge), so Kilo runs on Windows too (splashxmoon/friday#20, #22).
 export const kilo: Adapter = acp({
   tool: "kilo",
   bins: ["kilo"],
@@ -2067,7 +2117,7 @@ export const kilo: Adapter = acp({
   logout: ["auth", "logout"],
   status: kiloSignedIn,
   args: () => ["acp"],
-  unavailable: () => (process.platform === "win32" ? "Kilo's ACP mode doesn't answer instructions on Windows yet (Kilo 7.8.8). It works on macOS and Linux." : null),
+  nudge: () => process.platform === "win32",
 });
 
 export const devin: Adapter = acp({
@@ -2137,8 +2187,36 @@ export const ANTIGRAVITY_MODELS = ["--log-file", devNull, "models"];
  * models". It reads its own sign-in from the keychain, opens no browser, and Friday reads no token. Anything else it says (no
  * network, say) is unknown, not signed out.
  */
+/**
+ * Whether agy is set to run on an API-key provider of its own (its settings' `modelProvider`, as Orca reads it): only then are the
+ * key variables in the environment its to use. Otherwise an inherited GEMINI_API_KEY or GOOGLE_API_KEY (Gemini CLI's, say) switches
+ * agy to key sign-in, which its models turn down (401), so they are left out of everything Friday starts agy for, as Orca and
+ * T3 Code do. A settings file that can't be read as JSON is taken as one that may name a provider.
+ */
+export function agyOwnKeys(home = homedir()): boolean {
+  let text: string;
+  try {
+    text = readFileSync(path.join(home, ".gemini", "antigravity-cli", "settings.json"), "utf8");
+  } catch {
+    return false;
+  }
+  try {
+    const j = JSON.parse(text) as Record<string, unknown> | null;
+    return !!(j && typeof j === "object" && j.modelProvider);
+  } catch {
+    return true;
+  }
+}
+/** A tool's environment without what would mislead it (see agyOwnKeys): Windows names are matched in any case, as Windows does. */
+export function toolEnv<E extends Record<string, string | undefined>>(tool: EngineTool, env: E): E {
+  if (tool !== "antigravity" || agyOwnKeys()) return env;
+  const out = { ...env };
+  for (const k of Object.keys(out)) if (/^(?:GEMINI_API_KEY|GOOGLE_API_KEY)$/i.test(k)) delete out[k];
+  return out;
+}
+
 export async function antigravitySignedIn(bin: string): Promise<boolean | null> {
-  const r = await runCli(bin, ANTIGRAVITY_MODELS, 15_000).catch(() => null);
+  const r = await runCli(bin, ANTIGRAVITY_MODELS, 15_000, {}, "antigravity").catch(() => null);
   if (!r || r.code === -1) return null;
   if (/please sign in|not (?:logged|signed) in/i.test(r.out)) return false;
   return r.code === 0 && antigravityModels(r.out).length ? true : null;
@@ -2822,9 +2900,10 @@ export const isClaudeAppBundled = (bin: string) => {
  * Through `launcher`, like every other start: on Windows Codex and Cursor are found as `.cmd` shims, which Node refuses to
  * spawn without a shell ("spawn EINVAL"), so signing out of either never ran and said "still signed in: spawn EINVAL".
  */
-export async function runCli(bin: string, args: string[], timeoutMs = 20_000, extraEnv: Record<string, string> = {}): Promise<{ code: number; out: string }> {
+export async function runCli(bin: string, args: string[], timeoutMs = 20_000, extraEnv: Record<string, string> = {}, tool?: EngineTool): Promise<{ code: number; out: string }> {
   const how = await launcher(bin);
-  const r = await execCli(how.command, [...how.prefix, ...args], { env: { ...childEnv(), ...how.env, ...extraEnv }, timeoutMs });
+  const env = { ...childEnv(), ...how.env, ...extraEnv };
+  const r = await execCli(how.command, [...how.prefix, ...args], { env: tool ? toolEnv(tool, env) : env, timeoutMs });
   return { code: r.code, out: `${r.stdout}${r.stderr}`.trim() };
 }
 
@@ -2833,6 +2912,16 @@ export async function runCli(bin: string, args: string[], timeoutMs = 20_000, ex
  * CLI can't say (an older version, or one that prints something unexpected).
  */
 export async function loginStatus(tool: EngineTool, bin: string, account?: string): Promise<boolean | null> {
+  const own = await toolsOwnStatus(tool, bin, account);
+  // A tool that can't say, whose sign-in Friday proved here: signed in (acp-signin.ts).
+  return own === null && !account && wasProven(tool) ? true : own;
+}
+async function toolsOwnStatus(tool: EngineTool, bin: string, account?: string): Promise<boolean | null> {
+  // A sign-in Friday is carrying out with the tool answers for itself (acp-signin.ts), rather than the tool being started every
+  // few seconds to ask; one that ran in a terminal is the tool's own to say, as before.
+  const going = account ? null : acpSignInState(tool);
+  if (going?.phase === "done") return true;
+  if (going && (going.phase === "starting" || going.phase === "waiting" || going.phase === "verifying")) return false;
   const status = ADAPTERS[tool].status;
   if (!status) return null;
   if (typeof status === "function") return status(bin);
@@ -2945,6 +3034,31 @@ const statusMemo = new Map<string, { at: number; value: Promise<boolean | null> 
 const lastStatus = new Map<string, boolean>();
 /** CLIs whose signed-in answer is being looked at again, so a card refreshing every few seconds starts one look, not many. */
 const refreshing = new Set<string>();
+/**
+ * The look at each CLI under way, so one still running is waited on rather than another started beside it: a check that took
+ * longer than its five seconds (Antigravity's `agy models`, up to fifteen, a gigabyte unpacked at each start) was answered
+ * "don't know", and the next look five seconds later started a second agy while the first ran on.
+ */
+const looking = new Map<string, Promise<boolean | null>>();
+const lookOnce = (key: string, tool: EngineTool, bin: string, account?: string): Promise<boolean | null> => {
+  let p = looking.get(key);
+  if (!p) {
+    p = loginStatus(tool, bin, account).finally(() => looking.delete(key));
+    looking.set(key, p);
+  }
+  return p;
+};
+/** When a sign-in was last started through Friday, by tool: its check is kept quick for a while after (see `quietFor`). */
+const signInStarted = new Map<EngineTool, number>();
+export function noteSignInStarted(tool: EngineTool): void {
+  signInStarted.set(tool, Date.now());
+}
+/**
+ * How long an answer other than "signed in" stands before the CLI is asked again: five seconds, but a minute for Antigravity,
+ * whose every start unpacks about a gigabyte (T3 Code's note), unless somebody started signing in to it here in the last ten
+ * minutes. A sign-in Friday carries out answers for itself meanwhile (agy-signin.ts), and ends by forgetting what was learned.
+ */
+const quietFor = (tool: EngineTool) => (tool === "antigravity" && Date.now() - (signInStarted.get(tool) ?? 0) > 600_000 ? 60_000 : 5_000);
 export async function loginStatusCached(tool: EngineTool, bin: string, account?: string): Promise<boolean | null> {
   const key = `${tool}|${bin}|${account ?? ""}`;
   const hit = statusMemo.get(key);
@@ -2953,7 +3067,7 @@ export async function loginStatusCached(tool: EngineTool, bin: string, account?:
     if (value === true) {
       if (Date.now() - hit.at >= 600_000 && !refreshing.has(key)) {
         refreshing.add(key);
-        void Promise.race([loginStatus(tool, bin, account), new Promise<null>((r) => setTimeout(() => r(null), 5_000))])
+        void Promise.race([lookOnce(key, tool, bin, account), new Promise<null>((r) => setTimeout(() => r(null), 5_000))])
           .then((v) => {
             // Not over a sign-in or sign-out through Friday that happened meanwhile (forgetLoginStatus).
             if (v === null || statusMemo.get(key) !== hit) return;
@@ -2964,9 +3078,9 @@ export async function loginStatusCached(tool: EngineTool, bin: string, account?:
       }
       return true;
     }
-    if (Date.now() - hit.at < 5_000) return value;
+    if (Date.now() - hit.at < quietFor(tool)) return value;
   }
-  const entry = { at: Date.now(), value: Promise.race([loginStatus(tool, bin, account), new Promise<null>((r) => setTimeout(() => r(null), 5_000))]) };
+  const entry = { at: Date.now(), value: Promise.race([lookOnce(key, tool, bin, account), new Promise<null>((r) => setTimeout(() => r(null), 5_000))]) };
   statusMemo.set(key, entry);
   const value = await entry.value;
   entry.at = Date.now();
@@ -2986,6 +3100,8 @@ export function loginStatusQuick(tool: EngineTool, bin: string, ms = 1_500, acco
 /** Forget what was learned: after a sign-in or sign-out the answer has changed. */
 export function forgetLoginStatus(): void {
   statusMemo.clear();
+  // A look started before the sign-in or sign-out would bring back the answer from before it.
+  looking.clear();
   lastStatus.clear();
 }
 

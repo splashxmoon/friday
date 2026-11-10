@@ -1,3 +1,4 @@
+import { Terminals, type TermIn } from "./runner/terminals.js";
 import { CommandError, CommandRegistry } from "./commands.js";
 import { TemplateError, TemplateRegistry } from "./templates-store.js";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
@@ -70,6 +71,8 @@ import { cleanFocus } from "./focus.js";
 import { startMockFocus } from "./mock-focus.js";
 import { threadsToSettle } from "./threads.js";
 import { clientBuildOptions } from "./client-build.js";
+import { VoiceModels } from "./voice-models.js";
+import { voiceHttp } from "./voice-server.js";
 import { SkillRegistry } from "./skills.js";
 import type { SkillBrief } from "./types.js";
 import { discoverSkills, importChosen, importWholeRepo } from "./skill-import.js";
@@ -361,6 +364,8 @@ export interface AppOptions {
     };
     /** Agents outside Friday, over its MCP server (outside-agents.ts): this install's token, and the script they start (local/outside-mcp.ts). */
     outside?: { token: string; shim: string };
+    /** Where voice input's model is kept once downloaded (voice-models.ts): `<FRIDAY_HOME>/models`. Without it, no voice routes. */
+    models?: string;
   };
   /** Where teammates' own folders go when none is picked (teammates.ts defaultFolder): the home folder unless said, as tests do. */
   teammatesHome?: string;
@@ -3500,6 +3505,9 @@ export async function createApp(o: AppOptions) {
   };
 
   const bundle = await bundleClient();
+  // Voice input's model on this computer (voice-models.ts): the open-source edition's, kept beside its data.
+  // Downloaded from Hugging Face and jsDelivr, unless stand-ins are named (FRIDAY_VOICE_MODEL_HOST, FRIDAY_VOICE_ENGINE_HOST).
+  const voiceModels = o.local?.models ? new VoiceModels({ dir: o.local.models, hosts: { ...(process.env.FRIDAY_VOICE_MODEL_HOST ? { model: process.env.FRIDAY_VOICE_MODEL_HOST } : {}), ...(process.env.FRIDAY_VOICE_ENGINE_HOST ? { engine: process.env.FRIDAY_VOICE_ENGINE_HOST } : {}) } }) : null;
 
   // ── HTTP ─────────────────────────────────────────────────────────
   const server = http.createServer((req, res) => {
@@ -5553,6 +5561,9 @@ export async function createApp(o: AppOptions) {
         return json(res, 200, { ok: true });
       }
     }
+    // Voice input (voice-server.ts): its model, downloaded once and served from here, the runtime's .wasm, and a recording made
+    // into words on a server of your own. From this computer's own page only.
+    if (voiceModels && (url.pathname.startsWith("/api/voice/") || url.pathname.startsWith("/voice/")) && (await voiceHttp(voiceModels, req, res, url))) return;
     if (o.local && localLinks && (url.pathname === "/api/computers" || url.pathname.startsWith("/api/computers/"))) {
       const join = o.local.join;
       type Paired = { id: string; name: string; kind?: string; at: number; seen: number; host?: string; platform?: string; address?: string; version?: string; fp?: string; port?: number };
@@ -5862,6 +5873,23 @@ export async function createApp(o: AppOptions) {
   if (localLinks)
     termWss.on("connection", (ws, req) => {
       const id = new URL(req.url ?? "/", "http://localhost").searchParams.get("machine") ?? "";
+      // This computer's own shells, for a page with no desktop app around it: a coding tool's sign-in run under its row in
+      // Settings (MachineBadge; Arun, 2026-11-10: "ensure everything is stable and ready"). Its shells go with the page.
+      if (id === "here") {
+        const owner = randomBytes(9).toString("base64url");
+        const terms = new Terminals((m) => ws.readyState === 1 && ws.send(JSON.stringify(m)));
+        ws.on("message", (raw) => {
+          let msg: Record<string, unknown>;
+          try {
+            msg = JSON.parse(String(raw)) as Record<string, unknown>;
+          } catch {
+            return;
+          }
+          if (typeof msg.op === "string" && ["start", "write", "resize", "kill"].includes(msg.op)) terms.handle({ ...msg, owner } as unknown as TermIn);
+        });
+        ws.on("close", () => terms.stopAll());
+        return void ws.send(JSON.stringify({ op: "ready", machine: "" }));
+      }
       if (!/^[0-9a-f]{16}$/.test(id)) return closeSaying(ws, 4003, "That isn't one of your computers");
       const on = localLinks.current(id);
       if (!localLinks.connected(on)) return void computerName(on).then((n) => closeSaying(ws, 4004, `${n ?? "That computer"} isn't connected`));

@@ -1372,25 +1372,69 @@ button.catalog-card:hover:not(:disabled) .catalog-cta { color: var(--violet); ba
    lines each ran past the window; this is a third of that. */
 .mb-card .mb-top { padding: 11px 13px 9px; }
 .mb-card .mb-body { gap: 9px; padding: 10px 12px 12px; }
-.mb-card .mb-tools { gap: 0; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--panel); overflow: hidden; }
-.mb-card .mb-tool { gap: 8px; min-height: 34px; padding: 5px 6px 5px 9px; border: 0; border-radius: 0; background: transparent; }
-.mb-card .mb-tools > li + li { border-top: 1px solid var(--border); }
-.mb-card .mb-tool-line { gap: 9px; }
-.mb-card .mb-tool-mark { width: 20px; height: 20px; border-radius: 6px; background: transparent; }
-.mb-card .mb-tool-mark svg, .mb-card .mb-tool-mark img { width: 15px; height: 15px; }
-.mb-card .mb-tool-id { flex: 1; flex-direction: row; align-items: baseline; gap: 8px; line-height: 1.3; }
-.mb-card .mb-tool-name { font-size: 13px; white-space: nowrap; }
-.mb-card .mb-tool-state { margin-left: auto; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mb-card .mb-tool.in .mb-tool-state { color: var(--text-muted); }
-.mb-card .mb-tool.out .mb-tool-state { color: var(--amber); }
-.mb-card .btn.small.mb-tool-go { height: 22px; padding: 0 8px; font-size: 12px; }
-.mb-card .mb-tool-more { width: 22px; height: 22px; }
-.mb-card .mb-tool:hover { background: var(--hover); }
-.mb-card .mb-more .more-tools { padding: 7px 10px; border-radius: 0; font-size: 12px; }
-.mb-card .mb-install { margin: 2px 0 4px; }
+.mb-card .mb-tools, .mb-modal .mb-tools { gap: 0; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--panel); overflow: hidden; }
+.mb-card .mb-tool, .mb-modal .mb-tool { gap: 8px; min-height: 34px; padding: 5px 6px 5px 9px; border: 0; border-radius: 0; background: transparent; }
+.mb-card .mb-tools > li + li, .mb-modal .mb-tools > li + li { border-top: 1px solid var(--border); }
+.mb-card .mb-tool-line, .mb-modal .mb-tool-line { gap: 9px; }
+.mb-card .mb-tool-mark, .mb-modal .mb-tool-mark { width: 20px; height: 20px; border-radius: 6px; background: transparent; }
+.mb-card .mb-tool-mark svg, .mb-card .mb-tool-mark img, .mb-modal .mb-tool-mark svg, .mb-modal .mb-tool-mark img { width: 15px; height: 15px; }
+.mb-card .mb-tool-id, .mb-modal .mb-tool-id { flex: 1; flex-direction: row; align-items: baseline; gap: 8px; line-height: 1.3; }
+.mb-card .mb-tool-name, .mb-modal .mb-tool-name { font-size: 13px; white-space: nowrap; }
+.mb-card .mb-tool-state, .mb-modal .mb-tool-state { margin-left: auto; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mb-card .mb-tool.in .mb-tool-state, .mb-modal .mb-tool.in .mb-tool-state { color: var(--text-muted); }
+.mb-card .mb-tool.out .mb-tool-state, .mb-modal .mb-tool.out .mb-tool-state { color: var(--amber); }
+.mb-card .btn.small.mb-tool-go, .mb-modal .btn.small.mb-tool-go { height: 22px; padding: 0 8px; font-size: 12px; }
+.mb-card .mb-tool-more, .mb-modal .mb-tool-more { width: 22px; height: 22px; }
+.mb-card .mb-tool:hover, .mb-modal .mb-tool:hover { background: var(--hover); }
+.mb-card .mb-more .more-tools, .mb-modal .mb-more .more-tools { padding: 7px 10px; border-radius: 0; font-size: 12px; }
+.mb-card .mb-install, .mb-modal .mb-install { margin: 2px 0 4px; }
 
 /* Signing out is a decision with a consequence beyond Friday, so it says so
    before it offers the two ways through. */
+
+/* The tools as a modal (Arun, 2026-11-10: "a modal pop up instead of a dropdown... properly designed"): a header that names the
+   computer, the tools on it, the rest a press away, and Settings at its foot. The header and foot stay; the tools scroll between
+   them, so a long list never pushes the close button off the screen. */
+.mb-overlay { padding: 24px 16px; }
+/* `.modal.` so the dialog shell's own padding and gap, defined further down, don't come back over these. */
+.modal.mb-modal { width: min(600px, 100%); max-height: min(86vh, 860px); padding: 0; gap: 0; overflow: hidden; text-align: left; }
+.mb-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 20px 20px 0 22px; }
+.mb-modal-titles { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.mb-modal .mb-modal-head h2 { font-size: 18px; line-height: 1.25; }
+.mb-modal-where { display: flex; align-items: center; gap: 7px; min-width: 0; margin: 0; font-size: 13px; }
+.mb-modal-where .mb-where-name { color: var(--ink-2); }
+.mb-modal .mb-modal-lead { margin: 8px 22px 0; font-size: 12px; line-height: 1.5; color: var(--faint); }
+.mb-modal-body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; padding: 16px 22px 20px; margin-top: 14px; border-top: 1px solid var(--border); }
+.mb-modal-body > .mb-body { padding: 0; }
+.mb-modal-group { display: flex; flex-direction: column; gap: 8px; }
+.mb-modal-label { display: flex; align-items: center; gap: 8px; white-space: nowrap; margin: 0; font-size: 12px; font-weight: 500; letter-spacing: 0; color: var(--text-muted); }
+.mb-modal-count { font-variant-numeric: tabular-nums; color: var(--faint); font-weight: 400; }
+.mb-modal-toggle { width: 100%; min-height: 34px; padding: 0 10px 0 12px; border: 1px solid var(--border); border-radius: var(--r-md); background: transparent; text-align: left; cursor: pointer; transition: background var(--t-fast, 120ms) var(--ease-out, ease); }
+.mb-modal-toggle[aria-expanded="true"] { min-height: 0; padding: 0; border-color: transparent; }
+.mb-modal-toggle:hover { background: var(--hover); }
+.mb-modal-toggle[aria-expanded="true"]:hover { background: transparent; color: var(--ink-2); }
+.mb-modal-peek { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; min-width: 0; overflow: hidden; color: var(--faint); opacity: .85; }
+.mb-modal-caret { flex: 0 0 auto; color: var(--faint); transition: transform var(--t-fast, 120ms) var(--ease-out, ease); }
+.mb-modal-toggle[aria-expanded="true"] .mb-modal-caret { margin-left: auto; }
+.mb-modal-caret.open { transform: rotate(180deg); }
+.mb-modal .mb-tool { min-height: 40px; padding: 6px 8px 6px 12px; }
+.mb-modal .mb-tool-mark { width: 22px; height: 22px; }
+.mb-modal .mb-tool-mark svg, .mb-modal .mb-tool-mark img { width: 16px; height: 16px; }
+.mb-modal .btn.small.mb-tool-go { height: 26px; padding: 0 10px; }
+.mb-modal .mb-tool-more { width: 26px; height: 26px; }
+.mb-modal .mb-err { padding: 10px 22px 12px; }
+/* The dialog shell's own spacing is for forms: here the rows keep theirs. */
+.mb-modal p { margin: 0; }
+.mb-modal .mb-login { margin-top: 6px; }
+.mb-modal .btn { margin-top: 0; }
+.mb-modal-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 22px 14px; border-top: 1px solid var(--border); font-size: 12px; line-height: 1.45; color: var(--faint); }
+.mb-modal-foot .link-btn { flex: 0 0 auto; font-size: 12px; }
+@media (max-width: 640px) {
+  .mb-overlay { padding: 12px; align-items: end; }
+  .modal.mb-modal { max-height: calc(100vh - 24px); }
+  .mb-modal-peek { display: none; }
+  .mb-modal-foot { flex-direction: column; align-items: flex-start; gap: 6px; }
+}
 
 .mb-note { margin: 0; font-size: 12px; line-height: 1.5; color: var(--ink-2); }
 .mb-err { margin: 0; padding: 10px 15px 13px; font-size: 12px; line-height: 1.45; color: var(--red); border-top: 1px solid var(--border); }
@@ -4819,6 +4863,19 @@ button[aria-label="Pause the agent"] svg, button[aria-label="Resume the agent"] 
 .mb-more { list-style: none; }
 .mb-acp-input { width: 100%; padding: 7px 10px; border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--bg); color: var(--ink); font: 13px/18px var(--mono, ui-monospace, monospace); }
 .mb-acp-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+/* "Other ACP agent" picked from the ACP registry: a search, then the agents as a hairline list in a fixed height. */
+.mb-reg-open { margin: 0 0 6px; font-size: 13px; }
+.mb-reg-search { font-family: inherit; }
+.mb-reg { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.mb-reg-list { list-style: none; margin: 0; padding: 0; max-height: 236px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--r-sm); }
+.mb-reg-row { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-top: 1px solid var(--border); }
+.mb-reg-row:first-child { border-top: 0; }
+.mb-reg-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.mb-reg-name { font-size: 13px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mb-reg-ver { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.mb-reg-desc { font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mb-reg-how { flex: 0 0 auto; font-size: 12px; color: var(--text-muted); }
+.mb-reg-note { margin: 0; padding: 8px 10px; font-size: 12px; color: var(--text-muted); }
 
 .ws-tabs { display: flex; gap: 4px; padding: 6px 8px 2px; overflow-x: auto; scrollbar-width: none; }
 /* A tab row with more than fits (ScrollTabs): a thin bar while the pointer is over it, and the edges fade where tabs are hidden. */
@@ -7674,6 +7731,17 @@ img.set-mark { border-color: transparent; }
 .mb-tool.acting .mb-tool-state { color: var(--ink-2); }
 .mb-tool.just-in .mb-tool-state { color: var(--agent); }
 .mb-login { flex: 1 0 100%; margin: 6px 0 0; font-size: 12px; line-height: 1.45; color: var(--text-muted); }
+.mb-login-cmd { padding: 0 4px; border-radius: 4px; background: color-mix(in srgb, var(--ink) 6%, transparent); font-family: var(--mono, ui-monospace, monospace); font-size: 12px; overflow-wrap: anywhere; color: var(--ink); }
+.mb-login-copy { display: inline-grid; place-items: center; width: 18px; height: 18px; vertical-align: -4px; }
+/* A sign-in in a shell of Friday's own under the tool's row (the desktop app): the note, then the tool's own screen, its height
+   fixed so the list doesn't jump as it prints. */
+.mb-login-shell { flex: 1 0 100%; display: flex; flex-direction: column; gap: 6px; }
+.mb-login-term { display: flex; height: 196px; margin-bottom: 2px; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: var(--code-bg); }
+.mb-login-term .term-shell { flex: 1; min-width: 0; }
+/* A browser sign-in finished on another device: the address its browser ended on, pasted under the row. */
+.mb-login-paste { flex: 1 0 100%; display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.mb-login-paste-row { display: flex; gap: 6px; align-items: center; }
+.mb-login-paste-row .mb-acp-input { flex: 1; min-width: 0; }
 /* The glance inside a session's ring: the open tab's tool, under the tabs. The card is a fixed height, so the tool's limits
    spread down it rather than huddling at the top: a roomier head, rows further apart, bars a little thicker. */
 .lg-glance.lg-one { flex: 1; padding: 2px 8px 10px; }
@@ -13473,3 +13541,58 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover { opacity: .8; }
 .set-computer .mb-inline .mb-tool { min-height: 48px; }
 /* In Settings the lists run their full length: the page scrolls, not a 319px box inside it. */
 .set-computer .mb-inline:not(.mb-welcome) .mb-tools { max-height: none; overflow: visible; }
+
+/* ── Voice input (VoiceMic.tsx, VoiceSettings.tsx; Arun, 2026-11-09, design A) ──────────────────────────────────────────── */
+/* While voice has something to say, it has the footer's left side; the pickers come back as it goes. Same height: nothing jumps. */
+.prompt [data-voice] > [data-slot="box.pills"] { display: none !important; }
+.composer-bar[data-voice] > :not(.voice-bar, .voice-right, .send) { display: none !important; }
+.voice-bar { display: flex; flex: 1 1 0; align-items: center; gap: 8px; min-width: 0; height: 28px; padding: 0 6px; color: var(--ink); font-size: 13px; line-height: 18px; }
+.prompt [data-slot="input-group-addon"][data-align="block-end"]:not(:empty) > .voice-bar { flex: 1 1 0; flex-wrap: nowrap; min-width: 0; }
+.voice-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
+.voice-word { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.voice-word.muted { color: var(--text-muted); }
+/* Seven thin bars, each the loudness of a tenth of a second: they move only with the voice, and nothing loops. */
+.voice-meter { display: inline-flex; flex: none; align-items: center; gap: 2px; height: 16px; }
+.voice-meter i { display: block; width: 2px; border-radius: 1px; background: var(--ink-3); transition: height 120ms var(--ease-out); }
+.voice-line { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--text-muted); white-space: nowrap; text-overflow: ellipsis; }
+.voice-bar.bad .voice-line { color: var(--red); }
+.voice-bar .voice-act { flex: none; }
+.voice-bar .voice-x { flex: none; color: var(--ink-4); }
+/* What answers the line sits at its end, by the mic: Download, Settings, the cross. */
+.voice-bar .voice-line + :is(.voice-act, .voice-x) { margin-left: auto; }
+.voice-progress { flex: none; width: 72px; height: 2px; overflow: hidden; border-radius: 1px; background: var(--border); }
+.voice-progress i { display: block; height: 100%; background: var(--ink); transition: width 240ms var(--ease-out); }
+/* The mic just before Send, and while it listens "Esc to cancel" and a filled Stop. */
+.voice-right { display: inline-flex; flex: none; align-items: center; gap: 8px; }
+.composer-bar .voice-right { margin-left: auto; }
+.composer-bar .voice-right ~ .send { margin-left: 4px; }
+.voice-esc { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+.voice-mic { display: grid; flex: none; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 9999px; background: transparent; color: var(--ink-3); cursor: pointer; transition: background-color 120ms var(--ease-out), color 120ms var(--ease-out); }
+.voice-mic:hover:not(:disabled) { background: var(--surface-hover); color: var(--ink); }
+.voice-mic:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.voice-mic.voice-stop, .voice-mic.voice-stop:hover:not(:disabled) { background: var(--ink); color: var(--bg); }
+.voice-mic:disabled { cursor: default; opacity: .6; }
+.voice-stop-mark rect { fill: currentColor; stroke: none; }
+.prompt .voice-right { margin-right: 2px; }
+.prompt .voice-mic { width: 32px; height: 32px; }
+/* The words still being heard: grey, inside the box under what is typed. */
+/* In the textarea's own type and inset, so the grey words sit under the typed ones. */
+.voice-live { min-height: 19px; margin: 0; padding: 0 10px 6px; color: var(--text-muted); font-size: 13px; line-height: 19px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.home .voice-live { min-height: 22px; padding: 0 8px 6px; font-size: 15px; line-height: 22px; }
+@media (max-width: 640px) { .voice-esc { display: none; } }
+/* Settings › General › Voice: the two places speech can be made into words, as cards. */
+.voice-picks { display: flex; flex-direction: column; gap: 8px; width: 296px; max-width: 100%; }
+.voice-pick { display: flex; flex-direction: column; gap: 2px; padding: 9px 12px; border: 1px solid var(--border-strong); border-radius: 10px; background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; transition: border-color 120ms var(--ease-out), box-shadow 120ms var(--ease-out); }
+.voice-pick:hover { border-color: var(--ink-4); }
+.voice-pick[data-on] { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
+.voice-pick:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+.voice-pick-name { font-size: 13px; font-weight: 500; }
+.voice-pick-sub { color: var(--text-muted); font-size: 12px; line-height: 17px; }
+.voice-select { min-width: 160px; max-width: 330px; }
+/* The one-row box (the Crew room, a teammate's chat; teammates.css): voice's line sits between the field and the mic, with the +
+   aside while it shows, and the mic is the 32px round button its neighbours are, on their line. */
+.composer:has(> .team-box-mark) .prompt [data-voice] > [data-slot="box.pills"] > :not([aria-label="Add files"]) { display: none !important; }
+.composer:has(> .team-box-mark) .prompt [data-voice] > [data-slot="box.pills"] > [aria-label="Add files"] { visibility: hidden; }
+.composer:has(> .team-box-mark) .prompt .voice-mic { width: 32px !important; height: 32px !important; }
+.composer:has(> .team-box-mark) .prompt [data-voice] > .voice-bar { flex: 0 1 auto; order: 1; margin-bottom: 9px; }
+.composer:has(> .team-box-mark) .prompt .voice-right { order: 2; margin: 0 0 7px; }

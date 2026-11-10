@@ -60,8 +60,12 @@ for (const edition of ["hosted", "local"] as const) {
     t.diagnostic(`app.js first load: ${kb.toFixed(1)} KB brotli, ${modules.length} modules; with the session screen ${session.kb.toFixed(1)} KB`);
     for (const re of LATER) assert.deepEqual(modules.filter((m) => re.test(m)).slice(0, 3), [], `${re} is in app.js's first load: import it lazily (see lazy-answer.tsx)`);
     // Brotli at the build's quality 11 (src/pack-built.ts). Nov 5 2026: 427 KB hosted and local (443 before the teammate page, team
-    // brief, skills and run review left it). Raise it only on purpose.
-    assert.ok(kb < 445, `app.js and its static imports are ${kb.toFixed(0)} KB brotli, over the 445 KB budget`);
+    // brief, skills and run review left it). Raise it only on purpose. Nov 9 2026: 444.8 hosted, 446.4 local (444.4 before), with
+    // voice input's mic and key in the home box (VoiceMic.tsx, ~2 KB; its engine and the model's worker load at the first press):
+    // raised to 448 on purpose. Nov 10 2026: 446.8 hosted, 448.7 local (447.9 before), with Qwen's own mark in place of a bot
+    // (BrandMarks.tsx, one path of ~1.9 KB, shown wherever a tool is named; Arun: "use this for the qwen code icon"), the sign-in
+    // notes and the ACP registry already moved to chunks of their own: raised to 450 on purpose.
+    assert.ok(kb < 450, `app.js and its static imports are ${kb.toFixed(0)} KB brotli, over the 450 KB budget`);
     // A session link waits on the session screen too: CodeMirror (~150 KB packed) loads with the first file opened, not here
     // (mirror-editor.tsx). Nov 4 2026, merged with build/e2e-hardening: 890 KB hosted (1,048 KB before; Oct 22: 710 KB).
     assert.deepEqual(session.modules.filter((m) => /node_modules\/@codemirror\//.test(m)).slice(0, 3), [], "CodeMirror is in the session screen's first load: keep it in mirror-editor.tsx, loaded lazily");

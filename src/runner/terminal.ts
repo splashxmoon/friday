@@ -9,6 +9,38 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
  * command is returned either way, so a platform we can't open a terminal on
  * can still show it to copy.
  */
+/**
+ * How Windows opens a terminal window running `command`: cmd's `start`, in a window of its own that stays open. Given to cmd as
+ * written (windowsVerbatimArguments): Node's own quoting (\" inside quotes) is not cmd's, so a path with a space in it came out
+ * broken. `/s` drops the quotes round what follows /c, and the extra pair round the command does the same for `cmd /k`, so a quoted
+ * "C:\Program Files\…" survives both (splashxmoon/friday#21).
+ */
+export function windowsTerminalArgs(command: string): string[] {
+  return ["/d", "/s", "/c", `"start "" cmd /k "${command}""`];
+}
+
+/**
+ * The line that runs `argv` (with `env` set for it) when typed into the shell Friday's own terminal starts on this computer: its
+ * login shell on a Mac or Linux, PowerShell on Windows (desktop-terminal.ts), or the one FRIDAY_SHELL names. For a sign-in run
+ * inside Friday rather than in a window of its own (Arun, 2026-11-10: "Build all four", after T3 Code's sign-ins in its own page).
+ */
+export function shellLine(argv: string[], env: Record<string, string> = {}, platform: NodeJS.Platform = process.platform, shell = process.env.FRIDAY_SHELL ?? "", exit = false): string {
+  const kind = /(?:^|[\\/])cmd(?:\.exe)?$/i.test(shell) ? "cmd" : platform === "win32" && !/(?:ba|z|fi)?sh(?:\.exe)?$/i.test(shell) ? "pwsh" : "posix";
+  const vars = Object.entries(env);
+  if (kind === "pwsh") {
+    const q = (v: string) => `'${v.replace(/'/g, "''")}'`;
+    // `&` runs a quoted path as a command; a variable set first lasts for this shell, which is the sign-in's own.
+    return [...vars.map(([k, v]) => `$env:${k}=${q(v)}; `), `& ${argv.map(q).join(" ")}`, exit ? "; exit $LASTEXITCODE" : ""].join("");
+  }
+  if (kind === "cmd") {
+    const q = (v: string) => (/[\s"&|<>^]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+    return [...vars.map(([k, v]) => `set "${k}=${v}" && `), argv.map(q).join(" "), exit ? " & exit" : ""].join("");
+  }
+  const q = (v: string) => (/^[\w@%+=:,./-]+$/.test(v) ? v : `'${v.replace(/'/g, `'\\''`)}'`);
+  // `exit`: the shell ends with the command, so its end says the sign-in's command is over (and how it went).
+  return (vars.length ? `env ${vars.map(([k, v]) => q(`${k}=${v}`)).join(" ")} ` : "") + argv.map(q).join(" ") + (exit ? "; exit" : "");
+}
+
 export async function openInTerminal(argv: string[], env: Record<string, string> = {}): Promise<{ opened: boolean; command: string }> {
   const win = process.platform === "win32";
   const quote = (s: string) => (win ? (/[\s"]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s) : `'${s.replace(/'/g, `'\\''`)}'`);
@@ -23,8 +55,11 @@ export async function openInTerminal(argv: string[], env: Record<string, string>
       return { opened: true, command };
     }
     if (win) {
-      // `start "" cmd /k` leaves the window open after the sign-in finishes.
-      await run(process.env.COMSPEC ?? "cmd.exe", ["/c", "start", "", "cmd", "/k", command]);
+      // `start "" cmd /k` leaves the window open after the sign-in finishes. Not hidden: started hidden, the window it opened could
+      // be hidden too, and a sign-in waited in a window nobody could see.
+      await new Promise<void>((resolve, reject) =>
+        execFile(process.env.COMSPEC ?? "cmd.exe", windowsTerminalArgs(command), { windowsVerbatimArguments: true }, (err) => (err ? reject(err) : resolve())),
+      );
       return { opened: true, command };
     }
     const shell = `${command}; exec ${process.env.SHELL ?? "bash"}`;
