@@ -2968,19 +2968,31 @@ export function waitingOn(said: string): string {
   return sentences.find((s) => WAITING.test(s))?.trim() ?? "";
 }
 
-/** A path as agents give it, from the project's root: no "./" or leading "/", forward slashes. */
-const cleanPath = (p: string) => p.trim().replace(/\\/g, "/").replace(/^\.?\/+/, "").slice(0, 300);
+/** A path from the project's root, with equivalent in-root spellings sharing one custody key. */
+const cleanPath = (p: string): string => {
+  const relative = p.trim().replace(/\\/g, "/").replace(/^\.?\/+/, "").slice(0, 300);
+  if (!relative) return "";
+  const normalized = path.posix.normalize(relative);
+  // No claim for the root itself or a path that escapes it.
+  return normalized === "." || normalized === ".." || normalized.startsWith("../") ? "" : normalized;
+};
 
 /** Another lane holding `path`: by claim_files, or as a file its board task owns. A folder (ending in /) holds what is in it. */
 export function heldBy(state: SessionState, lane: string, path: string): { lane: string; name: string; why?: string; seq: number }[] {
-  const covers = (h: string, p: string) => h === p || (h.endsWith("/") && p.startsWith(h)) || (p.endsWith("/") && h.startsWith(p));
+  const canonical = cleanPath(path);
+  if (!canonical) return [];
+  // Old persisted events can still contain a noncanonical spelling; compare canonical identities on both sides.
+  const covers = (h: string, p: string) => {
+    const normalized = cleanPath(h);
+    return !!normalized && (normalized === p || (normalized.endsWith("/") && p.startsWith(normalized)) || (p.endsWith("/") && normalized.startsWith(p)));
+  };
   const out: { lane: string; name: string; why?: string; seq: number }[] = [];
   for (const [l, h] of Object.entries(state.holds ?? {})) {
-    if (l !== lane && h.paths.some((x) => covers(x, path))) out.push({ lane: l, name: laneName(state, l), ...(h.why ? { why: h.why } : {}), seq: h.seq });
+    if (l !== lane && h.paths.some((x) => covers(x, canonical))) out.push({ lane: l, name: laneName(state, l), ...(h.why ? { why: h.why } : {}), seq: h.seq });
   }
   for (const t of state.board?.tasks ?? []) {
     if (t.status !== "claimed" || !t.lane || t.lane === lane || out.some((o) => o.lane === t.lane)) continue;
-    if (t.owns.some((x) => covers(cleanPath(x), path))) out.push({ lane: t.lane, name: laneName(state, t.lane), why: `the board task "${t.title}"`, seq: -1 });
+    if (t.owns.some((x) => covers(x, canonical))) out.push({ lane: t.lane, name: laneName(state, t.lane), why: `the board task "${t.title}"`, seq: -1 });
   }
   return out;
 }
