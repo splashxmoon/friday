@@ -678,6 +678,13 @@ export class AgentMesh {
    * waits on the board meanwhile. Set by the app; the open-source edition has nobody else to ask.
    */
   boardRefused: ((sid: string, task: BoardTask, lane: string, why: string) => Promise<boolean>) | null = null;
+  /**
+   * A board task's own branch, readied in its agent's copy of the repo before the task reaches it (Arun, 2026-11-11: "add worktree
+   * per task like OMH fanout"): cut from where the board started, with what it waits on merged in, the agent's last task's work
+   * kept on its own branch. `idle`: the agent isn't working now, so its folder can be switched; a busy one is told to switch
+   * itself when it starts. Its line goes with the brief, and the branch on the task. Null where there is no copy to ready.
+   */
+  prepareTask: ((sid: string, lane: string, task: BoardTask, board: NonNullable<SessionState["board"]>, idle: boolean) => Promise<{ branch: string; line: string } | null>) | null = null;
 
   /** The crew's skills (team-skills.ts SKILL_TOOLS: list_skills, use_skill, save_skill): where offered, and the call. Set by the app. */
   skillTools: { offered(sid: string): Promise<boolean>; call(sid: string, lane: string, name: string, args: Record<string, unknown>): Promise<MeshResult> } | null = null;
@@ -1607,6 +1614,10 @@ export class AgentMesh {
     // Nor would tasks waiting on each other, round in a circle: refused, naming it (2026-10-28 audit: such a board sat for good).
     const cycle = cycleIn(tasks);
     if (cycle) return { output: `Those tasks wait on each other in a circle (${cycle.join(" → ")}), so none of them could start. Post them again with the order fixed.`, isError: true };
+    // Two tasks that run side by side owning the same file would edit it at once, on branches that then don't merge: refused,
+    // naming them, as Oh My Hermes' fanout refuses overlapping boundaries (Arun, 2026-11-11).
+    const clash = ownersClash(tasks);
+    if (clash.length) return { output: `${clash.slice(0, 4).map((c) => `"${c.a}" and "${c.b}" both own ${c.path}`).join("; ")}${clash.length > 4 ? ` (and ${clash.length - 4} more)` : ""}, and neither waits on the other, so they'd edit it at the same time. Give each file to one task, or make one wait on the other (after), and post them again.`, isError: true };
     const fromName = laneName(state, lane);
     await this.store.append(sid, agentActor(fromName), { type: "board.posted", fromLane: lane, fromName, tasks, ...(check.trim() ? { check: check.trim().slice(0, 400) } : {}) }, { lane });
     this.live.add(sid);
@@ -1614,8 +1625,11 @@ export class AgentMesh {
     return { output: `Posted ${tasks.length} task${tasks.length === 1 ? "" : "s"} to the board. ${handed.length ? `Handed out now: ${handed.join(", ")}.` : "No agent is free right now; each takes the next ready task when it finishes."} The rest go as agents free up and as what they wait on is done. You hear how it went once the board is done (sooner if one is blocked); do your own piece meanwhile, or claim_task one.` };
   }
 
-  /** claim_task: an agent takes a ready task itself, inside the turn it is in. */
-  async claim(sid: string, lane: string, id: string): Promise<MeshResult> {
+  /** claim_task: an agent takes a ready task itself, inside the turn it is in; in line with the hand-out rounds (inTurn). */
+  claim(sid: string, lane: string, id: string): Promise<MeshResult> {
+    return this.inTurn(sid, () => this.claimNow(sid, lane, id));
+  }
+  private async claimNow(sid: string, lane: string, id: string): Promise<MeshResult> {
     const state = await this.store.state(sid);
     if (!state.board) return { output: "There's no task board in this session.", isError: true };
     const name = laneName(state, lane);
@@ -1629,8 +1643,9 @@ export class AgentMesh {
     const stuck = key ? state.board.tasks.find((x) => x.id === key && x.status === "blocked" && !(x.declined ?? []).includes(name)) : undefined;
     const t = stuck ?? (key ? ready.find((x) => x.id === key) : (ready.find((x) => suits(x, name)) ?? ready[0]));
     if (!t) return { output: id ? `Task "${id}" isn't ready to take: ${boardLine(state.board.tasks.find((x) => x.id === id.trim().toLowerCase()))}` : "No task is ready right now: the rest wait on others or are taken.", isError: true };
-    await this.store.append(sid, agentActor(name), { type: "board.claimed", id: t.id, lane, name }, { lane });
-    return { output: `${taskBrief(state, t)}\n\nIt's yours. When you're done, call finish_task with id "${t.id}" and a short report.` };
+    const prep = await this.prepareTask?.(sid, lane, t, state.board, true).catch(() => null);
+    await this.store.append(sid, agentActor(name), { type: "board.claimed", id: t.id, lane, name, ...(prep ? { branch: prep.branch } : {}) }, { lane });
+    return { output: `${taskBrief(state, t)}${prep ? `\n\n${prep.line}` : ""}\n\nIt's yours. When you're done, call finish_task with id "${t.id}" and a short report.` };
   }
 
   /** finish_task, or a board task's run ending: the report goes on the board, and a review or what waits on it goes next. */
@@ -1705,6 +1720,8 @@ export class AgentMesh {
     }
     const added = (await this.repoChecks?.(sid, lane).catch(() => [])) ?? [];
     const runs: RepoCheck[] = [...(command ? [{ command }] : []), ...added.filter((c) => c.command !== command)];
+    // The commit the checks run on, and whether uncommitted work sits beside it: a pass on a clean commit is verified (verifiedAt).
+    const at = runs.length ? commitOf(await this.repo(sid, lane, { op: "shell", command: "git status --porcelain=v2 --branch", timeoutSec: 20 } as RepoCall).catch(() => "")) : null;
     for (const c of runs) {
       await this.store.append(sid, FRIDAY, { type: "board.checking", id, lane, command: c.command }, { lane });
       // A rule read off the change: nothing to run, its breaches are what goes back (rules.ts).
@@ -1716,7 +1733,7 @@ export class AgentMesh {
       const was = verdict === "failed" && TEST_CMD.test(c.command) ? await this.baseline?.(sid, lane, c.command).catch(() => null) : null;
       const vs = was ? compare(failingTests(out ?? ""), was) : null;
       if (onlyPre(vs)) verdict = "passed";
-      await this.store.append(sid, FRIDAY, { type: "board.checked", id, lane, command: c.command, ok: verdict !== "failed", output: clip(out ?? "", 4000), ...(verdict === "skipped" ? { skipped: true } : {}), ...(vs?.pre.length ? { pre: vs.pre } : {}), ...(vs?.whole ? { whole: true } : {}) }, { lane });
+      await this.store.append(sid, FRIDAY, { type: "board.checked", id, lane, command: c.command, ok: verdict !== "failed", output: clip(out ?? "", 4000), ...(verdict === "skipped" ? { skipped: true } : {}), ...(vs?.pre.length ? { pre: vs.pre } : {}), ...(vs?.whole ? { whole: true } : {}), ...(at ? { sha: at.sha, ...(at.dirty ? { dirty: true as const } : {}) } : {}) }, { lane });
       if (verdict !== "skipped") await c.ran?.(verdict === "failed").catch(() => undefined);
       if (verdict !== "failed") continue;
       const after = (await this.store.state(sid)).board?.tasks.find((x) => x.id === id);
@@ -1982,15 +1999,22 @@ export class AgentMesh {
    * One hand-out round at a time in a session: two at once each read the board before the other wrote, and gave the same task
    * out twice (a crew workflow posting its next stage while the board's own round after the last task ran; 2026-11-01).
    */
-  private rounds = new Map<string, Promise<string[]>>();
-  dispatch(sid: string): Promise<string[]> {
-    const next = (this.rounds.get(sid) ?? Promise.resolve([])).catch(() => []).then(() => this.round(sid));
+  /**
+   * An agent's own claim_task goes in the same line (2026-11-11 audit): it read the board while a round was readying a task's
+   * branch for another agent, and both were given the same task. Nothing in the line may wait on the line itself.
+   */
+  private rounds = new Map<string, Promise<unknown>>();
+  private inTurn<T>(sid: string, fn: () => Promise<T>): Promise<T> {
+    const next = (this.rounds.get(sid) ?? Promise.resolve()).catch(() => undefined).then(fn);
     this.rounds.set(sid, next);
     void next.then(
       () => this.rounds.get(sid) === next && this.rounds.delete(sid),
       () => this.rounds.get(sid) === next && this.rounds.delete(sid),
     );
     return next;
+  }
+  dispatch(sid: string): Promise<string[]> {
+    return this.inTurn(sid, () => this.round(sid));
   }
 
   /**
@@ -2083,14 +2107,15 @@ export class AgentMesh {
           this.refused.set(`${sid}|${chosen.id}`, `${name} is out of usage until its limit lifts. Pick another agent.`);
           continue;
         }
-        const r = await this.send(sid, state.board!.fromLane, { to: name, toLane: lane, text: taskBrief(state, chosen), kind: "task", board: chosen.id, system: true });
+        const prep = await this.prepareTask?.(sid, lane, chosen, state.board!, runOf(state, lane).status !== "running" && !pendingFor(state, lane).length).catch(() => null);
+        const r = await this.send(sid, state.board!.fromLane, { to: name, toLane: lane, text: `${taskBrief(state, chosen)}${prep ? `\n\n${prep.line}` : ""}`, kind: "task", board: chosen.id, system: true });
         if (!r.ok) {
           const asked = await this.boardRefused?.(sid, chosen, lane, r.error).catch(() => false);
           this.refused.set(`${sid}|${chosen.id}`, asked ? `Waiting for ${name}'s keeper to take it on.` : r.error);
           continue;
         }
         this.refused.delete(`${sid}|${chosen.id}`);
-        await this.store.append(sid, agentActor(name), { type: "board.claimed", id: chosen.id, lane, name }, { lane });
+        await this.store.append(sid, agentActor(name), { type: "board.claimed", id: chosen.id, lane, name, ...(prep ? { branch: prep.branch } : {}) }, { lane });
         handed.push(`"${chosen.id}" to ${name}${r.busy ? " (after what it's doing)" : r.offline ? " (when its computer is back)" : ""}`);
         continue;
       }
@@ -2120,14 +2145,16 @@ export class AgentMesh {
       }
       const name = laneName(state, pick.to);
       // Sent first, claimed once it went: a task that couldn't reach that agent stays on the board for someone else.
-      const r = await this.send(sid, state.board!.fromLane, { to: name, toLane: pick.to, text: taskBrief(state, pick.t), kind: "task", board: pick.t.id, system: true });
+      // Free, so its folder is readied for the task before the task reaches it.
+      const prep = await this.prepareTask?.(sid, pick.to, pick.t, state.board!, true).catch(() => null);
+      const r = await this.send(sid, state.board!.fromLane, { to: name, toLane: pick.to, text: `${taskBrief(state, pick.t)}${prep ? `\n\n${prep.line}` : ""}`, kind: "task", board: pick.t.id, system: true });
       if (!r.ok) {
         // Nobody else free takes it meanwhile? It may still go to this one through whoever can let it (boardRefused).
         if (!free.some((l) => l !== pick!.to && !skip.has(l) && may(pick!.t, l))) await this.boardRefused?.(sid, pick.t, pick.to, r.error).catch(() => false);
         skip.add(pick.to);
         continue;
       }
-      await this.store.append(sid, agentActor(name), { type: "board.claimed", id: pick.t.id, lane: pick.to, name, ...(why ? { why } : {}) }, { lane: pick.to });
+      await this.store.append(sid, agentActor(name), { type: "board.claimed", id: pick.t.id, lane: pick.to, name, ...(why ? { why } : {}), ...(prep ? { branch: prep.branch } : {}) }, { lane: pick.to });
       handed.push(`"${pick.t.id}" to ${name}${why ? ` (${why})` : ""}`);
     }
     return handed;
@@ -2756,6 +2783,74 @@ export function awayDiff(state: SessionState, doer: string, reviewer: string): s
 }
 
 /** Board tasks waiting on each other in a circle, by id, the first one again at the end; null when there is none. */
+/**
+ * The commit a folder is at and whether there is uncommitted work, from `git status --porcelain=v2 --branch` as the runner's
+ * shell gives it back ("$ cmd", "(exited 0)", then its output): one git command, so it runs the same in every shell, PowerShell
+ * included. Its "# branch.oid" line is the commit; any line not starting "#" is a change. Null outside git, or with no commit yet.
+ */
+export function commitOf(out: string | null | undefined): { sha: string; dirty: boolean } | null {
+  if (!out || !/\(exited 0\)/.test(out)) return null;
+  const lines = out.split(/\r?\n/).slice(2);
+  const sha = lines.map((l) => /^# branch\.oid ([0-9a-f]{40})\s*$/.exec(l)?.[1]).find(Boolean);
+  if (!sha) return null;
+  return { sha, dirty: lines.some((l) => /^[12u?] /.test(l)) };
+}
+
+/**
+ * A board task's own branch: the board, by its post's seq, the task's id, and a short tag of its session, so a board with the same
+ * number in another room or crew on the same repo never picks up this one's branch (crew/30-api-ov2u).
+ */
+export const taskBranch = (sid: string, boardSeq: number, id: string): string => `crew/${boardSeq}-${id}-${sid.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 4) || "s"}`;
+
+/** A path as a task names what it owns: no leading ./, no trailing /. */
+const ownPath = (p: string) => p.trim().replace(/^\.\//, "").replace(/\/+$/, "");
+/** The same file, or one inside a folder the other owns. */
+const overlaps = (a: string, b: string) => {
+  const x = ownPath(a);
+  const y = ownPath(b);
+  return !!x && !!y && (x === y || x.startsWith(`${y}/`) || y.startsWith(`${x}/`));
+};
+
+/**
+ * Tasks that would run at the same time owning the same file (or a folder and a file in it): neither waits on the other, however
+ * far down the line. Each pair once, with the path they share.
+ */
+export function ownersClash(tasks: readonly Pick<BoardTaskDef, "id" | "after" | "owns">[]): { a: string; b: string; path: string }[] {
+  const after = new Map(tasks.map((t) => [t.id, t.after]));
+  const reaches = (from: string, to: string, seen = new Set<string>()): boolean => {
+    if (seen.has(from)) return false;
+    seen.add(from);
+    return (after.get(from) ?? []).some((x) => x === to || reaches(x, to, seen));
+  };
+  const out: { a: string; b: string; path: string }[] = [];
+  for (let i = 0; i < tasks.length; i++)
+    for (let j = i + 1; j < tasks.length; j++) {
+      const a = tasks[i]!;
+      const b = tasks[j]!;
+      const shared = a.owns.find((x) => b.owns.some((y) => overlaps(x, y)));
+      if (shared && !reaches(a.id, b.id) && !reaches(b.id, a.id)) out.push({ a: a.id, b: b.id, path: ownPath(shared) });
+    }
+  return out;
+}
+
+/** The tasks in an order that merges cleanly: each after what it waits on, otherwise as posted. */
+export function mergeOrder<T extends Pick<BoardTaskDef, "id" | "after">>(tasks: readonly T[]): T[] {
+  const out: T[] = [];
+  const done = new Set<string>();
+  const visit = (t: T, seen: Set<string>) => {
+    if (done.has(t.id) || seen.has(t.id)) return;
+    seen.add(t.id);
+    for (const a of t.after) {
+      const dep = tasks.find((x) => x.id === a);
+      if (dep) visit(dep, seen);
+    }
+    done.add(t.id);
+    out.push(t);
+  };
+  for (const t of tasks) visit(t, new Set());
+  return out;
+}
+
 export function cycleIn(tasks: readonly Pick<BoardTaskDef, "id" | "after">[]): string[] | null {
   const after = new Map(tasks.map((t) => [t.id, t.after]));
   const state = new Map<string, 1 | 2>();

@@ -1216,3 +1216,121 @@ html.dark { --badge-work: #4d8eff; --badge-need: #f7b23b; --badge-done: #2fbf71;
   .tm-page-foot { margin: 2px -18px 0; padding: 12px 18px; }
 }
 @media (max-width: 640px) { .page.conns-page.tm-page { padding-bottom: 0 !important; } }
+
+/* The open-source build's teammate header (Crew overhaul 3A, 2026-11-11): one line, face, name, role in a word, what they're doing
+   and where; the tabs on the row under it; then the chat. */
+.tm-slim-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-height: 48px; padding: 6px 0 0; border-bottom: 1px solid var(--border); }
+.tm-slim-name { margin: 0; color: var(--ink); font-size: 16px; font-weight: 600; line-height: 22px; white-space: nowrap; }
+.tm-slim-chip { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 6px; background: var(--hover); color: var(--ink-2); font-size: 12px; white-space: nowrap; }
+.tm-slim-meta { flex: 1 1 160px; min-width: 0; overflow: hidden; color: var(--text-muted); font-size: 13px; line-height: 20px; text-overflow: ellipsis; white-space: nowrap; }
+.tm-slim-status.s-working, .tm-slim-status.s-limited { color: var(--ink-2); }
+.tm-slim-status.s-waiting, .tm-slim-status.s-needs { color: var(--amber); }
+.tm-slim-status.s-offline { color: var(--mate-offline); }
+.tm-slim-add { display: inline-flex; flex: none; align-items: center; gap: 4px; height: 24px; padding: 0 7px 0 5px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-muted); font: inherit; font-size: 12.5px; cursor: pointer; }
+.tm-slim-add:hover { background: var(--hover); color: var(--ink); }
+.tm-slim .tm-tabs { flex: 1 1 100%; gap: 18px; margin: 0 0 -1px; border-bottom: 0; }
+.tm-slim .tm-tab { height: 36px; }
+.tm-slim-held { margin: 8px 0 0; }
+
+/* The plan beside a crew room's chat (Crew overhaul 3B, 2026-11-11): what the lead works toward and how far it has got, then each
+   piece as a card that opens to it in full; the panel folds to a slim tab on the edge. Only where the window has room for it. */
+.tp { display: flex; flex: none; flex-direction: column; gap: 14px; width: 320px; min-height: 0; padding: 16px 14px 24px; overflow-y: auto; border-left: 1px solid var(--border); background: var(--bg); scrollbar-width: thin; }
+.tp-head { display: flex; flex-direction: column; gap: 4px; }
+.tp-head-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tp-head h2 { margin: 0; color: var(--ink); font-size: 14px; font-weight: 600; line-height: 20px; }
+.tp-fold { display: grid; place-items: center; width: 26px; height: 26px; border: 0; border-radius: 6px; background: none; color: var(--text-muted); cursor: pointer; }
+.tp-fold:hover, .tp-fold:focus-visible { background: var(--hover); color: var(--ink); }
+.tp-fold svg { width: 15px; height: 15px; }
+.tp-goal { margin: 0; color: var(--ink-2); font-size: 12.5px; line-height: 18px; overflow-wrap: anywhere; }
+.tp-count { display: flex; align-items: center; gap: 8px; margin: 2px 0 0; color: var(--text-muted); font-size: 12px; line-height: 18px; font-variant-numeric: tabular-nums; }
+.tp-bar { position: relative; flex: none; width: 56px; height: 4px; overflow: hidden; border-radius: 2px; background: var(--hover-strong); }
+.tp-bar i { position: absolute; inset: 0 auto 0 0; border-radius: 2px; background: var(--green); transition: width .3s ease; }
+.tp-list { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.tp-card { border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--card); overflow: hidden; }
+.tp-card[data-tone="needs"] { border-color: color-mix(in srgb, var(--amber) 60%, transparent); }
+.tp-card-head { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 11px 10px 11px 12px; border: 0; background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out); }
+.tp-card-head:hover { background: var(--hover); }
+.tp-noface { width: 24px; height: 24px; flex: none; border: 1px dashed var(--border-strong); border-radius: 999px; }
+.tp-text { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
+.tp-text b { font-size: 13px; font-weight: 500; line-height: 18px; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tp-card[data-open] .tp-text b { display: block; -webkit-line-clamp: unset; }
+.tp-word { color: var(--text-muted); font-size: 12.5px; line-height: 18px; }
+.tp-card[data-tone="done"] .tp-word { color: var(--green); }
+.tp-card[data-tone="reported"] .tp-word { color: var(--text-muted); }
+.tp-card[data-tone="needs"] .tp-word { color: var(--amber); }
+.tp-card[data-tone="work"] .tp-word { color: var(--ink-2); }
+.tp-chev { flex: none; width: 15px; height: 15px; margin-top: 2px; color: var(--text-muted); }
+.tp-more { display: flex; flex-direction: column; gap: 10px; padding: 2px 12px 12px 46px; }
+.tp-ask { margin: 0; color: var(--ink-2); font-size: 12.5px; line-height: 18px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tp-report .tp-clamp { color: var(--ink-2); font-size: 12.5px; line-height: 18px; overflow-wrap: anywhere; }
+.tp-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 5px 12px; margin: 0; font-size: 12px; line-height: 17px; }
+.tp-facts > div { display: contents; }
+.tp-facts dt { color: var(--text-muted); }
+.tp-facts dd { margin: 0; min-width: 0; color: var(--ink-2); overflow-wrap: anywhere; }
+.tp-facts code, .tp-codes code { padding: 0 4px; border-radius: 4px; background: var(--hover); color: var(--ink-2); font: 11px/17px var(--mono); }
+.tp-codes { display: flex; flex-wrap: wrap; gap: 3px; }
+.tp-check.ok { color: var(--green); }
+.tp-check.bad { color: var(--red); }
+.tp-check.run { color: var(--ink-2); }
+.tp-report { display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; border-radius: 8px; background: var(--hover); }
+.tp-report span { color: var(--text-muted); font-size: 11.5px; }
+.tp-report p { margin: 0; color: var(--ink-2); font-size: 12.5px; line-height: 18px; overflow-wrap: anywhere; }
+.tp-report small { color: var(--text-muted); font-size: 11.5px; line-height: 16px; overflow-wrap: anywhere; }
+.tp-chat { align-self: flex-start; height: 28px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--card); color: var(--ink); font: 500 12.5px var(--font); cursor: pointer; }
+.tp-chat:hover { background: var(--hover); }
+/* Folded: a slim column down the edge that still says how the plan stands: open, a ring of how far it has got, the count, and a
+   dot per piece in the colour of where it stands (amber needs you, green done, ink working, hollow waiting). */
+.tp.tp-shut { width: 48px; padding: 10px 0; align-items: center; overflow: hidden; }
+.tp-tab { display: flex; flex-direction: column; align-items: center; gap: 10px; width: 38px; padding: 6px 0 10px; border: 0; border-radius: 10px; background: none; color: var(--text-muted); cursor: pointer; transition: background-color var(--t-hover) var(--ease-out); }
+.tp-tab:hover, .tp-tab:focus-visible { background: var(--hover); color: var(--ink); }
+.tp-tab:focus-visible { outline: 2px solid var(--violet); outline-offset: -2px; }
+.tp-tab-open { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 7px; }
+.tp-tab-open svg { width: 16px; height: 16px; }
+.tp-ring { width: 28px; height: 28px; transform: rotate(-90deg); }
+.tp-ring circle { fill: none; stroke-width: 3; }
+.tp-ring-bg { stroke: var(--hover-strong); }
+.tp-ring-on { stroke: var(--green); stroke-linecap: round; transition: stroke-dasharray .3s ease; }
+.tp-ring-on[data-needs] { stroke: var(--badge-need, #f5a524); }
+.tp-tab-n { margin-top: -4px; color: var(--ink-2); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tp-tab-n i { color: var(--text-muted); font-style: normal; font-weight: 400; }
+.tp-dots { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+.tp-dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-2); }
+.tp-dots i[data-tone="done"] { background: var(--green); }
+.tp-dots i[data-tone="reported"] { background: color-mix(in srgb, var(--green) 45%, var(--border-strong)); }
+.tp-dots i[data-tone="needs"] { background: var(--badge-need, #f5a524); }
+.tp-dots i[data-tone="wait"] { background: none; box-shadow: inset 0 0 0 1.5px var(--border-strong); }
+/* Long text a few lines at a time, the rest under More. */
+.tp-clamp { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
+.tp-clamped { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
+.tp-more-btn { padding: 0; border: 0; background: none; color: var(--ink); font: 500 12px var(--font); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--ink) 35%, transparent); text-underline-offset: 3px; cursor: pointer; }
+.tp-note { margin-top: 2px; color: var(--ink-2); }
+.tp-card-head:focus-visible { outline: 0; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--violet) 70%, transparent); }
+/* A narrow window: the folded tab stays, and the open plan lies over the chat's right edge with a shadow, rather than going. */
+.tp.tp-over { position: absolute; top: 0; right: 0; bottom: 0; z-index: 30; width: min(340px, calc(100% - 48px)); box-shadow: -12px 0 32px rgb(0 0 0 / .28); }
+
+/* The lead's hand-out as one line (Crew overhaul 3B): its face in the message gutter, "Assigned to Kit: …", where it stands, and
+   Change; consecutive hand-outs read as a short list under what the lead said. */
+.tt-assign { display: grid; grid-template-columns: 34px 14px minmax(0, 1fr) auto minmax(64px, auto) auto; align-items: center; gap: 0 8px; max-width: 760px; min-height: 30px; color: var(--text-muted); font-size: 13.5px; line-height: 20px; }
+.tt-assign-who { display: grid; place-items: center; }
+.tt-assign-mark { width: 14px; height: 14px; color: var(--text-muted); }
+.tt-assign-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tt-assign-text b { color: var(--ink); font-weight: 600; }
+.tt-assign-status { color: var(--text-muted); white-space: nowrap; }
+.tt-assign-status.is-work { color: var(--ink-2); }
+.tt-assign-status.is-done, .tt-assign-status.is-read { color: var(--green); }
+.tt-assign .tt-assign-change { height: 26px; padding: 0 8px; border: 0; border-radius: var(--r-sm); background: none; color: var(--ink-2); font-size: 13px; font-weight: 500; }
+.tt-assign .tt-assign-change:hover { background: var(--hover); color: var(--ink); }
+.tt-assign .tt-stamp { color: var(--faint); font-size: 12px; }
+@media (max-width: 640px) { .tt-assign { grid-template-columns: 24px 14px minmax(0, 1fr) auto auto; } .tt-assign .tt-stamp { display: none; } .tt-assign-text { white-space: normal; } }
+
+/* A room's dialog held to the window: its fields keep their size, the list of teammates gives up height and scrolls, and the
+   buttons stay at the foot (2026-11-11). */
+.tm-room-form { flex: 1 1 auto; min-height: 0; }
+.tm-room-form > :not(.tm-room-who) { flex: none; }
+.tm-room-who { display: flex; flex: 0 1 auto; flex-direction: column; min-height: 0; }
+.tm-room-who .tm-pick { flex: 0 1 auto; min-height: 104px; overscroll-behavior: contain; }
+.tm-memory-over { color: var(--amber); font-size: 12.5px; line-height: 18px; }
+.tp-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.tp-chat.tp-quiet { border-color: transparent; background: none; color: var(--text-muted); }
+.tp-chat.tp-quiet:hover { color: var(--ink); }
+.tp-said { color: var(--text-muted); font-size: 12px; }

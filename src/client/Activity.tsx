@@ -13,6 +13,7 @@ import { GitMergeIcon,
   BrainIcon,
   GitPullRequestIcon,
   ShieldCheckIcon,
+  ShieldIcon,
   ShieldXIcon,
   CheckIcon,
   ChevronRightIcon,
@@ -159,6 +160,8 @@ import { CheckInLine, HandoffLine, FoldersGiven, TeammateChanged, FridayLine, te
 import { WorkflowAsks } from "./WorkflowAsks.js";
 import { useRoomRuns, WorkflowRunCard } from "./WorkflowRunCard.js";
 import { threadsOf } from "./team-threads.js";
+import { plainLine } from "./team-room.js";
+import { saysNoUpdate } from "../teammate-checkins.js";
 import { isLive, isPersonsWord, isWaiting, isWorkflowBoard, leadAnswers, nudgedRepeats, queuedFor, roomAsks, roomRunKind, selectedText, splitQuote, splitQuotes, switchedAfter, turnsFor, withQuotes, workflowChatter, type LeadInfo } from "./team-room.js";
 import { AGENT_DRAG, catchUpIndex, firstUnread, maxColumns, unreadByLane } from "./agentNav.js";
 import { followTarget, openingTarget } from "./follow-target.js";
@@ -166,7 +169,7 @@ import { carried, carriedFrom } from "./carried.js";
 import { reviewText, type LineComment } from "./review.js";
 import { savedCommands, shortcut, useSavedCommands, useShortcuts } from "./Shortcuts.js";
 import { CommandsDialog } from "./CommandsDialog.js";
-import { HandoffBar, HandoffCard, HandoffComposer, type HandoffMore, type HandoffTarget, RunMeta, StepGroup, Thinking as ThinkingView, Working, stepFor, type FileChange, type Step } from "./Response.js";
+import { HandoffBar, HandoffCard, HandoffComposer, type HandoffMore, type HandoffTarget, RunMeta, StepGroup, Thinking as ThinkingView, Working, stepFor, tookFor, type FileChange, type Step } from "./Response.js";
 import { DiffView, type DiffLine, type DiffMode } from "./DiffView.js";
 import { PinBar } from "./PinBar.js";
 import { commandFailed, receiptOf } from "../receipt.js";
@@ -188,8 +191,9 @@ import { agentLook, handoffTaskText, laneIdByName, laneLabel, reasonFor, suggest
 import type { AgentView } from "../agents.js";
 import { RaceCard } from "./Race.js";
 import { askIosPreview, isLocalUrl, lookOf, openInPreview, pageAppears, servedUrlIn } from "./previewBus.js";
-import { latestTests, prefillComposer, ReviewCard, secondReviewOf, testsIn } from "./RunReview.js";
+import { failedWords, latestTests, prefillComposer, ReviewCard, secondReviewOf, testsIn, type TestRun } from "./RunReview.js";
 import { CLASS_LABEL, carefulClass, headlineClass, mayApprove } from "../command-class.js";
+import { plainRisk } from "../plain-risk.js";
 import { checkpointsByMessage, isRedo, isSetAside, reversedBy, rewindImpact, rewindsIn, undoneRuns, type Rewind } from "../rewind.js";
 import { Check, ContextMenu, MenuButton, Picker, useConfirm, type MenuItem, relTime } from "./ui.js";
 import { RuleForm, RuleHow, RuleText } from "./RuleForm.js";
@@ -3779,6 +3783,8 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   const loginLine = item.ended?.body.outcome === "error" && signedOut(item.ended.body.error) && finalMsg && /not logged in|please run \/login/i.test(finalMsg.body.text) ? finalMsg : null;
   // Second opinion (Asides): another model asked about this turn, from the answer's strip; the form opens under the answer.
   const [opinion, setOpinion] = useState(false);
+  // A teammate's finished turn shows its steps folded into one line until that line is pressed (Crew overhaul 3A).
+  const [stepsOpen, setStepsOpen] = useState(false);
   // Asked of one of Friday's own models: the hosted Friday's, so none in the open-source edition.
   let opinionBtn: React.ReactNode = null;
   // What the run left that has a home of its own.
@@ -4249,6 +4255,16 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
       </>
     ) : null;
 
+  // A teammate's finished turn reads as its outcome (Arun, 2026-11-11, option 3A of the Crew overhaul, after Oh My Hermes): its
+  // steps and what it said along the way fold into one line, "Worked for 6m · 14 steps", and what it changed is a result card.
+  // Done, or closed by what came next in its lane (a permission card it stopped on): a run split by a yes folds before it.
+  const teamDone = !!mate && !!(item.ended || item.closedTs) && !active;
+  const stepCount = blocks.reduce((n, x) => n + (x.kind === "work" ? x.steps.length : 0), 0);
+  const foldSteps = teamDone && blocks.some((x) => x.kind === "work" || x.kind === "think");
+  const endTs = item.ended?.ts ?? item.closedTs;
+  const took = endTs && metaStart ? endTs - metaStart : 0;
+  const resulted = teamDone && !!item.ended && turnFiles.length > 0 && !ctx.state.options.work;
+
   return (
     <div className={`rsp ${landed ? "landed" : ""}${look ? ` ${look.className}` : ""}`} style={look?.style}>
       {confirmUI}
@@ -4278,7 +4294,14 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
       {/* The reply in reading order, the way Claude shows it (Arun, 2026-10-17): what the agent said, and between it a line per
           stretch of work ("Ran 2 commands, read 3 files ›") that opens to its steps. The live answer still streams in its own
           leaf below (LiveStream), so a delta never redraws these. */}
-      {blocks.map((x, i) =>
+      {foldSteps && (
+        <button type="button" className="rsp-steps-fold" aria-expanded={stepsOpen} onClick={() => setStepsOpen((o) => !o)}>
+          <Icon name={ended?.outcome === "error" ? "x" : "check"} size={13} className="rsp-steps-mark" />
+          {[took >= 1000 ? `Worked for ${tookFor(took)}` : "Worked", stepCount ? `${stepCount} step${stepCount === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ")}
+          <Icon name="chevronDown" size={13} className="rsp-steps-chev" />
+        </button>
+      )}
+      {(!foldSteps || stepsOpen) && blocks.map((x, i) =>
         x.kind === "say" ? (
           <div key={x.key} className="rsp-say">
             <MessageResponse {...LIVE}>{x.note.trim()}</MessageResponse>
@@ -4305,7 +4328,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
         </div>
       )}
       {typing && typing !== "waiting" && <LiveStream sid={ctx.sid} lane={lane} {...(!runLog && since !== undefined ? { since } : {})} />}
-      {verdict && finalMsg && (
+      {verdict && finalMsg && !resulted && (
         <span className={`rsp-verdict ${verdict.tone}`} title={tests?.command ?? "No test command ran in this run"}>
           <Icon name={verdict.tone === "pass" ? "check" : verdict.tone === "fail" ? "x" : "help"} size={12} /> {verdict.text}
         </span>
@@ -4350,7 +4373,8 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
           {...(usedApart ? { actionsEnd: <span className="rsp-act-used">{shortTokens(used)} tokens</span> } : {})}
         >
           {/* With the card under it asking, the options are said there only: the prose keeps its lead-in (audit CODE-10 A). */}
-          <MessageResponse {...LIVE}>{asking ? askProse(finalMsg.body.text) : finalMsg.body.text}</MessageResponse>
+          {/* A run with nothing new answers NO_UPDATE (a check-in, an automation): said in words, not as the token. */}
+          <MessageResponse {...LIVE}>{asking ? askProse(finalMsg.body.text) : saysNoUpdate(finalMsg.body.text) ? "_Nothing new since the last run._" : finalMsg.body.text}</MessageResponse>
         </StreamingResponse>
       )}
       {finalMsg && reasonOpen && (
@@ -4388,7 +4412,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
             ))}
         </div>
       )}
-      {runLog}
+      {!foldSteps && runLog}
 
       {/* No reply to hang the actions on: they stand alone under the log. */}
       {!active && !finalMsg && item.ended && (nextActions || opinionBtn) && <div className="rsp-actions">{nextActions}{opinionBtn}</div>}
@@ -4488,7 +4512,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
         turnFiles.length > 0 &&
         !ctx.state.options.work && // A Work session's changes are its outputs, in the rail: no diff to review (Arun, 2026-10-26: "get rid of this for work").
         (
-        <div className="change-set">
+        <MateResult on={resulted} title={plainLine(item.ask?.text ?? "")} files={turnFiles} tests={tests} failing={stillFailing.length} branch={ctx.state.engines[lane]?.branch} page={finalMsg?.body.text.match(/https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?[^\s)>\]`'"]*/)?.[0]}>
           <ReviewCard
             files={turnFiles}
             tests={tests}
@@ -4512,12 +4536,77 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
             contended={contendedPaths(ctx.state, lane)}
             {...(ctx.onOpen ? { onReview: (path?: string) => (ctx.onOpen!("files"), path && showDiffSoon(path, [0, 350, 900, 1700])) } : {})}
           />
-        </div>
+        </MateResult>
       )}
       </div>
     </div>
   );
 });
+
+/**
+ * A teammate's finished work as a result (Arun, 2026-11-11, option 3A of the Crew overhaul, after Oh My Hermes' structured result):
+ * what it was asked, then Changed, Checked and Branch as facts in rows, with the whole review (the diff, keep or undo, a second
+ * look) a press away under "See the changes", and "Open the page" where its answer named one running here. Off a teammate's
+ * turn (`on` false), the review card as it always was.
+ */
+function MateResult({ on, title, files, tests, failing, branch, page, children }: { on: boolean; title: string; files: DiffFile[]; tests: TestRun | null; failing: number; branch?: string | undefined; page?: string | undefined; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  if (!on) return <div className="change-set">{children}</div>;
+  const add = files.reduce((n, f) => n + f.additions, 0);
+  const del = files.reduce((n, f) => n + f.deletions, 0);
+  const named = files.slice(0, 2).map((f) => f.path.split("/").pop() ?? f.path);
+  const checked = tests ? (tests.status === "pass" ? { tone: "ok", text: `${truncate(tests.command, 48)} passes` } : { tone: "bad", text: failedWords(tests).text }) : failing ? { tone: "bad", text: `${failing} command${failing === 1 ? "" : "s"} still failing` } : { tone: "none", text: "No tests or checks ran" };
+  return (
+    <section className="mr" aria-label="What it changed">
+      {title && <h3 className="mr-title">{title}</h3>}
+      <dl className="mr-facts">
+        <div>
+          <dt>Changed</dt>
+          <dd>
+            {files.length} file{files.length === 1 ? "" : "s"}:{" "}
+            {named.map((n, i) => (
+              <span key={n + i}>
+                {i > 0 && (i === named.length - 1 && files.length === named.length ? " and " : ", ")}
+                <code>{n}</code>
+              </span>
+            ))}
+            {files.length > named.length ? ` and ${files.length - named.length} more` : ""}
+            <span className="mr-num">
+              {" "}
+              +{add} −{del}
+            </span>
+          </dd>
+        </div>
+        <div>
+          <dt>Checked</dt>
+          <dd className={`mr-check ${checked.tone}`} title={tests?.command}>
+            {checked.tone !== "none" && <Icon name={checked.tone === "ok" ? "check" : "x"} size={13} />}
+            {checked.text}
+          </dd>
+        </div>
+        {branch && (
+          <div>
+            <dt>Branch</dt>
+            <dd>
+              <code>{branch}</code>
+            </dd>
+          </div>
+        )}
+      </dl>
+      <div className="mr-acts">
+        <button type="button" className="mp-btn" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+          {open ? "Hide the changes" : "See the changes"}
+        </button>
+        {page && (
+          <a className="mp-btn quiet mr-link" href={page} target="_blank" rel="noreferrer">
+            Open the page
+          </a>
+        )}
+      </div>
+      {open && <div className="change-set mr-review">{children}</div>}
+    </section>
+  );
+}
 
 /**
  * A coding tool out of usage, under the run it cut short: carry on here when the allowance comes back, set with one press
@@ -5756,6 +5845,7 @@ function ApprovalReceipt({ ask, said, ctx }: { ask: Ev<"engine.approval">; said:
       {what ? (
         <>
           {by} {yes ? "let" : "didn't let"} {agent} run {what}
+          {yes && said.body.approval?.task ? ", and commands like it for this task" : ""}
         </>
       ) : (
         <>
@@ -5795,14 +5885,18 @@ function PermissionCard({ ev, ctx }: { ev: Ev<"engine.approval">; ctx: Ctx }) {
   const [busy, setBusy] = useState(false);
   const said = waiting ? undefined : ctx.events.find((e): e is Ev<"instruction"> => e.body.type === "instruction" && e.body.approval?.id === b.id);
   if (said) return <ApprovalReceipt ask={ev} said={said} ctx={ctx} />;
-  const answer = async (approve: boolean) => {
+  const answer = async (approve: boolean, task = false) => {
     if (approve && hostWait) return;
     setBusy(true);
-    const text = approve ? (b.scope === "commands" ? "Yes, run it." : "Yes, go ahead.") : "No, don't.";
-    const r = await send(viaInstruct ? { type: "instruct", lane, text, approval: { id: b.id, approve }, quiet: true } : { type: "approval.answer", lane, id: b.id, approve, quiet: true });
+    const forTask = approve && task && b.scope === "commands";
+    const text = approve ? (b.scope === "commands" ? (forTask ? "Yes, run it, and commands like it for the rest of this task." : "Yes, run it.") : "Yes, go ahead.") : "No, don't.";
+    const r = await send(viaInstruct ? { type: "instruct", lane, text, approval: { id: b.id, approve, ...(forTask ? { task: true } : {}) }, quiet: true } : { type: "approval.answer", lane, id: b.id, approve, ...(forTask ? { task: true } : {}), quiet: true });
     setBusy(false);
     if (!r.ok) ctx.notify(r.error ?? "Couldn't send that. Check your connection and try again.");
   };
+  // A teammate asks in plain words (Arun, 2026-11-11, option 3A of the Crew overhaul, after Oh My Hermes): what it wants to do,
+  // what that means, the command, and Allow once, Allow for this task or Deny.
+  if (state.options.team) return <MatePermission ev={ev} ctx={ctx} who={who} waiting={waiting} may={may} hostWait={hostWait} busy={busy} answer={answer} />;
   return (
     <div
       className={cn("apv", !waiting && "done")}
@@ -5901,6 +5995,73 @@ function PermissionCard({ ev, ctx }: { ev: Ev<"engine.approval">; ctx: Ctx }) {
           </p>
         ))}
       </div>
+    </div>
+  );
+}
+
+/**
+ * A teammate's permission card (Arun, 2026-11-11, option 3A of the Crew overhaul): "Kit wants to publish a package to npm", what
+ * that means for you in a sentence, the command itself, and the answers: Allow once, Allow for this task (commands like it, until
+ * this run ends: projection taskAllow) and Deny. A for allow and D for deny while it has focus, as the session's card.
+ */
+function MatePermission({ ev, ctx, who, waiting, may, hostWait, busy, answer }: { ev: Ev<"engine.approval">; ctx: Ctx; who: string; waiting: boolean; may: boolean; hostWait: string | null; busy: boolean; answer: (approve: boolean, task?: boolean) => Promise<void> }) {
+  const b = ev.body;
+  const lane = ev.lane ?? MAIN_LANE;
+  const words = b.scope === "commands" ? plainRisk(b.items) : { does: b.live ? "go on with what it's doing" : "change files and run commands for this turn", risk: b.live ? "" : `${b.tool ? ENGINE_NAMES[b.tool] : "Its coding tool"} can't ask about one thing at a time, so a yes lets it try the whole turn again with permission.`, careful: true, named: false };
+  // A go-ahead (guardrails.ts) says its own reason in plain words ("Publishes a release."): said, unless the command is one these
+  // words name better. A tool's own reason only when it says more than the kind does.
+  const guardWhy = b.guard && b.why ? b.why.replace(/^[^:]+:\s*/, "") : "";
+  const why = b.guard ? (words.named ? "" : guardWhy) : b.why && !words.named && !(b.scope === "commands" && restatesKind(b.why, b.items)) ? b.why : "";
+  const careful = words.careful || !!b.guard;
+  return (
+    <div
+      className={cn("mp", careful && "careful", !waiting && "done")}
+      data-needs={waiting && may ? lane : undefined}
+      role="group"
+      aria-label={`${who} wants to ${words.does}`}
+      tabIndex={waiting && may ? 0 : -1}
+      onKeyDown={(e) => {
+        if (!waiting || !may || busy || e.target !== e.currentTarget) return;
+        if (e.key === "a" || e.key === "A") (e.preventDefault(), void answer(true));
+        else if (e.key === "d" || e.key === "D") (e.preventDefault(), void answer(false));
+      }}
+    >
+      <div className="mp-head">
+        <ShieldIcon className="mp-icon" aria-hidden />
+        <b>
+          {who} wants to {words.does}
+        </b>
+      </div>
+      {(words.risk || why) && <p className="mp-risk">{b.guard && !words.named ? why : [words.risk, why].filter(Boolean).join(" ")}</p>}
+      {b.items.length > 0 && (
+        <div className="mp-cmds">
+          {b.items.map((i) => (
+            <code key={i}>{i}</code>
+          ))}
+        </div>
+      )}
+      {waiting &&
+        (may && !hostWait ? (
+          <div className="mp-acts">
+            <button type="button" className="mp-btn primary" disabled={busy} aria-keyshortcuts="A" title="Let it run this once (A)" onClick={() => void answer(true)}>
+              Allow once
+            </button>
+            {b.scope === "commands" && (
+              <button type="button" className="mp-btn" disabled={busy} title={`Let ${who} run commands like this without asking until this task is done`} onClick={() => void answer(true, true)}>
+                Allow for this task
+              </button>
+            )}
+            <button type="button" className="mp-btn quiet" disabled={busy} aria-keyshortcuts="D" title="Don't run it (D)" onClick={() => void answer(false)}>
+              Deny
+            </button>
+            <span className="mp-wait">
+              {who} waits here
+              <WaitedFor since={ev.ts} />
+            </span>
+          </div>
+        ) : (
+          <p className="mp-wait solo">Waiting for {hostWait ?? ctx.state.laneDrivers[lane]?.name ?? ctx.state.driver?.name ?? "whoever is driving"} to answer.</p>
+        ))}
     </div>
   );
 }

@@ -1,0 +1,69 @@
+/* The Agents page (AgentsPage.tsx): one column, what needs you on top, then the crew as rows, the rooms, and today's results.
+   Hairlines over boxes; the needs strip is the one tinted surface, amber, as needs-you is everywhere. */
+.ap { height: 100%; overflow-y: auto; display: flex; flex-direction: column; }
+.ap-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 0 22px; border-bottom: 1px solid var(--border); background: var(--bg); }
+.ap-head h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
+.ap-count { font-size: 13px; color: var(--text-muted); }
+.ap-head-acts { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.ap-body { width: min(880px, 100%); margin: 0 auto; padding: 22px 22px 48px; display: flex; flex-direction: column; gap: 24px; }
+.ap-label { margin: 0 0 6px; font-size: 12px; font-weight: 500; color: var(--text-muted); }
+
+.ap-btn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border: 1px solid var(--border-strong); border-radius: 8px; background: transparent; color: var(--ink); font: inherit; font-size: 13px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: background-color 120ms var(--ease-out, ease); }
+.ap-btn:hover { background: var(--hover); }
+.ap-btn:disabled { opacity: .55; cursor: default; }
+.ap-btn svg { width: 14px; height: 14px; }
+.ap-btn.ap-quiet { border-color: transparent; color: var(--ink-2); }
+.ap-btn.ap-quiet:hover { color: var(--ink); }
+.ap-btn.ap-primary { border-color: var(--ink); background: var(--ink); color: var(--bg); }
+.ap-btn.ap-primary:hover { opacity: .9; background: var(--ink); }
+.ap-btn:focus-visible, .ap-row-main:focus-visible, .ap-room:focus-visible, .ap-needs-step:focus-visible { outline: 2px solid var(--border-focus, var(--ink)); outline-offset: 2px; }
+
+/* What needs you: one at a time, answered here; ⌘J steps through. */
+.ap-needs { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--amber) 45%, var(--border)); border-radius: 12px; background: color-mix(in srgb, var(--amber) 9%, var(--bg)); }
+.ap-needs-text { flex: 1; min-width: 0; }
+.ap-needs-line { font-size: 13.5px; line-height: 1.45; color: var(--ink); overflow-wrap: anywhere; }
+.ap-needs-why { margin-top: 2px; font-size: 12px; line-height: 1.45; color: var(--ink-2); }
+.ap-needs-why.ap-err { color: var(--red); }
+.ap-needs-acts { display: flex; align-items: center; gap: 6px; flex: none; }
+.ap-needs-step { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 0 0 0 10px; border: 0; border-left: 1px solid var(--border-strong); background: none; font: inherit; font-size: 12px; color: var(--text-muted); white-space: nowrap; cursor: pointer; }
+.ap-needs-step kbd { font: 500 11px ui-monospace, Menlo, monospace; padding: 0 5px; border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: 5px; }
+
+/* The crew: one row each, its face, name and role, what it is doing now, how long ago, and Message. */
+.ap-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.ap-row { display: flex; align-items: center; gap: 8px; padding-right: 12px; }
+.ap-row + .ap-row { border-top: 1px solid var(--border); }
+.ap-row:hover { background: var(--hover); }
+.ap-row-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 12px 6px 12px 14px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.ap-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ap-row-name { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--ink); }
+.ap-row-name b { font-weight: 600; }
+.ap-chip { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 6px; background: var(--hover-strong); color: var(--ink-2); font-size: 12px; white-space: nowrap; }
+.ap-row-line { font-size: 12.5px; line-height: 1.4; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ap-row-line.s-working, .ap-row-line.s-limited { color: var(--ink-2); }
+.ap-row-line.s-waiting, .ap-row-line.s-needs { color: var(--amber); }
+.ap-row-line.s-stopped, .ap-row-line.s-failed { color: var(--red); }
+.ap-when { flex: none; font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+/* Rooms: the Crew room and the project rooms, then a new one. */
+.ap-rooms { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.ap-room { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.ap-room:hover { background: var(--hover); }
+.ap-room-text { display: flex; flex-direction: column; min-width: 0; font-size: 13.5px; }
+.ap-room-text b { font-weight: 600; color: var(--ink); }
+.ap-room-text span { font-size: 12px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ap-room-new { justify-content: flex-start; gap: 8px; border-style: dashed; border-color: var(--border-strong); color: var(--text-muted); font-size: 13px; }
+
+/* What finished today. */
+.ap-done { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.ap-done li { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 2px; font-size: 13px; }
+.ap-done-title { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.ap-done-meta { flex: none; font-size: 12px; color: var(--text-muted); }
+.ap-done-check { margin-left: auto; flex: none; color: var(--green); }
+
+@media (max-width: 720px) {
+  .ap-needs { flex-wrap: wrap; }
+  .ap-needs-acts { width: 100%; justify-content: flex-end; }
+  .ap-row-msg, .ap-when { display: none; }
+  .ap-head { padding: 0 16px; }
+  .ap-body { padding: 18px 16px 40px; }
+}

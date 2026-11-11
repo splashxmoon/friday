@@ -106,12 +106,12 @@ import { findWork, listWork, namedIn, pathParam, serveWork, shownFile, siteIcon,
 import { FRAME_TTL_MS, frameDir, inFrame, signFrame, verifyFrame } from "./work-frame.js";
 import type { PeerNote } from "./types.js";
 import { ago as agoOf, LocalPeers, LOOK_AT as SESSIONS_LOOKED_AT, MODE_RANK, newId, placeOf as placeOfSession, scheduleOf } from "./app-tools.js";
-import { backAt, backupText, offBackup, onBackup, backupOf, checkInDue, checkInText, quietCheckIns, type CheckIn, cleanRoom, cleanTeammate, MEMORY_FILE, MEMORY_MAX, defaultFolder, makeFolder, MAX_ROOMS, MAX_TEAMMATES, projectsOf, roomKeep, runsOnName, teammateNote, TeammateStore, worktreeHolding, type Room, type Teammate, type TeammateView } from "./teammates.js";
+import { backAt, backupText, offBackup, onBackup, backupOf, checkInDue, checkInText, quietCheckIns, type CheckIn, cleanRoom, cleanTeammate, MEMORY_FILE, MEMORY_MAX, memoryText, defaultFolder, makeFolder, MAX_ROOMS, MAX_TEAMMATES, projectsOf, roomKeep, runsOnName, teammateNote, TeammateStore, worktreeHolding, type Room, type Teammate, type TeammateView } from "./teammates.js";
 import { limitHit, planLimitHit } from "./limit-reset.js";
 import { RESUME_NUDGE } from "./limit-handoff.js";
 import { noteRunEnd } from "./limited.js";
 import { heldByPerson, runnableQueue } from "./held.js";
-import { hopBehind } from "./agent-mesh.js";
+import { hopBehind, mergeOrder, taskBranch } from "./agent-mesh.js";
 import { mkdir as mkdirAt, open as openAt, rename as renameAt, writeFile as writeFileAt } from "node:fs/promises";
 import { ownModelId } from "./own-model-id.js";
 import { handoffBrief } from "./handoff.js";
@@ -121,7 +121,8 @@ import { distinctLook } from "./teammate-look.js";
 import { budgetPatch, cleanRunBudget, CrewBudget, runOver, type RunBudget } from "./team-budget.js";
 import { movedSince, NUDGE_GAP_MS, QUIET_MS, saysGoalReached, selfRunAnswer, selfRunNote, selfRunNudge, STALL_NUDGES, leadSaid } from "./team-selfrun.js";
 import { awayAnswer, awayNote, briefLine, briefWorthPosting, clockOf, endsOnQuestion, roomNews, runsIn, teamBrief as awayBrief, usageOf, type LaneRun, type Place } from "./team-away.js";
-import { boardBusy } from "./session/projection.js";
+import { boardBusy, verifiedAt } from "./session/projection.js";
+import { saysNoUpdate } from "./teammate-checkins.js";
 import type { MateNote } from "./engine/hub.js";
 import type { MateRun, TeamAway } from "./teammates.js";
 import type { TeamBrief } from "./types.js";
@@ -1829,6 +1830,8 @@ export async function createApp(o: AppOptions) {
     copies.set(t.id, copy);
     return copy;
   };
+  /** Why each teammate's coding tool last failed to start here, by id, until it starts (Crew overhaul, 2026-11-11). */
+  const startFailed = new Map<string, string>();
   const startTeammate = async (sid: string, owner: { id: string; name: string }, t: Teammate, more: Record<string, unknown> = {}, at?: { lane: string; keepAs: string }) => {
     const tool = t.tool === "friday" ? undefined : t.tool;
     const copy = await copyFor((await teammates!.team()) ?? sid, t).catch(() => null);
@@ -1872,7 +1875,15 @@ export async function createApp(o: AppOptions) {
       teammateStarts.push(params);
       if (params.tool) return { lane: params.lane };
     }
-    return (await callHost("start", params, hostCtx(owner))) as { lane: string };
+    try {
+      const started = (await callHost("start", params, hostCtx(owner))) as { lane: string };
+      startFailed.delete(t.id);
+      return started;
+    } catch (e) {
+      // Why it couldn't start, for its row (teammateViews): "Codex isn't signed in on this computer", not a bare Offline.
+      startFailed.set(t.id, (e as Error).message ?? "");
+      throw e;
+    }
   };
   /** The person's own models on this computer (Settings › Your models, runner/own-models.ts), as its runner lists them; null when it can't say. */
   const ownModelsHere = (owner: { id: string; name: string }) =>
@@ -1953,6 +1964,8 @@ export async function createApp(o: AppOptions) {
         const name = paired?.has(on) ? await computerName(on) : null;
         problems.set(t.id, name ? `${name} isn't connected. It carries on once that computer links again.` : "Its computer was removed. It comes back if that computer is added again, or pick this computer under Runs on.");
       }
+    // One whose coding tool failed to start here: why, in words a person can act on.
+    for (const t of list) if (!problems.get(t.id) && startFailed.get(t.id) !== undefined) problems.set(t.id, startWhy(t, startFailed.get(t.id)!));
     const views = await teamLooks.mates(places, list, new Map([...problems].filter(([, why]) => !!why)));
     // Held for its budget or hours: why, and when it carries on (its status line).
     return Promise.all(views.map(async (v) => ((hold) => (hold ? { ...v, hold } : v))(await crewBudget.hold(v, places.flatMap((p) => (p.lanes[v.id] ? [{ sid: p.sid, lane: p.lanes[v.id]! }] : []))))));
@@ -2433,13 +2446,19 @@ export async function createApp(o: AppOptions) {
         if (tries < ERROR_RETRIES.length) await scheduleTeamResume(sid, lane, Date.now() + ERROR_RETRIES[tries]! * 60_000 * (teammateDry.retryMs !== undefined ? teammateDry.retryMs / 60_000 : 1));
         return;
       }
+      await answerAway(sid, lane, end, state, events, a.until);
+    };
+    /**
+     * A teammate whose turn ended on a question while the person is away is told to decide for itself (team-away.ts awayAnswer), once
+     * for each question: claimed by the turn's end, so a second process, the Away clock or a repeat call doesn't answer it again.
+     */
+    const answerAway = async (sid: string, lane: string, end: SessionEvent, state: SessionState, events: readonly SessionEvent[], until: number) => {
       const start = events.findLast((e) => e.seq < end.seq && (e.lane ?? MAIN_LANE) === lane && e.body.type === "run.started");
       const said = events.findLast((e) => e.seq > (start?.seq ?? 0) && e.seq < end.seq && (e.lane ?? MAIN_LANE) === lane && e.body.type === "agent.message" && !!e.body.text.trim());
       const asked = !!state.openQuestions[lane] || !!state.asks[lane] || (said?.body.type === "agent.message" && endsOnQuestion(said.body.text));
       if (!asked) return;
-      // Once for each question: claimed by the turn's end, so a second process or a repeat call doesn't answer it again.
       if (!(await redis.set(`${o.prefix}away-answered:${sid}:${lane}:${end.seq}`, "1", "EX", 86_400, "NX"))) return;
-      await tellTeammate(sid, lane, awayAnswer(a.until), { hop: 1 });
+      await tellTeammate(sid, lane, awayAnswer(until), { hop: 1 });
     };
 
     /**
@@ -2614,13 +2633,99 @@ export async function createApp(o: AppOptions) {
       const settled = !now.board || now.board.tasks.every((t) => t.status === "done" || t.status === "cancelled");
       if (a && settled && (await redis.set(`${o.prefix}away-brief:${sid}:${a.since}:${now.board ? `b${now.board.seq}` : `g${goal?.seq ?? 0}`}`, "1", "EX", 86_400, "NX")))
         void postBrief(a.since, Date.now()).catch((e) => closingOr("[teammates] brief", e));
-      const land = `${branches.length ? `merge your teammates' branches (${branches.map((c) => c.branch).join(", ")}) into one branch for this goal in ${branches[0]!.repo}, ` : ""}run the full tests and fix what fails, then open one pull request with gh pr create for the person to review. Don't merge it, push to the default branch or deploy.`;
+      // The board's tasks, each on its own branch (prepareTask): merged in the order they build on each other, with how each one's
+      // checks went, as Oh My Hermes' fanout lands its units (Arun, 2026-11-11). Otherwise the teammates' own branches.
+      const tasked = now.board ? mergeOrder(now.board.tasks.filter((t) => t.branch && t.status === "done")) : [];
+      // Verified only where its checks passed on the commit its branch is at now: anything since was never checked.
+      const tips = new Map(await Promise.all(tasked.map(async (t) => [t.id, (await git(branches[0]?.repo ?? repo ?? "", ["rev-parse", "--verify", "--quiet", `refs/heads/${t.branch}`]).catch(() => "")).trim()] as const)));
+      const checkWord = (t: (typeof tasked)[number]) => {
+        const v = verifiedAt(t);
+        if (v && tips.get(t.id) === v) return `verified at ${v.slice(0, 7)}`;
+        if (v || t.checks?.stale) return "NOT verified: committed on since its checks passed";
+        return t.checks?.ok === false ? "NOT verified: its checks failed" : t.checks?.dirty ? "NOT verified: checked with uncommitted work" : t.checks?.ok ? "NOT verified: commit unknown" : "NOT verified: no checks ran";
+      };
+      const merge = tasked.length
+        ? `merge the task branches into one branch for this goal in ${branches[0]?.repo ?? "the repo"}, one at a time in this order, so each lands on what it builds on: ${tasked.map((t, i) => `${i + 1}. ${t.branch} ("${t.title}", ${checkWord(t)})`).join("; ")}. A branch that isn't verified: run its checks on it and get them passing before you merge it. If one doesn't merge cleanly, fix it on that branch first. `
+        : branches.length
+          ? `merge your teammates' branches (${branches.map((c) => c.branch).join(", ")}) into one branch for this goal in ${branches[0]!.repo}, `
+          : "";
+      const land = `${merge}run the full tests and fix what fails, then open one pull request with gh pr create for the person to review. Don't merge it, push to the default branch or deploy.`;
+      if (!a && !tasked.length && !branches.length) return null;
       if (!a) return `[Friday] Land the work: ${land}`;
       return [
         `[Friday] The person is away until ${clockOf(a.until)}.${goal?.body.type === "instruction" ? ` The goal they gave you: "${goal.body.text.trim().slice(0, 1500)}"` : ""}`,
         `Land it now: ${land}`,
         "Then end with the morning brief, in a few lines: what got done, the pull request, what you assumed, what is blocked, and what needs the person.",
       ].join("\n\n");
+    };
+
+    /**
+     * A board task's own branch in its teammate's copy of the repo (agent-mesh prepareTask; Arun, 2026-11-11: "add worktree per task
+     * like OMH fanout"). Each teammate keeps one copy (copyFor), so its coding tool keeps its conversation, ports and database; each
+     * task gets a branch of its own there, cut from where the board started, with what it waits on merged in. What the teammate
+     * left on its last task is committed on that task's branch first, never lost. A task handed on mid-way takes its branch along:
+     * the copy that had it lets go, and the new one checks it out. Nothing is merged into the repo: the lead lands the branches in
+     * order (teamDone). Any git step failing leaves the teammate where it was, with nothing said.
+     */
+    const boardBases = new Map<string, string>();
+    const keepLeftover = async (dir: string, why: string) => {
+      if (!(await git(dir, ["status", "--porcelain"]).catch(() => "")).trim()) return;
+      await git(dir, ["add", "-A"]);
+      // Its own name where git has none set (a fresh Mac), rather than the commit failing.
+      await git(dir, ["commit", "-q", "--no-verify", "-m", why]).catch(() => git(dir, ["-c", "user.name=Friday", "-c", "user.email=friday@localhost", "commit", "-q", "--no-verify", "-m", why]));
+    };
+    mesh.prepareTask = async (sid, lane, task, board, idle) => {
+      const place = await placeOf(sid, lane).catch(() => null);
+      const t = place && (await teammates.list()).find((x) => x.id === place.id);
+      if (!t) return null;
+      const copy = copies.get(t.id) ?? (await copyFor((await teammates.team()) ?? sid, t).catch(() => null));
+      if (!copy) return null;
+      const top = (await git(copy.repo, ["rev-parse", "--show-toplevel"]).catch(() => "")).trim();
+      if (!top) return null;
+      const key = `${sid}:${board.seq}`;
+      const base = boardBases.get(key) ?? (await git(top, ["rev-parse", "HEAD"]).catch(() => "")).trim();
+      if (!base) return null;
+      boardBases.set(key, base);
+      const branch = taskBranch(sid, board.seq, task.id);
+      const short = base.slice(0, 7);
+      const has = async (b: string) => !!(await git(top, ["rev-parse", "--verify", "--quiet", `refs/heads/${b}`]).catch(() => "")).trim();
+      const exists = await has(branch);
+      const after = (await Promise.all(task.after.map(async (a) => ((await has(taskBranch(sid, board.seq, a))) ? taskBranch(sid, board.seq, a) : "")))).filter(Boolean);
+      const rules = "Commit your work on it as you go. The lead merges the task branches in order when the board is done; nothing merges by itself.";
+      // Working on something else now: told to switch when it starts this, rather than its folder moving under it.
+      if (!idle)
+        return { branch, line: `[Friday] This task has a branch of its own. When you start it, commit what's left of what you're on, then \`git switch ${exists ? branch : `-c ${branch} ${short}`}\`${!exists && after.length ? ` and merge ${after.join(", ")} into it` : ""}. ${rules}` };
+      try {
+        const now = (await git(copy.path, ["branch", "--show-current"]).catch(() => "")).trim();
+        if (now === branch) return { branch, line: `[Friday] You're on this task's own branch, ${branch}. ${rules}` };
+        await keepLeftover(copy.path, `Work in progress, kept by Friday before ${t.name} took "${task.title}"`);
+        const merged: string[] = [];
+        const unmerged: string[] = [];
+        if (exists) {
+          // Handed on: whoever had it lets go of it (its work kept on it), so it can be checked out here.
+          const held = worktreeHolding(await git(top, ["worktree", "list", "--porcelain"]).catch(() => ""), branch);
+          if (held && path.resolve(held) !== path.resolve(copy.path)) {
+            await keepLeftover(held, `Work in progress on "${task.title}", kept by Friday as it went to ${t.name}`);
+            await git(held, ["switch", "-q", "--detach"]);
+          }
+          await git(copy.path, ["switch", "-q", branch]);
+        } else {
+          await git(copy.path, ["switch", "-q", "-c", branch, base]);
+          for (const b of after) {
+            const ok = await git(copy.path, ["merge", "-q", "--no-edit", b]).then(() => true, () => false);
+            if (ok) merged.push(b);
+            else (await git(copy.path, ["merge", "--abort"]).catch(() => ""), unmerged.push(b));
+          }
+        }
+        await store.append(sid, FRIDAY, { type: "folder.switched", branch, from: now, noticed: true }, { lane }).catch(() => undefined);
+        const said = exists
+          ? `[Friday] You're on this task's own branch, ${branch}, with the work already done on it.`
+          : `[Friday] You're on this task's own branch, ${branch}, cut from ${short}, where the board started${merged.length ? `, with ${merged.join(" and ")} merged in so you build on ${merged.length === 1 ? "it" : "them"}` : ""}.`;
+        return { branch, line: `${said}${unmerged.length ? ` ${unmerged.join(" and ")} didn't merge in cleanly: merge ${unmerged.length === 1 ? "it" : "them"} yourself first.` : ""} ${rules}` };
+      } catch (e) {
+        console.error(`[teammates] ${t.name}'s branch for "${task.title}": ${(e as Error).message}`);
+        return null;
+      }
     };
 
     /** Away mode's own clock, every 20 seconds: over at its time, approvals not left waiting all night, nothing stranded. */
@@ -2641,6 +2746,13 @@ export async function createApp(o: AppOptions) {
             // As Friday, not the person: the person answering is them back, and this isn't them (it would end away mode).
             const r = await store.append(p.sid, FRIDAY_SAYS, { type: "instruction", text: `[Friday] The person is away until ${clockOf(a.until)} and can't approve that, so it was declined. Do what you can without it, decide the rest yourself (the safest reasonable option), record what you chose with write_note under a key starting "assumption", and carry on.`, interrupt: false, approval: { id: ask.id, approve: false }, hop: 1 }, { lane });
             if (r.ok) void bus.wake(p.sid, lane);
+          }
+          // A question asked before Away began waits on nobody either (2026-11-11 audit): an idle teammate whose last turn ended on
+          // one is told to decide for itself, as one asked while away is (answerAway, once per question).
+          for (const lane of Object.values(p.lanes)) {
+            if (state.approvals[lane] || runOf(state, lane).status === "running" || pendingFor(state, lane).length) continue;
+            const end = events.findLast((e) => (e.lane ?? MAIN_LANE) === lane && e.body.type === "run.ended");
+            if (end?.body.type === "run.ended" && !end.body.cut && end.body.outcome !== "error") await answerAway(p.sid, lane, end, state, events, a.until).catch(() => undefined);
           }
         }
       }
@@ -2985,8 +3097,9 @@ export async function createApp(o: AppOptions) {
     );
     for (const t of teamTimers) t.unref?.();
     // Their notes: who each is, its role and the team, read fresh for every turn (EngineHub.withAgent).
-    // A teammate's memory (teammates.ts MEMORY_FILE), its first page, read fresh each turn: nothing when there is none yet.
-    const memoryOf = (t: Teammate) => readFile(path.join(t.folder, MEMORY_FILE), "utf8").then((m) => m.slice(0, MEMORY_MAX), () => "");
+    // A teammate's memory (teammates.ts MEMORY_FILE), read fresh each turn: up to a page, past that its newest page and a word to
+    // tidy it (memoryText); nothing when there is none yet.
+    const memoryOf = (t: Teammate) => readFile(path.join(t.folder, MEMORY_FILE), "utf8").then(memoryText, () => "");
     /**
      * Back on its own tool, what it did on its backup meanwhile (runBack), with the first turn there since: its own tool's
      * conversation never saw it. Nothing once a turn has started there.
@@ -3404,8 +3517,11 @@ export async function createApp(o: AppOptions) {
       if (mine && outcome !== "waiting") {
         const { ws, id, run } = JSON.parse(mine) as { ws: string; id: string; run: string };
         const a = await automations.get(ws, id);
-        const done = await automations.updateRun(ws, id, run, { status: outcome === "done" ? "done" : "failed", ended: Date.now(), ...(error ? { note: error.slice(0, 300) } : {}) });
-        void a; void done; // Nobody to message here: the run shows on the Automations page.
+        // Nothing new (it answered NO_UPDATE): a quiet run, and nobody told (automations.ts promptFor).
+        const said = outcome === "done" ? (await store.events(sid)).findLast((e) => (e.lane ?? MAIN_LANE) === MAIN_LANE && e.body.type === "agent.message" && !!e.body.text.trim()) : undefined;
+        const quiet = said?.body.type === "agent.message" && saysNoUpdate(said.body.text);
+        const done = await automations.updateRun(ws, id, run, { status: quiet ? "quiet" : outcome === "done" ? "done" : "failed", ended: Date.now(), ...(quiet ? { note: "Nothing new" } : error ? { note: error.slice(0, 300) } : {}) });
+        void a; void done; void quiet; // Nobody to message here: the run shows on the Automations page.
       }
       for (const entry of await redis.smembers(automations.watchKey(sid))) {
         const [ws, id] = entry.split(" ");
@@ -4139,11 +4255,11 @@ export async function createApp(o: AppOptions) {
       if (!inv || inv.sid !== sid) return json(res, 403, { error: "Invalid invite for this session" });
       const user = await identity(req);
       if (!user) return json(res, 401, { error: "Missing user identity" });
-      const body = (await readJson(req)) as { lane?: unknown; id?: unknown; approve?: unknown };
+      const body = (await readJson(req)) as { lane?: unknown; id?: unknown; approve?: unknown; task?: unknown };
       const approve = body.approve === true;
       const lane = str(body.lane, 80) || MAIN_LANE;
       // An answer, not an instruction: writing to the lane would hand the wheel to whoever answered when nobody was driving.
-      const r = await core.handle(sid, { id: user.id, name: user.name }, { type: "approval.answer", lane, id: str(body.id, 80), approve });
+      const r = await core.handle(sid, { id: user.id, name: user.name }, { type: "approval.answer", lane, id: str(body.id, 80), approve, ...(approve && body.task === true ? { task: true } : {}) });
       return r.ok ? json(res, 201, { seq: r.seq }) : json(res, 400, { error: r.error ?? "Could not send that." });
     }
 
@@ -6838,3 +6954,15 @@ function auditLine(e: SessionEvent): string {
 
 
 
+
+/**
+ * Why a teammate's coding tool didn't start, said for its row (Crew overhaul, 2026-11-11: the Starter crew on a tool that wasn't
+ * signed in read "Offline · their coding tool isn't running" for good): signed out, not installed, or the tool's own words.
+ */
+export function startWhy(t: Pick<Teammate, "tool">, error: string): string {
+  const name = t.tool === "friday" ? "Its model" : ENGINE_NAMES[t.tool];
+  if (/not (?:logged|signed) in|log ?in|sign ?in|unauthori[sz]ed|authenticat/i.test(error)) return `${name} isn't signed in on this computer. Sign in from Settings › Coding tools.`;
+  if (/not installed|isn't installed|ENOENT|command not found|not found/i.test(error)) return `${name} isn't installed on this computer. Install it from Settings › Coding tools.`;
+  const said = error.replace(/\s+/g, " ").trim().slice(0, 140);
+  return said ? `${name} didn't start: ${said}` : `${name} didn't start.`;
+}

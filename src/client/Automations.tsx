@@ -144,8 +144,9 @@ const LOCAL_TEMPLATES: typeof TEMPLATES = [
 ];
 const templates = () => (isLocal() ? [...TEMPLATES.filter((t) => t.make().when?.kind !== "webhook"), ...LOCAL_TEMPLATES] : TEMPLATES);
 
-const runMark = (s: AutomationRun["status"]): TaskMarkState => (s === "running" || s === "starting" ? "working" : s === "done" ? "done" : s === "failed" ? "blocked" : "open");
-const RUN_WORD: Record<AutomationRun["status"], string> = { starting: "Starting", running: "Running", done: "Done", failed: "Failed", waiting: "Waiting for your computer", skipped: "Skipped" };
+const runMark = (s: AutomationRun["status"]): TaskMarkState => (s === "running" || s === "starting" ? "working" : s === "done" || s === "quiet" ? "done" : s === "failed" ? "blocked" : "open");
+// A quiet run had nothing new to say, and nobody was told (automations.ts).
+const RUN_WORD: Record<AutomationRun["status"], string> = { starting: "Starting", running: "Running", done: "Done", failed: "Failed", waiting: "Waiting for your computer", skipped: "Skipped", quiet: "Nothing new" };
 const MODE_WORD: Record<EngineMode, string> = { full: "Full access", edits: "Edits, asks first for commands", plan: "Plan only, changes nothing" };
 
 function toDraft(a: View): Draft {

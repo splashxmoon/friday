@@ -1,0 +1,44 @@
+/* Setting up a crew (CrewSetup.tsx): one sentence, the suggested teammates as cards, and the coding tool they start on. */
+.cs { height: 100%; overflow-y: auto; }
+.cs-body { width: min(780px, 100%); margin: 0 auto; padding: 64px 22px 48px; display: flex; flex-direction: column; }
+.cs-body h1 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -.015em; text-wrap: balance; }
+.cs-lead { margin: 6px 0 0; font-size: 14px; color: var(--ink-2); }
+.cs-box { margin-top: 22px; padding: 12px 14px 10px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--card); }
+.cs-box textarea { width: 100%; min-height: 48px; resize: none; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: 15px; line-height: 1.5; }
+.cs-box textarea::placeholder { color: var(--text-muted); }
+.cs-box:focus-within { border-color: var(--border-focus, var(--ink-2)); }
+.cs-starts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.cs-start { height: 26px; padding: 0 9px; border: 0; border-radius: 7px; background: var(--hover-strong); color: var(--ink-2); font: inherit; font-size: 12.5px; cursor: pointer; }
+.cs-start:hover { color: var(--ink); }
+.cs-label { margin: 26px 0 8px; font-size: 12px; font-weight: 500; color: var(--text-muted); }
+.cs-cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.cs-card { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
+.cs-card-top { display: flex; align-items: center; gap: 10px; }
+.cs-card-id { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 0; flex: 1; }
+.cs-card-id b { font-size: 14px; font-weight: 600; color: var(--ink); }
+.cs-chip { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 6px; background: var(--hover-strong); color: var(--ink-2); font-size: 12px; }
+.cs-card-acts { display: flex; gap: 2px; align-self: flex-start; }
+.cs-icon { display: grid; place-items: center; width: 26px; height: 26px; border: 0; border-radius: 7px; background: none; color: var(--text-muted); cursor: pointer; }
+.cs-icon:hover { background: var(--hover); color: var(--ink); }
+.cs-icon svg { width: 14px; height: 14px; }
+.cs-role { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+.cs-name-input, .cs-role-input { width: 100%; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--bg); color: var(--ink); font: inherit; outline: 0; }
+.cs-name-input { height: 26px; padding: 0 7px; font-size: 13.5px; font-weight: 600; }
+.cs-role-input { padding: 7px 8px; font-size: 12.5px; line-height: 1.5; resize: vertical; }
+.cs-name-input:focus, .cs-role-input:focus { border-color: var(--border-focus, var(--ink-2)); }
+.cs-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--border); }
+.cs-tool { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink); min-width: 0; }
+.cs-muted { color: var(--text-muted); }
+.cs-warn { color: var(--amber); font-size: 13px; }
+.cs-change { margin-left: 4px; }
+.cs-foot-acts { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.cs-btn { height: 32px; padding: 0 14px; border: 1px solid var(--border-strong); border-radius: 8px; background: transparent; color: var(--ink); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; }
+.cs-btn:hover { background: var(--hover); }
+.cs-btn:disabled { opacity: .5; cursor: default; }
+.cs-quiet { border-color: transparent; color: var(--ink-2); }
+.cs-primary { border-color: var(--ink); background: var(--ink); color: var(--bg); }
+.cs-primary:hover { background: var(--ink); opacity: .9; }
+.cs-btn:focus-visible, .cs-start:focus-visible, .cs-icon:focus-visible { outline: 2px solid var(--border-focus, var(--ink)); outline-offset: 2px; }
+.cs-err { margin: 12px 0 0; font-size: 13px; color: var(--red); }
+.cs-note { margin: 12px 0 0; font-size: 12px; color: var(--text-muted); }
+@media (max-width: 640px) { .cs-body { padding: 32px 16px 40px; } .cs-foot-acts { margin-left: 0; width: 100%; justify-content: flex-end; } }

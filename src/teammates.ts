@@ -227,6 +227,19 @@ export const MEMORY_FILE = "MEMORY.md";
 /** How much of it is read into the note: its first page or so. */
 export const MEMORY_MAX = 6000;
 
+/**
+ * A teammate's memory as it is read into its turns: all of it up to a page; past that its newest page, from a line's start, with a
+ * word to tidy it (2026-11-11 audit: its first page was read, so what it learned most recently was what it never saw, and nobody
+ * was told). Coding tools append to the file with their own tools, so the end is the newest.
+ */
+export function memoryText(m: string): string {
+  if (m.length <= MEMORY_MAX) return m;
+  const note = `[Friday] Your memory (${MEMORY_FILE}) is ${m.length.toLocaleString("en-US")} characters, over a page, so only its newest part is here. Tidy it: merge what repeats, drop what's stale, keep it under a page.\n\n`;
+  const tail = m.slice(-(MEMORY_MAX - note.length));
+  const cut = tail.indexOf("\n");
+  return note + (cut >= 0 && cut < 400 ? tail.slice(cut + 1) : tail);
+}
+
 /** A session runs up to twelve lanes beside its main one (SESSION_LANES): the team's size. */
 export const MAX_TEAMMATES = 12;
 

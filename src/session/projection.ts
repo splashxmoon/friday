@@ -152,6 +152,12 @@ export interface SessionState {
   /** What each lane has asked permission for and not yet been answered: an instruction in that lane, with or without an answer, ends the wait. */
   /** What each lane's agent is asking permission for. `live`: asked mid-turn, the tool waiting on the answer there and then. */
   approvals: Record<string, { id: string; seq: number; tool?: EngineTool; scope: "commands" | "turn"; items: string[]; live?: boolean; hostsOwn?: boolean }>;
+  /**
+   * Commands let through for the rest of a lane's run ("Allow for this task" on a teammate's permission card), as allow-list
+   * entries (alwaysAllowEntry): the hub answers a request matching one by itself, as for the session's allow list. Gone when
+   * the run ends, other than to wait on a person.
+   */
+  taskAllow?: Record<string, string[]>;
   /** Instructions sent but not yet delivered into the agent's context. */
   pendingInstructions: number[];
   /** Instructions taken back while they were still queued. */
@@ -281,13 +287,19 @@ export interface BoardTask extends BoardTaskDef {
   /** Times it went back to its agent after a review or its checks found something. */
   rounds: number;
   /** Its checks: running now (`running`), or how they went last. */
-  checks?: { command: string; running?: boolean; ok?: boolean; skipped?: boolean; output?: string };
+  /**
+   * Its checks: running now (`running`), or how they went last; `sha` the commit they ran on and `dirty` uncommitted work beside it.
+   * Passed on a clean commit is verified (verifiedAt), until a commit on its branch after them (`stale`).
+   */
+  checks?: { command: string; running?: boolean; ok?: boolean; skipped?: boolean; output?: string; sha?: string; dirty?: boolean; stale?: boolean };
   /** Who a person asked to take it next (board.released with `to`). */
   next?: string;
   /** Agents that turned it down as not theirs (finish_task decline): it is never offered to them again. */
   declined?: string[];
   /** Why the board gave it to the agent it is with (board.claimed), when it picked one for a reason beyond being free. */
   why?: string;
+  /** Its own branch, readied in its agent's copy of the repo (agent-mesh prepareTask): what the lead merges, in order. */
+  branch?: string;
 }
 
 export interface BoardState {
@@ -596,9 +608,10 @@ export function mergeOptions(o: SessionOptions, patch?: SessionOptionsPatch): Se
  * argument. The entry also has to end where a word does, so "npm test*" is not "npm testify". Asking is the fallback
  * for anything unusual, which costs a question and nothing more.
  */
-export const allowedCommand = (s: SessionState, command: string): boolean => {
+export const allowedCommand = (s: SessionState, command: string, lane?: string): boolean => {
   const c = command.trim();
-  return (s.options.allow ?? []).some((a) => {
+  // The session's list, and what was let through for this lane's task.
+  return [...(s.options.allow ?? []), ...(lane ? (s.taskAllow?.[lane] ?? []) : [])].some((a) => {
     if (!a.endsWith("*")) return a === c;
     const prefix = a.slice(0, -1).trimEnd();
     const rest = c.slice(prefix.length);
@@ -844,6 +857,12 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       // answer nobody could give any more, and the lane never moved again.
       // A yes only the host may give (hostsOwn: their computer), from anyone else, answers nothing: the card stays for them.
       const notTheirs = !!b.approval?.approve && !!s.approvals[lane]?.hostsOwn && !(ev.actor.kind === "human" && ev.actor.id === s.engines[lane]?.hostId);
+      // Yes for the rest of the task: commands like these are let through until the run ends.
+      const asked = s.approvals[lane];
+      if (!notTheirs && b.approval?.approve && b.approval.task && asked?.id === b.approval.id && asked.scope === "commands" && asked.items.length) {
+        const all = s.taskAllow ?? (s.taskAllow = {});
+        all[lane] = [...new Set([...(all[lane] ?? []), ...asked.items.map(alwaysAllowEntry)])].slice(-20);
+      }
       if (!notTheirs && (!s.approvals[lane]?.live || b.approval || b.interrupt)) delete s.approvals[lane];
       delete s.resumes[lane];
       delete s.asks[lane];
@@ -1037,7 +1056,7 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       if (!t) break;
       if (b.type === "board.checking") t.checks = { command: b.command, running: true };
       else if (b.type === "board.checked") {
-        t.checks = { command: b.command, ok: b.ok, output: b.output, ...(b.skipped ? { skipped: true } : {}) };
+        t.checks = { command: b.command, ok: b.ok, output: b.output, ...(b.skipped ? { skipped: true } : {}), ...(b.sha ? { sha: b.sha } : {}), ...(b.dirty ? { dirty: true } : {}) };
         // Failed: back to the agent that did it, as a review that found something does.
         if (!b.ok && !b.skipped) Object.assign(t, { status: "claimed", rounds: t.rounds + 1, reviewer: undefined });
       } else if (b.type === "board.released") {
@@ -1052,7 +1071,7 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
     case "board.reviewed": {
       const t = s.board?.tasks.find((x) => x.id === b.id);
       if (!t) break;
-      if (b.type === "board.claimed") Object.assign(t, { status: "claimed", lane: b.lane, name: b.name, next: undefined, why: b.why });
+      if (b.type === "board.claimed") Object.assign(t, { status: "claimed", lane: b.lane, name: b.name, next: undefined, why: b.why, ...(b.branch ? { branch: b.branch } : {}) });
       else if (b.type === "board.finished") Object.assign(t, { status: b.status === "blocked" ? "blocked" : t.noReview ? "done" : "review", lane: b.lane, name: b.name, report: b.report });
       // An empty lane takes the reviewer off: the one asked ran out of usage, and another is found (agent-mesh boardRunEnded).
       else if (b.type === "board.review") t.reviewer = b.lane ? { lane: b.lane, name: b.name } : undefined;
@@ -1171,6 +1190,8 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       if (b.type === "folder.committed" && b.prUrl && !b.error && s.pr?.url !== b.prUrl) s.pr = { url: b.prUrl, ...(b.base ? { base: b.base } : {}) };
       if (b.type === "folder.committed" && b.prUrl && !b.error) addPr(s, b.prUrl);
       if (b.type === "folder.committed" && b.branch && !b.error) {
+        // A commit on a task's branch after its checks passed: what was verified isn't what is there now.
+        for (const t of s.board?.tasks ?? []) if (t.checks?.sha && t.checks.sha !== b.sha && (t.branch ? t.branch === b.branch : t.lane === lane && t.status !== "claimed")) t.checks.stale = true;
         const cwd = s.engines[lane]?.cwd;
         for (const [id, e] of Object.entries(s.engines)) if (!cwd || id === lane || e.cwd === cwd) s.engines[id] = { ...e, branch: b.branch };
       }
@@ -1209,6 +1230,8 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       // What it held was for this run's work. Not a run cut off by a lost connection, which carries on when it is back, nor
       // one waiting on a person.
       if (b.outcome !== "waiting" && !b.cut && s.holds) delete s.holds[lane];
+      // What was let through for the task was for this run.
+      if (b.outcome !== "waiting" && !b.cut && s.taskAllow?.[lane]) delete s.taskAllow[lane];
       if (b.outcome === "done") {
         setRun("idle");
         (s.finished ??= {})[lane] = ev.seq;
@@ -1447,4 +1470,13 @@ export function signoffStatus(s: SessionState, lane: string, approverId: string)
   const have = reviews.filter(([, r]) => r.verdict === "approve").length;
   const changes = need > 0 ? reviews.filter(([, r]) => r.verdict === "changes").map(([id, r]) => ({ id, ...r })) : [];
   return { need, have, changes, ready: changes.length === 0 && have >= need };
+}
+
+/**
+ * A board task's checks passed on a commit with nothing uncommitted beside it, and nothing was committed on its branch since:
+ * done and proven, as Oh My Hermes says "verified" and not "reported done" (Arun, 2026-11-11). Its commit, or null.
+ */
+export function verifiedAt(t: Pick<BoardTask, "checks">): string | null {
+  const c = t.checks;
+  return c && c.ok && !c.skipped && !c.running && c.sha && !c.dirty && !c.stale ? c.sha : null;
 }

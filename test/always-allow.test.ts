@@ -59,3 +59,29 @@ test("one press of Always allow: the pattern for safe kinds of command, exactly 
   assert.ok(!allowedCommand(s, "npm testify"), "but not a different word");
   assert.ok(!allowedCommand(s, "npm test && rm -rf ."), "nor a second command chained on");
 });
+
+test("Allow for this task: commands like the one allowed are let through in that lane until its run ends, and nowhere else", async () => {
+  const { project } = await import("../src/session/projection.js");
+  const human = { kind: "human", id: ada.id, name: ada.name } as const;
+  const tool = { kind: "agent", id: "kit", name: "Kit" } as const;
+  const rows: [typeof human | typeof tool, Record<string, unknown>, string][] = [
+    [human, { type: "session.created", title: "t", ownerId: ada.id, ownerName: ada.name }, "main"],
+    [tool, { type: "run.started", causedBy: 1 }, "kit"],
+    [tool, { type: "engine.approval", id: "a1", scope: "commands", items: ["npm test"], live: true }, "kit"],
+    [human, { type: "instruction", text: "Yes", interrupt: false, approval: { id: "a1", approve: true, task: true } }, "kit"],
+  ];
+  const events = () => rows.map(([actor, body, lane], i) => ({ seq: i + 1, ts: 1, actor, body, ...(lane !== "main" ? { lane } : {}) })) as never;
+  let s = project("s", events());
+  assert.ok(allowedCommand(s, "npm test -- --watch", "kit"), "the same safe command with more arguments, in its lane");
+  assert.ok(!allowedCommand(s, "npm test", "nova"), "not another teammate's");
+  assert.ok(!allowedCommand(s, "npm test"), "nor the session's own list");
+  rows.push([tool, { type: "engine.approval", id: "a2", scope: "commands", items: ["git push origin main"], live: true }, "kit"]);
+  rows.push([human, { type: "instruction", text: "Yes", interrupt: false, approval: { id: "a2", approve: true, task: true } }, "kit"]);
+  s = project("s", events());
+  assert.ok(allowedCommand(s, "git push origin main", "kit"), "a risky one, exactly itself");
+  assert.ok(!allowedCommand(s, "git push origin main --force", "kit"), "never widened");
+  rows.push([tool, { type: "run.ended", outcome: "waiting" }, "kit"]);
+  assert.ok(allowedCommand(project("s", events()), "npm test", "kit"), "waiting on a person is still the task");
+  rows.push([tool, { type: "run.ended", outcome: "done" }, "kit"]);
+  assert.ok(!allowedCommand(project("s", events()), "npm test", "kit"), "the task over, it asks again");
+});

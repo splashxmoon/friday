@@ -8,7 +8,7 @@ import { WorkBar, WorkRail } from "./WorkRail.js";
 import { isWorkSid, markWorkSession, useWorkMode, WorkNote } from "./WorkMode.js";
 import { SessionMenu } from "./SessionMenu.js";
 import { EmptyState } from "@/components/dass/EmptyState";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { shortcut } from "./Shortcuts.js";
 import { createPortal } from "react-dom";
 import { tabRing, tabState } from "./agent-tab.js";
@@ -57,6 +57,7 @@ import type { Focus } from "../focus.js";
 import { CLASS_LABEL, COMMAND_CLASSES, type CommandClass } from "../command-class.js";
 import { FocusContext, herePublisher } from "./focusStore.js";
 import { RoomMenu, TeamFaces, teamTitle } from "./Teammates.js";
+const TeamPlan = lazy(() => import("./TeamPlan.js"));
 import { TeamHeaderControls } from "./TeamControls.js";
 import { ALL, AgentsContext, agentKey, agentsStore, focusAgent, focusedAgent, jumpToNeeds, nextKey, openedAt, setColumns, syncAddress, useAgents, useColumns, useFocusedAgent, useSeen } from "./agentFocus.js";
 import { AGENT_DRAG, closeColumn, dropAgent, evenWidths, fitColumns, maxColumns, pickInColumn, resizeAt, unreadByLane } from "./agentNav.js";
@@ -1011,6 +1012,13 @@ export function SessionView({
             return <Activity {...activityProps} headSlot={headTabs ? agentsSlot : null} />;
           })()}
         </div>
+        {/* A crew room's plan beside its chat (TeamPlan.tsx, Crew overhaul 3B): the room itself, not a teammate's own chat, and not
+            while a panel or the replay has the side. */}
+        {state.options.team && focused === ALL && !split && !bench && replayAt === null && (
+          <Suspense fallback={null}>
+            <TeamPlan state={state} events={s.events} send={send} />
+          </Suspense>
+        )}
         {state.options.work && <WorkRail state={state} events={s.events} sid={sid} invite={invite} away={bench} send={send} onBrowser={() => onOpen("preview")} onBrowse={(url) => (onOpen("preview"), openInPreview(url, sid, "auto"))} />}
         <BenchOrHistory
           bench={bench}

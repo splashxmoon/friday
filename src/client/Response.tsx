@@ -296,6 +296,8 @@ function StepList({ steps, shown: picked, onShown }: { steps: Step[]; shown?: st
   );
 }
 
+/** How long a run took, as its "Worked for" line says it. */
+export const tookFor = (ms: number) => span(ms);
 const span = (ms: number) => {
   const s = Math.max(0, Math.round(ms / 1000));
   if (s < 60) return `${s}s`;

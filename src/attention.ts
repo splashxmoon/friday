@@ -40,6 +40,8 @@ export interface Attention {
   careful?: true;
   /** A stopped run's own error, when `text` says it in plain words instead: shown on hover, and in full in the session. */
   detail?: string;
+  /** An approval's commands, as asked (up to five). */
+  items?: string[];
 }
 
 /**
@@ -84,7 +86,8 @@ export function attentionIn(state: SessionState, meId: string): Attention[] {
       const first = ask.items[0] ? `\`${ask.items[0].length > 80 ? `${ask.items[0].slice(0, 79)}…` : ask.items[0]}\`` : "";
       const more = ask.items.length > 1 ? ` and ${ask.items.length - 1} more` : "";
       const text = ask.scope === "commands" && first ? `${agentName(state, lane)} wants to run ${first}${more}` : `${agentName(state, lane)} is asking before it goes on`;
-      out.push({ ...of("approval", text, ask.seq, lane), approval: ask.id, ...(ask.scope === "commands" ? { command: true, ...(carefulClass(ask.items) ? { careful: true as const } : {}) } : {}) });
+      // The commands themselves, for a page that says them in plain words (the Agents page, plain-risk.ts).
+      out.push({ ...of("approval", text, ask.seq, lane), approval: ask.id, ...(ask.scope === "commands" ? { command: true, items: ask.items.slice(0, 5), ...(carefulClass(ask.items) ? { careful: true as const } : {}) } : {}) });
       continue;
     }
     const run = runOf(state, lane);

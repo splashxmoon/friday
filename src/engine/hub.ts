@@ -1103,10 +1103,11 @@ class LaneHost {
     // An item cut in cleanBody ends in a line saying so, and the yes would go to the whole command, which the runner
     // keeps. That line makes it two statements, which no "anything starting with" entry matches, and an exact entry
     // (at most 4,000 characters, see core.ts) is never as long as a cut item, so what follows the cut always asks.
-    if (!body.items.length || !body.items.every((i) => allowedCommand(state, i))) return;
+    if (!body.items.length || !body.items.every((i) => allowedCommand(state, i, this.lane))) return;
     // The list is the owners' say-so, which isn't the host's on a machine whose host isn't an owner: that host is asked.
     if (roleOf(state, this.info.hostId) !== "owner") return;
-    await this.store.append(this.sid, FRIDAY, { type: "instruction", text: "Allowed in advance: go ahead.", interrupt: false, approval: { id: body.id, approve: true } }, { lane: this.lane });
+    const forTask = !body.items.every((i) => allowedCommand(state, i));
+    await this.store.append(this.sid, FRIDAY, { type: "instruction", text: forTask ? "Allowed for this task: go ahead." : "Allowed in advance: go ahead.", interrupt: false, approval: { id: body.id, approve: true } }, { lane: this.lane });
   }
 
   // ── session → runner ─────────────────────────────────────────────

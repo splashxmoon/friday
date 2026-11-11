@@ -21,7 +21,7 @@ import type { WorkspaceUsage } from "./workspace-types.js";
 // ponytail: windows by vendor, not per model; an exact table if the bar needs to be exact
 function windowOf(model: string): number {
   if (/gemini/.test(model)) return 1_000_000;
-  if (/gpt-5/.test(model)) return 400_000;
+  if (/gpt-[5-9]/.test(model)) return 400_000;
   if (/claude/.test(model)) return 200_000;
   return 128_000;
 }

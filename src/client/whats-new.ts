@@ -15,13 +15,13 @@ export interface WhatsNewNotes {
 }
 
 export const WHATS_NEW: WhatsNewNotes = {
-  version: "0.2.21",
-  summary: "Talk instead of typing, sign in to any coding tool from Friday, and pick a model before the first chat.",
+  version: "0.2.22",
+  summary: "A new Crew: set one up from a sentence, see what needs you on the Agents page, and watch the lead's plan come together, every piece on a branch of its own.",
   items: [
-    { icon: "mic", title: "Voice input", line: "Press the mic or hold its shortcut. Your words are made into text on this computer." },
-    { icon: "key", title: "Sign in from Friday", line: "Each tool signs in its own way, in Friday's terminal or its page, and Friday checks it took." },
-    { icon: "grid", title: "Models from the start", line: "Kilo, OpenCode and the rest list their models before a first chat, free ones first." },
-    { icon: "plug", title: "Any ACP agent", line: "Add one from the ACP registry: installed in Friday's own folder, its download checked." },
+    { icon: "users", title: "A crew from a sentence", line: "Say what you're working on; Friday suggests the teammates, on a coding tool you're signed in to." },
+    { icon: "board", title: "The plan beside the room", line: "Each piece the lead hands out, who has it and where it stands, Verified once its checks pass." },
+    { icon: "gitFork", title: "A branch per task", line: "Each task is cut from where the plan started; the lead merges them in order, never by itself." },
+    { icon: "shield", title: "Asks in plain words", line: "\u201cKit wants to publish a package to npm\u201d: Allow once, Allow for this task, or Deny." },
   ],
 };
 

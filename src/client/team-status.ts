@@ -138,3 +138,27 @@ export function dayBreaks(ts: (number | undefined)[], now = Date.now()): (string
     return show ? dayName(t!, now) : null;
   });
 }
+
+/**
+ * What a role is, in one word, for its chip: Lead, Engineer, Reviewer and the rest, read from its words (the roles CrewSetup and
+ * the Starter crew give, and most written by hand). Nothing for a role it can't name, rather than its first words cut short.
+ */
+export function roleWord(role: string): string {
+  const r = role.toLowerCase();
+  const words: [RegExp, string][] = [
+    [/\blead(s|ing)? the crew\b|\blead\b|hands each teammate/, "Lead"],
+    [/\breview(s|er)?\b/, "Reviewer"],
+    [/\btests? every change|\bqa\b|edge cases/, "QA"],
+    [/\bbuilds? features|\bengineer|fixes bugs/, "Engineer"],
+    [/\bresearch/, "Researcher"],
+    [/\bdocs\b|\bwrites?\b|release notes|changelog/, "Writer"],
+    [/\bdesign|screens|polish/, "Designer"],
+    [/\bci\b|deploys?|dependenc/, "Ops"],
+  ];
+  return words.find(([re]) => re.test(r))?.[1] ?? "";
+}
+
+/** A teammate's line as a row says it: free, it says so ("Idle" told nobody anything); otherwise what `mateStatus` says. */
+export function freeLine(m: { line?: string | null }, s: { state: string; line: string }): string {
+  return s.state === "idle" && (/^(idle|ready)\b/i.test(s.line) || !m.line || /^(idle|ready)\b/i.test(m.line)) ? "Free for a task" : s.line;
+}

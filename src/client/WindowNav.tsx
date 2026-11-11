@@ -1,5 +1,6 @@
 import { Icon } from "./icons.js";
 import { CodeCrewToggle } from "./WorkMode.js";
+import { isLocal } from "./edition.js";
 
 /**
  * The chat list's button, Search, and Code or Crew, beside the Mac window's own buttons.
@@ -25,7 +26,8 @@ export function WindowNav({ open, onToggle, what = "sessions", working, needs }:
       </button>
       {/* Both editions (Arun, 2026-11-04: "add this for production btw"); only while the sidebar is open, since it switches what
           the sidebar lists (Arun, 2026-11-08: "only appear when the side bar is open"). */}
-      {window.fridayDesktop && open && <CodeCrewToggle className="in-bar" working={working} needs={needs} />}
+      {/* Not in the open-source build, whose sidebar has Sessions and Agents in its rail (Sidebar.tsx OssRail). */}
+      {window.fridayDesktop && open && !isLocal() && <CodeCrewToggle className="in-bar" working={working} needs={needs} />}
     </div>
   );
 }

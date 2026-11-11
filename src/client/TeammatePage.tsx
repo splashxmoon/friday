@@ -18,7 +18,8 @@ import type { Identity } from "./storage.js";
 import { readActivity, type ActivityRun } from "./team-api.js";
 import { ProofToggle } from "./ProofCard.js";
 import { plainLine } from "./team-room.js";
-import { ACCESS, timeOf } from "./team-status.js";
+import { ACCESS, freeLine, roleWord, timeOf } from "./team-status.js";
+import { isLocal } from "./edition.js";
 import { describeCheckIn } from "../teammate-checkins.js";
 import { SkillsPanel } from "./CrewSkills.js";
 import { base, Face, foldersOf, markOf, mateOn, mateStatus, modelLabel, refreshTeam, short, TeammateDialog, TeammateFolderCard, toolName, useTeamNow, workingSinceOf, type Team } from "./Teammates.js";
@@ -58,6 +59,70 @@ export function TeammatePage({ lane, identity, notify, branch }: { lane: string;
   let keeper = null as string | null;
   // The computer it runs on, as its keeper's Crew names it: their desktop app's, or one of their always-on machines.
   let computer = null as { label: string; connected: boolean } | null;
+  const tabs = (
+    <div className="tm-tabs" role="tablist" aria-label={`${m.name}'s page`}>
+      {/* Someone else's memory and settings are its keeper's alone (hosted-crew.ts). */}
+      {TABS.filter((x) => mine || (x.id !== "settings" && x.id !== "memory")).map((x) => (
+        <button key={x.id} type="button" role="tab" id={`tm-tab-${x.id}`} aria-selected={tab === x.id} aria-controls={x.id === "chat" ? undefined : `tm-panel-${x.id}`} className="tm-tab" onClick={() => setMateTab(lane, x.id)}>
+          {x.label}
+        </button>
+      ))}
+    </div>
+  );
+  const panel = tab !== "chat" && identity && (
+    <section className="tm-panel" id={`tm-panel-${tab}`} role="tabpanel" aria-labelledby={`tm-tab-${tab}`}>
+      {tab === "activity" && <ActivityTab identity={identity} id={m.id} lane={lane} />}
+      {tab === "results" && <ResultsTab identity={identity} id={m.id} lane={lane} />}
+      {tab === "skills" && <SkillsPanel mate={m} />}
+      {tab === "memory" && mine && <MemoryEditor identity={identity} id={m.id} name={m.name} />}
+      {tab === "settings" && mine && <TeammateDialog inline identity={identity} editing={m} onClose={() => {}} />}
+    </section>
+  );
+  // In the open-source build, one line (Arun, 2026-11-11, option 3A of the Crew overhaul): who, their role in a word, what they're
+  // doing and where, and the tabs at its end. What they may do and run on is in Settings, and the composer says what they run on.
+  if (isLocal()) {
+    const chip = lead ? "Lead" : roleWord(m.role ?? "");
+    const repos = foldersOf(m);
+    return (
+      <div className="tm-page tm-slim" data-tab={tab}>
+        <header className="tm-slim-head">
+          <Face seed={m.look ?? m.name} size={30} status={m.status} lead={lead} />
+          <h2 className="tm-slim-name">{m.name}</h2>
+          {chip && <span className="tm-slim-chip">{chip}</span>}
+          <span className="tm-slim-meta" title={m.role ?? ""}>
+            <span className={`tm-slim-status s-${s.state}`}>
+              {freeLine(m, s)}
+              {workingSinceOf(m) !== null && ` · ${elapsed(workingSinceOf(m)!, now)}`}
+            </span>
+            {repos.length > 0 && (
+              <span title={repos.join("\n")}>
+                {" "}
+                · in {repos.map(base).join(", ")}
+                {branch ? ` · ${branch}` : ""}
+              </span>
+            )}
+          </span>
+          {identity && mine && (
+            <button type="button" ref={addBtn} className="tm-slim-add" onClick={() => setGiving(true)} title="Give them a folder or repo to work in">
+              <PlusIcon className="size-3" />
+              {repos.length ? "Folder" : "Folder or repo"}
+            </button>
+          )}
+          {giving && identity && <TeammateFolderCard identity={identity} lane={lane} trigger={addBtn.current} onClose={() => setGiving(false)} notify={notify ?? (() => {})} />}
+          {tabs}
+        </header>
+        {m.held && identity && mine && (
+          <p className="tm-head-held tm-slim-held">
+            On hold: they wait until you lift it.{" "}
+            <button type="button" className="tm-link" onClick={() => void api(identity, "/api/teammates/lift", { method: "POST", body: JSON.stringify({ id: m.id }), headers: { "Content-Type": "application/json" } }).then(() => refreshTeam(identity)).catch((e: Error) => notify?.(e.message))}>
+              Lift the hold
+            </button>
+          </p>
+        )}
+        {panel}
+      </div>
+    );
+  }
   return (
     <div className="tm-page" data-tab={tab}>
       <header className="tm-head">
@@ -168,26 +233,8 @@ export function TeammatePage({ lane, identity, notify, branch }: { lane: string;
           </div>
         </div>
       </header>
-      <div className="tm-tabs" role="tablist" aria-label={`${m.name}'s page`}>
-        {/* Someone else's memory and settings are its keeper's alone (hosted-crew.ts). */}
-        {TABS.filter((x) => mine || (x.id !== "settings" && x.id !== "memory")).map((x) => (
-          <button key={x.id} type="button" role="tab" id={`tm-tab-${x.id}`} aria-selected={tab === x.id} aria-controls={x.id === "chat" ? undefined : `tm-panel-${x.id}`} className="tm-tab" onClick={() => setMateTab(lane, x.id)}>
-            {x.label}
-          </button>
-        ))}
-      </div>
-      {tab !== "chat" && identity && (
-        <section className="tm-panel" id={`tm-panel-${tab}`} role="tabpanel" aria-labelledby={`tm-tab-${tab}`}>
-          {tab === "activity" && <ActivityTab identity={identity} id={m.id} lane={lane} />}
-          {tab === "results" && <ResultsTab identity={identity} id={m.id} lane={lane} />}
-          {tab === "skills" && <SkillsPanel mate={m} />}
-          {tab === "memory" && mine && <MemoryEditor identity={identity} id={m.id} name={m.name} />}
-          {tab === "settings" && mine && (
-            // The form alone: its Check-ins say them, and a lowercase summary under Save said them again (audit CREW-30).
-            <TeammateDialog inline identity={identity} editing={m} onClose={() => {}} />
-          )}
-        </section>
-      )}
+      {tabs}
+      {panel}
     </div>
   );
 }
@@ -435,6 +482,12 @@ export function MemoryEditor({ identity, id, name }: { identity: Identity; id: s
       <div className="tm-memory-head">
         <p>What they keep between conversations, read with every message they get. They add to it as they learn; change anything here.</p>
         <span className="tm-sub">{text === null ? "" : mtime ? `Last updated ${timeOf(mtime)}` : text ? "" : "Empty so far"}</span>
+        {/* Over a page, they read only its newest page (teammates.ts memoryText): said here, where it can be tidied. */}
+        {text !== null && text.length > 6000 && (
+          <span className="tm-memory-over" role="status">
+            Over a page ({text.length.toLocaleString()} characters): they read only the newest part. Tidy it to keep what matters in sight.
+          </span>
+        )}
       </div>
       <Textarea
         className="tm-memory"

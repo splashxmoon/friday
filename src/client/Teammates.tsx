@@ -8,7 +8,7 @@
  */
 import { leaving } from "./leave-guard.js";
 import { lazy, memo, Suspense, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
-import { ArrowLeftIcon, ArrowUpIcon, CheckIcon, ChevronRightIcon, CopyIcon, EllipsisIcon, EyeIcon, HandIcon, ZapIcon, MessageSquareIcon, MessageSquareReplyIcon, UsersIcon, Settings2Icon, FolderGit2Icon, PlusIcon, ShuffleIcon, TriangleAlertIcon, UserPlusIcon, XIcon } from "lucide-react";
+import { ArrowLeftIcon, ArrowUpIcon, CheckIcon, ChevronRightIcon, CopyIcon, EllipsisIcon, EyeIcon, HandIcon, ZapIcon, MessageSquareIcon, MessageSquareReplyIcon, UsersIcon, Settings2Icon, FolderGit2Icon, GitBranchIcon, PlusIcon, ShuffleIcon, TriangleAlertIcon, UserPlusIcon, XIcon } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -49,6 +49,9 @@ import { ACCESS, backupFor, sayMate, type MateSays } from "./team-status.js";
 import { boardTitle, plainError, readSince, type Away } from "./team-api.js";
 // The team brief and a teammate's own page load when shown, not with the app (test/client-bundle.test.ts).
 const SinceYouLeft = lazy(() => import("./TeamBrief.js").then((m) => ({ default: m.SinceYouLeft })));
+// The Agents page loads when shown (AgentsPage.tsx), not with the app.
+const AgentsPage = lazy(() => import("./AgentsPage.js"));
+const CrewSetup = lazy(() => import("./CrewSetup.js"));
 import { prefillComposer } from "./prefill.js";
 import { notificationsOn } from "./prefs.js";
 import { useMateTab } from "./mate-tab.js";
@@ -1315,8 +1318,42 @@ export function TeamTalk(p: {
   stamp: ReactNode;
   fromMark?: ReactNode;
   toMark?: ReactNode;
+  /**
+   * The lead's hand-out, drawn as one line, "Assigned to Kit: build the pricing page · Kit is on it · Change" (Arun, 2026-11-11,
+   * option 3B of the Crew overhaul, after Hermes' visible handoffs), Change handing it to another teammate.
+   */
+  assign?: { others: { lane: string; name: string; look?: TeammateView["look"] }[]; onChange: (toName: string) => void };
 }) {
   const sender = mateOn(p.fromLane);
+  if (p.assign && p.kind === "task") {
+    const a = p.assign;
+    const open = p.status?.how !== "done" && p.status?.how !== "read";
+    return (
+      <div className="tt-assign">
+        <span className="tt-assign-who" title={`${p.fromName} assigned it`}>
+          <Who lane={p.fromLane} size={18} fallback={p.fromMark} />
+        </span>
+        <GitBranchIcon className="tt-assign-mark" aria-hidden="true" />
+        <span className="tt-assign-text" title={withoutFridayNotes(p.text)}>
+          <b>Assigned to {p.toName}</b>: {plainLine(boardTitle(withoutFridayNotes(p.text).split("\n").find((l) => l.trim()) ?? ""))}
+        </span>
+        {/* Where it stands, never cut short by a long task: its own column. */}
+        <span className={`tt-assign-status is-${p.status?.how ?? "none"}`}>{p.status?.word ?? ""}</span>
+        {open && a.others.length > 0 ? (
+          <MenuButton
+            className="tt-assign-change"
+            label={`Give it to another teammate instead of ${p.toName}`}
+            text="Change"
+            caret="chevronDown"
+            items={() => [{ heading: "Give it to" }, ...a.others.map((o) => ({ label: o.name, mark: <Face seed={o.look ?? o.name} size={16} />, onSelect: () => a.onChange(o.name) }))]}
+          />
+        ) : (
+          <span aria-hidden="true" />
+        )}
+        <span className="tt-stamp">{p.stamp}</span>
+      </div>
+    );
+  }
   const tone = sender ? mascotColour(sender.look ?? sender.name) : undefined;
   const many = !!p.team && p.team.length > 1;
   const to = (
@@ -1452,15 +1489,30 @@ export function openTeammate(t: Team, lane: string | null, onOpen: (r: RecentSes
  * Home, with the Team tab on (2026-10-27 audit: it showed Code's "What should we build?" box, so a first message there started a
  * coding session rather than work for the team): the Team room, or, before there is a team, how to start one.
  */
-export function TeamHome({ identity, onOpen }: { identity: Identity; onOpen: (r: RecentSession) => void }) {
+export function TeamHome({ identity, onOpen, needs }: { identity: Identity; onOpen: (r: RecentSession) => void; /** What waits on you (Attention.tsx), for the Agents page's strip. */ needs?: Attention[] }) {
   const t = useTeam(identity);
   // A team with nobody on it is a first run still (2026-10-28 QA: removing every teammate left an empty Team room).
   // On the hosted service the Crew room is yours, with your own teammates in it: the workspace's others are in the sidebar.
   const ready = !!t?.sid && ownOf(t).length > 0;
   useEffect(() => {
-    if (ready) openTeammate(t!, null, onOpen);
+    if (ready && !isLocal()) openTeammate(t!, null, onOpen);
   }, [ready]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The open-source build: the Agents page, what needs you and the crew at a glance, rather than straight into the room (Arun,
+  // 2026-11-11, the Crew overhaul's 2A).
+  if (ready && isLocal())
+    return (
+      <Suspense fallback={null}>
+        <AgentsPage identity={identity} onOpen={onOpen} {...(needs ? { needs } : {})} />
+      </Suspense>
+    );
   if (ready) return null;
+  // The open-source build's first run: the crew from a sentence, on a coding tool that is signed in here (CrewSetup.tsx, 1A).
+  if (isLocal() && t)
+    return (
+      <Suspense fallback={null}>
+        <CrewSetup identity={identity} />
+      </Suspense>
+    );
   let intro = "Teammates are AI coworkers with a name, a role and a memory of their own, running on your coding tools on this computer. Give the crew a goal and the lead plans it, hands out the parts and tells you what got done, even while you're away.";
   return (
     <div className="tm-home">
@@ -2308,8 +2360,10 @@ export function RoomDialog({ identity, team: t, editing, onClose, onMade }: { id
   let roomIntro = "Some of your teammates, working together on one thing. Each has a conversation of its own here, with its folder and notes the same as everywhere.";
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="tm-dialog max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain sm:max-w-[500px]">
-        <form onSubmit={(e) => void save(e)} className="tm-form">
+      {/* Held to the window, its list of teammates scrolling inside it, Cancel and Save always in sight (Arun, 2026-11-11: "fix height
+          of this as well": with seven teammates the whole dialog scrolled and its buttons sat under the window's edge). */}
+      <DialogContent className="tm-dialog tm-room-dialog flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-[500px]">
+        <form onSubmit={(e) => void save(e)} className="tm-form tm-room-form">
           <DialogHeader>
             <DialogTitle>{editing ? `Edit ${editing.name}` : "New room"}</DialogTitle>
             <DialogDescription>{editing ? "Someone taken out stops working here; someone brought in starts with a conversation of its own for this room." : roomIntro}</DialogDescription>
@@ -2327,7 +2381,7 @@ export function RoomDialog({ identity, team: t, editing, onClose, onMade }: { id
             <span>What it's for</span>
             <Textarea value={purpose} maxLength={2000} rows={2} placeholder="Optional. Told to its teammates with every message here." onChange={(e) => setPurpose(e.target.value)} />
           </label>
-          <div className="tm-field">
+          <div className="tm-field tm-room-who">
             <span>Who's in it</span>
             <div ref={pickBox} className="tm-pick" role="group" aria-label="Teammates in the room" aria-invalid={tried && !who.length} aria-describedby="tm-room-who">
               {pickable.map((m) => {

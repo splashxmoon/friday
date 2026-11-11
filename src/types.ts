@@ -475,12 +475,18 @@ export const ENGINE_MODEL_INFO: Record<EngineTool, EngineModelInfo[]> = {
     { group: "More models", id: "claude-opus-4-6", label: "Opus 4.6", blurb: "claude-opus-4-6" },
     { group: "More models", id: "claude-sonnet-4-6", label: "Sonnet 4.6", blurb: "claude-sonnet-4-6" },
   ],
+  // As Codex's own model list gives them (`model/list` over its app-server, codex-cli 0.166, November 11 2026): GPT-5.5 is
+  // retired, and GPT-6.1 Terra, GPT-6 Sol and the 5.6 family are offered.
   codex: [
     { group: "Smart routing", id: "auto", label: "Smart", blurb: "Luna or Sol, picked for each message" },
-    { group: "Models", id: "gpt-6.1-sol", label: "GPT-6.1 Sol", blurb: "Codex's recommended model: near-Astra work at lower cost." },
-    { group: "Models", id: "gpt-6-astra", label: "GPT-6 Astra", blurb: "Most capable, for complex work across code, apps and research." },
-    { group: "Models", id: "gpt-6-luna", label: "GPT-6 Luna", blurb: "Most efficient, for focused, high-volume tasks." },
-    { group: "Models", id: "gpt-5.5", label: "GPT-5.5", blurb: "Previous generation. Retires October 14, 2026." },
+    { group: "Latest", id: "gpt-6.1-sol", label: "GPT-6.1 Sol", blurb: "Codex's default: the workhorse for coding and everyday work." },
+    { group: "Latest", id: "gpt-6-astra", label: "GPT-6 Astra", blurb: "Frontier intelligence, for the most demanding work." },
+    { group: "Latest", id: "gpt-6.1-terra", label: "GPT-6.1 Terra", blurb: "Balanced, for straightforward work at a lower cost." },
+    { group: "Latest", id: "gpt-6-luna", label: "GPT-6 Luna", blurb: "Fast and affordable, for easier tasks." },
+    { group: "More models", id: "gpt-6-sol", label: "GPT-6 Sol", blurb: "gpt-6-sol" },
+    { group: "More models", id: "gpt-5.6-sol", label: "GPT-5.6 Sol", blurb: "gpt-5.6-sol" },
+    { group: "More models", id: "gpt-5.6-terra", label: "GPT-5.6 Terra", blurb: "gpt-5.6-terra" },
+    { group: "More models", id: "gpt-5.6-luna", label: "GPT-5.6 Luna", blurb: "gpt-5.6-luna" },
   ],
   cursor: [{ id: "auto", label: "Auto", blurb: "Cursor picks a model for each task." }],
   copilot: [{ id: "auto", label: "Auto", blurb: "Copilot picks a model for each task." }],
@@ -513,14 +519,17 @@ export const ENGINE_MODEL_INFO: Record<EngineTool, EngineModelInfo[]> = {
  * How hard a coding tool thinks, pinned per lane by whoever can steer it (`lane.effort`). Auto, the default, is no value at all:
  * no flag is passed, and the tool's own default or the router's pick applies. "xhigh" is shown as "Extra".
  */
-export type EngineEffort = "low" | "medium" | "high" | "xhigh" | "max";
-export const ENGINE_EFFORTS: readonly EngineEffort[] = ["low", "medium", "high", "xhigh", "max"];
+export type EngineEffort = "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
+export const ENGINE_EFFORTS: readonly EngineEffort[] = ["low", "medium", "high", "xhigh", "max", "ultra"];
+/** Low to Max: the levels Claude Code and Copilot take. Codex takes Ultra beyond them (EFFORT_LEVELS). */
+const BASE_EFFORTS: readonly EngineEffort[] = ["low", "medium", "high", "xhigh", "max"];
 export const ENGINE_EFFORT_INFO: Record<EngineEffort, { label: string; blurb: string }> = {
   low: { label: "Low", blurb: "Quick answers, for small and clear tasks." },
   medium: { label: "Medium", blurb: "A balance of speed and depth." },
   high: { label: "High", blurb: "Thinks longer, for harder changes." },
   xhigh: { label: "Extra", blurb: "Deeper still, for tricky bugs and designs." },
   max: { label: "Max", blurb: "Its most thorough, and the slowest and costliest." },
+  ultra: { label: "Ultra", blurb: "Codex's deepest, beyond Max, for the hardest problems. Its Luna models stop at Max." },
 };
 
 /**
@@ -528,7 +537,11 @@ export const ENGINE_EFFORT_INFO: Record<EngineEffort, { label: string; blurb: st
  * `model_reasoning_effort` (per turn over its app-server, `-c` for `codex exec`), Copilot's `--reasoning-effort` (1.0.95). The
  * rest have no such control, so nothing is guessed for them. The composer's effort pill offers these and no others.
  */
-export const EFFORT_LEVELS: Partial<Record<EngineTool, readonly EngineEffort[]>> = { claude: ENGINE_EFFORTS, codex: ENGINE_EFFORTS, copilot: ENGINE_EFFORTS };
+// Codex's Ultra: offered for its Sol, Astra and Terra models in its own model list (`model/list`, codex-cli 0.166, November 11 2026).
+export const EFFORT_LEVELS: Partial<Record<EngineTool, readonly EngineEffort[]>> = { claude: BASE_EFFORTS, codex: ENGINE_EFFORTS, copilot: BASE_EFFORTS };
+
+/** The level Codex is sent for a model: Ultra on a Luna model, which stops at Max, is Max. */
+export const codexEffort = (effort: string | undefined, model: string | undefined): string | undefined => (effort === "ultra" && /luna/i.test(model ?? "") ? "max" : effort);
 
 /**
  * The effort levels a lane's tool takes: those checked for it (EFFORT_LEVELS), or for another tool spoken to over ACP, those its own
@@ -922,7 +935,7 @@ export type EventBody =
    * on it and is checked by another agent before it counts (Arun, 2026-10-19: "a shared task board… and peer review").
    */
   | { type: "board.posted"; fromLane: string; fromName: string; tasks: BoardTaskDef[]; /** What proves a task works, run in its agent's folder when it is done (each task's own `check` first). */ check?: string; /** Whose work it is, when Friday posts it for a person (a hosted crew workflow's owner): its hand-outs carry them (own-plan.ts). */ by?: { id: string; name: string } }
-  | { type: "board.claimed"; id: string; lane: string; name: string; /** Why this agent, when the board picked it: "best at tests here", "the others are nearly out of usage". */ why?: string }
+  | { type: "board.claimed"; id: string; lane: string; name: string; /** Why this agent, when the board picked it: "best at tests here", "the others are nearly out of usage". */ why?: string; /** The task's own branch, readied in the agent's copy of the repo (agent-mesh prepareTask). */ branch?: string }
   | { type: "board.finished"; id: string; lane: string; name: string; status: "done" | "blocked"; report: string }
   | { type: "board.review"; id: string; lane: string; name: string }
   | { type: "board.reviewed"; id: string; lane: string; name: string; ok: boolean; note: string }
@@ -944,6 +957,9 @@ export type EventBody =
       pre?: string[];
       /** The command fails as a whole there too, where its tests can't be named. */
       whole?: boolean;
+      /** The commit it ran on, and whether there was uncommitted work beside it: a pass on a clean commit is verified. */
+      sha?: string;
+      dirty?: true;
     }
   /** A person's say over a task from the team's list: taken back to be handed to someone else, opened again, or dropped. */
   | { type: "board.released"; id: string; why: string; /** Who it should go to next, when a person picked. */ to?: string; /** The agent that turned it down: not offered to it again. */ declined?: string }
@@ -985,7 +1001,7 @@ export type EventBody =
   | { type: "member.removed"; userId: string; name: string; workspace?: true }
   | { type: "link.updated"; role: LinkRole; enabled: boolean; version: number }
   // Human → agent. Only the driver can append these.
-  | { type: "instruction"; text: string; interrupt: boolean; /** The people it @-mentions, by id (mentions.ts). */ mentions?: string[]; fromSuggestion?: number; attachments?: Attachment[]; handoff?: Handoff; /** A message from another session's agent (peers.ts). */ peer?: PeerNote; /** A message from another agent in this session (agent-mesh.ts). */ mesh?: MeshNote; /** Answers an `engine.approval`: the driver said yes or no to it. */ approval?: { id: string; approve: boolean }; /** An edit of a message still queued: this one takes its place in the queue, and that one is taken back. */ replaces?: number; /** Friday telling a coding tool whose turn ended short of its task to carry on (keep-going.ts). */ keepGoing?: true; /** A reply in a side thread on an earlier message (by its seq): its answer stays in the thread, not the room's main flow. */ thread?: { root: number }; /** Posted by an app on the person's behalf (Friday's token API or MCP, `sessions:write`), not typed by them: capped like a teammate's (Security R3). */ via?: "api"; /** Friday's own message carrying on what agents set going (a wake, a carry-on): how many agent-to-agent steps led to it, so the turn it starts counts on from there rather than from nothing (agent-mesh behindRun). */ hop?: number; /** A turn of its own: never handed to a turn under way, since its answer is read from the turn it starts. */ ownTurn?: true; /** Friday's: a check the project added (brain.ts) failed after this agent's change; the command. */ check?: string }
+  | { type: "instruction"; text: string; interrupt: boolean; /** The people it @-mentions, by id (mentions.ts). */ mentions?: string[]; fromSuggestion?: number; attachments?: Attachment[]; handoff?: Handoff; /** A message from another session's agent (peers.ts). */ peer?: PeerNote; /** A message from another agent in this session (agent-mesh.ts). */ mesh?: MeshNote; /** Answers an `engine.approval`: the driver said yes or no to it. `task`: yes to commands like these for the rest of this run too (a teammate's "Allow for this task"). */ approval?: { id: string; approve: boolean; task?: true }; /** An edit of a message still queued: this one takes its place in the queue, and that one is taken back. */ replaces?: number; /** Friday telling a coding tool whose turn ended short of its task to carry on (keep-going.ts). */ keepGoing?: true; /** A reply in a side thread on an earlier message (by its seq): its answer stays in the thread, not the room's main flow. */ thread?: { root: number }; /** Posted by an app on the person's behalf (Friday's token API or MCP, `sessions:write`), not typed by them: capped like a teammate's (Security R3). */ via?: "api"; /** Friday's own message carrying on what agents set going (a wake, a carry-on): how many agent-to-agent steps led to it, so the turn it starts counts on from there rather than from nothing (agent-mesh behindRun). */ hop?: number; /** A turn of its own: never handed to a turn under way, since its answer is read from the turn it starts. */ ownTurn?: true; /** Friday's: a check the project added (brain.ts) failed after this agent's change; the command. */ check?: string }
   /**
    * An agent in Manual mode wants to do something it may not do unasked.
    *

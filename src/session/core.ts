@@ -14,7 +14,7 @@ import { feedbackText, fromWriter, unseen, type PrComment } from "../pr-feedback
 import { checksText, type CheckFailure } from "../pr-checks.js";
 
 export type Command =
-  | { type: "instruct"; text: string; lane?: string; /** A reply in a side thread on this earlier message (its seq). */ thread?: unknown; /** From an app on the person's behalf (app.ts postMessage): its turn is capped (Security R3). */ via?: unknown; interrupt?: boolean; attachments?: Attachment[]; handoff?: { fromLane?: string; reason?: string; carried?: unknown }; approval?: { id?: unknown; approve?: unknown }; replaces?: unknown }
+  | { type: "instruct"; text: string; lane?: string; /** A reply in a side thread on this earlier message (its seq). */ thread?: unknown; /** From an app on the person's behalf (app.ts postMessage): its turn is capped (Security R3). */ via?: unknown; interrupt?: boolean; attachments?: Attachment[]; handoff?: { fromLane?: string; reason?: string; carried?: unknown }; approval?: { id?: unknown; approve?: unknown; task?: unknown }; replaces?: unknown }
   | { type: "suggest"; text: string; lane?: string; attachments?: Attachment[]; at?: { call: string; step: string } }
   /** To the people here, not an agent: an aside no agent reads. */
   | { type: "say"; text: string; lane?: string }
@@ -60,7 +60,7 @@ export type Command =
   | { type: "hub.plan"; text: string }
   | { type: "hub.approve"; id: string; tasks?: { id: string; tool?: EngineTool }[] }
   | { type: "hub.cancel"; id: string }
-  | { type: "approval.answer"; id: string; approve: boolean; lane?: string }
+  | { type: "approval.answer"; id: string; approve: boolean; lane?: string; /** Yes to commands like these for the rest of this run too ("Allow for this task"). */ task?: boolean }
   | { type: "suggestion.dismiss"; seq: number }
   | { type: "thread.send"; id: string; lane?: string }
   /** Several notes to one agent as one instruction (Arun, 2026-10-25: notes gather, then go together): each is marked sent. */
@@ -376,7 +376,7 @@ export class SessionCore {
         // Answering a request for permission: only to what is actually waiting, and only by whoever is driving this lane.
         const ask = cmd.approval ? state.approvals[lane] : undefined;
         if (cmd.approval && (!ask || ask.id !== cmd.approval.id)) return fail("That request was already answered, or isn't waiting any more.");
-        const approval = ask ? { id: ask.id, approve: cmd.approval?.approve === true } : undefined;
+        const approval = ask ? { id: ask.id, approve: cmd.approval?.approve === true, ...(cmd.approval?.approve === true && cmd.approval?.task === true && ask.scope === "commands" ? { task: true as const } : {}) } : undefined;
         const notYours = approval?.approve ? hostsYes(state, lane, m.id) : null;
         if (notYours) return fail(notYours);
         const answered = approval ? `answered:${sid}:${approval.id}` : "";
@@ -1068,7 +1068,8 @@ export class SessionCore {
         if (notYours) return fail(notYours);
         const answered = `answered:${sid}:${ask.id}`;
         if (!(await claimOnce(answered))) return fail("That request was already answered.");
-        const r = await append({ type: "instruction", text: approve ? "Yes, run it." : "No, don't.", interrupt: false, approval: { id: ask.id, approve } });
+        const task = approve && cmd.task === true && ask.scope === "commands";
+        const r = await append({ type: "instruction", text: approve ? (task ? "Yes, run it, and commands like it for the rest of this task." : "Yes, run it.") : "No, don't.", interrupt: false, approval: { id: ask.id, approve, ...(task ? { task: true as const } : {}) } });
         if (!r.ok) await release(answered);
         if (r.ok) this.wake(sid, lane);
         return r.ok ? ok(r.seq) : fail("Could not record that.");

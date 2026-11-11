@@ -5,7 +5,7 @@ import { constants } from "node:fs";
 import { createRequire } from "node:module";
 import { devNull, homedir } from "node:os";
 import path from "node:path";
-import { ENGINE_EFFORTS, ENGINE_NAMES, type AgentTaskStatus, type EngineEffort, type EngineMode, type EngineTool, type ToolCall } from "../types.js";
+import { codexEffort, ENGINE_EFFORTS, ENGINE_NAMES, type AgentTaskStatus, type EngineEffort, type EngineMode, type EngineTool, type ToolCall } from "../types.js";
 import { testFailedInChain } from "../receipt.js";
 import { contains } from "../folder-key.js";
 import { execCli, noteBackground } from "./spawn-cli.js";
@@ -780,7 +780,7 @@ export const codexExec: Adapter = {
     // So on Windows its shell commands are NOT confined to the folder once it may write: only its own file changes are held to it.
     const sandbox = !writes ? "read-only" : process.platform === "win32" ? "danger-full-access" : "workspace-write";
     // One argument for the whole setting, so its quotes reach Codex as written on Windows too.
-    const base = [...(t.friday ? codexConfig(t.friday) : []), ...codexExtras(t), "exec", "--json", "--skip-git-repo-check", ...(t.model ? ["--model", t.model] : []), ...(t.effort ? ["-c", `model_reasoning_effort="${t.effort}"`] : []), "--sandbox", sandbox];
+    const base = [...(t.friday ? codexConfig(t.friday) : []), ...codexExtras(t), "exec", "--json", "--skip-git-repo-check", ...(t.model ? ["--model", t.model] : []), ...(t.effort ? ["-c", `model_reasoning_effort="${codexEffort(t.effort, t.model)}"`] : []), "--sandbox", sandbox];
     if (t.mode === "full" && sandbox === "workspace-write") base.push("-c", "sandbox_workspace_write.network_access=true");
     // The folders beside its own, writable as the folder is. Read-only reads them anyway, and danger-full-access holds it to none.
     if (sandbox === "workspace-write") for (const d of t.dirs ?? []) base.push("--add-dir", d);
@@ -1061,7 +1061,7 @@ export const codex: Adapter = {
       }
       // Attached pictures as pictures (its `localImage` input), beside the text that names them.
       const input = [{ type: "text", text: notedPrompt(turn) }, ...images(turn).map((p) => ({ type: "localImage", path: p }))];
-      ask("turn/start", { threadId: tid, input, cwd: wire.cwd, sandboxPolicy, approvalPolicy, ...(turn.model ? { model: turn.model } : {}), ...(turn.effort ? { effort: turn.effort } : {}) }, (r) => {
+      ask("turn/start", { threadId: tid, input, cwd: wire.cwd, sandboxPolicy, approvalPolicy, ...(turn.model ? { model: turn.model } : {}), ...(turn.effort ? { effort: codexEffort(turn.effort, turn.model) } : {}) }, (r) => {
         if (r.error) return failed("The turn failed", r.error);
         turnId ||= str(r.result?.turn?.id);
         interruptIfWanted();
@@ -1626,6 +1626,7 @@ const EFFORT_WORDS: Record<EngineEffort, string[]> = {
   high: ["high"],
   xhigh: ["xhigh", "x-high", "extra high", "extra-high", "extra", "very high", "very-high"],
   max: ["max", "maximum", "highest"],
+  ultra: ["ultra"],
 };
 /** Which of an option's choices is each of Friday's effort levels, where it has one. */
 export function effortOptions(options: { id: string; name: string }[]): Partial<Record<EngineEffort, string>> {
@@ -2229,7 +2230,7 @@ export async function antigravitySignedIn(bin: string): Promise<boolean | null> 
  * after which the list it gave over ACP is kept (runner knownModels).
  */
 export function antigravityModels(out: string): { id: string; label: string }[] {
-  const LEVEL = /-(?:low|medium|high|xhigh|max)$/i;
+  const LEVEL = /-(?:low|medium|high|xhigh|max|ultra)$/i;
   const rows = out
     .split(/\r?\n/)
     .map((l) => /^(\S+)\t(.+)$/.exec(l.trim()))

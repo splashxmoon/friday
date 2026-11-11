@@ -5938,6 +5938,31 @@ html[data-band="page"] .ag-chat, html[data-band="page"] .ag-canvas { margin-top:
 /* A request for permission: what an agent in Manual mode wants to do, and the two ways to answer. */
 .apv { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 10px 14px; border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--card); }
 .apv.done { opacity: .7; }
+/* A teammate's permission card (Crew overhaul 3A, 2026-11-11): what it wants in plain words, what that means, the command, then
+   Allow once, Allow for this task and Deny, with "Kit waits here" at the end of the row. Amber where it's worth a careful look. */
+.mp { display: flex; flex-direction: column; gap: 8px; max-width: 680px; padding: 13px 16px 12px; border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--card); outline: none; }
+.mp.careful { border-color: color-mix(in srgb, var(--amber) 55%, transparent); background: color-mix(in srgb, var(--amber) 7%, var(--card)); }
+.mp:focus-visible { box-shadow: 0 0 0 2px var(--ring, var(--violet)); }
+.mp.done { opacity: .7; }
+.mp-head { display: flex; align-items: center; gap: 8px; font-size: 14px; line-height: 20px; color: var(--ink); }
+.mp-head b { font-weight: 600; }
+.mp-icon { width: 16px; height: 16px; flex: none; color: var(--text-muted); }
+.mp.careful .mp-icon { color: var(--amber); }
+.mp-risk { margin: 0; font-size: 13.5px; line-height: 20px; color: var(--text-muted); text-wrap: pretty; }
+.mp-cmds { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; min-width: 0; }
+.mp-cmds code { max-width: 100%; padding: 3px 8px; border-radius: 6px; background: var(--bg); border: 1px solid var(--border); font: 12.5px/18px var(--mono); color: var(--ink); white-space: pre-wrap; word-break: break-all; }
+.mp-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; }
+.mp-btn { height: 30px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--card); color: var(--ink); font: 500 13px/1 var(--font, inherit); white-space: nowrap; cursor: pointer; }
+.mp-btn:hover:not(:disabled) { background: var(--hover); }
+.mp-btn.primary { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+.mp-btn.primary:hover:not(:disabled) { background: var(--ink); opacity: .88; }
+.mp-btn.quiet { border-color: transparent; background: none; color: var(--text-muted); }
+.mp-btn.quiet:hover:not(:disabled) { color: var(--ink); }
+.mp-btn:disabled { opacity: .55; cursor: default; }
+.mp-btn:focus-visible { outline: 2px solid var(--ring, var(--violet)); outline-offset: 1px; }
+.mp-wait { margin-left: auto; font-size: 12.5px; color: var(--text-muted); white-space: nowrap; }
+.mp-wait.solo { margin: 0; white-space: normal; }
+@media (max-width: 520px) { .mp-wait { margin-left: 0; flex-basis: 100%; } }
 .apv-head { display: flex; align-items: center; gap: 7px; min-height: 20px; font-size: 13px; font-weight: 600; color: var(--ink); }
 .apv-head svg { color: var(--violet); flex: none; }
 .apv-waited { font-weight: 400; color: var(--text-muted); font-variant-numeric: tabular-nums; } /* audit CODE-21 A */
@@ -11813,6 +11838,11 @@ html:not(.dark) .overlap-pop > .overlap-notice { box-shadow: 0 0 0 1px rgb(0 0 0
 .ho-menu-row:disabled:hover { background: none; }
 /* The Tree's notes on the panel's 16px edge, as the Terminal's. */
 .tree-scroll > :is(.muted, .error) { padding: 12px 10px; margin: 0; }
+/* The tree with nothing to show (2026-11-11, Arun: "better empty state"): a quiet mark, what is so and what fills it, centred. */
+.tree-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-height: 240px; height: 100%; padding: 24px 28px; text-align: center; }
+.tree-empty-mark { display: grid; place-items: center; width: 36px; height: 36px; margin-bottom: 4px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); color: var(--text-muted); }
+.tree-empty-title { margin: 0; color: var(--ink); font-size: 13.5px; font-weight: 500; line-height: 20px; }
+.tree-empty-line { max-width: 280px; margin: 0; color: var(--text-muted); font-size: 12.5px; line-height: 18px; text-wrap: balance; overflow-wrap: anywhere; }
 .ctx-tool.none .ctx-tool-head { cursor: default; margin-bottom: 0; }
 /* In an opened Review card, the how-to line under the summary starts on the summary's edge, 8px under it. */
 .change-set .review-card .diff-review-hint { margin: 0; }
@@ -13596,3 +13626,118 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover { opacity: .8; }
 .composer:has(> .team-box-mark) .prompt .voice-mic { width: 32px !important; height: 32px !important; }
 .composer:has(> .team-box-mark) .prompt [data-voice] > .voice-bar { flex: 0 1 auto; order: 1; margin-bottom: 9px; }
 .composer:has(> .team-box-mark) .prompt .voice-right { order: 2; margin: 0 0 7px; }
+
+/* ── The open-source build's sidebar: the places as a rail down its left, then the list (Sidebar.tsx OssRail), as the
+   production build has it (Arun, 2026-11-11). The rail sits inside the sidebar's card, edge to edge, and takes the card's
+   own top padding, so it starts level with the list beside it on every platform (under a Mac's traffic lights too). ── */
+:root { --oss-rail-w: 52px; }
+/* The list's room beside the rail: outranks the flush sidebar's fixed padding (html .shell .sb-panel .sb-panel-inner.dass-panel…). */
+html .shell .sb-panel .sb-panel-inner.dass-panel.dass-panel.dass-panel.sb-rail-on { flex-direction: row; gap: 0; padding-left: calc(var(--oss-rail-w) + 10px) !important; }
+/* The desktop app's window buttons sit over the column's top: the rail's line starts below them, as the list's content does. */
+html.desktop .oss-rail { border-right: 0; }
+html.desktop .oss-rail::after { content: ""; position: absolute; top: 38px; right: 0; bottom: 0; width: 1px; background: var(--border); pointer-events: none; }
+.sb-list { min-height: 0; }
+.oss-rail {
+  position: absolute; top: 0; bottom: 0; left: 0; z-index: 1; width: var(--oss-rail-w);
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding-top: inherit; padding-bottom: 10px; border-right: 1px solid var(--border);
+  border-top-left-radius: inherit; border-bottom-left-radius: inherit;
+}
+.oss-rail-group { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.oss-rail-sep { flex: none; width: 20px; height: 1px; margin: 6px 0; background: var(--border); }
+.oss-rail-foot { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-top: auto; padding-top: 8px; }
+.oss-rail-btn {
+  position: relative; display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: var(--r-md, 9px);
+  background: transparent; color: var(--text-muted); cursor: pointer; transition: background-color 120ms var(--ease-out, ease), color 120ms var(--ease-out, ease);
+}
+.oss-rail-btn:hover { color: var(--ink); background: var(--hover); }
+.oss-rail-btn[data-active] { color: var(--ink); background: var(--hover-strong); }
+.oss-rail-btn:focus-visible { outline: 2px solid var(--border-focus, var(--ink)); outline-offset: -2px; }
+.oss-rail-n {
+  position: absolute; top: 2px; right: 1px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 999px;
+  font: 600 10.5px/15px var(--font, inherit); font-variant-numeric: tabular-nums; text-align: center;
+  color: var(--ink-2); background: var(--hover-strong); box-shadow: 0 0 0 2px var(--bg);
+}
+/* The faces' own bright amber (teammates.css --badge-need) in both themes (Arun, 2026-11-11: "fix the color of the notification thing"): light theme's --amber is the
+   dark amber made for text, which as a fill under dark digits read as brown. */
+.oss-rail-n.needs { color: #2a1a00; background: var(--badge-need, #f5a524); }
+/* The rail's own Update button (AppUpdate.tsx) at its foot, the same size as the places. */
+.oss-rail-foot .dass-rail-btn { width: 36px; height: 36px; }
+
+/* Your agents, under New session: who needs you, who works, the latest, three at most, then All agents. */
+.oss-agents-add { display: grid; place-items: center; width: 22px; height: 22px; border: 0; border-radius: 6px; background: none; color: var(--text-muted); cursor: pointer; }
+.oss-agents-add:hover, .oss-agents-add:focus-visible { background: var(--hover); color: var(--ink); }
+.oss-agents-add svg { width: 14px; height: 14px; }
+.oss-agent { display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 4px 8px; border: 0; border-radius: 8px; background: none; text-align: left; color: inherit; cursor: pointer; }
+.oss-agent:hover { background: var(--hover); }
+.oss-agent[data-active] { background: var(--hover-strong); }
+.oss-agent-text { display: flex; flex-direction: column; min-width: 0; }
+/* The Agents side's list (2026-11-11, after OpenBot and Oh My Hermes): Agents and +, a search, then rooms and agents as rows,
+   each a face, a name with its role in a word and when, and its latest line; no New session, no sessions. */
+.oss-crew { gap: 6px; }
+.oss-crew-head { display: flex; align-items: center; justify-content: space-between; height: 32px; padding: 0 2px 0 4px; }
+.oss-crew-title { height: 28px; padding: 0 6px; border: 0; border-radius: 6px; background: none; color: var(--ink); font: 600 14px/1 var(--font); cursor: pointer; }
+.oss-crew-title:hover, .oss-crew-title[data-active] { background: var(--hover); }
+.oss-crew-search { display: flex; align-items: center; gap: 7px; height: 30px; margin: 0 2px; padding: 0 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text-muted); }
+.oss-crew-search:focus-within { border-color: var(--border-strong); }
+.oss-crew-search svg { width: 14px; height: 14px; flex: none; }
+.oss-crew-search input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: none; color: var(--ink); font: 13px var(--font); }
+.oss-crew-search input::placeholder { color: var(--text-muted); }
+.oss-crew-search input::-webkit-search-cancel-button { display: none; }
+.oss-crew-scroll { display: flex; flex: 1; flex-direction: column; gap: 1px; min-height: 0; margin: 0 -4px; padding: 0 4px 12px; overflow-y: auto; }
+.oss-crew-label { display: flex; align-items: center; justify-content: space-between; height: 26px; margin-top: 8px; padding: 0 2px 0 8px; color: var(--text-muted); font-size: 12px; font-weight: 500; }
+.oss-crew-count { padding-right: 6px; font-variant-numeric: tabular-nums; }
+.oss-crew-row { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 6px 8px; border: 0; border-radius: 8px; background: none; color: inherit; text-align: left; cursor: pointer; }
+.oss-crew-row:hover { background: var(--hover); }
+.oss-crew-row[data-active] { background: var(--hover-strong); }
+.oss-crew-row:focus-visible { outline: 2px solid var(--violet); outline-offset: -2px; }
+.oss-crew-row > .tm-room-faces { flex: none; }
+.oss-crew-text { display: flex; flex: 1; flex-direction: column; gap: 1px; min-width: 0; }
+.oss-crew-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.oss-crew-top b { overflow: hidden; color: var(--ink); font-size: 13px; font-weight: 500; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.oss-crew-chip { flex: none; height: 18px; padding: 0 6px; border-radius: 5px; background: var(--hover); color: var(--ink-2); font-size: 11px; line-height: 18px; }
+.oss-crew-when { flex: none; margin-left: auto; color: var(--faint); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.oss-crew-line { overflow: hidden; color: var(--text-muted); font-size: 12px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
+.oss-crew-line.s-waiting, .oss-crew-line.s-needs { color: var(--amber); }
+.oss-crew-line.s-working { color: var(--ink-2); }
+.oss-crew-none { margin: 10px 8px; color: var(--text-muted); font-size: 12.5px; }
+.oss-agent-name, .oss-agent-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oss-agent-name { font-size: 13px; font-weight: 500; line-height: 17px; color: var(--ink); }
+.oss-agent-line { font-size: 12px; line-height: 15px; color: var(--text-muted); }
+.oss-agent-line.s-working, .oss-agent-line.s-limited { color: var(--ink-2); }
+.oss-agent-line.s-waiting, .oss-agent-line.s-needs { color: var(--amber); }
+.oss-agent-line.s-stopped, .oss-agent-line.s-failed { color: var(--red); }
+.oss-agent-plus { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; border: 1px dashed var(--border-strong); color: var(--text-muted); flex: none; }
+.oss-agent-plus svg { width: 13px; height: 13px; }
+/* The usage question and the word about Friday Team, at the list's foot where the dock was. */
+.sb-list-foot { flex: none; margin-top: auto; padding: 8px 4px 0; border-top: 1px solid var(--border); }
+
+/* A teammate's finished turn (Crew overhaul 3A, 2026-11-11): its steps folded into one line, then what it changed as a result
+   card, Changed / Checked / Branch in rows, with the whole review a press away. */
+.rsp-steps-fold { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; height: 24px; margin: 2px 0 4px; padding: 0 6px 0 2px; border: 0; border-radius: 6px; background: none; color: var(--text-muted); font-size: 13px; cursor: pointer; font-variant-numeric: tabular-nums; }
+.rsp-steps-fold:hover { color: var(--ink); background: var(--hover); }
+.rsp-steps-fold:focus-visible { outline: 2px solid var(--violet); outline-offset: 1px; }
+.rsp-steps-mark { color: var(--green); }
+.rsp-steps-chev { transition: transform .15s ease; }
+.rsp-steps-fold[aria-expanded="true"] .rsp-steps-chev { transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) { .rsp-steps-chev { transition: none; } }
+.mr { display: flex; flex-direction: column; gap: 10px; max-width: 680px; margin-top: 8px; padding: 14px 16px; border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--card); }
+.mr-title { margin: 0; font-size: 14px; line-height: 20px; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.mr-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 20px; margin: 0; font-size: 13.5px; line-height: 20px; }
+.mr-facts > div { display: contents; }
+.mr-facts dt { color: var(--text-muted); }
+.mr-facts dd { margin: 0; color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
+.mr-facts code { padding: 1px 5px; border-radius: 5px; background: var(--bg); border: 1px solid var(--border); font: 12.5px/18px var(--mono); }
+.mr-num { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.mr-check { display: inline-flex; align-items: center; gap: 5px; }
+.mr-check.ok { color: var(--green); }
+.mr-check.bad { color: var(--red); }
+.mr-check.none { color: var(--amber); }
+.mr-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.mr-link { display: inline-flex; align-items: center; text-decoration: none; }
+.mr-review { margin-top: 2px; }
+
+/* The open-source build on a place's own page (Needs you, the Board, Automations, Code review, Usage, Settings): the rail alone,
+   the page taking the list's room (Arun, 2026-11-11). The panel narrows to the rail; nothing is drawn beside it. */
+html.rail-only { --panel-w: calc(var(--oss-rail-w) + 12px) !important; }
+html.rail-only .shell .sb-panel .sb-panel-inner.dass-panel.dass-panel.dass-panel.sb-rail-on { padding-left: var(--oss-rail-w) !important; padding-right: 0 !important; }

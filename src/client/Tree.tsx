@@ -9,7 +9,7 @@ import { agentNameFor, patchLines } from "./Activity.js";
 import { argsOf } from "./args.js";
 import { CodeEditor, CodeReader, QuickOpen } from "./Editor.js";
 import type { Send } from "./useSession.js";
-import { Icon } from "./icons.js";
+import { Icon, type IconName } from "./icons.js";
 import { ContextMenu, relTime } from "./ui.js";
 import { useFocus } from "./focusStore.js";
 import { unnumbered } from "../project-rules.js";
@@ -206,6 +206,12 @@ export function TreePanel({
       .then((r) => r.json() as Promise<{ output?: string; error?: string; stale?: { at: number; reason: string } }>)
       .then((r) => {
         if (r.error) throw new Error(r.error);
+        // An empty folder is a listing of nothing, not a failure: it read "(no files)" in red (Arun, 2026-11-11: "better empty state").
+        if ((r.output ?? "").trim() === "(no files)") {
+          treeCache.set(sid, []);
+          setPaths([]);
+          return;
+        }
         // A sentence ("the machine isn't connected") is not a listing: keep
         // what is already on screen instead of replacing it with nothing.
         if (!/^\d+ files under /.test(r.output ?? "")) {
@@ -322,16 +328,18 @@ export function TreePanel({
       <div className={`tree-split ${pick ? "open" : ""}${pick && listShut ? " list-shut" : ""}`}>
       <div className="doc-scroll tree-scroll">
         {!where ? (
-          <p className="muted small">
-            No folder yet. Attach one with the folder button in the composer and it appears here as a working copy — or connect a machine from the session header to work in a checkout on it.
-          </p>
+          <TreeEmpty icon="folder" title="No folder yet" line="Attach one with the folder button in the composer, or connect a computer from the session's header, and its files show here." />
         ) : err ? (
           // A folder that isn't there yet is a state, not a failure: said in the panel's quiet grey, red kept for what broke.
           <p className={/no folder/i.test(err) ? "muted small" : "error small"}>{err}</p>
         ) : !paths ? (
           <p className="muted small">Reading the folder…</p>
         ) : !rows.length ? (
-          <p className="muted small">{q || onlyChanged ? "Nothing here matches." : "The folder came back empty."}</p>
+          q || onlyChanged ? (
+            <TreeEmpty icon="search" title={q ? `Nothing called “${q}”` : "No changed files"} line={q ? "Try part of the name, or clear the search." : "Files an agent changes in this session show here."} />
+          ) : (
+            <TreeEmpty icon="folder" title="No files yet" line={`${where.cwd ? `${where.cwd.split(/[\\/]/).filter(Boolean).pop()} is empty. ` : ""}What the agents make here shows up as they make it.`} />
+          )
         ) : (
           <div className="tree-rows" role="tree" aria-label="Files in the folder" ref={rowsEl} onKeyDown={onRowKey}>
             {rows.map((r) => {
@@ -664,6 +672,19 @@ function useFacts(state: SessionState, events: SessionEvent[], paths: string[]):
     const e = state.engines[MAIN_LANE] ?? Object.values(state.engines)[0];
     return { paths, changed, touched, where: e ? { host: e.hostName, cwd: e.cwd, branch: e.branch } : null };
   }, [state, events, paths, known]);
+}
+
+/** The tree with nothing to show: a mark, what is so, and what makes it fill, centred in the panel. */
+function TreeEmpty({ icon, title, line }: { icon: IconName; title: string; line: string }) {
+  return (
+    <div className="tree-empty" role="status">
+      <span className="tree-empty-mark" aria-hidden="true">
+        <Icon name={icon} size={18} />
+      </span>
+      <p className="tree-empty-title">{title}</p>
+      <p className="tree-empty-line">{line}</p>
+    </div>
+  );
 }
 
 /** "(no files)" and the trailing note are prose, not paths. */

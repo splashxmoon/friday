@@ -1321,7 +1321,7 @@ export function App() {
         {/* Keyed on the workspace switches: every page is drawn again in the new workspace, and reads its own lists again. */}
         <Suspense key={switches} fallback={route.kind === "session" ? <SessionSkeleton /> : <PageSkeleton />}>
         {!identity.id ? null : route.kind === "home" ? (
-          teamTabOn ? <TeamHome identity={identity} onOpen={(r) => navigate({ kind: "session", sid: r.sid, invite: r.invite })} /> :
+          teamTabOn ? <TeamHome identity={identity} needs={attention.items} onOpen={(r) => navigate({ kind: "session", sid: r.sid, invite: r.invite })} /> :
           <Code
             // Not keyed on the preset: the composer clears it once read, and a key that changed then remounted it empty.
             // Nor on the workspace's defaults: rebuilt when they arrived, it lost the picked folder. Code takes them as they come.

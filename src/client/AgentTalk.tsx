@@ -9,7 +9,8 @@ import { MenuButton, type MenuItem } from "./ui.js";
 import type { TodoStep } from "@/components/aicss/TodoList";
 import { MAIN_LANE, type Member, type MeshNote, type SessionEvent } from "../types.js";
 import type { Send } from "./useSession.js";
-import { mateOn, TeamTalk } from "./Teammates.js";
+import { mateOn, matesIn, TeamTalk } from "./Teammates.js";
+import { boardTitle } from "./team-api.js";
 import { boardReportText } from "./team-room.js";
 
 /**
@@ -98,7 +99,19 @@ export function AgentTalkCard({ ev, state, me, send, notify, delivered, stamp, t
   // A team (teammates.ts) reads it as a group chat (Teammates.tsx TeamTalk).
   // A board's report reads from the board's record: titles, not ids, and who did and checked each by their names (audit CREW-12).
   const said = m.kind === "reply" && m.ofTask && events ? boardReportText(ev.body.text, events, ev.seq, (l) => mateOn(l)?.name) : ev.body.text;
-  if (state.options.team) return <TeamTalk fromLane={m.fromLane} toLane={lane} fromName={m.fromName} toName={m.toName} kind={m.kind} report={!!m.ofTask} review={!!(m.board && m.review)} carried={!!m.carriedFrom} {...(team ? { team } : {})} text={said} why={why} {...(ask?.reply ? { answer: { text: ask.reply.text, auto: !!ask.reply.auto } } : {})} status={status} stamp={stamp} fromMark={from.mark} toMark={to.mark} />;
+  // The lead handing out a piece reads as one line, "Assigned to Kit: …", whose Change gives it to another teammate: a board
+  // task is moved on the board; one handed out by assign_task, the lead is asked to (as the Board's menu does).
+  const assigning = state.options.team && m.kind === "task" && !m.review && !m.carriedFrom && !(team && team.length > 1) && !!state.lead && m.fromLane === state.lead;
+  const assign = assigning
+    ? {
+        others: matesIn(state.id)
+          .filter((x) => x.lane !== lane && x.lane !== state.lead)
+          .map((x) => ({ lane: x.lane, name: x.m.name, ...(x.m.look ? { look: x.m.look } : {}) })),
+        onChange: (toName: string) =>
+          void send(m.board ? { type: "board.task", id: m.board, action: "reassign", to: toName } : { type: "instruct", lane: state.lead!, text: `Please hand "${boardTitle(said)}" from ${m.toName} to ${toName}.` }).then((r) => notify(r.ok ? (m.board ? `Given to ${toName}.` : `Asked ${m.fromName} to give it to ${toName}.`) : (r.error ?? "Couldn't change that."))),
+      }
+    : undefined;
+  if (state.options.team) return <TeamTalk fromLane={m.fromLane} toLane={lane} fromName={m.fromName} toName={m.toName} kind={m.kind} report={!!m.ofTask} review={!!(m.board && m.review)} carried={!!m.carriedFrom} {...(team ? { team } : {})} text={said} why={why} {...(ask?.reply ? { answer: { text: ask.reply.text, auto: !!ask.reply.auto } } : {})} status={status} stamp={stamp} fromMark={from.mark} toMark={to.mark} {...(assign ? { assign } : {})} />;
   return (
     <div className={cn("tk-card", moving && "waiting")}>
       <div className="tk-head">

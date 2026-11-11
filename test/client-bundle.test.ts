@@ -64,12 +64,19 @@ for (const edition of ["hosted", "local"] as const) {
     // voice input's mic and key in the home box (VoiceMic.tsx, ~2 KB; its engine and the model's worker load at the first press):
     // raised to 448 on purpose. Nov 10 2026: 446.8 hosted, 448.7 local (447.9 before), with Qwen's own mark in place of a bot
     // (BrandMarks.tsx, one path of ~1.9 KB, shown wherever a tool is named; Arun: "use this for the qwen code icon"), the sign-in
-    // notes and the ACP registry already moved to chunks of their own: raised to 450 on purpose.
-    assert.ok(kb < 450, `app.js and its static imports are ${kb.toFixed(0)} KB brotli, over the 450 KB budget`);
+    // notes and the ACP registry already moved to chunks of their own: raised to 450 on purpose. Nov 11 2026: 449.2 hosted, 450.8
+    // local (448.5 and 450.1 before 3A), with the production sidebar's rail and agents list in the open-source build (Sidebar.tsx
+    // OssRail, AgentsSection) and a lead's hand-outs as one line (Teammates.tsx TeamTalk); the Agents page, crew setup and the
+    // plan are chunks of their own, and the plain words for a teammate's ask stay with the Agents page: raised to 452 on purpose.
+    assert.ok(kb < 452, `app.js and its static imports are ${kb.toFixed(0)} KB brotli, over the 452 KB budget`);
     // A session link waits on the session screen too: CodeMirror (~150 KB packed) loads with the first file opened, not here
     // (mirror-editor.tsx). Nov 4 2026, merged with build/e2e-hardening: 890 KB hosted (1,048 KB before; Oct 22: 710 KB).
     assert.deepEqual(session.modules.filter((m) => /node_modules\/@codemirror\//.test(m)).slice(0, 3), [], "CodeMirror is in the session screen's first load: keep it in mirror-editor.tsx, loaded lazily");
     // Nov 8 2026: 922 KB hosted, 919 local, with the folder picker's sources and rows (Workspace.tsx, 0.2.19): raised to 930 on purpose.
-    assert.ok(session.kb < 930, `a session screen's first load is ${session.kb.toFixed(0)} KB brotli, over the 930 KB budget`);
+    // Nov 11 2026: 934.6 hosted, 931.8 local (930.6 and 927.6 before), with a crew chat's folded steps, result card and plain-words
+    // permission card (Activity.tsx; a chunk of their own saved 0.3 KB and flashed the old card while it loaded): raised to 936.
+    // Nov 11 2026, later: 936.0 hosted, 933.4 local, with a run's NO_UPDATE said in words and a lead's hand-out lines able to move a
+    // piece (Activity.tsx, AgentTalk.tsx); the plan and its actions load on their own: raised to 940 on purpose.
+    assert.ok(session.kb < 940, `a session screen's first load is ${session.kb.toFixed(0)} KB brotli, over the 940 KB budget`);
   });
 }

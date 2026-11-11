@@ -3,6 +3,7 @@ import type { Redis } from "ioredis";
 import { describeSchedule, dueSlotSince, validateSchedule, type AgentSchedule } from "./agents.js";
 import { ENGINE_NAMES, ENGINE_TOOLS, type EngineMode, type EngineTool } from "./types.js";
 import { untrusted, UNTRUSTED_NOTE } from "./untrusted.js";
+import { NO_UPDATE } from "./teammate-checkins.js";
 
 /**
  * Automations: the coding tools working on their own (Arun, 2026-10-23: "get rid of the agents tab page and replace it with
@@ -62,7 +63,8 @@ export interface Automation {
   paused?: { person: { id: string; name: string }; by: { id: string; name: string }; why: "removed" | "left" | "deleted"; at: number };
 }
 
-export type RunStatus = "starting" | "running" | "done" | "failed" | "waiting" | "skipped";
+/** `quiet`: it ran and had nothing new to say (NO_UPDATE): nobody is told, as OpenBot's quiet routine runs (Arun, 2026-11-11). */
+export type RunStatus = "starting" | "running" | "done" | "failed" | "waiting" | "skipped" | "quiet";
 
 export interface AutomationRun {
   id: string;
@@ -150,7 +152,13 @@ export function promptFor(a: Automation, event: string): string {
   const outside = !!event && (a.when.kind === "webhook" || a.when.kind === "session");
   const said = outside ? untrusted("what started this run", event) : event;
   const told = base.includes("{{event}}") ? base.replaceAll("{{event}}", () => said) : event ? `${base}\n\nWhat started this run:\n${said}` : base;
-  const parts = [`[Friday] This is an automation, “${a.name}”, running ${describeWhen(a.when)}. Nobody is watching it start: do the work, then finish with a short summary of what you did and anything a person should check.`, told, ...(outside ? [UNTRUSTED_NOTE] : [])];
+  const parts = [
+    `[Friday] This is an automation, “${a.name}”, running ${describeWhen(a.when)}. Nobody is watching it start: do the work, then finish with a short summary of what you did and anything a person should check.`,
+    told,
+    ...(outside ? [UNTRUSTED_NOTE] : []),
+    // A run with nothing to show ends quietly: no message to its owner, "Nothing new" on the Automations page (Arun, 2026-11-11).
+    `If there turns out to be nothing to do, or nothing new since its last run, reply with exactly ${NO_UPDATE} and nothing else: the run ends quietly and nobody is told.`,
+  ];
   if (a.then.pr) parts.push("When you're done and the change works, commit it on a new branch and open a pull request with a short description (gh pr create). If there is nothing to change, say so instead.");
   if (a.who.team.length) parts.push("You lead the agents in this session: split the work onto the shared board so they start on it at once, do your own piece, then check it all fits.");
   return parts.join("\n\n");

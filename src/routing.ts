@@ -145,7 +145,7 @@ export const successFor = (solve: number, tier: RouteTier) => 1 - (1 - solve) * 
  * published effort curves, not scores.
  */
 const EFFORT_TOOLS = new Set<EngineTool>(["codex"]);
-const EFFORT_ADJ: Record<Effort, { solve: number; cost: number }> = { low: { solve: -0.04, cost: 0.6 }, medium: { solve: 0, cost: 1 }, high: { solve: 0.03, cost: 1.7 }, xhigh: { solve: 0.04, cost: 2.4 }, max: { solve: 0.05, cost: 3.2 } };
+const EFFORT_ADJ: Record<Effort, { solve: number; cost: number }> = { low: { solve: -0.04, cost: 0.6 }, medium: { solve: 0, cost: 1 }, high: { solve: 0.03, cost: 1.7 }, xhigh: { solve: 0.04, cost: 2.4 }, max: { solve: 0.05, cost: 3.2 }, ultra: { solve: 0.055, cost: 4.2 } };
 const effortFor = (tier: RouteTier): Effort => (tier === "light" ? "low" : "medium");
 
 /** A model weighed for a task: how likely it is to get it right, a task's cost on it, and the cost of a correct result. */
