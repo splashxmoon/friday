@@ -4,7 +4,7 @@ import { TaskMark, type TaskMarkState } from "./TaskMark.js";
 import { cn } from "@/lib/utils";
 import { laneLabel } from "../left-off.js";
 import { agentLook } from "./handoff-ui.js";
-import { laneOf, meshOf, pendingFor, runOf, type SessionState } from "../session/projection.js";
+import { laneOf, meshOf, pendingFor, reviewApproved, runOf, type SessionState } from "../session/projection.js";
 import { MenuButton, type MenuItem } from "./ui.js";
 import type { TodoStep } from "@/components/aicss/TodoList";
 import { MAIN_LANE, type Member, type MeshNote, type SessionEvent } from "../types.js";
@@ -50,7 +50,7 @@ export function taskStatus(state: SessionState, m: MeshNote, lane: string): Talk
     if (t.status === "cancelled") return { word: "Dropped", how: "quiet" };
     if (t.lane && t.lane !== lane && t.status !== "review") return { word: `Moved to ${t.name ?? laneLabel(state, t.lane)}`, how: "quiet" };
     if (t.status === "open") return { word: t.next ? `Moved, waiting for ${t.next}` : "Back on the board", how: "quiet" };
-    if (t.status === "done") return { word: t.review?.ok ? "Done and checked" : "Done", how: "done" };
+    if (t.status === "done") return { word: reviewApproved(t.review) ? "Done and checked" : "Done", how: "done" };
     if (t.status === "blocked") return { word: "Stuck", how: "bad" };
     if (t.status === "review") return { word: t.reviewer ? `${t.reviewer.name} is checking it` : "Waiting for a check", how: "review" };
   } else if (meshOf(state).asks[m.id]?.reply) return { word: "Reported back", how: "done" };
@@ -233,7 +233,7 @@ export function BoardCard({ ev, state, stamp }: { ev: SessionEvent; state: Sessi
       : t.status === "cancelled"
         ? "dropped"
         : t.status === "done"
-      ? `${who(t) ?? ""}${"review" in t && t.review ? ` · checked by ${t.review.by}` : ""}`
+      ? `${who(t) ?? ""}${"review" in t && reviewApproved(t.review) ? ` · checked by ${t.review!.by}` : ""}`
       : t.status === "claimed" && !atWork(t)
         ? `${who(t)} has it · not working on it now`
       : t.status === "claimed"
@@ -366,7 +366,7 @@ export function teamTasks(state: SessionState, jump: (seq: number) => void, cont
       if (t.status === "cancelled") out.push({ ...base, status: "cancelled", note: "Dropped" });
       else if (t.checks?.running) out.push({ ...base, status: "active", note: "Running checks", who: who(t.lane, t.name) });
       else if (t.status === "claimed" && t.rounds && t.checks?.ok === false) out.push({ ...base, status: "active", note: "Fixing failed checks", tone: "warn", who: who(t.lane, t.name) });
-      else if (t.status === "done") out.push({ ...base, status: "completed", note: t.review?.ok ? "Checked" : "Done", who: who(t.lane, t.name) });
+      else if (t.status === "done") out.push({ ...base, status: "completed", note: reviewApproved(t.review) ? "Checked" : "Done", who: who(t.lane, t.name) });
       // Why, in its agent's own words, on hover: "Stuck" alone left a person guessing which of five reasons it was.
       else if (t.status === "blocked") out.push({ ...base, status: "pending", note: "Stuck", tone: "bad", who: who(t.lane, t.name), detail: `${t.title}: ${(t.report ?? "").split("\n").find((l) => l.trim())?.slice(0, 240) ?? "no report"}` });
       else if (t.status === "review") out.push({ ...base, status: "active", note: t.reviewer ? `${t.reviewer.name} checking` : "Waiting for a check", who: who(t.lane, t.name) });

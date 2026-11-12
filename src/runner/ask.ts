@@ -21,6 +21,11 @@ export interface AskInput {
   prompt: string;
   model?: string;
   timeoutMs?: number;
+  /**
+   * The folder it answers in, when the question is about one (Deep Dive's pages and questions, deep-dive.ts): still plan mode,
+   * so it reads and changes nothing. Without it, a scratch folder of Friday's own, as the agent builder needs nothing more.
+   */
+  cwd?: string;
 }
 
 /** onText hears the answer as the CLI writes it, a piece at a time; the whole answer is still what this returns. */
@@ -34,8 +39,8 @@ export async function askCli(input: AskInput, onText?: (chunk: string) => void):
   const bin = await findBin(input.tool);
   if (!bin) throw new Error(`${ENGINE_NAMES[input.tool]} isn't installed on this machine.`);
   const launch = await launcher(bin);
-  const cwd = path.join(tmpdir(), "friday-ask");
-  await mkdir(cwd, { recursive: true });
+  const cwd = input.cwd ?? path.join(tmpdir(), "friday-ask");
+  if (!input.cwd) await mkdir(cwd, { recursive: true });
 
   const spec = { prompt, resumeId: null, mode: "plan" as const, system: input.system, ...(input.model ? { model: input.model } : {}) };
   const args = adapter.args(spec);

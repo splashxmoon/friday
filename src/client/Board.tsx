@@ -678,7 +678,7 @@ export function Board({ identity, recents, projects, onOpen, onNew, onReview, so
         {confirm && <ConfirmDialog confirmation={confirm} onClose={() => setConfirm(null)} />}
 
         {/* One row: finding on the left, which cards and the week on the right, all 32px and centred on one line. */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="page-top flex flex-wrap items-center gap-2">
           <div className="relative w-full max-w-[340px] min-w-[220px] flex-1">
             <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-[var(--text-muted)]" />
             <Input

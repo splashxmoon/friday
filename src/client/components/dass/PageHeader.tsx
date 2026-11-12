@@ -28,7 +28,7 @@ export function PageHeader({
   // A section's heading (as="h2", Settings) is still shown.
   if (H === "h1")
     return (
-      <header className={cn(actions ? "mb-5 flex flex-wrap items-center justify-end gap-2" : "contents", className)}>
+      <header className={cn(actions ? "page-top mb-5 flex flex-wrap items-center justify-end gap-2" : "contents", className)}>
         <h1 ref={titleRef} tabIndex={titleRef ? -1 : undefined} className="sr-only">
           {title}
         </h1>

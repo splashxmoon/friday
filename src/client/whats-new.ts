@@ -15,13 +15,13 @@ export interface WhatsNewNotes {
 }
 
 export const WHATS_NEW: WhatsNewNotes = {
-  version: "0.2.22",
-  summary: "A new Crew: set one up from a sentence, see what needs you on the Agents page, and watch the lead's plan come together, every piece on a branch of its own.",
+  version: "0.2.23",
+  summary: "Deep Dive: your own coding tool explains a repo page by page, every claim linked to the lines it's about, and answers questions about the code.",
   items: [
-    { icon: "users", title: "A crew from a sentence", line: "Say what you're working on; Friday suggests the teammates, on a coding tool you're signed in to." },
-    { icon: "board", title: "The plan beside the room", line: "Each piece the lead hands out, who has it and where it stands, Verified once its checks pass." },
-    { icon: "gitFork", title: "A branch per task", line: "Each task is cut from where the plan started; the lead merges them in order, never by itself." },
-    { icon: "shield", title: "Asks in plain words", line: "\u201cKit wants to publish a package to npm\u201d: Allow once, Allow for this task, or Deny." },
+    { icon: "puzzle", title: "A repo, explained", line: "A page for each part, with diagrams, written by a small model on your own plan. It reads, never edits." },
+    { icon: "chat", title: "Ask about the code", line: "Answers cite their lines. Pick the model that answers, and delete a question when you're done with it." },
+    { icon: "check", title: "Claims checked", line: "A citation to a file or line that isn't there is asked about once, then struck through, never hidden." },
+    { icon: "sidebar", title: "A tidier window", line: "Headers stay up top, the rail stays when the list folds, and nothing sits under the window's buttons." },
   ],
 };
 

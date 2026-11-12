@@ -6,7 +6,7 @@ import { Tooltips } from "./Tooltips.js";
 import { TextMenu } from "./TextMenu.js";
 import { BuildWatch } from "./BuildWatch.js";
 import type { Role } from "../types.js";
-import { lazy, Suspense, type ComponentProps, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, type ComponentProps, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { isNarrow } from "./narrow.js";
 import { readTabNow, setTeamTab, TeamHome, TeammateDialog, useTeamTab } from "./Teammates.js";
 import { choosePlace, usePlaceFollows, usePlaceLeaves, useWorkSessions } from "./WorkMode.js";
@@ -32,6 +32,7 @@ const pages = {
   session: () => import("./SessionView.js").then((m) => (sessionCode = m)),
   automations: () => import("./Automations.js"),
   board: () => import("./Board.js"),
+  deepdive: () => import("./DeepDive.js"),
   review: () => import("./CodeReview.js"),
   needs: () => import("./NeedsYou.js"),
   usage: () => import("./UsagePage.js"),
@@ -49,6 +50,9 @@ function SessionView(p: ComponentProps<typeof LazySessionView>) {
 }
 // Only for someone opening a recording link, who has no account and needs nothing else here.
 const Board = lazy(() => pages.board().then((m) => ({ default: m.Board })));
+const DeepDivePage = lazy(() => pages.deepdive().then((m) => ({ default: m.DeepDivePage })));
+// Search opens on a press, so its code comes then: the room it left in the first load is what Deep Dive's page took (2026-11-12).
+const SearchModal = lazy(() => import("./SearchModal.js").then((m) => ({ default: m.SearchModal })));
 const AutomationsPage = lazy(() => pages.automations().then((m) => ({ default: m.AutomationsPage })));
 const TeamWorkflowsPage = lazy(() => import("./TeamWorkflows.js").then((m) => ({ default: m.TeamWorkflowsPage })));
 const CodeReview = lazy(() => pages.review().then((m) => ({ default: m.CodeReview })));
@@ -72,7 +76,6 @@ import { QuickPrompt } from "./QuickPrompt.js";
 import { quickText, sendQuickTo, startQuick } from "./quick-send.js";
 import { ShortcutList } from "./Shortcuts.js";
 import { Palette, baseActions, paletteOrder, type Action } from "./Palette.js";
-import { SearchModal } from "./SearchModal.js";
 import type { Plan } from "../plan-types.js";
 import { Sidebar } from "./Sidebar.js";
 import { PrWatch, usePrs } from "./prWatch.js";
@@ -112,6 +115,8 @@ type Route =
   | { kind: "people" }
   | { kind: "library" }
   | { kind: "board" }
+  /** Deep Dive: the repos explained, and questions about their code (DeepDive.tsx). */
+  | { kind: "deepdive" }
   | { kind: "review" }
   /** Everything waiting on you, ranked, with Friday's suggested answers (NeedsYou.tsx). */
   | { kind: "needs" }
@@ -137,6 +142,7 @@ function parseRoute(search: string): Route {
   if (p.get("view") === "people") return isLocal() ? { kind: "home" } : { kind: "people" };
   if (p.get("view") === "library") return isLocal() ? { kind: "home" } : { kind: "library" };
   if (p.get("view") === "board") return { kind: "board" };
+  if (p.get("view") === "deepdive") return { kind: "deepdive" };
   if (p.get("view") === "review") return { kind: "review" };
   if (p.get("view") === "needs") return { kind: "needs" };
   if (p.get("view") === "settings") return { kind: "settings", section: settingsSection(p.get("section")) };
@@ -173,6 +179,8 @@ function routeUrl(r: Route): string {
   if (r.kind === "people") return "/?view=people";
   if (r.kind === "library") return "/?view=library";
   if (r.kind === "board") return "/?view=board";
+  // The repo open in it is the page's own to keep in the address (DeepDive.tsx), so a reload lands on it.
+  if (r.kind === "deepdive") return "/?view=deepdive";
   if (r.kind === "review") return "/?view=review";
   if (r.kind === "needs") return "/?view=needs";
   if (r.kind === "settings") return `/?view=settings&section=${encodeURIComponent(r.section)}`;
@@ -185,6 +193,15 @@ function routeUrl(r: Route): string {
   if (r.agentId) q.set("agent", r.agentId);
   return q.size ? `/?${q}` : "/";
 }
+
+/** A desktop-width window (wider than the narrow layout, where the sidebar is a sheet), kept current as the window is resized. */
+const WIDE = "(min-width: 1001px)";
+const wideSub = (on: () => void) => {
+  const m = matchMedia(WIDE);
+  m.addEventListener("change", on);
+  return () => m.removeEventListener("change", on);
+};
+const wideNow = () => matchMedia(WIDE).matches;
 
 export function App() {
   // Who you are is whatever /api/me says. Until it answers, nothing is loaded:
@@ -755,7 +772,7 @@ export function App() {
       if (r.kind !== "session" && parseRoute(location.search).kind === r.kind) dispatchEvent(new CustomEvent("friday:same-page", { detail: r.kind }));
       history.pushState(null, "", routeUrl(r));
       setRoute(r);
-      if (r.kind !== "session") document.title = r.kind === "connections" ? "Connections · Friday" : r.kind === "agents" ? "Saved agents · Friday" : r.kind === "automations" ? "Automations · Friday" : r.kind === "settings" ? "Settings · Friday" : r.kind === "usage" ? "Usage · Friday" : r.kind === "new-teammate" ? "New teammate · Friday" : r.kind === "review" ? "Code Review · Friday" : r.kind === "needs" ? "Needs you · Friday" : r.kind === "board" ? "Agent Board · Friday" : r.kind === "library" ? "Library · Friday" : r.kind === "people" ? "People · Friday" : (r.kind as string) === "crew" ? "Crew · Friday" : "Friday";
+      if (r.kind !== "session") document.title = r.kind === "connections" ? "Connections · Friday" : r.kind === "agents" ? "Saved agents · Friday" : r.kind === "automations" ? "Automations · Friday" : r.kind === "settings" ? "Settings · Friday" : r.kind === "usage" ? "Usage · Friday" : r.kind === "new-teammate" ? "New teammate · Friday" : r.kind === "review" ? "Code Review · Friday" : r.kind === "needs" ? "Needs you · Friday" : r.kind === "board" ? "Agent Board · Friday" : r.kind === "deepdive" ? "Deep Dive · Friday" : r.kind === "library" ? "Library · Friday" : r.kind === "people" ? "People · Friday" : (r.kind as string) === "crew" ? "Crew · Friday" : "Friday";
       if (isNarrow(innerWidth)) setLayout({ sidebarCollapsed: true });
     },
     [setLayout],
@@ -1148,7 +1165,12 @@ export function App() {
     ];
   };
   // The sidebar is how you get anywhere now that there is no rail (Dass, 2026-10-19), so it shows on every page until it is folded away.
-  const panelOpen = !layout.sidebarCollapsed;
+  // The sidebar's button folds the session list, never the rail of places beside it (Arun, 2026-11-12: "make sure the side bar
+  // close thing doesnt close the button rail at all"): in the open-source build at a desktop width the rail stays, as on a place's
+  // own page, and only a narrow window, where the sidebar is a sheet over the page, puts the whole of it away.
+  const listOpen = !layout.sidebarCollapsed;
+  const keepRail = useSyncExternalStore(wideSub, wideNow, () => false) && isLocal();
+  const panelOpen = listOpen || keepRail;
   // The Chat button's own rule, shared with the Mac window's toolbar: on a chat page it folds the list, anywhere else it goes to the chats.
   const toggleChats = () => {
     if (inChat) {
@@ -1203,7 +1225,7 @@ export function App() {
   // Every full page sits under the window's band the same way, so they are all the same height: Usage and Settings were
   // left out, and stood 40px taller than the pages beside them.
   let crewWorkflows = false;
-  const fullBleed = crewWorkflows || route.kind === "agents" || route.kind === "automations" || route.kind === "connections" || route.kind === "people" || route.kind === "library" || route.kind === "board" || route.kind === "review" || route.kind === "needs" || route.kind === "usage" || route.kind === "new-teammate" || route.kind === "settings";
+  const fullBleed = crewWorkflows || route.kind === "agents" || route.kind === "automations" || route.kind === "connections" || route.kind === "people" || route.kind === "library" || route.kind === "board" || route.kind === "deepdive" || route.kind === "review" || route.kind === "needs" || route.kind === "usage" || route.kind === "new-teammate" || route.kind === "settings";
   useLayoutEffect(() => {
     if (!fullBleed) return;
     // When the band comes, not only if it is there as this opens: after a reload it came later, and the page stood 12px lower.
@@ -1230,7 +1252,7 @@ export function App() {
       {/* The first thing the keyboard reaches: straight to the page, past the rail and the list. */}
       <a className="skip-link" href="#main">Skip to the page</a>
       {/* Where a session puts its header in the desktop app: the band along the top of the window, which has the room. Fixed, so it takes no place in the grid. */}
-      <WindowNav open={panelOpen} onToggle={togglePanel} what={inAgents ? "agents" : "sessions"} working={attention.working.keys()} needs={attention.needSids} />
+      <WindowNav open={listOpen} onToggle={togglePanel} what={inAgents ? "agents" : "sessions"} working={attention.working.keys()} needs={attention.needSids} />
       {/* In a browser the sidebar folds by itself on a narrow window, and the window bar's button (WindowNav) is the app's: with
           the sidebar folded there was no way back to it but ⌘B (Arun, 2026-10-24: UX gaps). */}
       {!panelOpen && !window.fridayDesktop && (
@@ -1284,6 +1306,7 @@ export function App() {
           onOpenPeople={() => navigate({ kind: "people" })}
           onOpenLibrary={() => navigate({ kind: "library" })}
           onOpenBoard={() => navigate({ kind: "board" })}
+          onOpenDeepDive={() => navigate({ kind: "deepdive" })}
           onOpenReview={() => navigate({ kind: "review" })}
           onOpenNeeds={() => navigate({ kind: "needs" })}
           reviewsWaiting={reviewPrs?.available ? reviewPrs.review.length : 0}
@@ -1299,6 +1322,7 @@ export function App() {
           updateProject={(id, patch) => writeProjects((p) => p.map((x) => (x.id === id ? { ...x, ...patch } : x)))}
           deleteProject={deleteProject}
           panelOpen={panelOpen}
+          listOpen={listOpen}
           // From Chat this is the fold button for the list beside it. From
           // anywhere else it is a way back to Chat, with the list showing: a
           // person who clicks Chat wants their chats, whatever they put away
@@ -1397,6 +1421,8 @@ export function App() {
             onNew={() => toNewSession()}
             onReview={() => navigate({ kind: "review" })}
           />
+        ) : route.kind === "deepdive" ? (
+          <DeepDivePage identity={identity} />
         ) : route.kind === "review" ? (
           <CodeReview
             identity={identity}
@@ -1485,7 +1511,11 @@ export function App() {
           onClose={() => setPalette(false)}
         />
       )}
-      {search && <SearchModal recents={recents} onOpen={(r) => navigate({ kind: "session", sid: r.sid, invite: r.invite })} onClose={() => setSearch(false)} />}
+      {search && (
+        <Suspense fallback={null}>
+          <SearchModal recents={recents} onOpen={(r) => navigate({ kind: "session", sid: r.sid, invite: r.invite })} onClose={() => setSearch(false)} />
+        </Suspense>
+      )}
       {shortcuts && <ShortcutsModal onClose={() => setShortcuts(false)} />}
       <Tooltips />
       {/* Cut, copy and paste on a right-click, in the desktop app, whose window draws no menu of its own (TextMenu.tsx). */}

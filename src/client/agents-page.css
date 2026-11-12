@@ -1,6 +1,10 @@
 /* The Agents page (AgentsPage.tsx): one column, what needs you on top, then the crew as rows, the rooms, and today's results.
    Hairlines over boxes; the needs strip is the one tinted surface, amber, as needs-you is everywhere. */
-.ap { height: 100%; overflow-y: auto; display: flex; flex-direction: column; }
+/* .ap is also the plan card in a session's composer (style.css "agent progress"), whose border, round corners and clipping
+   rounded this page's top-left and stopped it scrolling (Arun, 2026-11-12: "add scroll for this page also the top header thing
+   is still curved on the top left"). This page's own root says so twice to win. */
+.ap.ap-page { height: 100%; min-height: 0; overflow-x: hidden; overflow-y: auto; display: flex; flex-direction: column; border: 0; border-radius: 0; background: transparent; }
+.ap-page > .ap-head { padding-top: 0; padding-bottom: 0; color: inherit; }
 .ap-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 0 22px; border-bottom: 1px solid var(--border); background: var(--bg); }
 .ap-head h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
 .ap-count { font-size: 13px; color: var(--text-muted); }

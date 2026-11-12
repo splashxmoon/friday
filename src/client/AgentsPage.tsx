@@ -74,7 +74,7 @@ export default function AgentsPage({ identity, onOpen, needs = [] }: { identity:
   const done = (brief?.done ?? []).slice(-6).reverse();
 
   return (
-    <div className="ap">
+    <div className="ap ap-page">
       <header className="ap-head">
         <h1>Agents</h1>
         <span className="ap-count">{mates.length} on your crew</span>

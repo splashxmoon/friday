@@ -27,7 +27,7 @@ import { setupStack, stackFor } from "./runner/stack.js";
 import { folderOwnDb } from "./runner/environment.js";
 import { recentReposCached } from "./runner/workspace.js";
 import { overlapsAcross, plannedOverlapsFor } from "./collisions.js";
-import { EFFORT_LEVELS, ENGINE_NAMES, engineName, ENGINE_TOOLS, isEngineEffort, MAIN_LANE, toolList, type EngineMode, type EngineTool, type IssueRef, type Role, SESSION_GONE } from "./types.js";
+import { EFFORT_LEVELS, ENGINE_MODELS, ENGINE_NAMES, engineName, ENGINE_TOOLS, isEngineEffort, MAIN_LANE, toolList, type EngineMode, type EngineTool, type IssueRef, type Role, SESSION_GONE } from "./types.js";
 import { fileURLToPath } from "node:url";
 import { Redis } from "ioredis";
 import { ops } from "./ops.js";
@@ -55,6 +55,7 @@ import type { ToolOption, ToolWindow } from "./routing.js";
 import { breaches as ruleBreaches, breachText, draftRule, DRAFT_SYSTEM, globsOf, parseDraft, STANDING, type RuleCheck } from "./rules.js";
 import { baselineOf, commandKey, compare, failingTests, onlyPre, preNote, type Baseline } from "./baseline.js";
 import { commandFailed, TEST_CMD } from "./receipt.js";
+import { answerAsk, buildDive, DeepDives, DIVE_MODELS, newAskId, type Dive, type DiveHost } from "./deep-dive.js";
 import { AFTER_RUN_TRIES, BRIEF_BUDGET, BrainRegistry, clipText, correctionOf, extractLessons, pickBrief, repoKeyOf, repoNameOf, type BrainEntry, type BrainKind } from "./brain.js";
 import { MIN_TOOL_CALLS, transcriptOf } from "./decision-log.js";
 import { runawayIn } from "./runaway.js";
@@ -716,6 +717,8 @@ export async function createApp(o: AppOptions) {
   interface Tenant {
     skills: SkillRegistry;
     brain: BrainRegistry;
+    /** Deep Dive's pages and questions, per repo (deep-dive.ts). */
+    dives: DeepDives;
   commands: CommandRegistry;
     templates: TemplateRegistry;
   }
@@ -729,6 +732,7 @@ export async function createApp(o: AppOptions) {
       t = {
         skills,
         brain: new BrainRegistry(redis, p),
+        dives: new DeepDives(redis, p),
         commands: new CommandRegistry(redis, p),
         templates: new TemplateRegistry(redis, p),
       };
@@ -895,6 +899,15 @@ export async function createApp(o: AppOptions) {
         "This session has no folder yet. Attach one with the folder button in the composer and it becomes a working copy you can read, search and edit — or connect a machine from the session header to work in a checkout there, which also allows running commands.",
     };
   };
+  /**
+   * Deep Dive's calls to the computer a repo is on (deep-dive.ts): a person's own, through their link to it, or this one when
+   * Friday runs here. Never this server's own disk when it is somebody else's server: it has no repo of theirs to read.
+   */
+  const diveHost =
+    (userId: string): DiveHost =>
+    async (method, params, ms) => {
+      return callHost(method, params, { serverUrl: selfUrl, user: { id: userId, name: "" }, runners: localRunners });
+    };
   // No model of Friday's own (o.llm says so), only yours, set up in Settings › Your models and called from this computer.
   const llm: LLM = new OwnModelLLM(o.llm, (userId, method, params, onProgress) => callHost(method, params, { serverUrl: selfUrl, user: { id: userId, name: "" }, runners: localRunners, progress: onProgress }));
   // The agents in a session talking to each other (agent-mesh.ts): coding tools through their runner, Friday Code directly. A
@@ -4477,6 +4490,84 @@ export async function createApp(o: AppOptions) {
     // The project brain (brain.ts): what the workspace has learned per repo, for its page. Anyone in the workspace reads and
     // tends it, as they would a team wiki; the repo is a query parameter, since its key has slashes in it. Turning learning off
     // or on is the whole workspace's, so it is an admin's or owner's (Arun, 2026-11-04); members see whether it is on.
+    // Deep Dive (deep-dive.ts): the repos explained, their pages, and questions about their code.
+    if (url.pathname === "/api/deepdive" || url.pathname.startsWith("/api/deepdive/")) {
+      const ctx = await context(req);
+      if (!ctx) return json(res, 401, { error: "Sign in first." });
+      const dives = ctx.t.dives;
+      // A build that stopped with the server that ran it (a restart, a quit) is said as stopped, not left writing for ever.
+      const settled = async (d: Dive): Promise<Dive> => {
+        if (d.status !== "building" || Date.now() - d.at < 25 * 60_000) return d;
+        const stopped: Dive = { ...d, status: "failed", stage: undefined, error: "It stopped before it finished, when Friday closed. Build it again." };
+        await dives.saveMeta(stopped);
+        return stopped;
+      };
+      try {
+        if (req.method === "GET" && url.pathname === "/api/deepdive") return json(res, 200, { dives: await Promise.all((await dives.list()).map(settled)) });
+        if (req.method === "POST" && url.pathname === "/api/deepdive/build") {
+          const b = await readJson(req);
+          const folder = str(b.folder, 600);
+          const tool = str(b.tool, 20) as EngineTool;
+          const model = str(b.model, 80);
+          if (!folder) return json(res, 400, { error: "Which folder?" });
+          if (!ENGINE_TOOLS.includes(tool)) return json(res, 400, { error: `Pick ${toolList()}.` });
+          const host = diveHost(ctx.me.id);
+          const f = ((await host("describe", { path: folder }, 30_000)) as { folder: { path: string; name: string; remote?: string } }).folder;
+          const repo = repoKeyOf(f.remote ? { url: f.remote } : null, f.path);
+          if (!repo) return json(res, 400, { error: "That folder has no name Friday can keep its Deep Dive under." });
+          const was = await dives.get(repo.key);
+          if (was && (await settled(was)).status === "building") return json(res, 409, { error: "This repo's Deep Dive is being written already.", dive: was });
+          const d: Dive = { key: repo.key, name: repo.name, folder: f.path, tool, ...(model ? { model } : {}), ...(model || DIVE_MODELS[tool] ? { writer: model || DIVE_MODELS[tool]!.name } : {}), by: ctx.me.id, status: "building", stage: "survey", head: "", branch: "", files: 0, lines: 0, started: Date.now(), at: Date.now(), done: 0, total: 0, uncovered: [] };
+          await dives.saveMeta(d);
+          void buildDive(dives, host, d);
+          return json(res, 202, { dive: d });
+        }
+        const key = str(url.searchParams.get("key"), 300);
+        if (!key) return json(res, 400, { error: "Which repo?" });
+        const found = await dives.get(key);
+        if (!found) return json(res, 404, { error: "There's no Deep Dive of that repo." });
+        const d = await settled(found);
+        if (req.method === "GET" && url.pathname === "/api/deepdive/repo") return json(res, 200, { dive: d, pages: await dives.pages(key), asks: await dives.asks(key) });
+        if (req.method === "DELETE" && url.pathname === "/api/deepdive/repo") {
+          await dives.remove(key);
+          return json(res, 200, { ok: true });
+        }
+        // A question goes with whoever asked it or whoever built the Deep Dive (Arun, 2026-11-12: "be able to delete questions").
+        if (req.method === "DELETE" && url.pathname === "/api/deepdive/ask") {
+          const id = str(url.searchParams.get("id"), 40);
+          const ask = (await dives.asks(key)).find((a) => a.id === id);
+          if (!ask) return json(res, 404, { error: "That question is gone already." });
+          if (ask.by !== ctx.me.id && d.by !== ctx.me.id) return json(res, 403, { error: "Only whoever asked it, or whoever built this Deep Dive, can delete it." });
+          await dives.removeAsk(key, id);
+          return json(res, 200, { ok: true });
+        }
+        // The code itself is on the computer of whoever wrote the Deep Dive: read there, by them.
+        if (d.by !== ctx.me.id) return json(res, 403, { error: "This repo is on the computer of whoever built its Deep Dive. They can ask about it and open its code." });
+        if (req.method === "DELETE" && url.pathname === "/api/deepdive/asks") {
+          await dives.clearAsks(key);
+          return json(res, 200, { ok: true });
+        }
+        if (req.method === "POST" && url.pathname === "/api/deepdive/ask") {
+          const b = await readJson(req);
+          const question = str(b.question, 2000);
+          if (!question) return json(res, 400, { error: "What do you want to know?" });
+          const picked = str(b.model, 80);
+          const model = picked && ENGINE_MODELS[d.tool]?.includes(picked) && picked !== "auto" ? picked : "";
+          const ask = { id: newAskId(), question, answer: "", bad: [], by: ctx.me.id, at: Date.now(), status: "asking" as const, ...(model ? { model } : {}) };
+          await dives.saveAsk(key, ask);
+          void answerAsk(dives, diveHost(ctx.me.id), model ? { ...d, model } : d, ask);
+          return json(res, 202, { ask });
+        }
+        if (req.method === "GET" && url.pathname === "/api/deepdive/code") {
+          const start = Number(url.searchParams.get("start")) || 1;
+          const end = Number(url.searchParams.get("end")) || start;
+          return json(res, 200, await diveHost(ctx.me.id)("dive.read", { path: d.folder, file: str(url.searchParams.get("file"), 400), start, end }, 30_000));
+        }
+        return json(res, 404, { error: "Not found" });
+      } catch (e) {
+        return json(res, 400, { error: (e as Error).message });
+      }
+    }
     if (url.pathname === "/api/brain" || url.pathname.startsWith("/api/brain/")) {
       const ctx = await context(req);
       if (!ctx) return json(res, 401, { error: "Sign in first." });

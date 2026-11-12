@@ -105,7 +105,7 @@ export function IssuesInbox({ data, controls, onWork, query, setQuery, search }:
   return (
     <div className="rv-split gap-5! min-[721px]:grid-cols-[clamp(320px,30%,460px)_minmax(0,1fr)]!">
       <aside className="rv-queue" aria-label="Issues">
-        <div className="flex items-center gap-2 border-b border-[var(--border)] p-2">
+        <div className="page-top-in flex items-center gap-2 border-b border-[var(--border)] p-2">
           <div className="relative min-w-0 flex-1">
             <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-[var(--text-muted)]" />
             <Input ref={search} value={query} placeholder="Search" aria-label="Search issues" className="h-8 border-[var(--border)] bg-[var(--bg)] pr-8 pl-8 text-[13px] shadow-none md:text-[13px]" onChange={(e) => setQuery(e.target.value)} />
@@ -143,7 +143,7 @@ export function IssuesInbox({ data, controls, onWork, query, setQuery, search }:
         </div>
       </aside>
       <section className="rv-pane" aria-label="Issue">
-        <div className="mb-4 flex shrink-0 items-center justify-end gap-2">{controls}</div>
+        <div className="page-top mb-4 flex shrink-0 items-center justify-end gap-2">{controls}</div>
         {current ? (
           <IssuePane key={current.key} issue={current} started={started[current.key]} onWork={() => onWork(issueBrief(current))} />
         ) : nothing ? (

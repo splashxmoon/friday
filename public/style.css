@@ -6192,7 +6192,7 @@ html.desktop:not(.desktop-mac) .shell.with-panel .sb-panel-inner { width: calc(v
    and the window's buttons centre in it, so the toolbar and the session header share that centre line. */
 html.desktop:not(.desktop-mac) .win-nav { display: flex; position: fixed; top: 8px; left: 14px; height: 24px; align-items: center; gap: 0; z-index: 70; -webkit-app-region: drag; }
 html.desktop:not(.desktop-mac) .win-nav :is(button, a) { -webkit-app-region: no-drag; }
-html.desktop:not(.desktop-mac) #band-left { left: 132px; }
+html.desktop:not(.desktop-mac) #band-left { left: 100px; }
 html.desktop:not(.desktop-mac)[data-band="session"] #band-left,
 html.desktop:not(.desktop-mac)[data-band="session"] #band-slot { top: 8px; height: 24px; }
 /* The folder card, inside the new-session box above what is typed: one compact row. Tile, name and kind over where it is, and the branch choice at the right. */
@@ -6446,7 +6446,7 @@ html.desktop-mac .sb-head-local + button { margin-top: 12px; }
 /* The session header's title starts after the toolbar rather than under it. */
 /* Right after the toolbar, beside the list's button, whether the chat list is open or put away (Arun, 2026-10-18): the list
    starts under the window's bar, so the bar is one strip across the window and the title has no reason to jump over it. */
-html.desktop-mac #band-left, html.desktop-mac .shell.with-panel #band-left { left: 202px; }
+html.desktop-mac #band-left, html.desktop-mac .shell.with-panel #band-left { left: 160px; }
 /* Except where the strip sits lower than the window's bar (every page but a session, at --band-top): there it would lie across
    the chat list's header, and being a window drag it swallowed clicks on the team switcher ("Arun's team": only "Arun" could be
    pressed, Arun 2026-10-19). With the list open it starts after the list; empty, it isn't there to be pressed at all. */
@@ -6474,7 +6474,7 @@ html.desktop-mac.lights-low[data-band="session"] #band-slot { top: 11px; }
    whose header starts after an open chat list, that rule (just above) still places it. */
 html.desktop-mac.win-full .win-nav { left: 12px; }
 html.desktop-mac.win-full #band-left,
-html.desktop-mac.win-full[data-band="session"] .shell.with-panel #band-left { left: 130px; }
+html.desktop-mac.win-full[data-band="session"] .shell.with-panel #band-left { left: 104px; }
 /* Team chat open, the session's header buttons stay where they are with it closed, at the window's right end over the
    chat panel's top (Arun, 2026-10-18): pulling them in to the page's edge pushed them into the middle of the bar. */
 
@@ -10116,9 +10116,10 @@ html .shell .main, html .shell.with-panel .main { border-top: 1px solid transpar
 html[data-band="session"] .shell .main, html[data-band="session"] .shell.with-panel .main { border-top-color: var(--border) !important; }
 /* Pages use the whole height now that their titles are gone and the bar above them is empty (Arun, 2026-10-19): with the sidebar
    open, every page but Home and a coding session starts at the window's top. Folded, the page keeps clear of the window's
-   buttons, as before. */
+   buttons, as before. Its top corner is square, as a coding session's is (Arun, 2026-11-12: "the top of this should not be curved....
+   it should ber straight like the coding session page"). */
 html.desktop:not([data-band="session"]) .shell.with-panel .main:not(:has(.home)) {
-  margin-top: 0 !important; border-top-left-radius: var(--r-shell, 14px) !important;
+  margin-top: 0 !important; border-top-left-radius: 0 !important;
 }
 /* The window's drag strip still runs across the top (html::before), so the empty top of a page moves the window; what can be
    pressed up there (tabs, buttons, fields, links) carves itself out of it and takes the click (Arun: "fix the header dragging"). */
@@ -13739,5 +13740,60 @@ html.desktop .oss-rail::after { content: ""; position: absolute; top: 38px; righ
 
 /* The open-source build on a place's own page (Needs you, the Board, Automations, Code review, Usage, Settings): the rail alone,
    the page taking the list's room (Arun, 2026-11-11). The panel narrows to the rail; nothing is drawn beside it. */
-html.rail-only { --panel-w: calc(var(--oss-rail-w) + 12px) !important; }
+html.rail-only { --panel-w: var(--oss-rail-w) !important; }
+/* The page meets the rail with no strip between them, one line where they meet (Arun, 2026-11-12: "there should be no gap
+   between the page section and the tab button rail"): the page's own edge is that line, so the rail's is not drawn too. */
+html.rail-only .oss-rail::after { display: none; }
+html.rail-only .oss-rail { border-right: 0 !important; }
 html.rail-only .shell .sb-panel .sb-panel-inner.dass-panel.dass-panel.dass-panel.sb-rail-on { padding-left: var(--oss-rail-w) !important; padding-right: 0 !important; }
+/* In the desktop window the rail-only page starts under the window's own row, as a session does: with the list gone, the
+   traffic lights and the sidebar and search buttons sit over the page instead of over the list, and drew on top of the Board's
+   search, the Automations tabs and every page's first line (Arun, 2026-11-12: "FIX THE DESIGN FOR WHEN THE SIDE BAR THING IS
+   OPEN"). The 40px is the white bar drawn above the page (html.desktop .shell::after), so bar and page stay one surface. */
+/* Square where the bar meets the rail, not rounded (Arun, 2026-11-12: "dont make this curved"). */
+html.desktop.rail-only .shell.with-panel::after { border-top-left-radius: 0 !important; }
+
+/* ── A page's header shares the window's bar, as a session's title does (Arun, 2026-11-12: "WHY IS THE HEADER MOVING DOWN???
+   like this should be still up top", "same for all of the pages too", "also adjust for windows and linux too") ────────────────
+   Every page but Home and a session runs to the window's top whether the list is open, the rail is alone or the sidebar is
+   folded, so folding it no longer drops the page 40px. Its first row (the header) starts after the window's own buttons where
+   they sit over the page, and on Windows and Linux ends before the window's caption buttons at the top right. The page's other
+   rows keep their place. --head-l and --head-r are those two clearances; the session title's own (#band-left) sits the same
+   way, a little closer to the buttons than before ("move the coding session title slighly closer to the header buttons"). */
+html.desktop .shell .main { --head-l: 0px; --head-r: 0px; }
+html.desktop-mac .shell:not(.with-panel) .main { --head-l: 136px; }
+html.desktop-mac.rail-only .shell.with-panel .main { --head-l: 84px; }
+html.desktop-mac.win-full .shell:not(.with-panel) .main { --head-l: 72px; }
+html.desktop-mac.win-full.rail-only .shell.with-panel .main { --head-l: 20px; }
+html.desktop:not(.desktop-mac) .shell:not(.with-panel) .main { --head-l: 68px; }
+html.desktop:not(.desktop-mac).rail-only .shell.with-panel .main { --head-l: 16px; }
+html.desktop:not(.desktop-mac) .shell .main { --head-r: 124px; }
+html.desktop:not([data-band="session"]) .shell .main:not(:has(.home)) { margin-top: 0 !important; border-top: 0 !important; border-top-left-radius: 0 !important; }
+html.desktop:not([data-band="session"]) .shell:not(:has(.main .home))::after { display: none !important; }
+/* The first row's middle on the window buttons' middle: 23px down on a Mac with the lowered buttons, 17px on one without, 20px
+   on Windows and Linux, for a row about 32px tall. */
+html.desktop:not([data-band="session"]) .shell .main:not(:has(.home)) > .page { padding-top: 8px !important; }
+html.desktop-mac:not(.lights-low):not([data-band="session"]) .shell .main:not(:has(.home)) > .page { padding-top: 2px !important; }
+html.desktop:not(.desktop-mac):not([data-band="session"]) .shell .main:not(:has(.home)) > .page { padding-top: 4px !important; }
+html.desktop .main :is(.page-top, .auto-head, .dd-top, .lh-top) { margin-left: var(--head-l); margin-right: var(--head-r); transition: margin-left var(--dass-slide, 200ms ease); }
+/* A page whose column is centred (Deep Dive's repos, Needs you) moves its first row only by what the window's buttons still
+   reach, which is nothing in a wide window: the column's left is the larger of the page's padding and half what is left over. */
+html.desktop .shell:not(.with-panel) .main { --main-x: 0px; }
+html.desktop.rail-only .shell.with-panel .main { --main-x: var(--oss-rail-w, 52px); }
+html.desktop .main :is(.dd-home-head, .ny-head) { margin-left: max(0px, calc(var(--head-l) + 24px - max(24px, (100vw - var(--main-x, 0px) - 780px) / 2))); margin-right: max(0px, calc(var(--head-r) + 24px - max(24px, (100vw - var(--main-x, 0px) - 780px) / 2))); }
+html.desktop .main .ap-head { min-height: 46px; padding-left: calc(22px + var(--head-l)); padding-right: calc(22px + var(--head-r)); transition: padding-left var(--dass-slide, 200ms ease); }
+@media (prefers-reduced-motion: reduce) { html.desktop .main :is(.page-top, .auto-head, .dd-top, .dd-home-head, .ny-head, .lh-top, .ap-head) { transition: none; } }
+/* A list's own search row at the page's top-left (Code Review's pull requests and issues): it keeps its border to the column's
+   edge and moves its field clear of the window's buttons instead (Arun, 2026-11-12: "fix.... i said to check"). */
+html.desktop .main .page-top-in { padding-top: 0; padding-left: calc(8px + var(--head-l)); transition: padding-left var(--dass-slide, 200ms ease); }
+/* Its field's middle on the window buttons' middle and the tabs' beside it (Arun, 2026-11-12: "make sure the search bar thing is
+   properly lined up"): the row's own top padding put it 9px below them. */
+/* On a Mac the line between the rail and the page starts under the window's buttons, as the session list's does, instead of
+   running up between the traffic lights and the sidebar button (Arun, 2026-11-12: "fix this line thing like we did for the
+   coding side bar, remember this is only for mac"): the rail draws its line from 38px down and the page's own edge is not drawn. */
+html.desktop-mac.rail-only .oss-rail.oss-rail::after { display: block; }
+html.desktop-mac.rail-only .shell.with-panel .main { border-left-color: transparent !important; }
+/* A session with its list folded and the rail kept: its title in the window's bar still starts after the window's buttons. */
+html.desktop-mac.rail-only .shell.with-panel #band-left { left: 160px !important; }
+html.desktop-mac.win-full.rail-only .shell.with-panel #band-left { left: 104px !important; }
+html.desktop:not(.desktop-mac).rail-only .shell.with-panel #band-left { left: 100px !important; }

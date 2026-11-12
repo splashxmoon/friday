@@ -331,7 +331,7 @@ export function CodeReview({
         ) : (
           <div className="rv-split gap-5! min-[721px]:grid-cols-[clamp(320px,30%,460px)_minmax(0,1fr)]!">
             <aside className="rv-queue" aria-label="Pull requests">
-              <div className="flex items-center gap-2 border-b border-[var(--border)] p-2">
+              <div className="page-top-in flex items-center gap-2 border-b border-[var(--border)] p-2">
                 <div className="relative min-w-0 flex-1">
                   <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-[var(--text-muted)]" />
                   <Input
@@ -412,7 +412,7 @@ export function CodeReview({
             </aside>
             <section className="rv-pane" aria-label="Pull request">
               {/* The page's tabs and buttons, level with the top of the list beside it (Arun, 2026-10-19). */}
-              {ready && <div className="mb-4 flex shrink-0 items-center justify-end gap-2">{controls}</div>}
+              {ready && <div className="page-top mb-4 flex shrink-0 items-center justify-end gap-2">{controls}</div>}
               {current ? (
                 <Pane key={current.pr.url} pr={current.pr} kind={current.kind} ctx={ctx} cmd={cmd} risk={risks.get(current.pr.url)} />
               ) : (

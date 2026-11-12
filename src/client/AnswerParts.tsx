@@ -62,10 +62,12 @@ function FileChip({ text, path, line }: { text: string; path: string; line?: num
     const taken = !window.dispatchEvent(new CustomEvent("friday:open-file", { detail: { path, line, outside, ...(lane ? { lane } : {}) }, cancelable: true }));
     if (!taken) copy();
   };
+  const ranged = /^(.+?):(\d+(?:[-–]\d+)?)$/.exec(text);
   return (
     <button type="button" className="file-chip" onClick={open} title={copied ? "Path copied" : `Open ${path}${line ? ` at line ${line}` : ""}${window.fridayDesktop?.openIn ? ` · ${IS_MAC ? "⌘" : "Ctrl"}-click for your editor` : ""}`} aria-label={`Open ${text}`}>
       <FileIcon path={path} size={14} />
-      <code>{text}</code>
+      {/* The lines apart from the path, so a page that wants them as a segment of their own (Deep Dive) can draw them so. */}
+      <code>{ranged ? <>{ranged[1]}<span className="file-chip-range"><span className="file-chip-colon">:</span>{ranged[2]}</span></> : text}</code>
       {/* The piece by its title, in the page's own type, where the session shows titles in place of paths (the 2026-10-28 critique). */}
       {/* No space after it on its line: inside the button it was a gap before the full stop that followed ("playbook ."). */}
       <span className="file-chip-title">{chipLabel(text, path)}</span>

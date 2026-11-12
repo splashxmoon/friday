@@ -17,7 +17,7 @@ import { heldByPerson } from "./held.js";
 import { nearLimit, type ToolWindow } from "./routing.js";
 import { KIND_WORDS, skillOf, strongAt, taskKind, type Skills, type TaskKind } from "./strengths.js";
 import { laneName } from "./session/core.js";
-import { boardBusy, canDriveLane, driverOf, folderMates, laneOf, meshOf, ownChanges, pendingFor, readyTasks, runOf, unreadPosts, type BoardTask, type MeshAsk, type MeshPost, type SessionState } from "./session/projection.js";
+import { boardBusy, canDriveLane, driverOf, folderMates, laneOf, meshOf, ownChanges, pendingFor, readyTasks, runOf, unreadPosts, type BoardTask, type TaskReview, type MeshAsk, type MeshPost, type SessionState } from "./session/projection.js";
 import type { SessionStore } from "./session/store.js";
 import { engineName, MAIN_LANE, type ActorRef, type BoardTaskDef, type EngineMode, type EventBody, type MeshNote, type RepoCall, type SessionEvent } from "./types.js";
 import { BROWSER_TOOL, browserCall, browserDriver } from "./browser-driver.js";
@@ -1971,7 +1971,7 @@ export class AgentMesh {
     const lines = t.lane ? ownChanges(state, t.lane).reduce((n, f) => n + f.additions + f.deletions, 0) : 0;
     const tested = !!t.checks?.ok && !t.checks.skipped && !t.checks.running && TEST_CMD.test(t.checks.command);
     const small = tested && lines > 0 && lines <= SMALL_CHANGE ? `Its tests passed (${t.checks!.command}) on a small change (${lines} lines), so it goes through without a second agent's check.` : "";
-    const nothing = /\bno files changed\b/.test(t.report ?? "") ? "Nothing changed to check." : !checkers.length ? "No other agent here to check it." : small;
+    const nothing = NOTHING_CHANGED.test(t.report ?? "") ? "Nothing changed to check." : !checkers.length ? "No other agent here to check it." : small;
     if (nothing) {
       await this.store.append(sid, FRIDAY, { type: "board.reviewed", id, lane: "", name: "Friday", ok: true, note: nothing }, { lane: t.lane ?? MAIN_LANE });
       await this.afterBoardMove(sid);
@@ -2202,9 +2202,22 @@ export class AgentMesh {
           await this.store.append(sid, FRIDAY, { type: "board.review", id: t.id, lane: "", name: "" }, { lane });
           continue;
         }
-        const ok = reviewPasses(said);
+        const verdict = reviewVerdict(said);
         const name = laneName(state, lane);
-        await this.store.append(sid, agentActor(name), { type: "board.reviewed", id: t.id, lane, name, ok, note: clip(said || "No verdict.", 2000) }, { lane });
+        // Neither approved nor sent back: asked once more for a verdict, rather than passed as if approved (2026-11-11: two of
+        // fourteen approvals in Arun's crews were "No verdict." and a reviewer saying it was still holding). The ask goes on the
+        // board first, so the turn that answers it is read as the review's.
+        if (verdict === "unclear") {
+          const since = events.findLast((e) => e.body.type === "board.finished" && e.body.id === t.id)?.seq ?? 0;
+          const askedHere = events.filter((e) => e.body.type === "board.review" && e.body.id === t.id && e.body.lane === lane && e.seq > since).length;
+          if (askedHere < 2) {
+            await this.store.append(sid, FRIDAY, { type: "board.review", id: t.id, lane, name }, { lane });
+            const r = await this.send(sid, state.board!.fromLane, { to: name, toLane: lane, text: `You didn't give a verdict on ${t.name ?? "its agent"}'s work on "${t.title}". End your turn with "Approved" if it is right, or "Changes needed:" and exactly what to fix.`, kind: "task", board: t.id, review: true, system: true });
+            if (r.ok) continue;
+          }
+        }
+        const ok = verdict !== "fail";
+        await this.store.append(sid, agentActor(name), { type: "board.reviewed", id: t.id, lane, name, ok, note: clip(said || "No verdict.", 2000), ...(verdict === "unclear" ? { unclear: true as const } : {}) }, { lane });
         if (!ok) await this.rework(sid, t.id);
         await this.afterBoardMove(sid);
       }
@@ -2241,7 +2254,7 @@ export class AgentMesh {
     const tasks = b.tasks.filter((t) => moved.has(t.id) && (t.status === "done" || t.status === "blocked"));
     if (!tasks.length) return;
     const text = [
-      ...tasks.map((t) => `## ${t.id}: ${t.title} (${t.status === "blocked" ? "blocked" : `done by ${t.name}`}${t.review ? `, ${t.review.ok ? "approved" : "not approved"} by ${t.review.by}` : ""})\n${t.report ?? ""}${t.review && !t.review.ok ? `\nReview: ${t.review.note}` : ""}`),
+      ...tasks.map((t) => `## ${t.id}: ${t.title} (${t.status === "blocked" ? "blocked" : `done by ${t.name}`}${t.review ? `, ${reviewSaid(t.review)}` : ""})\n${t.report ?? ""}${t.review && !t.review.ok ? `\nReview: ${t.review.note}` : ""}`),
       busy ? `Still on the board: ${b.tasks.filter((t) => t.status !== "done" && t.status !== "blocked").map((t) => `"${t.id}" (${t.status}${t.name ? `, ${t.name}` : ""})`).join(", ")}.` : "",
     ]
       .filter(Boolean)
@@ -2655,6 +2668,20 @@ function opening(report: string): string {
  */
 const BLOCKED = /\b(?:i'?m|i am|i was|i've been|i have been|i remain|it'?s|it is|this is|the task is|task is|still|remains?|got|am|was) (?:still )?(?:blocked|stuck)\b|\bblocked (?:on|by|until|waiting)\b|\b(?:can'?t|cannot|unable to|couldn'?t) (?:proceed|continue|finish|complete|go (?:any )?further|get (?:any )?further)\b|\bneed(?:s)? (?:a decision|your input|access|approval|someone to)\b|^\s*(?:\*\*)?(?:blocked|stuck)\b/im;
 
+/** A review in words, for the lead's report: "approved by Nih", "passed without a review (nothing changed to check)". */
+export const reviewSaid = (r: TaskReview): string =>
+  r.auto ? `passed without a review (${r.note.trim().replace(/\.$/, "").toLowerCase()})` : r.unclear ? `passed with no verdict from ${r.by}` : r.ok ? `approved by ${r.by}` : `not approved by ${r.by}`;
+
+/** Friday's record of a finished task saying nothing changed (factsOf), not the agent's words ("Dass's S1a is right: no files changed"). */
+export const NOTHING_CHANGED = /\[Friday, from the record\] no files changed\b/;
+
+/**
+ * A shell command that changes files: an in-place edit, a patch or a commit, a redirect or tee into a file (not into /dev/null or
+ * /tmp), or a script writing one. Read-only commands (grep, sed -n, git diff, tests) don't match.
+ */
+export const WRITES =
+  /\bsed\s+(?:-[a-zA-Z]+\s+)*-[a-zA-Z]*i\b|\bperl\s+-[a-zA-Z]*i|\bapply_patch\b|\bgit\s+(?:-C\s+\S+\s+)?(?:apply|am|commit|merge|cherry-pick|revert|restore|checkout\s+--)\b|\bpatch\s+-p|\btee\s+(?:-a\s+)?(?!\/dev\/|\/tmp\/)\S|(?<![0-9&=\-<>])>>?\s*(?!\/dev\/null|&|\/tmp\/|\$TMPDIR|\$\{?TMP)["']?[\w.~\/$-]|\.write_text\(|\bopen\([^)]*,\s*['"][wa]|writeFileSync\(|\bwriteFile\(/;
+
 /**
  * What the session's record shows an agent did in the run that handled a task: the files it left changed, the checks it ran and
  * how they came out, any commit, and how long it took. Written by Friday, not the agent: the lead can trust it without checking.
@@ -2668,12 +2695,28 @@ export function factsOf(state: SessionState, events: SessionEvent[], lane: strin
   const files = (lastDiff?.body.type === "agent.diff" ? lastDiff.body.files : (state.diffs[lane]?.files ?? [])).filter((f) => !shared || own.has(f.path));
   const calls = new Map<string, string>();
   const checks: string[] = [];
+  // What it changed by hand that its folder's diff doesn't show: files edited outside its folder (the real repo through a link,
+  // another teammate's copy), and commands that write. 30 tasks in Arun's crews went through as "Nothing changed to check", with
+  // no second agent's look, and at least 8 were real code changes made outside the agent's folder (2026-11-11 count).
+  const edited = new Set<string>();
+  const writes: string[] = [];
   for (const e of inRun) {
     if (e.body.type === "agent.message")
       for (const c of e.body.toolCalls) {
+        if (c.name === "edit" || c.name === "write") {
+          try {
+            const a = JSON.parse(c.arguments || "{}") as { path?: unknown; file_path?: unknown };
+            for (const p of String(a.path ?? a.file_path ?? "").split(", ")) if (p.trim()) edited.add(p.trim());
+          } catch {
+            edited.add("");
+          }
+          continue;
+        }
         if (c.name !== "run_command" && c.name !== "shell") continue;
         try {
-          calls.set(c.id, String((JSON.parse(c.arguments || "{}") as { command?: unknown }).command ?? "").trim());
+          const command = String((JSON.parse(c.arguments || "{}") as { command?: unknown }).command ?? "").trim();
+          calls.set(c.id, command);
+          if (WRITES.test(command)) writes.push(command);
         } catch {
           // Arguments that aren't JSON name no command.
         }
@@ -2687,8 +2730,23 @@ export function factsOf(state: SessionState, events: SessionEvent[], lane: strin
   }
   const commit = inRun.findLast((e) => e.body.type === "folder.committed");
   const took = Math.round((end.ts - got.ts) / 60_000);
+  const inDiff = (p: string) => files.some((f) => p === f.path || p.endsWith(`/${f.path}`));
+  const outside = [...edited].filter((p) => p && !inDiff(p));
+  const named = (ps: string[]) => `${ps.slice(0, 6).join(", ")}${ps.length > 6 ? `, and ${ps.length - 6} more` : ""}`;
+  // "no files changed" is said only when nothing at all shows a change: it is what lets a task through without a review.
+  const changed = files.length
+    ? `${files.length} file${files.length === 1 ? "" : "s"} changed: ${files.slice(0, 8).map((f) => `${f.path} +${f.additions} −${f.deletions}`).join(", ")}${files.length > 8 ? `, and ${files.length - 8} more` : ""}${outside.length ? `, and it edited ${outside.length} outside its folder: ${named(outside)}` : ""}`
+    : outside.length
+      ? `nothing changed in its folder, but it edited ${outside.length} file${outside.length === 1 ? "" : "s"} outside it: ${named(outside)}`
+      : edited.size
+        ? "it edited files its folder's diff doesn't show"
+        : writes.length
+          ? `nothing changed in its folder, but it ran commands that change files: ${writes.slice(-2).map((w) => clip(w.replace(/\s+/g, " "), 90)).join("; ")}`
+          : commit
+            ? "its changes are committed"
+            : "no files changed";
   const parts = [
-    files.length ? `${files.length} file${files.length === 1 ? "" : "s"} changed: ${files.slice(0, 8).map((f) => `${f.path} +${f.additions} −${f.deletions}`).join(", ")}${files.length > 8 ? `, and ${files.length - 8} more` : ""}` : "no files changed",
+    changed,
     checks.length ? `checks: ${[...new Set(checks)].slice(-4).join("; ")}` : "no tests or checks run",
     commit?.body.type === "folder.committed" ? `committed ${commit.body.sha.slice(0, 7)}` : "",
     end.body.type === "run.ended" && end.body.outcome === "error" ? `stopped on an error: ${clip(end.body.error ?? "", 160)}` : "",
@@ -3120,20 +3178,32 @@ function untilText(ms: number): string {
 
 /**
  * Whether a review lets the work through. Approved passes; a review that names something to change sends it back. One that
- * says neither, and names no problem, passes too: sent back, its agent was told to "fix what was found" with nothing found,
- * and marked the task blocked (Arun, 2026-10-21, two tasks stuck that way).
+ * says neither, and names no problem, doesn't send it back (its agent was told to "fix what was found" with nothing found, and
+ * marked the task blocked: Arun, 2026-10-21) and lets it through only as unclear, after its reviewer is asked again (reviewVerdict).
  */
 export function reviewPasses(said: string): boolean {
-  if (/^\s*(\*\*)?(approved|lgtm|looks good)\b/i.test(said)) return true;
+  return reviewVerdict(said) !== "fail";
+}
+
+/** A review's verdict: "pass", "fail", or "unclear" when it says neither and names no problem (or says nothing). */
+export function reviewVerdict(said: string): "pass" | "fail" | "unclear" {
+  if (!said.trim()) return "unclear";
+  return reviewOk(said) ?? "unclear";
+}
+
+function reviewOk(said: string): "pass" | "fail" | null {
+  if (/^\s*(\*\*)?(approved|lgtm|looks good)\b/i.test(said)) return "pass";
   // Saying it won't pass it, however it goes on: "I couldn't review this one, so I'm giving no approval. … Changes needed:" had
   // passed, on a later "Codex says it found no blockers there" (Arun, 2026-10-24, t3).
-  if (/(?<!\bno )\bchanges (?:needed|requested)\b|\bnot approved\b|\b(?:giving|give|gave) no approval\b|\bno approval\b|\bwithhold(?:ing)? (?:my )?approval\b|\b(?:can'?t|cannot|couldn'?t|unable to) (?:approve|review|check|verify) (?:it|this|the|that|them|any)/i.test(said)) return false;
+  if (/(?<!\bno )\bchanges (?:needed|requested)\b|\bnot approved\b|\b(?:giving|give|gave) no approval\b|\bno approval\b|\bwithhold(?:ing)? (?:my )?approval\b|\b(?:can'?t|cannot|couldn'?t|unable to) (?:approve|review|check|verify) (?:it|this|the|that|them|any)/i.test(said)) return "fail";
   // Saying it found nothing wrong is a pass however it is put: "no problems found", "nothing to fix", "no issues".
   const clean = /\bno (?:real |obvious |major )?(?:problems?|issues?|bugs?|concerns?|blockers?)\b|\bnothing (?:to fix|to change|wrong|blocking)\b|\bfound nothing\b/i;
   // A problem it names sends the work back (2026-10-21: "Found a problem: ... a double tap creates two charges" had passed,
   // as only "bug", "missing" or "fails" counted).
-  if (!clean.test(said) && /\b(?:found|spotted|noticed|there(?:'s| is| are)|one|a|two|several|some)\s+(?:\w+\s+)?(?:problems?|issues?|concerns?|blockers?)\b|\bproblem:|\bissue:|\bdouble[- ]charg|\bcharges? twice\b/i.test(said)) return false;
-  if (clean.test(said)) return true;
-  if (/(?<!\bno )changes needed|(?<!\bno )changes requested|needs? (?:a |to be )?fix|\bfail(?:s|ed|ing)?\b|\bbug\b|\bbroken\b|\bmissing\b|\bwrong\b|\bregression\b|must (?:be )?(?:fix|change|add|remove)|should (?:be )?(?:fix|change|add|remove)|not approved|\breject/i.test(said)) return false;
-  return true;
+  if (!clean.test(said) && /\b(?:found|spotted|noticed|there(?:'s| is| are)|one|a|two|several|some)\s+(?:\w+\s+)?(?:problems?|issues?|concerns?|blockers?)\b|\bproblem:|\bissue:|\bdouble[- ]charg|\bcharges? twice\b/i.test(said)) return "fail";
+  // "Approved" as a sentence of its own, after what it checked: "The fix is correct and nothing was missed. Approved."
+  if (/(?:^|[.!?]\s+|\n\s*)(?:\*\*)?(?:approved|lgtm)(?:\*\*)?(?:[.!:]|\s*$)/im.test(said)) return "pass";
+  if (clean.test(said)) return "pass";
+  if (/(?<!\bno )changes needed|(?<!\bno )changes requested|needs? (?:a |to be )?fix|\bfail(?:s|ed|ing)?\b|\bbug\b|\bbroken\b|\bmissing\b|\bwrong\b|\bregression\b|must (?:be )?(?:fix|change|add|remove)|should (?:be )?(?:fix|change|add|remove)|not approved|\breject/i.test(said)) return "fail";
+  return null;
 }

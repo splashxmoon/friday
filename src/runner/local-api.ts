@@ -30,6 +30,7 @@ import { githubCancel, githubConnect, githubDisconnect, githubStatus } from "./g
 import { githubItem, localRepo, prAct, prFiles, prReview, type DraftComment, type PrAction } from "./pr-actions.js";
 import { savedDirs, startDirs } from "./extra-dirs.js";
 import { readRepo } from "./repo-read.js";
+import { citedLines, lineCounts, readForPage, surveyRepo } from "./dive.js";
 import { addOwnModels, detectLocal, discoverModels, listOwnModels, ownComplete, ownVision, removeOwnModel, saveOwnModel, testOwnModel } from "./own-models.js";
 
 /**
@@ -850,10 +851,36 @@ export async function callHost(method: string, params: Record<string, unknown> =
           }
         : undefined;
       try {
-        return await askCli({ tool, system: str(params.system, 40_000), prompt: str(params.prompt, 120_000), ...(str(params.model, 60) ? { model: str(params.model, 60) } : {}) }, onText);
+        // `cwd`: a repo on this computer, for Deep Dive (still plan mode); `timeoutMs`: a page reads many files, so minutes.
+        const cwd = str(params.cwd, 600) ? at(params.cwd) : undefined;
+        if (cwd && !(await isDir(cwd))) throw new Error(`There's no folder at ${cwd}.`);
+        const timeoutMs = Math.min(Math.max(Number(params.timeoutMs) || 0, 0), 15 * 60_000) || undefined;
+        return await askCli({ tool, system: str(params.system, 40_000), prompt: str(params.prompt, 120_000), ...(str(params.model, 60) ? { model: str(params.model, 60) } : {}), ...(cwd ? { cwd } : {}), ...(timeoutMs ? { timeoutMs } : {}) }, onText);
       } finally {
         flush();
       }
+    }
+    // Deep Dive (deep-dive.ts, runner/dive.ts): a repo's shape, its cited files' lengths, and the lines a citation points at.
+    case "dive.survey": {
+      const p = at(params.path);
+      if (!(await isDir(p))) throw new Error(`There's no folder at ${p}.`);
+      return { survey: await surveyRepo(p) };
+    }
+    case "dive.lines": {
+      const p = at(params.path);
+      if (!(await isDir(p))) throw new Error(`There's no folder at ${p}.`);
+      return { counts: await lineCounts(p, Array.isArray(params.files) ? params.files.filter((f): f is string => typeof f === "string").slice(0, 400) : []) };
+    }
+    case "dive.files": {
+      const p = at(params.path);
+      if (!(await isDir(p))) throw new Error(`There's no folder at ${p}.`);
+      return { files: await readForPage(p, Array.isArray(params.files) ? params.files.filter((f): f is string => typeof f === "string").slice(0, 12) : []) };
+    }
+    case "dive.read": {
+      const p = at(params.path);
+      if (!(await isDir(p))) throw new Error(`There's no folder at ${p}.`);
+      const start = Math.max(1, Math.floor(Number(params.start) || 1));
+      return await citedLines(p, str(params.file, 400), start, Math.max(start, Math.floor(Number(params.end) || start)));
     }
     case "usage":
       return readLimits();

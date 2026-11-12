@@ -80,9 +80,11 @@ export interface SidebarProps {
   activeSid: string | null;
   /** On the new-session page opened from a project's "New session here": the project it will go in, shown in the list. */
   draftProject?: string | undefined;
-  view: "home" | "session" | "connections" | "agents" | "automations" | "people" | "library" | "crew" | "board" | "review" | "needs" | "settings" | "usage";
+  view: "home" | "session" | "connections" | "agents" | "automations" | "people" | "library" | "crew" | "board" | "deepdive" | "review" | "needs" | "settings" | "usage";
   /** Whether the chat list is showing beside the rail. */
   panelOpen: boolean;
+  /** Whether the session list shows beside the rail: false when the sidebar's button folded it and the rail stayed. */
+  listOpen?: boolean;
   /** The Chat button: opens Chat, or folds its list away when already there. */
   onChat: () => void;
   /** Whether the Chat button also folds the chat list while you are in chats. Off in the Mac app, where the window's toolbar does that. */
@@ -108,6 +110,8 @@ export interface SidebarProps {
   /** A rail button the pointer or focus has reached: its page's code can be fetched ahead of the click. */
   onWarm?: (view: SidebarProps["view"]) => void;
   onOpenBoard: () => void;
+  /** Deep Dive: the repos explained (DeepDive.tsx). */
+  onOpenDeepDive?: () => void;
   onOpenReview: () => void;
   /** The Needs you queue (NeedsYou.tsx). */
   onOpenNeeds?: () => void;
@@ -279,7 +283,8 @@ export function Sidebar(p: SidebarProps) {
   // On a place's own page (Needs you, the Board, Automations, Code review, Usage, Settings) the open-source build shows the rail
   // alone, and the page takes the list's room (Arun, 2026-11-11: "make sure the side bar isnt there when you click on like the
   // other pages"). style.css html.rail-only narrows the panel to the rail.
-  const railOnly = isLocal() && RAIL_PAGES.includes(p.view ?? "");
+  // The list folded with the sidebar's button leaves the rail too, the same way (App.tsx keepRail).
+  const railOnly = isLocal() && (RAIL_PAGES.includes(p.view ?? "") || p.listOpen === false);
   useEffect(() => {
     document.documentElement.classList.toggle("rail-only", railOnly);
     return () => document.documentElement.classList.remove("rail-only");
@@ -542,7 +547,7 @@ function OssRail({ p }: { p: SidebarProps }) {
   const t = useTeam(p.identityForApi);
   const mates = t ? ownOf(t) : [];
   const mateNeeds = mates.filter((m) => m.status === "waiting").length;
-  const onPage = ["needs", "board", "review", "automations", "agents", "usage", "settings"].includes(p.view ?? "");
+  const onPage = ["needs", "board", "deepdive", "review", "automations", "agents", "usage", "settings"].includes(p.view ?? "");
   // A place's page is lit; else the list you are in, Sessions or Agents.
   // Agents always opens the Agents page; Sessions leaves a page, or a crew chat, for a new session.
   const go = (place: "code" | "team") => {
@@ -609,6 +614,7 @@ function OssRail({ p }: { p: SidebarProps }) {
       <div className="oss-rail-group">
         {p.onOpenNeeds && item({ id: "needs", icon: "hand", label: "Needs you", on: p.view === "needs", go: p.onOpenNeeds, warm: "needs", n: waiting || undefined, needs: true })}
         {item({ id: "board", icon: "board", label: "Agent Board", on: p.view === "board", go: p.onOpenBoard, warm: "board" })}
+        {p.onOpenDeepDive && item({ id: "deepdive", icon: "puzzle", label: "Deep Dive", on: p.view === "deepdive", go: p.onOpenDeepDive, warm: "deepdive" })}
         {item({ id: "automations", icon: "zap", label: "Automations", on: p.view === "automations" || p.view === "agents", go: p.onOpenAutomations, warm: "automations" })}
         {item({ id: "review", icon: "gitPullRequest", label: "Code Review", on: p.view === "review", go: p.onOpenReview, warm: "review", n: p.reviewsWaiting || undefined, needs: true })}
       </div>
@@ -622,7 +628,7 @@ function OssRail({ p }: { p: SidebarProps }) {
 }
 
 /** Pages of their own, on the rail: none of them is the Sessions or the Agents list. */
-const RAIL_PAGES = ["needs", "board", "review", "automations", "agents", "usage", "settings"];
+const RAIL_PAGES = ["needs", "board", "deepdive", "review", "automations", "agents", "usage", "settings"];
 
 /**
  * The list beside the rail: the crew's own on the Agents side (CrewList), New session and your sessions on the other, with no

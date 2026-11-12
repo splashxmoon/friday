@@ -1,0 +1,365 @@
+/* Deep Dive (DeepDive.tsx): laid out the way people read a repo wiki, after DeepWiki (Arun, 2026-11-12: "design it like devins
+   to an extent"): the pages down the left, the page in the middle, what's on it down the right, the question box floating at
+   the foot. Friday's own tokens throughout, so it sits with the Board and Needs you in both themes. */
+
+.page.conns-page.dd-page > .page-inner { max-width: 780px; margin: 0 auto; }
+.page.conns-page.dd-page.dd-page-repo > .page-inner { max-width: 1320px; }
+.dd-page.dd-page-repo { padding-top: 20px; }
+/* A repo's header stays put and only what's under it scrolls, its scrollbar starting under the header at the page's right edge
+   (Arun, 2026-11-12: "make sure the right scroll bar thing is for the page content like the section and not the entire page").
+   The column keeps its 1320px, centred by padding, so the scroller itself can run to the edge. */
+.page.dd-page.dd-page-repo { --dd-gut: 24px; display: flex; flex-direction: column; overflow: hidden; padding-bottom: 0 !important; }
+.main .page.dd-page.dd-page-repo { scrollbar-gutter: auto; }
+.page.conns-page.dd-page.dd-page-repo > .page-inner { display: flex; flex: 1; flex-direction: column; width: 100%; max-width: none; min-height: 0; }
+.dd-page-repo .dd-repo { flex: 1; min-height: 0; }
+.dd-page-repo .dd-top { padding-inline: max(0px, calc((100% - 1320px) / 2)); }
+.dd-page-repo .dd-grid { flex: 1; min-height: 0; overflow-y: auto; container-type: size; margin-right: calc(-1 * var(--dd-gut)); padding-left: max(0px, calc((100% - 1320px) / 2)); padding-right: calc(var(--dd-gut) + max(0px, calc((100% - 1320px) / 2))); scrollbar-width: thin; }
+.dd-page-repo .dd-side, .dd-page-repo .dd-toc { max-height: 100cqh; }
+.dd-page-repo .dd-code { max-height: calc(100cqh - 36px); }
+.dd-page-repo .dd-main { min-height: 100cqh; }
+@media (max-width: 640px) { .page.dd-page.dd-page-repo { --dd-gut: 16px; } }
+@media (max-width: 760px) { .dd-page-repo .dd-main { min-height: 0; } .dd-page-repo .dd-side { max-height: none; } }
+
+.dd-spin { flex: none; width: 12px; height: 12px; border: 1.5px solid color-mix(in srgb, var(--ink) 18%, transparent); border-top-color: var(--ink); border-radius: 50%; animation: dd-spin 0.8s linear infinite; }
+@keyframes dd-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .dd-spin { animation-duration: 2.4s; } }
+.dd-loading { display: flex; align-items: center; gap: 8px; padding: 16px 0; color: var(--text-muted); font-size: 13px; }
+
+/* While it is written: the steps and what each found, over grey lines at the page's own sizes (Arun, 2026-11-12: "add better
+   loading state too"). The lines breathe; with reduced motion they hold still. */
+.dd-skel { display: flex; flex-direction: column; }
+.dd-skel > span { display: block; height: 10px; border-radius: 5px; background: var(--hover-strong); animation: dd-breathe 1.6s ease-in-out infinite; }
+.dd-skel > span:nth-child(2n) { animation-delay: 0.2s; }
+.dd-skel > span:nth-child(3n) { animation-delay: 0.4s; }
+@keyframes dd-breathe { 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) { .dd-skel > span { animation: none; } }
+.dd-skel-nav { gap: 18px; padding: 9px 8px; }
+.dd-skel-nav > span { height: 9px; }
+.dd-skel-nav > span:nth-child(odd) { width: 72%; }
+.dd-skel-nav > span:nth-child(even) { width: 54%; }
+.dd-skel-nav > span:first-child { width: 40%; }
+.dd-skel-title > span { width: 46%; height: 22px; border-radius: 7px; }
+.dd-skel-purpose { gap: 10px; margin: 14px 0 30px; }
+.dd-skel-purpose > span { height: 11px; }
+.dd-skel-purpose > span:last-child { width: 62%; }
+.dd-skel-prose { gap: 14px; }
+.dd-skel-prose > span:nth-child(4n) { width: 78%; }
+.dd-skel-prose > span:nth-child(5n) { width: 52%; margin-bottom: 14px; }
+.dd-pending .dd-loading { padding: 4px 0 18px; }
+.dd-building { flex: 1; width: 100%; max-width: 720px; margin: 0 auto; padding-bottom: 40px; }
+.dd-steps { display: flex; flex-direction: column; gap: 2px; margin: 0 0 14px; padding: 6px; border: 1px solid var(--border); border-radius: var(--r-lg); list-style: none; }
+.dd-steps li { display: grid; grid-template-columns: 22px auto 1fr; align-items: center; gap: 10px; min-height: 38px; padding: 0 10px; border-radius: var(--r-md); color: var(--text-muted); font-size: 13.5px; }
+.dd-steps li.on { background: var(--hover); color: var(--ink); }
+.dd-steps li.done { color: var(--ink-2); }
+.dd-step-mark { display: grid; place-items: center; width: 18px; height: 18px; border: 1.5px solid var(--border-strong); border-radius: 50%; }
+.dd-steps li.done .dd-step-mark { border-color: transparent; background: var(--ink); color: var(--bg); }
+.dd-steps li.on .dd-step-mark { border-color: transparent; }
+.dd-steps li.on .dd-spin { width: 14px; height: 14px; }
+.dd-step-name { font-weight: 500; white-space: nowrap; }
+.dd-step-said { min-width: 0; overflow: hidden; color: var(--text-muted); font-size: 12.5px; text-align: right; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dd-building-note { margin: 0 0 36px; color: var(--text-muted); font-size: 12.5px; line-height: 18px; }
+@media (max-width: 760px) { .dd-steps li { grid-template-columns: 22px 1fr; } .dd-step-said { grid-column: 2; padding-bottom: 8px; text-align: left; } }
+.dd-error { margin: 0; color: var(--red); font-size: 13px; line-height: 18px; }
+.dd-quiet { display: flex; align-items: center; gap: 6px; margin: 12px 0 0; color: var(--text-muted); font-size: 12px; line-height: 16px; }
+.dd-count { color: var(--text-muted); font-size: 12px; font-weight: 400; font-variant-numeric: tabular-nums; }
+.dd-mark { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--border-strong); }
+.dd-mark.warn { background: var(--amber); }
+.dd-mark.bad { background: var(--red); }
+
+/* A thin bar for how far the writing has got. */
+.dd-bar { display: block; height: 2px; margin-top: 8px; overflow: hidden; border-radius: 2px; background: var(--hover-strong); }
+.dd-bar > span { display: block; height: 100%; background: var(--ink); transform-origin: left; transition: transform 600ms var(--ease-out); }
+
+/* ── The repos ───────────────────────────────────────────────────── */
+.dd-home { display: flex; flex-direction: column; }
+.dd-home-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; min-height: 32px; }
+.dd-home-title { margin: 0; color: var(--ink); font-size: 15px; font-weight: 600; line-height: 22px; letter-spacing: -0.005em; }
+.dd-lede { max-width: 560px; margin: 4px 0 20px; color: var(--text-muted); font-size: 13px; line-height: 20px; }
+.dd-tool { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border-radius: var(--r-md); color: var(--ink); font-size: 12.5px; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out); }
+.dd-tool:hover, .dd-tool[data-state="open"] { background: var(--hover); }
+.dd-tool:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.dd-tool-label { color: var(--text-muted); }
+.dd-tool-chev { width: 14px; height: 14px; color: var(--text-muted); }
+.dd-h2 { margin: 0 0 8px; color: var(--text-muted); font-size: 12px; font-weight: 500; line-height: 16px; }
+.dd-start { margin-top: 32px; }
+
+/* The repos list (Arun, 2026-11-12: "design this better too, needs to be nicely designed"): the explained ones as a shelf of
+   cards, the ones that could be as a quiet list to pick from, the first time a small picture of what it makes. */
+.dd-shelf { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
+.dd-card { display: flex; flex-direction: column; gap: 10px; width: 100%; height: 100%; padding: 14px 14px 12px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--card); color: var(--ink); text-align: left; cursor: pointer; transition: border-color var(--t-hover) var(--ease-out), background-color var(--t-hover) var(--ease-out); }
+.dd-card:hover { border-color: var(--border-strong); }
+.dd-card:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+.dd-card-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.dd-card-head > svg { flex: none; color: var(--text-muted); opacity: 0; transition: opacity var(--t-hover) var(--ease-out), transform var(--t-hover) var(--ease-out); }
+.dd-card:hover .dd-card-head > svg, .dd-card:focus-visible .dd-card-head > svg { opacity: 1; transform: translateX(2px); }
+.dd-card-icon { display: grid; flex: none; place-items: center; width: 30px; height: 30px; border-radius: var(--r-md); background: var(--hover); color: var(--ink-2); }
+.dd-card-title { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.dd-card-owner { overflow: hidden; color: var(--text-muted); font-size: 12px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
+.dd-card-name { overflow: hidden; font-size: 14.5px; font-weight: 600; line-height: 20px; letter-spacing: -0.005em; text-overflow: ellipsis; white-space: nowrap; }
+.dd-card-meta { color: var(--ink-2); font-size: 12.5px; line-height: 18px; font-variant-numeric: tabular-nums; }
+.dd-card-meta.bad { color: var(--red); }
+.dd-card-state { display: flex; flex-direction: column; }
+.dd-card-state .dd-bar { margin-top: 6px; }
+.dd-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; padding-top: 10px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 12px; line-height: 16px; }
+.dd-card-by { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dd-card-foot .dd-sha { color: var(--text-muted); }
+.dd-card-skel { min-height: 118px; cursor: default; }
+.dd-skel-card { gap: 12px; padding-top: 4px; }
+.dd-skel-card > span:first-child { width: 55%; height: 14px; }
+.dd-skel-card > span:nth-child(2) { width: 30%; }
+.dd-skel-card > span:last-child { width: 80%; margin-top: 18px; }
+
+.dd-picks { margin: 0; padding: 0; list-style: none; }
+.dd-pick { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 4px 0 10px; border-radius: var(--r-md); transition: background-color var(--t-hover) var(--ease-out); }
+.dd-pick + .dd-pick { box-shadow: inset 0 1px 0 var(--border); }
+.dd-pick:hover, .dd-pick:focus-within { background: var(--hover); box-shadow: none; }
+.dd-pick:hover + .dd-pick, .dd-pick:focus-within + .dd-pick { box-shadow: none; }
+.dd-pick > svg { flex: none; color: var(--text-muted); }
+.dd-pick-name { flex: none; max-width: 45%; overflow: hidden; color: var(--ink); font-size: 13.5px; font-weight: 500; line-height: 20px; text-overflow: ellipsis; white-space: nowrap; }
+.dd-pick-path { flex: 1; min-width: 0; overflow: hidden; color: var(--text-muted); font-size: 12px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
+.dd-pick .dd-pick-go { flex: none; gap: 4px; color: var(--text-muted); font-size: 12.5px; }
+.dd-pick:hover .dd-pick-go, .dd-pick .dd-pick-go:focus-visible { color: var(--ink); }
+.dd-more { margin: 8px 10px 0; }
+.dd-skel-picks { gap: 26px; padding: 14px 10px; }
+.dd-skel-picks > span:nth-child(odd) { width: 46%; }
+.dd-skel-picks > span:nth-child(even) { width: 38%; }
+
+.dd-intro { display: grid; grid-template-columns: 220px minmax(0, 1fr); align-items: center; gap: 28px; margin: 8px 0 4px; padding: 22px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--card); }
+.dd-intro-title { margin: 0 0 6px; color: var(--ink); font-size: 18px; font-weight: 600; line-height: 24px; letter-spacing: -0.01em; }
+.dd-intro-text p { margin: 0 0 14px; color: var(--ink-2); font-size: 13.5px; line-height: 21px; }
+.dd-intro-facts { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; color: var(--text-muted); font-size: 12.5px; line-height: 18px; }
+.dd-intro-facts li { display: flex; align-items: center; gap: 8px; }
+.dd-intro-facts svg { flex: none; color: var(--ink-2); }
+/* The picture: a Deep Dive in miniature, its pages down the side and a page with a citation and a diagram. */
+.dd-intro-art { display: grid; grid-template-columns: 56px 1fr; gap: 12px; height: 150px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); overflow: hidden; }
+.dd-art-side { display: flex; flex-direction: column; gap: 9px; padding-top: 2px; }
+.dd-art-side > span { display: block; width: 80%; height: 5px; border-radius: 3px; background: var(--hover-strong); }
+.dd-art-side > span:nth-child(even) { width: 62%; }
+.dd-art-side > span.on { width: 100%; background: var(--text-muted); }
+.dd-art-page { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.dd-art-title { display: block; width: 58%; height: 9px; border-radius: 4px; background: var(--ink-2); }
+.dd-art-line { display: flex; align-items: center; height: 5px; border-radius: 3px; background: var(--hover-strong); }
+.dd-art-line.short { width: 70%; height: 14px; background: none; }
+.dd-art-line.short::before { content: ""; flex: 0 0 38%; height: 5px; border-radius: 3px; background: var(--hover-strong); }
+.dd-art-chip { flex: none; margin-left: 6px; padding: 1px 5px; border-radius: 4px; background: var(--hover-strong); color: var(--ink-2); font-family: var(--mono); font-size: 8px; line-height: 12px; white-space: nowrap; }
+.dd-art-box { display: flex; flex: 1; align-items: center; justify-content: center; gap: 4px; margin-top: 2px; border: 1px solid var(--border); border-radius: 6px; }
+.dd-art-box > span { width: 26px; height: 14px; border: 1px solid var(--border-strong); border-radius: 3px; }
+.dd-art-box > i { width: 10px; height: 1px; background: var(--border-strong); }
+/* Nothing explained yet: one centred column in the middle of the page, the picture over the words, the repos under them
+   (Arun, 2026-11-12: "center it"). */
+.dd-home-empty { min-height: calc(100vh - 104px); }
+.main .page.dd-page:has(.dd-home-empty) { scrollbar-gutter: auto; }
+@media (max-width: 640px) { .dd-home-empty { min-height: calc(100vh - 128px); } }
+.dd-home-empty > .dd-home-head { justify-content: flex-end; }
+.dd-home-empty > .dd-home-head > .dd-home-title { display: none; }
+.dd-home-empty > .dd-intro, .dd-home-empty > .dd-start { width: 100%; max-width: 520px; margin-inline: auto; }
+.dd-home-empty > .dd-intro { grid-template-columns: minmax(0, 1fr); justify-items: center; gap: 22px; margin-top: auto; padding: 0; border: 0; background: none; text-align: center; }
+.dd-home-empty .dd-intro-art { width: 260px; height: 160px; }
+.dd-home-empty .dd-intro-title { font-size: 20px; line-height: 28px; }
+.dd-home-empty .dd-intro-text p { margin-bottom: 16px; }
+.dd-home-empty .dd-intro-facts { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 6px 16px; }
+.dd-home-empty > .dd-start { margin-bottom: auto; padding-bottom: 48px; }
+.dd-home-empty .dd-h2 { text-align: center; }
+.dd-home-empty .dd-picks { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--card); padding: 4px; }
+@media (max-width: 640px) {
+  .dd-intro { grid-template-columns: minmax(0, 1fr); gap: 18px; padding: 16px; }
+  .dd-intro-art { height: 130px; }
+  .dd-pick-path { display: none; }
+  .dd-pick-name { flex: 1; max-width: none; }
+}
+
+/* ── One repo ────────────────────────────────────────────────────── */
+.dd-repo { display: flex; flex-direction: column; }
+.dd-top { display: flex; align-items: center; gap: 10px; min-height: 36px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+.dd-back { display: grid; flex: none; place-items: center; width: 28px; height: 28px; border-radius: var(--r-md); color: var(--text-muted); cursor: pointer; }
+.dd-back:hover { background: var(--hover); color: var(--ink); }
+.dd-back:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.dd-top-name { min-width: 0; margin: 0; overflow: hidden; color: var(--ink); font-size: 15px; font-weight: 600; line-height: 22px; letter-spacing: -0.005em; text-overflow: ellipsis; white-space: nowrap; }
+.dd-top-state { display: inline-flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; color: var(--text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.dd-top-state.bad { color: var(--red); }
+.dd-top-gap { flex: 1; }
+.dd-top-bar { margin: -1px 0 0; height: 2px; border-radius: 0; }
+.dd-repo > .dd-error { margin-top: 12px; }
+
+.dd-grid { display: grid; grid-template-columns: 232px minmax(0, 1fr); gap: 40px; align-items: start; }
+.dd-repo.with-toc .dd-grid { grid-template-columns: 232px minmax(0, 1fr) 200px; }
+.dd-repo.with-code .dd-grid { grid-template-columns: 216px minmax(0, 1fr) minmax(320px, 42%); gap: 28px; }
+
+/* The pages and questions, down the left. */
+.dd-side { position: sticky; top: 0; display: flex; flex-direction: column; max-height: calc(100vh - 120px); padding: 20px 0 24px; overflow-y: auto; scrollbar-width: thin; }
+.dd-side-meta { display: block; margin: 0 8px 14px; color: var(--text-muted); font-size: 12px; line-height: 18px; }
+.dd-side-meta svg { display: inline; vertical-align: -2px; }
+.dd-sha { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); }
+.dd-side-label { margin: 18px 8px 6px; color: var(--text-muted); font-size: 12px; font-weight: 500; line-height: 16px; }
+.dd-side-list { display: flex; flex-direction: column; gap: 1px; margin: 0; padding: 0; list-style: none; }
+.dd-side-item { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 30px; padding: 5px 8px; border-radius: var(--r-md); color: var(--ink-2); font-size: 13px; line-height: 18px; text-align: left; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out); }
+.dd-side-item > span:first-child { flex: 1; min-width: 0; }
+.dd-side-q > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The pages as a book's contents: a number and a name on one line each, quiet until read (Arun, 2026-11-12: "they seem crowded
+   and a lot of stuff to process"). The whole title is the tooltip and the page's own heading. */
+.dd-side-list[aria-label="Pages"] { gap: 0; }
+.dd-side-page { gap: 10px; min-height: 28px; padding: 4px 8px; color: var(--text-muted); }
+.dd-side-item.dd-side-page > .dd-side-n { flex: none; width: 14px; color: var(--faint, var(--text-muted)); font-size: 11.5px; font-variant-numeric: tabular-nums; text-align: right; }
+.dd-side-item.dd-side-page > .dd-side-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dd-side-page[aria-current] { color: var(--ink); }
+.dd-side-page[aria-current] > .dd-side-n { color: var(--text-muted); }
+.dd-side > .dd-side-label:first-child { margin-top: 0; }
+
+/* A question's delete: beside it in the list, shown on hover or when it is open. */
+.dd-side-qrow { position: relative; }
+.dd-side-qrow > .dd-side-q { padding-right: 30px; }
+.dd-side-x { position: absolute; top: 50%; right: 4px; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; color: var(--text-muted); opacity: 0; transform: translateY(-50%); cursor: pointer; transition: opacity var(--t-hover) var(--ease-out), background-color var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out); }
+.dd-side-qrow:hover > .dd-side-x, .dd-side-x:focus-visible, .dd-side-q[aria-current] + .dd-side-x { opacity: 1; }
+.dd-side-x:hover { background: var(--hover-strong); color: var(--ink); }
+.dd-side-x:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
+@media (hover: none) { .dd-side-x { opacity: 1; } }
+.dd-answer-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; }
+.dd-answer-del { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 8px; margin-right: -8px; border-radius: var(--r-md); color: var(--text-muted); font-size: 12.5px; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out); }
+.dd-answer-del:hover { background: var(--hover); color: var(--red); }
+.dd-answer-del:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.dd-more-btn { flex: none; }
+
+/* Previous and next at a page's foot. */
+.dd-pager { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; width: 100%; max-width: 720px; margin: 0 auto 8px; padding-top: 20px; border-top: 1px solid var(--border); }
+.dd-pager-btn { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-lg); text-align: left; cursor: pointer; transition: border-color var(--t-hover) var(--ease-out), background-color var(--t-hover) var(--ease-out); }
+.dd-pager-btn.next { grid-column: 2; align-items: flex-end; text-align: right; }
+.dd-pager-btn:hover { border-color: var(--border-strong); background: var(--hover); }
+.dd-pager-btn:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+.dd-pager-dir { display: inline-flex; align-items: center; gap: 4px; color: var(--text-muted); font-size: 12px; line-height: 16px; }
+.dd-pager-name { max-width: 100%; overflow: hidden; color: var(--ink); font-size: 14px; font-weight: 500; line-height: 20px; text-overflow: ellipsis; white-space: nowrap; }
+.dd-side-item:hover { background: var(--hover); color: var(--ink); }
+.dd-side-item[aria-current] { background: var(--hover-strong); color: var(--ink); font-weight: 500; }
+.dd-side-item:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
+.dd-side-foot { align-self: flex-start; margin: 16px 8px 0; padding: 0; color: var(--text-muted); font-size: 12px; line-height: 16px; text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; cursor: pointer; }
+.dd-side-foot:hover { color: var(--ink); text-decoration-color: currentColor; }
+
+/* The page, in the middle. */
+.dd-main { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: calc(100vh - 150px); padding-top: 28px; }
+.dd-article { flex: 1; width: 100%; max-width: 720px; margin: 0 auto; padding-bottom: 40px; }
+.dd-title { margin: 0; color: var(--ink); font-size: 26px; font-weight: 600; line-height: 34px; letter-spacing: -0.015em; text-wrap: balance; }
+.dd-question { font-size: 22px; line-height: 30px; }
+.dd-purpose { margin: 6px 0 20px; color: var(--text-muted); font-size: 15px; line-height: 22px; }
+.dd-warn { display: flex; align-items: baseline; gap: 10px; margin: 0 0 16px; padding: 10px 12px; border-radius: var(--r-md); background: var(--amber-soft, color-mix(in srgb, var(--amber) 12%, transparent)); color: var(--ink); font-size: 13px; line-height: 19px; }
+.dd-warn.bad { background: var(--red-soft, color-mix(in srgb, var(--red) 10%, transparent)); }
+.dd-warn .dd-mark { transform: translateY(-1px); }
+
+/* "Relevant source files", as DeepWiki opens each page. */
+.dd-files { margin: 0 0 24px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--card); }
+.dd-files > summary { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 0 12px; color: var(--ink-2); font-size: 13px; line-height: 18px; list-style: none; cursor: pointer; user-select: none; }
+.dd-files > summary::-webkit-details-marker { display: none; }
+.dd-files > summary svg { flex: none; color: var(--text-muted); transition: transform 160ms var(--ease-out); }
+.dd-files[open] > summary svg { transform: rotate(90deg); }
+.dd-files > summary:hover { color: var(--ink); }
+.dd-files > summary:focus-visible { border-radius: var(--r-md); outline: 2px solid var(--border-focus); outline-offset: -2px; }
+.dd-files ul { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 2px 12px 12px; list-style: none; }
+.dd-file { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 26px; padding: 0 8px; border-radius: 6px; background: var(--hover); color: var(--ink); cursor: pointer; transition: background-color var(--t-hover) var(--ease-out); }
+.dd-file:hover { background: var(--hover-strong); }
+.dd-file:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.dd-file code { overflow: hidden; font-family: var(--mono); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The page's words. */
+.dd-prose { color: var(--ink); font-size: 15px; line-height: 1.72; }
+.dd-prose > * > :first-child { margin-top: 0; }
+.dd-prose h2 { margin: 36px 0 10px; font-size: 19px; font-weight: 600; line-height: 26px; letter-spacing: -0.01em; scroll-margin-top: 24px; }
+.dd-prose h3 { margin: 24px 0 6px; font-size: 15.5px; font-weight: 600; line-height: 22px; }
+.dd-prose p { margin: 0 0 14px; }
+.dd-prose del { color: var(--text-muted); text-decoration-color: var(--red); }
+/* A citation, as DeepWiki draws one: the file, then its lines as a segment of their own. */
+.dd-prose .file-chip { gap: 5px; margin: 0 1px; padding: 0 0 0 6px; overflow: hidden; vertical-align: -0.15em; border: 0; border-radius: 5px; background: var(--hover); line-height: 22px; }
+.dd-prose .file-chip:hover { background: var(--hover-strong); border-color: transparent; }
+.dd-prose .file-chip .file-icon { width: 13px; height: 13px; }
+.dd-prose .file-chip code { display: inline-flex; align-items: stretch; font-size: 12px; line-height: 22px; overflow-wrap: normal; white-space: nowrap; }
+.dd-prose .file-chip code::after { content: ""; display: inline-block; width: 6px; }
+.dd-prose .file-chip:has(.file-chip-range) code::after { display: none; }
+.dd-prose .file-chip-colon { display: none; }
+.dd-prose .file-chip-range { margin-left: 6px; padding: 0 6px; background: var(--hover-strong); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.dd-prose .file-chip:hover .file-chip-range { background: color-mix(in srgb, var(--ink) 12%, transparent); }
+/* "Sources:" closing a section: smaller, so the reading line keeps its rhythm. */
+.dd-prose p.dd-sources { margin: -4px 0 18px; color: var(--text-muted); font-size: 12.5px; line-height: 26px; }
+
+/* What no page covers, closing the Overview. */
+.dd-uncovered { margin-top: 36px; padding-top: 20px; border-top: 1px solid var(--border); scroll-margin-top: 24px; }
+.dd-uncovered h2 { margin: 0 0 4px; color: var(--ink); font-size: 15px; font-weight: 600; line-height: 22px; }
+.dd-uncovered p { margin: 0 0 12px; color: var(--text-muted); font-size: 13px; line-height: 19px; }
+.dd-uncovered ul { margin: 0; padding: 0; list-style: none; border: 1px solid var(--border); border-radius: var(--r-md); }
+.dd-uncovered li { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 8px 12px; font-size: 13px; line-height: 18px; }
+.dd-uncovered li + li { border-top: 1px solid var(--border); }
+.dd-uncovered code { min-width: 0; overflow-wrap: anywhere; font-family: var(--mono); font-size: 12px; }
+.dd-uncovered li > span { flex: none; color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+/* The question box, floating at the foot of the page as DeepWiki's does. */
+/* What scrolls under it fades out above it, so no words show round its edges. */
+.dd-askwrap { position: sticky; bottom: 0; z-index: 5; width: 100%; max-width: 736px; margin: 0 auto; padding: 28px 8px 20px; background: linear-gradient(to bottom, transparent, var(--bg) 26px); }
+.dd-askbar { width: 100%; margin: 0; padding: 10px 10px 8px 14px; border: 1px solid var(--border-strong); border-radius: 14px; background: var(--card); box-shadow: 0 8px 28px rgb(0 0 0 / 0.14), 0 1px 2px rgb(0 0 0 / 0.06); transition: border-color var(--t-hover) var(--ease-out); }
+.dd-askbar:focus-within { border-color: var(--border-focus); }
+.dd-askbar textarea { display: block; width: 100%; min-height: 24px; max-height: 160px; padding: 2px 0; border: 0; background: transparent; color: var(--ink); font: inherit; font-size: 14px; line-height: 22px; resize: none; field-sizing: content; outline: none; }
+.dd-askbar textarea::placeholder { color: var(--text-muted); }
+.dd-askbar-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
+.dd-askbar-tool { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; color: var(--text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+/* The model a question is answered with, picked in the box (Arun, 2026-11-12: "be able to swap models ... for asking questions"). */
+.dd-askbar-model { display: inline-flex; align-items: center; gap: 6px; min-width: 0; height: 26px; margin-left: -6px; padding: 0 6px; border-radius: var(--r-md); color: var(--text-muted); font-size: 12px; white-space: nowrap; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out); }
+.dd-askbar-model > span { overflow: hidden; text-overflow: ellipsis; }
+.dd-askbar-model:hover, .dd-askbar-model[data-state="open"] { background: var(--hover); color: var(--ink); }
+.dd-askbar-model:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.dd-model-opt { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.dd-model-opt > span:first-child { display: inline-flex; align-items: center; gap: 6px; color: var(--ink); }
+.dd-model-tag { padding: 0 5px; border-radius: 4px; background: var(--hover-strong); color: var(--text-muted); font-size: 10.5px; font-weight: 500; line-height: 16px; }
+.dd-model-blurb { color: var(--text-muted); font-size: 11.5px; font-weight: 400; line-height: 16px; }
+.dd-send { display: grid; flex: none; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: var(--ink); color: var(--bg); cursor: pointer; transition: opacity var(--t-hover) var(--ease-out); }
+.dd-send:disabled { background: var(--hover-strong); color: var(--text-muted); cursor: default; }
+.dd-send:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+.dd-send .dd-spin { border-color: color-mix(in srgb, currentColor 25%, transparent); border-top-color: currentColor; }
+.dd-askbar-error { margin: 0 0 6px; color: var(--red); font-size: 12px; line-height: 16px; }
+
+/* "On this page", down the right. */
+.dd-toc { position: sticky; top: 0; max-height: calc(100vh - 120px); padding: 28px 0 24px; overflow-y: auto; scrollbar-width: thin; }
+.dd-toc .dd-side-label { margin: 0 0 8px; }
+.dd-toc ul { margin: 0; padding: 0; border-left: 1px solid var(--border); list-style: none; }
+.dd-toc button { display: block; width: 100%; margin-left: -1px; padding: 4px 0 4px 12px; border-left: 1px solid transparent; color: var(--text-muted); font-size: 12.5px; line-height: 18px; text-align: left; cursor: pointer; transition: color var(--t-hover) var(--ease-out), border-color var(--t-hover) var(--ease-out); }
+.dd-toc button:hover { color: var(--ink); }
+.dd-toc button[aria-current] { border-left-color: var(--ink); color: var(--ink); }
+.dd-toc button:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
+
+/* The code a citation points at, in place of "On this page". */
+.dd-code { position: sticky; top: 16px; display: flex; flex-direction: column; max-height: calc(100vh - 140px); margin-top: 20px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--card); overflow: hidden; }
+.dd-code-head { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 6px 6px 6px 12px; border-bottom: 1px solid var(--border); }
+.dd-code-head > svg, .dd-code-head > .file-icon { flex: none; }
+.dd-code-file { flex: 1; min-width: 0; overflow: hidden; color: var(--ink); font-family: var(--mono); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; direction: ltr; }
+.dd-code-dir { color: var(--text-muted); }
+.dd-code-range { flex: none; padding: 0 6px; border-radius: 4px; background: var(--hover-strong); color: var(--ink-2); font-size: 11.5px; line-height: 18px; font-variant-numeric: tabular-nums; }
+.dd-code-lines { position: relative; flex: 1; margin: 0; padding: 6px 0; overflow: auto; font-family: var(--mono); font-size: 12px; line-height: 19px; tab-size: 2; }
+.dd-code-lines > div { display: flex; padding-right: 14px; }
+.dd-code-lines > div.on { background: color-mix(in srgb, var(--accent, var(--ink)) 9%, transparent); }
+.dd-code-lines > div.on .n { color: var(--ink); }
+.dd-code-lines .n { flex: none; width: 46px; padding-right: 14px; color: var(--text-muted); text-align: right; user-select: none; }
+/* Long lines wrap under themselves, beside their number, so the code reads without scrolling sideways (Arun, 2026-11-12:
+   "make sure this is able to viewed without having to use horizontal scroll"). */
+.dd-code-lines .t { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.dd-code-lines { overflow-x: hidden; }
+.dd-code .dd-warn { margin: 12px; }
+
+/* Narrower: no "On this page"; the code still opens beside the page. */
+@media (max-width: 1180px) {
+  .dd-repo.with-toc .dd-grid { grid-template-columns: 216px minmax(0, 1fr); gap: 32px; }
+  .dd-toc { display: none; }
+  .dd-repo.with-code .dd-grid { grid-template-columns: minmax(0, 1fr) minmax(300px, 46%); }
+  .dd-repo.with-code .dd-side { display: none; }
+}
+/* Phone width: the pages as a row to swipe, the code as a sheet from the foot. */
+@media (max-width: 760px) {
+  .dd-grid, .dd-repo.with-toc .dd-grid, .dd-repo.with-code .dd-grid { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .dd-repo.with-code .dd-side { display: flex; }
+  .dd-side { position: static; flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 4px; max-height: none; padding: 10px 0; overflow-x: auto; border-bottom: 1px solid var(--border); scrollbar-width: none; }
+  .dd-side::-webkit-scrollbar { display: none; }
+  .dd-side-meta, .dd-side-foot { display: none; }
+  .dd-side-list { flex-direction: row; gap: 4px; }
+  .dd-side-label { margin: 0 4px 0 8px; white-space: nowrap; }
+  .dd-side-item { width: auto; white-space: nowrap; }
+  .dd-side-q > span:first-child { max-width: 180px; }
+  .dd-main { padding-top: 20px; }
+  .dd-title { font-size: 23px; line-height: 30px; }
+  .dd-askwrap { padding-bottom: 10px; }
+  .dd-main { min-height: 0; }
+  .dd-code { position: fixed; inset: auto 8px 8px; z-index: 30; max-height: 58vh; margin: 0; box-shadow: var(--shadow-pop); }
+  .dd-top { flex-wrap: wrap; }
+}

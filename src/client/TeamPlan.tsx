@@ -14,7 +14,7 @@ import { MenuButton } from "./ui.js";
 import { useNow } from "./presence.js";
 import { ChevronDownIcon, ChevronRightIcon, PanelRightCloseIcon, PanelRightOpenIcon } from "lucide-react";
 import { MAIN_LANE, type SessionEvent } from "../types.js";
-import { runOf, verifiedAt, type BoardTask, type SessionState } from "../session/projection.js";
+import { runOf, verifiedAt, type BoardTask, type SessionState, type TaskReview } from "../session/projection.js";
 import { focusAgent } from "./agentFocus.js";
 import { boardTitle } from "./team-api.js";
 import { plainLine } from "./team-room.js";
@@ -22,6 +22,43 @@ import { assignedTasks, colOf } from "./TeamBoard.js";
 import { Face, mateOn, matesIn } from "./Teammates.js";
 
 type Task = BoardTask & { assigned?: boolean };
+
+/**
+ * How the plan's reviews have gone, counting every round (Arun, 2026-11-11: "if every review comes back approved, it's a second
+ * agent agreeing with the first"): each teammate's approvals and send-backs, Friday's passes without a second agent, passes with
+ * no verdict, and the times a task's own checks sent it back.
+ */
+export function reviewTally(tasks: readonly Task[]): { by: { name: string; ok: number; back: number }[]; approved: number; back: number; auto: number; unclear: number; checks: number } {
+  const by = new Map<string, { name: string; ok: number; back: number }>();
+  let auto = 0;
+  let unclear = 0;
+  let checks = 0;
+  for (const t of tasks) {
+    checks += t.backs?.checks ?? 0;
+    for (const r of t.reviews ?? (t.review ? [t.review] : [])) {
+      if (r.auto) auto++;
+      else if (r.unclear) unclear++;
+      else {
+        const m = by.get(r.by) ?? { name: r.by, ok: 0, back: 0 };
+        if (r.ok) m.ok++;
+        else m.back++;
+        by.set(r.by, m);
+      }
+    }
+  }
+  const list = [...by.values()].sort((a, b) => b.back + b.ok - (a.back + a.ok));
+  return { by: list, approved: list.reduce((n, m) => n + m.ok, 0), back: list.reduce((n, m) => n + m.back, 0), auto, unclear, checks };
+}
+
+/** One review in words, its tone, and its note without the verdict it starts by saying again ("Approved: …"). */
+function reviewLine(r: TaskReview): { said: string; tone: "ok" | "bad" | ""; note: string } {
+  const note = plainLine(r.note).replace(/^\s*(approved|looks good|lgtm|changes needed|needs changes)\b[:.,!\s-]*/i, "");
+  if (r.auto) return { said: "Passed without a review", tone: "", note: r.note.replace(/\.$/, "") };
+  if (r.unclear) return { said: `${r.by} gave no verdict, so it passed without one`, tone: "", note: /^no verdict\.?$/i.test(r.note.trim()) ? "" : note };
+  return { said: r.ok ? `${r.by} approved it` : `${r.by} asked for changes`, tone: r.ok ? "ok" : "bad", note };
+}
+
+const times = (n: number) => `${n} time${n === 1 ? "" : "s"}`;
 type Tone = "done" | "reported" | "needs" | "work" | "wait";
 
 const OPEN_KEY = "friday.plan.open";
@@ -156,6 +193,7 @@ export default function TeamPlan({ state, events, send }: { state: SessionState;
           </span>
           {done} of {tasks.length} done{needs ? ` · ${needs} need${needs === 1 ? "s" : ""} you` : ""}
         </p>
+        <Tally tasks={tasks} />
       </header>
       <ol className="tp-list">
         {tasks.map((t) => {
@@ -179,6 +217,55 @@ export default function TeamPlan({ state, events, send }: { state: SessionState;
         })}
       </ol>
     </aside>
+  );
+}
+
+/**
+ * The plan's reviews in one line under its progress, opening to each teammate's approvals and send-backs, Friday's passes without
+ * a review and the times checks sent work back. Not drawn before anything has been reviewed or sent back.
+ */
+function Tally({ tasks }: { tasks: readonly Task[] }) {
+  const [open, setOpen] = useState(false);
+  const r = reviewTally(tasks);
+  if (!r.approved && !r.back && !r.auto && !r.unclear && !r.checks) return null;
+  const parts = [r.approved || r.back ? `${r.approved} approved` : "", r.back ? `${r.back} sent back` : "", r.auto ? `${r.auto} unreviewed` : ""].filter(Boolean);
+  return (
+    <div className="tp-tally">
+      <button type="button" className="tp-tally-head" aria-expanded={open} aria-label={`Reviews: ${parts.join(", ")}`} onClick={() => setOpen(!open)}>
+        <span className="tp-tally-sum" title="How this plan's reviews went">{parts.join(" · ") || `${r.checks} sent back by checks`}</span>
+        {open ? <ChevronDownIcon aria-hidden="true" /> : <ChevronRightIcon aria-hidden="true" />}
+      </button>
+      {open && (
+        <dl className="tp-tally-list">
+          {r.by.map((m) => (
+            <div key={m.name}>
+              <dt>{m.name}</dt>
+              <dd>
+                {m.ok} approved{m.back ? <b className="bad"> · {m.back} sent back</b> : null}
+              </dd>
+            </div>
+          ))}
+          {r.unclear > 0 && (
+            <div>
+              <dt>No verdict</dt>
+              <dd>{times(r.unclear)}, passed without one</dd>
+            </div>
+          )}
+          {r.auto > 0 && (
+            <div>
+              <dt>No review</dt>
+              <dd>{r.auto} passed by Friday: nothing changed, nobody else to check, or tests passed on a small change</dd>
+            </div>
+          )}
+          {r.checks > 0 && (
+            <div>
+              <dt>Checks</dt>
+              <dd>sent work back {times(r.checks)}</dd>
+            </div>
+          )}
+        </dl>
+      )}
+    </div>
   );
 }
 
@@ -216,18 +303,29 @@ function Details({ t, who, titleOf, onChat, acts }: { t: Task; who?: string | un
         ) : null}
       </span>,
     ]);
-  // Its note without the verdict it starts by saying again ("Approved: …").
-  const note = t.review?.note ? plainLine(t.review.note).replace(/^\s*(approved|looks good|lgtm|changes needed|needs changes)\b[:.,!\s-]*/i, "") : "";
-  if (t.review)
+  // Every review it has had, oldest first: a send-back's note stays once the next review passes it.
+  const reviews = t.reviews ?? (t.review ? [t.review] : []);
+  if (reviews.length || t.reviewer)
     rows.push([
-      "Review",
-      <span className={`tp-check ${t.review.ok ? "ok" : "bad"}`}>
-        {t.review.by} {t.review.ok ? "approved it" : "asked for changes"}
-        {note && <More text={note} lines={2} className="tp-note" />}
-      </span>,
+      reviews.length > 1 ? "Reviews" : "Review",
+      <ol className="tp-reviews">
+        {reviews.map((r, i) => {
+          const l = reviewLine(r);
+          return (
+            <li key={i} className={`tp-check ${l.tone}`}>
+              {l.said}
+              {l.note && <More text={l.note} lines={2} className="tp-note" />}
+            </li>
+          );
+        })}
+        {t.status === "review" && t.reviewer && <li>{t.reviewer.name} is checking it</li>}
+      </ol>,
     ]);
-  else if (t.reviewer) rows.push(["Review", `${t.reviewer.name} is checking it`]);
-  if (t.rounds) rows.push(["Went back", `${t.rounds} time${t.rounds === 1 ? "" : "s"}, after a review or its checks`]);
+  if (t.rounds) {
+    const r = t.backs?.review ?? 0;
+    const c = t.backs?.checks ?? 0;
+    rows.push(["Went back", r + c === t.rounds && r && c ? `${times(t.rounds)}: ${r} after a review, ${c} after its checks` : r + c === t.rounds && c ? `${times(c)}, after its checks failed` : r + c === t.rounds && r ? `${times(r)}, after a review` : `${times(t.rounds)}, after a review or its checks`]);
+  }
   if (t.branch) rows.push(["Branch", <code>{t.branch}</code>]);
   return (
     <div className="tp-more">

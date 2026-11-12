@@ -186,7 +186,7 @@ export function SettingsPage({
           aria-label="Settings sections"
           ref={menu}
         >
-          <h1 className="m-0 px-2 pt-1 text-[15px] font-semibold tracking-[-0.01em] text-[var(--ink)]">Settings</h1>
+          <h1 className="page-top m-0 px-2 pt-1 text-[15px] font-semibold tracking-[-0.01em] text-[var(--ink)]">Settings</h1>
           <InputGroup className="h-8 rounded-lg border-[var(--border-strong)] bg-[var(--bg)] shadow-[var(--shadow-xs)]">
             <InputGroupAddon>
               <SearchIcon className="size-3.5" />

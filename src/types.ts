@@ -938,7 +938,11 @@ export type EventBody =
   | { type: "board.claimed"; id: string; lane: string; name: string; /** Why this agent, when the board picked it: "best at tests here", "the others are nearly out of usage". */ why?: string; /** The task's own branch, readied in the agent's copy of the repo (agent-mesh prepareTask). */ branch?: string }
   | { type: "board.finished"; id: string; lane: string; name: string; status: "done" | "blocked"; report: string }
   | { type: "board.review"; id: string; lane: string; name: string }
-  | { type: "board.reviewed"; id: string; lane: string; name: string; ok: boolean; note: string }
+  /**
+   * A task's review. `lane` empty: Friday passed it without a second agent (nothing changed, nobody else to check, or its tests
+   * passed on a small change). `unclear`: the reviewer was asked twice and gave no verdict either way, so it passed without one.
+   */
+  | { type: "board.reviewed"; id: string; lane: string; name: string; ok: boolean; note: string; unclear?: true }
   /**
    * A finished task's checks, run by Friday in its agent's folder before anyone reviews it (Arun, 2026-10-19: "find gaps and
    * see how we can improve"): started, then how they went. Failed, the task goes back to its agent with the output.

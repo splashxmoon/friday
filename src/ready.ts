@@ -65,7 +65,8 @@ export function readyIn(state: SessionState): ReadyItem[] {
       additions: d.files.reduce((n, f) => n + (f.additions ?? 0), 0),
       deletions: d.files.reduce((n, f) => n + (f.deletions ?? 0), 0),
       ...(checks ? { checks } : {}),
-      ...(task?.review ? { review: { ok: task.review.ok, by: task.review.by, note: task.review.note.slice(0, 200) } } : {}),
+      // A review only when a second agent gave one: Friday's pass without a review, or one with no verdict, proves nothing.
+      ...(task?.review && !task.review.auto && !task.review.unclear ? { review: { ok: task.review.ok, by: task.review.by, note: task.review.note.slice(0, 200) } } : {}),
       ...(state.pr ? { pr: { url: state.pr.url, merged: !!state.pr.merged } } : {}),
       seq: d.seq,
       waiting: run.status === "waiting_for_human",

@@ -275,6 +275,12 @@ export interface SessionState {
 
 export type BoardStatus = "open" | "claimed" | "review" | "done" | "blocked" | "cancelled";
 
+/** One review of a board task: by an agent, or Friday's own pass without one (`auto`), or a pass with no verdict (`unclear`). */
+export type TaskReview = { ok: boolean; note: string; by: string; auto?: true; unclear?: true };
+
+/** Whether a second agent read the task and approved it: not Friday's pass without a review, nor one with no verdict. */
+export const reviewApproved = (r: TaskReview | undefined): boolean => !!r?.ok && !r.auto && !r.unclear;
+
 export interface BoardTask extends BoardTaskDef {
   status: BoardStatus;
   /** Who has it (claimed, or who did it once it's done), by lane and name. */
@@ -283,9 +289,14 @@ export interface BoardTask extends BoardTaskDef {
   report?: string;
   /** The agent checking it, and what it found. */
   reviewer?: { lane: string; name: string };
-  review?: { ok: boolean; note: string; by: string };
+  /** Its latest review. `auto`: Friday passed it without a second agent; `unclear`: passed with no verdict from its reviewer. */
+  review?: TaskReview;
+  /** Every review it has had, oldest first (the last ten): a send-back's note stays after the next review passes it. */
+  reviews?: TaskReview[];
   /** Times it went back to its agent after a review or its checks found something. */
   rounds: number;
+  /** Of those, how many were a review's and how many its checks'. */
+  backs?: { review?: number; checks?: number };
   /** Its checks: running now (`running`), or how they went last. */
   /**
    * Its checks: running now (`running`), or how they went last; `sha` the commit they ran on and `dirty` uncommitted work beside it.
@@ -1058,7 +1069,7 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       else if (b.type === "board.checked") {
         t.checks = { command: b.command, ok: b.ok, output: b.output, ...(b.skipped ? { skipped: true } : {}), ...(b.sha ? { sha: b.sha } : {}), ...(b.dirty ? { dirty: true } : {}) };
         // Failed: back to the agent that did it, as a review that found something does.
-        if (!b.ok && !b.skipped) Object.assign(t, { status: "claimed", rounds: t.rounds + 1, reviewer: undefined });
+        if (!b.ok && !b.skipped) Object.assign(t, { status: "claimed", rounds: t.rounds + 1, backs: { ...t.backs, checks: (t.backs?.checks ?? 0) + 1 }, reviewer: undefined });
       } else if (b.type === "board.released") {
         Object.assign(t, { status: "open", lane: undefined, name: undefined, reviewer: undefined, checks: undefined, ...(b.to ? { next: b.to } : { next: undefined }) });
         if (b.declined) t.declined = [...new Set([...(t.declined ?? []), b.declined])];
@@ -1076,10 +1087,11 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       // An empty lane takes the reviewer off: the one asked ran out of usage, and another is found (agent-mesh boardRunEnded).
       else if (b.type === "board.review") t.reviewer = b.lane ? { lane: b.lane, name: b.name } : undefined;
       else {
-        t.review = { ok: b.ok, note: b.note, by: b.name };
+        t.review = { ok: b.ok, note: b.note, by: b.name, ...(b.lane ? {} : { auto: true as const }), ...(b.unclear ? { unclear: true as const } : {}) };
+        t.reviews = [...(t.reviews ?? []), t.review].slice(-10);
         // Passed: done. Found something: back to the agent that did it, which picks it up again.
         if (b.ok) t.status = "done";
-        else Object.assign(t, { status: "claimed", rounds: t.rounds + 1, reviewer: undefined });
+        else Object.assign(t, { status: "claimed", rounds: t.rounds + 1, backs: { ...t.backs, review: (t.backs?.review ?? 0) + 1 }, reviewer: undefined });
       }
       break;
     }

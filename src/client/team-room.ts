@@ -278,7 +278,7 @@ export function nudgedRepeats(events: readonly SessionEvent[]): Set<number> {
  * it and checked by whoever's lane reviewed it, by their names now (`nameOf`), as the room names them everywhere else.
  */
 export function boardReportText(text: string, events: readonly SessionEvent[], seq: number, nameOf: (lane: string) => string | undefined): string {
-  type Rec = { title: string; lane?: string; name?: string; blocked?: boolean; review?: { lane: string; name: string; ok: boolean } };
+  type Rec = { title: string; lane?: string; name?: string; blocked?: boolean; review?: { lane: string; name: string; ok: boolean; unclear?: boolean } };
   const tasks = new Map<string, Rec>();
   for (const e of events) {
     if (e.seq >= seq) continue;
@@ -291,7 +291,7 @@ export function boardReportText(text: string, events: readonly SessionEvent[], s
       if (t) Object.assign(t, { lane: b.lane, name: b.name, blocked: b.status === "blocked", review: undefined });
     } else if (b.type === "board.reviewed") {
       const t = tasks.get(b.id);
-      if (t) t.review = { lane: b.lane, name: b.name, ok: b.ok };
+      if (t) t.review = { lane: b.lane, name: b.name, ok: b.ok, ...(b.unclear ? { unclear: true } : {}) };
     }
   }
   const who = (lane: string | undefined, name: string | undefined) => (lane ? nameOf(lane) : undefined) ?? name ?? "";
@@ -300,7 +300,8 @@ export function boardReportText(text: string, events: readonly SessionEvent[], s
     if (!t) return `## ${rest}`;
     const title = t.title.replace(/^Board task\s+"[^"]*"\s*:\s*/i, "");
     const did = t.blocked ? `blocked${t.name || t.lane ? ` (${who(t.lane, t.name)})` : ""}` : `done by ${who(t.lane, t.name)}`;
-    const checked = t.review ? `, ${t.review.ok ? "approved" : "not approved"} by ${who(t.review.lane, t.review.name)}` : "";
+    // Friday's pass without a second agent (no lane) and a pass with no verdict aren't approvals, and don't say so.
+    const checked = !t.review ? "" : !t.review.lane ? ", passed without a review" : t.review.unclear ? `, passed with no verdict from ${who(t.review.lane, t.review.name)}` : `, ${t.review.ok ? "approved" : "not approved"} by ${who(t.review.lane, t.review.name)}`;
     return `## ${title} (${did}${checked})`;
   });
 }
