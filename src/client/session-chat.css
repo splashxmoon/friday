@@ -1,0 +1,80 @@
+/* The coding session's chat, its agents' switch and header, matched to Friday Teams' session-chat.css (2026-11-14). The rules for
+   several people in one session (control, suggestions, people's messages) stay in the hosted edition. */
+
+.rsp-needs.is-theirs { color: var(--text-muted); background: transparent; }
+
+/* ── the agents' switch (Arun, 2026-11-09, option C): one segmented control pinned at the top of the chat column, centred over
+   it, above the feed's scroller so it stays as the chat scrolls and never lies over a message. Everything, each agent (its face,
+   its name, its state's dot), "N more" when they don't fit, +, a divider, Side by side. Whose an agent is goes in its tip. ── */
+.feed-toolbar.agent-switch { position: relative; z-index: 2; flex: none; display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; max-width: none !important; margin: 0 !important; padding: 10px 16px 6px; background: var(--bg); box-shadow: none; }
+/* The chat's top edge, softened: what scrolls up goes under a short fade rather than a hard line under the switch. */
+.feed-toolbar.agent-switch::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 12px; background: linear-gradient(var(--bg), transparent); pointer-events: none; }
+.feed-toolbar.agent-switch :is(.lane-tabs-wrap, .lane-tabs) { margin: 0; }
+.feed-toolbar.agent-switch .lane-tabs-wrap, .feed-toolbar.agent-switch.split-rail > .lane-tabs { display: inline-flex; align-items: center; gap: 2px; flex: 0 1 auto; min-width: 0; max-width: 100%; padding: 3px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
+.feed-toolbar.agent-switch .lane-tabs { display: flex; gap: 2px; min-width: 0; padding: 0; border-radius: 0; background: none; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; overscroll-behavior-x: contain; -webkit-mask-image: none; mask-image: none; }
+.feed-toolbar.agent-switch .lane-tabs-wrap .lane-tabs.over { padding-right: 0; }
+.feed-toolbar.agent-switch .lane-tabs-wrap .lane-tabs.over:not(.fade-l, .fade-r) { -webkit-mask-image: none; mask-image: none; }
+.feed-toolbar.agent-switch .lane-tabs > :first-child { margin-left: 0; }
+.feed-toolbar.agent-switch .lane-tabs > :last-child { margin-right: 0; }
+/* A switch that scrolls (a phone's) fades under a soft edge on the side with more past it. */
+.feed-toolbar.agent-switch .lane-tabs.fade-r { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); }
+.feed-toolbar.agent-switch .lane-tabs.fade-l { -webkit-mask-image: linear-gradient(90deg, transparent, #000 28px); mask-image: linear-gradient(90deg, transparent, #000 28px); }
+.feed-toolbar.agent-switch .lane-tabs.fade-l.fade-r { -webkit-mask-image: linear-gradient(90deg, transparent, #000 28px, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
+.feed-toolbar.agent-switch .lane-tab { --tab-ground: var(--card); height: 28px; gap: 7px; padding: 0 12px 0 6px; border: 0 !important; border-radius: 7px; background: none; color: var(--ink-2); font: 500 13px/1 var(--font); box-shadow: none; }
+.feed-toolbar.agent-switch .lane-tab:first-child { padding: 0 12px; }
+.feed-toolbar.agent-switch .lane-tab:hover:not(.on) { background: var(--hover); color: var(--ink); }
+.feed-toolbar.agent-switch .lane-tab.on { --tab-ground: var(--hover-strong); background: var(--hover-strong) !important; color: var(--ink); box-shadow: none; }
+.feed-toolbar.agent-switch .lane-tab.needs:not(.on) { color: var(--ink); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--st-queued, var(--amber)) 55%, transparent); }
+.feed-toolbar.agent-switch .lane-tab:focus-visible, .feed-toolbar.agent-switch :is(.lane-add, .lane-more, .lane-view):focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--focus-ring); }
+.feed-toolbar.agent-switch .lane-tab-text { flex-direction: row; line-height: 1; }
+.feed-toolbar.agent-switch .lane-tab-name { max-width: 128px; }
+.feed-toolbar.agent-switch .lane-tab-sub { display: none; }
+.feed-toolbar.agent-switch .lane-tab-mark { width: 20px; height: 20px; margin: 0; background: color-mix(in srgb, var(--ink) 7%, transparent) !important; }
+.feed-toolbar.agent-switch .lane-tab-mark .agent-mark svg, .feed-toolbar.agent-switch .lane-tab-mark > svg { width: 12px; height: 12px; }
+/* Its state is the dot after its name (agent-state.ts via the hub): no second ring round the face. */
+.feed-toolbar.agent-switch .lane-tab-mark::after { display: none; }
+.feed-toolbar.agent-switch .lane-tab .lane-tab-mark { margin-right: -2px !important; }
+.feed-toolbar.agent-switch .lane-tab .state-ring { margin-left: -1px; }
+.feed-toolbar.agent-switch .lane-tab.on > svg:last-child { width: 14px; height: 14px; margin-left: -3px; padding: 1.5px; }
+.feed-toolbar.agent-switch .lane-tab-lead { width: 12px; height: 12px; margin-left: -3px; }
+.feed-toolbar.agent-switch .lane-tab-unread { min-width: 16px; height: 16px; }
+.feed-toolbar.agent-switch .lane-add { flex: none; width: 28px; height: 28px; margin: 0; border: 0; border-radius: 7px; background: none; color: var(--ink-2); }
+.feed-toolbar.agent-switch .lane-add:hover, .feed-toolbar.agent-switch .lane-add[aria-expanded="true"] { background: var(--hover); color: var(--ink); }
+.feed-toolbar.agent-switch .lane-more { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px 0 10px; border: 0; border-radius: 7px; background: none; color: var(--ink-2); font: 500 13px/1 var(--font); white-space: nowrap; }
+.feed-toolbar.agent-switch .lane-more:hover { background: var(--hover); color: var(--ink); }
+.feed-toolbar.agent-switch .lane-more.on { background: var(--hover-strong); color: var(--ink); }
+.feed-toolbar.agent-switch .lane-more .lane-tab-mark { width: 20px; height: 20px; }
+.feed-toolbar.agent-switch .lane-more-name { max-width: 128px; overflow: hidden; text-overflow: ellipsis; }
+.feed-toolbar.agent-switch .lane-more-n { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.agent-switch-div { flex: none; width: 1px; height: 16px; margin: 0 4px; background: var(--border-strong); }
+.feed-toolbar.agent-switch .lane-view-wrap { margin: 0; }
+.feed-toolbar.agent-switch .lane-view { width: 28px; height: 28px; padding: 0; justify-content: center; border: 0; border-radius: 7px; background: none; color: var(--ink-2); }
+.feed-toolbar.agent-switch .lane-view:hover { background: var(--hover); color: var(--ink); }
+.feed-toolbar.agent-switch .lane-view[aria-pressed="true"] { background: var(--hover-strong); color: var(--ink); }
+.feed-toolbar.agent-switch .lane-view:focus-visible { outline: none; }
+.feed-toolbar.agent-switch .needs-pill { flex: none; height: 30px; }
+@media (max-width: 640px) {
+  .feed-toolbar.agent-switch { padding: 8px 12px 4px; }
+  .feed-toolbar.agent-switch .lane-tab-name { max-width: 112px; }
+}
+@media (prefers-reduced-motion: reduce) { .feed-toolbar.agent-switch .lane-tab { transition: none; } }
+
+/* The session header: only the session and its people now, so the title takes all the room there is, cut only when it truly
+   doesn't fit (its tip then says it whole). */
+.session-view > .topbar .tb-left, #band-left .tb-left { flex: 1 1 0; min-width: 0; }
+.session-view > .topbar .tb-title, #band-left .tb-title { flex: 1 1 auto; max-width: 100%; }
+.session-view > .topbar .tb-title h1, #band-left .tb-title h1 { flex: 0 1 auto; max-width: none !important; }
+
+/* ── an answer's Markdown: a long link breaks inside itself (its bullet stays with it), a code block scrolls in its own box on every
+   size rather than clipping on desktop and wrapping on a phone (B-42) ── */
+:is(.rsp-answer, .rsp-say) :is(p, li) a { overflow-wrap: anywhere; }
+:is(.rsp-answer, .rsp-say) pre { max-width: 100%; overflow-x: auto; white-space: pre; }
+:is(.rsp-answer, .rsp-say) pre code { white-space: pre; }
+
+/* A phone's header: one row of the title, the people and their pill, and the header's own buttons. No ⋯ folding them away (Arun,
+   2026-11-09: "get rid of this"): the title gives way instead, and the divider goes. */
+@media (max-width: 520px) {
+  .session-view > .topbar { flex-wrap: nowrap; }
+  .session-view > .topbar .tb-right { flex-shrink: 0; }
+  .session-view > .topbar .tb-right > .tb-divider { display: none; }
+}

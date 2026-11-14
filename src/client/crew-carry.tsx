@@ -10,27 +10,68 @@ import type { Handed, SessionState } from "../session/projection.js";
 import type { SessionEvent } from "../types.js";
 import { Avatar, Icon } from "./icons.js";
 import { Face, useTeamNow } from "./Teammates.js";
+import { roomsOut } from "./crew-at.js";
+import { loadRecents } from "./storage.js";
 import "./crew-carry.css";
 
 const notice = (text: string) => dispatchEvent(new CustomEvent("friday:notice", { detail: text }));
 const first = (n: string) => n.split(/\s+/)[0] || n;
 
-/** Rooms handed work from here in the last three days, not brought in yet. */
-const roomsOut = (events: readonly SessionEvent[]) => {
-  const brought = new Set(events.flatMap((e) => (e.body.type === "crew.handed.room.brought" ? [e.body.room] : [])));
-  const seen = new Set<string>();
-  return events
-    .filter((e) => e.body.type === "crew.handed.room" && Date.now() - e.ts < 3 * 86_400_000)
-    .reverse()
-    .filter((e) => e.body.type === "crew.handed.room" && !brought.has(e.body.room) && !seen.has(e.body.room) && !!seen.add(e.body.room)) as (SessionEvent & { body: Extract<SessionEvent["body"], { type: "crew.handed.room" }> })[];
-};
-
-/** How much is out with the crew from this session: hand-offs still at work, and rooms whose work hasn't come back in. */
-export function handedCount(state: SessionState, events: readonly SessionEvent[]): number {
-  return Object.values(state.handed ?? {}).filter((h) => handedLive(h)).length + roomsOut(events).length;
-}
-
 type RoomNow = { state: "working" | "waiting" | "done" | "stopped" | "queued" | "unknown"; line: string; said: string; working: string[]; at: number | null; crew?: { name: string; look?: string; working: boolean; lead: boolean }[] };
+
+/**
+ * What this session handed to the crew, in the agent status's list (StatusBar.tsx): each crew mate's job and each room, how it
+ * stands, and a press to open it (Arun, 2026-11-13: "show the current agents working in the coding session, plus any work that was
+ * handed off in a crew or crew room"). Loaded when that list first opens.
+ */
+export function HandedRows({ state, events, onPick }: { state: SessionState; events: readonly SessionEvent[]; onPick: () => void }) {
+  const invite = loadRecents().find((r) => r.sid === state.id)?.invite ?? "";
+  const jobs = Object.values(state.handed ?? {}).sort((a, b) => b.at - a.at).slice(0, 6);
+  const rooms = roomsOut(events).slice(0, 4);
+  const [now, setNow] = useState<Record<string, RoomNow>>({});
+  useEffect(() => {
+    if (!invite) return;
+    let live = true;
+    for (const r of rooms) void workReq<RoomNow>(kgPath(state.id, invite, "", `&roomStatus=${encodeURIComponent(r.body.room)}`)).then((x) => live && setNow((n) => ({ ...n, [r.body.room]: x })), () => {});
+    return () => void (live = false);
+  }, [state.id, invite, rooms.map((r) => r.body.room).join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!jobs.length && !rooms.length) return null;
+  const openJob = (job: string) => void workReq<{ sid: string; invite: string }>(kgPath(state.id, invite, `/${job}`)).then((o) => dispatchEvent(new CustomEvent("friday:open-session", { detail: { sid: o.sid, invite: o.invite } })), (e: Error) => notice(e.message));
+  const openRoom = (room: string) => void workReq<{ sid: string; invite: string }>(kgPath(state.id, invite, "", `&room=${encodeURIComponent(room)}`)).then((o) => dispatchEvent(new CustomEvent("friday:open-session", { detail: { sid: o.sid, invite: o.invite } })), (e: Error) => notice(e.message));
+  return (
+    <>
+      <p className="stb-pop-head">With the crew</p>
+      <ul className="stb-pop-list">
+        {jobs.map((h) => (
+          <li key={h.job}>
+            <button type="button" className="stb-pop-row" onClick={() => (onPick(), openJob(h.job))}>
+              <span className="stb-pop-mark">
+                <Avatar name={h.mateName} id={h.mate} size={16} />
+              </span>
+              <span className="stb-pop-main">
+                <span className="stb-pop-name">{h.mateName}</span>
+              </span>
+              <span className="stb-pop-word">{progressLine(h, Date.now()).replace(new RegExp(`^${h.mateName}\\s+`), "")}</span>
+            </button>
+          </li>
+        ))}
+        {rooms.map((r) => (
+          <li key={r.body.room}>
+            <button type="button" className="stb-pop-row" onClick={() => (onPick(), openRoom(r.body.room))}>
+              <span className="stb-pop-mark">
+                <Icon name="users" size={13} />
+              </span>
+              <span className="stb-pop-main">
+                <span className="stb-pop-name">{r.body.roomName}</span>
+              </span>
+              <span className="stb-pop-word">{now[r.body.room]?.line ?? "Open the room"}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+}
 
 /**
  * "You handed this to the room Payments": said once, then kept up under it (Arun, 2026-11-13: "add status update on the handed

@@ -83,6 +83,9 @@ for (const edition of ["hosted", "local"] as const) {
     // Nov 13 2026: 941.5 hosted, 938.7 local (936.5 and 933.6 before), with the same: raised to 943 on purpose.
     // Nov 13 2026, the Friday Teams port (Code and Crew connected, the allowlist read as a shell reads it): 944.5 hosted, 941.6
     // local, with the 16 KB allowlist loaded at the first card that offers Always allow rather than here: raised to 946 on purpose.
-    assert.ok(session.kb < 946, `a session screen's first load is ${session.kb.toFixed(0)} KB brotli, over the 946 KB budget`);
+    // Nov 14 2026, the session screen matched to Friday Teams: 947.9 hosted, 945.3 local (944.2 and 941.3 before), with one agent
+    // state for every view and plain-words errors (agent-state.ts) and the status bar's agent list; the row's words (agent-line.ts)
+    // stay in the first load without the rest, and the crew's rows in the list load when it opens: raised to 949 on purpose.
+    assert.ok(session.kb < 949, `a session screen's first load is ${session.kb.toFixed(0)} KB brotli, over the 949 KB budget`);
   });
 }

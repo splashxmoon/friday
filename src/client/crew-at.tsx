@@ -2,9 +2,26 @@
 // Friday Teams e4d637ea, 773e15e7 and 1815f0ac, keep-going.tsx): your crew mates and crew rooms after "@", "@Kit finish this" handed
 // straight on, and the action on a finished run. The session's hand-off lines load on their own (crew-carry.tsx).
 import { useEffect, useState } from "react";
-import { ASK_DEFAULT, CARRY_DEFAULT, mentionHandOff } from "../crew-carry-rules.js";
+import { ASK_DEFAULT, CARRY_DEFAULT, handedLive, mentionHandOff } from "../crew-carry-rules.js";
+import type { SessionState } from "../session/projection.js";
+import type { SessionEvent } from "../types.js";
 import { kgPath, openKeepGoing } from "./crew-carry-open.js";
 import { carryReq as workReq } from "./crew-carry-req.js";
+
+/** Rooms handed work from here in the last three days, not brought in yet. */
+export const roomsOut = (events: readonly SessionEvent[]) => {
+  const brought = new Set(events.flatMap((e) => (e.body.type === "crew.handed.room.brought" ? [e.body.room] : [])));
+  const seen = new Set<string>();
+  return events
+    .filter((e) => e.body.type === "crew.handed.room" && Date.now() - e.ts < 3 * 86_400_000)
+    .reverse()
+    .filter((e) => e.body.type === "crew.handed.room" && !brought.has(e.body.room) && !seen.has(e.body.room) && !!seen.add(e.body.room)) as (SessionEvent & { body: Extract<SessionEvent["body"], { type: "crew.handed.room" }> })[];
+};
+
+/** How much is out with the crew from this session: hand-offs still at work, and rooms whose work hasn't come back in. */
+export function handedCount(state: SessionState, events: readonly SessionEvent[]): number {
+  return Object.values(state.handed ?? {}).filter((h) => handedLive(h)).length + roomsOut(events).length;
+}
 
 /** What "@" in a session's box can hand work to: your crew mates and the crew rooms you're in (Arun, 2026-11-13). */
 export type CrewTarget = { kind: "mate" | "room"; id: string; name: string; /** What it is written as after "@": a room's name has no spaces. */ at: string; hint: string; /** A crew mate's mascot. */ look?: string };

@@ -118,7 +118,7 @@ test("an agent not signed in says so plainly, and once another agent carried its
   const events = session();
   events.push(ev({ type: "run.ended", outcome: "error", error: "Claude Code isn't signed in on the computer it runs on, or its login has expired. Run `claude auth login` in a terminal there." } as EventBody));
   let [a] = hubOf(project("s", events), events, "ada").agents;
-  assert.deepEqual([a!.status, a!.line], ["failed", "Not signed in on its computer"], "no terminal command");
+  assert.deepEqual([a!.status, a!.line], ["failed", "Hit an error · not signed in on its computer"], "no terminal command, and said as every error is (agent-state.ts)");
   const codex = { id: "engine:codex", name: "Ada's Codex", kind: "agent" as const };
   events.push(ev({ type: "lane.added", lane: { id: "l1", name: "Codex", agent: null, control: { kind: "open" }, controlMode: "ask", trigger: { kind: "manual" }, engine: true } } as EventBody, human));
   events.push(ev({ type: "engine.attached", engine: { tool: "codex", hostId: "ada", hostName: "Ada Lovelace", cwd: "/w" } } as EventBody, codex, "l1"));

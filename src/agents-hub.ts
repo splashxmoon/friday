@@ -4,7 +4,8 @@ import { plainLine } from "./client/work-outputs.js";
 import { carriedOn, clockUntil, limitHit, signedOut } from "./limit-reset.js";
 import { limitedLanes } from "./limited.js";
 import { commandFailed, TEST_CMD } from "./receipt.js";
-import { canDriveLane, driverOf, givenName, runOf, type SessionState } from "./session/projection.js";
+import { driverOf, givenName, runOf, type SessionState } from "./session/projection.js";
+import { agentState, type AgentNow, type AgentPhase } from "./agent-state.js";
 import { engineName, MAIN_LANE, type EngineMode, type EngineTool, type SessionEvent } from "./types.js";
 
 /**
@@ -14,6 +15,8 @@ import { engineName, MAIN_LANE, type EngineMode, type EngineTool, type SessionEv
  * source that can disagree.
  */
 export type AgentStatus = "working" | "waiting" | "paused" | "offline" | "limited" | "failed" | "done" | "ready";
+/** A phase as the older, coarser status the hub's readers sort and colour by. */
+const STATUS: Record<AgentPhase, AgentStatus> = { needs: "waiting", waiting: "waiting", working: "working", paused: "paused", failed: "failed", limited: "limited", offline: "offline", stopped: "ready", short: "done", done: "done", ready: "ready" };
 
 export interface HubAgent {
   lane: string;
@@ -39,6 +42,8 @@ export interface HubAgent {
    * alone can be on somebody else; this is what the agent rail, the needs-you count and ⌘J go by.
    */
   needsYou: boolean;
+  /** Where it stands as the one selector says it (agent-state.ts), for every place that shows it: its phase and words. */
+  now: AgentNow;
   /**
    * Tokens it has used in this session, read and written, as its turns counted them (agent.usage; Friday's own steps carry theirs):
    * whose subscription the session is spending, at a glance (Arun, 2026-10-25). Cache reads left out, as tool-usage.ts leaves them.
@@ -188,35 +193,36 @@ export function hubOf(state: SessionState, events: SessionEvent[], meId = ""): {
       ask: ask ? { id: ask.id, items: ask.items, scope: ask.scope } : null,
       tokens: spent.get(lane) ?? 0,
     };
-    // Who answers what this agent is held up on: whoever drives it, or anyone who may when nobody does.
-    const driver = driverOf(state, lane);
-    const steers = !!meId && (driver ? driver.id === meId : canDriveLane(state, meId, lane));
+    // Where it stands, from the one selector every view uses (agent-state.ts): who it waits on, and in what words.
+    const now = agentState(state, lane, meId, { limited: limited.get(lane) ?? null });
+    const status = STATUS[now.phase];
+    // Nobody looking (a page with no one signed in, a test): every wait reads as the reader's, as before there were names.
+    const needsYou = now.needsYou || (!meId && !!now.held);
+    const rest = { ...base, now: needsYou && !now.needsYou ? { ...now, phase: "needs" as const, word: "Needs you", needsYou } : now, needsYou, status };
+    const on = now.held ? (needsYou ? "you" : now.held.names.length ? now.held.names.join(" and ") : "a person") : "";
     const question = state.openQuestions[lane];
     const decision = run !== "running" ? state.asks[lane]?.questions[0] : undefined;
-    if (engine?.tool && !engine.online) return { ...base, needsYou: false, status: "offline", line: engine.hostId === meId ? "Offline · reconnect it from the chat" : `Offline · ${engine.hostName.split(/\s+/)[0]}'s computer` };
-    if (ask) {
-      const on = steers || !meId || !driver ? "you" : driver.name.split(/\s+/)[0];
-      return { ...base, needsYou: steers || !meId, status: "waiting", line: ask.items.length ? `Needs ${on}: ${clip(ask.items[0]!, 44)}` : `Waiting on ${on}` };
-    }
-    // A question was counted as working, or as ready once the run paused for it: the hub said nothing was asked.
-    if (question) {
-      const mine = !meId || question.to === meId;
-      return { ...base, needsYou: mine, status: "waiting", line: `${mine ? "Asking you" : `Asking ${question.toName.split(/\s+/)[0]}`}: ${clip(question.question.split("\n")[0]!, 44)}` };
-    }
-    if (decision) return { ...base, needsYou: steers || !meId, status: "waiting", line: `Needs a decision: ${clip(decision.question, 44)}` };
-    const rest = { ...base, needsYou: false };
-    if (run === "paused") return { ...rest, status: "paused", line: "Paused" };
-    if (run === "running") return { ...rest, status: "working", line: doingNow(events, lane)?.text ?? "Working" };
+    if (now.held?.kind === "question" && question) return { ...rest, line: `${needsYou ? "Asking you" : `Asking ${on}`}: ${clip(question.question.split("\n")[0]!, 44)}` };
+    if (now.held?.kind === "approval" && ask) return { ...rest, line: ask.items.length ? `${needsYou ? "Needs you" : now.word}: ${clip(ask.items[0]!, 44)}` : rest.now.word };
+    if (now.held?.kind === "ask" && decision) return { ...rest, line: `${needsYou ? "Needs a decision" : now.word}: ${clip(decision.question, 44)}` };
+    if (now.held) return { ...rest, line: rest.now.word };
+    if (now.phase === "working") return { ...rest, line: doingNow(events, lane)?.text ?? "Working" };
+    if (now.phase === "paused") return { ...rest, line: "Paused" };
     // Out of usage, its own or its account's (limited.ts), with when it comes back; once that has passed, ready again.
-    const out = limited.get(lane);
-    if (out) return { ...rest, status: "limited", line: `Out of usage${out.until ? ` until ${clockUntil(out.until)}` : ""}${out.via ? ` · same account as ${laneLabel(state, out.via)}` : ""}` };
-    // Not signed in on its computer: said so, not its tool's words; and once another agent here carried its task on, nothing is
-    // stopped (Arun, 2026-10-28: "iron everything and ensure we are good": Progress read a red "Stopped" over work Codex had done).
-    if (r?.outcome === "error" && signedOut(r.error)) return carriedOn(state, lane) ? { ...rest, status: "ready", line: "Not signed in · its work carried on" } : { ...rest, status: "failed", line: "Not signed in on its computer" };
-    if (r?.outcome === "error") return limitHit(r.error) ? { ...rest, status: "ready", line: "Usage back · ready for a task" } : { ...rest, status: "failed", line: clip(stoppedLine(r.error), 60) };
+    if (now.phase === "limited") {
+      const out = limited.get(lane);
+      return { ...rest, line: `Out of usage${now.until ? ` until ${clockUntil(now.until)}` : ""}${out?.via ? ` · same account as ${laneLabel(state, out.via)}` : ""}` };
+    }
+    if (now.phase === "failed") return { ...rest, line: clip(`Hit an error · ${now.error?.plain ?? "something went wrong"}`, 60) };
+    if (now.phase === "offline") return { ...rest, line: engine?.hostId === meId ? "Offline · reconnect it from the chat" : `Offline · ${(engine?.hostName ?? "their").split(/\s+/)[0]}'s computer` };
+    // Not signed in on its computer, its task carried on by another agent here: nothing is stopped (Arun, 2026-10-28).
+    if (r?.outcome === "error" && signedOut(r.error) && carriedOn(state, lane)) return { ...rest, line: "Not signed in · its work carried on" };
+    if (r?.outcome === "error" && limitHit(r.error)) return { ...rest, line: "Usage back · ready for a task" };
+    if (now.phase === "stopped") return { ...rest, line: "Stopped" };
     // Its words, not its Markdown: the line is a tab's name and tip, read out as "star star Notes star star" before (2026-11-04 QA).
-    if (r?.outcome === "done") return { ...rest, status: "done", line: clip(plainLine(r.answer) || "Done", 60) };
-    return { ...rest, status: "ready", line: "Ready for a task" };
+    // Stopped short of its plan, its word says so ("Stopped at 1 of 2"); its line is still what it said.
+    if (now.phase === "done" || now.phase === "short") return { ...rest, line: clip(plainLine(r?.answer ?? "") || now.word, 60) };
+    return { ...rest, line: "Ready for a task" };
   });
 
   const byPath = new Map<string, HubFile>();

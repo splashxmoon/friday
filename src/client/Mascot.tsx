@@ -165,7 +165,10 @@ export function Mascot({
   label,
   className,
   onPoke,
+  hue,
 }: {
+  /** Its body's colour, in place of its kind's own: one agent's face among several (agent-face.ts). */
+  hue?: string;
   kind?: MascotKind;
   mood?: MascotMood;
   size?: number;
@@ -194,6 +197,7 @@ export function Mascot({
       className={`mascot${frozen ? " still" : ""}${className ? ` ${className}` : ""}`}
       data-mood={mood}
       data-kind={kind}
+      {...(hue ? { style: { ["--mascot" as string]: hue } } : {})}
       {...(label && !onPoke ? { role: "img", "aria-label": label } : { "aria-hidden": true })}
     >
       <g className="m-all" style={{ transform: `rotate(${face.tilt ?? 0}deg)` }}>

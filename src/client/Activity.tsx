@@ -4,7 +4,7 @@ import { GO_AHEAD_WORDS } from "../guardrails.js";
 import { shortTokens } from "../tool-usage.js";
 import { collisionsFor } from "../collisions.js";
 import { runawayText } from "../runaway.js";
-import { clockUntil, limitHit, signedOut } from "../limit-reset.js";
+import { clockUntil, limitHit, planLimitHit, signedOut } from "../limit-reset.js";
 import { limitLine } from "../limit-words.js";
 import { cappedText, tokensUsed } from "../run-budget.js";
 import { reviewOrder } from "../code-review.js";
@@ -22,6 +22,7 @@ import { GitMergeIcon,
   ClockIcon,
   InfoIcon,
   EyeIcon,
+  PlusIcon,
   FileTextIcon,
   FileDiffIcon,
   FilePenIcon,
@@ -129,9 +130,10 @@ import { StartingLaneTab } from "./Lanes.js";
 import { tabListKeys, useRovingTabs } from "./roving.js";
 import { ToolResult, ToolResultOutput } from "@/components/agents/tool-result";
 import { cn } from "@/lib/utils";
+import { Tip } from "@/components/dass/page-bits";
+import "./session-chat.css";
 import { ownPlan } from "../own-plan.js";
 import { taskAllowApplies, can, canDriveLane, driverOf, laneOf, pendingFor, questionsTo, runOf, signoffStatus, type OpenQuestion, type SessionState, type Thread, givenName } from "../session/projection.js";
-import { isRawError, stoppedLine } from "../activity-line.js";
 import { ENGINE_MODEL_INFO, ENGINE_NAMES, ENGINE_TOOLS, liveMachine, MAIN_LANE, type Attachment, type DiffFile, type EngineMode, type EngineTool, type EventBody, type EventType, type Member, type PresenceMember, type SessionEvent, type Thinking, type ToolCall, effortNote, ENGINE_EFFORT_INFO, EFFORT_RESET_NOTE, effortLevelsOf, type EngineEffort } from "../types.js";
 import { api, fileUrl, uploadFile } from "./api.js";
 import { DropOverlay, pickable, uploadAll, useFileDragging } from "./Attach.js";
@@ -203,9 +205,11 @@ import { Face, teamNow } from "./Teammates.js";
 import { DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { handedOn as handedLane } from "../session/projection.js";
 import { isOwnModel } from "../own-model-id.js";
-import { agentLook, handoffTaskText, laneIdByName, laneLabel, reasonFor, suggestTarget, tintOfColor, tintOfEngine, wakesOnItsOwn, type Signals } from "./handoff-ui.js";
+import { agentLook, FridayFace, handoffTaskText, laneIdByName, laneLabel, reasonFor, suggestTarget, tintOfColor, tintOfEngine, wakesOnItsOwn, type Signals } from "./handoff-ui.js";
 import type { AgentView } from "../agents.js";
 import { RaceCard } from "./Race.js";
+import { agentNameFor, laneNamesFrom } from "./agent-name.js";
+import { agentState, lowerWord, phaseRing, plainError, PHASE_WORD, saysItAll, type AgentRing } from "../agent-state.js";
 import { askIosPreview, isLocalUrl, lookOf, openInPreview, pageAppears, servedUrlIn } from "./previewBus.js";
 import { failedWords, latestTests, prefillComposer, ReviewCard, secondReviewOf, testsIn, type TestRun } from "./RunReview.js";
 import { CLASS_LABEL, carefulClass, headlineClass, mayApprove } from "../command-class.js";
@@ -249,6 +253,11 @@ type Typing = "waiting" | "thinking" | "answering";
  * it is on changes. A new one each render was called on every live event, each a scroll that laid the whole page out again
  * (Arun, 2026-10-30: "the app feel laggy when running a lot of tasks and agents").
  */
+/** Up to this window width the agents' switch scrolls sideways with every agent in it, rather than folding some behind "N more". */
+const PHONE_SWITCH = 640;
+const ROW_ALL = 1000;
+/** The "N more" segment's width, kept for while any agent is behind it. */
+const MORE_W = 96;
 const tabIntoView = (el: HTMLElement | null) => el?.scrollIntoView({ block: "nearest", inline: "nearest" });
 const typingOf = (s: Stream | undefined): Typing => (s?.text ? "answering" : s?.reasoning ? "thinking" : "waiting");
 
@@ -324,7 +333,7 @@ type NotesItem = { kind: "notes"; evs: SessionEvent[] };
 type FeedItem = Item | NotesItem;
 
 /** Who joined, who has the wheel, which machine attached: true, but not the conversation. */
-const QUIET = new Set<string>(["session.created", "session.updated", "member.joined", "member.role_changed", "member.removed", "link.updated", "control.requested", "role.requested", "role.declined", "control.granted", "control.denied", "control.released", "engine.expected", "engine.attached", "engine.detached"]);
+const QUIET = new Set<string>(["lane.added", "session.created", "session.updated", "member.joined", "member.role_changed", "member.removed", "link.updated", "control.requested", "role.requested", "role.declined", "control.granted", "control.denied", "control.released", "engine.expected", "engine.attached", "engine.detached"]);
 
 /**
  * Two or more of them in a row become one line; a lone one is already small.
@@ -488,7 +497,6 @@ const HIDDEN = new Set<string>([
   "proof.posted",
   "proof.shot",
   "suggestion.dismissed",
-  "lane.added",
   "lane.removed",
   "lane.renamed",
   "folder.switched",
@@ -764,6 +772,11 @@ export function group(events: SessionEvent[], streaming: boolean | ReadonlySet<s
     // A yes or no to what the run is waiting on, answered while it runs (Claude Code asks mid-turn): the run carries on, in
     // the same block. It is drawn as nothing, and the card it answers leaves the feed.
     if (t === "instruction" && (ev.body as Extract<EventBody, { type: "instruction" }>).approval && runs.get(lane)) continue;
+    // An agent brought in is a note beside the work, not something done to this lane: it closes nothing.
+    if (t === "lane.added") {
+      items.push({ kind: "event", ev });
+      continue;
+    }
     // Something the team did in this lane closes its block. Another lane's work carries on around it.
     const open = runs.get(lane);
     if (open) (open.closedTs = ev.ts), (open.closedSeq = ev.seq), (open.closedBy = t), cutShort.set(lane, open), stoppedTurn.set(lane, open);
@@ -885,7 +898,6 @@ export function Activity({
   replaying = false,
   pin,
   secondary = false,
-  headSlot = null,
   onFocusLane,
   onCloseColumn,
   onPickLane,
@@ -903,12 +915,6 @@ export function Activity({
   otherLanes?: string[];
   /** Show only this agent, and write only to it: one column of a split chat. */
   pin?: string;
-  /**
-   * Where the session's header has room for the agents' tabs (SessionView, a wide window with one chat): the bar is drawn
-   * there, a line each, instead of across the top of the chat (Arun, 2026-10-24: "move the coding tool tabs to the header
-   * since we have space").
-   */
-  headSlot?: HTMLElement | null;
   /** The second column: leaves out what the first already does for the whole session. */
   secondary?: boolean;
   /** This column was used, so the panels beside it should follow its agent. */
@@ -1017,7 +1023,7 @@ export function Activity({
   // now: the one you are looking at, then any that need you, then the ones at work; they keep their places in the row, so a
   // tab never jumps along it as its agent changes state.
   const [fit, setFit] = useState(SHOWN);
-  const shownN = Math.min(SHOWN, fit);
+  const shownN = fit === ROW_ALL ? everyone.length : Math.min(SHOWN, fit);
   const urgency = (id: string) => (id === laneFilter ? 0 : statusOf(id)?.needsYou ? 1 : statusOf(id)?.status === "working" ? 2 : 3);
   const ranked = everyone.map((id, i) => ({ id, i })).sort((a, b) => urgency(a.id) - urgency(b.id) || a.i - b.i).map((x) => x.id);
   const inSight = new Set(ranked.slice(0, shownN));
@@ -1025,75 +1031,97 @@ export function Activity({
   let bar = true;
   // The team has the sidebar's Team tab to move between teammates, and the header names who is in view: no tabs here.
   if (state.options.team) bar = false;
-  let allLabel = "All agents";
+  // Every agent's work at once, as a filter says it: "All", or what it is filtered to (audit B-21: "All agents" read as a list of
+  // agents, and the menu under it chose what kind of message shows).
+  // "Everything" for every agent's work at once (Arun, 2026-11-09, option C: no ambiguous "All").
+  let allLabel = filter === "team" ? "Team messages" : filter === "agent" ? "Agent work" : "Everything";
   if (state.options.team) allLabel = "Crew room";
   const hiddenIds = everyone.filter((id) => !inSight.has(id));
   const pickLane = (id: string) => setLaneFilter(id);
+  // The name the feed, the box and the sidebar use (agent-name.ts): the main tab read "Main" over "Friday Code"'s answers (C-14).
   const ownerOf = (id: string) => {
     const engine = state.engines[id];
-    return tabOwner(laneLabel(state, id), engine?.hostId ? { id: engine.hostId, name: engine.hostName } : null, me.id);
+    const mine = engine?.hostId === me.id ? `${me.name.split(/\s+/)[0]}'s ` : "";
+    const said = agentNameFor(state, id);
+    return tabOwner(mine && said.startsWith(mine) ? said.slice(mine.length) : said, engine?.hostId ? { id: engine.hostId, name: engine.hostName } : null, me.id);
   };
   /** The line under an agent's name: whose it is when it isn't yours, and where it stands. */
   const tabSub = (id: string, steady = false) => {
     if (id === "all") {
       const working = hubAgents.filter((a) => a.status === "working").length;
-      return working ? `${working} working` : "Everyone";
+      return working ? `${working} of ${hubAgents.length} working` : `${hubAgents.length} agents`;
     }
     const st = statusOf(id);
     const owner = ownerOf(id).owner;
     const at = tabState(st?.status, st?.needsYou);
     // Measured with its widest time, so the count of tabs doesn't change as the seconds tick.
-    const words = steady && at === "working" ? "Working · 59m" : tabWords(at, st?.startedAt, Date.now());
+    const words = steady && at === "working" ? "Working · 59m" : tabWords(at, st?.startedAt, Date.now(), st?.now.word);
     return `${owner ? `${owner.split(/\s+/)[0]} · ` : ""}${words}`;
   };
   const cardWidths = ranked.map((id) => {
-    const { name, owner } = ownerOf(id);
-    // In the header a tab is one line, its name beside its mark: where it stands is in its ring and its tip.
-    // 15 of padding, the 20px mark and its 4 of margin, 8 between it and the name, a border each side: 49, and the chevron
-    // on the one in view (14, less 2, and its 8 of gap) 20.
-    // Someone else's has their initials beside the name: a 16px chip and its 6 of margin.
-    if (headSlot) return Math.ceil(49 + Math.min(128, textWidth(name, "500 12.5px")) + (owner ? 22 : 0) + (state.lead === id ? 17 : 0) + (laneFilter === id ? 20 : 0));
-    return Math.ceil(61 + Math.max(Math.min(150, textWidth(name, "500 13px")), textWidth(tabSub(id, true), "400 11px")) + (state.lead === id ? 24 : 0) + (laneFilter === id ? 26 : 0));
+    const { name } = ownerOf(id);
+    const st = statusOf(id);
+    // A segment of the agents' switch is one line: 8 + 12 of padding, the 20px face and 7 of gap, the name; its state dot (14 and
+    // 7 of gap) while it has one, the crown, the unread count and, on the one in view, the chevron. Whose it is is in its tip.
+    const ring = !!st && st.status !== "limited" && !!tabRing(tabState(st.status, st.needsYou));
+    const behind = laneFilter !== id && (unread[id] ?? 0) > 0;
+    return Math.ceil(47 + Math.min(128, textWidth(name, "500 13px")) + (ring ? 21 : 0) + (state.lead === id ? 19 : 0) + (behind ? 24 : 0) + (laneFilter === id ? 19 : 0));
   });
   const widthsKey = cardWidths.join(",");
   const tabsEl = useRef<HTMLDivElement>(null);
   // Filter by agent is a tab list: only the picked tab is a Tab stop, the arrows move between them (roving.ts).
   useRovingTabs(tabsEl);
-  /** The bar, in the header's slot when it has one, or where it always was. */
-  const inHead = (bar: ReactNode) => (headSlot ? createPortal(bar, headSlot) : bar);
   const [tabsOver, setTabsOver] = useState(false);
+  // Which ends of a switch that scrolls (a phone's) have more past them: a soft edge on that side only.
+  const [edges, setEdges] = useState({ l: false, r: false });
+  const edgesOf = useCallback((el: HTMLElement) => {
+    const l = el.scrollLeft > 1;
+    const r = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+    setEdges((was) => (was.l === l && was.r === r ? was : { l, r }));
+  }, []);
+  const tabsEdge = tabsOver ? `${edges.l ? " fade-l" : ""}${edges.r ? " fade-r" : ""}` : "";
   useEffect(() => {
     const el = tabsEl.current;
     if (!el) return;
-    const measure = () => setTabsOver(el.scrollWidth > el.clientWidth + 1);
+    const measure = () => {
+      setTabsOver(el.scrollWidth > el.clientWidth + 1);
+      edgesOf(el);
+    };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [state.lanes.length, headSlot]);
+  }, [state.lanes.length]);
   useEffect(() => {
     const bar = tabsEl.current?.closest<HTMLElement>(".feed-toolbar");
     if (!bar) return;
     const measure = () => {
+      // A phone's switch scrolls sideways under a soft edge, every agent in it, the one in view scrolled to (Arun, 2026-11-09).
+      if (innerWidth <= PHONE_SWITCH) return setFit((was) => (was === ROW_ALL ? was : ROW_ALL));
       const cs = getComputedStyle(bar);
       const pill = bar.querySelector<HTMLElement>(".needs-pill");
-      const all = tabsEl.current?.firstElementChild as HTMLElement | null;
-      // The bar, less its padding, the needs-you pill, All agents and the + card.
-      const head = bar.classList.contains("in-head");
-      // In the header, the room the header has for the bar (SessionView.tsx useCentredTabs), not the bar's own width: that is
-      // only as wide as the tabs already shown.
-      const free = head ? Number(headSlot?.dataset.room) : NaN;
-      const room = (free > 0 ? free : bar.clientWidth) - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - (pill ? pill.offsetWidth + 12 : 0) - (all?.offsetWidth ?? 130) - (head ? 4 + 30 + 4 : 6 + 52 + 10);
-      const n = tabsThatFit(widthsKey.split(",").map(Number), room, head ? 4 : 6, head ? 54 : 72, SHOWN);
+      const list = tabsEl.current;
+      const wrap = list?.parentElement;
+      const all = list?.firstElementChild as HTMLElement | null;
+      if (!list || !wrap) return;
+      // The chat column's width, less its padding, the needs-you pill, the switch's own edge, Everything, + and Side by side:
+      // what is left is the agents' (the switch is only as wide as the segments it already shows).
+      const ws = getComputedStyle(wrap);
+      const edge = parseFloat(ws.paddingLeft) + parseFloat(ws.paddingRight) + parseFloat(ws.borderLeftWidth) + parseFloat(ws.borderRightWidth);
+      const gap = parseFloat(ws.columnGap) || 0;
+      const beside = Array.from((wrap.children ?? []) as ArrayLike<Element>).filter((c) => c !== list && !c.classList.contains("lane-more")).reduce((a, c) => a + (c as HTMLElement).offsetWidth + gap, 0);
+      const room = bar.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - (pill ? pill.offsetWidth + 8 : 0) - edge - beside - (all?.offsetWidth ?? 100) - gap;
+      const widths = widthsKey.split(",").map(Number);
+      // Not even one with its name whole: none in the row, all of them behind the named "N agents" (audit C-10, B-24: a tab cut to
+      // its mark or one letter). The one in view is named on that button.
+      const n = widths.length && room < widths[0]! + (widths.length > 1 ? MORE_W : 0) ? 0 : tabsThatFit(widths, room, gap, MORE_W, SHOWN);
       setFit((was) => (was === n ? was : n));
     };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(bar);
-    const roomChanged = new MutationObserver(measure);
-    if (headSlot) roomChanged.observe(headSlot, { attributes: true, attributeFilter: ["data-room"] });
-    return () => (ro.disconnect(), roomChanged.disconnect());
-  }, [widthsKey, needs.some((a) => hiddenIds.includes(a.lane)), headSlot]);
+    return () => ro.disconnect();
+  }, [widthsKey, needs.some((a) => hiddenIds.includes(a.lane))]);
   const [agentMenu, setAgentMenu] = useState<{ x: number; y: number } | null>(null);
   const [addMenu, setAddMenu] = useState<{ x: number; y: number } | null>(null);
   /** Your crew mates, first in the add menu (crew-add-local.tsx; Code and Crew, connected). */
@@ -1244,6 +1272,8 @@ export function Activity({
   const answeredIds = useMemo(() => new Set(events.flatMap((e) => (e.body.type === "instruction" && e.body.approval ? [e.body.approval.id] : []))), [events]);
   const logOrder = items.filter(
     (it) =>
+      // An agent brought in is a note for the others in a shared session; on your own the new tab says it.
+      !(it.kind === "event" ? it.ev.body.type === "lane.added" : it.kind === "notes" && it.evs.every((e) => e.body.type === "lane.added")) &&
       // A permission card that went unanswered (the run moved on, or stopped) goes once it isn't waiting; an answered one stays as
       // its receipt (Arun, 2026-11-03, after Orca's resolution receipts: in a shared session who said yes matters).
       !(it.kind === "event" && it.ev.body.type === "engine.approval" && state.approvals[it.ev.lane ?? MAIN_LANE]?.id !== it.ev.body.id && !answeredIds.has(it.ev.body.id)) &&
@@ -1775,20 +1805,25 @@ export function Activity({
       )}
       {/* One agent on Solo has nothing to switch between and no one else's messages to filter out: no bar for it. Except in the
           local edition, where the bar's + is how a second agent joins, and a team of agents is the point. */}
-      {!pin && bar && (filter !== "all" || lanes.length > 0 || startingNow.length > 0 || needs.length > 0 || (!solo && events.length > 15) || (isLocal() && Object.keys(state.engines).length > 0)) && inHead(
-      <div className={`feed-toolbar${headSlot ? " in-head" : ""}`} data-slot="session.agents">
+      {!pin && bar && (filter !== "all" || lanes.length > 0 || startingNow.length > 0 || needs.length > 0 || (!solo && events.length > 15) || (isLocal() && Object.keys(state.engines).length > 0)) && (
+      // The agents' switch, pinned at the top of the chat column and centred over it (Arun, 2026-11-09, option C: the header holds
+      // only the session and its people). Above the feed's scroller, so it stays as the chat scrolls and never lies over a message.
+      <div className="feed-toolbar agent-switch" data-slot="session.agents">
         {(
           <div className="lane-tabs-wrap">
-          <div className={`lane-tabs${tabsOver ? " over" : ""}`} ref={tabsEl} role="tablist" aria-label="Filter by agent" onKeyDown={tabListKeys}>
-            {[...([["all", allLabel], ...shownIds.map((id) => [id, laneLabel(state, id)])] as [string, string][]).map(([id, name]) => {
+          <div className={`lane-tabs${tabsOver ? " over" : ""}${tabsEdge}`} ref={tabsEl} role="tablist" aria-label="Filter by agent" onKeyDown={tabListKeys} onScroll={(e) => edgesOf(e.currentTarget)}>
+            {[...([["all", allLabel], ...shownIds.map((id) => [id, agentNameFor(state, id)])] as [string, string][]).map(([id, name]) => {
               const look = id === "all" ? null : agentLook(state, id, 13);
               const st = id === "all" ? undefined : statusOf(id);
               const behind = id === "all" || laneFilter === id ? 0 : (unread[id] ?? 0);
               const key = everyone.indexOf(id) + 1;
-              // In the header a tab shows only its name, so its tip leads with the name and then where it stands.
               let tokens = st?.tokens ? ` · ${shortTokens(st.tokens)} tokens used` : "";
               if (state.options.work) tokens = ""; // no token counts in Work, the tab's tip included (Arun, 2026-10-28: "iron everything and ensure we are good")
-              const said = `${headSlot && id !== "all" ? `${ownerOf(id).name}${st?.line ? ` · ${st.line}` : ""}` : (st?.line ?? name)}${tokens}`;
+              // Whose it is and where it stands, in its tip ("Claude Code · Bea's · working"): the switch shows the name alone.
+              const owned = id === "all" ? null : ownerOf(id);
+              const whose = owned?.owner ? `${owned.owner.split(/\s+/)[0]}'s` : id !== "all" && state.engines[id]?.hostId === me.id ? "yours" : "";
+              const word = st ? tabWords(tabState(st.status, st.needsYou), st.startedAt, Date.now(), st.now.word) : "";
+              const said = `${[owned?.name ?? name, whose, word && word[0]!.toLowerCase() + word.slice(1)].filter(Boolean).join(" · ")}${tokens}`;
               const tip = id === "all" ? `Every agent's work · ${agentKey(0)}` : `${said}${key && key < 10 ? ` · ${agentKey(key)}` : ""}`;
               const coming = id === "all" ? undefined : startingOn(startingNow, state, id);
               const who = id === "all" ? null : ownerOf(id);
@@ -1809,28 +1844,18 @@ export function Activity({
                     e.preventDefault();
                     setKindMenu({ x: e.clientX, y: e.clientY, lane: id });
                   }}>
-                  {look && (
-                    <span className="lane-tab-mark">
-                      {look.mark}
-                      {/* Whose agent it is, when it isn't yours: their initials on the mark, the name without them. */}
-                      {/* Whose it is is said in words (the line under the name, or the chip beside it in the header): a badge here cut the ring. */}
-                    </span>
-                  )}
+                  {look && <span className="lane-tab-mark">{look.mark}</span>}
                   <span className="lane-tab-text">
                     <span className="lane-tab-name">
                       <TabName name={who?.name ?? name} />
-                      {/* Whose it is, beside the name in the header, which has no line under it to say so; never on the ring. */}
-                      {headSlot && who?.owner && <span className="lane-tab-who" aria-hidden="true">{initials(who.owner)}</span>}
                       {/* Out of usage: when it is back, after its name, its mark dimmed and no ring, which read as a spinner (audit CODE-23 B). */}
                       {id !== "all" && st?.status === "limited" && backAtOf(st.line) && <span className="lane-tab-until"> · {backAtOf(st.line)}</span>}
                     </span>
-                    {/* Where it stands in a word ("Working · 2m", "Needs you"), and for All agents how many are at work. */}
-                    <span className="lane-tab-sub">{tabSub(id)}</span>
                   </span>
                   {/* Its state as the small ring just after the name, in place of the big one round its mark (Arun, 2026-11-03). */}
                   {id !== "all" && st?.status !== "limited" && <StateRing state={tabRing(tabState(st?.status, st?.needsYou))} />}
                   {id !== "all" && state.lead === id && <CrownIcon className="lane-tab-lead size-3.5" aria-label="Leads the other agents" />}
-                  {st && <AgentState status={st.status} needsYou={st.needsYou} />}
+                  {st && <AgentState status={st.status} needsYou={st.needsYou} word={st.now.word} />}
                   {behind > 0 && <span className="lane-tab-unread" aria-label={`${behind} new`}>{behind > 9 ? "9+" : behind}</span>}
                   {laneFilter === id && filter !== "all" && <span className="lane-tab-kind">{filter === "team" ? "Team" : "Agent"}</span>}
                   {laneFilter === id && <Icon name="chevronDown" size={12} />}
@@ -1840,6 +1865,22 @@ export function Activity({
             // One list with the tabs above, so this tab and its lane's are one element.
             ...startingAhead.map((s) => <StartingLaneTab key={`starting-${s.tool}`} tool={s.tool} name={ENGINE_NAMES[s.tool]} />)]}
           </div>
+          {hiddenIds.length > 0 && (
+            // Named in words, never "≡ +1" (audit B-24): the agent in view when it is behind it, else how many there are.
+            <button type="button" className={cn("lane-all lane-more", hiddenIds.includes(laneFilter) && "on")} aria-haspopup="menu" aria-expanded={!!agentMenu} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setAgentMenu(agentMenu ? null : { x: Math.max(8, r.right - 240), y: r.bottom + 4 }); }}>
+              {hiddenIds.includes(laneFilter) ? (
+                <>
+                  <span className="lane-tab-mark">{agentLook(state, laneFilter, 13).mark}</span>
+                  <span className="lane-more-name">{ownerOf(laneFilter).name}</span>
+                  {hiddenIds.length > 1 && <span className="lane-more-n">+{hiddenIds.length - 1}</span>}
+                </>
+              ) : (
+                <span>{shownIds.length ? `${hiddenIds.length} more` : `${hiddenIds.length} agents`}</span>
+              )}
+              {hiddenIds.some((id) => statusOf(id)?.needsYou) ? <AgentState status="waiting" needsYou /> : hiddenIds.some((id) => runOf(state, id).status === "running") && <span className="lane-tab-live" aria-label="One is working" />}
+              <Icon name="chevronDown" size={13} />
+            </button>
+          )}
           {/* Another agent, one press from the agents already here. Beside the tabs rather than the last of them: in the list it
               was the part a narrow window cut off and faded under "More agents", and a button is no tab of a tab list (Arun,
               2026-10-28: "iron everything and ensure we are good… any logic errors and fixes"). */}
@@ -1848,7 +1889,7 @@ export function Activity({
               type="button"
               className="lane-add"
               aria-label="Add an agent"
-              title="Add an agent"
+              data-tip="Add an agent"
               aria-expanded={!!addMenu}
               onClick={(e) => {
                 const r = e.currentTarget.getBoundingClientRect();
@@ -1856,13 +1897,6 @@ export function Activity({
               }}
             >
               <Icon name="plus" size={14} />
-            </button>
-          )}
-          {hiddenIds.length > 0 && (
-            <button type="button" className="lane-all" title={`${hiddenIds.length} more agent${hiddenIds.length === 1 ? "" : "s"}`} aria-label="More agents" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setAgentMenu(agentMenu ? null : { x: r.right - 240, y: r.bottom + 4 }); }}>
-              <Icon name="list" size={14} />
-              <span>+{hiddenIds.length}</span>
-              {hiddenIds.some((id) => statusOf(id)?.needsYou) ? <AgentState status="waiting" needsYou /> : hiddenIds.some((id) => runOf(state, id).status === "running") && <span className="lane-tab-live" title="One is working" />}
             </button>
           )}
           </div>
@@ -1997,7 +2031,7 @@ export function Activity({
             }}
           />
         )}
-      </div>,
+      </div>
       )}
       {/* Opens at the bottom at once: scrolling smoothly down through the whole history, every time a session opened, was a
           wait dressed up as an animation. New words still glide in (resize). */}
@@ -2126,14 +2160,12 @@ export function Activity({
                   {tags && lane && it.kind !== "run" && (i === 0 || laneOfItem(visible[i - 1]!) !== laneId) && !answeredBelow(i) && (
                     <span className="lane-tag">
                       <span className="lane-tag-mark">{agentLook(state, lane.id, 12).mark}</span>
-                      {laneLabel(state, lane.id)}
-                      {/* The tool's name only where its mark isn't already saying it: "Second · Claude Code" beside Claude's mark said it twice. */}
-                      {!state.engines[lane.id]?.tool && <small>{agentLook(state, lane.id).label}</small>}
+                      {agentNameFor(state, lane.id)}
                     </span>
                   )}
                   {it.kind === "run" ? (
                     <>
-                      {teamGroup?.(it) ?? teamRun?.(it) ?? <RunBlock item={it} ctx={ctx} folded={!!it.ended && !(recentRunKeys.get(it.lane) ?? []).includes(it.key)} latest={it.key === lastRunKeys.get(it.lane)} active={!it.ended && it.key === lastRunKeys.get(it.lane) && it.closedBy !== "run.pause" && it.closedBy !== "run.cancel" && runOf(state, it.lane).status !== "idle"} typing={it.streaming ? typingOf(streams[it.lane]) : null} />}
+                      {teamGroup?.(it) ?? teamRun?.(it) ?? <RunBlock item={it} ctx={ctx} folded={!!it.ended && !(recentRunKeys.get(it.lane) ?? []).includes(it.key)} latest={it.key === lastRunKeys.get(it.lane)} active={!it.ended && it.key === lastRunKeys.get(it.lane) && it.closedBy !== "run.pause" && it.closedBy !== "run.cancel" && runOf(state, it.lane).status !== "idle" && runOf(state, it.lane).status !== "error"} typing={it.streaming ? typingOf(streams[it.lane]) : null} />}
                       {state.options.team && it.key === lastShownRun.get(it.lane) && ((at) => at && <PlanStopped ctx={ctx} lane={it.lane} at={at} />)(it.ended ?? it.messages.at(-1))}
                     </>
                   ) : it.kind === "notes" ? (
@@ -2232,7 +2264,7 @@ export function Activity({
           <ChatFind primary={!secondary} />
           {/* Words selected in the chat, quoted into the box and sent to whoever wrote them (QuoteSelection). */}
           {me.role !== "viewer" && <QuoteSelection onQuote={quote} />}
-          <Composer ctx={ctx} lane={target} locked={!!pin} onLane={(l) => (pick(l), laneFilter !== ALL && setLaneFilter(l))} onPin={() => setPinning(true)} events={events} plan={<LivePlan events={events} state={state} {...(pin ? { lane: pin } : {})} team={!secondary && boardHere} {...(me.role !== "viewer" ? { control: (id: string, action: TaskAction, to?: string) => void send({ type: "board.task", id, action, ...(to ? { to } : {}) }).then((r) => !r.ok && ctx.notify(r.error ?? "Couldn't change that task.")) } : {})} />} />
+          <Composer ctx={ctx} lane={target} locked={!!pin} onLane={(l) => (pick(l), laneFilter !== ALL && setLaneFilter(l))} onPin={() => setPinning(true)} events={events} plan={<LivePlan events={events} state={state} {...(pin ? { lane: pin } : laneFilter !== ALL && !state.options.team ? { lane: laneFilter } : {})} team={!secondary && boardHere} {...(me.role !== "viewer" ? { control: (id: string, action: TaskAction, to?: string) => void send({ type: "board.task", id, action, ...(to ? { to } : {}) }).then((r) => !r.ok && ctx.notify(r.error ?? "Couldn't change that task.")) } : {})} />} />
           {/* Under the box: the way back through the session on the left, and what the agent's context has cost on the right, under send.
               In the Focus layout both live in the status bar along the window's foot instead. */}
           {(() => {
@@ -2308,7 +2340,7 @@ function PendingRun({ ctx, lane, since }: { ctx: Ctx; lane: string; since: numbe
     <div className={extra ? "feed-item agent-lane" : "feed-item"} data-lane={lane} data-pending-run="" style={extra ? ({ "--tint": agentLook(ctx.state, lane).tint } as React.CSSProperties) : undefined}>
       <div className="rsp">
         <span className="rsp-avatar" aria-hidden>
-          {tool ? <EngineMark tool={tool} size={15} /> : <Mascot mood={runMood({ active: true, outcome: undefined, failing: 0 })} size={26} />}
+          {tool ? <EngineMark tool={tool} size={15} /> : <FridayFace state={ctx.state} lane={lane} mood={runMood({ active: true, outcome: undefined, failing: 0 })} size={26} still={false} />}
         </span>
         <div className="rsp-main">
           <div className="rsp-head">
@@ -3135,7 +3167,8 @@ function HumanMessage({ ev, ctx }: { ev: Ev<"instruction"> | Ev<"suggestion">; c
     if (state.options.team) return <HandoffLine from={h.fromName} to={h.toName} fromLane={laneIdByName(state, h.fromName)} toLane={laneIdByName(state, h.toName)} task={handoffTaskText(b.text)} reason={h.reason} carried={h.carried} status={status === "queued" ? "Waiting for its turn" : status} stamp={<Stamp ev={ev} />} />;
     return (
       <div className="rsp-ho-wrap">
-        <HandoffCard from={h.fromName} to={h.toName} fromLook={agentLook(state, laneIdByName(state, h.fromName))} toLook={agentLook(state, laneIdByName(state, h.toName))} reason={h.reason} carried={h.carried} task={handoffTaskText(b.text)} by={ev.actor.kind === "human" ? (ev.actor.id === me.id ? "you" : ev.actor.name) : undefined} />
+        // Each end by the name its agent goes by everywhere (agent-name.ts): the log keeps the lane's, which read "Main" (audit B-20).
+        <HandoffCard from={((id) => (id ? agentNameFor(state, id) : h.fromName))(laneIdByName(state, h.fromName))} to={((id) => (id ? agentNameFor(state, id) : h.toName))(laneIdByName(state, h.toName))} fromLook={agentLook(state, laneIdByName(state, h.fromName))} toLook={agentLook(state, laneIdByName(state, h.toName))} reason={h.reason} carried={h.carried} task={handoffTaskText(b.text)} by={ev.actor.kind === "human" ? (ev.actor.id === me.id ? "you" : ev.actor.name) : undefined} />
         <div className="rsp-ho-meta">
           <span>handoff</span>
           {status && <span>{status}</span>}
@@ -3662,20 +3695,19 @@ function didChange(files: DiffFile[] | undefined): files is DiffFile[] {
 }
 
 /** Where an agent stands, as the small ring after its name draws it: working, waiting on you, or stopped. */
-function sendRing(state: SessionState, lane: string): "working" | "needs" | "error" | null {
-  const run = runOf(state, lane).status;
-  if (state.openQuestions[lane] || state.approvals?.[lane] || run === "waiting_for_human") return "needs";
-  return run === "running" ? "working" : run === "error" ? "error" : null;
+/** The ring after an agent's name in the box: the one selector's (agent-state.ts), so it is amber only for whoever it waits on. */
+function sendRing(state: SessionState, lane: string, meId: string): AgentRing {
+  return phaseRing(agentState(state, lane, meId));
 }
 
-/** The box's agent half: who it goes to, with its tool's mark and its ring, and how many other agents are here. */
-function SendToFace({ state, lane, toPeople, name, more }: { state: SessionState; lane: string; toPeople: boolean; name: string; more: number }) {
+/** The box's agent half: who it goes to, with its tool's mark and its ring. */
+function SendToFace({ state, lane, toPeople, name, meId }: { state: SessionState; lane: string; toPeople: boolean; name: string; more?: number; meId: string }) {
   return (
     <>
       <span className="menu-pill-mark">{toPeople ? <Icon name="users" size={14} /> : <EngineMark tool={state.engines[lane]?.tool ?? ""} size={14} />}</span>
       <span className="send-to-name">{name}</span>
-      {!toPeople && <StateRing state={sendRing(state, lane)} />}
-      {more > 0 && <span className="send-to-more" aria-label={`${more} other agent${more === 1 ? "" : "s"} here`}>+{more}</span>}
+      {!toPeople && <StateRing state={sendRing(state, lane, meId)} />}
+      {/* No "+1" after it: it read as a vote (audit B-20). The agents' switch says who else is here. */}
     </>
   );
 }
@@ -3780,7 +3812,6 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   /** Who this run's work is being handed to, once one of the agents in the bar is picked. */
   const [handTo, setHandTo] = useState<string | null>(null);
   /** Retry was pressed on a turn that stopped with no reply (audit CODE-19 B). */
-  const [retried, setRetried] = useState(false);
   /** Somebody being brought in to take the work: it is offered the work the moment its lane appears. */
   const [adding, setAdding] = useState<{ agentId: string } | { tool: EngineTool } | null>(null);
   // A coding agent being brought in with nothing to fill in, until its lane shows up.
@@ -3867,7 +3898,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
         {confirmUI}
         <button type="button" className="rsp-folded" title="Show this run" onClick={() => setUnfolded(true)}>
           <span className="rsp-avatar" aria-hidden>
-            {mate ?? (ctx.state.engines[lane]?.tool ? <EngineMark tool={ctx.state.engines[lane]!.tool!} size={15} /> : <Mascot mood={runMood({ active, outcome: item.ended?.body.outcome, failing: stillFailing.length })} size={26} still />)}
+            {mate ?? (ctx.state.engines[lane]?.tool ? <EngineMark tool={ctx.state.engines[lane]!.tool!} size={15} /> : <FridayFace state={ctx.state} lane={lane} mood={runMood({ active, outcome: item.ended?.body.outcome, failing: stillFailing.length })} size={26} />)}
           </span>
           <span className="rsp-who">{agentNameFor(ctx.state, lane)}</span>
           <span className="rsp-folded-line">{line}</span>
@@ -4032,7 +4063,12 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   // A turn that ended on a usage limit ran out of usage, said as the sidebar says it, not "stopped" (2026-10-27 audit).
   // Nor one that wasn't signed in: that is the computer's to fix, not the work stopping on an error (Arun, 2026-10-28: "iron
   // everything and ensure we are good"); both are amber, as out of usage is everywhere else, never red.
-  const status = active ? "" : ended?.outcome === "error" ? (limitHit(ended.error) ? "ran out of usage" : signedOut(ended.error) ? "not signed in" : "stopped") : ended?.outcome === "waiting" ? "waiting on a person" : item.ended ? "" : last?.body.interrupted && item.closedBy !== "run.pause" && item.closedBy !== "run.cancel" && item.placeBefore === undefined ? "interrupted" : item.closedBy && item.closedBy !== "run.pause" ? "" : "stopped";
+  // A turn that stopped to ask says whom it waits on in the selector's words (agent-state.ts), and nothing once it was answered:
+  // "waiting on a person" stayed on a question long since answered.
+  const waitWord = ((n) => (latest && n.held ? lowerWord(n.word) : ""))(agentState(ctx.state, lane, ctx.me.id));
+  // The error's own line under it says who and what (ErrorLine): the head doesn't say it a second time. A turn with no end of its
+  // own reads "stopped" only when somebody stopped it, as its tab says (agent-state.ts): never "stopped" here and "Ready" there.
+  const status = active ? "" : ended?.outcome === "error" ? (planLimitHit(ended.error) ? "ran out of usage" : signedOut(ended.error) ? "not signed in" : "") : ended?.outcome === "waiting" ? waitWord : item.ended ? "" : last?.body.interrupted && item.closedBy !== "run.pause" && item.closedBy !== "run.cancel" && item.placeBefore === undefined ? "interrupted" : item.closedBy === "run.pause" || (!item.closedBy && latest && agentState(ctx.state, lane, ctx.me.id).phase === "stopped") ? "stopped" : "";
   // Anyone who could write to another agent can hand this one's work to it.
   const others = [MAIN_LANE, ...ctx.state.lanes.map((l) => l.id)].filter((id) => id !== lane && reviewVia(ctx.state, ctx.me, id) === "instruct");
   const carried = [
@@ -4251,23 +4287,9 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   // lone icon, being no longer the newest).
   const retryText = item.ask?.text?.trim() ?? "";
   const askedAgain = !!item.ended && ctx.events.some((e) => e.seq > item.ended!.seq && (e.lane ?? MAIN_LANE) === lane && e.body.type === "instruction" && e.body.text.trim() === retryText);
-  const retryable = !active && !finalMsg && !!item.ended && ended?.outcome === "error" && !hit && !out && !askedAgain && via === "instruct" && !!retryText && runOf(ctx.state, lane).status !== "running";
-  const retryBtn = retryable ? (
-    <button
-      type="button"
-      className="rsp-text-btn rsp-retry"
-      disabled={retried}
-      data-tip="Send its task again"
-      onClick={async () => {
-        setRetried(true);
-        const r = await ctx.send({ type: "instruct", text: retryText, ...(lane !== MAIN_LANE ? { lane } : {}) });
-        if (!r.ok) (setRetried(false), ctx.notify(r.error ?? "Couldn't send that again. Try once more."));
-      }}
-    >
-      <Icon name="refresh" size={13} />
-      {retried ? "Sent" : "Retry"}
-    </button>
-  ) : null;
+  // Who may send it again is the one rule (agent-state.ts retry): whoever is in control and the owner; anyone else asks them.
+  const retryable = !active && !finalMsg && !!item.ended && ended?.outcome === "error" && !planLimitHit(ended.error) && !out && !askedAgain && latest && !!retryText && runOf(ctx.state, lane).status !== "running";
+  const retryBtn = retryable ? <RetryAction ctx={ctx} lane={lane} text={retryText} className="rsp-text-btn rsp-retry" /> : null;
   // The rewind icon only in a reply's own action row, beside copy and the thumbs: a turn that stopped with no reply drew it alone on a
   // line of its own (audit CODE-19). Its files go back from its change card's Undo, or from the message's own rewind.
   const rewindIcon = rewindable && !retryable && !!finalMsg;
@@ -4336,7 +4358,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
       <span className="rsp-avatar" aria-hidden data-doing={doing || undefined}>
         {mate ?? (ctx.state.engines[lane]?.tool ? (
           <EngineMark tool={ctx.state.engines[lane]!.tool!} size={15} />
-        ) : <Mascot mood={runMood({ active, outcome: item.ended?.body.outcome, failing: stillFailing.length })} size={26} still={!active} />)}
+        ) : <FridayFace state={ctx.state} lane={lane} mood={runMood({ active, outcome: item.ended?.body.outcome, failing: stillFailing.length })} size={26} still={!active} />)}
       </span>
       <div className="rsp-main">
       <div className="rsp-head">
@@ -4344,7 +4366,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
         {/* Stopped to ask: it is waiting on a person, not thinking, and saying "Thinking" sent people looking for nothing. While it
             works the ring on its mark and the one live line under the reply say so; the head says only what needs you. A teammate's
             reply keeps its own words (its face is not a tool's mark). */}
-        {active && (!typing || typing === "waiting") && (waitsOnPerson(ctx.state, lane) ? (approving ? null : <span className="rsp-needs" role="status">Needs you</span>) : mate && !hasWork ? <Working label="Thinking" /> : null)}
+        {active && (!typing || typing === "waiting") && (waitsOnPerson(ctx.state, lane) ? (approving ? null : ((n) => <span className={cn("rsp-needs", !n.needsYou && "is-theirs")} role="status">{n.held ? n.word : "Waiting on a person"}</span>)(agentState(ctx.state, lane, ctx.me.id))) : mate && !hasWork ? <Working label="Thinking" /> : null)}
         {status && <span className={cn("rsp-status", ended?.outcome === "error" && (limitHit(ended.error) || signedOut(ended.error) ? "limit" : "err"))}>{status}</span>}
         {msgs[0] && (
           <span className="rsp-time">
@@ -4478,7 +4500,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
           limit is said by its note instead, with what to do; an older run's limit is history, said in a line, not in red. */}
       {/* Said in a line, "stopped · error", whose press shows what the tool said (audit CODE-4 C, Arun 2026-11-04: a five-line raw
           stack trace in red sat in the chat). */}
-      {ended?.outcome === "error" && !hit && !out && <ErrorLine error={ended.error ?? ""} />}
+      {ended?.outcome === "error" && !planLimitHit(ended.error) && !out && <ErrorLine name={name} error={ended.error ?? ""} />}
       {out && <SignedOutNote ctx={ctx} lane={lane} latest={latest} />}
       {!active && limit && !onBackup && <LimitNote ctx={ctx} lane={lane} resetsAt={limit.resetsAt} canSteer={via === "instruct"} pass={passTo} />}
       {!active && hit && !limit && (
@@ -4892,7 +4914,6 @@ function CarryOn({ ctx, lane, seq }: { ctx: Ctx; lane: string; seq: number }) {
  * was said on that lane: by then the person has moved on, or the work was handed to another agent.
  */
 function StoppedAgain({ ctx, lane, seq }: { ctx: Ctx; lane: string; seq: number }) {
-  const [sent, setSent] = useState(false);
   const latest = ctx.events.findLast((e) => e.body.type === "run.ended" && (e.lane ?? MAIN_LANE) === lane)?.seq === seq;
   const since = ctx.events.some((e) => e.seq > seq && e.body.type === "instruction" && ((e.lane ?? MAIN_LANE) === lane || e.body.handoff?.fromLane === lane));
   const asked = ctx.events.findLast((e) => e.seq < seq && e.body.type === "instruction" && (e.lane ?? MAIN_LANE) === lane);
@@ -4901,16 +4922,45 @@ function StoppedAgain({ ctx, lane, seq }: { ctx: Ctx; lane: string; seq: number 
   // Continue). Sending the whole message again redid what was done; a tool that quit as it started has nothing to carry on.
   const began = ctx.events.findLast((e) => e.seq < seq && e.body.type === "run.started" && (e.lane ?? MAIN_LANE) === lane)?.seq ?? seq;
   const worked = ctx.events.some((e) => e.seq > began && e.seq < seq && (e.lane ?? MAIN_LANE) === lane && e.body.type === "agent.message" && e.body.toolCalls.length > 0);
-  if (worked) return <CarryOn ctx={ctx} lane={lane} seq={seq} />;
+  if (worked && agentState(ctx.state, lane, ctx.me.id).retry?.mine) return <CarryOn ctx={ctx} lane={lane} seq={seq} />;
   if (!latest || since || !again || runOf(ctx.state, lane).status === "running") return null;
-  const tryAgain = async () => {
-    setSent(true);
-    const r = await ctx.send({ type: "instruct", text: again, ...(lane !== MAIN_LANE ? { lane } : {}) });
-    if (!r.ok) (setSent(false), ctx.notify(r.error ?? "Couldn't send that again. Try once more."));
-  };
+  return <RetryAction ctx={ctx} lane={lane} text={again} className="btn small stop-again" />;
+}
+
+/**
+ * What to do about an agent's error, the same rule for everyone (agent-state.ts retry): whoever is in control of it, and the
+ * session's owner, get "Try again" (the owner taking control back first when somebody else has it, as the tip says); everyone
+ * else asks them, by name, in the chat (audit B-18: only the person in control saw anything to do).
+ */
+function RetryAction({ ctx, lane, text, className }: { ctx: Ctx; lane: string; text: string; className: string }) {
+  const [sent, setSent] = useState(false);
+  const now = agentState(ctx.state, lane, ctx.me.id);
+  if (now.phase !== "failed" || !now.retry) return null;
+  const name = agentNameFor(ctx.state, lane);
+  const driver = driverOf(ctx.state, lane);
+  if (now.retry.mine) {
+    const takeBack = !!driver && driver.id !== ctx.me.id;
+    const tryAgain = async () => {
+      setSent(true);
+      if (takeBack) {
+        const t = await ctx.send({ type: "control.force", ...(lane !== MAIN_LANE ? { lane } : {}) });
+        if (!t.ok) return void (setSent(false), ctx.notify(t.error ?? "Couldn't take control back. Try once more."));
+      }
+      const r = await ctx.send({ type: "instruct", text, ...(lane !== MAIN_LANE ? { lane } : {}) });
+      if (!r.ok) (setSent(false), ctx.notify(r.error ?? "Couldn't send that again. Try once more."));
+    };
+    const button = (
+      <button type="button" className={className} disabled={sent} onClick={() => void tryAgain()}>
+        {sent ? "Sent" : "Try again"}
+      </button>
+    );
+    return takeBack ? <Tip label={`Takes control of ${name} back from ${driver!.name.split(/\s+/)[0]} and sends its task again`}>{button}</Tip> : button;
+  }
+  const who = now.retry.ask;
+  const to = Object.values(ctx.state.members).find((m) => !m.removed && m.name.split(/\s+/)[0] === who)?.name ?? who;
   return (
-    <button type="button" className="btn small stop-again" disabled={sent} onClick={() => void tryAgain()}>
-      {sent ? "Sent" : "Try again"}
+    <button type="button" className={className} disabled={sent} onClick={() => void ctx.send({ type: "say", text: `@${to} could you try ${name} again? It hit an error.`, quiet: true }).then((r) => (r.ok ? setSent(true) : ctx.notify(r.error ?? "Couldn't ask.")))}>
+      {sent ? `Asked ${who}` : `Ask ${who} to retry`}
     </button>
   );
 }
@@ -4922,7 +4972,7 @@ const backAtOf = (line: string): string => /\buntil ([^·]+?)\s*(?:·|$)/.exec(l
  * Why a turn stopped, as a status line: "stopped · error", which opens what the tool said, whole and copyable, in a small card
  * under it (audit CODE-4 C, Arun 2026-11-04). The words stay out of the chat: a raw stack trace there was five red lines.
  */
-function ErrorLine({ error }: { error: string }) {
+function ErrorLine({ error, name }: { error: string; /** Whose error: the line reads "Rio hit an error · too many requests". */ name: string }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
@@ -4942,7 +4992,8 @@ function ErrorLine({ error }: { error: string }) {
   return (
     <div className="rsp-err" ref={wrap}>
       <button type="button" className="rsp-err-line" aria-expanded={open} aria-haspopup="dialog" onClick={() => setOpen((o) => !o)} data-tip="What it said when it stopped">
-        stopped · error
+        {name} hit an error · {plainError(error)}
+        <span className="rsp-err-more">Details</span>
         <InfoIcon className="size-3.5" aria-hidden />
       </button>
       {open && (
@@ -5105,7 +5156,7 @@ function clockTime(t: number): string {
 function contendedPaths(state: SessionState, lane: string): Record<string, string> {
   const out: Record<string, string> = {};
   for (const c of collisionsFor(state, lane)) {
-    const others = [...new Set(c.claims.filter((x) => x.lane !== lane).map((x) => (x.lane === MAIN_LANE ? "Main" : (state.lanes.find((l) => l.id === x.lane)?.name ?? "another lane"))))];
+    const others = [...new Set(c.claims.filter((x) => x.lane !== lane).map((x) => (state.lanes.some((l) => l.id === x.lane) || x.lane === MAIN_LANE ? agentNameFor(state, x.lane) : "another lane")))];
     out[c.path] = `${others.join(", ")} also changed this`;
   }
   return out;
@@ -6634,10 +6685,18 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
           {who} {b.enabled ? `updated the ${b.role} invite link` : `turned off the ${b.role} invite link`}
         </Notice>
       );
+    // An agent brought in, said to the others here (audit B-20): with nobody else, the new tab says it.
+    case "lane.added":
+      if (Object.keys(state.members).length < 2 || state.options.team) return null;
+      return (
+        <Notice ev={ev} icon={PlusIcon} tone="control">
+          {who} added {b.lane.agent?.name ?? b.lane.name}
+        </Notice>
+      );
     case "control.requested":
       return (
         <Notice ev={ev} icon={HandIcon} tone="control">
-          {who} asked for control
+          {who} asked for control{state.lanes.length ? ` of ${agentNameFor(state, ev.lane ?? MAIN_LANE)}` : ""}
         </Notice>
       );
     case "role.requested":
@@ -6649,16 +6708,18 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
     case "role.declined":
       return null;
     case "control.granted": {
+      // Of which agent, once there is more than one (audit B-22).
+      const of = state.lanes.length ? ` of ${agentNameFor(state, ev.lane ?? MAIN_LANE)}` : "";
       const text =
-        b.reason === "claim"
+        (b.reason === "claim"
           ? `${b.toName} took control`
           : b.reason === "yield"
-            ? `${who} handed control to ${b.toName}`
+            ? `${who} gave control to ${b.toName}`
             : b.reason === "force"
-              ? `${b.toName} forced a takeover`
+              ? `${b.toName} took back control`
               : b.reason === "takeover"
                 ? `${b.toName} took over control`
-                : `${b.toName} took over automatically (the driver disconnected)`;
+                : `${b.toName} took over automatically (the driver disconnected)`) + of;
       return (
         <Notice ev={ev} icon={HandIcon} tone="control">
           {text}
@@ -6738,16 +6799,18 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
       return (
         <Notice ev={ev} icon={XIcon} tone="danger">
           {/* A tool's raw error (a stack trace) is said as what it means, the trace itself one click away (Arun, 2026-10-29:
-              "node:internal/modules/cjs/loader:1…"; activity-line.ts stoppedLine). */}
-          {b.error && isRawError(b.error) ? (
+              "node:internal/modules/cjs/loader:1…"; agent-state.ts plainError). */}
+          {/* Its own name, "hit an error" (never "stopped", which is what a person pressing Stop does) and what it means, the
+              provider's own words one press away, the same line for everyone (audit B-18, B-19). */}
+          {b.error && !saysItAll(b.error) ? (
             <details className="stop-detail">
-              <summary>{((said) => (said.startsWith("Stopped: ") ? `Agent stopped: ${said.slice(9)}` : "Agent stopped on an error"))(stoppedLine(b.error))}</summary>
+              <summary>{agentNameFor(state, lane)} hit an error · {plainError(b.error)}</summary>
               <pre>{b.error}</pre>
             </details>
           ) : (
-            <>Agent stopped: {b.error}</>
+            <>{agentNameFor(state, lane)} hit an error · {plainError(b.error)}</>
           )}
-          {b.outcome === "error" && !limitHit(b.error) && <StoppedAgain ctx={ctx} lane={lane} seq={ev.seq} />}
+          {b.outcome === "error" && !planLimitHit(b.error) && <StoppedAgain ctx={ctx} lane={lane} seq={ev.seq} />}
         </Notice>
       );
     }
@@ -8223,54 +8286,7 @@ const THINKING: Record<Thinking, { label: string }> = {
 };
 
 /** What to call the thing driving a lane: the person's CLI, a custom agent, or Friday's own. */
-export function agentNameFor(state: SessionState, lane: string): string {
-  const e = state.engines[lane];
-  // A folder with no CLI is still Friday Code doing the work, in that folder.
-  if (e?.tool) {
-    const tool = ENGINE_NAMES[e.tool];
-    const tools = Object.entries(state.engines).filter(([, x]) => !!x.tool);
-    // Whose it is, only when there is more than one person's to tell apart: on your own, "Arun's" on every line is noise. Never
-    // a teammate's: it goes by its own name, and its keeper is said where it matters (the sidebar, its page).
-    const owner = !state.options.team && new Set(tools.map(([, x]) => x.hostId)).size > 1 ? `${e.hostName}'s ` : "";
-    // The name somebody gave it, over its tool's: renamed, it is called that everywhere.
-    const given = givenName(state, lane);
-    // A name that already says whose it is ("Arokia's Claude Code", as a teammate's lane is named when it joins) isn't given
-    // the owner again: it read "Arokia Joseph's Arokia's Claude Code" (Arun, 2026-10-21).
-    const first = e.hostName.trim().split(/\s+/)[0] ?? "";
-    const theirs = !!first && !!given && given.toLowerCase().startsWith(`${first.toLowerCase()}'s `);
-    if (given) return theirs ? given : `${owner}${given}`;
-    // Two of the same tool (two Claude Code tasks side by side) are told apart by their own names, not "Claude Code" twice:
-    // the lane's name when it has one of its own, else a number. Its mark already says which tool it is.
-    const twins = [MAIN_LANE, ...state.lanes.map((l) => l.id)].filter((id) => state.engines[id]?.tool === e.tool && state.engines[id]?.hostId === e.hostId);
-    if (twins.length > 1) {
-      const own = lane === MAIN_LANE ? "" : (state.lanes.find((l) => l.id === lane)?.name ?? "").trim();
-      const named = own && own.toLowerCase() !== tool.toLowerCase() ? own : twins.indexOf(lane) === 0 ? tool : `${tool} ${twins.indexOf(lane) + 1}`;
-      return `${owner}${named}`;
-    }
-    return `${owner}${tool}`;
-  }
-  if (lane === MAIN_LANE) return state.mainName?.trim() || (state.options.agent?.name ?? "Friday Code");
-  const l = state.lanes.find((x) => x.id === lane);
-  // A lane since taken away (a teammate taken out of a room) keeps the name it had, from the log: "You made Agent the lead"
-  // rewrote what was said once it went (2026-10-27 audit).
-  return l?.agent?.name ?? l?.name ?? laneNamesSeen.get(lane) ?? "Agent";
-}
-
-/** Every lane's name as the logs drawn here last gave it (laneNamesFrom), lane ids being unique: kept after the lane goes. */
-const laneNamesSeen = new Map<string, string>();
-/** The names the log gives its lanes, as they were added and renamed: read once per log. */
-const namesRead = new WeakSet<readonly SessionEvent[]>();
-export function laneNamesFrom(events: readonly SessionEvent[]): ReadonlyMap<string, string> {
-  if (namesRead.has(events)) return laneNamesSeen;
-  namesRead.add(events);
-  for (const e of events) {
-    const b = e.body;
-    if (b.type === "lane.added" && b.lane.name) laneNamesSeen.set(b.lane.id, b.lane.agent?.name ?? b.lane.name);
-    else if (b.type === "lane.renamed" && b.name) laneNamesSeen.set(b.laneId, b.name);
-    else if (b.type === "crew.applied") for (const l of b.lanes) if (l.name) laneNamesSeen.set(l.id, l.agent?.name ?? l.name);
-  }
-  return laneNamesSeen;
-}
+export { agentNameFor, laneNamesFrom };
 
 /** How many files the message box holds, for what sits inside it (its Send button). */
 function WithAttachments({ children }: { children: (n: number) => ReactNode }) {
@@ -8590,7 +8606,8 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
       const d = driverOf(state, id);
       // One that can't work now says so first: the list read "Yours" beside an agent out of usage or signed out (QA, 2026-10-28).
       const run = runOf(state, id);
-      const stuck = run.status === "error" ? (limitHit(run.error) ? "Out of usage" : signedOut(run.error) ? "Not signed in" : "") : "";
+      const now = agentState(state, id, me.id);
+      const stuck = now.phase === "limited" || now.phase === "failed" ? (now.phase === "failed" ? `Hit an error · ${now.error?.plain ?? ""}` : now.word) : "";
       // Where it stands first, as the header's tabs say it: at work, asking you something, or whose it is.
       const asks = state.openQuestions[id]?.question;
       const said = stuck || (asks ? `Asks: ${asks.length > 26 ? `${asks.slice(0, 25)}…` : asks}` : run.status === "running" ? "Working" : "");
@@ -8600,7 +8617,7 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
       return {
         label: targetName(id),
         mark: <EngineMark tool={state.engines[id]?.tool ?? ""} size={15} />,
-        after: <StateRing state={sendRing(state, id)} />,
+        after: <StateRing state={sendRing(state, id, me.id)} />,
         checked: !toPeople && id === lane,
         ...(sub ? { sub } : {}),
         onSelect: () => (setToPeople(false), onLane?.(id)),
@@ -8671,6 +8688,9 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
     ? "Say something to the people here. @name tells them…"
     : ctx.solo && fridayHere && !noPicker && (mode === "drive" || mode === "claim")
       ? "Pick one of your coding tools in the agent menu below…"
+      : mode === "claim" && others > 0 && !state.options.team && !running
+      ? // Beside "Take control", the same words (audit B-23): writing to a free agent takes it.
+        `Nobody is in control of ${name}. Write to it to take control…`
       : mode === "drive" || mode === "claim"
       ? paused
         ? `Paused. Resume ${name}, or tell ${they.it} what to do instead…`
@@ -9102,12 +9122,12 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
                     box has it (audit CODE-14 A, Arun 2026-11-04: a grey two-part pill with a divider and two chevrons). */}
                 {onePill ? null : !locked && !naming && (targets.length > 1 || others > 0 || (!fridayIsHere && me.role === "owner" && !ctx.solo) || (!!ctx.onConnect && me.role !== "viewer")) ? (
                   <MenuButton className="send-to" label="Who it goes to" items={targetItems} width={targetWidth} maxHeight={300} above>
-                    <SendToFace state={state} lane={lane} toPeople={toPeople} name={toPeople ? "The people here" : targetName(lane)} more={targets.length - 1} />
+                    <SendToFace state={state} lane={lane} toPeople={toPeople} name={toPeople ? "The people here" : targetName(lane)} more={targets.length - 1} meId={me.id} />
                     <Icon name="chevronDown" size={13} className="menu-pill-caret" />
                   </MenuButton>
                 ) : (
                   <span className="send-to still">
-                    <SendToFace state={state} lane={lane} toPeople={toPeople} name={toPeople ? "The people here" : targetName(lane)} more={0} />
+                    <SendToFace state={state} lane={lane} toPeople={toPeople} name={toPeople ? "The people here" : targetName(lane)} more={0} meId={me.id} />
                   </span>
                 )}
                 {mode !== "view" && !toPeople && !onePill && <span className="send-bar" aria-hidden="true" />}
@@ -9252,9 +9272,9 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
  * An agent's state as a mark on its tab: a pulse while it works, amber when it waits (filled when on you), red when it
  * stopped on an error, orange out of usage, grey offline or paused. Ready and done need no mark: the tab says enough.
  */
-export function AgentState({ status, needsYou = false }: { status: AgentStatus; needsYou?: boolean }) {
+export function AgentState({ status, needsYou = false, word: said }: { status: AgentStatus; needsYou?: boolean; /** The selector's words ("Waiting on Ada"), for its label. */ word?: string }) {
   if (status === "ready" || status === "done") return null;
-  const word = needsYou ? "Needs you" : { working: "Working", waiting: "Waiting", paused: "Paused", offline: "Offline", limited: "Out of usage", failed: "Stopped on an error" }[status];
+  const word = said ?? (needsYou ? PHASE_WORD.needs : { working: PHASE_WORD.working, waiting: "Waiting", paused: PHASE_WORD.paused, offline: PHASE_WORD.offline, limited: PHASE_WORD.limited, failed: PHASE_WORD.failed }[status]);
   return <span className={cn("agent-state", `is-${status}`, needsYou && "is-needs")} role="img" aria-label={word} />;
 }
 

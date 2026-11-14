@@ -3236,6 +3236,7 @@ svg.fi { stroke-width: var(--fi-sw, 1.4px); }
 .rsp-err { position: relative; }
 .rsp-err-line { display: inline-flex; align-items: center; gap: 6px; min-height: 24px; padding: 2px 0; border: 0; background: none; color: var(--red); font: 400 13px/18px var(--font); cursor: pointer; }
 .rsp-err-line svg { color: var(--text-muted); }
+.rsp-err-more { margin-left: 2px; color: var(--ink-3); font-size: 12px; }
 .rsp-err-line:hover svg, .rsp-err-line[aria-expanded="true"] svg { color: var(--ink); }
 .rsp-err-pop { position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; width: min(520px, 100%); padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--card); box-shadow: 0 12px 32px rgb(0 0 0 / .18); }
 .rsp-err-pop pre { margin: 0; max-height: 160px; overflow: auto; font: 12px/1.55 var(--mono); color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -6835,8 +6836,11 @@ body:has(> .overlay, [data-slot="dialog-overlay"], [data-slot="sheet-overlay"]) 
    Not a row with the hand-off bar: its menu is fixed to the window, and a row that skips its own painting becomes the box that
    menu is placed in and clipped to. Older runs are folded to one line and have no bar, so that is nearly every row.
    Nor a row with a live block: a diagram is drawn by measuring its text, and in a row that isn't painted every measure is 0,
-   so it came out as an empty strip until it was opened large. */
-.feed-item:not(:has(.ho-bar)):not(:has(.live-block)) { content-visibility: auto; contain-intrinsic-size: auto 160px; }
+   so it came out as an empty strip until it was opened large.
+   Nor the newest 20, which are what a session opens on: the feed is pinned to its end and drawn in two passes, and rows that
+   came in at the 160px guess and were then laid out at their real height moved the whole screen, a layout shift of 0.5 on every
+   session opened (perf audit PF-2, Nov 9 2026: 0.504 -> 0.008 with no row skipped). */
+.feed-item:not(:has(.ho-bar)):not(:has(.live-block)):not(:nth-last-child(-n+20)) { content-visibility: auto; contain-intrinsic-size: auto 160px; }
 /* What it paints is also clipped to its padding box, which on a plain row is the text's own edge: a focus ring, or the notes
    line's negative margin, was cut off. A little padding, taken back by the margin, moves the edge out without moving anything. */
 .feed-item:not(.agent-lane):not(:has(.ho-bar)) { padding: 6px; margin: -6px; }
@@ -8005,6 +8009,41 @@ img.set-mark { border-color: transparent; }
 .rsp-diff .rsp-diff-head .dv-main { display: flex; flex-wrap: wrap; align-items: center; column-gap: 6px; row-gap: 4px; flex: 1 1 0; min-width: 0; padding-block: 4px; }
 .rsp-diff .rsp-diff-head .dv-title { display: flex; align-items: center; gap: 7px; flex: 0 1 auto; min-width: 0; max-width: 100%; }
 .rsp-diff .rsp-diff-head .dv-main > .rsp-diff-risk, .rsp-diff .rsp-diff-head .dv-main > .rsp-diff-contended { flex: none; margin-left: 0; overflow: visible; }
+/* The Changes panel's rows, and the chat's change card's the same (2026-11-09 audit C-20, C-37, after VS Code's and GitHub's file lists): about 30px each, a flat list rather
+   than a card per file, the name in full in the UI's own type with its folder after it, and what the reader should know about it
+   (by hand, touches billing, another agent's too) as quiet words on the same line, never a second or third line of red chips. */
+:is(.dp-card, .diff-card) .rsp-diff { padding: 0 12px; border-radius: 0; box-shadow: none; background: none; border-bottom: .5px solid var(--border); }
+:is(.dp-card, .diff-card) .rsp-diff + .rsp-diff { margin-top: 0; }
+:is(.dp-card, .diff-card) .rsp-diff > .rsp-diff-top { margin: 0 -12px; padding: 0 8px 0 12px; min-height: 30px; border-bottom: 0; }
+.dp-card .rsp-diff:not(.rsp-diff-closed) > .rsp-diff-top { position: sticky; top: 0; z-index: 4; background: var(--panel, var(--card)); border-bottom: .5px solid var(--border); }
+:is(.dp-card, .diff-card) .rsp-diff-head { min-height: 30px !important; padding-block: 0 !important; font-family: var(--font); font-size: 13px; }
+.dp-card .rsp-viewed { width: 28px; margin-left: -6px; }
+.rsp-diff .rsp-diff-head .dv-main { flex-wrap: nowrap; padding-block: 0; overflow: hidden; }
+/* The name is what a reader looks for: it keeps its whole width while it fits the row, and the words after it give way first. */
+.rsp-diff .rsp-diff-head .dv-title { flex: 0 1 auto; max-width: 100%; }
+.rsp-diff .rsp-diff-head .dv-name { flex: 0 1 auto; max-width: 100%; font-family: var(--font); font-weight: 500; }
+.rsp-diff .rsp-diff-head .dv-main > .rsp-diff-risk, .rsp-diff .rsp-diff-head .dv-main > .rsp-diff-contended { flex: 0 80 auto; min-width: 0; padding: 0; overflow: hidden; text-overflow: ellipsis; background: none; font: 500 12px/1 var(--font); color: var(--text-muted); }
+.rsp-diff .rsp-diff-head .dv-main > .rsp-diff-risk::before, .rsp-diff .rsp-diff-head .dv-main > .rsp-diff-contended::before { content: "· "; color: var(--faint); }
+.rsp-diff .rsp-diff-head .dv-main > .rsp-diff-risk:not(.rsp-diff-hand) { color: var(--red); }
+:root:not(.dark) .rsp-diff .rsp-diff-head .dv-main > .rsp-diff-risk:not(.rsp-diff-hand) { color: color-mix(in srgb, var(--red) 82%, #000); }
+.rsp-diff .rsp-diff-head .dv-main > .rsp-diff-contended { color: var(--amber); }
+/* A row's open and copy buttons lie over its right end on hover, so the name has the row's room (as the narrow rule below). */
+.dp-card .rsp-diff > .rsp-diff-top { position: relative; }
+/* They open beside the +/- rather than over it (Arun, 2026-11-09: the -0 was cut off under them): the row makes room, the count
+   slides left. */
+.dp-card .rsp-diff > .rsp-diff-top > .dv-actions { position: static; transform: none; padding-left: 0; background: none; flex: none; display: flex; align-items: center; max-width: 0; margin-left: 0; overflow: hidden; opacity: 0; pointer-events: none; transition: max-width .16s var(--ease-out, ease), margin-left .16s, opacity .12s; }
+.dp-card .rsp-diff > .rsp-diff-top:is(:hover, :focus-within) > .dv-actions { max-width: 120px; margin-left: 4px; opacity: 1; pointer-events: auto; }
+@media (prefers-reduced-motion: reduce) { .dp-card .rsp-diff > .rsp-diff-top > .dv-actions { transition: none; } }
+@container (max-width: 600px) { .dp-card .dv-bar { display: none; } }
+/* Long lines (audit C-17): off, one column scrolls with a scrollbar you can see and side by side cuts with an ellipsis; on, both
+   wrap, the same way. */
+.dp-card .rsp-diff:not(.dv-wrap) [class*="diffBody"] { scrollbar-width: thin; }
+.dp-card .rsp-diff:not(.dv-wrap) [class*="diffBody"]::-webkit-scrollbar { display: block; height: 8px; }
+.dp-card .rsp-diff:not(.dv-wrap) [class*="diffBody"]::-webkit-scrollbar-thumb { border-radius: 4px; background: var(--border-strong); }
+.rsp-diff:not(.dv-wrap) .dv-cell code { white-space: pre; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
+.rsp-diff.dv-wrap [class*="diffLines"] { width: auto; }
+.rsp-diff.dv-wrap [class*="diffRow"] code { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
+
 @container (max-width: 460px) { .dv-bar { display: none; } }
 @container (max-width: 360px) { .rsp-diff .rsp-diff-head .dv-dir { display: none; } .rsp-diff .rsp-diff-head .dv-name { flex-shrink: 1; } }
 /* Narrow (the Changes panel at 1210): the chips stay, on their own line, and a row's open and copy buttons lie over its right end
@@ -8319,6 +8358,22 @@ button.stb-item:active { transform: scale(.97); }
 .stb-run.wait .stb-dot { background: var(--amber); }
 .stb-run.wait { color: var(--amber); }
 .stb-run.err .stb-dot { background: var(--red); }
+/* The agent status, a button now (Arun, 2026-11-13: "make it a clickable like agent status"): what needs you, who works and
+   what is with the crew, the list of every agent and hand-off a press away. */
+.stb-run-btn { border: 0; border-radius: 6px; background: none; font: inherit; font-size: 12px; cursor: pointer; }
+.stb-run-btn:hover, .stb-run-btn[data-state="open"] { background: var(--hover); color: var(--ink); }
+.stb-run-btn svg:last-child { color: var(--text-muted); }
+.stb-pop { width: 320px; padding: 6px; }
+.stb-pop-head { margin: 6px 8px 4px; color: var(--text-muted); font-size: 11px; font-weight: 600; }
+.stb-pop-list { display: flex; flex-direction: column; margin: 0 0 4px; padding: 0; list-style: none; }
+.stb-pop-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border: 0; border-radius: 6px; background: none; color: var(--ink); font: 13px var(--font); text-align: left; cursor: pointer; }
+.stb-pop-row:hover { background: var(--hover); }
+.stb-pop-mark { display: grid; place-items: center; }
+.stb-pop-main { display: flex; flex-direction: column; min-width: 0; }
+.stb-pop-name { overflow: hidden; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.stb-pop-sub { overflow: hidden; color: var(--text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.stb-pop-word { max-width: 150px; overflow: hidden; color: var(--text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.stb-pop-word[data-needs] { color: var(--amber); font-weight: 500; }
 .stb-run-detail { color: var(--text-muted); font-weight: 400; font-variant-numeric: tabular-nums; }
 @media (prefers-reduced-motion: reduce) { .stb-run.busy .stb-dot { animation: none; } }
 
@@ -11063,53 +11118,6 @@ body.resizing .feed-item { content-visibility: auto; }
 /* What you can do with the control ("Drag onto the chat to open beside"): the quietest line, last. */
 .tip-body.how { margin-top: 1px; font-size: 12px; color: var(--text-muted); }
 
-/* ── The agents' tabs in the session's header (Activity headSlot, SessionView headTabs) ──────────────────────────────────
-   A wide window showing one chat has room in its header, so the tabs go up there instead of across the top of the chat
-   (Arun, 2026-10-24: "move the coding tool tabs to the header since we have space but we need to properly design this").
-   Each is one line the height of the header's buttons: the mark in its state's ring, the name beside it. Where it stands in
-   words ("Working · 2m", "Needs you") moves to its tooltip; the ring, its colour and its turning arc still say it at a
-   glance, and one that needs you is outlined in amber. The one in view is raised as before. Centred in the room between the
-   title and the header's own buttons; what doesn't fit waits behind +N, and + is a plain icon button at the end. */
-.tb-agents { flex: 1 1 0; min-width: 0; display: flex; align-items: center; justify-content: center; }
-.tb-agents:empty { display: none; }
-/* Standing a little taller than the window bar's 24px line, centred on it, so nothing around may cut it off. */
-.tb-left:has(> .tb-agents:not(:empty)), #band-left .tb-left:has(> .tb-agents:not(:empty)) { overflow: visible; flex-direction: row; align-items: center; }
-.tb-left:has(> .tb-agents:not(:empty)) > .tb-meta { display: none; }
-.tb-left:has(> .tb-agents:not(:empty)) > .tb-title { flex: 0 1 auto; min-width: 60px; }
-/* The tabs held to the middle of the session pane, the name shortening before them (SessionView useCentredTabs). */
-.tb-left.tabs-centred { position: relative; justify-content: flex-start; }
-.tb-left.tabs-centred > .tb-agents { position: absolute; top: 0; bottom: 0; flex: none; pointer-events: none; }
-/* The slot spans the middle of the header to centre the tabs; only the tabs themselves take clicks, so the name beside it and
-   the pills past it stay clickable, and the window band still drags around them (2026-10-28 QA: half the title was dead). */
-.tb-left.tabs-centred > .tb-agents :is(.feed-toolbar, .lane-tabs-wrap, .lane-tabs) { pointer-events: none; }
-.tb-left.tabs-centred > .tb-agents :is(button, a, [role="tab"], [role="button"], input, .lane-tab) { pointer-events: auto; }
-.tb-left.tabs-centred > .tb-title :is(h1, input) { max-width: none !important; }
-.feed-toolbar.in-head { width: 100%; max-width: none; margin: 0; padding: 0; gap: 8px; justify-content: center; }
-.feed-toolbar.in-head .lane-tabs-wrap { gap: 4px; margin: 0; max-width: 100%; }
-.feed-toolbar.in-head .lane-tabs { gap: 4px; padding: 0; overflow: visible; }
-.feed-toolbar.in-head .lane-tab { height: 30px; padding: 0 10px 0 5px; gap: 8px; border-radius: 9px; font: 500 13px var(--font); }
-.feed-toolbar.in-head .lane-tab:first-child { padding: 0 10px; }
-.feed-toolbar.in-head .lane-tab-sub { display: none; }
-.feed-toolbar.in-head .lane-tab-name { max-width: 128px; line-height: 1; }
-.feed-toolbar.in-head .lane-tab.on { box-shadow: none; }
-.feed-toolbar.in-head .lane-tab.on > svg:last-child { width: 14px; height: 14px; margin-left: -2px; padding: 1.5px; }
-.feed-toolbar.in-head .lane-tab-mark { width: 20px; height: 20px; margin: 0 1px 0 3px; }
-.feed-toolbar.in-head .lane-tab-mark .agent-mark svg, .feed-toolbar.in-head .lane-tab-mark > svg { width: 12px; height: 12px; }
-.feed-toolbar.in-head .lane-tab-owner { right: -6px; bottom: -5px; min-width: 12px; height: 12px; border-radius: 6px; font-size: 6.5px; }
-.feed-toolbar.in-head .lane-tab-lead { width: 12px; height: 12px; margin-left: -3px; }
-.feed-toolbar.in-head .lane-tab-unread { min-width: 16px; height: 16px; font-size: 12px; }
-.feed-toolbar.in-head .lane-add { width: 28px; height: 28px; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); }
-.feed-toolbar.in-head .lane-add:hover, .feed-toolbar.in-head .lane-add[aria-expanded="true"] { background: var(--hover); color: var(--ink); }
-.feed-toolbar.in-head .lane-all { height: 30px; padding: 0 9px; border-radius: 9px; font-size: 13px; }
-.feed-toolbar.in-head .needs-pill { height: 28px; }
-/* The window's bar is a drag strip: its tabs are pressed, dragged onto the chat and right-clicked, not the window. */
-html.desktop :is(#band-left, #band-slot) .feed-toolbar.in-head :is(.lane-tab, .lane-add, .lane-all, .needs-pill) { -webkit-app-region: no-drag; }
-/* The centred tabs' slot is as wide as the tab area and lies over the title beside it; the window's own drag strip is drawn in
-   the page's order, so the slot (after the title) dragged where the title is pressed to rename it. The slot and its wrappers
-   aren't a handle; the band around them still is (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION"). */
-html.desktop :is(#band-left, #band-slot) .tb-left.tabs-centred > .tb-agents,
-html.desktop :is(#band-left, #band-slot) .tb-left.tabs-centred > .tb-agents :is(.feed-toolbar, .lane-tabs-wrap, .lane-tabs) { -webkit-app-region: no-drag; }
-
 /* ── The side panel's open panels, as tabs along its header (Workbench tabs) ────────────────────────────────────────────
    Each a small tab: its icon and name, the one showing raised, its name a menu that swaps it for another; × on each closes it
    (shown on hover, and always on the one showing), a middle-click too; + at the end opens another beside it. */
@@ -11149,8 +11157,6 @@ html.desktop-mac[data-band="session"]:not(.bench-docked) #band-left { right: cal
 .lane-add svg { stroke-width: 2.4; }
 .feed-toolbar .lane-add { border-color: color-mix(in srgb, var(--ink) 30%, transparent); background: color-mix(in srgb, var(--ink) 4%, transparent); color: var(--ink-2); }
 .feed-toolbar .lane-add:hover, .feed-toolbar .lane-add[aria-expanded="true"] { border-color: color-mix(in srgb, var(--ink) 45%, transparent); background: var(--hover); color: var(--ink); }
-.feed-toolbar.in-head .lane-add { background: color-mix(in srgb, var(--ink) 8%, transparent); color: var(--ink-2); }
-.feed-toolbar.in-head .lane-add:hover, .feed-toolbar.in-head .lane-add[aria-expanded="true"] { background: color-mix(in srgb, var(--ink) 15%, transparent); color: var(--ink); }
 
 /* ── The rings, cleaner (Arun, 2026-10-24: "design the rings more clearer and cleaner too") ─────────────────────────────────
    One whole ring round each mark and nothing on it: the owner's initials, which sat on the ring and cut it, are said in words
@@ -11159,7 +11165,6 @@ html.desktop-mac[data-band="session"]:not(.bench-docked) #band-left { right: cal
    see. A clear gap between the ring and the disc, and the disc a quiet tint of the state rather than a dark well. */
 .feed-toolbar .lane-tab { --st: color-mix(in srgb, var(--ink) 16%, transparent); }
 .feed-toolbar .lane-tab .lane-tab-owner { display: none; }
-.feed-toolbar.in-head .lane-tab-mark { margin: 0 2px 0 4px; }
 .lane-tab-who { display: inline-grid; place-items: center; min-width: 16px; height: 16px; margin-left: 6px; padding: 0 3px; border-radius: 8px; vertical-align: 1px; background: color-mix(in srgb, var(--ink) 10%, transparent); color: var(--ink-2); font: 600 12px/1 var(--font); letter-spacing: .02em; }
 
 /* Adding an agent, on one screen when its answers are known (Engine.tsx quick): the agent and the code, a line each, the whole
@@ -11267,6 +11272,21 @@ html:not(.dark) .route-pill.on .route-pill-state { color: color-mix(in srgb, var
 .sb-crew-tools { display: inline-flex; align-items: center; gap: 4px; flex: none; color: var(--ink-2); }
 .sb-crew-tools > span { display: grid; place-items: center; width: 14px; height: 14px; }
 .sb-crew-more { width: auto !important; font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+/* Several agents finished or ready: only their marks, at the line's right under the time (Arun, 2026-11-10: "instead of 3 agents done
+   text can we have the coding tool icons on the right side"); a named branch or your role stays on the left, its "·" dropped. */
+.sb-row > .dass-row-sub > .sb-crew.sb-crew-end { flex: 1 1 auto; justify-content: flex-end; order: 1; }
+.dass-row-sub:has(> .sb-crew-end) > .sb-row-branch { margin-left: 0; }
+.dass-row-sub:has(> .sb-crew-end) > .sb-row-branch > .sb-row-dot { display: none; }
+.dass-row-sub:has(> .sb-crew-end) > .ml-auto { margin-left: 0; }
+/* Several at work the same: "working" on the left, then a named branch or your role, their marks at the right under the time. */
+.sb-row > .dass-row-sub > .sb-crew.sb-crew-split { display: contents; }
+.sb-crew-split > .sb-crew-words { flex: none; }
+.sb-crew-split > .sb-crew-tools { order: 1; margin-left: auto; }
+.dass-row-sub:has(> .sb-crew-split) > .ml-auto { margin-left: 0; }
+/* A teammate's session (TeamSessions.tsx): whose and where on the left, its agents' marks at the right under the time. */
+.dass-row-sub > .ts-tools { margin-left: auto; }
+/* The one agent a row's line is about, in its own face or its tool's mark (agent-face.ts), so two of Friday's agents read apart. */
+.sb-crew-mark { display: grid; place-items: center; flex: none; width: 14px; height: 14px; margin-right: -3px; color: var(--ink-2); }
 .sb-crew-words.working { color: var(--ink-2); }
 .sb-crew-words.failed { color: var(--ink-2); }
 .sb-crew-words.needs { color: var(--ink); } /* stopped short of its plan: needs you, its line in ink as every waiting row's */
@@ -11303,14 +11323,10 @@ html .shell.with-panel .main { border-top-left-radius: 0 !important; }
 /* The agents' rail over a split chat, in the header like the single chat's tabs (SessionView SplitRail `head`, Arun 2026-10-25:
    "design the coding tool tab better for split view"): the same tabs, rings and all. An agent open in a column has a bar of
    its colour under it, and the one in the column in use is the raised tab. */
-.feed-toolbar.split-rail.in-head { width: 100%; padding: 0; max-width: none; justify-content: center; gap: 10px; }
-.feed-toolbar.split-rail.in-head .lane-tabs { margin: 0; }
 /* Open in a column: its name underlined in its colour, so which agents the columns show reads at a glance. Under the name, not
    across the tab: a bar along the tab's foot ran into the bottom of the ring and started in a different place on each tab
    (Arun, 2026-10-25: "fix the placement of that horizontal line"). The name keeps room under it for the line it clips to. */
 .split-rail .lane-tab.shown .lane-tab-name { padding-bottom: 6px; margin-bottom: -6px; text-decoration: underline; text-decoration-color: var(--tint, var(--ink)); text-decoration-thickness: 2px; text-underline-offset: 5px; }
-.feed-toolbar.split-rail.in-head .lane-tab.shown:not(.on) { background: transparent; box-shadow: none; }
-.feed-toolbar.split-rail.in-head .needs-pill { height: 28px; margin-left: 4px; }
 
 /* Racing two to five agents (Race.tsx, Arun 2026-10-25): a row per racer in the dialog, its tool and model side by side; the
    column the numbers lean toward marked; the columns and diffs as many across as there are racers (set inline). */
@@ -12120,13 +12136,6 @@ html.desktop [data-slot="dialog-content"] { top: calc(50% + 20px); max-height: c
 @media (max-width: 600px) { .ans-code-body { white-space: pre-wrap !important; overflow-wrap: anywhere; } }
 
 /* ── QA round 2, Code sessions and the side panel (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL") ── */
-/* The header's tabs give way inside their slot, their names shortening with "…", rather than running on under the + beside them
-   ("Claude C" under it in a tight header). The marks keep their size. */
-.feed-toolbar.in-head .lane-tabs { min-width: 0; }
-.feed-toolbar.in-head .lane-tab { flex: 0 1 auto; min-width: 0; }
-.feed-toolbar.in-head .lane-tab > :not(.lane-tab-text) { flex: none; }
-.feed-toolbar.in-head .lane-tab-text { overflow: hidden; }
-.feed-toolbar.in-head .lane-tab-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A numbered name keeps its number when the tab narrows ("Claude Co… 3"): the words before it give way. */
 .feed-toolbar .lane-tab .lane-tab-name:has(> .lane-tab-num) { display: flex; min-width: 0; }
 .feed-toolbar .lane-tab .lane-tab-base { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -12535,6 +12544,11 @@ li:hover .dock-step-go, li:focus-visible .dock-step-go { opacity: 1; }
 .session-bar .stb-run { gap: 8px; padding: 0 8px 0 6px; color: var(--ink-2); font-size: 12px; }
 .session-bar .stb-run.wait { color: var(--needs); }
 .session-bar .stb-run.err { color: var(--danger); }
+/* Waiting on somebody else: said, never amber (audit B-14). A failed run's line gives way with an ellipsis, its reason first. */
+.session-bar .stb-run.held { color: var(--ink-2); }
+.session-bar .stb-run.err { flex: 0 1 auto; min-width: 0; }
+.session-bar .stb-run.err .stb-run-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-bar .stb-run.err .stb-run-text .stb-run-detail { margin: 0; color: inherit; opacity: .85; }
 .session-bar .stb-run .pr { --pr-ground: var(--bg); }
 .stb-mark { display: grid; place-items: center; width: 14px; height: 14px; line-height: 0; }
 .stb-mark svg { width: 12px; height: 12px; }
@@ -13052,7 +13066,6 @@ html.desktop:not(.desktop-mac) .drop-overlay { top: 48px; }
 .pr[data-pr="limited"] > .pr-ring { background: conic-gradient(var(--st-limited, #fb923c) 0 13%, color-mix(in srgb, var(--st-limited, #fb923c) 26%, transparent) 13% 100%); -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - var(--pr-w)), #000 calc(100% - var(--pr-w))); mask: radial-gradient(farthest-side, transparent calc(100% - var(--pr-w)), #000 calc(100% - var(--pr-w))); }
 /* The name close to its mark (Arun, 2026-11-03: "make the text be closer to the icon"). */
 .feed-toolbar .lane-tab .lane-tab-mark { margin-right: -8px !important; }
-.feed-toolbar.in-head .lane-tab .lane-tab-mark { margin-right: -5px !important; }
 
 /* ── The Changes panel (Arun, 2026-11-03: "Build the Changes panel like this", after the mockup) ───────────────────────────────
    Whose changes as chips, each with its state's small ring and how many files; the files; and docked at the foot, the checks as
@@ -13887,3 +13900,73 @@ html.reduce-motion .rl-now.shine, html.reduce-motion .rl-body, html.reduce-motio
 @keyframes rl-hop { 0%, 100% { transform: translateY(0) scale(1); } 40% { transform: translateY(-2.5px) scale(.97, 1.03); } 80% { transform: translateY(0) scale(1.04, .96); } }
 @media (prefers-reduced-motion: reduce) { .rsp-avatar[data-doing] > * { animation: none !important; } }
 html.reduce-motion .rsp-avatar[data-doing] > * { animation: none !important; }
+
+/* Changes in the side panel (Arun, 2026-11-09: "needs space between each other also the cards should use up the width of the
+   panel… there is space on the left and right side"): each file its own card with 6px between, and the list runs to 12px from
+   the panel's edges instead of 24, its toolbar with it (Friday Teams 5dd56778). */
+.bench-panel .doc-scroll { padding-inline: 12px; }
+.bench-panel .dp-tools { margin-inline: -12px; padding-inline: 12px; }
+.dp-card .rsp-diff { border-radius: 10px !important; border-bottom: 0; overflow: clip; }
+.dp-card .rsp-diff + .rsp-diff { margin-top: 6px !important; }
+.dp-card .rsp-diff:not(.rsp-diff-closed) > .rsp-diff-top { border-radius: 10px 10px 0 0; }
+
+/* ── Connect, one screen (Arun, 2026-11-10, the connect mockups' A refined): four rows in one group, each picked in place;
+   what moves as short tags; a warning is one line with its fix. ─────────────────────────────────────────────────────────── */
+.modal.engine-modal.cd.cd-a { width: min(460px, 100%); gap: 14px; padding: 18px 18px 16px; overflow: visible; }
+.cd-a .cd-head { align-items: center; }
+.cd-a .cd-head h2 { flex: 1; margin: 0; font-size: 15px; font-weight: 600; color: var(--ink); }
+.cd-a .cd-machine { padding: 0 2px; border: 0; background: none; font-size: 12.5px; }
+.cd-grp { display: flex; flex-direction: column; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--card-2); }
+.cd-rw { position: relative; }
+.cd-rw + .cd-rw, .cd-grp > .cd-row-seg { border-top: 1px solid var(--border); }
+.cd-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 42px; padding: 0 12px; border: 0; background: none; color: var(--ink); font: inherit; font-size: 13px; text-align: left; cursor: pointer; box-sizing: border-box; }
+button.cd-row:hover, .cd-rw[data-open] > .cd-row { background: var(--hover); }
+.cd-rw:first-child > .cd-row { border-radius: 11px 11px 0 0; }
+.cd-row[data-faded] { opacity: .45; }
+.cd-k { flex: none; width: 56px; color: var(--text-muted); font-size: 12.5px; }
+.cd-v { display: inline-flex; align-items: center; gap: 7px; flex: 1; min-width: 0; font-weight: 500; white-space: nowrap; overflow: hidden; }
+.cd-v[data-tone="warn"] { color: var(--amber); }
+.cd-v-text { overflow: hidden; text-overflow: ellipsis; }
+.cd-v > svg { flex: none; }
+.cd-dim { color: var(--text-muted); font-weight: 400; }
+.cd-chev { flex: none; color: var(--text-muted); }
+.cd-row-seg { cursor: default; }
+.cd-seg { display: inline-flex; margin-left: auto; padding: 2px; gap: 2px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border); }
+.cd-seg button { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 11px; border: 0; border-radius: 6px; background: none; color: var(--text-muted); font: inherit; font-size: 12.5px; cursor: pointer; }
+.cd-seg button:hover { color: var(--ink); }
+.cd-seg button.on { background: var(--card); color: var(--ink); font-weight: 500; box-shadow: 0 1px 2px rgb(0 0 0 / .12), 0 0 0 1px var(--border); }
+.cd-seg button.on[data-risky] { color: var(--amber); }
+/* A row's choices: a card over the rows below, so the dialog never jumps. */
+.cd-pop { position: absolute; z-index: 5; left: 6px; right: 6px; top: calc(100% + 4px); display: flex; flex-direction: column; gap: 4px; max-height: min(340px, 52vh); overflow-y: auto; padding: 5px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--card); box-shadow: 0 12px 32px rgb(0 0 0 / .22); }
+.cd-opts { display: flex; flex-direction: column; }
+.cd-opts-more { padding-top: 4px; border-top: 1px solid var(--border); }
+.cd-opt, .cd-pop .cd-folder { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 32px; padding: 0 9px; border: 0; border-radius: 7px; background: none; color: var(--ink); font: inherit; font-size: 13px; text-align: left; cursor: pointer; box-sizing: border-box; }
+.cd-opt:hover, .cd-pop .cd-folder:hover { background: var(--hover); }
+.cd-opt > svg { flex: none; }
+.cd-opt-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cd-opt[data-off] .cd-opt-name { color: var(--text-muted); }
+.cd-opt-r { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 12px; }
+.cd-opt-r.mono { font-family: var(--mono); font-size: 11.5px; }
+.cd-opt-r.warn { color: var(--amber); }
+.cd-opt-r.off { color: var(--text-muted); }
+.cd-opt-tick { color: var(--accent); }
+.cd-opt-more, .cd-opt-more .cd-opt-name, .cd-pop .more-tools { color: var(--text-muted); }
+.cd-pop .more-tools { justify-content: space-between; margin: 0; border: 0; }
+.cd-pop .cd-folder { min-height: 40px; padding: 4px 9px; }
+.cd-pop .cd-folder-icon { background: none; width: auto; height: auto; }
+.cd-pop .cd-folder-path { font-size: 11.5px; }
+.cd-pop .cd-chip-tag { display: none; }
+.cd-pop .cd-folder-check { color: var(--accent); }
+.cd-pop > :not(.cd-opts) { margin: 2px 4px 4px; }
+.cd-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: -4px; }
+.cd-tag { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 6px; background: var(--card-2); color: var(--text-muted); font-size: 12px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cd-warn { display: flex; align-items: center; gap: 8px; margin: 0; padding: 7px 8px 7px 11px; border-radius: 9px; background: var(--amber-soft); color: var(--amber); font-size: 12.5px; }
+.cd-warn > svg { flex: none; }
+.cd-warn button { margin-left: auto; flex: none; height: 24px; padding: 0 9px; border: 1px solid currentColor; border-radius: 6px; background: none; color: inherit; font: inherit; font-size: 12px; font-weight: 500; cursor: pointer; }
+.cd-warn button:hover { background: rgb(255 255 255 / .08); }
+.cd-a .cd-foot { padding-top: 2px; }
+.cd-a .cd-why { font-size: 12px; }
+.cd-a .cd-note { font-size: 12.5px; }
+.cd-a .cd-machine .machine-line { padding: 0; border: 0; background: none; }
+.cd-a .cd-row:focus-visible { outline: 2px solid var(--violet); outline-offset: -2px; border-radius: 10px; }
+.cd-pop .login-notice, .cd-pop > p { font-size: 12px; }

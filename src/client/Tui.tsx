@@ -5,6 +5,7 @@ import type { Send } from "./useSession.js";
 import { useLaneStream } from "./useSession.js";
 import { stepFor } from "./Response.js";
 import { answerRights } from "./Activity.js";
+import { agentState, lowerWord, plainError } from "../agent-state.js";
 
 /**
  * Friday's own terminal view of one agent, for every coding tool and Friday's own (Arun, 2026-10-30: "lets add a custom TUI
@@ -73,7 +74,7 @@ export function tuiLines(events: SessionEvent[], lanes: string[], me: string, fr
     } else if (b.type === "run.ended") {
       const took = started ? ` for ${dur(e.ts - started)}` : "";
       startedAt.delete(lane);
-      if (b.outcome === "error") out.push({ lane, k: "end", key: `e${e.seq}`, text: `✗ Stopped${took}: ${clip((b.error ?? "").split("\n")[0] ?? "", 140)}`, bad: true });
+      if (b.outcome === "error") out.push({ lane, k: "end", key: `e${e.seq}`, text: `✗ Hit an error${took} · ${plainError(b.error)}`, bad: true });
       else if (b.outcome === "waiting") out.push({ lane, k: "end", key: `e${e.seq}`, text: `✻ Waiting on you, after ${took.replace(" for ", "") || "a moment"}`, bad: false });
       else out.push({ lane, k: "end", key: `e${e.seq}`, text: `✻ Worked${took}`, bad: false });
     } else if (b.type === "run.pause") out.push({ lane, k: "sys", key: `p${e.seq}`, text: `⏹ ${e.actor.id === me ? "You" : e.actor.name} stopped it` });
@@ -273,6 +274,10 @@ export function FridayTui({
   const parts = full.split(/[\\/]/).filter(Boolean);
   const where = many ? "" : parts.length > 2 ? `…/${parts.slice(-2).join("/")}` : full;
   const workingNow = running.length;
+  // At rest, in the words every view uses (agent-state.ts): "waiting on Ada", "hit an error · …", never "idle" over a failed run.
+  const states = lanes.map((l) => ({ lane: l, now: agentState(state, l, me.id) }));
+  const shown = states.find((x) => x.now.needsYou) ?? states.find((x) => x.now.held) ?? states.find((x) => x.now.phase === "failed") ?? states.find((x) => x.lane === to) ?? states[0];
+  const idleWord = !shown ? "○ ready" : shown.now.phase === "failed" ? `✗ ${many ? `${who(state, shown.lane).name} ` : ""}hit an error · ${shown.now.error?.plain ?? ""}` : `${shown.now.needsYou ? "●" : "○"} ${many && shown.now.phase !== "ready" ? `${who(state, shown.lane).name} · ` : ""}${lowerWord(shown.now.word)}`;
   const firstSince = running.length ? (events.find((e) => e.seq === runOf(state, running[0]!).sinceSeq)?.ts ?? Date.now()) : 0;
   return (
     <div className="ftui" style={{ "--ftui-tint": target.tint } as React.CSSProperties} onClick={(e) => (e.target as HTMLElement).closest("button, a, textarea") || window.getSelection()?.toString() || box.current?.focus()}>
@@ -285,7 +290,7 @@ export function FridayTui({
         )}
         {!many && engine?.branch && <span className="ftui-dim">⎇ {engine.branch}</span>}
         {many && <span className="ftui-dim">{lanes.length} agents</span>}
-        <span className={`ftui-state ${workingNow ? "on" : ""}`}>{workingNow ? (many ? `● ${workingNow} working` : `● working ${dur(Date.now() - firstSince)}`) : menu ? "● needs you" : "○ idle"}</span>
+        <span className={`ftui-state ${workingNow ? "on" : ""}`}>{workingNow ? (many ? `● ${workingNow} working` : `● working ${dur(Date.now() - firstSince)}`) : idleWord}</span>
         <span className="ftui-grow" />
         {onNative && (
           <button type="button" className="ftui-link" onClick={onNative} title={`${target.name}'s own screen, on this conversation. Friday holds its turns while it's open.`}>

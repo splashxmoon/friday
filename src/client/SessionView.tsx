@@ -459,13 +459,8 @@ export function SessionView({
   useEffect(() => syncAddress(sid), [sid]);
   // As many columns as the window has room for, keeping the one in use; narrowing for a moment doesn't forget the rest.
   const split = wide && replayAt === null ? fitColumns(cols, room, focused, everyoneHere) : null;
-  // The agents' tabs go up into the header where it has the room: a wide window showing one chat. Side by side, each column
-  // has its own agent picker, and a narrow window keeps the bar across the chat.
-  const [agentsSlot, setAgentsSlot] = useState<HTMLElement | null>(null);
-  const headTabs = wide && !split;
-  // Side by side, the rail of agents goes up into the header too, where the single chat's tabs are (Arun, 2026-10-25: "design
-  // the coding tool tab better for split view"): it took a row of its own under the header, which sat empty in the middle.
-  const headRail = wide && !!split;
+  // The agents are a switch at the top of the chat column, never in the header (Arun, 2026-11-09: the header "looks so crowded",
+  // option C): the header holds the session and its people. Side by side, the rail of agents sits over the columns the same way.
   // An agent's tab dragged from the rail onto the chat opens it in a column beside the one in view; dropped on a column of a
   // split, beside that column, or in its place once there is no room for another.
   const [dragging, setDragging] = useState<string | null>(null);
@@ -826,7 +821,6 @@ export function SessionView({
     <FocusContext.Provider value={focusValue}>
     <div className={`session-view${focus ? " focus" : ""}`} data-slot="session">
       <TopBar
-        {...(headTabs || headRail ? { agentsSlot: setAgentsSlot } : {})}
         sessionPlan={sessionPlan}
         solo={solo}
         focus={focus}
@@ -969,7 +963,7 @@ export function SessionView({
               const ws = widths.length === split.length ? widths : evenWidths(split.length);
               return (
                 <>
-                  {headRail && agentsSlot ? createPortal(<SplitRail sid={sid} state={state} events={s.events} me={me.id} shown={split} active={activeLane} room={room} head />, agentsSlot) : <SplitRail sid={sid} state={state} events={s.events} me={me.id} shown={split} active={activeLane} room={room} />}
+                  <SplitRail sid={sid} state={state} events={s.events} me={me.id} shown={split} active={activeLane} room={room} />
                   <div className="split-cols" style={{ gridTemplateColumns: ws.map((w) => `minmax(0, ${w}fr)`).join(" 8px ") }}>
                     {split.flatMap((lane, at) => [
                       ...(at > 0
@@ -1023,7 +1017,7 @@ export function SessionView({
                 </>
               );
             }
-            return <Activity {...activityProps} headSlot={headTabs ? agentsSlot : null} />;
+            return <Activity {...activityProps} />;
           })()}
         </div>
         {/* A crew room's plan beside its chat (TeamPlan.tsx, Crew overhaul 3B): the room itself, not a teammate's own chat, and not
@@ -1407,10 +1401,7 @@ function TopBar({
   sessionPlan,
   solo,
   focus = false,
-  agentsSlot,
 }: {
-  /** Where the agents' tabs go in the header, when the window is wide enough for them there (Activity headSlot). */
-  agentsSlot?: (el: HTMLElement | null) => void;
   /** Solo or Team for this session (null until known). */
   sessionPlan: SessionPlan | null;
   /** This session is Solo: worked out once, by the page. */
@@ -1466,9 +1457,9 @@ function TopBar({
   const [settings, setSettings] = useState(false);
   const [editing, setEditing] = useState(false);
   const [meterOn, setMeterOn] = useState(() => localStorage.getItem("mpa.meter") === "1");
-  const [tabsEl, setTabsEl] = useState<HTMLElement | null>(null);
-  const tabsRef = useCallback((el: HTMLElement | null) => (agentsSlot?.(el), setTabsEl(el)), [agentsSlot]);
-  useCentredTabs(tabsEl);
+  // The full title in a tip, only when the header has had to cut it.
+  const [titleEl, setTitleEl] = useState<HTMLElement | null>(null);
+  const titleCut = useCut(titleEl);
   const owner = me.role === "owner";
   const agent = state.options.agent;
   const repo = repoOf(state);
@@ -1496,8 +1487,9 @@ function TopBar({
         ) : (
           // Renamed from the keyboard too, where a click renames it (2026-10-27 audit: it couldn't be reached by Tab).
           <h1
+            ref={setTitleEl}
             className={owner && !named ? "editable" : ""}
-            title={owner && !named ? `${state.title} (click to rename)` : shownTitle}
+            {...(titleCut ? { "data-tip": shownTitle } : {})}
             onClick={() => owner && !named && setEditing(true)}
             {...(owner && !named ? { tabIndex: 0, role: "button", "aria-label": `${state.title}: rename`, onKeyDown: (e: React.KeyboardEvent) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), setEditing(true)) } : {})}
           >
@@ -1541,7 +1533,6 @@ function TopBar({
         )}
         </div>
         )}
-        {agentsSlot && <div className="tb-agents" data-slot="session.agents" ref={tabsRef} />}
       </div>
   );
   const right = (
@@ -1663,74 +1654,20 @@ function TopBar({
   );
 }
 
-/** Narrowest a title gets for the tabs, and the space either side of them. */
-const TITLE_MIN = 96;
-const TABS_GAP = 20;
-
-/**
- * The agents' tabs in the middle of the session's header, however long its name: the name gives way, down to its first
- * words, before the tabs leave the middle (Arun, 2026-10-28: "cap the lenght of the session title so theat the coding tool
- * tab thing is centered in the header"). A window too narrow for that keeps them where they fall after the name.
- */
-function useCentredTabs(slot: HTMLElement | null) {
+/** Whether `el`'s text is cut short (ellipsis), kept current as it or its row resizes. */
+function useCut(el: HTMLElement | null): boolean {
+  const [cut, setCut] = useState(false);
   useLayoutEffect(() => {
-    const row = slot?.parentElement;
-    if (!slot || !row) return;
-    let frame = 0;
-    const place = () => {
-      frame = 0;
-      const title = row.querySelector<HTMLElement>(":scope > .tb-title");
-      const name = title?.querySelector<HTMLElement>("h1, input");
-      const pane = slot.closest<HTMLElement>(".session-view") ?? document.querySelector<HTMLElement>(".session-view");
-      const bar = slot.firstElementChild as HTMLElement | null;
-      slot.style.left = slot.style.width = "";
-      name?.style.removeProperty("max-width");
-      if (!title || !name || !pane || !bar) return void row.classList.remove("tabs-centred");
-      // Measured as placed: with the tabs out of the row, the name starts at the row's start.
-      row.classList.add("tabs-centred");
-      const p = pane.getBoundingClientRect();
-      const r = row.getBoundingClientRect();
-      const t = title.getBoundingClientRect();
-      const mid = p.left + p.width / 2;
-      // The room the tabs may take: from past the name's least to the row's end. Centred on the pane while they fit either side
-      // of its middle; when one side is short (the Work rail docked beside the pane), they slide toward the free side rather
-      // than being cut to twice the shorter half (2026-10-29: "All age…" / "Claude …" with about 190px free at 1440).
-      const lo = t.left + TITLE_MIN + TABS_GAP;
-      const hi = r.right - TABS_GAP;
-      if (hi - lo < 280) return void (row.classList.remove("tabs-centred"), delete slot.dataset.room);
-      // The whole room, for the tab bar to count its tabs against (Activity.tsx): sized to the tabs it shows, the slot alone
-      // never had room for one it had folded away, so Claude Code stayed under "+1" with half the header free (Arun,
-      // 2026-10-29: "why cant i see the claude coding tab in the header? there is enough space for it").
-      const room = String(Math.floor(hi - lo));
-      if (slot.dataset.room !== room) slot.dataset.room = room;
-      const need = Math.ceil(Math.max(bar.getBoundingClientRect().width, bar.scrollWidth));
-      const w = Math.min(need, hi - lo);
-      const left = Math.max(lo, Math.min(mid - w / 2, hi - w));
-      slot.style.left = `${left - r.left}px`;
-      slot.style.width = `${w}px`;
-      // What the tabs take now they're placed, and the name stops short of them, less what sits beside it (a status, faces).
-      const parts = [...bar.children].map((c) => c.getBoundingClientRect()).filter((b) => b.width > 0);
-      const start = parts.length ? Math.min(...parts.map((b) => b.left)) : mid;
-      const others = [...title.children].filter((c) => c !== name).map((c) => c.getBoundingClientRect().width).filter((w) => w > 0);
-      const beside = others.reduce((a, w) => a + w + (parseFloat(getComputedStyle(title).columnGap) || 0), 0);
-      name.style.setProperty("max-width", `${Math.max(TITLE_MIN - beside, start - TABS_GAP - t.left - beside)}px`, "important");
-    };
-    const soon = () => void (frame ||= requestAnimationFrame(place));
-    const sizes = new ResizeObserver(soon);
-    for (const el of [row, slot, document.querySelector(".session-view")]) if (el) sizes.observe(el);
-    // A new tab, an agent gone, or the name changed.
-    const changes = new MutationObserver(soon);
-    changes.observe(row, { childList: true, subtree: true, characterData: true });
-    place();
-    return () => {
-      cancelAnimationFrame(frame);
-      sizes.disconnect();
-      changes.disconnect();
-      row.classList.remove("tabs-centred");
-      slot.style.left = slot.style.width = "";
-      delete slot.dataset.room;
-    };
-  }, [slot]);
+    if (!el) return;
+    const measure = () => setCut(el.scrollWidth > el.clientWidth + 1);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    const mo = new MutationObserver(measure);
+    mo.observe(el, { childList: true, characterData: true, subtree: true });
+    return () => (ro.disconnect(), mo.disconnect());
+  }, [el]);
+  return cut;
 }
 
 /** How long the newest run has taken and what it has cost so far. Opt-in, and only the run: a session total is a number nobody can act on. */
@@ -2240,7 +2177,7 @@ const slugify = (s: string) =>
  * shows them (Activity.tsx), with the columns' agents marked. Choosing one that isn't showing puts it in a column (beside
  * the one in use while there is room, in its place after that); dragging one onto a column does the same there.
  */
-function SplitRail({ sid, state, events, me, shown, active, room, head = false }: { sid: string; state: SessionState; events: SessionEvent[]; me: string; shown: string[]; active: string; room: number; /** In the header, as the single chat's tabs are. */ head?: boolean }) {
+function SplitRail({ sid, state, events, me, shown, active, room }: { sid: string; state: SessionState; events: SessionEvent[]; me: string; shown: string[]; active: string; room: number }) {
   const agents = useAgents();
   const seen = useSeen(sid);
   const opened = openedAt(sid, events.at(-1)?.seq ?? 0);
@@ -2248,7 +2185,8 @@ function SplitRail({ sid, state, events, me, shown, active, room, head = false }
   const needs = agents.filter((a) => a.needsYou);
   const everyone = agents.map((a) => a.lane);
   return (
-    <div className={`feed-toolbar split-rail${head ? " in-head" : ""}`}>
+    // The same switch as the single chat's, over the columns (Arun, 2026-11-09, option C).
+    <div className="feed-toolbar split-rail agent-switch">
       <div className="lane-tabs" role="tablist" aria-label="Agents">
         {agents.map((a, i) => {
           const look = agentLook(state, a.lane, 13);
@@ -2297,25 +2235,27 @@ function SplitRail({ sid, state, events, me, shown, active, room, head = false }
 
 /** The terminal view's switch in a Code session's header: on, every agent there (and in every session) shows as a terminal. */
 function HeaderTuiSwitch({ sid, invite, state, me }: { sid: string; invite: string; state: SessionState; me: { id: string } }) {
+  const tui = useTuiSwitch(sid, invite, state, me);
+  return <ViewToggle className="in-head" size={18} on={tui.on} name={tui.name} onToggle={tui.toggle} />;
+}
+
+/** The terminal view's switch, for its button and for the phone header's ⋯. */
+function useTuiSwitch(sid: string, invite: string, state: SessionState, me: { id: string }) {
   const [on, setOn] = useTuiView();
   const lane = useFocusedAgent(sid);
   // Open in its own screen and not on its way back: lit, though the view is off.
   const native = lane !== ALL && !!state.terminals?.[lane] && state.engines[lane]?.hostId === me.id && !handingBack(sid, lane);
-  return (
-    <ViewToggle
-      className="in-head"
-      size={18}
-      on={on || native}
-      name={lane === ALL ? "every agent" : laneLabel(state, lane)}
-      onToggle={() => {
-        if (!on && !native) return setOn(true);
-        // Off: back to chat, and every agent of yours open in its own screen handed back to Friday once its tool is done with what
-        // it is doing there, never in the middle of it (Arun, 2026-10-30: "dont make the thing stop when witching from GUI to
-        // TUI or TUI to GUI"). Switched on again before then, they stay.
-        const mine = Object.keys(state.terminals ?? {}).filter((l) => state.engines[l]?.hostId === me.id);
-        setOn(false);
-        for (const l of mine) handBackWhenDone(sid, invite, l, { unless: tuiIsOn });
-      }}
-    />
-  );
+  return {
+    on: on || native,
+    name: lane === ALL ? "every agent" : laneLabel(state, lane),
+    toggle: () => {
+      if (!on && !native) return setOn(true);
+      // Off: back to chat, and every agent of yours open in its own screen handed back to Friday once its tool is done with what
+      // it is doing there, never in the middle of it (Arun, 2026-10-30: "dont make the thing stop when witching from GUI to
+      // TUI or TUI to GUI"). Switched on again before then, they stay.
+      const mine = Object.keys(state.terminals ?? {}).filter((l) => state.engines[l]?.hostId === me.id);
+      setOn(false);
+      for (const l of mine) handBackWhenDone(sid, invite, l, { unless: tuiIsOn });
+    },
+  };
 }

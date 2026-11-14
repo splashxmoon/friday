@@ -12,10 +12,16 @@ let layer: HTMLElement | null = null;
 export function popperLayer(): HTMLElement | undefined {
   if (typeof document === "undefined") return undefined;
   if (!layer || !layer.isConnected) {
-    layer = document.createElement("div");
-    layer.className = "popper-layer";
-    layer.setAttribute("aria-live", "off");
-    document.body.append(layer);
+    // A page without a full DOM (a unit test's) gets Radix's own default, the body.
+    try {
+      const l = document.createElement("div");
+      l.className = "popper-layer";
+      l.setAttribute("aria-live", "off");
+      document.body.append(l);
+      layer = l;
+    } catch {
+      return undefined;
+    }
   }
   return layer;
 }

@@ -65,7 +65,7 @@ export function StateRing({ state, title }: { state: Presence | null; title?: st
   if (!state || state === "idle" || state === "done" || state === "asleep") return null;
   return (
     <span className="state-ring" title={title}>
-      <PresenceRing state={state} size={8} label={{ working: "Working", needs: "Needs you", error: "Stopped", queued: "Waiting", limited: "Out of usage" }[state]}>
+      <PresenceRing state={state} size={8} label={title ?? { working: "Working", needs: "Needs you", error: "Hit an error", queued: "Waiting", limited: "Out of usage" }[state]}>
         <span />
       </PresenceRing>
     </span>

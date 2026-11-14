@@ -5,6 +5,7 @@
  */
 
 import type { AgentStatus } from "../agents-hub.js";
+import { PHASE_WORD } from "../agent-state.js";
 
 /** The state a tab is coloured by: the colours of the agents' task board (--st-working, --st-queued, --st-done, --st-blocked). */
 export type TabState = "working" | "needs" | "waiting" | "done" | "offline" | "failed" | "limited" | "idle";
@@ -21,11 +22,12 @@ export function tabState(status: AgentStatus | undefined, needsYou = false): Tab
   return "idle";
 }
 
-const WORDS: Record<TabState, string> = { working: "Working", needs: "Needs you", waiting: "Waiting", done: "Done", offline: "Offline", failed: "Stopped", limited: "Out of usage", idle: "Ready" };
+// The selector's own words (agent-state.ts PHASE_WORD), so a tab never says "Error" where the sidebar says "Hit an error".
+const WORDS: Record<TabState, string> = { working: PHASE_WORD.working, needs: PHASE_WORD.needs, waiting: "Waiting", done: PHASE_WORD.done, offline: PHASE_WORD.offline, failed: PHASE_WORD.failed, limited: PHASE_WORD.limited, idle: PHASE_WORD.ready };
 
-/** Where it stands, in a word or two, with how long it has been at it while it works. */
-export function tabWords(state: TabState, startedAt: number | null | undefined, now: number): string {
-  if (state !== "working" || !startedAt) return WORDS[state];
+/** Where it stands, in a word or two, with how long it has been at it while it works. `word`: the selector's own, which names who it waits on. */
+export function tabWords(state: TabState, startedAt: number | null | undefined, now: number, word?: string): string {
+  if (state !== "working" || !startedAt) return state === "working" ? WORDS.working : (word ?? WORDS[state]);
   const s = Math.max(0, Math.round((now - startedAt) / 1000));
   return `${WORDS.working} · ${s < 60 ? `${s}s` : `${Math.floor(s / 60)}m`}`;
 }

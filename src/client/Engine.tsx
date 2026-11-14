@@ -33,10 +33,10 @@ import { isLocal } from "./edition.js";
 const laneName = (s: SessionState, id: string) => (id === MAIN_LANE ? "Main" : (s.lanes.find((l) => l.id === id)?.name ?? id));
 
 const MODES: { id: EngineMode; label: string; blurb: string }[] = [
-  { id: "plan", label: "Plan", blurb: "Reads and proposes, and asks before it runs a command. Changes nothing." },
-  { id: "edits", label: "Manual", blurb: "Edits files, and asks you before it runs a command." },
+  { id: "plan", label: "Read only", blurb: "Reads and proposes, and asks before it runs a command. Changes nothing." },
+  { id: "edits", label: "Edits", blurb: "Edits files, and asks you before it runs a command." },
   // One person in the open-source edition: nobody else drives (2026-11-04 QA).
-  { id: "full", label: "Auto", blurb: "Edits and runs commands without asking." },
+  { id: "full", label: "Full access", blurb: "Edits and runs commands without asking." },
 ];
 /** Codex and Cursor cannot ask about one command at a time, so Manual asks once for the whole turn. */
 const blurbFor = (m: { id: EngineMode; blurb: string }, tool: string) => (m.id === "edits" && (tool === "codex" || tool === "cursor") ? "Asks you before any turn that changes something." : m.blurb);
@@ -140,10 +140,10 @@ export function ConnectDialog({
   }, [clash, folder?.path]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  // Where it works and which model are choices most people leave alone, so they sit behind one line.
-  const [advanced, setAdvanced] = useState(false);
-  // One question at a time: agent, then code, then what it may do.
-  const [step, setStep] = useState(0);
+  // One screen, each answer picked in place (Arun, 2026-11-10, the connect mockups' A refined): which row's choices are open,
+  // and the row that opened them, so a second press on it closes them.
+  const [open, setOpen] = useState<"" | "agent" | "code" | "where">("");
+  const [opener, setOpener] = useState<HTMLElement | null>(null);
 
   // Someone joining a session almost always has the same repo. If that folder
   // is on their machine too, start from it rather than making them find it.
@@ -218,7 +218,7 @@ export function ConnectDialog({
     setBusy(true);
     setErr("");
     try {
-      await hostApi(identity, "/api/runner/start", {
+      await hostApi<{ lane?: string }>(identity, "/api/runner/start", {
         method: "POST",
         body: JSON.stringify({
           sid,
@@ -270,69 +270,58 @@ export function ConnectDialog({
       (r) => chose({ folder: r.folder }),
       () => setErr("That folder isn't on this computer any more."),
     );
-  const whereLabel = where === "new" ? (me.role === "owner" ? "A new agent, beside Friday Code" : "As my own agent") : where === MAIN_LANE ? "In place of the main agent" : `In place of “${laneName(state, where)}”`;
-  const whyNot = busy ? "" : !hasCode ? "Choose the code it works on, or work without a folder" : clash ? "Pick Plan to connect" : tool && found && !found.path ? `${ENGINE_NAMES[tool]} isn't installed on this computer` : tool && found?.loggedIn === false ? `Sign in to ${ENGINE_NAMES[tool]} first` : "";
+  const whyNot = busy ? "" : !hasCode ? "Choose the code it works on, or work without a folder" : clash ? "Pick Read only to connect" : tool && found && !found.path ? `${ENGINE_NAMES[tool]} isn't installed on this computer` : tool && found?.loggedIn === false ? `Sign in to ${ENGINE_NAMES[tool]} first` : "";
 
   const agentOk = !tool || (!!found?.path && found.loggedIn !== false);
-  const canNext = step === 0 ? agentOk : step === 1 ? hasCode : true;
-  // Opened on an agent (a handoff, the agent menu), it skips what is already answered: an agent that is ready, and the code
-  // when the session's folder is here. Once, so it never moves somebody who has started choosing.
-  // Opened from + too, with the agent it starts on (Claude Code) ready and the session's folder found here: both answered, so
-  // it opens on one screen, the two answers on a line each with Change beside them, and what it may do (`quick`).
-  const skipped = useRef(false);
-  const [quick, setQuick] = useState(false);
-  useEffect(() => {
-    if (skipped.current || !hasMachine) return;
-    if (!agentOk) return void (skipped.current = true);
-    if (!prefilled) return;
-    skipped.current = true;
-    if (folder) {
-      setQuick(true);
-      setStep(2);
-    } else if (initialTool !== undefined) setStep(1);
-  }, [hasMachine, agentOk, prefilled, folder]); // eslint-disable-line react-hooks/exhaustive-deps
-  /** Back to one of the answers from the one-screen view: the steps show again from there. */
-  const change = (to: number) => {
-    setQuick(false);
-    setStep(to);
-  };
-  // Choosing the code is the answer to its step: go on to the last one rather than waiting for Next.
+  // Choosing the code answers its row: the choices close.
   const chose = (p: Picked | null) => {
     setNoFolder(false);
     setPicked(p);
-    if (p) setStep(2);
+    if (p) setOpen("");
   };
-  const last = step === 2;
-  const STEPS = ["Agent", "Code", "Access"];
+  const toggle = (id: "agent" | "code" | "where") => (e: React.MouseEvent<HTMLButtonElement>) => {
+    setOpener(e.currentTarget);
+    setOpen((o) => (o === id ? "" : id));
+  };
+  const accountLabel = account ? found?.accounts?.find((a) => a.id === account)?.label : undefined;
+  const codeName = folder ? folderName(folder.path) : noFolder ? "No folder" : "";
+  /** One row of the group: what it is, the answer, and its choices under it while open. */
+  const row = (id: "agent" | "code" | "where", k: string, value: React.ReactNode, pop: React.ReactNode, tone = "") => (
+    <div className="cd-rw" data-open={open === id || undefined}>
+      <button type="button" className="cd-row" aria-haspopup="true" aria-expanded={open === id} data-faded={(open && open !== id) || undefined} onClick={toggle(id)}>
+        <span className="cd-k">{k}</span>
+        <span className="cd-v" data-tone={tone || undefined}>{value}</span>
+        <Icon name={open === id ? "chevronUp" : "chevronDown"} size={12} className="cd-chev" />
+      </button>
+      {open === id && (
+        <CdPop label={k} opener={opener} onClose={() => setOpen("")}>
+          {pop}
+        </CdPop>
+      )}
+    </div>
+  );
+  const tick = <Icon name="check" size={13} className="cd-opt-tick" />;
+  const tags: string[] = [];
+  if (folder && canSplit && own) tags.push("New branch");
+  else if (folder?.branch) tags.push(folder.branch);
+  if (folder && !folder.isRepo && own) tags.push("Made a git repo first");
+  if (picked?.resume) tags.push(picked.resume.tool === tool ? `Continues “${picked.resume.title}”` : `History from “${picked.resume.title}”`);
+  if (dirs?.length) tags.push(`${dirs.length} more folder${dirs.length === 1 ? "" : "s"}`);
 
   return (
     <div className="overlay">
       <form
-        className="modal engine-modal cd"
+        className="modal engine-modal cd cd-a"
         ref={ref as unknown as React.RefObject<HTMLFormElement>}
         role="dialog" aria-modal="true"
         aria-label="Connect your coding agent"
         onSubmit={(e) => {
           e.preventDefault();
-          if (!last) {
-            if (canNext) setStep(step + 1);
-            return;
-          }
           if (!busy && hasCode && ready) void start();
         }}
       >
         <header className="cd-head">
-          <div className="cd-head-text">
-            <h2>{existing ? "Reconnect this agent" : "Work on code on your computer"}</h2>
-            <p>
-              {tool
-                ? // Nobody else is here in the open-source edition: "everyone here can watch and steer it" promised a room it hasn't.
-                  isLocal()
-                  ? "It runs on your computer, under your own login. Friday never sees a key."
-                  : "It runs on your computer, under your own login. Friday never sees a key, and everyone here can watch and steer it."
-                : "Your computer lends the folder and Friday Code works in it, with the files, terminal and preview shown here. Nothing to install."}
-            </p>
-          </div>
+          <h2>{existing ? "Reconnect this agent" : "Work on code on your computer"}</h2>
           <button type="button" className="icon-btn tiny" aria-label="Close" onClick={onClose}>
             <Icon name="x" size={14} />
           </button>
@@ -349,248 +338,153 @@ export function ConnectDialog({
               <MachineLine identity={identity} state={machine} refresh={refresh} />
             </div>
 
-            {!(quick && last) && (
-            <ol className="cd-steps" aria-label="Progress">
-              {STEPS.map((label, i) => (
-                <li key={label} className={i === step ? "now" : i < step ? "done" : ""}>
-                  <button type="button" disabled={i > step && !canNext} onClick={() => setStep(i)}>
-                    <span>{i < step ? <Icon name="check" size={11} /> : i + 1}</span>
-                    {label}
-                  </button>
-                </li>
-              ))}
-            </ol>
-            )}
-
-            {quick && last && (
-              <div className="cd-sum" aria-label="What it will be">
-                <button type="button" className="cd-sum-row" onClick={() => change(0)}>
-                  <span className="cd-sum-k">Agent</span>
-                  <span className="cd-sum-v">
-                    <EngineMark tool={tool} size={15} />
-                    {tool ? ENGINE_NAMES[tool] : "Friday Code"}
-                    {account && found?.accounts?.find((a) => a.id === account) && <span className="cd-sum-sub">{found.accounts.find((a) => a.id === account)!.label}</span>}
-                  </span>
-                  <span className="cd-sum-change">Change</span>
-                </button>
-                <button type="button" className="cd-sum-row" onClick={() => change(1)}>
-                  <span className="cd-sum-k">Code</span>
-                  <span className="cd-sum-v" title={folder?.path}>
-                    <Icon name="folder" size={14} />
-                    {folder ? folderName(folder.path) : "No folder"}
-                    {folder && (own ? <span className="cd-sum-sub">its own copy, on a new branch</span> : folder.branch ? <span className="cd-sum-sub">on {folder.branch}</span> : null)}
-                  </span>
-                  <span className="cd-sum-change">Change</span>
-                </button>
-              </div>
-            )}
-
-            {step === 0 && (
-            <section className="cd-step">
-              <h3>Which agent should do the work?</h3>
-              <div className="cd-tools" role="radiogroup" aria-label="Coding agent">
-                {/* First, because it needs nothing: a folder and Friday's own agent
-                    is the path for someone who has no CLI installed at all. Not in the open-source edition, which has no agent
-                    of its own: offered there as "Always ready", it said so only at the last step (2026-11-04 QA). */}
-                {!isLocal() && (
-                  <button type="button" role="radio" aria-checked={tool === ""} className={`cd-tool ${tool === "" ? "on" : ""}`} onClick={() => setTool("")}>
-                    <span className="cd-tool-icon">
-                      <EngineMark tool="" size={18} />
-                    </span>
-                    <span className="cd-tool-name">Friday Code</span>
-                    <span className="cd-pill ok">Always ready</span>
-                  </button>
-                )}
-                {[...tools.here, ...(moreTools ? tools.away : [])].map((t) => {
-                  const st = stateOf(t);
-                  return (
-                    <button key={t} type="button" role="radio" aria-checked={tool === t} className={`cd-tool ${tool === t ? "on" : ""}`} onClick={() => setTool(t)}>
-                      <span className="cd-tool-icon">
-                        <EngineMark tool={t} size={18} />
-                      </span>
-                      <span className="cd-tool-name">{ENGINE_NAMES[t]}</span>
-                      <span className={`cd-pill ${st.tone}`}>{st.text}</span>
-                    </button>
-                  );
-                })}
-                <MoreTools open={moreTools} count={tools.away.length} onToggle={() => setMoreTools((v) => !v)} className="cd-more" />
-              </div>
-              {tool && found && !found.path && (
-                <p className="cd-callout warn">
-                  {ENGINE_NAMES[tool]} isn't installed on {machine.machine?.name ?? "this computer"}. Install it there, then come back: this list updates by itself.
-                </p>
-              )}
-              {found?.path && <LoginNotice identity={identity} tool={found} onRecheck={refresh} />}
-              {found?.path && found.loggedIn !== false && <AccountPicker identity={identity} tool={found} value={account} onChange={setAccount} onChanged={refresh} />}
-            </section>
-            )}
-
-            {step === 1 && (
-            <section className="cd-step">
-              <h3>Which code should it work on?</h3>
-              {/* A list, one row a folder: its name, where it is and its branch, the session's own marked and first, the one
-                  picked ticked (Arun, 2026-10-24: "design this better too"). Then the ways to other code: any folder or repo
-                  on this computer, the session's repo cloned here, or none. */}
-              <div className="cd-folders" role="radiogroup" aria-label="Code it works on">
-                {[...recents, ...(folder && !recents.includes(folder.path) ? [folder.path] : [])].map((p) => {
-                  const on = folder?.path === p;
-                  return (
-                    <button key={p} type="button" role="radio" aria-checked={on} className={`cd-folder ${on ? "on" : ""}`} title={p} onClick={() => (on ? setStep(2) : pickRecent(p))}>
-                      <span className="cd-folder-icon">
-                        <Icon name="folder" size={15} />
-                      </span>
-                      <span className="cd-folder-text">
-                        <span className="cd-folder-name">
-                          {folderName(p)}
-                          {p === mainCwd && <span className="cd-chip-tag">This session's</span>}
-                        </span>
-                        <span className="cd-folder-path">
-                          {tidyPath(p, machine.home)}
-                          {on && folder?.branch ? ` · ${folder.branch}` : ""}
-                        </span>
-                      </span>
-                      {on && <Icon name="check" size={15} className="cd-folder-check" />}
-                    </button>
-                  );
-                })}
-                {/* Resuming belongs to a CLI's own history; lending a folder has none. */}
-                <WorkspacePill className="cd-folder cd-folder-more" text="Another folder or repo…" identity={identity} tool={tool || "claude"} value={folder} resume={tool ? picked?.resume : undefined} onPick={chose} onTool={setTool} />
-                {/* The way in for somebody on a second computer: the session's code is on the first one, so there is nothing
-                    here to pick. */}
-                {!folder && repo && (
-                  <button type="button" className="cd-folder cd-folder-more" disabled={cloning} onClick={() => void cloneHere()} title={`Clone ${repo.name} onto this computer`}>
-                    {cloning ? <span className="spinner" /> : <Icon name="download" size={14} />}
-                    <span className="ws-pill-text">Clone {repo.name} here</span>
-                  </button>
-                )}
-                {/* A scratch space, not the session's code: for an agent that reads, plans and answers without touching any files. */}
-                {!folder && tool && (
-                  <button type="button" role="radio" aria-checked={noFolder} className={`cd-folder cd-folder-more ${noFolder ? "on" : ""}`} onClick={() => (setNoFolder(!noFolder), setPicked(null))}>
-                    <Icon name="agent" size={14} />
-                    <span className="ws-pill-text">No folder: a blank space, not the session's code</span>
-                  </button>
-                )}
-              </div>
-              {folder && tool && <AlsoWorksIn identity={identity} folder={folder.path} value={dirs} onChange={setDirs} />}
-              {/* What happens to it, by who carries it on: the tool that had it resumes it whole, from its own memory; any other
-                  agent is only told its latest messages (up to sixty), which is also all the rest of the session gets. */}
-              {picked?.resume && (
-                <p className="cd-note">
-                  {picked.resume.tool === tool ? (
-                    <>
-                      Continues “{picked.resume.title}” in {ENGINE_NAMES[tool]}'s own memory. Its latest messages are also shared with this session, so every agent in it can work from them.
-                    </>
-                  ) : (
-                    <>
-                      Carries on from “{picked.resume.title}”. {tool ? ENGINE_NAMES[tool] : "Friday Code"} can't resume a {ENGINE_NAMES[picked.resume.tool]} conversation, so its latest messages are shared with this session as history instead.
-                    </>
-                  )}
-                </p>
-              )}
-            </section>
-            )}
-
-            {last && (
-            <>
-            {quick ? (
-              // On the one screen, each choice is a row of three or two, and a line on the one picked: the cards below say the
-              // same at three times the height.
-              <>
-                <section className="cd-step">
-                  <h3>What may it do without asking?</h3>
-                  <div className="cd-seg" role="radiogroup" aria-label="What it may do without asking">
-                    {MODES.map((m) => (
-                      <button key={m.id} type="button" role="radio" aria-checked={mode === m.id} className={mode === m.id ? "on" : ""} onClick={() => setMode(m.id)}>
-                        <Icon name={m.id === "plan" ? "eye" : m.id === "edits" ? "pencil" : "zap"} size={13} />
-                        {m.label}
+            <div className="cd-grp" aria-label="What it will be" role="group">
+              {row(
+                "agent",
+                "Agent",
+                <>
+                  <EngineMark tool={tool} size={15} />
+                  {tool ? ENGINE_NAMES[tool] : "Friday Code"}
+                  {accountLabel && <span className="cd-dim">{accountLabel}</span>}
+                </>,
+                <>
+                  <div className="cd-opts" role="radiogroup" aria-label="Coding agent">
+                    {/* Not in the open-source edition, which has no agent of its own (2026-11-04 QA). */}
+                    {!isLocal() && (
+                      <button type="button" role="radio" aria-checked={tool === ""} className="cd-opt" onClick={() => (setTool(""), setOpen(""))}>
+                        <EngineMark tool="" size={16} />
+                        <span className="cd-opt-name">Friday Code</span>
+                        {tool === "" && tick}
                       </button>
-                    ))}
+                    )}
+                    {[...tools.here, ...(moreTools ? tools.away : [])].map((t) => {
+                      const st = stateOf(t);
+                      const ok = st.tone === "ok";
+                      return (
+                        <button key={t} type="button" role="radio" aria-checked={tool === t} className="cd-opt" data-off={!ok || undefined} onClick={() => (setTool(t), ok && setOpen(""))}>
+                          <EngineMark tool={t} size={16} />
+                          <span className="cd-opt-name">{ENGINE_NAMES[t]}</span>
+                          {ok ? <span className="sr-only">Ready</span> : <span className={`cd-opt-r ${st.tone}`}>{st.text}</span>}
+                          {tool === t && tick}
+                        </button>
+                      );
+                    })}
+                    <MoreTools open={moreTools} count={tools.away.length} onToggle={() => setMoreTools((v) => !v)} className="cd-opt cd-opt-more" />
                   </div>
-                  <p className="cd-seg-note">{blurbFor(MODES.find((m) => m.id === mode) ?? MODES[0]!, tool ?? "")}</p>
-                </section>
-                {canSplit && (
-                  <section className="cd-step">
-                    <h3>Where does it work?</h3>
-                    <div className="cd-seg" role="radiogroup" aria-label="Where it works">
-                      <button type="button" role="radio" aria-checked={own} className={own ? "on" : ""} onClick={() => setOwnPick(true)}>
-                        <Icon name="gitBranch" size={13} />
-                        Its own copy
+                  {found?.path && found.loggedIn !== false && <AccountPicker identity={identity} tool={found} value={account} onChange={setAccount} onChanged={refresh} />}
+                  {found?.path && found.loggedIn !== false && <LoginNotice identity={identity} tool={found} onRecheck={refresh} />}
+                </>,
+              )}
+              {row(
+                "code",
+                "Code",
+                codeName ? (
+                  <>
+                    <Icon name="folder" size={14} />
+                    <span className="cd-v-text" title={folder?.path}>{codeName}</span>
+                  </>
+                ) : (
+                  <span className="cd-dim">{prefilled ? "Choose" : "Looking…"}</span>
+                ),
+                <>
+                  <div className="cd-opts" role="radiogroup" aria-label="Code it works on">
+                    {[...recents, ...(folder && !recents.includes(folder.path) ? [folder.path] : [])].map((p) => {
+                      const on = folder?.path === p;
+                      return (
+                        <button key={p} type="button" role="radio" aria-checked={on} className="cd-opt" title={p} onClick={() => (on ? setOpen("") : pickRecent(p))}>
+                          <Icon name="folder" size={14} />
+                          <span className="cd-opt-name">{folderName(p)}</span>
+                          <span className="cd-opt-r mono">{p === mainCwd ? "This session's" : tidyPath(p, machine.home)}</span>
+                          {on && tick}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="cd-opts cd-opts-more">
+                    {/* Resuming belongs to a CLI's own history; lending a folder has none. */}
+                    <WorkspacePill className="cd-opt cd-opt-more" text="Choose a folder…" identity={identity} tool={tool || "claude"} value={folder} resume={tool ? picked?.resume : undefined} onPick={chose} onTool={setTool} />
+                    {/* The way in from a second computer: the session's code is on the first one. */}
+                    {!folder && repo && (
+                      <button type="button" className="cd-opt cd-opt-more" disabled={cloning} onClick={() => void cloneHere()} title={`Clone ${repo.name} onto this computer`}>
+                        {cloning ? <span className="spinner" /> : <Icon name="download" size={14} />}
+                        <span className="cd-opt-name">Clone {repo.name}</span>
                       </button>
-                      <button type="button" role="radio" aria-checked={!own} className={!own ? "on" : ""} onClick={() => setOwnPick(false)}>
-                        <Icon name="folder" size={13} />
-                        This folder
+                    )}
+                    {/* A blank space, not the session's code: for an agent that reads, plans and answers. */}
+                    {tool && (
+                      <button type="button" role="radio" aria-checked={noFolder} className="cd-opt cd-opt-more" onClick={() => (setNoFolder(true), setPicked(null), setOpen(""))}>
+                        <Icon name="agent" size={14} />
+                        <span className="cd-opt-name">No folder</span>
+                        {noFolder && tick}
                       </button>
-                    </div>
-                    <p className="cd-seg-note">
-                      {own
-                        ? holder
-                          ? `On its own branch, so it can't touch ${holderName}'s files. Merge it when it's done.`
-                          : "On its own branch, so it can't overwrite anyone else's work. Merge it when it's done."
-                        : taken
-                          ? `Shared with ${holderName}: both edit it. Pick its own copy to keep their changes apart.`
-                          : "The folder as it is, on its current branch."}
-                    </p>
-                  </section>
+                    )}
+                  </div>
+                  {folder && tool && <AlsoWorksIn identity={identity} folder={folder.path} value={dirs} onChange={setDirs} />}
+                </>,
+              )}
+              {canSplit &&
+                row(
+                  "where",
+                  "Where",
+                  own ? "Own worktree" : "This folder",
+                  <div className="cd-opts" role="radiogroup" aria-label="Where it works">
+                    <button type="button" role="radio" aria-checked={own} className="cd-opt" onClick={() => (setOwnPick(true), setOpen(""))}>
+                      <Icon name="gitBranch" size={14} />
+                      <span className="cd-opt-name">Own worktree</span>
+                      <span className="cd-opt-r">{folder?.isRepo ? "new branch" : "git repo first"}</span>
+                      {own && tick}
+                    </button>
+                    <button type="button" role="radio" aria-checked={!own} className="cd-opt" onClick={() => (setOwnPick(false), setOpen(""))}>
+                      <Icon name="folder" size={14} />
+                      <span className="cd-opt-name">This folder</span>
+                      <span className="cd-opt-r">{taken ? `with ${holderName}` : folder?.branch ?? ""}</span>
+                      {!own && tick}
+                    </button>
+                  </div>,
+                  shares ? "warn" : "",
                 )}
-              </>
-            ) : (
-            <>
-            <section className="cd-step">
-              <h3>What may it do without asking?</h3>
-              <div className="cd-modes" role="radiogroup" aria-label="What it may do without asking" aria-describedby={holder && folder ? "cd-held" : undefined}>
-                {MODES.map((m) => (
-                  <button key={m.id} type="button" role="radio" aria-checked={mode === m.id} className={`cd-mode ${mode === m.id ? "on" : ""}`} onClick={() => setMode(m.id)}>
-                    <span className="cd-mode-top">
-                      <Icon name={m.id === "plan" ? "eye" : m.id === "edits" ? "pencil" : "zap"} size={14} />
-                      {m.label}
-                    </span>
-                    <span className="cd-mode-blurb">{blurbFor(m, tool ?? "")}</span>
-                  </button>
+              <div className="cd-row cd-row-seg">
+                <span className="cd-k" id="cd-access">Access</span>
+                <span className="cd-seg" role="radiogroup" aria-labelledby="cd-access">
+                  {MODES.map((m) => (
+                    <button key={m.id} type="button" role="radio" aria-checked={mode === m.id} aria-label={m.label} title={blurbFor(m, tool ?? "")} data-risky={(m.id === "full" && shares) || undefined} className={mode === m.id ? "on" : ""} onClick={() => setMode(m.id)}>
+                      {m.id === "full" && <Icon name="zap" size={11} />}
+                      {m.id === "plan" ? "Read" : m.id === "full" ? "Full" : m.label}
+                    </button>
+                  ))}
+                </span>
+              </div>
+            </div>
+
+            {tags.length > 0 && (
+              <div className="cd-tags">
+                {tags.map((t) => (
+                  <span key={t} className="cd-tag">{t}</span>
                 ))}
               </div>
-            </section>
-
-            {canSplit && (
-              <section className="cd-step">
-                <h3>Where does it work?</h3>
-                <div className="cd-modes" role="radiogroup" aria-label="Where it works">
-                  <button type="button" role="radio" aria-checked={own} className={`cd-mode ${own ? "on" : ""}`} onClick={() => setOwnPick(true)}>
-                    <span className="cd-mode-top">
-                      <Icon name="gitBranch" size={14} />
-                      Its own worktree
-                    </span>
-                    <span className="cd-mode-blurb">
-                      {folder?.isRepo
-                        ? "A separate copy on its own branch. It can't overwrite what others are doing, and you merge it when it's done."
-                        : "This folder isn't in git yet, so Friday makes it a repository first: one commit of what's here, on this computer, never pushed. Then this agent gets its own copy on its own branch."}
-                    </span>
-                  </button>
-                  <button type="button" role="radio" aria-checked={!own} className={`cd-mode ${!own ? "on" : ""}`} onClick={() => setOwnPick(false)}>
-                    <span className="cd-mode-top">
-                      <Icon name="folder" size={14} />
-                      This folder
-                    </span>
-                    <span className="cd-mode-blurb">{taken ? `Shared with ${holderName}, who is editing it too: both can change it.` : "The folder as it is, on its current branch."}</span>
-                  </button>
-                </div>
-              </section>
             )}
 
-            </>
-            )}
-
-            {/* Stays while the folder is held, whatever is picked, so choosing Plan doesn't make the dialog jump. On the one
-                screen the line under "Where does it work?" says it. */}
-            {holder && folder && !quick && (
-              <p className="cd-callout" id="cd-held">
-                {own
-                  ? `Its own worktree: it can edit without touching ${holderName}'s files.`
-                  : mode === "plan"
-                    ? `${holderName} is editing ${folder.name}; this one joins in Plan: it reads and advises without changing files.`
-                    : `${holderName} is editing ${folder.name} too: both work in it, and each one's changes show in the other's diff.${canSplit ? " Pick “Its own worktree” above to keep them apart." : ""}`}
+            {/* Warnings, one line each with the fix beside it. */}
+            {tool && found && !found.path && (
+              <p className="cd-warn">
+                {ENGINE_NAMES[tool]} isn't installed on this computer
+                <button type="button" onClick={refresh}>Check again</button>
               </p>
             )}
-            </>
+            {found?.path && found.loggedIn === false && <LoginNotice identity={identity} tool={found} onRecheck={refresh} />}
+            {shares && (
+              <p className="cd-warn" id="cd-held">
+                <Icon name="users" size={13} />
+                {holderName} is in {folder!.name} too
+                {canSplit && <button type="button" onClick={() => setOwnPick(true)}>Own worktree</button>}
+              </p>
+            )}
+            {shares && mode === "full" && (
+              <p className="cd-warn">
+                <Icon name="zap" size={13} />
+                Runs commands without asking
+                <button type="button" onClick={() => setMode("edits")}>Edits</button>
+              </p>
             )}
           </>
         )}
@@ -598,28 +492,27 @@ export function ConnectDialog({
 
         {hasMachine && (
           <footer className="cd-foot">
-            <span className="cd-why" role="status">{last ? whyNot : step === 0 && !agentOk ? (tool && found && !found.path ? `${ENGINE_NAMES[tool]} isn't installed here` : tool ? `Sign in to ${ENGINE_NAMES[tool]} first` : "") : ""}</span>
-            {step === 0 || (quick && last) ? (
-              <button type="button" className="btn ghost small" onClick={onClose}>
-                Cancel
-              </button>
-            ) : (
-              <button type="button" className="btn ghost small" onClick={() => setStep(step - 1)}>
-                Back
-              </button>
-            )}
-            {last ? (
-              <button type="submit" className="btn primary" disabled={busy || !hasCode || !ready || clash}>
-                {busy ? <span className="spinner" /> : <Icon name={tool ? "plug" : "folder"} size={13} />} {tool ? `Connect ${ENGINE_NAMES[tool]}` : "Lend this folder"}
-              </button>
-            ) : (
-              <button type="submit" className="btn primary" disabled={!canNext}>
-                Next
-              </button>
-            )}
+            <span className="cd-why" role="status">{whyNot}</span>
+            <button type="button" className="btn ghost small" onClick={onClose}>
+              Cancel
+            </button>
+            <button type="submit" className="btn primary" disabled={busy || !hasCode || !ready || clash || !agentOk}>
+              {busy && <span className="spinner" />} {busy ? "Connecting" : "Connect"}
+            </button>
           </footer>
         )}
       </form>
+    </div>
+  );
+}
+
+/** A row's choices, under it in the dialog: closes on a pick, Escape or a press outside, and keeps the dialog open. */
+function CdPop({ label, opener, onClose, children }: { label: string; opener: HTMLElement | null; onClose: () => void; children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useDismiss(ref, onClose, opener, { trap: false });
+  return (
+    <div ref={ref} className="cd-pop" role="group" aria-label={`${label} choices`}>
+      {children}
     </div>
   );
 }

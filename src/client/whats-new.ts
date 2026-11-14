@@ -15,13 +15,13 @@ export interface WhatsNewNotes {
 }
 
 export const WHATS_NEW: WhatsNewNotes = {
-  version: "0.2.24",
-  summary: "Your crew works in your coding sessions: hand a session on to a crew mate, bring its work back in, and ask fewer questions along the way.",
+  version: "0.2.25",
+  summary: "A coding session that says where everything stands in one place, and connects in one screen.",
   items: [
-    { icon: "handoff", title: "Keep this going", line: "Hand the rest of a session to a crew mate or a crew room, with where it stands. Its line follows it to the result." },
-    { icon: "users", title: "Your crew in any session", line: "Add a crew mate from the + with its role and memory, or @ it in the box. Bring its finished work in, a look first." },
-    { icon: "shield", title: "Asks only what matters", line: "Shipping, keys, sending data out and changes past its folders ask. Routine work in its own folders just runs." },
-    { icon: "agent", title: "A simpler New agent", line: "A face, a name, what it helps with and its coding tool. Everything else is in its Settings, from the gear." },
+    { icon: "agent", title: "One state, said plainly", line: "Every agent reads the same in its tab, the feed, the sidebar and the status bar. An error says what went wrong, with Try again." },
+    { icon: "list", title: "Every agent in one press", line: "Press it to see each agent here, what it's doing, and what's out with your crew." },
+    { icon: "columns", title: "The agents above the chat", line: "One switch at the top of the chat for all of them. The header is just the session." },
+    { icon: "plug", title: "Connect in one screen", line: "Agent, code, where it runs and how much it may do, each picked in place." },
   ],
 };
 

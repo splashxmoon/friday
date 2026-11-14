@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentView } from "../agents.js";
 import { can, canDriveLane, driverOf, runOf, type SessionState } from "../session/projection.js";
+import { agentState } from "../agent-state.js";
 import { engineName, ENGINE_NAMES, ENGINE_TOOLS, MAIN_LANE, SESSION_LANES, type EngineTool, type LaneControl, type LaneTrigger, type Member } from "../types.js";
 import { EngineMark } from "./BrandMarks.js";
 import { Icon, type IconName } from "./icons.js";
@@ -177,13 +178,8 @@ export function Lanes({
   };
 
   const here = [MAIN_LANE, ...lanes.map((l) => l.id)].filter((id) => id !== MAIN_LANE || !!state.engines[MAIN_LANE]?.tool || !!state.options.agent || lanes.length === 0);
-  const stateOf = (id: string): string => {
-    const e = state.engines[id];
-    if (e?.tool && !e.online) return "Offline";
-    if (state.approvals[id]) return "Needs you";
-    const run = runOf(state, id).status;
-    return run === "running" ? "Working" : run === "paused" ? "Paused" : "Ready";
-  };
+  // In the words every view uses (agent-state.ts): "Needs you" only for whoever it waits on.
+  const stateOf = (id: string): string => agentState(state, id, me.id).word;
   return (
     <>
       {/* Just a plus: adding an agent is what it is for. Who is here and what each is doing is said in its tooltip. */}
@@ -200,6 +196,7 @@ export function Lanes({
           onConnect={onConnect}
           onClose={() => setManaging(false)}
           solo={!!solo}
+          meId={me.id}
         />
       )}
     </>
@@ -214,6 +211,7 @@ function ManageLanes({
   onClose,
   onConnect,
   solo,
+  meId,
 }: {
   state: SessionState;
   agents: AgentView[];
@@ -222,6 +220,7 @@ function ManageLanes({
   onClose: () => void;
   onConnect: (tool?: EngineTool) => void;
   solo: boolean;
+  meId: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useDismiss(ref, onClose);
@@ -300,7 +299,7 @@ function ManageLanes({
                       <span className="lane-card-name">{c.name}</span>
                       <span className="lcv-sub">{sub}</span>
                     </div>
-                    <span className={`lcv-state${running ? " on" : ""}`}>{running ? "Running" : run.status === "idle" ? "Ready" : run.status}</span>
+                    <span className={`lcv-state${running ? " on" : ""}`}>{agentState(state, c.id, meId).word}</span>
                   </header>
                   <p className="lcv-desc">{lane ? triggerLabel(state, lane.trigger) : "The session's own agent. It answers whoever has the wheel."}</p>
                   <div className="lcv-tags">

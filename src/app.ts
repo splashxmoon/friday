@@ -5206,7 +5206,7 @@ export async function createApp(o: AppOptions) {
         if (said) previews.push(said);
         // A computer is up when it is linked, or when it is the one this Friday runs on: the open-source edition's own computer is
         // never a link, so every finished session's tool still read "Offline" after a restart (2026-11-04 retest).
-        const crew = crewOf(state, computerHere);
+        const crew = crewOf(state, computerHere, me.id);
         if (crew) crews.push(crew);
         const pr = prOf(state);
         if (pr) prs.push(pr);

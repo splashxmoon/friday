@@ -167,7 +167,7 @@ export function stoppedLine(error: string | undefined | null): string {
 }
 
 /** "3 PM", "3:30 PM": when a coding tool's usage comes back, as a row says it. */
-const backAt = (t: number) => new Date(t).toLocaleTimeString([], { hour: "numeric", ...(new Date(t).getMinutes() ? { minute: "2-digit" } : {}) });
+export const backAt = (t: number) => new Date(t).toLocaleTimeString([], { hour: "numeric", ...(new Date(t).getMinutes() ? { minute: "2-digit" } : {}) });
 
 /**
  * A stopped agent's line in its session's row, from what really happened: out of usage until when (audit CODE-5 A, Arun

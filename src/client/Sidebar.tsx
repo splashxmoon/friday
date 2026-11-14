@@ -1,5 +1,6 @@
 import { ChevronRightIcon, FolderGit2Icon, PlusIcon, SearchIcon, SettingsIcon, LogOutIcon, MoonIcon, SunIcon, XIcon } from "lucide-react";
 import { openKeepGoing } from "./crew-carry-open.js";
+import { plainLine } from "./team-room.js";
 import { dragEnds } from "./drag-end.js";
 import { SessionPrBadge } from "./SessionPrs.js";
 import { useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
@@ -34,8 +35,9 @@ import { isLocal, planLimits, planNow } from "./edition.js";
 import { TeamTip } from "./TeamTip.js";
 import type { SessionSummary } from "../board.js";
 import { EngineMark, FridayMark } from "./BrandMarks.js";
-import { isRawError, stoppedLine, stoppedRow } from "../activity-line.js";
-import { limitHit } from "../limit-reset.js";
+import { backAt, isRawError } from "../activity-line.js";
+import { agentLine, lowerWord } from "../agent-line.js";
+import { agentWord, CrewMark, CrewTools } from "./crew-marks.js";
 import { namedBranch } from "./branch-names.js";
 import { ENGINE_NAMES, type EngineTool } from "../types.js";
 import { doingWords, QUIET_AFTER_MS, quietFor } from "../step-words.js";
@@ -151,14 +153,6 @@ export function canFork(crew: Crew | null | undefined, local: boolean): boolean 
   return !local || !crew || crew.agents.some((a) => !!a.tool);
 }
 
-/**
- * An agent's name as the lists say it: the main lane's "Main" is its coding tool, or Friday Code when it has none, as the Agent
- * Board names it (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL"; the sidebar said "Main", the board
- * "Friday Code" and the rail "Main" for "Claude Code working").
- */
-export function agentWord(name: string, tool?: EngineTool | null): string {
-  return name === "Main" ? (tool ? ENGINE_NAMES[tool] : "Friday Code") : name;
-}
 
 /** A line said in the app's own notice, not the browser's alert (App.tsx "friday:notice"). */
 export const sayNotice = (text: string) => void window.dispatchEvent(new CustomEvent("friday:notice", { detail: text }));
@@ -324,7 +318,8 @@ export function Sidebar(p: SidebarProps) {
 /** A crew state as the shared presence ring draws it (presence.tsx). */
 // Stopped part way through its plan ("stopped at 3 of 5", Carry on waiting on you) reads as needs you, as the Work rail and bar
 // say it: the amber ring and "?", and the row rises with Needs you (coordinator, 2026-10-29).
-const CREW_PRESENCE: Record<CrewState, Presence> = { needs: "needs", working: "working", failed: "error", offline: "asleep", done: "idle", short: "needs", stopped: "idle", idle: "idle" };
+// Waiting on somebody else is the quiet dashed ring, never amber: amber is for the one it waits on (audit B-14).
+const CREW_PRESENCE: Record<CrewState, Presence> = { needs: "needs", waiting: "queued", working: "working", failed: "error", limited: "limited", offline: "asleep", done: "idle", short: "needs", stopped: "idle", idle: "idle" };
 /** A session whose agent stopped short of its plan, waiting on the person to carry it on, with nothing of it still running. */
 const stoppedShort = (crew: Crew | null | undefined, working: unknown): boolean => !working && !!crew?.agents.some((x) => x.state === "short");
 
@@ -334,8 +329,8 @@ const stopper = (crew: Crew | null | undefined, needs: Attention): string => {
   return x ? agentWord(x.name.replace(/^[^']+'s /, ""), x.tool) : (needs.agent ?? "The agent");
 };
 
-/** Every agent that stopped did so on its usage limit: waiting on the clock, amber, never the red of an error. */
-const onlyLimited = (a: Crew["agents"]) => a.some((x) => x.state === "failed") && a.filter((x) => x.state === "failed").every((x) => !!x.why && !!limitHit(x.why));
+/** Every agent that stopped did so on its usage limit: waiting on the clock, never the red of an error. */
+const onlyLimited = (a: Crew["agents"]) => a.some((x) => x.state === "limited") && !a.some((x) => x.state === "failed");
 
 /**
  * A session's state as a small ring just after its name (Arun, 2026-11-03: "get rid of the agent icon to the left … add the
@@ -354,7 +349,7 @@ function SessionRing({ state, crew, working, title, unread = false, stopped = fa
         </svg>
       </span>
     );
-  const pr: Presence | null = state === "needs" ? (stopped && !working ? "error" : "needs") : state === "working" ? "working" : onlyLimited(a) ? "needs" : a.some((x) => x.state === "failed") ? "error" : null;
+  const pr: Presence | null = state === "needs" ? (stopped && !working ? "error" : "needs") : state === "working" ? "working" : a.some((x) => x.state === "failed") ? "error" : onlyLimited(a) ? "limited" : a.some((x) => x.state === "waiting") ? "queued" : null;
   // Finished: a green ring where the ring turned (Arun, 2026-11-03: "add something to show that it was finished"; 2026-11-04:
   // "also can they make this just a green ring instead"), the size and place of the other rings, lit while you haven't opened it
   // since, quieter once you have.
@@ -370,7 +365,6 @@ function SessionRing({ state, crew, working, title, unread = false, stopped = fa
   return <StateRing state={pr} title={title} />;
 }
 
-const CREW_WORD: Record<CrewState, string> = { needs: "needs you", working: "working", failed: "stopped", offline: "offline", done: "done", short: "stopped early", stopped: "stopped", idle: "ready" };
 /** A working agent unheard for QUIET_AFTER_MS: said as quiet, never as working or done (step-words.ts). */
 const isQuiet = (x: { state: CrewState; heardAt?: number }, now: number) => x.state === "working" && !!x.heardAt && now - x.heardAt > QUIET_AFTER_MS;
 /** A session whose every working agent has gone quiet: its ring is the dashed one, and it sorts after those at work. */
@@ -384,7 +378,7 @@ export const crewQuiet = (crew: Crew | null | undefined, now: number): boolean =
  * who has gone quiet and for how long, what the one at work is doing this minute ("Codex · Editing Sidebar.tsx"), then how the
  * agents stand. Said agent first, so a line cut short keeps who and loses the detail. What needs you is the row's own line (ChatRow).
  */
-function CrewLine({ crew, now }: { crew: Crew; now: number }) {
+export function CrewLine({ crew, now }: { crew: Crew; now: number }) {
   const a = crew.agents;
   const short = (n: string, tool?: EngineTool) => agentWord(n.replace(/^[^']+'s /, ""), tool);
   const of = (st: CrewState) => a.filter((x) => x.state === st);
@@ -394,32 +388,44 @@ function CrewLine({ crew, now }: { crew: Crew; now: number }) {
   // Stopped short of its plan, among several agents too: the row sits under Needs you, so its line says why, never "ready"
   // (Arun, 2026-10-29: "Yes, fix them"; "2 agents · ready" under Needs you).
   const early = of("short");
+  const held = a.filter((x) => x.state === "needs" || x.state === "waiting");
+  // Each agent's words are the one selector's (agent-state.ts), the same its tab, the feed and the status bar say: "Rio hit an
+  // error · too many requests", "Rio · waiting on Ada" (audit B-19, B-35).
+  const line = (x: Crew["agents"][number]) => agentLine(short(x.name, x.tool), { phase: x.state === "failed" ? "failed" : "ready", word: x.until ? `${x.word} until ${backAt(x.until)}` : x.word, needsYou: false, held: null, ...(x.plain ? { error: { plain: x.plain, raw: x.why ?? "" } } : {}) });
+  const about = failed[0] ?? held[0] ?? working[0] ?? quiet[0] ?? (a.length === 1 ? a[0] : (early[0] ?? of("limited")[0])) ?? null;
   const words =
-    failed.length && failed[0]!.why ? stoppedRow(short(failed[0]!.name, failed[0]!.tool), failed[0]!.why)
+    failed.length ? line(failed[0]!)
+    : held.length ? line(held[0]!)
     // Handed on to a crew mate: said in the row's own line while it works (Code and Crew, connected, 2026-11-13).
     : crew.handed && working.every((x) => crew.handedLanes?.includes(x.lane)) ? crew.handed
     : working.length > 1 ? "working"
     : working.length ? `${short(working[0]!.name, working[0]!.tool)} · ${working[0]!.doing ? doingWords(working[0]!.doing) : "working"}`
     : quiet.length ? `${short(quiet[0]!.name, quiet[0]!.tool)} · no update in ${quietFor(quiet[0]!.heardAt!, now)}`
-    : failed.length ? `${short(failed[0]!.name, failed[0]!.tool)} stopped`
     : a.every((x) => x.state === "offline") ? "Offline"
-    : a.length === 1 ? `${short(a[0]!.name, a[0]!.tool)} · ${a[0]!.plan ? `stopped at ${a[0]!.plan}` : CREW_WORD[a[0]!.state]}`
-    : early.length ? `${short(early[0]!.name, early[0]!.tool)} · stopped at ${early[0]!.plan}`
-    : a.some((x) => x.state === "done") ? `${a.length} agents · done`
-    : `${a.length} agents · ready`;
+    : a.length === 1 || early.length || of("limited").length ? line(early[0] ?? of("limited")[0] ?? a[0]!)
+    : null;
+  // Several finished or ready, nothing more telling to say: no words, each one's coding tool at the line's right, under the time
+  // (Arun, 2026-11-10: "instead of 3 agents done text can we have the coding tool icons on the right side and get rid of the
+  // text"). What the words said is the marks' label.
+  if (words === null) {
+    const said = `${a.length} agents, ${a.some((x) => x.state === "done") ? "done" : "ready"}`;
+    return (
+      <span className="sb-crew sb-crew-end">
+        <CrewTools agents={a.map((x) => ({ key: x.lane, tool: x.tool, face: x.face }))} names={a.map((x) => short(x.name, x.tool))} label={`${said}: ${a.map((x) => short(x.name, x.tool)).join(", ")}`} />
+      </span>
+    );
+  }
+  // Several at work and nothing more telling than that: the word on the left and their marks at the line's right, under the time,
+  // where the same row's marks sit once they finish and a teammate's row has them (TeamSessions.tsx), not at its left.
+  const split = working.length > 1 && words === "working";
   return (
-    <span className="sb-crew">
+    <span className={`sb-crew${split ? " sb-crew-split" : ""}`}>
       {/* Several at work: each one's coding tool, small, in place of a count (Arun, 2026-11-03: "add the icons off the agents
           working instead of 3 working, make the icons small but visible"). */}
-      {working.length > 1 && (
-        <span className="sb-crew-tools" role="img" aria-label={`${working.length} working: ${working.map((x) => short(x.name, x.tool)).join(", ")}`}>
-          {working.slice(0, 5).map((x) => (
-            <span key={x.lane} title={short(x.name, x.tool)}>{x.tool ? <EngineMark tool={x.tool} size={12} /> : x.name === "Main" ? <FridayMark size={12} /> : <Icon name="agent" size={12} />}</span>
-          ))}
-          {working.length > 5 && <span className="sb-crew-more">+{working.length - 5}</span>}
-        </span>
-      )}
-      <span className={`truncate sb-crew-words${failed.length && failed[0]!.why ? " failed" : working.length ? " working" : quiet.length ? " quiet" : failed.length ? " failed" : of("short").length ? " needs" : ""}`}>{words}</span>
+      {working.length > 1 && <CrewTools agents={working.map((x) => ({ key: x.lane, tool: x.tool, face: x.face }))} names={working.map((x) => short(x.name, x.tool))} label={`${working.length} working: ${working.map((x) => short(x.name, x.tool)).join(", ")}`} />}
+      {/* The agent the line is about, in the face it wears everywhere (agent-face.ts): two of Friday's agents are told apart here too. */}
+      {about && working.length <= 1 && <span className="sb-crew-mark" aria-hidden="true"><CrewMark x={about} /></span>}
+      <span className={`truncate sb-crew-words${failed.length ? " failed" : held.some((x) => x.you) ? " needs" : held.length ? "" : working.length ? " working" : quiet.length ? " quiet" : early.some((x) => x.you) ? " needs" : ""}`}>{words}</span>
     </span>
   );
 }
@@ -732,7 +738,8 @@ function CrewList({ p }: { p: SidebarProps }) {
                 <b>{r.name}</b>
                 {r.at ? <span className="oss-crew-when">{shortAgo(r.at)}</span> : null}
               </span>
-              <span className="oss-crew-line">{r.line}</span>
+              {/* A room's last words as plain text: the lead's Markdown ("**Notes**", `code`, its lists) as words on one line. */}
+              <span className="oss-crew-line">{plainLine(r.line)}</span>
             </span>
           </button>
         ))}
@@ -1732,7 +1739,7 @@ function ChatRow({
             <span className="truncate text-[var(--text-muted)]">{quiet}</span>
           ) : needs ? (
             // A stopped run says who stopped and how, from what happened (audit CODE-4: "Claude Code stopped with an error").
-            <span className="truncate text-[var(--ink)]">{withCode(shortPaths(needs.kind === "stopped" ? stoppedRow(stopper(crew, needs), needs.detail ?? needs.text) : isRawError(needs.text) ? "Needs you" : needs.text))}</span>
+            <span className="truncate text-[var(--ink)]">{withCode(shortPaths(needs.kind === "stopped" ? `${stopper(crew, needs)} ${lowerWord(needs.text)}` : isRawError(needs.text) ? "Needs you" : needs.text))}</span>
           ) : compact && !short ? null : crew ? (
             <CrewLine crew={crew} now={now} />
           ) : summary ? (
@@ -1767,7 +1774,8 @@ function ChatRow({
               person chose, and as a boxed mono tag they were the loudest thing in the row (audit CODE-15 A, Arun 2026-11-04). */}
           {branchChip && !compact && !quiet && namedBranch(r.repos?.find((u) => u.branch)?.branch) && (
             <span className="sb-row-branch" title={`On branch ${r.repos!.find((u) => u.branch)!.branch}`}>
-              · {r.repos!.find((u) => u.branch)!.branch}
+              <span className="sb-row-dot">· </span>
+              {r.repos!.find((u) => u.branch)!.branch}
             </span>
           )}
           {r.role !== "owner" && (

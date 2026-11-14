@@ -774,7 +774,9 @@ export function HandoffBar({ targets, active, onPick, more, label = "Pass on", o
       )}
       {open && (
         <div className="ho-menu" role="menu" style={pos}>
-          {targets.length > 0 && <div className="ho-menu-h">In this session</div>}
+          {/* Who is already here first: the agents (the work switches to them, with what it knows), then the people (they take
+              control of it, with a note), then anything new (audit B-22). */}
+          {targets.length > 0 && <div className="ho-menu-h">Agents here</div>}
           {targets.map((t) =>
             row(t.id, t.tint, t.mark, t.name, t.suggested && t.why ? t.why : t.auto ? "Wakes by itself when this finishes" : undefined,
               <>

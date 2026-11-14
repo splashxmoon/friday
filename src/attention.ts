@@ -1,6 +1,7 @@
-import { stoppedLine } from "./activity-line.js";
+import { agentState, approvers, plainError, saysItAll, steersLane, type AgentPhase } from "./agent-state.js";
+import { faceIndex } from "./agent-face.js";
 import { carefulClass } from "./command-class.js";
-import { carriedOn, limitHit } from "./limit-reset.js";
+import { carriedOn, planLimitHit } from "./limit-reset.js";
 import { laneName } from "./session/core.js";
 import { driverOf, taskAllowApplies, questionsTo, requestsTo, roleOf, runOf, type SessionState } from "./session/projection.js";
 import { MAIN_LANE, type EngineTool } from "./types.js";
@@ -82,9 +83,11 @@ export function attentionIn(state: SessionState, meId: string): Attention[] {
 
   for (const lane of [MAIN_LANE, ...state.lanes.map((l) => l.id)]) {
     const driver = driverOf(state, lane);
-    // A coding tool asking before it runs something: it sits there until somebody says yes or no.
+    // A coding tool asking before it runs something: it sits there until somebody says yes or no. Who it waits on is one rule
+    // (agent-state.ts approvers), the one its tab, its sidebar row and the status bar go by: "Needs you" for Ada, "Waiting on
+    // Ada" for everyone else (audit B-14).
     const ask = state.approvals[lane];
-    if (ask && (driver ? driver.id === meId : roleOf(state, meId) === "owner")) {
+    if (ask && approvers(state, lane)?.ids.includes(meId)) {
       const first = ask.items[0] ? `\`${ask.items[0].length > 80 ? `${ask.items[0].slice(0, 79)}…` : ask.items[0]}\`` : "";
       const more = ask.items.length > 1 ? ` and ${ask.items.length - 1} more` : "";
       const text = ask.scope === "commands" && first ? `${agentName(state, lane)} wants to run ${first}${more}` : `${agentName(state, lane)} is asking before it goes on`;
@@ -93,31 +96,30 @@ export function attentionIn(state: SessionState, meId: string): Attention[] {
       continue;
     }
     const run = runOf(state, lane);
-    // A coding tool that finished its turn on a question: it does nothing more until somebody answers. Whose it is, is the
-    // permission request's rule: the lane's driver, or the owner when nobody drives it.
+    // A coding tool that finished its turn on a question: it does nothing more until somebody answers.
     const asked = state.asks[lane];
-    if (asked && run.status !== "running" && (driver ? driver.id === meId : roleOf(state, meId) === "owner")) {
+    if (asked?.questions.length && run.status !== "running" && steersLane(state, meId, lane)) {
       const more = asked.questions.length - 1;
       out.push(of("ask", `${asked.questions[0]!.question}${more ? ` (and ${more} more)` : ""}`, asked.seq, lane));
       continue;
     }
     // It stopped, and you are the one who can restart it. Not a coding tool out on its usage limit: Friday hands its task to
     // another agent and it carries on when the limit lifts, and its tab says so; a card nagging about it sat for an hour on
-    // Arun's screen (2026-10-25: "can you get rid of this for me").
+    // Arun's screen (2026-10-25: "can you get rid of this for me"). A passing per-minute 429 is an error like any other, worth
+    // trying again (agent-state.ts plainError).
     // Nor a turn the server's restart cut off (engine/hub.ts): it picks up again by itself when the tool reconnects, so
     // there's nothing to do. In the desktop app that's every time the app is quit or updated mid-turn.
     // Nor one not signed in whose task another agent carried on (agent-mesh.ts onLimit): the work isn't waiting on anybody.
-    if (run.status === "error" && driver?.id === meId && !limitHit(run.error) && !carriedOn(state, lane) && !/^The server restarted in the middle of /.test(run.error ?? "")) {
-      // Said in plain words where it is listed; the tool's own error stays in `detail` and in the session's feed (stoppedLine).
-      const said = run.error ? stoppedLine(run.error) : "The run stopped.";
-      out.push({ ...of("stopped", said, run.sinceSeq, lane), ...(run.error && said !== run.error.trim() ? { detail: run.error } : {}) });
+    if (run.status === "error" && driver?.id === meId && !planLimitHit(run.error) && !carriedOn(state, lane) && !/^The server restarted in the middle of /.test(run.error ?? "")) {
+      // Said in plain words where it is listed, as everywhere (agent-state.ts plainError); the tool's own words stay in `detail`.
+      const said = `Hit an error · ${plainError(run.error)}`;
+      out.push({ ...of("stopped", said, run.sinceSeq, lane), ...(run.error && !saysItAll(run.error) ? { detail: run.error } : {}) });
     }
   }
 
   // A message from another session waiting for someone who can steer its agent to let it through: it sat there unseen.
   for (const h of state.peersHeld ?? []) {
-    const driver = driverOf(state, h.lane);
-    if (driver ? driver.id === meId : roleOf(state, meId) === "owner") out.push(of("ask", `${h.fromName} in "${h.fromTitle}" sent a message: let it through or turn it down`, h.seq, h.lane));
+    if (steersLane(state, meId, h.lane)) out.push(of("ask", `${h.fromName} in "${h.fromTitle}" sent a message: let it through or turn it down`, h.seq, h.lane));
   }
 
   // Somebody said your name: it waits until you say or do anything in the session (projection clears it).
@@ -194,14 +196,16 @@ export function workingIn(state: SessionState): Working | null {
  * the most recent message maybe we add the agent status and stuff with their icons"): each agent's name, the coding tool it runs
  * on and its state in a word, read off the state the attention poll has already read, so it costs nothing extra.
  */
-export type CrewState = "needs" | "working" | "failed" | "offline" | "done" | "short" | "stopped" | "idle";
+export type CrewState = "needs" | "waiting" | "working" | "failed" | "limited" | "offline" | "done" | "short" | "stopped" | "idle";
 export interface Crew {
   sid: string;
   /**
-   * `plan`: "3 of 5", where it stopped with its plan short ("short"). While it works, `doing` is its latest step and `heardAt` when it
-   * last said anything; stopped on an error, `why` is the error's first line.
+   * Each agent as the one selector has it for the person asking (agent-state.ts agentState): `state` its kind, `word` its words
+   * ("Waiting on Ada", "Hit an error"), the same words its tab and the status bar use. `plan`: "3 of 5", where it stopped with its
+   * plan short ("short"). While it works, `doing` is its latest step and `heardAt` when it last said anything; stopped on an error,
+   * `why` is the error's first line and `plain` what it means; out of usage, `until` when it lifts.
    */
-  agents: { lane: string; name: string; tool?: EngineTool; state: CrewState; plan?: string; doing?: { name: string; target?: string }; heardAt?: number; why?: string }[];
+  agents: { lane: string; name: string; tool?: EngineTool; /** Friday's own agent's face (agent-face.ts), the same one its tab and its replies wear. */ face?: number; state: CrewState; word: string; /** Held up on the person asking: only then is it amber. */ you?: true; plan?: string; doing?: { name: string; target?: string }; heardAt?: number; why?: string; plain?: string; until?: number | null }[];
   /** A crew mate has its work now (crew.handed): "Kit is on it", and the lanes it works on it in here (crew-carry.ts). */
   handed?: string;
   handedLanes?: string[];
@@ -209,28 +213,28 @@ export interface Crew {
 /** The most agents a row shows. */
 const CREW_MAX = 6;
 
+const CREW_OF: Record<AgentPhase, CrewState> = { needs: "needs", waiting: "waiting", working: "working", paused: "waiting", failed: "failed", limited: "limited", offline: "offline", stopped: "stopped", short: "short", done: "done", ready: "idle" };
+
 /**
- * `hostUp`: whether the computer a lane's tool runs on is linked now. A tool that isn't attached is only offline when its computer
- * is: after a restart every finished session's tool read "Offline" until it was sent something, though the computer was right
- * here (2026-11-04 end-to-end check).
+ * Each agent in a session and where it stands, for the person `meId` (audit B-14: a question to Ada read "needs you" on everyone's
+ * row). `hostUp`: whether the computer a lane's tool runs on is linked now. A tool that isn't attached is only offline when its
+ * computer is: after a restart every finished session's tool read "Offline" until it was sent something, though the computer was
+ * right here (2026-11-04 end-to-end check).
  */
-export function crewOf(state: SessionState, hostUp?: (hostId: string) => boolean): Crew | null {
+export function crewOf(state: SessionState, hostUp?: (hostId: string) => boolean, meId = ""): Crew | null {
   const lanes = [MAIN_LANE, ...state.lanes.filter((l) => l.control.kind !== "standing").map((l) => l.id)];
   // The main lane counts once something is in it: a coding tool attached, or a run that has gone; a session of coding tools
   // alone has an empty main lane that is no one.
   const used = (lane: string) => lane !== MAIN_LANE || !!state.engines[MAIN_LANE] || !!state.finished?.[MAIN_LANE] || state.run.status !== "idle" || state.lanes.length === 0;
   const agents = lanes.filter(used).map((lane) => {
     const engine = state.engines[lane];
-    const run = runOf(state, lane);
-    const ran = !!state.finished?.[lane];
-    // Finished with its plan short: "stopped at 3 of 5", as the Work rail says it, never "done" (QA, 2026-10-28).
+    const now = agentState(state, lane, meId, hostUp ? { hostUp } : {});
+    const st = CREW_OF[now.phase];
     const plan = state.planDone?.[lane];
-    const short = !!plan && plan.done < plan.of;
-    const st: CrewState = state.openQuestions[lane] || state.approvals?.[lane] || run.status === "waiting_for_human" ? "needs" : run.status === "running" ? "working" : run.status === "error" && !carriedOn(state, lane) ? "failed" : run.status === "error" ? "idle" : engine?.tool && !engine.online && !(engine.hostId && hostUp?.(engine.hostId)) ? "offline" : state.stopped?.[lane] !== undefined ? "stopped" : ran && short ? "short" : ran ? "done" : "idle";
     const doing = st === "working" ? state.doing?.[lane] : undefined;
     const heard = st === "working" ? heardOf(state, lane) : undefined;
-    const why = st === "failed" ? run.error?.trim().split(/\r?\n/)[0]?.slice(0, 160) : undefined;
-    return { lane, name: laneName(state, lane), ...(engine?.tool ? { tool: engine.tool } : {}), state: st, ...(st === "short" ? { plan: `${plan!.done} of ${plan!.of}` } : {}), ...(doing ? { doing } : {}), ...(heard ? { heardAt: heard } : {}), ...(why ? { why } : {}) };
+    const why = now.error?.raw.trim().split(/\r?\n/)[0]?.slice(0, 160);
+    return { lane, name: laneName(state, lane), ...(engine?.tool ? { tool: engine.tool } : { face: faceIndex(state, lane) }), state: st, word: now.word, ...(now.needsYou ? { you: true as const } : {}), ...(st === "short" && plan ? { plan: `${plan.done} of ${plan.of}` } : {}), ...(doing ? { doing } : {}), ...(heard ? { heardAt: heard } : {}), ...(now.error ? { plain: now.error.plain, ...(why ? { why } : {}) } : {}), ...(now.until !== undefined ? { until: now.until } : {}) };
   });
   // A lane handed on to a crew mate: the row's own line says who has it, no badge of its own (Code and Crew, connected, 2026-11-13:
   // "The sidebar row says 'Kit is on it'").

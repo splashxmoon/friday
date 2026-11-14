@@ -4,6 +4,7 @@ import styles from "@/components/aicss/FileDiff.module.css";
 import { AgentCodeLine, useAgentCodeTokens, type AgentCodeLanguage, type AgentCodeToken } from "@/components/agents/agent-code";
 import { Checkbox } from "@/components/motion/checkbox";
 import { Icon } from "./icons.js";
+import { Tip } from "@/components/dass/page-bits";
 import { watchersOf } from "../focus.js";
 import { diffHere, useFocus } from "./focusStore.js";
 import { takesShowDiff } from "./focusDiff.js";
@@ -293,13 +294,26 @@ export function DiffView({
         </button>
         <span className="dv-actions">
           {change !== "deleted" && (
-            <button type="button" className="icon-btn tiny rsp-path-copy" title="Open in the tree" aria-label={`Open ${path} in the tree`} onClick={() => window.dispatchEvent(new CustomEvent("friday:open-file", { detail: { path } }))}>
-              <Icon name="folderOpen" size={12} />
-            </button>
+            <Tip label="Open in the tree">
+              <button type="button" className="icon-btn tiny rsp-path-copy" aria-label={`Open ${path} in the tree`} onClick={() => window.dispatchEvent(new CustomEvent("friday:open-file", { detail: { path } }))}>
+                <Icon name="folderOpen" size={12} />
+              </button>
+            </Tip>
           )}
-          <button type="button" className="icon-btn tiny rsp-path-copy" title={pathCopied ? "Copied" : "Copy the path"} aria-label={pathCopied ? "Path copied" : `Copy the path of ${path}`} onClick={() => void copy(path, setPathCopied)}>
-            <Icon name={pathCopied ? "check" : "copy"} size={12} />
-          </button>
+          <Tip label={pathCopied ? "Copied" : path}>
+            <button type="button" className="icon-btn tiny rsp-path-copy" aria-label={pathCopied ? "Path copied" : `Copy the path of ${path}`} onClick={() => void copy(path, setPathCopied)}>
+              <Icon name={pathCopied ? "check" : "copy"} size={12} />
+            </button>
+          </Tip>
+          {/* The patch's copy sits with the file's other actions (Arun, 2026-11-09): a footer of its own under the diff left one
+              button alone in the bottom-right corner, over the scrollbar. */}
+          {copyText && (
+            <Tip label={copied ? "Copied" : "Copy the change"}>
+              <button type="button" className="icon-btn tiny rsp-path-copy" aria-label={copied ? "Patch copied" : "Copy patch"} onClick={() => void copy(copyText, setCopied)}>
+                <Icon name={copied ? "check" : "clipboard"} size={12} />
+              </button>
+            </Tip>
+          )}
         </span>
       </div>
       {open && (
@@ -366,13 +380,6 @@ export function DiffView({
               </div>
             )}
           </div>
-          {copyText && (
-            <div className="rsp-diff-foot">
-              <button type="button" className="icon-btn tiny" aria-label={copied ? "Patch copied" : "Copy patch"} title={copied ? "Copied" : "Copy patch"} onClick={() => void copy(copyText, setCopied)}>
-                <Icon name={copied ? "check" : "copy"} size={13} />
-              </button>
-            </div>
-          )}
         </>
       )}
     </div>

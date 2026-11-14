@@ -108,7 +108,7 @@ test("a stopped run is yours only if you can restart it", () => {
   assert.equal(attentionFor(session({ run: claude }), ME), null);
   // A tool's raw error is said in words where it is listed, and kept as the detail (Arun, 2026-10-29).
   const crashed = attentionFor(session({ run: { status: "error" as const, sinceSeq: 33, error: "node:internal/modules/cjs/loader:1228\n  throw err;\nError: Cannot find module 'x'" } }), ME)!;
-  assert.equal(crashed.text, "Stopped: their tool failed to start");
+  assert.equal(crashed.text, "Hit an error · its tool didn't start", "in the words every view uses (agent-state.ts plainError)");
   assert.match(crashed.detail ?? "", /cjs\/loader/);
   assert.equal(attentionFor(session({ run: stopped }), ME)!.detail, undefined);
 });

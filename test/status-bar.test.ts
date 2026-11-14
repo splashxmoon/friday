@@ -23,14 +23,14 @@ test("idle is Ready; a run counts its time and the main agent's tools", () => {
   const running = { ...state, run: { status: "running" as const, sinceSeq: 4 } };
   assert.deepEqual(runLine(running, events, 66_000), { tone: "busy", text: "Working", detail: "1:05 · 2 steps" });
 
-  assert.equal(runLine({ ...state, run: { status: "waiting_for_human", sinceSeq: 4 } }, events, 0).text, "Waiting for you");
+  assert.equal(runLine({ ...state, run: { status: "waiting_for_human", sinceSeq: 4 } }, events, 0).text, "Needs you");
   assert.equal(runLine({ ...state, engines: { main: { tool: "claude", online: false, sinceSeq: 1 } as never } }, [], 0).text, "Offline", "a tool that went away is not Ready");
 });
 
 test("a run held on your approval is waiting for you, not working", () => {
   const state = project("s", []);
   const held = { ...state, run: { status: "running" as const, sinceSeq: 1 }, approvals: { main: { id: "a", seq: 2, scope: "commands" as const, items: ["rm -rf build"] } } };
-  assert.equal(runLine(held, [], 0).text, "Waiting for you");
+  assert.equal(runLine(held, [], 0).text, "Needs you");
 });
 
 test("two agents of one tool are told apart by number, the first keeping its plain name", async () => {
@@ -45,10 +45,11 @@ test("two agents of one tool are told apart by number, the first keeping its pla
 test("in a team the bar names who an agent waits for, and says you only to that person", () => {
   const state = project("s", []);
   const asked = { ...state, run: { status: "running" as const, sinceSeq: 1 }, openQuestions: { main: { to: "sam", toName: "Sam" } } } as never;
-  assert.equal(runLine(asked, [], 0, "sam").text, "Waiting for you");
-  assert.equal(runLine(asked, [], 0, "maya").text, "Waiting for Sam");
+  assert.equal(runLine(asked, [], 0, "sam").text, "Needs you");
+  assert.equal(runLine(asked, [], 0, "maya").text, "Waiting on Sam");
+  assert.equal(runLine(asked, [], 0, "maya").tone, "held", "not amber: it isn't waiting on Maya (audit B-14)");
   const approval = { ...state, run: { status: "running" as const, sinceSeq: 1 }, driver: { id: "sam", name: "Sam" }, approvals: { main: { id: "a", seq: 2, scope: "commands", items: [] } } } as never;
-  assert.equal(runLine(approval, [], 0, "maya").text, "Waiting for Sam", "an approval waits on the driver");
+  assert.equal(runLine(approval, [], 0, "maya").text, "Waiting on Sam", "an approval waits on the driver");
 });
 
 test("the ring is a coding tool's 5-hour limit, never its weekly one", async () => {
@@ -147,16 +148,16 @@ test("only the controls a tip helps get one: no words, words cut off, or a short
 test("a question asked in an agent's answer is waiting for you, not Ready", () => {
   const state = project("s", []);
   const asked = { ...state, asks: { main: { seq: 5, questions: [{ question: "Monday or Sunday?", options: [] }] } } } as never;
-  assert.equal(runLine(asked, [], 0).text, "Waiting for you");
+  assert.equal(runLine(asked, [], 0).text, "Needs you");
 });
 
 test("out of usage or signed out, with its work carried on by another agent, the bar isn't Stopped", async () => {
   const { carriedOn } = await import("../src/limit-reset.js");
-  const at = (seq: number, body: SessionEvent["body"], lane?: string): SessionEvent => ({ seq, ts: seq, actor: { id: "a", name: "A", kind: "agent" }, body, ...(lane ? { lane } : {}) }) as SessionEvent;
+  const at = (seq: number, body: SessionEvent["body"], lane?: string): SessionEvent => ({ seq, ts: Date.now() - 60_000 + seq, actor: { id: "a", name: "A", kind: "agent" }, body, ...(lane ? { lane } : {}) }) as SessionEvent;
   const lane = { type: "lane.added", lane: { id: "codex", name: "Codex", agent: null, control: { kind: "open" }, controlMode: "ask", trigger: { kind: "manual" } } } as SessionEvent["body"];
   const base = [at(1, lane), at(2, { type: "run.started", causedBy: 0 }), at(3, { type: "run.ended", outcome: "error", error: "5-hour limit reached ∙ resets 3pm" })];
   const alone = project("s", base);
-  assert.equal(runLine(alone, [], 0).text, "Stopped", "nobody has its work yet");
+  assert.match(runLine(alone, [], 0).text, /^Out of usage until /, "nobody has its work yet: out of usage, until when, never a red Stopped");
   const carried = project("s", [...base, at(4, { type: "run.started", causedBy: 0 }, "codex"), at(5, { type: "run.ended", outcome: "done" }, "codex")]);
   assert.ok(carriedOn(carried, "main"));
   assert.equal(runLine(carried, [], 0).text, "Ready", "Codex finished it");
@@ -165,5 +166,5 @@ test("out of usage or signed out, with its work carried on by another agent, the
   const agent = (lane: string, status: string, name: string) => ({ lane, name, status, line: "" }) as never;
   assert.equal(barLine({ tone: "idle", text: "Ready" }, [agent("main", "limited", "Claude Code"), agent("codex", "done", "Codex")]).text, "Ready");
   assert.equal(barLine({ tone: "idle", text: "Ready" }, [agent("main", "failed", "Claude Code"), agent("codex", "done", "Codex")], (l) => l === "main").text, "Ready");
-  assert.equal(barLine({ tone: "idle", text: "Ready" }, [agent("main", "failed", "Claude Code"), agent("codex", "done", "Codex")]).text, "Claude Code stopped");
+  assert.equal(barLine({ tone: "idle", text: "Ready" }, [agent("main", "failed", "Claude Code"), agent("codex", "done", "Codex")]).text, "Claude Code hit an error");
 });

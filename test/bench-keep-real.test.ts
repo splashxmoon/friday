@@ -106,6 +106,7 @@ type Tab = import("../src/client/Workbench.js").Tab;
 const { FocusContext } = await import("../src/client/focusStore.js");
 const { openInPreview } = await import("../src/client/previewBus.js");
 const { initialState } = await import("../src/session/projection.js");
+const { TooltipProvider } = await import("../src/client/components/ui/tooltip.js");
 
 const PATCH = "@@ -1,1 +1,1 @@\n-a\n+b\n";
 const settle = () => act(async () => new Promise((r) => setTimeout(r, 10)));
@@ -151,7 +152,7 @@ function session(sid = "s1", twoAgents = false) {
   let drawn = false;
   const draw = async (p: Partial<At> = {}) => {
     await act(async () => {
-      if (!drawn) root.render(h(Host));
+      if (!drawn) root.render(h(TooltipProvider, null, h(Host)));
       drawn = true;
     });
     await act(async () => set(p));

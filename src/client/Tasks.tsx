@@ -10,6 +10,7 @@ import { openInPreview } from "./previewBus.js";
 import { commandsIn } from "./Terminal.js";
 import { relTime } from "./ui.js";
 import type { Send } from "./useSession.js";
+import { agentState, type AgentPhase } from "../agent-state.js";
 
 /**
  * What is running here, and what has finished.
@@ -29,14 +30,18 @@ const STATE: Record<string, { label: string; icon: IconName; tone: string }> = {
   running: { label: "Running", icon: "play", tone: "go" },
   paused: { label: "Paused", icon: "pause", tone: "hold" },
   waiting: { label: "Waiting on an answer", icon: "help", tone: "hold" },
-  error: { label: "Stopped with an error", icon: "x", tone: "bad" },
+  error: { label: "Hit an error", icon: "x", tone: "bad" },
   done: { label: "Finished", icon: "check", tone: "ok" },
   stopped: { label: "Stopped", icon: "pause", tone: "hold" },
   ready: { label: "Stopped · ready for more", icon: "check", tone: "ok" },
   idle: { label: "Not started", icon: "pause", tone: "" },
+  limited: { label: "Out of usage", icon: "clock", tone: "hold" },
+  offline: { label: "Offline", icon: "pause", tone: "hold" },
 };
 
-const DONE = new Set(["done", "error", "stopped", "ready", "idle"]);
+const DONE = new Set(["done", "error", "stopped", "ready", "idle", "limited", "offline"]);
+/** A phase as the row's kind (its icon, tone and group); "ready" is "ready" once it has run, else not started. */
+const TASK_OF: Partial<Record<AgentPhase, string>> = { working: "running", needs: "waiting", waiting: "waiting", paused: "paused", failed: "error", limited: "limited", offline: "offline", stopped: "ready", short: "done", done: "done" };
 
 /** A subagent a coding tool started, where it stands now: the latest `agent.task` for it, with its first's description. */
 export interface SubTask {
@@ -279,8 +284,14 @@ export function TasksPanel({
     const span = spanOf(events, t.id);
     // The projection has no "finished": a run that ended goes back to idle. A lane
     // with an ended run is Finished, and only one that never ran is Not started.
-    const status = t.run.status === "waiting_for_human" ? "waiting" : t.run.status === "idle" && span?.end ? (span.stopped ? "ready" : "done") : t.run.status;
-    const look = STATE[status] ?? STATE.idle!;
+    // Where it stands from the one selector every view uses (agent-state.ts), in its words: "Waiting on Ada", "Hit an error" (audit B-19).
+    const at = agentState(state, t.id, me?.id ?? "");
+    const status = TASK_OF[at.phase] ?? (at.phase === "ready" && span?.end ? "ready" : "idle");
+    // Somebody else's agent mid-answer: its words stream in before they are logged, so "Getting started" after the first seconds
+    // read wrong to everyone watching it work (audit C-15). It is working.
+    const doing = status === "running" ? doingOf(events, t.id) : {};
+    if (doing.doing === "Getting started" && span && now - span.start > 4000) doing.doing = "Working";
+    const look = { ...(STATE[status] ?? STATE.idle!), label: at.phase === "ready" && !span ? STATE.idle!.label : at.word };
     // Running: how long so far. Done: how long it took. Both from the log.
     const took = span ? (status === "running" ? ` · ${duration(now - span.start)}` : span.end ? ` · took ${duration(span.end - span.start)}` : "") : "";
     return {
@@ -291,8 +302,9 @@ export function TasksPanel({
       // Running, its time alone: the spinner and the group it sits in already say it is running.
       sub: status === "running" ? (took ? took.slice(3) : look.label) : `${look.label}${ago(tsOf(t.run.sinceSeq))}${took}`,
       // Its error on a line of its own, its first sentence: the whole paragraph filled the row.
-      ...(t.run.error ? { why: t.run.error.split(/(?<=[.!?])\s/)[0]! } : {}),
-      ...(status === "running" ? doingOf(events, t.id) : {}),
+      // What its error means, in the words the feed and the sidebar use; the provider's own text is in the feed's details.
+      ...(at.error ? { why: at.error.plain } : {}),
+      ...doing,
       ...(t.run.status === "running" && mayStop(t.id) ? { stop: () => void send!({ type: "run.cancel", ...(t.id !== MAIN_LANE ? { lane: t.id } : {}) }) } : {}),
     };
   });

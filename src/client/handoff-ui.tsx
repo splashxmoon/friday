@@ -2,7 +2,9 @@ import type { ReactNode } from "react";
 import { engineName, ENGINE_TOOLS, MAIN_LANE, TOOL_INFO, type EngineTool } from "../types.js";
 import { runOf, uniqueLaneName, type SessionState } from "../session/projection.js";
 import { EngineMark } from "./AgentSwitch.js";
-import { AgentMark, Icon, type IconName } from "./icons.js";
+import { Icon, type IconName } from "./icons.js";
+import { Mascot, type MascotMood } from "./Mascot.js";
+import { faceOf } from "../agent-face.js";
 import { teammateMark } from "./Teammates.js";
 
 /**
@@ -69,7 +71,16 @@ export function agentLook(state: SessionState, lane: string | null, size = 14): 
   const named = !agent && def ? ENGINE_TOOLS.find((t) => def.name.toLowerCase().includes(t)) : undefined;
   if (named) return { kind: named, mark: <EngineMark tool={named} size={size} />, tint: TOOL_INFO[named].tint, label: engineName(named) };
   if (agent) return { kind: "agent", mark: <Icon name={(agent.icon as IconName | undefined) ?? "agent"} size={size} />, tint: AGENT_TINT[agent.color] ?? AGENT_TINT.indigo!, label: "saved agent" };
-  return { kind: "friday", mark: <AgentMark size={size} />, tint: FRIDAY_TINT, label: "Friday Code" };
+  // Friday's own agents each wear a face of their own (agent-face.ts), so two of them are told apart before their names are read
+  // (audit B-20). The session's own agent keeps Friday's colour as its tint.
+  const face = faceOf(state, lane);
+  return { kind: "friday", mark: <FridayFace state={state} lane={lane} size={size} />, tint: lane === MAIN_LANE ? FRIDAY_TINT : face.tint, label: "Friday Code" };
+}
+
+/** A Friday agent's face: the mascot body and colour its lane picks (agent-face.ts), still, sized like a mark. */
+export function FridayFace({ state, lane, size = 14, mood = "idle", still = true }: { state: Pick<SessionState, "lanes">; lane: string; size?: number; mood?: MascotMood; still?: boolean }) {
+  const face = faceOf(state, lane);
+  return <Mascot kind={face.kind} hue={face.hue} mood={mood} size={size} still={still} className="agent-face" />;
 }
 
 /** What the run that just finished left behind, in the terms a choice of next agent turns on. */
