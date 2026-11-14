@@ -233,6 +233,25 @@ export function Setup({ identity, recents, onDone }: { identity: Identity; recen
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The sheet is modal: Tab and Shift+Tab go round inside it, never to the page behind (team-audit2 ONB-I: Shift+Tab from Set up
+  // later reached the getting-started card's Hide). Only while the keyboard is in it: a menu it opens (a portal) keeps its own.
+  useEffect(() => {
+    if (!open) return;
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== "Tab") return;
+      const box = document.querySelector<HTMLElement>(".setup-overlay");
+      const at = document.activeElement as HTMLElement | null;
+      if (!box || (at && at !== document.body && !box.contains(at))) return;
+      const list = [...box.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])')].filter((x) => x.getClientRects().length > 0);
+      if (!list.length) return;
+      const first = list[0]!;
+      const last = list[list.length - 1]!;
+      if (e.shiftKey && (at === first || !box.contains(at))) (e.preventDefault(), last.focus());
+      else if (!e.shiftKey && (at === last || !box.contains(at))) (e.preventDefault(), first.focus());
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [open]);
   if (!open) return null;
 
   const i = Math.min(at, steps.length - 1);
@@ -377,12 +396,12 @@ export function Setup({ identity, recents, onDone }: { identity: Identity; recen
           </div>
 
           <footer className="wn-foot">
+            {/* One way to leave on every step, the × at the top (Set up later, and Esc does the same); Back is a button beside the
+                way on (audit ONB-D, ONB-E). */}
             {n === 0 ? (
-              <button type="button" className="wn-notes" onClick={() => finish(false)}>
-                Set up later
-              </button>
+              <span />
             ) : (
-              <button type="button" className="wn-notes" onClick={back}>
+              <button type="button" className="btn ghost small wn-back" onClick={back}>
                 <Icon name="arrowLeft" size={13} />
                 Back
               </button>
@@ -501,7 +520,7 @@ export function Setup({ identity, recents, onDone }: { identity: Identity; recen
 
 /** What Friday is, in four, on the welcome's first step. */
 const POINTS: { icon: IconName; title: string; line: string }[] = [
-  { icon: "users", title: "A crew that stays", line: "Teammates with names and memory, working through their queue while you're away." },
+  { icon: "users", title: "A crew that stays", line: "Agents with names and memory, working through their queue while you're away." },
   { icon: "key", title: "On plans you pay for", line: "Claude Code, Codex, Cursor and the rest run on your own sign-ins." },
   { icon: "shield", title: "Checked before it ships", line: "Your rules and your project's checks run on what the agents change." },
   { icon: "server", title: "Stays on this computer", line: "Your code, keys and sessions stay here. No account." },

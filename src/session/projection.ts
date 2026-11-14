@@ -1,7 +1,6 @@
 import { ownPlan } from "../own-plan.js";
 import type { GoalState } from "../goal.js";
-import { engineName, MAIN_LANE, EFFORT_LEVELS, type BoardTaskDef, type EngineEffort, type EngineTool, type HubState } from "../types.js";
-import { headlineClass, pieces } from "../command-class.js";
+import { engineName, liveMachine, MAIN_LANE, EFFORT_LEVELS, type BoardTaskDef, type EngineEffort, type EngineTool, type HubState } from "../types.js";
 import { parseAsks, type Ask } from "../ask-parse.js";
 import type {
   ActorRef,
@@ -94,6 +93,37 @@ export interface Thread {
   auto?: { lane: string };
 }
 
+/** A lane's work handed to a crew mate (crew.handed): who took it, how its work stands, and what it came back with. */
+export interface Handed {
+  job: string;
+  mate: string;
+  mateName: string;
+  lane: string;
+  by: { id: string; name: string };
+  at: number;
+  seq: number;
+  carried: string[];
+  ask: string[];
+  rule?: { id: string; text: string };
+  /** Where the crew mate works on it, on this computer: its lane in this session (crew-carry.ts). */
+  jobLane?: string;
+  /** How its work stands (crew-carry-rules.ts), as last said. */
+  state: string;
+  /** When it started working, for "18m". */
+  since?: number;
+  done?: number;
+  of?: number;
+  result?: { said: string; files: number; added: number; removed: number; prs: string[] };
+  /** Taken back, stopped from the session, or its work brought in: its wheel is the lane's own again. */
+  back?: "back" | "stopped" | "brought";
+}
+
+/** The live hand-off on a lane, if its work is a crew mate's now: the person typing there is asked first. */
+export function handedOn(s: Pick<SessionState, "handed">, lane: string): Handed | null {
+  for (const h of Object.values(s.handed ?? {})) if (h.lane === lane && !h.back && !["done", "declined", "expired", "ended"].includes(h.state)) return h;
+  return null;
+}
+
 export interface MemberState {
   name: string;
   role: Role;
@@ -153,11 +183,14 @@ export interface SessionState {
   /** What each lane's agent is asking permission for. `live`: asked mid-turn, the tool waiting on the answer there and then. */
   approvals: Record<string, { id: string; seq: number; tool?: EngineTool; scope: "commands" | "turn"; items: string[]; live?: boolean; hostsOwn?: boolean }>;
   /**
-   * Commands let through for the rest of a lane's run ("Allow for this task" on a teammate's permission card), as allow-list
-   * entries (alwaysAllowEntry): the hub answers a request matching one by itself, as for the session's allow list. Gone when
-   * the run ends, other than to wait on a person.
+   * Commands let through for the rest of a lane's run ("Allow for this task" on a teammate's permission card), as they were asked:
+   * each stands for what Always allow would add for it (command-allow.ts entryFor), so the hub answers a request matching one by
+   * itself, as for the session's allow list. Gone when
+   * the run ends (waiting on a person included), its computer switches to Manual, or the lane goes.
    */
   taskAllow?: Record<string, string[]>;
+  /** An older broad allowance for package scripts ("npm run*") was dropped from the allow list (dropBroadScripts): said once in Session settings. */
+  allowDropped?: true;
   /** Instructions sent but not yet delivered into the agent's context. */
   pendingInstructions: number[];
   /** Instructions taken back while they were still queued. */
@@ -249,6 +282,11 @@ export interface SessionState {
    * names, nor a list of other people's (Arun, 2026-11-02: "can we add these kinda of things to the coding session like tabs").
    */
   prs: string[];
+  /**
+   * Lanes handed to a crew mate ("Keep this going", Code and Crew, connected, 2026-11-13), by job: one line in the feed that keeps
+   * up with its work (crew.handed.moved), and the lane's wheel the crew mate's while it is live. Absent in a state kept before it.
+   */
+  handed?: Record<string, Handed>;
   /** Lanes set to carry on by themselves at a time (a usage limit resetting), and who set it. Off once anyone writes to the lane. */
   resumes: Record<string, { at: number; by: string; byName: string; seq: number }>;
   /**
@@ -275,11 +313,14 @@ export interface SessionState {
 
 export type BoardStatus = "open" | "claimed" | "review" | "done" | "blocked" | "cancelled";
 
-/** One review of a board task: by an agent, or Friday's own pass without one (`auto`), or a pass with no verdict (`unclear`). */
+/** One review of a board task: by an agent, or Friday's own pass without one (`auto`), or one with no verdict (`unclear`). */
 export type TaskReview = { ok: boolean; note: string; by: string; auto?: true; unclear?: true };
 
 /** Whether a second agent read the task and approved it: not Friday's pass without a review, nor one with no verdict. */
 export const reviewApproved = (r: TaskReview | undefined): boolean => !!r?.ok && !r.auto && !r.unclear;
+
+/** A change set in one line: each file's path and its counts. Two the same are the same work as far as a check can tell. */
+const diffPrint = (files: readonly { path: string; additions?: number; deletions?: number }[] | undefined): string => (files ?? []).map((f) => `${f.path}:${f.additions ?? 0}:${f.deletions ?? 0}`).sort().join("|");
 
 export interface BoardTask extends BoardTaskDef {
   status: BoardStatus;
@@ -289,7 +330,7 @@ export interface BoardTask extends BoardTaskDef {
   report?: string;
   /** The agent checking it, and what it found. */
   reviewer?: { lane: string; name: string };
-  /** Its latest review. `auto`: Friday passed it without a second agent; `unclear`: passed with no verdict from its reviewer. */
+  /** Its latest review. `auto`: Friday passed it without a second agent; `unclear`: no verdict from its reviewer (sent back since 2026-11-13). */
   review?: TaskReview;
   /** Every review it has had, oldest first (the last ten): a send-back's note stays after the next review passes it. */
   reviews?: TaskReview[];
@@ -302,7 +343,9 @@ export interface BoardTask extends BoardTaskDef {
    * Its checks: running now (`running`), or how they went last; `sha` the commit they ran on and `dirty` uncommitted work beside it.
    * Passed on a clean commit is verified (verifiedAt), until a commit on its branch after them (`stale`).
    */
-  checks?: { command: string; running?: boolean; ok?: boolean; skipped?: boolean; output?: string; sha?: string; dirty?: boolean; stale?: boolean };
+  checks?: { command: string; running?: boolean; ok?: boolean; skipped?: boolean; timedOut?: boolean; output?: string; sha?: string; dirty?: boolean; stale?: boolean; /** The lane's change set as it ran (diffPrint): another one since makes the result stale. */ on?: string };
+  /** Every check run on its latest hand-in, in order (`checks` is the last of them): none dropped (Arun, 2026-11-13: "air tight"). */
+  checked?: { command: string; ok: boolean; skipped?: boolean; timedOut?: boolean }[];
   /** Who a person asked to take it next (board.released with `to`). */
   next?: string;
   /** Agents that turned it down as not theirs (finish_task decline): it is never offered to them again. */
@@ -610,40 +653,30 @@ export function mergeOptions(o: SessionOptions, patch?: SessionOptionsPatch): Se
   return next;
 }
 
+/** Every package script at once ("npm run*", "pnpm run-script*"): deploy and release among them, so never an allowance. */
+const BROAD_SCRIPTS = /^(npm|pnpm|yarn|bun)\s+(run|run-script)\s*\*$/;
 /**
- * Allowed in advance: the exact command, or one that starts with an entry ending in `*` ("npm test*").
- *
- * A `*` entry allows that command with more arguments, not a line that goes on to do something else. `npm test && curl
- * … | sh`, `git status; rm -rf .` and `npm test > package.json` each ask, and so does anything that could hide a second
- * command where nobody would see it: `$(…)`, backticks, or the parentheses and braces PowerShell evaluates inside an
- * argument. The entry also has to end where a word does, so "npm test*" is not "npm testify". Asking is the fallback
- * for anything unusual, which costs a question and nothing more.
+ * An older broad allowance for package scripts, kept from before Always allow named the script (Fable re-check, 2026-11-11):
+ * dropped from the session's list as the log is read, so the next change to the list writes it without, and said once in Session
+ * settings (allowDropped). allowedCommand refuses one too, wherever else it is kept.
  */
-export const allowedCommand = (s: SessionState, command: string, lane?: string): boolean => {
-  const c = command.trim();
-  // The session's list, and what was let through for this lane's task.
-  return [...(s.options.allow ?? []), ...(lane ? (s.taskAllow?.[lane] ?? []) : [])].some((a) => {
-    if (!a.endsWith("*")) return a === c;
-    const prefix = a.slice(0, -1).trimEnd();
-    const rest = c.slice(prefix.length);
-    return c.startsWith(prefix) && (!/\w$/.test(prefix) || !rest || /^\s/.test(rest)) && pieces(c)?.length === 1 && !/[(){}]/.test(c);
-  });
-};
-/** The pattern that would allow commands like this one: its first two words, then anything. */
-export const allowPrefix = (command: string): string => {
-  const words = command.trim().split(/\s+/);
-  return `${words.slice(0, Math.min(2, words.length)).join(" ")}*`;
-};
+function dropBroadScripts(s: SessionState): void {
+  const allow = s.options.allow ?? [];
+  if (!allow.some((a) => BROAD_SCRIPTS.test(a.trim()))) return;
+  s.options = { ...s.options, allow: allow.filter((a) => !BROAD_SCRIPTS.test(a.trim())) };
+  s.allowDropped = true;
+}
 
 /**
- * What one press of "Always allow" adds for a command. Commands that look around, check, build or work git on this machine
- * get the pattern (allow "npm test" and "npm test -- --watch" is allowed too); anything that installs, publishes, deploys,
- * deletes or isn't recognised gets exactly itself, so "rm -rf build" never quietly becomes "rm -rf" anything.
+ * Whether "Allow for this task" would do what it says for `meId` on this lane's ask (Fable review, 2026-11-11): only the host of
+ * the machine it runs on, where that host owns the session (the hub lets a task's commands through for an owner's machine alone),
+ * of an ask about commands. Anyone else is offered Allow once.
  */
-export const alwaysAllowEntry = (command: string): string => {
-  const c = command.trim();
-  return ["read", "checks", "build", "git"].includes(headlineClass(c)) ? allowPrefix(c) : c;
-};
+export function taskAllowApplies(s: SessionState, lane: string, meId: string): boolean {
+  const ask = s.approvals[lane];
+  const host = (liveMachine(s, lane) ?? s.engines[lane])?.hostId;
+  return !!ask && ask.scope === "commands" && !!host && host === meId && roleOf(s, host) === "owner";
+}
 
 /** The member's role, or null if they aren't (or are no longer) in the session. */
 export function roleOf(s: SessionState, userId: string): Role | null {
@@ -833,11 +866,15 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       s.ownerId = b.ownerId;
       if (b.workspaceId) s.workspaceId = b.workspaceId;
       s.options = mergeOptions(s.options, b.options);
+      dropBroadScripts(s);
       s.driver = { id: b.ownerId, name: b.ownerName };
       s.members[b.ownerId] = { name: b.ownerName, role: "owner" };
       break;
     case "session.updated":
+      // A list written since, without one, has been seen: the line about it goes.
+      if (b.options?.allow && !b.options.allow.some((x) => BROAD_SCRIPTS.test(x.trim()))) delete s.allowDropped;
       s.options = mergeOptions(s.options, b.options);
+      dropBroadScripts(s);
       if (b.title) s.title = b.title;
       // A policy that no longer lets somebody drive takes their asks with it: left standing, a handoff could still grant them the wheel.
       if (b.options?.policy) s.pendingRequests = s.pendingRequests.filter((r) => canDriveLane(s, r.id, r.lane));
@@ -872,7 +909,7 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       const asked = s.approvals[lane];
       if (!notTheirs && b.approval?.approve && b.approval.task && asked?.id === b.approval.id && asked.scope === "commands" && asked.items.length) {
         const all = s.taskAllow ?? (s.taskAllow = {});
-        all[lane] = [...new Set([...(all[lane] ?? []), ...asked.items.map(alwaysAllowEntry)])].slice(-20);
+        all[lane] = [...new Set([...(all[lane] ?? []), ...asked.items])].slice(-20);
       }
       if (!notTheirs && (!s.approvals[lane]?.live || b.approval || b.interrupt)) delete s.approvals[lane];
       delete s.resumes[lane];
@@ -935,6 +972,20 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
     case "handover.cancelled":
       s.handover = null;
       break;
+    case "crew.handed":
+      s.handed = { ...(s.handed ?? {}), [b.job]: { job: b.job, mate: b.mate, mateName: b.mateName, lane: b.lane, by: { id: ev.actor.id, name: ev.actor.name }, at: ev.ts, seq: ev.seq, carried: b.carried, ask: b.ask, ...(b.rule ? { rule: b.rule } : {}), ...(b.jobLane ? { jobLane: b.jobLane } : {}), state: "asked" } };
+      break;
+    case "crew.handed.moved": {
+      const h = s.handed?.[b.job];
+      if (!h) break;
+      s.handed = { ...s.handed, [b.job]: { ...h, state: b.state, ...(b.state === "running" && !h.since ? { since: ev.ts } : {}), ...(b.done !== undefined ? { done: b.done } : {}), ...(b.of !== undefined ? { of: b.of } : {}), ...(b.result ? { result: b.result } : {}) } };
+      break;
+    }
+    case "crew.handed.back": {
+      const h = s.handed?.[b.job];
+      if (h) s.handed = { ...s.handed, [b.job]: { ...h, back: b.how } };
+      break;
+    }
     case "control.granted":
       // Taken by the one it was handed to: done, and kept for them to read. Taken by anybody else, it still waits for them.
       if (lane === MAIN_LANE && s.handover?.to === b.to) s.handover.taken = true;
@@ -1067,7 +1118,9 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       if (!t) break;
       if (b.type === "board.checking") t.checks = { command: b.command, running: true };
       else if (b.type === "board.checked") {
-        t.checks = { command: b.command, ok: b.ok, output: b.output, ...(b.skipped ? { skipped: true } : {}), ...(b.sha ? { sha: b.sha } : {}), ...(b.dirty ? { dirty: true } : {}) };
+        const on = diffPrint(s.diffs[b.lane]?.files);
+        t.checked = [...(t.checked ?? []), { command: b.command, ok: b.ok, ...(b.skipped ? { skipped: true } : {}), ...(b.timedOut ? { timedOut: true } : {}) }].slice(-12);
+        t.checks = { command: b.command, ok: b.ok, output: b.output, ...(on ? { on } : {}), ...(b.skipped ? { skipped: true } : {}), ...(b.timedOut ? { timedOut: true } : {}), ...(b.sha ? { sha: b.sha } : {}), ...(b.dirty ? { dirty: true } : {}) };
         // Failed: back to the agent that did it, as a review that found something does.
         if (!b.ok && !b.skipped) Object.assign(t, { status: "claimed", rounds: t.rounds + 1, backs: { ...t.backs, checks: (t.backs?.checks ?? 0) + 1 }, reviewer: undefined });
       } else if (b.type === "board.released") {
@@ -1083,7 +1136,7 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       const t = s.board?.tasks.find((x) => x.id === b.id);
       if (!t) break;
       if (b.type === "board.claimed") Object.assign(t, { status: "claimed", lane: b.lane, name: b.name, next: undefined, why: b.why, ...(b.branch ? { branch: b.branch } : {}) });
-      else if (b.type === "board.finished") Object.assign(t, { status: b.status === "blocked" ? "blocked" : t.noReview ? "done" : "review", lane: b.lane, name: b.name, report: b.report });
+      else if (b.type === "board.finished") Object.assign(t, { checked: undefined, status: b.status === "blocked" ? "blocked" : t.noReview ? "done" : "review", lane: b.lane, name: b.name, report: b.report });
       // An empty lane takes the reviewer off: the one asked ran out of usage, and another is found (agent-mesh boardRunEnded).
       else if (b.type === "board.review") t.reviewer = b.lane ? { lane: b.lane, name: b.name } : undefined;
       else {
@@ -1122,6 +1175,7 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       if (s.board?.fromLane === b.laneId && s.lead && s.lead !== b.laneId) s.board = { ...s.board, fromLane: s.lead, fromName: s.lanes.find((l) => l.id === s.lead)?.name ?? s.board.fromName };
       if (s.lead === b.laneId) s.lead = null;
       if (s.holds) delete s.holds[b.laneId];
+      if (s.taskAllow) delete s.taskAllow[b.laneId];
       if (s.terminals) delete s.terminals[b.laneId];
       for (const w of Object.values(s.wakes ?? {})) if (w.lane === b.laneId || w.on.lane === b.laneId) delete s.wakes![w.id];
       if (s.efforts) delete s.efforts[b.laneId];
@@ -1154,6 +1208,8 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       if (s.engines[lane]?.tool && s.engines[lane]!.tool !== b.engine.tool && s.planDone?.[lane]) delete s.planDone[lane];
       const repo = s.engines[lane]?.repo;
       s.engines[lane] = { ...(repo ? { repo } : {}), ...b.engine, online: true, sinceSeq: ev.seq };
+      // Its computer switched to Manual: every command asks its host again, what was allowed for the task included.
+      if (b.engine.mode === "edits" && s.taskAllow?.[lane]) delete s.taskAllow[lane];
       break;
     }
     case "engine.detached":
@@ -1181,6 +1237,12 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
     }
     case "agent.diff":
       s.diffs[lane] = { seq: ev.seq, base: b.base, files: b.files, ...(b.more?.length ? { more: b.more } : {}) };
+      // A check's result is about the change set it ran on: one that moved since makes it out of date, whoever committed or edited
+      // (only Friday's own commit said so; an agent's own git commit or a later edit left "passed" on work it never saw).
+      {
+        const now = diffPrint(b.files);
+        for (const t of s.board?.tasks ?? []) if (t.lane === lane && t.checks && !t.checks.running && t.checks.on !== undefined && t.checks.on !== now) t.checks.stale = true;
+      }
       // What a run actually changed is the strongest claim there is: it is
       // not what somebody meant to touch, it is what is now different.
       for (const f of b.files) claim(s, ev, f.path);
@@ -1243,7 +1305,8 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       // one waiting on a person.
       if (b.outcome !== "waiting" && !b.cut && s.holds) delete s.holds[lane];
       // What was let through for the task was for this run.
-      if (b.outcome !== "waiting" && !b.cut && s.taskAllow?.[lane]) delete s.taskAllow[lane];
+      // Ended waiting on a person too (Fable review, 2026-11-11): the yes that goes on starts a new run, which asks again.
+      if (!b.cut && s.taskAllow?.[lane]) delete s.taskAllow[lane];
       if (b.outcome === "done") {
         setRun("idle");
         (s.finished ??= {})[lane] = ev.seq;

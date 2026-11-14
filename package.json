@@ -1,6 +1,6 @@
 {
   "name": "friday-work",
-  "version": "0.2.23",
+  "version": "0.2.24",
   "description": "Your coding agents (Claude Code, Codex, Cursor and more) side by side, on your own computer. No account, nothing hosted.",
   "license": "MIT",
   "homepage": "https://www.tryfridaywork.com",
@@ -29,7 +29,8 @@
     "desktop:dist": "tsx scripts/build-local-desktop.mts && electron-builder",
     "build:css": "tailwindcss -i src/client/styles/globals.css -o public/tailwind.css --minify",
     "typecheck": "tsc --noEmit",
-    "test": "node scripts/test.mjs"
+    "test": "node scripts/test.mjs",
+    "relay": "tsx src/relay-main.ts"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.4",

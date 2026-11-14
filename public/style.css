@@ -61,6 +61,7 @@
   --st-read: #3eaeae;
   --st-done: var(--green);
   --st-blocked: var(--red);
+  --st-sent: #94a3b8;
   /* A filled red that white text reads on (5.3:1); --red itself is for red text on dark. */
   --red-solid: #c8372d;
   /* Chart fills: two tints of one quiet hue. */
@@ -149,6 +150,7 @@
   --st-held: #be185d;
   --st-review: #6d28d9;
   --st-read: #0e7490;
+  --st-sent: #475569;
   --red-solid: var(--red);
   --chart-1: #9aa6ba;
   --chart-2: #6f7a8f;
@@ -1452,22 +1454,6 @@ button.catalog-card:hover:not(:disabled) .catalog-cta { color: var(--violet); ba
 /* Balanced, so a narrow window wraps the question into two even lines rather than leaving "up?" alone on the second (QA round 2,
    report-f 21; Arun, 2026-10-28: "TEST EVERYTHING… EVERY VISUAL"). */
 .hero-title { font-size: 32px; font-weight: 600; letter-spacing: -.02em; margin: 0 0 26px; text-align: center; text-wrap: balance; }
-/* The line turns over rather than crossfading: one sign saying something else,
-   not two things swapping. The wrapper holds the perspective so the flip has
-   depth; the span inside is what actually turns. */
-.hero-flip { display: inline-block; perspective: 700px; }
-.hero-flip > span {
-  display: inline-block; transform-origin: 50% 50%;
-  animation: hero-flip 560ms cubic-bezier(.22, 1, .36, 1) both;
-}
-@keyframes hero-flip {
-  from { transform: rotateX(-88deg); opacity: 0; }
-  60% { opacity: 1; }
-  to { transform: none; opacity: 1; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .hero-flip > span { animation: none; }
-}
 .project-chip {
   display: inline-flex; align-items: center; gap: 8px; margin-bottom: 12px; padding: 4px 6px 4px 12px; border-radius: var(--r-pill);
   background: var(--card); border: 1px solid var(--border-strong); color: var(--ink-2); font-size: 13px;
@@ -5952,6 +5938,14 @@ html[data-band="page"] .ag-chat, html[data-band="page"] .ag-canvas { margin-top:
 .mp-cmds { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; min-width: 0; }
 .mp-cmds code { max-width: 100%; padding: 3px 8px; border-radius: 6px; background: var(--bg); border: 1px solid var(--border); font: 12.5px/18px var(--mono); color: var(--ink); white-space: pre-wrap; word-break: break-all; }
 .mp-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; }
+/* Narrow: Allow once and Deny side by side, Allow for this task under them, never Deny alone on a row of its own. */
+@media (max-width: 640px) {
+  .mp-acts { display: grid; grid-template-columns: 1fr 1fr; }
+  .mp-acts .mp-btn { width: 100%; }
+  .mp-acts .mp-btn.quiet { order: 1; border-color: var(--border-strong); }
+  .mp-acts .mp-btn:not(.primary):not(.quiet) { order: 2; grid-column: 1 / -1; }
+  .mp-acts .mp-wait { order: 3; grid-column: 1 / -1; margin-left: 0; }
+}
 .mp-btn { height: 30px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--card); color: var(--ink); font: 500 13px/1 var(--font, inherit); white-space: nowrap; cursor: pointer; }
 .mp-btn:hover:not(:disabled) { background: var(--hover); }
 .mp-btn.primary { background: var(--ink); border-color: var(--ink); color: var(--bg); }
@@ -7324,6 +7318,8 @@ html[data-band="page"] .page.settings-page { padding-top: 16px; }
 .set-card { display: flex; flex-direction: column; padding: 2px 18px; border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--card); }
 .set-card > .set-row:first-child, .set-card > form.set-row:first-child { border-top: 0; }
 .set-card .set-row { padding: 14px 0; }
+/* Settings › Models: your own models sit in the section's "Your models" group, whose panel is already the card. */
+.set-own-models .own-models > .set-card { padding: 0; border: 0; border-radius: 0; background: none; }
 .set-card-head { display: flex; align-items: center; gap: 8px; padding: 14px 0 8px; }
 .set-card-title { margin: 0; font-size: 14px; font-weight: 600; color: var(--ink); }
 .set-card-count { font-weight: 400; }
@@ -10380,6 +10376,10 @@ html.desktop .home { padding-top: calc(max(7.5vh, 48px) + 40px); }
    instruction; one that names you is edged in the live colour. The composer says so too while it is writing one. */
 .chat-aside .chat-bubble { background: transparent !important; border: 1px dashed var(--border-strong); color: var(--ink); }
 .chat-aside .chat-bubble.chat-for-me { border-style: solid; border-color: var(--dass-live, #2563eb); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dass-live, #2563eb) 14%, transparent); }
+/* A message marked as decided (core.ts "decide"): every agent reads it from then on. Quiet, beside the time. */
+.msg-decided-row { display: flex; margin-top: 2px; }
+.msg-decided-row.mine { justify-content: flex-end; }
+.msg-decided-row .tag.msg-decided { color: var(--green); background: color-mix(in srgb, var(--green) 12%, transparent); }
 .chat-aside .tag.chat-you { color: var(--dass-live, #2563eb); background: color-mix(in srgb, var(--dass-live, #2563eb) 12%, transparent); }
 .composer.to-people .composer-box { border-style: dashed; }
 .composer.to-people .composer-caption { color: var(--dass-live, #2563eb); }
@@ -12174,7 +12174,7 @@ html.desktop [data-slot="dialog-content"] { top: calc(50% + 20px); max-height: c
 }
 .tray.scroll-x-cue { --cue-bg: var(--tray); }
 /* The home's headline breaks in balanced lines, never a lone word on the last ("up?" at 420). */
-.hero-title, .hero-flip > span { text-wrap: balance; }
+.hero-title { text-wrap: balance; }
 /* A wheel past the end of a card's list stays in the card, not scrolling the page behind it (the tools card on home). The card
    alone, not everything in it: its tool list clips with overflow: hidden, which makes it a scroll container that can't scroll,
    and with contain there the wheel stopped at the list and the card never scrolled (Arun, 2026-10-29: "this wont scroll for me"). */
@@ -12290,6 +12290,12 @@ html.reduce-motion :is([data-slot$="-content"], [data-slot$="-overlay"], .quick,
 .home .composer-bar .model-choice .menu-pill-mark { margin-right: 0; }
 .home .composer-bar .cm-anchor .icon-btn { width: 28px; height: 28px; border-radius: var(--r-md); color: var(--ink-3); }
 .home .composer-bar .cm-anchor .icon-btn:hover { color: var(--ink); background: var(--surface-hover); }
+/* Full access is longer than Auto was (Teams' words, 2026-11-14), and this box has the mic Teams' hasn't: at a phone's width the
+   row stays one row, the agent pill giving way ("Claude Co…") rather than the send arrow dropping to a line of its own. */
+@media (max-width: 520px) {
+  .home .composer-bar { flex-wrap: nowrap; }
+  .home .composer-bar .agent-pill.model-choice { flex: 0 1 auto; }
+}
 /* Where it works: a thin tray hung from the box's foot (Arun, 2026-11-08: "make it be connected to the input chat but make the
    ends of it curved a little"; then "connect where the input box finished curving and at the bottom of it where it is now flat"):
    inset by the box's corner radius, so its sides drop from where the box's curve ends, and its own foot is rounded. */
@@ -12566,15 +12572,10 @@ li:hover .dock-step-go, li:focus-visible .dock-step-go { opacity: 1; }
 .bench-body .rules-empty-mark { background: var(--surface-hover); color: var(--ink-3); }
 
 /* ── Automations: the intro in plain words, templates as rows with "Use" on hover, the list as rows ── */
-/* Coding tools or Crew workflows, at the top of Automations (AutomationsSwitch.tsx): the switch and what the one picked is, on the
-   left; the page's own button on the right, on the switch's line. */
-.auto-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 16px; margin-bottom: 20px; }
-.auto-switch { display: grid; gap: 8px; min-width: 0; }
-.auto-seg { justify-self: start; }
-.auto-seg button { display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; }
-.auto-seg button svg { opacity: .7; }
-.auto-seg button.on svg { opacity: 1; }
-.auto-switch-line { margin: 0; max-width: 80ch; color: var(--ink-3); font-size: 12.5px; line-height: 18px; }
+/* New automation's menu: what runs it, a coding tool or your crew, each with its line (Automations.tsx, the "Why Crew" plan, 2026-11-13). */
+.auto-new-menu { max-width: 340px; }
+.auto-new-text { display: grid; gap: 2px; min-width: 0; }
+.auto-new-sub { color: var(--ink-3); font-size: 12px; line-height: 16px; white-space: normal; }
 .automations-page .auto-label { margin: 0 0 8px; padding: 0 8px; color: var(--ink-3); font-size: 12px; font-weight: 500; }
 .automations-page .auto-intro { padding: 8px 8px 24px !important; border: 0 !important; border-radius: 0 !important; background: none !important; border-bottom: 1px solid var(--line) !important; }
 .automations-page .auto-steps li { padding: 6px 8px; border: 0; background: none; }
@@ -13662,8 +13663,16 @@ html.desktop .oss-rail::after { content: ""; position: absolute; top: 38px; righ
 /* The faces' own bright amber (teammates.css --badge-need) in both themes (Arun, 2026-11-11: "fix the color of the notification thing"): light theme's --amber is the
    dark amber made for text, which as a fill under dark digits read as brown. */
 .oss-rail-n.needs { color: #2a1a00; background: var(--badge-need, #f5a524); }
+/* Something new since you looked, with nothing waiting on you: a quiet dot where a count would be (the Agents icon, Sidebar.tsx useAgentsDot). */
+.oss-rail-dot { position: absolute; top: 6px; right: 6px; width: 7px; height: 7px; border-radius: 999px; background: var(--ink-2); box-shadow: 0 0 0 2px var(--bg); }
 /* The rail's own Update button (AppUpdate.tsx) at its foot, the same size as the places. */
 .oss-rail-foot .dass-rail-btn { width: 36px; height: 36px; }
+/* As Friday Teams' rail has them (team-shell.css .ts-rail-btn; Arun, 2026-11-14: "like the production build UI layout"): 20px icons
+   in 40px buttons, and in the desktop app the rail starting 44px down, under the window's row. */
+.oss-rail-btn { width: 40px; height: 40px; border-radius: 10px; }
+.oss-rail-foot .dass-rail-btn { width: 40px; height: 40px; }
+.oss-rail-dot { top: 8px; right: 8px; }
+html.desktop .oss-rail { padding-top: 44px; }
 
 /* Your agents, under New session: who needs you, who works, the latest, three at most, then All agents. */
 .oss-agents-add { display: grid; place-items: center; width: 22px; height: 22px; border: 0; border-radius: 6px; background: none; color: var(--text-muted); cursor: pointer; }
@@ -13701,6 +13710,16 @@ html.desktop .oss-rail::after { content: ""; position: absolute; top: 38px; righ
 .oss-crew-line { overflow: hidden; color: var(--text-muted); font-size: 12px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
 .oss-crew-line.s-waiting, .oss-crew-line.s-needs { color: var(--amber); }
 .oss-crew-line.s-working { color: var(--ink-2); }
+/* How an agent stands, on its row's right in its own colour, as the Agents page says it (Arun, 2026-11-13: "show their current work
+   status"): Working, Needs you, Done, Idle, Out of usage, Stopped, Offline. What it is on is the line under. */
+.oss-crew-state { flex: none; margin-left: auto; padding-left: 4px; color: var(--mate-idle); font: 500 11px/16px var(--font); white-space: nowrap; }
+.oss-crew-state[data-tone="working"] { color: var(--mate-working); }
+.oss-crew-state[data-tone="waiting"] { color: var(--mate-waiting); }
+.oss-crew-state[data-tone="done"] { color: var(--dass-ok, var(--green)); }
+.oss-crew-state[data-tone="limited"] { color: var(--mate-limited); }
+.oss-crew-state[data-tone="stopped"] { color: var(--mate-stopped); }
+.oss-crew-state[data-tone="offline"] { color: var(--mate-offline); }
+.oss-crew-line.s-done { color: var(--text-muted); }
 .oss-crew-none { margin: 10px 8px; color: var(--text-muted); font-size: 12.5px; }
 .oss-agent-name, .oss-agent-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .oss-agent-name { font-size: 13px; font-weight: 500; line-height: 17px; color: var(--ink); }
@@ -13719,6 +13738,7 @@ html.desktop .oss-rail::after { content: ""; position: absolute; top: 38px; righ
 .rsp-steps-fold:hover { color: var(--ink); background: var(--hover); }
 .rsp-steps-fold:focus-visible { outline: 2px solid var(--violet); outline-offset: 1px; }
 .rsp-steps-mark { color: var(--green); }
+.rsp-steps-fold[data-failed] .rsp-steps-mark { color: var(--red); }
 .rsp-steps-chev { transition: transform .15s ease; }
 .rsp-steps-fold[aria-expanded="true"] .rsp-steps-chev { transform: rotate(180deg); }
 @media (prefers-reduced-motion: reduce) { .rsp-steps-chev { transition: none; } }
@@ -13753,47 +13773,117 @@ html.rail-only .shell .sb-panel .sb-panel-inner.dass-panel.dass-panel.dass-panel
 /* Square where the bar meets the rail, not rounded (Arun, 2026-11-12: "dont make this curved"). */
 html.desktop.rail-only .shell.with-panel::after { border-top-left-radius: 0 !important; }
 
-/* ── A page's header shares the window's bar, as a session's title does (Arun, 2026-11-12: "WHY IS THE HEADER MOVING DOWN???
-   like this should be still up top", "same for all of the pages too", "also adjust for windows and linux too") ────────────────
-   Every page but Home and a session runs to the window's top whether the list is open, the rail is alone or the sidebar is
-   folded, so folding it no longer drops the page 40px. Its first row (the header) starts after the window's own buttons where
-   they sit over the page, and on Windows and Linux ends before the window's caption buttons at the top right. The page's other
-   rows keep their place. --head-l and --head-r are those two clearances; the session title's own (#band-left) sits the same
-   way, a little closer to the buttons than before ("move the coding session title slighly closer to the header buttons"). */
-html.desktop .shell .main { --head-l: 0px; --head-r: 0px; }
-html.desktop-mac .shell:not(.with-panel) .main { --head-l: 136px; }
-html.desktop-mac.rail-only .shell.with-panel .main { --head-l: 84px; }
-html.desktop-mac.win-full .shell:not(.with-panel) .main { --head-l: 72px; }
-html.desktop-mac.win-full.rail-only .shell.with-panel .main { --head-l: 20px; }
-html.desktop:not(.desktop-mac) .shell:not(.with-panel) .main { --head-l: 68px; }
-html.desktop:not(.desktop-mac).rail-only .shell.with-panel .main { --head-l: 16px; }
-html.desktop:not(.desktop-mac) .shell .main { --head-r: 124px; }
-html.desktop:not([data-band="session"]) .shell .main:not(:has(.home)) { margin-top: 0 !important; border-top: 0 !important; border-top-left-radius: 0 !important; }
-html.desktop:not([data-band="session"]) .shell:not(:has(.main .home))::after { display: none !important; }
-/* The first row's middle on the window buttons' middle: 23px down on a Mac with the lowered buttons, 17px on one without, 20px
-   on Windows and Linux, for a row about 32px tall. */
-html.desktop:not([data-band="session"]) .shell .main:not(:has(.home)) > .page { padding-top: 8px !important; }
-html.desktop-mac:not(.lights-low):not([data-band="session"]) .shell .main:not(:has(.home)) > .page { padding-top: 2px !important; }
-html.desktop:not(.desktop-mac):not([data-band="session"]) .shell .main:not(:has(.home)) > .page { padding-top: 4px !important; }
-html.desktop .main :is(.page-top, .auto-head, .dd-top, .lh-top) { margin-left: var(--head-l); margin-right: var(--head-r); transition: margin-left var(--dass-slide, 200ms ease); }
-/* A page whose column is centred (Deep Dive's repos, Needs you) moves its first row only by what the window's buttons still
-   reach, which is nothing in a wide window: the column's left is the larger of the page's padding and half what is left over. */
-html.desktop .shell:not(.with-panel) .main { --main-x: 0px; }
-html.desktop.rail-only .shell.with-panel .main { --main-x: var(--oss-rail-w, 52px); }
-html.desktop .main :is(.dd-home-head, .ny-head) { margin-left: max(0px, calc(var(--head-l) + 24px - max(24px, (100vw - var(--main-x, 0px) - 780px) / 2))); margin-right: max(0px, calc(var(--head-r) + 24px - max(24px, (100vw - var(--main-x, 0px) - 780px) / 2))); }
-html.desktop .main .ap-head { min-height: 46px; padding-left: calc(22px + var(--head-l)); padding-right: calc(22px + var(--head-r)); transition: padding-left var(--dass-slide, 200ms ease); }
-@media (prefers-reduced-motion: reduce) { html.desktop .main :is(.page-top, .auto-head, .dd-top, .dd-home-head, .ny-head, .lh-top, .ap-head) { transition: none; } }
-/* A list's own search row at the page's top-left (Code Review's pull requests and issues): it keeps its border to the column's
-   edge and moves its field clear of the window's buttons instead (Arun, 2026-11-12: "fix.... i said to check"). */
-html.desktop .main .page-top-in { padding-top: 0; padding-left: calc(8px + var(--head-l)); transition: padding-left var(--dass-slide, 200ms ease); }
-/* Its field's middle on the window buttons' middle and the tabs' beside it (Arun, 2026-11-12: "make sure the search bar thing is
-   properly lined up"): the row's own top padding put it 9px below them. */
+/* Every page sits under the window's row, as Friday Teams has it (Arun, 2026-11-14: "i said i wanted it like the production build
+   UI layout"): the 2026-11-12 block that ran each page's header up into the window's bar, with clearances for its buttons, is
+   gone. */
 /* On a Mac the line between the rail and the page starts under the window's buttons, as the session list's does, instead of
    running up between the traffic lights and the sidebar button (Arun, 2026-11-12: "fix this line thing like we did for the
    coding side bar, remember this is only for mac"): the rail draws its line from 38px down and the page's own edge is not drawn. */
-html.desktop-mac.rail-only .oss-rail.oss-rail::after { display: block; }
-html.desktop-mac.rail-only .shell.with-panel .main { border-left-color: transparent !important; }
 /* A session with its list folded and the rail kept: its title in the window's bar still starts after the window's buttons. */
 html.desktop-mac.rail-only .shell.with-panel #band-left { left: 160px !important; }
 html.desktop-mac.win-full.rail-only .shell.with-panel #band-left { left: 104px !important; }
 html.desktop:not(.desktop-mac).rail-only .shell.with-panel #band-left { left: 100px !important; }
+
+/* ── A place's own page sits under the window's row, as in Friday Teams (team-shell.css html.desktop.ts-rail-only; Arun,
+   2026-11-14: "i said i wanted it like the production build UI layout"): the window's row (its buttons, the sidebar's, Search)
+   runs across the top over the rail's column, and the page is a panel under it beside the rail, its top and left edges drawn and
+   its top-left corner rounded. Its header and actions are the page's own first row, not the window's: nothing of the page goes
+   under the window's buttons, so it needs no clearance for them. ────────────────────────────────────────────────────────────── */
+html.desktop.rail-only .shell.shell.with-panel > .main.main.main { margin-top: 38px !important; border-top: 1px solid var(--border) !important; border-left: 1px solid var(--border) !important; border-radius: var(--r-shell, 14px) 0 0 0 !important; }
+html.desktop.rail-only .shell.with-panel .main { --head-l: 0px; --head-r: 0px; }
+html.desktop.rail-only .shell.with-panel .main:not(:has(.home)) > .page { padding-top: 16px !important; }
+html.desktop.rail-only .oss-rail::after { display: none; }
+
+/* Agent talk as rows (AgentTalk.tsx TalkRow; Friday Teams 9f12ef32; Arun, 2026-11-14, design 10: "add different color coding for
+   the states too"): both marks with an arrow, who did what in a sentence, the point in one line, and the state as a pill in its own
+   colour. Sent is slate, read teal, working blue and moving, being checked violet, needs a person amber and pulsing, stuck red, done
+   green. */
+.tk-card.tk-talk { gap: 0; max-width: 680px; padding: 0; border-radius: 14px; background: var(--panel); transition: border-color .15s ease; }
+.tk-card.tk-talk:hover { border-color: var(--border-strong, var(--border)); }
+.tk-row-head { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 10px 12px 10px 10px; }
+.tk-toggle { display: flex; flex: 1; align-items: center; gap: 12px; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.tk-toggle:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 4px; border-radius: 8px; }
+.tk-talk .tk-route { flex: none; gap: 3px; overflow: visible; }
+.tk-talk .tk-mark { width: 24px; height: 24px; border-radius: 8px; }
+.tk-talk .tk-mark svg { width: 14px; height: 14px; }
+.tk-arrow { width: 12px; height: 12px; flex: none; color: var(--faint, var(--text-muted)); }
+.tk-talk-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.tk-talk-who { overflow: hidden; color: var(--text-muted); font-size: 12px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
+.tk-talk-who .tk-name { color: var(--ink-2); font-weight: 500; }
+.tk-line { overflow: hidden; color: var(--ink); font-size: 14px; font-weight: 500; line-height: 20px; text-overflow: ellipsis; white-space: nowrap; }
+.tk-talk .tk-status { flex: none; margin: 0; max-width: 220px; padding: 3px 10px 3px 8px; font-weight: 500; }
+.tk-status-word { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk-talk .tk-row-head > .stamp { flex: none; min-width: 52px; text-align: right; }
+.tk-status.is-wait { --st: var(--st-sent); }
+.tk-status.is-hold { --st: var(--amber); }
+.tk-status.is-review { --st: var(--st-review); }
+.tk-status.is-bad { --st: var(--st-blocked); }
+.tk-status.is-hold .tk-dot { animation: tk-ping 1.8s ease-out infinite; }
+@keyframes tk-ping { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--st) 55%, transparent); } 100% { box-shadow: 0 0 0 6px transparent; } }
+.tk-status.is-work .tk-dot { animation: tk-blink 1.2s ease-in-out infinite; }
+@keyframes tk-blink { 50% { opacity: .3; } }
+.tk-status.is-work .tk-status-word { background: linear-gradient(90deg, var(--st) 0%, var(--st) 40%, var(--ink) 50%, var(--st) 60%, var(--st) 100%); background-size: 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: tk-shine 1.8s linear infinite; }
+@keyframes tk-shine { from { background-position: 100% 0; } to { background-position: -150% 0; } }
+@media (prefers-reduced-motion: reduce) { .tk-status .tk-dot, .tk-status .tk-status-word { animation: none !important; } .tk-status.is-work .tk-status-word { color: var(--st); background: none; } }
+html.reduce-motion .tk-status .tk-dot, html.reduce-motion .tk-status .tk-status-word { animation: none !important; }
+html.reduce-motion .tk-status.is-work .tk-status-word { color: var(--st); background: none; }
+/* A row that needs someone, or is stuck, says so with its edge too. */
+.tk-talk.is-hold { border-color: color-mix(in srgb, var(--amber) 45%, var(--border)); }
+.tk-talk.is-bad { border-color: color-mix(in srgb, var(--st-blocked) 40%, var(--border)); }
+.tk-body { display: flex; flex-direction: column; gap: 8px; padding: 0 12px 12px 76px; animation: tk-open .2s ease-out; }
+@keyframes tk-open { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+.tk-body .tk-why { margin: 0; }
+.tk-body .tk-foot { justify-content: flex-end; }
+@media (max-width: 640px) { .tk-body { padding-left: 12px; } .tk-talk .tk-status { max-width: 120px; } .tk-talk .tk-row-head > .stamp { display: none; } }
+
+/* A reply's work as one line (run-line.tsx; Friday Teams 566e73d9; Arun, 2026-11-14, direction A): the step under way, changing in place with a bright
+   light passing over its words, a tick per step and the clock; done, one summary that opens to the steps grouped by kind. */
+.rl { margin: 4px 0; }
+.rl-head { display: flex; align-items: center; gap: 10px; width: 100%; max-width: 100%; margin-left: -8px; padding: 6px 8px; border: 0; border-radius: var(--r-md); background: none; color: var(--text-muted); font: 500 14px/20px var(--font); text-align: left; cursor: pointer; transition: background-color .15s ease, color .15s ease; }
+.rl-head:hover { background: var(--hover); color: var(--ink); }
+.rl-head:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.rl-text { flex: 1; min-width: 0; overflow: hidden; }
+.rl-now, .rl-done { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Brighter than the app's other shine: the words go from muted to full ink as the light passes. */
+.rl-now.shine { --shine-base: var(--text-muted); --shine-ink: var(--ink); animation: rl-in .32s cubic-bezier(.2, .8, .2, 1); }
+.rl-now.shine .shine-win, .rl-now.shine .shine-copy { animation-duration: 1.9s; }
+.rl-now.needs { color: var(--needs, var(--amber)); }
+@keyframes rl-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.rl.has-fail .rl-done { color: var(--text-muted); }
+.rl-fail { color: var(--red); }
+.rl-ticks { display: inline-flex; flex: none; gap: 3px; }
+.rl-ticks i { width: 5px; height: 5px; border-radius: 2px; background: color-mix(in srgb, var(--ink) 35%, transparent); }
+.rl-ticks i.now { background: var(--ink); animation: rl-blink 1s ease-in-out infinite; }
+.rl-ticks i.bad { background: var(--red); }
+.rl-ticks i.skip { background: color-mix(in srgb, var(--ink) 14%, transparent); }
+@keyframes rl-blink { 50% { opacity: .35; } }
+.rl-clock { flex: none; color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.rl-body { display: flex; flex-direction: column; gap: 2px; margin: 2px 0 6px 4px; padding-left: 14px; border-left: 1px solid var(--border); animation: rl-in .2s ease-out; }
+.rl-group { display: flex; flex-direction: column; }
+.rl-row { display: grid; grid-template-columns: 88px minmax(0, 1fr) auto; align-items: baseline; gap: 12px; width: 100%; padding: 5px 8px; margin-left: -8px; border: 0; border-radius: var(--r-sm); background: none; color: var(--ink-2); font: 400 13px/19px var(--font); text-align: left; cursor: pointer; }
+.rl-row:hover { background: var(--hover); }
+.rl-row:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.rl-label { color: var(--text-muted); }
+.rl-what { overflow: hidden; color: var(--ink); text-overflow: ellipsis; white-space: nowrap; }
+.rl-side { color: var(--text-muted); font-size: 12px; }
+.rl-side.bad { color: var(--red); }
+.rl-side.live { color: var(--live); }
+.rl-group > .rsp-steps { margin: 2px 0 6px; }
+.rl-thought { margin: 2px 0 6px; white-space: pre-wrap; }
+.rl-body > .rsp-say { margin-top: 6px; color: var(--ink-2); }
+@media (prefers-reduced-motion: reduce) { .rl-now.shine, .rl-body, .rl-ticks i.now { animation: none; } }
+html.reduce-motion .rl-now.shine, html.reduce-motion .rl-body, html.reduce-motion .rl-ticks i.now { animation: none; }
+
+/* The mascot beside a working reply moves with what it is doing: thinking breathes, reading sways, editing bobs, running hops. */
+.rsp-avatar[data-doing] > * { transform-origin: 50% 80%; }
+.rsp-avatar[data-doing="think"] > * { animation: rl-breathe 2.4s ease-in-out infinite; }
+.rsp-avatar[data-doing="read"] > *, .rsp-avatar[data-doing="search"] > * { animation: rl-sway 1.1s ease-in-out infinite; }
+.rsp-avatar[data-doing="edit"] > * { animation: rl-bob .55s ease-in-out infinite; }
+.rsp-avatar[data-doing="run"] > * { animation: rl-hop .75s cubic-bezier(.3, 0, .3, 1) infinite; }
+.rsp-avatar[data-doing="work"] > *, .rsp-avatar[data-doing="other"] > *, .rsp-avatar[data-doing="ask"] > * { animation: rl-breathe 1.6s ease-in-out infinite; }
+@keyframes rl-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06, .95); } }
+@keyframes rl-sway { 0%, 100% { transform: translateX(-1px) rotate(-3deg); } 50% { transform: translateX(1px) rotate(3deg); } }
+@keyframes rl-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.5px); } }
+@keyframes rl-hop { 0%, 100% { transform: translateY(0) scale(1); } 40% { transform: translateY(-2.5px) scale(.97, 1.03); } 80% { transform: translateY(0) scale(1.04, .96); } }
+@media (prefers-reduced-motion: reduce) { .rsp-avatar[data-doing] > * { animation: none !important; } }
+html.reduce-motion .rsp-avatar[data-doing] > * { animation: none !important; }

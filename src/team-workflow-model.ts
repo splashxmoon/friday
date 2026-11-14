@@ -486,7 +486,7 @@ export function workflowChecks(
       }
     }
     if (s.kind === "approve") return;
-    if (!s.mate) out.push({ level: "fix", text: `Pick ${s.kind === "check" ? "who checks" : "a teammate for"} step ${n}`, on: s.id });
+    if (!s.mate) out.push({ level: "fix", text: `Pick ${s.kind === "check" ? "who checks" : "a crew mate for"} step ${n}`, on: s.id });
     else if (s.mate !== LEAD) {
       const m = team.mates.find((x) => x.id === s.mate);
       if (!m) out.push({ level: "fix", text: `Step ${n}'s teammate isn't in the crew any more`, on: s.id });
@@ -680,7 +680,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   {
     id: "standup",
     name: "Morning standup digest",
-    blurb: "Every teammate says what it did yesterday and what is next, side by side; the lead writes the digest.",
+    blurb: "Every crew mate says what it did yesterday and what is next, side by side; the lead writes the digest.",
     trigger: weekdays("08:30"),
     steps: [
       { suits: ["*"], does: "Say in three lines what you did since yesterday's standup, what you're on next, and what blocks you.", col: 0 },

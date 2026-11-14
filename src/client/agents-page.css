@@ -7,7 +7,7 @@
 .ap-page > .ap-head { padding-top: 0; padding-bottom: 0; color: inherit; }
 .ap-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 0 22px; border-bottom: 1px solid var(--border); background: var(--bg); }
 .ap-head h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
-.ap-count { font-size: 13px; color: var(--text-muted); }
+.ap-count { font-size: 13px; color: var(--text-muted); white-space: nowrap; }
 .ap-head-acts { display: flex; align-items: center; gap: 6px; margin-left: auto; }
 .ap-body { width: min(880px, 100%); margin: 0 auto; padding: 22px 22px 48px; display: flex; flex-direction: column; gap: 24px; }
 .ap-label { margin: 0 0 6px; font-size: 12px; font-weight: 500; color: var(--text-muted); }
@@ -30,7 +30,7 @@
 .ap-needs-why.ap-err { color: var(--red); }
 .ap-needs-acts { display: flex; align-items: center; gap: 6px; flex: none; }
 .ap-needs-step { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 0 0 0 10px; border: 0; border-left: 1px solid var(--border-strong); background: none; font: inherit; font-size: 12px; color: var(--text-muted); white-space: nowrap; cursor: pointer; }
-.ap-needs-step kbd { font: 500 11px ui-monospace, Menlo, monospace; padding: 0 5px; border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: 5px; }
+.ap-needs-step kbd { font: 500 12px ui-monospace, Menlo, monospace; padding: 0 5px; border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: 5px; }
 
 /* The crew: one row each, its face, name and role, what it is doing now, how long ago, and Message. */
 .ap-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
@@ -69,5 +69,7 @@
   .ap-needs-acts { width: 100%; justify-content: flex-end; }
   .ap-row-msg, .ap-when { display: none; }
   .ap-head { padding: 0 16px; }
+  /* The window's own bar says "Agents" in a narrow window: said once. */
+  .ap-head h1 { display: none; }
   .ap-body { padding: 18px 16px 40px; }
 }

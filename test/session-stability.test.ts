@@ -12,17 +12,12 @@ const bot = (name: string): ActorRef => ({ id: `engine:${name}`, name, kind: "ag
 let seq = 0;
 const ev = (body: object, lane?: string, actor: ActorRef = ada) => ({ seq: ++seq, ts: seq * 1000, actor, body, ...(lane ? { lane } : {}) }) as SessionEvent;
 
-test("the same change set reported again (a tool reconnecting) is one card, not one a reconnect", () => {
+test("a change set a tool reports as it reconnects is no card in the chat", () => {
   seq = 0;
   const files = [{ path: "a.ts", additions: 3, deletions: 1, patch: "@@ -1 +1 @@\n-a\n+b" }];
   const items = group([ev({ type: "session.created", title: "t", ownerId: ada.id, ownerName: ada.name }), ev({ type: "agent.diff", files }, undefined, bot("Codex")), ev({ type: "agent.diff", files }, undefined, bot("Codex")), ev({ type: "agent.diff", files }, undefined, bot("Codex"))], false);
-  assert.equal(items.filter((i) => i.kind === "event" && i.ev.body.type === "agent.diff").length, 1);
-  // A different change set with nothing of the lane's between is the folder now, in the earlier card's place (each runner
-  // measures from where it stands, so two reports of one folder can differ); the newest is what is drawn.
-  const more = group([ev({ type: "agent.diff", files }, undefined, bot("Codex")), ev({ type: "agent.diff", files: [...files, { path: "b.ts", additions: 1, deletions: 0, patch: "@@ +1 @@\n+c" }] }, undefined, bot("Codex"))], false);
-  const drawn = more.filter((i) => i.kind === "event" && i.ev.body.type === "agent.diff") as Extract<(typeof more)[number], { kind: "event" }>[];
-  assert.equal(drawn.length, 1);
-  assert.equal((drawn[0]!.ev.body as { files: unknown[] }).files.length, 2);
+  // Not a card at all now (Arun, 2026-11-13: "stop showing these random change XXXX files"), however many times it is said.
+  assert.equal(items.filter((i) => i.kind === "event" && i.ev.body.type === "agent.diff").length, 0);
 });
 
 test("a task's card says where the task stands: on it, stopped, moved on, being checked, done", () => {

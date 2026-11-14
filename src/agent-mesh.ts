@@ -48,6 +48,20 @@ export { meshHead } from "./mesh-note.js";
 
 /** Past this many agent-to-agent steps in a chain (A woke B woke C…), that one message is refused. Talk itself never pauses. */
 export const MAX_HOPS = 4;
+
+/**
+ * A message that only acknowledges ("Got it, thanks!", "Sounds good 👍"): it wakes the other agent for nothing and is one more
+ * card for the people reading (session-noise map, 2026-11-13). Long or carrying anything past the ack, it goes as written.
+ */
+const ACK = /^(?:(?:ok(?:ay)?|k|got it|gotcha|thanks?(?: you)?|thx|ty|cheers|great|perfect|nice|cool|awesome|sounds good|sgtm|lgtm|will do|on it|noted|understood|roger(?: that)?|ack(?:nowledged)?|acknowledged|makes sense|sure|yes|yep|yup|done|no problem|np|appreciate it|much appreciated|thank you so much|thanks a lot|great work|nice work|good work|well done)[\s,.!:;-]*)+$/i;
+export function onlyAcknowledges(text: string): boolean {
+  const t = text
+    .replace(/\p{Extended_Pictographic}|\u200d|\ufe0f/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (t.length > 80) return false;
+  return !t || ACK.test(t);
+}
 /** How much a coding tool may do, least first: an agent never has another do more than it may itself. */
 export const MODE_RANK: Record<EngineMode, number> = { plan: 0, edits: 1, full: 2 };
 /** The most of a task's diff written into a review brief for a reviewer on another computer. */
@@ -103,6 +117,11 @@ const FRIDAY: ActorRef = { id: "friday", name: "Friday", kind: "system" };
 const agentActor = (name: string): ActorRef => ({ id: "agent", name, kind: "agent" });
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 const clip = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
+/**
+ * A check's output kept from both ends: its command and first lines, and the end where runners print what failed. Cut from the
+ * head alone, the summary was lost on any long run (Arun, 2026-11-13: "give more on what was reviewed/checked").
+ */
+const ends = (t: string, n: number) => (t.length > n ? `${t.slice(0, Math.floor(n * 0.3))}\n… ${t.length - n} characters left out …\n${t.slice(-Math.floor(n * 0.7))}` : t);
 const lanesOf = (s: SessionState) => {
   let all = [MAIN_LANE, ...s.lanes.map((l) => l.id)];
   // A team's main lane is its room, nobody's agent (teammates.ts): never messaged, never given a board task.
@@ -382,7 +401,7 @@ export const MESH_TOOLS: MeshToolDef[] = [
  * they work (Arun, 2026-10-20: "constantly updating and stuff like checking up on each other").
  */
 export const MESH_INSTRUCTIONS =
-  "You are one of several agents in a Friday session; people watch all of you live. These tools keep an open line to the other agents: list_agents to see who is here and what each is doing, check_messages to read what came in for you (messages also reach you while you work, so there is no need to keep checking), post_update to tell everyone what you finished or changed without interrupting them, message_agent to tell one agent something it must act on, message_team to tell several or everyone at once, ask_agent to ask one and wait for its answer, reply_to_agent to answer a question asked of you, wait_for_agent to wait until another finishes work yours depends on, show_preview to open a page you started (a dev server on localhost) in the session's Preview panel for the people here, preview_screenshot to see it yourself (never launch Chrome or install a browser to look), list_tasks, claim_task, post_proof and finish_task for the session's shared task board (take the next ready task when you finish one), read_notes and write_note for the session's shared notes, claim_files before you change files others may be changing (and release_files when done), wake_me_when to be woken when what you wait on happens (another agent's turn, a board task, a job you left running) instead of ending on 'waiting' for a person to check back, hand_off to pass work on, and list_sessions, read_session and message_session for the other Friday sessions your person is in (tell one when you change something it builds on). Stay in touch without chatter, since every message and tool call costs usage: post_update once when you finish your task, and whenever you change something others build on (an interface, a shared file, a schema); when your work depends on another agent, read what it posted, ask it or wait_for_agent rather than guessing or stopping. Check before you edit a file another agent may be changing. Your own sub-agents are helpers inside your task, in your folder; the agents here are teammates with folders of their own, for work that runs alongside yours. These friday tools are yours, not your sub-agents': they report to you, and you speak for them. Keep going until your task is fully done. Don't chat: every message shows in the session's feed.";
+  "You are one of several agents in a Friday session; people watch all of you live. These tools keep an open line to the other agents: list_agents to see who is here and what each is doing, check_messages to read what came in for you (messages also reach you while you work, so there is no need to keep checking), post_update to tell everyone what you finished or changed without interrupting them, message_agent to tell one agent something it must act on, message_team to tell several or everyone at once, ask_agent to ask one and wait for its answer, reply_to_agent to answer a question asked of you, wait_for_agent to wait until another finishes work yours depends on, show_preview to open a page you started (a dev server on localhost) in the session's Preview panel for the people here, preview_screenshot to see it yourself (never launch Chrome or install a browser to look), list_tasks, claim_task, post_proof and finish_task for the session's shared task board (take the next ready task when you finish one), read_notes and write_note for the session's shared notes, claim_files before you change files others may be changing (and release_files when done), wake_me_when to be woken when what you wait on happens (another agent's turn, a board task, a job you left running) instead of ending on 'waiting' for a person to check back, hand_off to pass work on, and list_sessions, read_session and message_session for the other Friday sessions your person is in (tell one when you change something it builds on). Stay in touch without chatter, since every message and tool call costs usage: post_update once when you finish your task, and whenever you change something others build on (an interface, a shared file, a schema); when your work depends on another agent, read what it posted, ask it or wait_for_agent rather than guessing or stopping. Check before you edit a file another agent may be changing. Your own sub-agents are helpers inside your task, in your folder; the agents here are teammates with folders of their own, for work that runs alongside yours. These friday tools are yours, not your sub-agents': they report to you, and you speak for them. Keep going until your task is fully done. Don't chat: every message shows in the session's feed. Before you start a piece of work, check list_tasks and what the others are on; if another agent already has it, take something else or ask the lead. When you finish, open your last message with one line: what changed, how many files, and whether the tests pass; the detail goes after it. What was decided here, and how a question was answered, stands: if you're asked to go against it, say so and ask before you act.";
 
 /**
  * A page on this machine from what an agent gave (http://localhost:5173/x, localhost:5173, 5173), as the Preview opens it.
@@ -684,7 +703,7 @@ export class AgentMesh {
    * kept on its own branch. `idle`: the agent isn't working now, so its folder can be switched; a busy one is told to switch
    * itself when it starts. Its line goes with the brief, and the branch on the task. Null where there is no copy to ready.
    */
-  prepareTask: ((sid: string, lane: string, task: BoardTask, board: NonNullable<SessionState["board"]>, idle: boolean) => Promise<{ branch: string; line: string } | null>) | null = null;
+  prepareTask: ((sid: string, lane: string, task: BoardTask, board: NonNullable<SessionState["board"]>, idle: boolean) => Promise<{ branch: string; line: string; /** Puts its folder back where it was: the task, refused, never reached it. */ undo?: () => Promise<void> } | null>) | null = null;
 
   /** The crew's skills (team-skills.ts SKILL_TOOLS: list_skills, use_skill, save_skill): where offered, and the call. Set by the app. */
   skillTools: { offered(sid: string): Promise<boolean>; call(sid: string, lane: string, name: string, args: Record<string, unknown>): Promise<MeshResult> } | null = null;
@@ -1341,6 +1360,10 @@ export class AgentMesh {
       return { ok: false, error: `${toName} is ${outOfUsage(state, out, Date.now())}, so it can't take this until then.${free.length ? ` Free now: ${free.map((n) => `"${n}"`).join(", ")}.` : " No other agent is free right now; carry on yourself, or say what you need from the people here."}` };
     }
 
+    // An ack alone isn't sent: nothing in it to act on, and every one is a card in the feed. A question or a task always goes.
+    if (!req.system && req.kind === "tell" && onlyAcknowledges(text)) {
+      return { ok: false, error: `That only acknowledges ${toName}, so Friday didn't send it: nothing in it for ${toName} to act on. Carry on with the work; message again when there's something to say.` };
+    }
     // A loop guard turns away this one message and nothing more: agent talk itself is never paused, so every agent stays
     // reachable (Arun, 2026-10-20: "do not pause agent to agent talking too ever").
     if (!req.system && hop + 1 > MAX_HOPS) {
@@ -1728,18 +1751,20 @@ export class AgentMesh {
       const broke = c.judge ? await c.judge().catch(() => null) : null;
       const out = c.judge ? (broke ? `$ ${c.command}\n(exited 1)\n${broke}` : `$ ${c.command}\n(exited 0)\n`) : await this.repo(sid, lane, { op: "shell", command: c.command, timeoutSec: CHECK_SECONDS } as RepoCall).catch((e: Error) => `Couldn't run it: ${e.message}`);
       let verdict = checkVerdict(out);
+      // Timed out isn't "couldn't run there": it ran and never said it passed, so it is never a pass (said as timed out).
+      const timedOut = verdict === "skipped" && /^\$ [^\n]*\n\(timed out/.test(out ?? "");
       // Failures that were already there at the commit the agent's copy started from aren't the task's (baseline.ts): only the
       // new ones send it back, and a run whose every failure was there before passes, saying so.
       const was = verdict === "failed" && TEST_CMD.test(c.command) ? await this.baseline?.(sid, lane, c.command).catch(() => null) : null;
       const vs = was ? compare(failingTests(out ?? ""), was) : null;
       if (onlyPre(vs)) verdict = "passed";
-      await this.store.append(sid, FRIDAY, { type: "board.checked", id, lane, command: c.command, ok: verdict !== "failed", output: clip(out ?? "", 4000), ...(verdict === "skipped" ? { skipped: true } : {}), ...(vs?.pre.length ? { pre: vs.pre } : {}), ...(vs?.whole ? { whole: true } : {}), ...(at ? { sha: at.sha, ...(at.dirty ? { dirty: true as const } : {}) } : {}) }, { lane });
+      await this.store.append(sid, FRIDAY, { type: "board.checked", id, lane, command: c.command, ok: verdict === "passed", output: ends(out ?? "", 6000), ...(verdict === "skipped" ? { skipped: true } : {}), ...(timedOut ? { timedOut: true as const } : {}), ...(vs?.pre.length ? { pre: vs.pre } : {}), ...(vs?.whole ? { whole: true } : {}), ...(at ? { sha: at.sha, ...(at.dirty ? { dirty: true as const } : {}) } : {}) }, { lane });
       if (verdict !== "skipped") await c.ran?.(verdict === "failed").catch(() => undefined);
       if (verdict !== "failed") continue;
       const after = (await this.store.state(sid)).board?.tasks.find((x) => x.id === id);
       if (!after) return false;
       if (after.rounds > MAX_REWORK) {
-        await this.store.append(sid, FRIDAY, { type: "board.finished", id, lane, name: after.name ?? "", status: "blocked", report: `Its checks failed ${after.rounds} times; the last run of \`${c.command}\`:\n${clip(out ?? "", 1500)}` }, { lane });
+        await this.store.append(sid, FRIDAY, { type: "board.finished", id, lane, name: after.name ?? "", status: "blocked", report: `Its checks failed ${after.rounds} times; the last run of \`${c.command}\`:\n${ends(out ?? "", 2000)}` }, { lane });
         await this.reportBoard(sid, true);
         return false;
       }
@@ -2110,6 +2135,8 @@ export class AgentMesh {
         const prep = await this.prepareTask?.(sid, lane, chosen, state.board!, runOf(state, lane).status !== "running" && !pendingFor(state, lane).length).catch(() => null);
         const r = await this.send(sid, state.board!.fromLane, { to: name, toLane: lane, text: `${taskBrief(state, chosen)}${prep ? `\n\n${prep.line}` : ""}`, kind: "task", board: chosen.id, system: true });
         if (!r.ok) {
+          // Refused: its folder goes back to the branch it was on (Fable review, 2026-11-11).
+          await prep?.undo?.().catch(() => undefined);
           const asked = await this.boardRefused?.(sid, chosen, lane, r.error).catch(() => false);
           this.refused.set(`${sid}|${chosen.id}`, asked ? `Waiting for ${name}'s keeper to take it on.` : r.error);
           continue;
@@ -2149,6 +2176,7 @@ export class AgentMesh {
       const prep = await this.prepareTask?.(sid, pick.to, pick.t, state.board!, true).catch(() => null);
       const r = await this.send(sid, state.board!.fromLane, { to: name, toLane: pick.to, text: `${taskBrief(state, pick.t)}${prep ? `\n\n${prep.line}` : ""}`, kind: "task", board: pick.t.id, system: true });
       if (!r.ok) {
+        await prep?.undo?.().catch(() => undefined);
         // Nobody else free takes it meanwhile? It may still go to this one through whoever can let it (boardRefused).
         if (!free.some((l) => l !== pick!.to && !skip.has(l) && may(pick!.t, l))) await this.boardRefused?.(sid, pick.t, pick.to, r.error).catch(() => false);
         skip.add(pick.to);
@@ -2216,7 +2244,9 @@ export class AgentMesh {
             if (r.ok) continue;
           }
         }
-        const ok = verdict !== "fail";
+        // Still none: not a pass (Arun, 2026-11-13: "they need to be air tight and actually be trust worthy"). It goes back to its
+        // agent with the reviewer's words, as no verdict, and reworks are capped as ever, then a person.
+        const ok = verdict === "pass";
         await this.store.append(sid, agentActor(name), { type: "board.reviewed", id: t.id, lane, name, ok, note: clip(said || "No verdict.", 2000), ...(verdict === "unclear" ? { unclear: true as const } : {}) }, { lane });
         if (!ok) await this.rework(sid, t.id);
         await this.afterBoardMove(sid);
@@ -2234,7 +2264,10 @@ export class AgentMesh {
       await this.reportBoard(sid, true);
       return;
     }
-    await this.send(sid, state.board!.fromLane, { to: t.name ?? laneName(state, t.lane), ...(t.lane ? { toLane: t.lane } : {}), text: `${t.review?.by ?? "The reviewer"} checked your work on "${t.title}" and found:\n${t.review?.note ?? ""}\n\nFix it, then end your turn with a short report as before.`, kind: "task", board: id, system: true });
+    const text = t.review?.unclear
+      ? `${t.review.by} looked at your work on "${t.title}" but gave no verdict, so it hasn't passed. What it said:\n${t.review.note}\n\nIf that names something to fix, fix it; then end your turn with a short report as before.`
+      : `${t.review?.by ?? "The reviewer"} checked your work on "${t.title}" and found:\n${t.review?.note ?? ""}\n\nFix it, then end your turn with a short report as before.`;
+    await this.send(sid, state.board!.fromLane, { to: t.name ?? laneName(state, t.lane), ...(t.lane ? { toLane: t.lane } : {}), text, kind: "task", board: id, system: true });
   }
 
   /** After a task moved: tell the poster if the board is through, and hand out what that freed up. */
@@ -2670,7 +2703,7 @@ const BLOCKED = /\b(?:i'?m|i am|i was|i've been|i have been|i remain|it'?s|it is
 
 /** A review in words, for the lead's report: "approved by Nih", "passed without a review (nothing changed to check)". */
 export const reviewSaid = (r: TaskReview): string =>
-  r.auto ? `passed without a review (${r.note.trim().replace(/\.$/, "").toLowerCase()})` : r.unclear ? `passed with no verdict from ${r.by}` : r.ok ? `approved by ${r.by}` : `not approved by ${r.by}`;
+  r.auto ? `passed without a review (${r.note.trim().replace(/\.$/, "").toLowerCase()})` : r.unclear ? `${r.ok ? "passed" : "sent back"} with no verdict from ${r.by}` : r.ok ? `approved by ${r.by}` : `not approved by ${r.by}`;
 
 /** Friday's record of a finished task saying nothing changed (factsOf), not the agent's words ("Dass's S1a is right: no files changed"). */
 export const NOTHING_CHANGED = /\[Friday, from the record\] no files changed\b/;
@@ -3178,11 +3211,11 @@ function untilText(ms: number): string {
 
 /**
  * Whether a review lets the work through. Approved passes; a review that names something to change sends it back. One that
- * says neither, and names no problem, doesn't send it back (its agent was told to "fix what was found" with nothing found, and
- * marked the task blocked: Arun, 2026-10-21) and lets it through only as unclear, after its reviewer is asked again (reviewVerdict).
+ * says neither is unclear: its reviewer is asked again, and still none never lets it through (Arun, 2026-11-13: "they need to be
+ * air tight"); it goes back to its agent with the reviewer's words, said as no verdict (boardRunEnded).
  */
 export function reviewPasses(said: string): boolean {
-  return reviewVerdict(said) !== "fail";
+  return reviewVerdict(said) === "pass";
 }
 
 /** A review's verdict: "pass", "fail", or "unclear" when it says neither and names no problem (or says nothing). */
@@ -3192,12 +3225,14 @@ export function reviewVerdict(said: string): "pass" | "fail" | "unclear" {
 }
 
 function reviewOk(said: string): "pass" | "fail" | null {
-  if (/^\s*(\*\*)?(approved|lgtm|looks good)\b/i.test(said)) return "pass";
+  if (/^\s*(\*\*)?approved\b/i.test(said)) return "pass";
+  // "Looks good, but the null case is broken" had passed on its first words (Arun, 2026-11-13: "air tight").
+  if (/^\s*(\*\*)?(lgtm|looks good)\b/i.test(said)) return /\bbut\b[^.\n]*\b(?:broken|bug|fails?|failing|missing|wrong|crash(?:es)?|null|undefined|doesn'?t|isn'?t|won'?t|can'?t|not)\b/i.test(said) ? "fail" : "pass";
   // Saying it won't pass it, however it goes on: "I couldn't review this one, so I'm giving no approval. … Changes needed:" had
   // passed, on a later "Codex says it found no blockers there" (Arun, 2026-10-24, t3).
   if (/(?<!\bno )\bchanges (?:needed|requested)\b|\bnot approved\b|\b(?:giving|give|gave) no approval\b|\bno approval\b|\bwithhold(?:ing)? (?:my )?approval\b|\b(?:can'?t|cannot|couldn'?t|unable to) (?:approve|review|check|verify) (?:it|this|the|that|them|any)/i.test(said)) return "fail";
   // Saying it found nothing wrong is a pass however it is put: "no problems found", "nothing to fix", "no issues".
-  const clean = /\bno (?:real |obvious |major )?(?:problems?|issues?|bugs?|concerns?|blockers?)\b|\bnothing (?:to fix|to change|wrong|blocking)\b|\bfound nothing\b/i;
+  const clean = /\bno (?:real |obvious |major )?(?:problems?|issues?|bugs?|concerns?|blockers?)\b|\bnothing (?:to fix|to change|wrong|blocking)\b|\bfound nothing\b|\bno changes (?:needed|required|requested)\b/i;
   // A problem it names sends the work back (2026-10-21: "Found a problem: ... a double tap creates two charges" had passed,
   // as only "bug", "missing" or "fails" counted).
   if (!clean.test(said) && /\b(?:found|spotted|noticed|there(?:'s| is| are)|one|a|two|several|some)\s+(?:\w+\s+)?(?:problems?|issues?|concerns?|blockers?)\b|\bproblem:|\bissue:|\bdouble[- ]charg|\bcharges? twice\b/i.test(said)) return "fail";
@@ -3205,5 +3240,7 @@ function reviewOk(said: string): "pass" | "fail" | null {
   if (/(?:^|[.!?]\s+|\n\s*)(?:\*\*)?(?:approved|lgtm)(?:\*\*)?(?:[.!:]|\s*$)/im.test(said)) return "pass";
   if (clean.test(said)) return "pass";
   if (/(?<!\bno )changes needed|(?<!\bno )changes requested|needs? (?:a |to be )?fix|\bfail(?:s|ed|ing)?\b|\bbug\b|\bbroken\b|\bmissing\b|\bwrong\b|\bregression\b|must (?:be )?(?:fix|change|add|remove)|should (?:be )?(?:fix|change|add|remove)|not approved|\breject/i.test(said)) return "fail";
+  // "All good", "looks right", "ready to merge", with nothing named against it above.
+  if (/\ball good\b|\blooks (?:good|fine|right|correct)\b|\bready to (?:merge|ship)\b/i.test(said)) return "pass";
   return null;
 }

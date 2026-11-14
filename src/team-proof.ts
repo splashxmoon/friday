@@ -136,7 +136,10 @@ function proofIn(events: readonly SessionEvent[], s: Stretch): Proof {
   // Friday's own check of a board task, run in its folder once it was handed in: the one that counts, so first.
   const checked = s.task ? after.findLast((e) => e.body.type === "board.checked" && e.body.id === s.task) : undefined;
   const friday: ProofCheck[] = checked?.body.type === "board.checked" ? [{ command: checked.body.command, ok: checked.body.ok, by: "friday", ...(checked.body.skipped ? { skipped: true } : {}), ...(checked.body.pre?.length ? { pre: checked.body.pre.length } : {}), ...(!checked.body.ok && !checked.body.skipped ? { output: checked.body.output.slice(-600) } : {}) }] : [];
-  const checks = [...friday, ...[...self.values()].filter((c) => c.command !== friday[0]?.command).slice(-4)];
+  // Every check still failing is kept (Arun, 2026-11-13: "air tight"): the last four by when they were first run let a failing
+  // `npm test` fall off behind four passing commands, and the line read "Checks pass".
+  const own = [...self.values()].filter((c) => c.command !== friday[0]?.command);
+  const checks = [...friday, ...own.filter((c) => !c.ok), ...own.filter((c) => c.ok).slice(-4)];
   // Its review: the last it posted for this task, or, for a run of its own, the last it posted in the run with no task named.
   const posted = after.findLast((e) => e.body.type === "proof.posted" && laneOfEvent(e) === s.lane && (s.task ? e.body.id === s.task : !e.body.id));
   const review = posted?.body.type === "proof.posted" ? { done: posted.body.done, checked: posted.body.checked, unsure: posted.body.unsure } : undefined;
@@ -248,7 +251,8 @@ export function proofSummary(p: Proof): string {
   const failed = p.checks.find((c) => !c.ok && !c.skipped);
   const ran = p.checks.filter((c) => !c.skipped);
   const parts = [
-    failed ? "Checks failed" : ran.length ? "Checks pass" : "No checks run",
+    // Whose check it is: Friday ran it in the folder, or the agent ran its own (its word, read from its log).
+    failed ? (failed.by === "friday" ? "Friday's check failed" : "Its own check failed") : ran.some((c) => c.by === "friday") ? "Checks pass (Friday ran them)" : ran.length ? "Its own checks pass" : "No checks run",
     p.changed.files.length ? `${p.changed.files.length + p.changed.more} file${p.changed.files.length + p.changed.more === 1 ? "" : "s"} +${p.changed.add} −${p.changed.del}` : "No files changed",
     p.page?.file ? "picture" : "",
     p.review ? "self-reviewed" : "no self-review",

@@ -167,9 +167,11 @@ export interface Room {
   /** What it is for, in the person's words: told to its teammates with every turn there. */
   purpose?: string;
   created: number;
+  /** Who made it, on the hosted service: its rooms are capped per person (crew-room-cap.ts). */
+  by?: string;
 }
 
-/** How many rooms a team keeps. */
+/** How many rooms a team keeps (on the hosted service, how many each person keeps: crew-room-cap.ts). */
 export const MAX_ROOMS = 20;
 
 /** A teammate's conversation in a room: its own, beside the one it has in the team (Runner keepAs). */
@@ -180,8 +182,8 @@ export function cleanRoom(body: Record<string, unknown>, known: readonly string[
   const name = typeof body.name === "string" ? body.name.trim().slice(0, 60) : undefined;
   if (name !== undefined && !name) throw new Error("Give the room a name.");
   const members = Array.isArray(body.members) ? [...new Set(body.members.filter((m): m is string => typeof m === "string"))] : undefined;
-  if (members && !members.length) throw new Error("Pick at least one teammate for the room.");
-  if (members && members.length > MAX_TEAMMATES) throw new Error(`A room has up to ${MAX_TEAMMATES} teammates.`);
+  if (members && !members.length) throw new Error("Pick at least one agent for the room.");
+  if (members && members.length > MAX_TEAMMATES) throw new Error(`A room has up to ${MAX_TEAMMATES} crew mates.`);
   if (members?.some((m) => !known.includes(m))) throw new Error("One of those isn't in your crew any more.");
   const purpose = typeof body.purpose === "string" ? body.purpose.trim().slice(0, 2000) : undefined;
   return { ...(name !== undefined ? { name } : {}), ...(members ? { members } : {}), ...(purpose !== undefined ? { purpose } : {}) };

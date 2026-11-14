@@ -166,7 +166,7 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
         <section aria-label="Limits" className="flex flex-col gap-3">
           <div className="lh-top">
             {readAt > 0 && <span className="lh-read num">Read {readAgo(readAt, clock)}</span>}
-            <Button variant="ghost" size="xs" className="text-[var(--text-muted)]" disabled={rereading} onClick={() => (setRereading(true), refreshToolLimits(identity, true))} aria-label="Read the limits again">
+            <Button variant="ghost" size="xs" className="text-[var(--text-muted)]" disabled={rereading} onClick={() => (setRereading(true), refreshToolLimits(identity, true))} title="Read the limits again">
               <RefreshCwIcon className={cn("size-3.5", rereading && "animate-spin")} />
               {rereading ? "Reading…" : "Refresh"}
             </Button>

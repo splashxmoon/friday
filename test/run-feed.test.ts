@@ -56,8 +56,9 @@ test("anything the team does in between ends the run's claim on later diffs", ()
     false,
   );
   const runs = items.filter((i) => i.kind === "run") as Extract<(typeof items)[number], { kind: "run" }>[];
-  assert.equal(runs[0]!.diffs.length, 0, "that diff came after somebody spoke, so it is its own card");
-  assert.ok(items.some((i) => i.kind === "event" && i.ev.body.type === "agent.diff"));
+  assert.equal(runs[0]!.diffs.length, 0, "that diff came after somebody spoke, so it isn't that run's");
+  // Loose, it isn't a card at all (Arun, 2026-11-13: "stop showing these random change XXXX files"): the Changes panel has it.
+  assert.ok(!items.some((i) => i.kind === "event" && i.ev.body.type === "agent.diff"));
 });
 
 /**
@@ -264,7 +265,7 @@ test("a message queued mid-run leaves the rest of the run its ask and its undo",
  * deploys read as a column of "Changed 80 files" cards with nothing between them (Arun, 2026-10-25). With nothing of the lane's
  * since the last loose card, the newest report takes its place; other lanes' reports in between don't keep it.
  */
-test("a loose change set said again takes the earlier card's place, per lane", () => {
+test("a loose change set is never a card of its own, on any lane", () => {
   const lane = (seq: number, body: EventBody, l: string): SessionEvent => ({ ...ev(seq, body), lane: l }) as SessionEvent;
   const items = group(
     [
@@ -277,11 +278,10 @@ test("a loose change set said again takes the earlier card's place, per lane", (
     ],
     false,
   );
-  const loose = items.filter((i) => i.kind === "event" && i.ev.body.type === "agent.diff") as Extract<(typeof items)[number], { kind: "event" }>[];
-  assert.deepEqual(loose.map((i) => i.ev.seq), [6, 5], "one card per lane, the newest report each");
-  // Something of the lane's in between (a run) keeps the card before it as history.
+  // A change set outside any run is never a card (Arun, 2026-11-13): the Changes panel has the folder as it stands.
+  assert.equal(items.filter((i) => i.kind === "event" && i.ev.body.type === "agent.diff").length, 0);
   const after = group([ev(1, diff("a.ts")), ev(2, msg()), ev(3, { type: "run.ended", outcome: "done" }), ev(4, { type: "instruction", text: "x", interrupt: false }), ev(5, diff("z.ts"))], false);
-  assert.equal(after.filter((i) => i.kind === "event" && i.ev.body.type === "agent.diff").length, 2);
+  assert.equal(after.filter((i) => i.kind === "event" && i.ev.body.type === "agent.diff").length, 0);
 });
 
 test("a lane since taken away keeps its name from the log: never \"Agent\" in what was said while it was there", async () => {

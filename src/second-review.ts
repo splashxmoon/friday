@@ -89,7 +89,26 @@ At most ${MAX_FINDINGS} findings, the most serious first.`;
   return { system, prompt };
 }
 
+/**
+ * How much of a change the review reads: files shown whole, of all of them, and whether any was cut (Arun, 2026-11-13: "give more
+ * on what was reviewed"). The same budget as reviewRequest's, so a clean review of a 90-file change says it read 12.
+ */
+export function coverage(plan: Pick<ReviewPlan, "files">): { files: number; of: number; cut: boolean } {
+  let budget = MAX_DIFF;
+  let files = 0;
+  let cut = false;
+  for (const f of plan.files) {
+    if (budget <= 0) return { files, of: plan.files.length, cut: true };
+    if (f.patch.length > budget || f.truncated) cut = true;
+    else files++;
+    budget -= Math.min(f.patch.length, budget);
+  }
+  return { files, of: plan.files.length, cut };
+}
+
 const SEVERITIES = new Set(["high", "medium", "low"]);
+/** What models call a severity besides the three asked for: a "critical" problem was dropped as no problem at all. */
+const SEVERITY_ALIAS: Record<string, "high" | "medium" | "low"> = { critical: "high", blocker: "high", severe: "high", major: "high", error: "high", moderate: "medium", warning: "medium", minor: "low", nit: "low", info: "low", suggestion: "low" };
 
 /** The reviewer's answer as findings. Anything that is not the shape asked for is no finding at all, never a guess. */
 export function parseFindings(text: string): ReviewFinding[] {
@@ -107,7 +126,8 @@ export function parseFindings(text: string): ReviewFinding[] {
   const out: ReviewFinding[] = [];
   for (const f of list as Record<string, unknown>[]) {
     if (!f || typeof f !== "object") continue;
-    const severity = String(f.severity ?? "").toLowerCase();
+    const said = String(f.severity ?? "").toLowerCase().trim();
+    const severity = SEVERITY_ALIAS[said] ?? said;
     const title = typeof f.title === "string" ? f.title.trim().slice(0, 140) : "";
     if (!SEVERITIES.has(severity) || !title) continue;
     const detail = typeof f.detail === "string" ? f.detail.trim().slice(0, 700) : "";
@@ -140,5 +160,12 @@ export async function reviewChange(llm: LLM, plan: ReviewPlan, opts: { model?: s
     signal: opts.signal ?? AbortSignal.timeout(120_000),
     ...(opts.model ? { model: opts.model } : {}),
   });
-  return parseFindings(r.text);
+  const findings = parseFindings(r.text);
+  // No findings and no answer in the shape asked for is not a clean review: a refusal, prose or broken JSON came back as "found
+  // no problems" (Arun, 2026-11-13: "they need to be air tight and actually be trust worthy"). Said as not reviewed instead.
+  if (!findings.length && !answered(r.text)) throw new Error("The second review's answer couldn't be read, so this change wasn't reviewed.");
+  return findings;
 }
+
+/** Whether a reply is the answer asked for: a findings list, even an empty one. */
+export const answered = (text: string): boolean => /"findings"\s*:\s*\[/.test(text);

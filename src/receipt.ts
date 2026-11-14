@@ -9,11 +9,50 @@ import type { DiffFile } from "./types.js";
  * success and aren't — weakening a test, or claiming one passed that never ran.
  */
 
-/** Commands that are a test run, whatever the project calls them. */
-export const TEST_CMD = /\b(test|tests|jest|vitest|pytest|mocha|rspec|phpunit|playwright|cypress|ava|tap)\b|go test|cargo test|gradle test|mvn test|dotnet test/i;
+/** What may come before the program: an env assignment, a runner of runners (npx, pnpm exec), a wrapper (time, timeout, nice). */
+const LEAD = /^(?:[A-Z_][A-Z0-9_]*=\S*\s+|(?:npx|bunx|pnpx)\s+(?:--?[\w-]+\s+)*|(?:pnpm|yarn)\s+(?:exec|dlx)\s+|bun\s+x\s+|env\s+|time\s+|nice\s+|timeout\s+\S+\s+|(?:nyc|c8)\s+(?:--?[\w-]+\s+)*|bundle\s+exec\s+|poetry\s+run\s+|uv\s+run\s+|pipenv\s+run\s+)+/i;
+/** A piece of a command line that runs tests: its program is a test runner, or a package manager asked for its test script. */
+const RUNS_TESTS = new RegExp(
+  [
+    String.raw`^(?:jest|vitest|pytest|py\.test|mocha|rspec|phpunit|ava|tap|karma|jasmine|nextest)\b`,
+    String.raw`^playwright\s+test\b`,
+    String.raw`^cypress\s+run\b`,
+    String.raw`^(?:npm|pnpm|yarn|bun)\s+(?:(?:run|run-script)\s+)?(?:t|test|tests|e2e|spec)(?::[\w-]+)?(?:\s|$)`,
+    String.raw`^(?:npm|pnpm|yarn|bun)\s+(?:run|run-script)\s+[\w:-]*(?:test|e2e|spec)[\w:-]*(?:\s|$)`,
+    String.raw`^(?:go|cargo|swift|mix|deno|bun|dotnet|zig)\s+test\b`,
+    String.raw`^cargo\s+nextest\b`,
+    String.raw`^(?:\./)?gradlew?\s+(?:\S+\s+)*?(?:test|check)\b`,
+    String.raw`^(?:\./)?mvnw?\s+(?:\S+\s+)*?(?:test|verify)\b`,
+    String.raw`^make\s+(?:test|tests|check)\b`,
+    String.raw`^python3?\s+-m\s+(?:pytest|unittest)\b`,
+    String.raw`^(?:node|tsx|bun)\s+(?:--[\w-]+\s+)*--test\b`,
+    String.raw`^(?:rake|rails)\s+(?:test|spec)\b`,
+    String.raw`^(?:\./)?(?:bin|scripts?)/[\w.-]*test[\w.-]*(?:\s|$)`,
+  ].join("|"),
+  "i",
+);
+/** The pieces of a command line, each as the shell runs it: split where one command ends and the next starts. */
+const piecesOf = (command: string) =>
+  command
+    .split(/&&|\|\||[;|\n]|(?<![&>])&(?![&>])/)
+    .map((p) => p.replace(/[`]/g, "").trim().replace(/^\(+|\)+$/g, "").trim().replace(LEAD, ""))
+    .filter(Boolean);
+
+/**
+ * Whether a command is a test run: one of its pieces runs a test runner, not just names the word (Arun, 2026-11-13: "they need
+ * to be air tight and actually be trust worthy"). "grep -rn foo test/", "cat test/x.ts" and "git commit -m 'fix tests'" ran no
+ * test, yet the old word match counted each as a passing run under an agent's "done".
+ */
+export function isTestRun(command: string): boolean {
+  return piecesOf(command).some((p) => RUNS_TESTS.test(p));
+}
+
+/** Commands that are a test run, whatever the project calls them: `TEST_CMD.test(command)`, as the old pattern was read. */
+export const TEST_CMD: { test(command: string): boolean } = { test: (c) => !!c && isTestRun(c) };
 
 /** Joined so the exit status is the last command's, or deliberately ignored: `npm test; git diff`, `pytest || true`, `a & b`. */
-const CHAINED = /;|\n|\|\||(?<![&|])&(?![&>])/;
+// A single pipe too: `npm test | tail -40` exits with tail's 0 whatever the tests did (Arun, 2026-11-13: "air tight").
+const CHAINED = /;|\n|\|\||(?<!\|)\|(?!\|)|(?<![&|])&(?![&>])/;
 /** What a test run prints when it did not pass, in the runners people use. */
 const FAILED_OUTPUT = /npm (?:ERR!|error)\b|^\s*(?:Uncaught )?\w*Error(?: \[[\w-]+\])?:|\b[1-9]\d* (?:failed|failing)\b|^\s*FAIL(?:ED)?\b|\bexit(?:ed)? (?:with )?code [1-9]/im;
 
@@ -138,6 +177,14 @@ export function receiptOf(input: {
     if (added.some((l) => SILENCE.test(l))) flags.push({ level: "warn", text: `Silenced a type or lint check in ${f.path}` });
     if (added.some((l) => SWALLOW.test(l))) flags.push({ level: "warn", text: `Catches an error and ignores it in ${f.path}` });
     if (CI_FILE.test(f.path) && added.some((l) => IGNORE_FAILURE.test(l))) flags.push({ level: "bad", text: `Made a check pass whatever happens in ${f.path}` });
+    // The check itself rewritten: a package.json "test" (or "check", "lint", "typecheck") script changed by the work it checks
+    // (Arun, 2026-11-13: "air tight"). "test": "echo ok" passed every run after it.
+    else if (/(^|\/)package\.json$/.test(f.path)) {
+      const script = /^\s*"(?:test|tests|check|lint|typecheck|e2e)(?::[\w-]+)?"\s*:/;
+      const was = removed.filter((l) => script.test(l));
+      const now = added.filter((l) => script.test(l));
+      if (was.length && (now.length < was.length || now.some((l) => !was.includes(l)))) flags.push({ level: "warn", text: `Changed how the project checks itself: ${(now[0] ?? was[0]!).trim().replace(/,$/, "")} in ${f.path}` });
+    }
     if (TEST_FILE.test(f.path)) {
       const strongGone = removed.filter((l) => STRONG.test(l)).length - added.filter((l) => STRONG.test(l)).length;
       if (strongGone > 0 && added.some((l) => WEAK.test(l))) flags.push({ level: "bad", text: `Loosened ${strongGone === 1 ? "an assertion" : `${strongGone} assertions`} in ${f.path}` });

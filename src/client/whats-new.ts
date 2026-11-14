@@ -15,13 +15,13 @@ export interface WhatsNewNotes {
 }
 
 export const WHATS_NEW: WhatsNewNotes = {
-  version: "0.2.23",
-  summary: "Deep Dive: your own coding tool explains a repo page by page, every claim linked to the lines it's about, and answers questions about the code.",
+  version: "0.2.24",
+  summary: "Your crew works in your coding sessions: hand a session on to a crew mate, bring its work back in, and ask fewer questions along the way.",
   items: [
-    { icon: "puzzle", title: "A repo, explained", line: "A page for each part, with diagrams, written by a small model on your own plan. It reads, never edits." },
-    { icon: "chat", title: "Ask about the code", line: "Answers cite their lines. Pick the model that answers, and delete a question when you're done with it." },
-    { icon: "check", title: "Claims checked", line: "A citation to a file or line that isn't there is asked about once, then struck through, never hidden." },
-    { icon: "sidebar", title: "A tidier window", line: "Headers stay up top, the rail stays when the list folds, and nothing sits under the window's buttons." },
+    { icon: "handoff", title: "Keep this going", line: "Hand the rest of a session to a crew mate or a crew room, with where it stands. Its line follows it to the result." },
+    { icon: "users", title: "Your crew in any session", line: "Add a crew mate from the + with its role and memory, or @ it in the box. Bring its finished work in, a look first." },
+    { icon: "shield", title: "Asks only what matters", line: "Shipping, keys, sending data out and changes past its folders ask. Routine work in its own folders just runs." },
+    { icon: "agent", title: "A simpler New agent", line: "A face, a name, what it helps with and its coding tool. Everything else is in its Settings, from the gear." },
   ],
 };
 

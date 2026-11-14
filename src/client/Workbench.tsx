@@ -1,6 +1,16 @@
 import { iosFolders } from "./ios-folders.js";
 import { dragEnds } from "./drag-end.js";
-import { Activity as Keep, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { Activity as Keep, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { mateOn } from "./Teammates.js";
+const MateSettingsBody = lazy(() => import("./TeammatePage.js").then((m) => ({ default: m.MateSettingsBody })));
+/** A crew mate's settings as a side panel tab (TeammatePage.tsx MateSettingsBody). */
+const MateSettingsPane = ({ identity, lane }: { identity: Parameters<typeof MateSettingsBody>[0]["identity"]; lane: string }) => (
+  <Suspense fallback={null}>
+    <div className="msd-pane">
+      <MateSettingsBody identity={identity} lane={lane} />
+    </div>
+  </Suspense>
+);
 import type { SessionState } from "../session/projection.js";
 import type { Member, SessionEvent } from "../types.js";
 import type { Send } from "./useSession.js";
@@ -40,10 +50,12 @@ import { isWorkSid } from "./WorkMode.js";
  */
 export type Tab =
   | "agents" | "overview" | "tree" | "files" | "git" | "terminal" | "preview" | "usage" | "rules"
+  // A crew mate's settings, in its own chat (Arun, 2026-11-13: "make the settings panel work like this").
+  | "mate"
   ;
 
 export const TAB_LABEL: Record<Tab, string> = {
-  agents: "Agents", overview: "Tasks", tree: "Tree", files: "Changes", git: "Git", terminal: "Terminal", preview: "Preview", usage: "Usage", rules: "Rules",
+  agents: "Agents", mate: "Settings", overview: "Tasks", tree: "Tree", files: "Changes", git: "Git", terminal: "Terminal", preview: "Preview", usage: "Usage", rules: "Rules",
   ...(isLocal() ? { preview: "Browser" } : {}), // the agents browse in it too (local/desktop-browser.ts)
 };
 /** The panels in the side panel's card, in the order people reach for them. */
@@ -64,11 +76,12 @@ const PANEL_SAYS: Record<Tab, string> = {
   tree: "The project's files",
   agents: "Who is here and what each is doing",
   usage: "Tokens, limits and what each run cost",
+  mate: "This crew mate's settings",
   rules: "Instructions every agent follows",
   ...(isLocal() ? { preview: "Your pages and the web, where the agents browse too" } : {}),
 };
 const TAB_ICON: Record<Tab, IconName> = {
-  agents: "agent", overview: "list", tree: "folderOpen", files: "file", git: "gitBranch", terminal: "terminalSquare", preview: "play", usage: "chart", rules: "book",
+  agents: "agent", mate: "settings", overview: "list", tree: "folderOpen", files: "file", git: "gitBranch", terminal: "terminalSquare", preview: "play", usage: "chart", rules: "book",
   ...(isLocal() ? { preview: "webBrowser" as IconName } : {}),
 };
 
@@ -397,6 +410,9 @@ export function Workbench({
   const work = !!state.options.work;
   if (work) closeLabel = "Close the browser";
   order = work ? ["preview"] : PANEL_ORDER;
+  // A crew mate's own chat: its Settings first, then the panels a session has.
+  const mateHere = !!state.options.team && !!lane && !!mateOn(lane);
+  if (mateHere) order = ["mate", ...order];
   every = order;
   // Its one panel is the Browser (Arun, 2026-10-27: "get rid of the plus buttons and logic for the side panel stuff it should only
   // be browser"): whatever else was open goes, and anything asking for another panel gets the Browser.
@@ -900,6 +916,7 @@ export function Workbench({
         />
       );
     // Each agent's share of the session, in the open-source edition too, with no allowance above it (Arun, 2026-11-03: "Per-agent cost").
+    if (which === "mate" && lane) return <MateSettingsPane identity={identity} lane={lane} />;
     if (which === "usage") return <UsagePanel state={state} events={events} identity={identity} solo={headless || isLocal()} />;
     if (which === "rules") return <RulesPanel state={state} sid={sid} invite={invite} me={me} send={send} {...(lane ? { lane } : {})} />;
     if (which === "tree") return <TreePanel state={state} events={laneEvents} {...(lane ? { lane } : {})} sid={sid} invite={invite} onClose={onClose} bare send={send} me={me} jump={jump} />;

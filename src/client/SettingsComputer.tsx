@@ -4,7 +4,7 @@ import { MachineBadge } from "./MachineBadge.js";
 import { pickedMachine, useMachine } from "./local.js";
 import { KeepAwakeRow } from "./KeepAwake.js";
 import { ComputerUseRow } from "./ComputerUse.js";
-import { ComputersSettings } from "./Computers.js";
+import { ComputersSettings } from "./ComputersSettings.js";
 import { isLocal } from "./edition.js";
 import type { Identity } from "./storage.js";
 
@@ -71,8 +71,8 @@ export function ComputerSection({ identity, part = "this" }: { identity: Identit
         {/* Computer use is under Agents › Permissions now: what agents may do, not what the computer is. */}
       </SettingsGroup>
       {/* Where new sessions start: this computer, or a machine of yours that stays on, so agents keep running when this one shuts. */}
-      {/* No phone pairing on this computer's Friday: there is no open-source phone app yet (Arun, 2026-11-04: "WE DONT HAVE AN APP FOR
-          OPEN SOURCE YET SO GET RID OF IT"). PhoneSettings.tsx stays for when there is. */}
+      {/* Your phone: in Arun's own build only while the open-source phone app isn't out (Arun, 2026-11-04: "WE DONT HAVE AN APP FOR
+          OPEN SOURCE YET SO GET RID OF IT"; back 2026-11-12 for the app's phase 1, "this is for the open source build"). */}
       {/* Your other computers are their own tab (Computers › Other computers), and GitHub is under Connections. */}
       {!isLocal() && <Facts className="px-0.5" items={[{ term: "Friday's agent", detail: "Works in folders this computer lends it, with the files, terminal and preview shown in the session." }]} />}
     </section>

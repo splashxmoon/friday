@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { ArrowRightIcon, CheckIcon, KanbanSquareIcon, MegaphoneIcon, PauseIcon, ReplyIcon } from "lucide-react";
 import { TaskMark, type TaskMarkState } from "./TaskMark.js";
 import { cn } from "@/lib/utils";
@@ -11,7 +11,7 @@ import { MAIN_LANE, type Member, type MeshNote, type SessionEvent } from "../typ
 import type { Send } from "./useSession.js";
 import { mateOn, matesIn, TeamTalk } from "./Teammates.js";
 import { boardTitle } from "./team-api.js";
-import { boardReportText } from "./team-room.js";
+import { boardReportText, plainLine } from "./team-room.js";
 
 /**
  * The agents in a session talking to each other (agent-mesh.ts), as the people watching read it: who wrote to whom, what, and
@@ -55,9 +55,52 @@ export function taskStatus(state: SessionState, m: MeshNote, lane: string): Talk
     if (t.status === "review") return { word: t.reviewer ? `${t.reviewer.name} is checking it` : "Waiting for a check", how: "review" };
   } else if (meshOf(state).asks[m.id]?.reply) return { word: "Reported back", how: "done" };
   if (run === "running") return { word: `${m.toName} is on it`, how: "work" };
-  if (run === "waiting_for_human") return { word: `${m.toName} is waiting on a person`, how: "wait" };
+  if (run === "waiting_for_human") return { word: `${m.toName} is waiting on a person`, how: "hold" };
   if (run === "error") return { word: `${m.toName} stopped`, how: "bad" };
   return { word: `${m.toName} hasn't finished it`, how: "wait" };
+}
+
+/** The first line of what was said, as the row's headline: no markdown, cut to a line. */
+const headlineOf = (text: string) => ((l) => (l.length > 160 ? `${l.slice(0, 159)}…` : l))(plainLine(text.split("\n").find((l) => l.trim()) ?? "").trim());
+
+/**
+ * One exchange between agents as a row (Friday Teams 9f12ef32; Arun, 2026-11-14, design 10 of the agent-talk mockups: "i like
+ * 10.... and add different color coding for the states too"): both marks with an arrow, who did what in one sentence ("Kit asked
+ * Codex"), the point in one line, and where it stands as a pill in its own colour. It opens to the whole message and the answer
+ * under it.
+ */
+function TalkRow({ kind, from, to, who, headline, status, stamp, open: startOpen = false, children }: { kind: string; from: ReactNode; to: ReactNode; who: ReactNode; headline: string; status: TalkStatus | null; stamp: ReactNode; open?: boolean; children: ReactNode }) {
+  const [open, setOpen] = useState(startOpen);
+  const body = useId();
+  return (
+    <div className={cn("tk-card tk-talk", open && "open", status && `is-${status.how}`)} data-kind={kind}>
+      <div className="tk-row-head">
+        <button type="button" className="tk-toggle" aria-expanded={open} aria-controls={body} onClick={() => setOpen((o) => !o)}>
+          <span className="tk-route">
+            {from}
+            <ArrowRightIcon className="tk-arrow" aria-hidden="true" />
+            {to}
+          </span>
+          <span className="tk-talk-main">
+            <span className="tk-talk-who">{who}</span>
+            {headline && <span className="tk-line">{headline}</span>}
+          </span>
+        </button>
+        {status && (
+          <span className={cn("tk-status", `is-${status.how}`)} title={status.word}>
+            <i className="tk-dot" aria-hidden="true" />
+            <span className="tk-status-word">{status.word}</span>
+          </span>
+        )}
+        {stamp}
+      </div>
+      {open && (
+        <div id={body} className="tk-body">
+          {children}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -112,29 +155,53 @@ export function AgentTalkCard({ ev, state, me, send, notify, delivered, stamp, t
       }
     : undefined;
   if (state.options.team) return <TeamTalk fromLane={m.fromLane} toLane={lane} fromName={m.fromName} toName={m.toName} kind={m.kind} report={!!m.ofTask} review={!!(m.board && m.review)} carried={!!m.carriedFrom} {...(team ? { team } : {})} text={said} why={why} {...(ask?.reply ? { answer: { text: ask.reply.text, auto: !!ask.reply.auto } } : {})} status={status} stamp={stamp} fromMark={from.mark} toMark={to.mark} {...(assign ? { assign } : {})} />;
+  // Who did what, in one sentence: "Kit asked Codex", "Rio gave Lex a task", "Codex reported back to Rio".
+  const toWho = team && team.length > 1 ? (team.length > 2 ? `${team.length} agents` : team.join(" and ")) : m.toName;
+  const name = (n: string) => <b className="tk-name">{n}</b>;
+  const who = m.carriedFrom ? (
+    <>
+      {name(m.toName)} took over from {name(laneLabel(state, m.carriedFrom))}
+    </>
+  ) : team && team.length > 1 ? (
+    <>
+      {name(m.fromName)} told <b className="tk-name" title={team.join(", ")}>{toWho}</b>
+    </>
+  ) : m.kind === "reply" ? (
+    <>
+      {name(m.fromName)} {m.ofTask ? "reported back to" : "answered"} {name(m.toName)}
+    </>
+  ) : m.board && m.review ? (
+    <>
+      {name(m.fromName)} asked {name(m.toName)} for a review
+    </>
+  ) : m.kind === "task" ? (
+    <>
+      {name(m.fromName)} gave {name(m.toName)} a task
+    </>
+  ) : (
+    <>
+      {name(m.fromName)} {m.kind === "ask" ? "asked" : "told"} {name(m.toName)}
+    </>
+  );
+  const shown: TalkStatus | null = status ?? (moving ? { word: `Queued for ${m.toName}`, how: "wait" } : null);
+  const text = ev.body.text;
   return (
-    <div className={cn("tk-card", moving && "waiting")}>
-      <div className="tk-head">
-        <span className="tk-route">
-          <span className="tk-mark" style={{ "--tint": from.tint } as React.CSSProperties}>{from.mark}</span>
-          <span className="tk-name">{m.fromName}</span>
-          <ArrowRightIcon className="size-3 shrink-0 opacity-60" />
-          {team && team.length > 1 ? (
-            <span className="tk-name">{team.join(", ")}</span>
-          ) : (
-            <>
-              <span className="tk-mark" style={{ "--tint": to.tint } as React.CSSProperties}>{to.mark}</span>
-              <span className="tk-name">{m.toName}</span>
-            </>
-          )}
-        </span>
-        <span className={cn("tk-kind", `is-${m.kind}`)}>{kind}</span>
-        {stamp}
-      </div>
+    <TalkRow
+      kind={kind}
+      from={<span className="tk-mark" style={{ "--tint": from.tint } as React.CSSProperties}>{from.mark}</span>}
+      to={team && team.length > 1 ? <span className="tk-mark"><MegaphoneIcon className="size-3" /></span> : <span className="tk-mark" style={{ "--tint": to.tint } as React.CSSProperties}>{to.mark}</span>}
+      who={who}
+      headline={headlineOf(text)}
+      status={shown}
+      stamp={stamp}
+    >
       {why && <p className="tk-why">{why}</p>}
-      <div className="tk-panel">
-        <Clamped text={ev.body.text} />
-      </div>
+      {/* The whole message, when there is more of it than the headline already says. */}
+      {text.trim() !== headlineOf(text) && (
+        <div className="tk-panel">
+          <Clamped text={text} />
+        </div>
+      )}
       {ask?.reply && (
         <div className="tk-panel tk-answer">
           <div className="tk-answer-head">
@@ -146,17 +213,7 @@ export function AgentTalkCard({ ev, state, me, send, notify, delivered, stamp, t
           <Clamped text={ask.reply.text} />
         </div>
       )}
-      {(status || moving) && (
-        <div className="tk-foot">
-          {status && (
-            <span className={cn("tk-status", `is-${status.how}`)}>
-              {status.how === "work" ? <span className="ring-spin" aria-hidden="true" /> : status.how === "done" || status.how === "read" ? <CheckIcon className="size-3 shrink-0" /> : <i className="tk-dot" aria-hidden="true" />}
-              {status.word}
-            </span>
-          )}
-        </div>
-      )}
-    </div>
+    </TalkRow>
   );
 }
 
@@ -174,31 +231,27 @@ export function AgentUpdateCard({ ev, state, stamp }: { ev: SessionEvent; state:
   const look = agentLook(state, b.fromLane, 13);
   // A team (teammates.ts) reads it as a group chat: one teammate's word to the rest.
   if (state.options.team) return <TeamTalk fromLane={b.fromLane} toLane="" fromName={b.fromName} toName="everyone" kind="tell" team={others} text={b.text} status={status ? { word: status, how: readers.length === others.length ? "done" : "wait" } : null} stamp={stamp} fromMark={look.mark} />;
+  const all = readers.length === others.length;
   return (
-    <div className="tk-card">
-      <div className="tk-head">
-        <span className="tk-route">
-          <span className="tk-mark" style={{ "--tint": look.tint } as React.CSSProperties}>{look.mark}</span>
-          <span className="tk-name">{b.fromName}</span>
-          <ArrowRightIcon className="size-3 shrink-0 opacity-60" />
-          <span className="tk-mark"><MegaphoneIcon className="size-3" /></span>
-          <span className="tk-name">Everyone</span>
-        </span>
-        <span className="tk-kind is-update">Update</span>
-        {stamp}
-      </div>
-      <div className="tk-panel">
-        <Clamped text={b.text} />
-      </div>
-      {status && (
-        <div className="tk-foot">
-          <span className={cn("tk-status", readers.length === others.length ? "is-done" : "is-wait")}>
-            {readers.length === others.length ? <CheckIcon className="size-3 shrink-0" /> : <i className="tk-dot" aria-hidden="true" />}
-            {status}
-          </span>
+    <TalkRow
+      kind="Update"
+      from={<span className="tk-mark" style={{ "--tint": look.tint } as React.CSSProperties}>{look.mark}</span>}
+      to={<span className="tk-mark"><MegaphoneIcon className="size-3" /></span>}
+      who={
+        <>
+          <b className="tk-name">{b.fromName}</b> told <b className="tk-name">everyone</b>
+        </>
+      }
+      headline={headlineOf(b.text)}
+      status={status ? { word: status, how: all ? "read" : "wait" } : null}
+      stamp={stamp}
+    >
+      {b.text.trim() !== headlineOf(b.text) && (
+        <div className="tk-panel">
+          <Clamped text={b.text} />
         </div>
       )}
-    </div>
+    </TalkRow>
   );
 }
 

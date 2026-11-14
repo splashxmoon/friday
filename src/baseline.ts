@@ -118,8 +118,12 @@ export function compare(failing: string[] | null, base: Baseline): Compared | nu
   return failing ? { pre: [], fresh: failing } : { pre: [], fresh: [], whole: false };
 }
 
-/** Nothing the run failed is its own: every failure was already there, or the command fails at the base as a whole. */
-export const onlyPre = (c: Compared | null): boolean => !!c && !c.fresh.length && (c.pre.length > 0 || c.whole === true);
+/**
+ * Nothing the run failed is its own: every failure it names was already there, by name. A command that fails at the base "as a
+ * whole", with no names to compare on one side, doesn't count: a flaky test on main made a build the change broke read as
+ * "failing before too" and passed the gate (Arun, 2026-11-13: "they need to be air tight"). It is still said beside the failure.
+ */
+export const onlyPre = (c: Compared | null): boolean => !!c && !c.fresh.length && c.pre.length > 0;
 
 /** "2 already failing on main" and the like, for a card; "" when there is nothing to say. */
 export function preWords(c: Compared | null, branch = "main"): string {

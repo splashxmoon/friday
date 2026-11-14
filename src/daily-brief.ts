@@ -239,7 +239,15 @@ export function briefDue(s: BriefSettings, now: number): { kind: "morning" | "ev
 /** The board's checks that passed, by task id: the proof a task works. */
 function proofsIn(events: readonly SessionEvent[]): Map<string, string> {
   const out = new Map<string, string>();
-  for (const e of events) if (e.body.type === "board.checked" && e.body.ok && !e.body.skipped) out.set(e.body.id, `${clip(e.body.command, 60)} passed`);
+  // The latest result only (Arun, 2026-11-13: "air tight"): a pass ever was a tick even after it failed again, and a board posted
+  // again reuses its task ids ("t1"), so a new board's task starts with none.
+  for (const e of events) {
+    if (e.body.type === "board.posted") for (const t of e.body.tasks) out.delete(t.id);
+    else if (e.body.type === "board.checked" && !e.body.skipped) {
+      if (e.body.ok) out.set(e.body.id, `${clip(e.body.command, 60)} passed`);
+      else out.delete(e.body.id);
+    }
+  }
   return out;
 }
 
@@ -379,7 +387,8 @@ export function collectBrief(i: BriefInput): DailyBrief | null {
     }
     for (const t of state.board?.tasks ?? []) {
       const mate = crew && t.lane ? mateAt(state.id, t.lane) : undefined;
-      if (t.status === "blocked" && !crew) risk.push({ kind: "blocked", who: t.name ?? "", text: `is blocked on “${plainText(t.title)}” in ${state.title}${t.report ? `: ${clip(t.report, 120)}` : ""}`, where: whereOf(state, t.lane ? { lane: t.lane } : {}) });
+      // A stop by a person is their own doing, here too (the Crew's read below skips it the same way, Arun 2026-11-01).
+      if (t.status === "blocked" && !crew && !/\bstopped \S+ on it\b/.test(t.report ?? "")) risk.push({ kind: "blocked", who: t.name ?? "", text: `is blocked on “${plainText(t.title)}” in ${state.title}${t.report ? `: ${clip(t.report, 120)}` : ""}`, where: whereOf(state, t.lane ? { lane: t.lane } : {}) });
       if (t.status === "claimed" && t.lane && !plan.some((p) => p.where?.sid === state.id && p.where.lane === t.lane && p.source === "board")) plan.push({ who: mate?.name ?? t.name ?? agentOf(state, t.lane), text: plainText(t.title), source: "board", where: whereOf(state, { lane: t.lane }), ...(mate ? { mate } : {}) });
     }
     const readyNext = (state.board?.tasks ?? []).filter((t) => t.status === "open").length;

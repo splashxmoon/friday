@@ -1,4 +1,5 @@
 import { runOf, type SessionState } from "./session/projection.js";
+import { isTestRun } from "./receipt.js";
 import { ENGINE_NAMES, MAIN_LANE, type EngineTool } from "./types.js";
 
 /**
@@ -26,7 +27,7 @@ export interface ReadyItem {
   additions: number;
   deletions: number;
   /** Its own tests, as last run: passed or not, and the command. */
-  checks?: { ok: boolean; command: string };
+  checks?: { ok: boolean; command: string; /** The work changed after it ran: it says nothing about what is there now. */ stale?: true };
   /** A second agent's read of it. */
   review?: { ok: boolean; by: string; note: string };
   pr?: { url: string; merged: boolean };
@@ -53,7 +54,7 @@ export function readyIn(state: SessionState): ReadyItem[] {
     // The newest board task of this lane that is done or being checked: what this work was.
     const task = [...(state.board?.tasks ?? [])].reverse().find((t) => t.lane === lane && (t.status === "done" || t.status === "review"));
     if (!task && state.board?.tasks.length) continue;
-    const checks = task?.checks && !task.checks.running && !task.checks.skipped && task.checks.ok !== undefined ? { ok: task.checks.ok, command: task.checks.command } : undefined;
+    const checks = task?.checks && !task.checks.running && !task.checks.skipped && task.checks.ok !== undefined ? { ok: task.checks.ok, command: task.checks.command, ...(task.checks.stale ? { stale: true as const } : {}) } : undefined;
     out.push({
       sid: state.id,
       where: state.title || "A session",
@@ -81,7 +82,7 @@ export function readyIn(state: SessionState): ReadyItem[] {
  * rooms it works in) show once.
  */
 export function rankReady(items: ReadyItem[], at: (i: ReadyItem) => number): ReadyItem[] {
-  const tier = (i: ReadyItem) => (i.pr ? 2 : i.checks?.ok || i.review?.ok ? 0 : 1);
+  const tier = (i: ReadyItem) => (i.pr ? 2 : (i.checks?.ok && !i.checks.stale) || i.review?.ok ? 0 : 1);
   const seen = new Set<string>();
   return [...items]
     .sort((a, b) => tier(a) - tier(b) || at(b) - at(a))
@@ -91,10 +92,23 @@ export function rankReady(items: ReadyItem[], at: (i: ReadyItem) => number): Rea
     });
 }
 
+/** What kind of check a command is, in a word or two: tests, a typecheck, lint, a build, or a check. */
+export function checkKind(command: string): string {
+  if (isTestRun(command)) return "tests";
+  if (/\btsc\b|typecheck|type-check|\bmypy\b|\bpyright\b/i.test(command)) return "typecheck";
+  if (/\blint\b|eslint|ruff|clippy|golangci/i.test(command)) return "lint";
+  if (/\bbuild\b/i.test(command)) return "build";
+  return "check";
+}
+
 /** The line under an item: what proves it, in words. */
 export function proofLine(i: ReadyItem): string {
   const parts: string[] = [];
-  if (i.checks) parts.push(i.checks.ok ? "tests passed" : "tests failing");
+  // Said as what ran (Arun, 2026-11-13: "give more on what was reviewed/checked"): a typecheck isn't "tests passed".
+  if (i.checks) {
+    const what = checkKind(i.checks.command);
+    parts.push(i.checks.stale ? `${what} ${i.checks.ok ? "passed" : "failed"} before the latest changes` : `${what} ${i.checks.ok ? "passed" : "failing"}`);
+  }
   if (i.review) parts.push(i.review.ok ? `reviewed by ${i.review.by}` : `${i.review.by} asked for changes`);
   if (!parts.length) parts.push("not checked yet");
   return parts.join(" · ");

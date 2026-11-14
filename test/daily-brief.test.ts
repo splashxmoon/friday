@@ -130,6 +130,11 @@ test("a busy day: done across Code and Work sessions with PRs, at risk, today's 
   await add("s-board", { type: "board.posted", fromLane: MAIN_LANE, fromName: "Claude Code", tasks: [{ id: "t1", title: "Wire the invoice API", detail: "", owns: [], after: [] }, { id: "t2", title: "Style the table", detail: "", owns: [], after: [] }] });
   await add("s-board", { type: "board.claimed", id: "t1", lane: MAIN_LANE, name: "Claude Code" });
   await add("s-board", { type: "board.finished", id: "t1", lane: MAIN_LANE, name: "Claude Code", status: "blocked", report: "Needs the Stripe test key" });
+  // A task a person stopped: their own doing, not at risk (Arun, 2026-11-13).
+  await session("s-stop", "Deploy");
+  await add("s-stop", { type: "board.posted", fromLane: MAIN_LANE, fromName: "Claude Code", tasks: [{ id: "t3", title: "Push the image", detail: "", owns: [], after: [] }] });
+  await add("s-stop", { type: "board.claimed", id: "t3", lane: MAIN_LANE, name: "Kit" });
+  await add("s-stop", { type: "board.finished", id: "t3", lane: MAIN_LANE, name: "Kit", status: "blocked", report: "Arun Dass stopped Kit on it. Kit is free again; reassign or retry it." });
   // Running now, and work queued behind it.
   await session("s-run", "Onboarding tour");
   await turn("s-run", "Looking at the tour steps", { text: "Add a skip button to the tour", end: false });
@@ -138,7 +143,7 @@ test("a busy day: done across Code and Work sessions with PRs, at risk, today's 
   await session("s-ask", "Pricing page");
   await turn("s-ask", "", { end: false });
   await add("s-ask", { type: "agent.question", callId: "c1", question: "Monthly or yearly first?", to: maya.id, toName: maya.name });
-  const sessions = await read("s-checkout", "s-copy", "s-api", "s-limit", "s-error", "s-board", "s-run", "s-ask");
+  const sessions = await read("s-checkout", "s-copy", "s-api", "s-limit", "s-error", "s-board", "s-stop", "s-run", "s-ask");
   const b = collectBrief(base({ since, sessions, prs: { "https://github.com/acme/shop/pull/39": "merged", "https://github.com/acme/shop/pull/41": "open" }, limits: [{ tool: "claude", windows: [{ kind: "five_hour", usedPercent: 86, resetsAt: null }, { kind: "seven_day", usedPercent: 40, resetsAt: null }] }] }))!;
   assert.ok(b, "a brief");
   const doneIn = (sid: string) => b.done.filter((d) => d.where.sid === sid);
@@ -153,6 +158,7 @@ test("a busy day: done across Code and Work sessions with PRs, at risk, today's 
   assert.match(riskOf("limit")[0]?.text ?? "", /hit its usage limit in Search index/);
   assert.match(riskOf("error")[0]?.text ?? "", /Migrations: ENOENT/);
   assert.match(riskOf("blocked")[0]?.text ?? "", /Wire the invoice API.*Stripe test key/);
+  assert.ok(!b.risk.some((r) => /stopped Kit on it/.test(r.text)), "a stop by a person is not at risk");
   assert.match(riskOf("usage")[0]?.text ?? "", /^is at 86% of its 5-hour window/);
   assert.equal(riskOf("usage")[0]?.who, "Claude Code");
   assert.deepEqual(b.plan.find((p) => p.where?.sid === "s-run" && p.source === "running")?.text, "Add a skip button to the tour");
@@ -268,4 +274,22 @@ test("the open-source edition: /api/brief on demand, settings, and the morning b
   assert.equal(latest.brief.done[0].text, "Fixed the double charge.");
   await app.briefs.tick();
   assert.equal((await send("/api/brief/latest")).brief.id, latest.brief.id, "once per slot");
+});
+
+// Every check on a hand-in is kept, not only the last (Arun, 2026-11-13: "air tight").
+test("a board task keeps each check run on its latest hand-in", async () => {
+  const { project } = await import("../src/session/projection.js");
+  let seq = 0;
+  const ev = (body: Record<string, unknown>) => ({ seq: ++seq, ts: seq, actor: { id: "friday", name: "Friday", kind: "system" }, lane: "main", body }) as never;
+  const st = project("s", [
+    ev({ type: "session.created", title: "t", ownerId: "u", ownerName: "U" }),
+    ev({ type: "board.posted", fromLane: "main", fromName: "Lead", tasks: [{ id: "a", title: "A", detail: "", owns: [], after: [] }] }),
+    ev({ type: "board.claimed", id: "a", lane: "main", name: "Kit" }),
+    ev({ type: "board.finished", id: "a", lane: "main", name: "Kit", status: "done", report: "done" }),
+    ev({ type: "board.checked", id: "a", lane: "main", command: "npx tsc --noEmit", ok: true, output: "" }),
+    ev({ type: "board.checked", id: "a", lane: "main", command: "npm test", ok: true, output: "" }),
+  ]);
+  const t = st.board!.tasks.find((x) => x.id === "a")!;
+  assert.deepEqual(t.checked?.map((c) => c.command), ["npx tsc --noEmit", "npm test"]);
+  assert.equal(t.checks?.command, "npm test");
 });

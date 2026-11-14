@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-test("'dark mode' finds Appearance; 'api key' finds Your models; nonsense finds nothing", async () => {
+test("'dark mode' finds Appearance; 'api key' finds Models; nonsense finds nothing", async () => {
   const { sectionsMatching, SECTIONS } = await import("../src/client/Settings.js");
   const ids = (q: string) => sectionsMatching(SECTIONS, q).map((s) => s.id);
   assert.deepEqual(ids("dark mode"), ["appearance"]);
@@ -51,10 +51,17 @@ test("old links land on the tab that holds them now, and the tabs are grouped by
   assert.deepEqual([of("computer").label, of("computer").group], ["This computer", "Computers"]);
   assert.equal(of("other-computers").group, "Computers");
   for (const id of ["coding-tools", "own-models", "memory", "permissions", "usage-limits"]) assert.equal(of(id).group, "Agents", id);
-  for (const id of ["github", "outside-agents"]) assert.equal(of(id).group, "Connections", id);
+  for (const id of ["github"]) assert.equal(of(id).group, "Connections", id);
   for (const id of ["privacy", "data"]) assert.equal(of(id).group, "Privacy & data", id);
   for (const id of ["updates", "help"]) assert.equal(of(id).group, "Help", id);
   // A group's tabs sit together, in the order the groups are listed.
   const order = SECTIONS.map((s) => GROUPS.indexOf(s.group));
   assert.deepEqual(order, [...order].sort((a, b) => a - b), "tabs in group order");
+});
+
+test("one Usage and one Models (UX audit F10, 2026-11-07): the old section's name opens Models", async () => {
+  const { settingsSection, sectionsMatching, SECTIONS } = await import("../src/client/Settings.js");
+  assert.deepEqual(SECTIONS.filter((s) => /usage/i.test(s.label)).map((s) => s.label), ["Usage"]);
+  assert.deepEqual(SECTIONS.filter((s) => /models/i.test(s.label)).map((s) => s.label), ["Models"]);
+  for (const q of ["credits", "daily"]) assert.ok(sectionsMatching(SECTIONS, q).some((s) => s.id === "usage-limits"), q);
 });

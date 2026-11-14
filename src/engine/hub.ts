@@ -16,11 +16,12 @@ import { taskKind } from "../strengths.js";
 import { missedLast, type Learned } from "../route-learning.js";
 import { repoKeyOf } from "../repo-key.js";
 import { randomUUID } from "node:crypto";
-import { buildCatchUp, needsCatchUp } from "../session/catchup.js";
+import { buildCatchUp, decidedSince, needsCatchUp } from "../session/catchup.js";
 import { lastRunStart, spentBefore, tokensIn, ToolUsage } from "../tool-usage.js";
 import { WebSocket } from "ws";
 import type { Bus, BusMessage } from "../bus.js";
-import { allowedCommand, can, canDriveLane, laneEffort, laneHeld, pendingFor, roleOf, runOf, unreadPosts, type MeshPost, type SessionState, effortResets } from "../session/projection.js";
+import { allowedCommand } from "../command-allow.js";
+import { can, canDriveLane, laneEffort, laneHeld, pendingFor, roleOf, runOf, unreadPosts, type MeshPost, type SessionState, effortResets } from "../session/projection.js";
 import { accessCommand, type SessionCore } from "../session/core.js";
 import { CUT_OFF_CHECK, cutOffBefore, handoffBrief } from "../handoff.js";
 import { startCheckpoint } from "../rewind.js";
@@ -1099,15 +1100,8 @@ class LaneHost {
       void this.usage.record(ws, this.info.tool, body);
     }
     if (!r.ok || body.type !== "engine.approval" || body.scope !== "commands") return;
-    const state = await this.store.state(this.sid);
-    // An item cut in cleanBody ends in a line saying so, and the yes would go to the whole command, which the runner
-    // keeps. That line makes it two statements, which no "anything starting with" entry matches, and an exact entry
-    // (at most 4,000 characters, see core.ts) is never as long as a cut item, so what follows the cut always asks.
-    if (!body.items.length || !body.items.every((i) => allowedCommand(state, i, this.lane))) return;
-    // The list is the owners' say-so, which isn't the host's on a machine whose host isn't an owner: that host is asked.
-    if (roleOf(state, this.info.hostId) !== "owner") return;
-    const forTask = !body.items.every((i) => allowedCommand(state, i));
-    await this.store.append(this.sid, FRIDAY, { type: "instruction", text: forTask ? "Allowed for this task: go ahead." : "Allowed in advance: go ahead.", interrupt: false, approval: { id: body.id, approve: true } }, { lane: this.lane });
+    const allowed = autoAllow(await this.store.state(this.sid), this.lane, body.items, this.info.hostId, {});
+    if (allowed) await this.store.append(this.sid, FRIDAY, { type: "instruction", text: allowed === "task" ? "Allowed for this task: go ahead." : "Allowed in advance: go ahead.", interrupt: false, approval: { id: body.id, approve: true } }, { lane: this.lane });
   }
 
   // ── session → runner ─────────────────────────────────────────────
@@ -1337,6 +1331,8 @@ class LaneHost {
        */
       const first = needsCatchUp(events, this.lane, this.info.hostId);
       const catchUp = first ? buildCatchUp(state, events, pending, this.lane) : "";
+      // After that, what people marked as decided since its last turn (core.ts "decide"): it never argues a settled call again.
+      const decided = first ? "" : decidedSince(state, events, this.lane, pending);
       // Its first turn here also carries what the team learned on this repo before, from any agent: it starts briefed, not cold.
       // Asked now and waited on with the model and the note below: none of the three needs another's answer.
       const briefing = first && this.briefer ? this.briefer(this.lane, turn.prompt).catch(() => "") : "";
@@ -1357,7 +1353,7 @@ class LaneHost {
       const [brief, routed, note] = await Promise.all([briefing, routing, this.systemNote(events)]);
       slowly(`a turn's brief for ${this.sid}`, building, { events: events.length });
       // The shield hides typed keys from the agent too: told once, wherever in what it gets (a catch-up included) one is.
-      let prompt = withShieldNote(`${brief}${catchUp}${turn.prompt}`);
+      let prompt = withShieldNote(`${brief}${catchUp}${decided}${turn.prompt}`);
       const model = routed?.model;
       // The lane's pinned effort, as the log stood when this turn was built: a change made while it runs waits for the next.
       const effort = laneEffort(state, this.lane, this.info.tool, routed?.effort);
@@ -1431,7 +1427,9 @@ class LaneHost {
           this.modeTold = this.taskMode;
         }
       }
-      if (state.options.team && !command) prompt = withShieldNote(`${brief}${catchUp}${this.preambleNow()}${modeNote}${turn.prompt}`);
+      if (state.options.team && !command) prompt = withShieldNote(`${brief}${catchUp}${decided}${this.preambleNow()}${modeNote}${turn.prompt}`);
+      // A crew mate in a coding session: what changed since its last turn (its memory) leads it too.
+      else if (this.matePreamble.length && !command) prompt = withShieldNote(`${brief}${catchUp}${decided}${this.preambleNow()}${turn.prompt}`);
       this.inFlight = pending;
       this.turnCap = cap;
       // Every instruction of it handed back after a dropped connection: the turn its runner may still have running, to take on
@@ -1544,7 +1542,8 @@ class LaneHost {
     if (process.env.FRIDAY_MINE === "1") system = [system, "", BROWSER_NOTE].join("\n");
     // A teammate: who it is, its role, its folder and how the team works (teammates.ts), the same turn after turn; what changes
     // (its rooms, its memory since, being away) leads the turn's prompt instead (preambleNow).
-    const mate = state.options.team ? await this.teammate?.().catch(() => null) : null;
+    // Or a crew mate brought into a coding session as one of its lanes (crew-code.ts; Code and Crew, connected): never its main lane.
+    const mate = state.options.team || this.lane !== MAIN_LANE ? await this.teammate?.().catch(() => null) : null;
     this.matePreamble = mate?.preamble ?? [];
     if (mate) system = [system, "", mate.note].join("\n");
     if (!agent?.instructions?.trim()) return system;
@@ -2117,4 +2116,18 @@ function cleanBody(raw: unknown): EventBody | null {
     return { type: "agent.diff", base: s(b.base, 64), files, ...(more.length ? { more } : {}) };
   }
   return null;
+}
+
+/**
+ * Whether a command a tool asks about is let through without a person: on the session's Always allow list ("advance") or what
+ * was allowed for this lane's task ("task"), or null when a person is asked. Never one held by a rule above the session or one a
+ * teammate's level says to ask about, and never on a machine whose host isn't an owner (the list is the owners' say-so, not that
+ * host's). An item cut in cleanBody ends in a line saying so, and the yes would go to the whole command, which the runner keeps:
+ * that line makes it two statements, which no "anything starting with" entry matches, and an exact entry (at most 4,000
+ * characters, see core.ts) is never as long as a cut item, so what follows the cut always asks.
+ */
+export function autoAllow(state: SessionState, lane: string, items: readonly string[], hostId: string, o: { held?: boolean; levelAsks?: boolean }): "advance" | "task" | null {
+  if (o.held || o.levelAsks || !items.length || !items.every((i) => allowedCommand(state, i, lane))) return null;
+  if (roleOf(state, hostId) !== "owner") return null;
+  return items.every((i) => allowedCommand(state, i)) ? "advance" : "task";
 }

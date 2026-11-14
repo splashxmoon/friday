@@ -68,7 +68,10 @@ for (const edition of ["hosted", "local"] as const) {
     // local (448.5 and 450.1 before 3A), with the production sidebar's rail and agents list in the open-source build (Sidebar.tsx
     // OssRail, AgentsSection) and a lead's hand-outs as one line (Teammates.tsx TeamTalk); the Agents page, crew setup and the
     // plan are chunks of their own, and the plain words for a teammate's ask stay with the Agents page: raised to 452 on purpose.
-    assert.ok(kb < 452, `app.js and its static imports are ${kb.toFixed(0)} KB brotli, over the 452 KB budget`);
+    // Nov 13 2026: 450.7 hosted, 452.4 local (448.9 and 450.6 before), with Code and Crew, connected in a coding session's box: your
+    // crew in Add an agent, "@Kit" and "@Checkout" with their faces and colours, Keep this going from a run and a row (crew-at.tsx,
+    // mention-tint.tsx); the hand-off lines, the sheet and the fetches load on their own: raised to 454 on purpose.
+    assert.ok(kb < 454, `app.js and its static imports are ${kb.toFixed(0)} KB brotli, over the 454 KB budget`);
     // A session link waits on the session screen too: CodeMirror (~150 KB packed) loads with the first file opened, not here
     // (mirror-editor.tsx). Nov 4 2026, merged with build/e2e-hardening: 890 KB hosted (1,048 KB before; Oct 22: 710 KB).
     assert.deepEqual(session.modules.filter((m) => /node_modules\/@codemirror\//.test(m)).slice(0, 3), [], "CodeMirror is in the session screen's first load: keep it in mirror-editor.tsx, loaded lazily");
@@ -77,6 +80,9 @@ for (const edition of ["hosted", "local"] as const) {
     // permission card (Activity.tsx; a chunk of their own saved 0.3 KB and flashed the old card while it loaded): raised to 936.
     // Nov 11 2026, later: 936.0 hosted, 933.4 local, with a run's NO_UPDATE said in words and a lead's hand-out lines able to move a
     // piece (Activity.tsx, AgentTalk.tsx); the plan and its actions load on their own: raised to 940 on purpose.
-    assert.ok(session.kb < 940, `a session screen's first load is ${session.kb.toFixed(0)} KB brotli, over the 940 KB budget`);
+    // Nov 13 2026: 941.5 hosted, 938.7 local (936.5 and 933.6 before), with the same: raised to 943 on purpose.
+    // Nov 13 2026, the Friday Teams port (Code and Crew connected, the allowlist read as a shell reads it): 944.5 hosted, 941.6
+    // local, with the 16 KB allowlist loaded at the first card that offers Always allow rather than here: raised to 946 on purpose.
+    assert.ok(session.kb < 946, `a session screen's first load is ${session.kb.toFixed(0)} KB brotli, over the 946 KB budget`);
   });
 }

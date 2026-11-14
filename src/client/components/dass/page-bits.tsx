@@ -74,6 +74,8 @@ export function PageTabs<T extends string>({
             <TabsTrigger
               key={o.value}
               value={o.value}
+              // These tabs switch what one page shows; there is no tab panel for Radix's aria-controls to point at (axe: a dangling id).
+              aria-controls={undefined}
               className="h-[26px] flex-none gap-1.5 rounded-md px-2.5 text-[13px] font-medium text-[var(--text-muted)] shadow-none transition-colors duration-[var(--dass-fast)] hover:text-[var(--ink)] aria-selected:border-transparent aria-selected:bg-[var(--bg)] aria-selected:text-[var(--ink)] aria-selected:shadow-[0_1px_3px_rgb(0_0_0/.12),0_0_0_1px_var(--border)] dark:aria-selected:border-transparent dark:aria-selected:bg-[var(--bg)]"
             >
               {o.label}

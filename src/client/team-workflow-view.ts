@@ -1,58 +1,16 @@
 /**
- * Which automations the Automations page shows: the coding tools' own (Automations.tsx) or the crew's workflows (TeamWorkflows.tsx),
- * picked by the switch at its top (AutomationsSwitch) and remembered on this computer (Arun, 2026-10-28: "make the automation for
- * the teams platform different…"; 2026-11-02: the same for whichever place the sidebar is on). Kept apart from the page so the app,
- * the rail and the Crew room's header can say it without loading it.
+ * The crew's workflows from anywhere (the Crew room's More, ⌘K, a run's notice) and the notices of their runs. Kept apart from the
+ * page so the app, the rail and the Crew room's header can reach them without loading it.
  */
-import { useEffect, useRef, useState } from "react";
-import { isLocal } from "./edition.js";
+import { useEffect, useRef } from "react";
 import { notificationsOn } from "./prefs.js";
 import { useTeamNow, type Team } from "./Teammates.js";
 
-export type AutomationsView = "workflows" | "coding";
-const KEY = "friday.automationsView";
-const EVENT = "friday:automations-view";
-
-// The coding tools' until the crew's are picked: the sidebar's Automations says "Your coding tools on a schedule" first.
-const read = (): AutomationsView => {
-  try {
-    return localStorage.getItem(KEY) === "workflows" ? "workflows" : "coding";
-  } catch {
-    return "coding";
-  }
-};
-
-export function setAutomationsView(v: AutomationsView): void {
-  try {
-    localStorage.setItem(KEY, v);
-  } catch {
-    // A preference: losing it costs nothing.
-  }
-  dispatchEvent(new Event(EVENT));
-}
-
-export function useAutomationsView(): [AutomationsView, (v: AutomationsView) => void] {
-  const [v, setV] = useState(read);
-  useEffect(() => {
-    const heard = () => setV(read());
-    addEventListener(EVENT, heard);
-    return () => removeEventListener(EVENT, heard);
-  }, []);
-  return [v, setAutomationsView];
-}
-
 /**
- * The team's workflows, from anywhere (the Team room's header, ⌘K): the Team tab on, and the Automations page showing them. On the
- * hosted service, the Crew's Workflows (/?view=crew&tab=workflows), with the Crew in the sidebar.
+ * The crew's workflows, from anywhere: the Automations page, where they are listed with the coding tools' own (the "Why Crew" plan,
+ * 2026-11-13: one list). In both editions; the hosted Crew's old link (?view=crew&tab=workflows) shows the same list.
  */
 export function openWorkflows(): void {
-  if (!isLocal()) {
-    if (new URLSearchParams(location.search).get("tab") === "workflows") return;
-    history.pushState(null, "", "/?view=crew&tab=workflows");
-    return void dispatchEvent(new PopStateEvent("popstate"));
-  }
-  // Not the sidebar turned to the Crew too: the page says which automations these are, whichever place it is on.
-  setAutomationsView("workflows");
   if (new URLSearchParams(location.search).get("view") === "automations") return void dispatchEvent(new CustomEvent("friday:same-page", { detail: "automations" }));
   history.pushState(null, "", "/?view=automations");
   dispatchEvent(new PopStateEvent("popstate"));

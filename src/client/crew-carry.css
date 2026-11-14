@@ -1,0 +1,176 @@
+/* "Keep this going" (crew-carry.tsx, CrewCarrySheet.tsx; ported from Friday Teams' keep-going.css): the hand-off sheet, the
+   session's one line for a hand-off, and Bring it in. Every class starts kg-. */
+.kg-sheet form { display: flex; flex-direction: column; gap: 14px; }
+.kg-sheet { max-height: min(88vh, 860px); overflow-y: auto; }
+.kg-sec { display: flex; flex-direction: column; gap: 4px; }
+.kg-label { color: var(--text-muted); font-size: 12px; font-weight: 500; }
+/* Who, in groups (Arun, 2026-11-13: "deasign this better"): a group's shared outcome said once at its head, the list its own
+   scroll so what goes with it stays in view, a tick on the pick. */
+.kg-groups { display: flex; flex-direction: column; gap: 10px; max-height: min(320px, 42vh); margin: 0 -6px; padding: 0 6px; overflow-y: auto; overscroll-behavior: contain; }
+.kg-group { display: flex; flex-direction: column; gap: 1px; }
+.kg-group-head { display: flex; align-items: baseline; gap: 8px; padding: 2px 8px 4px; color: var(--ink-2); font-size: 12px; font-weight: 600; }
+.kg-group-line { margin-left: auto; color: var(--text-muted); font-weight: 400; }
+.kg-who { display: grid; grid-template-columns: auto minmax(0, 1fr) auto 14px; gap: 10px; align-items: center; width: 100%; min-height: 40px; padding: 6px 8px; border: 0; border-radius: var(--r-md, 8px); background: none; color: var(--ink); text-align: left; cursor: pointer; }
+.kg-who:hover { background: var(--hover, var(--bg-2)); }
+.kg-who[data-on] { background: color-mix(in srgb, var(--ink) 8%, transparent); }
+.kg-who:focus-visible { outline: 2px solid var(--ring, var(--accent)); outline-offset: -2px; }
+.kg-who-main { display: flex; flex-direction: column; min-width: 0; }
+.kg-who-name { overflow: hidden; font-size: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.kg-who-sub { overflow: hidden; color: var(--text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.kg-who-line { max-width: 240px; overflow: hidden; color: var(--text-muted); font-size: 12px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.kg-who-line[data-now] { color: var(--ink-2); }
+.kg-tick { display: grid; place-items: center; color: var(--ink); }
+.kg-room-mark { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; background: color-mix(in srgb, var(--ink) 8%, transparent); color: var(--ink-2); }
+.kg-foot { align-items: center; }
+.kg-foot-line { margin-right: auto; overflow: hidden; color: var(--text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 520px) { .kg-who-line { display: none; } .kg-foot-line { margin: 0; white-space: normal; text-align: center; } }
+.kg-make .kg-plus { display: grid; place-items: center; width: 24px; height: 24px; border: 1px dashed var(--border-strong, var(--border)); border-radius: 999px; color: var(--text-muted); }
+.kg-check { display: flex; gap: 8px; align-items: flex-start; color: var(--ink-2); font-size: 13px; line-height: 1.4; cursor: pointer; }
+.kg-check > input { margin-top: 3px; }
+.kg-note { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r-md, 8px); background: var(--bg); color: var(--ink); font: inherit; font-size: 13px; resize: vertical; }
+.kg-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.kg-chip { padding: 3px 10px; border: 1px solid var(--border); border-radius: 999px; background: none; color: var(--ink-2); font-size: 12px; cursor: pointer; }
+.kg-chip[aria-pressed="true"], .kg-chip[aria-checked="true"] { border-color: var(--ink-2); background: var(--bg-2, var(--hover)); color: var(--ink); }
+.kg-hint, .kg-err { margin: 0; color: var(--text-muted); font-size: 12px; }
+.kg-err { color: var(--danger, var(--ink)); }
+
+/* The session's line: said once, its status kept up under it, its result back here. */
+.kg-line { display: flex; flex-direction: column; gap: 3px; margin: 6px 0; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--r-lg, 10px); font-size: 13px; }
+.kg-head { display: flex; gap: 8px; align-items: center; color: var(--ink); }
+.kg-mark { color: var(--text-muted); }
+.kg-said { flex: 1; min-width: 0; }
+.kg-stamp { color: var(--text-muted); font-size: 12px; }
+.kg-sub { padding-left: 22px; color: var(--text-muted); font-size: 12px; }
+.kg-status { display: flex; gap: 8px; align-items: center; padding-left: 22px; color: var(--ink-2); font-size: 12px; }
+.kg-dot { width: 6px; height: 6px; border-radius: 999px; background: var(--text-muted); }
+.kg-line[data-state="running"] .kg-dot { background: var(--green, #22a06b); }
+.kg-line[data-state="input"] .kg-dot { background: var(--amber, #d97706); }
+.kg-link { padding: 0; border: 0; background: none; color: var(--text-muted); font-size: 12px; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.kg-link:hover { color: var(--ink); }
+.kg-result { display: flex; gap: 8px; margin-top: 4px; padding-left: 22px; }
+.kg-result-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.kg-result-main > p { margin: 0; color: var(--ink-2); }
+.kg-diff { color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+
+/* A room hand-off in one line (Arun, 2026-11-13: "design better there is alot to read"): who it went to, how it stands, the way
+   in; what came back as one quiet line under it. */
+.kg-room .kg-head { flex-wrap: wrap; row-gap: 2px; }
+.kg-room .kg-said { flex: 0 1 auto; }
+.kg-room-status { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--text-muted); font-size: 12px; }
+.kg-room-status::before { content: "·"; margin-right: 2px; color: var(--faint); }
+.kg-room[data-state="done"] .kg-room-status { color: var(--dass-ok, var(--green)); }
+.kg-room[data-state="stopped"] .kg-room-status { color: var(--danger, var(--ink)); }
+.kg-room .kg-link { margin-left: auto; }
+.kg-room-foot { display: flex; align-items: center; gap: 10px; padding-left: 22px; min-width: 0; }
+.kg-room-foot .kg-room-said { flex: 1; padding-left: 0; }
+.kg-room-brought { flex: none; color: var(--text-muted); font-size: 12px; }
+.kg-result-acts { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
+.kg-bring { flex: none; height: 26px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--r-md, 8px); background: var(--card, var(--bg)); color: var(--ink); font: 500 12px var(--font); cursor: pointer; }
+.kg-bring:hover { background: var(--hover); }
+.kg-bring:disabled { opacity: .5; cursor: default; }
+.kg-room-said { margin: 0; padding-left: 22px; overflow: hidden; color: var(--text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Bring it in, with a look first (KeepGoingSheet.tsx BringSheet). */
+.kg-bring-sheet form, .kg-bring-sheet { gap: 12px; }
+.kg-piece { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 8px 10px; border: 1px solid transparent; border-radius: var(--r-md, 8px); background: none; color: var(--ink); text-align: left; cursor: pointer; }
+.kg-piece:hover { background: var(--hover); }
+.kg-piece[data-on] { border-color: var(--border); background: color-mix(in srgb, var(--ink) 6%, transparent); }
+.kg-piece[data-skip] { opacity: .75; }
+.kg-piece-top { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.kg-piece-what { flex: 1; min-width: 0; overflow: hidden; font-size: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.kg-piece-tag { flex: none; padding: 0 6px; border-radius: 4px; background: var(--hover-strong, var(--hover)); color: var(--ink-2); font: 500 11px/18px var(--font); }
+.kg-piece-tag[data-rel="handed"] { color: var(--dass-ok, var(--green)); }
+.kg-piece-tag[data-rel="other"] { color: var(--text-muted); }
+.kg-piece-sub { overflow: hidden; color: var(--text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.kg-piece-warn { color: var(--mate-limited, var(--amber)); font-size: 12px; }
+.kg-piece-skip { color: var(--text-muted); font-size: 12px; }
+.kg-files-toggle { align-self: flex-start; text-decoration: none; }
+.kg-files { display: flex; flex-direction: column; gap: 3px; max-height: 180px; overflow-y: auto; padding: 4px 2px; }
+.kg-file code { overflow: hidden; font: 12px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+
+/* A room hand-off with its crew's faces (Arun, 2026-11-13): the face it went to on the left, then who handed it where and when, how
+   it stands as a chip beside the room's faces, what came back on one line, and the two things to do with it. */
+.kg-line.kg-room { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 12px; flex-direction: unset; padding: 12px 14px; }
+.kg-room-face { display: grid; place-items: start center; padding-top: 1px; color: var(--text-muted); }
+.kg-room-main { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.kg-room-top { display: flex; align-items: baseline; gap: 10px; min-width: 0; color: var(--ink); font-size: 13px; }
+.kg-room-top .kg-said { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kg-room-meta { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.kg-room-chip { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px; border-radius: 999px; background: color-mix(in srgb, var(--ink) 7%, transparent); color: var(--ink-2); font-size: 12px; font-weight: 500; white-space: nowrap; }
+.kg-room-chip i { width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); }
+.kg-room-chip[data-state="working"] { background: color-mix(in srgb, var(--mate-working) 14%, transparent); color: var(--ink); }
+.kg-room-chip[data-state="working"] i { background: var(--mate-working); animation: kg-pulse 1.4s ease-in-out infinite; }
+@keyframes kg-pulse { 50% { opacity: .35; transform: scale(.8); } }
+@media (prefers-reduced-motion: reduce) { .kg-room-chip[data-state="working"] i { animation: none; } }
+.kg-room-chip[data-state="waiting"] { background: color-mix(in srgb, var(--amber) 16%, transparent); color: var(--amber); }
+.kg-room-chip[data-state="waiting"] i { background: var(--amber); }
+.kg-room-chip[data-state="done"] { background: color-mix(in srgb, var(--green) 14%, transparent); color: var(--dass-ok, var(--green)); }
+.kg-room-chip[data-state="stopped"] { background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--danger, var(--red)); }
+.kg-room-crew { display: inline-flex; align-items: center; }
+.kg-room-crew-face { display: grid; place-items: center; margin-left: -4px; border-radius: 50%; box-shadow: 0 0 0 2px var(--card, var(--bg)); }
+.kg-room-crew-face:first-child { margin-left: 0; }
+.kg-room-crew-face[data-working] { box-shadow: 0 0 0 2px var(--card, var(--bg)), 0 0 0 3.5px var(--mate-working); }
+.kg-line.kg-room .kg-room-said { margin: 0; padding: 0; overflow: hidden; color: var(--text-muted); font-size: 12.5px; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
+.kg-room-acts { display: flex; align-items: center; gap: 12px; margin-top: 2px; }
+.kg-room-acts .kg-link { font-size: 12.5px; }
+.kg-room-acts .kg-link { margin-left: 0; }
+.kg-mate-face { display: grid; flex: none; place-items: center; }
+.kg-line:not(.kg-room) .kg-sub, .kg-line:not(.kg-room) .kg-status, .kg-line:not(.kg-room) .kg-result { padding-left: 28px; }
+.kg-room-acts { justify-content: flex-end; }
+
+/* The Bring sheet held to its width, each piece a tickable row (Arun, 2026-11-13: "WHAT THE HELL IS THIS, FIX THIS NOW", "BE ABLE
+   TO CHECK MULTIPLE TOO"): long first lines cut, never pushing the dialog sideways. */
+.kg-bring-sheet { overflow-x: hidden; }
+.kg-bring-sheet > * { min-width: 0; }
+.kg-pieces { gap: 4px; min-width: 0; }
+.kg-piece { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: start; gap: 10px; min-width: 0; max-width: 100%; overflow: hidden; }
+.kg-piece-box { display: grid; place-items: center; width: 16px; height: 16px; margin-top: 2px; border: 1.5px solid var(--border-strong, var(--border)); border-radius: 4px; color: var(--bg); }
+.kg-piece[data-on] .kg-piece-box { border-color: var(--ink); background: var(--ink); }
+.kg-piece-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.kg-piece-top { min-width: 0; }
+.kg-piece-what { white-space: nowrap; }
+
+/* Finished crew work ready to come in, one line over the box (crew-carry.tsx BringReady). */
+.kg-ready { position: relative; z-index: 0; display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0 16px -14px; padding: 7px 8px 21px 12px; border: 1px solid var(--border-strong); border-bottom: 0; border-radius: 16px 16px 0 0; background: color-mix(in srgb, var(--hover) 55%, var(--bg)); font-size: 12.5px; line-height: 18px; }
+.kg-ready ~ .prompt { position: relative; z-index: 1; }
+.kg-ready-faces { display: inline-flex; flex: none; }
+.kg-ready-faces > * { border-radius: 50%; box-shadow: 0 0 0 2px color-mix(in srgb, var(--hover) 55%, var(--bg)); }
+.kg-ready-faces > * + * { margin-left: -6px; }
+.kg-ready-text { flex: 1; min-width: 0; overflow: hidden; color: var(--ink-2); text-overflow: ellipsis; white-space: nowrap; }
+.kg-ready-text b { color: var(--ink); font-weight: 500; }
+.kg-ready-meta { color: var(--text-muted); }
+.kg-ready-go { flex: none; height: 24px; padding: 0 11px; border: 0; border-radius: 7px; background: var(--ink); color: var(--bg); font: 500 12px/24px var(--font); cursor: pointer; }
+.kg-ready-go:hover { opacity: .88; }
+.kg-ready-x { flex: none; height: 24px; padding: 0 9px; border: 0; border-radius: 7px; background: none; color: var(--ink-2); font: 12px/24px var(--font); cursor: pointer; }
+.kg-ready-x:hover { background: var(--hover); color: var(--ink); }
+.kg-ready :is(button):focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+
+/* The sheet as design 1 (Friday Teams 2117b78a; Arun, 2026-11-14): a row of faces to pick from, one line on the pick, the box,
+   short chips for what goes with it, one line for what it asks before. */
+.kg-sheet form { gap: 16px; }
+.kg-who-wrap { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.kg-faces { display: flex; flex-wrap: wrap; gap: 2px; margin: 0 -8px; }
+.kg-face { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 76px; padding: 8px 2px 6px; border: 0; border-radius: 12px; background: none; color: var(--text-muted); font: 500 12px/16px var(--font); cursor: pointer; transition: background-color .15s ease, color .15s ease; }
+.kg-face:hover { background: var(--hover); color: var(--ink); }
+.kg-face[data-on] { background: color-mix(in srgb, var(--ink) 8%, transparent); box-shadow: inset 0 0 0 1.5px var(--ink-2); color: var(--ink); }
+.kg-face:focus-visible { outline: 2px solid var(--border-focus, var(--accent)); outline-offset: 1px; }
+.kg-face:disabled { opacity: .6; cursor: default; }
+.kg-face-mark { position: relative; display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; background: color-mix(in srgb, var(--ink) 6%, transparent); color: var(--ink-2); }
+.kg-face-room { display: flex; align-items: center; }
+.kg-face-room > * + * { margin-left: -7px; }
+.kg-face-dot { position: absolute; right: 0; bottom: 0; width: 10px; height: 10px; border-radius: 50%; background: var(--text-muted); box-shadow: 0 0 0 2px var(--panel, var(--bg)); }
+.kg-face-dot[data-now] { background: var(--dass-ok, var(--green, #3fa66b)); }
+.kg-face-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kg-face-make .kg-face-mark { border: 1px dashed var(--border-strong, var(--border)); background: none; }
+.kg-pick-line { margin: 0; overflow: hidden; color: var(--text-muted); font-size: 12.5px; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.kg-sheet .kg-note { min-height: 72px; padding: 11px 13px; border-radius: 12px; font-size: 14px; line-height: 21px; resize: none; }
+.kg-sec .kg-label { margin-bottom: 4px; }
+.kg-chip.kg-carry { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 11px; border-radius: 8px; font-size: 12.5px; font-weight: 500; }
+.kg-chip.kg-carry[aria-checked="false"] { color: var(--text-muted); }
+.kg-asks { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 10px; background: color-mix(in srgb, var(--ink) 5%, transparent); color: var(--ink-2); font-size: 12.5px; line-height: 18px; }
+.kg-asks-mark { flex: none; color: var(--text-muted); }
+.kg-asks-line { flex: 1; min-width: 0; }
+.kg-asks .kg-link { font-size: 12.5px; }
+.kg-asks-chips { flex-basis: 100%; padding-top: 4px; }
+.kg-foot { gap: 8px; }

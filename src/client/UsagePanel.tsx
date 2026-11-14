@@ -52,6 +52,7 @@ export function UsagePanel({ state, events, identity, solo = false }: { state: S
   const tools = (lane: string) => !!state.engines[lane]?.tool;
   const agents = [...r.byAgent].sort((a, b) => Number(b.running) - Number(a.running) || b.lastAt - a.lastAt);
   const runningNow = r.byAgent.filter((x) => x.running).length;
+  const here = 1 + state.lanes.filter((l) => l.id !== MAIN_LANE).length;
   const people = r.byPerson.filter((p) => p.counted && p.tokens > 0);
   const top = Math.max(1, ...agents.map((x) => x.tokens));
   const onOwnPlan = agents.filter((x) => tools(x.key));
@@ -64,7 +65,9 @@ export function UsagePanel({ state, events, identity, solo = false }: { state: S
         <h3 className="uz-h">
           Agents
           <span className="uz-h-hint">
-            {agents.length} total{runningNow ? ` · ${runningNow} running` : ""}
+            {/* Only the agents that ran are listed: said as such, beside how many are here (2026-11-09 audit C-35: "1 total" with 2). */}
+            {here > agents.length ? `${agents.length} of ${here} ran` : `${agents.length} total`}
+            {runningNow ? ` · ${runningNow} running` : ""}
             {counted ? ` · ${shortTokens(r.tokens)} tokens` : ""}
           </span>
         </h3>

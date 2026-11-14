@@ -22,12 +22,23 @@
 .db-meta { display: inline-flex; align-items: center; height: 20px; color: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; }
 .db-proof { gap: 4px; color: color-mix(in srgb, var(--dass-ok, var(--green)) 80%, var(--ink)); }
 
-.db-usage { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
-.db-usage li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; font-size: 13px; }
-.db-usage b { min-width: 96px; color: var(--ink); font-weight: 600; }
-.db-tokens { color: var(--ink-2); font-variant-numeric: tabular-nums; }
-.db-window { color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-.db-window[data-high] { color: var(--mate-limited, var(--ink)); font-weight: 600; }
+.db-usage { display: flex; flex-direction: column; gap: 12px; margin: 2px 0 0; padding: 0; list-style: none; }
+.db-tool { display: flex; flex-direction: column; gap: 7px; }
+.db-tool-head { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
+.db-tool-head b { color: var(--ink); font-weight: 600; }
+.db-tokens { margin-left: auto; color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.db-windows { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 8px 18px; }
+.db-window { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.db-window-top { display: flex; align-items: baseline; gap: 6px; font-size: 12px; }
+.db-window-label { overflow: hidden; color: var(--text-muted); text-overflow: ellipsis; white-space: nowrap; }
+.db-pct { margin-left: auto; color: var(--ink-2); font-weight: 500; font-variant-numeric: tabular-nums; }
+.db-bar { display: block; height: 4px; overflow: hidden; border-radius: 99px; background: color-mix(in srgb, var(--ink) 9%, transparent); }
+.db-bar i { display: block; height: 100%; min-width: 0; border-radius: inherit; background: color-mix(in srgb, var(--ink) 45%, transparent); transition: width .3s ease; }
+.db-window[data-level="high"] .db-pct { color: var(--mate-limited, var(--ink)); font-weight: 600; }
+.db-window[data-level="high"] .db-bar i { background: var(--mate-limited, var(--ink)); }
+.db-window[data-level="full"] .db-pct { color: color-mix(in srgb, var(--red) 85%, var(--ink)); font-weight: 600; }
+.db-window[data-level="full"] .db-bar i { background: color-mix(in srgb, var(--red) 85%, var(--ink)); }
+@media (prefers-reduced-motion: reduce) { .db-bar i { transition: none; } }
 
 .db-sheet { gap: 0; width: min(460px, 100vw); max-width: none; }
 .db-sheet-head { display: flex; flex-direction: column; gap: 4px; padding: 18px 48px 12px 20px; border-bottom: 1px solid var(--border); }
@@ -36,13 +47,14 @@
 .db-sheet-body { flex: 1; min-height: 0; padding: 2px 20px 12px; overflow-y: auto; }
 .db-sheet-body .tm-brief-quiet { padding: 16px 0; font-size: 13px; }
 
-.db-schedule { display: flex; flex-direction: column; gap: 8px; padding: 14px 20px 18px; border-top: 1px solid var(--border); }
-.db-time { display: flex; align-items: center; gap: 10px; color: var(--ink); font-size: 13px; }
-.db-time-label { min-width: 64px; }
+.db-schedule { display: flex; flex-direction: column; gap: 6px; padding: 14px 20px 16px; border-top: 1px solid var(--border); }
+.db-time { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px; color: var(--ink); font-size: 13px; }
+.db-time[data-off] .db-time-label { color: var(--text-muted); }
+.db-time-label { font-weight: 500; }
 .db-time input { height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--card); color: var(--ink); font: 500 13px var(--font); font-variant-numeric: tabular-nums; }
 .db-time input:disabled { opacity: .5; }
 .db-time input:focus-visible { outline: none; box-shadow: var(--dass-ring, 0 0 0 2px var(--ink)); }
-.db-zone { display: flex; flex-wrap: wrap; gap: 8px; margin: 2px 0 0; color: var(--text-muted); font-size: 12px; }
+.db-zone { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 0; color: var(--text-muted); font-size: 12px; }
 
 .db-note { position: fixed; top: 52px; right: 16px; z-index: 40; display: flex; align-items: center; gap: 12px; max-width: min(440px, calc(100vw - 32px)); padding: 10px 10px 10px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); box-shadow: var(--shadow-pop); color: var(--ink-2); font-size: 13px; animation: db-in .24s cubic-bezier(.2, .8, .2, 1) both; }
 .db-note b { color: var(--ink); }

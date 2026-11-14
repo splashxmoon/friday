@@ -97,3 +97,15 @@ test("a test that crashed inside a chain is a failure, though the chain exited 0
   const out = parse(JSON.stringify({ type: "item.completed", item: { id: "c", type: "command_execution", command: "npm test; git diff", aggregated_output: crashed, exit_code: 0, status: "completed" } }));
   assert.equal((out.find((o) => o.kind === "result") as { isError: boolean }).isError, true, "and the agent's own log says it failed");
 });
+
+// Checks and reviews held to what really ran (Arun, 2026-11-13: "they need to be air tight and actually be trust worthy").
+test("a test run is a test runner run, not a command that names the word", async () => {
+  const { isTestRun, testFailedInChain, receiptOf } = await import("../src/receipt.js");
+  for (const c of ["npm test", "npm run test:unit", "cd web && pnpm test -- --run", "npx vitest run", "CI=1 npx jest src", "python -m pytest tests/", "go test ./...", "make test", "node --test test/", "npm test | tail -40"]) assert.ok(isTestRun(c), c);
+  for (const c of ["grep -rn foo test/", "cat test/x.ts", "ls tests/", "echo test", "git commit -m 'fix tests'", "sed -n 1,20p test/a.ts", "npm run build"]) assert.ok(!isTestRun(c), c);
+  // A failing run piped into tail: its own failure, not tail's 0.
+  assert.ok(testFailedInChain("npm test | tail -40", "Tests: 2 failed, 10 passed"));
+  // The project's test script rewritten by the work it checks.
+  const r = receiptOf({ calls: [], failed: () => null, files: [{ path: "package.json", status: "modified", additions: 1, deletions: 1, patch: '@@ -3 +3 @@\n-    "test": "vitest run",\n+    "test": "echo ok",' }] as never, answer: "" });
+  assert.ok(r.flags.some((f) => /Changed how the project checks itself/.test(f.text)), JSON.stringify(r.flags));
+});

@@ -106,3 +106,29 @@ test("a raw error is never a teammate's live line (Arun, 2026-10-29: \"node:inte
   assert.equal(sayMate(mate({ status: "offline", line: raw })).line, "Offline");
   assert.equal(plainError(raw), "Stopped: their tool failed to start");
 });
+
+// The sidebar's agent rows (Arun, 2026-11-13): a one-word tag from the prompt, and the state word on the right.
+test("roleWord: one or two words from the prompt, a fallback for anything else", async () => {
+  const { roleWord } = await import("../src/client/team-status.js");
+  assert.equal(roleWord("Builds features and fixes bugs in our code."), "Engineer");
+  assert.equal(roleWord("Tests every change before it ships: runs the suite."), "QA");
+  assert.equal(roleWord("Leads the crew. Turns my goals into a plan and reviews."), "Lead");
+  assert.equal(roleWord("Researches competitors and sums up what they ship."), "Researcher");
+  assert.equal(roleWord("Writes our docs, release notes and changelog."), "Writer");
+  assert.equal(roleWord("Keeps an eye on the weather."), "Generalist");
+  assert.equal(roleWord(""), "");
+});
+
+test("rowState: working, needs you, done, idle, offline, each said once", async () => {
+  const { rowState, sayMate } = await import("../src/client/team-status.js");
+  const base = { name: "Kit", tool: "claude" as const, queued: 0 };
+  const now = 1_000_000_000;
+  const at = (m: Parameters<typeof sayMate>[0] & { lastAt?: number; halted?: true }) => rowState(m, sayMate(m, { now }), now);
+  assert.deepEqual(at({ ...base, status: "working", line: "Fixing the cart total" }), { word: "Working", tone: "working", line: "Fixing the cart total" });
+  assert.equal(at({ ...base, status: "waiting", line: "Needs a decision: Monthly or yearly?" }).line, "Monthly or yearly?");
+  assert.deepEqual(at({ ...base, status: "idle", line: "Fixed the flaky checkout test", lastAt: now - 600_000 }), { word: "Done", tone: "done", line: "Fixed the flaky checkout test" });
+  assert.equal(at({ ...base, status: "idle", line: "Fixed the flaky checkout test", lastAt: now - 5 * 3600_000 }).word, "Idle", "an old finish reads as idle");
+  assert.equal(at({ ...base, status: "idle", line: "Fixed it", lastAt: now - 60_000, halted: true }).word, "Idle", "a stop isn't a finish");
+  assert.deepEqual(at({ ...base, status: "offline", line: "Offline · their coding tool isn't running" }), { word: "Offline", tone: "offline", line: "their coding tool isn't running" });
+  assert.equal(at({ ...base, status: "idle", line: "" }).line, "Free for a task");
+});

@@ -299,6 +299,7 @@ export function useShortcuts({
   people = [],
   agents = [],
   onAgent,
+  crew = [],
   only,
   loadFiles,
   filesFrom = "",
@@ -322,6 +323,8 @@ export function useShortcuts({
   /** Agents "@" can name: offered before people, and picking one points the box at it. */
   agents?: { id: string; name: string; mark: ReactNode; hint: string; /** How it stands, for its hint's colour. */ tone?: string }[];
   onAgent?: (id: string) => void;
+  /** Your crew mates and crew rooms: naming one first in a coding session's box hands its work on (crew-carry.tsx). */
+  crew?: { id: string; name: string; hint: string; kind: "mate" | "room"; /** Its face: a crew mate's mascot. */ mark?: ReactNode }[];
   /** The other people in the session: "@" offers them before files, and naming one tells them (mentions.ts). */
   people?: { id: string; name: string; online?: boolean }[];
   /** The lane the box writes to. */
@@ -434,7 +437,7 @@ export function useShortcuts({
             setOpen(null);
           },
         }))
-      : open?.kind === "person" && (people.length || agents.length)
+      : open?.kind === "person" && (people.length || agents.length || crew.length)
         ? [
           ...agents
             .filter((a) => named(a.name, open.query.toLowerCase()))
@@ -453,6 +456,26 @@ export function useShortcuts({
                 setValue(el, head + el.value.slice(el.selectionStart), head.length);
                 setOpen(null);
                 onAgent?.(a.id);
+              },
+            })),
+          // Your crew and its rooms, after the agents here: picked, its name goes first in the box, and sending hands the work on.
+          ...crew
+            .filter((c) => named(c.name, open.query.toLowerCase()))
+            .slice(0, 8)
+            .map((c) => ({
+              key: `crew:${c.kind}:${c.id}`,
+              label: c.name,
+              hint: c.hint,
+              icon: (c.kind === "room" ? "users" : "agent") as IconName,
+              ...(c.mark ? { mark: c.mark } : {}),
+              pick: () => {
+                const el = textarea.current;
+                if (!el) return;
+                const head = `@${c.name} `;
+                // At the start, as a hand-off reads it; anything typed before moves after it.
+                const rest = `${el.value.slice(0, open.start)}${el.value.slice(el.selectionStart)}`.trim();
+                setValue(el, head + rest, head.length);
+                setOpen(null);
               },
             })),
           ...people
@@ -561,8 +584,8 @@ export function useShortcuts({
 
   const popover =
     open && visible ? (
-      <div className={`shortcut-pop${below ? " below" : ""}`} role="listbox" aria-label={open.kind === "command" ? "Commands" : open.kind === "person" ? (agents.length && !people.length ? "Agents" : "People") : "Files"}>
-        <div className="shortcut-head">{open.kind === "command" ? (tool ? `${tool} commands` : "Commands") : open.kind === "person" ? (agents.length && !people.length ? "Send it to" : "People here") : "Files in the folder"}</div>
+      <div className={`shortcut-pop${below ? " below" : ""}`} role="listbox" aria-label={open.kind === "command" ? "Commands" : open.kind === "person" ? (agents.length && !people.length ? "Agents" : crew.length && !people.length ? "Crew" : "People") : "Files"}>
+        <div className="shortcut-head">{open.kind === "command" ? (tool ? `${tool} commands` : "Commands") : open.kind === "person" ? (agents.length || crew.length ? "Send it to" : "People here") : "Files in the folder"}</div>
         {open.kind === "file" && filesEnabled && files === null && <div className="shortcut-empty">Reading the folder…</div>}
         {open.kind === "file" && !filesEnabled && <div className="shortcut-empty">{noFolder}</div>}
         {open.kind === "file" && filesEnabled && files !== null && !items.length && (

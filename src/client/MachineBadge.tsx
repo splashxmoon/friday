@@ -16,7 +16,7 @@ import { isLocal } from "./edition.js";
 import { openOutside } from "./openOutside.js";
 import { ENGINE_INFO, installStep, osOf, splitTools, toolOrder } from "./engines.js";
 import { Icon } from "./icons.js";
-import { NoMachine, hostApi, machineRefusal, type LocalTool, type MachineState } from "./local.js";
+import { NoMachine, hostApi, machineRefusal, unchecked, type LocalTool, type MachineState } from "./local.js";
 import type { Identity } from "./storage.js";
 import { floating, MenuButton, MoreTools, useDismiss } from "./ui.js";
 import { openSettings } from "./openSettings.js";
@@ -132,11 +132,13 @@ export function MachineBadge({ identity, machine, refresh, inline = false, welco
   // The installed ones up top. The one whose install line is open stays where it was clicked: one opened from the tools folded
   // away stays among them, not moved up the list as its form opens (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
   // Settings › Coding tools lists the ones not here in the open (below), so one being installed stays where it is.
-  let shown = splitTools(here ? (t) => tools.some((x) => x.tool === t) : null, moreTools || part === "tools" ? "" : installing);
-  // One order, in the welcome, Settings and the agent picker alike (toolOrder).
+  // One that couldn't be checked is listed with them: it may well be installed, and its Check again is where it is seen.
+  const unsure = (t: EngineTool) => machine.tools.some((x) => x.tool === t && unchecked(x));
+  let shown = splitTools(here ? (t) => tools.some((x) => x.tool === t) || unsure(t) : null, moreTools || part === "tools" ? "" : installing);
+  // One order, in the welcome, Settings and the agent picker alike (toolOrder); one that couldn't be checked under the signed-in ones.
   const order = toolOrder((t) => {
     const f = tools.find((x) => x.tool === t);
-    return !f ? "absent" : f.loggedIn === false ? "signed out" : "ready";
+    return !f ? (unsure(t) ? "signed out" : "absent") : f.loggedIn === false ? "signed out" : "ready";
   });
   const inOrder = (list: EngineTool[]) => [...list].sort(order);
   shown = { here: inOrder(shown.here), away: inOrder(shown.away) };
@@ -489,6 +491,7 @@ export function MachineBadge({ identity, machine, refresh, inline = false, welco
                   key={tool}
                   tool={tool}
                   found={tools.find((x) => x.tool === tool) ?? machine.tools.find((x) => x.tool === tool) ?? null}
+                  onRecheck={refresh}
                   accounts={ACCOUNT_TOOLS.includes(tool) ? <AccountList identity={identity} tool={tools.find((x) => x.tool === tool) ?? machine.tools.find((x) => x.tool === tool) ?? { tool, name: "", path: null, loggedIn: null, source: null }} onChanged={refresh} /> : undefined}
                   busy={step === "signing" && acting?.tool !== tool}
                   acting={acting?.tool === tool ? acting.what : null}
@@ -523,6 +526,7 @@ export function MachineBadge({ identity, machine, refresh, inline = false, welco
                       key={tool}
                       tool={tool}
                       found={tools.find((x) => x.tool === tool) ?? machine.tools.find((x) => x.tool === tool) ?? null}
+                      onRecheck={refresh}
                       accounts={ACCOUNT_TOOLS.includes(tool) ? <AccountList identity={identity} tool={tools.find((x) => x.tool === tool) ?? machine.tools.find((x) => x.tool === tool) ?? { tool, name: "", path: null, loggedIn: null, source: null }} onChanged={refresh} /> : undefined}
                       busy={step === "signing" && acting?.tool !== tool}
                       acting={acting?.tool === tool ? acting.what : null}
@@ -554,6 +558,7 @@ export function MachineBadge({ identity, machine, refresh, inline = false, welco
                 key={tool}
                 tool={tool}
                 found={tools.find((x) => x.tool === tool) ?? machine.tools.find((x) => x.tool === tool) ?? null}
+                onRecheck={refresh}
                 accounts={ACCOUNT_TOOLS.includes(tool) ? <AccountList identity={identity} tool={tools.find((x) => x.tool === tool) ?? machine.tools.find((x) => x.tool === tool) ?? { tool, name: "", path: null, loggedIn: null, source: null }} onChanged={refresh} /> : undefined}
                 busy={step === "signing" && acting?.tool !== tool}
                 acting={acting?.tool === tool ? acting.what : null}
@@ -693,6 +698,7 @@ export function MachineBadge({ identity, machine, refresh, inline = false, welco
                             key={tool}
                             tool={tool}
                             found={tools.find((x) => x.tool === tool) ?? machine.tools.find((x) => x.tool === tool) ?? null}
+                            onRecheck={refresh}
                         accounts={ACCOUNT_TOOLS.includes(tool) ? <AccountList identity={identity} tool={tools.find((x) => x.tool === tool) ?? machine.tools.find((x) => x.tool === tool) ?? { tool, name: "", path: null, loggedIn: null, source: null }} onChanged={refresh} /> : undefined}
                             busy={step === "signing" && acting?.tool !== tool}
                             acting={acting?.tool === tool ? acting.what : null}
@@ -736,6 +742,7 @@ export function MachineBadge({ identity, machine, refresh, inline = false, welco
                                 key={tool}
                                 tool={tool}
                                 found={tools.find((x) => x.tool === tool) ?? machine.tools.find((x) => x.tool === tool) ?? null}
+                                onRecheck={refresh}
                             accounts={ACCOUNT_TOOLS.includes(tool) ? <AccountList identity={identity} tool={tools.find((x) => x.tool === tool) ?? machine.tools.find((x) => x.tool === tool) ?? { tool, name: "", path: null, loggedIn: null, source: null }} onChanged={refresh} /> : undefined}
                                 busy={step === "signing" && acting?.tool !== tool}
                                 acting={acting?.tool === tool ? acting.what : null}
@@ -835,6 +842,7 @@ function ToolRow({
   onSignIn,
   onSignOut,
   onCancel,
+  onRecheck,
   acpLine,
   acpNote,
   onSetCommand,
@@ -879,6 +887,8 @@ function ToolRow({
   onSignIn: () => void;
   onSignOut: (thenIn: boolean) => void;
   onCancel: () => void;
+  /** Look at the computer's tools again: for a row whose look failed or ran out of time ("Couldn't check"). */
+  onRecheck?: () => void;
   /** "Other ACP agent": what starts it, as a command line, and setting it. */
   acpLine?: string;
   /** What the last save of it came to, when there is something to say. */
@@ -911,7 +921,7 @@ function ToolRow({
   const step = installStep(tool, osOf(typeof window !== "undefined" ? window.fridayDesktop?.platform : undefined));
   const install = step.command;
   const name = ENGINE_NAMES[tool];
-  const state = !found?.path ? "missing" : found.unavailable ? "unavailable" : found.loggedIn === false ? "out" : found.loggedIn ? "in" : "unknown";
+  const state = !found?.path ? (found?.unknown ? "unchecked" : "missing") : found.unavailable ? "unavailable" : found.loggedIn === false ? "out" : found.loggedIn ? "in" : "unknown";
   const word = checking
     ? "Checking the sign-in…"
     : acting === "out"
@@ -930,16 +940,18 @@ function ToolRow({
             ? "Signed in ✓"
             : state === "missing"
               ? "Not installed"
-              : state === "unavailable"
-                ? "Can't run here yet"
-              : state === "out"
-                ? "Not signed in"
-                : state === "in"
-                  ? found?.source === "claude-app"
-                    ? "Signed in · Claude app"
-                    : "Signed in"
-                  : // Found, its sign-in not something the tool lets us check: said as found, not promised as ready.
-                    "Installed";
+              : state === "unchecked"
+                ? "Couldn't check"
+                : state === "unavailable"
+                  ? "Can't run here yet"
+                  : state === "out"
+                    ? "Not signed in"
+                    : state === "in"
+                      ? found?.source === "claude-app"
+                        ? "Signed in · Claude app"
+                        : "Signed in"
+                      : // Found, its sign-in not something the tool lets us check: said as found, not promised as ready.
+                        "Installed";
   return (
     <li ref={row} className={`mb-tool ${state} ${acting ? "acting" : ""} ${justIn ? "just-in" : ""}`}>
       <span className="mb-tool-line">
@@ -968,6 +980,10 @@ function ToolRow({
       ) : state === "missing" ? (
         <button type="button" className="btn small mb-tool-go" aria-expanded={installing} onClick={onInstall}>
           {installing ? "Hide" : found?.app ? "Add agent" : "Install"}
+        </button>
+      ) : state === "unchecked" && onRecheck ? (
+        <button type="button" className="btn small mb-tool-go" disabled={busy} onClick={onRecheck}>
+          Check again
         </button>
       ) : state === "out" ? (
         <button type="button" className="btn primary small mb-tool-go" disabled={busy} onClick={onSignIn}>

@@ -7,7 +7,7 @@ import { execFile } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, session, shell, systemPreferences } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, powerMonitor, session, shell, systemPreferences } from "electron";
 import { powerSaveBlocker } from "electron";
 import { MAC_CSS, THEME_WATCH, WIN_CSS } from "../desktop-chrome.js";
 import { registerNative } from "../desktop-native.js";
@@ -227,7 +227,8 @@ async function exited(pid: number | undefined, ms: number): Promise<void> {
 async function begin(): Promise<boolean> {
   // Friday not starting (its folder can't be written, a disk full) left an app with no window and nothing to say why.
   try {
-    friday = await startLocal();
+    // Using this computer (any input in the last two minutes): what an agent needs shows here, and the phone isn't buzzed too.
+    friday = await startLocal({ atComputer: () => powerMonitor.getSystemIdleTime() < 120 });
   } catch (e) {
     dialog.showErrorBox("Friday couldn't start", e instanceof Error ? e.message : String(e));
     app.exit(1);

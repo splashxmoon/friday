@@ -113,7 +113,7 @@ test("work changed outside its folder gets a second agent's review; Friday passe
   assert.equal(said.asked, true);
 });
 
-test("a review with no verdict is asked for one again, then passes as no verdict, never as an approval", async () => {
+test("a review with no verdict is asked for one again, then goes back to its agent as no verdict, never through", async () => {
   const m = await team();
   await m.add({ type: "agent.diff", base: "b0", files: [{ path: "src/a.js", status: "modified", additions: 900, deletions: 4 }] } as EventBody, "lb", bot("Builder"));
   await m.mesh.finish("s", "lb", "a", "Done: fixed the login.", false);
@@ -131,11 +131,13 @@ test("a review with no verdict is asked for one again, then passes as no verdict
   const again = m.events.findLast((e) => e.lane === "lw" && e.body.type === "instruction");
   assert.match(again?.body.type === "instruction" ? again.body.text : "", /You didn't give a verdict on Builder's work on "Fix the login"\. End your turn with "Approved"/);
   assert.equal((await task(m)).status, "review");
-  // Asked twice and still nothing: it goes through, said as no verdict.
+  // Asked twice and still nothing: not a pass (Arun, 2026-11-13: "air tight"); back to its agent with the reviewer's words.
   await turn("Looked at it.");
   const t = await task(m);
-  assert.deepEqual([t.status, t.review?.unclear, reviewApproved(t.review)], ["done", true, false]);
-  assert.equal(reviewSaid(t.review!), "passed with no verdict from Writer");
+  assert.deepEqual([t.status, t.lane, t.review?.ok, t.review?.unclear, reviewApproved(t.review)], ["claimed", "lb", false, true, false]);
+  assert.equal(reviewSaid(t.review!), "sent back with no verdict from Writer");
+  const back = m.events.findLast((e) => e.lane === "lb" && e.body.type === "instruction");
+  assert.match(back?.body.type === "instruction" ? back.body.text : "", /Writer looked at your work on "Fix the login" but gave no verdict, so it hasn't passed\. What it said:\nLooked at it\./);
 });
 
 test("every review round is kept, send-backs counted apart from failed checks, and the plan's tally tells approvals from passes without a review", () => {

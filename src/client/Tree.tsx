@@ -546,8 +546,24 @@ function FileView({
   useEffect(() => {
     if (change && !editing) return;
     let live = true;
-    fetch(`/api/sessions/${encodeURIComponent(sid)}/repo?op=read${viewer ? "" : "&raw=1"}&path=${encodeURIComponent(path)}&invite=${encodeURIComponent(invite)}${lane ? `&lane=${encodeURIComponent(lane)}` : ""}`)
-      .then((r) => r.json() as Promise<{ output?: string; error?: string }>)
+    type Read = { output?: string; error?: string };
+    const readIn = (l: string | undefined) =>
+      fetch(`/api/sessions/${encodeURIComponent(sid)}/repo?op=read${viewer ? "" : "&raw=1"}&path=${encodeURIComponent(path)}&invite=${encodeURIComponent(invite)}${l ? `&lane=${encodeURIComponent(l)}` : ""}`).then((r) => r.json() as Promise<Read>);
+    // Where the file is: the agent that changed it first, then the one this panel shows, then every other agent here. In a crew
+    // room each crew mate works in a copy of its own, so a file Kit made isn't in Nova's (Arun, 2026-11-13: "i cannot see the
+    // files too... make sure everything is viewable in the side panel for the crew rooms").
+    const lanes = [...new Set([change?.lane, lane, ...Object.keys(state.engines)])];
+    const missing = (r: Read) => /^There's no file at /.test(r.error ?? r.output ?? "");
+    const find = async (): Promise<Read> => {
+      let first: Read | null = null;
+      for (const l of lanes) {
+        const r = await readIn(l).catch((e: Error) => ({ error: e.message }) as Read);
+        if (!missing(r)) return r;
+        first ??= r;
+      }
+      return first ?? { error: `There's no file at ${path}.` };
+    };
+    find()
       .then((r) => live && (r.error ? setErr(r.error) : setText(viewer ? unnumbered(r.output ?? "") : (r.output ?? ""))))
       .catch((e: Error) => live && setErr(e.message));
     return () => {

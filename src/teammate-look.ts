@@ -31,8 +31,17 @@ export const ALL_COLOURS = [...TEAM_COLOURS, ...MORE_COLOURS];
 /** A look from the second set of faces: more shapes, eyes and colours (teammate-face.tsx lookOf). */
 export const isV2 = (seed: string) => seed.startsWith("v2:");
 
+/**
+ * A colour picked for a look, apart from its shape (Arun, 2026-11-13, the new-agent page's swatches): "~c<n>" at its end pins
+ * ALL_COLOURS[n]; the shape and eyes are the rest of the seed's (shapeSeed). A look without it keeps the colour its seed gives.
+ */
+const PIN = /~c(\d{1,2})$/;
+export const shapeSeed = (seed: string) => seed.replace(PIN, "");
+export const pinnedColour = (seed: string): number | null => ((m) => (m ? Number(m[1]) % ALL_COLOURS.length : null))(PIN.exec(seed));
+export const withColour = (seed: string, n: number) => `${shapeSeed(seed)}~c${n}`;
+
 /** A teammate's colour: its mascot, its @name in the box, its name over its words. */
-export const teamColour = (seed: string) => (isV2(seed) ? ALL_COLOURS[(hash(seed) >>> 3) % ALL_COLOURS.length]! : TEAM_COLOURS[SLOTS[(hash(seed || "Friday") >>> 3) % SLOTS.length]!]!);
+export const teamColour = (seed: string) => ((p) => (p !== null ? ALL_COLOURS[p]! : isV2(seed) ? ALL_COLOURS[(hash(seed) >>> 3) % ALL_COLOURS.length]! : TEAM_COLOURS[SLOTS[(hash(seed || "Friday") >>> 3) % SLOTS.length]!]!))(pinnedColour(seed));
 
 /**
  * A look for a new teammate whose colour none of the team's has, while one is free: `seed` itself when its colour is free, else

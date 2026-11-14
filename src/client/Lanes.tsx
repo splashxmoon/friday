@@ -12,6 +12,7 @@ import { splitTools } from "./engines.js";
 import { startTeam } from "./edition.js";
 import { Dialog } from "./AgentDialogs.js";
 import { raceBase } from "./Race.js";
+import { useCrewAddRows } from "./crew-add-local.js";
 import type { Send } from "./useSession.js";
 
 /** The most lanes one session can run, as the server enforces it: it said 6 while the server takes 12 (SESSION_LANES). */
@@ -98,12 +99,14 @@ export function Lanes({
   // Anybody who can steer can bring an agent of their own: their Claude Code,
   // Codex or Cursor, on their machine, under their account.
   const bringOwn = !owner && me.role !== "viewer" && can(state, me.id, "control");
+  /** Your crew mates, first in the menu: each a lane of its own here, with its role and memory (crew-add-local.tsx). */
+  const crewRows = useCrewAddRows(state, me, identity);
   if (lanes.length === 0 && !owner && !bringOwn && !state.engines[MAIN_LANE]) return null;
 
 
   const items = (): MenuItem[] => {
     // Who is driving which agent is read off the tabs and the composer; this menu is for adding agents.
-    const rows: MenuItem[] = [];
+    const rows: MenuItem[] = [...crewRows()];
     if (owner) {
       // What the workspace has already built comes first: a saved agent is the likeliest thing someone
       // wants to add, and it used to be reachable only through "Custom agent…" and a three-step form.

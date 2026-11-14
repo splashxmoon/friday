@@ -4,6 +4,7 @@ import { ENGINE_NAMES, ENGINE_TOOLS, type EngineMode, type EngineTool } from "..
 import { api } from "./api.js";
 import { EngineMark } from "./BrandMarks.js";
 import { useMachine, type LocalTool } from "./local.js";
+import { isLocal } from "./edition.js";
 import { canRoute } from "./RouteWhy.js";
 import type { Identity } from "./storage.js";
 import { Face, refreshTeam, type Team } from "./Teammates.js";
@@ -30,7 +31,7 @@ export interface CrewRole {
 }
 
 export const CREW_ROLES: CrewRole[] = [
-  { key: "lead", label: "Lead", role: "Leads the crew toward: {goal}. Turns my goals into a plan, hands each teammate their part, checks the work and tells me where it stands.", mode: "full", names: ["Nova", "Ada", "Zed"], calls: /(?!)/ },
+  { key: "lead", label: "Lead", role: "Leads the crew toward: {goal}. Turns my goals into a plan, hands each crew mate their part, checks the work and tells me where it stands.", mode: "full", names: ["Nova", "Ada", "Zed"], calls: /(?!)/ },
   { key: "engineer", label: "Engineer", role: "Builds features and fixes bugs in our code. Keeps the tests green and works on a branch of their own for each change.", mode: "full", names: ["Kit", "Rio", "Max"], calls: /\b(build|code|feature|fix|bug|app|ship|api|backend|frontend|implement|refactor|repo|website|site)\w*/i },
   { key: "reviewer", label: "Reviewer", role: "Reviews every change before it ships: reads the diff, runs the tests and says exactly what to fix.", mode: "edits", names: ["Juno", "Iris", "Lev"], calls: /\b(review|pr|pull request|quality|audit|check)\w*/i },
   { key: "qa", label: "QA", role: "Tests every change like a user: runs the app, tries the edge cases and files what breaks with steps to repeat it.", mode: "edits", names: ["Vera", "Tess", "Ola"], calls: /\b(test|qa|bug|break|edge case|regression)\w*/i },
@@ -107,8 +108,8 @@ export default function CrewSetup({ identity, onMade }: { identity: Identity; on
   };
 
   const start = async () => {
-    if (!tool) return setErr("Install a coding tool first (Claude Code, Codex, Cursor…) in Settings › Coding tools: each teammate works through one.");
-    if (!shown.length) return setErr("Add a teammate first.");
+    if (!tool) return setErr("Install a coding tool first (Claude Code, Codex, Cursor…) in Settings › Coding tools: each crew mate works through one.");
+    if (!shown.length) return setErr("Add a crew mate first.");
     setBusy(true);
     setErr("");
     let lead: string | null = null;
@@ -138,7 +139,8 @@ export default function CrewSetup({ identity, onMade }: { identity: Identity; on
     <div className="cs">
       <div className="cs-body">
         <h1>Set up your crew</h1>
-        <p className="cs-lead">Say what you want help with. Friday suggests the teammates; change anything before they start.</p>
+        {/* The difference from Code, said once where the crew starts (the "Why Crew" plan, 2026-11-13), in the lead's own line. */}
+        <p className="cs-lead">Crew mates keep working without you, where Code is a task you drive. Say what you want help with; Friday suggests the crew mates, and you change anything before they start.</p>
         <div className="cs-box">
           <label htmlFor="cs-goal" className="sr-only">
             What should your crew help with?
@@ -154,7 +156,7 @@ export default function CrewSetup({ identity, onMade }: { identity: Identity; on
         </div>
 
         <h2 className="cs-label">
-          {shown.length === 1 ? "Friday suggests one teammate" : `Friday suggests ${["", "one", "two", "three", "four", "five", "six", "seven", "eight"][shown.length] ?? shown.length} teammates`}
+          {shown.length === 1 ? "Friday suggests one crew mate" : `Friday suggests ${["", "one", "two", "three", "four", "five", "six", "seven", "eight"][shown.length] ?? shown.length} crew mates`}
         </h2>
         <ul className="cs-cards">
           {shown.map((c) => (
@@ -224,7 +226,12 @@ export default function CrewSetup({ identity, onMade }: { identity: Identity; on
             {err}
           </p>
         )}
-        <p className="cs-note">Each gets a folder of their own in ~/Friday, works in your project when you give them work, and remembers what you tell them.</p>
+        {/* On the open-source app the crew is yours alone: sharing it is what Friday Team adds, said once, in this line rather than a
+            banner of its own (the "Why Crew" plan, 2026-11-13). */}
+        <p className="cs-note">
+          Each gets a folder of their own in ~/Friday, works in your project when you give them work, and remembers what you tell them.
+          {isLocal() ? " Sharing a crew with your team is what Friday Team adds." : ""}
+        </p>
       </div>
     </div>
   );

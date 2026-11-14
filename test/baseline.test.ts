@@ -47,7 +47,8 @@ test("a run's failures split into those that were there before and those that ar
   // Names on one side only: the whole command.
   const unnamed = baselineOf("make test", "abc1234", "$ make test\n(exited 2)\nboom");
   assert.deepEqual(compare(["a"], unnamed), { pre: [], fresh: [], whole: true });
-  assert.equal(onlyPre(compare(null, unnamed)), true);
+  // Failing at the base too, but with no names to compare: not cleared as "already failing" (Arun, 2026-11-13: "air tight").
+  assert.equal(onlyPre(compare(null, unnamed)), false);
   const passed = baselineOf("npm test", "abc1234", "$ npm test\n(exited 0)\n");
   assert.deepEqual(compare(["a"], passed), { pre: [], fresh: ["a"] });
   assert.deepEqual(compare(null, passed), { pre: [], fresh: [], whole: false });

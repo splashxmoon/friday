@@ -3123,11 +3123,23 @@ export async function findBin(tool: EngineTool): Promise<string | null> {
   const key = `${tool}|${childPath()}`;
   const hit = binMemo.get(key);
   if (hit && (await executable(hit))) return hit;
-  const found = await scanBin(tool);
-  if (found) binMemo.set(key, found);
-  else binMemo.delete(key);
-  return found;
+  // One walk at a time per tool and PATH: a look that ran out of time (tool-probe.ts) carries on, and the next look shares it
+  // rather than starting another beside it.
+  let walk = binWalks.get(key);
+  if (!walk) {
+    walk = scanBin(tool)
+      .then((found) => {
+        if (found) binMemo.set(key, found);
+        else binMemo.delete(key);
+        return found;
+      })
+      .finally(() => binWalks.delete(key));
+    binWalks.set(key, walk);
+  }
+  return walk;
 }
+/** The walks of PATH still going, by tool and PATH (findBin). */
+const binWalks = new Map<string, Promise<string | null>>();
 
 async function scanBin(tool: EngineTool): Promise<string | null> {
   binScans.count++;

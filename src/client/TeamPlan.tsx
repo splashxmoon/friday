@@ -8,14 +8,14 @@
  * asks, who has it and why, the files it owns, what it waits on, its checks, its review, its branch and what it last said, with
  * the way to its teammate's chat. The panel itself folds to a slim tab on the window's edge, and stays as it was left.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Send } from "./useSession.js";
 import { MenuButton } from "./ui.js";
 import { useNow } from "./presence.js";
 import { ChevronDownIcon, ChevronRightIcon, PanelRightCloseIcon, PanelRightOpenIcon } from "lucide-react";
 import { MAIN_LANE, type SessionEvent } from "../types.js";
 import { runOf, verifiedAt, type BoardTask, type SessionState, type TaskReview } from "../session/projection.js";
-import { focusAgent } from "./agentFocus.js";
+import { focusAgent, useAgents } from "./agentFocus.js";
 import { boardTitle } from "./team-api.js";
 import { plainLine } from "./team-room.js";
 import { assignedTasks, colOf } from "./TeamBoard.js";
@@ -54,7 +54,7 @@ export function reviewTally(tasks: readonly Task[]): { by: { name: string; ok: n
 function reviewLine(r: TaskReview): { said: string; tone: "ok" | "bad" | ""; note: string } {
   const note = plainLine(r.note).replace(/^\s*(approved|looks good|lgtm|changes needed|needs changes)\b[:.,!\s-]*/i, "");
   if (r.auto) return { said: "Passed without a review", tone: "", note: r.note.replace(/\.$/, "") };
-  if (r.unclear) return { said: `${r.by} gave no verdict, so it passed without one`, tone: "", note: /^no verdict\.?$/i.test(r.note.trim()) ? "" : note };
+  if (r.unclear) return { said: `${r.by} gave no verdict, so it ${r.ok ? "passed without one" : "went back"}`, tone: r.ok ? "" : "bad", note: /^no verdict\.?$/i.test(r.note.trim()) ? "" : note };
   return { said: r.ok ? `${r.by} approved it` : `${r.by} asked for changes`, tone: r.ok ? "ok" : "bad", note };
 }
 
@@ -83,8 +83,7 @@ export function planWord(t: Task, state: Pick<SessionState, "approvals" | "laneR
   if (t.status === "done") {
     if (verifiedAt(t)) return { word: "Verified", tone: "done" };
     const c = t.checks;
-    const why = !c || c.skipped ? "no checks ran" : !c.ok ? "its checks failed" : c.stale ? "changed since its checks" : c.dirty ? "checked with uncommitted work" : !c.sha ? "checked, commit unknown" : "";
-    return { word: `Reported done${why ? ` · ${why}` : ""}`, tone: "reported" };
+    return { word: "Done, not verified", tone: "reported" };
   }
   if (t.status === "review") return { word: t.reviewer ? `${t.reviewer.name} is checking it` : "Being checked", tone: "work" };
   if (t.status === "claimed") return { word: t.checks?.running ? "Running its checks" : quietFor >= QUIET_MS ? `Working · quiet ${Math.round(quietFor / 60_000)}m` : "Working", tone: "work" };
@@ -92,6 +91,18 @@ export function planWord(t: Task, state: Pick<SessionState, "approvals" | "laneR
   if (first) return { word: `Waits on ${titleOf(first)}`, tone: "wait" };
   return { word: t.next ? `${t.next} takes it next` : "To do", tone: "wait" };
 }
+
+/** Why a piece reported done isn't verified, in plain words. */
+export function unverifiedWhy(t: Pick<BoardTask, "checks">): string {
+  const c = t.checks;
+  return !c || c.skipped ? "no checks ran on it" : c.timedOut ? "its checks timed out" : !c.ok ? "its checks failed" : c.stale ? "it changed after its checks ran" : c.dirty ? "its checks ran with uncommitted work beside it" : !c.sha ? "its checks passed, but the commit they ran on wasn't recorded" : "";
+}
+
+/** The chip's word for a tone: short, and the same everywhere on the plan. */
+const CHIP: Record<Tone, string> = { done: "Verified", reported: "Done", needs: "Needs you", work: "Working", wait: "Waiting" };
+
+/** "12m", "3h", "2d": how long, for the card's line. */
+const span = (ms: number) => ((m) => (m < 1 ? "just now" : m < 60 ? `${m}m` : m < 1440 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d`))(Math.round(ms / 60_000));
 
 /** What a person asked the lead, as the plan's goal: not Friday's own notes said on their behalf ("[session] Carry on…"). */
 export function goalOf(events: readonly SessionEvent[], lead: string): string {
@@ -121,6 +132,29 @@ export default function TeamPlan({ state, events, send }: { state: SessionState;
   const [peek, setPeek] = useState(false);
   const open = narrow ? peek : wideOpen;
   const [shown, setShown] = useState<Set<string> | null>(null);
+  // Read off the whole log once per new event, not at every render (the clock redraws it each minute; Fable review, 2026-11-11).
+  const leadLane = state.lead ?? state.board?.fromLane ?? "";
+  const goal = useMemo(() => goalOf(events, leadLane), [events.length, leadLane]); // eslint-disable-line react-hooks/exhaustive-deps
+  // When each lane last did anything, for a piece whose teammate has gone quiet.
+  const lastAt = useMemo(() => {
+    const at = new Map<string, number>();
+    for (let i = events.length - 1; i >= 0 && at.size < 40; i--) {
+      const l = events[i]!.lane ?? MAIN_LANE;
+      if (!at.has(l)) at.set(l, events[i]!.ts);
+    }
+    return at;
+  }, [events.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  // When each piece was taken and when it was handed in, for its card's line (Arun, 2026-11-13: "more details and info too").
+  const times = useMemo(() => {
+    const at = new Map<string, { claimed?: number; finished?: number }>();
+    for (const e of events) {
+      const b = e.body;
+      if (b.type === "board.claimed") at.set(b.id, { claimed: e.ts });
+      else if (b.type === "board.finished") at.set(b.id, { ...at.get(b.id), finished: e.ts });
+    }
+    return at;
+  }, [events.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const agents = useAgents();
   const tasks: Task[] = [...(state.board?.tasks ?? []), ...assignedTasks(state)].filter((t) => colOf(t));
   if (!tasks.length) return null;
   const byId = new Map(tasks.map((t) => [t.id, t]));
@@ -128,16 +162,10 @@ export default function TeamPlan({ state, events, send }: { state: SessionState;
     const t = byId.get(id);
     return t ? `“${clip(boardTitle(t.title), 28)}”` : "another piece";
   };
-  const goal = goalOf(events, state.lead ?? state.board?.fromLane ?? "");
   const done = tasks.filter((t) => t.status === "done").length;
-  // When each lane last did anything, for a piece whose teammate has gone quiet.
-  const lastAt = new Map<string, number>();
-  for (let i = events.length - 1; i >= 0 && lastAt.size < 40; i--) {
-    const l = events[i]!.lane ?? MAIN_LANE;
-    if (!lastAt.has(l)) lastAt.set(l, events[i]!.ts);
-  }
   const words = new Map(tasks.map((t) => [t.id, planWord(t, state, titleOf, t.lane && lastAt.has(t.lane) ? now - lastAt.get(t.lane)! : 0)]));
   const needs = tasks.filter((t) => words.get(t.id)!.tone === "needs").length;
+  const working = tasks.filter((t) => words.get(t.id)!.tone === "work").length;
   // What needs you opens by itself until a card is pressed.
   const expanded = shown ?? new Set(tasks.filter((t) => words.get(t.id)!.tone === "needs").map((t) => t.id));
   const flip = (id: string) => setShown(new Set(expanded.has(id) ? [...expanded].filter((x) => x !== id) : [...expanded, id]));
@@ -156,7 +184,7 @@ export default function TeamPlan({ state, events, send }: { state: SessionState;
       <aside className="tp tp-shut" aria-label="The plan, folded">
         {/* Folded, it still says how the plan stands: how far it has got as a ring, the count, and a dot for each piece in the
             colour of where it stands (Arun, 2026-11-11: "design better please"). */}
-        <button type="button" className="tp-tab" onClick={() => fold(true)} title={`Show the plan: ${done} of ${tasks.length} done${needs ? `, ${needs} need${needs === 1 ? "s" : ""} you` : ""}`} aria-label={`Show the plan: ${done} of ${tasks.length} done`} aria-expanded={false}>
+        <button type="button" className="tp-tab" onClick={() => fold(true)} title={`Show the plan: ${done} of ${tasks.length} done${working ? `, ${working} working` : ""}${needs ? `, ${needs} need${needs === 1 ? "s" : ""} you` : ""}`} aria-label={`Show the plan: ${done} of ${tasks.length} done${working ? `, ${working} working` : ""}`} aria-expanded={false}>
           <span className="tp-tab-open" aria-hidden="true">
             <PanelRightOpenIcon />
           </span>
@@ -168,10 +196,20 @@ export default function TeamPlan({ state, events, send }: { state: SessionState;
             {done}
             <i>/{tasks.length}</i>
           </span>
+          {/* Each piece as its crew mate's face, ringed in how it stands, the ring turning while it works (Arun, 2026-11-13: "add
+              like working states for this"); a dot for a piece nobody has yet. */}
           <span className="tp-dots" aria-hidden="true">
-            {tasks.slice(0, 12).map((t) => (
-              <i key={t.id} data-tone={words.get(t.id)!.tone} />
-            ))}
+            {tasks.slice(0, 8).map((t) => {
+              const m = t.lane ? mateOn(t.lane) : null;
+              return m ? (
+                <span key={t.id} className="tp-dot-face" data-tone={words.get(t.id)!.tone}>
+                  <Face seed={m.look ?? m.name} size={16} />
+                </span>
+              ) : (
+                <i key={t.id} data-tone={words.get(t.id)!.tone} />
+              );
+            })}
+            {tasks.length > 8 && <small className="tp-dots-more">+{tasks.length - 8}</small>}
           </span>
         </button>
       </aside>
@@ -191,7 +229,7 @@ export default function TeamPlan({ state, events, send }: { state: SessionState;
           <span className="tp-bar" aria-hidden="true">
             <i style={{ width: `${(done / tasks.length) * 100}%` }} />
           </span>
-          {done} of {tasks.length} done{needs ? ` · ${needs} need${needs === 1 ? "s" : ""} you` : ""}
+          {done} of {tasks.length} done{working ? ` · ${working} working` : ""}{needs ? ` · ${needs} need${needs === 1 ? "s" : ""} you` : ""}
         </p>
         <Tally tasks={tasks} />
       </header>
@@ -204,10 +242,23 @@ export default function TeamPlan({ state, events, send }: { state: SessionState;
           return (
             <li key={t.id} className="tp-card" data-tone={s.tone} data-open={on || undefined}>
               <button type="button" className="tp-card-head" aria-expanded={on} onClick={() => flip(t.id)}>
-                {m ? <Face seed={m.look ?? m.name} size={24} /> : <span className="tp-noface" aria-hidden="true" />}
+                {m ? <Face seed={m.look ?? m.name} size={24} status={s.tone === "work" ? "working" : s.tone === "needs" ? "waiting" : "idle"} /> : <span className="tp-noface" aria-hidden="true" />}
                 <span className="tp-text">
                   <b>{boardTitle(t.title)}</b>
-                  <span className="tp-word">{who && s.word === "Working" ? `${who} is on it` : s.word}</span>
+                  {/* How it stands as a chip, then who, how long and how much (Arun, 2026-11-13: "add like working states ... and more
+                      details and info too and status"). */}
+                  <span className="tp-meta">
+                    <span className="tp-state" data-tone={s.tone}>
+                      <i aria-hidden="true" />
+                      {s.tone === "work" || s.tone === "wait" ? s.word.replace(/^Working$/, "Working") : CHIP[s.tone]}
+                    </span>
+                    <span className="tp-meta-bits">
+                      {[who, ((x) => (x ? (t.status === "done" ? `${span(now - x)} ago` : t.status === "claimed" || t.status === "review" ? span(now - x) : "") : ""))(t.status === "done" ? times.get(t.id)?.finished : times.get(t.id)?.claimed), ((n) => (n ? `${n} file${n === 1 ? "" : "s"}` : ""))(t.lane && t.status !== "open" ? (state.diffs[t.lane]?.files.length ?? 0) : 0)].filter(Boolean).join(" · ")}
+                    </span>
+                  </span>
+                  {/* What it is doing right now, while it works; why it isn't verified, once it reports done. */}
+                  {s.tone === "work" && t.lane && ((a) => (a?.line && a.status === "working" ? <span className="tp-now">{a.line}</span> : null))(agents.find((x) => x.lane === t.lane))}
+                  {s.tone === "reported" && <span className="tp-now">{unverifiedWhy(t).replace(/^./, (c) => c.toUpperCase())}</span>}
                 </span>
                 {on ? <ChevronDownIcon className="tp-chev" aria-hidden="true" /> : <ChevronRightIcon className="tp-chev" aria-hidden="true" />}
               </button>
@@ -248,7 +299,7 @@ function Tally({ tasks }: { tasks: readonly Task[] }) {
           {r.unclear > 0 && (
             <div>
               <dt>No verdict</dt>
-              <dd>{times(r.unclear)}, passed without one</dd>
+              <dd>{times(r.unclear)}, never counted as an approval</dd>
             </div>
           )}
           {r.auto > 0 && (
@@ -291,8 +342,8 @@ function Details({ t, who, titleOf, onChat, acts }: { t: Task; who?: string | un
   if (t.checks)
     rows.push([
       "Checks",
-      <span className={`tp-check ${t.checks.running ? "run" : t.checks.ok ? "ok" : t.checks.skipped ? "" : "bad"}`}>
-        <code>{t.checks.command}</code> {t.checks.running ? "running" : t.checks.skipped ? "couldn't run" : t.checks.ok ? "passed" : "failed"}
+      <span className={`tp-check ${t.checks.running ? "run" : t.checks.skipped ? "" : t.checks.ok ? "ok" : "bad"}`}>
+        <code title={t.checks.command}>{t.checks.command.replace(/^\s*cd\s+\S+\s*&&\s*/, "")}</code> {t.checks.running ? "running" : t.checks.skipped ? "couldn't run" : t.checks.ok ? "passed" : "failed"}
         {/* Which commit it ran on, and what makes it not verified. */}
         {!t.checks.running && t.checks.sha ? (
           <>
@@ -302,6 +353,19 @@ function Details({ t, who, titleOf, onChat, acts }: { t: Task; who?: string | un
           </>
         ) : null}
       </span>,
+    ]);
+  // Every check run on its latest hand-in, not only the last (Arun, 2026-11-13: "air tight"): the ones before it, as each went.
+  const earlier = (t.checked ?? []).slice(0, t.checks?.running ? undefined : -1);
+  if (earlier.length)
+    rows.push([
+      "Also ran",
+      <ol className="tp-reviews">
+        {earlier.map((c, i) => (
+          <li key={i} className={`tp-check ${c.skipped ? "" : c.ok ? "ok" : "bad"}`}>
+            <code>{c.command}</code> {c.timedOut ? "timed out" : c.skipped ? "couldn't run" : c.ok ? "passed" : "failed"}
+          </li>
+        ))}
+      </ol>,
     ]);
   // Every review it has had, oldest first: a send-back's note stays once the next review passes it.
   const reviews = t.reviews ?? (t.review ? [t.review] : []);
@@ -371,7 +435,7 @@ function Acts({ t, state, send }: { t: Task; state: SessionState; send: Send }) 
   const control = (action: "reassign" | "retry" | "sendback" | "cancel", to?: string) =>
     void send({ type: "board.task", id: t.id, action, ...(to ? { to } : {}) }).then((r) => setSaid(r.ok ? (action === "retry" ? "Tried again." : action === "cancel" ? "Dropped." : action === "sendback" ? "Sent back." : `Given to ${to}.`) : (r.error ?? "Couldn't change that.")));
   const askLead = (to: string) =>
-    void send({ type: "instruct", lane: state.lead!, text: `Please hand "${boardTitle(t.title)}" from ${t.name ?? "its teammate"} to ${to}.` }).then((r) => setSaid(r.ok ? `Asked ${lead ?? "the lead"} to give it to ${to}.` : (r.error ?? "Couldn't ask the lead.")));
+    void send({ type: "instruct", lane: state.lead!, text: `Please hand "${boardTitle(t.title)}" from ${t.name ?? "its crew mate"} to ${to}.` }).then((r) => setSaid(r.ok ? `Asked ${lead ?? "the lead"} to give it to ${to}.` : (r.error ?? "Couldn't ask the lead.")));
   const open = t.status !== "done" && t.status !== "cancelled";
   const give = open && others.length > 0 && (!t.assigned || !!state.lead);
   return (
@@ -384,7 +448,7 @@ function Acts({ t, state, send }: { t: Task; state: SessionState; send: Send }) 
       {give && (
         <MenuButton
           className="tp-chat"
-          label="Give it to another teammate"
+          label="Give it to another crew mate"
           text={t.assigned ? `Ask ${lead ?? "the lead"} to move it` : "Give it to"}
           caret="chevronDown"
           items={() => others.map((x) => ({ label: x.m.name, mark: <Face seed={x.m.look ?? x.m.name} size={16} />, onSelect: () => (t.assigned ? askLead(x.m.name) : control("reassign", x.m.name)) }))}

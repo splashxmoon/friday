@@ -30,7 +30,7 @@ export default function AgentsPage({ identity, onOpen, needs = [] }: { identity:
   const sids = useMemo(() => new Set(t ? [t.sid, ...(t.rooms ?? []).map((r) => r.sid)] : []), [t]);
   const waits = needs.filter((n) => sids.has(n.sid) && (n.kind === "approval" || n.kind === "question" || n.kind === "ask" || n.kind === "stopped"));
   const one = waits[Math.min(at, Math.max(0, waits.length - 1))];
-  const waitName = one ? (mates.find((m) => m.lane === one.lane)?.name ?? one.agent ?? "A teammate") : "";
+  const waitName = one ? (mates.find((m) => m.lane === one.lane)?.name ?? one.agent ?? "A crew mate") : "";
   const plain = one?.approval && one.items?.length ? plainRisk(one.items) : null;
   useEffect(() => {
     const start = new Date();
@@ -117,8 +117,9 @@ export default function AgentsPage({ identity, onOpen, needs = [] }: { identity:
                     Deny
                   </button>
                   {/* As the chat's card offers it: commands like this one, without asking, until the task is done. */}
-                  {one.command && (
-                    <button type="button" className="ap-btn" disabled={!!busy} onClick={() => void answer(one, true, true)} title="Let it run commands like this without asking until this task is done">
+                  {/* Only where it does what it says (taskAllowApplies): the host of its computer, in a session they own. */}
+                  {one.forTask && (
+                    <button type="button" className="ap-btn" disabled={!!busy} onClick={() => void answer(one, true, true)} title="Let it run commands like this without asking until it next stops">
                       Allow for this task
                     </button>
                   )}
@@ -182,7 +183,7 @@ export default function AgentsPage({ identity, onOpen, needs = [] }: { identity:
               <RoomFaces seeds={mates.slice(0, 3).map((m) => m.look ?? m.name)} size={22} />
               <span className="ap-room-text">
                 <b>Crew room</b>
-                <span>{t.lead ? `${mateOf(t.lead)?.name ?? "The lead"} leads` : "Where your teammates work together"}</span>
+                <span>{t.lead ? `${mateOf(t.lead)?.name ?? "The lead"} leads` : "Where your crew mates work together"}</span>
               </span>
             </button>
             {(t.rooms ?? []).map((r: RoomView) => (

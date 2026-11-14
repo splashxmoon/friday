@@ -5,6 +5,7 @@ import { closingSaid, keepAlive } from "../heartbeat.js";
 import { ENGINE_NAMES, ENGINE_TOOLS } from "../types.js";
 import { ADAPTERS, findBin, forgetLoginStatus, isClaudeAppBundled, loginStatusCached, loginStatusQuick } from "./adapters.js";
 import { callHost, machineInfo, type HostContext, type MachineInfo } from "./local-api.js";
+import { isUnknown, orElse, probeTool } from "./tool-probe.js";
 import { RunnerError } from "./runner.js";
 import type { Runner } from "./runner.js";
 
@@ -41,23 +42,29 @@ export interface MachineTool {
   source: "cli" | "claude-app" | null;
   /** Installed, but it can't run on this computer, and why. */
   unavailable?: string;
+  /** Its look failed or ran out of time (tool-probe.ts): neither found nor missing. */
+  unknown?: true;
 }
 
 /** Re-scanned on connect and after a sign-in, since that is what changes it. */
 export async function scanTools(quick = false): Promise<MachineTool[]> {
   return Promise.all(
-    ENGINE_TOOLS.map(async (tool) => {
-      const bin = await findBin(tool);
+    // Each tool on its own. Finding it has a deadline: one that hangs or throws is unknown on its row, not the whole list gone
+    // (tool-probe.ts). One that was found stays found, whatever its sign-in check does.
+    ENGINE_TOOLS.map(async (tool): Promise<MachineTool> => {
+      const bin = await probeTool(tool, () => findBin(tool));
+      if (isUnknown(bin)) return bin;
       // Quick: don't hold a first hello back for a slow sign-in check; say
       // "don't know yet" and send the real answer when it arrives.
-      const status = bin ? (quick ? loginStatusQuick(tool, bin) : loginStatusCached(tool, bin)) : null;
+      const loggedIn = bin ? await orElse(() => (quick ? loginStatusQuick(tool, bin) : loginStatusCached(tool, bin)), null) : null;
+      const unavailable = bin ? await orElse(() => ADAPTERS[tool].unavailable?.(), undefined) : undefined;
       return {
         tool,
         name: ENGINE_NAMES[tool],
         path: bin,
-        loggedIn: await status,
+        loggedIn,
         source: bin ? ((isClaudeAppBundled(bin) ? "claude-app" : "cli") as "cli" | "claude-app") : null,
-        ...(bin && ADAPTERS[tool].unavailable?.() ? { unavailable: ADAPTERS[tool].unavailable!()! } : {}),
+        ...(unavailable ? { unavailable } : {}),
       };
     }),
   );
@@ -71,17 +78,20 @@ export async function scanTools(quick = false): Promise<MachineTool[]> {
  * check has answered or run out of time. The hello used to wait for the slowest of them, which was most of linking.
  */
 export function streamTools(onChange: (tools: MachineTool[]) => void = () => {}): { found: Promise<MachineTool[]>; done: Promise<MachineTool[]> } {
-  // A scan that fails is an empty list, never a rejection: connect() waits on it, and a rejection there left it hanging.
+  // A scan that fails is an empty list, never a rejection: connect() waits on it, and a rejection there left it hanging. One
+  // tool whose look hangs or throws is that tool unknown, the rest still listed (tool-probe.ts).
   const found = Promise.all(
     ENGINE_TOOLS.map(async (tool): Promise<MachineTool> => {
-      const bin = await findBin(tool);
+      const bin = await probeTool(tool, () => findBin(tool));
+      if (isUnknown(bin)) return bin;
+      const unavailable = bin ? await orElse(() => ADAPTERS[tool].unavailable?.(), undefined) : undefined;
       return {
         tool,
         name: ENGINE_NAMES[tool],
         path: bin,
         loggedIn: null,
         source: bin ? (isClaudeAppBundled(bin) ? "claude-app" : "cli") : null,
-        ...(bin && ADAPTERS[tool].unavailable?.() ? { unavailable: ADAPTERS[tool].unavailable!()! } : {}),
+        ...(unavailable ? { unavailable } : {}),
       };
     }),
   ).catch(() => [] as MachineTool[]);
@@ -90,7 +100,7 @@ export function streamTools(onChange: (tools: MachineTool[]) => void = () => {})
     await Promise.all(
       first.map(async (t, i) => {
         if (!t.path) return;
-        const loggedIn = await loginStatusQuick(t.tool, t.path);
+        const loggedIn = await loginStatusQuick(t.tool, t.path).catch(() => null);
         if (loggedIn === null) return;
         list = list.map((x, j) => (j === i ? { ...x, loggedIn } : x));
         onChange(list);

@@ -90,3 +90,36 @@ test("a permitted list is known kinds only, once each", () => {
   assert.deepEqual(cleanClasses("checks"), []);
   assert.deepEqual(cleanClasses(null), []);
 });
+
+// Fable's final probe of the allow rules (2026-11-11): a command is read as a shell reads it (command-shape.ts).
+test("a line is read as a shell reads it: quotes make one word, expansions and globs are marked, and what can't be read is nothing", async () => {
+  const { lexLine } = await import("../src/command-shape.js");
+  const words = (line: string) => lexLine(line)?.pieces.map((p) => p.words.map((w) => w.text));
+  assert.deepEqual(words('git commit -m "feat(ui): a; b > c --force"'), [["git", "commit", "-m", "feat(ui): a; b > c --force"]], "a message in quotes is one word");
+  assert.deepEqual(words("git reset --ha''rd"), [["git", "reset", "--hard"]]);
+  assert.deepEqual(words("git reset --h\\a\\r\\d"), [["git", "reset", "--hard"]]);
+  assert.deepEqual(words("npm test 2>&1 | tail -20"), [["npm", "test"], ["tail", "-20"]]);
+  assert.deepEqual(words("npm test >/dev/null && git diff"), [["npm", "test"], ["git", "diff"]]);
+  assert.deepEqual(lexLine("git status && git diff | head")?.ops, ["&&", "|"]);
+  const expands = (line: string) => lexLine(line)?.pieces[0]!.words.some((w) => w.expands);
+  for (const x of ["git reset $'--hard'", "git reset --ha$1rd", "git reset $@--hard", 'git reset $"--hard"', "git reset $X", 'git commit -m "use `x`"', 'echo "$HOME"']) assert.equal(expands(x), true, x);
+  assert.equal(expands("git commit -m 'it costs $5'"), false, "single quotes keep a $ as it is");
+  assert.equal(lexLine("git checkout .*")?.pieces[0]!.words[2]!.glob, true);
+  assert.equal(lexLine("git checkout '*.ts'")?.pieces[0]!.words[2]!.glob, false);
+  for (const x of ["npm test & rm x", "npm test > out.txt", "npm test >> out.txt", "cat < a", "(npm test)", "npm test # x", "npm test;", "npm test； rm", "npm test​&& rm", "npm test\nrm", "npm test\u000brm", "git commit -m 'open", "npm test rm"]) assert.equal(lexLine(x), null, JSON.stringify(x));
+});
+
+test("a piece's kind comes from its words as the shell hands them over", () => {
+  assert.equal(one('git commit -m "add --force flag"'), "git", "a flag named in a message is no flag");
+  assert.equal(one('git commit -m "fix: a; b"'), "git", "a semicolon in a message splits nothing");
+  assert.equal(one("git reset $'--hard'"), "other", "what the shell changes first is anything at all");
+  assert.equal(one("git reset --ha''rd"), "destructive");
+  assert.equal(one("npm test | sh"), "other");
+});
+
+// A crew mate reading a file with sed asked its person every time (Arun, 2026-11-13: "why is crew asking me to approve this stuff?").
+test("sed printing lines is looking; any other sed script is not", () => {
+  for (const l of ["sed -n 1,150p server/firmware-intel.js", "sed -n '/start/,/end/p' notes.md", "sed -n -e 3,4p a.ts", "sed -n '$p' log.txt"]) assert.deepEqual(classesOf(l), ["read"], l);
+  for (const l of ["sed -n '1w out.txt' a", "sed -n '1e rm -rf x' a", "sed 's/a/b/' a", "sed -n '/x/w /tmp/o' a"]) assert.deepEqual(classesOf(l), ["other"], l);
+  assert.deepEqual(classesOf("sed -i -n 1p a"), ["destructive"]);
+});

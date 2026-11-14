@@ -27,6 +27,8 @@ export interface LocalTool {
   app?: boolean;
   /** Installed, but it can't run on this computer, and why (Kilo's ACP on Windows). */
   unavailable?: string;
+  /** Its look on that computer failed or ran out of time (runner/tool-probe.ts): not known to be there or not. */
+  unknown?: true;
   /** Its accounts on that computer, when it has more than one (Claude Code, Codex: runner/accounts.ts). */
   accounts?: { id: string; label: string; loggedIn: boolean | null; out?: boolean; outUntil?: number | null }[];
 }
@@ -481,8 +483,11 @@ export function useMachine(identity: Identity): { state: MachineState; refresh: 
   return { state, refresh };
 }
 
+/** Looked for on its computer and not known to be there or not: its look failed or ran out of time (runner/tool-probe.ts). */
+export const unchecked = (t: Pick<LocalTool, "path" | "unknown"> | null | undefined): boolean => !!t && !t.path && t.unknown === true;
+
 export function toolLabel(t: LocalTool): string {
-  if (!t.path) return "not installed";
+  if (!t.path) return unchecked(t) ? "couldn't check" : "not installed";
   const from = t.source === "claude-app" ? "from the Claude app" : "installed";
   return t.loggedIn === false ? `${from} · not logged in` : t.loggedIn ? `${from} · logged in` : from;
 }

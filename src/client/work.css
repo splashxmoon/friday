@@ -479,11 +479,6 @@ html.work-session .bench-panel .browser-bar :is([aria-label="Point at something 
 .wa-find-x { flex: none; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text-muted); cursor: pointer; }
 .wa-find-x:hover { background: var(--hover); color: var(--ink); }
 
-/* Work's new-session page (html.work-home, WorkMode WorkField) leaves out "Your year": Work isn't counted in coding turns. */
-html.work-home .ha-heat { display: none; }
-/* A folder's place in the page's own type, not a terminal's (QA, 2026-10-28: the picked folder's path was monospace). */
-html.work-home .fcard-p { font: 12px/1.35 var(--font); }
-
 /* A notice (a file somebody else is changing too) floats over the chat, never over the rail (2026-10-27 design review: it sat on
    Progress and stayed there). */
 html.rail-docked .toast-stack { right: calc(var(--rail-edge, 0px) + 16px); }
@@ -724,14 +719,6 @@ button.wr-source:not(.search) { grid-template-columns: 16px 24px minmax(0, 1fr);
 @media (max-width: 720px) { .gallery-act > span { display: none; } .gallery-stage { padding: 8px 12px 16px; } .gallery-nav.prev { left: 6px; } .gallery-nav.next { right: 6px; } }
 
 
-/* Work home: as Code's, one flat ground (the drifting threads behind it are gone), and under the box a row of text pills, no icons
-   (DIRECTION.md §9.7), on the box's left edge as the folder line under them is; each fills the box with the start of a task. */
-.work-starters { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 6px; width: 100%; max-width: var(--composer-w, 656px); margin: 12px auto 0; }
-.work-starter { display: inline-flex; align-items: center; height: 28px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: 999px; background: transparent; color: var(--ink-2); font: 500 13px/1 var(--font); cursor: pointer; transition: border-color var(--t-hover) var(--ease-out), background-color var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out); }
-.work-starter:hover { background: var(--hover); color: var(--ink); }
-/* One ring, the app's own (style.css :focus-visible box-shadow): an outline here drew a second one round it (QA, 2026-10-28). */
-.work-starter:focus-visible { outline: none; }
-.work-starters.off { visibility: hidden; }
 /* The agent switcher over the chat on a narrower window sits on a row of its own, not floating on the transcript. */
 @media (max-width: 1000px) {
   html.work-session .feed-toolbar { position: relative; z-index: 3; background: var(--bg); box-shadow: 0 1px 0 var(--border); }
@@ -742,11 +729,3 @@ html.work-session .bench-panel .browser-url { font-family: var(--font); font-siz
 /* A piece in a right-to-left language reads from the right, its own way, in a card or a row (QA, 2026-10-28). */
 :is(.wa-card, .wr-doc) [dir="auto"] { text-align: start; }
 
-/* The note a new Work session carries over from its home (WorkMode WorkNote: "Codex didn't start…"): in the chat's column, a
-   quiet card with a hairline, its line in the row's ink and the why under it in meta, Got it a ghost button (DIRECTION.md §5;
-   Arun, 2026-10-29: "Make everything is redesigned like panel contents, etc"). */
-.banners:has(> .work-note) { box-sizing: border-box; width: min(100%, 760px); margin: 0 auto; padding: 12px 20px 0; }
-.banner.work-note { align-items: center; gap: 12px; padding: 10px 10px 10px 14px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--card); }
-.banner.work-note > svg { flex: none; color: var(--text-muted); }
-.banner.work-note strong { display: block; color: var(--ink); font-size: 13px; font-weight: 500; line-height: 18px; }
-.banner.work-note p { margin: 2px 0 0; color: var(--text-muted); font-size: 12px; line-height: 16px; }

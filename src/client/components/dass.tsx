@@ -136,7 +136,8 @@ export function Choice<T extends string>({
   className,
 }: {
   value: T;
-  options: readonly (readonly [T, ReactNode])[];
+  /** Each option, with an optional third part: one the person can't choose stays visible, disabled, with why on hover. */
+  options: readonly (readonly [T, ReactNode] | readonly [T, ReactNode, { disabled?: boolean; title?: string }])[];
   onChange: (v: T) => void;
   label?: string;
   disabled?: boolean;
@@ -152,10 +153,12 @@ export function Choice<T extends string>({
       // A plain segmented control (2026-10-29 direction §9.2): a hairline track, nothing filled but the one chosen.
       className={cn("h-8 gap-0.5 rounded-[8px] border border-[var(--border)] bg-transparent p-[2px]", className)}
     >
-      {options.map(([v, text]) => (
+      {options.map(([v, text, o]) => (
         <ToggleGroupItem
           key={v}
           value={v}
+          disabled={o?.disabled}
+          title={o?.title}
           className="h-[26px] min-w-0 rounded-[6px] px-2.5 text-[13px] font-medium text-[var(--text-muted)] transition-colors duration-[var(--dass-fast)] hover:bg-transparent hover:text-[var(--ink)] data-[state=on]:bg-[var(--hover-strong)] data-[state=on]:text-[var(--ink)] data-[state=on]:shadow-none"
         >
           {text}
@@ -313,7 +316,7 @@ export function ActionMenu({ items, label, trigger, align = "end" }: { items: ()
               <DropdownMenuSeparator key={i} />
             )
           ) : "label" in it ? (
-            <DropdownMenuItem key={i} variant={it.danger ? "destructive" : "default"} disabled={it.disabled} title={it.title} onSelect={() => it.onSelect()} className="text-[13px]">
+            <DropdownMenuItem key={i} variant={it.danger ? "destructive" : "default"} disabled={it.disabled} title={it.title} onSelect={() => it.onSelect?.()} className="text-[13px]">
               {it.mark ?? (it.checked ? <CheckIcon /> : it.icon ? <Icon name={it.icon} size={14} /> : null)}
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="truncate">{it.label}</span>

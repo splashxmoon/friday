@@ -90,7 +90,8 @@ export function buildCatchUp(state: SessionState, events: SessionEvent[], pendin
     .slice(-3)
     .map((e) => (e.body.type === "folder.committed" ? `“${cut(e.body.message, 80)}” on ${e.body.branch || "the current branch"}` : ""));
 
-  const decided = answered(events.filter((e) => e.seq < first)).map((d) => `${d.question} → ${d.answer}`);
+  // Answers to questions, then what people marked as decided (core.ts "decide"), which a newcomer must not argue again.
+  const decided = [...answered(events.filter((e) => e.seq < first)).map((d) => `${d.question} → ${d.answer}`), ...state.memory.filter((m) => m.key.startsWith("decision:") && m.text).map((m) => cut(m.text, 300))];
 
   if (!asked.length && !work.length && !committed.length && !decided.length) return "";
 
@@ -116,4 +117,19 @@ export function buildCatchUp(state: SessionState, events: SessionEvent[], pendin
   const room = Math.max(600, BUDGET - header.join("\n").length - fixed.join("\n").length);
 
   return [...header, ...fixed, ...section("What people have asked, oldest first", fit(asked, room)), "Now, the new message:", ""].join("\n");
+}
+
+/**
+ * What people marked as decided (core.ts "decide") since this lane's last turn, for every turn after its first (Code and Crew,
+ * connected, 2026-11-13: "told to every agent: on joining, every turn after, and in where we left off"): the first turn has them
+ * in its catch-up. Only those still standing (a mark taken off is an empty memory), each once. "" when there are none.
+ */
+export function decidedSince(state: Pick<SessionState, "memory">, events: readonly SessionEvent[], lane: string, pending: readonly number[]): string {
+  const now = new Set(pending);
+  const last = events.findLast((e) => (e.lane ?? MAIN_LANE) === lane && e.body.type === "instructions.delivered" && !e.body.seqs.some((q) => now.has(q)));
+  if (!last) return "";
+  const standing = new Map(state.memory.filter((m) => m.key.startsWith("decision:") && m.text).map((m) => [m.key, m.text]));
+  const keys = [...new Set(events.filter((e) => e.seq > last.seq && e.body.type === "memory.saved" && e.body.key.startsWith("decision:") && e.body.text).map((e) => (e.body as { key: string }).key))].filter((k) => standing.has(k));
+  if (!keys.length) return "";
+  return `[Friday] Decided in this session since your last turn. It stands: if you're asked to go against it, say so and ask before you act.\n${keys.map((k) => `- ${cut(standing.get(k)!, 300)}`).join("\n")}\n\n`;
 }

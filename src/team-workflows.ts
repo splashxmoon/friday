@@ -339,7 +339,7 @@ export class TeamWorkflows {
         const laneOfMate = (mate: string) => (mate === LEAD ? lead : (place.lanes[mate] ?? ""));
         const here = stageCols(order, at, run.from).flat();
         const missing = here.find((s) => !members.includes(laneOfMate(s.mate)));
-        if (missing) throw new Error(`One of its teammates isn't in ${place.name}.`);
+        if (missing) throw new Error(`One of its crew mates isn't in ${place.name}.`);
         const held = can && here.map((s) => laneOfMate(s.mate)).find((l) => !can.lanes.includes(l));
         if (held && !can.asks) throw new Error(can.why(held));
         const tasks = workflowTasks({ ...w, steps: order }, (mate) => laneName(state, laneOfMate(mate)), run.carry ?? run.input ?? "", at, run.from);

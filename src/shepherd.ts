@@ -91,6 +91,9 @@ function pushOrStop(events: SessionEvent[], after: SessionEvent[], ended: Sessio
   if (opts.reviewer) {
     const review = events.findLast((e) => e.body.type === "review.done" && e.body.runSeq === ended.seq);
     if (!review && now - ended.ts < REVIEW_GRACE_MS) return { kind: "wait", why: "the fix is about to be reviewed" };
+    // No review, or one that couldn't be read, is never a yes (Arun, 2026-11-13: "air tight"): a fix it never read isn't pushed.
+    if (!review) return { kind: "end", outcome: "stopped", text: "The second review of the fix never came back, so Friday didn't push it. Have a look at the change." };
+    if (review.body.type === "review.done" && review.body.error) return { kind: "end", outcome: "stopped", text: `Friday didn't push the fix: ${review.body.error.replace(/\.$/, "")}. Have a look at the change.` };
     if (review?.body.type === "review.done" && review.body.sent) return { kind: "wait", why: "the agent is fixing what the review found" };
     if (review?.body.type === "review.done" && review.body.findings.some((f) => f.severity !== "low")) {
       return { kind: "end", outcome: "stopped", text: "The second review still found problems in the fix, so Friday didn't push it. Have a look at the review on the change." };
@@ -103,6 +106,8 @@ function pushOrStop(events: SessionEvent[], after: SessionEvent[], ended: Sessio
     failed: (id) => (results.has(id) ? results.get(id)! : null),
     files: diff?.body.type === "agent.diff" ? diff.body.files : [],
   });
+  // Its own tests failing after the fix: not pushed, whatever else the receipt says.
+  if (receipt.tests === "fail") return { kind: "end", outcome: "stopped", text: "The fix's own tests failed, so Friday didn't push it. A person needs to look." };
   const bad = receipt.flags.find((f) => f.level === "bad");
   if (bad) return { kind: "end", outcome: "stopped", text: `Friday didn't push the fix: ${bad.text.replace(/\.$/, "")}. A person needs to look.` };
   return { kind: "push", reason, since };

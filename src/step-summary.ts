@@ -11,7 +11,7 @@ const secs = (s: number) => (s < 60 ? `${s}s` : `${Math.round(s / 60)}m`);
 const n = (count: number, one: string, many: string) => (count === 1 ? one : `${count} ${many}`);
 /** A step still under way, said as such: "Running npm test", never "Ran". */
 const DOING: Record<string, string> = { Ran: "Running", Read: "Reading", Listed: "Listing", Searched: "Searching", "Searched the web": "Searching the web", Edited: "Editing", Wrote: "Writing", Opened: "Opening", Noted: "Noting", Planned: "Planning", Used: "Using" };
-const doingVerb = (verb: string) => DOING[verb] ?? `${verb}…`;
+export const doingVerb = (verb: string) => DOING[verb] ?? `${verb}…`;
 
 export function stepsSummary(all: StepLike[], thoughtSecs = 0): string {
   if (!all.length) return thoughtSecs > 0 ? `Thought for ${secs(thoughtSecs)}` : "Thought";

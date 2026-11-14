@@ -13,6 +13,7 @@ import { GitHubConnect } from "./GitHubConnect.js";
 import { hostApi, installedOn, type MachineMode } from "./local.js";
 import { resumeProblem, type ResumeLink } from "./resume-link.js";
 import { splitTools } from "./engines.js";
+import { MODE_BLURB, MODE_NAME } from "./StartControls.js";
 import { loadRecentFolderTimes, loadRecentFolders, saveRecentFolder, type Identity } from "./storage.js";
 import { placeCard, relTime, useDismiss } from "./ui.js";
 
@@ -1127,13 +1128,6 @@ function Browser({ identity, path, filter = "", onOpen, onUse, onBack }: { ident
   );
 }
 
-/** What each mode lets the session do, in the fewest words that are still true. */
-const MODE_PILL: Record<EngineMode, { text: string; tone: string; why: string }> = {
-  plan: { text: "Plan", tone: "calm", why: "Reads and proposes, and asks before it runs a command. Changes nothing." },
-  edits: { text: "Manual", tone: "calm", why: "Edits files, and asks before it runs a command." },
-  full: { text: "Auto", tone: "warn", why: "Runs commands without asking. Narrow it inside the session." },
-};
-
 /** What continuing a conversation does with it, wherever that is offered. */
 const SHARED = "Its latest messages are shared with this session: every agent in it can work from them, and everyone in it can read them.";
 
@@ -1307,7 +1301,8 @@ The folder stays on this machine.`}>
  * every session is a line nobody reads by the third time.
  */
 export function WorkspaceSummary({ folder, resume, mode, children, onClear }: { folder: FolderInfo; resume?: CliSession; mode?: EngineMode; children?: ReactNode; /** Let go of the choice: picked by accident, or changed your mind. */ onClear?: () => void }) {
-  const m = mode ? MODE_PILL[mode] : null;
+  // The permission by the box's own name and words (StartControls), so the two never say it differently.
+  const m = mode ? { text: MODE_NAME[mode], tone: mode === "full" ? "warn" : "calm", why: MODE_BLURB[mode] } : null;
   return (
     <div className="ws-summary">
       {onClear && (

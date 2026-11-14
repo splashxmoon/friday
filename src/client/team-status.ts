@@ -145,20 +145,64 @@ export function dayBreaks(ts: (number | undefined)[], now = Date.now()): (string
  */
 export function roleWord(role: string): string {
   const r = role.toLowerCase();
+  if (!r.trim()) return "";
+  // One or two words for what it is, read from its own prompt (Arun, 2026-11-13: "like engineer, researcher, etc"): the first
+  // match wins, so a lead that also reviews reads as Lead.
   const words: [RegExp, string][] = [
-    [/\blead(s|ing)? the crew\b|\blead\b|hands each teammate/, "Lead"],
+    [/\blead(s|ing)? the crew\b|\blead\b|hands each teammate|\bplans? (the|our) work|\bcoordinat/, "Lead"],
     [/\breview(s|er)?\b/, "Reviewer"],
-    [/\btests? every change|\bqa\b|edge cases/, "QA"],
-    [/\bbuilds? features|\bengineer|fixes bugs/, "Engineer"],
-    [/\bresearch/, "Researcher"],
-    [/\bdocs\b|\bwrites?\b|release notes|changelog/, "Writer"],
-    [/\bdesign|screens|polish/, "Designer"],
-    [/\bci\b|deploys?|dependenc/, "Ops"],
+    [/\btests? every change|\bqa\b|edge cases|\bwrites? tests\b|\btester\b/, "QA"],
+    [/\bsecurity|vulnerab|\baudit/, "Security"],
+    [/\bresearch|\binvestigat|\bcompetitor/, "Researcher"],
+    [/\bdocs\b|documentation|release notes|changelog|\bcopy\b|\bwriter\b/, "Writer"],
+    [/\bdesign|screens|polish|\bui\b|\bux\b/, "Designer"],
+    [/\bci\b|deploys?|dependenc|infra|\bdevops\b|\bpipelines?\b/, "Ops"],
+    [/\bdata\b|analytics|metrics|dashboards?|\bsql\b/, "Analyst"],
+    [/\btriage|\bsupport\b|\btickets?\b|\bissues?\b/, "Triage"],
+    [/\bmarketing|\bseo\b|social|\bcontent\b/, "Marketing"],
+    [/\bproduct\b|\bspecs?\b|requirements|roadmap/, "Product"],
+    [/\bfinish(es)?\b|leaves open|loose ends/, "Finisher"],
+    [/\bbuilds?\b|\bengineer|fixes bugs|\bfeatures?\b|\bcode\b|\bimplement|refactor|\bmigrat/, "Engineer"],
   ];
-  return words.find(([re]) => re.test(r))?.[1] ?? "";
+  return words.find(([re]) => re.test(r))?.[1] ?? "Generalist";
+}
+
+/** A finished run reads as Done this long, then as Idle. */
+export const DONE_FRESH_MS = 2 * 3600_000;
+
+/**
+ * The state a row names on its right, as the Agents page's states read (Arun, 2026-11-13: "add like states we have in the crew
+ * platform page like them working, done, idle etc"), and the line under its name with that word taken off the front, so the two
+ * never say the same thing twice. Done: it finished something lately and nothing stopped it.
+ */
+export function rowState(m: { status: MateState; line?: string | null; lastAt?: number; halted?: true; held?: boolean; pending?: number }, s: MateSays, now = Date.now()): { word: string; tone: MateState | "done"; line: string } {
+  const strip = (l: string, re: RegExp) => l.replace(re, "").trim();
+  if (m.pending) return { word: "Proposed", tone: "waiting", line: "Waits for a yes" };
+  if (s.state === "working") return { word: "Working", tone: "working", line: strip(s.line, /^Working\b\s*(·\s*)?/) || "On it" };
+  if (s.state === "waiting") return { word: "Needs you", tone: "waiting", line: strip(s.line, /^Needs you:?\s*(·\s*)?/) || "Waiting on you" };
+  if (s.state === "stopped") return { word: "Stopped", tone: "stopped", line: strip(s.line, /^Stopped\b\s*(·\s*)?/) || "Its last run failed" };
+  if (s.state === "limited") return { word: "Out of usage", tone: "limited", line: strip(s.line, /^Out of usage\s*(·\s*)?/) };
+  if (s.state === "offline") return { word: "Offline", tone: "offline", line: strip(s.line, /^Offline\s*(·\s*)?/) };
+  if (m.held) return { word: "On hold", tone: "idle", line: strip(s.line, /^On hold\s*(·\s*)?/) };
+  if (!m.halted && m.line && !/^(idle|ready)\b/i.test(m.line) && m.lastAt && now - m.lastAt < DONE_FRESH_MS) return { word: "Done", tone: "done", line: m.line };
+  return { word: "Idle", tone: "idle", line: freeLine(m, s) };
 }
 
 /** A teammate's line as a row says it: free, it says so ("Idle" told nobody anything); otherwise what `mateStatus` says. */
 export function freeLine(m: { line?: string | null }, s: { state: string; line: string }): string {
   return s.state === "idle" && (/^(idle|ready)\b/i.test(s.line) || !m.line || /^(idle|ready)\b/i.test(m.line)) ? "Free for a task" : s.line;
+}
+
+/**
+ * A teammate's finished turn folded into one line (Crew overhaul 3A), "Worked for 6m · 14 steps · 2 failed": its failed steps said
+ * beside its time and count, never folded out of sight; and, for a turn that stopped on a card (a permission it asked), what it
+ * said last before it, kept in sight to say why (Fable review, 2026-11-11). A finished turn's answer is drawn under it anyway.
+ */
+export function foldOf(blocks: readonly ({ kind: "work"; steps: readonly { state: string }[] } | { kind: "say"; note: string } | { kind: string })[], o: { tookWords: string; closedByCard: boolean }): { line: string; failed: number; keep: string | null } {
+  const steps = blocks.flatMap((b) => (b.kind === "work" && "steps" in b ? b.steps : []));
+  const failed = steps.filter((x) => x.state === "failed").length;
+  const line = [o.tookWords ? `Worked for ${o.tookWords}` : "Worked", steps.length ? `${steps.length} step${steps.length === 1 ? "" : "s"}` : "", failed ? `${failed} failed` : ""].filter(Boolean).join(" · ");
+  const last = blocks.at(-1);
+  const keep = o.closedByCard && last?.kind === "say" && "note" in last && last.note.trim() ? last.note.trim() : null;
+  return { line, failed, keep };
 }

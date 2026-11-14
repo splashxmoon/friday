@@ -301,7 +301,7 @@ export function boardReportText(text: string, events: readonly SessionEvent[], s
     const title = t.title.replace(/^Board task\s+"[^"]*"\s*:\s*/i, "");
     const did = t.blocked ? `blocked${t.name || t.lane ? ` (${who(t.lane, t.name)})` : ""}` : `done by ${who(t.lane, t.name)}`;
     // Friday's pass without a second agent (no lane) and a pass with no verdict aren't approvals, and don't say so.
-    const checked = !t.review ? "" : !t.review.lane ? ", passed without a review" : t.review.unclear ? `, passed with no verdict from ${who(t.review.lane, t.review.name)}` : `, ${t.review.ok ? "approved" : "not approved"} by ${who(t.review.lane, t.review.name)}`;
+    const checked = !t.review ? "" : !t.review.lane ? ", passed without a review" : t.review.unclear ? `, ${t.review.ok ? "passed" : "sent back"} with no verdict from ${who(t.review.lane, t.review.name)}` : `, ${t.review.ok ? "approved" : "not approved"} by ${who(t.review.lane, t.review.name)}`;
     return `## ${title} (${did}${checked})`;
   });
 }

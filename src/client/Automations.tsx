@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowLeftIcon, ArrowRightIcon, BugIcon, CheckIcon, ClockIcon, CopyIcon, FolderOpenIcon, GitPullRequestIcon, InboxIcon, PlayIcon, PlusIcon, ScrollTextIcon, Trash2Icon, WebhookIcon, WrenchIcon, ZapIcon, type LucideIcon } from "lucide-react";
+import { ArrowLeftIcon, ArrowRightIcon, BugIcon, UsersIcon, CheckIcon, ClockIcon, CopyIcon, FolderOpenIcon, GitPullRequestIcon, InboxIcon, PlayIcon, PlusIcon, ScrollTextIcon, Trash2Icon, WebhookIcon, WrenchIcon, ZapIcon, type LucideIcon } from "lucide-react";
 import type { AgentSchedule, AgentView } from "../agents.js";
 import type { Automation, AutomationRun } from "../automations.js";
 import { ENGINE_NAMES, type EngineMode, type EngineTool } from "../types.js";
 import { api } from "./api.js";
-import { AutomationsSwitch } from "./AutomationsSwitch.js";
+import { CrewWorkflowRow, useCrewWorkflows } from "./TeamWorkflows.js";
+import { WorkflowAsks } from "./WorkflowAsks.js";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { holdLeave } from "./leave-guard.js";
 import { isLocal } from "./edition.js";
 import { EngineMark, FridayMark } from "./BrandMarks.js";
@@ -161,7 +163,7 @@ export function AutomationsPage({
   recents,
   onOpen,
   onSavedAgents,
-  onTeamWorkflows,
+  onWorkflow,
 }: {
   identity: Identity;
   agents: AgentView[];
@@ -169,14 +171,18 @@ export function AutomationsPage({
   onOpen: (sid: string, invite: string) => void;
   /** The saved agents' own page: what "Who" can pick from. */
   onSavedAgents: () => void;
-  /** Across to the crew's workflows (TeamWorkflows.tsx), by the switch at the top (AutomationsSwitch). */
-  onTeamWorkflows?: () => void;
+  /**
+   * The crew's workflows in the same list (TeamWorkflows.tsx), each opened in its builder: its id, or null for a new one (the "Why
+   * Crew" plan, 2026-11-13: one list of automations, each saying who runs it, a crew mate or a coding tool).
+   */
+  onWorkflow?: (id: string | null) => void;
 }) {
   const [list, setList] = useState<View[] | null>(null);
   const [failed, setFailed] = useState("");
   const [editing, setEditing] = useState<{ id: string | null; draft: Draft } | null>(null);
   const [ask, confirmUI] = useConfirm();
   const [busy, setBusy] = useState("");
+  const wf = useCrewWorkflows(identity, !!onWorkflow);
 
   const load = useCallback(async () => {
     try {
@@ -290,11 +296,9 @@ export function AutomationsPage({
     <div className="page conns-page automations-page px-6! max-[640px]:px-4!">
       <div className="page-inner">
         {confirmUI}
-        <div className="auto-head">
-        {onTeamWorkflows && <AutomationsSwitch view="coding" onView={onTeamWorkflows} />}
+        {onWorkflow && wf.dialogs}
         <PageHeader
           title="Automations"
-          className="mb-0"
           actions={
             <>
               {/* Saved agents are the product's (Agent Studio): the open-source edition's automations run your coding tools. */}
@@ -305,18 +309,46 @@ export function AutomationsPage({
                   </Button>
                 </Tip>
               )}
-              <Button size="sm" className="h-8 px-3 text-[13px]" onClick={() => start({})}>
-                <PlusIcon /> New automation
-              </Button>
+              {/* Either kind from the one button: what runs it is the first thing chosen. */}
+              {onWorkflow ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button size="sm" className="h-8 px-3 text-[13px]">
+                      <PlusIcon /> New automation
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="auto-new-menu">
+                    <DropdownMenuItem onSelect={() => start({})}>
+                      <ZapIcon />
+                      <span className="auto-new-text">
+                        <span>A coding tool</span>
+                        <span className="auto-new-sub">On a schedule, a webhook or another agent finishing. Each run is a session.</span>
+                      </span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => onWorkflow(null)}>
+                      <UsersIcon />
+                      <span className="auto-new-text">
+                        <span>Your crew</span>
+                        <span className="auto-new-sub">Crew mates in steps that hand on to each other. Each run is a board in a room.</span>
+                      </span>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : (
+                <Button size="sm" className="h-8 px-3 text-[13px]" onClick={() => start({})}>
+                  <PlusIcon /> New automation
+                </Button>
+              )}
             </>
           }
         />
-        </div>
-        {failed && (
+        {(failed || (onWorkflow && wf.failed)) && (
           <p role="alert" className="mb-4 rounded-lg border border-[var(--border)] px-3 py-2 text-[13px] text-[var(--red)]">
-            {failed}
+            {failed || wf.failed}
           </p>
         )}
+        {/* A crew workflow's run waiting for your OK, answered here as on its builder. */}
+        {onWorkflow && <WorkflowAsks identity={identity} onAnswered={() => void wf.load()} />}
 
         {list === null ? (
           <div className="grid gap-2">
@@ -324,7 +356,7 @@ export function AutomationsPage({
               <Skeleton key={i} className="h-16 rounded-xl" />
             ))}
           </div>
-        ) : list.length === 0 ? (
+        ) : list.length === 0 && !wf.list?.length ? (
           <Intro onStart={() => start({})} />
         ) : (
           <ul className="grid gap-2" aria-label="Your automations">
@@ -342,6 +374,7 @@ export function AutomationsPage({
                 people={people}
               />
             ))}
+            {onWorkflow && wf.list?.map((w) => <CrewWorkflowRow key={w.id} w={w} wf={wf} onEdit={() => onWorkflow(w.id)} />)}
           </ul>
         )}
 

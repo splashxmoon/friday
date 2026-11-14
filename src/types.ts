@@ -901,7 +901,12 @@ export type EventBody =
   | { type: "aside.answered"; id: string; text: string; model: string; error?: string }
   | { type: "review.started"; runSeq: number; round: number }
   /** What it found. `sent` when the findings went back to the agent to fix; otherwise they are left for the person. */
-  | { type: "review.done"; runSeq: number; round: number; findings: ReviewFinding[]; sent: boolean; error?: string }
+  /**
+   * A check the project keeps (repo-checks), run by Friday after a run that changed files: passed, failed or timed out, kept
+   * either way so a person can see it ran (Arun, 2026-11-13: "give more on what was reviewed/checked"). `run`: that run's end.
+   */
+  | { type: "repo.checked"; run: number; command: string; ok: boolean; timedOut?: true; output?: string }
+  | { type: "review.done"; runSeq: number; round: number; findings: ReviewFinding[]; sent: boolean; error?: string; /** The model that read it. */ model?: string; /** How much it read: files whole of all of them, and whether some were cut (second-review.ts coverage). */ read?: { files: number; of: number; cut: boolean } }
   /** A person handed the pull request to Friday to see through to merge, or took it back. */
   | { type: "pr.shepherd"; on: boolean; prUrl: string }
   /** One thing Friday did on the way: handed over the checks or comments, pushed a fix, asked for review again. */
@@ -940,7 +945,8 @@ export type EventBody =
   | { type: "board.review"; id: string; lane: string; name: string }
   /**
    * A task's review. `lane` empty: Friday passed it without a second agent (nothing changed, nobody else to check, or its tests
-   * passed on a small change). `unclear`: the reviewer was asked twice and gave no verdict either way, so it passed without one.
+   * passed on a small change). `unclear`: the reviewer was asked twice and gave no verdict either way, so it went back with its
+   * words (it passed without one before 2026-11-13).
    */
   | { type: "board.reviewed"; id: string; lane: string; name: string; ok: boolean; note: string; unclear?: true }
   /**
@@ -957,6 +963,8 @@ export type EventBody =
       output: string;
       /** It couldn't be run there (a Manual machine, no shell): neither passed nor failed. */
       skipped?: boolean;
+      /** It ran past its time and never finished: not a pass (Arun, 2026-11-13: "air tight"). */
+      timedOut?: true;
       /** Failures that were already there at the commit the copy started from (baseline.ts): not the task's, so `ok`. */
       pre?: string[];
       /** The command fails as a whole there too, where its tests can't be named. */
@@ -1042,6 +1050,25 @@ export type EventBody =
   /** Said to the people in the session, not to an agent: no agent reads it, steers by it or answers it (an aside). */
   | { type: "chat"; text: string; mentions?: string[] }
   | { type: "handover.cancelled" }
+  /**
+   * The rest of a lane's work handed to a crew mate ("Keep this going", Code and Crew, connected, 2026-11-13): said once here by
+   * whoever handed it. `carried`: what went with it, in words; `ask`: what it asks them before ("Opening a PR"). On this computer
+   * the crew mate takes it as a lane of this session (`jobLane`), in a copy of the folder of its own (crew-carry.ts).
+   */
+  | { type: "crew.handed"; job: string; mate: string; mateName: string; lane: string; carried: string[]; ask: string[]; rule?: { id: string; text: string }; jobLane?: string }
+  /** How that job stands now: folded into the one line `crew.handed` drew, never a line of its own. `result` once it is done. */
+  | { type: "crew.handed.moved"; job: string; state: string; done?: number; of?: number; result?: { said: string; files: number; added: number; removed: number; prs: string[] } }
+  /**
+   * The rest of a lane's work handed to a crew room: posted there as the person's own message to the room's lead, said once here.
+   * The room's own rules run it from there.
+   */
+  | { type: "crew.handed.room"; room: string; roomName: string; roomSid: string; lane: string; to: string; carried: string[]; /** Its message in the room: what the line's status is read from. */ seq?: number; roomLane?: string }
+  /** The lane taken back from the job (`back`), the job stopped from the session's line (`stopped`), or its work brought in. */
+  | { type: "crew.handed.back"; job: string; how: "back" | "stopped" | "brought" }
+  /** A room's finished work brought into this session (crew-carry.ts): its line says so. */
+  | { type: "crew.handed.room.brought"; room: string }
+  /** Finished crew work brought into this session (crew-carry.ts bringPick): each piece by its place and when it finished. */
+  | { type: "crew.brought"; pieces: { key: string; at: number }[] }
   | { type: "control.requested" }
   /** A viewer asking to edit (Arun, 2026-10-24: UX gaps): an owner makes them an editor (member.role_changed), or says not now. */
   | { type: "role.requested" }

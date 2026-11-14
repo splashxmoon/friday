@@ -2,7 +2,7 @@ import { stoppedLine } from "./activity-line.js";
 import { carefulClass } from "./command-class.js";
 import { carriedOn, limitHit } from "./limit-reset.js";
 import { laneName } from "./session/core.js";
-import { driverOf, questionsTo, requestsTo, roleOf, runOf, type SessionState } from "./session/projection.js";
+import { driverOf, taskAllowApplies, questionsTo, requestsTo, roleOf, runOf, type SessionState } from "./session/projection.js";
 import { MAIN_LANE, type EngineTool } from "./types.js";
 
 /**
@@ -42,6 +42,8 @@ export interface Attention {
   detail?: string;
   /** An approval's commands, as asked (up to five). */
   items?: string[];
+  /** "Allow for this task" would apply for you here (projection.ts taskAllowApplies): else only Allow once is offered. */
+  forTask?: true;
 }
 
 /**
@@ -87,7 +89,7 @@ export function attentionIn(state: SessionState, meId: string): Attention[] {
       const more = ask.items.length > 1 ? ` and ${ask.items.length - 1} more` : "";
       const text = ask.scope === "commands" && first ? `${agentName(state, lane)} wants to run ${first}${more}` : `${agentName(state, lane)} is asking before it goes on`;
       // The commands themselves, for a page that says them in plain words (the Agents page, plain-risk.ts).
-      out.push({ ...of("approval", text, ask.seq, lane), approval: ask.id, ...(ask.scope === "commands" ? { command: true, items: ask.items.slice(0, 5), ...(carefulClass(ask.items) ? { careful: true as const } : {}) } : {}) });
+      out.push({ ...of("approval", text, ask.seq, lane), approval: ask.id, ...(ask.scope === "commands" ? { command: true, items: ask.items.slice(0, 5), ...(taskAllowApplies(state, lane, meId) ? { forTask: true as const } : {}), ...(carefulClass(ask.items) ? { careful: true as const } : {}) } : {}) });
       continue;
     }
     const run = runOf(state, lane);
@@ -200,6 +202,9 @@ export interface Crew {
    * last said anything; stopped on an error, `why` is the error's first line.
    */
   agents: { lane: string; name: string; tool?: EngineTool; state: CrewState; plan?: string; doing?: { name: string; target?: string }; heardAt?: number; why?: string }[];
+  /** A crew mate has its work now (crew.handed): "Kit is on it", and the lanes it works on it in here (crew-carry.ts). */
+  handed?: string;
+  handedLanes?: string[];
 }
 /** The most agents a row shows. */
 const CREW_MAX = 6;
@@ -227,7 +232,11 @@ export function crewOf(state: SessionState, hostUp?: (hostId: string) => boolean
     const why = st === "failed" ? run.error?.trim().split(/\r?\n/)[0]?.slice(0, 160) : undefined;
     return { lane, name: laneName(state, lane), ...(engine?.tool ? { tool: engine.tool } : {}), state: st, ...(st === "short" ? { plan: `${plan!.done} of ${plan!.of}` } : {}), ...(doing ? { doing } : {}), ...(heard ? { heardAt: heard } : {}), ...(why ? { why } : {}) };
   });
-  return agents.length ? { sid: state.id, agents: agents.slice(0, CREW_MAX) } : null;
+  // A lane handed on to a crew mate: the row's own line says who has it, no badge of its own (Code and Crew, connected, 2026-11-13:
+  // "The sidebar row says 'Kit is on it'").
+  const live = Object.values(state.handed ?? {}).filter((h) => !h.back && ["asked", "waiting", "queued", "running", "input"].includes(h.state));
+  const handed = live.length ? { handed: `${live[0]!.mateName} is on it`, handedLanes: live.flatMap((h) => (h.jobLane ? [h.jobLane] : [])) } : {};
+  return agents.length ? { sid: state.id, agents: agents.slice(0, CREW_MAX), ...handed } : null;
 }
 
 /**

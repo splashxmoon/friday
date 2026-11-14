@@ -235,7 +235,7 @@ export function StepMark({ mark }: { mark: string }) {
   );
 }
 
-function StepList({ steps, shown: picked, onShown }: { steps: Step[]; shown?: string | null; onShown?: (id: string | null) => void }) {
+export function StepList({ steps, shown: picked, onShown }: { steps: Step[]; shown?: string | null; onShown?: (id: string | null) => void }) {
   const [own, setOwn] = useState<string | null>(null);
   const shown = picked !== undefined ? picked : own;
   const setShown = (id: string | null) => (onShown ? onShown(id) : setOwn(id));
@@ -428,7 +428,7 @@ export function RunLog({
  * their places above (StepGroup). "N files changed" opens the changes; the files aren't listed here as well, where a run
  * of sixty filled the screen with chips that said less than the Diff panel does (Arun, 2026-10-18).
  */
-export function RunMeta({ files, live, onFile, startedAt, endedAt, tokens, compacted, waiting = false, forecast, tokensApart = false, quietWait = false, doing = "Working" }: { /** What it is at while it works: "Writing" once its answer streams. */ doing?: string; /** Waiting on a card that says how long itself (a permission card): no "Waiting for an answer" line too (audit CODE-21 A). */ quietWait?: boolean; /** The tokens are said on the reply's own icon row (audit CODE-11 B): not here as well. */ tokensApart?: boolean; files: FileChange[]; live: boolean; onFile?: () => void; startedAt?: number; endedAt?: number; tokens?: number; /** The conversation's size before Friday had it compacted for this run. */ compacted?: number; /** Its turn waits on a person (a question, a permission): not working. */ waiting?: boolean; /** While it works: about how long is left, and when its window fills at this pace (runForecast.ts). */ forecast?: string }) {
+export function RunMeta({ files, live, onFile, startedAt, endedAt, tokens, compacted, waiting = false, forecast, tokensApart = false, quietWait = false, doing = "Working", noTime = false }: { /** The run's own line says how long (run-line.tsx): not here as well. */ noTime?: boolean; /** What it is at while it works: "Writing" once its answer streams. */ doing?: string; /** Waiting on a card that says how long itself (a permission card): no "Waiting for an answer" line too (audit CODE-21 A). */ quietWait?: boolean; /** The tokens are said on the reply's own icon row (audit CODE-11 B): not here as well. */ tokensApart?: boolean; files: FileChange[]; live: boolean; onFile?: () => void; startedAt?: number; endedAt?: number; tokens?: number; /** The conversation's size before Friday had it compacted for this run. */ compacted?: number; /** Its turn waits on a person (a question, a permission): not working. */ waiting?: boolean; /** While it works: about how long is left, and when its window fills at this pace (runForecast.ts). */ forecast?: string }) {
   // The clock only runs while there is something to time.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -442,7 +442,7 @@ export function RunMeta({ files, live, onFile, startedAt, endedAt, tokens, compa
   const elapsed = startedAt && (live || took >= 1000) ? span(took) : "";
   // Waiting on a person says so: "Working · 32m" under a turn stopped on a question contradicted the bar's "Waiting for you"
   // (2026-10-27 audit).
-  const time = live && waiting && quietWait ? "" : live ? `${waiting ? "Waiting for an answer" : doing}${elapsed ? ` · ${elapsed}` : ""}${forecast && !waiting ? ` · ${forecast}` : ""}` : elapsed ? `Worked for ${elapsed}` : "";
+  const time = noTime || (live && waiting && quietWait) ? "" : live ? `${waiting ? "Waiting for an answer" : doing}${elapsed ? ` · ${elapsed}` : ""}${forecast && !waiting ? ` · ${forecast}` : ""}` : elapsed ? `Worked for ${elapsed}` : "";
   const changed = files.length ? `${files.length} file${files.length === 1 ? "" : "s"} changed` : "";
   const used = tokens && !tokensApart ? `${shortTokens(tokens)} tokens` : "";
   const trimmed = compacted ? `conversation compacted from ${shortTokens(compacted)}` : "";
@@ -699,7 +699,7 @@ export interface HandoffMore {
  * is the whole decision. Beyond the ones already here, "More" brings in a saved agent or a coding agent of your
  * own (Claude Code, Codex, Cursor) and hands the work to it as soon as it is in.
  */
-export function HandoffBar({ targets, active, onPick, more, label = "Pass on" }: { targets: HandoffTarget[]; active: string | null; onPick: (id: string | null) => void; more?: HandoffMore; /** Its words, where a session says it its own way. */ label?: string }) {
+export function HandoffBar({ targets, active, onPick, more, label = "Pass on", onKeepGoing }: { targets: HandoffTarget[]; active: string | null; onPick: (id: string | null) => void; more?: HandoffMore; /** Its words, where a session says it its own way. */ label?: string; /** "Keep this going…": the rest to your crew, with where it stands (crew-carry.tsx). In this menu, not a second control beside it. */ onKeepGoing?: () => void }) {
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
   // Fixed to the window, placed from the button: the feed clips anything that hangs out of it.
@@ -793,6 +793,8 @@ export function HandoffBar({ targets, active, onPick, more, label = "Pass on" }:
             )}
           {more && more.agents.length > 0 && <div className="ho-menu-h">Saved agents</div>}
           {more?.agents.map((a) => row(a.id, a.tint, <Icon name={a.icon} size={14} />, a.name, a.blurb, null, false, () => more.onAgent(a.id)))}
+          {onKeepGoing && <div className="ho-menu-h">Your crew</div>}
+          {onKeepGoing && row("keep-going", undefined, <Icon name="handoff" size={14} />, "Keep this going…", "Hand the rest on, with where it stands", null, false, () => (setOpen(false), onKeepGoing()))}
         </div>
       )}
     </div>

@@ -80,7 +80,7 @@ const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1).trim
 const PAST: Record<string, string> = { Reading: "Read", Looking: "Looked", Searching: "Searched", Editing: "Edited", Writing: "Wrote", Running: "Ran", Starting: "Started", Checking: "Checked", Stopping: "Stopped", Asking: "Asked", Handing: "Handed", Deploying: "Deployed", Making: "Made", Adding: "Added", Using: "Used" };
 const past = (s: string) => s.replace(/^\w+/, (w) => PAST[w] ?? w);
 
-const KIND: [HubCheck["kind"], RegExp][] = [
+const KIND: [HubCheck["kind"], { test(s: string): boolean }][] = [
   ["typecheck", /\btsc\b|typecheck|type-check|\bmypy\b|\bpyright\b/i],
   ["lint", /\blint\b|eslint|ruff|clippy|golangci/i],
   // A build is a build tool asked to build, not any command with the word in it ("rm -rf build" is not one).

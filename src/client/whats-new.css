@@ -17,15 +17,17 @@ html.desktop .wn-overlay { padding-top: 52px; }
 .wn-x:hover { background: color-mix(in srgb, var(--ink) 7%, transparent); color: var(--ink); }
 .wn-body { padding: 20px 24px 6px; }
 .wn-body h2 { margin: 0; color: var(--ink); font-size: 18px; font-weight: 600; letter-spacing: -.01em; }
-.wn-sub { margin: 6px 0 14px; color: var(--text-muted); font-size: 13.5px; line-height: 20px; text-wrap: pretty; }
+.wn-sub { margin: 6px 0 14px; color: var(--text-muted); font-size: 13px; line-height: 18px; text-wrap: pretty; }
+.wn-back { gap: 4px; }
 .wn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 22px; margin: 0; padding: 12px 0 8px; border-top: 1px solid var(--border); list-style: none; }
 .wn-grid li { display: flex; align-items: flex-start; gap: 11px; min-width: 0; padding: 8px 0; }
 .wn-tile { display: grid; flex: none; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: color-mix(in srgb, var(--ink) 6%, transparent); color: var(--ink-2); }
 .wn-item { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .wn-item b { overflow: hidden; color: var(--ink); font-size: 13px; font-weight: 500; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
-.wn-item span { color: var(--text-muted); font-size: 12.5px; line-height: 17px; }
+.wn-item span { color: var(--text-muted); font-size: 12px; line-height: 16px; }
 .wn-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 24px 18px; }
-.wn-notes { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; color: var(--text-muted); font: inherit; font-size: 12.5px; font-weight: 500; white-space: nowrap; cursor: pointer; }
+.wn-foot-end { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+.wn-notes { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; color: var(--text-muted); font: inherit; font-size: 12px; line-height: 16px; font-weight: 500; white-space: nowrap; cursor: pointer; }
 .wn-notes:hover { color: var(--ink); }
 .wn-got { white-space: nowrap; }
 /* A narrow window: one column, so no line is squeezed. */

@@ -231,16 +231,30 @@ export function BriefView({ brief: b, max = 12, card = false }: { brief: DailyBr
       {b.usage.length > 0 && (
         <section className="db-section">
           <h4>Usage today</h4>
+          {/* Each tool: its name and today's tokens on one line, its windows under it as small meters (Arun, 2026-11-13: "can
+              you design this better please"; the windows wrapped onto loose lines and "no tokens yet" filled the gaps). */}
           <ul className="db-usage">
             {b.usage.map((u) => (
-              <li key={u.tool}>
-                <b>{u.name}</b>
-                <span className="db-tokens">{u.tokens ? `${shortTokens(u.tokens)} tokens` : "no tokens yet"}</span>
-                {u.windows.map((w) => (
-                  <span key={w.label} className="db-window" data-high={w.used >= 80 ? "true" : undefined} title={w.resetsAt ? `Resets ${clock(w.resetsAt * 1000, b.tz)}` : undefined}>
-                    {w.label} {w.used}%
-                  </span>
-                ))}
+              <li key={u.tool} className="db-tool">
+                <div className="db-tool-head">
+                  <b>{u.name}</b>
+                  {u.tokens > 0 && <span className="db-tokens">{shortTokens(u.tokens)} tokens</span>}
+                </div>
+                {u.windows.length > 0 && (
+                  <div className="db-windows">
+                    {u.windows.map((w) => (
+                      <div key={w.label} className="db-window" data-level={w.used >= 100 ? "full" : w.used >= 80 ? "high" : undefined} title={w.resetsAt ? `Resets ${clock(w.resetsAt * 1000, b.tz)}` : undefined}>
+                        <span className="db-window-top">
+                          <span className="db-window-label">{w.label.charAt(0).toUpperCase() + w.label.slice(1)}</span>
+                          <span className="db-pct">{w.used}%</span>
+                        </span>
+                        <span className="db-bar" aria-hidden="true">
+                          <i style={{ width: `${Math.min(100, Math.max(0, w.used))}%` }} />
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </li>
             ))}
           </ul>
@@ -282,10 +296,10 @@ function Schedule({ identity, settings, onChange }: { identity: Identity; settin
       .then((r) => (setErr(""), onChange(r.settings), setLatest({ ...latest, settings: r.settings })))
       .catch((e: Error) => setErr(e.message));
   const row = (kind: "morning" | "evening", label: string, fallback: string) => (
-    <div className="db-time">
-      <Switch on={!!settings[kind]} onChange={(on) => void save({ [kind]: on ? fallback : null })} label={`${label} brief`} />
+    <div className="db-time" data-off={settings[kind] ? undefined : "true"}>
       <span className="db-time-label">{label}</span>
       <input type="time" value={settings[kind] ?? fallback} disabled={!settings[kind]} onChange={(e) => e.target.value && void save({ [kind]: e.target.value })} aria-label={`${label} brief time`} />
+      <Switch on={!!settings[kind]} onChange={(on) => void save({ [kind]: on ? fallback : null })} label={`${label} brief`} />
     </div>
   );
   return (
@@ -293,7 +307,7 @@ function Schedule({ identity, settings, onChange }: { identity: Identity; settin
       {row("morning", "Morning", "08:30")}
       {row("evening", "Evening", "18:00")}
       <p className="db-zone">
-        In {settings.tz.replace(/_/g, " ")}
+        Times in {settings.tz.replace(/_/g, " ")}
         {settings.tz !== tz() && (
           <button type="button" className="link-btn" onClick={() => void save({ tz: tz() })}>
             Use {tz().replace(/_/g, " ")}

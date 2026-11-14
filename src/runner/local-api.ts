@@ -1,6 +1,7 @@
 import { computerAllow, computerStatus, setComputerUse } from "./computer.js";
 import { readLimits } from "./limits.js";
 import { findApp, forgetLoginStatus, loginStatusQuick } from "./adapters.js";
+import { isUnknown, orElse, probeTool } from "./tool-probe.js";
 import { mkdir, mkdtemp, open, rm, rmdir, stat, writeFile } from "node:fs/promises";
 import { homedir, hostname, tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
@@ -298,23 +299,34 @@ export async function callHost(method: string, params: Record<string, unknown> =
       // `tool`: just that one, for a start that only needs to know about the agent it is starting.
       const one = str(params.tool, 20) as EngineTool;
       const tools = await Promise.all(
+        // Each tool on its own. Finding it has a deadline: one whose look hangs or throws is unknown on its row (tool-probe.ts).
+        // A tool that was found is listed as found, whatever its sign-in or accounts do.
         (ENGINE_TOOLS.includes(one) ? [one] : ENGINE_TOOLS).map(async (t) => {
-          const bin = await findBin(t);
+          const bin = await probeTool(t, () => findBin(t));
+          if (isUnknown(bin)) return bin;
+          // Side by side, each within its own budget: one after the other, a slow sign-in check and then each account's ran
+          // past the look's deadline and a tool someone needed to sign in to couldn't be picked (Fable review, 2026-11-10).
+          const [loggedIn, app, accounts] = await Promise.all([
+            // A slow answer is "don't know yet", not a reason to hold the whole card
+            // back: the check carries on in the background and the next look has it.
+            bin ? orElse(() => loginStatusQuick(t, bin), null) : null,
+            // The app is here though the agent isn't (Cursor's editor, without its CLI).
+            bin ? false : orElse(() => findApp(t), false),
+            // Its accounts here, when it has more than one (accounts.ts): each signed in or not, and out of usage or not.
+            bin && hasAccounts(t) ? orElse(() => accountRows(t, bin), {}) : {},
+          ]);
+          // Installed, but it can't run here (Kilo's ACP on Windows): said on its row rather than found out from a turn.
+          const unavailable = bin ? await orElse(() => ADAPTERS[t].unavailable?.(), undefined) : undefined;
           return {
             tool: t,
             name: ENGINE_NAMES[t],
             path: bin,
-            // A slow answer is "don't know yet", not a reason to hold the whole card
-            // back: the check carries on in the background and the next look has it.
-            loggedIn: bin ? await loginStatusQuick(t, bin) : null,
+            loggedIn,
             // Claude Code bundled in the Claude desktop app signs in separately from the app.
             source: bin ? (isClaudeAppBundled(bin) ? "claude-app" : "cli") : null,
-            // The app is here though the agent isn't (Cursor's editor, without its CLI).
-            ...(!bin && (await findApp(t)) ? { app: true } : {}),
-            // Installed, but it can't run here (Kilo's ACP on Windows): said on its row rather than found out from a turn.
-            ...(bin && ADAPTERS[t].unavailable?.() ? { unavailable: ADAPTERS[t].unavailable!()! } : {}),
-            // Its accounts here, when it has more than one (accounts.ts): each signed in or not, and out of usage or not.
-            ...(bin && hasAccounts(t) ? await accountRows(t, bin) : {}),
+            ...(app ? { app: true } : {}),
+            ...(unavailable ? { unavailable } : {}),
+            ...accounts,
           };
         }),
       );

@@ -70,6 +70,8 @@ export type Command =
   | { type: "goal.clear" }
   | { type: "handover.save"; text: string }
   | { type: "react"; seq: number; up: boolean | null; reason?: string }
+  /** A person's message marked as decided, or the mark taken off (`on: false`): kept in the session's memory, which every agent reads. */
+  | { type: "decide"; seq: number; on: boolean }
   | { type: "thread.reopen"; id: string }
   | {
       type: "settings.update";
@@ -376,7 +378,9 @@ export class SessionCore {
         // Answering a request for permission: only to what is actually waiting, and only by whoever is driving this lane.
         const ask = cmd.approval ? state.approvals[lane] : undefined;
         if (cmd.approval && (!ask || ask.id !== cmd.approval.id)) return fail("That request was already answered, or isn't waiting any more.");
-        const approval = ask ? { id: ask.id, approve: cmd.approval?.approve === true, ...(cmd.approval?.approve === true && cmd.approval?.task === true && ask.scope === "commands" ? { task: true as const } : {}) } : undefined;
+        // For the task only from the lane's driver, an owner or the machine's host (as approval.answer).
+        const mayTask = !!ask && (laneDriver?.id === m.id || owner || (liveMachine(state, lane) ?? state.engines[lane])?.hostId === m.id) && roleOf(state, (liveMachine(state, lane) ?? state.engines[lane])?.hostId ?? "") === "owner";
+        const approval = ask ? { id: ask.id, approve: cmd.approval?.approve === true, ...(cmd.approval?.approve === true && cmd.approval?.task === true && ask.scope === "commands" && mayTask ? { task: true as const } : {}) } : undefined;
         const notYours = approval?.approve ? hostsYes(state, lane, m.id) : null;
         if (notYours) return fail(notYours);
         const answered = approval ? `answered:${sid}:${approval.id}` : "";
@@ -544,6 +548,27 @@ export class SessionCore {
           await append({ type: "memory.saved", key, text: "", auto: true });
         }
         return ok(r.seq);
+      }
+
+      case "decide": {
+        // Decided once, read by every agent from then on (session-noise map, 2026-11-13): "we're going with server totals" was said
+        // once and scrolled away, and the next agent, or the one after a compaction, argued it again. Kept as session memory
+        // (memory.saved, `decision:<seq>`), which agents already read and which survives compaction; marked by who decided.
+        if (!allowed("suggest")) return deny("mark a decision");
+        const seq = Math.floor(Number(cmd.seq));
+        if (!Number.isInteger(seq) || seq < 1 || seq > state.lastSeq) return fail("No such message.");
+        const key = `decision:${seq}`;
+        if (cmd.on === false) {
+          if (!state.memory.some((x) => x.key === key && x.text)) return ok(state.lastSeq);
+          const r = await append({ type: "memory.saved", key, text: "", auto: true });
+          return r.ok ? ok(r.seq) : fail("Could not record that.");
+        }
+        const target = (await this.store.events(sid)).find((e) => e.seq === seq);
+        const said = target && (target.body.type === "instruction" || target.body.type === "chat" || target.body.type === "suggestion" || target.body.type === "agent.message") ? target.body.text.replace(/\s+/g, " ").trim() : "";
+        if (!said) return fail("Only something someone said can be marked as decided.");
+        const who = target!.actor.kind === "human" ? target!.actor.name : `${target!.actor.name}, marked by ${m.name}`;
+        const r = await append({ type: "memory.saved", key, text: `Decided (${who}): ${said.length > 400 ? `${said.slice(0, 399)}…` : said}`, auto: true });
+        return r.ok ? ok(r.seq) : fail("Could not record that.");
       }
 
       case "handover.save": {
@@ -1053,7 +1078,11 @@ export class SessionCore {
         const machine = liveMachine(state, lane) ?? state.engines[lane];
         const machineLane = machine && Object.keys(state.engines).find((k) => state.engines[k] === machine);
         const myMachine = !!machine && machine.hostId === m.id && (machine.mode === "edits" || !(machineLane && (await this.othersRaised(state, machineLane))));
+        // "Allow for this task" widens a yes to commands like this one until the run ends: the lane's driver's, an owner's or the
+        // machine's host's to give, never a yes given only for some kinds of command (Fable review, 2026-11-11).
+        let mayTask = iDrive || owner || machine?.hostId === m.id;
         if (!iDrive && !owner && !myMachine) {
+          mayTask = false;
           const allowedKinds = role === "editor" ? state.options.approve.editor : [];
           if (!allowedKinds.length) return deny("answer for an agent you're not driving");
           if (ask.scope !== "commands" || !ask.items.length) return fail(`Only ${laneDriver?.name ?? "the driver"} can answer this one: it isn't about a single command.`);
@@ -1068,7 +1097,8 @@ export class SessionCore {
         if (notYours) return fail(notYours);
         const answered = `answered:${sid}:${ask.id}`;
         if (!(await claimOnce(answered))) return fail("That request was already answered.");
-        const task = approve && cmd.task === true && ask.scope === "commands";
+        // And only where the hub will honour it, a machine whose host owns the session: else the receipt would say what isn't so.
+        const task = approve && cmd.task === true && ask.scope === "commands" && mayTask && roleOf(state, (liveMachine(state, lane) ?? state.engines[lane])?.hostId ?? "") === "owner";
         const r = await append({ type: "instruction", text: approve ? (task ? "Yes, run it, and commands like it for the rest of this task." : "Yes, run it.") : "No, don't.", interrupt: false, approval: { id: ask.id, approve, ...(task ? { task: true as const } : {}) } });
         if (!r.ok) await release(answered);
         if (r.ok) this.wake(sid, lane);

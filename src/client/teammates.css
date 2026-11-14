@@ -178,6 +178,8 @@ html.dark .tm-time { color-scheme: dark; }
 .tm-backdrop { position: absolute; z-index: 0; margin: 0; overflow: hidden; border-style: solid; border-color: transparent; color: var(--ink); pointer-events: none; }
 /* A teammate's hue is its face only, never text or a fill (DIRECTION.md §2): an @name is a neutral pill in the ink. */
 .tm-mention { border-radius: 5px; background: var(--hover-strong); box-shadow: 0 0 0 2px var(--hover-strong); color: var(--ink); }
+/* In a coding session's box each @name wears its own colour (Arun, 2026-11-13: "the color coded @s in the coding session"). */
+.mt-mention { --t: color-mix(in srgb, var(--c, var(--ink-2)) 20%, transparent); border-radius: 5px; background: var(--t); box-shadow: 0 0 0 2px var(--t); color: color-mix(in srgb, var(--c, var(--ink)) 70%, var(--ink)); }
 
 /* Over the box: who an @-named message goes to. */
 /* "To Kit · Juno" over the box while it names them: meta words with their faces, no box. */
@@ -759,6 +761,8 @@ html .tm-row[data-active="true"] { background: var(--sel-bg, var(--hover-strong)
 /* Plain text tabs, the one you are on underlined (DIRECTION.md §9.3). */
 .tm-tabs { display: flex; gap: 20px; margin: 0 0 6px; padding: 0 2px; border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
 .tm-tab { position: relative; height: 36px; padding: 0; border: 0; background: none; color: var(--text-muted); font: inherit; font-size: 13px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: color var(--t-hover) var(--ease-out); }
+/* A phone: every tab in sight, Settings never cut off at the edge. */
+@media (max-width: 640px) { .tm-tabs { gap: 12px; } .tm-tab { font-size: 12.5px; } }
 .tm-tab:hover { color: var(--ink-2); }
 .tm-tab[aria-selected="true"] { color: var(--ink); }
 .tm-tab[aria-selected="true"]::after { content: ""; position: absolute; right: 0; bottom: -1px; left: 0; height: 1.5px; border-radius: 1px; background: var(--ink); }
@@ -1178,45 +1182,6 @@ html.dark { --badge-work: #4d8eff; --badge-need: #f7b23b; --badge-done: #2fbf71;
 .tm-wait-face:hover { position: relative; z-index: 1; transform: translateY(-1px); }
 .tm-wait-face:focus-visible { outline: 2px solid var(--focus-ring, var(--ink)); outline-offset: 1px; }
 
-/* The New teammate page (TeammateDialog `page`; Arun, 2026-11-08: "make the crew teammate creator thing into a page instead of a
-   modal pop up"): a heading, the form as one card, and beside it the teammate as the crew will meet them, following the form. */
-/* No padding under the page: the foot's sticky edge is the window's bottom, not 60px above it with the form showing through. */
-.page.conns-page.tm-page { padding-bottom: 0; }
-.tm-page-wrap { max-width: 1040px; margin: 0 auto; padding-bottom: 40px; }
-.tm-page-head { display: flex; flex-direction: column; gap: 6px; margin-bottom: 24px; }
-.tm-page-back { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; height: 26px; margin: 0 0 6px -8px; padding: 0 8px; border: 0; border-radius: var(--r-md); background: none; color: var(--text-muted); font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer; transition: color 120ms ease, background-color 120ms ease; }
-.tm-page-back:hover { background: var(--hover); color: var(--ink); }
-.tm-page-back:focus-visible { outline: 2px solid var(--border-focus, var(--ink)); outline-offset: 1px; }
-.tm-page-head h1 { margin: 0; color: var(--ink); font-size: 24px; font-weight: 600; line-height: 30px; letter-spacing: -0.01em; }
-.tm-page-head p { max-width: 64ch; margin: 0; color: var(--text-muted); font-size: 13.5px; line-height: 1.5; }
-.tm-page-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 24px; align-items: start; }
-.tm-form-page { gap: 22px; padding: 26px 28px 0; border: 1px solid var(--border); border-radius: var(--r-xl); background: var(--card); }
-.tm-page-foot { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; gap: 12px; margin: 2px -28px 0; padding: 14px 28px 14px; border-top: 1px solid var(--border); border-radius: 0 0 var(--r-xl) var(--r-xl); background: var(--card); }
-.tm-page-foot-acts { display: flex; align-items: center; gap: 8px; margin-left: auto; }
-.tm-card { position: sticky; top: 0; display: flex; flex-direction: column; gap: 16px; padding: 22px; border: 1px solid var(--border); border-radius: var(--r-xl); background: var(--card); }
-.tm-card-face { display: grid; place-items: center; width: 88px; height: 88px; border-radius: var(--r-lg); background: var(--bg); box-shadow: inset 0 0 0 1px var(--border); }
-.tm-card-who { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.tm-card-who b { overflow: hidden; color: var(--ink); font-size: 17px; font-weight: 600; line-height: 22px; text-overflow: ellipsis; white-space: nowrap; }
-.tm-card-who p { display: -webkit-box; margin: 0; overflow: hidden; color: var(--ink-2); font-size: 13px; line-height: 19px; -webkit-box-orient: vertical; -webkit-line-clamp: 4; }
-.tm-card-who .tm-card-none { color: var(--text-muted); font-weight: 400; }
-.tm-card-facts { display: flex; flex-direction: column; margin: 0; border-top: 1px solid var(--border); }
-.tm-card-facts > div { display: flex; flex-direction: column; gap: 2px; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 13px; line-height: 18px; }
-.tm-card-facts dt { color: var(--text-muted); font-size: 12px; }
-.tm-card-facts dd { min-width: 0; margin: 0; color: var(--ink); }
-.tm-card-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 12px; }
-.tm-card-path span { font-family: var(--font); color: var(--text-muted); }
-.tm-card-note { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
-/* Narrow: the teammate over the form, a row of its own. */
-@media (max-width: 900px) {
-  .tm-page-grid { grid-template-columns: minmax(0, 1fr); }
-  .tm-card { position: static; order: -1; display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 4px 14px; padding: 16px; }
-  .tm-card-face { grid-row: span 2; width: 64px; height: 64px; }
-  .tm-card-facts, .tm-card-note { display: none; }
-  .tm-form-page { padding: 20px 18px 0; }
-  .tm-page-foot { margin: 2px -18px 0; padding: 12px 18px; }
-}
-@media (max-width: 640px) { .page.conns-page.tm-page { padding-bottom: 0 !important; } }
-
 /* The open-source build's teammate header (Crew overhaul 3A, 2026-11-11): one line, face, name, role in a word, what they're doing
    and where; the tabs on the row under it; then the chat. */
 .tm-slim-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-height: 48px; padding: 6px 0 0; border-bottom: 1px solid var(--border); }
@@ -1280,15 +1245,15 @@ html.dark { --badge-work: #4d8eff; --badge-need: #f7b23b; --badge-done: #2fbf71;
 .tp-facts > div { display: contents; }
 .tp-facts dt { color: var(--text-muted); }
 .tp-facts dd { margin: 0; min-width: 0; color: var(--ink-2); overflow-wrap: anywhere; }
-.tp-facts code, .tp-codes code { padding: 0 4px; border-radius: 4px; background: var(--hover); color: var(--ink-2); font: 11px/17px var(--mono); }
+.tp-facts code, .tp-codes code { padding: 0 4px; border-radius: 4px; background: var(--hover); color: var(--ink-2); font: 12px/17px var(--mono); }
 .tp-codes { display: flex; flex-wrap: wrap; gap: 3px; }
 .tp-check.ok { color: var(--green); }
 .tp-check.bad { color: var(--red); }
 .tp-check.run { color: var(--ink-2); }
 .tp-report { display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; border-radius: 8px; background: var(--hover); }
-.tp-report span { color: var(--text-muted); font-size: 11.5px; }
+.tp-report span { color: var(--text-muted); font-size: 12px; }
 .tp-report p { margin: 0; color: var(--ink-2); font-size: 12.5px; line-height: 18px; overflow-wrap: anywhere; }
-.tp-report small { color: var(--text-muted); font-size: 11.5px; line-height: 16px; overflow-wrap: anywhere; }
+.tp-report small { color: var(--text-muted); font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }
 .tp-chat { align-self: flex-start; height: 28px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--card); color: var(--ink); font: 500 12.5px var(--font); cursor: pointer; }
 .tp-chat:hover { background: var(--hover); }
 /* Folded: a slim column down the edge that still says how the plan stands: open, a ring of how far it has got, the count, and a
@@ -1347,3 +1312,120 @@ html.dark { --badge-work: #4d8eff; --badge-need: #f7b23b; --badge-done: #2fbf71;
 .tp-chat.tp-quiet { border-color: transparent; background: none; color: var(--text-muted); }
 .tp-chat.tp-quiet:hover { color: var(--ink); }
 .tp-said { color: var(--text-muted); font-size: 12px; }
+
+/* A plan card opened, given room to read (Arun, 2026-11-13: "add better typography for this, everything seems squished"): the full
+   width of the card rather than a gutter under the face, each fact's label over its value, body text at 13px with air between lines. */
+.tp-more { gap: 14px; padding: 4px 14px 14px; border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); padding-top: 12px; }
+.tp-ask, .tp-ask .tp-clamp { color: var(--ink-2); font-size: 13px; line-height: 1.55; }
+.tp-facts { display: flex; flex-direction: column; gap: 10px; font-size: 13px; line-height: 1.5; }
+.tp-facts > div { display: flex; flex-direction: column; gap: 2px; }
+.tp-facts dt { color: var(--text-muted); font-size: 11.5px; font-weight: 500; letter-spacing: .01em; }
+.tp-facts dd { color: var(--ink); }
+.tp-facts code, .tp-codes code { padding: 1px 5px; font: 12px/1.6 var(--mono); overflow-wrap: anywhere; }
+.tp-codes { gap: 4px; }
+.tp-note, .tp-facts .tp-clamp { margin-top: 4px; color: var(--ink-2); font-size: 13px; line-height: 1.55; }
+.tp-report { gap: 6px; padding: 10px 12px; border-radius: 10px; }
+.tp-report > span:first-child { font-size: 11.5px; font-weight: 500; }
+.tp-report .tp-clamp, .tp-report p { color: var(--ink-2); font-size: 13px; line-height: 1.55; }
+.tp-report small { margin-top: 2px; font-size: 12px; line-height: 1.5; }
+.tp-acts { gap: 8px; padding-top: 2px; }
+
+/* A crew mate's settings as a tab of its chat's side panel (Workbench.tsx "mate", TeammatePage.tsx MateSettingsBody): each category
+   a card with what it is set to now, the plan's cards; opened, a page of the panel with Back. */
+.msd-pane { height: 100%; padding: 14px; overflow-y: auto; }
+.msd { display: flex; flex-direction: column; gap: 12px; }
+.msd-card { overflow: visible; }
+.msd-card .tp-card-head { align-items: center; }
+/* What a category is set to now, one quiet line under its name (the plan card's own, TeamPlan in Friday Teams). */
+.tp-now { overflow: hidden; color: var(--text-muted); font-size: 12px; line-height: 17px; text-overflow: ellipsis; white-space: nowrap; }
+.msd-card .tp-now { white-space: nowrap; }
+/* Just "Back", its highlight its own size (Arun, 2026-11-13: "the hover highlight shouldnt be full width ... say back"). */
+.msd-back { display: inline-flex; align-items: center; gap: 4px; min-width: 0; margin-left: -6px; padding: 2px 6px 2px 2px; border: 0; border-radius: 6px; background: none; color: var(--ink); cursor: pointer; }
+.msd-back:hover { background: var(--hover); }
+.msd-back svg { width: 16px; height: 16px; color: var(--text-muted); flex: none; }
+.msd > .msd-back { align-self: flex-start; height: 28px; margin-left: -4px; padding: 0 10px 0 4px; color: var(--ink-2); font: 500 13px var(--font); }
+.msd > .msd-back:hover { color: var(--ink); }
+/* In the panel's narrow column each field's label sits over it, and choices wrap rather than run past the edge. */
+.msd-page { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.msd-page .tm-row-field { grid-template-columns: minmax(0, 1fr); row-gap: 6px; }
+.msd-page .tm-row-label { padding-top: 0; }
+.msd-page .tm-row-input, .msd-page .tm-field, .msd-page fieldset { min-width: 0; max-width: 100%; }
+.msd-page [role="radiogroup"], .msd-page .tm-chips { flex-wrap: wrap; }
+.msd-page .tm-form-inline > .tm-where:first-of-type { padding-top: 0; border-top: 0; }
+.msd-page .tm-form-inline { gap: 14px; }
+
+/* Where a crew mate works, in its Settings (TeammatePage.tsx MateFolders): each folder a row, the picker a press away. */
+.msd-folders { display: flex; flex-direction: column; gap: 4px; }
+.msd-folder { display: grid; grid-template-columns: 16px auto minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 34px; padding: 0 6px 0 10px; border: 1px solid var(--border); border-radius: 8px; color: var(--ink); font-size: 13px; }
+.msd-folder svg { color: var(--text-muted); }
+.msd-folder-name { font-weight: 500; white-space: nowrap; }
+.msd-folder small { overflow: hidden; color: var(--text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.msd-folder-x { display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 6px; background: none; color: var(--text-muted); cursor: pointer; }
+.msd-folder-x:hover { background: var(--hover); color: var(--ink); }
+.msd-open { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; height: 32px; margin-top: 4px; padding: 0 12px; border: 1px dashed var(--border-strong, var(--border)); border-radius: 8px; background: none; color: var(--ink-2); font: 500 13px var(--font); cursor: pointer; }
+.msd-open:hover { background: var(--hover); color: var(--ink); }
+
+/* New agent, as one calm column (Teammates.tsx TeammateForm; Arun, 2026-11-13: "design it kinda like this", "stop stuffing
+   everything with so much text"): the face, its colour and shape as rows to pick from, three fields, Create, and suggestions under
+   it, tight enough that the suggestions show without scrolling ("make the mascot smaller so we can see the suggestions"). */
+.nag-page { display: flex; flex-direction: column; align-items: center; gap: 24px; padding-top: 20px; padding-bottom: 48px; overflow-y: auto; }
+.nag { display: flex; flex-direction: column; align-items: stretch; gap: 12px; width: 100%; max-width: 440px; }
+.nag-face { display: grid; place-items: center; }
+.nag-colours { display: grid; grid-template-columns: repeat(8, 22px); justify-content: center; gap: 8px 10px; }
+.nag-colour { width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; cursor: pointer; box-shadow: 0 0 0 0 transparent; transition: box-shadow var(--t-hover, .15s) ease, transform var(--t-hover, .15s) ease; }
+.nag-colour:hover { transform: scale(1.08); }
+.nag-colour[aria-checked="true"] { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--ink-2); }
+.nag-colour:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--ring, var(--ink)); }
+/* Its shapes on one row, wider than the fields under them. */
+.nag-shapes { display: flex; flex-wrap: nowrap; justify-content: center; gap: 3px; margin: 2px -60px 2px; }
+.nag-shape { display: grid; flex: none; place-items: center; width: 36px; height: 36px; padding: 0; border: 1px solid transparent; border-radius: 10px; background: none; color: var(--text-muted); cursor: pointer; }
+.nag-shape:hover { background: var(--hover); }
+.nag-shape[aria-checked="true"] { border-color: var(--ink-2); background: var(--hover); }
+.nag-field { display: flex; flex-direction: column; gap: 6px; color: var(--ink-2); font-size: 13px; font-weight: 500; }
+.nag-field i { margin-left: 2px; color: var(--red, #e5484d); font-style: normal; }
+.nag-field textarea { resize: vertical; }
+.nag-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; padding: 4px 6px 4px 14px; border: 1px solid var(--border); border-radius: var(--r-md, 10px); background: var(--card, var(--bg)); color: var(--ink-2); font-size: 13px; font-weight: 500; }
+.nag-acts { display: flex; justify-content: center; gap: 8px; margin-top: 4px; }
+.nag-sugg { width: 100%; max-width: 860px; }
+.nag-sugg h2 { margin: 0 0 10px 2px; color: var(--text-muted); font-size: 12px; font-weight: 500; }
+.nag-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.nag-card { display: flex; align-items: center; gap: 14px; min-height: 76px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--card, var(--bg)); color: var(--ink); text-align: left; cursor: pointer; transition: background-color var(--t-hover, .15s) ease, border-color var(--t-hover, .15s) ease; }
+.nag-card:hover { background: var(--hover); }
+.nag-card[aria-pressed="true"] { border-color: var(--ink-2); }
+.nag-card > span { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.nag-card b { font-size: 14px; font-weight: 600; }
+.nag-card small { display: -webkit-box; overflow: hidden; color: var(--text-muted); font-size: 12.5px; line-height: 1.45; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+/* The starter crew's button under its words. */
+.nag-card-crew { flex-direction: column; align-items: flex-start; justify-content: space-between; gap: 10px; cursor: default; }
+.nag-card-crew:hover { background: var(--card, var(--bg)); }
+@media (max-width: 640px) { .nag-shapes { flex-wrap: wrap; margin-left: 0; margin-right: 0; } }
+@media (max-width: 480px) { .nag-colours { grid-template-columns: repeat(8, 20px); gap: 10px; } .nag-colour { width: 20px; height: 20px; } }
+
+/* The plan's cards with how each stands (Arun, 2026-11-13: "add like working states for this ... and more details and info too and
+   status"): a chip in the state's colour, its dot turning while it works; who, how long and how many files beside it; what it is
+   doing now, or why it isn't verified. Folded, each piece is its crew mate's face, ringed the same way. */
+.tp-meta { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 3px; color: var(--text-muted); font-size: 12px; line-height: 18px; }
+.tp-meta-bits { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tp-state { flex: none; }
+.tp-state { display: inline-flex; align-items: center; gap: 5px; height: 18px; padding: 0 7px 0 6px; border-radius: 999px; background: color-mix(in srgb, var(--ink) 7%, transparent); color: var(--ink-2); font-weight: 500; }
+.tp-state i { width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); }
+.tp-state[data-tone="work"] { background: color-mix(in srgb, var(--mate-working) 14%, transparent); color: var(--ink); }
+.tp-state[data-tone="work"] i { background: var(--mate-working); animation: tp-pulse 1.4s ease-in-out infinite; }
+.tp-state[data-tone="needs"] { background: color-mix(in srgb, var(--amber) 16%, transparent); color: var(--amber); }
+.tp-state[data-tone="needs"] i { background: var(--amber); }
+.tp-state[data-tone="done"] { background: color-mix(in srgb, var(--green) 14%, transparent); color: var(--green); }
+.tp-state[data-tone="done"] i { background: var(--green); }
+.tp-state[data-tone="reported"] i { background: color-mix(in srgb, var(--green) 50%, var(--border-strong)); }
+.tp-state[data-tone="wait"] i { background: none; box-shadow: inset 0 0 0 1.5px var(--border-strong); }
+.tp-now { overflow: hidden; color: var(--text-muted); font-size: 12px; line-height: 17px; text-overflow: ellipsis; white-space: nowrap; }
+.tp-card[data-tone="work"] { border-color: color-mix(in srgb, var(--mate-working) 35%, var(--border-strong)); }
+@keyframes tp-pulse { 50% { opacity: .35; transform: scale(.8); } }
+.tp-dot-face { display: grid; place-items: center; border-radius: 50%; box-shadow: 0 0 0 2px var(--sidebar, var(--bg)), 0 0 0 3.5px var(--border-strong); }
+.tp-dot-face[data-tone="work"] { box-shadow: 0 0 0 2px var(--sidebar, var(--bg)), 0 0 0 3.5px var(--mate-working); animation: tp-ring 1.6s ease-in-out infinite; }
+.tp-dot-face[data-tone="needs"] { box-shadow: 0 0 0 2px var(--sidebar, var(--bg)), 0 0 0 3.5px var(--amber); }
+.tp-dot-face[data-tone="done"] { box-shadow: 0 0 0 2px var(--sidebar, var(--bg)), 0 0 0 3.5px var(--green); }
+.tp-dot-face[data-tone="reported"] { box-shadow: 0 0 0 2px var(--sidebar, var(--bg)), 0 0 0 3.5px color-mix(in srgb, var(--green) 50%, var(--border-strong)); }
+@keyframes tp-ring { 50% { box-shadow: 0 0 0 2px var(--sidebar, var(--bg)), 0 0 0 3.5px color-mix(in srgb, var(--mate-working) 40%, transparent); } }
+.tp-dots { gap: 9px; }
+.tp-dots-more { color: var(--text-muted); font-size: 10px; }
+@media (prefers-reduced-motion: reduce) { .tp-state[data-tone="work"] i, .tp-dot-face[data-tone="work"] { animation: none; } }

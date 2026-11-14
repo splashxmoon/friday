@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Icon } from "./icons.js";
 import type { RecentSession } from "./storage.js";
-import { isTeamSid, newTeammate, useTeamNow } from "./Teammates.js";
+import { isTeamSid, useTeamNow } from "./Teammates.js";
+import { choosePlace } from "./WorkMode.js";
 import "./getting-started.css";
 
 /**
@@ -41,7 +42,9 @@ export function GettingStarted({ recents, onPickFolder }: { recents: RecentSessi
   const steps = [
     { id: "task", title: "Give an agent its first task", body: "Describe a change in the box above. It works in a folder of its own until you pick one.", done: own.length > 0, act: "Write it", run: focusBox },
     { id: "folder", title: "Point it at your own project", body: "Pick a folder or repo, and the agent works on your real code, on a branch of its own.", done: read(OWN_FOLDER), act: "Pick a folder", run: onPickFolder },
-    { id: "mate", title: "Add a teammate who stays", body: "A name, a role and a coding tool: it keeps its memory and works through its queue while you're away.", done: !!t?.teammates.length, act: "Add", run: newTeammate },
+    // The Crew, which opens on its three-click setup (CrewSetup.tsx) while nobody is on it, not the full New agent form (the "Why
+    // Crew" plan, 2026-11-13).
+    { id: "mate", title: "Add an agent who stays", body: "Say what you want help with and Friday suggests the crew. They keep their memory and work through their queue while you're away.", done: !!t?.teammates.length, act: "Add", run: () => choosePlace("team") },
   ];
   const done = steps.filter((s) => s.done).length;
   if (hidden || done === steps.length) return null;

@@ -11,7 +11,6 @@
  * Its own code, not the Agent Studio's (that is the paid edition's): the same look, taken from the tray tokens.
  *
  */
-import { AutomationsSwitch } from "./AutomationsSwitch.js";
 import { holdLeave } from "./leave-guard.js";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import {
@@ -250,10 +249,16 @@ function useCrewTeam(identity: Identity): Team | null {
   return shared ?? read;
 }
 
-export function TeamWorkflowsPage({ identity, onCoding }: { identity: Identity; /** Across to the coding tools' own automations. */ onCoding: () => void }) {
+/**
+ * The crew's workflows as the one Automations list needs them (Automations.tsx): read, run and turned on and off there, beside the
+ * coding tools' own automations, each opened in the builder (TeamWorkflowsPage). The two back ends stay apart (automations.ts and
+ * team-workflows.ts); the list is one (the "Why Crew" plan, 2026-11-13: two automation systems on one page). `on` false reads
+ * nothing, for a page that doesn't show them.
+ */
+export function useCrewWorkflows(identity: Identity, on = true) {
   const team = useCrewTeam(identity);
-  // On the hosted service a step or a trigger names your own teammates, or one on a key its keeper shares: anyone else's on its
-  // own plan takes its keeper's work only (own-plan.ts). The open-source edition's teammates are all the person's.
+  // On the hosted service a step or a trigger names your own crew mates, or one on a key its keeper shares: anyone else's on its
+  // own plan takes its keeper's work only (own-plan.ts). The open-source edition's crew mates are all the person's.
   const pick = useMemo(() => {
     const mates = (team?.teammates ?? []) as (TeammateView & { mine?: boolean; onKey?: boolean })[];
     if (!mates.some((m) => m.mine !== undefined)) return undefined;
@@ -263,7 +268,6 @@ export function TeamWorkflowsPage({ identity, onCoding }: { identity: Identity; 
   const names = useNames(team, pick);
   const [list, setList] = useState<WorkflowView[] | null>(null);
   const [failed, setFailed] = useState("");
-  const [editing, setEditing] = useState<{ id: string | null; draft: Draft; fresh?: boolean } | null>(null);
   const [busy, setBusy] = useState("");
   const [ask, confirmUI] = useConfirm();
   /** A workflow whose Run now asks for something first. */
@@ -279,19 +283,12 @@ export function TeamWorkflowsPage({ identity, onCoding }: { identity: Identity; 
     }
   }, [identity]);
   useEffect(() => {
+    if (!on) return;
     void load();
-    // A run moves on by itself (its steps, then done): read again while the page is in sight, oftener while one runs.
+    // A run moves on by itself (its steps, then done): read again while the page is in sight.
     const t = setInterval(() => document.visibilityState === "visible" && void load(), 5000);
     return () => clearInterval(t);
-  }, [load]);
-  // Its own name in the tab, however it was reached (the Team room's header goes there without the app's navigate).
-  useEffect(() => void (document.title = "Crew workflows · Friday"), []);
-  // The sidebar's Automations, pressed in the builder, is the way back to the list.
-  useEffect(() => {
-    const again = (e: Event) => (e as CustomEvent).detail === "automations" && setEditing(null);
-    addEventListener("friday:same-page", again);
-    return () => removeEventListener("friday:same-page", again);
-  }, []);
+  }, [load, on]);
 
   const runNow = async (w: WorkflowView, input?: string) => {
     if (w.ask?.trim() && input === undefined) return setAsking(w);
@@ -310,120 +307,122 @@ export function TeamWorkflowsPage({ identity, onCoding }: { identity: Identity; 
     await api(identity, `/api/workflows/${w.id}`, { method: "PATCH", body: JSON.stringify({ on }), headers: JSON_BODY }).catch((e) => setFailed((e as Error).message));
     void load();
   };
-  const startFrom = (t: WorkflowTemplate | null) =>
-    setEditing({ id: null, fresh: true, draft: t ? { ...blank(), ...fromTemplate(t, names.pickable.map((m) => ({ id: m.id, name: m.name, role: m.role }))) } : blank() });
+  const dialogs = (
+    <>
+      {confirmUI}
+      {asking && <RunAsk name={asking.name} ask={asking.ask ?? ""} onClose={() => setAsking(null)} onRun={(input) => (setAsking(null), void runNow(asking, input))} />}
+    </>
+  );
+  return { team, names, list, failed, busy, load, runNow, setOn, ask, dialogs };
+}
+export type CrewWorkflows = ReturnType<typeof useCrewWorkflows>;
 
-  if (editing) {
-    const view = editing.id ? (list?.find((w) => w.id === editing.id) ?? null) : null;
+/**
+ * A crew workflow opened in the builder, from the one Automations list (Automations.tsx): `open` is its id, or "new" for one not
+ * made yet. Back, or the sidebar's Automations pressed here, returns to the list (`onList`).
+ */
+export function TeamWorkflowsPage({ identity, open, onList }: { identity: Identity; open: string; onList: () => void }) {
+  const wf = useCrewWorkflows(identity);
+  const { team, names, list } = wf;
+  const [editing, setEditing] = useState<{ id: string | null; draft: Draft; fresh?: boolean } | null>(open === "new" ? { id: null, fresh: true, draft: blank() } : null);
+  // An existing one opens once the list has it.
+  useEffect(() => {
+    if (open === "new" || editing || !list) return;
+    const w = list.find((x) => x.id === open);
+    if (w) setEditing({ id: w.id, draft: draftOf(w) });
+    else onList();
+  }, [list, open]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Its own name in the tab, however it was reached.
+  useEffect(() => void (document.title = "Crew workflow · Friday"), []);
+  // The sidebar's Automations, pressed in the builder, is the way back to the list.
+  useEffect(() => {
+    const again = (e: Event) => (e as CustomEvent).detail === "automations" && onList();
+    addEventListener("friday:same-page", again);
+    return () => removeEventListener("friday:same-page", again);
+  }, [onList]);
+
+  if (!editing)
     return (
-      <>
-        {confirmUI}
-        <Builder
-          key={editing.id ?? "new"}
-          identity={identity}
-          team={team}
-          names={names}
-          id={editing.id}
-          initial={editing.draft}
-          view={view}
-          fresh={!!editing.fresh}
-          others={(list ?? []).filter((w) => w.id !== editing.id && !theirs(w))}
-          ask={ask}
-          onBack={() => (setEditing(null), void load())}
-          onSaved={(v) => (setList((l) => [v, ...(l ?? []).filter((x) => x.id !== v.id)]), setEditing({ id: v.id, draft: draftOf(v) }))}
-          onRan={() => void load()}
-          onDeleted={() => (setEditing(null), void load())}
-        />
-      </>
-    );
-  }
-
-  return (
-    <div className="page conns-page automations-page wf-page px-6! max-[640px]:px-4!">
-      <div className="page-inner">
-        {confirmUI}
-        {asking && <RunAsk name={asking.name} ask={asking.ask ?? ""} onClose={() => setAsking(null)} onRun={(input) => (setAsking(null), void runNow(asking, input))} />}
-        {/* Untitled on screen like every page (Arun, 2026-10-19: "get rid of all of these header text"): the title is the tab's. */}
-        <div className="auto-head">
-          <AutomationsSwitch view="workflows" onView={onCoding} />
-          <PageHeader
-            title="Crew workflows"
-            className="mb-0"
-            actions={
-              <Button size="sm" className="h-8 px-3 text-[13px]" onClick={() => startFrom(null)}>
-                <PlusIcon /> New workflow
-              </Button>
-            }
-          />
+      <div className="page conns-page automations-page wf-page px-6! max-[640px]:px-4!">
+        <div className="page-inner">
+          {wf.failed ? (
+            <p role="alert" className="mb-4 rounded-lg border border-[var(--border)] px-3 py-2 text-[13px] text-[var(--red)]">
+              {wf.failed}
+            </p>
+          ) : (
+            <Skeleton className="h-[172px] rounded-2xl" />
+          )}
         </div>
-        {failed && (
-          <p role="alert" className="mb-4 rounded-lg border border-[var(--border)] px-3 py-2 text-[13px] text-[var(--red)]">
-            {failed}
-          </p>
-        )}
-        <WorkflowAsks identity={identity} onAnswered={() => void load()} />
-        {list === null ? (
-          <div className="wf-grid">
-            {[0, 1, 2].map((i) => (
-              <Skeleton key={i} className="h-[172px] rounded-2xl" />
-            ))}
-          </div>
-        ) : list.length === 0 ? (
-          <Intro />
-        ) : (
-          <ul className="wf-grid" aria-label="Your crew's workflows">
-            {list.map((w) => (
-              <WorkflowCard key={w.id} w={w} names={names} busy={busy === w.id} onEdit={() => setEditing({ id: w.id, draft: draftOf(w) })} onRun={() => void runNow(w)} onToggle={(on) => void setOn(w, on)} />
-            ))}
-          </ul>
-        )}
-        <section className="mt-9" aria-labelledby="wf-templates">
-          <h2 id="wf-templates" className="wf-tpl-head">
-            {list?.length ? "Start another from a template" : "Start from a template"}
-          </h2>
-          <ul className="wf-tpl-list">
-            {WORKFLOW_TEMPLATES.map((t) => (
-              <TemplateTile key={t.id} t={t} names={names} onUse={() => startFrom(t)} />
-            ))}
-          </ul>
-        </section>
       </div>
-    </div>
+    );
+  const view = editing.id ? (list?.find((w) => w.id === editing.id) ?? null) : null;
+  return (
+    <>
+      {wf.dialogs}
+      <Builder
+        key={editing.id ?? "new"}
+        identity={identity}
+        team={team}
+        names={names}
+        id={editing.id}
+        initial={editing.draft}
+        view={view}
+        fresh={!!editing.fresh}
+        others={(list ?? []).filter((w) => w.id !== editing.id && !theirs(w))}
+        ask={wf.ask}
+        onBack={onList}
+        onSaved={(v) => (void wf.load(), setEditing({ id: v.id, draft: draftOf(v) }))}
+        onRan={() => void wf.load()}
+        onDeleted={onList}
+      />
+    </>
   );
 }
 
 /**
- * Before there are any: a workflow drawn as what it is, trigger to outcome. Made from the header's one New workflow, as Automations'
- * intro is (final pass, 2026-10-29: one primary button a screen, DIRECTION.md §2).
+ * A crew workflow as a row of the one Automations list, beside the coding tools' own (Automations.tsx Row): what starts it as a
+ * chip, then who runs it, its crew mates by face and by name, and its controls where a coding automation has them (the "Why Crew"
+ * plan, 2026-11-13: each item says who runs it). A run under way says where it is instead. The row opens it in the builder.
  */
-function Intro() {
-  const parts: [LucideIcon, string, string][] = [
-    [ClockIcon, "When", "Every Friday at 16:00"],
-    [UsersIcon, "Researcher", "Reads the week's merges"],
-    [FileTextIcon, "Writer", "Drafts the changelog"],
-    [BellRingIcon, "Then", "A brief in the room"],
-  ];
+export function CrewWorkflowRow({ w, wf, onEdit }: { w: WorkflowView; wf: CrewWorkflows; onEdit: () => void }) {
+  const last = w.runs[0];
+  const live = underWay(last) ? last : null;
+  const Icon = TRIGGER_ICON[w.trigger.kind];
+  const owner = theirs(w);
+  const who = stepsLine(w.steps, wf.names);
   return (
-    <div className="auto-intro wf-intro">
-      <div className="flex min-w-0 flex-col justify-center gap-3">
-        <h2 className="text-[20px] leading-tight font-semibold tracking-[-0.01em]">Hand your crew work that runs itself</h2>
-        <p className="max-w-[440px] text-[14px] leading-relaxed text-[var(--text-muted)]">
-          A workflow is a trigger, then steps, then what happens after. A step is a teammate and what it does; a check sends the work back until it passes; your OK waits for you. Press New workflow and describe it, or start from a template.
-        </p>
-      </div>
-      <ol className="wf-intro-flow" aria-label="An example">
-        {parts.map(([Icon, label, text], i) => (
-          <li key={label}>
-            <span className="wf-intro-node">
-              <Icon className="size-3.5" />
-              <span className="wf-intro-label">{label}</span>
-              <span className="wf-intro-text">{text}</span>
-            </span>
-            {i < parts.length - 1 && <ArrowRightIcon className="wf-intro-arrow size-3.5" aria-hidden="true" />}
-          </li>
-        ))}
-      </ol>
-    </div>
+    <li className="auto-row min-w-0" data-kind="crew">
+      <span className={cn("grid h-8 min-w-8 shrink-0 place-items-center rounded-lg bg-[var(--hover)] px-1", !w.on && "opacity-70")}>
+        <StepFaces steps={w.steps} room={w.room} names={wf.names} size={18} run={live} />
+      </span>
+      <button type="button" className={cn("min-w-0 flex-1 text-left focus-visible:outline-none", !w.on && "opacity-70")} onClick={onEdit} aria-label={`Edit ${w.name}`}>
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-[14px] font-medium">{w.name}</span>
+          <span className="auto-when" style={{ "--tone": `var(${w.trigger.kind === "schedule" ? "--st-queued" : w.trigger.kind === "webhook" ? "--st-working" : w.trigger.kind === "manual" ? "--text-muted" : "--st-review"})` } as CSSProperties}>
+            <Icon className="size-3" />
+            {triggerShort(w.trigger, wf.names)}
+          </span>
+        </span>
+        <span className="mt-0.5 block truncate text-[13px] text-[var(--text-muted)]">
+          {live ? liveWords(live, w.steps) : who ? `Your crew: ${who}` : "Your crew, no steps yet"}
+          {owner ? ` · ${owner.name}'s` : ""}
+        </span>
+      </button>
+      {last && !live && (
+        <span className="hidden shrink-0 items-center gap-1.5 text-[12px] text-[var(--text-muted)] sm:flex" title={last.note || RUN_WORD[last.status]}>
+          <TaskMark state={runMark(last.status)} />
+          {RUN_WORD[last.status]} · {relTime(last.at)}
+        </span>
+      )}
+      {!owner && (
+        <Tip label="Run it now">
+          <Button variant="ghost" size="icon-sm" aria-label={`Run ${w.name} now`} disabled={wf.busy === w.id} onClick={() => void wf.runNow(w)}>
+            <PlayIcon />
+          </Button>
+        </Tip>
+      )}
+      <Switch checked={w.on} disabled={!!owner} onCheckedChange={(on) => void wf.setOn(w, on)} aria-label={owner ? `${w.name} is ${owner.name}'s, ${w.on ? "on" : "off"}` : w.on ? `Pause ${w.name}` : `Turn ${w.name} on`} />
+    </li>
   );
 }
 
@@ -550,84 +549,6 @@ function StepFaces({ steps, room, names, size = 22, run }: { steps: WorkflowStep
         </span>
       ))}
     </span>
-  );
-}
-
-function WorkflowCard({ w, names, busy, onEdit, onRun, onToggle }: { w: WorkflowView; names: Names; busy: boolean; onEdit: () => void; onRun: () => void; onToggle: (on: boolean) => void }) {
-  const last = w.runs[0];
-  const live = underWay(last) ? last : null;
-  const Icon = TRIGGER_ICON[w.trigger.kind];
-  const owner = theirs(w);
-  return (
-    // The whole card opens it, as a card does; its own controls keep their presses (QA, 2026-10-28: only the title opened it).
-    // Its chain as faces (24px, ringed while their step runs), the schedule as meta, and the switch the one control; a run
-    // under way says what it is doing under the title (Arun, 2026-10-29: "so clean and beautiful…"; DIRECTION.md §9.9). Run now
-    // is there under the pointer or the keyboard only, not a second control at rest.
-    <li className={cn("wf-card", !w.on && "off", live && "live")} onClick={(e) => !(e.target as HTMLElement).closest("button, a, input, [role=switch]") && onEdit()}>
-      <div className="wf-card-head">
-        <button type="button" className="wf-card-open" onClick={onEdit} aria-label={`Edit ${w.name}`}>
-          <span className="wf-card-name">{w.name}</span>
-        </button>
-        {!owner && (
-          <Tip label="Run it now">
-            <Button variant="ghost" size="icon-sm" className="wf-card-ctl wf-card-run" aria-label={`Run ${w.name} now`} disabled={busy} onClick={onRun}>
-              <PlayIcon />
-            </Button>
-          </Tip>
-        )}
-        <Switch className="wf-card-ctl" checked={w.on} disabled={!!owner} onCheckedChange={onToggle} aria-label={owner ? `${w.name} is ${owner.name}'s, ${w.on ? "on" : "off"}` : w.on ? `Turn ${w.name} off` : `Turn ${w.name} on`} />
-      </div>
-      {live ? (
-        <span className="wf-card-live" role="status">
-          <span className={live.status === "asking" ? "wf-card-asking" : "tm-live-text"}>{liveWords(live, w.steps)}</span>
-        </span>
-      ) : (
-        <span className="wf-card-when">
-          <Icon className="size-3.5" aria-hidden="true" />
-          <span className="truncate">{triggerShort(w.trigger, names)}</span>
-          <span className="wf-card-room">· {owner && w.room === TEAM_ROOM ? `${owner.name}'s Crew` : names.room(w.room) || "a room that's gone"}</span>
-          {owner && w.room !== TEAM_ROOM && <span className="wf-card-room">· {owner.name}'s</span>}
-        </span>
-      )}
-      <span className="wf-card-steps">
-        <StepFaces steps={w.steps} room={w.room} names={names} size={24} run={live} />
-        <span className="wf-card-who">{stepsLine(w.steps, names)}</span>
-      </span>
-      <div className="wf-card-foot">
-        {/* While it runs the line under the title says so: the foot says only when it started, not "Running" again. */}
-        {live ? (
-          <span className="wf-card-last">Started {relTime(live.at) === "now" ? "just now" : `${relTime(live.at)} ago`}</span>
-        ) : last ? (
-          <span className="wf-card-last" title={last.note || RUN_WORD[last.status]}>
-            <TaskMark state={runMark(last.status)} />
-            {RUN_WORD[last.status]} · {relTime(last.at) === "now" ? "just now" : `${relTime(last.at)} ago`}
-          </span>
-        ) : (
-          <span className="wf-card-last muted">Hasn't run yet</span>
-        )}
-        {w.next && w.trigger.kind === "schedule" && <span className="wf-card-next" title={new Date(w.next).toLocaleString()}>Next: {whenIn(w.next, w.trigger.schedule.tz)}</span>}
-      </div>
-    </li>
-  );
-}
-
-/** A template as a row (DIRECTION.md §9.9): its name, what it does, who does it and when, and "Use" there on hover or focus. */
-function TemplateTile({ t, names, onUse }: { t: WorkflowTemplate; names: Names; onUse: () => void }) {
-  const made = useMemo(() => fromTemplate(t, names.pickable.map((m) => ({ id: m.id, name: m.name, role: m.role }))), [t, names]);
-  return (
-    <li>
-      <button type="button" className="wf-tpl-row" onClick={onUse}>
-        <span className="wf-tpl-text">
-          <span className="wf-tpl-name">{t.name}</span>
-          <span className="wf-tpl-blurb">{t.blurb}</span>
-        </span>
-        <StepFaces steps={made.steps} room={TEAM_ROOM} names={names} size={20} />
-        <span className="wf-tpl-when">{triggerShort(made.trigger, names)}</span>
-        <span className="wf-tpl-use">
-          Use <ArrowRightIcon className="size-3.5" />
-        </span>
-      </button>
-    </li>
   );
 }
 
@@ -873,8 +794,8 @@ function Builder({
     <div className={cn("ag-studio wf-studio", side && "with-side")}>
       {asking && <RunAsk name={d.name || "it"} ask={d.ask ?? ""} onClose={() => setAsking(false)} onRun={(input) => (setAsking(false), void runNow(input))} />}
       <header className="wf-head">
-        <Tip label="Back to the workflows">
-          <Button variant="ghost" size="icon-sm" aria-label="Back to the workflows" onClick={back}>
+        <Tip label="Back to Automations">
+          <Button variant="ghost" size="icon-sm" aria-label="Back to Automations" onClick={back}>
             <ArrowLeftIcon />
           </Button>
         </Tip>
@@ -2552,7 +2473,7 @@ function RoomSelect({ value, names, onChange, label }: { value: string; names: N
         <SelectValue placeholder="Pick a room" />
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value={TEAM_ROOM}>{names.pick ? ((n) => `Your Crew · your ${n === 1 ? "teammate" : `${n} teammates`}`)(names.mates.filter((m) => (m as { mine?: boolean }).mine).length) : "Crew room · everyone"}</SelectItem>
+        <SelectItem value={TEAM_ROOM}>{names.pick ? ((n) => `Your Crew · your ${n === 1 ? "crew mate" : `${n} crew mates`}`)(names.mates.filter((m) => (m as { mine?: boolean }).mine).length) : "Crew room · everyone"}</SelectItem>
         {names.rooms.map((r) => (
           <SelectItem key={r.id} value={r.id}>
             {r.name} · {Object.keys(r.lanes).length} teammate{Object.keys(r.lanes).length === 1 ? "" : "s"}

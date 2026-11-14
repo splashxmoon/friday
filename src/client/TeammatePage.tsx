@@ -6,7 +6,7 @@
  *
  */
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { FileIcon, FolderGit2Icon, GitPullRequestIcon, PlusIcon, RefreshCwIcon, ShieldIcon, XIcon } from "lucide-react";
+import { ChevronLeftIcon, ChevronRightIcon, FileIcon, FolderGit2Icon, GitPullRequestIcon, PlusIcon, RefreshCwIcon, ShieldIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ENGINE_NAMES, type EngineTool } from "../types.js";
@@ -22,7 +22,7 @@ import { ACCESS, freeLine, roleWord, timeOf } from "./team-status.js";
 import { isLocal } from "./edition.js";
 import { describeCheckIn } from "../teammate-checkins.js";
 import { SkillsPanel } from "./CrewSkills.js";
-import { base, Face, foldersOf, markOf, mateOn, mateStatus, modelLabel, refreshTeam, short, TeammateDialog, TeammateFolderCard, toolName, useTeamNow, workingSinceOf, type Team } from "./Teammates.js";
+import { base, Face, foldersOf, markOf, mateOn, mateStatus, MATE_CATS, modelLabel, refreshTeam, setFolders, short, TeammateFolderCard, TeammateForm, toolName, useTeamNow, workingSinceOf, type MateCat, type Team } from "./Teammates.js";
 
 import { setMateTab, useMateTab, type MateTab } from "./mate-tab.js";
 export { setMateTab, useMateTab, type MateTab };
@@ -32,8 +32,104 @@ const TABS: { id: MateTab; label: string }[] = [
   { id: "results", label: "Results" },
   { id: "skills", label: "Skills" },
   { id: "memory", label: "Memory" },
-  { id: "settings", label: "Settings" },
 ];
+
+/** The category its Settings panel opens on, when something asked for one (the Access fact opens Access). */
+let nextCat: MateCat = "profile";
+/** A crew mate's Settings panel, opened on a category (Arun, 2026-11-13: "a settings button in the header that opens a side panel"). */
+export const openMateSettings = (lane: string, cat: MateCat = "profile") => ((nextCat = cat), setMateTab(lane, "settings"));
+
+/**
+ * A crew mate's settings, as a tab of its chat's side panel (Arun, 2026-11-13: "make the settings panel work like this"): each
+ * category a card saying what it is set to now, opened as a page of the panel with the way back.
+ */
+export function MateSettingsBody({ identity, lane }: { identity: Identity; lane: string }) {
+  const m = mateOn(lane);
+  const [open, setOpen] = useState<MateCat | null>(nextCat === "profile" ? null : nextCat);
+  useEffect(() => void (nextCat = "profile"), []);
+  if (!m) return null;
+  let computer = null as { label: string; connected: boolean } | null;
+  const access = ACCESS[m.mode ?? "full"].label;
+  const now: Record<MateCat, string> = {
+    profile: (m.role ?? "").split("\n")[0]?.trim() || "No instructions yet",
+    tool: `${toolName(m.tool)} · ${modelLabel(m.tool, m.model)}`,
+    access,
+    computer: computer ? `${computer.label}${computer.connected ? "" : " · not connected"}` : "Your computer",
+    where: ["Its own folder", ...foldersOf(m).map(base)].join(", "),
+    checkins: m.checkins?.length ? `${m.checkins.length} check-in${m.checkins.length === 1 ? "" : "s"}` : "None",
+    budget: m.budget ? "Set" : "No caps",
+  };
+  // A category opens as a page of the panel, with the way back to the list (Arun, 2026-11-13: "dont make these dropdowns but
+  // instead it will be the side panel like a new page with a back button").
+  const page = open ? MATE_CATS.find((c) => c.id === open)! : null;
+  return (
+    <section className="msd" aria-label={`${m.name}'s settings`}>
+      {page ? (
+        <>
+          {/* Just "Back", its highlight its own size (Arun, 2026-11-13: "the hover highlight shouldnt be full width ... say back"). */}
+          <button type="button" className="msd-back" onClick={() => setOpen(null)} aria-label="Back to settings">
+            <ChevronLeftIcon aria-hidden="true" />
+            Back
+          </button>
+          <div className="msd-page" key={page.id} aria-label={page.label}>
+            {page.id === "where" ? <MateFolders identity={identity} lane={lane} /> : <TeammateForm inline only={page.id} identity={identity} editing={m} />}
+          </div>
+        </>
+      ) : (
+        <ol className="tp-list">
+          {MATE_CATS.map((c) => (
+            <li key={c.id} className="tp-card msd-card">
+              <button type="button" className="tp-card-head" onClick={() => setOpen(c.id)}>
+                <span className="tp-text">
+                  <b>{c.label}</b>
+                  <span className="tp-now">{now[c.id]}</span>
+                </span>
+                <ChevronRightIcon className="tp-chev" aria-hidden="true" />
+              </button>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Where a crew mate works, as the folder and repo picker sessions use (Arun, 2026-11-13: "add a open to work in ... like what we
+ * have for the folder, repo, git picker"): its own folder, each folder or repo it works in with a ×, and Open to add another.
+ */
+function MateFolders({ identity, lane }: { identity: Identity; lane: string }) {
+  const m = mateOn(lane);
+  const btn = useRef<HTMLButtonElement>(null);
+  const [picking, setPicking] = useState(false);
+  if (!m) return null;
+  const say = (text: string) => dispatchEvent(new CustomEvent("friday:notice", { detail: text }));
+  const dirs = foldersOf(m);
+  return (
+    <div className="msd-folders">
+      <div className="msd-folder" title={m.folder}>
+        <FolderGit2Icon className="size-3.5" aria-hidden="true" />
+        <span className="msd-folder-name">Its own folder</span>
+        <small>{short(m.folder)}</small>
+      </div>
+      {dirs.map((d) => (
+        <div key={d} className="msd-folder" title={d}>
+          <FolderGit2Icon className="size-3.5" aria-hidden="true" />
+          <span className="msd-folder-name">{base(d)}</span>
+          <small>{short(d)}</small>
+          <button type="button" className="msd-folder-x" aria-label={`Stop ${m.name} working in ${short(d)}`} title="Take it away" onClick={() => void setFolders(identity, m, dirs.filter((x) => x !== d)).catch((e: Error) => say(e.message))}>
+            <XIcon className="size-3" />
+          </button>
+        </div>
+      ))}
+      <button type="button" ref={btn} className="msd-open" onClick={() => setPicking(true)}>
+        <PlusIcon className="size-3.5" aria-hidden="true" />
+        Open a folder or repo
+      </button>
+      {picking && <TeammateFolderCard identity={identity} lane={lane} trigger={btn.current} onClose={() => setPicking(false)} notify={say} />}
+    </div>
+  );
+}
 
 /** "40m", "1h 5m": minutes as the page says them. */
 // Under half a minute is "<1m", never "0m" (2026-10-28 QA).
@@ -62,20 +158,19 @@ export function TeammatePage({ lane, identity, notify, branch }: { lane: string;
   const tabs = (
     <div className="tm-tabs" role="tablist" aria-label={`${m.name}'s page`}>
       {/* Someone else's memory and settings are its keeper's alone (hosted-crew.ts). */}
-      {TABS.filter((x) => mine || (x.id !== "settings" && x.id !== "memory")).map((x) => (
+      {TABS.filter((x) => mine || x.id !== "memory").map((x) => (
         <button key={x.id} type="button" role="tab" id={`tm-tab-${x.id}`} aria-selected={tab === x.id} aria-controls={x.id === "chat" ? undefined : `tm-panel-${x.id}`} className="tm-tab" onClick={() => setMateTab(lane, x.id)}>
           {x.label}
         </button>
       ))}
     </div>
   );
-  const panel = tab !== "chat" && identity && (
+  const panel = tab !== "chat" && tab !== "settings" && identity && (
     <section className="tm-panel" id={`tm-panel-${tab}`} role="tabpanel" aria-labelledby={`tm-tab-${tab}`}>
       {tab === "activity" && <ActivityTab identity={identity} id={m.id} lane={lane} />}
       {tab === "results" && <ResultsTab identity={identity} id={m.id} lane={lane} />}
       {tab === "skills" && <SkillsPanel mate={m} />}
       {tab === "memory" && mine && <MemoryEditor identity={identity} id={m.id} name={m.name} />}
-      {tab === "settings" && mine && <TeammateDialog inline identity={identity} editing={m} onClose={() => {}} />}
     </section>
   );
   // In the open-source build, one line (Arun, 2026-11-11, option 3A of the Crew overhaul): who, their role in a word, what they're
@@ -148,54 +243,8 @@ export function TeammatePage({ lane, identity, notify, branch }: { lane: string;
               )}
             </p>
           )}
-          {/* What they may do and run on, as facts in a row: buttons where a press changes it (Settings), plain text otherwise
-              (Arun, 2026-10-28: the critique's "chips that are links look different from buttons"). */}
-          <dl className="tm-facts">
-            <div>
-              <dt>Access</dt>
-              <dd>
-                <button type="button" className="tm-fact-btn" data-mode={m.mode ?? "full"} disabled={!mine} onClick={() => setMateTab(lane, "settings")} title={mine ? `${access.blurb} Change it in Settings.` : access.blurb}>
-                  <ShieldIcon className="size-3" />
-                  {access.label}
-                </button>
-              </dd>
-            </div>
-            <div>
-              <dt>Runs on</dt>
-              <dd title={m.model === "auto" ? "Smart routing: Friday picks the model for each message, from how hard it reads and how much of your limits is left." : undefined}>
-                {/* The coding tool's mark is said here, once, not on the face (DIRECTION.md §6). */}
-                {markOf(m.tool) ? <EngineMark tool={markOf(m.tool) as EngineTool} size={12} /> : <FridayMark size={12} />}
-                {toolName(m.tool)} · {modelLabel(m.tool, m.model)}
-              </dd>
-            </div>
-            {keeper && (
-              <div>
-                <dt>Keeper</dt>
-                <dd title={mine ? "Yours: it runs on your computer, on your plan" : `${keeper}'s: it runs on ${keeper}'s computer, and what you ask of it goes to ${keeper} first`}>{keeper}</dd>
-              </div>
-            )}
-            {computer && (
-              <div>
-                <dt>Computer</dt>
-                <dd title={computer.connected ? "Connected now" : "Not connected: it starts once this computer is"}>
-                  {computer.label}
-                  {computer.connected ? "" : " · not connected"}
-                </dd>
-              </div>
-            )}
-            {backup && (
-              <div>
-                <dt>Backup</dt>
-                <dd>{backup}</dd>
-              </div>
-            )}
-            {today && (
-              <div>
-                <dt>Today</dt>
-                <dd>{today.turns ? `${today.turns} turn${today.turns === 1 ? "" : "s"}${today.minutes >= 1 ? ` · ${mins(today.minutes)}` : ""}` : "No turns yet"}</dd>
-              </div>
-            )}
-          </dl>
+          {/* No facts here (Arun, 2026-11-13: "get rid of this"): what it may do, runs on and works in is in its Settings, in the
+              header's gear. */}
           {m.held && identity && mine && (
             <p className="tm-head-held">
               On hold: they wait until you lift it.{" "}
@@ -204,33 +253,6 @@ export function TeammatePage({ lane, identity, notify, branch }: { lane: string;
               </button>
             </p>
           )}
-          <div className="tm-head-where" aria-label="Where they work">
-            <span className="tm-where-label">Works in</span>
-            <span className="tm-chip own" title={`Their own folder, for their notes: ${m.folder}`}>
-              <FolderGit2Icon className="size-3" />
-              {base(m.folder)}
-              <small>notes</small>
-            </span>
-            {foldersOf(m).map((d, i) => (
-              // The repo by its name; its branch on hover, not a generated name as a code chip (audit CREW-19, 2026-11-04).
-              <span key={d} className="tm-chip" title={i === 0 && branch ? `${d}\nOn ${branch}` : d}>
-                <FolderGit2Icon className="size-3" />
-                <b>{base(d)}</b>
-                {identity && mine && (
-                  <button type="button" aria-label={`Stop ${m.name} working in ${short(d)}`} title="Take it away" onClick={() => void api(identity, `/api/teammates/${m.id}`, { method: "PATCH", body: JSON.stringify({ projects: foldersOf(m).filter((x) => x !== d) }), headers: { "Content-Type": "application/json" } }).then(() => refreshTeam(identity)).catch(() => {})}>
-                    <XIcon className="size-3" />
-                  </button>
-                )}
-              </span>
-            ))}
-            {identity && mine && (
-              <button type="button" ref={addBtn} className="tm-chip add" onClick={() => setGiving(true)}>
-                <PlusIcon className="size-3" />
-                Folder or repo
-              </button>
-            )}
-            {giving && identity && <TeammateFolderCard identity={identity} lane={lane} trigger={addBtn.current} onClose={() => setGiving(false)} notify={notify ?? (() => {})} />}
-          </div>
         </div>
       </header>
       {tabs}

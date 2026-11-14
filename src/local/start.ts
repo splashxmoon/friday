@@ -9,6 +9,7 @@ import { localKV } from "./kv.js";
 import { NO_MODELS } from "./no-models.js";
 import { outsideToken, writeOutsideShim } from "./outside-mcp.js";
 import { PhoneAccess } from "./phone.js";
+import { relayBase } from "./reach.js";
 import { JoinHub } from "./join.js";
 import { endTools } from "../runner/spawn-cli.js";
 
@@ -128,7 +129,7 @@ function fridayVersion(): string {
   }
 }
 
-export async function startLocal(o: { home?: string; port?: number; /** A link from another computer's Settings › Your computers: this one is paired with it, once (add-computer.ts). */ join?: string; /** Removed or turned away there for good: what to do (a service exits, so it isn't started again). */ onGone?: () => void } = {}): Promise<Started> {
+export async function startLocal(o: { home?: string; port?: number; /** A link from another computer's Settings › Your computers: this one is paired with it, once (add-computer.ts). */ join?: string; /** Removed or turned away there for good: what to do (a service exits, so it isn't started again). */ onGone?: () => void; /** Whether the person is using this computer now (the desktop app): their phone isn't notified then. */ atComputer?: () => boolean } = {}): Promise<Started> {
   // The local client, built from its own entry (client-build.ts), whatever the environment says.
   process.env.FRIDAY_EDITION = "local";
   const home = path.resolve(o.home || process.env.FRIDAY_HOME || path.join(os.homedir(), ".friday"));
@@ -164,7 +165,7 @@ export async function startLocal(o: { home?: string; port?: number; /** A link f
   const url = `http://127.0.0.1:${port}`;
   // Your phone (phone.ts): its own listener, off until turned on in Settings, handing what it may ask to this server.
   const version = fridayVersion();
-  const phone = new PhoneAccess({ kv: kv.redis, home, appPort: port, computer: computerName(), names: networkNames, version });
+  const phone = new PhoneAccess({ kv: kv.redis, home, appPort: port, computer: computerName(), names: networkNames, version, relay: relayBase(process.env) });
   // This computer used from another one's Friday (join.ts): a link it holds there, once paired from Settings › Your computers.
   // Known there by this install's own id (from its secret, so the same each time and nobody else's): pairing it again replaces its row.
   const machineId = createHash("sha256").update(`friday-machine:${secret}`).digest("hex").slice(0, 32);
@@ -184,7 +185,7 @@ export async function startLocal(o: { home?: string; port?: number; /** A link f
     // Project memory (brain.ts): each finished run read by the coding tool that did it, on this computer, for what it taught.
     decisionLog: true,
     dataDir: path.join(home, "uploads"),
-    local: { redis: kv.redis, sub: kv.sub, user: { id: "local", name }, phone, outside, join, models: path.join(home, "models"),
+    local: { redis: kv.redis, sub: kv.sub, user: { id: "local", name }, ...(o.atComputer ? { atComputer: o.atComputer } : {}), phone, outside, join, models: path.join(home, "models"),
     },
   });
   // Turned on before, so on again: the phone stays connected through a restart.

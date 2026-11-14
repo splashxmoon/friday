@@ -71,13 +71,14 @@ export const SECTIONS: SectionDef[] = [
     blurb: "The coding tools on this computer, and the accounts each one uses.",
     keywords: "coding tools tool claude code codex cursor copilot opencode antigravity agy devin junie kiro droid amp muse sign in sign out install account accounts login acp other agent command fewer more",
   },
+  // One Models section in the hosted edition (UX audit F10, 2026-11-07): Friday's models and your own, in two groups
+  // (Settings.tsx). "models", the old Friday's models section, opens it (settingsSection).
   {
     id: "own-models",
-    label: "Your models",
+    label: "Models",
     group: "Agents",
     icon: "key",
-    blurb:
-      "Your own API keys, and models running on this computer, for Friday's agent.",
+    blurb: "Your own API keys, and models running on this computer, for Friday's agent.",
     keywords: "own model api key byok bring your own ollama lm studio local openai anthropic gemini groq deepseek mistral friday code",
   },
   {
@@ -100,13 +101,14 @@ export const SECTIONS: SectionDef[] = [
   },
   // Not a section: a row to the Usage page, so a search for usage, a budget or a limit finds it (audit REST-21, Arun 2026-11-04).
   // App.tsx opens the page for it.
+  // The one Usage: the team's spend and credits are on that page too (UX audit F10, 2026-11-07).
   {
     id: "usage-limits",
-    label: "Usage & limits",
+    label: "Usage",
     group: "Agents",
     icon: "usage",
     blurb: "Your coding tools' limits, what your plans cost, and the tokens your agents used.",
-    keywords: "usage limits limit budget spend cost price plan tokens 5-hour weekly alert reset heatmap busiest hours history",
+    keywords: "usage limits limit budget spend cost price plan tokens credits 5-hour weekly alert reset heatmap busiest hours history daily",
   },
 
   // ── Computers: this one, and the others agents can run on ──
@@ -139,15 +141,7 @@ export const SECTIONS: SectionDef[] = [
     blurb: "The GitHub login your agents clone, push and open pull requests with.",
     keywords: "github git login sign in pull request pr repos clone push token gh",
   },
-  // Only on this computer's Friday: the hosted one has its own MCP server, for apps with a token (public-mcp.ts).
-  {
-    id: "outside-agents",
-    label: "Other agents (MCP)",
-    group: "Connections",
-    icon: "agent",
-    blurb: "Let Claude Code, Codex, Cursor and other agents on this computer hand work to Friday.",
-    keywords: "mcp server outside other agents let use friday claude code codex cursor hand off delegate start session tools api",
-  },
+
 
   // ── Workspace: the team, and what it pays ──
 
@@ -221,6 +215,7 @@ export function settingsSection(id: string | null | undefined): string {
     about: "updates",
     feedback: "help",
     analytics: "privacy",
+    // One Models (UX audit F10): the old section's name opens the new.
   };
   const s = aliases[id ?? ""] ?? id ?? "";
   return SECTIONS.some((x) => x.id === s) ? s : "appearance";

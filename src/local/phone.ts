@@ -6,6 +6,7 @@ import https from "node:https";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { ReachHome, type ReachState } from "./reach.js";
 
 /**
  * Your phone, connected to the Friday on this computer (Arun, 2026-10-30: phone access so people stay with Friday, paired over
@@ -55,10 +56,31 @@ export interface Device {
   version?: string;
   fp?: string;
   port?: number;
+  /** A phone's notifications (phone-push.ts): Apple's token for it, debug or release, and the key it seals them with. */
+  push?: PhonePush;
+}
+
+/** Where a phone's notifications go, and the key only it and this computer hold. */
+export interface PhonePush {
+  token: string;
+  env: "production" | "sandbox";
+  key: string;
+}
+
+/** A phone's push details as it sent them, checked: a hex token from Apple, and a 32-byte key. Null when they aren't. */
+export function pushOf(raw: unknown): PhonePush | null {
+  const p = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
+  if (!p || typeof p.token !== "string" || !/^[0-9a-f]{32,200}$/i.test(p.token) || typeof p.key !== "string") return null;
+  const key = Buffer.from(p.key.replace(/-/g, "+").replace(/_/g, "/"), "base64");
+  if (key.length !== 32) return null;
+  return { token: p.token.toLowerCase(), env: p.env === "sandbox" ? "sandbox" : "production", key: key.toString("base64") };
 }
 
 /** What another computer said of itself (computers.ts hello, /phone/hello), kept with its pairing. */
 export type DeviceNote = Partial<Pick<Device, "host" | "platform" | "address" | "version">>;
+
+/** A device as Settings sees it: never its token's hash or its push key, only whether notifications reach it. */
+export type ShownDevice = Omit<Device, "hash" | "push"> & { notifies?: true };
 
 /** What the app hears from the listener about other computers: one paired again under a new id, and one that left. */
 export interface PhoneHooks {
@@ -66,6 +88,8 @@ export interface PhoneHooks {
   forgot?: (id: string) => void;
   /** The Friday version another computer said it runs, as it linked. */
   heard?: (id: string, version: string) => void;
+  /** A phone asking for a test notification (phone-push.ts test): the service's status, 0 when none could be sent. */
+  test?: (id: string, computer: string) => Promise<number>;
 }
 
 export interface PhoneState {
@@ -75,9 +99,11 @@ export interface PhoneState {
   port: number | null;
   addresses: { address: string; via: "wifi" | "tailscale" }[];
   secure: boolean;
-  devices: Omit<Device, "hash">[];
+  devices: ShownDevice[];
   /** Where another computer reaches this one, open or not (computers.ts): the port it pairs with, the certificate it pins. */
   computers?: { port: number | null; fingerprint: string; addresses: string[] };
+  /** Reach from anywhere (reach.ts): through Friday's relay, which only passes ciphertext. */
+  reach?: ReachState;
   error?: string;
 }
 
@@ -97,6 +123,9 @@ export const PHONE_ROUTES: [string, RegExp][] = [
   ["GET", /^\/api\/(agents|templates|workspace|machines)$/],
   // Which tools and folders are here, for a new session: read only. Never the runner's other calls.
   ["POST", /^\/api\/runner\/(tools|folders)$/],
+  // A new task on this computer, from the phone (Arun, 2026-11-12, phase 1): an agent started in a folder here, never with full
+  // access (app.ts holds a phone's to edits or plan, and every command it runs asks first).
+  ["POST", /^\/api\/runner\/start$/],
   ["GET", /^\/api\/teammates(\/since)?$/],
   // The crew from the phone: away, pause, stop all, lift holds, and a room run on its own or stopped (Arun, 2026-10-31: "so i can
   // watch and manage the crew pages too").
@@ -253,8 +282,32 @@ export class PhoneAccess {
       portRetryMs?: number;
       /** A computer removed: its link closed too (computers.ts). */
       onForget?: (id: string) => void;
+      /** Friday's relay for reaching this computer from anywhere (reach.ts relayBase); null when it's off here. */
+      relay?: string | null;
     },
-  ) {}
+  ) {
+    this.reach = new ReachHome({ kv: o.kv, port: () => this.port, relay: o.relay ?? null, log: (l) => console.log(`[phone] ${l}`) });
+  }
+
+  /** This computer through the relay, for phones away from its network (reach.ts). */
+  private reach: ReachHome;
+
+  /** Reach from anywhere on or off: only ever with phone access on, so turning that off closes the relay too. */
+  async setReach(on: boolean): Promise<PhoneState> {
+    this.error = "";
+    if (on && !(await this.phoneOn())) {
+      this.error = "Turn on phone access first.";
+      return this.state();
+    }
+    await this.reach.setOn(on);
+    return this.state();
+  }
+
+  /** What a phone needs to find this computer through the relay, while that's on. */
+  private async route(): Promise<{ id: string; relay: string } | null> {
+    const r = await this.reach.state();
+    return r.on && r.id && r.relay ? { id: r.id, relay: r.relay } : null;
+  }
 
   private addresses() {
     const all = (this.o.addresses ?? reachable)();
@@ -276,17 +329,18 @@ export class PhoneAccess {
     const on = await this.phoneOn();
     const devices = Object.values(await this.o.kv.hgetall(KEY("devices")))
       .map((v) => JSON.parse(v) as Device)
-      .map(({ hash: _h, ...d }) => d)
+      .map(({ hash: _h, push, ...d }): ShownDevice => (push ? { ...d, notifies: true } : d))
       .sort((a, b) => b.seen - a.seen);
     // Listening for the phone: open for another computer only, it is not (audit REST-1).
     const listening = on && !!this.server;
     const computers = { port: this.port ?? (Number(await this.o.kv.get(KEY("port"))) || null), fingerprint: this.fingerprint, addresses: this.server ? this.addresses().map((a) => a.address) : [] };
-    return { on, listening, port: listening ? this.port : null, addresses: listening ? this.addresses() : [], secure: this.secure, devices, computers, ...(this.error ? { error: this.error } : {}) };
+    return { on, listening, port: listening ? this.port : null, addresses: listening ? this.addresses() : [], secure: this.secure, devices, computers, reach: await this.reach.state(), ...(this.error ? { error: this.error } : {}) };
   }
 
   /** Starts it if the person turned it on before, or another computer of theirs links here: Friday opening again keeps both. */
   async resume(): Promise<void> {
     if ((await this.phoneOn()) || (await this.hasComputer())) await this.listen().catch((e) => (this.error = (e as Error).message));
+    if (await this.phoneOn()) await this.reach.resume().catch(() => {});
   }
 
   async setOn(on: boolean): Promise<PhoneState> {
@@ -296,9 +350,12 @@ export class PhoneAccess {
     else {
       // The phones go at once, their code with them; the listener stays only while another computer still needs it.
       this.codes.phone = null;
+      // Nothing reachable through the relay either; its own switch is kept, so it comes back with phone access.
+      this.reach.stop();
       await this.dropPhones();
       await this.settle();
     }
+    if (on) await this.reach.resume().catch(() => {});
     return this.state();
   }
 
@@ -347,7 +404,10 @@ export class PhoneAccess {
     // Its names too, after the addresses: a computer that moves to another network, or is given another address, is still
     // found by name, where the addresses alone left the other one reconnecting for good (2026-11-04 linking test).
     const names = kind === "computer" ? await this.names() : [];
-    const q = new URLSearchParams({ h: [...addresses.map((a) => a.address), ...names].join(","), p: String(this.port), c: code, s: this.secure ? "https" : "http", n: this.o.computer, ...(this.secure ? { f: this.fingerprint } : {}) });
+    // A phone's code carries the relay route too, while Reach from anywhere is on (only with a certificate: the relay must never
+    // carry plain HTTP).
+    const relay = kind === "phone" && this.secure ? await this.route() : null;
+    const q = new URLSearchParams({ h: [...addresses.map((a) => a.address), ...names].join(","), p: String(this.port), c: code, s: this.secure ? "https" : "http", n: this.o.computer, ...(this.secure ? { f: this.fingerprint } : {}), ...(relay ? { r: relay.id, rb: relay.relay } : {}) });
     return { code, until: c.until, link: `friday://${kind === "computer" ? "computer" : "pair"}?${q}` };
   }
 
@@ -397,8 +457,24 @@ export class PhoneAccess {
     return this.state();
   }
 
+  /** The phones to notify, while phone access is on: each with Apple's token and its key (phone-push.ts). */
+  async pushTargets(): Promise<{ id: string; token: string; env: "production" | "sandbox"; key: string }[]> {
+    if (!(await this.phoneOn())) return [];
+    return Object.values(await this.o.kv.hgetall(KEY("devices")))
+      .map((v) => JSON.parse(v) as Device)
+      .flatMap((d) => (d.kind !== "computer" && d.push ? [{ id: d.id, ...d.push }] : []));
+  }
+
+  /** A phone Apple says is gone (the app deleted, or a new token): its notifications stop until it says where again. */
+  async dropPush(id: string): Promise<void> {
+    const raw = await this.o.kv.hget(KEY("devices"), id);
+    if (!raw) return;
+    const { push: _p, ...rest } = JSON.parse(raw) as Device;
+    await this.o.kv.hset(KEY("devices"), id, JSON.stringify(rest));
+  }
+
   /** A phone (or a computer) giving the code it scanned or was given: its token, once, or nothing. */
-  private async pair(code: string, name: string, from: string, kind: "phone" | "computer" = "phone", machine = ""): Promise<{ token: string; id: string } | null> {
+  private async pair(code: string, name: string, from: string, kind: "phone" | "computer" = "phone", machine = "", push: PhonePush | null = null): Promise<{ token: string; id: string } | null> {
     const now = Date.now();
     const tries = (this.recent.get(from) ?? []).filter((t) => now - t < 60_000);
     if (tries.length >= PAIRS_PER_MINUTE) return null;
@@ -422,6 +498,7 @@ export class PhoneAccess {
       hash: sha(token),
       at: now,
       seen: now,
+      ...(kind === "phone" && push ? { push } : {}),
       ...(kind === "computer" ? { address: fromAddress(from), ...(this.fingerprint ? { fp: this.fingerprint } : {}), ...(this.port ? { port: this.port } : {}), ...(mid ? { machine: mid } : {}) } : {}),
     };
     // The same install paired again (added again by SSH, a command, or its app, after a re-pair or a removal): its new pairing
@@ -452,7 +529,8 @@ export class PhoneAccess {
         // When it was last here, for the list in Settings: written at most once a minute.
         if (Date.now() - (this.seenWrite.get(d.id) ?? 0) > 60_000) {
           this.seenWrite.set(d.id, Date.now());
-          void this.o.kv.hset(KEY("devices"), d.id, JSON.stringify({ ...d, seen: Date.now() })).catch(() => {});
+          // Waited for: written after the request's own change to its row (its push details), it put the old row back.
+          await this.o.kv.hset(KEY("devices"), d.id, JSON.stringify({ ...d, seen: Date.now() })).catch(() => {});
         }
         return d;
       }
@@ -524,6 +602,7 @@ export class PhoneAccess {
   }
 
   async stop(): Promise<void> {
+    this.reach.stop();
     clearTimeout(this.portRetry);
     this.portRetry = undefined;
     const s = this.server;
@@ -544,8 +623,8 @@ export class PhoneAccess {
     if (req.headers.origin) return end(res, 403, { error: "Phones only." });
     if (req.method === "POST" && url.pathname === "/phone/pair") {
       const body = await readBody(req, 4096).catch(() => null);
-      const b = (body ? safeJson(body) : null) as { code?: unknown; name?: unknown; kind?: unknown; machine?: unknown } | null;
-      const got = typeof b?.code === "string" ? await this.pair(b.code, typeof b.name === "string" ? b.name : "", req.socket.remoteAddress ?? "", b.kind === "computer" ? "computer" : "phone", typeof b.machine === "string" ? b.machine : "") : null;
+      const b = (body ? safeJson(body) : null) as { code?: unknown; name?: unknown; kind?: unknown; machine?: unknown; push?: unknown } | null;
+      const got = typeof b?.code === "string" ? await this.pair(b.code, typeof b.name === "string" ? b.name : "", req.socket.remoteAddress ?? "", b.kind === "computer" ? "computer" : "phone", typeof b.machine === "string" ? b.machine : "", pushOf(b.push)) : null;
       if (!got) return end(res, 401, { error: "That code didn't work. Make a new one in Friday on your computer." });
       return end(res, 200, { token: got.token, device: got.id, computer: this.o.computer });
     }
@@ -553,7 +632,30 @@ export class PhoneAccess {
     if (!device) return end(res, 401, { error: "This phone isn't connected to Friday on this computer. Pair it again." });
     // Open for another computer while phone access is off: a phone is refused (audit REST-1).
     if (device.kind !== "computer" && !(await this.phoneOn())) return end(res, 401, { error: "Phone access is off in Friday on this computer." });
-    if (url.pathname === "/phone/hello" && req.method === "GET") return end(res, 200, { computer: this.o.computer, device: device.id });
+    if (url.pathname === "/phone/hello" && req.method === "GET") {
+      // The relay route too, so a phone paired before Reach from anywhere was on learns it without pairing again.
+      const relay = device.kind !== "computer" && this.secure ? await this.route() : null;
+      return end(res, 200, { computer: this.o.computer, device: device.id, ...(this.o.version ? { version: this.o.version } : {}), notifies: !!device.push, ...(relay ? { relay } : {}) });
+    }
+    // A test notification, asked for in the app's Settings: sealed and sent as a real one is.
+    if (url.pathname === "/phone/test" && req.method === "POST" && device.kind !== "computer") {
+      if (!device.push) return end(res, 409, { error: "This phone hasn't said where its notifications go. Turn notifications on in the app." });
+      const status = (await this.hooks.test?.(device.id, this.o.computer).catch(() => 0)) ?? 0;
+      return status === 200 ? end(res, 200, { ok: true }) : end(res, 502, { error: status === 0 ? "Friday couldn't send one just now. Wait a few seconds and try again." : `Friday's push service said ${status}.` });
+    }
+    // Where this phone's notifications go, said after pairing (it allowed them later, or Apple gave it a new token), or
+    // { off: true } to stop them.
+    if (url.pathname === "/phone/push" && req.method === "POST" && device.kind !== "computer") {
+      const b = safeJson((await readBody(req, 4096).catch(() => "")) || "{}") as { off?: unknown } | null;
+      const push = b?.off === true ? null : pushOf(b);
+      if (!push && b?.off !== true) return end(res, 400, { error: "That isn't a notification token and key." });
+      const raw = await this.o.kv.hget(KEY("devices"), device.id);
+      if (raw) {
+        const { push: _old, ...rest } = JSON.parse(raw) as Device;
+        await this.o.kv.hset(KEY("devices"), device.id, JSON.stringify(push ? { ...rest, push } : rest));
+      }
+      return end(res, 200, { ok: true, notifies: !!push });
+    }
     // Another computer, once linked: says which Friday it runs, and hears this one's and where this computer is now, so a link
     // whose addresses went stale (another network, a new address) finds it again (join.ts).
     if (url.pathname === "/phone/hello" && req.method === "POST" && device.kind === "computer") {

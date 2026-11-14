@@ -8,7 +8,7 @@
  */
 import { leaving } from "./leave-guard.js";
 import { lazy, memo, Suspense, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
-import { ArrowLeftIcon, ArrowUpIcon, CheckIcon, ChevronRightIcon, CopyIcon, EllipsisIcon, EyeIcon, HandIcon, ZapIcon, MessageSquareIcon, MessageSquareReplyIcon, UsersIcon, Settings2Icon, FolderGit2Icon, GitBranchIcon, PlusIcon, ShuffleIcon, TriangleAlertIcon, UserPlusIcon, XIcon } from "lucide-react";
+import { ArrowUpIcon, CheckIcon, ChevronRightIcon, CopyIcon, EllipsisIcon, EyeIcon, HandIcon, ZapIcon, MessageSquareIcon, MessageSquareReplyIcon, UsersIcon, Settings2Icon, FolderGit2Icon, GitBranchIcon, PlusIcon, ShuffleIcon, TriangleAlertIcon, UserPlusIcon, XIcon } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,6 +24,7 @@ import { ownName, useOwnModels } from "./ownModelStore.js";
 import { describeCheckIn, isCheckIn, quietCheckIns as quietOfLog, type CheckIn } from "../teammate-checkins.js";
 import type { SessionEvent } from "../types.js";
 import { clockUntil } from "../limit-reset.js";
+import { limitLine } from "../limit-words.js";
 import { api } from "./api.js";
 import { focusAgent, useFocusedAgent } from "./agentFocus.js";
 import { ALL } from "./agentNav.js";
@@ -35,7 +36,7 @@ import { useComputers } from "./Computers.js";
 import type { Identity, RecentSession } from "./storage.js";
 import type { Attention } from "../attention.js";
 import type { NeedMark } from "../needs-rank.js";
-import { distinctLook, teamColour as mascotColour } from "./teammate-block.js";
+import { ALL_COLOURS, distinctLook, pinnedColour, shapeSeed, teamColour as mascotColour, withColour } from "./teammate-block.js";
 import { BlobFace, Crown, type Eyes } from "./teammate-face.js";
 import { Initials, initialsFaces } from "./teammate-initials.js";
 import { byState, elapsed, PresenceRing, useBlink, useFlip, useNow, type Presence } from "./presence.js";
@@ -54,7 +55,7 @@ const AgentsPage = lazy(() => import("./AgentsPage.js"));
 const CrewSetup = lazy(() => import("./CrewSetup.js"));
 import { prefillComposer } from "./prefill.js";
 import { notificationsOn } from "./prefs.js";
-import { useMateTab } from "./mate-tab.js";
+import { setMateTab, useMateTab } from "./mate-tab.js";
 const TeammatePage = lazy(() => import("./TeammatePage.js").then((m) => ({ default: m.TeammatePage })));
 import { BudgetFields } from "./TeammateBudget.js";
 import type { MateBudget, RunBudget } from "../team-budget.js";
@@ -378,6 +379,8 @@ let loadFailed = false;
 
 /** The team session's id, once known: the sidebar leaves it out of the sessions list. */
 export const teamSid = () => team?.sid ?? null;
+/** The team as last read, outside a component (a view that has it already keeps it fresh). */
+export const teamNow = (): Team | null => (on ? team : null);
 
 /**
  * The team, kept fresh every few seconds, even out of sight, so what they are doing is current the moment the window is looked
@@ -558,7 +561,7 @@ export const plumbing = (type: string) => PLUMBING.test(type);
 export const foldersOf = (m: Pick<TeammateView, "projects" | "project">): string[] => m.projects ?? (m.project ? [m.project] : []);
 
 /** Gives a teammate a folder or repo to work in, or takes one away; it starts again with them, its conversation kept. */
-async function setFolders(identity: Identity, m: TeammateView, projects: string[]): Promise<void> {
+export async function setFolders(identity: Identity, m: TeammateView, projects: string[]): Promise<void> {
   await api(identity, `/api/teammates/${m.id}`, { method: "PATCH", body: JSON.stringify({ projects }), headers: { "Content-Type": "application/json" } });
   await refreshTeam(identity);
 }
@@ -595,16 +598,10 @@ export function TeammateFolderCard({ identity, lane, trigger, onClose, notify }:
 const COPIED = ["fontFamily", "fontSize", "fontWeight", "fontStyle", "lineHeight", "letterSpacing", "wordSpacing", "textIndent", "tabSize", "whiteSpace", "overflowWrap", "wordBreak", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth", "boxSizing", "textTransform"] as const;
 
 /**
- * Each @Name in the team's box drawn as that teammate's pill, in its own colour, as it is typed (Arun, 2026-10-27: "add like
- * some visual UI thing in the input chat if you @ a teammate"). A textarea can't colour part of its text, so a copy of the text
- * sits exactly under it, in the same type and wrapping, and the textarea's own letters go clear while there is a name to draw;
- * its caret and selection stay its own.
+ * A copy of a textarea's text laid exactly under it (its type, padding, box and wrapping), its own letters clear while `on`, so parts
+ * of the text can be drawn in colour: the team's @names here, and a coding session's @names (mention-tint.tsx).
  */
-export function MentionBackdrop({ sid, text, textarea }: { sid: string; text: string; textarea: RefObject<HTMLTextAreaElement | null> }) {
-  const mates = here(sid);
-  const marks = mentionsIn(text, mates);
-  const back = useRef<HTMLDivElement>(null);
-  const on = marks.length > 0;
+export function useTextBackdrop(textarea: RefObject<HTMLTextAreaElement | null>, back: RefObject<HTMLDivElement | null>, on: boolean): void {
   useLayoutEffect(() => {
     const el = textarea.current;
     const b = back.current;
@@ -635,6 +632,20 @@ export function MentionBackdrop({ sid, text, textarea }: { sid: string; text: st
     };
   });
   useEffect(() => () => textarea.current?.classList.remove("tm-ghost"), [textarea]);
+}
+
+/**
+ * Each @Name in the team's box drawn as that teammate's pill, in its own colour, as it is typed (Arun, 2026-10-27: "add like
+ * some visual UI thing in the input chat if you @ a teammate"). A textarea can't colour part of its text, so a copy of the text
+ * sits exactly under it, in the same type and wrapping, and the textarea's own letters go clear while there is a name to draw;
+ * its caret and selection stay its own.
+ */
+export function MentionBackdrop({ sid, text, textarea }: { sid: string; text: string; textarea: RefObject<HTMLTextAreaElement | null> }) {
+  const mates = here(sid);
+  const marks = mentionsIn(text, mates);
+  const back = useRef<HTMLDivElement>(null);
+  const on = marks.length > 0;
+  useTextBackdrop(textarea, back, on);
   if (!on) return null;
   const parts: ReactNode[] = [];
   let at = 0;
@@ -984,10 +995,8 @@ export function ToolSwitched({ ev, stamp }: { ev: SessionEvent; stamp: ReactNode
             <b>{b.name}</b> is back on <EngineMark tool={b.to} size={13} /> <b>{ENGINE_NAMES[b.to]}</b>: its usage limit lifted
           </>
         ) : (
-          <>
-            <EngineMark tool={b.from} size={13} /> <b>{ENGINE_NAMES[b.from]}</b> ran out of usage, so <b>{b.name}</b> carries on with <EngineMark tool={b.to} size={13} /> <b>{ENGINE_NAMES[b.to]}</b>
-            {b.until ? ` until ${clockUntil(b.until)}` : ""}
-          </>
+          // The same sentence as Code's hand-on at a limit (limit-words.ts).
+          limitLine({ out: ENGINE_NAMES[b.from], until: b.until ? clockUntil(b.until) : null, carrier: b.name, with: ENGINE_NAMES[b.to] })
         )}
       </span>
       <span className="tt-stamp">{stamp}</span>
@@ -1061,7 +1070,7 @@ export function TeamWorking({ sid }: { sid: string }) {
                     </button>
                   ))}
                 </span>
-                <b>{who.length} teammates</b>
+                <b>{who.length} crew mates</b>
               </span>
             ) : (
               // Their faces side by side, then their names, then what they do: still, no shimmer (audit CREW-33, 2026-11-04).
@@ -1342,7 +1351,7 @@ export function TeamTalk(p: {
         {open && a.others.length > 0 ? (
           <MenuButton
             className="tt-assign-change"
-            label={`Give it to another teammate instead of ${p.toName}`}
+            label={`Give it to another crew mate instead of ${p.toName}`}
             text="Change"
             caret="chevronDown"
             items={() => [{ heading: "Give it to" }, ...a.others.map((o) => ({ label: o.name, mark: <Face seed={o.look ?? o.name} size={16} />, onSelect: () => a.onChange(o.name) }))]}
@@ -1480,6 +1489,15 @@ export function TeammateHeader(p: { lane: string; identity?: Identity; notify?: 
 export const teamRecent = (t: Team): RecentSession => ({ sid: t.sid, title: "Crew", invite: t.invite, role: "owner", openedAt: Date.now() });
 
 /** Opens one teammate's own chat, or the Team room when `lane` is null. */
+/**
+ * A crew mate's settings, from its row's Edit…: its chat, with its Settings open in the side panel (SessionView.tsx watches for
+ * it; TeammatePage.tsx MateSettingsBody). The dialog that edited it is gone (Arun, 2026-11-13: its settings in a side panel).
+ */
+export function editTeammate(t: Team, m: TeammateView, onOpen: (r: RecentSession) => void): void {
+  setMateTab(m.lane, "settings");
+  openTeammate(t, m.lane, onOpen);
+}
+
 export function openTeammate(t: Team, lane: string | null, onOpen: (r: RecentSession) => void): void {
   focusAgent(t.sid, lane ?? ALL);
   onOpen(teamRecent(t));
@@ -1770,7 +1788,6 @@ export function SidebarTeammates({ identity, onOpen, activeSid, needs = [], mark
   // The person's own models, read once for the page, so a teammate on one is named by it (modelLabel) wherever it shows.
   useOwnModels(identity);
   const [menu, setMenu] = useState<{ m: TeammateView; x: number; y: number } | null>(null);
-  const [editing, setEditing] = useState<TeammateView | null>(null);
   // Someone else's teammate being asked, and an ask of one of yours being answered (CrewHosted.tsx).
   // Each tray folds by its name, with a chevron and a count, as Code's and Work's groups do, and stays as left (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
   const [shut, setShut] = useState<string[]>(() => {
@@ -1897,7 +1914,7 @@ export function SidebarTeammates({ identity, onOpen, activeSid, needs = [], mark
   const lead = t.lead ?? null;
   const items = (m: TeammateView): MenuItem[] => [
     { label: `Open ${m.name}'s chat`, icon: "chat", onSelect: () => openTeammate(t, m.lane, onOpen) },
-    { label: "Edit…", icon: "pencil", onSelect: () => setEditing(m) },
+    { label: "Edit…", icon: "pencil", onSelect: () => editTeammate(t, m, onOpen) },
     ...(t.rooms ?? [])
       .filter((r) => !r.lanes[m.id])
       .slice(0, 6)
@@ -2116,7 +2133,6 @@ export function SidebarTeammates({ identity, onOpen, activeSid, needs = [], mark
         />
       )}
       {rooming && <RoomDialog identity={identity} team={t} editing={rooming === true ? null : rooming} onClose={() => setRooming(null)} onMade={(r) => openRoom(r, onOpen)} />}
-      {editing && <TeammateDialog identity={identity} editing={editing} onClose={() => setEditing(null)} />}
     </section>
   );
 }
@@ -2428,24 +2444,32 @@ export function RoomDialog({ identity, team: t, editing, onClose, onMade }: { id
   );
 }
 
-/**
- * The tool and model picker (AgentModelPicker) opens in a layer of its own, outside the dialog: a press or a focus there is
- * the picker's, not one that closes the dialog (Arun, 2026-10-27: "cannot select").
- */
-const keepForPicker = (e: Event) => {
-  if ((e.target as Element | null)?.closest?.(".amp")) e.preventDefault();
-};
+/** A crew mate's Settings panel, one category at a time (TeammatePage.tsx MateSettingsBody). */
+export type MateCat = "profile" | "tool" | "access" | "computer" | "where" | "checkins" | "budget";
+export const MATE_CATS: { id: MateCat; label: string; about: string }[] = [
+  { id: "profile", label: "Profile", about: "Its face, name and instructions." },
+  { id: "tool", label: "Coding tool", about: "What it runs on, and what takes over when that runs out." },
+  { id: "access", label: "Access", about: "How far it goes on its own." },
+  { id: "computer", label: "Computer", about: "Where it runs, and as which account." },
+  { id: "where", label: "Folders", about: "Its own folder, and the folders and repos it works in." },
+  { id: "checkins", label: "Check-ins", about: "What it does by itself, on a schedule." },
+  { id: "budget", label: "Budget and hours", about: "Daily caps and working hours. Nothing is capped unless set." },
+];
 
-/** New teammate, or one changed: its robot and name, its role, the coding tool it runs on, and where it works. */
-export function TeammateDialog({ identity, editing, onClose, inline, page }: {
+/**
+ * An agent of the crew: made on the New agent page (App.tsx ?view=new-teammate) in four things, its face, name, coding tool and
+ * instructions (Arun, 2026-11-13), or changed one category at a time in its Settings, a tab of its chat's side panel
+ * (TeammatePage.tsx MateSettingsBody, `inline` and `only`). No dialog any more: Edit… opens its Settings (editTeammate).
+ */
+export function TeammateForm({ identity, editing, onClose = () => {}, inline, only }: {
   identity: Identity;
   editing: TeammateView | null;
-  onClose: () => void;
-  /** Drawn in place, as a teammate's Settings tab (TeammatePage.tsx), not as a dialog. */
+  /** The New agent page's Cancel, and where it goes when the starter crew is made. */
+  onClose?: () => void;
+  /** Drawn in place, in a crew mate's Settings (TeammatePage.tsx), with Save changes; otherwise the New agent page. */
   inline?: boolean;
-  /** A page of its own, the New teammate page (App.tsx; Arun, 2026-11-08: "make the crew teammate creator thing into a page
-   *  instead of a modal pop up"): its heading, the form, and beside it the teammate as the crew will see them. */
-  page?: boolean;
+  /** Inline, one category of its settings only (the Settings panel's). */
+  only?: MateCat;
 }) {
   const installed = installedOn(identity);
   const tools = useMemo(() => {
@@ -2575,7 +2599,7 @@ export function TeammateDialog({ identity, editing, onClose, inline, page }: {
       // Its folder is made for it on the keeper's computer; the account is the one picked there.
       const r = await api<{ restartLater?: string[]; made?: string; teammates?: TeammateView[] }>(identity, editing ? `/api/teammates/${editing.id}` : "/api/teammates", { method: editing ? "PATCH" : "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json" } });
       const now = await refreshTeam(identity);
-      if (page && !editing) {
+      if (!editing) {
         // From the page, straight to them: the Crew, on the new teammate's own room. The server names the one it made (hosted) or
         // answers with the crew, the new one last (this computer's).
         const all = now?.teammates ?? r.teammates ?? [];
@@ -2628,369 +2652,394 @@ export function TeammateDialog({ identity, editing, onClose, inline, page }: {
     setSaved(false);
     (e.currentTarget.parentElement?.querySelector(`[data-mode="${next}"]`) as HTMLElement | null)?.focus();
   };
-  const about = editing ? "Changes apply from their next turn." : isLocal() ? "They work on your computer with your own coding tool or model, keep a folder of their own, and remember their conversation." : "They work on your computer with your own coding tool and plan, keep a folder of their own there, and remember their conversation. Everyone in the workspace sees them.";
-  const form = (
-        <form onSubmit={(e) => void save(e)} className={inline ? "tm-form tm-form-inline" : page ? "tm-form tm-form-page" : "tm-form"} onChange={() => setSaved(false)}>
-          {!inline && !page && (
-          <DialogHeader>
-            <DialogTitle>{editing ? `Edit ${editing.name}` : "New teammate"}</DialogTitle>
-            <DialogDescription>{about}</DialogDescription>
-          </DialogHeader>
-          )}
-          {!editing && (
-            <div className="tm-templates" role="group" aria-label="Start from a role">
-              <span className="tm-templates-label">Start from</span>
-              {(Object.keys(ROLES) as (keyof typeof ROLES)[]).map((k) => (
-                <button key={k} type="button" className="tm-template" aria-pressed={role === ROLES[k].role} onClick={() => useTemplate(k)}>
-                  {k}
-                </button>
-              ))}
-            </div>
-          )}
-          {/* Who it is, as a tray: its block on a tile of its own, its tool in the tile's corner, and its name beside it with the
-              shuffle on the name's line, so nothing sits over the block (Arun, 2026-10-27: "design this better and better space"). */}
-          <div className="tm-id">
-            <div className="tm-id-face">
-              <Robot seed={look} tool={markOf(tool)} size={58} status="idle" />
-            </div>
-            <div className="tm-field tm-id-name">
-              <div className="tm-id-label">
-                <label htmlFor={`${uid}-name`}>Name</label>
-                <span className="tm-look-acts">
-                  <button type="button" className="tm-shuffle" aria-expanded={picking} onClick={() => setPicking((p) => !p)} title="Choose its face">
-                    Pick a look
-                  </button>
-                  <button type="button" className="tm-shuffle" onClick={() => setShuffled(distinctLook(`v2:${name.trim() || "Friday"}-${Math.random().toString(36).slice(2, 7)}`, [...others, look]))} title="Another look for it">
-                    <ShuffleIcon className="size-3.5" />
-                    Shuffle
-                  </button>
-                </span>
-              </div>
-              {/* Not focused on a teammate's Settings tab, where it scrolled their header away (QA, 2026-10-28). */}
-              <Input ref={nameField} id={`${uid}-name`} autoFocus={!inline} value={name} maxLength={40} placeholder="A name, like Rio" aria-invalid={!!nameErr} aria-describedby={nameErr ? `${uid}-name-err` : keptName !== name.trim() ? `${uid}-name-kept` : undefined} onChange={(e) => (setName(e.target.value), setNameErr(""))} />
-              {nameErr ? (
-                <p id={`${uid}-name-err`} role="alert" className="tm-err">
-                  {nameErr}
-                </p>
-              ) : (
-                // What the server keeps of a name, said as it is typed: an emoji went without a word ("Zoë 🚀 测试" saved as "Zoë
-                // 测试"; QA, 2026-10-28).
-                keptName !== name.trim() && (
-                  <p id={`${uid}-name-kept`} className="tm-name-kept" role="status">
-                    A name keeps letters, numbers, spaces and . _ ' - only: it's saved as “{keptName || "Teammate"}”.
-                  </p>
-                )
-              )}
-            </div>
-          </div>
-          {picking && (
-            <div className="tm-looks" role="radiogroup" aria-label="Its face">
-              {choices.map((s) => (
-                <button key={s} type="button" role="radio" aria-checked={s === look} className="tm-look" onClick={() => (setShuffled(s), setPicking(false))} title="This face">
-                  <Robot seed={s} size={40} status="idle" />
-                </button>
-              ))}
-              <button type="button" className="tm-look tm-look-more" onClick={() => setDeal((d) => d + 1)} title="Twelve more">
-                <ShuffleIcon className="size-4" />
-                <span>More</span>
+  // The form in parts (Arun, 2026-11-13: "broken up into categories kinda like how the settings page is"): a crew mate's Settings
+  // panel shows one category at a time (TeammatePage.tsx MateSettingsBody); New agent is the four things only, below.
+  const who = (
+    <>
+      {/* Who it is, as a tray: its block on a tile of its own, its tool in the tile's corner, and its name beside it with the
+          shuffle on the name's line, so nothing sits over the block (Arun, 2026-10-27: "design this better and better space"). */}
+      <div className="tm-id">
+        <div className="tm-id-face">
+          <Robot seed={look} tool={markOf(tool)} size={58} status="idle" />
+        </div>
+        <div className="tm-field tm-id-name">
+          <div className="tm-id-label">
+            <label htmlFor={`${uid}-name`}>Name</label>
+            <span className="tm-look-acts">
+              <button type="button" className="tm-shuffle" aria-expanded={picking} onClick={() => setPicking((p) => !p)} title="Choose its face">
+                Pick a look
               </button>
-            </div>
-          )}
-          <label className="tm-field">
-            <span>Role</span>
-            {/* An example, plainly one, naming nobody on the team (2026-10-27 audit: it read as filled in, and named Kit). */}
-            <Textarea value={role} maxLength={4000} rows={3} placeholder="e.g. Writes our release notes and keeps the changelog" onChange={(e) => setRole(e.target.value)} />
-            <small>Their standing instructions, read with every turn.</small>
-          </label>
-          <div className="tm-field">
-            <span>Runs on</span>
-            {/* Its own class: "tm-runs" is the activity list's tray, and drew a box around the picker (Arun, 2026-10-28: "look for
-                like the little details and designs too like that agent box thing"). */}
-            <div className="tm-runs-on">
-              <TeammatePicker identity={identity} tool={tool} model={model} effort={effort} onEffort={setEffort} onChange={(t, m) => (pickTool(t), setModel(m))} {...(isLocal() ? {} : { runsOn: machine })} />
-            </div>
-            {/* On one of the person's own models: Friday Code runs it, with no tool's model, effort or backup to set. */}
-            {tool === "friday" ? (
-              <small>
-                {model ? (
-                  `Friday Code runs it on ${modelLabel(tool, model)}, on your key or your computer. No usage limits of a coding tool's, so no backup: if the model's server stops answering, it says so.`
-                ) : (
-                  // A press away, not a path to find (2026-10-28 QA).
-                  <>
-                    Pick one of your models above, or{" "}
-                    <button type="button" className="link-btn" onClick={() => dispatchEvent(new CustomEvent("friday:settings", { detail: { tab: "own-models" } }))}>
-                      add one in Settings
-                    </button>
-                    .
-                  </>
-                )}
-              </small>
-            ) : (
-            /* Advanced (Arun, 2026-10-27: the OpenBot gap "an Advanced model/effort section in the dialog"): what it runs on, said
-                plainly beside the picker, folded until wanted; its line says what is set. */
-            <details className="tm-advanced">
-              <summary>
-                <span>If {ENGINE_NAMES[tool]} runs out of usage</span>
-                <span className="tm-advanced-now">{ENGINE_NAMES[backup || (tool === "claude" ? "codex" : "claude")]} takes over</span>
-              </summary>
-              {/* The model and effort are set in the picker above, once (Arun, 2026-10-28: the critique's "remove the duplicate model
-                  picker from Advanced"). */}
-              <div className="tm-advanced-body">
-                <label className="tm-row-field">
-                  <span className="tm-row-label">Backup</span>
-                  <span className="tm-row-input">
-                    {/* Not again under its own name: "Codex (automatic)" and "Codex" were two choices of one thing (QA, 2026-10-28). */}
-                    <Picker<EngineTool | "">
-                      className="tm-select"
-                      value={backup === (tool === "claude" ? "codex" : "claude") ? "" : backup}
-                      label="Backup"
-                      onChange={setBackup}
-                      options={[{ value: "", label: `${ENGINE_NAMES[tool === "claude" ? "codex" : "claude"]} (automatic)` }, ...tools.filter((x) => x !== tool && x !== (tool === "claude" ? "codex" : "claude")).map((x) => ({ value: x, label: ENGINE_NAMES[x] }))]}
-                    />
-                    <small>Out of usage, they carry on with this, and go back to {ENGINE_NAMES[tool]} when its limit lifts.</small>
-                  </span>
-                </label>
-              </div>
-            </details>
-            )}
-            {toolChanged && (
-              <p className="tm-note" role="status">
-                <TriangleAlertIcon className="size-3.5" />A new {tool === "friday" || editing!.tool === "friday" ? "model" : "tool"} starts a new conversation: it won't remember what it said on {toolName(editing!.tool)}.
+              <button type="button" className="tm-shuffle" onClick={() => setShuffled(distinctLook(`v2:${name.trim() || "Friday"}-${Math.random().toString(36).slice(2, 7)}`, [...others, look]))} title="Another look for it">
+                <ShuffleIcon className="size-3.5" />
+                Shuffle
+              </button>
+            </span>
+          </div>
+          {/* Not focused on a teammate's Settings tab, where it scrolled their header away (QA, 2026-10-28). */}
+          <Input ref={nameField} id={`${uid}-name`} autoFocus={!inline} value={name} maxLength={40} placeholder="A name, like Rio" aria-invalid={!!nameErr} aria-describedby={nameErr ? `${uid}-name-err` : keptName !== name.trim() ? `${uid}-name-kept` : undefined} onChange={(e) => (setName(e.target.value), setNameErr(""))} />
+          {nameErr ? (
+            <p id={`${uid}-name-err`} role="alert" className="tm-err">
+              {nameErr}
+            </p>
+          ) : (
+            // What the server keeps of a name, said as it is typed: an emoji went without a word ("Zoë 🚀 测试" saved as "Zoë
+            // 测试"; QA, 2026-10-28).
+            keptName !== name.trim() && (
+              <p id={`${uid}-name-kept`} className="tm-name-kept" role="status">
+                A name keeps letters, numbers, spaces and . _ ' - only: it's saved as “{keptName || "Agent"}”.
               </p>
-            )}
-          </div>
-          {isLocal() && !machine && tool !== "friday" && <LocalAccount identity={identity} tool={tool} value={account} onChange={setAccount} />}
-          {isLocal() && (computers.length > 0 || !!machine) && (
-            <label className="tm-row-field">
-              <span className="tm-row-label">Runs on</span>
-              <span className="tm-row-input">
-                <Picker className="tm-select" value={machine} label="Runs on" onChange={setMachine} options={[{ value: "", label: "This computer" }, ...computers.map((c) => ({ value: c.id, label: c.label, ...(c.detail ? { hint: c.detail } : {}) })), ...(machine && !computers.some((c) => c.id === machine) ? [{ value: machine, label: "Your other computer", hint: "not connected now" }] : [])]} />
-                <small>{machine ? `Its coding tool, its own folder (~/Friday/teammates/${name.trim() || "Name"}) and the folders it works in are on that computer.` : "Its coding tool and its folders are on this computer."}</small>
-              </span>
-            </label>
+            )
           )}
-          <fieldset className="tm-where tm-access">
-            <legend>Access</legend>
-            <div className="tm-access-opts" role="radiogroup" aria-label="Access">
-              {MODES.map((k) => (
-                <button key={k} type="button" role="radio" aria-checked={mode === k} tabIndex={mode === k ? 0 : -1} className="tm-access-opt" data-mode={k} onClick={() => (setMode(k), setSaved(false))} onKeyDown={(e) => accessKey(e, k)}>
-                  <span className="tm-access-icon" aria-hidden="true">{k === "plan" ? <EyeIcon /> : k === "edits" ? <HandIcon /> : <ZapIcon />}</span>
-                  <span className="tm-access-text">
-                    <span className="tm-access-name">{ACCESS[k].label}</span>
-                    <span className="tm-access-blurb">{ACCESS[k].blurb}</span>
-                  </span>
-                  <span className="tm-access-radio" aria-hidden="true" />
+        </div>
+      </div>
+      {picking && (
+        <div className="tm-looks" role="radiogroup" aria-label="Its face">
+          {choices.map((s) => (
+            <button key={s} type="button" role="radio" aria-checked={s === look} className="tm-look" onClick={() => (setShuffled(s), setPicking(false))} title="This face">
+              <Robot seed={s} size={40} status="idle" />
+            </button>
+          ))}
+          <button type="button" className="tm-look tm-look-more" onClick={() => setDeal((d) => d + 1)} title="Twelve more">
+            <ShuffleIcon className="size-4" />
+            <span>More</span>
+          </button>
+        </div>
+      )}
+      <label className="tm-field">
+        {/* Its instructions, as people call them (Arun, 2026-11-13: "the coding tool it will use, and its instructions"). */}
+        <span>Instructions</span>
+        {/* An example, plainly one, naming nobody on the team (2026-10-27 audit: it read as filled in, and named Kit). */}
+        <Textarea value={role} maxLength={4000} rows={4} placeholder="e.g. Writes our release notes and keeps the changelog. Short, clear, no hype." onChange={(e) => setRole(e.target.value)} />
+        <small>What it does and how, read with every turn.</small>
+      </label>
+    </>
+  );
+  const toolPart = (
+    <>
+      <div className="tm-field">
+        <span>Runs on</span>
+        {/* Its own class: "tm-runs" is the activity list's tray, and drew a box around the picker (Arun, 2026-10-28: "look for
+            like the little details and designs too like that agent box thing"). */}
+        <div className="tm-runs-on">
+          <TeammatePicker identity={identity} tool={tool} model={model} effort={effort} onEffort={setEffort} onChange={(t, m) => (pickTool(t), setModel(m))} {...(isLocal() ? {} : { runsOn: machine })} />
+        </div>
+        {/* On one of the person's own models: Friday Code runs it, with no tool's model, effort or backup to set. */}
+        {tool === "friday" ? (
+          <small>
+            {model ? (
+              `Friday Code runs it on ${modelLabel(tool, model)}, on your key or your computer. No usage limits of a coding tool's, so no backup: if the model's server stops answering, it says so.`
+            ) : (
+              // A press away, not a path to find (2026-10-28 QA).
+              <>
+                Pick one of your models above, or{" "}
+                <button type="button" className="link-btn" onClick={() => dispatchEvent(new CustomEvent("friday:settings", { detail: { tab: "own-models" } }))}>
+                  add one in Settings
                 </button>
-              ))}
-            </div>
-            <small className="tm-checkin-note">Applies in {[editing?.folder ? short(editing.folder) : "their own folder", ...projects.map(short)].join(", ")}.</small>
-          </fieldset>
-          <fieldset className="tm-where tm-checkins" ref={checkList}>
-            <legend>Check-ins</legend>
-            {checkins.map((c, i) => (
-              <div key={c.id} className="tm-checkin">
-                <Input value={c.text} maxLength={2000} placeholder="What to ask it" aria-invalid={!!checkErr && checkAt === i} aria-describedby={checkErr && checkAt === i ? `${uid}-checkin-err` : undefined} onChange={(e) => (putCheckIn(i, { text: e.target.value }), setCheckErr(""))} aria-label="What it is asked" />
-                <div className="tm-checkin-when">
-                  <Picker<CheckIn["every"]> className="tm-select" value={c.every} label="How often" onChange={(every) => putCheckIn(i, { every })} options={[{ value: "hourly", label: "Every hour" }, { value: "daily", label: "Every day" }, { value: "weekdays", label: "Every weekday" }, { value: "weekly", label: "Every week" }]} />
-                  {c.every === "weekly" && (
-                    <span className="tm-days" role="group" aria-label="Days">
-                      {["S", "M", "T", "W", "T", "F", "S"].map((d, n) => (
-                        <button key={n} type="button" aria-pressed={c.days.includes(n)} onClick={() => putCheckIn(i, { days: c.days.includes(n) ? c.days.filter((x) => x !== n) : [...c.days, n].sort() })}>
-                          {d}
-                        </button>
-                      ))}
-                    </span>
-                  )}
-                  {c.every !== "hourly" && <Input type="time" className="tm-time" value={c.at} aria-label="At" onChange={(e) => putCheckIn(i, { at: e.target.value || "09:00" })} />}
-                  <button type="button" className="tm-checkin-x" aria-label="Remove this check-in" title="Remove" onClick={() => (setCheckins((all) => all.filter((_, j) => j !== i)), setCheckErr(""))}>
-                    <XIcon className="size-3.5" />
-                  </button>
-                </div>
-                {checkErr && checkAt === i && (
-                  <p role="alert" id={`${uid}-checkin-err`} className="tm-err">
-                    {checkErr}
-                  </p>
-                )}
-              </div>
-            ))}
-            {checkins.length < 6 && (
-              // A real first ask, there to keep or change: the example used to be a placeholder, which looked filled in and was
-              // dropped on save as empty (2026-10-27 audit).
-              <button type="button" className="tm-chip add tm-checkin-add" onClick={() => setCheckins((all) => [...all, { id: `c${Date.now().toString(36)}`, text: "Stand-up: what you did, what's next, what blocks you", every: "weekdays", at: "09:00", days: [], tz: zone }])}>
-                <PlusIcon className="size-3" />
-                Add a check-in
-              </button>
+                .
+              </>
             )}
-            <small className="tm-checkin-note">Asked in the Crew room on schedule. With nothing new, they stay quiet.</small>
-          </fieldset>
-          <BudgetFields value={budget} onChange={(b) => (setBudget(b), setSaved(false))} tool={tool} model={model} />
-          <fieldset className="tm-where">
-            <legend>Where they work</legend>
-            {(isLocal() || editing) && (
+          </small>
+        ) : (
+        /* Advanced (Arun, 2026-10-27: the OpenBot gap "an Advanced model/effort section in the dialog"): what it runs on, said
+            plainly beside the picker, folded until wanted; its line says what is set. */
+        <details className="tm-advanced">
+          <summary>
+            <span>If {ENGINE_NAMES[tool]} runs out of usage</span>
+            <span className="tm-advanced-now">{ENGINE_NAMES[backup || (tool === "claude" ? "codex" : "claude")]} takes over</span>
+          </summary>
+          {/* The model and effort are set in the picker above, once (Arun, 2026-10-28: the critique's "remove the duplicate model
+              picker from Advanced"). */}
+          <div className="tm-advanced-body">
             <label className="tm-row-field">
-              <span className="tm-row-label">Folder</span>
+              <span className="tm-row-label">Backup</span>
               <span className="tm-row-input">
-                {editing ? (
-                  <span className="tm-path" title={editing.folder}>
-                    {short(editing.folder)}
-                  </span>
-                ) : (
-                  <Input value={folder} placeholder={`~/Friday/teammates/${name.trim() || "Name"}`} onChange={(e) => setFolder(e.target.value)} />
-                )}
-                <small>{editing ? (isLocal() ? "Where they keep their notes and what they make." : "On your computer: where they keep their notes and what they make.") : "Their own, made for them. Leave it for the default."}</small>
-              </span>
-            </label>
-            )}
-            <label className="tm-row-field">
-              <span className="tm-row-label">Projects</span>
-              <span className="tm-row-input">
-                {projects.length > 0 && (
-                  <span className="tm-chips">
-                    {projects.map((d) => (
-                      <span key={d} className="tm-chip" title={d}>
-                        <FolderGit2Icon className="size-3" />
-                        {short(d)}
-                        <button type="button" aria-label={`Take ${short(d)} away`} onClick={() => (setProjects(projects.filter((x) => x !== d)), setTookOff({ dir: d, at: projects.indexOf(d) }))}>
-                          <XIcon className="size-3" />
-                        </button>
-                      </span>
-                    ))}
-                  </span>
-                )}
-                <Input
-                  value={project}
-                  placeholder="~/code/site, then Enter"
-                  aria-label="Add a folder or repo"
-                  onChange={(e) => (e.target.value.includes(",") ? addProject(e.target.value) : setProject(e.target.value))}
-                  onBlur={() => project.trim() && addProject()}
-                  onKeyDown={(e) => {
-                    if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
-                    e.preventDefault();
-                    addProject();
-                  }}
+                {/* Not again under its own name: "Codex (automatic)" and "Codex" were two choices of one thing (QA, 2026-10-28). */}
+                <Picker<EngineTool | "">
+                  className="tm-select"
+                  value={backup === (tool === "claude" ? "codex" : "claude") ? "" : backup}
+                  label="Backup"
+                  onChange={setBackup}
+                  options={[{ value: "", label: `${ENGINE_NAMES[tool === "claude" ? "codex" : "claude"]} (automatic)` }, ...tools.filter((x) => x !== tool && x !== (tool === "claude" ? "codex" : "claude")).map((x) => ({ value: x, label: ENGINE_NAMES[x] }))]}
                 />
-                {tookOff && !projects.includes(tookOff.dir) && (
-                  <span className="tm-undo" role="status">
-                    Took {short(tookOff.dir)} away.{" "}
-                    <button type="button" className="tm-undo-btn" onClick={() => (setProjects((p) => [...p.slice(0, tookOff.at), tookOff.dir, ...p.slice(tookOff.at)]), setTookOff(null))}>
-                      Undo
-                    </button>
-                  </span>
-                )}
-                <small>Optional. Folders and repos they work in beside their own. Enter, a comma or leaving the field adds one.</small>
+                <small>Out of usage, they carry on with this, and go back to {ENGINE_NAMES[tool]} when its limit lifts.</small>
               </span>
             </label>
-          </fieldset>
-          {err && (
-            <p role="alert" className="tm-err">
-              {err}
+          </div>
+        </details>
+        )}
+        {toolChanged && (
+          <p className="tm-note" role="status">
+            <TriangleAlertIcon className="size-3.5" />A new {tool === "friday" || editing!.tool === "friday" ? "model" : "tool"} starts a new conversation: it won't remember what it said on {toolName(editing!.tool)}.
+          </p>
+        )}
+      </div>
+    </>
+  );
+  const machinePart = (
+    <>
+      {isLocal() && !machine && tool !== "friday" && <LocalAccount identity={identity} tool={tool} value={account} onChange={setAccount} />}
+      {isLocal() && (computers.length > 0 || !!machine) && (
+        <label className="tm-row-field">
+          <span className="tm-row-label">Runs on</span>
+          <span className="tm-row-input">
+            <Picker className="tm-select" value={machine} label="Runs on" onChange={setMachine} options={[{ value: "", label: "This computer" }, ...computers.map((c) => ({ value: c.id, label: c.label, ...(c.detail ? { hint: c.detail } : {}) })), ...(machine && !computers.some((c) => c.id === machine) ? [{ value: machine, label: "Your other computer", hint: "not connected now" }] : [])]} />
+            <small>{machine ? `Its coding tool, its own folder (~/Friday/teammates/${name.trim() || "Name"}) and the folders it works in are on that computer.` : "Its coding tool and its folders are on this computer."}</small>
+          </span>
+        </label>
+      )}
+    </>
+  );
+  const accessPart = (
+    <>
+      <fieldset className="tm-where tm-access">
+        <legend>Access</legend>
+        <div className="tm-access-opts" role="radiogroup" aria-label="Access">
+          {MODES.map((k) => (
+            <button key={k} type="button" role="radio" aria-checked={mode === k} tabIndex={mode === k ? 0 : -1} className="tm-access-opt" data-mode={k} onClick={() => (setMode(k), setSaved(false))} onKeyDown={(e) => accessKey(e, k)}>
+              <span className="tm-access-icon" aria-hidden="true">{k === "plan" ? <EyeIcon /> : k === "edits" ? <HandIcon /> : <ZapIcon />}</span>
+              <span className="tm-access-text">
+                <span className="tm-access-name">{ACCESS[k].label}</span>
+                <span className="tm-access-blurb">{ACCESS[k].blurb}</span>
+              </span>
+              <span className="tm-access-radio" aria-hidden="true" />
+            </button>
+          ))}
+        </div>
+        <small className="tm-checkin-note">Applies in {[editing?.folder ? short(editing.folder) : "their own folder", ...projects.map(short)].join(", ")}.</small>
+      </fieldset>
+    </>
+  );
+  const how = (
+    <>
+      {toolPart}
+      {machinePart}
+      {accessPart}
+    </>
+  );
+  const checkNote = "Asked in the Crew room on schedule. With nothing new, they stay quiet.";
+  const checkRows = (
+    <>
+      {checkins.map((c, i) => (
+        <div key={c.id} className="tm-checkin">
+          <Input value={c.text} maxLength={2000} placeholder="What to ask it" aria-invalid={!!checkErr && checkAt === i} aria-describedby={checkErr && checkAt === i ? `${uid}-checkin-err` : undefined} onChange={(e) => (putCheckIn(i, { text: e.target.value }), setCheckErr(""))} aria-label="What it is asked" />
+          <div className="tm-checkin-when">
+            <Picker<CheckIn["every"]> className="tm-select" value={c.every} label="How often" onChange={(every) => putCheckIn(i, { every })} options={[{ value: "hourly", label: "Every hour" }, { value: "daily", label: "Every day" }, { value: "weekdays", label: "Every weekday" }, { value: "weekly", label: "Every week" }]} />
+            {c.every === "weekly" && (
+              <span className="tm-days" role="group" aria-label="Days">
+                {["S", "M", "T", "W", "T", "F", "S"].map((d, n) => (
+                  <button key={n} type="button" aria-pressed={c.days.includes(n)} onClick={() => putCheckIn(i, { days: c.days.includes(n) ? c.days.filter((x) => x !== n) : [...c.days, n].sort() })}>
+                    {d}
+                  </button>
+                ))}
+              </span>
+            )}
+            {c.every !== "hourly" && <Input type="time" className="tm-time" value={c.at} aria-label="At" onChange={(e) => putCheckIn(i, { at: e.target.value || "09:00" })} />}
+            <button type="button" className="tm-checkin-x" aria-label="Remove this check-in" title="Remove" onClick={() => (setCheckins((all) => all.filter((_, j) => j !== i)), setCheckErr(""))}>
+              <XIcon className="size-3.5" />
+            </button>
+          </div>
+          {checkErr && checkAt === i && (
+            <p role="alert" id={`${uid}-checkin-err`} className="tm-err">
+              {checkErr}
             </p>
           )}
-          {/* Stays in sight at the dialog's foot however tall it is (2026-10-27 audit: Cancel and Add were cut off at 950px). */}
-          {inline ? (
-            <div className="tm-inline-foot">
-              {saved && (
-                <span className="tm-saved" role="status">
-                  <CheckIcon className="size-3.5" /> Saved. {later || "It applies from their next turn."}
-                </span>
-              )}
-              <Button type="submit" disabled={busy || !name.trim() || !changed}>
-                {busy ? "Saving…" : "Save changes"}
-              </Button>
-            </div>
-          ) : page ? (
-            // In sight at the page's foot however far down the form is scrolled.
-            <div className="tm-page-foot">
-              {!editing && !(team && ownOf(team).length) && <StarterTeam identity={identity} onDone={onClose} />}
-              <span className="tm-page-foot-acts">
-                <Button type="button" variant="ghost" onClick={onClose}>
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={busy || !name.trim()}>
-                  {busy ? "Adding…" : "Add teammate"}
-                </Button>
-              </span>
-            </div>
+        </div>
+      ))}
+      {checkins.length < 6 && (
+        // A real first ask, there to keep or change: the example used to be a placeholder, which looked filled in and was
+        // dropped on save as empty (2026-10-27 audit).
+        <button type="button" className="tm-chip add tm-checkin-add" onClick={() => setCheckins((all) => [...all, { id: `c${Date.now().toString(36)}`, text: "Stand-up: what you did, what's next, what blocks you", every: "weekdays", at: "09:00", days: [], tz: zone }])}>
+          <PlusIcon className="size-3" />
+          Add a check-in
+        </button>
+      )}
+    </>
+  );
+  const budgetFields = <BudgetFields value={budget} onChange={(b) => (setBudget(b), setSaved(false))} tool={tool} model={model} />;
+  const whereRows = (
+    <>
+      {(isLocal() || editing) && (
+      <label className="tm-row-field">
+        <span className="tm-row-label">Folder</span>
+        <span className="tm-row-input">
+          {editing ? (
+            <span className="tm-path" title={editing.folder}>
+              {short(editing.folder)}
+            </span>
           ) : (
-          <DialogFooter className="tm-dialog-foot">
-            {!editing && !(team && ownOf(team).length) && <StarterTeam identity={identity} onDone={onClose} />}
-            <Button type="button" variant="ghost" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={busy || !name.trim()}>
-              {busy ? "Saving…" : editing ? "Save" : "Add teammate"}
-            </Button>
-          </DialogFooter>
+            <Input value={folder} placeholder={`~/Friday/teammates/${name.trim() || "Name"}`} onChange={(e) => setFolder(e.target.value)} />
           )}
-        </form>
+          <small>{editing ? (isLocal() ? "Where they keep their notes and what they make." : "On your computer: where they keep their notes and what they make.") : "Their own, made for them. Leave it for the default."}</small>
+        </span>
+      </label>
+      )}
+      <label className="tm-row-field">
+        <span className="tm-row-label">Projects</span>
+        <span className="tm-row-input">
+          {projects.length > 0 && (
+            <span className="tm-chips">
+              {projects.map((d) => (
+                <span key={d} className="tm-chip" title={d}>
+                  <FolderGit2Icon className="size-3" />
+                  {short(d)}
+                  <button type="button" aria-label={`Take ${short(d)} away`} onClick={() => (setProjects(projects.filter((x) => x !== d)), setTookOff({ dir: d, at: projects.indexOf(d) }))}>
+                    <XIcon className="size-3" />
+                  </button>
+                </span>
+              ))}
+            </span>
+          )}
+          <Input
+            value={project}
+            placeholder="~/code/site, then Enter"
+            aria-label="Add a folder or repo"
+            onChange={(e) => (e.target.value.includes(",") ? addProject(e.target.value) : setProject(e.target.value))}
+            onBlur={() => project.trim() && addProject()}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+              e.preventDefault();
+              addProject();
+            }}
+          />
+          {tookOff && !projects.includes(tookOff.dir) && (
+            <span className="tm-undo" role="status">
+              Took {short(tookOff.dir)} away.{" "}
+              <button type="button" className="tm-undo-btn" onClick={() => (setProjects((p) => [...p.slice(0, tookOff.at), tookOff.dir, ...p.slice(tookOff.at)]), setTookOff(null))}>
+                Undo
+              </button>
+            </span>
+          )}
+          <small>Optional. Folders and repos they work in beside their own. Enter, a comma or leaving the field adds one.</small>
+        </span>
+      </label>
+    </>
   );
-  if (inline) return form;
-  if (page) return (
-    <div className="page conns-page tm-page">
-      <div className="tm-page-wrap">
-        <header className="tm-page-head">
-          <button type="button" className="tm-page-back" onClick={onClose}>
-            <ArrowLeftIcon className="size-3.5" />
-            Crew
+  const errLine = err && (
+    <p role="alert" className="tm-err">
+      {err}
+    </p>
+  );
+  if (inline)
+    return (
+      <form onSubmit={(e) => void save(e)} className="tm-form tm-form-inline" data-cat={only} onChange={() => setSaved(false)}>
+        {(!only || only === "profile") && who}
+        {only ? (only === "tool" ? toolPart : only === "computer" ? machinePart : only === "access" ? accessPart : null) : how}
+        {(!only || only === "checkins") && (
+          <fieldset className="tm-where tm-checkins" ref={checkList}>
+            {!only && <legend>Check-ins</legend>}
+            {checkRows}
+            <small className="tm-checkin-note">{checkNote}</small>
+          </fieldset>
+        )}
+        {(!only || only === "budget") && budgetFields}
+        {(!only || only === "where") && (
+          <fieldset className="tm-where">
+            {!only && <legend>Where they work</legend>}
+            {whereRows}
+          </fieldset>
+        )}
+        {errLine}
+        <div className="tm-inline-foot">
+          {saved && (
+            <span className="tm-saved" role="status">
+              <CheckIcon className="size-3.5" /> Saved. {later || "It applies from their next turn."}
+            </span>
+          )}
+          <Button type="submit" disabled={busy || !name.trim() || !changed}>
+            {busy ? "Saving…" : "Save changes"}
+          </Button>
+        </div>
+      </form>
+    );
+  // The first agent: three at once is offered among the suggestions.
+  const starter = !editing && !(team && ownOf(team).length);
+  // New, in four things, laid out as one calm column (Arun, 2026-11-13: "a simple page where it has the mascots image you can
+  // choose, the name of the crew mate, the coding tool it will use, and its instructions"; "design it kinda like this", "stop
+  // stuffing everything with so much text"): the face, its colour and shape, its name, what it helps with, what it runs on, Create;
+  // suggestions under it. Access, folders, check-ins and the rest start as they should and are in its Settings once it's made.
+  const colourAt = pinnedColour(look) ?? Math.max(0, ALL_COLOURS.indexOf(mascotColour(look)));
+  const pinned = (seed: string) => withColour(seed, colourAt);
+  return (
+    <div className="page nag-page px-6! max-[640px]:px-4!">
+      <form className="nag" onSubmit={(e) => void save(e)} aria-label="New agent">
+        <div className="nag-face" aria-hidden="true">
+          <Robot seed={look} size={64} status="idle" />
+        </div>
+        <div className="nag-colours" role="radiogroup" aria-label="Colour">
+          {ALL_COLOURS.map((c, i) => (
+            <button key={c} type="button" role="radio" aria-checked={i === colourAt} aria-label={`Colour ${i + 1}`} className="nag-colour" style={{ background: c }} onClick={() => setShuffled(withColour(look, i))} />
+          ))}
+        </div>
+        <div className="nag-shapes" role="radiogroup" aria-label="Its face">
+          {choices.map((sd) => (
+            <button key={sd} type="button" role="radio" aria-checked={shapeSeed(look) === sd} className="nag-shape" onClick={() => setShuffled(pinned(sd))} title="This face">
+              <Robot seed={pinned(sd)} size={30} status="idle" />
+            </button>
+          ))}
+          <button type="button" className="nag-shape nag-more" onClick={() => setDeal((d) => d + 1)} title="More faces" aria-label="More faces">
+            <ShuffleIcon className="size-4" />
           </button>
-          <h1>New teammate</h1>
-          <p>{about}</p>
-        </header>
-        <div className="tm-page-grid">
-          {form}
-          <MateCard look={look} name={name.trim()} role={role.trim()} tool={tool} model={model} mode={mode} checkins={checkins} folder={folder.trim() || `~/Friday/teammates/${keptName || "Name"}`} projects={projects.length} />
         </div>
-      </div>
+        <div className="nag-field">
+          <span>
+            <label htmlFor={`${uid}-name`}>Name</label>
+            <i aria-hidden="true">*</i>
+          </span>
+          <Input ref={nameField} id={`${uid}-name`} autoFocus required value={name} maxLength={40} placeholder="Rio" aria-invalid={!!nameErr} aria-describedby={nameErr ? `${uid}-name-err` : undefined} onChange={(e) => (setName(e.target.value), setNameErr(""))} />
+        </div>
+        {nameErr ? (
+          <p id={`${uid}-name-err`} role="alert" className="tm-err">
+            {nameErr}
+          </p>
+        ) : (
+          keptName !== name.trim() && (
+            <p className="tm-name-kept" role="status">
+              Saved as “{keptName || "Agent"}”.
+            </p>
+          )
+        )}
+        <label className="nag-field">
+          <span>What should it help with?</span>
+          <Textarea value={role} maxLength={4000} rows={3} placeholder="Fix bugs and keep the tests green." onChange={(e) => setRole(e.target.value)} />
+        </label>
+        <div className="nag-row">
+          <span>Runs on</span>
+          <TeammatePicker identity={identity} tool={tool} model={model} effort={effort} onEffort={setEffort} onChange={(t, m) => (pickTool(t), setModel(m))} {...(isLocal() ? {} : { runsOn: machine })} />
+        </div>
+        {errLine}
+        <div className="nag-acts">
+          <Button type="button" variant="ghost" size="sm" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" size="sm" disabled={busy || !name.trim()}>
+            {busy ? "Creating…" : "Create agent"}
+          </Button>
+        </div>
+      </form>
+      <section className="nag-sugg" aria-label="Suggestions">
+        <h2>Suggestions</h2>
+        <div className="nag-cards">
+          {(Object.keys(ROLES) as (keyof typeof ROLES)[]).map((k) => (
+            <button key={k} type="button" className="nag-card" aria-pressed={role === ROLES[k].role} onClick={() => useTemplate(k)}>
+              <Robot seed={`v2:${k}`} size={36} status="idle" />
+              <span>
+                <b>{k}</b>
+                <small>{ROLES[k].role.split(/(?<=\.)\s/)[0]}</small>
+              </span>
+            </button>
+          ))}
+          {starter && (
+            <div className="nag-card nag-card-crew">
+              <span>
+                <b>Starter crew</b>
+                <small>A lead, an engineer and a writer at once.</small>
+              </span>
+              <StarterTeam identity={identity} onDone={onClose} />
+            </div>
+          )}
+        </div>
+      </section>
     </div>
-  );
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="tm-dialog max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain sm:max-w-[540px]" onInteractOutside={keepForPicker} onFocusOutside={keepForPicker}>
-        {form}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-/**
- * The teammate being made, as the crew will meet them: their face, name and role, and in a few lines what they work through, how
- * far they may go, when they check in and where they work. Beside the New teammate page's form, following it as it is filled.
- */
-function MateCard({ look, name, role, tool, model, mode, checkins, folder, projects }: { look: string; name: string; role: string; tool: MateTool; model: string; mode: EngineMode; checkins: CheckIn[]; folder: string; projects: number }) {
-  const EVERY: Record<CheckIn["every"], string> = { hourly: "every hour", daily: "every day", weekdays: "every weekday", weekly: "every week" };
-  const first = checkins[0];
-  return (
-    <aside className="tm-card" aria-label="Your new teammate">
-      <div className="tm-card-face">
-        <Robot seed={look} tool={markOf(tool)} size={64} status="idle" />
-      </div>
-      <div className="tm-card-who">
-        <b className={name ? "" : "tm-card-none"}>{name || "Their name"}</b>
-        <p className={role ? "" : "tm-card-none"}>{role || "Their role: what they do, read with every turn."}</p>
-      </div>
-      <dl className="tm-card-facts">
-        <div>
-          <dt>Works through</dt>
-          <dd>{tool === "friday" ? (model ? modelLabel(tool, model) : "One of your models") : `${toolName(tool)}${model ? ` · ${modelLabel(tool, model)}` : ""}`}</dd>
-        </div>
-        <div>
-          <dt>Access</dt>
-          <dd>{ACCESS[mode].label}</dd>
-        </div>
-        <div>
-          <dt>Check-ins</dt>
-          <dd>{first ? `${EVERY[first.every]}${first.every === "hourly" ? "" : ` at ${first.at}`}${checkins.length > 1 ? `, +${checkins.length - 1}` : ""}` : "None"}</dd>
-        </div>
-        <div>
-          <dt>Folder</dt>
-          <dd className="tm-card-path" title={folder}>
-            {folder}
-            {projects > 0 && <span>, +{projects} project{projects === 1 ? "" : "s"}</span>}
-          </dd>
-        </div>
-      </dl>
-      <p className="tm-card-note">They keep their own memory and work through their queue while you're away.</p>
-    </aside>
   );
 }
 

@@ -14,7 +14,7 @@
  *
  */
 import { memo } from "react";
-import { isV2, teamColour } from "./teammate-block.js";
+import { isV2, shapeSeed, teamColour } from "./teammate-block.js";
 import { reducedMotion } from "./presence.js";
 
 const hash = (seed: string) => [...seed].reduce((h, c) => (Math.imul(h, 31) + c.charCodeAt(0)) >>> 0, 2166136261);
@@ -53,6 +53,8 @@ export const onTop = (e: Extra) => e === "sprout" || e === "ears" || e === "ante
 const looks = new Map<string, Look>();
 /** A seed's shape and eyes: three harmonics of small amplitude, and where the eyes sit. */
 export function lookOf(seed: string): Look {
+  // A picked colour isn't part of the shape (teammate-look.ts withColour).
+  seed = shapeSeed(seed);
   const had = looks.get(seed);
   if (had) return had;
   const r = numbers(hash(seed || "Friday") ^ 0x9e3779b9);
@@ -116,6 +118,7 @@ export function outline(waves: readonly Wave[], turn = 0): string {
 const shapes = new Map<string, { still: string; breathing: string }>();
 /** A seed's outline, and the slow breath a working face takes through two near neighbours of it and back. */
 export function shapeOf(seed: string): { still: string; breathing: string } {
+  seed = shapeSeed(seed);
   const had = shapes.get(seed);
   if (had) return had;
   const { waves, turn } = lookOf(seed);

@@ -1,3 +1,4 @@
+import { touchesSecrets } from "./command-class.js";
 /**
  * What a teammate with full access may do on its own, what it asks you first, and what it never does (Arun, 2026-11-03: "they
  * have full automatic bypass permissions and will only ask for go aheads on certain things, you will have to decide the
@@ -6,8 +7,8 @@
  *
  *   Runs on its own: reading anything, its own folder and the projects it was given (edits, builds, tests, installs, commits,
  *   pushing its own branches, draft pull requests), the web, talking to the other teammates.
- *   Asks first (a go-ahead): speaking for you outside, shipping, deleting what isn't its own, money, keys and access, and your
- *   computer beyond its folders. Sign-ins, two-factor and CAPTCHAs are yours to do: a hand-off, not a yes.
+ *   Asks first (a go-ahead): speaking for you outside or sending data off your computer, shipping, deleting what isn't its own,
+ *   money, keys and access (reading them too, since 2026-11-13, as Friday Teams asks), and your computer beyond its folders. Sign-ins, two-factor and CAPTCHAs are yours to do: a hand-off, not a yes.
  *   Never: the floor no yes opens (wiping a disk or your home folder, piping the web into a shell, your SSH keys, Friday's own data).
  *
  * Pure: the runner calls it for every step a teammate's coding tool wants to take and acts on the answer (runner.ts, "ask").
@@ -18,11 +19,11 @@ export type Verdict = { kind: "run" } | { kind: "ask"; tag: GoAhead; why: string
 
 /** What each go-ahead is, as its card says it (the reason the teammate is asking). */
 export const GO_AHEAD_WORDS: Record<GoAhead, string> = {
-  outside: "Speaks for you outside",
+  outside: "Sends something outside",
   ship: "Ships",
   delete: "Deletes what isn't its own",
   money: "Spends money",
-  keys: "Changes keys or access",
+  keys: "Keys or access",
   computer: "Reaches past its folders",
   takeover: "Needs you to sign in",
 };
@@ -205,6 +206,10 @@ function guardPiece(piece: string, at: GuardPlace): Verdict {
   if (/^(mail|mailx|sendmail|msmtp|mutt)$/.test(cmd)) return ask("outside", "Sends an email.");
   if ((cmd === "curl" || cmd === "wget" || cmd === "http") && /hooks\.slack\.com|api\.slack\.com\/api\/chat|discord(app)?\.com\/api\/webhooks|api\.sendgrid|api\.mailgun|api\.postmarkapp|api\.resend\.com|api\.twitter\.com|api\.x\.com|graph\.facebook|api\.linkedin|api\.telegram\.org/.test(line)) return ask("outside", "Sends a message to someone outside, as you.");
 
+  // Sending data out of your computer: a request that carries a body or a file, or a copy to another machine. Reading the web, and
+  // anything sent to this computer's own servers (an agent trying the app it started), runs on its own (Arun, 2026-11-13, as above).
+  if (sendsOut(cmd, args, line)) return ask("outside", `Sends data out of your computer (${clip(line)}).`);
+
   // ── shipping ──
   if (cmd === "git" && sub === "push") {
     if (has(/^(-f|--force|--force-with-lease.*|--mirror)$/) || args.some((a) => /^\+/.test(a))) return ask("ship", "Force-pushes, rewriting history others may have.");
@@ -264,11 +269,46 @@ function guardPiece(piece: string, at: GuardPlace): Verdict {
       if (v.kind !== "run") return v;
     }
   }
+  // Reading keys or credentials (~/.ssh, ~/.aws, an id_rsa, ~/.npmrc) is never just looking around: asked, as Friday Teams asks it
+  // (Arun, 2026-11-13: "only shipping, changes past their folders, sending data out and credentials ask"). Writing there is the
+  // floor, above.
+  // A Windows path says it with backslashes (Get-Content $HOME\.ssh\id_rsa, type C:\Users\me\.aws\credentials).
+  if (touchesSecrets(line.replace(/\\/g, "/"))) return ask("keys", `Reads your keys or credentials (${clip(line)}).`);
   return RUN;
 }
 
 /** Whether it is working in a folder of its own (git's reset and clean act on the folder it is in). */
-const inOwn = (at: GuardPlace) => at.given.length === 0 && at.own.length > 0;
+const inOwn = (at: GuardPlace) => {
+  if (!at.own.length) return false;
+  if (!at.given.length) return true;
+  // In its own copy of a project (a worktree it works a task in), on a branch of its own: resetting or cleaning there is its work, as
+  // in Friday Teams (Arun, 2026-11-13: "im babysitting them"). In the project itself, or on a shared branch, it is yours to say.
+  const here = norm(at.cwd ?? at.own[0]!, at.home);
+  return at.own.some((r) => under(here, norm(r, at.home))) && !!at.branch && !SHARED_BRANCH.test(at.branch);
+};
+
+/** The hosts that are this computer: a request to them stays here. */
+const LOCAL_HOST = /^(?:https?:\/\/)?(?:localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|\[::1\]|::1)(?::\d+)?(?:\/|$)/i;
+/** Whether a command sends data off this computer: a request with a body, a form or a file, or a copy to another machine. */
+function sendsOut(cmd: string, args: string[], line: string): boolean {
+  // Windows ships curl.exe, and PowerShell users write it so: curl alone there can be Invoke-WebRequest's alias, read below.
+  cmd = cmd.replace(/\.exe$/i, "").toLowerCase() === "curl" || /^(wget|scp|rsync|sftp)(\.exe)?$/i.test(cmd) ? cmd.replace(/\.exe$/i, "").toLowerCase() : cmd;
+  const targets = args.filter((a) => LOCAL_HOST.test(a) || /^(?:https?:\/\/|[\w.-]+\.[a-z]{2,}(?:[:/]|$))/i.test(a));
+  const local = targets.length > 0 && targets.every((t) => LOCAL_HOST.test(t));
+  if (cmd === "curl") {
+    if (local) return false;
+    return args.some((a) => /^(-d|--data|--data-\w+|--json|-F|--form|--form-string|-T|--upload-file)$/.test(a) || /^--(data|json|form|upload-file)(-\w+)?=/.test(a) || /^-[a-zA-Z]*[dFT].+/.test(a)) || /(?:^|\s)(?:-X|--request)\s*["']?(POST|PUT|PATCH|DELETE)\b/i.test(` ${line}`);
+  }
+  if (cmd === "wget") return !local && args.some((a) => /^--(post|body)-(data|file)(=|$)|^--method(=|$)/.test(a));
+  if (cmd === "http" || cmd === "https" || cmd === "xh") return !local && /^(POST|PUT|PATCH|DELETE)$/i.test(args[0] ?? "");
+  if (/^(Invoke-WebRequest|Invoke-RestMethod|iwr|irm)$/i.test(cmd)) return !local && /-Method\s+["']?(Post|Put|Patch|Delete)\b|-InFile\b|-Body\b/i.test(line);
+  // scp, rsync, sftp: a destination on another machine (user@host:path or host:path).
+  if (/^(scp|rsync|sftp)$/.test(cmd)) {
+    const dest = args.filter((a) => !a.startsWith("-")).at(-1) ?? "";
+    return /^(?:[\w.-]+@)?[\w.-]+:/.test(dest) && !/^(?:[\w.-]+@)?(?:localhost|127\.0\.0\.1):/.test(dest);
+  }
+  return false;
+}
 
 const clip = (s: string) => (s.length > 80 ? `${s.slice(0, 79)}…` : s);
 

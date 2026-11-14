@@ -1,11 +1,12 @@
 import { StateRing } from "./presence.js";
+import { openKeepGoing } from "./crew-carry-open.js";
 import { dragEnds } from "./drag-end.js";
 import { isLocal, ownModel, planLimits, type SessionPlan } from "./edition.js";
 import { sessionComputer, useSessionMachine } from "./local.js";
 import { openInPreview } from "./previewBus.js";
 import { pictureSession } from "./LiveBlock.js";
 import { WorkBar, WorkRail } from "./WorkRail.js";
-import { isWorkSid, markWorkSession, useWorkMode, WorkNote } from "./WorkMode.js";
+import { isWorkSid, markWorkSession } from "./WorkMode.js";
 import { SessionMenu } from "./SessionMenu.js";
 import { EmptyState } from "@/components/dass/EmptyState";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
@@ -56,8 +57,10 @@ import { useSession, type Send } from "./useSession.js";
 import type { Focus } from "../focus.js";
 import { CLASS_LABEL, COMMAND_CLASSES, type CommandClass } from "../command-class.js";
 import { FocusContext, herePublisher } from "./focusStore.js";
-import { RoomMenu, TeamFaces, teamTitle } from "./Teammates.js";
+import { mateOn, RoomMenu, TeamFaces, teamTitle } from "./Teammates.js";
+import { setMateTab, useMateTab } from "./mate-tab.js";
 const TeamPlan = lazy(() => import("./TeamPlan.js"));
+const RememberOffer = lazy(() => import("./RememberOffer.js"));
 import { TeamHeaderControls } from "./TeamControls.js";
 import { ALL, AgentsContext, agentKey, agentsStore, focusAgent, focusedAgent, jumpToNeeds, nextKey, openedAt, setColumns, syncAddress, useAgents, useColumns, useFocusedAgent, useSeen } from "./agentFocus.js";
 import { AGENT_DRAG, closeColumn, dropAgent, evenWidths, fitColumns, maxColumns, pickInColumn, resizeAt, unreadByLane } from "./agentNav.js";
@@ -443,6 +446,8 @@ export function SessionView({
   // The agent in view, one choice for the page (agentFocus.ts): the agent the panels follow, and in a split the column in
   // use. Choosing one that no column shows (⌃4, the palette, ⌘J to another agent) goes back to one chat, on it.
   const focused = useFocusedAgent(sid);
+  // A crew mate's Settings asked for from elsewhere (its row's Edit…): opened in the side panel, below.
+  const mateTab = useMateTab(focused);
   // A team's room has no folder of its own (teammates.ts): its panels show the lead's, the teammate it writes to.
   let roomLane = "";
   if (s.state?.options.team) roomLane = s.state.lead ?? s.state.lanes[0]?.id ?? "";
@@ -631,6 +636,9 @@ export function SessionView({
     if (isLocal() && !st.options.work && !st.options.team) {
       act("tui", tuiIsOn() ? "Back to chat view" : "Terminal view", "terminalSquare", () => setTuiOn(!tuiIsOn()));
       act("settings", "Session settings", "settings", () => dispatchEvent(new Event("friday:session-settings")));
+      // The rest handed on to your crew or a crew room, from the session's own menu (Code and Crew, connected, 2026-11-13): this
+      // edition's sessions have no People menu, so it is here, beside the session's settings.
+      if (who.role !== "viewer") act("keep-going", "Keep this going…", "handoff", () => openKeepGoing({ sid }));
     }
     act("file", "Open a file…", "file", () => (setTab("files"), setBench(true), setTimeout(() => dispatchEvent(new CustomEvent("friday:quick-open")), 60)), shortcut("⌘P"));
     // Every agent by name, and what is waiting: the palette is where a keyboard goes when it doesn't know the number.
@@ -663,6 +671,14 @@ export function SessionView({
     setBench(true);
     setHistory(false);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // A crew mate's settings asked for from elsewhere (its row's Edit…): the side panel, on its Settings tab (Arun, 2026-11-13).
+  useEffect(() => {
+    if (mateTab !== "settings" || focused === ALL) return;
+    setTab("mate");
+    setBench(true);
+    setHistory(false);
+    setMateTab(focused, "chat");
+  }, [mateTab, focused]); // eslint-disable-line react-hooks/exhaustive-deps
   // The pictures agents show here come from this session's files, whatever the page's address says (LiveBlock localPicture).
   Object.assign(pictureSession, { sid, invite });
   // An agent's browser tool wants a page in this session's Browser panel (local/desktop-browser.ts): the panel opens on it.
@@ -676,15 +692,11 @@ export function SessionView({
       }),
     [sid, onOpen],
   );
-  // The sidebar lists Code or Work sessions; opening one of the other kind turns it over, so the session you are in is always
-  // in the list, marked (2026-10-27 design review: a Code session opened while the switch said Work was nowhere in it).
-  const [workMode, setWorkMode] = useWorkMode();
+  // A Work session made before Work went (WorkMode.tsx) is marked as one, so it stays out of Code's list.
   const isWork = s.state ? !!s.state.options.work : null;
   useEffect(() => {
-    if (isWork === null) return;
     if (isWork) markWorkSession(sid);
-    if (isWork !== workMode) setWorkMode(isWork);
-  }, [sid, isWork]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sid, isWork]);
 
   // Opening a session that never says hello (the server down, a proxy in the way) showed the skeleton for good: after a while it
   // says so, with the way to try again (Arun, 2026-10-24: UX gaps).
@@ -931,7 +943,9 @@ export function SessionView({
           {/* No "While you were away" card (Arun, 2026-10-21: "get rid of this too"): the feed's "New since you looked" line marks where you left off. */}
           {!replaying && <Banners state={state} me={me} send={send} />}
           {!replaying && <HandoverBanner state={state} me={me} />}
-          {!replaying && state.options.work && <WorkNote sid={sid} />}
+          {/* "Remember these for Kit?": a crew mate's decisions offered to its memory once its run is over (Code and Crew, connected,
+              2026-11-13). Loaded only when something here was marked as decided. */}
+          {!replaying && me.role !== "viewer" && state.memory.some((m) => m.key.startsWith("decision:") && !!m.text) && <Suspense fallback={null}><RememberOffer state={state} events={s.events} /></Suspense>}
           {(() => {
             const column = (lane: string, at: number) => (
               <div key={lane} className={`split-col${activeLane === lane ? " on" : ""}${dropOn?.at === at ? " drop-on" : ""}`} data-col={at}>
@@ -1184,6 +1198,7 @@ function PresenceBar({ presence, state, me, events, send, follow }: { presence: 
             <button type="button" className="pb-handover" onClick={() => (setRoster(false), setHandover(true))}>
               <Icon name="book" size={13} /> Where we left off
             </button>
+
             {[true, false].map((on) => {
               const group = people.filter((x) => x.online === on);
               if (!group.length) return null;
@@ -1352,6 +1367,22 @@ function PersonCard({
 }
 
 // ── top bar ─────────────────────────────────────────────────────────
+
+/**
+ * A crew mate's settings, a gear in the header beside the panel button (Arun, 2026-11-13: "move this to the header next to the
+ * side panel button"): on its own chat, for its keeper; it opens and closes its Settings in the side panel.
+ */
+function MateGear({ sid, on, onToggle }: { sid: string; on: boolean; onToggle: () => void }) {
+  const lane = useFocusedAgent(sid);
+  const m = lane !== ALL ? mateOn(lane) : null;
+  let mine = !!m;
+  if (!m || !mine) return null;
+  return (
+    <button type="button" className={`panel-tab icon mate-gear ${on ? "on" : ""}`} title={`${m.name}'s settings`} aria-label={`${m.name}'s settings`} aria-pressed={on} onClick={onToggle}>
+      <Icon name="settings" size={18} />
+    </button>
+  );
+}
 
 function TopBar({
   follow,
@@ -1557,6 +1588,7 @@ function TopBar({
         {/* A room's settings with the header's other buttons, where a Code session has its gear, rather than an "…" beside its name (Arun, 2026-10-27: "place the edit room button somewhere better"). */}
         {/* The team's own: its threads, its board, Stop all while anyone works, and Away / Pause (TeamControls.tsx; Arun, 2026-10-28). */}
         {state.options.team && <TeamHeaderControls identity={identity} state={state} events={events} send={send} notify={notify} panel={{ on: view.bench || view.history.open, toggle: view.onPanel }} />}
+        {state.options.team && <MateGear sid={sid} on={view.bench && view.tab === "mate"} onToggle={() => (view.bench && view.tab === "mate" ? view.onPanel() : view.onTab("mate"))} />}
         {state.options.team && <RoomMenu identity={identity} sid={state.id} notify={notify} />}
         {state.options.work && <button type="button" className={`panel-tab icon work-browser-btn ${view.bench && view.tab === "preview" ? "on" : ""}`} aria-pressed={view.bench && view.tab === "preview"} aria-label={view.bench && view.tab === "preview" ? "Close the browser" : "Open the browser"} title={view.bench && view.tab === "preview" ? "Close the browser" : "Browser: the pages the agents open, and any you want"} onClick={() => view.onTab("preview")}><Icon name="webBrowser" size={17} /></button>}
         {/* One button for the side panel, where the panels are a card to pick from (Workbench), in place of a row of four and a
@@ -1864,6 +1896,8 @@ function SettingsBody({ state, send, meter, solo = false }: { state: SessionStat
       )}
       {/* Which commands editors may approve: Solo has no editors. */}
       {!solo && <ApproveRules state={state} send={send} />}
+      {/* Said once the list has dropped it (projection.ts dropBroadScripts). */}
+      {state.allowDropped && <p className="muted small">An older broad allowance for npm scripts was removed; allow each script again as it comes up.</p>}
       <div className="set-row">
         <div>
           <div className="set-label">Run tests after changes</div>

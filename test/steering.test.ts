@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { allowPrefix, allowedCommand, project } from "../src/session/projection.js";
+import { allowPrefix, allowedCommand } from "../src/command-allow.js";
+import { project } from "../src/session/projection.js";
 import type { EventBody, SessionEvent } from "../src/types.js";
 
 /**

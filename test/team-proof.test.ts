@@ -76,7 +76,8 @@ test("a backend task handed in with proof: its checks, only the files it changed
   assert.equal(p.page, undefined);
   assert.deepEqual(p.missing, []);
   assert.equal(missingLine(p), "");
-  assert.equal(proofSummary(p), "Checks pass · 1 file +40 −2 · self-reviewed");
+  // Its own run, said as its own: Friday ran nothing here (Arun, 2026-11-13).
+  assert.equal(proofSummary(p), "Its own checks pass · 1 file +40 −2 · self-reviewed");
 
   // Writer is asked to review it, and reads the proof before the task and the report.
   const ask = m.events.findLast((e) => e.lane === "lw" && e.body.type === "instruction" && e.body.mesh?.review);
@@ -135,7 +136,7 @@ test("handed in without proof: it is told to post it, and the proof says what it
   p = taskProof(m.events, "a")!;
   assert.deepEqual(p.missing, []);
   assert.deepEqual(p.checks, [{ command: "npm run typecheck", ok: false, by: "friday", output: "src/a.ts(3,1): error TS2304" }]);
-  assert.match(proofSummary(p), /^Checks failed/);
+  assert.match(proofSummary(p), /^Friday's check failed/);
 });
 
 test("a task id used again on a new board is a task of its own; a lead's goal run carries proof too", async () => {

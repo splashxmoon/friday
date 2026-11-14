@@ -19,6 +19,7 @@ import { preferredAccount, useAccountChoice } from "./Accounts.js";
 import { EngineMark } from "./BrandMarks.js";
 import { savedCommands, useSavedCommands, useShortcuts } from "./Shortcuts.js";
 import { AgentModelPicker } from "./AgentModelPicker.js";
+import { MODE_BLURB, MODE_KEY, MODE_NAME } from "./StartControls.js";
 import { canRoute, saveSmartRouting, smartRoutingOn, useRouteHint } from "./RouteWhy.js";
 import { keepAuto, reachForMessage } from "./smartReach.js";
 import type { Plan } from "../plan-types.js";
@@ -29,7 +30,6 @@ import { branchName, branchRef, FolderBranchPick, type FolderBranch } from "./Br
 import type { ResumeLink } from "./resume-link.js";
 import { issueBranch, parseIssueUrl, parsePrLink, withIssue, withPr, type Issue, type Pr } from "../github-issue.js";
 import { isTeamSid } from "./Teammates.js";
-import { leaveWorkNote, markWorkSession, startTeammate, teammateOf, useWorkMode, WORK_LINES, WORK_MODE_BLURB, WORK_PLACEHOLDER, WorkField, WorkStarters } from "./WorkMode.js";
 import { CircleDotIcon, GitPullRequestIcon } from "lucide-react";
 import { DailyBriefCard, openBrief } from "./DailyBrief.js";
 import { GoalsCard } from "./Goals.js";
@@ -121,16 +121,6 @@ function useStarters(): typeof STARTERS {
   }, []);
 }
 
-/** The new-session box's last permission choice, on this computer. */
-const MODE_KEY = "friday.newSession.mode";
-const MODE_LABEL: Record<EngineMode, string> = { plan: "plan", edits: "manual", full: "auto" };
-/** How the choice is named on the button and in the list. */
-const MODE_NAME: Record<EngineMode, string> = { plan: "Plan", edits: "Manual", full: "Auto" };
-const MODE_BLURB: Record<EngineMode, string> = {
-  plan: "Reads and proposes, and asks before it runs a command. Changes nothing.",
-  edits: "Edits files, and asks before it runs a command.",
-  full: "Runs commands without asking.",
-};
 
 /**
  * The branch a new piece of work lands on.
@@ -420,21 +410,7 @@ export function Code({
     ENGINE_TOOLS.filter((t) => machine.tools.some((x) => x.tool === t && x.path && x.loggedIn !== false && !x.unavailable)),
   );
   const folder = picked?.folder ?? null;
-  // Work (WorkMode.tsx): content and knowledge work, with the other of Claude Code and Codex always brought in beside the first.
-  // Picked in the sidebar only, with no switch or "With Codex" above the box (Arun, 2026-10-26: "get rid of the tab to switch
-  // between code and work and with codex too").
-  const [workPick] = useWorkMode();
-  const work = isLocal() && workPick;
-  const team = true;
-  // No new branch for a Work session's folder; back to one when Code is picked again.
-  const wasWork = useRef(work);
-  useEffect(() => {
-    if (work) setNewBranch(false);
-    else if (wasWork.current) setNewBranch(true);
-    wasWork.current = work;
-  }, [work]);
   const ready = ENGINE_TOOLS.filter((t) => machine.tools.some((x) => x.tool === t && x.path && x.loggedIn !== false && !x.unavailable));
-  const mate = work ? teammateOf(engine, ready) : null;
   // The folders beside it the coding tool may work in too, once changed here (see AlsoWorksIn); null keeps those kept for the folder.
   const [dirs, setDirs] = useState<string[] | null>(null);
   useEffect(() => setDirs(null), [folder?.path]);
@@ -580,7 +556,7 @@ export function Code({
     textarea: input,
     sid: "",
     invite: "",
-    commands: !work,
+    commands: true,
     files: hasMachine && !!folder,
     saved: savedCommands(savedCmds.commands),
     ...(engine ? { tool: ENGINE_NAMES[engine] } : {}),
@@ -664,7 +640,6 @@ export function Code({
           ...(issue ? { issue: { url: issue.url, repo: issue.repo, number: issue.number, title: issue.title } } : {}),
           ...(pr ? { pr: { url: pr.url, repo: pr.repo, number: pr.number, title: pr.title, head: pr.head } } : {}),
           kind: "code",
-          ...(work ? { work: true, ...(mate && team ? { team: true } : {}) } : {}),
           // The invite links start on, so there is something to copy from People the moment the session exists.
           // Everything the first step needs has to be in place before the
           // agent takes it. Sending the goal at creation woke the agent
@@ -683,7 +658,6 @@ export function Code({
       });
       const invite = r.invites.owner!;
       made = r.sessionId;
-      if (work) markWorkSession(r.sessionId);
       // The machine joins first. With a CLI selected the CLI does the work;
       // with Friday Code the computer lends the folder and Friday works in
       // it — same bridge either way, so files, terminal, preview and diffs
@@ -700,7 +674,6 @@ export function Code({
             body: JSON.stringify({
               sid: r.sessionId,
               invite,
-              ...(work ? { work: true } : {}),
               ...(engine ? { tool: engine } : {}),
               // No folder: a new project folder for it, named from what was asked, which is the session's code from then on.
               ...(folder ? { cwd: folder.path } : { noFolder: true, project: goal.trim().slice(0, 400) }),
@@ -726,17 +699,6 @@ export function Code({
               ...(picked?.resume && forkResume ? { resumeFork: true } : {}),
             }),
           });
-          // In Work, the other tool joins the same folder; a failure leaves the session to the first, and says so in the session,
-          // where it is read: said here, "Sending the task…" replaced it at once and the page went.
-          const at = begun.cwd ?? folder?.path;
-          if (mate && team && at) {
-            setAttachNote(`Bringing in ${ENGINE_NAMES[mate]}…`);
-            await startTeammate(identity, { sid: r.sessionId, invite, tool: mate, cwd: at, mode }).catch((e: Error) => {
-              const said = `${ENGINE_NAMES[mate]} didn't join: ${e.message.replace(/\.$/, "")}.`;
-              setAttachNote(said);
-              leaveWorkNote(r.sessionId, said);
-            });
-          }
           void begun;
         } catch (e) {
           attached = false;
@@ -810,16 +772,10 @@ export function Code({
   useEffect(() => setDirtyOn(null), [folder?.path]);
 
   let placeholder = solo ? "Describe the change…" : "Describe the change. Teammates can join, watch the run and steer it live…";
-  if (work) placeholder = WORK_PLACEHOLDER;
   // The branch controls, for a folder that is a repository.
-  let branchy = !!folder?.isRepo;
-  if (work) branchy = false;
-  // The line under the box when no folder is picked, in the words of the kind of session being started.
-  let noFolderLine = "code";
-  if (work) noFolderLine = "work";
-  // What each permission means, said for the kind of session being started.
-  let modeBlurb = MODE_BLURB;
-  if (work) modeBlurb = WORK_MODE_BLURB;
+  const branchy = !!folder?.isRepo;
+  // What each permission means.
+  const modeBlurb = MODE_BLURB;
   // The branch to work on, for a folder that is a repository: a line in the box (with the folder's own card only when a conversation
   // is picked up again).
   const branchLine = (
@@ -907,21 +863,14 @@ export function Code({
   return (
     <div className="home">
       {/* Code's home is one flat ground (Arun, 2026-10-29: "so clean and beautiful really with a clear direction in design
-          language"; DIRECTION.md §9.5: the dot field goes). Work keeps its own field. */}
-      {
-        work ? <WorkField /> :
-        null
-      }
+          language"; DIRECTION.md §9.5: the dot field goes). */}
       {/* Which coding tools are here, as one pill in the corner opposite "tokens saved": their marks and how many are ready,
           with the card that signs in, switches account or installs one behind it. */}
       <div className="home-tools">
         <Badge identity={identity} machine={machine} refresh={refresh} />
       </div>
       <Greeting name={identity.name} />
-      {
-        work ? <HeroTitle lines={WORK_LINES} /> :
-        <HeroTitle />
-      }
+      <HeroTitle />
       {/* No coding tool ready on this computer: said here, with the way to set one up, before a message is written that can only
           stop on "isn't signed in" (Arun, 2026-10-30: the first few minutes after install are where people quit). */}
       {(machine.mode === "local" || machine.mode === "linked") && !machine.tools.some((t) => t.path && t.loggedIn !== false && !t.unavailable) && (
@@ -1097,7 +1046,6 @@ export function Code({
             ref={input}
             id="code-input"
             aria-label="Describe the change"
-            {...(work ? { "aria-label": "Describe what to make" } : {})} // Work's own words (Arun, 2026-10-28: "iron everything… focusing on UI and UX").
             autoFocus
             // Kept as it was sent while the session is being made: an edit now would not be what the agent is given.
             readOnly={busy}
@@ -1160,7 +1108,6 @@ export function Code({
                 onTool: (t) => ((chose.current = true), setEngine(t)),
                 // In the app, it connects itself (the box says so); in a browser, straight to connecting this computer.
                 ...(hasMachine ? {} : { onNeedsMachine: () => (window.fridayDesktop?.link ? setLinking(true) : connectThisComputer()) }),
-                ...(work ? { plain: true } : {}), // In Work, folders: no repos, GitHub or clone (w1 #3).
               }}
             />
             {/* On Solo a saved agent rides on the coding tool: said here, and taken off with the cross. */}
@@ -1195,12 +1142,11 @@ export function Code({
             {/* What the agent may do without asking: read and propose, ask before it runs a command, or run freely. Applies to whichever agent is chosen. */}
             <MenuButton
               className="agent-pill mode-pill"
-              label="What it may do without asking"
+              label="Permissions"
               text={MODE_NAME[mode]}
-              width={300}
               above
               items={() => [
-                { heading: "What it may do" },
+                { heading: "Permissions" },
                 ...(["plan", "edits", "full"] as EngineMode[]).map((m) => ({
                   label: MODE_NAME[m],
                   // Codex and Cursor cannot ask about one command at a time, so for them Manual asks once for the whole turn.
@@ -1236,11 +1182,9 @@ export function Code({
               <button
                 type="button"
                 className="cw-drop"
-                aria-label="Choose a folder"
+                aria-label="New folder, choose where it works"
                 title={
-                  noFolderLine === "work"
-                      ? "Your pieces are saved in a new folder. Choose one."
-                      : files.some((f) => f.folder)
+                  files.some((f) => f.folder)
                         ? // A folder's copy attached is not a folder picked (2026-10-28 QA).
                           `${toolName || "The agent"} starts in a new project folder, with your copy of “${files.find((f) => f.folder)!.folder}” attached to the message. Choose a folder to work in it instead.`
                         : `No folder picked: ${toolName || "the agent"} starts in a new project folder. Choose one.`
@@ -1259,10 +1203,9 @@ export function Code({
                 </button>
               )}
             </span>
-            {!folder && <span className="composer-below-note">{work ? "Your pieces are saved in a new folder" : `${toolName || "The agent"} starts in a new project folder`}</span>}
+            {!folder && <span className="composer-below-note">{`${toolName || "The agent"} starts in a new project folder`}</span>}
           </div>
         )}
-      {work && <WorkStarters off={!!goal.trim() || busy} onPick={(t) => (setGoal(t), requestAnimationFrame(() => input.current?.focus()))} />}
 
       {(engine || folder || picked) && !(hasMachine && folder && !(engine && tool && (!tool.path || tool.loggedIn === false))) && (
         <div className="code-ws">
@@ -1338,7 +1281,7 @@ export function Code({
 
       {/* Someone new: the things that show what Friday is for, one press each (GettingStarted.tsx). In both editions, the hosted
           service following the local build (Arun, 2026-11-04); "Since you left" below still says what happened while away. */}
-      {!work && <GettingStarted recents={recents} onPickFolder={() => setTimeout(() => document.querySelector<HTMLButtonElement>(".cw-drop")?.click(), 0)} />}
+      <GettingStarted recents={recents} onPickFolder={() => setTimeout(() => document.querySelector<HTMLButtonElement>(".cw-drop")?.click(), 0)} />
       {/* The morning brief or evening wrap-up across everything, then what happened in each session while you were away. */}
       <DailyBriefCard />
       {/* Every goal you set, at risk first (goals.ts). */}

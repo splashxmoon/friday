@@ -128,16 +128,17 @@ function ReceiptView({ receipt }: { receipt: Receipt }) {
 }
 
 /** What the second agent made of a run's change: still reading, nothing found, sent back to fix, or left for the person. */
-export type SecondReview = { state: "reviewing" | "clean" | "sent" | "open" | "skipped"; findings: ReviewFinding[]; round: number; note?: string };
+export type SecondReview = { state: "reviewing" | "clean" | "sent" | "open" | "skipped"; findings: ReviewFinding[]; round: number; note?: string; /** Who read it and how much (review.done model, read). */ model?: string; read?: { files: number; of: number; cut: boolean } };
 
 export function secondReviewOf(events: SessionEvent[], endSeq: number): SecondReview | null {
   const done = events.findLast((e) => e.body.type === "review.done" && e.body.runSeq === endSeq);
   if (done?.body.type === "review.done") {
     const { findings, round, sent, error } = done.body;
+    const by = { ...(done.body.model ? { model: done.body.model } : {}), ...(done.body.read ? { read: done.body.read } : {}) };
     if (error) return { state: "skipped", findings: [], round, note: error };
-    if (sent) return { state: "sent", findings: findings.filter((f) => f.severity !== "low"), round };
-    if (findings.some((f) => f.severity !== "low")) return { state: "open", findings, round };
-    return { state: "clean", findings, round };
+    if (sent) return { state: "sent", findings: findings.filter((f) => f.severity !== "low"), round, ...by };
+    if (findings.some((f) => f.severity !== "low")) return { state: "open", findings, round, ...by };
+    return { state: "clean", findings, round, ...by };
   }
   const started = events.find((e) => e.body.type === "review.started" && e.body.runSeq === endSeq);
   return started?.body.type === "review.started" ? { state: "reviewing", findings: [], round: started.body.round } : null;
@@ -254,7 +255,8 @@ function SecondReviewView({ r, via, lane, sid, endSeq, send, notify }: { r: Seco
     return (
       <div className="sr-block sr-ok">
         <p className="sr-line">
-          <Icon name="shield" size={13} /> {r.round === 2 ? "Read again after the fix: no problems left." : "A second agent read this change and found no problems."}
+          <Icon name="shield" size={13} /> {r.round === 2 ? "Read again after the fix: no problems left." : r.read?.cut ? `A second agent read ${r.read.files} of ${r.read.of} files and found no problems there. The rest was too long to read.` : "A second agent read this change and found no problems."}
+          {r.model && <span className="sr-by muted"> · {r.model}</span>}
           {notes.length > 0 && (
             <button type="button" className="link-btn" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
               {notes.length} small note{notes.length === 1 ? "" : "s"}

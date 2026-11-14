@@ -24,7 +24,6 @@ import {
   ShortcutsTab,
 } from "./SettingsPrefs.js";
 import { CodingToolsSection, ComputerSection } from "./SettingsComputer.js";
-import { OutsideAgentsSection } from "./SettingsOutside.js";
 import type { WorkspaceUsage } from "./workspace-types.js";
 import { isLocal, planLimits, planNow, startTeam } from "./edition.js";
 import { GROUPS, SECTIONS, sectionsMatching, settingsSection, type Group, type SectionDef } from "./settings-sections.js";
@@ -127,7 +126,6 @@ export function SettingsPage({
           "defaults",
           "integrations",
           "usage",
-          "models",
           ...(workspace?.personal !== false ? ["members"] : []),
           ...(isLocal() ? [] : ["outside-agents", "other-computers", "voice"]),
         ]
@@ -269,8 +267,14 @@ export function SettingsPage({
             {current.id === "github" && <ComputerSection identity={identity} part="github" />}
             {current.id === "permissions" && <ComputerSection identity={identity} part="permissions" />}
             {current.id === "coding-tools" && <CodingToolsSection identity={identity} />}
-            {current.id === "own-models" && <OwnModelsSection identity={identity} workspace={workspace} />}
-            {current.id === "outside-agents" && <OutsideAgentsSection identity={identity} />}
+            {/* One Models section (UX audit F10, 2026-11-07): Friday's models, on a plan with Friday's agent, then your own. */}
+            {current.id === "own-models" && (
+              <div className="flex flex-col gap-5">
+                <SettingsGroup title="Your models" className="set-own-models">
+                  <OwnModelsSection identity={identity} workspace={workspace} />
+                </SettingsGroup>
+              </div>
+            )}
             {current.id === "privacy" && <DataTab part="privacy" />}
             {current.id === "data" && <DataTab part="backup" />}
             {current.id === "updates" && <AboutTab part="updates" />}

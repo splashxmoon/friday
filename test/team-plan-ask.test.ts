@@ -35,3 +35,18 @@ test("a teammate's memory over a page is read from its newest part, with a word 
   assert.ok(!read.includes("- fact 0:"), "the oldest left out");
   assert.match(read.split("\n\n")[1]!, /^- fact \d+:/, "from a line's start");
 });
+
+test("a teammate's folded turn says its failed steps beside its time and count, and keeps what it last said before a card in sight", async () => {
+  const { foldOf } = await import("../src/client/team-status.js");
+  const work = (states: string[]) => ({ kind: "work" as const, steps: states.map((state) => ({ state })) });
+  const say = (note: string) => ({ kind: "say" as const, note });
+  // Fable review, 2026-11-11: "Worked for 6m · 14 steps" over two failed commands said nothing was wrong.
+  const f = foldOf([say("Reading it."), work(["done", "failed", "done"]), work(["failed"])], { tookWords: "6m", closedByCard: false });
+  assert.equal(f.line, "Worked for 6m · 4 steps · 2 failed");
+  assert.equal(f.failed, 2);
+  assert.equal(f.keep, null, "a finished turn's answer is under it");
+  // Stopped on a permission card: what it said just before stays in sight, saying why.
+  const c = foldOf([say("Reading it."), work(["done"]), say("I need to publish this to test the install.")], { tookWords: "", closedByCard: true });
+  assert.equal(c.line, "Worked · 1 step");
+  assert.equal(c.keep, "I need to publish this to test the install.");
+});

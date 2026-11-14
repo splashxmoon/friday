@@ -8,9 +8,9 @@ import { BuildWatch } from "./BuildWatch.js";
 import type { Role } from "../types.js";
 import { lazy, Suspense, type ComponentProps, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { isNarrow } from "./narrow.js";
-import { readTabNow, setTeamTab, TeamHome, TeammateDialog, useTeamTab } from "./Teammates.js";
+import { readTabNow, setTeamTab, TeamHome, TeammateForm, useTeamTab } from "./Teammates.js";
 import { choosePlace, usePlaceFollows, usePlaceLeaves, useWorkSessions } from "./WorkMode.js";
-import { openWorkflows, useAutomationsView, useWorkflowNotices } from "./team-workflow-view.js";
+import { useWorkflowNotices } from "./team-workflow-view.js";
 import type { AgentView, PersonListing } from "../agents.js";
 import type { CollectionView, SkillView } from "../skills.js";
 import type { McpPublic } from "../mcp-types.js";
@@ -72,6 +72,7 @@ import type { WorkspaceUsage } from "./workspace-types.js";
 import { Icon } from "./icons.js";
 import { Setup } from "./Setup.js";
 import { WhatsNew } from "./WhatsNew.js";
+import { KeepGoingHost } from "./crew-carry-open.js";
 import { QuickPrompt } from "./QuickPrompt.js";
 import { quickText, sendQuickTo, startQuick } from "./quick-send.js";
 import { ShortcutList } from "./Shortcuts.js";
@@ -772,7 +773,7 @@ export function App() {
       if (r.kind !== "session" && parseRoute(location.search).kind === r.kind) dispatchEvent(new CustomEvent("friday:same-page", { detail: r.kind }));
       history.pushState(null, "", routeUrl(r));
       setRoute(r);
-      if (r.kind !== "session") document.title = r.kind === "connections" ? "Connections · Friday" : r.kind === "agents" ? "Saved agents · Friday" : r.kind === "automations" ? "Automations · Friday" : r.kind === "settings" ? "Settings · Friday" : r.kind === "usage" ? "Usage · Friday" : r.kind === "new-teammate" ? "New teammate · Friday" : r.kind === "review" ? "Code Review · Friday" : r.kind === "needs" ? "Needs you · Friday" : r.kind === "board" ? "Agent Board · Friday" : r.kind === "deepdive" ? "Deep Dive · Friday" : r.kind === "library" ? "Library · Friday" : r.kind === "people" ? "People · Friday" : (r.kind as string) === "crew" ? "Crew · Friday" : "Friday";
+      if (r.kind !== "session") document.title = r.kind === "connections" ? "Connections · Friday" : r.kind === "agents" ? "Saved agents · Friday" : r.kind === "automations" ? "Automations · Friday" : r.kind === "settings" ? "Settings · Friday" : r.kind === "usage" ? "Usage · Friday" : r.kind === "new-teammate" ? "New agent · Friday" : r.kind === "review" ? "Code Review · Friday" : r.kind === "needs" ? "Needs you · Friday" : r.kind === "board" ? "Agent Board · Friday" : r.kind === "deepdive" ? "Deep Dive · Friday" : r.kind === "library" ? "Library · Friday" : r.kind === "people" ? "People · Friday" : (r.kind as string) === "crew" ? "Crew · Friday" : "Friday";
       if (isNarrow(innerWidth)) setLayout({ sidebarCollapsed: true });
     },
     [setLayout],
@@ -1112,7 +1113,13 @@ export function App() {
   // new-chat page and is gone everywhere else, where there is nothing to list;
   // folding it away is a preference of its own, kept for when you come back.
   const [teamTabOn] = useTeamTab();
-  const [autoView, setAutoView] = useAutomationsView();
+  // A crew workflow open in its builder from the one Automations list: its id, "new", or null for the list (the "Why Crew" plan,
+  // 2026-11-13: coding automations and crew workflows are one list). Back to the list on any other page.
+  const [workflowOpen, setWorkflowOpen] = useState<string | null>(null);
+  useEffect(() => {
+    let keep = route.kind === "automations";
+    if (!keep) setWorkflowOpen(null);
+  }, [route.kind]); // eslint-disable-line react-hooks/exhaustive-deps
   useWorkflowNotices();
   // Which sessions are which, read from the server here whatever shows: with the sidebar folded nothing else asked (2026-10-28).
   useWorkSessions(identity);
@@ -1225,6 +1232,22 @@ export function App() {
   // Every full page sits under the window's band the same way, so they are all the same height: Usage and Settings were
   // left out, and stood 40px taller than the pages beside them.
   let crewWorkflows = false;
+  // Automations: the coding tools' and the crew's workflows as one list, each saying who runs it, made from one New automation; a
+  // crew workflow opens in its builder over it (the "Why Crew" plan, 2026-11-13). It was a switch between two pages, Coding tools
+  // and Crew workflows (Arun, 2026-11-02: "fix this logic and design it nicely for switching"); the back ends stay apart.
+  const automations = () =>
+    workflowOpen ? (
+      <TeamWorkflowsPage identity={identity} open={workflowOpen} onList={() => setWorkflowOpen(null)} />
+    ) : (
+      <AutomationsPage
+        onWorkflow={(id) => setWorkflowOpen(id ?? "new")}
+        identity={identity}
+        agents={agents}
+        recents={recents}
+        onOpen={(sid, invite) => navigate({ kind: "session", sid, invite })}
+        onSavedAgents={() => navigate({ kind: "agents" })}
+      />
+    );
   const fullBleed = crewWorkflows || route.kind === "agents" || route.kind === "automations" || route.kind === "connections" || route.kind === "people" || route.kind === "library" || route.kind === "board" || route.kind === "deepdive" || route.kind === "review" || route.kind === "needs" || route.kind === "usage" || route.kind === "new-teammate" || route.kind === "settings";
   useLayoutEffect(() => {
     if (!fullBleed) return;
@@ -1339,6 +1362,8 @@ export function App() {
         {/* Someone new is set up first (this computer, its coding tools, GitHub), not toured: the tour waits behind it. */}
         {identity.id && route.kind === "home" && <Setup identity={identity} recents={recents} onDone={() => requestAnimationFrame(() => document.querySelector<HTMLElement>(".composer textarea, textarea")?.focus())} />}
         {identity.id && <WhatsNew userId={identity.id} />}
+        {/* "Keep this going" (crew-carry-open.tsx): the hand-off sheet, the wheel's question and Bring it in, from anywhere. */}
+        {identity.id && isLocal() && <KeepGoingHost />}
         {/* A new account's workspace on no paid plan: the plans, in front of everything but a shared session, which stays free to watch. */}
 
         {/* A page opened before its code has arrived shows its shape, not a blank. */}
@@ -1392,18 +1417,7 @@ export function App() {
             onDocChange={(d) => setLayout({ ...(d.open !== undefined ? { docOpen: d.open } : {}), ...(d.width !== undefined ? { docWidth: d.width } : {}) })}
           />
         ) : route.kind === "automations" ? (
-          // The coding tools' or the crew's, as the switch at the top of the page says, whichever place the sidebar is on: it was the
-          // crew's only with the Crew tab picked last, with nothing on the page saying so (Arun, 2026-11-02). The hosted Crew's
-          // workflows are its own page (?view=crew&tab=workflows).
-          autoView === "workflows" && (isLocal() || teamTabOn) ? <TeamWorkflowsPage identity={identity} onCoding={() => setAutoView("coding")} /> :
-          <AutomationsPage
-            onTeamWorkflows={isLocal() || teamTabOn ? () => setAutoView("workflows") : openWorkflows}
-            identity={identity}
-            agents={agents}
-            recents={recents}
-            onOpen={(sid, invite) => navigate({ kind: "session", sid, invite })}
-            onSavedAgents={() => navigate({ kind: "agents" })}
-          />
+          automations()
         ) : route.kind === "board" ? (
           <Board
             solo={planLimits(planNow(workspace)).fridayAgent === "none"}
@@ -1447,7 +1461,7 @@ export function App() {
           <UsagePage identity={identity} solo={planLimits(planNow(workspace)).fridayAgent === "none"} />
         ) : route.kind === "new-teammate" ? (
           // Cancel goes back to the Crew room, where a new teammate is asked for.
-          <TeammateDialog page identity={identity} editing={null} onClose={() => (setTeamTab(true), navigate({ kind: "home" }))} />
+          <TeammateForm identity={identity} editing={null} onClose={() => (setTeamTab(true), navigate({ kind: "home" }))} />
         ) : null}
         </Suspense>
       </main>
