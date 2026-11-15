@@ -39,7 +39,7 @@ import type { NeedMark } from "../needs-rank.js";
 import { ALL_COLOURS, distinctLook, pinnedColour, shapeSeed, teamColour as mascotColour, withColour } from "./teammate-block.js";
 import { BlobFace, Crown, type Eyes } from "./teammate-face.js";
 import { Initials, initialsFaces } from "./teammate-initials.js";
-import { byState, elapsed, PresenceRing, useBlink, useFlip, useNow, type Presence } from "./presence.js";
+import { StateRing, byState, elapsed, PresenceRing, useBlink, useFlip, useNow, type Presence } from "./presence.js";
 import { LazyAnswer } from "./lazy-answer.js";
 import { EVERYONE, mentionsIn, namedIn, namesEveryone } from "./teammate-mentions.js";
 import { threadsOf, type ThreadState } from "./team-threads.js";
@@ -52,7 +52,6 @@ import { boardTitle, plainError, readSince, type Away } from "./team-api.js";
 const SinceYouLeft = lazy(() => import("./TeamBrief.js").then((m) => ({ default: m.SinceYouLeft })));
 // The Agents page loads when shown (AgentsPage.tsx), not with the app.
 const AgentsPage = lazy(() => import("./AgentsPage.js"));
-const CrewSetup = lazy(() => import("./CrewSetup.js"));
 import { prefillComposer } from "./prefill.js";
 import { notificationsOn } from "./prefs.js";
 import { setMateTab, useMateTab } from "./mate-tab.js";
@@ -84,7 +83,22 @@ export interface RoomView {
   purpose?: string;
   /** What each of its teammates working now is on, by lane. */
   doing?: Record<string, string>;
+  /** A crew mate's thread, by its id: listed in that crew mate's chat, never with the rooms (teammates.ts Room.thread). */
+  thread?: string;
 }
+
+/** A crew mate's state as the small ring set after its name, the one a coding session's tabs wear; nothing at rest. */
+export function MateRing({ status, title }: { status: TeammateView["status"] | undefined; title?: string }) {
+  return <StateRing state={presenceOf(status)} {...(title ? { title } : {})} />;
+}
+
+/** In a crew mate's thread, that crew mate's lane there; elsewhere null. */
+export const threadLaneOf = (sid: string): string | null => ((r) => (r?.thread ? (r.lanes[r.thread] ?? null) : null))(team?.rooms?.find((x) => x.sid === sid));
+
+/** The crew's rooms as the person sees them: not its crew mates' threads. */
+export const roomsOf = (t: Team | null | undefined): RoomView[] => (t?.rooms ?? []).filter((r) => !r.thread);
+/** One crew mate's threads, newest first. */
+export const mateThreads = (t: Team | null | undefined, mateId: string): RoomView[] => (t?.rooms ?? []).filter((r) => r.thread === mateId).sort((a, b) => (b.last?.at ?? 0) - (a.last?.at ?? 0));
 
 export interface Team {
   sid: string;
@@ -1043,6 +1057,26 @@ export function TeamWorking({ sid }: { sid: string }) {
   // Working here, in this chat's own runs: not busy in another room (statusIn).
   const busy = matesIn(sid).filter(({ lane, m }) => statusIn(sid, lane, m) === "working");
   if (!busy.length) return null;
+  // In the open-source edition, one chip for each at work: its face, its name and what it is doing in plain words, the raw command
+  // or query on hover (Arun, 2026-11-15: "design this better", of "Ivy is running find / -path /proc -prun… · Sage is searching…").
+  if (isLocal())
+    return (
+      <div className="tw" role="status" aria-live="polite">
+        {busy.slice(0, 4).map(({ lane, m }) => {
+          const line = mateStatus(m, { sid, lane }).line;
+          const since = busy.length === 1 ? workingSinceOf(m) : null;
+          return (
+            <button key={m.id} type="button" className="tw-chip" onClick={() => focusAgent(sid, lane)} title={`${m.name}: ${line}`} aria-label={`${m.name}: ${line}. Open ${m.name}'s chat`}>
+              <Face seed={m.look ?? m.name} size={16} />
+              <b>{m.name}</b>
+              <span className="tw-what">{plainDoing(line)}</span>
+              {since !== null && <span className="tw-time">{elapsed(since, now)}</span>}
+            </button>
+          );
+        })}
+        {busy.length > 4 && <span className="tw-more">+{busy.length - 4} more at work</span>}
+      </div>
+    );
   // Those doing the same thing said once: "Nova, Kit and Juno are writing their answers", not the line three times over (2026-11-02
   // crew walk-through). Each name still opens that teammate's chat.
   const groups: { line: string; who: typeof busy }[] = [];
@@ -1097,6 +1131,24 @@ export function TeamWorking({ sid }: { sid: string }) {
       })}
     </div>
   );
+}
+
+/**
+ * What a crew mate is doing, in a few plain words for its chip: "Running a command", not the command; "Searching the web", not the
+ * query; "Talking to the crew", not a tool's name. The whole line is the chip's tip.
+ */
+export function plainDoing(line: string): string {
+  const l = line.replace(/^(is|are)\s+/i, "").trim();
+  if (/^running\b/i.test(l)) return /\b(test|vitest|jest|pytest|playwright)\b/i.test(l) ? "Running the tests" : /\b(build|tsc|compile)\b/i.test(l) ? "Building" : "Running a command";
+  if (/^search(ing)? the web|^looking up|^browsing|^reading the web|^fetching/i.test(l)) return "Searching the web";
+  if (/^using friday\b|message|asking|handing|^talking/i.test(l)) return "Talking to the crew";
+  if (/^(reading|looking (at|through)|searching (the )?(code|files|for))/i.test(l)) return "Reading files";
+  if (/^(editing|changing|writing (to )?[\w./-]+\.\w+|updating [\w./-]+\.\w+)/i.test(l)) return "Editing files";
+  if (/^writing (its|their|the) answer|^writing$/i.test(l)) return "Writing its answer";
+  if (/^thinking/i.test(l)) return "Thinking";
+  if (/^planning|^making a plan/i.test(l)) return "Planning";
+  const short = l.replace(/[:"“].*$/, "").trim() || l;
+  return short.length > 32 ? `${short.slice(0, 31).trimEnd()}…` : short[0]!.toUpperCase() + short.slice(1);
 }
 
 /** A doing said of several: "Writing its answer" → "are writing their answers", "Running the tests" → "are running the tests". */
@@ -1226,6 +1278,29 @@ export function TeamRun({ sid, lane, active, doing, said, outcome, changed, stam
   );
 }
 
+/**
+ * A crew mate's reply in a room, under its answer beside Copy and the thumbs (Arun, 2026-11-15: "follow the design of the agent
+ * response bubble thing like we have in the agent individual rooms too for the crew rooms"): its own chat, a side thread and
+ * Save as a skill, as icons; a thread with replies says how many.
+ */
+export function RoomReplyActions({ sid, lane, root, events, done }: { sid: string; lane: string; root: number | null; events: SessionEvent[]; done: boolean }) {
+  const m = mateOn(lane);
+  if (!m) return null;
+  return (
+    <>
+      <button type="button" className="grid size-7 place-items-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring" aria-label={`Open ${m.name}'s chat`} data-tip={`Open ${m.name}'s chat`} onClick={() => focusAgent(sid, lane)}>
+        <MessageSquareIcon className="size-3.5" aria-hidden="true" />
+      </button>
+      {root !== null && <ThreadChip sid={sid} root={root} lane={lane} events={events} icon />}
+      {done && (
+        <Suspense fallback={null}>
+          <SaveAsSkill sid={sid} lane={lane} icon />
+        </Suspense>
+      )}
+    </>
+  );
+}
+
 /** Copy a teammate's words, said as done for a moment. */
 function CopyText({ text }: { text: string }) {
   const [done, setDone] = useState(false);
@@ -1255,7 +1330,8 @@ function Bubble({ text, tone, whole }: { text: string; tone?: string; /** Never 
   const [open, setOpen] = useState(!!whole);
   // A picture, a video or a table is shown whole: cut, it said nothing.
   const media = /\.(png|jpe?g|gif|webp|avif|svg|mp4|mov|webm|m4v)\b/i.test(text) || /^\s*\|.*\|\s*$/m.test(text);
-  const long = !whole && !media && (text.length > 420 || text.split("\n").length > 6);
+  // Whole in the open-source edition: nothing to press to read it (Arun, 2026-11-15: "stop making it by default making me click show all").
+  const long = !isLocal() && !whole && !media && (text.length > 420 || text.split("\n").length > 6);
   return (
     <div className={long && !open ? "tt-bubble clamped" : "tt-bubble"} style={tone ? ({ "--c": tone } as CSSProperties) : undefined}>
       <div className="tt-rich">
@@ -1279,7 +1355,7 @@ function Gist({ text, tone }: { text: string; tone?: string }) {
   const [open, setOpen] = useState(false);
   const own = withoutFridayNotes(text);
   const g = gist(own);
-  if (!g.more) return <Bubble text={own} {...(tone ? { tone } : {})} />;
+  if (!g.more || isLocal()) return <Bubble text={own} whole {...(tone ? { tone } : {})} />;
   if (open)
     return (
       <>
@@ -1385,6 +1461,13 @@ export function TeamTalk(p: {
           </span>
           <span className="tt-verb">{verb}</span>
           <span className="tt-stamp">{p.stamp}</span>
+          {/* Where it stands, a word beside the time (Arun, 2026-11-15: of "Read all" and "Read by Ivy" under a message). */}
+          {isLocal() && p.status && (
+            <span className={`tt-seen is-${p.status.how}`} title={p.status.word}>
+              {busy ? <span className="ring-spin" aria-hidden="true" /> : p.status.how === "done" || p.status.how === "read" ? <CheckIcon className="size-3 shrink-0" aria-hidden="true" /> : <i className="tt-dot" aria-hidden="true" />}
+              {p.status.how === "read" ? "Read" : p.status.word}
+            </span>
+          )}
         </div>
         {p.why && <p className="tt-why">{p.why}</p>}
         <Gist text={boardTitle(p.text)} {...(tone ? { tone } : {})} />
@@ -1402,7 +1485,7 @@ export function TeamTalk(p: {
             </div>
           </div>
         )}
-        {p.status && (
+        {p.status && !isLocal() && (
           <div className={`tt-status is-${p.status.how}`}>
             {busy ? <span className="ring-spin" aria-hidden="true" /> : p.status.how === "done" || p.status.how === "read" ? <CheckIcon className="size-3 shrink-0" /> : <i className="tt-dot" aria-hidden="true" />}
             {p.status.word}
@@ -1477,6 +1560,34 @@ export function useTeamNow(): Team | null {
 /** The top of a teammate's own chat: their page, with its tabs (TeammatePage.tsx). */
 // A function, not the import itself: the two files import each other, and a const taken from one still loading is not there yet.
 export { useMateTab };
+const MateTitleLazy = lazy(() => import("./TeammatePage.js").then((m) => ({ default: m.MateTitle })));
+const MateHelloLazy = lazy(() => import("./TeammatePage.js").then((m) => ({ default: m.MateHello })));
+/** A crew mate's chat's title in the window's header (TeammatePage.tsx MateTitle), its plain name until that has loaded. */
+export function MateHeaderTitle(p: { lane: string; identity: Identity; notify?: (m: string) => void; fallback: ReactNode }) {
+  return (
+    <Suspense fallback={p.fallback}>
+      <MateTitleLazy lane={p.lane} identity={p.identity} {...(p.notify ? { notify: p.notify } : {})} />
+    </Suspense>
+  );
+}
+const MateSwitchAskLazy = lazy(() => import("./TeammatePage.js").then((m) => ({ default: m.MateSwitchAsk })));
+/** A switch to a fallback that waits on you, at the foot of the chat (TeammatePage.tsx MateSwitchAsk). */
+export function MateSwitchCard(p: { identity: Identity; lane: string; sid: string }) {
+  return (
+    <Suspense fallback={null}>
+      <MateSwitchAskLazy {...p} />
+    </Suspense>
+  );
+}
+/** The top of a crew mate's chat (TeammatePage.tsx MateHello). */
+export function MateChatTop(p: { lane: string; identity?: Identity; notify?: (m: string) => void; empty: boolean }) {
+  return (
+    <Suspense fallback={null}>
+      <MateHelloLazy {...p} />
+    </Suspense>
+  );
+}
+
 export function TeammateHeader(p: { lane: string; identity?: Identity; notify?: (m: string) => void; branch?: string }) {
   return (
     <Suspense fallback={null}>
@@ -1524,13 +1635,9 @@ export function TeamHome({ identity, onOpen, needs }: { identity: Identity; onOp
       </Suspense>
     );
   if (ready) return null;
-  // The open-source build's first run: the crew from a sentence, on a coding tool that is signed in here (CrewSetup.tsx, 1A).
-  if (isLocal() && t)
-    return (
-      <Suspense fallback={null}>
-        <CrewSetup identity={identity} />
-      </Suspense>
-    );
+  // The open-source build's first run: its first agent, on the New agent page as any other (Arun, 2026-11-15: "IDK WHY YOU CHANGED
+  // THIS BUT I WANT TO GET RID OF THIS AND REWORK IT", of the crew setup).
+  if (isLocal() && t) return <TeammateForm identity={identity} editing={null} first />;
   let intro = "Teammates are AI coworkers with a name, a role and a memory of their own, running on your coding tools on this computer. Give the crew a goal and the lead plans it, hands out the parts and tells you what got done, even while you're away.";
   return (
     <div className="tm-home">
@@ -1667,6 +1774,56 @@ export const workingSinceOf = (m: Pick<TeammateView, "look" | "name" | "status">
 export const presenceOf = (status: TeammateView["status"] | undefined): Presence => PRESENCE[status ?? "idle"];
 const STATE_WORD: Partial<Record<Presence, string>> = { working: "working", needs: "needs you", error: "stopped", limited: "out of usage", done: "just finished", queued: "waiting its turn" };
 const HALTED_WORD = "stopped by you";
+/**
+ * Dozing (Arun, 2026-11-15: "make them look like they are sleeping when idle for some time and appear awake on hover or start
+ * typing"): a crew mate at rest that hasn't done anything for DOZE_AFTER shuts its eyes, breathes slowly and shows a small z z.
+ * Hovered it opens its eyes (teammates.css); typing anywhere wakes every one of them for a while.
+ */
+const DOZE_AFTER = 10 * 60_000;
+const AWAKE_FOR = 30_000;
+let awakeUntil = 0;
+let dozeClock = Date.now();
+const dozeSubs = new Set<() => void>();
+const dozeTell = () => dozeSubs.forEach((f) => f());
+// A minute's tick, shared, and only while a face is drawn: a face falls asleep on time without each keeping a clock of its own, and
+// nothing ticks with none on screen (a test that loads this file and never draws a face exits).
+let dozeTick: ReturnType<typeof setInterval> | undefined;
+const dozeSubscribe = (f: () => void) => {
+  dozeSubs.add(f);
+  dozeTick ??= setInterval(() => ((dozeClock = Date.now()), dozeTell()), 60_000);
+  return () => {
+    dozeSubs.delete(f);
+    if (!dozeSubs.size && dozeTick) (clearInterval(dozeTick), (dozeTick = undefined));
+  };
+};
+if (typeof window !== "undefined") {
+  let wakeTimer: ReturnType<typeof setTimeout> | undefined;
+  addEventListener(
+    "input",
+    (e) => {
+      const el = e.target as HTMLElement | null;
+      if (!el || !(el instanceof HTMLTextAreaElement || el.isContentEditable)) return;
+      const was = Date.now() < awakeUntil;
+      awakeUntil = Date.now() + AWAKE_FOR;
+      clearTimeout(wakeTimer);
+      wakeTimer = setTimeout(() => ((dozeClock = Date.now()), dozeTell()), AWAKE_FOR + 50);
+      if (!was) ((dozeClock = Date.now()), dozeTell());
+    },
+    true,
+  );
+}
+function useDozing(seed: string, status: TeammateView["status"] | undefined): boolean {
+  const now = useSyncExternalStore(
+    dozeSubscribe,
+    () => dozeClock,
+    () => 0,
+  );
+  useTeamVersion();
+  if (!isLocal() || status !== "idle" || now < awakeUntil) return false;
+  const m = team?.teammates.find((x) => (x.look ?? x.name) === seed);
+  return !!m?.lastAt && now - m.lastAt > DOZE_AFTER;
+}
+
 export const Face = memo(function Face({ seed, size, status, label, lead }: { seed: string; size: number; status?: TeammateView["status"]; /** Said to a screen reader; none when the name is beside it. */ label?: string; /** Leads where it is shown: a crown. */ lead?: boolean }) {
   const finished = status === "idle" ? doneAt.get(seed) : undefined;
   const done = finished !== undefined && Date.now() - finished < DONE_FOR;
@@ -1679,6 +1836,7 @@ export const Face = memo(function Face({ seed, size, status, label, lead }: { se
     return () => clearTimeout(t);
   }, [done, finished, halted, cut]);
   const blink = useBlink(status === "working" && !initialsFaces());
+  const dozing = useDozing(seed, status);
   const eyes: Eyes = status === "offline" ? "closed" : blink ? "blink" : "open";
   const state: Presence | "halted" = halted ? "halted" : done ? "done" : presenceOf(status);
   // How it stands as a badge on the top right of its head (Arun, 2026-11-03, picked "solid badges", then "2 · Soft depth" of three
@@ -1688,12 +1846,21 @@ export const Face = memo(function Face({ seed, size, status, label, lead }: { se
   const b = Math.max(12, Math.round(size * 0.4));
   const sign = Math.round(b * 0.72);
   return (
+    // In the open-source edition no ring round the face and no badge: the small state ring after its name says how it stands, as
+    // a coding session's tab does (Arun, 2026-11-15: "I DONT WANT THE BIG CIRCLE AROUND THE MASCOT I WANT THE SMALL RING"; MateRing).
+    // The hosted service keeps its badges.
     <PresenceRing state="idle" size={size} className="tm-face-wrap" {...(label ? { label: `${label}${state === "idle" || state === "asleep" ? "" : `, ${state === "halted" ? HALTED_WORD : STATE_WORD[state]}`}` } : {})}>
       <span className="tm-face-in" data-lead={lead ? "true" : undefined} aria-hidden="true">
-        {initialsFaces() ? <Initials seed={seed} size={size} /> : <BlobFace seed={seed} size={size} eyes={eyes} breathing={status === "working"} crowned={lead} />}
+        {initialsFaces() ? <Initials seed={seed} size={size} /> : <BlobFace seed={seed} size={size} eyes={eyes} breathing={status === "working"} crowned={lead} dozing={dozing} />}
+        {dozing && size >= 18 && (
+          <span className="tm-zz" aria-hidden="true">
+            <i>z</i>
+            <i>z</i>
+          </span>
+        )}
         {lead && <Crown />}
       </span>
-      {state !== "idle" && state !== "asleep" && (
+      {!isLocal() && state !== "idle" && state !== "asleep" && (
         <span className="tm-badge" data-state={state} style={{ "--b": `${b}px` } as CSSProperties} aria-hidden="true">
           {state === "working" ? (
             <span className="tm-badge-dots">
@@ -1851,7 +2018,8 @@ export function SidebarTeammates({ identity, onOpen, activeSid, needs = [], mark
     // Nobody on the crew yet: its first run (TeamHome, the Starter crew), not the room's "No teammates here yet" (Arun, 2026-10-29:
     // the verification's "Crew's first screen on a fresh server shows the room's No teammates here yet").
     if (!ownOf(t).length) return void ((!activeSid || isTeamSid(activeSid)) && dispatchEvent(new Event("friday:team-home")));
-    if (!activeSid || !isTeamSid(activeSid)) openTeammate(t, null, onOpen);
+    // The open-source edition has no Crew room page: the Agents page is where turning to the crew lands (App.tsx).
+    if (!isLocal() && (!activeSid || !isTeamSid(activeSid))) openTeammate(t, null, onOpen);
   }, [t?.sid]); // eslint-disable-line react-hooks/exhaustive-deps
   // Still being read: the trays' shape, quietly, rather than an empty sidebar that fills in a moment later (Arun, 2026-10-28: the
   // critique's "a loading skeleton for the team sidebar").
@@ -1882,7 +2050,7 @@ export function SidebarTeammates({ identity, onOpen, activeSid, needs = [], mark
   // out: the Crew room's row showed only an unread dot over a workflow waiting on you (2026-11-04 retest).
   const waitIn = (sid: string, server: number) => (marks ? marks.filter((n) => n.sid === sid).length : server);
   const teamWaiting = waitIn(t.sid, t.waiting ?? 0);
-  const rooms = (t.rooms ?? []).map((r) => ({ ...r, waiting: waitIn(r.sid, r.waiting) }));
+  const rooms = roomsOf(t).map((r) => ({ ...r, waiting: waitIn(r.sid, r.waiting) }));
   // The person's own teammates: those in the Crew room, theirs to restart, and what counts toward the most they keep.
   const own = ownOf(t);
   const roomItems = (r: RoomView): MenuItem[] => [
@@ -1915,7 +2083,7 @@ export function SidebarTeammates({ identity, onOpen, activeSid, needs = [], mark
   const items = (m: TeammateView): MenuItem[] => [
     { label: `Open ${m.name}'s chat`, icon: "chat", onSelect: () => openTeammate(t, m.lane, onOpen) },
     { label: "Edit…", icon: "pencil", onSelect: () => editTeammate(t, m, onOpen) },
-    ...(t.rooms ?? [])
+    ...roomsOf(t)
       .filter((r) => !r.lanes[m.id])
       .slice(0, 6)
       .map((r) => ({ label: `Add to ${r.name}`, icon: "users" as const, onSelect: () => void api(identity, `/api/teammates/rooms/${r.id}`, { method: "PATCH", body: JSON.stringify({ members: [...Object.keys(r.lanes), m.id] }), headers: { "Content-Type": "application/json" } }).then(() => refreshTeam(identity)).catch(fail) })),
@@ -2148,7 +2316,8 @@ export function RoomMenu({ identity, sid, notify }: { identity: Identity; sid: s
   const [editing, setEditing] = useState(false);
   const [ask, confirmUI] = useConfirm();
   const r = t?.rooms?.find((x) => x.sid === sid);
-  if (!t || !r) return null;
+  // A crew mate's thread is renamed and removed from its title's menu (TeammatePage.tsx MateTitle), not as a room.
+  if (!t || !r || r.thread) return null;
   const remove = () =>
     ask({
       title: `Remove ${r.name}?`,
@@ -2264,6 +2433,12 @@ export function TeamFaces({ sid, lead }: { sid: string; lead: string | null }) {
   const mates = matesIn(sid);
   const purpose = team?.rooms?.find((r) => r.sid === sid)?.purpose;
   if (!mates.length) return null;
+  // One crew mate's own chat (the crew's session, focused on it): its name is the header's, so the rest of the crew's faces were a
+  // row of everyone else (Arun, 2026-11-15: "why the hell are there so many of the mascots if im looking at ocks chat"). They stay
+  // where they switch between who is in it: the Crew room and the rooms.
+  if (team && sid === team.sid && focused !== ALL) return null;
+  // A crew mate's thread is that crew mate's chat: its name is the header's, with nobody else to switch to.
+  if (threadLaneOf(sid)) return null;
   // Faces only: the sidebar's faces wear the badges and the line over the box says who works, so the header says neither again
   // (audit CREW-14, 2026-11-04). How each stands is still in its title.
   return (
@@ -2452,7 +2627,7 @@ export const MATE_CATS: { id: MateCat; label: string; about: string }[] = [
   { id: "access", label: "Access", about: "How far it goes on its own." },
   { id: "computer", label: "Computer", about: "Where it runs, and as which account." },
   { id: "where", label: "Folders", about: "Its own folder, and the folders and repos it works in." },
-  { id: "checkins", label: "Check-ins", about: "What it does by itself, on a schedule." },
+  { id: "checkins", label: "Routines", about: "What it does by itself, on a schedule." },
   { id: "budget", label: "Budget and hours", about: "Daily caps and working hours. Nothing is capped unless set." },
 ];
 
@@ -2461,15 +2636,17 @@ export const MATE_CATS: { id: MateCat; label: string; about: string }[] = [
  * instructions (Arun, 2026-11-13), or changed one category at a time in its Settings, a tab of its chat's side panel
  * (TeammatePage.tsx MateSettingsBody, `inline` and `only`). No dialog any more: Edit… opens its Settings (editTeammate).
  */
-export function TeammateForm({ identity, editing, onClose = () => {}, inline, only }: {
+export function TeammateForm({ identity, editing, onClose = () => {}, inline, only, first }: {
   identity: Identity;
   editing: TeammateView | null;
   /** The New agent page's Cancel, and where it goes when the starter crew is made. */
   onClose?: () => void;
   /** Drawn in place, in a crew mate's Settings (TeammatePage.tsx), with Save changes; otherwise the New agent page. */
   inline?: boolean;
-  /** Inline, one category of its settings only (the Settings panel's). */
-  only?: MateCat;
+  /** Inline, one category of its settings only (the Settings panel's), or its face alone (its pencil). */
+  only?: MateCat | "look";
+  /** The first agent: nothing to cancel back to. */
+  first?: boolean;
 }) {
   const installed = installedOn(identity);
   const tools = useMemo(() => {
@@ -2740,32 +2917,8 @@ export function TeammateForm({ identity, editing, onClose = () => {}, inline, on
             )}
           </small>
         ) : (
-        /* Advanced (Arun, 2026-10-27: the OpenBot gap "an Advanced model/effort section in the dialog"): what it runs on, said
-            plainly beside the picker, folded until wanted; its line says what is set. */
-        <details className="tm-advanced">
-          <summary>
-            <span>If {ENGINE_NAMES[tool]} runs out of usage</span>
-            <span className="tm-advanced-now">{ENGINE_NAMES[backup || (tool === "claude" ? "codex" : "claude")]} takes over</span>
-          </summary>
-          {/* The model and effort are set in the picker above, once (Arun, 2026-10-28: the critique's "remove the duplicate model
-              picker from Advanced"). */}
-          <div className="tm-advanced-body">
-            <label className="tm-row-field">
-              <span className="tm-row-label">Backup</span>
-              <span className="tm-row-input">
-                {/* Not again under its own name: "Codex (automatic)" and "Codex" were two choices of one thing (QA, 2026-10-28). */}
-                <Picker<EngineTool | "">
-                  className="tm-select"
-                  value={backup === (tool === "claude" ? "codex" : "claude") ? "" : backup}
-                  label="Backup"
-                  onChange={setBackup}
-                  options={[{ value: "", label: `${ENGINE_NAMES[tool === "claude" ? "codex" : "claude"]} (automatic)` }, ...tools.filter((x) => x !== tool && x !== (tool === "claude" ? "codex" : "claude")).map((x) => ({ value: x, label: ENGINE_NAMES[x] }))]}
-                />
-                <small>Out of usage, they carry on with this, and go back to {ENGINE_NAMES[tool]} when its limit lifts.</small>
-              </span>
-            </label>
-          </div>
-        </details>
+        // Out of usage, it carries on with its fallbacks, in their order: the Settings panel's Fallbacks page (TeammatePage.tsx).
+        <small>Out of usage, {name.trim() || "it"} carries on with its fallbacks: Fallbacks, in its settings, sets their order and whether it asks you first.</small>
         )}
         {toolChanged && (
           <p className="tm-note" role="status">
@@ -2919,9 +3072,36 @@ export function TeammateForm({ identity, editing, onClose = () => {}, inline, on
       {err}
     </p>
   );
+  const colourAt = pinnedColour(look) ?? Math.max(0, ALL_COLOURS.indexOf(mascotColour(look)));
+  const pinned = (seed: string) => withColour(seed, colourAt);
+  // Its face alone, from the pencil on its settings (Arun, 2026-11-15, the reference's face with a pencil): the colours and the
+  // shapes as New agent has them.
+  const lookPart = (
+    <div className="nag msd-look">
+      <div className="nag-face" aria-hidden="true">
+        <Robot seed={look} size={64} status="idle" />
+      </div>
+      <div className="nag-colours" role="radiogroup" aria-label="Colour">
+        {ALL_COLOURS.map((c, i) => (
+          <button key={c} type="button" role="radio" aria-checked={i === colourAt} aria-label={`Colour ${i + 1}`} className="nag-colour" style={{ background: c }} onClick={() => (setShuffled(withColour(look, i)), setSaved(false))} />
+        ))}
+      </div>
+      <div className="nag-shapes" role="radiogroup" aria-label="Its face">
+        {choices.map((sd) => (
+          <button key={sd} type="button" role="radio" aria-checked={shapeSeed(look) === sd} className="nag-shape" onClick={() => (setShuffled(pinned(sd)), setSaved(false))} title="This face">
+            <Robot seed={pinned(sd)} size={30} status="idle" />
+          </button>
+        ))}
+        <button type="button" className="nag-shape nag-more" onClick={() => setDeal((d) => d + 1)} title="More faces" aria-label="More faces">
+          <ShuffleIcon className="size-4" />
+        </button>
+      </div>
+    </div>
+  );
   if (inline)
     return (
       <form onSubmit={(e) => void save(e)} className="tm-form tm-form-inline" data-cat={only} onChange={() => setSaved(false)}>
+        {only === "look" && lookPart}
         {(!only || only === "profile") && who}
         {only ? (only === "tool" ? toolPart : only === "computer" ? machinePart : only === "access" ? accessPart : null) : how}
         {(!only || only === "checkins") && (
@@ -2951,19 +3131,19 @@ export function TeammateForm({ identity, editing, onClose = () => {}, inline, on
         </div>
       </form>
     );
-  // The first agent: three at once is offered among the suggestions.
-  const starter = !editing && !(team && ownOf(team).length);
-  // New, in four things, laid out as one calm column (Arun, 2026-11-13: "a simple page where it has the mascots image you can
-  // choose, the name of the crew mate, the coding tool it will use, and its instructions"; "design it kinda like this", "stop
-  // stuffing everything with so much text"): the face, its colour and shape, its name, what it helps with, what it runs on, Create;
-  // suggestions under it. Access, folders, check-ins and the rest start as they should and are in its Settings once it's made.
-  const colourAt = pinnedColour(look) ?? Math.max(0, ALL_COLOURS.indexOf(mascotColour(look)));
-  const pinned = (seed: string) => withColour(seed, colourAt);
   return (
     <div className="page nag-page px-6! max-[640px]:px-4!">
+      <header className="nag-head">
+        <h1>{first ? "Your first agent" : "New agent"}</h1>
+        {!first && (
+          <button type="button" className="nag-cancel" onClick={onClose}>
+            Cancel
+          </button>
+        )}
+      </header>
       <form className="nag" onSubmit={(e) => void save(e)} aria-label="New agent">
         <div className="nag-face" aria-hidden="true">
-          <Robot seed={look} size={64} status="idle" />
+          <Robot seed={look} size={72} status="idle" />
         </div>
         <div className="nag-colours" role="radiogroup" aria-label="Colour">
           {ALL_COLOURS.map((c, i) => (
@@ -3000,18 +3180,15 @@ export function TeammateForm({ identity, editing, onClose = () => {}, inline, on
         )}
         <label className="nag-field">
           <span>What should it help with?</span>
-          <Textarea value={role} maxLength={4000} rows={3} placeholder="Fix bugs and keep the tests green." onChange={(e) => setRole(e.target.value)} />
+          <Textarea value={role} maxLength={4000} rows={3} placeholder="Research, write, plan or build" onChange={(e) => setRole(e.target.value)} />
         </label>
         <div className="nag-row">
-          <span>Runs on</span>
+          <span>Model</span>
           <TeammatePicker identity={identity} tool={tool} model={model} effort={effort} onEffort={setEffort} onChange={(t, m) => (pickTool(t), setModel(m))} {...(isLocal() ? {} : { runsOn: machine })} />
         </div>
         {errLine}
         <div className="nag-acts">
-          <Button type="button" variant="ghost" size="sm" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" size="sm" disabled={busy || !name.trim()}>
+          <Button type="submit" disabled={busy || !name.trim()}>
             {busy ? "Creating…" : "Create agent"}
           </Button>
         </div>
@@ -3021,22 +3198,13 @@ export function TeammateForm({ identity, editing, onClose = () => {}, inline, on
         <div className="nag-cards">
           {(Object.keys(ROLES) as (keyof typeof ROLES)[]).map((k) => (
             <button key={k} type="button" className="nag-card" aria-pressed={role === ROLES[k].role} onClick={() => useTemplate(k)}>
-              <Robot seed={`v2:${k}`} size={36} status="idle" />
+              <Robot seed={`v2:${k}`} size={40} status="idle" />
               <span>
                 <b>{k}</b>
-                <small>{ROLES[k].role.split(/(?<=\.)\s/)[0]}</small>
+                <small>{ROLES[k].blurb}</small>
               </span>
             </button>
           ))}
-          {starter && (
-            <div className="nag-card nag-card-crew">
-              <span>
-                <b>Starter crew</b>
-                <small>A lead, an engineer and a writer at once.</small>
-              </span>
-              <StarterTeam identity={identity} onDone={onClose} />
-            </div>
-          )}
         </div>
       </section>
     </div>
@@ -3044,13 +3212,14 @@ export function TeammateForm({ identity, editing, onClose = () => {}, inline, on
 }
 
 /** Roles to start a teammate from: standing instructions, a check-in, how far it may go, and names it might take. */
-export const ROLES: Record<"Lead" | "Engineer" | "Writer" | "Researcher" | "QA", { role: string; checkin: string; every?: "daily" | "weekdays" | "weekly"; days?: number[]; mode: EngineMode; names: string[] }> = {
-  Lead: { role: "Leads the crew. Turns my goals into a plan, hands each teammate their part, checks the work and tells me where it stands.", checkin: "Stand-up for me: what the crew did, what's next, what's blocked.", mode: "full" as EngineMode, names: ["Nova", "Ada", "Iris"] },
-  Engineer: { role: "Builds features and fixes bugs in our code. Keeps the tests green and opens a pull request for each change.", checkin: "", mode: "full" as EngineMode, names: ["Kit", "Rio", "Max"] },
-  Writer: { role: "Writes our docs, release notes and posts in our voice: clear, short, no hype.", checkin: "", mode: "edits" as EngineMode, names: ["Juno", "Wren", "Sol"] },
+export const ROLES: Record<"Assistant" | "Researcher" | "Writer" | "Analyst" | "Engineer" | "Lead", { blurb: string; role: string; checkin: string; every?: "daily" | "weekdays" | "weekly"; days?: number[]; mode: EngineMode; names: string[] }> = {
+  Assistant: { blurb: "Drafts, follow-ups and everyday busywork.", role: "Takes the everyday busywork off my hands: drafts, follow-ups, lookups and reminders.", checkin: "", mode: "full" as EngineMode, names: ["Ivy", "Remy", "Otto"] },
   // Weekly on Mondays, as its words say: it was set to every weekday (QA, 2026-10-28).
-  Researcher: { role: "Researches what others ship and what our users ask for, and writes it up with links.", checkin: "What changed in our space last week, in five bullets.", every: "weekly", days: [1], mode: "plan", names: ["Sage", "Lux", "Pip"] },
-  QA: { role: "Tests every change before it ships: runs the app, tries the edge cases and files what breaks with steps to repeat it.", checkin: "", mode: "edits" as EngineMode, names: ["Vera", "Tess", "Ola"] },
+  Researcher: { blurb: "Finds things out and writes them up.", role: "Researches what I ask and writes it up with links.", checkin: "What changed in our space last week, in five bullets.", every: "weekly", days: [1], mode: "full" as EngineMode, names: ["Sage", "Lux", "Pip"] },
+  Writer: { blurb: "Docs and posts in your voice.", role: "Writes our docs, notes and posts in our voice: clear, short, no hype.", checkin: "", mode: "full" as EngineMode, names: ["Juno", "Wren", "Sol"] },
+  Analyst: { blurb: "Digs into numbers and reports back.", role: "Digs into data and questions, and reports what it found with where it came from.", checkin: "", mode: "full" as EngineMode, names: ["Quinn", "Mira", "Theo"] },
+  Engineer: { blurb: "Builds features and fixes bugs.", role: "Builds features and fixes bugs in our code. Keeps the tests green and opens a pull request for each change.", checkin: "", mode: "full" as EngineMode, names: ["Kit", "Rio", "Max"] },
+  Lead: { blurb: "Plans the work and hands it out.", role: "Leads the crew. Turns my goals into a plan, hands each teammate their part, checks the work and tells me where it stands.", checkin: "Stand-up for me: what the crew did, what's next, what's blocked.", mode: "full" as EngineMode, names: ["Nova", "Ada", "Iris"] },
 };
 
 /** A name from the list that nobody on the team has yet. */
@@ -3115,12 +3284,18 @@ type SendCmd = (cmd: { type: "instruct"; text: string; lane: string; thread: num
  * press opens the thread beside the room (Arun, 2026-10-27: the OpenBot gap "side threads"). The thread's own messages are left
  * out of the room's main flow (team-threads.ts).
  */
-export function ThreadChip({ sid, root, lane, events }: { sid: string; root: number; lane: string; events: SessionEvent[] }) {
+export function ThreadChip({ sid, root, lane, events, icon }: { sid: string; root: number; lane: string; events: SessionEvent[]; /** With no replies yet, an icon in a reply's action row. */ icon?: boolean }) {
   const t = threadsOf(events);
   const list = t.byRoot.get(root) ?? [];
   const last = list.at(-1);
   const mate = mateOn(lane);
   const said = threadSaid(t.state.get(root), mate?.name ?? "It", lane, sid);
+  if (icon && !list.length)
+    return (
+      <button type="button" className="grid size-7 place-items-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring" aria-label="Reply in thread" data-tip="Reply in thread" onClick={() => openThread({ sid, root, lane })}>
+        <MessageSquareReplyIcon className="size-3.5" aria-hidden="true" />
+      </button>
+    );
   return (
     <>
       <button type="button" className={`tt-thread${list.length ? " has" : ""}`} onClick={() => openThread({ sid, root, lane })} aria-label={list.length ? `Open the thread, ${list.length} ${list.length === 1 ? "reply" : "replies"}` : "Reply in thread"}>
@@ -3169,10 +3344,31 @@ const threadWatchers = new Set<() => void>();
 export const openThread = (t: { sid: string; root: number; lane: string } | null) => {
   openNow = t;
   for (const f of threadWatchers) f();
+  // In the open-source edition a thread is a tab of the room's side panel (Arun, 2026-11-15: "make the threads open in the side
+  // panel instead of just appearing from the side covering everything behind it"): its session opens the panel on it.
+  if (t && isLocal()) dispatchEvent(new CustomEvent("friday:open-thread", { detail: { sid: t.sid } }));
 };
+/** The thread open now, for the side panel that shows it (Workbench.tsx). */
+export function useOpenThread(): { sid: string; root: number; lane: string } | null {
+  return useSyncExternalStore(
+    (f) => (threadWatchers.add(f), () => void threadWatchers.delete(f)),
+    () => openNow,
+  );
+}
+/** The open thread, drawn in the side panel's Thread tab: the same thread, as a panel of the page rather than over it. */
+export function ThreadInPanel({ sid, events, send, meId }: { sid: string; events: SessionEvent[]; send: SendCmd; meId?: string }) {
+  const t = useOpenThread();
+  if (!t || t.sid !== sid) return null;
+  return <ThreadPanel key={t.root} inPanel sid={sid} root={t.root} lane={t.lane} events={events} send={send} {...(meId ? { meId } : {})} onClose={() => openThread(null)} />;
+}
 
 /** Where the open thread is drawn, once per room (Activity): it stays open while the room's messages come and go. */
-export function ThreadHost({ sid, events, send, meId }: { sid: string; events: SessionEvent[]; send: SendCmd; /** Who is reading: their own replies say "You". */ meId?: string }) {
+export function ThreadHost(p: { sid: string; events: SessionEvent[]; send: SendCmd; /** Who is reading: their own replies say "You". */ meId?: string }) {
+  // The open-source edition draws it in the side panel instead (ThreadInPanel).
+  if (isLocal()) return null;
+  return <ThreadOver {...p} />;
+}
+function ThreadOver({ sid, events, send, meId }: { sid: string; events: SessionEvent[]; send: SendCmd; meId?: string }) {
   const t = useSyncExternalStore(
     (f) => (threadWatchers.add(f), () => void threadWatchers.delete(f)),
     () => openNow,
@@ -3219,7 +3415,7 @@ export const agoShort = (ts: number) => {
 };
 
 /** A thread, beside the room: the message it hangs off, every reply and answer in order, and a box to reply in. */
-function ThreadPanel({ sid, root, lane, events, send, onClose, meId }: { sid: string; root: number; lane: string; events: SessionEvent[]; send: SendCmd; onClose: () => void; meId?: string }) {
+function ThreadPanel({ sid, root, lane, events, send, onClose, meId, inPanel }: { sid: string; root: number; lane: string; events: SessionEvent[]; send: SendCmd; onClose: () => void; meId?: string; /** In the side panel's Thread tab, whose own x closes it. */ inPanel?: boolean }) {
   const [text, setText] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
@@ -3276,7 +3472,7 @@ function ThreadPanel({ sid, root, lane, events, send, onClose, meId }: { sid: st
     );
   };
   return (
-    <aside className="tt-thread-panel" role="dialog" aria-label={`Thread with ${mate?.name ?? "the teammate"}`}>
+    <aside className={inPanel ? "tt-thread-panel in-bench" : "tt-thread-panel"} role={inPanel ? "region" : "dialog"} aria-label={`Thread with ${mate?.name ?? "the teammate"}`}>
       <header>
         <b>Thread</b>
         <span>with {mate?.name ?? "the teammate"}</span>
@@ -3439,6 +3635,123 @@ export function TalkGroup({ pieces, children }: { pieces: TalkPiece[]; children:
       </button>
       {open && <div className="talk-group-body">{children}</div>}
     </div>
+  );
+}
+
+/**
+ * A crew mate's crew work, as one line in its own chat (Arun, 2026-11-15: "make sure if they are in a crew room or what not, their
+ * work doesnt appear in their own agent chat page"): what the lead or a teammate handed it, and what it did with that, stay in the
+ * Crew room. Its own chat says only that it was busy with the crew, or is now, and takes you there.
+ */
+export function CrewWorkLine({ pieces, times = [], live, onOpen, room }: { pieces: TalkPiece[]; /** When each piece was said, by its place. */ times?: (number | undefined)[]; live: boolean; /** Where the whole of it is, when that is elsewhere. */ onOpen?: () => void; /** In the room itself: said as them working together, nowhere to go. */ room?: boolean }) {
+  // As a group chat (Arun, 2026-11-15: "design this better and more interactive and fun and informational please this kinda needs
+  // to feel like a group chat"): who is in it as faces, its last words each under who said them in their colour, someone typing while
+  // it goes on, and the whole of it opened in place; the Crew room a press from its foot.
+  const [open, setOpen] = useState(false);
+  const who = new Map<string, string>();
+  for (const p of pieces) for (const t of p.who) if (t.name && t.name !== "everyone" && t.name !== "The board") who.set((t.lane && mateOn(t.lane)?.name) || t.name, t.lane);
+  const people = [...who.entries()];
+  const said = pieces.map((p, i) => ({ ...p, at: times[i] })).filter((p) => !p.note && p.text.trim());
+  const last = said.slice(-2);
+  const speaker = (p: TalkPiece) => {
+    const w = p.who[0];
+    const m = w?.lane ? mateOn(w.lane) : null;
+    return { name: m?.name ?? w?.name ?? "Someone", seed: m ? (m.look ?? m.name) : (w?.name ?? "") };
+  };
+  const working = live ? (people.find(([, lane]) => lane && mateOn(lane)?.status === "working")?.[0] ?? people.at(-1)?.[0]) : null;
+  return (
+    <section className="cw" data-open={open ? "" : undefined} data-live={live ? "" : undefined} aria-label="Crew work">
+      <button type="button" className="cw-head" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <span className="cw-faces" aria-hidden="true">
+          {people.slice(0, 3).map(([name, lane]) => (
+            <span key={name} className="cw-face">
+              {lane && mateOn(lane) ? <Face seed={mateOn(lane)!.look ?? name} size={20} /> : <Face seed={name} size={20} />}
+            </span>
+          ))}
+        </span>
+        <span className="cw-title">
+          <b>{listNames(people.slice(0, 3).map(([n]) => n)) || "The crew"}</b>
+          <span>
+            {live ? (room ? "working together now" : "working on it now") : room ? (people.length > 1 ? "worked together" : "to the crew") : "crew work"} · {said.length} {said.length === 1 ? "message" : "messages"}
+          </span>
+        </span>
+        <ChevronIcon open={open} />
+      </button>
+      {!open && (
+        <ul className="cw-msgs">
+          {last.map((p, i) => {
+            const sp = speaker(p);
+            return (
+              <li key={i} className="cw-msg">
+                <span className="cw-msg-face" aria-hidden="true">
+                  <Face seed={sp.seed} size={16} />
+                </span>
+                <b style={{ color: mascotColour(sp.seed) }}>{sp.name}</b>
+                <span>{plainLine(p.text)}</span>
+              </li>
+            );
+          })}
+          {working && (
+            <li className="cw-msg cw-typing" aria-label={`${working} is working`}>
+              <span className="cw-msg-face" aria-hidden="true">
+                <Face seed={((m) => (m ? (m.look ?? m.name) : working))(people.find(([n]) => n === working)?.[1] ? mateOn(people.find(([n]) => n === working)![1]) : null)} size={16} />
+              </span>
+              <b>{working}</b>
+              <span className="cw-dots" aria-hidden="true">
+                <i />
+                <i />
+                <i />
+              </span>
+            </li>
+          )}
+        </ul>
+      )}
+      {open && (
+        // Opened, every message as a post of the same shape (Arun, 2026-11-15: "fix this design"): its sender's face and name, whom
+        // it was to, when, and all its words.
+        <ul className="cw-thread">
+          {said.map((p, i) => {
+            const sp = speaker(p);
+            const to = p.who[1] ? ((p.who[1].lane && mateOn(p.who[1].lane)?.name) || p.who[1].name) : "";
+            return (
+              <li key={i} className="cw-post">
+                <Face seed={sp.seed} size={24} />
+                <div className="cw-post-body">
+                  <div className="cw-post-head">
+                    <b style={{ color: mascotColour(sp.seed) }}>{sp.name}</b>
+                    {to && to !== sp.name ? <span>to {to === "everyone" ? "the crew" : to}</span> : room && <span>to the crew</span>}
+                    {p.at && <time>{new Date(p.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time>}
+                  </div>
+                  {room ? (
+                    <div className="cw-post-rich">
+                      <LazyAnswer text={p.text.trim()} />
+                    </div>
+                  ) : (
+                    <p>{plainLine(p.text)}</p>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+          {working && (
+            <li className="cw-post cw-post-typing" aria-label={`${working} is working`}>
+              <Face seed={((m) => (m ? (m.look ?? m.name) : working))(people.find(([n]) => n === working)?.[1] ? mateOn(people.find(([n]) => n === working)![1]) : null)} size={24} />
+              <span className="cw-dots" aria-hidden="true">
+                <i />
+                <i />
+                <i />
+              </span>
+            </li>
+          )}
+        </ul>
+      )}
+      {onOpen && (
+        <button type="button" className="cw-go" onClick={onOpen}>
+          Open in the Crew room
+          <ChevronRightIcon aria-hidden="true" />
+        </button>
+      )}
+    </section>
   );
 }
 

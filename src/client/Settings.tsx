@@ -223,7 +223,7 @@ export function SettingsPage({
                         key={s.id}
                         type="button"
                         data-active={on || undefined}
-                        className="dass-row flex-row items-center gap-2.5 py-1.5 text-[13px] text-[var(--ink-2)] data-[active]:font-medium data-[active]:text-[var(--ink)] max-[760px]:w-auto max-[760px]:rounded-full max-[760px]:border max-[760px]:border-[var(--border)] max-[760px]:px-3"
+                        className="dass-row flex-row items-center gap-2.5 py-1.5 text-[13px] text-[var(--ink-2)] data-[active]:font-medium data-[active]:text-[var(--ink)] max-[760px]:w-auto max-[760px]:rounded-[8px] max-[760px]:border max-[760px]:border-[var(--border)] max-[760px]:px-3"
                         aria-current={on ? "page" : undefined}
                         onClick={() => onSection(s.id)}
                       >

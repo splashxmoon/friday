@@ -47,7 +47,7 @@ export function useSkills(): Skill[] | null {
 }
 
 /** Kept, and open to this teammate: to all, kept for it, or kept for teammates no longer in the crew (team-skills.ts usableBy). */
-const usable = (s: Skill, mate: string, mates: readonly TeammateView[]) => {
+export const usable = (s: Skill, mate: string, mates: readonly TeammateView[]) => {
   if (s.proposed || s.revises) return false;
   const live = (s.for ?? []).filter((id) => mates.some((m) => m.id === id));
   return !live.length || live.includes(mate);
@@ -359,12 +359,31 @@ export function SkillsDialog({ onClose }: { onClose: () => void }) {
 // ── Save as a skill, and a workflow step's skill ──────────────────────────────────────────────────────────────────────────
 
 /** Under a teammate's finished run: asks it to write what it did up as a skill (save_skill), which comes back as a card to keep. */
-export function SaveAsSkill({ sid, lane }: { sid: string; lane: string }) {
+export function SaveAsSkill({ sid, lane, icon }: { sid: string; lane: string; /** An icon in a reply's action row (Activity.tsx RunBlock). */ icon?: boolean }) {
   const [state, setState] = useState<"" | "busy" | "asked" | string>("");
   const m = mateOn(lane);
   if (!m) return null;
   // On the hosted service only your own teammate: someone else's runs on its keeper's plan.
   if (state === "asked") return <span className="tt-chip">Asked {m.name} to write it up</span>;
+  if (icon)
+    return (
+      <button
+        type="button"
+        className="grid size-7 place-items-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+        disabled={state === "busy"}
+        aria-label="Save as a skill"
+        data-tip={state && state !== "busy" ? state : `Save as a skill: ${m.name} writes what it did up as steps the crew can repeat`}
+        onClick={() => {
+          setState("busy");
+          void call("/write-up", "POST", { sid, lane }).then(
+            () => setState("asked"),
+            (e: Error) => setState(e.message),
+          );
+        }}
+      >
+        <ListChecksIcon className="size-3.5" aria-hidden="true" />
+      </button>
+    );
   return (
     <button
       type="button"

@@ -5,6 +5,9 @@ import type { Automation, AutomationRun } from "../automations.js";
 import { ENGINE_NAMES, type EngineMode, type EngineTool } from "../types.js";
 import { api } from "./api.js";
 import { CrewWorkflowRow, useCrewWorkflows } from "./TeamWorkflows.js";
+import { AutoDoors, WhoMark as WeekWhoMark, type WeekItem, type WeekSched, type WeekWho } from "./AutoWeek.js";
+import { useTeamNow } from "./Teammates.js";
+import { LEAD, WORKFLOW_TEMPLATES } from "../team-workflow-model.js";
 import { WorkflowAsks } from "./WorkflowAsks.js";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { holdLeave } from "./leave-guard.js";
@@ -183,6 +186,8 @@ export function AutomationsPage({
   const [ask, confirmUI] = useConfirm();
   const [busy, setBusy] = useState("");
   const wf = useCrewWorkflows(identity, !!onWorkflow);
+  const teamNow = useTeamNow();
+  const machine = useMachine(identity).state;
 
   const load = useCallback(async () => {
     try {
@@ -292,6 +297,25 @@ export function AutomationsPage({
 
   const start = (draft: Partial<Draft>) => setEditing({ id: null, draft: { ...blank(), ...Object.fromEntries(Object.entries(draft).filter(([, v]) => v !== undefined)) } });
 
+  // The week ahead (AutoWeek.tsx): every automation, crew workflow and crew mate's routine that runs on a schedule, by who runs it.
+  const crewSeeds = (teamNow?.teammates ?? []).map((m) => ({ seed: m.look ?? m.name, name: m.name }));
+  const lead = teamNow?.teammates.find((m) => m.lane === teamNow?.lead);
+  const seedOf = (id: string) => ((m) => (m ? (m.look ?? m.name) : null))(id === LEAD ? lead : teamNow?.teammates.find((m) => m.id === id));
+  const asSched = (s: { every: string; at: string; days: number[]; tz?: string; hours?: number }): WeekSched => ({ every: s.every as WeekSched["every"], at: s.at || "09:00", days: s.days ?? [], ...(s.hours ? { hours: s.hours } : {}), ...(s.tz ? { tz: s.tz } : {}) });
+  const weekItems: WeekItem[] = [
+    ...(list ?? []).flatMap((a): WeekItem[] =>
+      a.on && a.when.kind === "schedule" ? [{ key: `a:${a.id}`, name: a.name, kind: "Automation", who: a.who.tool === "friday" ? { kind: "mate", seed: "Friday", name: "Friday" } : { kind: "tool", tool: a.who.tool }, sched: asSched(a.when.schedule), open: () => setEditing({ id: a.id, draft: toDraft(a) }) }] : [],
+    ),
+    ...(onWorkflow ? (wf.list ?? []) : []).flatMap((w): WeekItem[] => {
+      if (!w.on || w.trigger.kind !== "schedule") return [];
+      const seeds = [...new Set(w.steps.map((s) => seedOf(s.mate)).filter((x): x is string => !!x))];
+      return [{ key: `w:${w.id}`, name: w.name, kind: "Crew workflow", who: { kind: "crew", seeds: seeds.length ? seeds : crewSeeds.slice(0, 2).map((m) => m.seed), name: "The crew" }, sched: asSched(w.trigger.schedule), open: () => onWorkflow!(w.id) }];
+    }),
+    ...(isLocal() ? (teamNow?.teammates ?? []) : []).flatMap((m) => (m.checkins ?? []).filter((c) => !c.off).map((c): WeekItem => ({ key: `r:${m.id}:${c.id}`, name: c.name || c.text.split("\n")[0]!.slice(0, 60), kind: `${m.name}'s routine`, who: { kind: "mate", seed: m.look ?? m.name, name: m.name }, sched: asSched(c) }))),
+  ];
+  const toolsHere = (machine.tools ?? []).filter((t) => !!t.path).map((t) => t.tool);
+  const exTool: WeekWho = { kind: "tool", tool: toolsHere[0] ?? "claude" };
+
   return (
     <div className="page conns-page automations-page px-6! max-[640px]:px-4!">
       <div className="page-inner">
@@ -356,6 +380,23 @@ export function AutomationsPage({
               <Skeleton key={i} className="h-16 rounded-xl" />
             ))}
           </div>
+        ) : isLocal() ? (
+          <>
+            <AutoDoors crew={crewSeeds} tools={toolsHere} crewCount={(wf.list?.length ?? 0) + weekItems.filter((i) => i.key.startsWith("r:")).length} toolCount={list.length} onTool={() => start({})} {...(onWorkflow ? { onCrew: () => onWorkflow(null) } : {})} />
+            {(list.length > 0 || !!wf.list?.length) && (
+              <section className="mb-8" aria-labelledby="auto-list">
+                <h2 id="auto-list" className="auto-label">
+                  On autopilot
+                </h2>
+                <ul className="grid gap-2" aria-label="Your automations">
+                  {list.map((a) => (
+                    <Row key={a.id} a={a} busy={busy === a.id} onEdit={() => setEditing({ id: a.id, draft: toDraft(a) })} onRun={() => void runNow(a)} onToggle={(on) => void setOn(a, on)} onOpen={onOpen} />
+                  ))}
+                  {onWorkflow && wf.list?.map((w) => <CrewWorkflowRow key={w.id} w={w} wf={wf} onEdit={() => onWorkflow(w.id)} />)}
+                </ul>
+              </section>
+            )}
+          </>
         ) : list.length === 0 && !wf.list?.length ? (
           <Intro onStart={() => start({})} />
         ) : (
@@ -378,10 +419,59 @@ export function AutomationsPage({
           </ul>
         )}
 
-        <section className="mt-8" aria-labelledby="auto-templates">
+        <section className={isLocal() ? "" : "mt-8"} aria-labelledby="auto-templates">
           <h2 id="auto-templates" className="auto-label">
             {list?.length ? "Add another from a template" : "Start with one of these"}
           </h2>
+          {/* In the open-source edition, by who runs them: the crew's workflows beside the coding tools' own. */}
+          {isLocal() && onWorkflow ? (
+            <div className="aw-starters">
+              <div className="aw-starters-col">
+                <h3>For your crew</h3>
+                <div className="auto-tpls">
+                  {WORKFLOW_TEMPLATES.map((t) => (
+                    <button key={t.id} type="button" className="auto-tpl group" onClick={() => onWorkflow(`tpl:${t.id}`)}>
+                      <span className="auto-tile aw-tpl-faces">
+                        <WeekWhoMark who={{ kind: "crew", seeds: (crewSeeds.length ? crewSeeds : [{ seed: "Sage" }, { seed: "Nova" }]).slice(0, 2).map((m) => m.seed), name: "" }} size={16} />
+                      </span>
+                      <span className="auto-tpl-text">
+                        <span className="auto-tpl-title">{t.name}</span>
+                        <span className="auto-tpl-blurb">{t.blurb}</span>
+                      </span>
+                      <WhenChip when={t.trigger.kind === "schedule" ? { kind: "schedule", schedule: t.trigger.schedule } : { kind: "manual" }} />
+                      <span className="auto-use">
+                        Use <ArrowRightIcon className="size-3.5" />
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="aw-starters-col">
+                <h3>For a coding tool</h3>
+                <div className="auto-tpls">
+                  {templates().map((t) => {
+                    const made = t.make();
+                    return (
+                      <button key={t.id} type="button" className="auto-tpl group" onClick={() => start(made)}>
+                        <span className="auto-tile">
+                          <WeekWhoMark who={exTool} size={16} />
+                        </span>
+                        <span className="auto-tpl-text">
+                          <span className="auto-tpl-title">{t.title}</span>
+                          <span className="auto-tpl-blurb">{t.blurb}</span>
+                        </span>
+                        <WhenChip when={made.when ?? { kind: "manual" }} />
+                        <span className="auto-use">
+                          Use <ArrowRightIcon className="size-3.5" />
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          ) : (
+          <>
           {/* Templates are rows, not a grid of cards (DIRECTION.md §9.9): what it does, when it runs in meta, and "Use" on hover. */}
           <div className="auto-tpls">
             {templates().map((t) => {
@@ -412,6 +502,8 @@ export function AutomationsPage({
               </span>
             </button>
           </div>
+          </>
+          )}
         </section>
       </div>
     </div>
@@ -591,7 +683,7 @@ function Chip({ on, onClick, children, disabled }: { on: boolean; onClick: () =>
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[13px] transition-colors disabled:opacity-40",
+        "inline-flex h-7 items-center gap-1.5 rounded-[8px] border px-2.5 text-[13px] transition-colors disabled:opacity-40",
         on ? "border-[var(--ink-2)] bg-[var(--hover)] text-[var(--ink)]" : "border-[var(--border)] text-[var(--ink-2)] hover:bg-[var(--hover)]",
       )}
     >

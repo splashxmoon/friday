@@ -1,7 +1,9 @@
 import { iosFolders } from "./ios-folders.js";
 import { dragEnds } from "./drag-end.js";
 import { Activity as Keep, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { mateOn } from "./Teammates.js";
+import { mateOn, openThread, ThreadInPanel, useOpenThread } from "./Teammates.js";
+import { ALL, useFocusedAgent } from "./agentFocus.js";
+import { RoomProfile } from "./TeamControls.js";
 const MateSettingsBody = lazy(() => import("./TeammatePage.js").then((m) => ({ default: m.MateSettingsBody })));
 /** A crew mate's settings as a side panel tab (TeammatePage.tsx MateSettingsBody). */
 const MateSettingsPane = ({ identity, lane }: { identity: Parameters<typeof MateSettingsBody>[0]["identity"]; lane: string }) => (
@@ -52,10 +54,14 @@ export type Tab =
   | "agents" | "overview" | "tree" | "files" | "git" | "terminal" | "preview" | "usage" | "rules"
   // A crew mate's settings, in its own chat (Arun, 2026-11-13: "make the settings panel work like this").
   | "mate"
+  // A room's profile, in the Crew room or a room (TeamControls.tsx RoomProfile).
+  | "room"
+  // A side thread of the room, open beside it (Teammates.tsx ThreadInPanel).
+  | "thread"
   ;
 
 export const TAB_LABEL: Record<Tab, string> = {
-  agents: "Agents", mate: "Settings", overview: "Tasks", tree: "Tree", files: "Changes", git: "Git", terminal: "Terminal", preview: "Preview", usage: "Usage", rules: "Rules",
+  agents: "Agents", mate: "Profile", room: "Profile", thread: "Thread", overview: "Tasks", tree: "Tree", files: "Changes", git: "Git", terminal: "Terminal", preview: "Preview", usage: "Usage", rules: "Rules",
   ...(isLocal() ? { preview: "Browser" } : {}), // the agents browse in it too (local/desktop-browser.ts)
 };
 /** The panels in the side panel's card, in the order people reach for them. */
@@ -76,12 +82,14 @@ const PANEL_SAYS: Record<Tab, string> = {
   tree: "The project's files",
   agents: "Who is here and what each is doing",
   usage: "Tokens, limits and what each run cost",
-  mate: "This crew mate's settings",
+  mate: "This crew mate's profile: who it is, how it works, and what it does on its own",
+  room: "This room: who is in it, what it is for, and what it made",
+  thread: "A side thread with one crew mate",
   rules: "Instructions every agent follows",
   ...(isLocal() ? { preview: "Your pages and the web, where the agents browse too" } : {}),
 };
 const TAB_ICON: Record<Tab, IconName> = {
-  agents: "agent", mate: "settings", overview: "list", tree: "folderOpen", files: "file", git: "gitBranch", terminal: "terminalSquare", preview: "play", usage: "chart", rules: "book",
+  agents: "agent", mate: "user", room: "users", thread: "chat", overview: "list", tree: "folderOpen", files: "file", git: "gitBranch", terminal: "terminalSquare", preview: "play", usage: "chart", rules: "book",
   ...(isLocal() ? { preview: "webBrowser" as IconName } : {}),
 };
 
@@ -411,8 +419,34 @@ export function Workbench({
   if (work) closeLabel = "Close the browser";
   order = work ? ["preview"] : PANEL_ORDER;
   // A crew mate's own chat: its Settings first, then the panels a session has.
-  const mateHere = !!state.options.team && !!lane && !!mateOn(lane);
-  if (mateHere) order = ["mate", ...order];
+  // A crew mate's own chat: the session focused on it, not a room showing everyone whose lead's lane the panel was handed (the
+  // Marketing room's panel showed Ivy's profile; Arun, 2026-11-15).
+  const focusedNow = useFocusedAgent(sid);
+  const mateHere = !!state.options.team && !!lane && focusedNow !== ALL && !!mateOn(lane);
+  // A crew mate's chat has one panel, its settings, which hold everything else (Arun, 2026-11-15: "get rid of the side panels stuff
+  // for the agent page because it has everything in the agent settings"); the Crew room, which shares its session, never shows it.
+  // A file it names, pressed in its chat, opens beside it as Files, with Profile one press back (Arun, 2026-11-15: "also be able to
+  // click and view the files and stuff too").
+  const [filesOpen, setFilesOpen] = useState(false);
+  useEffect(() => {
+    if (tab === "tree") setFilesOpen(true);
+  }, [tab]);
+  // A room's panel, in the open-source edition, is its profile (Arun, 2026-11-15: "we need to have the profile be for the team
+  // room too and we need to move those things over to the side panel").
+  const roomHere = isLocal() && !!state.options.team && !mateHere;
+  if (mateHere) (order = ["mate"]), (tabs = tab === "tree" || filesOpen ? ["mate", "tree"] : ["mate"]);
+  // The room's open thread, a tab of its own while it is open.
+  const openTh = useOpenThread();
+  const threadHere = roomHere && openTh?.sid === sid;
+  if (roomHere) (order = ["room"]), (tabs = ["room", ...(threadHere ? (["thread"] as Tab[]) : []), ...(tab === "tree" || filesOpen ? (["tree"] as Tab[]) : [])]);
+  else tabs = tabs.filter((t) => t !== "mate" && t !== "room" && t !== "thread");
+  useEffect(() => {
+    if (mateHere && tab !== "mate" && tab !== "tree") onPick?.("mate");
+    else if (roomHere && tab !== "room" && tab !== "tree" && !(tab === "thread" && threadHere)) onPick?.("room");
+    else if (!mateHere && !roomHere && (tab === "mate" || tab === "room" || tab === "thread")) onPick?.(order[0]!);
+    if ((mateHere || roomHere) && split) setSplit(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mateHere, roomHere, threadHere, tab, split]);
   every = order;
   // Its one panel is the Browser (Arun, 2026-10-27: "get rid of the plus buttons and logic for the side panel stuff it should only
   // be browser"): whatever else was open goes, and anything asking for another panel gets the Browser.
@@ -628,8 +662,9 @@ export function Workbench({
   // A second panel, and closing: in this panel's header, or (Solo) beside the tabs in the session's header.
   const actions = (
         <span className="bench-tab-actions">
-          {/* Which two panels, and whether they sit one above the other or side by side, is a choice, so the button is a menu. */}
-          <button
+          {/* Which two panels, and whether they sit one above the other or side by side, is a choice, so the button is a menu. Not
+              beside a crew mate's profile, its one panel (Arun, 2026-11-15: "get rid of this too"). */}
+          {!mateHere && !roomHere && <button
             type="button"
             className={`icon-btn tiny split-btn ${split ? "on" : ""}`}
             title="Show two panels"
@@ -642,7 +677,7 @@ export function Workbench({
           >
             <Icon name="columns" size={15} />
             <Icon name="chevronDown" size={11} />
-          </button>
+          </button>}
           {splitMenu && (
             <ContextMenu
               at={splitMenu}
@@ -748,7 +783,10 @@ export function Workbench({
               <Icon name="sidePanel" size={13} />
               Panels
             </span>
-          ) : onPicker ? (
+          ) : onPicker && !mateHere && !roomHere ? (
+            // Not in a crew's room or a crew mate's chat: theirs is Profile and Files, with no menu of every panel (Arun, 2026-11-15:
+            // the room's panel showed "Profile ⌄ ×" and a + of Tasks, Changes, Git…, "get rid of it").
+
             <div className="bench-tabrow" role="tablist" aria-label="Open panels" ref={tabRow} data-slot="panel.tabs">
               {tabs.map((t) => (
                 <span
@@ -799,6 +837,43 @@ export function Workbench({
                   onHistory && { label: "History", icon: "clock" as const, onSelect: onHistory },
                 ]}
               />
+            </div>
+          ) : mateHere || roomHere ? (
+            // A crew mate's panel: Profile, and Files once opened, as the panel tabs every session has, with + to open Files
+            // (Arun, 2026-11-15: "fix this design error also add a plus sign too to handle files too... like files tab").
+            <div className="bench-tabrow" role="tablist" aria-label="Panels">
+              <span className={`bench-tab${tab === "mate" || tab === "room" ? " on" : ""}`}>
+                <button type="button" role="tab" aria-selected={tab === "mate" || tab === "room"} className="bench-tab-btn mate-tab-btn" onClick={() => onPick?.(roomHere ? "room" : "mate")}>
+                  <Icon name={roomHere ? "users" : "user"} size={13} />
+                  <span className="bench-tab-name">Profile</span>
+                </button>
+              </span>
+              {tabs.includes("thread") && (
+                <span className={`bench-tab${tab === "thread" ? " on" : ""}`}>
+                  <button type="button" role="tab" aria-selected={tab === "thread"} className="bench-tab-btn" onClick={() => onPick?.("thread")}>
+                    <Icon name="chat" size={13} />
+                    <span className="bench-tab-name">Thread{openTh && mateOn(openTh.lane) ? ` · ${mateOn(openTh.lane)!.name}` : ""}</span>
+                  </button>
+                  <button type="button" className="bench-tab-x" aria-label="Close the thread" title="Close the thread" onClick={() => (openThread(null), onPick?.("room"))}>
+                    <Icon name="x" size={11} />
+                  </button>
+                </span>
+              )}
+              {tabs.includes("tree") ? (
+                <span className={`bench-tab${tab === "tree" ? " on" : ""}`}>
+                  <button type="button" role="tab" aria-selected={tab === "tree"} className="bench-tab-btn" onClick={() => onPick?.("tree")}>
+                    <Icon name="file" size={13} />
+                    <span className="bench-tab-name">Files</span>
+                  </button>
+                  <button type="button" className="bench-tab-x" aria-label="Close Files" title="Close Files" onClick={() => (setFilesOpen(false), onPick?.(roomHere ? "room" : "mate"))}>
+                    <Icon name="x" size={11} />
+                  </button>
+                </span>
+              ) : (
+                <button type="button" className="icon-btn tiny bench-add" aria-label="Open Files" title="Files: its folder and what it made" onClick={() => onPick?.("tree")}>
+                  <Icon name="plus" size={14} />
+                </button>
+              )}
             </div>
           ) : (
             <span className="bench-here">
@@ -917,6 +992,18 @@ export function Workbench({
       );
     // Each agent's share of the session, in the open-source edition too, with no allowance above it (Arun, 2026-11-03: "Per-agent cost").
     if (which === "mate" && lane) return <MateSettingsPane identity={identity} lane={lane} />;
+    if (which === "thread")
+      return (
+        <div className="msd-pane tt-thread-pane">
+          <ThreadInPanel sid={sid} events={events} send={(c) => send(c as never)} meId={identity.id} />
+        </div>
+      );
+    if (which === "room")
+      return (
+        <div className="msd-pane">
+          <RoomProfile identity={identity} state={state} events={events} send={send} notify={(m) => dispatchEvent(new CustomEvent("friday:notice", { detail: m }))} />
+        </div>
+      );
     if (which === "usage") return <UsagePanel state={state} events={events} identity={identity} solo={headless || isLocal()} />;
     if (which === "rules") return <RulesPanel state={state} sid={sid} invite={invite} me={me} send={send} {...(lane ? { lane } : {})} />;
     if (which === "tree") return <TreePanel state={state} events={laneEvents} {...(lane ? { lane } : {})} sid={sid} invite={invite} onClose={onClose} bare send={send} me={me} jump={jump} />;

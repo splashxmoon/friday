@@ -344,6 +344,22 @@ export const MESH_TOOLS: MeshToolDef[] = [
     annotations: { readOnlyHint: false, openWorldHint: false },
   },
   {
+    // Nothing leaves the computer without the person's yes (after OpenBot's send preview; Arun, 2026-11-15: "we need ours to be the
+    // same"): the draft is shown as a card in the agent's chat with Send, Edit and Keep draft, and the answer comes as its next message.
+    name: "propose_send",
+    description: "Before you send, post or publish anything outside this computer (an email, a chat message, a post, a comment, a release note), show the person exactly what would go out. It appears as a card in your chat with Send, Edit and Keep draft. Don't send it yourself: end your turn after this, and their answer comes as your next message (send it as shown, send their edited version, or keep it as a draft).",
+    inputSchema: obj(
+      {
+        via: { type: "string", description: "Where it goes: email, a chat app, a social post, a GitHub comment, and so on." },
+        to: { type: "string", description: "Who or where: an address, a channel, a repo and issue." },
+        subject: { type: "string", description: "Its subject or title, if it has one." },
+        body: { type: "string", description: "Exactly what would be sent." },
+      },
+      ["via", "to", "body"],
+    ),
+    annotations: { destructiveHint: false, openWorldHint: false },
+  },
+  {
     name: "post_update",
     description: "Post a short update to every other agent in the session without interrupting any of them: what you finished, an interface or a file you changed that others build on, what you are about to touch. Each reads it at its next check or turn. Use message_agent instead for something one agent must act on.",
     inputSchema: obj({ text: { type: "string", description: "The update, one to three sentences, naming files and functions exactly." } }, ["text"]),
@@ -940,6 +956,10 @@ export class AgentMesh {
           return await this.finish(sid, lane, str(args.id), str(args.report), args.blocked === true, args.decline === true);
         case "post_update":
           return await this.post(sid, lane, str(args.text));
+        case "propose_send":
+          return str(args.body).trim()
+            ? { output: `Shown to the person as a draft to ${str(args.to)} by ${str(args.via)}, with Send, Edit and Keep draft. Don't send it yourself: end your turn now. Their answer comes as your next message.` }
+            : { output: "Give the exact text that would go out as body.", isError: true };
         case "wait_for_agent": {
           const secs = Number(args.wait_seconds);
           const wait = Number.isFinite(secs) && secs > 0 ? Math.min(secs * 1000, ASK_WAIT_MAX_MS) : WATCH_WAIT_MS;

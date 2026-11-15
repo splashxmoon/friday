@@ -8,6 +8,8 @@ import type { IconName } from "./icons.js";
 export interface WhatsNewNotes {
   /** The release these are for, as tagged (v0.2.10 → "0.2.10"). */
   version: string;
+  /** The release's own headline, when it has one worth leading with; else "What's new in Friday". */
+  title?: string;
   /** One sentence under the title: what the release adds up to. */
   summary: string;
   /** Up to four, in a two-by-two grid. */
@@ -15,13 +17,14 @@ export interface WhatsNewNotes {
 }
 
 export const WHATS_NEW: WhatsNewNotes = {
-  version: "0.2.25",
-  summary: "A coding session that says where everything stands in one place, and connects in one screen.",
+  version: "0.2.26",
+  title: "Crews, completely reworked",
+  summary: "Meet your AI team. Hand a teammate a job, research, writing, planning or code, and it gets it done and keeps going while you're away.",
   items: [
-    { icon: "agent", title: "One state, said plainly", line: "Every agent reads the same in its tab, the feed, the sidebar and the status bar. An error says what went wrong, with Try again." },
-    { icon: "list", title: "Every agent in one press", line: "Press it to see each agent here, what it's doing, and what's out with your crew." },
-    { icon: "columns", title: "The agents above the chat", line: "One switch at the top of the chat for all of them. The header is just the session." },
-    { icon: "plug", title: "Connect in one screen", line: "Agent, code, where it runs and how much it may do, each picked in place." },
+    { icon: "users", title: "A team that works for you", line: "Each teammate has a role, its own memory and a profile. They run on the coding tools you already have." },
+    { icon: "chat", title: "Rooms like a group chat", line: "Whole replies, their back-and-forth in one card, and side threads beside the room." },
+    { icon: "clock", title: "Routines on their own", line: "Stand-ups, weekly reviews, an eye on new issues, on a schedule, while you sleep." },
+    { icon: "shield", title: "Never stuck on a limit", line: "Fallbacks in order, each with its model and effort. It can ask you before it switches." },
   ],
 };
 

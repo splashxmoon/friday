@@ -10,9 +10,23 @@ import type { SessionEvent } from "./types.js";
  */
 export interface CheckIn {
   id: string;
+  /**
+   * Its name, as the Routines page lists it (Arun, 2026-11-15: "add routines too, make it very advanced ... combine the check ins
+   * with the routines"): a check-in is a routine, and every routine a check-in underneath.
+   */
+  name?: string;
   /** What it is asked, in the person's words. */
   text: string;
-  every: "hourly" | "daily" | "weekdays" | "weekly";
+  /** "every" is every `hours` hours, on the hour. */
+  every: "hourly" | "every" | "daily" | "weekdays" | "weekly";
+  /** For "every": 2, 3, 4, 6, 8 or 12. */
+  hours?: number;
+  /** Turned off: kept, never run. */
+  off?: true;
+  /** Where it runs: "thread" starts a new thread of the crew mate's each time; absent, its main chat. */
+  where?: "thread";
+  /** false: it always says what it found; absent, a run with nothing new says nothing (NO_UPDATE). */
+  quiet?: false;
   /** HH:MM, for all but hourly. */
   at: string;
   /** For weekly: the days, 0 = Sunday. */
@@ -23,8 +37,10 @@ export interface CheckIn {
   last?: string;
 }
 
-/** How many check-ins a teammate keeps. */
-export const MAX_CHECKINS = 6;
+/** How many routines a crew mate keeps. */
+export const MAX_CHECKINS = 12;
+/** How many hours apart an "every few hours" routine may run. */
+export const EVERY_HOURS = [2, 3, 4, 6, 8, 12] as const;
 
 /** What a teammate with nothing new for a check-in answers, and the room then shows nothing for it. */
 export const NO_UPDATE = "NO_UPDATE";
@@ -34,7 +50,7 @@ export function cleanCheckIn(v: unknown, id: string): CheckIn | null {
   if (!v || typeof v !== "object") return null;
   const c = v as Record<string, unknown>;
   const text = typeof c.text === "string" ? c.text.trim().slice(0, 2000) : "";
-  const every = ["hourly", "daily", "weekdays", "weekly"].includes(c.every as string) ? (c.every as CheckIn["every"]) : null;
+  const every = ["hourly", "every", "daily", "weekdays", "weekly"].includes(c.every as string) ? (c.every as CheckIn["every"]) : null;
   if (!text || !every) return null;
   const at = typeof c.at === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(c.at) ? c.at : "09:00";
   const days = [...new Set((Array.isArray(c.days) ? c.days : []).filter((d): d is number => Number.isInteger(d) && d >= 0 && d <= 6))].sort();
@@ -44,7 +60,22 @@ export function cleanCheckIn(v: unknown, id: string): CheckIn | null {
   } catch {
     // Not a zone this computer knows: UTC.
   }
-  return { id: typeof c.id === "string" && /^[\w-]{4,24}$/.test(c.id) ? c.id : id, text, every, at, days: every === "weekly" && !days.length ? [1] : days, tz, ...(typeof c.last === "string" ? { last: c.last.slice(0, 20) } : {}) };
+  const name = typeof c.name === "string" ? c.name.replace(/\s+/g, " ").trim().slice(0, 60) : "";
+  const hours = (EVERY_HOURS as readonly number[]).includes(c.hours as number) ? (c.hours as number) : 4;
+  return {
+    id: typeof c.id === "string" && /^[\w-]{4,24}$/.test(c.id) ? c.id : id,
+    ...(name ? { name } : {}),
+    text,
+    every,
+    ...(every === "every" ? { hours } : {}),
+    at,
+    days: every === "weekly" && !days.length ? [1] : days,
+    tz,
+    ...(c.off === true ? { off: true as const } : {}),
+    ...(c.where === "thread" ? { where: "thread" as const } : {}),
+    ...(c.quiet === false ? { quiet: false as const } : {}),
+    ...(typeof c.last === "string" ? { last: c.last.slice(0, 20) } : {}),
+  };
 }
 
 /**
@@ -59,8 +90,10 @@ export function checkInDue(c: CheckIn, now: Date): string | null {
     const hh = get("hour") === "24" ? "00" : get("hour");
     return { hh, minutes: Number(hh) * 60 + Number(get("minute")), date: `${get("year")}-${get("month")}-${get("day")}`, day: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(get("weekday")) };
   };
+  if (c.off) return null;
   let p = at(now);
   if (c.every === "hourly") return p.minutes % 60 < 15 ? `${p.date}T${p.hh}` : null;
+  if (c.every === "every") return p.minutes % 60 < 15 && Number(p.hh) % (c.hours ?? 4) === 0 ? `${p.date}T${p.hh}` : null;
   const [ah, am] = c.at.split(":").map(Number);
   let late = p.minutes - (ah! * 60 + am!);
   // Just past midnight, the slot is yesterday's: one at 23:30 is still due at 00:10, on the day it was for (2026-10-27 audit: a
@@ -76,9 +109,10 @@ export function checkInDue(c: CheckIn, now: Date): string | null {
 }
 
 /** "every weekday at 09:00": a check-in's schedule in words. */
-export function describeCheckIn(c: Pick<CheckIn, "every" | "at" | "days">): string {
+export function describeCheckIn(c: Pick<CheckIn, "every" | "at" | "days" | "hours">): string {
   const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
   if (c.every === "hourly") return "every hour";
+  if (c.every === "every") return `every ${c.hours ?? 4} hours`;
   if (c.every === "daily") return `every day at ${c.at}`;
   if (c.every === "weekdays") return `every weekday at ${c.at}`;
   return `every ${c.days.map((d) => DAYS[d]).join(", ")} at ${c.at}`;
@@ -137,5 +171,22 @@ export function quietCheckIns(events: readonly SessionEvent[]): { quiet: Set<num
 
 /** What a teammate is told when a check-in is due. */
 export const checkInText = (c: CheckIn) =>
-  `[Check-in] ${c.text}\n\n(Your ${describeCheckIn(c)} check-in, set by the person. Do it, then say what you found in a few lines. If there is nothing new since the last one, reply with exactly ${NO_UPDATE} and nothing else.)`;
+  `[Check-in] ${c.text}\n\n(Your ${describeCheckIn(c)} routine${c.name ? `, "${c.name}"` : ""}, set by the person. Do it, then say what you found in a few lines.${c.quiet === false ? "" : ` If there is nothing new since the last one, reply with exactly ${NO_UPDATE} and nothing else.`})`;
+
+/**
+ * When a routine runs next, from `now`: the first five-minute mark in the next eight days its schedule is due at, or null (off,
+ * or never). For the page; the server keeps to checkInDue.
+ */
+export function nextRun(c: CheckIn, now = new Date()): Date | null {
+  if (c.off) return null;
+  const step = 5 * 60_000;
+  let t = Math.ceil(now.getTime() / step) * step;
+  const end = t + 8 * 86_400_000;
+  for (; t < end; t += step) {
+    const slot = checkInDue({ ...c, last: undefined }, new Date(t));
+    // Its first minute, not a time inside its late window, and not the slot it has run in already.
+    if (slot && slot !== c.last && !checkInDue({ ...c, last: undefined }, new Date(t - step))) return new Date(t);
+  }
+  return null;
+}
 

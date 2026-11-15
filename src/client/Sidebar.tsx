@@ -1,6 +1,8 @@
 import { ChevronRightIcon, FolderGit2Icon, PlusIcon, SearchIcon, SettingsIcon, LogOutIcon, MoonIcon, SunIcon, XIcon } from "lucide-react";
 import { openKeepGoing } from "./crew-carry-open.js";
 import { plainLine } from "./team-room.js";
+import { mateItems, roomItems } from "./mate-menu.js";
+import { askNewFolder, DRAG_TYPE as CREW_DRAG, folderItems, moveItems, useCrewFolders, useShutFolders } from "./crew-folders.js";
 import { dragEnds } from "./drag-end.js";
 import { SessionPrBadge } from "./SessionPrs.js";
 import { useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
@@ -44,7 +46,7 @@ import { doingWords, QUIET_AFTER_MS, quietFor } from "../step-words.js";
 import { useSettledOrder } from "./sidebar-order.js";
 import { shortcut } from "./Shortcuts.js";
 import { choosePlace, CodeCrewToggle, isWorkSid, useWorkSessions } from "./WorkMode.js";
-import { Face, isTeamSid, mateStatus, newTeammate, openRoom, openTeammate, ownOf, RoomDialog, RoomFaces, SidebarTeammates, useTeam, useTeamTab, type RoomView } from "./Teammates.js";
+import { Face, isTeamSid, MateRing, mateStatus, newTeammate, openRoom, openTeammate, ownOf, RoomDialog, roomsOf, RoomFaces, SidebarTeammates, useTeam, useTeamTab, type RoomView } from "./Teammates.js";
 import { roleWord, rowState } from "./team-status.js";
 import { byDay } from "./sidebar-days.js";
 import { ALL as ALL_AGENTS, useFocusedAgent } from "./agentFocus.js";
@@ -668,18 +670,37 @@ function CrewList({ p }: { p: SidebarProps }) {
   const focused = useFocusedAgent(t?.sid ?? "");
   const [q, setQ] = useState("");
   const [rooming, setRooming] = useState(false);
+  const [editingRoom, setEditingRoom] = useState<RoomView | null>(null);
+  const [ask, confirmUI] = useConfirm();
+  const [menuAt, setMenuAt] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [folders, saveFolders] = useCrewFolders(p.identityForApi);
+  const [shut, flipShut] = useShutFolders();
+  const [folderAt, setFolderAt] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [dropOn, setDropOn] = useState<string | null>(null);
   if (!t) return <div className="sb-list oss-crew flex min-w-0 flex-1 flex-col" />;
   const has = (...words: (string | null | undefined)[]) => !q.trim() || words.some((w) => w?.toLowerCase().includes(q.trim().toLowerCase()));
   const rank = (s: string) => (s === "waiting" ? 0 : s === "stopped" ? 1 : s === "working" ? 2 : 3);
   const mates = [...ownOf(t)].sort((a, b) => rank(a.status) - rank(b.status) || (b.lastAt ?? 0) - (a.lastAt ?? 0)).filter((m) => has(m.name, m.role));
-  const lead = ownOf(t).find((m) => m.lane === t.lead);
   const rooms: { key: string; name: string; seeds: string[]; line: string; at?: number; here: boolean; open: () => void }[] = [
-    { key: "crew", name: "Crew room", seeds: ownOf(t).slice(0, 4).map((m) => m.look ?? m.name), line: t.last ? `${t.last.by}: ${t.last.text}` : lead ? `${lead.name} leads` : "Where your crew works together", ...(t.last?.at ? { at: t.last.at } : {}), here: p.activeSid === t.sid && focused === ALL_AGENTS, open: () => openTeammate(t, null, p.onOpen) },
-    ...(t.rooms ?? []).map((r: RoomView) => ({ key: r.id, name: r.name, seeds: ownOf(t).filter((m) => r.lanes[m.id]).slice(0, 4).map((m) => m.look ?? m.name), line: r.last ? `${r.last.by}: ${r.last.text}` : `${Object.keys(r.lanes).length} in it`, ...(r.last?.at ? { at: r.last.at } : {}), here: p.activeSid === r.sid, open: () => openRoom(r, p.onOpen) })),
+    // No default Crew room in the list (Arun, 2026-11-15: "get rid of this default crew room thing"): its session stays, as the
+    // home of each crew mate's main chat, and is reached from a crew mate's crew work line.
+    ...roomsOf(t).map((r: RoomView) => ({ key: r.id, name: r.name, seeds: ownOf(t).filter((m) => r.lanes[m.id]).slice(0, 4).map((m) => m.look ?? m.name), line: r.last ? `${r.last.by}: ${r.last.text}` : `${Object.keys(r.lanes).length} in it`, ...(r.last?.at ? { at: r.last.at } : {}), here: p.activeSid === r.sid, open: () => openRoom(r, p.onOpen) })),
   ].filter((r) => has(r.name));
   const onPage = !p.activeSid;
   return (
-    <div className="sb-list oss-crew flex min-w-0 flex-1 flex-col" role="group" aria-label="Your crew">
+    <div
+      className="sb-list oss-crew flex min-w-0 flex-1 flex-col"
+      role="group"
+      aria-label="Your crew"
+      // A right-click anywhere on it, its empty space too, opens what can be made here (Arun, 2026-11-15: "ALLOW FOR RIGHT CLICK ON
+      // THIS SIDE BAR!!!!! LIKE ANYWHERE ON IT LIKE THE EMPTY SPACE"). A row's or a group's own menu comes first; the search keeps
+      // the system's, for paste.
+      onContextMenu={(e) => {
+        if (e.defaultPrevented || (e.target as HTMLElement).closest("input, textarea")) return;
+        e.preventDefault();
+        setMenuAt({ id: "blank", x: e.clientX, y: e.clientY });
+      }}
+    >
       <div className="oss-crew-head">
         <button type="button" className="oss-crew-title mr-auto" data-active={onPage || undefined} onClick={() => (p.onNew(), choosePlace("team"))} title="All your agents, what needs you and what finished today">
           Agents
@@ -690,12 +711,12 @@ function CrewList({ p }: { p: SidebarProps }) {
           <Tooltip>
             <TooltipTrigger asChild>
               <DropdownMenuTrigger asChild>
-                <button type="button" className="oss-agents-add" aria-label="New agent or room">
+                <button type="button" className="oss-agents-add" aria-label="New agent, room or group">
                   <PlusIcon aria-hidden="true" />
                 </button>
               </DropdownMenuTrigger>
             </TooltipTrigger>
-            <TooltipContent side="right">New agent or room</TooltipContent>
+            <TooltipContent side="right">New agent, room or group</TooltipContent>
           </Tooltip>
           <DropdownMenuContent side="bottom" align="end" className="w-52">
             <DropdownMenuItem onSelect={newTeammate}>
@@ -703,6 +724,9 @@ function CrewList({ p }: { p: SidebarProps }) {
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setRooming(true)}>
               <Icon name="users" size={14} /> New room for a project
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => askNewFolder(ask, folders, saveFolders)}>
+              <Icon name="plus" size={14} /> New group
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -725,49 +749,117 @@ function CrewList({ p }: { p: SidebarProps }) {
         <input type="search" placeholder="Search" aria-label="Search agents and rooms" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Escape" && setQ("")} />
       </label>
       <div className="oss-crew-scroll">
-        {(rooms.length > 0 || !q.trim()) && (
-        <div className="oss-crew-label">
-          <span>Rooms</span>
-        </div>
-        )}
-        {rooms.map((r) => (
-          <button key={r.key} type="button" className="oss-crew-row" data-active={r.here || undefined} onClick={r.open}>
-            <RoomFaces seeds={r.seeds} size={30} />
-            <span className="oss-crew-text">
-              <span className="oss-crew-top">
-                <b>{r.name}</b>
-                {r.at ? <span className="oss-crew-when">{shortAgo(r.at)}</span> : null}
-              </span>
-              {/* A room's last words as plain text: the lead's Markdown ("**Notes**", `code`, its lists) as words on one line. */}
-              <span className="oss-crew-line">{plainLine(r.line)}</span>
-            </span>
-          </button>
-        ))}
-        <div className="oss-crew-label">
-          <span>Your crew</span>
-          <span className="oss-crew-count">{ownOf(t).length}</span>
-        </div>
-        {mates.map((m) => {
-          // Its name and a word for what it is, how it stands on the right, and under them what it is on or did last (Arun,
-          // 2026-11-13: "show their current work status and add a tag of basically what their role is").
-          const st = rowState(m, mateStatus(m));
-          const chip = t.lead === m.lane ? "Lead" : roleWord(m.role ?? "");
-          return (
-            <button key={m.id} type="button" className="oss-crew-row" data-active={(p.activeSid === t.sid && focused === m.lane) || undefined} onClick={() => openTeammate(t, m.lane, p.onOpen)} aria-label={`${m.name}${chip ? `, ${chip}` : ""}: ${st.word}${st.line ? `, ${st.line}` : ""}`}>
-              <Face seed={m.look ?? m.name} size={30} status={m.status} lead={t.lead === m.lane} />
-              <span className="oss-crew-text">
-                <span className="oss-crew-top">
-                  <b>{m.name}</b>
-                  {chip && <span className="oss-crew-chip">{chip}</span>}
-                  <span className="oss-crew-state" data-tone={st.tone}>
-                    {st.word}
+        {(() => {
+          // Each crew mate and room as its row, carried by a drag onto a folder and opened from a right-click.
+          const dragOf = (key: string) => ({ draggable: true, onDragStart: (e: DragEvent) => (e.dataTransfer.setData(CREW_DRAG, key), (e.dataTransfer.effectAllowed = "move")) });
+          const roomRow = (r: (typeof rooms)[number]) => (
+            <div key={r.key} className="oss-crew-item" {...dragOf(`room:${r.key}`)} onContextMenu={(e) => (e.preventDefault(), setMenuAt({ id: `room:${r.key}`, x: e.clientX, y: e.clientY }))}>
+              <button type="button" className="oss-crew-row" data-active={r.here || undefined} onClick={r.open}>
+                <RoomFaces seeds={r.seeds} size={30} />
+                <span className="oss-crew-text">
+                  <span className="oss-crew-top">
+                    <b>{r.name}</b>
+                    {r.at ? <span className="oss-crew-when">{shortAgo(r.at)}</span> : null}
                   </span>
+                  {/* A room's last words as plain text: the lead's Markdown ("**Notes**", `code`, its lists) as words on one line. */}
+                  <span className="oss-crew-line">{plainLine(r.line)}</span>
                 </span>
-                {st.line && <span className={`oss-crew-line s-${st.tone}`} title={st.line}>{st.line}</span>}
-              </span>
-            </button>
+              </button>
+            </div>
           );
-        })}
+          const mateRow = (m: (typeof mates)[number]) => {
+            // Its name and a word for what it is, how it stands on the right, and under them what it is on or did last (Arun,
+            // 2026-11-13: "show their current work status and add a tag of basically what their role is").
+            const st = rowState(m, mateStatus(m));
+            const chip = t.lead === m.lane ? "Lead" : roleWord(m.role ?? "");
+            return (
+              // What can be done to it, from a right-click: Remove among them (Arun, 2026-11-15: "WHY CANT I DELETE AND REMOVE
+              // AGENTS?"). No ⋯ beside its words ("get rid of that .... by the texts"): the Agents page has one beside Message.
+              <div key={m.id} className="oss-crew-item" {...dragOf(`mate:${m.id}`)} onContextMenu={(e) => (e.preventDefault(), setMenuAt({ id: `mate:${m.id}`, x: e.clientX, y: e.clientY }))}>
+                <button type="button" className="oss-crew-row" data-active={(p.activeSid === t.sid && focused === m.lane) || undefined} onClick={() => openTeammate(t, m.lane, p.onOpen)} aria-label={`${m.name}${chip ? `, ${chip}` : ""}: ${st.word}${st.line ? `, ${st.line}` : ""}`}>
+                  <Face seed={m.look ?? m.name} size={30} status={m.status} lead={t.lead === m.lane} />
+                  <span className="oss-crew-text">
+                    <span className="oss-crew-top">
+                      <b>{m.name}</b>
+                      <MateRing status={m.status} title={st.word} />
+                      {chip && <span className="oss-crew-chip">{chip}</span>}
+                      <span className="oss-crew-state" data-tone={st.tone}>
+                        {st.word}
+                      </span>
+                    </span>
+                    {st.line && <span className={`oss-crew-line s-${st.tone}`} title={st.line}>{st.line}</span>}
+                  </span>
+                </button>
+              </div>
+            );
+          };
+          // No folders yet: rooms, then the crew, as before.
+          if (!folders.folders.length)
+            return (
+              <>
+                {rooms.length > 0 && (
+                  <div className="oss-crew-label">
+                    <span>Rooms</span>
+                  </div>
+                )}
+                {rooms.map(roomRow)}
+                <div className="oss-crew-label">
+                  <span>Your crew</span>
+                  <span className="oss-crew-count">{ownOf(t).length}</span>
+                </div>
+                {mates.map(mateRow)}
+              </>
+            );
+          // Project folders (Arun, 2026-11-15: "placing agents and like crew rooms into prodject folders too... like categories"):
+          // each folds, takes what is dropped on it and opens its own menu from a right-click; what is in none comes last.
+          const where = (key: string) => (folders.folders.some((f) => f.id === folders.place[key]) ? folders.place[key]! : null);
+          const group = (id: string | null, name: string) => {
+            const rs = rooms.filter((r) => where(`room:${r.key}`) === id);
+            const ms = mates.filter((m) => where(`mate:${m.id}`) === id);
+            if (q.trim() && !rs.length && !ms.length) return null;
+            const key = id ?? "none";
+            const open = !shut.has(key);
+            return (
+              <div key={key} className="oss-folder" data-drop={dropOn === key || undefined}>
+                <button
+                  type="button"
+                  className="oss-folder-head"
+                  aria-expanded={open}
+                  onClick={() => flipShut(key)}
+                  onContextMenu={(e) => id && (e.preventDefault(), setFolderAt({ id, x: e.clientX, y: e.clientY }))}
+                  onDragOver={(e) => e.dataTransfer.types.includes(CREW_DRAG) && (e.preventDefault(), setDropOn(key))}
+                  onDragLeave={() => setDropOn((d) => (d === key ? null : d))}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setDropOn(null);
+                    const item = e.dataTransfer.getData(CREW_DRAG);
+                    if (!item) return;
+                    const place = { ...folders.place };
+                    if (id) place[item] = id;
+                    else delete place[item];
+                    void saveFolders({ ...folders, place });
+                  }}
+                >
+                  <Icon name={open ? "chevronDown" : "chevronRight"} size={12} />
+                  <span className="oss-folder-name">{name}</span>
+                  <span className="oss-crew-count">{rs.length + ms.length}</span>
+                </button>
+                {open && (
+                  <div className="oss-folder-body">
+                    {rs.map(roomRow)}
+                    {ms.map(mateRow)}
+                  </div>
+                )}
+              </div>
+            );
+          };
+          return (
+            <>
+              {folders.folders.map((f) => group(f.id, f.name))}
+              {group(null, "Not in a group")}
+            </>
+          );
+        })()}
         {q.trim() && !mates.length && !rooms.length && <p className="oss-crew-none">Nothing called “{q.trim()}”.</p>}
         {!q.trim() && !mates.length && (
           <button type="button" className="oss-agent oss-agent-first" onClick={() => (choosePlace("team"), p.onNew())}>
@@ -782,6 +874,32 @@ function CrewList({ p }: { p: SidebarProps }) {
         )}
       </div>
       {rooming && p.identityForApi && <RoomDialog identity={p.identityForApi} team={t} editing={null} onClose={() => setRooming(false)} onMade={(r) => openRoom(r, p.onOpen)} />}
+      {editingRoom && <RoomDialog identity={p.identityForApi} team={t} editing={editingRoom} onClose={() => setEditingRoom(null)} onMade={() => setEditingRoom(null)} />}
+      {menuAt && (
+        <ContextMenu
+          at={menuAt}
+          items={() => {
+            if (menuAt.id === "blank")
+              return [
+                { label: "New agent", icon: "agent", onSelect: newTeammate },
+                { label: "New room for a project", icon: "users", onSelect: () => setRooming(true) },
+                { label: "New group", icon: "folder", onSelect: () => askNewFolder(ask, folders, saveFolders) },
+                { label: "All agents", icon: "user", onSelect: () => (p.onNew(), choosePlace("team")) },
+              ];
+            const move = moveItems(menuAt.id, folders, saveFolders, ask);
+            const m = menuAt.id.startsWith("mate:") ? t.teammates.find((x) => `mate:${x.id}` === menuAt.id) : null;
+            if (m) return [...mateItems({ identity: p.identityForApi, team: t, mate: m, ask }).slice(0, -1), ...move, mateItems({ identity: p.identityForApi, team: t, mate: m, ask }).at(-1)];
+            // A room's own (the Crew room has no other): open, edit, remove, with the folders between.
+            const r = (t.rooms ?? []).find((x) => `room:${x.id}` === menuAt.id);
+            if (!r) return [{ label: "Open", icon: "users", onSelect: () => openTeammate(t, null, p.onOpen) }, ...move];
+            const own = roomItems({ identity: p.identityForApi, room: r, ask, onOpen: () => openRoom(r, p.onOpen), onEdit: () => setEditingRoom(r), onRemoved: () => p.activeSid === r.sid && openTeammate(t, null, p.onOpen) });
+            return [...own.slice(0, -1), ...move, own.at(-1)];
+          }}
+          onClose={() => setMenuAt(null)}
+        />
+      )}
+      {folderAt && <ContextMenu at={folderAt} items={() => folderItems(folderAt.id, folders, saveFolders, ask)} onClose={() => setFolderAt(null)} />}
+      {confirmUI}
     </div>
   );
 }
@@ -1108,7 +1226,7 @@ function SessionsList({ p }: { p: SidebarProps }) {
   // Drag a session onto a project (or onto Recent to unfile it).
   const dropZone = (target: string | null) => ({
     onDragOver: (e: DragEvent) => {
-      if (!e.dataTransfer.types.includes(DRAG_TYPE)) return;
+      if (!e.dataTransfer.types.includes(CREW_DRAG)) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
       setDrop(target ?? "__recent");
@@ -1117,7 +1235,7 @@ function SessionsList({ p }: { p: SidebarProps }) {
       if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) setDrop(null);
     },
     onDrop: (e: DragEvent) => {
-      const sid = e.dataTransfer.getData(DRAG_TYPE);
+      const sid = e.dataTransfer.getData(CREW_DRAG);
       setDrop(null);
       if (!sid) return;
       e.preventDefault();

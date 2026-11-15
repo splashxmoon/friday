@@ -86,6 +86,9 @@ for (const edition of ["hosted", "local"] as const) {
     // Nov 14 2026, the session screen matched to Friday Teams: 947.9 hosted, 945.3 local (944.2 and 941.3 before), with one agent
     // state for every view and plain-words errors (agent-state.ts) and the status bar's agent list; the row's words (agent-line.ts)
     // stay in the first load without the rest, and the crew's rows in the list load when it opens: raised to 949 on purpose.
-    assert.ok(session.kb < 949, `a session screen's first load is ${session.kb.toFixed(0)} KB brotli, over the 949 KB budget`);
+    // Nov 15 2026: 949.8 hosted, 947.2 local, with a crew mate's chat as a teammate's: the line its crew work folds to, its threads
+    // found by session, and "This chat" opened as it makes something (Activity.tsx, Teammates.tsx); the panel and the thread strip
+    // load on their own (ChatPanel.tsx, TeammatePage.tsx): raised to 952 on purpose; to 956 for room replies drawn as a crew mate's chat draws them and Friday's own time field (2026-11-15).
+    assert.ok(session.kb < 956, `a session screen's first load is ${session.kb.toFixed(0)} KB brotli, over the 956 KB budget`);
   });
 }

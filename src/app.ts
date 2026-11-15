@@ -19,6 +19,7 @@ import { EngineHub } from "./engine/hub.js";
 import { callHost } from "./runner/local-api.js";
 import { usageCounts } from "./usage.js";
 import { readRepo as readFolder } from "./runner/repo-read.js";
+import { cleanFolders, readFolders } from "./crew-folders.js";
 import { readFailed } from "./project-rules.js";
 import { parseRepo } from "./runner/repo.js";
 import { Runner } from "./runner/runner.js";
@@ -108,7 +109,7 @@ import { findWork, listWork, namedIn, pathParam, serveWork, shownFile, siteIcon,
 import { FRAME_TTL_MS, frameDir, inFrame, signFrame, verifyFrame } from "./work-frame.js";
 import type { PeerNote } from "./types.js";
 import { ago as agoOf, LocalPeers, LOOK_AT as SESSIONS_LOOKED_AT, MODE_RANK, newId, placeOf as placeOfSession, scheduleOf } from "./app-tools.js";
-import { backAt, backupText, offBackup, onBackup, backupOf, checkInDue, checkInText, quietCheckIns, type CheckIn, cleanRoom, cleanTeammate, MEMORY_FILE, MEMORY_MAX, memoryText, defaultFolder, makeFolder, MAX_ROOMS, MAX_TEAMMATES, onOwnModel, projectsOf, roomKeep, runsOnName, teammateNote, TeammateStore, worktreeHolding, type Room, type Teammate, type TeammateView } from "./teammates.js";
+import { backAt, backupText, offBackup, onBackup, backupOf, backupsOf, cleanBackups, checkInDue, checkInText, quietCheckIns, type CheckIn, cleanRoom, cleanTeammate, MEMORY_FILE, MEMORY_MAX, memoryText, defaultFolder, makeFolder, MAX_ROOMS, MAX_TEAMMATES, MAX_THREADS, NEW_THREAD, onOwnModel, projectsOf, roomKeep, runsOnName, teammateNote, TeammateStore, worktreeHolding, type Room, type Teammate, type TeammateView } from "./teammates.js";
 import { limitHit, planLimitHit } from "./limit-reset.js";
 import { RESUME_NUDGE } from "./limit-handoff.js";
 import { noteRunEnd } from "./limited.js";
@@ -1787,6 +1788,15 @@ export async function createApp(o: AppOptions) {
   const computerHere = (ownerId: string) => !!links.tokenFor(ownerId) || !!localHost();
   // ── Teammates (teammates.ts): persistent AI teammates on this computer, in the open-source edition ──────────
   const teammates = o.local && localEdition() ? new TeammateStore(redis, o.prefix) : null;
+  // Every crew mate made before on full access, once per Friday home (Arun, 2026-11-15: "make existing crew mates full access too");
+  // their access stays theirs to change after.
+  if (teammates)
+    void (async () => {
+      const done = `${o.prefix}crew:fullAccess:v1`;
+      if (await redis.get(done)) return;
+      for (const t of await teammates.list()) if (t.mode && t.mode !== "full") await teammates.update(t.id, (cur) => ({ ...cur, mode: undefined }));
+      await redis.set(done, "1");
+    })().catch((e) => console.error("[teammates] full access:", e));
   /**
    * The "Needs you" queue (needs-you.ts): what waits on each person across their sessions, Crew rooms and teammates, ranked, each
    * with a suggested answer. The suggestion is the person's own work: on Friday's model where their plan has one (counted against
@@ -2080,6 +2090,10 @@ export async function createApp(o: AppOptions) {
   const teamRoomNow = async (sid: string) => teamLooks.now(sid, new Set((await teammates!.list()).map((t) => t.lane)));
   /** Puts each switched teammate whose limit has lifted back on its own tool (a timer calls it; tests too). */
   let runBack: () => Promise<void> = async () => {};
+  /** The person's answer to a crew mate's switch that waits on them (Teammate.switchAsk): go to its fallback, or wait. */
+  let answerSwitch: (id: string, go: boolean) => Promise<string | null> = async () => "Switching isn't on here.";
+  /** A crew mate's routine run now, as Run now asks (the same as on its schedule). */
+  let routineNow: (id: string, routine: string) => Promise<string | null> = async () => "Routines aren't on here.";
   /** Asks each teammate its check-ins that are due at `now` (a timer calls it; tests call it with a time). */
   let runCheckIns: (now?: Date) => Promise<void> = async () => {};
   /** A teammate's effort on one of its lanes (its tool's level, or none for Auto): its record's, set as the lane's own. */
@@ -2087,7 +2101,7 @@ export async function createApp(o: AppOptions) {
   const setEffort = async (sid: string, owner: { id: string; name: string }, lane: string, t: Teammate) =>
     t.tool === "friday" ? undefined : store.append(sid, { id: owner.id, name: owner.name, kind: "human" }, { type: "lane.effort", effort: t.effort ?? null, tool: t.tool }, { lane });
   /** The rooms as the Team room's teammates are told them: each one's members, who is working on what, and its last words. */
-  const roomsBrief = async (list: Teammate[]): Promise<string> => teamLooks.roomsBrief(await teammates!.rooms(), (id) => list.find((t) => t.id === id)?.name);
+  const roomsBrief = async (list: Teammate[]): Promise<string> => teamLooks.roomsBrief((await teammates!.rooms()).filter((r) => !r.thread), (id) => list.find((t) => t.id === id)?.name);
   /**
    * A teammate's work everywhere else, for its turn in a room (as roomsBrief is for the Team room): how it stands in the Team room
    * and its other rooms, and its last words there, so it neither redoes nor contradicts what it does elsewhere (2026-10-28).
@@ -2095,7 +2109,7 @@ export async function createApp(o: AppOptions) {
   const elsewhereBrief = async (t: Teammate, here: string): Promise<string> => {
     const team = await teammates!.team();
     const rooms = await teammates!.rooms();
-    return teamLooks.elsewhere([...(team && team !== here ? [{ sid: team, name: "the Crew room", lane: t.lane }] : []), ...rooms.filter((r) => r.sid !== here && r.lanes[t.id]).map((r) => ({ sid: r.sid, name: `the room "${r.name}"`, lane: r.lanes[t.id]! }))]);
+    return teamLooks.elsewhere([...(team && team !== here ? [{ sid: team, name: "the Crew room", lane: t.lane }] : []), ...rooms.filter((r) => r.sid !== here && r.lanes[t.id]).map((r) => ({ sid: r.sid, name: r.thread ? `your thread "${r.name}"` : `the room "${r.name}"`, lane: r.lanes[t.id]! }))]);
   };
   /**
    * A folder for a new teammate no other teammate's record has (2026-10-28 audit: renamed, then a new one given the old name, two
@@ -2260,6 +2274,12 @@ export async function createApp(o: AppOptions) {
    */
   const makeRoom = async (owner: { id: string; name: string }, workspaceId: string, body: Record<string, unknown>, gate?: () => Promise<string | null>): Promise<{ room: Room; failed: string } | string> => {
     const list = await teammates!.list();
+    // A crew mate's thread: a room of that one crew mate, named when the person first writes in it (teammates.ts Room.thread).
+    const thread = typeof body.thread === "string" ? body.thread : "";
+    if (thread) {
+      if (!list.some((t) => t.id === thread)) return "That crew mate isn't in the crew any more.";
+      body = { name: typeof body.name === "string" && body.name.trim() ? body.name : NEW_THREAD, members: [thread] };
+    }
     let c: ReturnType<typeof cleanRoom>;
     try {
       c = cleanRoom(body, list.map((t) => t.id));
@@ -2269,10 +2289,12 @@ export async function createApp(o: AppOptions) {
     if (!c.name || !c.members) return "Give the room a name and pick who is in it.";
     // Counted and made under one lock: two made at once each found room for one more (2026-10-27 audit).
     const r = await teammates!.locked("rooms:add", async () => {
-      if ((await teammates!.rooms()).length >= MAX_ROOMS) return `A crew keeps up to ${MAX_ROOMS} rooms. Take one away first.`;
+      const all = await teammates!.rooms();
+      if (thread && all.filter((x) => x.thread === thread).length >= MAX_THREADS) return `A crew mate keeps up to ${MAX_THREADS} threads. Take one away first.`;
+      if (!thread && all.filter((x) => !x.thread).length >= MAX_ROOMS) return `A crew keeps up to ${MAX_ROOMS} rooms. Take one away first.`;
       const stop = await gate?.();
       if (stop) return stop;
-      const made: Room = { id: randomBytes(5).toString("hex"), name: c.name!, sid: randomBytes(6).toString("base64url"), lanes: {}, ...(c.purpose ? { purpose: c.purpose } : {}), created: Date.now() };
+      const made: Room = { id: randomBytes(5).toString("hex"), name: c.name!, sid: randomBytes(6).toString("base64url"), lanes: {}, ...(c.purpose ? { purpose: c.purpose } : {}), ...(thread ? { thread } : {}), created: Date.now() };
       // Kept from the start and after each teammate joins: a join that fails leaves a room to fix, not a session nobody lists
       // with tools running in it.
       await store.create(made.sid, made.name, { id: owner.id, name: owner.name, role: "owner" }, { team: true, controlMode: "ask", mcp: true }, workspaceId);
@@ -3127,7 +3149,8 @@ export async function createApp(o: AppOptions) {
             return { output: `${next.name}'s role is changed. It reads it from its next turn.` };
           }
           case "rooms": {
-            const rooms = await teammates.rooms();
+            // A crew mate's threads are its own conversations with the person, not rooms of the crew.
+            const rooms = (await teammates.rooms()).filter((r) => !r.thread);
             const name = (id: string) => list.find((t) => t.id === id)?.name ?? "someone gone";
             return {
               output: rooms.length
@@ -3188,19 +3211,40 @@ export async function createApp(o: AppOptions) {
         // Put on its own model meanwhile: nothing to switch (see above).
         if (!t || t.tool === "friday") return false;
         let next: Teammate & { tool: EngineTool } = { ...t, tool: t.tool };
-        if (!t.switched) {
-          // Only its own tool running out switches it; a lane still on something else is left to the usual hand-on.
-          if (ran !== t.tool) return false;
-          // On its backup (teammates.ts onBackup); never to a tool this computer doesn't have ready: the lane was left with no
-          // tool at all (2026-10-27 audit).
-          const backup = onBackup(t, hit.resetsAt ?? null);
-          if (!backup || (await toolReady(by, backup.tool)) === false) return false;
+        if (ran === t.tool) {
+          // The tool it is on ran out, its own or a fallback: the next of its fallbacks in its order (teammates.ts backupsOf), never
+          // one this computer doesn't have ready (2026-10-27 audit: the lane was left with no tool at all), never back round to one
+          // that ran out already. None left: the usual hand-on follows.
+          const chain = backupsOf(t);
+          const after = t.switched ? chain.slice(chain.indexOf(t.tool) + 1) : chain;
+          let to: EngineTool | null = null;
+          for (const c of after) if ((await toolReady(by, c)) !== false) (to ??= c);
+          if (!to) return false;
+          // Ask first: held until the person says, with nothing handed on meanwhile (Arun, 2026-11-15: "ask before switching").
+          if (t.onLimit === "ask") {
+            await teammates.put({ ...t, switchAsk: { to, from: t.tool, sid, lane, endSeq: end.seq, resetsAt: hit.resetsAt ?? null, at: Date.now() } });
+            return true;
+          }
+          const backup = onBackup(t, hit.resetsAt ?? null, Date.now(), to);
+          if (!backup) return false;
           next = backup;
           await teammates.put(next);
-        } else if (ran !== t.switched.from) {
-          // Its backup ran out too: nothing left to switch to, so no switching back and forth; the usual hand-on follows.
+        } else if (!t.switched || ran !== t.switched.from) {
+          // A lane on something else is left to the usual hand-on.
           return false;
         }
+        return carryOn(sid, lane, place.keepAs, by, t, next, end.seq, events, state);
+      });
+      return switched;
+    };
+    /**
+     * A lane onto the tool a crew mate switched to, and it told where it was: the switch on its own, or the one the person said yes
+     * to. A start that fails puts the record back and its own tool on the lane again.
+     */
+    const carryOn = async (sid: string, lane: string, keepAs: string | undefined, by: { id: string; name: string }, t: Teammate, next: Teammate & { tool: EngineTool }, endSeq: number, events: SessionEvent[], state: SessionState): Promise<boolean> => {
+      const place = { keepAs };
+      const end = { seq: endSeq };
+      {
         // This lane, now idle on its limit, onto the backup. A start that fails puts the record back and its own tool on the lane
         // again, rather than leaving the lane with none (2026-10-27 audit), and the usual hand-on follows.
         if (!(await restartLane(sid, by, next, lane, place.keepAs ? { lane, keepAs: place.keepAs } : undefined))) {
@@ -3215,11 +3259,32 @@ export async function createApp(o: AppOptions) {
         await store.append(sid, FRIDAY_SAYS, { type: "teammate.switched", name: t.name, lane, from: next.switched!.from, to: next.tool, until: next.switched!.until });
         // It carries on: a new tool is a new conversation, so it is given the record of what it did. As the turn that ran out,
         // agent steps and all, not a new start (behindRun).
-        await tellTeammate(sid, lane, backupText(next.switched!.from, next.tool, handoffBrief(events, lane, end.seq)), { hop: hopBehind(state, events, lane) });
+        await tellTeammate(sid, lane, backupText(t.tool as EngineTool, next.tool, handoffBrief(events, lane, end.seq)), { hop: hopBehind(state, events, lane) });
         return true;
-      });
-      return switched;
+      }
     };
+    answerSwitch = (id, go) =>
+      teammates.locked(`t:${id}`, async () => {
+        const t = await teammates.get(id);
+        const ask = t?.switchAsk;
+        if (!t || !ask) return "Nothing waits on that any more.";
+        const kept: Teammate = { ...t, switchAsk: undefined };
+        if (!go) {
+          await teammates.put(kept);
+          // It waits for its own tool: the turn goes again once the limit lifts, when the tool said when.
+          if (ask.resetsAt) await scheduleTeamResume(ask.sid, ask.lane, ask.resetsAt + 60_000);
+          return null;
+        }
+        const by = ownerIn(await store.state(ask.sid));
+        if (!by) return "That chat has nobody to run it for.";
+        if ((await toolReady(by, ask.to)) === false) return (await teammates.put(kept), `${ENGINE_NAMES[ask.to]} isn't ready on this computer.`);
+        const next = onBackup(kept, ask.resetsAt, Date.now(), ask.to);
+        if (!next) return (await teammates.put(kept), "There is nothing to switch to.");
+        await teammates.put(next);
+        const [events, state] = await Promise.all([store.events(ask.sid), store.state(ask.sid)]);
+        const ok = await carryOn(ask.sid, ask.lane, (await placeOf(ask.sid, ask.lane))?.keepAs, by, kept, next, ask.endSeq, events, state);
+        return ok ? null : `${ENGINE_NAMES[ask.to]} didn't start. ${t.name} is back on ${ENGINE_NAMES[ask.from]}.`;
+      });
     // Back on its own tool, account, model and effort once that limit lifts (or five hours on, when it never said), and only when
     // none of its lanes is mid-run, so no turn is cut off: checked each minute, one pass at a time.
     let backing = false;
@@ -3316,8 +3381,32 @@ export async function createApp(o: AppOptions) {
           if (!next || !due.length || quietSince) continue;
           // As Friday, on the person's schedule, and a turn of its own: handed into a turn under way, its answer was never read as
           // the check-in's (teammate-checkins.ts quietCheckIns).
-          for (const { c } of due) await tellTeammate(team, next.lane, checkInText(c), { ownTurn: true });
+          for (const { c } of due) await runRoutine(next, c).catch((e) => closingOr("[teammates] routine", e));
         }
+    };
+    /**
+     * One run of a routine: asked of the crew mate as Friday, a turn of its own, in its main chat or, set so, in a new thread of
+     * its own named for the routine and the day (teammates.ts Room.thread), so each run is a conversation to open by itself.
+     */
+    const runRoutine = async (t: Teammate, c: CheckIn): Promise<string | null> => {
+      const team = await teammates.team();
+      if (!team) return "There is no crew yet.";
+      if (c.where !== "thread") return (await tellTeammate(team, t.lane, checkInText(c), { ownTurn: true }), null);
+      const owner = ownerIn(await store.state(team));
+      if (!owner) return "The crew has nobody to run it for.";
+      const day = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      const made = await makeRoom(owner, LOCAL_WORKSPACE.id, { thread: t.id, name: `${(c.name || c.text.split("\n")[0]!).slice(0, 48)} · ${day}` });
+      if (typeof made === "string") return made;
+      const lane = made.room.lanes[t.id];
+      if (!lane) return `${t.name} didn't start in its new thread.${made.failed ? ` ${made.failed}` : ""}`;
+      await tellTeammate(made.room.sid, lane, checkInText(c), { ownTurn: true });
+      return null;
+    };
+    routineNow = async (id, routine) => {
+      const t = await teammates.get(id);
+      const c = t?.checkins?.find((x) => x.id === routine);
+      if (!t || !c) return "That routine isn't there any more.";
+      return runRoutine(t, { ...c, off: undefined });
     };
     let checking = false;
     teamTimers.push(
@@ -3397,7 +3486,7 @@ export async function createApp(o: AppOptions) {
       if (!r || !t) return null;
       const others = Object.keys(r.lanes).filter((x) => x !== t.id).flatMap((x) => list.find((y) => y.id === x)?.name ?? []);
       const m = await memoryAsOf(sid, lane, t);
-      const note = teammateNote(t, list, { name: (await store.state(sid).catch(() => null))?.title || r.name, with: others, ...(r.purpose ? { purpose: r.purpose } : {}), ...(team ? { team } : {}) }, m.memory, copies.get(t.id));
+      const note = teammateNote(t, list, { name: (await store.state(sid).catch(() => null))?.title || r.name, with: others, ...(r.purpose ? { purpose: r.purpose } : {}), ...(team ? { team } : {}), ...(r.thread ? { thread: true } : {}) }, m.memory, copies.get(t.id));
       return { t, note, preamble: [{ key: "elsewhere", text: await elsewhereBrief(t, sid) }, ...memoryPart(m, t), { key: "back", text: (await backBrief(sid, lane)).trim() }, ...(await awayPart(sid, lane))] };
     };
     hub.teammate = async (sid, lane) => {
@@ -5396,7 +5485,7 @@ export async function createApp(o: AppOptions) {
           const tool = mates.map((x) => x.tool).find((x): x is EngineTool => !!x && x !== "friday");
           const m = await suggestWith({ id: ctx.me.id }, ctx.workspace?.id ?? "", tool);
           if (!m) return json(res, 503, { error: "Drafting needs a coding tool on one of your teammates. Build it from a template instead." });
-          const q = draftPrompt(text, { mates: mates.map((x) => ({ name: x.name, role: x.role })), rooms: rooms.map((r) => ({ name: r.name })) });
+          const q = draftPrompt(text, { mates: mates.map((x) => ({ name: x.name, role: x.role })), rooms: rooms.filter((r) => !r.thread).map((r) => ({ name: r.name })) });
           const r = await m.llm.complete({ system: q.system, messages: [{ role: "user", content: q.prompt }], tools: [], signal: AbortSignal.timeout(90_000), reasoningEffort: "low", ...(m.model ? { model: m.model } : {}) });
           const got = draftFromAnswer(r.text, { mates, rooms }, typeof b.tz === "string" ? b.tz.slice(0, 60) : "UTC");
           if (!got) return json(res, 422, { error: "It couldn't make a workflow of that. Try saying who does what, and when." });
@@ -5467,6 +5556,19 @@ export async function createApp(o: AppOptions) {
           return json(res, 200, { sid, invite: signInvite(o.secret, sid, "owner"), lead: (await store.state(sid)).lead ?? null, ...(await teamRoomNow(sid)), teammates: await teammateViews(sid), rooms: await roomViews(), hidden: await hidden(), away: away ? { until: away.until, since: away.since } : null, paused: await teammates.paused(), selfRuns: await teammates.selfRuns(), ran: (await workflows?.ended()) ?? [], asks: (await workflows?.asks()) ?? [], flowRuns: (await workflows?.roomRuns()) ?? [], visits: (await visits.all()).map((v) => ({ sid: v.sid, lane: v.lane, mate: v.mate })), ...more });
         };
         if (req.method === "GET" && url.pathname === "/api/teammates") return team();
+        // Project folders for the crew mates and rooms (crew-folders.ts; Arun, 2026-11-15: "placing agents and like crew rooms into
+        // prodject folders too... like categories"): one record, read and written whole by the Agents sidebar.
+        if (url.pathname === "/api/teammates/folders") {
+          const key = `${o.prefix}crew:folders:${owner.id}`;
+          if (req.method === "GET") return json(res, 200, readFolders(await redis.get(key)));
+          if (req.method === "PUT") {
+            const c = cleanFolders(await readJson(req));
+            if (typeof c === "string") return json(res, 400, { error: c });
+            await redis.set(key, JSON.stringify(c));
+            return json(res, 200, c);
+          }
+          return json(res, 405, { error: "GET or PUT." });
+        }
         // A folder it is given has to be on this computer: a typo would start it in nothing.
         if (req.method === "POST" && url.pathname === "/api/teammates") {
           const made = await addTeammate(sid, owner, await readJson(req));
@@ -5572,7 +5674,8 @@ export async function createApp(o: AppOptions) {
             }
             if (c.purpose !== undefined) r.purpose = c.purpose || undefined;
             try {
-              if (c.members) {
+              // A thread is its crew mate's alone: nobody joins it or leaves it.
+              if (c.members && !r.thread) {
                 for (const id of Object.keys(r.lanes)) if (!c.members.includes(id)) await leaveRoom(r, owner, id);
                 // Read again here, under the room's lock: one taken off the team since the page asked isn't brought in (2026-10-28
                 // audit: a room's edit racing a teammate's removal gave the room a lane for nobody).
@@ -5591,7 +5694,7 @@ export async function createApp(o: AppOptions) {
           });
           return said ? json(res, said.startsWith("That room") ? 404 : 400, { error: said }) : team();
         }
-        const one = url.pathname.match(/^\/api\/teammates\/([\w-]{4,40})(\/reconnect|\/stop|\/lead|\/memory|\/activity|\/visit|\/remember)?$/);
+        const one = url.pathname.match(/^\/api\/teammates\/([\w-]{4,40})(\/reconnect|\/stop|\/lead|\/memory|\/activity|\/visit|\/remember|\/switch|\/routine)?$/);
         if (!one) return json(res, 404, { error: "Not found" });
         const t = await teammates.get(one[1]!);
         if (!t) return json(res, 404, { error: "That teammate isn't in your crew any more." });
@@ -5669,6 +5772,18 @@ export async function createApp(o: AppOptions) {
           for (const p of places) if (runOf(await store.state(p.sid), p.lane).status === "running") await core.handle(p.sid, owner, { type: "run.pause", lane: p.lane });
           return team();
         }
+        // A routine run now, from its Run now.
+        if (req.method === "POST" && one[2] === "/routine") {
+          const b = (await readJson(req)) as { id?: unknown };
+          const said = await routineNow(one[1]!, typeof b.id === "string" ? b.id : "");
+          return said ? json(res, 400, { error: said }) : team();
+        }
+        // A switch that waited on the person: go to the fallback, or wait for its own tool.
+        if (req.method === "POST" && one[2] === "/switch") {
+          const b = (await readJson(req)) as { go?: unknown };
+          const said = await answerSwitch(one[1]!, b.go === true);
+          return said ? json(res, 400, { error: said }) : team();
+        }
         if (req.method === "POST" && one[2] === "/lead") {
           // Leads the Team room: what is said there without an @name goes to it.
           const r1 = await core.handle(sid, owner, { type: "lead.set", lane: t.lane });
@@ -5713,7 +5828,7 @@ export async function createApp(o: AppOptions) {
             // An account is its tool's: a new tool drops the old one's, unless the edit names one (2026-10-28 audit: Codex started
             // as Claude's account). Back on its own tool, the account it had there.
             const model = c.model ?? back?.fromModel, account = back ? (c.account ?? back.fromAccount) : c.tool !== t2.tool && !("account" in body) ? undefined : c.account, effort = c.effort ?? (back && !("effort" in body) ? back.fromEffort : undefined);
-            const next: Teammate = { ...t2, ...budgetPatch(body), ...("machine" in c ? { machine: c.machine } : {}), name: c.name, role: c.role, tool: c.tool, model, account, ...(c.mode ? { mode: c.mode === "full" ? undefined : c.mode } : {}), ...(c.look ? { look: c.look } : {}), ...(c.projects ? { projects: c.projects, project: undefined } : {}), ...("effort" in body || c.tool !== t2.tool ? { effort } : {}), ...("backup" in body ? { backup } : {}), ...(c.checkins ? { checkins: c.checkins.map((x) => ({ ...x, ...(t2.checkins?.find((y) => y.id === x.id)?.last ? { last: t2.checkins.find((y) => y.id === x.id)!.last } : {}) })) } : {}), ...(c.tool !== t2.tool ? { switched: undefined } : {}), ...(body.keep === true ? { madeBy: undefined } : {}) };
+            const next: Teammate = { ...t2, ...budgetPatch(body), ...("machine" in c ? { machine: c.machine } : {}), name: c.name, role: c.role, tool: c.tool, model, account, ...(c.mode ? { mode: c.mode === "full" ? undefined : c.mode } : {}), ...(c.look ? { look: c.look } : {}), ...(c.projects ? { projects: c.projects, project: undefined } : {}), ...("effort" in body || c.tool !== t2.tool ? { effort } : {}), ...("backup" in body ? { backup } : {}), ...("backups" in body ? { backups: cleanBackups(body.backups, own) } : {}), ...("onLimit" in body ? { onLimit: body.onLimit === "ask" ? ("ask" as const) : undefined } : {}), ...(c.tool !== t2.tool ? { switchAsk: undefined } : {}), ...(c.checkins ? { checkins: c.checkins.map((x) => ({ ...x, ...(t2.checkins?.find((y) => y.id === x.id)?.last ? { last: t2.checkins.find((y) => y.id === x.id)!.last } : {}) })) } : {}), ...(c.tool !== t2.tool ? { switched: undefined } : {}), ...(body.keep === true ? { madeBy: undefined } : {}) };
             // Folders on another computer of yours are that computer's to have: not looked for here.
             const missing = next.machine ? null : await missingDirOf(c.projects?.filter((d) => !projectsOf(t2).includes(d)));
             if (missing) return `There's no folder at ${missing} on this computer.`;
@@ -5761,9 +5876,15 @@ export async function createApp(o: AppOptions) {
           // Out of every room it was in, each under that room's lock and as it is stored then; a room it was the last one in is
           // kept, empty, for the person to fill or take away.
           for (const r of await teammates.rooms()) {
-            if (!r.lanes[t.id]) continue;
+            if (!r.lanes[t.id] && r.thread !== t.id) continue;
             await teammates.locked(`room:${r.id}`, async () => {
               const room = await teammates.room(r.id);
+              // Its threads go with it: they were its conversations, nobody else's.
+              if (room?.thread === t.id) {
+                if (room.lanes[t.id]) await leaveRoom(room, owner, t.id);
+                await teammates.removeRoom(room);
+                return;
+              }
               if (!room?.lanes[t.id]) return;
               await leaveRoom(room, owner, t.id);
               await teammates.putRoom(room);

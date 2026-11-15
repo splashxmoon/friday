@@ -22,3 +22,8 @@
 .gs-go.primary { border-color: var(--ink); background: var(--ink); color: var(--bg); }
 .gs-go.primary:hover { opacity: .9; }
 @media (prefers-reduced-motion: reduce) { .gs-bar > i { transition: none; } }
+
+
+/* Buttons and chips are rounded squares, never pills, everywhere (Arun, 2026-11-14: "stop switching between like completely
+   rounded buttons and only stick the square ones ... FOLLOW MY DESIGN LANGUAGE"). Dots, faces, switches and counts stay round. */
+.gs-go { border-radius: var(--r-md); }

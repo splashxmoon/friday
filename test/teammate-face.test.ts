@@ -1,4 +1,4 @@
-// Crew: the teammates' faces, Friday's own round blobs (Arun, 2026-10-29: "those avatars should be purely circle based with
+// Crew: the teammates' faces, Friday's own (clouds, squares, pills, capsules, flowers, pebbles since 2026-11-15) (Arun, 2026-10-29: "those avatars should be purely circle based with
 // different morphed shapes").
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -15,15 +15,20 @@ test("a face is the same for the same seed, and a shuffled seed gives another", 
   assert.equal(many.size, 8, "every teammate a silhouette of its own");
 });
 
-test("every face is round: a smooth closed curve, its widest point on the box's circle and never far inside it", () => {
-  for (const seed of ["Ines", "Theo", "Rafa", "Quinn", "Nova", "Kit", "Juno", "x", "", "Friday-k3x9q", "长名字"]) {
+test("every face is one smooth closed curve of its kind, its farthest point on the box's circle", () => {
+  const kinds = new Set<string>();
+  for (const seed of ["Ines", "Theo", "Rafa", "Quinn", "Nova", "Kit", "Juno", "x", "", "Friday-k3x9q", "长名字", ...Array.from({ length: 40 }, (_, i) => `v2:s${i}`)]) {
     const d = shapeOf(seed).still;
-    assert.match(d, /^M[^LHV]*Z$/, "curves only: no straight line, so no corner");
+    kinds.add(lookOf(seed).body);
+    assert.match(d, /^M[^LHV]*Z$/, "curves only: no straight line segment");
     const r = points(d).map(([x, y]) => Math.hypot(x, y));
     assert.equal(r.length, 48);
-    assert.ok(Math.abs(Math.max(...r) - 50) < 0.05, `${seed}: its widest point touches the ring's circle`);
-    assert.ok(Math.min(...r) > 50 * 0.8, `${seed}: morphed, never squashed (narrowest ${Math.min(...r).toFixed(1)})`);
+    assert.ok(Math.abs(Math.max(...r) - 50) < 0.05, `${seed}: its farthest point touches the ring's circle`);
+    assert.ok(Math.min(...r) > 50 * 0.55, `${seed}: never a sliver (narrowest ${Math.min(...r).toFixed(1)})`);
   }
+  // Arun, 2026-11-15: "cloud, square, pill etc instead of random circle shapes": the plain morphed circle isn't dealt.
+  assert.ok(!kinds.has("blob"));
+  for (const k of ["cloud", "square", "pill", "capsule"]) assert.ok(kinds.has(k), `${k} is among the faces`);
 });
 
 test("a working face's breath stays within its circle at every step, and comes back to where it started", () => {

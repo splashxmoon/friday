@@ -102,3 +102,8 @@
 .ny-crew-ago { flex: none; color: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; }
 .ny-crew-foot { margin: 12px 12px 0; color: var(--faint); font-size: 12.5px; line-height: 18px; }
 @media (max-width: 640px) { .ny-crew-text { flex-direction: column; gap: 0; } }
+
+
+/* Buttons and chips are rounded squares, never pills, everywhere (Arun, 2026-11-14: "stop switching between like completely
+   rounded buttons and only stick the square ones ... FOLLOW MY DESIGN LANGUAGE"). Dots, faces, switches and counts stay round. */
+.ny-room { border-radius: var(--r-sm, 6px); }

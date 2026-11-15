@@ -57,7 +57,7 @@ import { useSession, type Send } from "./useSession.js";
 import type { Focus } from "../focus.js";
 import { CLASS_LABEL, COMMAND_CLASSES, type CommandClass } from "../command-class.js";
 import { FocusContext, herePublisher } from "./focusStore.js";
-import { mateOn, RoomMenu, TeamFaces, teamTitle } from "./Teammates.js";
+import { MateHeaderTitle, mateOn, RoomMenu, TeamFaces, teamTitle } from "./Teammates.js";
 import { setMateTab, useMateTab } from "./mate-tab.js";
 const TeamPlan = lazy(() => import("./TeamPlan.js"));
 const RememberOffer = lazy(() => import("./RememberOffer.js"));
@@ -242,6 +242,18 @@ export function SessionView({
     window.addEventListener("friday:open-file", on);
     return () => window.removeEventListener("friday:open-file", on);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // A room's side thread opens as the side panel's Thread tab (Teammates.tsx openThread, open-source edition).
+  useEffect(() => {
+    const on = (e: Event) => {
+      if ((e as CustomEvent<{ sid?: string }>).detail?.sid !== sid) return;
+      setTab("thread");
+      setPicking(false);
+      setBench(true);
+      setHistory(false);
+    };
+    addEventListener("friday:open-thread", on);
+    return () => removeEventListener("friday:open-thread", on);
+  }, [sid]); // eslint-disable-line react-hooks/exhaustive-deps
   const [benchWidth, setBenchWidth] = useState(() => {
     const v = Number(localStorage.getItem("mpa.benchWidth"));
     return v >= 320 && v <= 980 ? v : 560;
@@ -1372,8 +1384,8 @@ function MateGear({ sid, on, onToggle }: { sid: string; on: boolean; onToggle: (
   let mine = !!m;
   if (!m || !mine) return null;
   return (
-    <button type="button" className={`panel-tab icon mate-gear ${on ? "on" : ""}`} title={`${m.name}'s settings`} aria-label={`${m.name}'s settings`} aria-pressed={on} onClick={onToggle}>
-      <Icon name="settings" size={18} />
+    <button type="button" className={`panel-tab icon mate-gear ${on ? "on" : ""}`} title={`${m.name}'s profile`} aria-label={`${m.name}'s profile`} aria-pressed={on} onClick={onToggle}>
+      <Icon name="sidePanel" size={18} />
     </button>
   );
 }
@@ -1451,6 +1463,8 @@ function TopBar({
   // The team (Teammates.tsx) is titled for who is in view: the Team room, or the teammate whose chat it is.
   shownTitle = teamTitle(state, useFocusedAgent(state.id));
   const named = shownTitle !== state.title;
+  const focusedHere = useFocusedAgent(state.id);
+  const mateLane = state.options.team && focusedHere !== ALL ? focusedHere : null;
   let gear = true;
   // A team's chat has no session settings to show (Arun, 2026-10-27: "get rid of this too"): its teammates' are in their dialogs.
   if (state.options.team) gear = false;
@@ -1484,6 +1498,9 @@ function TopBar({
             }}
             onCancel={() => setEditing(false)}
           />
+        ) : isLocal() && state.options.team && identity && mateLane && mateOn(mateLane) ? (
+          // A crew mate's chat: its face, name and thread, the thread a menu of its threads (TeammatePage.tsx MateTitle).
+          <MateHeaderTitle lane={mateLane} identity={identity} notify={notify} fallback={<h1>{shownTitle}</h1>} />
         ) : (
           // Renamed from the keyboard too, where a click renames it (2026-10-27 audit: it couldn't be reached by Tab).
           <h1
@@ -1578,9 +1595,11 @@ function TopBar({
         )}
         {/* A room's settings with the header's other buttons, where a Code session has its gear, rather than an "…" beside its name (Arun, 2026-10-27: "place the edit room button somewhere better"). */}
         {/* The team's own: its threads, its board, Stop all while anyone works, and Away / Pause (TeamControls.tsx; Arun, 2026-10-28). */}
-        {state.options.team && <TeamHeaderControls identity={identity} state={state} events={events} send={send} notify={notify} panel={{ on: view.bench || view.history.open, toggle: view.onPanel }} />}
+        {/* Not in a crew mate's own chat: its settings hold its controls (Arun, 2026-11-15). */}
+        {state.options.team && !(isLocal() && mateLane) && <TeamHeaderControls identity={identity} state={state} events={events} send={send} notify={notify} panel={isLocal() ? { on: view.bench && view.tab === "room", toggle: () => (view.bench && view.tab === "room" ? view.onPanel() : view.onTab("room")) } : { on: view.bench || view.history.open, toggle: view.onPanel }} />}
         {state.options.team && <MateGear sid={sid} on={view.bench && view.tab === "mate"} onToggle={() => (view.bench && view.tab === "mate" ? view.onPanel() : view.onTab("mate"))} />}
-        {state.options.team && <RoomMenu identity={identity} sid={state.id} notify={notify} />}
+        {/* Its settings are in its profile, in the side panel, in the open-source edition (TeamControls.tsx RoomProfile). */}
+        {state.options.team && !isLocal() && <RoomMenu identity={identity} sid={state.id} notify={notify} />}
         {state.options.work && <button type="button" className={`panel-tab icon work-browser-btn ${view.bench && view.tab === "preview" ? "on" : ""}`} aria-pressed={view.bench && view.tab === "preview"} aria-label={view.bench && view.tab === "preview" ? "Close the browser" : "Open the browser"} title={view.bench && view.tab === "preview" ? "Close the browser" : "Browser: the pages the agents open, and any you want"} onClick={() => view.onTab("preview")}><Icon name="webBrowser" size={17} /></button>}
         {/* One button for the side panel, where the panels are a card to pick from (Workbench), in place of a row of four and a
             "⋯" here (Arun, 2026-10-24: "using this svg icon make it be the side panel button and on the side panel open it will
@@ -1647,7 +1666,7 @@ function TopBar({
     );
   }
   return (
-    <header className="topbar" data-slot="session.header">
+    <header className="topbar" data-slot="session.header" data-mate={isLocal() && state.options.team && mateLane && mateOn(mateLane) ? "" : undefined}>
       {left}
       {right}
     </header>

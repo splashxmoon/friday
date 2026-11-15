@@ -151,10 +151,10 @@ function Sheet({ onClose }: { onClose: () => void }) {
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, [onClose]);
-  const { version, summary, items } = WHATS_NEW;
+  const { version, summary, items, title } = WHATS_NEW;
   return createPortal(
     <div className="overlay wn-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <section className="wn" role="dialog" aria-modal="true" aria-labelledby="wn-title">
+      <section className="wn" role="dialog" aria-modal="true" aria-labelledby={title ? "wn-kicker wn-title" : "wn-title"}>
         <div className="wn-hero" aria-hidden="true">
           <CrewFaces />
         </div>
@@ -163,7 +163,10 @@ function Sheet({ onClose }: { onClose: () => void }) {
           <Icon name="x" size={14} />
         </button>
         <div className="wn-body">
-          <h2 id="wn-title">What's new in Friday</h2>
+          {/* A release with a headline of its own leads with it, "What's new" over it (Arun, 2026-11-15: "BE LIKE CREWS HAVE NOW BEEN
+              REWORKED ... THIS NEEDS TO BE THE BEST THING"). */}
+          {title && <span id="wn-kicker" className="wn-kicker">What's new in Friday</span>}
+          <h2 id="wn-title">{title ?? "What's new in Friday"}</h2>
           <p className="wn-sub">{summary}</p>
           <ul className="wn-grid">
             {items.slice(0, 4).map((it) => (

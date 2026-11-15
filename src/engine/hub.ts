@@ -90,6 +90,8 @@ const MODES: EngineMode[] = ["plan", "edits", "full"];
 
 /** How long a runner is given to say whether its tool took a message mid-turn before it goes with the next turn instead. */
 const STEER_ANSWER_MS = 15_000;
+/** Said with a person's message that reaches a coding tool mid-task. */
+export const STEER_NOTE = "[Friday] The person wrote this while you were working. If it is a question, answer it in one line; if it changes what you are doing, take it in; then carry on from where you are, without starting over.";
 
 /**
  * A message that can be read mid-turn: words to the agent, from a person, another agent or another session's. Not a Stop or
@@ -1163,7 +1165,10 @@ class LaneHost {
     if (!(await this.append({ type: "instructions.delivered", seqs: [ev.seq] })).ok) return void this.pump();
     const id = randomUUID().slice(0, 8);
     this.steering.set(id, ev.seq);
-    this.sendRaw({ kind: "steer", id, text: withShieldNote(prompt) });
+    // A person's word mid-task comes with how to take it (after OpenBot's steer note; Arun, 2026-11-15): a question answered in a
+    // line, a correction taken in, and the work carried on rather than started over.
+    const steerNote = ev.actor.kind === "human" ? `${STEER_NOTE}\n\n` : "";
+    this.sendRaw({ kind: "steer", id, text: withShieldNote(steerNote + prompt) });
     // A runner that never says: as if it couldn't, once it has had time to.
     setTimeout(() => void this.steered(id, false), STEER_ANSWER_MS).unref?.();
   }

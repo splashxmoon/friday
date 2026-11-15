@@ -57,3 +57,8 @@
   .sk-row-meta { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 10px; max-width: none; text-align: left; }
   .sk-edit-pair { grid-template-columns: 1fr; }
 }
+
+
+/* Buttons and chips are rounded squares, never pills, everywhere (Arun, 2026-11-14: "stop switching between like completely
+   rounded buttons and only stick the square ones ... FOLLOW MY DESIGN LANGUAGE"). Dots, faces, switches and counts stay round. */
+.sk-for-chip { border-radius: var(--r-sm, 6px); }

@@ -51,6 +51,16 @@ export interface Teammate {
   model?: string;
   /** The tool it switches to when its own runs out of usage (limit), to carry the work on; absent is the other of Claude Code and Codex. */
   backup?: EngineTool;
+  /**
+   * Its fallbacks, in order (Arun, 2026-11-15: "add orders of fallbacks ... like claude to codex as a fall back for codex, open
+   * code etc"): out of usage on its own tool it goes to the first that is ready, and when that runs out too, to the next. Set, it
+   * takes the place of `backup`.
+   */
+  backups?: (EngineTool | Fallback)[];
+  /** Out of usage: "ask" holds the switch until the person says (Arun, 2026-11-15: "ask before switching to another model/tool"); absent switches on its own. */
+  onLimit?: "ask";
+  /** A switch waiting on the person: where it ran out, what it would go to, and when its own tool said it is back. */
+  switchAsk?: { to: EngineTool; from: EngineTool; sid: string; lane: string; endSeq: number; resetsAt: number | null; at: number };
   /** On its backup now: the tool it ran out on, when that lifts (null when it didn't say) and when it switched. */
   switched?: { from: EngineTool; fromModel?: string; fromAccount?: string; fromEffort?: EngineEffort; until: number | null; at: number };
   /** What it does by itself on a schedule (CheckIn): a stand-up, a sweep of new issues, a weekly write-up. */
@@ -169,7 +179,18 @@ export interface Room {
   created: number;
   /** Who made it, on the hosted service: its rooms are capped per person (crew-room-cap.ts). */
   by?: string;
+  /**
+   * A thread of one crew mate's, by its id: a conversation of its own with the person, apart from its main chat (Arun, 2026-11-15:
+   * "adding new threads and stuff when chatting with the agents"). Kept as a room of one, so it has its own session and its own
+   * conversation with its tool (roomKeep), and listed in that crew mate's chat rather than with the rooms.
+   */
+  thread?: string;
 }
+
+/** What a new thread is called until the person's first message names it (team-views.ts). */
+export const NEW_THREAD = "New thread";
+/** How many threads one crew mate keeps. */
+export const MAX_THREADS = 40;
 
 /** How many rooms a team keeps (on the hosted service, how many each person keeps: crew-room-cap.ts). */
 export const MAX_ROOMS = 20;
@@ -190,7 +211,10 @@ export function cleanRoom(body: Record<string, unknown>, known: readonly string[
 }
 
 /** The tool a teammate switches to when its own runs out: the one it picked, or the other of Claude Code and Codex. */
-export const backupOf = (t: Pick<Teammate, "tool" | "backup">): EngineTool => t.backup ?? (t.tool === "claude" ? "codex" : "claude");
+export const backupOf = (t: Pick<Teammate, "tool" | "backup" | "backups" | "switched">): EngineTool => backupsOf(t)[0] ?? (t.tool === "claude" ? "codex" : "claude");
+
+export { backupsOf, cleanBackups, fallbackFor, fallbacksOf, MAX_BACKUPS, type Fallback } from "./teammate-backups.js";
+import { backupsOf, fallbackFor, type Fallback } from "./teammate-backups.js";
 
 export { checkInDue, checkInText, cleanCheckIn, describeCheckIn, MAX_CHECKINS, NO_UPDATE, quietCheckIns, type CheckIn } from "./teammate-checkins.js";
 
@@ -199,17 +223,24 @@ export { checkInDue, checkInText, cleanCheckIn, describeCheckIn, MAX_CHECKINS, N
  * backup's routing model when it has one, its effort if the backup takes that level, no account (the one picked is its own
  * tool's, never lent to another), and what it ran on before to go back to. Null when there is nothing to switch to.
  */
-export function onBackup<T extends Teammate>(t: T, resetsAt: number | null, now = Date.now()): (T & { tool: EngineTool }) | null {
+export function onBackup<T extends Teammate>(t: T, resetsAt: number | null, now = Date.now(), pick?: EngineTool): (T & { tool: EngineTool }) | null {
   if (t.tool === "friday") return null;
-  const to = backupOf(t);
+  const to = pick ?? backupOf(t);
   if (to === t.tool) return null;
   const routes = ENGINE_MODEL_INFO[to].some((m) => m.id === "auto");
+  // The model and effort set for that fallback, else its routing model and the effort it had, where that tool takes it.
+  const f = fallbackFor(t, to);
+  const model = f?.model ?? (routes ? "auto" : undefined);
+  const effort = f?.effort ?? (t.effort && (EFFORT_LEVELS[to] ?? []).includes(t.effort) ? t.effort : undefined);
+  // Already on a fallback that ran out too: on to the next, still going back to its own tool when that is back.
+  if (t.switched) return { ...t, tool: to, model, effort, account: undefined, switchAsk: undefined };
   return {
     ...t,
     tool: to,
-    model: routes ? "auto" : undefined,
-    effort: t.effort && (EFFORT_LEVELS[to] ?? []).includes(t.effort) ? t.effort : undefined,
+    model,
+    effort,
     account: undefined,
+    switchAsk: undefined,
     switched: { from: t.tool, ...(t.model ? { fromModel: t.model } : {}), ...(t.account ? { fromAccount: t.account } : {}), ...(t.effort ? { fromEffort: t.effort } : {}), until: resetsAt, at: now },
   };
 }
@@ -324,7 +355,7 @@ export async function makeFolder(folder: string): Promise<void> {
  * What a teammate's tool is told with every turn, besides Friday's own note: who it is, what it is for, where it works and how
  * the team works. Read from its record each turn, so a changed role applies from the next.
  */
-export function teammateNote(t: Teammate, team: readonly Pick<Teammate, "name" | "tool" | "role">[], room?: { name: string; with: string[]; purpose?: string; /** The Team room's session, where the rest of the team is reached. */ team?: string }, memory = "", copy?: { repo: string; path: string; branch: string }, /** Said another way where Friday keeps it elsewhere: who it is, and where its memory is and how it adds to it. */ kept?: { intro: string; memory: string; how: string }): string {
+export function teammateNote(t: Teammate, team: readonly Pick<Teammate, "name" | "tool" | "role">[], room?: { name: string; with: string[]; purpose?: string; /** The Team room's session, where the rest of the team is reached. */ team?: string; /** One of its own threads with the person, not a room. */ thread?: boolean }, memory = "", copy?: { repo: string; path: string; branch: string }, /** Said another way where Friday keeps it elsewhere: who it is, and where its memory is and how it adds to it. */ kept?: { intro: string; memory: string; how: string }): string {
   const others = team.filter((o) => o.name !== t.name);
   const who = (o: Pick<Teammate, "name" | "tool" | "role">) => `${o.name} (${o.tool === "friday" ? "own model" : ENGINE_NAMES[o.tool]}${o.role ? `: ${o.role.split("\n")[0]!.slice(0, 80)}` : ""})`;
   // In a room only its members are lanes beside it, reachable with message_agent; the rest of the team is in the Team room
@@ -332,7 +363,8 @@ export function teammateNote(t: Teammate, team: readonly Pick<Teammate, "name" |
   const here = room ? others.filter((o) => room.with.includes(o.name)) : others;
   const away = room ? others.filter((o) => !room.with.includes(o.name)) : [];
   return [
-    ...(room ? [`You are in the room "${room.name}"${room.with.length ? ` with ${room.with.join(", ")}` : ", on your own"}: what is said here is about this room's work. You have a conversation of your own in each room you are in; your folder and notes are the same in all of them.${room.purpose ? ` The room is for: ${room.purpose}` : ""}`] : []),
+    ...(room?.thread ? [`This is one of your threads with the person${room.name !== NEW_THREAD ? `, "${room.name}"` : ""}: a conversation of its own, apart from your main chat and your other threads. Your folder, notes and memory are the same in all of them.`] : []),
+    ...(room && !room.thread ? [`You are in the room "${room.name}"${room.with.length ? ` with ${room.with.join(", ")}` : ", on your own"}: what is said here is about this room's work. You have a conversation of your own in each room you are in; your folder and notes are the same in all of them.${room.purpose ? ` The room is for: ${room.purpose}` : ""}`] : []),
     kept ? kept.intro : `You are ${t.name}, one of the person's AI teammates in Friday, running on their ${runsOnName(t)} on their own computer.`,
     t.role ? `Your role, in their words: ${t.role}` : "You have no set role: help with whatever you are given.",
     projectsOf(t).length
@@ -347,6 +379,15 @@ export function teammateNote(t: Teammate, team: readonly Pick<Teammate, "name" |
     // What reaches the room, as OpenBot's channels have it (Arun, 2026-10-27: "keep the room chat clean and clear"): the answer,
     // once; the coordination among teammates kept to the agent tools, where the room folds it to a line.
     "What you say ends up in the crew's chat, which the person reads. Lead with the answer and give the shortest complete one: the outcome, what blocks you, what you need from them, in a few lines; no setup, no narration, no acknowledgements, no recap of what others said. Say your result once and end the turn: don't repeat it, and don't add a closing line. Keep the coordination with your teammates to Friday's agent tools (message, ask, post_update, tasks) rather than your reply. When nothing needs the person to read it (a routine check, nothing new, still waiting), end without any text. Your steps stay in your own chat. Name a file you made, a picture or a video by its path in backticks and it shows there.",
+    // How it works and replies as a teammate, after Rakazo's and OpenBot's agents (Arun, 2026-11-15: "look at their github repos, i
+    // want to see how their agents function and reply, we need ours to be the same"; "do all five").
+    "On a task that will take minutes, start with one line: what you understood, what you look at first, and about how long it takes. A quick answer gets no preface. While you work, post an update only when a finding changes the plan, something fails, or you need the person; never only to say you are still working.",
+    "Finish the whole request before you stop. Never end by asking whether to go on, and never end on what you are about to do (\"I'll now run the tests\") without doing it.",
+    "When you finish, lead with the verdict, then the key facts, then anything you couldn't check. Say done only once you have checked the result; otherwise say where it stands (drafted, waiting, blocked) and why.",
+    "Ask the person only what you can't find out yourself: one question at a time, with the likely answers to pick from.",
+    "Before anything leaves this computer (an email, a message, a post, a comment, a release, a deploy, a payment), show it with Friday's propose_send and wait for the person's answer. Never send it on your own.",
+    "If the person writes while you are working, answer a question in one line, take in a correction, and carry on from where you are without starting over.",
+    "When you hand work to a teammate, write the message so it stands on its own: the goal, what they need to know, what they may do, and what finished looks like. What a teammate reports is theirs: check it before you pass it on as yours, or say it is unverified. In a room, speak when you are addressed or have something useful to add.",
     // How a teammate answers work it was handed, and keeps to its own, as OpenBot's agent communication policy has it.
     `When a teammate handed you the work, end with four short lines: Status (done, partly, blocked), Result (what you made or found), Evidence (files, tests, links), Unblock (what you need, or nothing). Never hand a task back to whoever gave it to you; say what blocks you instead. Decisions the crew should keep to go in ${onOwnModel(t) ? "remember" : "write_note"}.`,
     // Friday Code reaches only the folder it works in, which may be a project rather than its own: it keeps its memory with a
@@ -523,4 +564,13 @@ export class TeammateStore {
   async setTeam(sid: string): Promise<void> {
     await this.redis.set(this.teamKey(), sid);
   }
+}
+
+/** A thread's name from the person's first message in it: its first line, plain, cut at a word near 48 characters. */
+export function threadTitle(text: string): string {
+  const line = (text.split("\n").find((l) => l.trim()) ?? "").replace(/[`*_#>]+/g, "").replace(/\s+/g, " ").trim();
+  if (line.length <= 48) return line || NEW_THREAD;
+  const cut = line.slice(0, 48);
+  const at = cut.lastIndexOf(" ");
+  return `${(at > 24 ? cut.slice(0, at) : cut).replace(/[,.;:!?-]+$/, "")}…`;
 }

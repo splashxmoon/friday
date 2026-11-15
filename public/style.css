@@ -11251,6 +11251,22 @@ html:not(.dark) .route-pill.on .route-pill-state { color: color-mix(in srgb, var
 .sb-row .inline-edit.sb-rename { flex: 1 1 auto; min-width: 0; height: 24px; margin-left: -8px; } /* the title line up to the time (audit CODE-25) */
 .sb-row-gap { flex: 1 1 0; min-width: 0; margin-left: -8px; }
 .state-ring { display: inline-grid; place-items: center; flex: none; width: 14px; height: 14px; }
+/* Whole pixels, so it turns in place: its 8px dot's ring came to 14.5px across, and turning a box that sits between pixels drew it
+   a hair higher and lower each turn (Arun, 2026-11-15: "the ring is bobbling up and down while spinning keep it static"). */
+.state-ring .pr[data-pr] { --pr-w: 2px !important; --pr-gap: 1px !important; }
+/* And it turns its colours, not itself: a row can sit on a half pixel (a 30px face beside an odd line), and a box turned there
+   still swayed. The comet's start angle moves; the circle stays put. */
+@property --sr-a { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+@keyframes sr-turn { to { --sr-a: 360deg; } }
+.state-ring .pr[data-pr="working"] > .pr-ring {
+  background:
+    conic-gradient(from var(--sr-a), transparent 0 6%, color-mix(in srgb, var(--live) 14%, transparent) 30%, color-mix(in srgb, var(--live) 55%, transparent) 70%, var(--live) 96%, transparent 96.5%),
+    color-mix(in srgb, var(--live) 18%, transparent) !important;
+  animation: sr-turn 1s linear infinite !important;
+  transform: none !important;
+}
+@media (prefers-reduced-motion: reduce) { .state-ring .pr[data-pr="working"] > .pr-ring { animation: none !important; } }
+html.reduce-motion .state-ring .pr[data-pr="working"] > .pr-ring { animation: none !important; }
 .sb-row .state-ring { margin-left: -2px; }
 .state-ring .pr-badge { display: none; } /* too small for its "?": the amber ring and the line under the name say it */
 .sb-row .dass-row-title { color: var(--ink); font-weight: 500; }
@@ -13612,7 +13628,7 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover { opacity: .8; }
 .composer-bar .voice-right { margin-left: auto; }
 .composer-bar .voice-right ~ .send { margin-left: 4px; }
 .voice-esc { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
-.voice-mic { display: grid; flex: none; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 9999px; background: transparent; color: var(--ink-3); cursor: pointer; transition: background-color 120ms var(--ease-out), color 120ms var(--ease-out); }
+.voice-mic { display: grid; flex: none; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: var(--r-md); /* a rounded square, as every button (Arun, 2026-11-15) */ background: transparent; color: var(--ink-3); cursor: pointer; transition: background-color 120ms var(--ease-out), color 120ms var(--ease-out); }
 .voice-mic:hover:not(:disabled) { background: var(--surface-hover); color: var(--ink); }
 .voice-mic:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
 .voice-mic.voice-stop, .voice-mic.voice-stop:hover:not(:disabled) { background: var(--ink); color: var(--bg); }
@@ -13714,6 +13730,19 @@ html.desktop .oss-rail { padding-top: 44px; }
 .oss-crew-row:hover { background: var(--hover); }
 .oss-crew-row[data-active] { background: var(--hover-strong); }
 .oss-crew-row:focus-visible { outline: 2px solid var(--violet); outline-offset: -2px; }
+/* A crew mate's row and its right-click menu (mate-menu.ts). */
+/* Project folders (crew-folders.tsx; Arun, 2026-11-15: "like categories basically"): a quiet header that folds its rows, takes a
+   row dropped on it, and opens Rename and Remove from a right-click. */
+.oss-folder { display: flex; flex-direction: column; margin-top: 6px; border-radius: 8px; }
+.oss-folder-head { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 28px; padding: 4px 8px; border: 0; border-radius: 7px; background: none; color: var(--text-muted); font: 500 12px/18px var(--font); text-align: left; cursor: pointer; }
+.oss-folder-head:hover { color: var(--ink); background: var(--hover); }
+.oss-folder-head:focus-visible { outline: 2px solid var(--border-focus, var(--ink)); outline-offset: -2px; }
+.oss-folder-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oss-folder-body { display: flex; flex-direction: column; padding-left: 6px; }
+.oss-folder[data-drop] > .oss-folder-head { color: var(--ink); background: var(--hover-strong); box-shadow: inset 0 0 0 1px var(--border-strong); }
+.oss-crew-item[draggable="true"] { cursor: default; }
+.oss-crew-item { position: relative; display: flex; flex-direction: column; }
+.oss-crew-item > .oss-crew-row { width: 100%; }
 .oss-crew-row > .tm-room-faces { flex: none; }
 .oss-crew-text { display: flex; flex: 1; flex-direction: column; gap: 1px; min-width: 0; }
 .oss-crew-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
@@ -13970,3 +13999,188 @@ button.cd-row:hover, .cd-rw[data-open] > .cd-row { background: var(--hover); }
 .cd-a .cd-machine .machine-line { padding: 0; border: 0; background: none; }
 .cd-a .cd-row:focus-visible { outline: 2px solid var(--violet); outline-offset: -2px; border-radius: 10px; }
 .cd-pop .login-notice, .cd-pop > p { font-size: 12px; }
+
+/* Buttons and chips are rounded squares, never pills, everywhere (Arun, 2026-11-14: "stop switching between like completely
+   rounded buttons and only stick the square ones ... FOLLOW MY DESIGN LANGUAGE"). Dots, faces, switches and counts stay round. */
+.view-btn,
+.segmented,
+.segmented button,
+.jump-pill,
+.agent-question button[aria-label="Submit response"],
+.diff-undo,
+.thread-btn,
+.lanes-pill.is-replaying, .lanes-pill.is-replaying.on,
+.ag-starter, .ag-conn,
+.ag-preset,
+.followup,
+.overlap-open,
+.ws-tab,
+.term-view-tab,
+.task-link,
+.ag-ready-btn,
+.qi-send,
+.nudge-cta,
+.tour-skip, .tour-back,
+.tour-next,
+.cd-pill, .add-pill,
+.lane-tab,
+.git-btn,
+.lane-all,
+.sg-shuffle,
+.morning-next span,
+.rsp-raise-btn,
+.diff-thread-ask,
+.bd-week-btn,
+.rsp-reaction,
+.feed-earlier,
+.hist-play,
+.wy-more,
+.pb-follow,
+.tb-meta .repo-chip-btn,
+.replay-badge,
+.settings-page .settings-tab,
+.rv-load-person,
+.ws-gh-cta .gh-actions .btn.primary,
+.dp-next,
+.overlap-open,
+.bd-chip-fact,
+.build-pill button,
+.ios-tools .icon-btn,
+.btn.primary,
+.send,
+.replay-propose-open,
+.mb-welcome .btn.small.mb-tool-go,
+.wl-gh .btn.small,
+.pb-roster-wrap > .share-btn { border-radius: var(--r-md); }
+.chat-role,
+.composer-lane,
+.catchup-chip,
+.lane-tag,
+.usage-plan,
+.mb-pill,
+.project-chip,
+.chip,
+.status,
+.made-chip,
+.bench-mode, .bench-host,
+.ac-status,
+.menu-pill,
+.run-status,
+.attach-chip,
+.agent-chip,
+.engine-model,
+.diff-status,
+.ws-chip,
+.ws-mode,
+.repo-chip,
+.tree-badge,
+.branch-pill,
+.rsp-ho-agent,
+.run-chip,
+.term-side,
+.diff-thread-done,
+.rsp-diff-risk,
+.rsp-diff-contended,
+.review-tests,
+.viewer-badge,
+.watch-chip,
+.pin-chip,
+.review-branch,
+.hist-chip,
+.mb-preview li,
+.plan-review,
+.bill-badge,
+.acct-plan,
+.cd-chip,
+.lane-chip,
+.ho-chip,
+.ho-chip-tag,
+.lane-tag,
+.commit-pr, .commit-pushed,
+.lanes-modal .lane-card-meta span,
+.lcv-state,
+.morning-pr,
+.rsp-verdict,
+.week-chip,
+.week-pill,
+.ho-file-tag,
+.feed-merged-stats span,
+.diff-here,
+.rsp-why,
+:is(.composer-under, .stb-slot) .menu-pill,
+.agent-record-chip,
+.fcard-kind,
+.bd-chip,
+.wy-pill,
+.pb-roster,
+.ho-stats li,
+.att-pic-name,
+.sr-sev,
+.rv-session,
+.rv-risk,
+.rv-sev,
+.lg-tag,
+.rw-best,
+.route-pill-state,
+.hub-file-both,
+.ship-branch,
+.lh-chip,
+.lh-plan,
+.lh-roomy,
+.rv-risk,
+.bd-pr,
+.build-pill,
+.pw-you-label,
+.env-h-warn,
+.env-tools li,
+.review-issues,
+.needs-pill,
+.xdirs-chip,
+.xdirs-x,
+.tk-kind,
+.tk-status,
+.rsp-verdict,
+.review-tests, .review-issues,
+.auto-when,
+.ts-detail .ts-pr,
+.race-lean-chip,
+.gitp-pill,
+.redirect-guest,
+.review-peek-new,
+.overlap-pill,
+.brain-kind,
+.cc-tests,
+.cc-also,
+.cc-warn { border-radius: var(--r-sm, 6px); }
+.pb-roster-wrap:has(> .share-btn) { border-radius: var(--r-md); }
+/* More room on its right (Arun, 2026-11-14: "move the environment card to the left a little more"). */
+.env-dock { width: 284px; padding-right: 24px; }
+@media (max-width: 760px) { .env-dock { width: min(300px, 88vw); padding: 8px; } }
+
+/* Code Review's piles (CodeReview.tsx): each a heading that folds what is under it, its dot in the pile's colour. */
+.rv-pile { padding: 8px 2px 2px; }
+.rv-pile-btn { display: flex; align-items: center; gap: 8px; width: 100%; height: 30px; padding: 0 8px; border: 0; border-radius: var(--r-md); background: transparent; color: var(--ink-2); font: 600 12.5px var(--font); text-align: left; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out); }
+.rv-pile-btn:hover { background: var(--hover); color: var(--ink); }
+.rv-pile-btn:focus-visible { outline: 2px solid var(--ink-2); outline-offset: -2px; }
+.rv-pile-chev { width: 14px; height: 14px; color: var(--text-muted); transition: transform var(--t-hover) var(--ease-out); }
+.rv-pile-btn[aria-expanded="false"] .rv-pile-chev { transform: rotate(-90deg); }
+.rv-pile-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); }
+.rv-pile[data-tone="fix"] .rv-pile-dot { background: var(--red); }
+.rv-pile[data-tone="ready"] .rv-pile-dot { background: var(--green); }
+.rv-pile[data-tone="waiting"] .rv-pile-dot { background: var(--amber); }
+.rv-pile-name { flex: 1 1 auto; min-width: 0; }
+.rv-pile-n { min-width: 22px; padding: 1px 7px; border-radius: 6px; background: var(--hover); color: var(--text-muted); font-size: 11.5px; font-weight: 500; font-variant-numeric: tabular-nums; text-align: center; }
+.rv-pile-btn[aria-expanded="false"] { color: var(--text-muted); }
+
+/* Code Review's pile chips over your own (CodeReview.tsx): every pile, or one alone, each with its dot and count. */
+.rv-piles { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 8px 8px 6px; border-bottom: 1px solid var(--border); }
+.rv-pile-chip { display: inline-flex; flex: none; align-items: center; gap: 5px; height: 26px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--r-md); background: transparent; color: var(--ink-2); font: 500 12px var(--font); white-space: nowrap; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out), border-color var(--t-hover) var(--ease-out); }
+.rv-pile-chip:hover { border-color: var(--border-strong); color: var(--ink); }
+.rv-pile-chip > span { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.rv-pile-chip > i { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); }
+.rv-pile-chip[data-tone="fix"] > i { background: var(--red); }
+.rv-pile-chip[data-tone="ready"] > i { background: var(--green); }
+.rv-pile-chip[data-tone="waiting"] > i { background: var(--amber); }
+.rv-pile-chip[aria-checked="true"] { border-color: var(--ink); background: var(--ink); color: var(--bg); }
+.rv-pile-chip[aria-checked="true"] > span { color: color-mix(in srgb, var(--bg) 70%, transparent); }
+.rv-pile-chip:focus-visible { outline: 2px solid var(--ink-2); outline-offset: 1px; }

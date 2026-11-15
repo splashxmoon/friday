@@ -122,7 +122,7 @@ export function crewCarry(d: CarryDeps) {
   /** The crew rooms, each with who takes a hand-off: the room's lead, else its first crew mate. A room with nobody in it is left out. */
   const roomsFor = async (mates: readonly Teammate[]) => {
     const out: { id: string; name: string; sid: string; to: string; lane: string; mates: string[]; line: string }[] = [];
-    for (const r of await d.crew.rooms()) {
+    for (const r of (await d.crew.rooms()).filter((x) => !x.thread)) {
       const st = await d.store.state(r.sid).catch(() => null);
       if (!st) continue;
       const lanes = Object.entries(r.lanes);

@@ -89,6 +89,8 @@ export function CodeReview({
     }
   };
   const [query, setQuery] = useState("");
+  /** One pile of your own shown alone ("ready", "fix", …), or every pile. */
+  const [onlyPile, setOnlyPile] = useState<"" | "fix" | "ready" | "waiting" | "draft">("");
   const [repo, setRepo] = useState("");
   const [cards, setCards] = useState<BoardCard[]>([]);
   const gh = useGithub(identity, linked);
@@ -167,9 +169,13 @@ export function CodeReview({
       { title: "Quick to review", quick: true, items: quick.map((pr) => ({ pr, kind })) },
     ].filter((g) => g.items.length);
   };
+  // Your own, by pile: every pile, or one picked from the chips over the list (Arun, 2026-11-15: "add a better filter for like
+  // showing ready to merge and stuff because those can get hidden pretty quickly").
+  const allPiles = (["fix", "ready", "waiting", "draft"] as const).map((pile) => ({ pile, title: PILES[pile], items: shown.filter((p) => pileOf(p) === pile).sort(riskiest).map((pr) => ({ pr, kind: pile as Kind })) }));
+  const pileHere = onlyPile && allPiles.some((g) => g.pile === onlyPile && g.items.length) ? onlyPile : "";
   const groups: { title: string; quick?: boolean; items: { pr: PullRequest; kind: Kind }[] }[] =
     shownTab === "mine"
-      ? (["fix", "ready", "waiting", "draft"] as const).map((pile) => ({ title: PILES[pile], items: shown.filter((p) => pileOf(p) === pile).sort(riskiest).map((pr) => ({ pr, kind: pile as Kind })) })).filter((g) => g.items.length)
+      ? allPiles.filter((g) => g.items.length && (!pileHere || g.pile === pileHere)).map(({ title, items }) => ({ title, items }))
       : shownTab === "you"
         ? reviewable("review")
         : shownTab === "repos"
@@ -187,9 +193,32 @@ export function CodeReview({
       onConfirm: () => approveTogether(identity, list.map((p) => ({ url: p.url, title: `#${p.number} ${p.title}`, head: p.head, id: p.id }))).finally(refresh),
     });
   };
-  const order = groups.flatMap((g) => g.items);
+  // Each pile folds to its heading, and stays folded (Arun, 2026-11-15: "make the categories and stuff collapsable and better
+  // designed too"); the arrow keys move through the piles that are open.
+  const [shut, setShut] = useState<Set<string>>(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem("friday.review.shut") ?? "[]") as string[]);
+    } catch {
+      return new Set();
+    }
+  });
+  const flipPile = (t: string) =>
+    setShut((x) => {
+      const n = new Set(x);
+      if (!n.delete(t)) n.add(t);
+      try {
+        localStorage.setItem("friday.review.shut", JSON.stringify([...n]));
+      } catch {
+        // Remembered for this visit only.
+      }
+      return n;
+    });
+  const order = groups.flatMap((g) => (g.title && !g.quick && shut.has(g.title) ? [] : g.items));
   const [sel, setSel] = useState("");
-  const current = order.find((i) => i.pr.url === sel) ?? order[0];
+  // Every pull request, folded or not: the one picked stays open beside the list, and all piles folded is still a list (Arun,
+  // 2026-11-15: "if i collapse all of the categories everything disappears").
+  const every = groups.flatMap((g) => g.items);
+  const current = every.find((i) => i.pr.url === sel) ?? order[0] ?? every[0];
   const [cmd, setCmd] = useState<Cmd | null>(null);
   const search = useRef<HTMLInputElement>(null);
   const keys = useRef({ order, current, tools, auto, setTab, refresh });
@@ -374,6 +403,21 @@ export function CodeReview({
                   </DropdownMenu>
                 )}
               </div>
+              {shownTab === "mine" && allPiles.filter((g) => g.items.length).length > 1 && (
+                <div className="rv-piles" role="radiogroup" aria-label="Show a pile">
+                  <button type="button" role="radio" aria-checked={!pileHere} className="rv-pile-chip" onClick={() => setOnlyPile("")}>
+                    All <span>{allPiles.reduce((n, g) => n + g.items.length, 0)}</span>
+                  </button>
+                  {allPiles
+                    .filter((g) => g.items.length)
+                    .map((g) => (
+                      <button key={g.pile} type="button" role="radio" aria-checked={pileHere === g.pile} className="rv-pile-chip" data-tone={g.pile} onClick={() => (setOnlyPile(pileHere === g.pile ? "" : g.pile), shut.has(g.title) && flipPile(g.title))}>
+                        <i aria-hidden="true" />
+                        {g.title} <span>{g.items.length}</span>
+                      </button>
+                    ))}
+                </div>
+              )}
               {error && (
                 <p role="alert" className="m-0 border-b border-[var(--border)] px-3 py-2 text-[13px] text-[var(--red)]">
                   {error}
@@ -383,7 +427,7 @@ export function CodeReview({
               <div className="rv-queue-list">
                 {shownTab === "repos" && team === null ? (
                   <SkeletonRows rows={3} />
-                ) : order.length ? (
+                ) : every.length ? (
                   groups.map((g) => (
                     <div key={g.title || "all"} className="flex flex-col gap-px" role={g.quick ? "group" : undefined} aria-label={g.quick ? `Quick to review, ${g.items.length}` : undefined}>
                       {g.quick ? (
@@ -397,11 +441,16 @@ export function CodeReview({
                           )}
                         </QuickHeader>
                       ) : g.title && (
-                        <h2 className="m-0 flex items-center gap-1.5 px-2.5 pt-2.5 pb-1 text-[12px] font-medium tracking-[0.06em] text-[var(--text-muted)] uppercase">
-                          {g.title} <span className="tabular-nums">{g.items.length}</span>
+                        <h2 className="rv-pile m-0" data-tone={g.items[0]?.kind ?? ""}>
+                          <button type="button" className="rv-pile-btn" aria-expanded={!shut.has(g.title)} onClick={() => flipPile(g.title)}>
+                            <ChevronDownIcon className="rv-pile-chev" aria-hidden="true" />
+                            <i className="rv-pile-dot" aria-hidden="true" />
+                            <span className="rv-pile-name">{g.title}</span>
+                            <span className="rv-pile-n">{g.items.length}</span>
+                          </button>
                         </h2>
                       )}
-                      {g.items.map(({ pr, kind }) => (
+                      {!(g.title && !g.quick && shut.has(g.title)) && g.items.map(({ pr, kind }) => (
                         <QueueItem key={pr.url} pr={pr} kind={kind} on={current?.pr.url === pr.url} working={ctx.sessionFor.get(pr.url)} risk={kind === "merged" || g.quick ? undefined : risks.get(pr.url)} onPick={() => setSel(pr.url)} />
                       ))}
                     </div>
@@ -590,7 +639,7 @@ function ToolChip({ tool, on, onClick }: { tool: EngineTool; on: boolean; onClic
       aria-pressed={on}
       onClick={onClick}
       className={cn(
-        "h-7 rounded-full border-[var(--border)] bg-transparent px-2.5 text-[12px] font-medium text-[var(--text-muted)] shadow-none hover:bg-[var(--hover)] hover:text-[var(--ink)] dark:bg-transparent",
+        "h-7 rounded-[8px] border-[var(--border)] bg-transparent px-2.5 text-[12px] font-medium text-[var(--text-muted)] shadow-none hover:bg-[var(--hover)] hover:text-[var(--ink)] dark:bg-transparent",
         on && "border-[var(--border-strong)] bg-[var(--hover)] text-[var(--ink)] dark:bg-[var(--hover)]",
       )}
     >
@@ -645,7 +694,7 @@ function Load({ prs }: { prs: PullRequest[] }) {
     <div className="flex flex-wrap items-center gap-1.5 border-b border-[var(--border)] px-3 py-2" aria-label="Review requests per person">
       <span className="mr-1 text-[12px] font-medium tracking-[0.06em] text-[var(--text-muted)] uppercase">Review load</span>
       {load.slice(0, 6).map((l) => (
-        <Badge key={l.login} variant="outline" className="h-6 gap-1.5 rounded-full border-[var(--border)] pr-1 pl-1 text-[12px] font-medium text-[var(--ink-2)]" title={`${l.login}: asked to review ${l.count}`}>
+        <Badge key={l.login} variant="outline" className="h-6 gap-1.5 rounded-[6px] border-[var(--border)] pr-1 pl-1 text-[12px] font-medium text-[var(--ink-2)]" title={`${l.login}: asked to review ${l.count}`}>
           {l.avatar ? <img className="size-4 rounded-full" src={l.avatar} alt="" /> : <UserIcon />}
           {l.login}
           <Count n={l.count} className="h-4 min-w-4 px-1 text-[11px]" />

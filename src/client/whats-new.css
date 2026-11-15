@@ -100,3 +100,12 @@ html.desktop .wn.ob { max-height: min(536px, calc(100dvh - 76px)); }
 .ob-tools .mb-welcome .btn.small.mb-tool-go { height: 28px; padding: 0 12px; border-radius: 999px; font-size: 12.5px; }
 .ob-tools .mb-welcome .mb-more { border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
 .ob-tools .mb-welcome .mb-more .more-tools { justify-content: flex-start; padding: 10px 0 2px 43px; }
+
+
+/* Buttons and chips are rounded squares, never pills, everywhere (Arun, 2026-11-14: "stop switching between like completely
+   rounded buttons and only stick the square ones ... FOLLOW MY DESIGN LANGUAGE"). Dots, faces, switches and counts stay round. */
+.ob-tools .mb-welcome .btn.small.mb-tool-go { border-radius: var(--r-md); }
+
+/* A release's own headline, "What's new in Friday" small over it (WhatsNew.tsx). */
+.wn-kicker { display: block; margin-bottom: 4px; color: var(--text-muted); font-size: 12px; font-weight: 500; letter-spacing: 0.01em; }
+.wn-body .wn-kicker + h2 { font-size: 22px; line-height: 1.2; letter-spacing: -.015em; }

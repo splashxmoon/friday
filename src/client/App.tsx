@@ -8,7 +8,7 @@ import { BuildWatch } from "./BuildWatch.js";
 import type { Role } from "../types.js";
 import { lazy, Suspense, type ComponentProps, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { isNarrow } from "./narrow.js";
-import { readTabNow, setTeamTab, TeamHome, TeammateForm, useTeamTab } from "./Teammates.js";
+import { readTabNow, setTeamTab, TeamHome, TeammateForm, useTeamNow, useTeamTab } from "./Teammates.js";
 import { choosePlace, usePlaceFollows, usePlaceLeaves, useWorkSessions } from "./WorkMode.js";
 import { useWorkflowNotices } from "./team-workflow-view.js";
 import type { AgentView, PersonListing } from "../agents.js";
@@ -66,6 +66,7 @@ const SettingsPage = lazy(() => pages.settings().then((m) => ({ default: m.Setti
 import { chooseTheme } from "./prefs.js";
 import { applyTheme, readTheme } from "./theme.js";
 const UsagePage = lazy(() => pages.usage().then((m) => ({ default: m.UsagePage })));
+import { ALL, useFocusedAgent } from "./agentFocus.js";
 import { isLocal, ownModel, planLimits, planNow } from "./edition.js";
 import type { SkillTemplate } from "../skill-catalog.js";
 import type { WorkspaceUsage } from "./workspace-types.js";
@@ -780,6 +781,45 @@ export function App() {
   );
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
+  // A crew mate or a room removed while its page is open: the page goes, back to the Agents page (Arun, 2026-11-15: "make sure if
+  // i delete a crew or crew room make sure its page disappears off of my screen"). Only what was seen here and then went: a room or
+  // crew mate the team hasn't loaded yet isn't gone. A crew mate's thread removed is its own menu's to leave.
+  const teamNow = useTeamNow();
+  const hereSid = route.kind === "session" ? route.sid : "";
+  const focusedHere = useFocusedAgent(hereSid);
+  const crewSeen = useRef<{ rooms: Map<string, boolean>; lanes: Set<string> }>({ rooms: new Map(), lanes: new Set() });
+  // The crew mate whose chat was open: its removal unfocuses it before the team says it is gone.
+  const lastMate = useRef({ sid: "", lane: "" });
+  if (lastMate.current.sid !== hereSid) lastMate.current = { sid: hereSid, lane: "" };
+  if (focusedHere !== ALL) lastMate.current.lane = focusedHere;
+  useEffect(() => {
+    if (!isLocal() || !teamNow) return;
+    const seen = crewSeen.current;
+    for (const r of teamNow.rooms ?? []) seen.rooms.set(r.sid, !!r.thread);
+    for (const m of teamNow.teammates) seen.lanes.add(m.lane);
+    if (!hereSid) return;
+    const roomGone = hereSid !== teamNow.sid && seen.rooms.get(hereSid) === false && !(teamNow.rooms ?? []).some((r) => r.sid === hereSid);
+    const lane = focusedHere !== ALL ? focusedHere : lastMate.current.lane;
+    const mateGone = hereSid === teamNow.sid && !!lane && seen.lanes.has(lane) && !teamNow.teammates.some((m) => m.lane === lane);
+    if (!roomGone && !mateGone) return;
+    lastMate.current.lane = "";
+    navigateRef.current({ kind: "home" });
+    choosePlace("team");
+  }, [teamNow, hereSid, focusedHere]);
+  // No Crew room page in the open-source edition (Arun, 2026-11-15: "why is there a crew room appearing when i have nothing there"):
+  // its session holds every crew mate's own chat, and with none of them picked it showed all their old turns at once. Landing on it
+  // with no crew mate in view, after a moment for a crew mate's chat opening to say which, is the Agents page instead.
+  const focusNow = useRef(focusedHere);
+  focusNow.current = focusedHere;
+  useEffect(() => {
+    if (!isLocal() || !teamNow || !hereSid || hereSid !== teamNow.sid || focusedHere !== ALL) return;
+    const t = setTimeout(() => {
+      if (focusNow.current !== ALL) return;
+      navigateRef.current({ kind: "home" });
+      choosePlace("team");
+    }, 350);
+    return () => clearTimeout(t);
+  }, [teamNow?.sid, hereSid, focusedHere]); // eslint-disable-line react-hooks/exhaustive-deps
   /**
    * The new-session page, from wherever a session is asked for: out of the Crew first, whose home is its room rather than the box,
    * so "New session" from ⌘K, Code Review or the Board landed in the Crew room and what was typed went nowhere (2026-11-02 review).

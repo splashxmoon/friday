@@ -14,7 +14,8 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "./icons.js";
-import { EllipsisIcon, InfinityIcon, PanelRightIcon, ListChecksIcon, FileCodeIcon, FileTextIcon, GitPullRequestIcon, ImageIcon, PackageIcon, CirclePauseIcon, KanbanSquareIcon, MessagesSquareIcon, MoonIcon, PlayIcon, SquareIcon, SunIcon, WorkflowIcon } from "lucide-react";
+import { TimeField } from "./time-field.js";
+import { ChevronLeftIcon, ChevronRightIcon, EllipsisIcon, PencilIcon, PlusIcon, XIcon, InfinityIcon, PanelRightIcon, ListChecksIcon, FileCodeIcon, FileTextIcon, GitPullRequestIcon, ImageIcon, PackageIcon, CirclePauseIcon, KanbanSquareIcon, MessagesSquareIcon, MoonIcon, PlayIcon, SquareIcon, SunIcon, WorkflowIcon } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
@@ -23,14 +24,15 @@ import { Textarea } from "@/components/ui/textarea";
 import type { SessionEvent } from "../types.js";
 import type { SessionState } from "../session/projection.js";
 import { api } from "./api.js";
-import { Picker, useConfirm } from "./ui.js";
+import { MenuButton, Picker, useConfirm, type MenuItem } from "./ui.js";
+import { focusAgent } from "./agentFocus.js";
 import type { Identity } from "./storage.js";
 import type { Send } from "./useSession.js";
 import { comeBack, nextAt, nextEight, setAway, setPaused, setSelfRun, stopAll, untilOf } from "./team-api.js";
 import { threadsOf } from "./team-threads.js";
 import { teamCommand } from "./team-commands.js";
 import { plainLine } from "./team-room.js";
-import { agoShort, Face, markStopped, mateOn, mateStatus, openThread, refreshTeam, threadSaid, useTeamNow } from "./Teammates.js";
+import { agoShort, Face, MateRing, markStopped, mateOn, mateStatus, openThread, ownOf, refreshTeam, RoomFaces, threadSaid, useTeamNow } from "./Teammates.js";
 import { assignedTasks, TeamBoard } from "./TeamBoard.js";
 import { proofsIn } from "../team-proof.js";
 import { ProofToggle } from "./ProofCard.js";
@@ -124,7 +126,18 @@ export function TeamHeaderControls({ identity, state, events, send, notify, pane
           CREW-15, 2026-11-04). ⌘. still stops them all, asked first. */}
       {/* One ⋯ for the room: the board, its threads and the rest (Arun, 2026-11-01: "i want to be simplier and easy to digest as
           a user for crew"). The faces by the title and the line over the box say who works. */}
-      <RoomMore identity={identity} sid={state.id} events={events} notify={notify} board={tasks.length ? { open, all: tasks.length, show: () => setBoard(true) } : null} {...(panel ? { panel } : {})} />
+      {isLocal() ? (
+        // The room's one button opens its profile in the side panel, where the board, threads and the rest are now (Arun,
+        // 2026-11-15: "move those things over to the side panel").
+        panel && (
+          <button type="button" className={`panel-tab icon tm-hd-btn ${panel.on ? "on" : ""}`} aria-pressed={panel.on} aria-label={panel.on ? "Close the room's profile" : "The room's profile"} title="The room's profile" onClick={panel.toggle} data-on={t.paused ? "paused" : t.away?.until ? "away" : t.selfRuns?.[state.id] ? "run" : undefined}>
+            <Icon name="sidePanel" size={18} />
+            {(t.paused || !!t.away?.until || !!t.selfRuns?.[state.id]) && <i className="panel-tab-dot" />}
+          </button>
+        )
+      ) : (
+        <RoomMore identity={identity} sid={state.id} events={events} notify={notify} board={tasks.length ? { open, all: tasks.length, show: () => setBoard(true) } : null} {...(panel ? { panel } : {})} />
+      )}
       {board && <TeamBoard state={state} events={events} send={send} onClose={() => setBoard(false)} />}
     </>
   );
@@ -311,6 +324,162 @@ function RoomMore({ identity, sid, events, notify, board, panel }: { panel?: { o
   );
 }
 
+/**
+ * A room's profile, in the side panel, as a crew mate's is (Arun, 2026-11-15: "we need to have the profile be for the team room too
+ * and we need to move those things over to the side panel too"): who it is (its faces, its name, what it is for), who is in it and
+ * who leads, and what the room's menu held (the board, its threads, what it made, running on its own, away and pause, skills,
+ * workflows), each a row that opens as a page here. The Crew room has no name or purpose to change and everyone is in it.
+ */
+export function RoomProfile({ identity, state, events, send, notify }: { identity: Identity; state: SessionState; events: SessionEvent[]; send: Send; notify: (m: string) => void }) {
+  const t = useTeamNow();
+  const sid = state.id;
+  const [page, setPage] = useState<null | "results" | "run" | "away" | "threads">(null);
+  const [board, setBoard] = useState(false);
+  const [skills, setSkills] = useState(false);
+  const [ask, confirmUI] = useConfirm();
+  const threads = useThreads(sid, events);
+  const results = useResults(sid, events);
+  const waiting = skillsWaiting(useSkills());
+  const r = t?.rooms?.find((x) => x.sid === sid && !x.thread) ?? null;
+  const [name, setName] = useState(r?.name ?? "");
+  const [purpose, setPurpose] = useState(r?.purpose ?? "");
+  useEffect(() => (setName(r?.name ?? ""), setPurpose(r?.purpose ?? "")), [r?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!t) return null;
+  const crew = sid === t.sid;
+  if (!crew && !r) return null;
+  const mates = ownOf(t);
+  const members = crew ? mates.map((m) => ({ m, lane: m.lane })) : mates.filter((m) => r!.lanes[m.id]).map((m) => ({ m, lane: r!.lanes[m.id]! }));
+  const others = crew ? [] : mates.filter((m) => !r!.lanes[m.id]);
+  const lead = state.lead ?? null;
+  const tasks = [...(state.board?.tasks ?? []), ...assignedTasks(state)].filter((x) => x.status !== "cancelled");
+  const open = tasks.filter((x) => x.status !== "done").length;
+  const selfRun = t.selfRuns?.[sid] ?? null;
+  const away = t.away?.until ? t.away : null;
+  const paused = !!t.paused;
+  const patch = (body: Record<string, unknown>) => api(identity, `/api/teammates/rooms/${r!.id}`, { method: "PATCH", body: JSON.stringify(body), headers: { "Content-Type": "application/json" } }).then(() => refreshTeam(identity)).catch((e: Error) => notify(e.message || "That didn't save."));
+  const done = () => setPage(null);
+  if (page)
+    return (
+      <section className="msd" aria-label="This room's profile">
+        <button type="button" className="msd-back" onClick={done} aria-label="Back to the room's profile">
+          <ChevronLeftIcon aria-hidden="true" />
+          Back
+        </button>
+        <div className="msd-page">
+          {page === "results" && <ResultsButton sid={sid} events={events} embedded={done} />}
+          {page === "threads" && <ThreadsList sid={sid} list={threads} onOpen={done} />}
+          {page === "run" && <SelfRunSwitch identity={identity} sid={sid} notify={notify} embedded={done} />}
+          {page === "away" && <AwaySwitch identity={identity} notify={notify} embedded={done} />}
+        </div>
+      </section>
+    );
+  type Row = { key: string; label: string; icon: React.ReactNode; now?: string; n?: number; onClick: () => void };
+  const rows: Row[] = [
+    ...(tasks.length ? [{ key: "board", label: "Board", icon: <KanbanSquareIcon />, now: `${open} open of ${tasks.length}`, n: open, onClick: () => setBoard(true) }] : []),
+    ...(threads.length ? [{ key: "threads", label: "Threads", icon: <MessagesSquareIcon />, now: `${threads.length}`, n: threads.filter((x) => x.state === "answering").length, onClick: () => setPage("threads") }] : []),
+    { key: "results", label: "Results", icon: <PackageIcon />, now: results.handed.length + results.count ? `${results.handed.length + results.count}` : "Nothing yet", onClick: () => setPage("results") },
+    { key: "run", label: "Run on its own", icon: <InfinityIcon />, now: selfRun ? "On" : "Off", onClick: () => setPage("run") },
+    { key: "away", label: "Away and pause", icon: paused ? <CirclePauseIcon /> : <MoonIcon />, now: away ? `Away until ${untilOf(away.until!)}` : paused ? "Paused" : "Here", onClick: () => setPage("away") },
+    { key: "skills", label: "Skills", icon: <ListChecksIcon />, ...(waiting ? { now: `${waiting} to keep or drop`, n: waiting } : {}), onClick: () => setSkills(true) },
+    { key: "workflows", label: "Workflows", icon: <WorkflowIcon />, onClick: () => openWorkflows() },
+  ];
+  const memberItems = (m: (typeof members)[number]): MenuItem[] => [
+    { label: `Open ${m.m.name}'s chat here`, icon: "chat", onSelect: () => focusAgent(sid, m.lane) },
+    lead !== m.lane && { label: "Make them the lead", icon: "crown", onSelect: () => void send({ type: "lead.set", lane: m.lane }).then((x) => !x.ok && notify(x.error ?? "Couldn't do that.")) },
+    !crew && members.length > 1 && { label: `Take ${m.m.name} out of the room`, icon: "x", danger: true, onSelect: () => void patch({ members: members.filter((x) => x.m.id !== m.m.id).map((x) => x.m.id) }) },
+  ];
+  return (
+    <section className="msd msd-home" aria-label="This room's profile">
+      <div className="msd-id">
+        <span className="msd-id-face rp-faces" aria-hidden="true">
+          <RoomFaces seeds={members.slice(0, 3).map(({ m }) => m.look ?? m.name)} size={30} />
+        </span>
+        <div className="msd-id-text">
+          {crew ? (
+            <h3 className="msd-id-name rp-name">Crew room</h3>
+          ) : (
+            <input className="msd-id-name" value={name} maxLength={60} aria-label="Room name" onChange={(e) => setName(e.target.value)} onBlur={() => name.trim() && name.trim() !== r!.name && void patch({ name: name.trim() })} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), e.currentTarget.blur())} />
+          )}
+          <span className="msd-id-line">
+            <span>
+              {members.length} {members.length === 1 ? "crew mate" : "crew mates"}
+              {lead && mateOn(lead) ? ` · ${mateOn(lead)!.name} leads` : ""}
+            </span>
+          </span>
+        </div>
+      </div>
+      {!crew && (
+        <label className="msd-field">
+          <span>What it's for</span>
+          <Textarea value={purpose} maxLength={2000} rows={2} placeholder="Ship the new pricing page" onChange={(e) => setPurpose(e.target.value)} onBlur={() => purpose.trim() !== (r!.purpose ?? "") && void patch({ purpose: purpose.trim() })} />
+          <small>Its crew mates hear it with every message here.</small>
+        </label>
+      )}
+      <div className="msd-group">
+        <h3 className="msd-group-name">In this room</h3>
+        <ul className="msd-rows">
+          {members.map((x) => (
+            <li key={x.m.id} className="rp-member">
+              <button type="button" className="msd-row" onClick={() => focusAgent(sid, x.lane)} title={`Open ${x.m.name}'s chat here`}>
+                <Face seed={x.m.look ?? x.m.name} size={20} />
+                <span className="msd-row-label">{x.m.name}</span>
+                <MateRing status={x.m.status} />
+                {lead === x.lane && <span className="rp-lead">Lead</span>}
+                <span className="msd-row-now">{mateStatus(x.m, { sid, lane: x.lane }).line}</span>
+              </button>
+              <MenuButton className="rp-more" label={`More for ${x.m.name}`} items={() => memberItems(x)} />
+            </li>
+          ))}
+          {others.length > 0 && (
+            <li>
+              <MenuButton className="msd-row rp-add" label="Add a crew mate to this room" items={() => others.map((m): MenuItem => ({ label: m.name, mark: <Face seed={m.look ?? m.name} size={18} />, onSelect: () => void patch({ members: [...members.map((x) => x.m.id), m.id] }) }))}>
+                <span className="msd-row-icon" aria-hidden="true">
+                  <PlusIcon />
+                </span>
+                <span className="msd-row-label">Add a crew mate</span>
+              </MenuButton>
+            </li>
+          )}
+        </ul>
+      </div>
+      <div className="msd-group">
+        <h3 className="msd-group-name">The room</h3>
+        <ul className="msd-rows">
+          {rows.map((x) => (
+            <li key={x.key}>
+              <button type="button" className="msd-row" onClick={x.onClick}>
+                <span className="msd-row-icon" aria-hidden="true">{x.icon}</span>
+                <span className="msd-row-label">{x.label}</span>
+                {x.now && <span className="msd-row-now">{x.now}</span>}
+                <ChevronRightIcon className="msd-row-chev" aria-hidden="true" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+      {!crew && (
+        <button
+          type="button"
+          className="msd-remove"
+          onClick={() =>
+            ask({
+              title: `Remove ${r!.name}?`,
+              body: "Its crew mates stop working in it. They stay in your crew, with their folders and everything they made; the room's conversation is kept, out of sight.",
+              action: "Remove room",
+              onConfirm: () => void api(identity, `/api/teammates/rooms/${r!.id}`, { method: "DELETE" }).then(() => refreshTeam(identity)).catch((e: Error) => notify(e.message)),
+            })
+          }
+        >
+          Remove this room
+        </button>
+      )}
+      {board && <TeamBoard state={state} events={events} send={send} onClose={() => setBoard(false)} />}
+      {skills && <SkillsDialog onClose={() => setSkills(false)} />}
+      {confirmUI}
+    </section>
+  );
+}
+
 /** The room's side threads, waiting on a teammate first, then by the newest reply (team-threads.ts). */
 function useThreads(sid: string, events: SessionEvent[]) {
   const threads = threadsOf(events);
@@ -434,10 +603,22 @@ function SelfRunSwitch({ identity, sid, notify, embedded }: { identity: Identity
                 <span>Budget</span>
                 <Picker className="tm-select" value={tokens} label="The run's budget" onChange={setTokens} options={[...RUN_BUDGETS.map((n) => ({ value: n, label: `${n / 1_000_000}M tokens`, ...(n === DEFAULT_RUN_TOKENS ? { hint: "a night's work" } : {}) })), { value: 0, label: "No budget" }]} />
               </label>
-              <label>
+              <div className="tm-selfrun-ends">
                 <span>Ends at</span>
-                <Input type="time" className="tm-time" value={ends} aria-label="Ends at" onChange={(e) => setEnds(e.target.value)} />
-              </label>
+                {/* No end until one is set; then Friday's own time field, with × to have none again (no native time field). */}
+                {ends ? (
+                  <span className="tm-ends-set">
+                    <TimeField value={ends} onChange={setEnds} />
+                    <button type="button" className="tm-ends-clear" aria-label="No end time" title="No end time" onClick={() => setEnds("")}>
+                      <XIcon className="size-3.5" aria-hidden="true" />
+                    </button>
+                  </span>
+                ) : (
+                  <button type="button" className="rt-chip tm-ends-add" onClick={() => setEnds("06:00")}>
+                    No end time · Set one
+                  </button>
+                )}
+              </div>
             </div>
             <p className="tm-away-note">It never pushes to a default branch, deploys, deletes data or spends money. {isLocal() ? "Keep the Mac on power: it stays awake while the room runs." : "Keep your computer on: the room runs there."}</p>
             <Button type="submit" size="sm" disabled={busy || !goal.trim()}>
@@ -461,6 +642,14 @@ function SelfRunSwitch({ identity, sid, notify, embedded }: { identity: Identity
     </Popover>
   );
 }
+
+/** "8:00 AM" from "08:00", in this computer's way of saying times. */
+const clockOf = (hhmm: string) => {
+  const [h, m] = hhmm.split(":").map(Number);
+  const d = new Date();
+  d.setHours(h!, m!, 0, 0);
+  return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+};
 
 function AwaySwitch({ identity, notify, embedded }: { identity: Identity; notify: (m: string) => void; /** A page of the room's ⋯ menu, this closing it. */ embedded?: () => void }) {
   const t = useTeamNow();
@@ -497,13 +686,35 @@ function AwaySwitch({ identity, notify, embedded }: { identity: Identity; notify
           >
             <b className="tm-away-title">Step away</b>
             <p>Until then the crew decides for itself and notes what it assumed. Writing in any crew chat brings you back.</p>
-            <label className="tm-away-time">
-              <span>Back at</span>
-              <Input type="time" value={at} onChange={(e) => setAt(e.target.value || "08:00")} aria-label="Back at" />
-            </label>
+            {/* When you're back, on Friday's own time field with the usual mornings a press away (Arun, 2026-11-15: "design this
+                better no native controls"). */}
+            <div className="rt-when tm-away-card">
+              <div className="rt-when-rows">
+                <div className="rt-when-row">
+                  <span className="rt-when-label">Back at</span>
+                  <TimeField value={at} onChange={setAt} />
+                </div>
+                <div className="rt-when-row">
+                  <span aria-hidden="true" />
+                  <div className="rt-chips" role="radiogroup" aria-label="Usual times">
+                    {["07:00", "08:00", "09:00", "13:00", "18:00"].map((v) => (
+                      <button key={v} type="button" role="radio" aria-checked={at === v} className="rt-chip" onClick={() => setAt(v)}>
+                        {clockOf(v)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div className="rt-when-foot">
+                <MoonIcon className="size-3.5 shrink-0" aria-hidden="true" />
+                <span className="rt-when-next">
+                  Away until <b>{untilOf(until)}</b>
+                </span>
+              </div>
+            </div>
             <p className="tm-away-note">{KEEP_ON}</p>
             <Button type="submit" size="sm" disabled={busy}>
-              <MoonIcon className="size-4" /> Away until {untilOf(until)}
+              <MoonIcon className="size-4" /> Step away
             </Button>
           </form>
         )}
@@ -647,12 +858,13 @@ export function QueuedActions({ seqs, send, onEdit }: { seqs: { lane: string; se
     }
   };
   return (
+    // Icons, each named on hover and to a screen reader (Arun, 2026-11-15: "use svg icons for this", the Edit and Cancel words).
     <span className="tm-queued-acts">
-      <button type="button" className="link-btn" disabled={busy} onClick={() => void withdraw(true).then(onEdit)}>
-        Edit
+      <button type="button" className="tm-queued-btn" disabled={busy} aria-label="Edit before it's read" title="Edit before it's read" onClick={() => void withdraw(true).then(onEdit)}>
+        <PencilIcon aria-hidden="true" />
       </button>
-      <button type="button" className="link-btn" disabled={busy} onClick={() => void withdraw()}>
-        Cancel
+      <button type="button" className="tm-queued-btn" disabled={busy} aria-label="Take it back" title="Take it back" onClick={() => void withdraw()}>
+        <XIcon aria-hidden="true" />
       </button>
     </span>
   );

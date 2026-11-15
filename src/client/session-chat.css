@@ -78,3 +78,10 @@
   .session-view > .topbar .tb-right { flex-shrink: 0; }
   .session-view > .topbar .tb-right > .tb-divider { display: none; }
 }
+
+/* Buttons and chips are rounded squares, never pills, everywhere (Arun, 2026-11-14: "stop switching between like completely
+   rounded buttons and only stick the square ones ... FOLLOW MY DESIGN LANGUAGE"). Dots, faces, switches and counts stay round. */
+.ctl-asks,
+.composer-ask-stop,
+.composer-send .composer-suggest-btn,
+.their-q-opt { border-radius: var(--r-md); }

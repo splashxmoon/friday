@@ -1,0 +1,32 @@
+/* Automations' ways in and its marks (AutoWeek.tsx). */
+.aw-tool { display: inline-grid; flex: none; place-items: center; border-radius: 5px; background: var(--bg); box-shadow: 0 0 0 1px var(--border); }
+.aw-tool.big { width: 30px; height: 30px; border-radius: 8px; }
+.aw-stack { display: inline-flex; flex: none; }
+.aw-stack > span + span { margin-left: -6px; }
+
+/* The two ways in. */
+.aw-doors { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; margin-bottom: 26px; }
+.aw-door { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); color: var(--ink); font: inherit; text-align: left; cursor: pointer; transition: border-color var(--t-hover) var(--ease-out), background-color var(--t-hover) var(--ease-out); }
+.aw-door:hover { border-color: var(--border-strong); background: color-mix(in srgb, var(--hover) 50%, var(--card)); }
+.aw-door:focus-visible { outline: 2px solid var(--ink-2); outline-offset: 2px; }
+.aw-door-faces { display: flex; align-items: center; height: 34px; }
+.aw-door-faces > span { display: inline-grid; margin-left: -8px; transition: transform 220ms var(--ease-out); }
+.aw-door-faces > span:first-child { margin-left: 0; }
+.aw-door-tools > span { margin-left: 4px; }
+/* Hovered, the crew hops in turn: one after the other, a little. */
+.aw-door:hover .aw-door-faces > span { transform: translateY(-3px); transition-delay: calc(var(--i, 0) * 45ms); }
+@media (prefers-reduced-motion: reduce) { .aw-door:hover .aw-door-faces > span, button.aw-pill:hover { transform: none; } }
+.aw-door-text { display: flex; flex-direction: column; gap: 3px; }
+.aw-door-text b { font-size: 14px; font-weight: 600; }
+.aw-door-text span { color: var(--text-muted); font-size: 12.5px; line-height: 18px; }
+.aw-door-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: auto; padding-top: 10px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 12px; }
+.aw-door-go { display: inline-flex; flex: none; align-items: center; gap: 4px; color: var(--ink); font-weight: 500; }
+.aw-door-go svg { width: 13px; height: 13px; transition: transform var(--t-hover) var(--ease-out); }
+.aw-door:hover .aw-door-go svg { transform: translateX(2px); }
+
+/* Starters in two lists, by who runs them. */
+.aw-starters { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; }
+.aw-starters-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.aw-starters-col > h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 2px; color: var(--ink-2); font-size: 12.5px; font-weight: 600; }
+
+/* A narrow page: the week scrolls sideways, each day keeping its width. */

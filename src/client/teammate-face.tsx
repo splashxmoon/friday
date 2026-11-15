@@ -13,7 +13,7 @@
  * size), and not at all with reduced motion. It replaces the Avatar Lab mascots (AGPL), so no face is anyone else's drawing.
  *
  */
-import { memo } from "react";
+import { memo, type CSSProperties } from "react";
 import { isV2, shapeSeed, teamColour } from "./teammate-block.js";
 import { reducedMotion } from "./presence.js";
 
@@ -31,17 +31,20 @@ function numbers(seed: number): () => number {
   };
 }
 
-type Wave = { k: number; a: number; p: number };
+/** A harmonic of the outline; `bump` makes it |sin|, k bumps meeting in soft dips: a cloud's scallops. */
+type Wave = { k: number; a: number; p: number; bump?: true };
 /**
  * The second set of faces (Arun, 2026-11-03: "add more mascot designs and colors too"), for looks marked "v2:": still round and
- * soft, never a box or a pill (2026-10-29), now with a body of four kinds (a blob, a cloud of six soft bumps, a five-petal flower,
+ * soft (since 2026-11-15 a square, a pill and a capsule too, below), now with a body of four kinds (a blob, a cloud of six soft bumps, a five-petal flower,
  * a pebble), eyes of four (dots, round ones with a shine, small beads, wide-set ovals) and one small extra or none (cheeks,
  * freckles, a sprout, round ears, an antenna). Every look made before is a plain blob with dots, as it was.
  */
-export type Body = "blob" | "cloud" | "flower" | "pebble";
+export type Body = "blob" | "cloud" | "flower" | "pebble" | "square" | "pill" | "capsule";
 export type EyeKind = "dot" | "round" | "bead" | "wide";
 export type Extra = "none" | "cheeks" | "freckles" | "sprout" | "ears" | "antenna";
-export type Look = { waves: Wave[]; turn: number; eyeGap: number; eyeY: number; eyeX: number; eyeW: number; eyeH: number; body: Body; eyeKind: EyeKind; extra: Extra };
+/** A body drawn as a rounded box rather than a morphed circle: its width, height and corner radius, before scaling to the circle. */
+export type Box = { w: number; h: number; rc: number };
+export type Look = { box?: Box; waves: Wave[]; turn: number; eyeGap: number; eyeY: number; eyeX: number; eyeW: number; eyeH: number; body: Body; eyeKind: EyeKind; extra: Extra };
 const pick = <T,>(r: () => number, xs: readonly (readonly [T, number])[]): T => {
   let x = r() * xs.reduce((s, [, w]) => s + w, 0);
   for (const [v, w] of xs) if ((x -= w) < 0) return v;
@@ -75,16 +78,27 @@ export function lookOf(seed: string): Look {
     eyeKind: "dot",
     extra: "none",
   };
-  if (isV2(seed)) {
-    // Drawn from the same numbers, after the first set's, so a v2 look is as fixed for its seed as any.
-    look.body = pick<Body>(r, [["blob", 3], ["cloud", 2], ["flower", 2], ["pebble", 2]]);
+  // Every face has a body of its own kind, old looks too (Arun, 2026-11-15: "all of the shapes ... like cloud, square, pill etc
+  // instead of random circle shapes"): a cloud, a soft square, a pill lying down, a capsule standing up, a flower or a pebble;
+  // the plain morphed circle is no longer dealt. Drawn from the same numbers, after the first set's, so a look stays fixed for its
+  // seed. Only a v2 look also has eyes and an extra of its own kind.
+  const v2 = isV2(seed);
+  look.body = pick<Body>(r, [["cloud", 3], ["square", 3], ["pill", 3], ["capsule", 2], ["flower", 2], ["pebble", 1.5]]);
+  if (v2) {
     look.eyeKind = pick<EyeKind>(r, [["dot", 3], ["round", 3], ["bead", 2], ["wide", 2]]);
     look.extra = pick<Extra>(r, [["none", 3], ["cheeks", 2], ["freckles", 1], ["sprout", 1.5], ["ears", 1.5], ["antenna", 1]]);
+    // No ears (Arun, 2026-11-15: "get rid of the ears"): drawn from the same numbers so every other look stays as it was.
+    if (look.extra === "ears") look.extra = "none";
+  }
+  {
     const p = () => between(0, Math.PI * 2);
-    if (look.body === "cloud") look.waves = [{ k: 6, a: between(0.045, 0.06), p: p() }, { k: 3, a: between(0.01, 0.025), p: p() }];
+    if (look.body === "square") (look.box = { w: 88, h: 86, rc: between(26, 32) }), (look.eyeY = between(-4, 0));
+    else if (look.body === "pill") (look.box = { w: 100, h: between(66, 72), rc: 99 }), (look.eyeY = between(-3, 1)), (look.eyeGap = Math.max(look.eyeGap, 14));
+    else if (look.body === "capsule") (look.box = { w: between(72, 78), h: 100, rc: 99 }), (look.eyeY = between(-9, -4)), (look.eyeGap = Math.min(look.eyeGap, 12.5));
+    else if (look.body === "cloud") look.waves = [{ k: r() < 0.5 ? 6 : 7, a: between(0.13, 0.16), p: p(), bump: true }, { k: 2, a: between(0.02, 0.04), p: p() }];
     else if (look.body === "flower") look.waves = [{ k: 5, a: between(0.06, 0.08), p: p() }, { k: 2, a: between(0.01, 0.02), p: p() }];
     else if (look.body === "pebble") (look.waves = [{ k: 2, a: between(0.08, 0.11), p: p() }, { k: 3, a: between(0.01, 0.03), p: p() }]), (look.turn = r() < 0.5 ? 0 : Math.PI / 4);
-    if (look.eyeKind === "wide") look.eyeGap = between(16, 18.5);
+    if (look.eyeKind === "wide") look.eyeGap = look.body === "capsule" ? 14 : between(16, 18.5);
     if (look.eyeKind === "bead") look.eyeGap = between(10, 13);
   }
   looks.set(seed, look);
@@ -98,14 +112,52 @@ const f = (n: number) => (Math.round(n * 100) / 100).toString();
 export function outline(waves: readonly Wave[], turn = 0): string {
   const radii = Array.from({ length: N }, (_, i) => {
     const t = (i / N) * Math.PI * 2;
-    return 1 + waves.reduce((s, w) => s + w.a * Math.sin(w.k * (t + turn) + w.p), 0);
+    return 1 + waves.reduce((s, w) => s + w.a * (w.bump ? Math.abs(Math.sin((w.k / 2) * (t + turn) + w.p)) : Math.sin(w.k * (t + turn) + w.p)), 0);
   });
   const scale = 50 / Math.max(...radii);
   const pts = radii.map((rr, i) => {
     const t = (i / N) * Math.PI * 2 - Math.PI / 2;
     return [Math.cos(t) * rr * scale, Math.sin(t) * rr * scale] as const;
   });
-  // Catmull-Rom through every point, as cubic Béziers: smooth all the way round, no corner anywhere.
+  return smooth(pts);
+}
+
+/**
+ * A rounded box (a soft square, a pill, a capsule) as the same kind of outline: 48 points evenly round its edge from the top's
+ * middle, clockwise, smoothed the same way, and scaled so its farthest point is on the circle of radius 50.
+ */
+export function boxOutline({ w, h, rc }: Box): string {
+  const r = Math.min(rc, w / 2, h / 2);
+  const [hw, hh] = [w / 2, h / 2];
+  // The edge as straight runs and quarter arcs, walked by length.
+  const sx = hw - r, sy = hh - r;
+  const segs: { len: number; at: (t: number) => readonly [number, number] }[] = [];
+  const line = (x0: number, y0: number, x1: number, y1: number) => segs.push({ len: Math.hypot(x1 - x0, y1 - y0), at: (t) => [x0 + (x1 - x0) * t, y0 + (y1 - y0) * t] });
+  const arc = (cx: number, cy: number, a0: number) => segs.push({ len: (Math.PI / 2) * r, at: (t) => [cx + r * Math.cos(a0 + (t * Math.PI) / 2), cy + r * Math.sin(a0 + (t * Math.PI) / 2)] });
+  line(0, -hh, sx, -hh);
+  arc(sx, -sy, -Math.PI / 2);
+  line(hw, -sy, hw, sy);
+  arc(sx, sy, 0);
+  line(sx, hh, -sx, hh);
+  arc(-sx, sy, Math.PI / 2);
+  line(-hw, sy, -hw, -sy);
+  arc(-sx, -sy, Math.PI);
+  line(-sx, -hh, 0, -hh);
+  const total = segs.reduce((n, g) => n + g.len, 0);
+  const raw = Array.from({ length: N }, (_, i) => {
+    let d = (i / N) * total;
+    for (const g of segs) {
+      if (d <= g.len || g === segs[segs.length - 1]) return g.at(g.len ? Math.min(1, d / g.len) : 0);
+      d -= g.len;
+    }
+    return [0, -hh] as const;
+  });
+  const scale = 50 / Math.max(...raw.map(([x, y]) => Math.hypot(x, y)));
+  return smooth(raw.map(([x, y]) => [x * scale, y * scale] as const));
+}
+
+/** Catmull-Rom through every point, as cubic Béziers: smooth all the way round. */
+function smooth(pts: readonly (readonly [number, number])[]): string {
   const at = (i: number) => pts[(i + N) % N]!;
   let d = `M${f(pts[0]![0])} ${f(pts[0]![1])}`;
   for (let i = 0; i < N; i++) {
@@ -121,7 +173,14 @@ export function shapeOf(seed: string): { still: string; breathing: string } {
   seed = shapeSeed(seed);
   const had = shapes.get(seed);
   if (had) return had;
-  const { waves, turn } = lookOf(seed);
+  const { waves, turn, box } = lookOf(seed);
+  // A box keeps its shape: a working one breathes as a whole (BlobFace), never through its outline.
+  if (box) {
+    const still = boxOutline(box);
+    const s = { still, breathing: [still, still, still, still].join(";") };
+    shapes.set(seed, s);
+    return s;
+  }
   const still = outline(waves, turn);
   const drift = (da: number[], dp: number[]) => outline(waves.map((w, i) => ({ ...w, a: w.a * da[i]!, p: w.p + dp[i]! })), turn);
   const breathing = [still, drift([1.25, 0.8, 1.2], [0.45, -0.35, 0.3]), drift([0.8, 1.25, 0.85], [-0.35, 0.45, -0.25]), still].join(";");
@@ -167,8 +226,7 @@ function EyesOf({ look, eyes, size }: { look: Look; eyes: Eyes; size: number }) 
         {xs.map((x) => (
           <g key={x}>
             <circle cx={f(x)} cy={f(look.eyeY)} r={f(rr)} fill={EYE} fillOpacity={0.88} />
-            {/* A round eye's shine, where a light from the top left would catch it; too small to draw on a tiny face. */}
-            {look.eyeKind === "round" && size >= 20 && <circle cx={f(x + rr * 0.35)} cy={f(look.eyeY - rr * 0.38)} r={f(rr * 0.32)} fill="#fff" fillOpacity={0.9} />}
+            {/* No shine in the eyes (Arun, 2026-11-15: "get rid of ... the white glitter in their eyes"). */}
           </g>
         ))}
       </g>
@@ -199,7 +257,14 @@ function EyesOf({ look, eyes, size }: { look: Look; eyes: Eyes; size: number }) 
  * A teammate's face at `size` px: its blob in its hue and its eyes, or (`letters`) its initials on the same blob. `breathing`
  * lets a working face drift; it holds still with reduced motion.
  */
-export const BlobFace = memo(function BlobFace({ seed, size, eyes = "open", breathing = false, letters, crowned = false }: { seed: string; size: number; eyes?: Eyes; breathing?: boolean; letters?: string; /** The lead: its crown is on its head, so nothing else is. */ crowned?: boolean }) {
+/** Each face's own rhythm, from its seed: when in its cycle it blinks, so a sidebar of faces never blinks as one. */
+function lifeOf(seed: string): CSSProperties {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+  return { "--blink-d": `${-(h % 70) / 10}s`, "--blink-t": `${5.5 + (h % 30) / 10}s` } as CSSProperties;
+}
+
+export const BlobFace = memo(function BlobFace({ seed, size, eyes = "open", breathing = false, letters, crowned = false, dozing = false }: { seed: string; size: number; eyes?: Eyes; breathing?: boolean; letters?: string; /** The lead: its crown is on its head, so nothing else is. */ crowned?: boolean; /** Asleep at rest: eyes shut until hovered (Teammates.tsx useDozing). */ dozing?: boolean }) {
   const look = lookOf(seed);
   const shape = shapeOf(seed);
   const fill = teamColour(seed);
@@ -207,23 +272,13 @@ export const BlobFace = memo(function BlobFace({ seed, size, eyes = "open", brea
   // A face as large as a page's header morphs its outline; a smaller one, which is nearly every face (rows, the sidebar, the
   // chat), breathes as a whole by transform, which the compositor runs: eight agents at work had their outlines re-drawn on the
   // main thread every frame, in every place their faces showed (Arun, 2026-11-04: "look at app performance… a lot of agents").
-  const morph = moving && size >= 40;
+  const morph = moving && size >= 40 && !look.box;
   const extra = letters || (crowned && onTop(look.extra)) ? "none" : look.extra;
   // Something on its head: the body a little smaller and lower, so all of it stays in the face's circle and its ring.
   const top = onTop(extra);
   return (
     // Its size inline: the places a face sits size their own icons' svgs (".rsp-avatar svg" and the like), never a face's.
-    <svg className={`tm-face tm-blob${moving && !morph ? " tm-breathe" : ""}`} width={size} height={size} style={{ width: size, height: size }} viewBox="-50 -50 100 100" aria-hidden="true" focusable="false">
-      {extra === "ears" && (
-        <g fill={fill}>
-          {[-1, 1].map((s) => (
-            <g key={s}>
-              <circle cx={s * 25} cy={-29} r={12} />
-              <circle cx={s * 25} cy={-29} r={5.5} fill={shade(fill, 0.78)} />
-            </g>
-          ))}
-        </g>
-      )}
+    <svg className={`tm-face tm-blob${moving && !morph ? " tm-breathe" : ""}${dozing ? " tm-dozing" : ""}`} width={size} height={size} style={{ width: size, height: size, ...lifeOf(seed) }} viewBox="-50 -50 100 100" aria-hidden="true" focusable="false">
       {extra === "antenna" && (
         // In a deeper shade of its own colour, so it reads on either ground and grows out of its head rather than floating.
         <g>
@@ -258,7 +313,17 @@ export const BlobFace = memo(function BlobFace({ seed, size, eyes = "open", brea
                 {[-1, 1].flatMap((s) => [0, 1, 2].map((i) => <circle key={`${s}${i}`} cx={f(look.eyeX + s * (look.eyeGap + 4 + i * 4))} cy={f(look.eyeY + 13 + (i === 1 ? 2.5 : 0))} r={1.5} />))}
               </g>
             )}
-            <EyesOf look={look} eyes={eyes} size={size} />
+            {/* Its eyes as one group, for the blink and the glance teammates.css gives them (Arun, 2026-11-15: "make the mascots feel
+                alive and have some movement over hover"). */}
+            <g className="tm-eyes">
+              <EyesOf look={look} eyes={eyes} size={size} />
+            </g>
+            {/* Dozing, its shut eyes over the open ones, which a hover brings back (teammates.css). */}
+            {dozing && eyes === "open" && (
+              <g className="tm-eyes-shut">
+                <EyesOf look={look} eyes="closed" size={size} />
+              </g>
+            )}
           </>
         )}
       </g>

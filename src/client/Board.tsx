@@ -15,6 +15,7 @@ import { hostApi, useMachine } from "./local.js";
 import { usePrs } from "./prWatch.js";
 import { QuickHeader, RiskChip, approveTogether, type Approvable } from "./reviewRisk.js";
 import { ChartLineIcon, CheckIcon, ChevronRightIcon, CopyIcon, GitPullRequestIcon, LayoutGridIcon, SearchIcon, XIcon } from "lucide-react";
+import { isLocal } from "./edition.js";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -235,7 +236,7 @@ function Card({ card, onOpen, solo, focused, onFocus, action }: { card: BoardCar
         {!solo && card.people && card.people.length > 0 && (
           <span className="flex shrink-0 items-center -space-x-1.5" aria-label={`In the room: ${card.people.map((p) => p.name).join(", ")}`}>
             {card.people.slice(0, 3).map((p) => (
-              <span key={p.id} className={cn("rounded-full ring-2 ring-[var(--bg)]", p.waiting && "ring-[var(--dass-needs)]")} title={p.waiting ? `${p.name} · the agent is waiting on them` : `${p.name} is here`}>
+              <span key={p.id} className={cn("rounded-[8px] ring-2 ring-[var(--bg)]", p.waiting && "ring-[var(--dass-needs)]")} title={p.waiting ? `${p.name} · the agent is waiting on them` : `${p.name} is here`}>
                 <Avatar name={p.name} id={p.id} size={18} />
               </span>
             ))}
@@ -453,7 +454,7 @@ function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; chi
       aria-pressed={on}
       onClick={onClick}
       className={cn(
-        "h-7 rounded-full border-[var(--border)] bg-transparent px-3 text-[12px] font-medium text-[var(--ink-2)] shadow-none hover:bg-[var(--hover)] hover:text-[var(--ink)] dark:bg-transparent",
+        "h-7 rounded-[8px] border-[var(--border)] bg-transparent px-3 text-[12px] font-medium text-[var(--ink-2)] shadow-none hover:bg-[var(--hover)] hover:text-[var(--ink)] dark:bg-transparent",
         on && "border-[var(--ink)] bg-[var(--ink)] text-[var(--bg)] hover:bg-[var(--ink)] hover:text-[var(--bg)] dark:bg-[var(--ink)]",
       )}
     >
@@ -623,8 +624,9 @@ export function Board({ identity, recents, projects, onOpen, onNew, onReview, so
     if (c.gh?.checks === "failing") return { label: `${n} checks`, title: "Its failing checks, on GitHub", icon: true, run: () => openOutside(`${c.pr!.url}/checks`) };
     return { label: n, title: "Open the pull request on GitHub", icon: true, run: () => openOutside(c.pr!.url) };
   };
-  const active = found.length;
   const idle = by("idle");
+  // What the board shows: in the open-source edition, without the idle ones it no longer lists.
+  const active = isLocal() ? found.length - idle.length : found.length;
   const usedProjects = projects.filter((p) => recents.some((r) => r.projectId === p.id));
 
   // Keys: the board is a grid of cards.
@@ -863,7 +865,8 @@ export function Board({ identity, recents, projects, onOpen, onNew, onReview, so
 
             {/* Sessions with nothing running: folded under a hairline, so the four lanes stay the board. */}
             {/* Shown only when something is idle: "Idle 0 · Nothing running" said nothing worth a line. */}
-            {!onlyYou && idle.length > 0 && (
+            {/* None in the open-source edition (Arun, 2026-11-15: "get rid of this idle stuff too"): the board is what is moving. */}
+            {!isLocal() && !onlyYou && idle.length > 0 && (
             <Collapsible open={idleOpen} onOpenChange={setIdleOpen} className="mt-2 border-t border-[var(--border)] pt-3">
               <CollapsibleTrigger asChild>
                 <Button variant="ghost" size="sm" className="h-8 gap-2 px-2 text-[13px] font-semibold text-[var(--ink)] hover:bg-[var(--hover)]">

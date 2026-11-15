@@ -186,7 +186,8 @@ function useNames(team: Team | null, pick?: (id: string) => boolean) {
     const onLane = (lane: string): TeammateView | null => mates.find((m) => m.lane === lane) ?? ((id) => mates.find((m) => m.id === id) ?? null)(rooms.map((r) => Object.entries(r.lanes).find(([, l]) => l === lane)?.[0]).find(Boolean));
     return {
       mates,
-      rooms,
+      // A crew mate's threads aren't rooms a workflow works in.
+      rooms: rooms.filter((r) => !r.thread),
       /** The teammates a trigger, or a template's steps, name: your own, on the hosted service (a step may name anyone's: asked of its keeper). */
       pickable: pick ? mates.filter((m) => pick(m.id)) : mates,
       /** Whose a teammate is, on the hosted service, when it isn't yours: its keeper's name. */
@@ -325,9 +326,16 @@ export function TeamWorkflowsPage({ identity, open, onList }: { identity: Identi
   const wf = useCrewWorkflows(identity);
   const { team, names, list } = wf;
   const [editing, setEditing] = useState<{ id: string | null; draft: Draft; fresh?: boolean } | null>(open === "new" ? { id: null, fresh: true, draft: blank() } : null);
+  // A template picked on the Automations page ("tpl:<id>"), made a new workflow once the crew is known, its steps given to them.
+  useEffect(() => {
+    if (!open.startsWith("tpl:") || editing || !team) return;
+    const t = WORKFLOW_TEMPLATES.find((x) => x.id === open.slice(4));
+    if (!t) return onList();
+    setEditing({ id: null, draft: { ...blank(), ...fromTemplate(t, names.pickable.map((m) => ({ id: m.id, name: m.name, role: m.role }))), name: t.name } });
+  }, [open, team]); // eslint-disable-line react-hooks/exhaustive-deps
   // An existing one opens once the list has it.
   useEffect(() => {
-    if (open === "new" || editing || !list) return;
+    if (open === "new" || open.startsWith("tpl:") || editing || !list) return;
     const w = list.find((x) => x.id === open);
     if (w) setEditing({ id: w.id, draft: draftOf(w) });
     else onList();

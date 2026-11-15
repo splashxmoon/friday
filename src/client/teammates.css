@@ -164,7 +164,7 @@ html.dark .tm-time { color-scheme: dark; }
   .tm-form textarea { min-height: 56px; }
   .tm-tool { height: 36px; }
   .tm-where { padding-top: 12px; gap: 10px; }
-  .tm-field > small, .tm-row-input > small { display: none; }
+  .tm-dialog .tm-field > small, .tm-dialog .tm-row-input > small { display: none; }
 }
 
 /* Over a message in the Team room: who it went to. */
@@ -359,7 +359,7 @@ body[style*="pointer-events: none"] > .amp { pointer-events: auto; }
 /* In a teammate's own chat its model picker sits between the field and send, never squeezing the field under a line. */
 .composer:has(> .team-box-mark) .prompt [data-slot="input-group"] > [data-slot="input-group-addon"]:last-child > div:first-child > .menu-pill { flex: none; align-self: center; margin-bottom: 0; }
 .composer:has(> .team-box-mark) .prompt [data-slot="input-group"] > [data-slot="input-group-addon"]:last-child :is(button[aria-label="Add files"], div:last-child > button) {
-  width: 32px !important; height: 32px !important; min-width: 32px; margin: 0 0 7px !important; padding: 0; border-radius: var(--r-pill) !important;
+  width: 32px !important; height: 32px !important; min-width: 32px; margin: 0 0 7px !important; padding: 0; border-radius: var(--r-md) !important;
   border: 0 !important; display: grid; place-items: center;
 }
 .composer:has(> .team-box-mark) .prompt [data-slot="input-group"] > [data-slot="input-group-addon"]:last-child button[aria-label="Add files"] { margin-left: 2px !important; border-radius: var(--r-md) !important; background: transparent; color: var(--ink-3); }
@@ -455,6 +455,15 @@ html .tm-row[data-active="true"] { background: var(--sel-bg, var(--hover-strong)
 /* The agents' talk among themselves, folded (TalkGroup): one quiet line, faces, who and how many, the last words greyed;
    opened, each message as it was, in a tray. */
 .talk-group { max-width: 760px; }
+/* A crew mate's crew work, one line in its own chat that takes you to the Crew room (CrewWorkLine). */
+.crew-work-line { display: flex; align-items: center; gap: 8px; max-width: 760px; width: 100%; min-height: 30px; padding: 0 10px; border: 1px dashed var(--border); border-radius: var(--r-md); background: none; color: var(--text-muted); font: 12px/16px var(--font); text-align: left; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out); }
+.crew-work-line:hover, .crew-work-line:focus-visible { background: var(--hover); color: var(--ink-2); }
+.crew-work-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); }
+.crew-work-line[data-live] .crew-work-dot { background: var(--green); }
+.crew-work-what { overflow: hidden; min-width: 0; color: var(--ink-2); text-overflow: ellipsis; white-space: nowrap; }
+.crew-work-go { display: inline-flex; flex: none; align-items: center; gap: 2px; margin-left: auto; }
+.crew-work-go svg { width: 13px; height: 13px; }
+
 /* A system line (DIRECTION.md §5): 12px --ink-3, the faces inline, one quiet line that opens. */
 .talk-group-head { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 28px; padding: 2px 8px 2px 6px; border: 0; border-radius: var(--r-md); background: transparent; color: var(--text-muted); font: inherit; font-size: 12px; text-align: left; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out); }
 .talk-group-head:hover { background: var(--tray-hover, var(--hover)); color: var(--ink-2); }
@@ -1333,6 +1342,49 @@ html.dark { --badge-work: #4d8eff; --badge-need: #f7b23b; --badge-done: #2fbf71;
 /* A crew mate's settings as a tab of its chat's side panel (Workbench.tsx "mate", TeammatePage.tsx MateSettingsBody): each category
    a card with what it is set to now, the plan's cards; opened, a page of the panel with Back. */
 .msd-pane { height: 100%; padding: 14px; overflow-y: auto; }
+/* A crew mate's settings, design A of the mockup (Arun, 2026-11-15: "in our design language and change it up a bit"): who it is
+   as a card with its face and its name edited in place, what it does, four tiles that say how it works, a short list, and
+   Remove as a quiet link at the foot. */
+.msd-home { gap: 14px; padding-bottom: 6px; }
+.msd-id { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
+.msd-id-face { position: relative; flex: none; display: grid; place-items: center; width: 56px; height: 56px; padding: 0; border: 0; border-radius: 14px; background: none; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out); }
+.msd-id-face:hover { background: var(--hover); }
+.msd-id-face:focus-visible { outline: 2px solid var(--ink-2); outline-offset: 1px; }
+.msd-id-pencil { position: absolute; right: -3px; bottom: -3px; display: grid; place-items: center; width: 20px; height: 20px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--card); color: var(--ink-2); }
+.msd-id-face:hover .msd-id-pencil { color: var(--ink); }
+.msd-id-pencil svg { width: 11px; height: 11px; }
+.msd-id-text { display: flex; flex: 1; flex-direction: column; gap: 1px; min-width: 0; }
+.msd-id-name { width: 100%; min-width: 0; height: 28px; margin-left: -6px; padding: 0 6px; border: 1px solid transparent; border-radius: 7px; background: none; color: var(--ink); font: 600 15px/20px var(--font); letter-spacing: -0.01em; outline: none; transition: background-color var(--t-hover) var(--ease-out), border-color var(--t-hover) var(--ease-out); }
+.msd-id-name:hover { background: var(--hover); }
+.msd-id-name:focus { border-color: var(--border-strong); background: var(--card); }
+.msd-id-name[aria-invalid="true"] { border-color: var(--red); }
+.msd-id-line { display: flex; align-items: baseline; gap: 6px; min-width: 0; color: var(--text-muted); font-size: 12px; line-height: 17px; }
+.msd-id-line b { flex: none; color: var(--ink-2); font-weight: 500; }
+.msd-id-line b + span::before { content: "·"; margin-right: 6px; color: var(--text-muted); }
+.msd-id-line span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msd-id-line em { color: var(--green); font-style: normal; }
+.msd-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.msd-field > label { color: var(--ink-2); font: 500 12.5px/18px var(--font); }
+.msd-field > label em { color: var(--green); font-style: normal; font-weight: 400; }
+.msd-field textarea { min-height: 76px; resize: vertical; background: var(--card); font-size: 13px; line-height: 19px; }
+.msd-field small { color: var(--text-muted); font-size: 12px; line-height: 16px; }
+.msd-err { color: var(--red) !important; font-size: 12px; line-height: 16px; }
+.msd-rows { margin: 0; padding: 0; list-style: none; border: 1px solid var(--border); border-radius: 10px; background: var(--card); overflow: hidden; }
+.msd-rows > li + li { border-top: 1px solid var(--border); }
+.msd-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 38px; padding: 0 10px 0 12px; border: 0; background: none; color: var(--ink); font: 13px/18px var(--font); text-align: left; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out); }
+.msd-row:hover { background: var(--hover); }
+.msd-row:focus-visible { outline: 2px solid var(--ink-2); outline-offset: -2px; }
+.msd-row-icon { display: grid; flex: none; place-items: center; width: 16px; color: var(--text-muted); }
+.msd-row-icon svg { width: 15px; height: 15px; }
+.msd-row-label { flex: none; white-space: nowrap; }
+.msd-row-now { flex: 1; min-width: 0; overflow: hidden; color: var(--text-muted); font-size: 12px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.msd-row-chev { flex: none; width: 15px; height: 15px; margin-left: auto; color: var(--text-muted); }
+.msd-row-now + .msd-row-chev { margin-left: 0; }
+.msd-remove { align-self: flex-start; height: 26px; margin: 2px 0 0 -6px; padding: 0 6px; border: 0; border-radius: 6px; background: none; color: var(--text-muted); font: 12.5px var(--font); cursor: pointer; transition: color var(--t-hover) var(--ease-out), background-color var(--t-hover) var(--ease-out); }
+.msd-remove:hover, .msd-remove:focus-visible { background: color-mix(in srgb, var(--red) 10%, transparent); color: var(--red); }
+.msd-look { width: 100%; max-width: none; margin: 4px 0 0; gap: 14px; }
+.msd-look .nag-shapes { flex-wrap: wrap; justify-content: center; max-width: 100%; margin: 2px 0; }
+
 .msd { display: flex; flex-direction: column; gap: 12px; }
 .msd-card { overflow: visible; }
 .msd-card .tp-card-head { align-items: center; }
@@ -1429,3 +1481,491 @@ html.dark { --badge-work: #4d8eff; --badge-need: #f7b23b; --badge-done: #2fbf71;
 .tp-dots { gap: 9px; }
 .tp-dots-more { color: var(--text-muted); font-size: 10px; }
 @media (prefers-reduced-motion: reduce) { .tp-state[data-tone="work"] i, .tp-dot-face[data-tone="work"] { animation: none; } }
+
+/* A crew mate's threads under its name (TeammatePage.tsx MateThreads): Main, its newest threads, New thread. Selection is a fill,
+   as the sidebar's is; a thread at work has a green dot. */
+.tm-threads { display: flex; align-items: center; gap: 4px; margin: 10px 0 0; overflow-x: auto; scrollbar-width: none; }
+.tm-threads::-webkit-scrollbar { display: none; }
+.tm-thread { display: inline-flex; flex: none; align-items: center; gap: 6px; height: 28px; max-width: 200px; padding: 0 10px; border: 0; border-radius: 8px; background: none; color: var(--text-muted); font: 12.5px/16px var(--font); cursor: pointer; transition: background-color var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out); }
+.tm-thread:hover { background: var(--hover); color: var(--ink-2); }
+.tm-thread:focus-visible { outline: 2px solid var(--ink-2); outline-offset: -2px; }
+.tm-thread[aria-current="page"] { background: var(--surface-selected, var(--hover-strong)); color: var(--ink); font-weight: 500; cursor: default; }
+.tm-thread-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tm-thread-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+.tm-thread-more { color: var(--text-muted); }
+.tm-thread-new { gap: 4px; padding: 0 9px 0 7px; color: var(--ink-2); }
+.tm-thread-new svg { width: 14px; height: 14px; }
+.tm-thread-new[aria-busy] { opacity: 0.6; cursor: progress; }
+
+
+/* A crew mate's chat's title in the window's header (TeammatePage.tsx MateTitle): face, name, and the thread as a menu. */
+.mt-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mt-face { display: inline-flex; flex: none; line-height: 0; }
+.mt-title .mt-name { flex: none; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mt-sep { flex: none; width: 14px; height: 14px; margin: 0 -3px; color: var(--text-muted); }
+.mt-thread { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 320px; height: 28px; padding: 0 6px 0 8px; border: 0; border-radius: 8px; background: none; color: var(--ink-2); font: 500 13.5px/18px var(--font); cursor: pointer; -webkit-app-region: no-drag; transition: background-color var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out); }
+.mt-thread:hover, .mt-thread.on { background: var(--hover); color: var(--ink); }
+.mt-thread:focus-visible { outline: 2px solid var(--ink-2); outline-offset: -2px; }
+.mt-thread-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mt-thread-caret { flex: none; width: 14px; height: 14px; color: var(--text-muted); }
+.mt-new svg { width: 17px; height: 17px; }
+.mt-new[aria-busy] { opacity: 0.6; cursor: progress; }
+
+/* An empty crew mate chat: who you're talking to and how to begin (MateHello). */
+.mt-hello { display: flex; flex-direction: column; align-items: center; gap: 6px; margin: 12vh auto 0; max-width: 420px; text-align: center; }
+.mt-hello h2 { margin: 10px 0 0; color: var(--ink); font-size: 20px; font-weight: 600; line-height: 26px; letter-spacing: -0.01em; }
+.mt-hello-about { margin: 0; color: var(--ink-2); font-size: 14px; line-height: 21px; text-wrap: balance; }
+.mt-hello-off { margin: 8px 0 0; color: var(--mate-offline, var(--text-muted)); font-size: 13px; line-height: 19px; text-wrap: balance; }
+.mt-hello-how { margin: 8px 0 0; color: var(--text-muted); font-size: 13px; line-height: 19px; text-wrap: balance; }
+.mt-held { display: flex; align-items: center; gap: 8px; margin: 0; padding: 8px 12px; border: 1px solid color-mix(in srgb, var(--amber) 40%, var(--border)); border-radius: 10px; background: color-mix(in srgb, var(--amber) 7%, var(--card)); color: var(--ink-2); font-size: 13px; }
+.mt-held .tm-link { margin-left: auto; }
+
+/* A queued message's Edit and Take back, as icons (TeamControls.tsx QueuedActions). */
+.tm-queued-acts { display: inline-flex; align-items: center; gap: 2px; margin-left: 6px; vertical-align: middle; }
+.tm-queued-btn { display: inline-grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--text-muted); cursor: pointer; transition: background-color var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out); }
+.tm-queued-btn:hover, .tm-queued-btn:focus-visible { background: var(--hover); color: var(--ink); }
+.tm-queued-btn:disabled { opacity: 0.5; cursor: default; }
+.tm-queued-btn svg { width: 13px; height: 13px; }
+
+/* A crew mate's threads as tabs in the window's header (TeammatePage.tsx MateTitle): Main, then each open thread with its ×,
+   + for a new one, and the menu of every thread. The one you are in is a fill, as the sidebar's selection is. */
+.mt-tabs { display: flex; align-items: center; gap: 2px; min-width: 0; margin-left: 6px; overflow-x: auto; scrollbar-width: none; -webkit-app-region: no-drag; }
+.mt-tabs::-webkit-scrollbar { display: none; }
+.mt-tab { display: inline-flex; flex: none; align-items: center; height: 28px; max-width: 200px; border-radius: 8px; color: var(--text-muted); font: 13px/18px var(--font); transition: background-color var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out); }
+button.mt-tab { padding: 0 10px; border: 0; background: none; cursor: pointer; }
+.mt-tab:hover { background: var(--hover); color: var(--ink-2); }
+.mt-tab[aria-selected="true"] { background: var(--surface-selected, var(--hover-strong)); color: var(--ink); font-weight: 500; }
+.mt-tab-open { display: inline-flex; align-items: center; gap: 6px; min-width: 0; height: 100%; padding: 0 2px 0 10px; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+.mt-tab-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mt-tab-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+.mt-tab-x { display: grid; flex: none; place-items: center; width: 20px; height: 20px; margin: 0 4px 0 2px; padding: 0; border: 0; border-radius: 5px; background: none; color: var(--text-muted); opacity: 0; cursor: pointer; transition: opacity var(--t-hover) var(--ease-out), background-color var(--t-hover) var(--ease-out); }
+.mt-tab:hover .mt-tab-x, .mt-tab[aria-selected="true"] .mt-tab-x, .mt-tab-x:focus-visible { opacity: 1; }
+.mt-tab-x:hover { background: var(--hover-strong); color: var(--ink); }
+.mt-tab-x svg { width: 12px; height: 12px; }
+.mt-tab-new, .mt-more { display: grid; flex: none; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 7px; background: none; color: var(--text-muted); cursor: pointer; -webkit-app-region: no-drag; transition: background-color var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out); }
+.mt-tab-new:hover, .mt-more:hover, .mt-more.on { background: var(--hover); color: var(--ink); }
+.mt-tab-new svg, .mt-more svg { width: 15px; height: 15px; }
+.mt-tab:focus-visible, .mt-tab-open:focus-visible, .mt-tab-new:focus-visible, .mt-more:focus-visible { outline: 2px solid var(--ink-2); outline-offset: -2px; }
+
+/* A crew mate's settings in categories again (Arun, 2026-11-15): each group named, its rows one card. */
+.msd-group { display: flex; flex-direction: column; gap: 6px; }
+.msd-group-name { margin: 0; padding: 0 2px; color: var(--text-muted); font: 500 12px/16px var(--font); }
+
+/* Fallbacks (TeammatePage.tsx MateFallbacks). */
+.mfb { display: flex; flex-direction: column; gap: 14px; }
+.mfb-lead { margin: 0; color: var(--ink-2); font-size: 13px; line-height: 19px; }
+.mfb-list { margin: 0; padding: 0; list-style: none; border: 1px solid var(--border); border-radius: 10px; background: var(--card); overflow: hidden; }
+.mfb-list li { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 8px 0 12px; font-size: 13px; }
+.mfb-list li + li { border-top: 1px solid var(--border); }
+.mfb-own { color: var(--text-muted); }
+.mfb-i { display: grid; flex: none; place-items: center; width: 18px; height: 18px; border-radius: 5px; background: var(--hover); color: var(--ink-2); font-size: 11px; font-variant-numeric: tabular-nums; }
+.mfb-n { flex: 1; min-width: 0; overflow: hidden; color: var(--ink); text-overflow: ellipsis; white-space: nowrap; }
+.mfb-own .mfb-n { color: var(--text-muted); }
+.mfb-tag { flex: none; padding: 1px 7px; border-radius: 6px; background: var(--hover); color: var(--text-muted); font-size: 11.5px; }
+.mfb-acts { display: inline-flex; flex: none; gap: 2px; }
+.mfb-btn { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--text-muted); cursor: pointer; }
+.mfb-btn:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
+.mfb-btn:disabled { opacity: 0.35; cursor: default; }
+.mfb-btn svg { width: 14px; height: 14px; }
+.mfb-add { display: inline-flex; align-self: flex-start; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border: 1px dashed var(--border-strong); border-radius: 8px; background: none; color: var(--ink-2); font: 500 13px var(--font); cursor: pointer; }
+.mfb-add:hover, .mfb-add.on { background: var(--hover); color: var(--ink); }
+.mfb-add svg { width: 14px; height: 14px; }
+
+/* A switch waiting on you, at the foot of the chat (MateSwitchAsk). */
+.mt-ask { display: flex; flex-direction: column; gap: 10px; max-width: 760px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--amber) 45%, var(--border)); border-radius: 12px; background: color-mix(in srgb, var(--amber) 7%, var(--card)); }
+.mt-ask p { margin: 0; color: var(--ink-2); font-size: 13px; line-height: 19px; }
+.mt-ask b { color: var(--ink); font-weight: 500; }
+.mt-ask-acts { display: flex; gap: 8px; }
+
+.mfb-toggle { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
+.mfb-toggle-text { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
+.mfb-toggle-text b { color: var(--ink); font-size: 13px; font-weight: 500; line-height: 18px; }
+.mfb-toggle-text span { color: var(--text-muted); font-size: 12px; line-height: 16px; }
+.mfb-pick { flex: 1; min-width: 0; }
+.mfb-list li { min-height: 44px; }
+
+/* A crew mate's routines (MateRoutines.tsx): cards that turn on and off where they stand, and an editor on Friday's own controls. */
+.rt { display: flex; flex-direction: column; gap: 14px; }
+.rt-head { display: flex; align-items: center; gap: 10px; }
+.rt-head p { flex: 1; margin: 0; color: var(--ink-2); font-size: 13px; line-height: 19px; }
+.rt-list { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.rt-card { display: flex; align-items: center; gap: 8px; padding: 4px 10px 4px 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); transition: border-color var(--t-hover) var(--ease-out); }
+.rt-card:hover { border-color: var(--border-strong); }
+.rt-card[data-off] .rt-card-main b, .rt-card[data-off] .rt-card-sched { color: var(--text-muted); }
+.rt-card-main { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; padding: 8px 10px; border: 0; border-radius: 9px; background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.rt-card-main:hover { background: var(--hover); }
+.rt-card-main:focus-visible { outline: 2px solid var(--ink-2); outline-offset: -2px; }
+.rt-card-main b { overflow: hidden; font-size: 13.5px; font-weight: 500; line-height: 19px; text-overflow: ellipsis; white-space: nowrap; }
+.rt-card-sched { overflow: hidden; color: var(--ink-2); font-size: 12px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
+.rt-card-next { color: var(--text-muted); font-size: 12px; line-height: 16px; font-variant-numeric: tabular-nums; }
+.rt-card-acts { display: inline-flex; flex: none; align-items: center; gap: 6px; }
+.rt-icon { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 8px; background: none; color: var(--text-muted); cursor: pointer; }
+.rt-icon:hover, .rt-icon:focus-visible { background: var(--hover); color: var(--ink); }
+.rt-icon svg { width: 14px; height: 14px; }
+.rt-note { margin: 0; color: var(--green); font-size: 12.5px; }
+.rt-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 14px; border: 1px dashed var(--border-strong); border-radius: 12px; }
+.rt-empty p { margin: 0; color: var(--text-muted); font-size: 12.5px; }
+.rt-empty .rt-empty-title { color: var(--ink); font-size: 13.5px; font-weight: 500; }
+.rt-starters { display: flex; flex-direction: column; gap: 6px; width: 100%; margin: 4px 0; padding: 0; list-style: none; }
+.rt-starter { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 9px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); color: var(--ink); font: inherit; text-align: left; cursor: pointer; transition: border-color var(--t-hover) var(--ease-out), background-color var(--t-hover) var(--ease-out); }
+.rt-starter:hover { border-color: var(--border-strong); background: var(--hover); }
+.rt-starter b { font-size: 13px; font-weight: 500; }
+.rt-starter span { color: var(--text-muted); font-size: 12px; }
+.rt-edit { gap: 16px; }
+.rt-field { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.rt-field > span { color: var(--ink-2); font: 500 12.5px/18px var(--font); }
+.rt-field textarea { min-height: 72px; resize: vertical; background: var(--card); font-size: 13px; line-height: 19px; }
+.rt-field input { background: var(--card); }
+.rt-seg { display: flex; flex-wrap: wrap; gap: 2px; padding: 3px; border: 1px solid var(--border); border-radius: 10px; background: var(--hover); }
+.rt-seg-opt { flex: 1 1 auto; min-height: 28px; padding: 0 10px; border: 0; border-radius: 7px; background: none; color: var(--ink-2); font: 500 12.5px var(--font); white-space: nowrap; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out), box-shadow var(--t-hover) var(--ease-out); }
+.rt-seg-opt:hover { color: var(--ink); }
+.rt-seg-opt[aria-checked="true"] { background: var(--card); color: var(--ink); box-shadow: 0 1px 2px rgb(0 0 0 / 0.12), 0 0 0 1px var(--border); }
+.rt-seg-opt:focus-visible { outline: 2px solid var(--ink-2); outline-offset: -2px; }
+.rt-seg-two .rt-seg-opt { flex: 1 1 0; }
+.rt-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.rt-chip { min-width: 40px; height: 30px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--ink-2); font: 500 12.5px var(--font); font-variant-numeric: tabular-nums; cursor: pointer; transition: border-color var(--t-hover) var(--ease-out), background-color var(--t-hover) var(--ease-out); }
+.rt-chip:hover { border-color: var(--border-strong); color: var(--ink); }
+.rt-chip[aria-checked="true"], .rt-chip[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: var(--bg); }
+.rt-day { width: 34px; min-width: 34px; padding: 0; }
+.rt-time { display: inline-flex; align-self: flex-start; align-items: center; gap: 4px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
+.rt-spin { display: inline-flex; flex-direction: column; align-items: center; }
+.rt-spin-btn { display: grid; place-items: center; width: 34px; height: 16px; padding: 0; border: 0; border-radius: 5px; background: none; color: var(--text-muted); cursor: pointer; }
+.rt-spin-btn:hover { background: var(--hover); color: var(--ink); }
+.rt-spin-btn svg { width: 13px; height: 13px; }
+.rt-spin-v { display: grid; place-items: center; width: 34px; height: 26px; border-radius: 6px; color: var(--ink); font: 600 17px/1 var(--font); font-variant-numeric: tabular-nums; cursor: ns-resize; outline: none; }
+.rt-spin-v:focus-visible { background: var(--hover); box-shadow: 0 0 0 2px var(--ink-2); }
+.rt-colon { color: var(--text-muted); font: 600 17px/1 var(--font); }
+.rt-ampm { display: inline-flex; flex-direction: column; gap: 2px; margin-left: 6px; padding: 2px; border-radius: 7px; background: var(--hover); }
+.rt-ampm-opt { height: 20px; padding: 0 8px; border: 0; border-radius: 5px; background: none; color: var(--text-muted); font: 600 11px var(--font); cursor: pointer; }
+.rt-ampm-opt[aria-checked="true"] { background: var(--card); color: var(--ink); box-shadow: 0 0 0 1px var(--border); }
+.rt-next { color: var(--text-muted); font-size: 12px; line-height: 16px; }
+.rt-toggle { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
+.rt-toggle > span { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
+.rt-toggle b { color: var(--ink); font-size: 13px; font-weight: 500; }
+.rt-toggle small { color: var(--text-muted); font-size: 12px; line-height: 16px; }
+.rt-foot { display: flex; align-items: center; gap: 8px; padding-top: 2px; }
+.rt-foot-acts { display: inline-flex; gap: 8px; margin-left: auto; }
+
+/* A crew mate's chat's header as a tab strip (Arun, 2026-11-15: "make these feel like actual tabs ... connected to the horizontal line
+   below it and also make the header slightly slimmer"): slimmer, its threads standing on its bottom line, the one you are in open
+   into the chat below it with the line broken under it; the rest plain words until pointed at. */
+.session-view > .topbar[data-mate] { min-height: 46px; padding-top: 0; padding-bottom: 0; align-items: stretch; }
+.topbar[data-mate] .tb-left, .topbar[data-mate] .tb-title { overflow: visible; }
+.topbar[data-mate] .tb-right { align-self: center; }
+.topbar[data-mate] .mt-title { align-self: stretch; align-items: flex-end; gap: 8px; }
+.topbar[data-mate] .mt-face { margin-bottom: 6px; }
+.topbar[data-mate] .mt-title .mt-name { margin-bottom: 7px; padding: 0; line-height: 20px; }
+.topbar[data-mate] .mt-tabs { align-self: stretch; align-items: flex-end; gap: 0; margin-left: 10px; overflow: visible; min-width: 0; }
+.topbar[data-mate] .mt-tab { position: relative; flex: 0 1 auto; min-width: 64px; max-width: 180px; height: 34px; margin-bottom: -1px; border: 1px solid transparent; border-bottom: 0; border-radius: 9px 9px 0 0; background: none; color: var(--text-muted); font-weight: 400; }
+.topbar[data-mate] button.mt-tab { padding: 0 12px; }
+.topbar[data-mate] .mt-tab:hover:not([aria-selected="true"]) { background: color-mix(in srgb, var(--hover) 70%, transparent); color: var(--ink-2); }
+.topbar[data-mate] .mt-tab[aria-selected="true"] { z-index: 1; border-color: var(--border); background: var(--bg); color: var(--ink); font-weight: 500; }
+/* The line under the open tab is the tab's own ground: it opens into the chat. */
+.topbar[data-mate] .mt-tab[aria-selected="true"]::after { content: ""; position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: var(--bg); }
+/* A thin divider between two tabs at rest, as tab strips have; none beside the open one. */
+.topbar[data-mate] .mt-tab + .mt-tab:not([aria-selected="true"])::before { content: ""; position: absolute; top: 10px; bottom: 10px; left: -1px; width: 1px; background: var(--border); }
+.topbar[data-mate] .mt-tab[aria-selected="true"] + .mt-tab::before { display: none; }
+.topbar[data-mate] .mt-tab-open { padding: 0 2px 0 12px; }
+.topbar[data-mate] .mt-tab-new, .topbar[data-mate] .mt-more { margin-bottom: 4px; }
+.topbar[data-mate] .mt-tab-new { margin-left: 4px; }
+
+/* A coding tool's mark beside what a profile row says (Arun, 2026-11-15: "add coding tool icons"). */
+.msd-row-now:has(.msd-row-mark) { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.msd-row-mark { display: inline-flex; flex: none; line-height: 0; }
+.mfb-own > svg, .mfb-own > img { flex: none; opacity: 0.8; }
+.msd-row-now-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* New agent, as Arun's reference had it in Friday's own words (2026-11-15): a slim header with Cancel, Create alone under the form. */
+.nag-head { display: flex; align-items: center; justify-content: space-between; align-self: stretch; height: 44px; margin: -20px 0 0; border-bottom: 1px solid var(--border); }
+.nag-head h1 { margin: 0; color: var(--ink); font-size: 14px; font-weight: 600; }
+.nag-cancel { height: 28px; padding: 0 10px; border: 0; border-radius: 7px; background: none; color: var(--ink-2); font: 500 13px var(--font); cursor: pointer; }
+.nag-cancel:hover { background: var(--hover); color: var(--ink); }
+.nag-acts { margin-top: 8px; }
+.nag-acts button { min-width: 132px; }
+
+/* Buttons and chips are rounded squares, never pills, everywhere (Arun, 2026-11-14: "stop switching between like completely
+   rounded buttons and only stick the square ones ... FOLLOW MY DESIGN LANGUAGE"). Dots, faces, switches and counts stay round. */
+.tm-template { border-radius: var(--r-md); }
+.tm-queued,
+.tm-head-lead,
+.tp-state { border-radius: var(--r-sm, 6px); }
+
+/* A crew mate's Profile tab, which never closes, keeps its right padding. */
+.mate-tab-btn { padding-right: 10px; }
+
+/* A crew mate's memory as notes (MateMemory.tsx). */
+.mm { display: flex; flex-direction: column; gap: 12px; }
+.mm-head { display: flex; align-items: center; gap: 12px; }
+.mm-meter { display: flex; flex: 1; flex-direction: column; gap: 6px; min-width: 0; }
+.mm-meter-words { display: flex; align-items: baseline; gap: 8px; }
+.mm-meter-words b { color: var(--ink); font-size: 13.5px; font-weight: 600; }
+.mm-meter-words span { color: var(--text-muted); font-size: 12px; }
+.mm-meter-bar { position: relative; height: 4px; overflow: hidden; border-radius: 2px; background: var(--hover-strong); }
+.mm-meter-bar i { position: absolute; inset: 0 auto 0 0; border-radius: 2px; background: var(--ink-2); transition: width .3s var(--ease-out); }
+.mm-meter-bar i[data-over] { background: var(--amber); }
+.mm-mode { flex: none; }
+.mm-mode .rt-seg-opt { flex: none; min-height: 24px; padding: 0 10px; font-size: 12px; }
+.mm-when { margin: -6px 0 0; color: var(--text-muted); font-size: 12px; }
+.mm-stale { display: flex; align-items: center; gap: 8px; margin: 0; padding: 8px 12px; border: 1px solid color-mix(in srgb, var(--amber) 40%, var(--border)); border-radius: 10px; background: color-mix(in srgb, var(--amber) 7%, var(--card)); color: var(--ink-2); font-size: 12.5px; }
+.mm-stale .tm-link { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; }
+.mm-add, .mm-search { display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 6px 0 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); transition: border-color var(--t-hover) var(--ease-out); }
+.mm-add:focus-within, .mm-search:focus-within { border-color: var(--border-strong); }
+.mm-add > svg, .mm-search > svg { flex: none; width: 15px; height: 15px; color: var(--text-muted); }
+.mm-add input, .mm-search input { flex: 1; min-width: 0; height: 100%; border: 0; background: none; color: var(--ink); font: 13px var(--font); outline: none; }
+.mm-add input::placeholder, .mm-search input::placeholder { color: var(--text-muted); }
+.mm-search { height: 32px; background: none; }
+.mm-btn { height: 26px; padding: 0 10px; border: 0; border-radius: 7px; background: var(--ink); color: var(--bg); font: 500 12.5px var(--font); cursor: pointer; }
+.mm-btn:disabled { opacity: 0.45; cursor: default; }
+.mm-btn.ghost { background: none; color: var(--ink-2); }
+.mm-btn.ghost:hover { background: var(--hover); color: var(--ink); }
+.mm-list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; border: 1px solid var(--border); border-radius: 10px; background: var(--card); overflow: hidden; }
+.mm-heading { padding: 10px 12px 4px; color: var(--text-muted); font-size: 11.5px; font-weight: 600; letter-spacing: 0.02em; }
+.mm-list > .mm-heading:not(:first-child) { margin-top: 4px; border-top: 1px solid var(--border); }
+.mm-note { position: relative; display: flex; align-items: flex-start; gap: 6px; padding: 2px 6px 2px 4px; }
+.mm-note + .mm-note { border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+.mm-note-text { flex: 1; min-width: 0; padding: 8px 8px; border: 0; border-radius: 7px; background: none; color: var(--ink); font: 13px/19px var(--font); text-align: left; overflow-wrap: anywhere; cursor: text; }
+.mm-note-text:hover { background: var(--hover); }
+.mm-note-tools { display: inline-flex; flex: none; gap: 2px; padding-top: 5px; opacity: 0; transition: opacity var(--t-hover) var(--ease-out); }
+.mm-note:hover .mm-note-tools, .mm-note:focus-within .mm-note-tools { opacity: 1; }
+.mm-icon { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--text-muted); cursor: pointer; }
+.mm-icon:hover { background: var(--hover); color: var(--ink); }
+.mm-icon svg { width: 13px; height: 13px; }
+.mm-note-edit { flex-direction: column; align-items: stretch; gap: 6px; padding: 8px 10px; background: var(--hover); }
+.mm-note-edit textarea { width: 100%; padding: 6px 8px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--card); color: var(--ink); font: 13px/19px var(--font); resize: vertical; outline: none; }
+.mm-note-acts { display: flex; justify-content: flex-end; gap: 6px; }
+.mm-none { padding: 12px; color: var(--text-muted); font-size: 12.5px; }
+.mm-empty { padding: 16px; border: 1px dashed var(--border-strong); border-radius: 12px; }
+.mm-empty p { margin: 0; color: var(--text-muted); font-size: 12.5px; line-height: 18px; }
+.mm-empty .mm-empty-title { margin-bottom: 4px; color: var(--ink); font-size: 13.5px; font-weight: 500; }
+.mm-text { display: flex; flex-direction: column; gap: 8px; }
+.mm-text textarea { min-height: 260px; background: var(--card); font: 12.5px/19px var(--font-mono, ui-monospace, monospace); }
+.mm-text-foot { display: flex; align-items: center; justify-content: space-between; color: var(--text-muted); font-size: 12px; }
+
+/* What a crew mate changed, as its files under its answer (Activity.tsx MateResult, open-source edition). */
+.mr-strip-wrap { display: flex; flex-direction: column; gap: 8px; max-width: 760px; }
+.mr-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.mr-file { display: inline-flex; align-items: center; gap: 6px; max-width: 240px; height: 30px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--ink); font: 12.5px var(--font); cursor: pointer; transition: border-color var(--t-hover) var(--ease-out), background-color var(--t-hover) var(--ease-out); }
+.mr-file:hover { border-color: var(--border-strong); background: var(--hover); }
+.mr-file:focus-visible { outline: 2px solid var(--ink-2); outline-offset: 1px; }
+.mr-file svg { flex: none; color: var(--text-muted); }
+.mr-file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mr-strip .mr-num { flex: none; color: var(--text-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.mr-more { color: var(--text-muted); font-size: 12px; }
+.mr-strip .mr-check { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
+.mr-review-btn { height: 30px; padding: 0 8px; border: 0; border-radius: 8px; background: none; color: var(--text-muted); font: 500 12.5px var(--font); cursor: pointer; }
+.mr-review-btn:hover { background: var(--hover); color: var(--ink); }
+.topbar[data-mate] .mt-title > .state-ring { align-self: flex-end; margin: 0 0 12px -2px; }
+
+/* Crew work in a crew mate's own chat, as a small group chat (Teammates.tsx CrewWorkLine). */
+.cw { display: flex; flex-direction: column; max-width: 560px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); overflow: hidden; }
+.cw-head { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 12px; border: 0; background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out); }
+.cw-head:hover { background: var(--hover); }
+.cw-head:focus-visible { outline: 2px solid var(--ink-2); outline-offset: -2px; }
+.cw-faces { display: inline-flex; flex: none; }
+.cw-face { display: inline-flex; border-radius: 50%; }
+.cw-face + .cw-face { margin-left: -6px; box-shadow: 0 0 0 2px var(--card); }
+.cw-title { display: flex; flex: 1; align-items: baseline; gap: 8px; min-width: 0; }
+.cw-title b { overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.cw-title span { flex: none; color: var(--text-muted); font-size: 12px; }
+.cw[data-live] .cw-title span { color: var(--green); }
+.cw-head .talk-group-chev { color: var(--text-muted); }
+.cw-msgs { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0 12px 10px 40px; list-style: none; }
+.cw-msg { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12.5px; line-height: 18px; }
+.cw-msg-face { display: inline-flex; flex: none; }
+.cw-msg b { flex: none; font-weight: 600; }
+.cw-msg > span { min-width: 0; overflow: hidden; color: var(--ink-2); text-overflow: ellipsis; white-space: nowrap; }
+.cw-typing b { color: var(--text-muted); font-weight: 500; }
+.cw-dots { display: inline-flex; gap: 3px; padding: 4px 8px; border-radius: 10px; background: var(--hover); }
+.cw-dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--text-muted); animation: cw-bounce 1.2s infinite ease-in-out; }
+.cw-dots i:nth-child(2) { animation-delay: .15s; }
+.cw-dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes cw-bounce { 0%, 60%, 100% { transform: translateY(0); opacity: .5; } 30% { transform: translateY(-3px); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .cw-dots i { animation: none; } }
+.cw-body { display: flex; flex-direction: column; gap: 12px; padding: 6px 12px 10px; border-top: 1px solid var(--border); }
+.cw-go { display: inline-flex; align-items: center; gap: 2px; align-self: stretch; height: 32px; padding: 0 12px; border: 0; border-top: 1px solid var(--border); background: none; color: var(--text-muted); font: 500 12px var(--font); text-align: left; cursor: pointer; }
+.cw-go:hover { background: var(--hover); color: var(--ink); }
+.cw-go svg { width: 13px; height: 13px; }
+
+.cw-thread { display: flex; flex-direction: column; gap: 12px; margin: 0; padding: 10px 14px 12px; list-style: none; border-top: 1px solid var(--border); }
+.cw-post { display: flex; align-items: flex-start; gap: 10px; }
+.cw-post > .tm-face-wrap, .cw-post > span:first-child { flex: none; margin-top: 1px; }
+.cw-post-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cw-post-head { display: flex; align-items: baseline; gap: 6px; font-size: 12px; }
+.cw-post-head b { font-size: 13px; font-weight: 600; }
+.cw-post-head span, .cw-post-head time { color: var(--text-muted); }
+.cw-post-body p { margin: 0; color: var(--ink); font-size: 13px; line-height: 19px; overflow-wrap: anywhere; }
+.cw-post-typing { align-items: center; }
+
+/* Who a crew mate waits on (crew-waiting.tsx): one line of who, each with how it stands. */
+.cwait { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; max-width: 760px; padding: 9px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
+.cwait-head { color: var(--text-muted); font-size: 12.5px; }
+.cwait-head b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.cwait-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.cwait-who { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px 0 4px; border-radius: 8px; background: var(--hover); font-size: 12.5px; }
+.cwait-name { color: var(--ink); font-weight: 500; }
+.cwait-state { color: var(--text-muted); }
+.cwait-who[data-state="working"] .cwait-state { color: var(--blue, var(--ink-2)); }
+.cwait-who[data-state="needs"] .cwait-state { color: var(--amber); }
+.cwait-who[data-state="replied"] .cwait-state { color: var(--green); }
+.cwait-who[data-state="stopped"] .cwait-state { color: var(--red); }
+
+/* A draft a crew mate would send, waiting on the person (crew-waiting.tsx DraftCard). */
+.dc { display: flex; flex-direction: column; gap: 10px; max-width: 620px; padding: 12px 14px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--card); }
+.dc-head { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.dc-head b { color: var(--ink); font-size: 13px; font-weight: 600; }
+.dc-head span { color: var(--text-muted); }
+.dc-draft { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 9px; background: var(--hover); }
+.dc-subject { margin: 0; color: var(--ink); font-size: 13px; font-weight: 600; }
+.dc-body { margin: 0; color: var(--ink); font-size: 13px; line-height: 19px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.dc-edit { width: 100%; padding: 6px 8px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--card); color: var(--ink); font: 13px/19px var(--font); resize: vertical; outline: none; }
+.dc-acts { display: flex; gap: 8px; }
+.dc-btn { height: 30px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--ink); font: 500 12.5px var(--font); cursor: pointer; }
+.dc-btn:hover { background: var(--hover); }
+.dc-btn.primary { border-color: var(--ink); background: var(--ink); color: var(--bg); }
+.dc-btn.primary:hover { opacity: 0.9; }
+.dc-btn.quiet { border-color: transparent; background: none; color: var(--ink-2); }
+.dc-btn:disabled { opacity: 0.45; cursor: default; }
+
+/* Who is at work, one chip each (Teammates.tsx TeamWorking, open-source edition). */
+.tw { display: flex; flex: 1 1 auto; align-items: center; gap: 6px; min-width: 0; overflow: hidden; }
+.tw-chip { display: inline-flex; flex: 0 1 auto; align-items: center; gap: 6px; min-width: 0; height: 26px; padding: 0 9px 0 5px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text-muted); font: 12.5px var(--font); white-space: nowrap; cursor: pointer; transition: border-color var(--t-hover) var(--ease-out), background-color var(--t-hover) var(--ease-out); }
+.tw-chip:hover { border-color: var(--border-strong); background: var(--hover); }
+.tw-chip:focus-visible { outline: 2px solid var(--ink-2); outline-offset: 1px; }
+.tw-chip > b { flex: none; color: var(--ink); font-weight: 500; }
+.tw-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tw-what::before { content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 6px 1px 0; border-radius: 50%; background: var(--green); vertical-align: middle; animation: tw-pulse 1.6s ease-in-out infinite; }
+@keyframes tw-pulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .tw-what::before { animation: none; opacity: .8; } }
+.tw-time { flex: none; font-variant-numeric: tabular-nums; }
+.tw-more { flex: none; color: var(--text-muted); font-size: 12.5px; }
+
+/* A room's profile (TeamControls.tsx RoomProfile): the crew mate profile's layout, with its members. */
+.rp-faces { width: auto; padding: 0 6px; }
+.rp-name { margin: 0; padding: 0; border: 0; line-height: 28px; }
+.rp-member { display: flex; align-items: center; }
+.rp-member > .msd-row { flex: 1; min-width: 0; }
+.rp-member > .msd-row .tm-face-wrap { flex: none; }
+.rp-lead { flex: none; padding: 1px 7px; border-radius: 6px; background: var(--hover); color: var(--ink-2); font-size: 11.5px; }
+.rp-more { flex: none; margin-right: 6px; opacity: 0; }
+.rp-member:hover .rp-more, .rp-more:focus-visible, .rp-more.on { opacity: 1; }
+.rp-add { color: var(--ink-2); }
+
+/* Where a crew mate's message to another stands, beside its time (Teammates.tsx TeamTalk, open-source edition). */
+.tt-seen { display: inline-flex; align-items: center; gap: 4px; min-width: 0; color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+.tt-seen.is-done svg, .tt-seen.is-read svg { color: var(--green); }
+.tt-seen.is-bad { color: var(--red); }
+.tt-seen.is-work { color: var(--ink-2); }
+.tt-seen .ring-spin { width: 11px; height: 11px; }
+
+/* A routine's When, one card (MateRoutines.tsx): how often across its top, a labelled row for each thing it asks, next run at its foot. */
+.rt-when { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--border); border-radius: 12px; background: var(--card); overflow: visible; }
+.rt-when-kinds { margin: 6px; border: 0; border-radius: 9px; }
+.rt-when-kinds .rt-seg-opt { flex: 1 1 0; min-width: max-content; }
+.rt-when-rows { display: flex; flex-direction: column; gap: 10px; padding: 6px 14px 14px; }
+.rt-when-row { display: grid; grid-template-columns: 44px minmax(0, 1fr); align-items: center; gap: 10px; min-width: 0; }
+.rt-when-label { color: var(--text-muted); font: 500 12.5px/18px var(--font); }
+.rt-when .rt-chip { height: 30px; background: var(--bg); }
+.rt-when .rt-chip[aria-checked="true"], .rt-when .rt-chip[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: var(--bg); }
+.rt-when .rt-day { width: auto; min-width: 42px; padding: 0 8px; }
+.rt-when-foot { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 9px 14px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 12.5px; line-height: 18px; }
+.rt-when-next { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rt-when-next b { color: var(--ink); font-weight: 500; }
+.rt-when-tz { margin-left: auto; flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+
+/* A time on Friday's own field: hour and minutes as cells that open a grid, AM or PM beside (MateRoutines.tsx TimeField). */
+.rt-tf { position: relative; display: inline-flex; align-items: center; gap: 8px; justify-self: start; }
+.rt-tf-box { display: inline-flex; align-items: center; height: 32px; padding: 0 3px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+.rt-tf-box:focus-within { border-color: var(--border-strong); }
+.rt-tf-cell { display: grid; place-items: center; min-width: 30px; height: 24px; padding: 0 4px; border: 0; border-radius: 5px; background: none; color: var(--ink); font: 600 14px/1 var(--font); font-variant-numeric: tabular-nums; cursor: pointer; }
+.rt-tf-cell:hover, .rt-tf-cell[data-on] { background: var(--hover); }
+.rt-tf-cell:focus-visible { outline: 2px solid var(--ink-2); outline-offset: -1px; }
+.rt-tf-colon { color: var(--text-muted); font: 600 14px/1 var(--font); }
+.rt-tf-ampm { flex-wrap: nowrap; padding: 2px; border-radius: 8px; }
+.rt-tf-ampm .rt-seg-opt { flex: none; min-height: 26px; padding: 0 9px; font-size: 12px; }
+.rt-tf-pop { position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; display: grid; grid-template-columns: repeat(4, 40px); gap: 3px; padding: 6px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--card); box-shadow: var(--shadow-pop); animation: tm-rise var(--t-open) var(--ease-out) both; }
+.rt-tf-opt { height: 30px; border: 0; border-radius: 6px; background: none; color: var(--ink-2); font: 500 13px var(--font); font-variant-numeric: tabular-nums; cursor: pointer; }
+.rt-tf-opt:hover { background: var(--hover); color: var(--ink); }
+.rt-tf-opt[aria-selected="true"] { background: var(--ink); color: var(--bg); }
+.rt-tf-opt:focus-visible { outline: 2px solid var(--ink-2); outline-offset: -2px; }
+@media (prefers-reduced-motion: reduce) { .rt-tf-pop { animation: none; } }
+
+/* Away's card (TeamControls.tsx AwaySwitch) and Run on its own's end time, on Friday's own time field. */
+.tm-away-card .rt-when-rows { padding-top: 14px; }
+.tm-away-card .rt-when-row { grid-template-columns: 52px minmax(0, 1fr); }
+.tm-selfrun-ends { display: grid; gap: 4px; color: var(--text-muted); font-size: 12px; }
+.tm-ends-set { display: inline-flex; align-items: center; gap: 6px; }
+.tm-ends-clear { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-md); background: none; color: var(--text-muted); cursor: pointer; }
+.tm-ends-clear:hover { background: var(--hover); color: var(--ink); }
+.tm-ends-add { height: 32px; color: var(--text-muted); }
+
+/* An @name in each crew mate's own colour, in the box as it's typed and in the message once sent (Arun, 2026-11-15: "add the color
+   coding @ tag for when typing in the input chat and after sending too"); @everyone stays neutral (its --c is --ink-2). */
+.tm-mention { --t: color-mix(in srgb, var(--c, var(--ink-2)) 24%, transparent); background: var(--t); box-shadow: 0 0 0 2px var(--t); }
+.tm-mention.sent { color: color-mix(in srgb, var(--c, var(--ink)) 72%, var(--ink)); }
+.tm-mention.sent[data-tight] { box-shadow: -2px 0 0 0 var(--t), 0 -2px 0 0 var(--t), 0 2px 0 0 var(--t); }
+
+/* The When card fits the width it is given (a side panel is narrow, an expanded one wide): narrow, how often in two even rows
+   and each row's label over it with the days as seven even cells; wide, one row of kinds and the labels at the left. */
+.rt-when { container-type: inline-size; }
+.rt-when-kinds { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.rt-when-kinds .rt-seg-opt { min-width: 0; padding: 0 6px; grid-column: span 2; }
+.rt-when-kinds .rt-seg-opt:nth-child(-n + 2) { grid-column: span 3; }
+.rt-when-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.rt-when .rt-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.rt-when .rt-day { min-width: 0; width: auto; padding: 0; }
+@container (min-width: 440px) {
+  .rt-when-kinds { display: flex; }
+  .rt-when-kinds .rt-seg-opt, .rt-when-kinds .rt-seg-opt:nth-child(-n + 2) { flex: 1 1 auto; padding: 0 10px; }
+  .rt-when-row { grid-template-columns: 52px minmax(0, 1fr); gap: 10px; }
+  .rt-when .rt-days { display: flex; gap: 6px; }
+  .rt-when .rt-day { min-width: 38px; padding: 0 8px; }
+}
+
+/* Opened in a room, each message whole, as an answer reads (Teammates.tsx CrewWorkLine room). */
+.cw-post-rich { min-width: 0; color: var(--ink); font-size: 13.5px; line-height: 21px; }
+.cw-post-rich :is(p, ul, ol) { margin: 0 0 6px; }
+.cw-post-rich > :last-child, .cw-post-rich > * > :last-child { margin-bottom: 0; }
+
+/* A thread in the side panel's Thread tab (Teammates.tsx ThreadInPanel): the panel's own column, not a sheet over the page. */
+.tt-thread-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; padding: 0 !important; }
+.tt-thread-panel.in-bench { position: static; z-index: auto; inset: auto; display: flex; flex: 1 1 auto; flex-direction: column; width: auto; min-height: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; animation: none; }
+/* Its tab says whose thread it is and closes it: no header of its own. */
+.tt-thread-panel.in-bench > header { display: none; }
+
+/* The mascots alive (Arun, 2026-11-15: "make the mascots feel alive and have some movement over hover or something... make it
+   dynamic and fun"; teammate-face.tsx). At rest each blinks now and then on its own rhythm (--blink-t, --blink-d from its seed). A
+   row, card or button with a face in it, hovered: the face hops, squashing as it lands, and glances up. The face itself hovered:
+   a little wiggle. All of it still under reduced motion. */
+.tm-face .tm-eyes { transform-box: fill-box; transform-origin: 50% 50%; animation: tm-blink var(--blink-t, 6s) var(--blink-d, 0s) infinite; }
+@keyframes tm-blink { 0%, 95.5%, 100% { transform: scaleY(1); } 97% { transform: scaleY(0.12); } }
+.tm-face-in { transform-origin: 50% 100%; }
+:is(button, a, [role="button"], [role="tab"], .oss-crew-item, .aw-door, .rp-member, .msd-row):hover .tm-face-in { animation: tm-hop 560ms cubic-bezier(.3, .7, .4, 1) 1; }
+:is(button, a, [role="button"], [role="tab"], .oss-crew-item, .aw-door, .rp-member, .msd-row):hover .tm-face .tm-eyes { animation: tm-glance 560ms ease-out 1 both; }
+@keyframes tm-hop {
+  0% { transform: none; }
+  22% { transform: translateY(-14%) scale(0.96, 1.06); }
+  48% { transform: translateY(0) scale(1.08, 0.9); }
+  68% { transform: translateY(-4%) scale(0.98, 1.02); }
+  100% { transform: none; }
+}
+@keyframes tm-glance { 0% { transform: none; } 30%, 70% { transform: translate(6%, -14%); } 100% { transform: none; } }
+.tm-face-wrap:hover > .tm-face-in { animation: tm-wiggle 520ms ease-in-out 1; }
+@keyframes tm-wiggle { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-9deg); } 55% { transform: rotate(7deg); } 80% { transform: rotate(-3deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .tm-face .tm-eyes, :is(button, a, [role="button"], [role="tab"], .oss-crew-item, .aw-door, .rp-member, .msd-row):hover :is(.tm-face-in, .tm-face .tm-eyes), .tm-face-wrap:hover > .tm-face-in { animation: none !important; }
+}
+html.reduce-motion :is(.tm-face .tm-eyes, .tm-face-in) { animation: none !important; }
+
+/* Dozing (Teammates.tsx useDozing): eyes shut, a slow breath and a small z z drifting up. Hovered, or once you type, awake. */
+.tm-face.tm-dozing .tm-eyes { visibility: hidden; animation: none; }
+.tm-face.tm-dozing .tm-blob-body { transform-box: fill-box; transform-origin: 50% 100%; animation: tm-snooze 4.2s ease-in-out infinite; }
+@keyframes tm-snooze { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(1.03, 0.965); } }
+.tm-zz { position: absolute; top: -6px; right: -5px; display: flex; gap: 0; pointer-events: none; }
+.tm-zz i { display: block; color: var(--text-muted); font: italic 600 9px/1 var(--font); opacity: 0; animation: tm-zz 3.2s ease-in-out infinite; }
+.tm-zz i + i { font-size: 7px; margin-top: -5px; animation-delay: 1.6s; }
+@keyframes tm-zz { 0% { opacity: 0; transform: translate(0, 3px); } 30% { opacity: 0.9; } 80% { opacity: 0; transform: translate(3px, -5px); } 100% { opacity: 0; } }
+:is(button, a, [role="button"], [role="tab"], .oss-crew-item, .aw-door, .rp-member, .msd-row, .tm-face-wrap):hover .tm-face.tm-dozing .tm-eyes { visibility: visible; }
+:is(button, a, [role="button"], [role="tab"], .oss-crew-item, .aw-door, .rp-member, .msd-row, .tm-face-wrap):hover .tm-face.tm-dozing .tm-eyes-shut { visibility: hidden; }
+:is(button, a, [role="button"], [role="tab"], .oss-crew-item, .aw-door, .rp-member, .msd-row, .tm-face-wrap):hover .tm-zz { display: none; }
+@media (prefers-reduced-motion: reduce) { .tm-face.tm-dozing .tm-blob-body, .tm-zz i { animation: none !important; } .tm-zz i { opacity: 0.7; } }
+html.reduce-motion :is(.tm-face.tm-dozing .tm-blob-body, .tm-zz i) { animation: none !important; }

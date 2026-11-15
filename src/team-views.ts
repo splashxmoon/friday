@@ -2,7 +2,7 @@ import { hubOf } from "./agents-hub.js";
 import { heldByPerson } from "./held.js";
 import { pendingFor, type SessionState } from "./session/projection.js";
 import { roomNews, runsIn, usageOf, type LaneRun } from "./team-away.js";
-import { quietCheckIns, type MateRun, type Teammate, type TeammateView } from "./teammates.js";
+import { NEW_THREAD, quietCheckIns, threadTitle, type MateRun, type Teammate, type TeammateView } from "./teammates.js";
 import { briefProof, runProof } from "./team-proof.js";
 import { ENGINE_NAMES, MAIN_LANE, type SessionEvent } from "./types.js";
 
@@ -117,14 +117,16 @@ export class TeamLooks {
   }
 
   /** A room as the app shows it: who is in it (their lanes there), how many work or need the person, its lead and last words. */
-  async room(r: { id: string; name: string; sid: string; lanes: Record<string, string>; purpose?: string }, invite: string) {
-    const { state, agents: all, said, news } = await this.look(r.sid);
-    // Renamed from its own page (its title, settings.update): its title is its name.
-    const name = state.title || r.name;
+  async room(r: { id: string; name: string; sid: string; lanes: Record<string, string>; purpose?: string; thread?: string }, invite: string) {
+    const { state, agents: all, said, news, events } = await this.look(r.sid);
+    // Renamed from its own page (its title, settings.update): its title is its name. A thread not named yet goes by the first thing
+    // the person said in it.
+    const first = r.thread && (state.title || r.name) === NEW_THREAD ? events.find((e) => e.body.type === "instruction" && e.actor.kind === "human" && !e.body.approval && e.body.text.trim()) : undefined;
+    const name = first && first.body.type === "instruction" ? threadTitle(first.body.text) : state.title || r.name;
     const lanes = Object.values(r.lanes);
     const agents = all.filter((a) => lanes.includes(a.lane) && state.engines[a.lane]?.online);
     const doing = Object.fromEntries(agents.filter((a) => a.status === "working").map((a) => [a.lane, a.line ?? ""]));
-    return { id: r.id, name, sid: r.sid, invite, lanes: r.lanes, lead: state.lead ?? null, news, ...(r.purpose ? { purpose: r.purpose } : {}), working: agents.filter((a) => a.status === "working").length, waiting: agents.filter((a) => a.status === "waiting").length, last: said, doing };
+    return { id: r.id, name, sid: r.sid, invite, lanes: r.lanes, ...(r.thread ? { thread: r.thread } : {}), lead: state.lead ?? null, news, ...(r.purpose ? { purpose: r.purpose } : {}), working: agents.filter((a) => a.status === "working").length, waiting: agents.filter((a) => a.status === "waiting").length, last: said, doing };
   }
 
   /** A Crew room's own counts, as each room's are: its teammates (`lanes`) at work there and those waiting on the person there. */

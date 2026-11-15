@@ -729,3 +729,12 @@ html.work-session .bench-panel .browser-url { font-family: var(--font); font-siz
 /* A piece in a right-to-left language reads from the right, its own way, in a card or a row (QA, 2026-10-28). */
 :is(.wa-card, .wr-doc) [dir="auto"] { text-align: start; }
 
+
+
+/* Buttons and chips are rounded squares, never pills, everywhere (Arun, 2026-11-14: "stop switching between like completely
+   rounded buttons and only stick the square ones ... FOLLOW MY DESIGN LANGUAGE"). Dots, faces, switches and counts stay round. */
+.work-seg,
+.work-seg button,
+.wa-chips button { border-radius: var(--r-md); }
+.wr-chip,
+.sb-work-hint { border-radius: var(--r-sm, 6px); }

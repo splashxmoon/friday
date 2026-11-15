@@ -5,12 +5,14 @@ import type { TeamBrief } from "../types.js";
 import { api } from "./api.js";
 import { Icon } from "./icons.js";
 import type { Identity, RecentSession } from "./storage.js";
-import { comeBack, nextEight, readSince, setAway, untilOf } from "./team-api.js";
+import { readSince } from "./team-api.js";
 import type { TeammateView } from "../teammates.js";
-import { Face, mateStatus, newTeammate, openRoom, openTeammate, ownOf, RoomDialog, RoomFaces, useTeam, type RoomView } from "./Teammates.js";
+import { Face, MateRing, mateStatus, newTeammate, openRoom, openTeammate, ownOf, RoomDialog, roomsOf, RoomFaces, useTeam, type RoomView } from "./Teammates.js";
 import { withCode } from "./Attention.js";
 import { freeLine, roleWord } from "./team-status.js";
 import { plainRisk } from "../plain-risk.js";
+import { mateItems } from "./mate-menu.js";
+import { MenuButton, useConfirm } from "./ui.js";
 import "./agents-page.css";
 
 /**
@@ -20,6 +22,7 @@ import "./agents-page.css";
  */
 export default function AgentsPage({ identity, onOpen, needs = [] }: { identity: Identity; onOpen: (r: RecentSession) => void; /** What waits on you (Attention.tsx), the crew's own shown here. */ needs?: Attention[] }) {
   const t = useTeam(identity);
+  const [ask, confirmUI] = useConfirm();
   const [rooming, setRooming] = useState(false);
   const [brief, setBrief] = useState<TeamBrief | null>(null);
   const [at, setAt] = useState(0);
@@ -68,8 +71,6 @@ export default function AgentsPage({ identity, onOpen, needs = [] }: { identity:
     if (w.sid === t.sid) openTeammate(t, m?.lane ?? null, onOpen);
     else onOpen({ sid: w.sid, invite: inviteOf(w.sid), title: w.title, role: "owner", openedAt: Date.now() });
   };
-  const away = t.away?.until ? t.away : null;
-  const toggleAway = () => void (away ? comeBack(identity) : setAway(identity, nextEight()));
   const order = [...mates].sort((a, b) => rank(a) - rank(b) || (b.lastAt ?? 0) - (a.lastAt ?? 0));
   const done = (brief?.done ?? []).slice(-6).reverse();
 
@@ -79,9 +80,7 @@ export default function AgentsPage({ identity, onOpen, needs = [] }: { identity:
         <h1>Agents</h1>
         <span className="ap-count">{mates.length} on your crew</span>
         <span className="ap-head-acts">
-          <button type="button" className="ap-btn ap-quiet" onClick={toggleAway} title={away ? "Back now: the crew asks again" : "They decide for themselves and note what they assumed, until 8 AM"}>
-            {away ? `Away until ${untilOf(away.until!)} · I'm back` : "Away until morning"}
-          </button>
+          {/* No Away here (Arun, 2026-11-15: "get rid of the away until morning stuff on this page"): it is a room's, in its profile. */}
           <button type="button" className="ap-btn" onClick={newTeammate}>
             <PlusIcon aria-hidden="true" /> New agent
           </button>
@@ -159,6 +158,7 @@ export default function AgentsPage({ identity, onOpen, needs = [] }: { identity:
                     <span className="ap-row-text">
                       <span className="ap-row-name">
                         <b>{m.name}</b>
+                        <MateRing status={m.status} />
                         {chip && <span className="ap-chip">{chip}</span>}
                       </span>
                       <span className={`ap-row-line s-${s.state}`}>{line}</span>
@@ -168,6 +168,7 @@ export default function AgentsPage({ identity, onOpen, needs = [] }: { identity:
                   <button type="button" className="ap-btn ap-quiet ap-row-msg" onClick={() => openTeammate(t, m.lane, onOpen)}>
                     Message
                   </button>
+                  <MenuButton className="ap-row-more" label={`More for ${m.name}`} items={() => mateItems({ identity, team: t, mate: m, ask })} />
                 </li>
               );
             })}
@@ -179,14 +180,7 @@ export default function AgentsPage({ identity, onOpen, needs = [] }: { identity:
             Rooms
           </h2>
           <div className="ap-rooms">
-            <button type="button" className="ap-room" onClick={() => openTeammate(t, null, onOpen)}>
-              <RoomFaces seeds={mates.slice(0, 3).map((m) => m.look ?? m.name)} size={22} />
-              <span className="ap-room-text">
-                <b>Crew room</b>
-                <span>{t.lead ? `${mateOf(t.lead)?.name ?? "The lead"} leads` : "Where your crew mates work together"}</span>
-              </span>
-            </button>
-            {(t.rooms ?? []).map((r: RoomView) => (
+            {roomsOf(t).map((r: RoomView) => (
               <button key={r.id} type="button" className="ap-room" onClick={() => openRoom(r, onOpen)}>
                 <RoomFaces seeds={mates.filter((m) => r.lanes[m.id]).slice(0, 3).map((m) => m.look ?? m.name)} size={22} />
                 <span className="ap-room-text">
@@ -227,6 +221,7 @@ export default function AgentsPage({ identity, onOpen, needs = [] }: { identity:
         )}
       </div>
       {rooming && <RoomDialog identity={identity} team={t} editing={null} onClose={() => setRooming(false)} onMade={(r) => openRoom(r, onOpen)} />}
+      {confirmUI}
     </div>
   );
 }

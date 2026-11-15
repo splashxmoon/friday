@@ -67,6 +67,15 @@ export function progressSince(events: SessionEvent[], lane: string, sinceSeq: nu
   return leftNow < leftThen;
 }
 
+/**
+ * A question that only asks whether to go on ("Shall I continue?", "Want me to proceed with the rest?"), which a teammate never
+ * needs to ask (after OpenBot's continuation check; Arun, 2026-11-15: "we need ours to be the same"). Never one about something
+ * that leaves this computer or can't be undone (deploy, push, send, post, publish, merge, delete, pay): those are the person's.
+ */
+const GO_ON = /\b(shall i|should i|do you want me to|would you like me to|want me to|can i|may i|ok(ay)? to|good to)\b[^?]{0,80}\b(continue|proceed|go on|go ahead|keep going|carry on|move on|start (on )?the next|do the rest|finish (it|the rest|up))\b[^?]{0,60}\?\s*$/i;
+const NOT_MINE = /\b(deploy|push|send|post|publish|merge|delete|remove|drop|pay|purchase|release|email|message)\b/i;
+export const asksToGoOn = (text: string): boolean => GO_ON.test(text) && !NOT_MINE.test(text.slice(-200));
+
 /** How the agents stay in touch while they work, said with every nudge to carry on. */
 // Not "check messages between steps": messages reach a working agent anyway, and every check is another full read of its
 // conversation (Arun, 2026-10-31: "i am burning through my claude code usage pretty fast").
@@ -97,9 +106,11 @@ export function keepGoingNote(state: SessionState, events: SessionEvent[], lane:
   // "Done: …" messages), so its turn's end is the end.
   const last = nudges.at(-1);
   if (last && !progressSince(events, lane, run.sinceSeq, last.seq)) return null;
-  // Ended on a question: it is asking someone, and the answer is what it needs to go on.
-  if (text.endsWith("?")) return null;
+  // Ended on a question: it is asking someone, and the answer is what it needs to go on; unless all it asks is whether to go on.
+  const goOn = asksToGoOn(text);
+  if (text.endsWith("?") && !goOn) return null;
   const why: string[] = [];
+  if (goOn) why.push("you asked whether to go on, and you don't need to: the work you were given is yours to finish");
   const left = unfinishedPlan(events, lane, run.sinceSeq);
   if (left) why.push(`your plan still has ${left} step${left === 1 ? "" : "s"} open`);
   else if (announcesAction(text)) why.push("you said what you would do next, but the turn ended before you did it");
