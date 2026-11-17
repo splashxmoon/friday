@@ -7,7 +7,8 @@
  *   npm run desktop:dist   build, then package installers into release/ (electron-builder)
  */
 import { build } from "esbuild";
-import { copyFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
+import os from "node:os";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +17,17 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dist = path.join(root, "dist");
 process.env.FRIDAY_EDITION = "local";
 const { clientBuildOptions } = await import("../src/client-build.js");
+
+// Friday's own sign-in apps (src/runner/builtin-apps.ts), from a file on the building computer and never from the source:
+// ~/.friday-build/builtin-apps.json, or FRIDAY_BUILTIN_APPS_FILE, as { "GOOGLE": { "id": "…", "secret": "…" } }. None, and the
+// app asks for an app of the person's own, as before.
+const appsFile = process.env.FRIDAY_BUILTIN_APPS_FILE || path.join(os.homedir(), ".friday-build", "builtin-apps.json");
+let builtInApps = "{}";
+if (existsSync(appsFile)) {
+  const parsed = JSON.parse(readFileSync(appsFile, "utf8"));
+  builtInApps = JSON.stringify(parsed);
+  console.log(`Built-in sign-in apps: ${Object.keys(parsed).join(", ") || "none"}`);
+}
 
 await rm(dist, { recursive: true, force: true });
 await build(clientBuildOptions(path.join(dist, "client"), true));
@@ -30,6 +42,7 @@ await build({
   // Electron, the terminal's native pty module, which the runner loads by name and the app ships beside this file, and esbuild,
   // which only builds the page when there's no prebuilt one, so a packaged app never loads it.
   external: ["electron", "@homebridge/node-pty-prebuilt-multiarch", "esbuild"],
+  define: { __FRIDAY_BUILT_IN_APPS__: builtInApps },
   // A require() inside an ES module, for the CommonJS packages bundled code reaches for.
   banner: { js: "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);" },
   logLevel: "warning",

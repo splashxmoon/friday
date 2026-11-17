@@ -295,6 +295,11 @@ export function BoardCard({ ev, state, stamp }: { ev: SessionEvent; state: Sessi
           ? `${who(t)} finished${"reviewer" in t && t.reviewer ? ` · ${t.reviewer.name} is checking` : " · waiting for a check"}`
           : t.status === "blocked"
             ? `blocked${who(t) ? ` · ${who(t)}` : ""}`
+            : "waiting" in t && t.waiting
+              ? // Held for a copy of the board's project (room-project.ts); the board says why in full.
+                "next" in t && t.next
+                ? `for ${t.next} · waiting on its copy of the repo`
+                : "waiting for a crew mate with the repo"
             : t.after.length
               ? `after ${t.after.join(", ")}`
               : "ready";

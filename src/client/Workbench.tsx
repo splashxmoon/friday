@@ -38,6 +38,7 @@ import { GitPanel } from "./GitPanel.js";
 import type { Identity } from "./storage.js";
 import { ContextMenu, isTyping, MenuButton, relTime } from "./ui.js";
 import { sourcesIn } from "./WorkPanels.js";
+import { listYield, rowLeftWithList } from "./list-yield.js";
 import { isWorkSid } from "./WorkMode.js";
 
 /**
@@ -537,6 +538,18 @@ export function Workbench({
    * way back. It used to leave a 48px strip of chat beside it, too narrow to read and easy to take for a crushed column.
    */
   const cover = over && !full;
+  // A small window with the session list open: the list folds to its rail while the panel is open beside the chat, rather than the
+  // panel covering the chat (list-yield.ts). Judged on the row as it is with the list open, so folding it doesn't undo the call.
+  useLayoutEffect(() => {
+    if (!isLocal() || !open || full || !rowEl) return listYield.set(false);
+    const listShown = !document.documentElement.classList.contains("rail-only") && !!document.querySelector(".sb-list");
+    const box = rowEl.getBoundingClientRect();
+    const withList = box.right - rowLeftWithList(box.left, listShown);
+    const rail = document.querySelector(".oss-rail")?.getBoundingClientRect().right ?? box.left;
+    const withRail = box.right - rail - 10;
+    listYield.set(withList - chatRoom(rowEl) < 320 && withRail - chatRoom(rowEl) >= 320);
+  }, [open, full, row, rowEl]);
+  useEffect(() => () => listYield.set(false), []);
   const shown = Math.min(w, maxWidthIn(rowEl));
   // Docked beside the chat, the panel says where its left edge is (--bench-edge: from the window's right), so on a Mac the
   // session's header buttons can sit just before it while it runs up to the top of the window (style.css, .bench-docked).

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { createInterface } from "node:readline";
 import { PassThrough, Writable } from "node:stream";
-import type { AcpKept } from "./adapters.js";
+import { heardCodexVersion, type AcpKept } from "./adapters.js";
 import { mcpForAgent, type AcpMcpServer } from "./mcp-servers.js";
 import { own as listOwned } from "./owned.js";
 
@@ -767,13 +767,16 @@ export class WarmAcp {
       }
       if (how.dialect === "codex") {
         // Its handshake: `initialized` back, then the conversation. One it can't resume is left to the turn to open, and to say why.
+        heardCodexVersion(init.result);
         proc.stdin!.write(`${JSON.stringify({ method: "initialized", params: {} })}\n`);
         const kept: AcpKept = { caps: {} };
+        // A new conversation is the turn's to start, with Friday's note as its developer instructions (adapters.ts openThread),
+        // which isn't known here: started here, without it, the note led the first message and named the conversation.
+        if (!how.resumeId) return kept;
         const cwd = how.opts.cwd ?? process.cwd();
-        const params = how.resumeId ? { threadId: how.resumeId, cwd } : { cwd, serviceName: "friday" };
-        const s = await call("friday-open", `${JSON.stringify({ id: "friday-open", method: how.resumeId ? "thread/resume" : "thread/start", params })}\n`);
+        const s = await call("friday-open", `${JSON.stringify({ id: "friday-open", method: "thread/resume", params: { threadId: how.resumeId, cwd } })}\n`);
         const threadId = typeof s?.result?.thread?.id === "string" ? s.result.thread.id : "";
-        if (s?.result && threadId) Object.assign(kept, { sessionId: threadId, res: s.result, fresh: !how.resumeId });
+        if (s?.result && threadId) Object.assign(kept, { sessionId: threadId, res: s.result, fresh: false });
         return kept;
       }
       const kept: AcpKept = { caps: init.result.agentCapabilities ?? {} };

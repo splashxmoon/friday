@@ -10,6 +10,7 @@ import { Icon } from "./icons.js";
 // lazy-answer or the Textarea with it split them into chunks of their own that every first load paid for (client-bundle test).
 import RichAnswer from "./rich-answer.js";
 import { hostApi } from "./local.js";
+import { WorkspaceCard } from "./Workspace.js";
 import type { Identity } from "./storage.js";
 import { ConfirmDialog, isTyping, relTime, type Confirmation } from "./ui.js";
 import { Button } from "@/components/ui/button";
@@ -164,8 +165,11 @@ function Repos({ identity, dives, error, onOpen, onStarted }: { identity: Identi
   const chosen = usable.find((t) => t.tool === tool)?.tool ?? usable[0]?.tool ?? "";
   const known = new Set((dives ?? []).map((d) => d.folder));
   const fresh = (folders ?? []).filter((f) => f.isRepo && !known.has(f.path));
-  const [more, setMore] = useState(false);
-  const shown = more ? fresh : fresh.slice(0, 6);
+  // The finder (the folder and repo picker sessions use: search, browse, GitHub, any folder), and under it a few recent repos to
+  // start at once (Arun, 2026-11-17: "add support to find and select repos or folders or whatever for deep dive instead of this").
+  const [finding, setFinding] = useState(false);
+  const finder = useRef<HTMLButtonElement>(null);
+  const recent = fresh.slice(0, 4);
   const start = async (folder: string) => {
     if (!chosen) return;
     setStarting(folder);
@@ -225,7 +229,7 @@ function Repos({ identity, dives, error, onOpen, onStarted }: { identity: Identi
         </ul>
       ) : dives.length > 0 ? (
         <>
-          <p className="dd-lede">Pages that explain each repo, every claim pointing at the lines it's about. Open one to read it or ask about the code.</p>
+          <p className="dd-lede">Pages that explain each repo, every claim pointing at the lines it's about.</p>
           <ul className="dd-shelf" aria-label="Explained">
             {dives.map((d) => (
               <li key={d.key}>
@@ -239,7 +243,7 @@ function Repos({ identity, dives, error, onOpen, onStarted }: { identity: Identi
       )}
       <section className="dd-start" aria-labelledby="dd-start">
         <h2 id="dd-start" className="dd-h2">
-          {dives?.length ? "Not explained yet" : "Pick a repo"}
+          {dives?.length ? "Explain another" : "Pick a repo"}
         </h2>
         {startError && <p className="dd-error" role="alert">{startError}</p>}
         {folders === null || tools === null ? (
@@ -248,31 +252,34 @@ function Repos({ identity, dives, error, onOpen, onStarted }: { identity: Identi
           <EmptyState small icon={<Icon name="terminal" />} title="No coding tool to write it">
             Deep Dive is written by a coding tool on this computer, like Claude Code or Codex. Install one and sign in, then come back.
           </EmptyState>
-        ) : !fresh.length ? (
-          <EmptyState small icon={<Icon name="folder" />} title={dives?.length ? "Every recent repo is explained" : "No repos yet"}>
-            {dives?.length ? "New repos you work in with Friday show here." : "Start a session in a repo and it shows here, ready to explain."}
-          </EmptyState>
         ) : (
           <>
-            <ul className="dd-picks">
-              {shown.map((f) => (
-                <li key={f.path} className="dd-pick dd-folder">
-                  <Icon name="folder" size={15} />
-                  <span className="dd-pick-name">{f.name}</span>
-                  <span className="dd-pick-path" title={f.path}>
-                    {shortPath(f.path.slice(0, Math.max(0, f.path.length - f.name.length - 1)) || f.path)}
-                  </span>
-                  <Button size="sm" variant="ghost" className="dd-pick-go" disabled={!!starting} onClick={() => void start(f.path)} aria-label={`Dive into ${f.name}`}>
-                    {starting === f.path ? "Starting…" : "Dive in"}
-                    {starting !== f.path && <Icon name="arrowRight" size={13} />}
-                  </Button>
-                </li>
-              ))}
-            </ul>
-            {fresh.length > 6 && (
-              <button type="button" className="dd-side-foot dd-more" onClick={() => setMore(!more)}>
-                {more ? "Show fewer" : `Show ${fresh.length - 6} more`}
-              </button>
+            <button ref={finder} type="button" className="dd-find" aria-haspopup="dialog" aria-expanded={finding} disabled={!!starting} onClick={() => setFinding((v) => !v)}>
+              <Icon name="search" size={15} />
+              <span>{starting ? "Starting…" : "Find a repo or folder"}</span>
+              <span className="dd-find-hint">Search, browse or clone</span>
+            </button>
+            {recent.length > 0 && (
+              <div className="dd-recent" aria-label="Recent repos">
+                <span className="dd-recent-label">Recent</span>
+                {recent.map((f) => (
+                  <button key={f.path} type="button" className="dd-recent-chip" disabled={!!starting} title={f.path} aria-label={`Dive into ${f.name}`} onClick={() => void start(f.path)}>
+                    <Icon name="folder" size={13} />
+                    {starting === f.path ? "Starting…" : f.name}
+                  </button>
+                ))}
+              </div>
+            )}
+            {finding && (
+              <WorkspaceCard
+                identity={identity}
+                tool={chosen || "claude"}
+                trigger={finder.current}
+                only="repos"
+                prefer="below"
+                onPick={(p) => p && void start(p.folder.path)}
+                onClose={() => setFinding(false)}
+              />
             )}
           </>
         )}
@@ -513,12 +520,6 @@ function Repo({ identity, repo, onBack }: { identity: Identity; repo: string; on
       {error && <p className="dd-error" role="alert">{error}</p>}
       <div className="dd-grid">
         <nav className="dd-side" aria-label="Deep Dive">
-          {dive.status !== "building" && dive.head && (
-            <p className="dd-side-meta">
-              Written {ago(dive.at)} at <span className="dd-sha">{sha(dive.head)}</span>
-              {dive.branch ? ` on ${dive.branch}` : ""}, by <EngineMark tool={dive.tool} size={12} /> {writerOf(dive.tool, dive.writer)}
-            </p>
-          )}
           <p className="dd-side-label">Pages</p>
           {pages.length === 0 && dive.status === "building" && <SkeletonLines n={7} className="dd-skel-nav" />}
           <ul className="dd-side-list" aria-label="Pages">

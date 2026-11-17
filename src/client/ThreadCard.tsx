@@ -2,6 +2,7 @@ import { lazy, Suspense, useContext, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { focusAgent, useAgents, useFocusedAgent } from "./agentFocus.js";
 import { agentNameFor } from "./agent-name.js";
+import { AGENT_DRAG } from "./agentNav.js";
 import { agentLook } from "./handoff-ui.js";
 import { tabState } from "./agent-tab.js";
 import { Icon } from "./icons.js";
@@ -29,6 +30,20 @@ import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/compon
 import { fileUrl } from "./api.js";
 import { runProof, type Proof } from "../team-proof.js";
 import "./thread-card.css";
+
+/**
+ * An agent's row, dragged onto the chat, opens it side by side with what is shown there, as the agent tabs do (Arun, 2026-11-16:
+ * "allow to drag this so open the side by side view too"). The session's chat takes the drop (SessionView sv-main, AGENT_DRAG).
+ */
+const dragAgent = (lane: string) => ({
+  draggable: true,
+  onDragStart: (e: React.DragEvent) => {
+    e.dataTransfer.setData(AGENT_DRAG, lane);
+    e.dataTransfer.effectAllowed = "copy";
+    dispatchEvent(new CustomEvent("friday:agent-drag", { detail: { lane } }));
+  },
+  onDragEnd: () => dispatchEvent(new CustomEvent("friday:agent-drag", { detail: { lane: null } })),
+});
 
 const HandedRows = lazy(() => import("./crew-carry.js").then((m) => ({ default: m.HandedRows })));
 
@@ -64,6 +79,29 @@ const firstLine = (t: string) => (t.split("\n").find((l) => l.trim()) ?? "").tri
 
 /** The menu of an agent (Rename, Make it lead, Side by side, Remove, what the chat shows), the chat's own (Activity.tsx kindMenu). */
 const agentMenu = (x: number, y: number, lane?: string) => dispatchEvent(new CustomEvent("friday:agent-menu", { detail: { x, y, ...(lane ? { lane } : {}) } }));
+
+/**
+ * An agent row's ⋯: the menu its right-click opens, for those who can see it there (Arun, 2026-11-17: "add the three dot thing for
+ * the agent parts"). Its own click and keys stay its own, not the row's (which shows only that agent's work).
+ */
+function AgentMore({ lane, name }: { lane: string; name: string }) {
+  return (
+    <button
+      type="button"
+      className="tc-end-btn tc-agent-more"
+      aria-label={`More for ${name}`}
+      title={`More for ${name}`}
+      onClick={(e) => {
+        e.stopPropagation();
+        const r = e.currentTarget.getBoundingClientRect();
+        agentMenu(r.right - 240, r.bottom + 4, lane);
+      }}
+      onKeyDown={(e) => e.stopPropagation()}
+    >
+      <Icon name="more" size={14} />
+    </button>
+  );
+}
 
 // ── the header's button ─────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -289,19 +327,40 @@ function Agents({ state, events, me, sid, invite, send, identity, onConnect, onC
     requestAnimationFrame(() => document.querySelector(`[data-needs="${CSS.escape(lane)}"]`)?.scrollIntoView({ block: "nearest" }));
   };
   const sum = [working ? `${working} working` : "", needs ? `${needs} need${needs > 1 ? "" : "s"} you` : ""].filter(Boolean);
+  // Folded, how they stand at a glance (Arun, 2026-11-17: "add like a agent status or something for when this is closed, needs to be
+  // compact and not crowding"): each agent's face with its state's dot, and a word when nobody works or waits on you.
+  const stopped = agents.filter((a) => toneOf(a) === "bad").length;
+  const done = agents.filter((a) => toneOf(a) === "done").length;
+  // One word, the most pressing: the faces' dots say the rest, and the faces how many there are.
+  const word = needs ? { text: `${needs} need${needs > 1 ? "" : "s"} you`, tone: "need" } : working ? { text: `${working} working`, tone: "work" } : stopped ? { text: `${stopped} stopped`, tone: "bad" } : done ? { text: done === agents.length ? (done > 1 ? "all done" : "done") : `${done} done`, tone: "done" } : null;
+  const words: Record<Tone, string> = { work: "working", need: "needs you", done: "done", bad: "stopped", wait: "waiting", idle: "free" };
+  const status = agents.map((a) => `${agentNameFor(state, a.lane)} ${words[toneOf(a)]}`).join(", ");
   return (
     <div className="tc-sec tc-agents">
       <div className="tc-head">
-        <button type="button" className="tc-head-btn" onClick={fold} aria-expanded={!folded} title={folded ? "Show the agents" : "Fold the agents"}>
+        <button type="button" className="tc-head-btn" onClick={fold} aria-expanded={!folded} title={folded ? `Show the agents${status ? `: ${status}` : ""}` : "Fold the agents"}>
           <span className="tc-ic">
             <Icon name={folded ? "chevronRight" : "chevronDown"} size={14} />
           </span>
           <b>Agents</b>
-          {!sum.length && <span className="tc-dim">{agents.length + starting.length}</span>}
-          {sum.length > 0 && (
+          {!sum.length && !(folded && agents.length) && <span className="tc-dim">{agents.length + starting.length}</span>}
+          {sum.length > 0 && !folded && (
             <span className="tc-head-sum">
               {working > 0 && <span>· {working} working</span>}
               {needs > 0 && <span className="tc-need-word"> · {needs} need{needs > 1 ? "" : "s"} you</span>}
+            </span>
+          )}
+          {folded && word && <span className={cn("tc-head-sum tc-settled", `is-${word.tone}`)}>{word.text}</span>}
+          {folded && agents.length > 0 && (
+            <span className="tc-fold-faces" aria-hidden="true">
+              {/* Up to three; past that two and how many more, leaving room for the word beside them in the card's width. */}
+              {(agents.length > 3 ? agents.slice(0, 2) : agents).map((a) => (
+                <span key={a.lane} className="tc-face" style={{ "--tint": agentLook(state, a.lane, 11).tint } as React.CSSProperties}>
+                  {agentLook(state, a.lane, 11).mark}
+                  <i className={`tc-dot is-${toneOf(a)}`} />
+                </span>
+              ))}
+              {agents.length > 3 && <span className="tc-fold-more">+{agents.length - 2}</span>}
             </span>
           )}
         </button>
@@ -337,7 +396,8 @@ function Agents({ state, events, me, sid, invite, send, identity, onConnect, onC
                     onClick={() => focusAgent(sid, on ? "all" : a.lane)}
                     onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), focusAgent(sid, on ? "all" : a.lane))}
                     onContextMenu={may ? (e) => (e.preventDefault(), agentMenu(e.clientX, e.clientY, a.lane)) : undefined}
-                    title={on ? "Back to every agent's work" : `Only ${agentNameFor(state, a.lane)}'s work`}
+                    {...dragAgent(a.lane)}
+                    title={on ? "Back to every agent's work" : `Only ${agentNameFor(state, a.lane)}'s work · drag onto the chat to see it side by side`}
                     aria-label={`${agentNameFor(state, a.lane)}${state.lead === a.lane ? ", leads the others" : ""}: ${sub}${time ? `, ${time}` : ""}`}
                     aria-pressed={on}
                   >
@@ -349,6 +409,7 @@ function Agents({ state, events, me, sid, invite, send, identity, onConnect, onC
                       <span className="tc-agent-name">
                         <span className="tc-trunc">{agentNameFor(state, a.lane)}</span>
                         {state.lead === a.lane && <span className="tc-lead" role="img" aria-label="Leads the other agents" title="Leads the other agents"><Icon name="crown" size={13} /></span>}
+                        {time && <span className="tc-time">{time}</span>}
                       </span>
                       {proof && said ? (
                         <PopoverTrigger asChild>
@@ -362,13 +423,14 @@ function Agents({ state, events, me, sid, invite, send, identity, onConnect, onC
                         </span>
                       )}
                     </span>
-                    {tone === "need" ? (
-                      <button type="button" className="tc-answer" onClick={(e) => (e.stopPropagation(), answer(a.lane))}>
-                        Answer
-                      </button>
-                    ) : (
-                      <span className="tc-time">{time}</span>
-                    )}
+                    <span className="tc-agent-end">
+                      {tone === "need" && (
+                        <button type="button" className="tc-answer" onClick={(e) => (e.stopPropagation(), answer(a.lane))}>
+                          Answer
+                        </button>
+                      )}
+                      {may && <AgentMore lane={a.lane} name={agentNameFor(state, a.lane)} />}
+                    </span>
                   </div>
                       </PopoverAnchor>
                       <PopoverContent side="left" align="start" sideOffset={20} collisionPadding={12} className="tc-proof-pop" onClick={(e) => e.stopPropagation()}>
@@ -383,7 +445,8 @@ function Agents({ state, events, me, sid, invite, send, identity, onConnect, onC
                     onClick={() => focusAgent(sid, on ? "all" : a.lane)}
                     onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), focusAgent(sid, on ? "all" : a.lane))}
                     onContextMenu={may ? (e) => (e.preventDefault(), agentMenu(e.clientX, e.clientY, a.lane)) : undefined}
-                    title={on ? "Back to every agent's work" : `Only ${agentNameFor(state, a.lane)}'s work`}
+                    {...dragAgent(a.lane)}
+                    title={on ? "Back to every agent's work" : `Only ${agentNameFor(state, a.lane)}'s work · drag onto the chat to see it side by side`}
                     aria-label={`${agentNameFor(state, a.lane)}${state.lead === a.lane ? ", leads the others" : ""}: ${sub}${time ? `, ${time}` : ""}`}
                     aria-pressed={on}
                   >
@@ -395,18 +458,20 @@ function Agents({ state, events, me, sid, invite, send, identity, onConnect, onC
                       <span className="tc-agent-name">
                         <span className="tc-trunc">{agentNameFor(state, a.lane)}</span>
                         {state.lead === a.lane && <span className="tc-lead" role="img" aria-label="Leads the other agents" title="Leads the other agents"><Icon name="crown" size={13} /></span>}
+                        {time && <span className="tc-time">{time}</span>}
                       </span>
                       <span className="tc-agent-sub" title={a.line}>
                         {sub}
                       </span>
                     </span>
-                    {tone === "need" ? (
-                      <button type="button" className="tc-answer" onClick={(e) => (e.stopPropagation(), answer(a.lane))}>
-                        Answer
-                      </button>
-                    ) : (
-                      <span className="tc-time">{time}</span>
-                    )}
+                    <span className="tc-agent-end">
+                      {tone === "need" && (
+                        <button type="button" className="tc-answer" onClick={(e) => (e.stopPropagation(), answer(a.lane))}>
+                          Answer
+                        </button>
+                      )}
+                      {may && <AgentMore lane={a.lane} name={agentNameFor(state, a.lane)} />}
+                    </span>
                   </div>
                   )}
                 </li>

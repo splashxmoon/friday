@@ -2,6 +2,9 @@ import { useEffect, useId, useState, type ReactNode } from "react";
 import { stepKind } from "../run-strip.js";
 import { doingVerb, stepsSummary } from "../step-summary.js";
 import { Shine } from "./shine.js";
+import { BrainIcon, CircleDotIcon, EyeIcon, GlobeIcon, MessageCircleQuestionIcon, PencilLineIcon, SearchIcon, SquareTerminalIcon, SquareArrowOutUpRightIcon, UsersIcon } from "lucide-react";
+import "./run-line.css";
+import { useHeldWords } from "./work-line.js";
 import { Orb } from "@/components/aicss/Orb";
 import { StepList, tookFor, type Step } from "./Response.js";
 
@@ -18,6 +21,34 @@ type Block = { kind: "work"; id: string; steps: Step[] } | { kind: "think"; key:
 /** What a step is doing, said while it runs: "Running npm test", "Reading cart.ts". */
 const doingOf = (s: Step) => `${doingVerb(s.verb)}${s.target ? ` ${clip(s.target, 72)}` : ""}`;
 const clip = (s: string, n: number) => ((t) => (t.length > n ? `${t.slice(0, n - 1)}…` : t))(s.replace(/\s+/g, " "));
+const baseOf = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
+
+/**
+ * A crew mate's step said in plain words for its working line (work-line.tsx): "Reading checkout.ts", "Searching the code",
+ * "Running the tests", never the raw command; `full` is the whole of it, for the hover. `kind` is the face's motion.
+ */
+export function plainStep(blocks: readonly Block[], waiting = false): { words: string; full: string; kind: string } {
+  if (waiting) return { words: "Waiting for an answer", full: "Waiting for an answer", kind: "" };
+  const steps = blocks.flatMap((b) => (b.kind === "work" && "steps" in b ? b.steps : []));
+  const s = steps.findLast((x) => x.state === "running") ?? (blocks.at(-1)?.kind === "think" ? undefined : steps.at(-1));
+  if (!s) return { words: "Thinking", full: "Thinking", kind: "think" };
+  const full = doingOf(s);
+  const k = stepKind(s);
+  const file = s.target ? clip(baseOf(s.target), 40) : "";
+  if (s.verb === "Searched the web") return { words: "Searching the web", full, kind: "search" };
+  if (k === "read") return { words: file ? `Reading ${file}` : "Reading files", full, kind: "read" };
+  if (k === "search") return { words: "Searching the code", full, kind: "search" };
+  if (k === "edit") return { words: file ? `Editing ${file}` : "Editing files", full, kind: "edit" };
+  if (k === "test") return { words: "Running the tests", full, kind: "run" };
+  if (k === "run") return { words: /\b(build|tsc|compile)\b/i.test(s.target ?? "") ? "Building" : "Running a command", full, kind: "run" };
+  return { words: doingVerb(s.verb).replace(/…$/, ""), full, kind: "work" };
+}
+
+/** Each kind of step's mark in the opened line (Arun, 2026-11-17: "add svg icons next to the steps like looked at, searched, changed, ran"). */
+function GroupIcon({ k }: { k: string }) {
+  const I = k === "think" ? BrainIcon : k === "read" ? EyeIcon : k === "search" ? SearchIcon : k === "edit" ? PencilLineIcon : k === "run" ? SquareTerminalIcon : k === "web" ? GlobeIcon : k === "open" ? SquareArrowOutUpRightIcon : k === "ask" ? MessageCircleQuestionIcon : k === "crew" ? UsersIcon : CircleDotIcon;
+  return <I className="rl-icon" data-k={k.split(":")[0]} aria-hidden="true" />;
+}
 
 /** The kind a step's group is: what it looked at, searched, changed, ran, or anything else by its own verb. */
 function groupOf(s: Step): { key: string; label: string } {
@@ -43,20 +74,6 @@ export function doingKind(blocks: readonly Block[], live: boolean): string {
   return k === "test" ? "run" : k;
 }
 
-/**
- * What a crew mate is doing this moment, for its typing bubble (Teammates.tsx WorkBubble): the step under way, else the last it
- * took while it thinks of the next, else thinking; writing once its answer streams.
- */
-export function liveWord(blocks: readonly Block[], waiting = false, writing = false): string {
-  if (waiting) return "Waiting for an answer";
-  if (writing) return "Writing";
-  const steps = blocks.flatMap((b) => (b.kind === "work" && "steps" in b ? b.steps : []));
-  const running = steps.findLast((s) => s.state === "running");
-  if (running) return doingOf(running);
-  if (blocks.at(-1)?.kind === "think" || !steps.length) return "Thinking";
-  return doingOf(steps.at(-1)!);
-}
-
 function Clock({ since }: { since: number }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -66,9 +83,10 @@ function Clock({ since }: { since: number }) {
   return <span className="rl-clock">{now - since >= 1000 ? tookFor(now - since) : ""}</span>;
 }
 
-export function RunLine({ blocks, live, since, took, waiting = false, writing = false, forecast, notes, plain = false, startOpen = false }: { blocks: readonly Block[]; live: boolean; since?: number; took: number; waiting?: boolean; writing?: boolean; forecast?: string; /** What it said along the way, shown when the line is opened. */ notes?: ReactNode; /** A crew mate's: the step under way and the clock, without a tick per step. */ plain?: boolean; /** Shown opened (a crew mate's work, asked for from its message). */ startOpen?: boolean }) {
-  const [open, setOpen] = useState(startOpen);
-  const [group, setGroup] = useState<string | null>(null);
+export function RunLine({ blocks, live, since, took, waiting = false, writing = false, forecast, notes, plain = false, startOpen = false, bare = false }: { blocks: readonly Block[]; live: boolean; since?: number; took: number; waiting?: boolean; writing?: boolean; forecast?: string; /** What it said along the way, shown when the line is opened. */ notes?: ReactNode; /** A crew mate's: the step under way and the clock, without a tick per step. */ plain?: boolean; /** Shown opened (a crew mate's work, asked for from its message). */ startOpen?: boolean; /** Its steps alone, under a line that already says the one under way (work-line.tsx WorkLine): no head, each kind closed until pressed. */ bare?: boolean }) {
+  const [open, setOpen] = useState(startOpen || bare);
+  // The group opened: undefined follows the step under way while it works (its group opens as the line does), null is none.
+  const [group, setGroup] = useState<string | null | undefined>(undefined);
   const body = useId();
   const steps = blocks.flatMap((b) => (b.kind === "work" && "steps" in b ? b.steps : []));
   const thinks = blocks.filter((b): b is Extract<Block, { kind: "think" }> => b.kind === "think" && "thought" in b);
@@ -77,7 +95,15 @@ export function RunLine({ blocks, live, since, took, waiting = false, writing = 
   const failed = steps.filter((s) => s.state === "failed").length;
 
   // The line: while it works, the step under way; done, the whole run in a sentence.
-  const word = waiting ? "Waiting for an answer" : running ? doingOf(running) : writing ? "Writing the answer" : blocks.at(-1)?.kind === "think" || !steps.length ? "Thinking" : "Working";
+  // Said as the crew's working line says it (work-line.tsx): the step in plain words ("Running the tests"), the whole command on
+  // hover, each step held a moment and risen in, a long think said its other ways (Arun, 2026-11-17: "bring this work line stuff
+  // design into the coding sessions... more advanced for the coding session and interactive as well").
+  const plainNow = plainStep(blocks, waiting);
+  const word = waiting ? "Waiting for an answer" : running ? plainNow.words : writing ? "Writing the answer" : blocks.at(-1)?.kind === "think" || !steps.length ? "Thinking" : plainNow.words;
+  const full = running ? doingOf(running) : word;
+  const words = useHeldWords(word, live);
+  const opened = group === undefined ? (live && running && !bare ? groupOf(running).key : null) : group;
+  const pick = (key: string) => setGroup(opened === key ? null : key);
   const summary = stepsSummary(steps, thoughtSecs);
   const doneLine = [took >= 1000 ? `Worked ${tookFor(took)}` : "", took >= 1000 ? summary.charAt(0).toLowerCase() + summary.slice(1) : summary].filter(Boolean).join(" · ");
   // A tick per step, the newest last; a long run keeps its last 24.
@@ -103,15 +129,15 @@ export function RunLine({ blocks, live, since, took, waiting = false, writing = 
   };
 
   return (
-    <div className={`rl${live ? " live" : ""}${failed && !live ? " has-fail" : ""}`}>
-      <button type="button" className="rl-head" aria-expanded={open} aria-controls={body} onClick={() => setOpen((o) => !o)}>
+    <div className={`rl${live ? " live" : ""}${failed && !live ? " has-fail" : ""}${bare ? " bare" : ""}`} data-orb={live && !waiting && !bare ? "" : undefined}>
+      {!bare && <button type="button" className="rl-head" aria-expanded={open} aria-controls={body} onClick={() => setOpen((o) => !o)}>
         {/* The same nine-cell grid as the reply's "Thinking" line, so working reads as the same thing moving on. */}
         {live && !waiting && <Orb variant="S3" size={14} label={word} />}
         <span className="rl-text">
           {live ? (
             // Keyed by the step, so each new one slides in over the last.
-            <Shine key={running?.id ?? word} on={!waiting} className={`rl-now${waiting ? " needs" : ""}`}>
-              {word}
+            <Shine key={words} on={!waiting} className={`rl-now${waiting ? " needs" : ""}`} {...(full !== words ? { title: full } : {})}>
+              {words}
             </Shine>
           ) : (
             <span className="rl-done">
@@ -120,39 +146,51 @@ export function RunLine({ blocks, live, since, took, waiting = false, writing = 
             </span>
           )}
         </span>
+        {live && !plain && steps.length > 1 && <span className="rl-count">{steps.length} steps</span>}
+        {/* A tick per step: hovered, what it was; pressed, the line opens on its kind (the head itself is the keyboard's way in). */}
         {ticks.length > 1 && !plain && (
           <span className="rl-ticks" aria-hidden="true">
             {ticks.map((s) => (
-              <i key={s.id} className={s.state === "running" ? "now" : s.state === "failed" ? "bad" : s.state === "waiting" ? "skip" : "on"} />
+              <i
+                key={s.id}
+                className={s.state === "running" ? "now" : s.state === "failed" ? "bad" : s.state === "waiting" ? "skip" : "on"}
+                data-k={groupOf(s).key.split(":")[0]}
+                title={`${doingOf(s)}${s.state === "failed" ? " · failed" : ""}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setOpen(true);
+                  setGroup(groupOf(s).key);
+                }}
+              />
             ))}
           </span>
         )}
         {live && since !== undefined && !waiting && <Clock since={since} />}
         {live && forecast && <span className="rl-clock">{forecast}</span>}
         <span className={`rsp-caret side ${open ? "open" : ""}`} aria-hidden />
-      </button>
+      </button>}
       {open && (
         <div id={body} className="rl-body">
           {thinks.length > 0 && (
             <div className="rl-group">
-              <button type="button" className="rl-row" aria-expanded={group === "think"} onClick={() => setGroup(group === "think" ? null : "think")}>
-                <span className="rl-label">Thought</span>
+              <button type="button" className="rl-row" aria-expanded={opened === "think"} onClick={() => pick("think")}>
+                <span className="rl-label"><GroupIcon k="think" />Thought</span>
                 <span className="rl-what">{clip(thinks.map((t) => t.thought).join(" "), 90)}</span>
                 <span className="rl-side">{thoughtSecs ? tookFor(thoughtSecs * 1000) : ""}</span>
               </button>
-              {group === "think" && <p className="rsp-tl-thought rl-thought">{thinks.map((t) => t.thought).join("\n\n")}</p>}
+              {opened === "think" && <p className="rsp-tl-thought rl-thought">{thinks.map((t) => t.thought).join("\n\n")}</p>}
             </div>
           )}
           {groups.map((g) => {
             const s = side(g);
             return (
               <div key={g.key} className="rl-group">
-                <button type="button" className="rl-row" aria-expanded={group === g.key} onClick={() => setGroup(group === g.key ? null : g.key)}>
-                  <span className="rl-label">{g.label}</span>
+                <button type="button" className="rl-row" aria-expanded={opened === g.key} onClick={() => pick(g.key)}>
+                  <span className="rl-label"><GroupIcon k={g.key} />{g.label}</span>
                   <span className="rl-what">{what(g)}</span>
                   <span className={`rl-side${s.tone ? ` ${s.tone}` : ""}`}>{s.text}</span>
                 </button>
-                {group === g.key && <StepList steps={g.steps} />}
+                {opened === g.key && <StepList steps={g.steps} />}
               </div>
             );
           })}

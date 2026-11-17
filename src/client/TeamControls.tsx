@@ -15,7 +15,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "./icons.js";
 import { TimeField } from "./time-field.js";
-import { ChartColumnIcon, SendIcon, ChevronLeftIcon, ChevronRightIcon, EllipsisIcon, PencilIcon, PlusIcon, XIcon, InfinityIcon, PanelRightIcon, ListChecksIcon, FileCodeIcon, FileTextIcon, GitPullRequestIcon, ImageIcon, PackageIcon, CirclePauseIcon, KanbanSquareIcon, MessagesSquareIcon, MoonIcon, PlayIcon, SquareIcon, SunIcon, WorkflowIcon } from "lucide-react";
+import { ChartColumnIcon, SendIcon, ChevronLeftIcon, ChevronRightIcon, EllipsisIcon, PencilIcon, PlusIcon, XIcon, InfinityIcon, PanelRightIcon, ListChecksIcon, FileCodeIcon, FileTextIcon, GitPullRequestIcon, ImageIcon, PackageIcon, CirclePauseIcon, KanbanSquareIcon, MessagesSquareIcon, MoonIcon, PlayIcon, SquareIcon, SunIcon, WorkflowIcon, FolderGit2Icon } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
@@ -42,6 +42,9 @@ import { assignedTasks, TeamBoard } from "./TeamBoard.js";
 import { proofsIn } from "../team-proof.js";
 import { ProofToggle } from "./ProofCard.js";
 import { openWorkflows } from "./team-workflow-view.js";
+import { memberLine, projectError, projectText } from "./room-project-text.js";
+import { ProjectRows, type ProjectMember } from "./RoomProject.js";
+import { folderName, isFolderPath, showProject } from "../room-project.js";
 import { SkillsDialog, skillsWaiting, useSkills } from "./CrewSkills.js";
 import { isLocal } from "./edition.js";
 import { DEFAULT_RUN_TOKENS, RUN_BUDGETS, runBudgetLine } from "../team-budget.js";
@@ -338,7 +341,7 @@ function RoomMore({ identity, sid, events, notify, board, panel }: { panel?: { o
 export function RoomProfile({ identity, state, events, send, notify }: { identity: Identity; state: SessionState; events: SessionEvent[]; send: Send; notify: (m: string) => void }) {
   const t = useTeamNow();
   const sid = state.id;
-  const [page, setPage] = useState<null | "results" | "run" | "away" | "threads" | "spend" | "send">(null);
+  const [page, setPage] = useState<null | "results" | "run" | "away" | "threads" | "spend" | "send" | "project">(null);
   const [board, setBoard] = useState(false);
   const [skills, setSkills] = useState(false);
   const [ask, confirmUI] = useConfirm();
@@ -375,12 +378,15 @@ export function RoomProfile({ identity, state, events, send, notify }: { identit
           {page === "threads" && <ThreadsList sid={sid} list={threads} onOpen={done} />}
           {page === "run" && <SelfRunSwitch identity={identity} sid={sid} notify={notify} embedded={done} />}
           {page === "away" && <AwaySwitch identity={identity} notify={notify} embedded={done} />}
+          {page === "project" && <RoomProjectPage identity={identity} room={r!} members={members.map((x) => x.m)} notify={notify} />}
           {page === "send" && <RoomSend identity={identity} sid={sid} roomId={crew ? null : r!.id} name={crew ? "the Crew room" : r!.name} notify={notify} />}
           {page === "spend" && <SpendPage identity={identity} query={crew ? "crew=1" : `room=${encodeURIComponent(r!.id)}`} who={crew ? "The crew" : r!.name} />}
         </div>
       </section>
     );
   type Row = { key: string; label: string; icon: React.ReactNode; now?: string; n?: number; onClick: () => void };
+  // A room's project (room-project.ts) is a crew's own, on this computer: not a hosted team's.
+  let withProject = true;
   const rows: Row[] = [
     ...(tasks.length ? [{ key: "board", label: "Board", icon: <KanbanSquareIcon />, now: `${open} open of ${tasks.length}`, n: open, onClick: () => setBoard(true) }] : []),
     ...(threads.length ? [{ key: "threads", label: "Threads", icon: <MessagesSquareIcon />, now: `${threads.length}`, n: threads.filter((x) => x.state === "answering").length, onClick: () => setPage("threads") }] : []),
@@ -451,7 +457,9 @@ export function RoomProfile({ identity, state, events, send, notify }: { identit
           )}
         </ul>
       </div>
-      {!crew && <RoomFolders identity={identity} room={r!} members={members.map((x) => x.m)} patch={patch} notify={notify} />}
+      {/* Its project (splashxmoon/friday#24) heads its folders, where the work is (Arun, 2026-11-17: "move the projects thing under the
+          folders category and rename the category"): a crew's own rooms, not the Crew room or a hosted team's. */}
+      {!crew && <RoomFolders identity={identity} room={r!} members={members.map((x) => x.m)} patch={patch} notify={notify} {...(withProject ? { project: { now: r!.project ? showProject(r!.project) : "No project", open: () => setPage("project") } } : {})} />}
       <div className="msd-group">
         <h3 className="msd-group-name">The room</h3>
         <ul className="msd-rows">
@@ -487,6 +495,64 @@ export function RoomProfile({ identity, state, events, send, notify }: { identit
       {skills && <SkillsDialog onClose={() => setSkills(false)} />}
       {confirmUI}
     </section>
+  );
+}
+
+/**
+ * A room's project, as a page of its profile (splashxmoon/friday#24): the repo and branch, changed here, and where each crew mate
+ * in it stands with it on its own computer: its copy, more than one, none, the branch missing, or not checked. A reference only:
+ * nothing is cloned or switched; new tasks go by it and tasks already made keep the one they were made under.
+ */
+function RoomProjectPage({ identity, room, members, notify }: { identity: Identity; room: RoomView; members: TeammateView[]; notify: (m: string) => void }) {
+  const [copies, setCopies] = useState<ProjectMember[] | null>(null);
+  const saved = `${room.project?.repo ?? ""}|${room.project?.branch ?? ""}|${Object.keys(room.lanes).join(",")}`;
+  useEffect(() => {
+    let live = true;
+    setCopies(null);
+    api<{ members: ProjectMember[] }>(identity, `/api/teammates/rooms/${encodeURIComponent(room.id)}/project`)
+      .then((x) => live && setCopies(x.members))
+      .catch(() => live && setCopies([]));
+    return () => void (live = false);
+  }, [identity, room.id, saved]);
+  const save = async (p: { repo: string; branch?: string } | null): Promise<string | null> => {
+    try {
+      await api(identity, `/api/teammates/rooms/${encodeURIComponent(room.id)}`, { method: "PATCH", body: JSON.stringify({ project: p }), headers: { "Content-Type": "application/json" } });
+      await refreshTeam(identity);
+      notify(p ? `${room.name} is on ${isFolderPath(p.repo) ? `the folder ${folderName(p.repo)}` : projectText({ repo: p.repo.includes("://") ? p.repo : `https://github.com/${p.repo}` }) || p.repo}${p.branch ? ` · ${p.branch}` : ""} now. New tasks go by it; tasks already made keep theirs.` : `${room.name} has no project now.`);
+      return null;
+    } catch (e) {
+      const m = (e as Error).message || "That didn't save.";
+      if (projectError(m)) return m;
+      notify(m);
+      return null;
+    }
+  };
+  const face = (id: string) => members.find((m) => m.id === id);
+  return (
+    <div className="rpj-page">
+      <ProjectRows identity={identity} project={room.project ?? null} onSave={save} />
+      {room.project && (
+        <div className="msd-group">
+          <h3 className="msd-group-name">{isFolderPath(room.project.repo) ? "Who works in it" : "Each crew mate's copy"}</h3>
+          <ul className="msd-rows" aria-busy={!copies}>
+            {(copies ?? members.map((m): ProjectMember => ({ id: m.id, name: m.name }))).map((c) => {
+              const m = face(c.id);
+              const line = copies ? memberLine(c.repo, room.project?.branch, room.project ?? undefined) : { text: "Looking…", tone: "muted" as const };
+              return (
+                <li key={c.id}>
+                  <span className="msd-row rpj-member" title={line.title}>
+                    <Face seed={m?.look ?? c.name} size={20} />
+                    <span className="msd-row-label">{c.name}</span>
+                    <span className={`msd-row-now rpj-state rpj-${line.tone}`}>{line.tone === "ok" ? short(line.text) : line.text}</span>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+          <small className="rf-note">{isFolderPath(room.project.repo) ? "Project tasks go only to a crew mate on this computer, and it does them in this folder." : <>Project tasks go only to a crew mate with one copy{room.project.branch ? ` that has ${room.project.branch}` : ""}. One given to a crew mate without one waits, and says who has it.</>}</small>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -586,7 +652,7 @@ function RoomSend({ identity, sid, roomId, name, notify }: { identity: Identity;
  * default they will carry over the folders they work in from their own individual pages"): each one's own, from its page, said as
  * whose and changed there; and the room's own for all of them here, added and taken away here (teammates.ts Room.folders).
  */
-function RoomFolders({ identity, room, members, patch, notify }: { identity: Identity; room: RoomView; members: TeammateView[]; patch: (body: Record<string, unknown>) => Promise<unknown>; notify: (m: string) => void }) {
+function RoomFolders({ identity, room, members, patch, notify, project }: { identity: Identity; room: RoomView; members: TeammateView[]; patch: (body: Record<string, unknown>) => Promise<unknown>; notify: (m: string) => void; /** The room's Project row, first, where a room can have one. */ project?: { now: string; open: () => void } }) {
   const [adding, setAdding] = useState(false);
   const addRow = useRef<HTMLButtonElement>(null);
   const own = room.folders ?? [];
@@ -607,8 +673,20 @@ function RoomFolders({ identity, room, members, patch, notify }: { identity: Ide
   };
   return (
     <div className="msd-group">
-      <h3 className="msd-group-name">Folders</h3>
+      <h3 className="msd-group-name">{project ? "Project and folders" : "Folders"}</h3>
       <ul className="msd-rows">
+        {project && (
+          <li>
+            <button type="button" className="msd-row" onClick={project.open}>
+              <span className="msd-row-icon" aria-hidden="true">
+                <FolderGit2Icon />
+              </span>
+              <span className="msd-row-label">Project</span>
+              <span className="msd-row-now">{project.now}</span>
+              <ChevronRightIcon className="msd-row-chev" aria-hidden="true" />
+            </button>
+          </li>
+        )}
         {[...carried].map(([dir, who]) => (
           <li key={`c:${dir}`}>
             <span className="msd-row rf-row" title={`${dir}\nFrom ${names(who)}'s own page: change it there.`}>

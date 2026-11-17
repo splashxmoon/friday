@@ -85,7 +85,10 @@ export function registerTray(deps: {
       webPreferences: { contextIsolation: true, sandbox: true, preload: deps.preload, backgroundThrottling: false },
     });
     w.setAlwaysOnTop(true, "pop-up-menu");
-    w.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    // skipTransformProcessType: without it Electron turns the whole app into a menu-bar-only process to do this, so Friday lost its
+    // Dock dot and clicking its Dock icon no longer brought it to the front (Arun, 2026-11-16: "it doesnt bring the friday app to
+    // the front and it doesnt have that little dot under it showing that it is running").
+    w.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
     w.on("blur", () => {
       // A picker's menu open over it takes the focus for a moment: the panel stays.
       if (!w.isVisible() || menuOpen) return;

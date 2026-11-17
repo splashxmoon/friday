@@ -199,9 +199,12 @@ function Row({ t, state, lane, proof, onMenu, onOpen }: { t: Task; state: Sessio
               : (s?.line ?? "On it")
             : waits.length
               ? `After “${waits.map((d) => plainLine(boardTitle(state.board?.tasks.find((x) => x.id === d)?.title ?? d))).join("”, “")}”`
-              : t.next
-                ? `Next for ${t.next}`
-                : "Ready for whoever is free";
+              : t.waiting
+                ? // Held for a copy of the board's project (room-project.ts): why, and who has it.
+                  t.waiting
+                : t.next
+                  ? `Next for ${t.next}`
+                  : "Ready for whoever is free";
   const col = colOf(t);
   // A workflow's check is posted as "Check: …": said as its tag, not as the first word of every one.
   const said = plainLine(boardTitle(t.title));

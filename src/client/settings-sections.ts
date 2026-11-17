@@ -42,7 +42,7 @@ export const SECTIONS: SectionDef[] = [
     icon: "bell",
     blurb:
       "Only when something waits on you: a question, a finished run, a failure. Banners come while Friday's window is hidden; the chime, if you want it, either way.",
-    keywords: "alerts away banner chime sound permission",
+    keywords: "alerts away banner chime sound permission limit usage 80 five hour",
   },
   // Voice input (VoiceSettings.tsx): the open-source edition's for now (Settings.tsx hides it elsewhere).
   {

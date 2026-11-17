@@ -1383,7 +1383,17 @@ button.catalog-card:hover:not(:disabled) .catalog-cta { color: var(--violet); ba
 .mb-card .mb-tool-id, .mb-modal .mb-tool-id { flex: 1; flex-direction: row; align-items: baseline; gap: 8px; line-height: 1.3; }
 .mb-card .mb-tool-name, .mb-modal .mb-tool-name { font-size: 13px; white-space: nowrap; }
 .mb-card .mb-tool-state, .mb-modal .mb-tool-state { margin-left: auto; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mb-card .mb-tool.in .mb-tool-state, .mb-modal .mb-tool.in .mb-tool-state { color: var(--text-muted); }
+/* A coding tool's update on its row (tool-updates.tsx): Update when a newer one is out, Updating while it runs, then how it went. */
+.mb-tool-upd { display: inline-flex; align-items: center; gap: 5px; margin-right: 6px; color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+.mb-tool-upd.ok { color: var(--green); }
+.mb-tool-upd.bad { color: var(--red); }
+.mb-tool-upd-btn { margin-right: 6px; }
+/* In Settings' grid row, the update takes a column of its own before the row's other action, rather than lying over it. */
+.mb-inline .mb-tool:has(> .mb-tool-upd-btn, > .mb-tool-upd) { grid-template-columns: minmax(0, 1fr) auto auto; }
+.mb-inline .mb-tool > :is(.mb-tool-upd-btn, .mb-tool-upd) { grid-column: 2; grid-row: 1; margin-right: 0; }
+.mb-inline .mb-tool:has(> .mb-tool-upd-btn, > .mb-tool-upd) > :is(.mb-tool-go:not(.mb-tool-upd-btn), .mb-tool-more, .acct-tool-acts) { grid-column: 3; grid-row: 1; }
+/* Signed in, in green, as amber says it isn't (Arun, 2026-11-17: "make the signed in text green too"). */
+.mb-card .mb-tool.in .mb-tool-state, .mb-modal .mb-tool.in .mb-tool-state, .mb-inline .mb-tool.in .mb-tool-state { color: var(--green); }
 .mb-card .mb-tool.out .mb-tool-state, .mb-modal .mb-tool.out .mb-tool-state { color: var(--amber); }
 .mb-card .btn.small.mb-tool-go, .mb-modal .btn.small.mb-tool-go { height: 22px; padding: 0 8px; font-size: 12px; }
 .mb-card .mb-tool-more, .mb-modal .mb-tool-more { width: 22px; height: 22px; }
@@ -6470,10 +6480,18 @@ html.desktop #band-left:empty { display: none; }
 html.desktop-mac[data-band="session"] #band-left,
 html.desktop-mac[data-band="session"] #band-slot { top: 5px; height: 24px; }
 
-/* The Mac app's window buttons sit 6px lower now (centre 23px down), and what shares a line with them follows. Only apps that say so move; older ones keep the buttons higher and these where they were. */
-html.desktop-mac.lights-low .win-nav { top: 11px; }
+/* The Mac app says how far down its window buttons sit (preload trafficLightY; App.tsx sets their centre as --lights-cy), and what
+   shares a line with them follows: the toolbar, the band and a session's header row. Only apps that say so move; older ones keep
+   the buttons higher and these where they were. The open-source app has them centred 20px down, the product app 23px. */
+html.desktop-mac.lights-low .win-nav { top: calc(var(--lights-cy, 23px) - 12px); }
 html.desktop-mac.lights-low[data-band="session"] #band-left,
-html.desktop-mac.lights-low[data-band="session"] #band-slot { top: 11px; }
+html.desktop-mac.lights-low[data-band="session"] #band-slot { top: calc(var(--lights-cy, 23px) - 12px); }
+/* A session's header on that same line, not 56px tall with its row 5 to 8px below the buttons (Arun, 2026-11-16: "move everything
+   up slightly here for mac.... and also look into windows and linux too"). It starts 1px down, so twice its centre less 2px tall. */
+html.desktop-mac.lights-low .session-view > .topbar { min-height: calc(2 * var(--lights-cy, 23px) - 2px); padding-top: 3px; padding-bottom: 3px; }
+/* Windows and Linux: the window's own buttons are drawn over a 40px band (desktop.ts titleBarOverlay), centred 20px down, as the
+   toolbar is (.win-nav); the header's row was 28px down and its bar ran 16px past the band. Now it is the band's height. */
+html.desktop:not(.desktop-mac) .session-view > .topbar { min-height: 38px; padding-top: 3px; padding-bottom: 3px; }
 /* Full screen hides the traffic lights (App.tsx sets .win-full): the toolbar takes their place and the header beside it follows,
    rather than leaving the 72px gap they had (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL"). On a page
    whose header starts after an open chat list, that rule (just above) still places it. */
@@ -7894,13 +7912,6 @@ img.set-mark { border-color: transparent; }
 /* The forecast under the routing card's head: how long, and how much of a window (forecast.ts). */
 .rw-forecast { margin: -2px 0 0; font-size: 12px; line-height: 16px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .amp-forecast { min-width: 0; font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* What routing learned (Usage page): one row a preference, its words, where it comes from, and its reset. */
-.rl-list { margin: 0; padding: 4px 0; list-style: none; }
-.rl-row { display: flex; align-items: center; gap: 12px; padding: 10px 16px; }
-.rl-row + .rl-row { border-top: 1px solid var(--border); }
-.rl-text { min-width: 0; flex: 1 1 auto; }
-.rl-says { margin: 0; font-size: 13px; line-height: 18px; color: var(--ink); text-wrap: pretty; }
-.rl-from { margin: 2px 0 0; font-size: 12px; line-height: 16px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 /* Smart routing's switch in the composer, beside the agent picker: off is a quiet pill, on wears the accent. */
 .route-pill { gap: 6px; }
 .route-pill-state { padding: 0 6px; border-radius: 999px; font-size: 12px; font-weight: 600; color: var(--text-muted); background: var(--card-2); }
@@ -8620,7 +8631,7 @@ html:not(.dark) .ctx-gauge .ctx-ring circle:first-child { stroke-opacity: .32; }
 .lh-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 14px; }
 .lh-card { display: flex; flex-direction: column; gap: 18px; min-width: 0; padding: 20px 22px 16px; border-radius: var(--r-xl); background: var(--card); box-shadow: inset 0 0 0 1px var(--border); }
 .lh-card[data-level="hot"] { box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--red) 38%, var(--border)); }
-.lh-card .num, .lh-sum .num, .us-act .num, .lh-read { font-variant-numeric: tabular-nums; }
+.lh-card .num, .us-act .num, .lh-read { font-variant-numeric: tabular-nums; }
 .lh-card-head { display: flex; align-items: center; gap: 9px; min-width: 0; font-size: 14px; color: var(--ink); }
 .lh-card-head > svg, .lh-card-head > span:first-child { flex: none; }
 .lh-card-head > b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
@@ -8654,14 +8665,6 @@ html:not(.dark) .ctx-gauge .ctx-ring circle:first-child { stroke-opacity: .32; }
 .lh-top { display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-height: 28px; }
 .lh-read { color: var(--text-muted); font-size: 12px; }
 /* The one line under the cards: the plans together, whether one could be smaller, and the alert. */
-.lh-sum { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-radius: var(--r-xl); background: var(--card); box-shadow: inset 0 0 0 1px var(--border); }
-.lh-sum-cell { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 14px 20px 15px; }
-.lh-sum-cell + .lh-sum-cell { box-shadow: inset 1px 0 0 var(--border); }
-.lh-sum-k { color: var(--text-muted); font-size: 12px; }
-.lh-sum-v { color: var(--ink); font-size: 14px; font-weight: 600; }
-.lh-sum-s { color: var(--text-muted); font-size: 12px; line-height: 17px; text-wrap: pretty; }
-.lh-sum-switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; }
-@media (max-width: 760px) { .lh-sum { grid-template-columns: 1fr; } .lh-sum-cell + .lh-sum-cell { box-shadow: inset 0 1px 0 var(--border); } }
 /* Tokens: the figures on the left, which also say each colour, and the days on the right. */
 .us-act { display: grid; grid-template-columns: 250px minmax(0, 1fr); }
 .us-act-side { display: flex; flex-direction: column; gap: 20px; padding: 20px 22px; box-shadow: inset -1px 0 0 var(--border); }
@@ -12185,6 +12188,8 @@ html.desktop [data-slot="dialog-content"] { top: calc(50% + 20px); max-height: c
 /* A tab not showing keeps no room for its ×, hidden until it is pointed at: then the tab opens to make room for it beside the
    icon. Laid over the tab, it hid most of a shortened tab's icon (Arun, 2026-11-09: "the x mark covering most of the icon"). */
 .bench-tab:not(.on) .bench-tab-btn { padding-right: 9px; }
+/* A tab with no × after it (a crew mate's Profile) is as wide on the right as on the left (Arun, 2026-11-17: "same spacing on the right side as it is on the left"). */
+.bench-tab-btn:last-child { padding-right: 9px; }
 .bench-tab:not(.on) .bench-tab-x { width: 0; margin: 0; overflow: hidden; transition: width .12s var(--ease-out), margin .12s var(--ease-out); }
 .bench-tab:not(.on):hover .bench-tab-x, .bench-tab:not(.on) .bench-tab-x:focus-visible { width: 18px; margin: 0 5px 0 -4px; }
 .bench-tabrow[data-more-after] { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); }
@@ -13706,7 +13711,8 @@ html.desktop .oss-rail::after { content: ""; position: absolute; top: 38px; righ
   border-top-left-radius: inherit; border-bottom-left-radius: inherit;
 }
 .oss-rail-group { display: flex; flex-direction: column; align-items: center; gap: 2px; }
-.oss-rail-sep { flex: none; width: 20px; height: 1px; margin: 6px 0; background: var(--border); }
+/* Plain to see in dark, light and over the frosted window (Arun, 2026-11-17: "make this more visible in the rail"): the ink at a fifth, a little wider. */
+.oss-rail-sep { flex: none; width: 22px; height: 1px; margin: 6px 0; border-radius: 1px; background: color-mix(in srgb, var(--ink) 22%, transparent); }
 .oss-rail-foot { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-top: auto; padding-top: 8px; }
 .oss-rail-btn {
   position: relative; display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: var(--r-md, 9px);
@@ -13733,6 +13739,95 @@ html.desktop .oss-rail::after { content: ""; position: absolute; top: 38px; righ
 .oss-rail-foot .dass-rail-btn { width: 40px; height: 40px; }
 .oss-rail-dot { top: 8px; right: 8px; }
 html.desktop .oss-rail { padding-top: 44px; }
+/* Your coding tools' limits on the rail (gauge.tsx RailRing): a twin ring per tool, 5 hours outside and the week inside, in vivid
+   green, orange and red; the tool's mark in the middle, or when a used-up 5 hours is back. */
+.oss-rail-rings { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.rr { position: relative; display: grid; place-items: center; width: 38px; height: 38px; }
+.rr > .rr-rings { position: absolute; inset: 0; }
+.rr-track { stroke: color-mix(in srgb, var(--ink) 13%, transparent); }
+.rr-arc { transition: stroke-dasharray 400ms var(--ease-out, ease); }
+.rr-arc.green { stroke: #22c55e; }
+.rr-arc.orange { stroke: #f97316; }
+.rr-arc.red { stroke: #ef4444; }
+html.dark .rr-arc.green { stroke: #4ade80; }
+html.dark .rr-arc.orange { stroke: #fb923c; }
+html.dark .rr-arc.red { stroke: #f87171; }
+.rr-mark { position: relative; }
+.rr-back { position: relative; font: 600 11px/1 var(--font, inherit); letter-spacing: -.02em; color: #ef4444; font-variant-numeric: tabular-nums; }
+html.dark .rr-back { color: #f87171; }
+@media (prefers-reduced-motion: reduce) { .rr-arc { transition: none; } }
+/* A tool with more than one account: how many, small at the foot of its rail ring (Sidebar.tsx); the ring is the one in use. */
+.oss-rail-ring { position: relative; }
+.oss-rail-accts { position: absolute; right: 1px; bottom: 1px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 999px; background: var(--bg); box-shadow: 0 0 0 1px var(--border-strong); color: var(--ink-2); font: 600 9.5px/14px var(--font, inherit); font-variant-numeric: tabular-nums; text-align: center; }
+
+/* A tool's accounts (account-glance.tsx, usage-accounts.tsx): in the card over a rail ring, and on the Usage page with a ring and
+   a menu each. Their own prefix, acg-: the agent builder's classes are ag-. */
+.acg-head { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--ink); }
+.acg-head b { font-weight: 600; }
+.acg-n { color: var(--text-muted); font-size: 12px; }
+.acg-list { margin: 6px 0 0; padding: 0; list-style: none; }
+.acg-acct { padding: 9px 0; border-top: 1px solid var(--border); }
+.acg-acct:first-child { border-top: 0; padding-top: 4px; }
+.acg-who { min-width: 0; }
+.acg-top { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; color: var(--ink); }
+.acg-top > b { min-width: 0; overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.acg-dot { flex: none; width: 7px; height: 7px; margin-right: -2px; border-radius: 50%; background: #22c55e; }
+html.dark .acg-dot { background: #4ade80; }
+.acg-tags { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; margin-left: auto; }
+.acg-tag { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 6px; background: var(--hover); color: var(--ink-2); font-size: 11px; font-weight: 500; white-space: nowrap; }
+.acg-tag.out { background: color-mix(in srgb, #ef4444 14%, transparent); color: var(--red, #ef4444); }
+.acg-mail { display: block; min-width: 0; margin-top: 2px; overflow: hidden; color: var(--text-muted); font-size: 12px; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.acg-bars { display: flex; flex-direction: column; gap: 5px; margin-top: 7px; }
+.acg-bar { display: grid; grid-template-columns: 74px minmax(0, 1fr); align-items: center; gap: 1px 8px; font-size: 11.5px; color: var(--ink-2); }
+.acg-bar-name { overflow: hidden; color: var(--text-muted); text-overflow: ellipsis; white-space: nowrap; }
+.acg-bar-track { height: 5px; border-radius: 3px; background: color-mix(in srgb, var(--ink) 10%, transparent); overflow: hidden; }
+.acg-bar-track > i { display: block; height: 100%; border-radius: 3px; }
+.acg-bar-track > i.green { background: #22c55e; }
+.acg-bar-track > i.orange { background: #f97316; }
+.acg-bar-track > i.red { background: #ef4444; }
+html.dark .acg-bar-track > i.green { background: #4ade80; }
+html.dark .acg-bar-track > i.orange { background: #fb923c; }
+html.dark .acg-bar-track > i.red { background: #f87171; }
+.acg-bar-said { grid-column: 2; display: flex; justify-content: space-between; gap: 8px; font-variant-numeric: tabular-nums; }
+.acg-bar-reset { color: var(--text-muted); }
+.acg-none { color: var(--text-muted); font-size: 12px; }
+/* The Usage page's (Arun, 2026-11-17: "need a better layout for this, everything is kinda all over the place like the team tag"):
+   a card per tool and a row per account, in columns that line up from row to row and card to card: its ring, who it is (its plan
+   right after its name, its email under it) in a column of its own width, its windows one to a line (name, bar, how much, when it
+   resets), and its menu. */
+.acg-page { display: flex; flex-direction: column; gap: 10px; }
+.acg-tool { padding: 10px 14px 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
+.acg-tool > .acg-head { min-height: 30px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+.acg-add { display: inline-flex; align-items: center; gap: 4px; height: 26px; margin-left: auto; padding: 0 9px; border: 1px solid var(--border-strong); border-radius: 7px; background: transparent; color: var(--ink-2); font: inherit; font-size: 12px; cursor: pointer; }
+.acg-add:hover { background: var(--hover); color: var(--ink); }
+.acg-tool .acg-list { margin-top: 0; }
+.acg-acct.page { display: grid; grid-template-columns: 38px 200px minmax(0, 1fr) 26px; align-items: center; gap: 16px; padding: 12px 0; }
+.acg-acct.page:first-child { padding-top: 12px; }
+.acg-acct.page .acg-tags { margin-left: 0; justify-content: flex-start; }
+.acg-acct.page .acg-bars { gap: 7px; margin-top: 0; }
+.acg-acct.page .acg-bar { grid-template-columns: 78px minmax(0, 1fr) 168px; gap: 12px; font-size: 12px; }
+.acg-acct.page .acg-bar-said { grid-column: 3; grid-row: 1; }
+.acg-end { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.acg-ring-none { width: 38px; height: 38px; border-radius: 50%; box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--ink) 10%, transparent); }
+.acg-rename { display: flex; align-items: center; gap: 6px; padding: 8px 0; }
+.acg-rename input { flex: 1; min-width: 0; height: 28px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: 7px; background: transparent; color: var(--ink); font: inherit; font-size: 13px; }
+.acg-tool .acct-add { margin: 8px 0 4px; }
+@media (max-width: 900px) {
+  .acg-acct.page { grid-template-columns: 38px minmax(0, 1fr) 26px; row-gap: 10px; }
+  .acg-acct.page .acg-bars { grid-column: 2 / -1; grid-row: 2; }
+  .acg-acct.page .acg-end { grid-column: 3; grid-row: 1; }
+  .acg-acct.page .acg-bar { grid-template-columns: 70px minmax(0, 1fr) 150px; }
+}
+
+/* The Agents icon: three crew faces, two behind and one in front (Sidebar.tsx CrewIcon). The two behind are cut round the one in
+   front by a mask, a hole a little wider than it, so the three read apart on any ground (the rail, a hover, the lit place, frosted);
+   quieter at rest, full on hover or when lit. The front face's centre is (14px, 14px) in the 28 by 22 group. */
+.oss-rail-crew { position: relative; display: block; width: 28px; height: 22px; opacity: .85; transition: opacity 120ms var(--ease-out, ease); }
+.oss-rail-btn:hover .oss-rail-crew, .oss-rail-btn[data-active] .oss-rail-crew { opacity: 1; }
+.oss-rail-crew > span { position: absolute; display: block; line-height: 0; }
+.oss-rail-crew-l { left: 0; top: 0; -webkit-mask: radial-gradient(circle 10.4px at 14px 14px, transparent 96%, #000 100%); mask: radial-gradient(circle 10.4px at 14px 14px, transparent 96%, #000 100%); }
+.oss-rail-crew-r { left: 13px; top: 0; -webkit-mask: radial-gradient(circle 10.4px at 1px 14px, transparent 96%, #000 100%); mask: radial-gradient(circle 10.4px at 1px 14px, transparent 96%, #000 100%); }
+.oss-rail-crew-f { left: 5px; top: 5px; }
 
 /* Your agents, under New session: who needs you, who works, the latest, three at most, then All agents. */
 .oss-agents-add { display: grid; place-items: center; width: 22px; height: 22px; border: 0; border-radius: 6px; background: none; color: var(--text-muted); cursor: pointer; }
@@ -13791,7 +13886,7 @@ html.desktop .oss-rail { padding-top: 44px; }
 .oss-crew-state[data-tone="done"] { color: var(--dass-ok, var(--green)); }
 .oss-crew-state[data-tone="limited"] { color: var(--mate-limited); }
 .oss-crew-state[data-tone="stopped"] { color: var(--mate-stopped); }
-.oss-crew-state[data-tone="offline"] { color: var(--mate-offline); }
+.oss-crew-state[data-tone="offline"] { color: var(--danger); } /* red, not grey: an offline crew mate does nothing until it is restarted (Arun, 2026-11-16) */
 .oss-crew-line.s-done { color: var(--text-muted); }
 .oss-crew-none { margin: 10px 8px; color: var(--text-muted); font-size: 12.5px; }
 .oss-agent-name, .oss-agent-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -14208,17 +14303,20 @@ button.cd-row:hover, .cd-rw[data-open] > .cd-row { background: var(--hover); }
 .rv-pile-btn[aria-expanded="false"] { color: var(--text-muted); }
 
 /* Code Review's pile chips over your own (CodeReview.tsx): every pile, or one alone, each with its dot and count. */
-.rv-piles { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 8px 8px 6px; border-bottom: 1px solid var(--border); }
-.rv-pile-chip { display: inline-flex; flex: none; align-items: center; gap: 5px; height: 26px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--r-md); background: transparent; color: var(--ink-2); font: 500 12px var(--font); white-space: nowrap; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out), border-color var(--t-hover) var(--ease-out); }
-.rv-pile-chip:hover { border-color: var(--border-strong); color: var(--ink); }
+/* One row, never wrapped (Arun, 2026-11-17: "fix layout and the color of the selected tab button too"): borderless chips, the one
+   picked lit as the rail lights its place (--hover-strong) rather than filled black; a row too narrow scrolls sideways. */
+.rv-piles { display: flex; flex-wrap: nowrap; gap: 2px; padding: 6px 4px; border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
+.rv-piles::-webkit-scrollbar { display: none; }
+.rv-pile-chip { display: inline-flex; flex: none; align-items: center; gap: 4px; height: 26px; padding: 0 7px; border: 0; border-radius: var(--r-md); background: transparent; color: var(--ink-2); font: 500 12px var(--font); white-space: nowrap; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out), border-color var(--t-hover) var(--ease-out); }
+.rv-pile-chip:hover { background: var(--hover); color: var(--ink); }
 .rv-pile-chip > span { color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .rv-pile-chip > i { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); }
 .rv-pile-chip[data-tone="fix"] > i { background: var(--red); }
 .rv-pile-chip[data-tone="ready"] > i { background: var(--green); }
 .rv-pile-chip[data-tone="waiting"] > i { background: var(--amber); }
-.rv-pile-chip[aria-checked="true"] { border-color: var(--ink); background: var(--ink); color: var(--bg); }
-.rv-pile-chip[aria-checked="true"] > span { color: color-mix(in srgb, var(--bg) 70%, transparent); }
-.rv-pile-chip:focus-visible { outline: 2px solid var(--ink-2); outline-offset: 1px; }
+.rv-pile-chip[aria-checked="true"] { background: var(--hover-strong); color: var(--ink); }
+.rv-pile-chip[aria-checked="true"] > span { color: var(--ink-2); }
+.rv-pile-chip:focus-visible { outline: 2px solid var(--ink-2); outline-offset: -2px; }
 /* A folder's + in the sidebar (threads.tsx): there on hover, where the folder's state was, so the two never overlap. */
 .sb-repo-group .sb-thr-add { opacity: 0; transition: opacity var(--t-hover) var(--ease-out); }
 .sb-repo-group .group\/label:hover .sb-thr-add, .sb-repo-group .sb-thr-add:focus-visible { opacity: 1; }
@@ -14502,7 +14600,9 @@ html.desktop:not(.rail-only) .sb-panel-inner.sb-rail-on::before { border-color: 
    top row is one see-through bar, over the rail as over the page, and the rail's tint starts under it, where the page does. The
    sidebar's own glass edge (a hairline with a lit inner line, from the window's top) is not drawn: the page's edge and the list's
    frame are the lines, one hairline each, from the bar down. */
-html.glass .shell.with-panel:has(.sb-rail-on) > .sb-panel { border-right: 0 !important; box-shadow: none !important; background: linear-gradient(to bottom, transparent 38px, var(--sidebar) 38px) !important; }
+/* The rail is the window's own glass, as the top bar is, all the way down and in dark and light alike: its own tint under the bar
+   made it a darker strip than the bar it meets (Arun, 2026-11-17: "rail needs to match top band"). */
+html.glass .shell.with-panel:has(.sb-rail-on) > .sb-panel { border-right: 0 !important; box-shadow: none !important; background: transparent !important; }
 html.glass.desktop .shell.with-panel:has(.sb-rail-on)::after { background: transparent; }
 /* One tint, not two: the sidebar's inner panel painted the sidebar's colour over the outer's, a darker rail than the bar. */
 html.glass .shell.with-panel:has(.sb-rail-on) .sb-panel-inner.dass-panel { background: transparent !important; }
@@ -14649,6 +14749,10 @@ html.glass-native:not(.dark) :is(
    have that material (the page draws no blur there), so it takes the rail's tone as a solid colour instead: the same grey, never
    a tint over the chat. And it is caught by what it is, not a list of names: anything that is a dialog, a menu, a list to pick
    from or a tip, anything Radix floats, and the app's own popovers (the model picker was a dialog a list didn't name). */
+/* The side panel over the chat (no room beside it, or expanded) is solid in frosted: see-through, the chat read through it (Arun,
+   2026-11-17: "fix this see through"). The page's own ground, as the window has it without glass (desktop.ts WINDOW_BG). */
+html.glass.dark .bench-panel.over { background: #1c1c1c !important; }
+html.glass:not(.dark) .bench-panel.over { background: #fafaf9 !important; }
 html.glass-native.dark { --float-solid: rgb(42 42 46); }
 html.glass-native:not(.dark) { --float-solid: rgb(237 237 235); }
 html.glass-native :is(

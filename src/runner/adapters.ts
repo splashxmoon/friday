@@ -97,6 +97,18 @@ export interface TurnSpec {
   withSystem?: boolean;
   /** `system`, written to this file, for a tool that can read it from one: a long one would not fit on a command line. */
   systemFile?: string;
+  /**
+   * The MCP servers set up in Friday's Connections (connections.ts), as this turn's tool takes them: their names, Claude Code's
+   * private config file, Codex's `-c` settings and the environment holding their keys, and Amp's map. The ACP tools get theirs
+   * in `acpMcp`.
+   */
+  connections?: { names: string[]; claudeFile?: string; codexArgs: string[]; codexEnv: Record<string, string>; amp: Record<string, unknown> };
+  /**
+   * A one-off question (ask.ts), never resumed: run without saving it as a conversation of the tool's own, so Friday's questions
+   * in the background don't fill the person's Codex or Claude Code history (Arun, 2026-11-17: "how to avoid this appearing in the
+   * codex chat thing", of a Codex Recents full of "You read a finished run of…").
+   */
+  ephemeral?: boolean;
   /** Carry on from a copy of the resumed conversation rather than the conversation itself (Claude Code). */
   fork?: boolean;
   /** One of that CLI's own models. Empty means whatever it defaults to. */
@@ -189,6 +201,40 @@ export function claudePictures(t: TurnSpec): Record<string, unknown>[] {
 }
 /** Whether a flag is still to be passed: it isn't one this tool's version said it doesn't know. */
 const offered = (t: TurnSpec, flag: string) => !t.skip?.includes(flag);
+
+/** Which of these flags an error names as one the tool doesn't know (see Adapter.optional), or null. */
+export function refusedFlag(error: string, flags: string[]): string | null {
+  if (!/unknown (?:option|argument|flag)|unrecognized|unexpected argument|invalid (?:value|argument|choice)|is invalid|not a valid|is not allowed/i.test(error)) return null;
+  // The flag whole, not the start of a longer one: "--mode" is not named by "--model".
+  const named = (f: string) => error.split(f).slice(1).some((after) => !/^[\w-]/.test(after));
+  return flags.find(named) ?? null;
+}
+
+/**
+ * Codex's first turn of a conversation: Friday's standing note as its developer instructions (`-c developer_instructions`)
+ * rather than ahead of the message, so the conversation Codex keeps (and the Codex app lists) is named after what the person
+ * asked, not "You are working inside a Friday session" (Arun, 2026-11-17). A note too long for a command line, and a note new to
+ * a resumed conversation, still lead the message as before (PROMPT_MARK): a resumed one is already named.
+ */
+const codexNoteAsConfig = (t: TurnSpec) => !t.resumeId && (t.withSystem ?? true) && !!t.system && !carriesConversation(t.system) && !tooLongForArgv(t.system);
+/**
+ * A note that carries an earlier conversation (hub.ts: one brought from another tool, or one Codex lost) ends on this sentence. It
+ * leads the first message as before, where reading the conversation back (imports.ts) finds it to carry it on again.
+ */
+const carriesConversation = (system: string) => /not as instructions to carry out again\.\s*$/.test(system);
+
+/**
+ * The Codex app-server's version, as its `initialize` answer says it ("friday/0.166.0 (Mac OS …)"): the newest one heard on this
+ * computer. A conversation started under one from before `thread/start` took `developerInstructions` (in its documentation by
+ * November 2025) has Friday's note lead the message, as before: an older one would drop the field without a word.
+ */
+let codexAppVersion: number[] | null = null;
+export function heardCodexVersion(result: unknown): void {
+  const m = /\/(\d+)\.(\d+)\.(\d+)/.exec(String((result as { userAgent?: unknown } | null)?.userAgent ?? ""));
+  if (m) codexAppVersion = [Number(m[1]), Number(m[2]), Number(m[3])];
+}
+const CODEX_INSTRUCTIONS_FROM = [0, 63, 0];
+const codexTakesInstructions = () => !!codexAppVersion && codexAppVersion.reduce((c, n, i) => c || n - CODEX_INSTRUCTIONS_FROM[i]!, 0) >= 0;
 
 /**
  * Where Friday's standing text ends and the message begins, in a prompt that carries both (Codex, Cursor). Reading the
@@ -447,8 +493,10 @@ function claudeTool(name: string, input: Record<string, unknown>): { name: strin
       return { name: "edit", args: { path: p, ...(input.old_string !== undefined ? { old_string: input.old_string, new_string: input.new_string } : {}) } };
     case "Write":
       return { name: "write", args: { path: p, content: cut(str(input.content), 2000) } };
+    // Which part it read, too: a long file read in parts is several reads, not the same read again (the loop guard pauses
+    // on the same call four times; benchmark, 2026-11-17: a run reading routing.py in four parts was stopped as a loop).
     case "Read":
-      return { name: "read", args: { path: p } };
+      return { name: "read", args: { path: p, ...(input.offset !== undefined ? { offset: input.offset } : {}), ...(input.limit !== undefined ? { limit: input.limit } : {}), ...(input.pages !== undefined ? { pages: input.pages } : {}) } };
     case "Grep":
     case "Glob":
       return { name: "search", args: { pattern: str(input.pattern), ...(p ? { path: p } : {}) } };
@@ -498,9 +546,11 @@ export const claude: Adapter = {
   login: ["auth", "login"],
   logout: ["auth", "logout"],
   status: { args: ["auth", "status", "--json"] },
-  optional: ["--chrome", "--thinking-display"],
+  optional: ["--chrome", "--thinking-display", "--no-session-persistence"],
   args: (t) => [
     "-p",
+    // A one-off question isn't kept as a conversation of its own (TurnSpec.ephemeral).
+    ...(t.ephemeral && offered(t, "--no-session-persistence") ? ["--no-session-persistence"] : []),
     "--output-format",
     "stream-json",
     "--verbose",
@@ -533,7 +583,7 @@ export const claude: Adapter = {
     ...(t.mode === "full" && t.guarded
       ? ["--allowedTools", ...AUTO_TOOLS.filter((x) => !SHELL_TOOLS.includes(x))]
       : t.mode === "full" || t.grant?.scope === "turn"
-      ? ["--allowedTools", ...AUTO_TOOLS, ...(t.mode === "full" ? (t.mcp ?? []).map((s) => `mcp__${s}`) : []), ...(t.grant?.scope === "turn" ? t.grant.items.filter((i) => MCP_TOOL.test(i)) : [])]
+      ? ["--allowedTools", ...AUTO_TOOLS, ...(t.mode === "full" ? [...(t.mcp ?? []), ...(t.connections?.names ?? [])].map((s) => `mcp__${s}`) : []), ...(t.grant?.scope === "turn" ? t.grant.items.filter((i) => MCP_TOOL.test(i)) : [])]
       : t.grant?.scope === "commands"
         ? ["--allowedTools", ...t.grant.items.flatMap((c) => SHELL_TOOLS.map((s) => `${s}(${c})`))]
         : []),
@@ -541,6 +591,8 @@ export const claude: Adapter = {
     // and an imported conversation alone came close to that. Others stay inline, which every version takes.
     // Friday's MCP server beside the person's own, its tools allowed in every mode: they only talk to the other agents here.
     ...(t.friday ? ["--mcp-config", claudeConfig(t.friday), "--allowedTools", "mcp__friday"] : []),
+    // The servers set up in Friday's Connections, from a file only this person can read (it holds their keys).
+    ...(t.connections?.claudeFile ? ["--mcp-config", t.connections.claudeFile] : []),
     // The person's skills in every mode, unasked: a skill is instructions to read, and anything it then runs or changes is
     // asked about as usual. In Manual a skill's use stopped the turn for a yes that told nobody anything.
     "--allowedTools",
@@ -772,6 +824,8 @@ export const codexExec: Adapter = {
   login: ["login"],
   logout: ["logout"],
   status: { args: ["login", "status"] },
+  optional: ["--ephemeral"],
+  env: (t) => t.connections?.codexEnv ?? {},
   args: (t) => {
     // Codex's own sandbox does the gating: read-only, or writes confined to the folder.
     // Manual is read-only until a person says yes to the turn: Codex cannot ask about one command at a time.
@@ -790,7 +844,9 @@ export const codexExec: Adapter = {
     // as the benchmark's own Codex agent does (--dangerously-bypass-approvals-and-sandbox). Only from that variable, never by default.
     const bypass = writes && process.env.FRIDAY_CODEX_SANDBOX === "bypass";
     // One argument for the whole setting, so its quotes reach Codex as written on Windows too.
-    const base = [...(t.friday ? codexConfig(t.friday) : []), ...codexExtras(t), "exec", "--json", "--skip-git-repo-check", ...(t.model ? ["--model", t.model] : []), ...(t.effort ? ["-c", `model_reasoning_effort="${codexEffort(t.effort, t.model)}"`] : []), ...(bypass ? ["--dangerously-bypass-approvals-and-sandbox"] : ["--sandbox", sandbox])];
+    // The note as a TOML string: JSON's escapes are TOML's.
+    const note = codexNoteAsConfig(t) ? ["-c", `developer_instructions=${JSON.stringify(t.system)}`] : [];
+    const base = [...(t.friday ? codexConfig(t.friday) : []), ...(t.connections?.codexArgs ?? []), ...codexExtras(t), ...note, "exec", "--json", "--skip-git-repo-check", ...(t.ephemeral && offered(t, "--ephemeral") ? ["--ephemeral"] : []), ...(t.model ? ["--model", t.model] : []), ...(t.effort ? ["-c", `model_reasoning_effort="${codexEffort(t.effort, t.model)}"`] : []), ...(bypass ? ["--dangerously-bypass-approvals-and-sandbox"] : ["--sandbox", sandbox])];
     if (t.mode === "full" && sandbox === "workspace-write" && !bypass) base.push("-c", "sandbox_workspace_write.network_access=true");
     // The folders beside its own, writable as the folder is. Read-only reads them anyway, and danger-full-access holds it to none.
     if (sandbox === "workspace-write") for (const d of t.dirs ?? []) base.push("--add-dir", d);
@@ -799,8 +855,9 @@ export const codexExec: Adapter = {
     const pics = images(t).map((f) => `--image=${f}`);
     return t.resumeId ? [...base, "resume", t.resumeId, ...pics, "-"] : [...base, ...pics, "-"];
   },
-  // Codex has no system-prompt flag, so the standing note leads the turn it is new to (see `withSystem`).
-  stdin: (t) => ((t.withSystem ?? !t.resumeId) ? `${t.system}\n\n${PROMPT_MARK}\n${t.prompt}` : t.prompt),
+  // The standing note is its developer instructions on a conversation's first turn (codexNoteAsConfig); else it leads the turn it
+  // is new to (see `withSystem`).
+  stdin: (t) => (codexNoteAsConfig(t) ? t.prompt : (t.withSystem ?? !t.resumeId) ? `${t.system}\n\n${PROMPT_MARK}\n${t.prompt}` : t.prompt),
   prespawn: true,
   parser() {
     const started = new Set<string>();
@@ -993,7 +1050,9 @@ export const codex: Adapter = {
   status: { args: ["login", "status"] },
   dialect: "codex",
   // Friday's MCP server as `-c` settings ahead of the subcommand (friday-mcp.ts).
-  args: (t) => [...(t.friday ? codexConfig(t.friday) : []), ...codexExtras(t), "app-server"],
+  args: (t) => [...(t.friday ? codexConfig(t.friday) : []), ...(t.connections?.codexArgs ?? []), ...codexExtras(t), "app-server"],
+  // The keys of the servers set up in Connections, which Codex hands on to them (env_vars, env_http_headers).
+  env: (t) => t.connections?.codexEnv ?? {},
   interactive: true,
   stdin: () => `${JSON.stringify({ id: 0, method: "initialize", params: { clientInfo: { name: "friday", title: "Friday", version: "1" } } })}\n`,
   parser(t, io) {
@@ -1012,6 +1071,10 @@ export const codex: Adapter = {
       wire.write(line({ id, method, params }));
     };
     let tid = kept?.sessionId ?? "";
+    /** The model its turns run on: the one picked, else the one Codex said it opened the conversation on, for what a turn cost. */
+    let ranOn = turn.model ?? "";
+    /** Friday's note was given to the conversation as it started (openThread), so the message goes without it. */
+    let noteGiven = false;
     let turnId = "";
     /** Stop came after the turn was asked for and before Codex named it: interrupted as soon as it does. */
     let cancelWanted = false;
@@ -1073,7 +1136,8 @@ export const codex: Adapter = {
         return [];
       }
       // Attached pictures as pictures (its `localImage` input), beside the text that names them.
-      const input = [{ type: "text", text: notedPrompt(turn) }, ...images(turn).map((p) => ({ type: "localImage", path: p }))];
+      // Friday's note went with the conversation as its developer instructions (openThread): the message is the person's alone.
+      const input = [{ type: "text", text: noteGiven ? turn.prompt : notedPrompt(turn) }, ...images(turn).map((p) => ({ type: "localImage", path: p }))];
       ask("turn/start", { threadId: tid, input, cwd: wire.cwd, sandboxPolicy, approvalPolicy, ...(turn.model ? { model: turn.model } : {}), ...(turn.effort ? { effort: codexEffort(turn.effort, turn.model) } : {}) }, (r) => {
         if (r.error) return failed("The turn failed", r.error);
         turnId ||= str(r.result?.turn?.id);
@@ -1093,6 +1157,7 @@ export const codex: Adapter = {
       if (s.error) return failed(how === "start" ? "It couldn't start a conversation" : `thread/${how} failed`, s.error);
       tid = str(s.result?.thread?.id);
       if (!tid) return finish("It didn't start a conversation.");
+      ranOn = turn.model || str(s.result?.model) || ranOn;
       if (kept) Object.assign(kept, { sessionId: tid, res: s.result ?? {}, fresh: false });
       return [{ kind: "session" as const, id: tid }, ...go()];
     };
@@ -1100,11 +1165,18 @@ export const codex: Adapter = {
       // A copy of it when the thread itself is busy elsewhere (see Runner.turn), as Claude Code's --fork-session: its memory, a new id.
       if (turn.resumeId && turn.fork) ask("thread/fork", { threadId: turn.resumeId, cwd: wire.cwd }, opened("fork"));
       else if (turn.resumeId) ask("thread/resume", { threadId: turn.resumeId, cwd: wire.cwd }, opened("resume"));
-      else ask("thread/start", { cwd: wire.cwd, serviceName: "friday" }, opened("start"));
+      else {
+        // A new conversation takes Friday's note as its developer instructions, so Codex (and the Codex app's list) names it after
+        // the person's message, not "You are working inside a Friday session" (Arun, 2026-11-17); a one-off question (ask.ts) is
+        // kept nowhere (`ephemeral`).
+        noteGiven = !!turn.system && (turn.withSystem ?? true) && !carriesConversation(turn.system) && codexTakesInstructions();
+        ask("thread/start", { cwd: wire.cwd, serviceName: "friday", ...(noteGiven ? { developerInstructions: turn.system } : {}), ...(turn.ephemeral ? { ephemeral: true } : {}) }, opened("start"));
+      }
       return [];
     };
     const initialized = (r: Rpc): AdapterOut[] => {
       if (r.error) return failed("It couldn't start", r.error);
+      heardCodexVersion(r.result);
       wire.write(line({ method: "initialized", params: {} }));
       return openThread();
     };
@@ -1280,7 +1352,7 @@ export const codex: Adapter = {
         case "turn/completed": {
           const spent = total && base ? { input: Math.max(0, total.input - base.input), cached: Math.max(0, total.cached - base.cached), output: Math.max(0, total.output - base.output) } : null;
           if (total) keep({ tokenTotals: total });
-          const out = spent ? usage(Math.max(0, spent.input - spent.cached), spent.cached, spent.output, lastCall ?? undefined) : [];
+          const out = spent ? usage(Math.max(0, spent.input - spent.cached), spent.cached, spent.output, lastCall ?? undefined, ranOn ? { model: ranOn } : {}) : [];
           const status = str(p?.turn?.status);
           const err = status === "failed" ? str(p?.turn?.error?.message) || "Codex couldn't finish the turn." : undefined;
           return [...out, ...finish(err)];
@@ -1792,7 +1864,7 @@ function acp(p: AcpProfile): Adapter {
           const u = r.result?.usage ?? {};
           const [inp, cached, outp, total] = [count(u.inputTokens), count(u.cachedReadTokens), count(u.outputTokens), count(u.totalTokens)];
           const holdsCache = !total || Math.abs(total - (inp + outp)) <= Math.abs(total - (inp + cached + outp));
-          const out = usage(holdsCache ? Math.max(0, inp - cached) : inp, cached, outp);
+          const out = usage(holdsCache ? Math.max(0, inp - cached) : inp, cached, outp, undefined, ranOn ? { model: ranOn } : {});
           const stop = str(r.result?.stopReason);
           const why =
             stop === "refusal" ? "It declined to do that." : stop === "max_tokens" ? "It ran out of room for its answer." : stop === "max_turn_requests" ? "It reached its limit of steps for one turn." : undefined;
@@ -1841,6 +1913,7 @@ function acp(p: AcpProfile): Adapter {
        */
       const model = (res: any): AdapterOut[] => {
         const menu = modelMenu(res);
+        ranOn = menu?.current || turn.model || ranOn;
         // What it offers, for the model picker, once a turn: Friday's own list for these tools is empty, since it depends on the account.
         const offers = listedModels || !menu ? [] : menu.list.filter((c) => c.id);
         if (offers.length) {
@@ -1850,11 +1923,14 @@ function acp(p: AcpProfile): Adapter {
         return pickModel(res, menu);
       };
       let listedModels = false;
+      /** The model its turn runs on, as the tool's own menu says, for what the turn cost (spend.ts). */
+      let ranOn = "";
       const pickModel = (res: any, menu: ModelMenu | null): AdapterOut[] => {
         if (p.modelAtStart || !turn.model || !menu || menu.current === turn.model) return effortStep(res);
         const known = menu.list.find((c) => c.id === turn.model || c.name.toLowerCase() === turn.model!.toLowerCase());
         if (!known) return [{ kind: "delta", channel: "reasoning", text: `\n${name} doesn't offer “${turn.model}” here, so it uses ${menu.current || "its own choice"}.\n` }, ...effortStep(res)];
         if (known.id === menu.current) return effortStep(res);
+        ranOn = known.id;
         if (menu.opt) {
           ask("session/set_config_option", { sessionId: sid, configId: menu.opt.id, value: known.id }, (r) => {
             if (r.result?.configOptions) keep({ configOptions: r.result.configOptions });
@@ -2460,7 +2536,7 @@ export const amp: Adapter = {
     "--dangerously-allow-all",
     ...(t.model && !t.resumeId ? ["--mode", t.model] : []),
     // Friday's MCP server (friday-mcp.ts); an Amp too old for the flag runs the turn again without it.
-    ...(t.friday && offered(t, "--mcp-config") ? ["--mcp-config", ampConfig(t.friday)] : []),
+    ...((t.friday || t.connections) && offered(t, "--mcp-config") ? ["--mcp-config", JSON.stringify({ ...(t.connections?.amp ?? {}), ...(t.friday ? JSON.parse(ampConfig(t.friday)) : {}) })] : []),
   ],
   optional: ["--mcp-config"],
   status: anyOf([], ["AMP_API_KEY"]),

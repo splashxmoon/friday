@@ -47,3 +47,21 @@ test("spend split by model, day, lane and run, who started each, unpriced tokens
   assert.ok(r.usd! > 0 && r.endedAt === now - 500);
   assert.deepEqual(s.runs.find((x) => x.lane === "L2")!.by, { kind: "friday", label: "Friday started it" }, "nobody asked: Friday started it");
 });
+
+test("a lane on Auto is priced at the model Auto picked for each turn, never at a model called auto", () => {
+  // Arun, 2026-11-17: "see why the tracking is not working properly": every turn on Auto came to $0, under a model named "auto".
+  const now = Date.UTC(2026, 10, 17, 12);
+  const events = [
+    ev({ type: "run.started", causedBy: 0 }, "L1", now - 5000),
+    ev({ type: "model.routed", model: "gpt-5-mini", tier: "light", why: "everyday", shadow: true, tool: "codex", current: "auto" }, "L1", now - 4900),
+    ev({ type: "model.routed", model: "gpt-5.1-codex", tier: "heavy", why: "a refactor", tool: "codex" }, "L1", now - 4800),
+    ev({ type: "agent.usage", tool: "codex", input: 1_000_000, cached: 0, output: 0 }, "L1", now - 4000),
+    ev({ type: "agent.usage", tool: "codex", input: 1_000_000, cached: 0, output: 0, model: "gpt-5-nano" }, "L1", now - 3000),
+    ev({ type: "agent.usage", tool: "codex", input: 500, cached: 0, output: 0 }, "L2", now - 2000),
+  ];
+  const s = spendOf([{ sid: "s1", lanes: ["L1", "L2"], events, engines: { L1: { tool: "codex", model: "auto" }, L2: { tool: "codex", model: "auto" } } }], now - 86_400_000, "UTC");
+  const models = s.byModel.map((m) => m.model).sort();
+  assert.deepEqual(models, ["Codex's own pick", "gpt-5-nano", "gpt-5.1-codex"], "the pick that ran, not the one only logged; what the turn said wins");
+  assert.equal(Math.round(s.usd * 100) / 100, 1.25 + 0.05);
+  assert.equal(s.unpriced, 500, "Auto with nothing picked yet is the tool's own pick, unpriced");
+});

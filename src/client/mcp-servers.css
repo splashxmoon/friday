@@ -1,0 +1,194 @@
+/* MCP servers (McpServers.tsx): the directory, with the Claude Code switch and Custom server beside its search. */
+.msv { display: flex; flex-direction: column; gap: 22px; width: 100%; max-width: 760px; margin: 0 auto; padding: 24px 0 48px; }
+.msv-h2 { display: flex; align-items: baseline; gap: 7px; margin: 0 0 8px; color: var(--ink); font-size: 13px; font-weight: 600; }
+.msv-h2 > span { color: var(--text-muted); font-weight: 400; font-variant-numeric: tabular-nums; }
+.msv-card { margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 12px; background: var(--card); list-style: none; }
+
+/* Custom server's sheet: Remote or Runs here, then plain fields, each with a line under it; a config pasted whole one link away. */
+.msv-fields { display: flex; flex-direction: column; gap: 14px; }
+.msv-fields .mdir-field > span:first-child { color: var(--ink-2); font-size: 12.5px; font-weight: 500; }
+.msv-fields .mdir-field em { margin-left: 4px; color: var(--text-muted); font-style: normal; font-weight: 400; }
+.msv-fields .mdir-field small { color: var(--text-muted); font-size: 11.5px; line-height: 16px; text-wrap: pretty; }
+.msv-fields .mdir-field input { height: 34px; }
+.msv-mono { font-family: var(--mono, ui-monospace, monospace) !important; font-size: 12.5px !important; }
+.msv-env { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px; }
+.msv-env > input { height: 34px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 8px; background: transparent; color: var(--ink); font: inherit; font-size: 13px; }
+.msv-env > input:focus { border-color: var(--border-focus); outline: none; }
+.msv-seg { display: inline-flex; align-self: flex-start; gap: 2px; padding: 2px; border-radius: 9px; background: var(--hover); }
+.msv-seg > button { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border: 0; border-radius: 7px; background: transparent; color: var(--text-muted); font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out); }
+.msv-seg > button:hover { color: var(--ink); }
+.msv-seg > button[aria-checked="true"] { background: var(--card); color: var(--ink); box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 12%, transparent); }
+.msv-seg > button:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.msv-trust { margin: 0; padding: 10px 12px; border-radius: 9px; background: var(--hover); color: var(--text-muted); font-size: 12px; line-height: 17px; text-wrap: pretty; }
+.msv-dlg-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.msv-dlg-foot > .link-btn, .msv-switch { color: var(--ink-2); font-size: 12.5px; }
+.msv-switch { align-self: flex-start; }
+
+/* The box. */
+.msv-add { display: flex; flex-direction: column; gap: 8px; }
+.msv-add > form { padding: 10px 10px 8px 12px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--card); transition: border-color var(--t-hover) var(--ease-out); }
+.msv-add > form:focus-within { border-color: var(--border-focus); }
+.msv-paste { display: block; width: 100%; min-height: 60px; padding: 2px 0; border: 0; background: transparent; color: var(--ink); font: 12.5px/19px var(--mono, ui-monospace, monospace); resize: vertical; outline: none; }
+.msv-paste::placeholder { color: var(--text-muted); font-family: var(--font); font-size: 13px; }
+.msv-add-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; }
+.msv-hint { min-width: 0; color: var(--text-muted); font-size: 12px; }
+.msv-acts { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+
+/* Reviewing what was pasted: its name, what it runs, and what it asks for. */
+.msv-review { display: flex; flex-direction: column; gap: 10px; }
+.msv-draft { display: flex; flex-direction: column; gap: 7px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+.msv-draft:last-of-type { padding-bottom: 2px; border-bottom: 0; }
+.msv-draft-head { display: flex; align-items: center; gap: 8px; color: var(--text-muted); }
+.msv-name { min-width: 0; max-width: 260px; height: 26px; padding: 0 7px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--ink); font: inherit; font-size: 14px; font-weight: 600; }
+.msv-name:hover, .msv-name:focus { border-color: var(--border-strong); outline: none; }
+.msv-kind { margin-left: auto; color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+.msv-line { display: block; overflow: hidden; padding: 6px 8px; border-radius: 6px; background: var(--hover); color: var(--ink-2); font: 12px/17px var(--mono, ui-monospace, monospace); text-overflow: ellipsis; white-space: nowrap; }
+.msv-need { display: grid; grid-template-columns: minmax(0, 220px) minmax(0, 1fr); align-items: center; gap: 10px; font-size: 12.5px; }
+.msv-need > span { overflow: hidden; color: var(--ink-2); font-family: var(--mono, ui-monospace, monospace); text-overflow: ellipsis; white-space: nowrap; }
+.msv-need > span em { color: var(--text-muted); font-family: var(--font); font-style: normal; }
+.msv-need > input { height: 30px; padding: 0 9px; border: 1px solid var(--border-strong); border-radius: 7px; background: transparent; color: var(--ink); font: inherit; font-size: 13px; }
+.msv-need > input:focus { border-color: var(--border-focus); outline: none; }
+
+/* What happened. */
+.msv-said, .msv-error { margin: 0; font-size: 12.5px; line-height: 18px; }
+.msv-said.ok { color: var(--green); }
+.msv-said.bad, .msv-error { color: var(--red); }
+
+@media (max-width: 640px) {
+  .msv-need { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+}
+
+/* The directory (mcp-directory.tsx): the kinds down the left with their counts, every service in quiet rows of two under its
+   kind's name, the ones connected marked green. */
+/* The directory uses the page's width: four or five cards a row on a wide window. */
+.msv-page .msv { max-width: 1320px; }
+.mdir { display: flex; flex-direction: column; gap: 12px; }
+.mdir-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.mdir-head .msv-h2 { margin: 0; }
+/* Beside the search: the Claude Code switch, and Custom server. */
+.mdir-head-acts { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mdir-cc { display: inline-flex; flex: none; align-items: center; gap: 7px; height: 32px; padding: 0 6px 0 10px; border: 1px solid var(--border); border-radius: 9px; color: var(--ink-2); font-size: 12.5px; white-space: nowrap; cursor: pointer; transition: border-color var(--t-hover) var(--ease-out); }
+.mdir-cc:hover { border-color: var(--border-strong); }
+.mdir-custom-btn { height: 32px; border-radius: 9px; gap: 5px; }
+.mdir-search { display: flex; align-items: center; gap: 7px; width: 260px; height: 32px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--card); color: var(--text-muted); transition: border-color var(--t-hover) var(--ease-out); }
+.mdir-search:focus-within { border-color: var(--border-focus); }
+.mdir-search > input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; background: transparent; color: var(--ink); font: inherit; font-size: 13px; outline: none; }
+.mdir-body { display: grid; grid-template-columns: 184px minmax(0, 1fr); align-items: start; gap: 20px; }
+.mdir-filters { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 1px; }
+.mdir-filter { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); font: inherit; font-size: 13px; text-align: left; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out); }
+.mdir-filter > svg { flex: none; color: var(--text-muted); transition: color var(--t-hover) var(--ease-out); }
+.mdir-filter:hover > svg, .mdir-filter[aria-pressed="true"] > svg { color: var(--ink); }
+.mdir-filter > span:first-of-type { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mdir-filter:hover { background: var(--hover); color: var(--ink); }
+.mdir-filter[aria-pressed="true"] { background: var(--hover-strong); color: var(--ink); font-weight: 500; }
+.mdir-filter:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
+/* While searching, the counts are the matches; a kind with none is faded. */
+.mdir-filter.none:not([aria-pressed="true"]) { color: var(--text-muted); opacity: .55; }
+.mdir-count { flex: none; color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.mdir-sep { height: 1px; margin: 6px 10px; background: var(--border); }
+.mdir-list { display: flex; flex-direction: column; gap: 26px; min-width: 0; }
+.mdir-group-head { display: flex; align-items: center; gap: 7px; margin: 2px 0 10px 2px; color: var(--ink); font-size: 14px; font-weight: 600; letter-spacing: -0.005em; }
+.mdir-group-head > svg { flex: none; color: var(--ink-2); }
+.mdir-group-head > span { color: var(--text-muted); font-size: 12.5px; font-weight: 500; font-variant-numeric: tabular-nums; }
+/* A card a service: its logo and how it connects along the top, its name, what it does in two lines. Connected ones carry their
+   state in colour and a faint tint, and say Manage when pointed at. */
+.mdir-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(208px, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; }
+.mdir-cards > li { display: flex; min-width: 0; }
+.mdir-card { position: relative; display: flex; flex: 1; flex-direction: column; align-items: stretch; gap: 3px; min-width: 0; min-height: 112px; padding: 12px 12px 13px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); color: var(--ink); font: inherit; text-align: left; cursor: pointer; box-shadow: 0 1px 0 color-mix(in srgb, var(--ink) 3%, transparent); transition: border-color var(--t-hover) var(--ease-out), background-color var(--t-hover) var(--ease-out), box-shadow var(--t-hover) var(--ease-out), transform var(--t-hover) var(--ease-out); }
+.mdir-card:hover { border-color: var(--border-strong); box-shadow: 0 2px 10px -4px color-mix(in srgb, var(--ink) 18%, transparent); transform: translateY(-1px); }
+.mdir-card:active { transform: none; }
+.mdir-card:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.mdir-card.is-on { border-color: color-mix(in srgb, var(--green) 32%, var(--border)); background: color-mix(in srgb, var(--green) 4%, var(--card)); }
+.mdir-card.is-bad { border-color: color-mix(in srgb, var(--red) 32%, var(--border)); background: color-mix(in srgb, var(--red) 3%, var(--card)); }
+.mdir-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 7px; }
+.mdir-name { overflow: hidden; color: var(--ink); font-size: 13.5px; font-weight: 500; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.mdir-blurb { display: -webkit-box; overflow: hidden; color: var(--text-muted); font-size: 12px; line-height: 16px; -webkit-line-clamp: 2; -webkit-box-orient: vertical; text-wrap: pretty; }
+.mdir-manage-hint { display: inline-flex; align-items: center; gap: 3px; margin-top: auto; padding-top: 8px; color: var(--text-muted); font-size: 11.5px; font-weight: 500; transition: color var(--t-hover) var(--ease-out); }
+.mdir-card:hover .mdir-manage-hint, .mdir-card:focus-visible .mdir-manage-hint { color: var(--ink); }
+/* How it connects, quiet, until pointed at; the state of one that's connected, in its colour. */
+.mdir-how { display: inline-flex; flex: none; align-items: center; gap: 5px; color: var(--text-muted); font-size: 11.5px; white-space: nowrap; opacity: .75; transition: opacity var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out); }
+.mdir-card:hover .mdir-how { opacity: 1; color: var(--ink-2); }
+.mdir-how:not(.on):not(.bad):not(.off) { padding: 2px 7px; border-radius: 999px; background: var(--hover); }
+.mdir-how > i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.mdir-how.on { color: var(--green); opacity: 1; }
+.mdir-how.bad { color: var(--red); opacity: 1; }
+.mdir-how.off { opacity: 1; }
+.mdir-card:hover .mdir-how.on { color: var(--green); }
+.mdir-card:hover .mdir-how.bad { color: var(--red); }
+.mdir-mark { position: relative; display: grid; flex: none; place-items: center; border: 1px solid var(--border); border-radius: 9px; background: #fff; color: var(--ink-2); overflow: hidden; }
+.mdir-mark > img { position: absolute; inset: 0; margin: auto; object-fit: contain; opacity: 0; transition: opacity .15s ease; }
+.mdir-mark > img.loaded { opacity: 1; }
+html.dark .mdir-mark { border-color: color-mix(in srgb, var(--ink) 10%, transparent); background: color-mix(in srgb, var(--ink) 6%, var(--bg)); }
+html.dark .mdir-mark > img.mdir-invert { filter: invert(1) brightness(1.6); }
+/* A server of one's own: a drawn mark, and what it runs in place of a description. */
+.mdir-mark.mdir-own { background: var(--hover); }
+html.dark .mdir-mark.mdir-own { background: color-mix(in srgb, var(--ink) 8%, var(--bg)); }
+.mdir-own-line { font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; word-break: break-all; }
+.mdir-sheet .mdir-own-line { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mdir-empty { margin: 4px 10px; color: var(--text-muted); font-size: 13px; }
+.mdir-more { align-self: flex-start; font-size: 12.5px; }
+.mdir-note { margin: 0; color: var(--text-muted); font-size: 12.5px; line-height: 18px; text-wrap: pretty; }
+@media (max-width: 860px) {
+  .mdir-body { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .mdir-filters { position: static; flex-direction: row; flex-wrap: nowrap; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+  .mdir-filters::-webkit-scrollbar { display: none; }
+  .mdir-filter { flex: none; }
+  .mdir-sep { display: none; }
+}
+@media (max-width: 640px) {
+  .mdir-cards { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }
+}
+
+/* What a connected service has, at the top of its sheet: its state and switch, its tools, and the ways to manage it. */
+.mdir-manage { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: color-mix(in srgb, var(--ink) 2.5%, var(--card)); }
+.mdir-manage-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.mdir-pill { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 12.5px; font-weight: 500; }
+.mdir-pill > i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.mdir-pill.on { color: var(--green); }
+.mdir-pill.bad { color: var(--red); }
+.mdir-toggle { display: inline-flex; align-items: center; gap: 8px; color: var(--ink-2); font-size: 12.5px; cursor: pointer; }
+.mdir-why { margin: 0; color: var(--ink-2); font-size: 12.5px; line-height: 18px; }
+/* Its tools, folded to a line (how many, the first few in words) that opens to all of them in two quiet columns. */
+.mdir-tools { display: flex; flex-direction: column; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.mdir-tools-line { display: flex; align-items: center; gap: 7px; width: 100%; min-width: 0; padding: 8px 0; border: 0; background: none; color: var(--text-muted); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.mdir-tools-line > svg { flex: none; }
+.mdir-tools-sum { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mdir-tools-sum > b { color: var(--ink); font-weight: 500; }
+.mdir-tools-more { flex: none; color: var(--ink-2); font-weight: 500; }
+.mdir-tools-line:hover .mdir-tools-more { color: var(--ink); }
+.mdir-tools-line:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; border-radius: 4px; }
+.mdir-tools-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px 16px; max-height: 168px; margin: 0 0 9px; padding: 0 0 0 20px; overflow-y: auto; list-style: none; }
+.mdir-tools-list > li { overflow: hidden; color: var(--ink-2); font-size: 12.5px; line-height: 19px; text-overflow: ellipsis; white-space: nowrap; }
+.mdir-manage-acts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.mdir-manage-acts svg { margin-right: 2px; }
+.mdir-grow { flex: 1; }
+.mdir-danger { color: var(--red); }
+.mdir-danger:hover { background: color-mix(in srgb, var(--red) 10%, transparent); color: var(--red); }
+/* Disconnect, asked first: a quiet red panel in the actions' place, the question and what it does, then Keep and Disconnect. */
+.mdir-confirm { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid color-mix(in srgb, var(--red) 28%, var(--border)); border-radius: 10px; background: color-mix(in srgb, var(--red) 6%, var(--card)); }
+.mdir-confirm-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.mdir-confirm-text > b { color: var(--ink); font-size: 13px; font-weight: 600; line-height: 18px; }
+.mdir-confirm-text > span { color: var(--ink-2); font-size: 12.5px; line-height: 18px; text-wrap: pretty; }
+.mdir-confirm-acts { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+/* A service's sheet. The dialog is a grid, and its column grew to the tools line's one-line width (nowrap), so the box ran out past
+   the sheet's edge (Arun, 2026-11-17, Notion's sheet: "fix this"): the column is the sheet's width, and what is in it shortens. */
+.mdir-sheet { grid-template-columns: minmax(0, 1fr); }
+.mdir-sheet > *, .mdir-manage, .mdir-manage-top, .mdir-tools { min-width: 0; }
+.mdir-sheet-head { display: flex; align-items: flex-start; gap: 12px; text-align: left; }
+.mdir-sheet-head p { margin-top: 2px; }
+.mdir-form { display: flex; flex-direction: column; gap: 10px; }
+.mdir-form > button { align-self: flex-start; }
+.mdir-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-muted); }
+.mdir-field > input, .mdir-copy > input { height: 32px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 8px; background: transparent; color: var(--ink); font: inherit; font-size: 13px; }
+.mdir-field > input:focus, .mdir-copy > input:focus { border-color: var(--border-focus); outline: none; }
+.mdir-copy { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mdir-copy > code { flex: 1; min-width: 0; overflow: hidden; padding: 6px 8px; border-radius: 6px; background: var(--hover); color: var(--ink-2); font: 12px/17px var(--mono, ui-monospace, monospace); text-overflow: ellipsis; white-space: nowrap; }
+.mdir-copy > input { flex: 1; min-width: 0; }
+.mdir-or { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text-muted); }
+.mdir-wait { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; color: var(--ink-2); font-size: 13px; }
+.mdir-state { margin: 0; color: var(--text-muted); font-size: 12.5px; }
+.mdir-state.ok { color: var(--green); }
+.mdir-state.bad { color: var(--red); }
+.mdir-foot { margin: 4px 0 0; color: var(--text-muted); font-size: 11.5px; line-height: 16px; }
+@media (max-width: 860px) { .mdir-head { flex-wrap: wrap; } .mdir-head-acts { flex-wrap: wrap; width: 100%; } .mdir-search { flex: 1 1 180px; width: auto; } }
+@media (max-width: 640px) { .mdir-cc > span { display: none; } }

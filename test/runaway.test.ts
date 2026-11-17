@@ -68,3 +68,26 @@ test("the same call with the same arguments over and over, nothing changed betwe
   for (let i = 0; i < SAME_CALL; i++) clicks.push(ev({ type: "agent.message", text: "", toolCalls: [{ id: `c${i}`, name: "mcp__Claude_Browser__computer", arguments: JSON.stringify({ action: "left_click", coordinate: [1, 2] }) }] }));
   assert.equal(runawayIn(clicks, "main")?.kind, "repeat");
 });
+
+test("reading a long file in parts, or a file a command just rewrote, is not the same call over (benchmark, 2026-11-17)", () => {
+  const read = (id: string, args: Record<string, unknown>) => ev({ type: "agent.message", text: "", toolCalls: [{ id, name: "read", arguments: JSON.stringify(args) }] });
+  const parts = [started()];
+  for (const [i, offset] of [330, 800, 1190, 1640].entries()) parts.push(read(`p${i}`, { path: "/app/fastapi/routing.py", offset, limit: 300 }));
+  assert.equal(runawayIn(parts, "main"), null, "four parts of one file");
+  const shots = [started()];
+  for (let i = 0; i < SAME_CALL + 2; i++) shots.push(shell(`s${i}`, `bin/v.sh now.png click ${i}`), result(`s${i}`, true), read(`r${i}`, { path: "/workspace/shots/now.png" }));
+  assert.equal(runawayIn(shots, "main"), null, "a new screenshot each time");
+  const again = [started()];
+  for (let i = 0; i < SAME_CALL; i++) again.push(read(`a${i}`, { path: "/app/README.md" }));
+  assert.equal(runawayIn(again, "main")?.kind, "repeat", "the same read, nothing between, is still a loop");
+});
+
+test("Claude Code's Read keeps which part of the file it read, so parts aren't the same call", async () => {
+  const { ADAPTERS } = await import("../src/runner/adapters.js");
+  const parse = ADAPTERS.claude.parser({ prompt: "Go", resumeId: null, mode: "full", system: "" } as never, { cwd: "/app", write: () => {}, end: () => {} } as never);
+  const line = (offset: number) => JSON.stringify({ type: "assistant", message: { id: `m${offset}`, content: [{ type: "tool_use", id: `t${offset}`, name: "Read", input: { file_path: "/app/routing.py", offset, limit: 300 } }] } });
+  const calls = [330, 800].flatMap((o) => (parse(line(o)) as { kind: string; toolCalls?: { arguments: string }[] }[]).flatMap((x) => x.toolCalls ?? []));
+  assert.equal(calls.length, 2);
+  assert.notEqual(calls[0]!.arguments, calls[1]!.arguments);
+  assert.match(calls[0]!.arguments, /"offset":330/);
+});

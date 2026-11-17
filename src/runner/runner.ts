@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { GO_AHEAD_WORDS, guardTool, type GoAhead, type GuardPlace, type Verdict } from "../guardrails.js";
@@ -27,7 +28,10 @@ import { CODEX_BUILTINS, expandCommand, skillCommands, toolCommandsIn } from "./
 import { skillsNote } from "./shared-skills.js";
 import { parseContextReport, type ToolContext } from "./context-report.js";
 import { projectMcpServers, type AcpMcpServer } from "./mcp-servers.js";
-import { nodeForScripts } from "./adapters.js";
+import { acpMount, claudeMountFile, codexMount, mountedServers } from "./connections.js";
+import { nodeForScripts, refusedFlag } from "./adapters.js";
+// Kept here too, where it was first.
+export { refusedFlag } from "./adapters.js";
 import { AUTO_MODE, autoModeRefused } from "./adapters.js";
 import { acpEntry, ensureCursorEntry, openFridayMcp, type FridayMcp, type MeshAnswer } from "./friday-mcp.js";
 import { canScreenshot, screenshot } from "./screenshot.js";
@@ -335,12 +339,6 @@ export function rememberModels(tool: EngineTool, list: { id: string; label: stri
  * Which of `flags` a CLI said it doesn't know, from how it failed: commander's "unknown option '--approve-mcps'", clap's
  * "unexpected argument '--mode' found", or a value it won't take for one ("invalid value for --mode"). Null for any other failure.
  */
-export function refusedFlag(error: string, flags: string[]): string | null {
-  if (!/unknown (?:option|argument|flag)|unrecognized|unexpected argument|invalid (?:value|argument|choice)|is invalid|not a valid|is not allowed/i.test(error)) return null;
-  // The flag whole, not the start of a longer one: "--mode" is not named by "--model".
-  const named = (f: string) => error.split(f).slice(1).some((after) => !/^[\w-]/.test(after));
-  return flags.find(named) ?? null;
-}
 
 /**
  * Whether the server's message makes this a Work session's turn: only from the open-source edition's own server (localEdition), whatever another server says.
@@ -382,10 +380,15 @@ function sayBusy(): void {
     process.stdout.write(`${BUSY_LINE}${now ? 1 : 0}\n`);
   }
 }
-function busy(d: 1 | -1): void {
+/** Turns running by tool, so a tool is never updated under one (tool-updates.ts). */
+const turnsByTool = new Map<string, number>();
+function busy(d: 1 | -1, tool?: string): void {
   turnsRunning = Math.max(0, turnsRunning + d);
+  if (tool) turnsByTool.set(tool, Math.max(0, (turnsByTool.get(tool) ?? 0) + d));
   sayBusy();
 }
+/** Whether any of this tool's turns is running on this machine. */
+export const toolBusy = (tool: string): boolean => (turnsByTool.get(tool) ?? 0) > 0;
 /** Kept busy for `ms` from now (0 lets it go), however many turns run meanwhile: the server's keep-awake (hosted-crew.ts). */
 export function holdAwake(ms: number): void {
   awakeUntil = ms > 0 ? Date.now() + Math.min(ms, 10 * 60_000) : 0;
@@ -512,6 +515,10 @@ export class Runner {
   private skipFlags = new Set<string>();
   /** The project's MCP servers, for a tool spoken to over ACP (see mcp-servers.ts): read as the lane opens and before each turn. */
   private acpMcp: AcpMcpServer[] = [];
+  /** The servers set up in Connections, as this lane's tool takes them, read each turn (connections.ts). */
+  private conns: { spec: NonNullable<TurnSpec["connections"]>; acp: AcpMcpServer[] } | null = null;
+  /** This runner's own name for its Claude Code config file of those servers. */
+  private readonly connKey = randomBytes(5).toString("hex");
   /** Friday's own MCP server for this lane's tool, through which it talks to the other agents in the session (friday-mcp.ts). */
   private friday: { spec: FridayMcp; url: string; close(): void } | null = null;
   /** Its calls the server hasn't answered yet, by id. */
@@ -828,7 +835,7 @@ export class Runner {
       // Claude Code after the snapshot and any checkpoint being taken, not beside them: on Windows a CLI being started holds the
       // pipes of the gits running then, and the checkpoint before the first turn took three times as long. With no checkpoint
       // running it starts as soon as the snapshot is in, rather than a fixed 1.5s later in case a turn came.
-      void Promise.all([warming, this.mcpServers(), this.loadSkills().then(() => this.systemFileFor(this.noted(note)))]).then(async ([, mcp, systemFile]) => {
+      void Promise.all([warming, this.mcpServers(), this.loadSkills().then(() => this.systemFileFor(this.noted(note))), this.readConnections()]).then(async ([, mcp, systemFile]) => {
         await this.checkpointing;
         warm.prepare(this.launch.command, [...this.launch.prefix, ...ADAPTERS.claude.args({ ...this.spec("", note, mcp, undefined, undefined, effort), ...(systemFile ? { systemFile } : {}) })], this.spawnOptions());
       }).catch(() => {
@@ -1041,6 +1048,24 @@ export class Runner {
     this.acpMcp = await projectMcpServers(this.opts.cwd).catch(() => []);
   }
 
+  /**
+   * The servers set up in Friday's Connections, read each turn: one added or turned off counts from the next turn, with no
+   * restart. Nothing when there are none, or the file can't be read.
+   */
+  private async readConnections(): Promise<void> {
+    const tool = this.opts.tool;
+    if (!tool) return;
+    const servers = await mountedServers(tool).catch(() => []);
+    if (!servers.length) return void (this.conns = null);
+    const codex = tool === "codex" ? codexMount(servers) : { args: [], env: {} };
+    const claudeFile = tool === "claude" ? await claudeMountFile(servers, this.connKey).catch(() => null) : null;
+    const amp = Object.fromEntries(servers.map((m) => [m.name, m.transport === "stdio" ? { command: m.command, args: m.args ?? [], env: m.env ?? {} } : { url: m.url, headers: m.headers ?? {} }]));
+    this.conns = {
+      spec: { names: servers.map((m) => m.name), ...(claudeFile ? { claudeFile } : {}), codexArgs: codex.args, codexEnv: codex.env, amp },
+      acp: acpMount(servers),
+    };
+  }
+
   /** Claude Code's MCP servers for this folder, which Auto lets it use. Read each time: one added since then counts. */
   private async mcpServers(): Promise<string[]> {
     return this.opts.tool === "claude" && this.mode === "full" ? claudeMcpServers(this.opts.cwd) : [];
@@ -1208,8 +1233,9 @@ export class Runner {
       ...(ask ? { ask: true } : {}),
       // A teammate at full access is held to the go-ahead list (guardrails.ts; Arun, 2026-11-03).
       ...(this.opts.keepAs && mode === "full" ? { guarded: true } : {}),
-      ...(this.acpMcp.length || (this.friday && acpTool) ? { acpMcp: [...this.acpMcp, ...(this.friday && acpTool ? [acpEntry(this.friday.spec)] : [])] } : {}),
+      ...(this.acpMcp.length || (this.friday && acpTool) || (this.conns && acpTool) ? { acpMcp: [...this.acpMcp, ...(this.friday && acpTool ? [acpEntry(this.friday.spec)] : []), ...(this.conns && acpTool ? this.conns.acp : [])] } : {}),
       ...(this.friday ? { friday: this.friday.spec } : {}),
+      ...(this.conns ? { connections: this.conns.spec } : {}),
       ...(this.skipFlags.size ? { skip: [...this.skipFlags] } : {}),
       ...(this.work ? { work: true } : {}),
     };
@@ -1437,14 +1463,14 @@ export class Runner {
     this.log(`${this.label} carries on the turn it was on when the connection dropped`);
     this.adopted = prev;
     this.cap = { id };
-    busy(1);
+    busy(1, this.opts.tool);
     let over = false;
     prev.handOn = (msg) => {
       const x = msg as { kind?: string; id?: string };
       this.send(x.id === kept.id ? { ...x, id } : x);
       if (x.kind !== "turn.end" || x.id !== kept.id || over) return;
       over = true;
-      busy(-1);
+      busy(-1, this.opts.tool);
       if (this.cap?.id === id) this.cap = null;
       // What it reports after its end (the diff) still comes through for a while; then it is let go of for good.
       setTimeout(() => {
@@ -1532,14 +1558,14 @@ export class Runner {
       if (kept && this.prev) return this.adopt(this.prev, kept, m.id);
       // Any other turn: one kept going from before the drop must not run beside it, in the same folder and conversation.
       this.prev?.dropKept();
-      busy(1);
+      busy(1, this.opts.tool);
       // For this turn and what is asked of the folder while it runs: no further than the turn says (see `mode`).
       this.cap = { id: m.id, ...(m.mode ? { mode: m.mode } : {}) };
       void this.turn(m)
         .catch((e) => this.send({ kind: "turn.end", id: m.id, outcome: "error", error: (e as Error).message }))
         .finally(() => {
           if (this.cap?.id === m.id) this.cap = null;
-          busy(-1);
+          busy(-1, this.opts.tool);
         });
     }
     else if (m.kind === "stop") {
@@ -1608,7 +1634,7 @@ export class Runner {
     const bare = asTyped && !!adapter.interactive;
     let prompt = own ?? m.prompt;
     const files = retry ?? (await this.download(m.attachments ?? []));
-    const [mcp] = await Promise.all([this.mcpServers(), this.readAcpMcp()]);
+    const [mcp] = await Promise.all([this.mcpServers(), this.readAcpMcp(), this.readConnections()]);
     if (files.length && !asTyped) prompt += `\n\nFiles attached to the session, saved on this machine:\n${files.map((f) => `- ${f}`).join("\n")}`;
     // Pictures, said to be looked at: a tool handed them as images sees them already, and one that isn't (Cursor, Amp, an ACP
     // tool that takes none) opens them itself, as it would a screenshot named to it at its own prompt.

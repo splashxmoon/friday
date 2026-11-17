@@ -117,7 +117,7 @@ export class TeamLooks {
   }
 
   /** A room as the app shows it: who is in it (their lanes there), how many work or need the person, its lead and last words. */
-  async room(r: { id: string; name: string; sid: string; lanes: Record<string, string>; purpose?: string; folders?: string[]; thread?: string }, invite: string) {
+  async room(r: { id: string; name: string; sid: string; lanes: Record<string, string>; purpose?: string; folders?: string[]; thread?: string; project?: { repo: string; branch?: string } }, invite: string) {
     const { state, agents: all, said, news, events } = await this.look(r.sid);
     // Renamed from its own page (its title, settings.update): its title is its name. A thread not named yet goes by the first thing
     // the person said in it.
@@ -126,7 +126,7 @@ export class TeamLooks {
     const lanes = Object.values(r.lanes);
     const agents = all.filter((a) => lanes.includes(a.lane) && state.engines[a.lane]?.online);
     const doing = Object.fromEntries(agents.filter((a) => a.status === "working").map((a) => [a.lane, a.line ?? ""]));
-    return { id: r.id, name, sid: r.sid, invite, lanes: r.lanes, ...(r.thread ? { thread: r.thread } : {}), lead: state.lead ?? null, news, ...(r.purpose ? { purpose: r.purpose } : {}), ...(r.folders?.length ? { folders: r.folders } : {}), working: agents.filter((a) => a.status === "working").length, waiting: agents.filter((a) => a.status === "waiting").length, last: said, doing };
+    return { id: r.id, name, sid: r.sid, invite, lanes: r.lanes, ...(r.thread ? { thread: r.thread } : {}), lead: state.lead ?? null, news, ...(r.purpose ? { purpose: r.purpose } : {}), ...(r.folders?.length ? { folders: r.folders } : {}), ...(r.project && !r.thread ? { project: r.project } : {}), working: agents.filter((a) => a.status === "working").length, waiting: agents.filter((a) => a.status === "waiting").length, last: said, doing };
   }
 
   /** A Crew room's own counts, as each room's are: its teammates (`lanes`) at work there and those waiting on the person there. */

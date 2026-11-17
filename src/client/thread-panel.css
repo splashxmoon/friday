@@ -1,0 +1,38 @@
+/* A thread with a crew mate (Teammates.tsx ThreadPanel; Arun, 2026-11-17: "design this better..."): what it is on in a card at
+   its top, a line with how many replies, the replies as a chat of their own, and the box as the room's. */
+.tt-thread-body.tth { gap: 14px; padding: 14px 16px 16px; }
+.tth-who { display: flex; align-items: center; gap: 7px; min-height: 22px; color: var(--ink-3); font-size: 12px; line-height: 18px; }
+.tth-who b { color: var(--ink); font-size: 13.5px; font-weight: 600; letter-spacing: -0.005em; }
+.tth-who time { color: var(--ink-4); font-variant-numeric: tabular-nums; }
+
+/* What the thread is on: its message whole, in a card. */
+.tth-root { padding: 12px 16px 14px; border-radius: 14px; background: var(--card); box-shadow: inset 0 0 0 1px var(--border); }
+.tth-root-text { margin-top: 8px; color: var(--ink); font-size: 14px; line-height: 22px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.tth-root-text :is(p, ul, ol) { max-width: none; margin: 0 0 10px; }
+.tth-root-text :is(p, ul, ol):last-child { margin-bottom: 0; }
+.tth-root-text > div, .tth-bubble > div { white-space: normal; }
+
+/* How many replies: a quiet label on a hairline. */
+.tth-sep { display: flex; align-items: center; gap: 10px; color: var(--ink-3); font-size: 12px; font-weight: 500; line-height: 16px; }
+.tth-sep::before, .tth-sep::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+.tth-sep::before { flex: 0 0 12px; }
+.tth-empty { max-width: 300px; margin: 6px auto 0; color: var(--ink-3); font-size: 12.5px; line-height: 19px; text-align: center; text-wrap: balance; }
+
+/* The crew mate's replies under its face, the person's at the right, each hugging its words. */
+.tth-row { display: grid; grid-template-columns: 24px minmax(0, 1fr); column-gap: 10px; }
+.tth-row > :first-child { margin-top: 1px; }
+.tth-main { min-width: 0; }
+.tth-bubble { width: fit-content; max-width: 100%; margin-top: 4px; padding: 8px 12px 9px; border-radius: 4px 14px 14px 14px; background: var(--hover); box-shadow: inset 0 0 0 1px var(--border); color: var(--ink); font-size: 14px; line-height: 22px; overflow-wrap: anywhere; }
+.tth-bubble :is(p, ul, ol) { max-width: none; margin: 0 0 8px; }
+.tth-bubble :is(p, ul, ol):last-child { margin-bottom: 0; }
+.tth-mine { display: flex; flex-direction: column; align-items: flex-end; align-self: flex-end; max-width: 85%; }
+.tth-mine .tth-bubble { margin: 0; border-radius: 14px 14px 4px 14px; background: var(--hover-strong); box-shadow: none; white-space: pre-wrap; }
+.tth-time { margin-top: 4px; color: var(--ink-4); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.tth-typing { display: flex; align-items: center; gap: 8px; color: var(--ink-3); font-size: 12.5px; line-height: 18px; }
+
+/* The box: the room's, floating at the foot with no rule over it. */
+.tt-thread-panel .tt-thread-box { padding: 6px 12px 12px; border-top: 0; }
+.tt-thread-panel .tt-thread-field { padding: 4px 6px 4px 4px; border: 0; border-radius: 16px; background: var(--card); box-shadow: inset 0 0 0 1px var(--border-strong), 0 1px 2px rgb(0 0 0 / 0.04); }
+.tt-thread-panel .tt-thread-field:focus-within { box-shadow: inset 0 0 0 1px var(--border-focus), 0 1px 2px rgb(0 0 0 / 0.04); }
+.tt-thread-panel .tt-thread-field textarea { min-height: 40px; padding: 10px 10px 8px; font-size: 14px; line-height: 21px; }
+.tt-thread-panel .tt-thread-field .tt-thread-send { margin-bottom: 3px; }

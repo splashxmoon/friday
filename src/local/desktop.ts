@@ -115,6 +115,10 @@ function setGlass(w: BrowserWindow, on: boolean, theme: "dark" | "light") {
 function open(url: string) {
   if (win && !win.isDestroyed()) {
     if (win.isMinimized()) win.restore();
+    win.show();
+    // From the Dock, a second launch or the menu bar, Friday isn't the active app: focus() alone left its window behind the one
+    // in front on macOS. It is brought forward too.
+    if (process.platform === "darwin") app.focus({ steal: true });
     return win.focus();
   }
   win = new BrowserWindow({
@@ -128,10 +132,10 @@ function open(url: string) {
     ...(lastGlass() && process.platform === "win32" ? { backgroundMaterial: "acrylic" as const } : {}),
     show: false,
     autoHideMenuBar: true,
-    // No title bar: the page draws its own header there, as in the product app. On macOS the traffic lights sit in it, 17px down
-    // so their centre lines up with the header's; elsewhere the window's buttons are drawn over its right end.
+    // No title bar: the page draws its own header there, as in the product app. On macOS the traffic lights sit in it, 14px down
+    // (centre 20px down, Arun 2026-11-16: "move everything up slightly"), and the header's row lines up with them (style.css); elsewhere the window's buttons are drawn over its right end.
     ...(process.platform === "darwin"
-      ? { titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 16, y: 17 } }
+      ? { titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 16, y: 14 } }
       : { titleBarStyle: "hidden" as const, titleBarOverlay: OVERLAY[lastTheme()] }),
     // webviewTag: the Preview panel draws the app being built in a <webview>, locked down below.
     webPreferences: {

@@ -49,6 +49,8 @@ export type WorkOptions = { shepherd?: boolean };
 
 type Kind = "review" | "ready" | "fix" | "waiting" | "draft" | "team" | "merged";
 const PILES = { ready: "Ready to merge", fix: "Needs a fix", waiting: "Waiting on others", draft: "Drafts" } as const;
+/** The same piles as chips, short enough that all of them sit on one row of the list (Arun, 2026-11-17: "fix layout"); the full name is the chip's tip. */
+const PILE_CHIPS = { ready: "Ready", fix: "To fix", waiting: "Waiting", draft: "Drafts" } as const;
 /** A key pressed on the page, for the open pull request to carry out. `n` makes the same key twice two commands. */
 type Cmd = { key: "github" | "merge" | "approve"; n: number };
 
@@ -411,9 +413,9 @@ export function CodeReview({
                   {allPiles
                     .filter((g) => g.items.length)
                     .map((g) => (
-                      <button key={g.pile} type="button" role="radio" aria-checked={pileHere === g.pile} className="rv-pile-chip" data-tone={g.pile} onClick={() => (setOnlyPile(pileHere === g.pile ? "" : g.pile), shut.has(g.title) && flipPile(g.title))}>
+                      <button key={g.pile} type="button" role="radio" aria-checked={pileHere === g.pile} aria-label={`${g.title}, ${g.items.length}`} title={g.title} className="rv-pile-chip" data-tone={g.pile} onClick={() => (setOnlyPile(pileHere === g.pile ? "" : g.pile), shut.has(g.title) && flipPile(g.title))}>
                         <i aria-hidden="true" />
-                        {g.title} <span>{g.items.length}</span>
+                        {PILE_CHIPS[g.pile]} <span>{g.items.length}</span>
                       </button>
                     ))}
                 </div>

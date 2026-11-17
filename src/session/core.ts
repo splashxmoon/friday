@@ -1,6 +1,6 @@
 import { refusal } from "../own-plan.js";
 import { randomBytes } from "node:crypto";
-import { engineName, ENGINE_TOOLS, SESSION_LANES, hostOnlyYes, isEngineEffort, effortLevelsOf, liveMachine, MAIN_LANE, type EngineEffort, type EngineTool, type ActorRef, type AgentSnapshot, type Attachment, type ControlMode, type EventBody, type Lane, type LaneControl, type LaneTrigger, type LinkRole, type PolicyPatch, type Role, type Handoff, type RepoCall, type SessionOptionsPatch, type Thinking, EFFORT_LEVELS } from "../types.js";
+import { engineName, ENGINE_TOOLS, SESSION_LANES, hostOnlyYes, isEngineEffort, effortLevelsOf, liveMachine, MAIN_LANE, type EngineEffort, type EngineTool, type ActorRef, type AgentSnapshot, type Attachment, type CardPress, type ControlMode, type EventBody, type Lane, type LaneControl, type LaneTrigger, type LinkRole, type PolicyPatch, type Role, type Handoff, type RepoCall, type SessionOptionsPatch, type Thinking, EFFORT_LEVELS } from "../types.js";
 import { canDriveLane, driverOf, freshLaneName, laneHeld, laneOf, meshOf, mergeOptions, pendingFor, roleOf, runOf, signoffStatus, uniqueLaneName, type SessionState, effortResets } from "./projection.js";
 import type { AppendGuard, AppendResult, SessionStore } from "./store.js";
 type PipelineDef = never;
@@ -14,7 +14,7 @@ import { feedbackText, fromWriter, unseen, type PrComment } from "../pr-feedback
 import { checksText, type CheckFailure } from "../pr-checks.js";
 
 export type Command =
-  | { type: "instruct"; text: string; lane?: string; /** A reply in a side thread on this earlier message (its seq). */ thread?: unknown; /** From an app on the person's behalf (app.ts postMessage): its turn is capped (Security R3). */ via?: unknown; interrupt?: boolean; attachments?: Attachment[]; handoff?: { fromLane?: string; reason?: string; carried?: unknown }; approval?: { id?: unknown; approve?: unknown; task?: unknown }; replaces?: unknown }
+  | { type: "instruct"; text: string; lane?: string; /** A reply in a side thread on this earlier message (its seq). */ thread?: unknown; /** From an app on the person's behalf (app.ts postMessage): its turn is capped (Security R3). */ via?: unknown; interrupt?: boolean; attachments?: Attachment[]; handoff?: { fromLane?: string; reason?: string; carried?: unknown }; approval?: { id?: unknown; approve?: unknown; task?: unknown }; replaces?: unknown; /** A press on a card an agent drew in the chat (cleanPress). */ card?: unknown }
   | { type: "suggest"; text: string; lane?: string; attachments?: Attachment[]; at?: { call: string; step: string } }
   /** To the people here, not an agent: an aside no agent reads. */
   | { type: "say"; text: string; lane?: string }
@@ -203,6 +203,24 @@ function hostsYes(state: SessionState, lane: string, who: string): string | null
  * driver-only. Stopping (pause, cancel) is allowed for the driver *or an
  * owner*: whoever is accountable for the session always has a kill switch.
  */
+/** A press on a card an agent drew, as the page sent it, made safe: the card, a button's name, and short values. */
+function cleanPress(v: unknown): CardPress | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const o = v as Record<string, unknown>;
+  const word = (x: unknown, n: number) => (typeof x === "string" || typeof x === "number" ? String(x).replace(/\s+/g, " ").trim().slice(0, n) : "");
+  const id = word(o.id, 40);
+  const action = word(o.action, 30);
+  if (!id || !action) return undefined;
+  const values: Record<string, string | string[]> = {};
+  if (o.values && typeof o.values === "object")
+    for (const [k, x] of Object.entries(o.values as Record<string, unknown>).slice(0, 12)) {
+      const key = k.replace(/[^\w-]/g, "").slice(0, 30);
+      // A value as written, its lines kept (an edited draft is paragraphs); a list's items each a line.
+      if (key) values[key] = Array.isArray(x) ? x.slice(0, 40).map((y) => word(y, 120)) : typeof x === "string" ? x.replace(/\r\n/g, "\n").replace(/[\x00-\x08\x0b-\x1f]/g, "").trim().slice(0, 6000) : word(x, 500);
+    }
+  return { id, action, ...(Object.keys(values).length ? { values } : {}) };
+}
+
 export class SessionCore {
   constructor(
     private store: SessionStore,
@@ -389,7 +407,7 @@ export class SessionCore {
         const thread = Number.isInteger(root) && root > 0 ? { root } : undefined;
         if (answered && !(await claimOnce(answered))) return fail("That request was already answered.");
         const r = await append(
-          { type: "instruction", text, interrupt, ...withMentions(text), ...(cmd.via === "api" ? { via: "api" as const } : {}), ...(attachments.length ? { attachments } : {}), ...(handoff ? { handoff } : {}), ...(approval ? { approval } : {}), ...(replaces !== undefined ? { replaces } : {}), ...(thread ? { thread } : {}) },
+          { type: "instruction", text, interrupt, ...withMentions(text), ...(cmd.via === "api" ? { via: "api" as const } : {}), ...(attachments.length ? { attachments } : {}), ...(handoff ? { handoff } : {}), ...(approval ? { approval } : {}), ...((c) => (c ? { card: c } : {}))(cleanPress(cmd.card)), ...(replaces !== undefined ? { replaces } : {}), ...(thread ? { thread } : {}) },
           { expectDriver: m.id, bumpEpoch: interrupt && laneRun.status === "running" },
         );
         if (!r.ok && answered) await release(answered);

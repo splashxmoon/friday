@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { ACCOUNT_TOOLS, AccountList } from "./Accounts.js";
+import { ToolUpdateButton, useToolUpdates } from "./tool-updates.js";
 import { ENGINE_NAMES, ENGINE_TOOLS, type EngineTool } from "../types.js";
 
 /**
@@ -59,6 +60,7 @@ export function signInFinished(o: { needsSignIn: boolean; waiting: boolean; sawS
 }
 
 export function MachineBadge({ identity, machine, refresh, inline = false, welcome = false, part }: { identity: Identity; machine: MachineState; refresh: () => void; /** Always shown, compact, with no pill to open it: the new-session page's corner. */ inline?: boolean; /** In the welcome (Setup.tsx): the well-known tools always listed, ready ones first, and no line about where it runs. */ welcome?: boolean; /** Inline, one half only: the computer (Settings › Computer), or the tools on it (Settings › Coding tools). */ part?: "computer" | "tools" }) {
+  useToolUpdates(identity);
   const [open, setOpen] = useState(false);
   // What stays here, said for the kind of work in front of you (w1 #4: "The code, the terminal and your coding tool" in Work).
   const topLine = "The code, the terminal and your coding tool stay here. Nothing is uploaded.";
@@ -968,6 +970,8 @@ function ToolRow({
         </span>
       </span>
 
+      {/* A newer version of it is out: Update, the way it was installed (tool-updates.tsx). */}
+      {!acting && (state === "in" || state === "out" || state === "unknown") && <ToolUpdateButton tool={tool} />}
       {acting === "in" ? (
         // Waiting on the person, in another window: the way out of that is here, beside the wait.
         <button type="button" className="btn ghost small mb-tool-go" onClick={onCancel}>

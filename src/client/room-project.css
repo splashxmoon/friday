@@ -1,0 +1,36 @@
+/* A room's Project (splashxmoon/friday#24, RoomProject.tsx), chosen in the folder picker refined for repos (Workspace.tsx
+   RepoPicker, `.rpk`). In the room dialog: the repo as a box that opens it, its × for No project, and the branch beside it. On
+   the profile: rows like its Folders, the branch edited in place, saved as it changes (Arun, 2026-11-17: "redesign this better"). */
+.rpj > span .rpj-opt { margin-left: 4px; color: var(--text-muted); font-style: normal; font-weight: 400; }
+.rpj-inputs { display: grid; grid-template-columns: minmax(0, 1fr) minmax(112px, 36%); gap: 8px; min-width: 0; }
+.rpj-repo-box, .rpj-branch-box { position: relative; min-width: 0; }
+.rpj-lead { position: absolute; top: 50%; left: 11px; width: 14px; height: 14px; color: var(--text-muted); transform: translateY(-50%); pointer-events: none; }
+.rpj-trigger:disabled { cursor: default; opacity: 0.5; }
+.rpj-trigger:disabled:hover { background: transparent; }
+.rpj-trigger { position: relative; display: flex; align-items: center; gap: 8px; width: 100%; height: 32px; padding: 0 10px 0 31px; border: 1px solid var(--input, var(--border)); border-radius: 8px; background: transparent; color: var(--text-muted); font: 13px/18px var(--font); text-align: left; cursor: pointer; transition: border-color var(--t-hover) var(--ease-out), background-color var(--t-hover) var(--ease-out); }
+.rpj-trigger:hover { background: var(--hover); }
+.rpj-trigger:focus-visible { outline: 2px solid var(--ink-2); outline-offset: 1px; }
+.rpj-trigger[aria-invalid="true"] { border-color: var(--red); }
+.rpj-trigger.set { padding-right: 32px; color: var(--ink); }
+.rpj-trigger.set .rpj-lead { color: var(--ink-2); }
+.rpj-trigger-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rpj-trigger.set .rpj-trigger-text { font-weight: 500; }
+.rpj-trigger-host { flex: none; color: var(--text-muted); font-size: 12px; }
+.rpj-chev { flex: none; width: 14px; height: 14px; color: var(--text-muted); }
+.rpj-clear { position: absolute; top: 50%; right: 4px; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--r-md, 6px); background: none; color: var(--text-muted); transform: translateY(-50%); cursor: pointer; transition: background-color var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out); }
+.rpj-clear:hover { background: var(--hover); color: var(--ink); }
+.rpj-clear:focus-visible { outline: 2px solid var(--ink-2); outline-offset: -2px; }
+.rpj-clear svg { width: 13px; height: 13px; }
+
+/* No top padding on the list: its sticky section heads would stick under it and leave a strip the rows scroll through. */
+.rpj-branch-box .rpj-trigger.set .rpj-trigger-text, .rpj-branch-now { font-family: var(--mono); font-size: 12px; }
+
+.rpj-page { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.rpj-name { min-width: 0; overflow: hidden; font-weight: 500; text-overflow: ellipsis; }
+.rpj-rows .msd-row:disabled { cursor: default; opacity: 0.6; }
+.rpj-member { cursor: default; }
+.rpj-member:hover { background: none; }
+.rpj-state.rpj-ok { color: var(--text-muted); }
+.rpj-state.rpj-warn { color: var(--amber); }
+.rpj-state.rpj-muted { color: var(--text-muted); font-style: italic; }
+.rbk .wsp-sub:empty { display: none; }

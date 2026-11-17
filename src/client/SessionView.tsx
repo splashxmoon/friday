@@ -702,7 +702,7 @@ export function SessionView({
       act("settings", "Session settings", "settings", () => dispatchEvent(new Event("friday:session-settings")));
       // The rest handed on to your crew or a crew room, from the session's own menu (Code and Crew, connected, 2026-11-13): this
       // edition's sessions have no People menu, so it is here, beside the session's settings.
-      if (who.role !== "viewer") act("keep-going", "Keep this going…", "handoff", () => openKeepGoing({ sid }));
+      if (who.role !== "viewer") act("keep-going", "Keep this going", "handoff", () => openKeepGoing({ sid }));
     }
     act("file", "Open a file…", "file", () => (setTab("files"), setBench(true), setTimeout(() => dispatchEvent(new CustomEvent("friday:quick-open")), 60)), shortcut("⌘P"));
     // Every agent by name, and what is waiting: the palette is where a keyboard goes when it doesn't know the number.

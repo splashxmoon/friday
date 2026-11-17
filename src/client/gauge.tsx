@@ -301,12 +301,12 @@ export function AccountCardsView({ limits, tool, className = "" }: { limits: Rea
 }
 
 /** The limits Friday can read, one tool under another: the rail's Usage card, and a Solo session's. */
-export function CodingToolLimits({ identity }: { identity: Identity }) {
+export function CodingToolLimits({ identity, only }: { identity: Identity; /** Just this tool's: the card over its own ring on the rail. */ only?: EngineTool }) {
   const limits = useToolLimits(identity);
   const g = glanceOf(limits);
   // The four always, then every other tool this computer has a reading for.
   const read = limits && limits !== "none" ? limits.tools ?? {} : {};
-  const shown = ENGINE_TOOLS.filter((t) => LIMITED.includes(t) || read[t]);
+  const shown = only ? [only] : ENGINE_TOOLS.filter((t) => LIMITED.includes(t) || read[t]);
   return (
     <div className="lg-glance">
       {shown.map((t) => (
@@ -378,6 +378,107 @@ export function fiveHourOf(tool: EngineTool | undefined, limits: Read, account?:
 export function weekOf(tool: EngineTool | undefined, limits: Read, account?: string): Row | null {
   if (!tool) return null;
   return rowsFor(tool, limits, account).find((x) => x.win === "week" && x.used !== null) ?? null;
+}
+
+/**
+ * One account of a tool as the limits read it: who (its label, email and plan), its 5 hours and its week, its tag ("Most room") and,
+ * when it ran out, until when. A tool with one account here is one of these, "Main", from its own reading (Arun, 2026-11-17: the
+ * accounts design for the rail's card and the Usage page).
+ */
+export type AccountView = { id: string; label: string; email: string | null; plan: string | null; tag?: string; five: AccountCard["rows"][number] | null; week: AccountCard["rows"][number] | null; out: string; /** Its other windows, a model's own week ("Weekly · Fable"), as Claude Code says them. */ more: AccountCard["rows"] };
+export function accountViews(limits: Read, tool: EngineTool): AccountView[] {
+  const pickOf = (rows: AccountCard["rows"]) => {
+    const five = rows.find((r) => r.win === "5h") ?? null;
+    // The account's own week first (its windows come in WINDOW_ORDER: seven_day before a model's), a model's week after it.
+    const week = rows.find((r) => r.win === "week") ?? null;
+    return { five, week, out: rows.find((r) => r.win === "out")?.text ?? "", more: rows.filter((r) => r !== five && r !== week && r.win !== "out" && r.used !== null) };
+  };
+  const cards = tool === "claude" || tool === "codex" ? accountCards(limits, tool) : null;
+  if (cards) return cards.map((c) => ({ id: c.id, label: c.label, email: c.email ?? null, plan: c.plan, ...(c.tag ? { tag: c.tag } : {}), ...pickOf(c.rows) }));
+  const g = glanceOf(limits)[tool];
+  return g?.rows.length ? [{ id: "default", label: "Main", email: null, plan: g.plan ?? null, ...pickOf(g.rows) }] : [];
+}
+
+/** A ring's colour band: green with room, orange from 70% used, red from 90%, as the glance's bars are (ToolGlance). */
+const bandOf = (used: number) => (used >= 90 ? "red" : used >= 70 ? "orange" : "green");
+
+/**
+ * Your coding tools' limits on the rail, a twin ring for each tool that has a reading (Arun, 2026-11-17: "a ring design on the rail
+ * for the usage limits of your connected/signed in coding tools", "it will hold hourly and weekly limits", option B of the mockups;
+ * "use vibrant and beautiful colors of green, yellow/orange and red"): its week the outer ring and its 5-hour window (or, without one, its first
+ * figure) the inner, its mark in the middle; a 5-hour window used up says when it starts over instead. Null with no
+ * reading at all, where the rail keeps its plain Usage icon.
+ */
+export function useRailLimits(identity: Identity): { tool: EngineTool; outer: number; inner: number | null; back: string; label: string; accounts: number }[] {
+  const limits = useToolLimits(identity);
+  const read = limits && limits !== "none" ? limits.tools ?? {} : {};
+  // The account new sessions use (Accounts.tsx preferredAccount), followed as it changes.
+  const [, again] = useState(0);
+  useEffect(() => {
+    const on = () => again((n) => n + 1);
+    addEventListener("friday-account-default", on);
+    addEventListener("storage", on);
+    return () => (removeEventListener("friday-account-default", on), removeEventListener("storage", on));
+  }, []);
+  return ENGINE_TOOLS.filter((t) => LIMITED.includes(t) || read[t]).flatMap((tool) => {
+    const many = limits && limits !== "none" && (tool === "claude" || tool === "codex") ? (limits.accounts?.[tool] ?? []) : [];
+    const account = many.length > 1 ? inUseAccount(tool, many.map((a) => a.id)) : undefined;
+    const five = fiveHourOf(tool, limits, account);
+    const week = weekOf(tool, limits, account);
+    const first = five ? null : rowsFor(tool, limits, account).find((r) => r.used !== null && r.win !== "week");
+    const outer = five?.used ?? first?.used ?? week?.used ?? null;
+    if (outer === null) return [];
+    const inner = five || first ? (week?.used ?? null) : null;
+    // "Resets in 2h 05m" → "2h"; "Out until 3:10 PM" has no short form, and keeps the mark.
+    const back = outer >= 100 ? (/in (\d+[dhm])/.exec(five?.resets ?? first?.resets ?? "")?.[1] ?? "") : "";
+    const outerName = five ? "5-hour" : first ? first.label : "Weekly";
+    const who = account ? ` (${many.find((a) => a.id === account)?.label ?? "Main"}, 1 of ${many.length} accounts)` : "";
+    const label = `${ENGINE_NAMES[tool]}${who}: ${outerName} ${Math.round(outer)}% used${inner !== null ? `, weekly ${Math.round(inner)}% used` : ""}${back ? `, back in ${back}` : ""}`;
+    return [{ tool, outer, inner, back, label, accounts: Math.max(1, many.length) }];
+  });
+}
+
+/** The account new sessions use, by id, as Accounts.tsx keeps it ("mpa.account.default.<tool>"); the tool's own sign-in until picked. */
+export function inUseAccount(tool: EngineTool, ids: string[]): string {
+  let id = "";
+  try {
+    id = localStorage.getItem(`mpa.account.default.${tool}`) ?? "";
+  } catch {
+    // Private mode: the tool's own sign-in.
+  }
+  return ids.includes(id) ? id : "default";
+}
+
+/** One tool's twin ring for the rail: the week outside, 5 hours inside, its mark (or when it's back) in the middle. */
+export function RailRing({ tool, outer, inner, back }: { tool: EngineTool; outer: number; inner: number | null; back: string }) {
+  const R1 = 16.5;
+  const R2 = 11.75;
+  const arc = (r: number, used: number, w: number, band: string) => {
+    const c = 2 * Math.PI * r;
+    return (
+      <>
+        <circle className="rr-track" cx="19" cy="19" r={r} fill="none" strokeWidth={w} />
+        {used > 0 && <circle className={`rr-arc ${band}`} cx="19" cy="19" r={r} fill="none" strokeWidth={w} strokeLinecap="round" strokeDasharray={`${(c * Math.min(used, 100)) / 100} ${c}`} transform="rotate(-90 19 19)" />}
+      </>
+    );
+  };
+  return (
+    <span className="rr" aria-hidden="true">
+      <svg className="rr-rings" width="38" height="38" viewBox="0 0 38 38">
+        {/* The week outside and the five hours inside (Arun, 2026-11-17: "swap the ring placements for weekly and hourly"); a tool
+            with no week has its one figure as the outer ring alone. */}
+        {inner !== null ? (
+          <>
+            {arc(R1, inner, 3, bandOf(inner))}
+            {arc(R2, outer, 2.5, bandOf(outer))}
+          </>
+        ) : (
+          arc(R1, outer, 3, bandOf(outer))
+        )}
+      </svg>
+      {back ? <b className="rr-back">{back}</b> : <EngineMark tool={tool} size={inner !== null ? 13 : 16} className="rr-mark" />}
+    </span>
+  );
 }
 
 export function ContextGauge({ events, model = "", identity, tool, lane, solo = false, account }: { events: SessionEvent[]; friday: boolean; model?: string; identity: Identity; tool?: EngineTool; /** The agent the message box is aimed at: the ring is its context, not the whole session's. */ lane?: string; /** Solo: the coding tools' glance, and no Friday tab. */ solo?: boolean; /** Which of the tool's accounts on the computer the lane runs on, when it has more than one. */ account?: string }) {

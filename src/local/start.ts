@@ -186,6 +186,8 @@ export async function startLocal(o: { home?: string; port?: number; /** A link f
     decisionLog: true,
     dataDir: path.join(home, "uploads"),
     local: { redis: kv.redis, sub: kv.sub, user: { id: "local", name }, ...(o.atComputer ? { atComputer: o.atComputer } : {}), phone, outside, join, models: path.join(home, "models"),
+      // The coding tools on this computer kept up to date, a while after it starts and every six hours (tool-updates.ts).
+      toolUpdates: true,
     },
   });
   // Turned on before, so on again: the phone stays connected through a restart.

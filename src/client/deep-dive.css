@@ -109,17 +109,22 @@
 .dd-skel-card > span:nth-child(2) { width: 30%; }
 .dd-skel-card > span:last-child { width: 80%; margin-top: 18px; }
 
-.dd-picks { margin: 0; padding: 0; list-style: none; }
-.dd-pick { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 4px 0 10px; border-radius: var(--r-md); transition: background-color var(--t-hover) var(--ease-out); }
-.dd-pick + .dd-pick { box-shadow: inset 0 1px 0 var(--border); }
-.dd-pick:hover, .dd-pick:focus-within { background: var(--hover); box-shadow: none; }
-.dd-pick:hover + .dd-pick, .dd-pick:focus-within + .dd-pick { box-shadow: none; }
-.dd-pick > svg { flex: none; color: var(--text-muted); }
-.dd-pick-name { flex: none; max-width: 45%; overflow: hidden; color: var(--ink); font-size: 13.5px; font-weight: 500; line-height: 20px; text-overflow: ellipsis; white-space: nowrap; }
-.dd-pick-path { flex: 1; min-width: 0; overflow: hidden; color: var(--text-muted); font-size: 12px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
-.dd-pick .dd-pick-go { flex: none; gap: 4px; color: var(--text-muted); font-size: 12.5px; }
-.dd-pick:hover .dd-pick-go, .dd-pick .dd-pick-go:focus-visible { color: var(--ink); }
-.dd-more { margin: 8px 10px 0; }
+/* The finder: a field-like button that opens the folder and repo picker sessions use (Workspace.tsx WorkspaceCard), and a few
+   recent repos under it to start at once, in place of the long list (Arun, 2026-11-17). */
+.dd-find { display: flex; align-items: center; gap: 10px; width: 100%; height: 42px; padding: 0 14px; border: 1px solid var(--border-strong); border-radius: var(--r-lg, 12px); background: var(--card); color: var(--text-muted); font: inherit; font-size: 14px; text-align: left; cursor: text; transition: border-color var(--t-hover) var(--ease-out); }
+.dd-find:hover { border-color: var(--border-focus, var(--ink-3)); }
+.dd-find[aria-expanded="true"] { border-color: var(--border-focus, var(--ink-2)); }
+.dd-find:focus-visible { outline: 2px solid var(--border-focus, var(--ink-2)); outline-offset: 2px; }
+.dd-find > svg { flex: none; }
+.dd-find > span:first-of-type { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dd-find-hint { flex: none; font-size: 12px; color: var(--text-muted); opacity: .8; }
+.dd-recent { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+.dd-recent-label { margin-right: 2px; color: var(--text-muted); font-size: 12px; }
+.dd-recent-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 220px; height: 26px; padding: 0 9px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--ink-2); font: inherit; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out); }
+.dd-recent-chip:hover { background: var(--hover); color: var(--ink); }
+.dd-recent-chip > svg { flex: none; color: var(--text-muted); }
+.dd-home-empty .dd-recent { justify-content: center; }
+@media (max-width: 520px) { .dd-find-hint { display: none; } }
 .dd-skel-picks { gap: 26px; padding: 14px 10px; }
 .dd-skel-picks > span:nth-child(odd) { width: 46%; }
 .dd-skel-picks > span:nth-child(even) { width: 38%; }
@@ -160,12 +165,9 @@
 .dd-home-empty .dd-intro-facts { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 6px 16px; }
 .dd-home-empty > .dd-start { margin-bottom: auto; padding-bottom: 48px; }
 .dd-home-empty .dd-h2 { text-align: center; }
-.dd-home-empty .dd-picks { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--card); padding: 4px; }
 @media (max-width: 640px) {
   .dd-intro { grid-template-columns: minmax(0, 1fr); gap: 18px; padding: 16px; }
   .dd-intro-art { height: 130px; }
-  .dd-pick-path { display: none; }
-  .dd-pick-name { flex: 1; max-width: none; }
 }
 
 /* ── One repo ────────────────────────────────────────────────────── */
@@ -187,8 +189,6 @@
 
 /* The pages and questions, down the left. */
 .dd-side { position: sticky; top: 0; display: flex; flex-direction: column; max-height: calc(100vh - 120px); padding: 20px 0 24px; overflow-y: auto; scrollbar-width: thin; }
-.dd-side-meta { display: block; margin: 0 8px 14px; color: var(--text-muted); font-size: 12px; line-height: 18px; }
-.dd-side-meta svg { display: inline; vertical-align: -2px; }
 .dd-sha { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); }
 .dd-side-label { margin: 18px 8px 6px; color: var(--text-muted); font-size: 12px; font-weight: 500; line-height: 16px; }
 .dd-side-list { display: flex; flex-direction: column; gap: 1px; margin: 0; padding: 0; list-style: none; }
@@ -289,9 +289,18 @@
 
 /* The question box, floating at the foot of the page as DeepWiki's does. */
 /* What scrolls under it fades out above it, so no words show round its edges. */
-.dd-askwrap { position: sticky; bottom: 0; z-index: 5; width: 100%; max-width: 736px; margin: 0 auto; padding: 28px 8px 20px; background: linear-gradient(to bottom, transparent, var(--bg) 26px); }
+/* Above what a page draws (a diagram's or code block's toolbar and zoom controls are z-index 10–20, streamdown), so scrolled under
+   the box they don't show through it (Arun, 2026-11-17: "fix this random shawdow thing behind the input box"); under the narrow
+   code panel (30) and anything full screen. */
+.dd-askwrap { position: sticky; bottom: 0; z-index: 25; width: 100%; max-width: 736px; margin: 0 auto; padding: 28px 8px 20px; background: linear-gradient(to bottom, transparent, var(--bg) 26px); }
 .dd-askbar { width: 100%; margin: 0; padding: 10px 10px 8px 14px; border: 1px solid var(--border-strong); border-radius: 14px; background: var(--card); box-shadow: 0 8px 28px rgb(0 0 0 / 0.14), 0 1px 2px rgb(0 0 0 / 0.06); transition: border-color var(--t-hover) var(--ease-out); }
 .dd-askbar:focus-within { border-color: var(--border-focus); }
+/* In frosted, the card colour is see-through, so the page's words read through the box (Arun, 2026-11-17: "fix this, it is still
+   see through"): solid there, in the frosted theme's own colours. The fade around it stays the page's own see-through ground, and
+   the box casts no shadow there: a solid band and the shadow read as a dark frame round it ("there is a weird shadow around the
+   input box"). */
+html.glass .dd-askbar { background: #ffffff; box-shadow: none; }
+html.glass.dark .dd-askbar { background: #232327; }
 .dd-askbar textarea { display: block; width: 100%; min-height: 24px; max-height: 160px; padding: 2px 0; border: 0; background: transparent; color: var(--ink); font: inherit; font-size: 14px; line-height: 22px; resize: none; field-sizing: content; outline: none; }
 .dd-askbar textarea::placeholder { color: var(--text-muted); }
 .dd-askbar-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
@@ -351,7 +360,7 @@
   .dd-repo.with-code .dd-side { display: flex; }
   .dd-side { position: static; flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 4px; max-height: none; padding: 10px 0; overflow-x: auto; border-bottom: 1px solid var(--border); scrollbar-width: none; }
   .dd-side::-webkit-scrollbar { display: none; }
-  .dd-side-meta, .dd-side-foot { display: none; }
+  .dd-side-foot { display: none; }
   .dd-side-list { flex-direction: row; gap: 4px; }
   .dd-side-label { margin: 0 4px 0 8px; white-space: nowrap; }
   .dd-side-item { width: auto; white-space: nowrap; }

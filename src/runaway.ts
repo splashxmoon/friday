@@ -106,6 +106,9 @@ export function runawayIn(events: SessionEvent[], lane: string): Runaway | null 
         same.set(key, n);
         if (n >= SAME_CALL && c.name !== "shell" && c.name !== "run_command" && !/^(update_plan|todo|check_messages|wait_for_agent|list_tasks)$/.test(c.name) && !watching(c.name, c.arguments)) return { command: callWords(c.name, c.arguments), times: n, kind: "repeat" };
         if (c.name !== "shell" && c.name !== "run_command") continue;
+        // A command can change what the next read sees (a screenshot taken again, a file rebuilt): reading it after one is reading
+        // something new, not the same thing over (benchmark, 2026-11-17: a run looking at each new screenshot was stopped as a loop).
+        same.clear();
         try {
           const cmd = norm(String((JSON.parse(c.arguments || "{}") as { command?: unknown }).command ?? ""));
           if (cmd) commands.set(c.id, cmd);

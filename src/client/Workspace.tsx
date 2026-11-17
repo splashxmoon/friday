@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEven
 import { createPortal } from "react-dom";
 import type { CliSession, CliSessionList } from "../runner/imports.js";
 import { parseRepo } from "../runner/repo.js";
+import { repoKey as repoKeyOf } from "../room-project.js";
 import type { FolderInfo, GithubRepo } from "../runner/workspace.js";
 import { ENGINE_NAMES, ENGINE_TOOLS, type EngineMode, type EngineTool } from "../types.js";
 import { EngineMark } from "./BrandMarks.js";
@@ -15,7 +16,7 @@ import { resumeProblem, type ResumeLink } from "./resume-link.js";
 import { splitTools } from "./engines.js";
 import { MODE_BLURB, MODE_NAME } from "./StartControls.js";
 import { loadRecentFolderTimes, loadRecentFolders, saveRecentFolder, type Identity } from "./storage.js";
-import { placeCard, relTime, useDismiss } from "./ui.js";
+import { floating, placeCard, relTime, useDismiss } from "./ui.js";
 
 /**
  * Choosing where a coding agent works, in one card.
@@ -1536,4 +1537,272 @@ export function useResumeLink(identity: Identity, link: ResumeLink | undefined, 
     };
   }, [identity, link, machine, where]);
   return link ? note : "";
+}
+
+/**
+ * A repo picked for a room's Project: an address to take as it is, a folder whose remote names it (/api/teammates/repo-of; with
+ * `orFolder`, the folder itself when it names none), or a folder to work in as it is.
+ */
+export type RepoChoice = { repo: string } | { dir: string; orFolder?: true } | { folder: string };
+
+/**
+ * The folder picker, refined for a room's Project (Arun, 2026-11-17: "utilize the folder picker thing we have for like the folders,
+ * repos and stuff but more refined for this"): one list of repos, not folders. The crew's own first (from their folders), then the
+ * repos on this computer, then GitHub's, each repo once, the room's own marked Current; an address typed is taken as it is, a path
+ * typed is read for its remote. Picking clones nothing and opens nothing: it names the room's repo.
+ */
+export function RepoPicker({ identity, trigger, crew, onPick, onClose, prefer = "below", current }: { identity: Identity; trigger: HTMLElement | null; /** The repos in the crew's folders (RoomProject useRepoSuggestions). */ crew: { repo: string; name: string; folders: { path: string; who: string }[] }[]; onPick: (c: RepoChoice) => void; onClose: () => void; prefer?: "above" | "below"; /** The room's repo now, said on its row. */ current?: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  useDismiss(ref, onClose, trigger);
+  const data = useWorkspaceData(identity, "claude", true);
+  const [q, setQ] = useState("");
+  const [sel, setSel] = useState(0);
+  const desktop = typeof window !== "undefined" ? window.fridayDesktop : undefined;
+  const place = placeCard(trigger?.getBoundingClientRect(), 480, { want: 400, min: 240, prefer, gap: 8 });
+  const pick = (c: RepoChoice) => (onPick(c), onClose());
+  const query = q.trim();
+  const ql = query.toLowerCase();
+  const isPath = /^(~|\/|[a-z]:[\\/])/i.test(query);
+  const typed = !isPath ? repoKeyOf(query) : null;
+  const now = current ? repoKeyOf(current) : null;
+  const has = (...words: (string | undefined)[]) => !ql || words.some((w) => w?.toLowerCase().includes(ql));
+  const seen = new Set<string>();
+  const once = (addr: string | undefined) => {
+    const k = addr ? repoKeyOf(addr) : null;
+    if (!k || seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  };
+  const tag = (addr: string): { when?: string } => (now && repoKeyOf(addr) === now ? { when: "Current" } : {});
+  const curDir = current && /^(?:\/|[a-z]:[\\/]|\\\\)/i.test(current) ? current : null;
+  const names = (who: string[]) => (who.length > 1 ? `${who.slice(0, -1).join(", ")} and ${who.at(-1)}` : (who[0] ?? ""));
+  const crewItems: PickItem[] = crew
+    .filter((s) => has(s.name, s.repo) && once(s.repo))
+    .map((s) => ({ key: `c:${s.repo}`, kind: "repo", title: s.name, sub: `In ${names([...new Set(s.folders.map((f) => f.who))])}'s folders`, verb: "Use", ...tag(s.repo), run: () => pick({ repo: s.repo }) }));
+  const localAll = (data.recent ?? []).filter((f) => f.isRepo && f.remote && repoKeyOf(f.remote) && has(f.name, f.remote, f.path) && once(f.remote));
+  const localItems: PickItem[] = localAll.slice(0, query ? 12 : 8).map((f) => ({ key: `l:${f.path}`, kind: "folder", title: repoKeyOf(f.remote!)!.replace(/^github\.com\//, ""), sub: shortPath(f.path, data.home), ...(f.branch ? { branch: f.branch } : {}), verb: "Use", ...tag(f.remote!), run: () => pick({ dir: f.path }) }));
+  // Folders as they are (Arun, 2026-11-17: "also add support for folders too"): the recent ones that aren't a repo named above.
+  const foldAll = (data.recent ?? []).filter((f) => !(f.isRepo && f.remote && repoKeyOf(f.remote)) && has(f.name, f.path));
+  const foldItems: PickItem[] = foldAll.slice(0, query ? 12 : 5).map((f) => ({ key: `f:${f.path}`, kind: "folder", title: f.name, sub: shortPath(f.path, data.home), verb: "Use", ...(curDir === f.path ? { when: "Current" } : {}), run: () => pick({ folder: f.path }) }));
+  const ghAll = data.github?.available ? data.github.repos.filter((r) => has(r.slug, r.description) && once(r.url)) : [];
+  const ghItems: PickItem[] = ghAll.slice(0, query ? 20 : 8).map((r) => ({ key: `g:${r.slug}`, kind: "github", title: r.slug, sub: r.description || "On GitHub", lock: r.private, verb: "Use", ...tag(r.url), run: () => pick({ repo: r.url }) }));
+  const useItems: PickItem[] = [];
+  if (typed && !seen.has(typed)) useItems.push({ key: "use", kind: "use", title: `Use ${typed.replace(/^github\.com\//, "")}`, sub: "As typed: none of the crew's folders has it yet", verb: "Use", run: () => pick({ repo: query }) });
+  if (isPath) {
+    const dir = data.home && query.startsWith("~") ? `${data.home}${query.slice(1)}` : query;
+    useItems.push({ key: "path-f", kind: "use", title: "Use this folder", sub: `${query} · the crew works in it as it is`, verb: "Use", run: () => pick({ folder: dir.replace(/[\\/]+$/, "") || dir }) });
+    useItems.push({ key: "path", kind: "use", title: "Use this folder's repo", sub: `${query} · each crew mate in its own copy`, verb: "Use", run: () => pick({ dir }) });
+  }
+  const sections = [
+    { label: "", items: useItems, more: 0 },
+    { label: "Your crew's repos", items: crewItems, more: 0 },
+    { label: "On this computer", items: localItems, more: localAll.length - localItems.length },
+    { label: "Folders", items: foldItems, more: foldAll.length - foldItems.length },
+    { label: "On GitHub", items: ghItems, more: ghAll.length - ghItems.length },
+  ].filter((s) => s.items.length);
+  const flat = sections.flatMap((s) => s.items);
+  const at = Math.min(sel, Math.max(0, flat.length - 1));
+  useEffect(() => {
+    setSel(0);
+  }, [q]);
+  // In braces: scrollIntoView returns a promise in newer Chromium, and an effect may return only its cleanup.
+  useEffect(() => {
+    list.current?.querySelector(`[data-idx="${at}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [at]);
+  const keys = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowDown") (e.preventDefault(), setSel(Math.min(at + 1, flat.length - 1)));
+    else if (e.key === "ArrowUp") (e.preventDefault(), setSel(Math.max(at - 1, 0)));
+    else if (e.key === "Enter") (e.preventDefault(), flat[at]?.run());
+    else if (e.key === "Escape") (e.preventDefault(), e.stopPropagation(), onClose());
+  };
+  let idx = 0;
+  // As the app's floating cards are (ui.tsx floating): a Radix dialog it opens from (the room dialog) leaves it alone.
+  return floating(
+    <div ref={ref} data-owned-floating className="ws-card wsp rpk" role="dialog" aria-label="Choose the room's repo or folder" style={place}>
+      <div className="ws-search wsp-search">
+        <SearchIcon className="size-4 shrink-0 opacity-60" />
+        <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={keys} placeholder="Find a repo or folder, or type owner/repo, a URL or a path" spellCheck={false} autoCapitalize="off" autoCorrect="off" aria-label="Find a repo or folder" />
+        <kbd className="wsp-kbd" aria-hidden>
+          esc
+        </kbd>
+      </div>
+      <div className="wsp-list" ref={list}>
+        {data.recent === null && !flat.length && (
+          <p className="wsp-empty">
+            <span className="spinner tiny" /> Looking for your repos…
+          </p>
+        )}
+        {sections.map((s) => (
+          <div key={s.label || "use"} className={`wsp-section${s.label ? "" : " bare"}`}>
+            {s.label && (
+              <div className="wsp-head">
+                <span>{s.label}</span>
+                {s.more > 0 && <span className="wsp-hint">{s.more} more · type to narrow</span>}
+              </div>
+            )}
+            {s.items.map((it) => {
+              const i = idx++;
+              return <PickRow key={it.key} item={it} idx={i} on={i === at} query={query} onHover={() => setSel(i)} />;
+            })}
+          </div>
+        ))}
+        {!flat.length && data.recent !== null && <p className="wsp-empty">{query ? `No repo or folder called “${query}”. Type owner/repo, its URL or a folder's path to use it as it is.` : "No repos found yet. Type owner/repo, its URL or a folder's path."}</p>}
+      </div>
+      <div className="wsp-foot">
+        {desktop?.pickFolder && (
+          <button
+            type="button"
+            className="wsp-foot-btn"
+            title={`Pick a folder in ${systemPicker(desktop.platform)}: its remote names the repo, or the folder is the project when it has none`}
+            onClick={async () => {
+              const p = await desktop.pickFolder();
+              if (p) pick({ dir: p, orFolder: true });
+            }}
+          >
+            <FolderOpenIcon className="size-3.5" />
+            {desktop.platform === "darwin" ? "Choose in Finder…" : desktop.platform === "win32" ? "Choose in Explorer…" : "Choose folder…"}
+          </button>
+        )}
+        <span className="wsp-drop">Nothing is cloned or switched</span>
+        <span className="wsp-keys" aria-hidden>
+          <span>
+            <kbd>↑</kbd>
+            <kbd>↓</kbd>
+          </span>
+          <span>
+            <kbd>↵</kbd> use
+          </span>
+        </span>
+      </div>
+    </div>,
+  );
+}
+
+/**
+ * The branch a room's work starts from, picked as its repo is (Arun, 2026-11-17: "add option to work in a certain branch ... or
+ * leave it blank (default)"): the repo's default first, then the branches in the crew's copies of it, newest first; a name typed is
+ * taken as it is (a crew mate without it is told to fetch it). Nothing is checked out: each crew mate keeps its own branch.
+ */
+export function BranchPicker({ identity, trigger, repo, current, onPick, onClose, prefer = "below" }: { identity: Identity; trigger: HTMLElement | null; repo: string; /** The room's branch now; "" is the default. */ current: string; /** "" for the repo's default. */ onPick: (branch: string) => void; onClose: () => void; prefer?: "above" | "below" }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  useDismiss(ref, onClose, trigger);
+  type Found = { branches: { name: string; where: "crew" | "here" | "remote" }[]; default?: string; copies: number; here: number; remote: "ok" | "unreachable" };
+  const [found, setFound] = useState<Found | null>(null);
+  const [q, setQ] = useState("");
+  const [sel, setSel] = useState(0);
+  // The folders on this computer the folder picker knows that are copies of this repo: read too, beside the crew's and the remote.
+  const data = useWorkspaceData(identity, "claude", true);
+  const want = repoKeyOf(repo);
+  const dirs = data.recent === null ? null : data.recent.filter((f) => f.remote && repoKeyOf(f.remote) === want).map((f) => f.path);
+  const dirsKey = dirs?.join("\n") ?? null;
+  useEffect(() => {
+    if (dirsKey === null) return;
+    let live = true;
+    api<Found>(identity, "/api/teammates/repo-branches", { method: "POST", body: JSON.stringify({ repo, dirs: dirsKey ? dirsKey.split("\n") : [] }), headers: { "Content-Type": "application/json" } })
+      .then((r) => live && setFound(r))
+      .catch(() => live && setFound({ branches: [], copies: 0, here: 0, remote: "unreachable" }));
+    return () => void (live = false);
+  }, [identity, repo, dirsKey]);
+  const place = placeCard(trigger?.getBoundingClientRect(), 340, { want: 360, min: 200, prefer, gap: 8 });
+  const pick = (b: string) => (onPick(b), onClose());
+  const query = q.trim();
+  const ql = query.toLowerCase();
+  const listed = found?.branches ?? [];
+  const all = listed.map((b) => b.name);
+  const whereOf = new Map(listed.map((b) => [b.name, b.where]));
+  const dflt = found?.default;
+  const WHERE = { crew: "In the crew's copies", here: "On this computer", remote: "On the remote" } as const;
+  const items: PickItem[] = [];
+  if (!ql || "default".includes(ql) || dflt?.toLowerCase().includes(ql))
+    items.push({ key: "default", kind: "use", title: "Default branch", sub: dflt ? `The repo's default, ${dflt} now` : "Whatever the repo's default is", verb: "Use", ...(!current ? { when: "Current" } : {}), run: () => pick("") });
+  const typedNew = query && !all.some((b) => b.toLowerCase() === ql) && !/[\s~^:?*[\\]|\.\.|@\{|^-|\/$|\.lock$/.test(query);
+  if (typedNew) items.push({ key: "typed", kind: "use", title: `Use ${query}`, sub: "As typed: a crew mate without it is told to fetch it", verb: "Use", run: () => pick(query) });
+  const matching = all.filter((b) => !ql || b.toLowerCase().includes(ql));
+  // Grouped by where each was seen (Arun, 2026-11-17: "add like categories like separating like crew branches and others"): the
+  // crew's copies, other copies on this computer, then the rest of the remote's; the default branch first in its group.
+  const groups = (["crew", "here", "remote"] as const)
+    .map((where) => {
+      const names = matching.filter((b) => (whereOf.get(b) ?? "remote") === where);
+      const first = dflt && names.includes(dflt) ? [dflt, ...names.filter((b) => b !== dflt)] : names;
+      const cap = query ? 30 : where === "remote" ? 16 : 10;
+      return {
+        label: WHERE[where],
+        more: first.length - Math.min(first.length, cap),
+        items: first.slice(0, cap).map((b): PickItem => ({ key: `b:${b}`, kind: "repo", title: b, sub: b === dflt ? "Default branch" : "", verb: "Use", ...(b === current ? { when: "Current" } : {}), run: () => pick(b) })),
+      };
+    })
+    .filter((g) => g.items.length);
+  const top = items.length;
+  for (const g of groups) items.push(...g.items);
+  const at = Math.min(sel, Math.max(0, items.length - 1));
+  useEffect(() => {
+    setSel(0);
+  }, [q]);
+  // In braces: scrollIntoView returns a promise in newer Chromium, and an effect may return only its cleanup.
+  useEffect(() => {
+    list.current?.querySelector(`[data-idx="${at}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [at]);
+  const keys = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowDown") (e.preventDefault(), setSel(Math.min(at + 1, items.length - 1)));
+    else if (e.key === "ArrowUp") (e.preventDefault(), setSel(Math.max(at - 1, 0)));
+    else if (e.key === "Enter") (e.preventDefault(), items[at]?.run());
+    else if (e.key === "Escape") (e.preventDefault(), e.stopPropagation(), onClose());
+  };
+  return floating(
+    <div ref={ref} data-owned-floating className="ws-card wsp rpk rbk" role="dialog" aria-label="Choose the room's branch" style={place}>
+      <div className="ws-search wsp-search">
+        <GitBranchIcon className="size-4 shrink-0 opacity-60" />
+        <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={keys} placeholder="Find a branch, or type its name" spellCheck={false} autoCapitalize="off" autoCorrect="off" aria-label="Find a branch" />
+        <kbd className="wsp-kbd" aria-hidden>
+          esc
+        </kbd>
+      </div>
+      <div className="wsp-list" ref={list}>
+        {top > 0 && (
+          <div className="wsp-section bare">
+            {items.slice(0, top).map((it, i) => (
+              <PickRow key={it.key} item={it} idx={i} on={i === at} query="" onHover={() => setSel(i)} />
+            ))}
+          </div>
+        )}
+        {(() => {
+          let idx = top;
+          return groups.map((g) => (
+            <div key={g.label} className="wsp-section">
+              <div className="wsp-head">
+                <span>{g.label}</span>
+                {g.more > 0 && <span className="wsp-hint">{g.more} more · type to narrow</span>}
+              </div>
+              {g.items.map((it) => {
+                const i = idx++;
+                return <PickRow key={it.key} item={it} idx={i} on={i === at} query={query} onHover={() => setSel(i)} />;
+              })}
+            </div>
+          ));
+        })()}
+        {found === null && (
+          <p className="wsp-empty">
+            <span className="spinner tiny" /> Looking at the repo's branches…
+          </p>
+        )}
+        {found && !all.length && !query && <p className="wsp-empty">{found.remote === "unreachable" ? "Couldn't reach the repo, and no copy here has other branches. Type one." : "The repo has no other branches."}</p>}
+        {found && found.remote === "unreachable" && all.length > 0 && !query && <p className="wsp-empty">Couldn't reach the repo itself: these are its copies' branches.</p>}
+        {query && !items.length && <p className="wsp-empty">That isn't a branch name git would take.</p>}
+      </div>
+      <div className="wsp-foot">
+        <span className="wsp-drop">Each crew mate keeps its own branch</span>
+        <span className="wsp-keys" aria-hidden>
+          <span>
+            <kbd>↑</kbd>
+            <kbd>↓</kbd>
+          </span>
+          <span>
+            <kbd>↵</kbd> use
+          </span>
+        </span>
+      </div>
+    </div>,
+  );
 }

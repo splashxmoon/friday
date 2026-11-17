@@ -944,7 +944,12 @@ export type EventBody =
    * lead, when there is one). Agents claim ready tasks themselves, idle ones are handed them, a finished task unlocks what waits
    * on it and is checked by another agent before it counts (Arun, 2026-10-19: "a shared task board… and peer review").
    */
-  | { type: "board.posted"; fromLane: string; fromName: string; tasks: BoardTaskDef[]; /** Put to the person first (Arun, 2026-11-16, "Do 5"): nothing is handed out until they start it (board.started). */ proposed?: true; /** What proves a task works, run in its agent's folder when it is done (each task's own `check` first). */ check?: string; /** Whose work it is, when Friday posts it for a person (a hosted crew workflow's owner): its hand-outs carry them (own-plan.ts). */ by?: { id: string; name: string } }
+  | { type: "board.posted"; fromLane: string; fromName: string; tasks: BoardTaskDef[]; /** Put to the person first (Arun, 2026-11-16, "Do 5"): nothing is handed out until they start it (board.started). */ proposed?: true; /** What proves a task works, run in its agent's folder when it is done (each task's own `check` first). */ check?: string; /** Whose work it is, when Friday posts it for a person (a hosted crew workflow's owner): its hand-outs carry them (own-plan.ts). */ by?: { id: string; name: string }; /** The room's project as the board was posted (room-project.ts): its tasks go only to a crew mate with a copy of it, and keep this one if the room's changes. */ project?: { repo: string; branch?: string } }
+  /**
+   * Why a ready task isn't handed out yet, said once each time it changes (splashxmoon/friday#24): the crew mate it was given to has
+   * no copy of the board's project, or no crew mate has. Empty: nothing holds it any more.
+   */
+  | { type: "board.waiting"; id: string; why: string }
   /** The person started a proposed board: its tasks go out now (agent-mesh round). */
   /** An agent opened a new thread in the project (agent-mesh start_thread): where it is, to open it and file it with the others. */
   | { type: "thread.started"; sid: string; title: string; tool: string; invite: string; fromName: string }
@@ -990,6 +995,7 @@ export type EventBody =
    * (post_proof), for the board task `id` or its run; and the picture of that page its runner took (`proof`: that post's seq).
    */
   | { type: "proof.posted"; id?: string; done: string; checked: string; unsure: string; page?: string }
+  | { type: "ui.card"; id: string; card: import("./gen-ui-model.js").UiCard } // A card an agent drew in the chat (gen-ui.ts).
   | { type: "proof.shot"; proof: number; url: string; file: string; width?: number; height?: number }
   /** An agent given a name of its own ("Reviewer" for the second Claude Code); the main lane's too. */
   | { type: "lane.renamed"; laneId: string; name: string }
@@ -1022,7 +1028,7 @@ export type EventBody =
   | { type: "member.removed"; userId: string; name: string; workspace?: true }
   | { type: "link.updated"; role: LinkRole; enabled: boolean; version: number }
   // Human → agent. Only the driver can append these.
-  | { type: "instruction"; text: string; interrupt: boolean; /** The people it @-mentions, by id (mentions.ts). */ mentions?: string[]; fromSuggestion?: number; attachments?: Attachment[]; handoff?: Handoff; /** A message from another session's agent (peers.ts). */ peer?: PeerNote; /** A message from another agent in this session (agent-mesh.ts). */ mesh?: MeshNote; /** Answers an `engine.approval`: the driver said yes or no to it. `task`: yes to commands like these for the rest of this run too (a teammate's "Allow for this task"). */ approval?: { id: string; approve: boolean; task?: true }; /** An edit of a message still queued: this one takes its place in the queue, and that one is taken back. */ replaces?: number; /** Friday telling a coding tool whose turn ended short of its task to carry on (keep-going.ts). */ keepGoing?: true; /** A reply in a side thread on an earlier message (by its seq): its answer stays in the thread, not the room's main flow. */ thread?: { root: number }; /** Posted by an app on the person's behalf (Friday's token API or MCP, `sessions:write`), not typed by them: capped like a teammate's (Security R3). */ via?: "api"; /** Friday's own message carrying on what agents set going (a wake, a carry-on): how many agent-to-agent steps led to it, so the turn it starts counts on from there rather than from nothing (agent-mesh behindRun). */ hop?: number; /** A turn of its own: never handed to a turn under way, since its answer is read from the turn it starts. */ ownTurn?: true; /** Friday's: a check the project added (brain.ts) failed after this agent's change; the command. */ check?: string }
+  | { type: "instruction"; text: string; interrupt: boolean; /** The people it @-mentions, by id (mentions.ts). */ mentions?: string[]; fromSuggestion?: number; attachments?: Attachment[]; handoff?: Handoff; /** A message from another session's agent (peers.ts). */ peer?: PeerNote; /** A message from another agent in this session (agent-mesh.ts). */ mesh?: MeshNote; /** Answers an `engine.approval`: the driver said yes or no to it. `task`: yes to commands like these for the rest of this run too (a teammate's "Allow for this task"). */ approval?: { id: string; approve: boolean; task?: true }; /** An edit of a message still queued: this one takes its place in the queue, and that one is taken back. */ replaces?: number; /** Friday telling a coding tool whose turn ended short of its task to carry on (keep-going.ts). */ keepGoing?: true; /** A reply in a side thread on an earlier message (by its seq): its answer stays in the thread, not the room's main flow. */ thread?: { root: number }; /** Posted by an app on the person's behalf (Friday's token API or MCP, `sessions:write`), not typed by them: capped like a teammate's (Security R3). */ via?: "api"; /** Friday's own message carrying on what agents set going (a wake, a carry-on): how many agent-to-agent steps led to it, so the turn it starts counts on from there rather than from nothing (agent-mesh behindRun). */ hop?: number; /** A turn of its own: never handed to a turn under way, since its answer is read from the turn it starts. */ ownTurn?: true; /** Friday's: a check the project added (brain.ts) failed after this agent's change; the command. */ check?: string; /** A press on a card an agent drew in the chat: which card, which button, what was filled in. */ card?: CardPress }
   /**
    * An agent in Manual mode wants to do something it may not do unasked.
    *
@@ -1494,4 +1500,11 @@ export interface MachineTool {
   path: string | null;
   loggedIn: boolean | null;
   source: "cli" | "claude-app" | null;
+}
+
+/** A press on a card an agent drew in the chat: the card's id, the button's name, and what was filled in or ticked. */
+export interface CardPress {
+  id: string;
+  action: string;
+  values?: Record<string, string | string[]>;
 }

@@ -251,7 +251,9 @@ html.dark .tm-time { color-scheme: dark; }
 .tm-rsp > .rsp-avatar { width: 34px; height: 34px; margin-top: 0; border-radius: 0; background: none; overflow: visible; }
 .tm-rsp .rsp-head { min-height: 22px; }
 .tm-rsp .rsp-who { font-weight: 600; }
-.tm-rsp .rsp-say, .tm-rsp .rsp-answer { align-self: flex-start; max-width: 100%; padding: 9px 14px 10px; border-radius: 4px 16px 16px 16px; background: var(--hover); box-shadow: inset 0 0 0 1px var(--border); }
+/* Hugging its words, as a group chat's bubble does, wherever it sits (Arun, 2026-11-17: "make sure the bubble thing doesnt extend all
+   the way... like make it dynamic like a group chat"): inside a block wrapper align-self did nothing and it ran the row's width. */
+.tm-rsp .rsp-say, .tm-rsp .rsp-answer { align-self: flex-start; width: fit-content; max-width: 100%; padding: 9px 14px 10px; border-radius: 4px 16px 16px 16px; background: var(--hover); box-shadow: inset 0 0 0 1px var(--border); }
 .tm-rsp .rsp-say > :first-child, .tm-rsp .rsp-answer > :first-child { margin-top: 0; }
 .tm-rsp .rsp-say > :last-child, .tm-rsp .rsp-answer > :last-child { margin-bottom: 0; }
 
@@ -745,7 +747,7 @@ html .tm-row[data-active="true"] { background: var(--sel-bg, var(--hover-strong)
 .tm-head-status.s-working, .tm-head-status.s-limited { color: var(--ink-2); }
 .tm-head-status.s-waiting, .tm-head-status.s-stopped { color: var(--ink); }
 .tm-head-elapsed { color: var(--text-muted); font-variant-numeric: tabular-nums; }
-.tm-head-status.s-offline { color: var(--mate-offline); }
+.tm-head-status.s-offline { color: var(--danger); }
 .tm-page .tm-head-role { max-width: 64ch; margin-top: 2px; }
 .tm-head-role.clamped { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; }
 .tm-head-more, .tm-link { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; padding: 0; border: 0; background: none; color: var(--ink); font: inherit; font-size: 12.5px; font-weight: 600; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--ink) 35%, transparent); text-underline-offset: 3px; cursor: pointer; }
@@ -1095,14 +1097,15 @@ html.dark .tm-budget .tb-seg button.on { background: color-mix(in srgb, var(--in
 /* A face's state as a badge on the top right of its head (Teammates.tsx Face; Arun 2026-11-03, "Soft depth"): a disc in the state's
    colour, tuned per theme, a white sign (dark on amber), a faint light from above, a hairline edge and a cut-out of the ground it
    sits on, so it reads on a face of any colour. */
-:root { --badge-work: #3b82f6; --badge-need: #f5a524; --badge-done: #22a861; --badge-stop: #e5484d; --badge-halt: #8e8e93; }
-html.dark { --badge-work: #4d8eff; --badge-need: #f7b23b; --badge-done: #2fbf71; --badge-stop: #f0585d; --badge-halt: #7c7c82; }
+:root { --badge-work: #3b82f6; --badge-need: #ffc53d; --badge-done: #22a861; --badge-stop: #e5484d; --badge-halt: #8e8e93; }
+html.dark { --badge-work: #4d8eff; --badge-need: #ffc53d; --badge-done: #2fbf71; --badge-stop: #f0585d; --badge-halt: #7c7c82; }
 .tm-face-wrap { position: relative; }
 .tm-badge { position: absolute; z-index: 2; top: calc(var(--b) * -0.22); right: calc(var(--b) * -0.26); display: grid; place-items: center; width: var(--b); height: var(--b); border-radius: 50%; color: #fff; line-height: 0; pointer-events: none;
   background-image: linear-gradient(180deg, rgb(255 255 255 / .22), rgb(255 255 255 / 0) 60%);
   box-shadow: 0 0 0 2px var(--pr-ground, var(--sidebar, var(--bg))), inset 0 0 0 .5px rgb(0 0 0 / .18), 0 1px 2px rgb(0 0 0 / .22); }
 .tm-badge[data-state="working"] { background-color: var(--badge-work); }
-.tm-badge[data-state="needs"] { background-color: var(--badge-need); color: #2a1a00; }
+/* A clean golden yellow, not the orange it was (Arun, 2026-11-17: "also use a better yelow color too"); dark brown on it to read. */
+.tm-badge[data-state="needs"] { background-color: var(--badge-need); color: #3d2a00; }
 .tm-badge[data-state="done"] { background-color: var(--badge-done); animation: tm-badge-in .24s cubic-bezier(.3, 1.4, .5, 1); }
 .tm-badge:is([data-state="error"], [data-state="limited"]) { background-color: var(--badge-stop); }
 /* Stopped by the person: a neutral mark, not a finish (audit CREW-40). */
@@ -1203,7 +1206,7 @@ html.dark { --badge-work: #4d8eff; --badge-need: #f7b23b; --badge-done: #2fbf71;
 .tm-slim-meta { flex: 1 1 160px; min-width: 0; overflow: hidden; color: var(--text-muted); font-size: 13px; line-height: 20px; text-overflow: ellipsis; white-space: nowrap; }
 .tm-slim-status.s-working, .tm-slim-status.s-limited { color: var(--ink-2); }
 .tm-slim-status.s-waiting, .tm-slim-status.s-needs { color: var(--amber); }
-.tm-slim-status.s-offline { color: var(--mate-offline); }
+.tm-slim-status.s-offline { color: var(--danger); }
 .tm-slim-add { display: inline-flex; flex: none; align-items: center; gap: 4px; height: 24px; padding: 0 7px 0 5px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-muted); font: inherit; font-size: 12.5px; cursor: pointer; }
 .tm-slim-add:hover { background: var(--hover); color: var(--ink); }
 .tm-slim .tm-tabs { flex: 1 1 100%; gap: 18px; margin: 0 0 -1px; border-bottom: 0; }
@@ -2098,24 +2101,6 @@ html.reduce-motion :is(.tm-face.tm-dozing .tm-blob-body, .tm-zz i) { animation: 
 /* Why a crew mate is working (run-why.ts), beside its name: quiet, a routine's or a wake's in its crew mate's colour. */
 .rsp-why { overflow: hidden; max-width: 260px; padding: 0 7px; border-radius: 6px; background: var(--hover); color: var(--ink-2); font-size: 11.5px; line-height: 19px; text-overflow: ellipsis; white-space: nowrap; }
 .rsp-why:is([data-kind="routine"], [data-kind="wake"]) { background: color-mix(in srgb, var(--who, var(--ink)) 14%, transparent); color: var(--ink); }
-
-/* A crew mate's working bubble (Teammates.tsx WorkBubble): the dots, then what it is doing now; each new step rises in as the last
-   fades up and out, in the same place. */
-.ct-work { gap: 10px; max-width: min(460px, 100%); height: auto; min-height: 34px; padding: 0 14px 0 12px; }
-.ct-dots { display: inline-flex; flex: none; align-items: center; gap: 4px; }
-.ct-dots > i { width: 6px; height: 6px; border-radius: 50%; background: color-mix(in srgb, var(--who, var(--ink-3)) 70%, var(--ink-3)); animation: ct-dot 1.2s ease-in-out infinite; }
-.ct-dots > i:nth-child(2) { animation-delay: 0.15s; }
-.ct-dots > i:nth-child(3) { animation-delay: 0.3s; }
-.ct-steps { position: relative; display: grid; min-width: 0; overflow: hidden; height: 20px; }
-.ct-step { grid-area: 1 / 1; overflow: hidden; color: var(--ink-2); font-size: 13px; line-height: 20px; text-overflow: ellipsis; white-space: nowrap; animation: ct-step-in 280ms var(--ease-out) both; }
-.ct-step.out { animation: ct-step-out 280ms var(--ease-out) both; }
-@keyframes ct-step-in { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: none; } }
-@keyframes ct-step-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-9px); } }
-@media (prefers-reduced-motion: reduce) {
-  .ct-step, .ct-step.out { animation: none; }
-  .ct-step.out { display: none; }
-  .ct-dots > i { animation: ct-fade 1.6s ease-in-out infinite; }
-}
 
 /* A room's work, sent on (TeamControls.tsx RoomSend): the brief it goes with, readable before it goes, then where to. */
 .rs { display: flex; flex-direction: column; gap: 14px; }

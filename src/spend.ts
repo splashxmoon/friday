@@ -1,6 +1,6 @@
 import { PRICES } from "./team-budget.js";
 import { whyRun, type Why } from "./run-why.js";
-import { MAIN_LANE, type SessionEvent } from "./types.js";
+import { ENGINE_NAMES, MAIN_LANE, type EngineTool, type SessionEvent } from "./types.js";
 
 /**
  * What a crew mate or a room spent, every token accounted for (Arun, 2026-11-15: "we track everything like input, output, cache,
@@ -155,10 +155,16 @@ export function spendOf(places: readonly Place[], from: number, tz?: string): Sp
   for (const p of places) {
     const lanes = new Set(p.lanes);
     const open = new Map<string, SpendRun>();
+    /** The model Auto last picked on each lane (a `model.routed` that ran, not one only logged): what its next turns ran on. */
+    const routed = new Map<string, string>();
     for (const e of p.events) {
       const lane = e.lane ?? MAIN_LANE;
       if (!lanes.has(lane)) continue;
       const b = e.body;
+      if (b.type === "model.routed") {
+        if (!b.shadow && b.model) routed.set(lane, b.model);
+        continue;
+      }
       if (b.type === "run.started") {
         const asked = b.causedBy !== undefined ? p.events.find((x) => x.seq === b.causedBy) : undefined;
         const ask = asked?.body.type === "instruction" ? line(asked.body.text.replace(/^\[(Check-in|Friday)\]\s*/, "")) : "";
@@ -179,7 +185,10 @@ export function spendOf(places: readonly Place[], from: number, tz?: string): Sp
       if (b.type === "agent.usage") {
         t = turnTokens(b);
         tool = b.tool ?? p.engines[lane]?.tool;
-        model = b.model ?? p.engines[lane]?.model;
+        // The model the turn said it ran on; else, on Auto, the one Auto picked for it; else the lane's own. "auto" is a setting,
+        // not a model, and was counted as one with no price (Arun, 2026-11-17: "see why the tracking is not working properly").
+        const set = p.engines[lane]?.model;
+        model = b.model || (set === "auto" ? routed.get(lane) : set) || undefined;
       } else if (b.type === "agent.message" && b.tokens) {
         t = { ...NO_TOKENS, input: b.tokens };
         tool = "friday";
@@ -187,7 +196,7 @@ export function spendOf(places: readonly Place[], from: number, tz?: string): Sp
       if (!t || e.ts < from) continue;
       const price = priceFor(tool, model);
       const cost = price ? usdOf(t, price) : null;
-      const name = model ? plainModel(model) : tool === "friday" ? "Friday's own model" : `${tool ?? "unknown"} (model not said)`;
+      const name = model ? plainModel(model) : tool === "friday" ? "Friday's own model" : `${(tool && ENGINE_NAMES[tool as EngineTool]) || tool || "A coding tool"}'s own pick`;
       tokens = add(tokens, t);
       turns += b.type === "agent.usage" ? 1 : 0;
       if (cost === null || !price) unpriced += tokensTotal(t);

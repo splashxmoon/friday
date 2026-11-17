@@ -844,7 +844,7 @@ export function HandoffBar({ targets, active, onPick, more, label = "Pass on", o
           {/* Who is already here first: the agents (the work switches to them, with what it knows), then the people (they take
               control of it, with a note), then anything new (audit B-22). */}
           {onKeepGoing && <div className="ho-menu-h">Your crew</div>}
-          {onKeepGoing && row("keep-going", undefined, <Icon name="users" size={14} />, "Keep this going…", "Hand the rest to your crew, with where it stands", null, false, () => (setOpen(false), onKeepGoing()))}
+          {onKeepGoing && row("keep-going", undefined, <Icon name="users" size={14} />, "Keep this going", "Hand the rest to your crew, with where it stands", null, false, () => (setOpen(false), onKeepGoing()))}
           {targets.length > 0 && <div className="ho-menu-h">Agents here</div>}
           {targets.map((t) =>
             row(t.id, t.tint, t.mark, t.name, t.suggested && t.why ? t.why : t.auto ? "Wakes by itself when this finishes" : undefined,

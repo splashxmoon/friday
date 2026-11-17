@@ -62,6 +62,8 @@ export interface StreamingResponseProps {
   extraActions?: ReactNode;
   /** Quiet words at the row's far end, right-aligned: what the turn used. */
   actionsEnd?: ReactNode;
+  /** What belongs to the answer under its words and above its row of actions: a card the agent drew as it answered. */
+  below?: ReactNode;
   className?: string;
   contentClassName?: string;
   actionsClassName?: string;
@@ -119,6 +121,7 @@ export function StreamingResponse({
   noFeedback = false,
   extraActions,
   actionsEnd,
+  below,
   className,
   contentClassName,
   actionsClassName,
@@ -188,6 +191,7 @@ export function StreamingResponse({
       >
         {children}
       </div>
+      {below}
 
       <AnimatePresence initial={false}>
         {shouldShowActions ? (

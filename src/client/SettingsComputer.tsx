@@ -1,6 +1,7 @@
 import { Facts, SettingsGroup, SettingsRow } from "@/components/dass";
 import { GitHubConnect } from "./GitHubConnect.js";
 import { MachineBadge } from "./MachineBadge.js";
+import { AutoUpdateRow } from "./tool-updates.js";
 import { pickedMachine, useMachine } from "./local.js";
 import { KeepAwakeRow } from "./KeepAwake.js";
 import { ComputerUseRow } from "./ComputerUse.js";
@@ -20,6 +21,11 @@ export function CodingToolsSection({ identity }: { identity: Identity }) {
   const { state: machine, refresh } = useMachine(identity);
   return (
     <section className="flex flex-col gap-5">
+      {(machine.mode === "local" || machine.mode === "linked") && (
+        <div className="set-card">
+          <AutoUpdateRow identity={identity} />
+        </div>
+      )}
       <div className="set-card set-computer">
         <MachineBadge identity={identity} machine={machine} refresh={refresh} inline part="tools" />
       </div>

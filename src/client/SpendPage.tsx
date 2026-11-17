@@ -60,6 +60,11 @@ export function SpendPage({ identity, query, who }: { identity: Identity; query:
   }, [identity, query, days]);
   const all = got ? total(got.tokens) : 0;
   const peak = got ? Math.max(1, ...got.byDay.map((d) => d.tokens)) : 1;
+  // Dollars only where there are some: a page of "$0" beside every row said nothing (Arun, 2026-11-17: "fix the typography and
+  // cramped text, and clutter").
+  const priced = !!got && got.usd > 0;
+  const usdOr = (n: number | null) => (n === null ? <span className="sp-none" title="No list price for this model">—</span> : dollars(n));
+  const typical = got && got.runs.length >= 3 ? [...got.runs].sort((a, b) => total(a.tokens) - total(b.tokens))[Math.floor(got.runs.length / 2)]! : null;
   return (
     <div className="sp">
       <div className="sp-head">
@@ -77,33 +82,53 @@ export function SpendPage({ identity, query, who }: { identity: Identity; query:
       {got && !all && <p className="sp-quiet">{who} hasn't used anything {days === 1 ? "today" : `in the last ${days} days`}.</p>}
       {got && all > 0 && (
         <>
-          <div className="sp-total">
-            <span className="sp-usd">{dollars(got.usd)}</span>
-            <span className="sp-total-sub">
-              {shortTokens(all)} tokens · {got.turns} {got.turns === 1 ? "turn" : "turns"} · {got.runs.length} {got.runs.length === 1 ? "run" : "runs"}
-            </span>
-            {got.unpriced > 0 && <span className="sp-total-sub">+ {shortTokens(got.unpriced)} tokens on models with no list price</span>}
-            {/* What a run of its usually comes to, from its own runs: the estimate before handing it the next one. */}
-            {got.runs.length >= 3 &&
-              ((mid) => (
-                <span className="sp-total-sub">
-                  A typical run: {mid.usd === null ? "" : `${dollars(mid.usd)} · `}
-                  {shortTokens(total(mid.tokens))} tokens
-                </span>
-              ))([...got.runs].sort((a, b) => total(a.tokens) - total(b.tokens))[Math.floor(got.runs.length / 2)]!)}
+          {/* The total, then three figures under it; tokens are the headline when nothing has a list price. */}
+          <div className="sp-hero">
+            <div className="sp-hero-top">
+              <span className="sp-usd">{priced ? dollars(got.usd) : shortTokens(all)}</span>
+              <span className="sp-hero-unit">{priced ? "at list price" : "tokens"}</span>
+            </div>
+            <dl className="sp-stats">
+              {priced && (
+                <div>
+                  <dt>Tokens</dt>
+                  <dd>{shortTokens(all)}</dd>
+                </div>
+              )}
+              <div>
+                <dt>Runs</dt>
+                <dd>{got.runs.length}</dd>
+              </div>
+              <div>
+                <dt>Turns</dt>
+                <dd>{got.turns}</dd>
+              </div>
+              {/* What a run of its usually comes to, from its own runs: the estimate before handing it the next one. */}
+              {typical && (
+                <div>
+                  <dt>Typical run</dt>
+                  <dd>{typical.usd ? dollars(typical.usd) : shortTokens(total(typical.tokens))}</dd>
+                </div>
+              )}
+            </dl>
           </div>
+          {got.unpriced > 0 && (
+            <p className="sp-flag">
+              {got.unpriced >= all ? "None of these models has a list price" : `${shortTokens(got.unpriced)} tokens ran on models with no list price`}, so {got.unpriced >= all ? "there's no dollar figure" : "they aren't in the total"}. Counted all the same.
+            </p>
+          )}
 
           {/* Each kind of token, as a share of all of them and what it came to. */}
           <div className="sp-bar" role="img" aria-label={KINDS.map((k) => `${k.label} ${shortTokens(got.tokens[k.key])}`).join(", ")}>
             {KINDS.map((k) => (got.tokens[k.key] ? <i key={k.key} className={`sp-k-${k.key}`} style={{ flexGrow: got.tokens[k.key] } as CSSProperties} /> : null))}
           </div>
-          <ul className="sp-kinds">
+          <ul className="sp-kinds" data-priced={priced || undefined}>
             {KINDS.map((k) => (
               <li key={k.key} title={k.about}>
                 <span className={`sp-dot sp-k-${k.key}`} aria-hidden="true" />
                 <span className="sp-kind-label">{k.label}</span>
                 <span className="sp-kind-n">{shortTokens(got.tokens[k.key])}</span>
-                <span className="sp-kind-usd">{dollars(got.usdByKind[k.key])}</span>
+                {priced && <span className="sp-kind-usd">{dollars(got.usdByKind[k.key])}</span>}
               </li>
             ))}
             {got.tokens.reasoning > 0 && (
@@ -111,7 +136,7 @@ export function SpendPage({ identity, query, who }: { identity: Identity; query:
                 <span className="sp-dot" aria-hidden="true" />
                 <span className="sp-kind-label">of which reasoning</span>
                 <span className="sp-kind-n">{shortTokens(got.tokens.reasoning)}</span>
-                <span className="sp-kind-usd" />
+                {priced && <span className="sp-kind-usd" />}
               </li>
             )}
           </ul>
@@ -138,16 +163,16 @@ export function SpendPage({ identity, query, who }: { identity: Identity; query:
           {got.byLane.length > 1 && (
             <section className="sp-sec" aria-label="By crew mate">
               <h4>By crew mate</h4>
-              <ul className="sp-rows">
+              <ul className="sp-rows" data-priced={priced || undefined}>
                 {got.byLane.map((l) => {
                   const m = mateOn(l.lane);
                   const name = m?.name ?? got.names[l.lane] ?? "A crew mate";
                   return (
                     <li key={`${l.sid} ${l.lane}`}>
-                      <span className="sp-row-mark">{m ? <Face seed={m.look ?? m.name} size={18} /> : null}</span>
+                      <span className="sp-row-mark">{m ? <Face seed={m.look ?? m.name} size={20} /> : null}</span>
                       <span className="sp-row-label">{name}</span>
                       <span className="sp-row-n">{shortTokens(total(l.tokens))}</span>
-                      <span className="sp-row-usd">{dollars(l.usd)}</span>
+                      {priced && <span className="sp-row-usd">{dollars(l.usd)}</span>}
                     </li>
                   );
                 })}
@@ -157,13 +182,13 @@ export function SpendPage({ identity, query, who }: { identity: Identity; query:
 
           <section className="sp-sec" aria-label="By model">
             <h4>By model</h4>
-            <ul className="sp-rows">
+            <ul className="sp-rows" data-priced={priced || undefined}>
               {got.byModel.map((m) => (
                 <li key={m.model}>
                   <span className="sp-row-mark" aria-hidden="true" />
-                  <span className="sp-row-label sp-mono">{m.model}</span>
+                  <span className={`sp-row-label${/\s/.test(m.model) ? "" : " sp-mono"}`}>{m.model}</span>
                   <span className="sp-row-n">{shortTokens(total(m.tokens))}</span>
-                  <span className="sp-row-usd">{m.usd === null ? "no list price" : dollars(m.usd)}</span>
+                  {priced && <span className="sp-row-usd">{usdOr(m.usd)}</span>}
                 </li>
               ))}
             </ul>
@@ -202,8 +227,14 @@ export function SpendPage({ identity, query, who }: { identity: Identity; query:
                         </span>
                       </span>
                       <span className="sp-run-num">
-                        <span className="sp-row-usd">{r.usd === null ? "–" : dollars(r.usd)}</span>
-                        <small>{shortTokens(total(r.tokens))}</small>
+                        {priced ? (
+                          <>
+                            <span className="sp-row-usd">{usdOr(r.usd)}</span>
+                            <small>{shortTokens(total(r.tokens))}</small>
+                          </>
+                        ) : (
+                          <span className="sp-row-usd">{shortTokens(total(r.tokens))}</span>
+                        )}
                       </span>
                     </button>
                     {on && (
@@ -233,7 +264,7 @@ export function SpendPage({ identity, query, who }: { identity: Identity; query:
               })}
             </ul>
           </section>
-          <p className="sp-note">List price: what this work would cost on each model's API. On a Claude or ChatGPT plan you pay your plan; this shows what the work is worth and where it went. Counted from what each coding tool reported for every turn.</p>
+          <p className="sp-note sp-foot">List price is what this work would cost on each model's API. On a Claude or ChatGPT plan you pay your plan; this shows what the work is worth and where it went, from what each coding tool reported every turn.</p>
         </>
       )}
     </div>

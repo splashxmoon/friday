@@ -7,7 +7,8 @@ import { Icon } from "./icons.js";
 import type { Identity, RecentSession } from "./storage.js";
 import { readSince } from "./team-api.js";
 import type { TeammateView } from "../teammates.js";
-import { Face, MateRing, mateStatus, newTeammate, openRoom, openTeammate, ownOf, RoomDialog, roomsOf, RoomFaces, useTeam, type RoomView } from "./Teammates.js";
+import { Face, MateRing, mateStatus, newTeammate, openRoom, openTeammate, ownOf, RoomDialog, roomNow, roomsOf, RoomFaces, useTeam, type RoomView } from "./Teammates.js";
+import { plainLine } from "./team-room.js";
 import { withCode } from "./Attention.js";
 import { freeLine, roleWord } from "./team-status.js";
 import { plainRisk } from "../plain-risk.js";
@@ -180,15 +181,22 @@ export default function AgentsPage({ identity, onOpen, needs = [] }: { identity:
             Rooms
           </h2>
           <div className="ap-rooms">
-            {roomsOf(t).map((r: RoomView) => (
-              <button key={r.id} type="button" className="ap-room" onClick={() => openRoom(r, onOpen)}>
-                <RoomFaces seeds={mates.filter((m) => r.lanes[m.id]).slice(0, 3).map((m) => m.look ?? m.name)} size={22} />
-                <span className="ap-room-text">
-                  <b>{r.name}</b>
-                  <span>{r.last ? `${r.last.by}: ${r.last.text}` : `${Object.keys(r.lanes).length} in it`}</span>
-                </span>
-              </button>
-            ))}
+            {roomsOf(t).map((r: RoomView) => {
+              // Who is at work in it, or that it needs you, as the sidebar's row says (Teammates.tsx roomNow).
+              const now = roomNow(r, mates);
+              return (
+                <button key={r.id} type="button" className="ap-room" data-tone={now.state?.tone} onClick={() => openRoom(r, onOpen)}>
+                  <RoomFaces seeds={now.seeds.slice(0, 3)} states={now.states.slice(0, 3)} size={22} />
+                  <span className="ap-room-text">
+                    <b>
+                      {r.name}
+                      {now.ring && <MateRing status={now.ring} title={now.state?.word} />}
+                    </b>
+                    <span>{plainLine(now.line)}</span>
+                  </span>
+                </button>
+              );
+            })}
             <button type="button" className="ap-room ap-room-new" onClick={() => setRooming(true)}>
               <Icon name="plus" size={15} /> New room for a project
             </button>

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { ENGINE_NAMES, ENGINE_TOOLS, toolList, type EngineTool } from "../types.js";
-import { ADAPTERS, childEnv, findBin, launcher } from "./adapters.js";
+import { ADAPTERS, childEnv, findBin, launcher, refusedFlag } from "./adapters.js";
 import { spawnCli } from "./spawn-cli.js";
 
 /**
@@ -30,6 +30,18 @@ export interface AskInput {
 
 /** onText hears the answer as the CLI writes it, a piece at a time; the whole answer is still what this returns. */
 export async function askCli(input: AskInput, onText?: (chunk: string) => void): Promise<{ text: string }> {
+  try {
+    return await askOnce(input, onText, []);
+  } catch (e) {
+    // An older version that doesn't know one of the newer flags (Adapter.optional, here --ephemeral or
+    // --no-session-persistence) is asked once more without it, as a session's turn is.
+    const flag = refusedFlag((e as Error).message, ADAPTERS[input.tool]?.optional ?? []);
+    if (!flag) throw e;
+    return askOnce(input, onText, [flag]);
+  }
+}
+
+async function askOnce(input: AskInput, onText: ((chunk: string) => void) | undefined, skip: string[]): Promise<{ text: string }> {
   if (!ENGINE_TOOLS.includes(input.tool)) throw new Error(`Pick ${toolList()}.`);
   const prompt = input.prompt.trim();
   if (!prompt) throw new Error("Nothing to ask.");
@@ -42,7 +54,8 @@ export async function askCli(input: AskInput, onText?: (chunk: string) => void):
   const cwd = input.cwd ?? path.join(tmpdir(), "friday-ask");
   if (!input.cwd) await mkdir(cwd, { recursive: true });
 
-  const spec = { prompt, resumeId: null, mode: "plan" as const, system: input.system, ...(input.model ? { model: input.model } : {}) };
+  // Never resumed, so never kept as a conversation of the tool's own (TurnSpec.ephemeral).
+  const spec = { prompt, resumeId: null, mode: "plan" as const, system: input.system, ephemeral: true, ...(skip.length ? { skip } : {}), ...(input.model ? { model: input.model } : {}) };
   const args = adapter.args(spec);
   // Cursor's answer streams as it is written (the adapter asks for that), and its own result line has it whole.
   const partial = input.tool === "cursor";

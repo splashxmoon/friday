@@ -10,6 +10,7 @@ import type { Redis } from "ioredis";
 import { isOwnModel, ownModelParts } from "./own-model-id.js";
 import { cleanCheckIn, MAX_CHECKINS, type CheckIn } from "./teammate-checkins.js";
 import { EFFORT_LEVELS, ENGINE_MODEL_INFO, ENGINE_NAMES, ENGINE_TOOLS, isEngineEffort, type EngineEffort, type EngineMode, type EngineTool } from "./types.js";
+import { cleanProject, type RoomProject } from "./room-project.js";
 
 /**
  * Teammates: persistent AI teammates on this computer (Arun, 2026-10-27: "i think my local build should be like open bot:
@@ -203,6 +204,11 @@ export interface Room {
    * project, and keeps that copy when it starts again. `from` is the coding session.
    */
   work?: { cwd: string; carry?: boolean; from: string };
+  /**
+   * The repo its work is on, and the branch that work starts from (splashxmoon/friday#24): a reference each crew mate's own copy
+   * is found by (room-project.ts), never a checkout or the room's folder. Absent: No project. Named rooms only, not threads.
+   */
+  project?: RoomProject;
 }
 
 /** What a new thread is called until the person's first message names it (team-views.ts). */
@@ -227,7 +233,7 @@ export function cleanTrust(v: unknown): GoAhead[] | undefined {
 /** How many folders a room adds for its crew mates. */
 export const MAX_ROOM_FOLDERS = 12;
 
-export function cleanRoom(body: Record<string, unknown>, known: readonly string[]): { name?: string; members?: string[]; purpose?: string; folders?: string[] } {
+export function cleanRoom(body: Record<string, unknown>, known: readonly string[]): { name?: string; members?: string[]; purpose?: string; folders?: string[]; /** null: take the project off. */ project?: RoomProject | null } {
   const name = typeof body.name === "string" ? body.name.trim().slice(0, 60) : undefined;
   if (name !== undefined && !name) throw new Error("Give the room a name.");
   const members = Array.isArray(body.members) ? [...new Set(body.members.filter((m): m is string => typeof m === "string"))] : undefined;
@@ -242,7 +248,8 @@ export function cleanRoom(body: Record<string, unknown>, known: readonly string[
     if (folders.some((f) => !path.isAbsolute(f) || f.split(/[\\/]/).includes(".."))) throw new Error("Give each folder as its whole path on this computer.");
     if (folders.length > MAX_ROOM_FOLDERS) throw new Error(`A room adds up to ${MAX_ROOM_FOLDERS} folders.`);
   }
-  return { ...(name !== undefined ? { name } : {}), ...(members ? { members } : {}), ...(purpose !== undefined ? { purpose } : {}), ...(folders ? { folders } : {}) };
+  const project = cleanProject(body.project);
+  return { ...(name !== undefined ? { name } : {}), ...(members ? { members } : {}), ...(purpose !== undefined ? { purpose } : {}), ...(folders ? { folders } : {}), ...(project !== undefined ? { project } : {}) };
 }
 
 /** The tool a teammate switches to when its own runs out: the one it picked, or the other of Claude Code and Codex. */

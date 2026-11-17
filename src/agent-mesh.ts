@@ -18,6 +18,7 @@ import { heldByPerson } from "./held.js";
 import { nearLimit, type ToolWindow } from "./routing.js";
 import { KIND_WORDS, skillOf, strongAt, taskKind, type Skills, type TaskKind } from "./strengths.js";
 import { laneName } from "./session/core.js";
+import { isFolderProject, notReadyWhy, ready as repoReady, repoLine, repoName, type MemberRepo, type RoomProject } from "./room-project.js";
 import { boardBusy, canDriveLane, driverOf, folderMates, laneOf, meshOf, ownChanges, pendingFor, readyTasks, runOf, unreadPosts, type BoardTask, type TaskReview, type MeshAsk, type MeshPost, type SessionState } from "./session/projection.js";
 import type { SessionStore } from "./session/store.js";
 import { engineName, MAIN_LANE, type ActorRef, type BoardTaskDef, type EngineMode, type EventBody, type MeshNote, type RepoCall, type SessionEvent } from "./types.js";
@@ -720,6 +721,10 @@ export class AgentMesh {
    * kept on its own branch. `idle`: the agent isn't working now, so its folder can be switched; a busy one is told to switch
    * itself when it starts. Its line goes with the brief, and the branch on the task. Null where there is no copy to ready.
    */
+  /** A room's project, stamped on a board as it is posted there (room-project.ts; splashxmoon/friday#24). Null: none. */
+  roomProject: ((sid: string) => Promise<RoomProject | null>) | null = null;
+  /** Where a lane's crew mate stands with a project, on the computer it runs on. Undefined: the lane isn't a crew mate. */
+  laneRepo: ((sid: string, lane: string, p: RoomProject) => Promise<MemberRepo | undefined>) | null = null;
   prepareTask: ((sid: string, lane: string, task: BoardTask, board: NonNullable<SessionState["board"]>, idle: boolean) => Promise<{ branch: string; line: string; /** Puts its folder back where it was: the task, refused, never reached it. */ undo?: () => Promise<void> } | null>) | null = null;
 
   /** The crew's skills (team-skills.ts SKILL_TOOLS: list_skills, use_skill, save_skill): where offered, and the call. Set by the app. */
@@ -770,6 +775,8 @@ export class AgentMesh {
 
   /** The app's own features for the agents (app-tools.ts APP_TOOLS: search_sessions, start_session, manage_automation). Set by the app. */
   appTools: { call(sid: string, lane: string, name: string, args: Record<string, unknown>): Promise<MeshResult> } | null = null;
+  /** show_ui, cards drawn in the chat (gen-ui.ts), on this computer's Friday. Set by the app. */
+  genUi: { tools: MeshToolDef[]; instructions: string; call(sid: string, lane: string, args: Record<string, unknown>, name?: string): Promise<MeshResult> } | null = null;
   /** The tools for `sid`: meshListing's, with the app's own (app-tools.ts) and manage_teammate where the app offers them. */
   /**
    * Whether the run on `lane` is its computer's owner's own: the person behind it is the one whose agent it is, and so is every
@@ -795,6 +802,7 @@ export class AgentMesh {
     if (this.teammateTool && (await this.teammateTool.offered(sid).catch(() => false))) l = { ...l, tools: [...l.tools, TEAMMATE_TOOL] };
     if (this.skillTools && (await this.skillTools.offered(sid).catch(() => false))) l = { ...l, tools: [...l.tools, ...SKILL_TOOLS] };
     if (this.lessons) l = { ...l, tools: [...l.tools, ...LESSON_TOOLS] };
+    if (this.genUi) l = { tools: [...l.tools, ...this.genUi.tools], instructions: `${l.instructions}${this.genUi.instructions}` };
     // A team's lead steers the others (steer_agent) and puts its board right (manage_task): offered in a team session, answered
     // for its lead only.
     if ((await this.store.state(sid).catch(() => null))?.options.team) l = { tools: [...l.tools, STEER_TOOL, BOARD_TOOL], instructions: `${l.instructions} If you lead the crew, steer_agent stops a teammate's turn or cuts in with new orders that reach it now, and manage_task cancels, retries or reassigns a board task.` };
@@ -939,6 +947,8 @@ export class AgentMesh {
         case "manage_teammate": return this.teammateTool ? await this.teammateTool.call(sid, lane, args) : { output: "There's no crew here.", isError: true };
         case "list_skills": case "use_skill": case "save_skill": return this.skillTools ? await this.skillTools.call(sid, lane, name, args) : { output: "There's no crew here.", isError: true };
         case "search_sessions": case "start_session": case "manage_automation": return this.appTools ? await this.appTools.call(sid, lane, name, args) : { output: "That isn't available here.", isError: true };
+        case "show_ui": return this.genUi ? await this.genUi.call(sid, lane, args) : { output: "That isn't available here.", isError: true };
+        case "update_ui": return this.genUi ? await this.genUi.call(sid, lane, args, "update_ui") : { output: "That isn't available here.", isError: true };
         case "steer_agent": return await this.steer(sid, lane, args);
         case "manage_task": return await this.manageTask(sid, lane, args);
         case "assign_task":
@@ -1667,7 +1677,9 @@ export class AgentMesh {
     // spawning surprised people): the board waits for Start the team. A crew room runs its own (its Away and self-run post boards).
     // The open-source edition's coding threads only: the hosted Friday's boards (Work, Away, a Friday Code lead) go out at once.
     const proposed = localEdition() && !state.options.team && !state.options.work;
-    await this.store.append(sid, agentActor(fromName), { type: "board.posted", fromLane: lane, fromName, tasks, ...(check.trim() ? { check: check.trim().slice(0, 400) } : {}), ...(proposed ? { proposed: true as const } : {}) }, { lane });
+    // The room's project as it is now: the board keeps it, whatever the room's becomes.
+    const project = await this.roomProject?.(sid).catch(() => null);
+    await this.store.append(sid, agentActor(fromName), { type: "board.posted", fromLane: lane, fromName, tasks, ...(check.trim() ? { check: check.trim().slice(0, 400) } : {}), ...(proposed ? { proposed: true as const } : {}), ...(project ? { project } : {}) }, { lane });
     this.live.add(sid);
     if (proposed) return { output: `Posted ${tasks.length} task${tasks.length === 1 ? "" : "s"} as a proposal: the person sees the team in the chat and starts it, changes it, or asks you to do it yourself. Nothing is handed out until they start it. End your turn now with a line on how you'd split the work; you'll hear when it starts, and get the reports as the tasks finish.` };
     const handed = await this.dispatch(sid);
@@ -1693,9 +1705,13 @@ export class AgentMesh {
     const stuck = key ? state.board.tasks.find((x) => x.id === key && x.status === "blocked" && !(x.declined ?? []).includes(name)) : undefined;
     const t = stuck ?? (key ? ready.find((x) => x.id === key) : (ready.find((x) => suits(x, name)) ?? ready[0]));
     if (!t) return { output: id ? `Task "${id}" isn't ready to take: ${boardLine(state.board.tasks.find((x) => x.id === id.trim().toLowerCase()))}` : "No task is ready right now: the rest wait on others or are taken.", isError: true };
+    // On a project, only with a copy of it (room-project.ts): never in an unrelated folder.
+    const proj = state.board.project;
+    const mine = proj ? await this.laneRepo?.(sid, lane, proj).catch(() => undefined) : undefined;
+    if (proj && this.laneRepo && !repoReady(mine)) return { output: `This board is on ${isFolderProject(proj) ? `the folder ${proj.repo}` : repoName(proj.repo)}, and you (${name}) can't take its tasks yet: ${name} ${notReadyWhy(mine, proj)}. Leave them to a crew mate with a copy, or say what you need.`, isError: true };
     const prep = await this.prepareTask?.(sid, lane, t, state.board, true).catch(() => null);
     await this.store.append(sid, agentActor(name), { type: "board.claimed", id: t.id, lane, name, ...(prep ? { branch: prep.branch } : {}) }, { lane });
-    return { output: `${taskBrief(state, t)}${prep ? `\n\n${prep.line}` : ""}\n\nIt's yours. When you're done, call finish_task with id "${t.id}" and a short report.` };
+    return { output: `${taskBrief(state, t)}${proj ? `\n\n${repoLine(proj, mine)}` : ""}${prep ? `\n\n${prep.line}` : ""}\n\nIt's yours. When you're done, call finish_task with id "${t.id}" and a short report.` };
   }
 
   /** finish_task, or a board task's run ending: the report goes on the board, and a review or what waits on it goes next. */
@@ -2105,6 +2121,20 @@ export class AgentMesh {
     /** Tasks a person handed to one agent, tried once this round (see `chosen` below). */
     const tried = new Set<string>();
     const skills = await this.skillsFor(state);
+    // On a project (room-project.ts; splashxmoon/friday#24): tasks go only to a crew mate with a copy of it. One a person gave to a
+    // crew mate without one waits, saying why and who has it, and is never moved on by itself.
+    const proj = b.project && this.laneRepo ? b.project : undefined;
+    const repos = new Map<string, MemberRepo | undefined>();
+    // Crew mates only: a lane that isn't one (a session's own agent) has no copy to find, and takes none of these tasks.
+    if (proj)
+      for (const l of lanesOf(state)) {
+        const m = await this.laneRepo!(sid, l, proj).catch(() => undefined);
+        if (m) repos.set(l, m);
+      }
+    const fits = (l: string) => !proj || repoReady(repos.get(l));
+    const haveIt = () => [...repos.keys()].filter((l) => fits(l)).map((l) => laneName(state, l));
+    const waits = new Map<string, string>();
+    const briefFor = (t: BoardTask, l: string) => `${taskBrief(state, t)}${proj ? `\n\n${repoLine(proj, repos.get(l))}` : ""}`;
     /**
      * The free agent best at this task's kind (strengths.ts), keeping the order given where none stands out, and why it, when
      * there was more to it than being free: said on the task (board.claimed), for "why did this go to X?".
@@ -2174,8 +2204,13 @@ export class AgentMesh {
           this.refused.set(`${sid}|${chosen.id}`, `${name} is out of usage until its limit lifts. Pick another agent.`);
           continue;
         }
+        if (!fits(lane)) {
+          const others = haveIt().filter((n) => n !== name);
+          waits.set(chosen.id, `Waiting for ${name}, who ${notReadyWhy(repos.get(lane), proj!)}.${others.length ? ` ${others.join(" and ")} ${others.length === 1 ? "has" : "have"} it: reassign it to start now.` : ""}`);
+          continue;
+        }
         const prep = await this.prepareTask?.(sid, lane, chosen, state.board!, runOf(state, lane).status !== "running" && !pendingFor(state, lane).length).catch(() => null);
-        const r = await this.send(sid, state.board!.fromLane, { to: name, toLane: lane, text: `${taskBrief(state, chosen)}${prep ? `\n\n${prep.line}` : ""}`, kind: "task", board: chosen.id, system: true });
+        const r = await this.send(sid, state.board!.fromLane, { to: name, toLane: lane, text: `${briefFor(chosen, lane)}${prep ? `\n\n${prep.line}` : ""}`, kind: "task", board: chosen.id, system: true });
         if (!r.ok) {
           // Refused: its folder goes back to the branch it was on (Fable review, 2026-11-11).
           await prep?.undo?.().catch(() => undefined);
@@ -2189,7 +2224,14 @@ export class AgentMesh {
         continue;
       }
       const ready = readyTasks(state).filter((t) => !tried.has(t.id));
-      if (!ready.length || !free.length) break;
+      // Nobody here has the project ready: said on each task, not handed to a folder it isn't in.
+      if (proj && ready.length && !haveIt().length) {
+        const each = [...repos.keys()].map((l) => `${laneName(state, l)} ${notReadyWhy(repos.get(l), proj)}`).join("; ");
+        for (const t of ready.filter((x) => !x.next)) waits.set(t.id, isFolderProject(proj) ? `No crew mate here can reach the folder ${proj.repo}${each ? `: ${each}` : ""}.` : `No crew mate here has ${repoName(proj.repo)}${proj.branch ? ` with ${proj.branch}` : ""} yet${each ? `: ${each}` : ""}.`);
+        break;
+      }
+      const able = free.filter(fits);
+      if (!ready.length || !able.length) break;
       // The best match of task and agent: one named for it first, else the first ready to the first free.
       // A person's pick first, and only to them: a task they handed to someone waits for that agent rather than going to
       // whoever is free.
@@ -2197,18 +2239,18 @@ export class AgentMesh {
       // Never to an agent that turned the task down.
       const may = (t: BoardTask, l: string) => !(t.declined ?? []).some((n) => n.toLowerCase() === laneName(state, l).toLowerCase());
       for (const t of ready) {
-        const to = free.find((l) => may(t, l) && (t.next ? laneName(state, l).toLowerCase() === t.next.toLowerCase() : suits(t, laneName(state, l))));
+        const to = able.find((l) => may(t, l) && (t.next ? laneName(state, l).toLowerCase() === t.next.toLowerCase() : suits(t, laneName(state, l))));
         if (to) {
           pick = { t, to };
           break;
         }
       }
-      const open = ready.filter((t) => !t.next && free.some((l) => may(t, l)));
+      const open = ready.filter((t) => !t.next && able.some((l) => may(t, l)));
       if (!pick && !open.length) break;
       let why: string | undefined = pick ? (pick.t.next ? undefined : "the plan named it for this") : undefined;
       if (!pick) {
         const t = open.find((x) => !x.agent) ?? open[0]!;
-        const best = bestFor(t, free.filter((l) => may(t, l)))!;
+        const best = bestFor(t, able.filter((l) => may(t, l)))!;
         pick = { t, to: best.to };
         why = best.why;
       }
@@ -2216,16 +2258,25 @@ export class AgentMesh {
       // Sent first, claimed once it went: a task that couldn't reach that agent stays on the board for someone else.
       // Free, so its folder is readied for the task before the task reaches it.
       const prep = await this.prepareTask?.(sid, pick.to, pick.t, state.board!, true).catch(() => null);
-      const r = await this.send(sid, state.board!.fromLane, { to: name, toLane: pick.to, text: `${taskBrief(state, pick.t)}${prep ? `\n\n${prep.line}` : ""}`, kind: "task", board: pick.t.id, system: true });
+      const r = await this.send(sid, state.board!.fromLane, { to: name, toLane: pick.to, text: `${briefFor(pick.t, pick.to)}${prep ? `\n\n${prep.line}` : ""}`, kind: "task", board: pick.t.id, system: true });
       if (!r.ok) {
         await prep?.undo?.().catch(() => undefined);
         // Nobody else free takes it meanwhile? It may still go to this one through whoever can let it (boardRefused).
-        if (!free.some((l) => l !== pick!.to && !skip.has(l) && may(pick!.t, l))) await this.boardRefused?.(sid, pick.t, pick.to, r.error).catch(() => false);
+        if (!able.some((l) => l !== pick!.to && !skip.has(l) && may(pick!.t, l))) await this.boardRefused?.(sid, pick.t, pick.to, r.error).catch(() => false);
         skip.add(pick.to);
         continue;
       }
       await this.store.append(sid, agentActor(name), { type: "board.claimed", id: pick.t.id, lane: pick.to, name, ...(why ? { why } : {}), ...(prep ? { branch: prep.branch } : {}) }, { lane: pick.to });
       handed.push(`"${pick.t.id}" to ${name}${why ? ` (${why})` : ""}`);
+    }
+    // Why each ready task still waits, said when that changes, and cleared once nothing holds it.
+    if (proj) {
+      const now = await this.store.state(sid);
+      for (const t of now.board?.tasks ?? []) {
+        if (t.status !== "open") continue;
+        const why = waits.get(t.id) ?? "";
+        if ((t.waiting ?? "") !== why) await this.store.append(sid, FRIDAY, { type: "board.waiting", id: t.id, why }, { lane: now.board!.fromLane });
+      }
     }
     return handed;
   }

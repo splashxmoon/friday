@@ -1,0 +1,36 @@
+/* A crew mate at work, said after its name (work-line.tsx): "Kit · Searching the code", no bubble. */
+.wl { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: 14px; line-height: 20px; }
+.wl-sep { color: var(--ink-4); }
+.wl-slot { display: grid; min-width: 0; }
+.wl-phrase { grid-area: 1 / 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; --shine-base: color-mix(in srgb, var(--ink) 42%, transparent); --shine-ink: var(--ink); animation: wl-rise 180ms var(--ease-out) backwards; }
+@keyframes wl-rise { from { opacity: 0; transform: translateY(4px); } }
+.wl-now { display: inline-flex; align-items: center; gap: 4px; min-width: 0; height: 24px; margin: -2px 0 -2px -6px; padding: 0 6px; border: 0; border-radius: 6px; background: none; color: inherit; font: inherit; cursor: pointer; }
+.wl-now:hover { background: var(--hover); }
+.wl-now:focus-visible { outline: 2px solid var(--focus, color-mix(in srgb, var(--ink) 40%, transparent)); outline-offset: 1px; }
+.wl-chev { flex: none; width: 12px; height: 12px; color: var(--ink-3); opacity: 0; transition: opacity .12s, transform .18s var(--ease-out); }
+.wl-now:hover .wl-chev, .wl-now:focus-visible .wl-chev, .wl-now[aria-expanded="true"] .wl-chev { opacity: 1; }
+.wl-now[aria-expanded="true"] .wl-chev { transform: rotate(180deg); }
+/* The name and the line share the head; the line gives way first. */
+.rsp-head:has(> .wl) { min-width: 0; }
+.rsp-head:has(> .wl) > .rsp-who { flex: none; }
+
+/* The face's eyes follow the step (teammate-face.tsx .tm-look round its eyes): reading scans across, searching darts, editing and
+   writing look down at the work, running looks up at it, thinking drifts. Its body's motion is style.css .rsp-avatar[data-doing]. */
+.tm-face .tm-look { transform-box: view-box; transition: transform .35s var(--ease-out); }
+.rsp-avatar[data-doing="read"] .tm-look { animation: wl-eyes-read 2.6s ease-in-out infinite; }
+.rsp-avatar[data-doing="search"] .tm-look { animation: wl-eyes-search 1.8s steps(1) infinite; }
+.rsp-avatar[data-doing="edit"] .tm-look { transform: translate(0, 6px); }
+.rsp-avatar[data-doing="type"] .tm-look { transform: translate(0, 8px); }
+.rsp-avatar[data-doing="run"] .tm-look { transform: translate(4px, -5px); }
+.rsp-avatar[data-doing="think"] .tm-look { animation: wl-eyes-think 3.2s ease-in-out infinite; }
+@keyframes wl-eyes-read { 0%, 100% { transform: translate(-7px, 3px); } 45%, 50% { transform: translate(7px, 3px); } 53% { transform: translate(-7px, 5px); } }
+@keyframes wl-eyes-search { 0% { transform: translate(-6px, -2px); } 30% { transform: translate(6px, -3px); } 60% { transform: translate(2px, 3px); } 80% { transform: translate(-4px, 1px); } }
+@keyframes wl-eyes-think { 0%, 100% { transform: translate(-3px, -6px); } 50% { transform: translate(4px, -6px); } }
+.rsp-avatar[data-doing="type"] > * { animation: rl-bob .9s ease-in-out infinite; transform-origin: 50% 80%; }
+
+@media (prefers-reduced-motion: reduce) {
+  .wl-phrase { animation: none; }
+  .rsp-avatar[data-doing] .tm-look { animation: none; transform: none; }
+}
+html.reduce-motion .wl-phrase { animation: none; }
+html.reduce-motion .rsp-avatar[data-doing] .tm-look { animation: none; transform: none; }

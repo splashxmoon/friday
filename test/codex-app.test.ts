@@ -280,3 +280,21 @@ test("a Codex too old for an app-server is known at once, and its turns run the 
   assert.equal(warm.unsupported, true);
   assert.deepEqual(codexExec.args(spec).slice(0, 2), ["exec", "--json"], "the old way is still here for it");
 });
+
+test("a turn's usage says the model it ran on: the one picked, else the one Codex opened the conversation on", () => {
+  // Arun, 2026-11-17: "see why the tracking is not working properly": Codex's turns came with no model, so nothing was priced.
+  const s = server({});
+  s.say({ id: 0, result: { userAgent: "codex" } });
+  s.say({ id: s.last().id, result: { thread: { id: "thr_1" }, model: "gpt-5.1-codex" } });
+  s.notify("turn/started", { threadId: "thr_1", turn: { id: "turn_1", status: "inProgress" } });
+  const u = { inputTokens: 100, cachedInputTokens: 0, outputTokens: 10, reasoningOutputTokens: 0, cacheWriteInputTokens: 0, totalTokens: 110 };
+  s.notify("thread/tokenUsage/updated", { threadId: "thr_1", turnId: "turn_1", tokenUsage: { last: u, total: u } });
+  const end = s.notify("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed", items: [] } });
+  assert.equal((end[0] as Extract<AdapterOut, { kind: "usage" }>).model, "gpt-5.1-codex");
+  const picked = server({ model: "gpt-5-mini" });
+  picked.say({ id: 0, result: { userAgent: "codex" } });
+  picked.say({ id: picked.last().id, result: { thread: { id: "thr_2" }, model: "gpt-5.1-codex" } });
+  picked.notify("turn/started", { threadId: "thr_2", turn: { id: "turn_2", status: "inProgress" } });
+  picked.notify("thread/tokenUsage/updated", { threadId: "thr_2", turnId: "turn_2", tokenUsage: { last: u, total: u } });
+  assert.equal((picked.notify("turn/completed", { threadId: "thr_2", turn: { id: "turn_2", status: "completed", items: [] } })[0] as Extract<AdapterOut, { kind: "usage" }>).model, "gpt-5-mini");
+});

@@ -77,7 +77,12 @@
 .tc-agent.is-need .tc-agent-sub { color: var(--amber); }
 .tc-agent.is-done .tc-agent-sub { color: var(--green); }
 .tc-agent.is-bad .tc-agent-sub { color: var(--red); }
-.tc-time { min-width: 30px; color: var(--faint); font-size: 11.5px; text-align: right; font-variant-numeric: tabular-nums; }
+/* How long it took, beside its name (Arun, 2026-11-17: "move the time stamp around too"); the row's right end is its ⋯. */
+.tc-time { flex: none; color: var(--faint); font-size: 11.5px; font-weight: 400; font-variant-numeric: tabular-nums; }
+.tc-agent-end { display: flex; align-items: center; gap: 4px; }
+.tc-agent-end:empty { display: none; }
+/* Its ⋯ in the card's right column with the header's ⋯ and the chevrons: the same box, reaching the row's edge (Arun, 2026-11-17: "make sure the three dots are all lined up properly"). */
+.tc-agent .tc-agent-more { width: auto; height: 28px; margin: 0 -8px 0 0; padding: 0 8px 0 7px; }
 .tc-answer { height: 24px; padding: 0 9px; border: 0; border-radius: 7px; background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--ink); font: 500 12px var(--font); cursor: pointer; }
 .tc-answer:hover { background: color-mix(in srgb, var(--amber) 28%, transparent); }
 
@@ -247,3 +252,17 @@ html.desktop .tc :is(button, [role="button"]):not(:disabled), html.desktop :is(.
 .tpf-btn:hover, .tpf-btn:focus-visible { background: var(--hover); border-color: var(--border-strong); outline: none; }
 /* An agent's ring is the session tab's (presence.tsx TabRing), centred in its column. */
 .tc-ring-slot { display: grid; place-items: center; justify-self: center; }
+
+/* Folded, the agents' faces with their state's dot at the head's right end, small and apart (Arun, 2026-11-17: "compact and not
+   crowding"), and a word when all are settled. */
+.tc-fold-faces { display: flex; align-items: center; flex: none; margin-left: auto; padding-left: 6px; }
+.tc-fold-faces .tc-face { width: 18px; height: 18px; margin-left: -4px; border-radius: 5px; background: color-mix(in srgb, var(--tint) 18%, var(--panel)); box-shadow: 0 0 0 1.5px var(--panel); }
+.tc-fold-faces .tc-face:first-child { margin-left: 0; }
+.tc-fold-more { margin-left: 3px; }
+.tc-fold-faces .tc-face svg { width: 11px; height: 11px; }
+.tc-fold-faces .tc-dot { z-index: 1; width: 6px; height: 6px; right: -2px; bottom: -2px; } /* above the next face, which overlaps its corner */
+.tc-fold-more { color: var(--text-muted); flex: none; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.tc-settled { margin-left: 2px; }
+.tc-settled.is-need { color: var(--amber); }
+.tc-settled.is-bad { color: var(--red); }
+

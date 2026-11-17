@@ -1,4 +1,5 @@
 import { ChevronRightIcon, FolderGit2Icon, PlusIcon, SearchIcon, SettingsIcon, LogOutIcon, MoonIcon, SunIcon, XIcon } from "lucide-react";
+import "./working-dot.css";
 import { openKeepGoing } from "./crew-carry-open.js";
 import { plainLine } from "./team-room.js";
 import { mateItems, roomItems } from "./mate-menu.js";
@@ -14,7 +15,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { shortPaths } from "./shortPaths.js";
 import { UpdateRailButton } from "./AppUpdate.js";
 import { forkSession } from "./github-menu.js";
-import { CodingToolLimits } from "./gauge.js";
+import { CodingToolLimits, RailRing, useRailLimits } from "./gauge.js";
+import { AccountGlance } from "./account-glance.js";
 import type { McpPublic } from "../mcp-types.js";
 import { Avatar, Icon, type IconName } from "./icons.js";
 import type { AgentView, PersonListing } from "../agents.js";
@@ -46,7 +48,8 @@ import { doingWords, QUIET_AFTER_MS, quietFor } from "../step-words.js";
 import { useSettledOrder } from "./sidebar-order.js";
 import { shortcut } from "./Shortcuts.js";
 import { choosePlace, CodeCrewToggle, isWorkSid, useWorkSessions } from "./WorkMode.js";
-import { Face, isTeamSid, MateRing, mateStatus, newTeammate, openRoom, openTeammate, ownOf, RoomDialog, roomsOf, RoomFaces, SidebarTeammates, useTeam, useTeamTab, type RoomView } from "./Teammates.js";
+import { BlobFace } from "./teammate-face.js";
+import { Face, isTeamSid, MateRing, mateStatus, newTeammate, openRoom, openTeammate, ownOf, RoomDialog, roomNow, roomsOf, RoomFaces, SidebarTeammates, useTeam, useTeamTab, type RoomView } from "./Teammates.js";
 import { roleWord, rowState } from "./team-status.js";
 import { byDay } from "./sidebar-days.js";
 import { ALL as ALL_AGENTS, useFocusedAgent } from "./agentFocus.js";
@@ -86,7 +89,7 @@ export interface SidebarProps {
   activeSid: string | null;
   /** On the new-session page opened from a project's "New session here": the project it will go in, shown in the list. */
   draftProject?: string | undefined;
-  view: "home" | "session" | "connections" | "agents" | "automations" | "people" | "library" | "crew" | "board" | "deepdive" | "review" | "needs" | "settings" | "usage";
+  view: "home" | "session" | "connections" | "agents" | "automations" | "people" | "library" | "crew" | "board" | "deepdive" | "mcp" | "review" | "needs" | "settings" | "usage";
   /** Whether the chat list is showing beside the rail. */
   panelOpen: boolean;
   /** Whether the session list shows beside the rail: false when the sidebar's button folded it and the rail stayed. */
@@ -118,6 +121,8 @@ export interface SidebarProps {
   onOpenBoard: () => void;
   /** Deep Dive: the repos explained (DeepDive.tsx). */
   onOpenDeepDive?: () => void;
+  /** MCP servers for every coding tool on this computer (McpServers.tsx). */
+  onOpenMcp?: () => void;
   onOpenReview: () => void;
   /** The Needs you queue (NeedsYou.tsx). */
   onOpenNeeds?: () => void;
@@ -586,7 +591,7 @@ function OssRail({ p }: { p: SidebarProps }) {
   const mates = t ? ownOf(t) : [];
   const mateNeeds = mates.filter((m) => m.status === "waiting").length;
   const agentsDot = useAgentsDot(mates, crew);
-  const onPage = ["needs", "board", "deepdive", "review", "automations", "agents", "usage", "settings"].includes(p.view ?? "");
+  const onPage = ["needs", "board", "deepdive", "mcp", "review", "automations", "agents", "usage", "settings"].includes(p.view ?? "");
   // A place's page is lit; else the list you are in, Sessions or Agents.
   // Agents always opens the Agents page; Sessions leaves a page, or a crew chat, for a new session.
   const go = (place: "code" | "team") => {
@@ -606,9 +611,11 @@ function OssRail({ p }: { p: SidebarProps }) {
         onPointerEnter={() => o.warm && p.onWarm?.(o.warm)}
         onFocus={() => o.warm && p.onWarm?.(o.warm)}
       >
-        <Icon name={o.icon} size={20} />
+        {o.id === "agents" ? <CrewIcon seeds={mates.map((m) => m.look ?? m.name)} /> : <Icon name={o.icon} size={20} />}
         {!!o.n && <span className={`oss-rail-n${o.needs ? " needs" : ""}`} aria-hidden="true">{o.n > 9 ? "9+" : o.n}</span>}
-        {!o.n && o.dot && <span className="oss-rail-dot" aria-hidden="true" />}
+        {/* Someone at work: a small dot that breathes in its corner (Arun, 2026-11-17: "add a little dot on the top right corner when
+            an agent or room or whatever is working"); what waits on you, or just finished, comes first. */}
+        {!o.n && (o.id === "agents" && mates.some((m) => m.status === "working") ? <span className="oss-rail-dot wk" aria-hidden="true" /> : o.dot && <span className="oss-rail-dot" aria-hidden="true" />)}
       </button>
     );
     // Usage, with your coding tools' limits a short rest away (audit REST-10): not over the Usage page itself.
@@ -634,6 +641,35 @@ function OssRail({ p }: { p: SidebarProps }) {
       </Tooltip>
     );
   };
+  // Your coding tools' limits, a twin ring each, in the Usage icon's place once any has a reading (gauge.tsx RailRing); pressed, the
+  // Usage page, and the same card over them as over the Usage icon.
+  const rings = useRailLimits(p.identityForApi);
+  const onUsage = p.view === "usage";
+  // Each ring hovered shows that tool's own limits; pressed, the Usage page. Not over the Usage page itself.
+  const [ringCard, setRingCard] = useState<string | null>(null);
+  const railRings = (
+    <div className="oss-rail-rings">
+      {rings.map((r) => {
+        const button = (
+          <button type="button" className="oss-rail-btn oss-rail-ring" data-active={onUsage || undefined} aria-current={onUsage ? "page" : undefined} aria-label={r.label} data-tour={r.tool === rings[0]!.tool ? "Usage" : undefined} onClick={() => (setRingCard(null), p.onOpenUsage())} onPointerEnter={() => p.onWarm?.("usage")} onFocus={() => p.onWarm?.("usage")}>
+            <RailRing tool={r.tool} outer={r.outer} inner={r.inner} back={r.back} />
+            {/* More than one account: how many, small at the ring's foot; the ring is the one new sessions use. */}
+            {r.accounts > 1 && <span className="oss-rail-accts" aria-hidden="true">{r.accounts}</span>}
+          </button>
+        );
+        return onUsage ? (
+          <span key={r.tool}>{button}</span>
+        ) : (
+          <HoverCard key={r.tool} openDelay={300} closeDelay={120} open={ringCard === r.tool} onOpenChange={(o) => setRingCard(o ? r.tool : (c) => (c === r.tool ? null : c))}>
+            <HoverCardTrigger asChild>{button}</HoverCardTrigger>
+            <HoverCardContent side="right" align="end" className="usage-card w-72 p-3">
+              {r.accounts > 1 ? <AccountGlance tool={r.tool} identity={p.identityForApi} /> : <CodingToolLimits identity={p.identityForApi} only={r.tool} />}
+            </HoverCardContent>
+          </HoverCard>
+        );
+      })}
+    </div>
+  );
   // Up and down move along the rail, as along any toolbar.
   const onKey = (e: React.KeyboardEvent<HTMLElement>) => {
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
@@ -655,20 +691,39 @@ function OssRail({ p }: { p: SidebarProps }) {
         {p.onOpenNeeds && item({ id: "needs", icon: "hand", label: "Needs you", on: p.view === "needs", go: p.onOpenNeeds, warm: "needs", n: waiting || undefined, needs: true })}
         {item({ id: "board", icon: "board", label: "Agent Board", on: p.view === "board", go: p.onOpenBoard, warm: "board" })}
         {p.onOpenDeepDive && item({ id: "deepdive", icon: "puzzle", label: "Deep Dive", on: p.view === "deepdive", go: p.onOpenDeepDive, warm: "deepdive" })}
+        {p.onOpenMcp && item({ id: "mcp", icon: "wrench", label: "MCP servers", on: p.view === "mcp", go: p.onOpenMcp, warm: "mcp" })}
         {item({ id: "automations", icon: "zap", label: "Automations", on: p.view === "automations" || p.view === "agents", go: p.onOpenAutomations, warm: "automations" })}
         {item({ id: "review", icon: "gitPullRequest", label: "Code Review", on: p.view === "review", go: p.onOpenReview, warm: "review", n: p.reviewsWaiting || undefined, needs: true })}
       </div>
       <div className="oss-rail-foot">
         <UpdateRailButton />
-        {item({ id: "usage", icon: "usage", label: "Usage", on: p.view === "usage", go: p.onOpenUsage, warm: "usage" })}
+        {rings.length ? railRings : item({ id: "usage", icon: "usage", label: "Usage", on: p.view === "usage", go: p.onOpenUsage, warm: "usage" })}
         {item({ id: "settings", icon: "settings", label: "Settings", on: p.view === "settings", go: p.onOpenSettings })}
       </div>
     </nav>
   );
 }
 
+/** Three faces when the crew has fewer than three of its own, so the icon is always a group. */
+const CREW_ICON_SEEDS = ["v2:rail-a", "v2:rail-b", "v2:rail-c"];
+/**
+ * The Agents place's icon: three of the crew's faces in a small group, the first three of your own crew, made up from Friday's
+ * when it has fewer (Arun, 2026-11-17: "use like the mascots like three of them grouped together as the button icon thing for the
+ * agents button on the rail"). Two behind, one in front.
+ */
+function CrewIcon({ seeds }: { seeds: string[] }) {
+  const three = [...seeds, ...CREW_ICON_SEEDS.filter((s) => !seeds.includes(s))].slice(0, 3);
+  return (
+    <span className="oss-rail-crew" aria-hidden="true">
+      <span className="oss-rail-crew-l"><BlobFace seed={three[1]!} size={15} /></span>
+      <span className="oss-rail-crew-r"><BlobFace seed={three[2]!} size={15} /></span>
+      <span className="oss-rail-crew-f"><BlobFace seed={three[0]!} size={18} /></span>
+    </span>
+  );
+}
+
 /** Pages of their own, on the rail: none of them is the Sessions or the Agents list. */
-const RAIL_PAGES = ["needs", "board", "deepdive", "review", "automations", "agents", "usage", "settings"];
+const RAIL_PAGES = ["needs", "board", "deepdive", "mcp", "review", "automations", "agents", "usage", "settings"];
 
 /**
  * The list beside the rail: the crew's own on the Agents side (CrewList), New session and your sessions on the other, with no
@@ -708,10 +763,12 @@ function CrewList({ p }: { p: SidebarProps }) {
   const has = (...words: (string | null | undefined)[]) => !q.trim() || words.some((w) => w?.toLowerCase().includes(q.trim().toLowerCase()));
   const rank = (s: string) => (s === "waiting" ? 0 : s === "stopped" ? 1 : s === "working" ? 2 : 3);
   const mates = [...ownOf(t)].sort((a, b) => rank(a.status) - rank(b.status) || (b.lastAt ?? 0) - (a.lastAt ?? 0)).filter((m) => has(m.name, m.role));
-  const rooms: { key: string; name: string; seeds: string[]; line: string; at?: number; here: boolean; open: () => void }[] = [
+  type RoomRow = ReturnType<typeof roomNow> & { key: string; name: string; here: boolean; open: () => void };
+  const roomRowOf = (r: RoomView): RoomRow => ({ ...roomNow(r, ownOf(t)), key: r.id, name: r.name, here: p.activeSid === r.sid, open: () => openRoom(r, p.onOpen) });
+  const rooms: RoomRow[] = [
     // No default Crew room in the list (Arun, 2026-11-15: "get rid of this default crew room thing"): its session stays, as the
     // home of each crew mate's main chat, and is reached from a crew mate's crew work line.
-    ...roomsOf(t).map((r: RoomView) => ({ key: r.id, name: r.name, seeds: ownOf(t).filter((m) => r.lanes[m.id]).slice(0, 4).map((m) => m.look ?? m.name), line: r.last ? `${r.last.by}: ${r.last.text}` : `${Object.keys(r.lanes).length} in it`, ...(r.last?.at ? { at: r.last.at } : {}), here: p.activeSid === r.sid, open: () => openRoom(r, p.onOpen) })),
+    ...roomsOf(t).map(roomRowOf),
   ].filter((r) => has(r.name));
   const onPage = !p.activeSid;
   return (
@@ -782,14 +839,24 @@ function CrewList({ p }: { p: SidebarProps }) {
           const roomRow = (r: (typeof rooms)[number]) => (
             <div key={r.key} className="oss-crew-item" {...dragOf(`room:${r.key}`)} onContextMenu={(e) => (e.preventDefault(), setMenuAt({ id: `room:${r.key}`, x: e.clientX, y: e.clientY }))}>
               <button type="button" className="oss-crew-row" data-active={r.here || undefined} onClick={r.open}>
-                <RoomFaces seeds={r.seeds} size={30} />
+                <span className="wk-wrap">
+                  <RoomFaces seeds={r.seeds} size={30} states={r.states} />
+                  {r.ring === "working" && <i className="wk-dot" aria-hidden="true" />}
+                </span>
                 <span className="oss-crew-text">
                   <span className="oss-crew-top">
                     <b>{r.name}</b>
-                    {r.at ? <span className="oss-crew-when">{shortAgo(r.at)}</span> : null}
+                    {r.ring && <MateRing status={r.ring} title={r.state?.word} />}
+                    {r.state ? (
+                      <span className="oss-crew-state" data-tone={r.state.tone}>
+                        {r.state.word}
+                      </span>
+                    ) : r.at ? (
+                      <span className="oss-crew-when">{shortAgo(r.at)}</span>
+                    ) : null}
                   </span>
                   {/* A room's last words as plain text: the lead's Markdown ("**Notes**", `code`, its lists) as words on one line. */}
-                  <span className="oss-crew-line">{plainLine(r.line)}</span>
+                  <span className={`oss-crew-line${r.state ? ` s-${r.state.tone}` : ""}`}>{plainLine(r.line)}</span>
                 </span>
               </button>
             </div>
@@ -804,7 +871,10 @@ function CrewList({ p }: { p: SidebarProps }) {
               // AGENTS?"). No ⋯ beside its words ("get rid of that .... by the texts"): the Agents page has one beside Message.
               <div key={m.id} className="oss-crew-item" {...dragOf(`mate:${m.id}`)} onContextMenu={(e) => (e.preventDefault(), setMenuAt({ id: `mate:${m.id}`, x: e.clientX, y: e.clientY }))}>
                 <button type="button" className="oss-crew-row" data-active={(p.activeSid === t.sid && focused === m.lane) || undefined} onClick={() => openTeammate(t, m.lane, p.onOpen)} aria-label={`${m.name}${chip ? `, ${chip}` : ""}: ${st.word}${st.line ? `, ${st.line}` : ""}`}>
-                  <Face seed={m.look ?? m.name} size={30} status={m.status} lead={t.lead === m.lane} />
+                  <span className="wk-wrap">
+                    <Face seed={m.look ?? m.name} size={30} status={m.status} lead={t.lead === m.lane} />
+                    {m.status === "working" && <i className="wk-dot" aria-hidden="true" />}
+                  </span>
                   <span className="oss-crew-text">
                     <span className="oss-crew-top">
                       <b>{m.name}</b>
@@ -1335,7 +1405,7 @@ function SessionsList({ p }: { p: SidebarProps }) {
     // Said in the app's notice, not an alert that froze the page; and not offered where it can't be done (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
     canFork(p.attention.crews.get(r.sid), isLocal()) ? { label: "Fork session", icon: "gitFork", onSelect: () => void forkSession(r.sid, r.invite).then((e) => e && sayNotice(e)) } : null,
     // The rest handed on, to your crew or a crew room (Code and Crew, connected, 2026-11-13).
-    isLocal() && r.role !== "viewer" ? { label: "Keep this going…", icon: "handoff" as const, onSelect: () => openKeepGoing({ sid: r.sid, invite: r.invite }) } : null,
+    isLocal() && r.role !== "viewer" ? { label: "Keep this going", icon: "handoff" as const, onSelect: () => openKeepGoing({ sid: r.sid, invite: r.invite }) } : null,
     { label: "Rename session", icon: "pencil", onSelect: () => setRenaming({ kind: "session", id: r.sid }) },
     // New again on every device, as a mail list's "Mark as unread" (Herdr's most-asked-for, 2026-11-01): its last finished turn unread.
     r.sid !== p.activeSid && !unreadNow.has(r.sid) ? { label: "Mark as unread", icon: "mail", onSelect: () => (markUnread([r.sid]), void api(p.identityForApi, `/api/sessions/${encodeURIComponent(r.sid)}/unread`, { method: "POST" }).catch(() => {})) } : null,
@@ -1371,7 +1441,7 @@ function SessionsList({ p }: { p: SidebarProps }) {
     { heading: "Move to project" },
     ...p.projects.map((proj) => ({ label: proj.name, icon: "folder" as const, checked: r.projectId === proj.id, onSelect: () => p.updateRecent(r.sid, { projectId: proj.id }) })),
     {
-      label: "New project…",
+      label: "New project",
       icon: "plus",
       onSelect: () => {
         const id = p.createProject("New project");

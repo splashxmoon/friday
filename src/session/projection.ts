@@ -362,6 +362,8 @@ export interface BoardTask extends BoardTaskDef {
   why?: string;
   /** Its own branch, readied in its agent's copy of the repo (agent-mesh prepareTask): what the lead merges, in order. */
   branch?: string;
+  /** Why it waits though it is ready (board.waiting): its crew mate has no copy of the board's project, or nobody has. */
+  waiting?: string;
 }
 
 export interface BoardState {
@@ -376,6 +378,8 @@ export interface BoardState {
   by?: { id: string; name: string };
   /** Waiting on the person to start it (board.posted `proposed`): nothing is handed out until board.started. */
   proposed?: true;
+  /** The room's project when it was posted (room-project.ts): its tasks go only to a crew mate with a copy of it. */
+  project?: { repo: string; branch?: string };
 }
 
 /** Tasks whose every dependency is done and that nobody has: the ones an agent can take now. */
@@ -1118,8 +1122,13 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       if (s.board && b.lane && s.board.fromLane !== MAIN_LANE && !s.lanes.some((l) => l.id === s.board!.fromLane)) s.board = { ...s.board, fromLane: b.lane, fromName: s.lanes.find((l) => l.id === b.lane)?.name ?? s.board.fromName };
       break;
     case "board.posted":
-      s.board = { fromLane: b.fromLane, fromName: b.fromName, seq: ev.seq, tasks: b.tasks.map((t) => ({ ...t, status: "open", rounds: 0 })), ...(b.check ? { check: b.check } : {}), ...(b.by ? { by: b.by } : {}), ...(b.proposed ? { proposed: true as const } : {}) };
+      s.board = { fromLane: b.fromLane, fromName: b.fromName, seq: ev.seq, tasks: b.tasks.map((t) => ({ ...t, status: "open", rounds: 0 })), ...(b.check ? { check: b.check } : {}), ...(b.by ? { by: b.by } : {}), ...(b.proposed ? { proposed: true as const } : {}), ...(b.project ? { project: b.project } : {}) };
       break;
+    case "board.waiting": {
+      const t = s.board?.tasks.find((x) => x.id === b.id);
+      if (t) t.waiting = b.why || undefined;
+      break;
+    }
     case "board.started":
       if (s.board?.proposed) {
         const { proposed: _started, ...rest } = s.board;
@@ -1140,9 +1149,9 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
         // Failed: back to the agent that did it, as a review that found something does.
         if (!b.ok && !b.skipped) Object.assign(t, { status: "claimed", rounds: t.rounds + 1, backs: { ...t.backs, checks: (t.backs?.checks ?? 0) + 1 }, reviewer: undefined });
       } else if (b.type === "board.released") {
-        Object.assign(t, { status: "open", lane: undefined, name: undefined, reviewer: undefined, checks: undefined, ...(b.to ? { next: b.to } : { next: undefined }) });
+        Object.assign(t, { status: "open", lane: undefined, name: undefined, reviewer: undefined, checks: undefined, waiting: undefined, ...(b.to ? { next: b.to } : { next: undefined }) });
         if (b.declined) t.declined = [...new Set([...(t.declined ?? []), b.declined])];
-      } else t.status = "cancelled";
+      } else Object.assign(t, { status: "cancelled", waiting: undefined });
       break;
     }
     case "board.claimed":
@@ -1151,7 +1160,7 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
     case "board.reviewed": {
       const t = s.board?.tasks.find((x) => x.id === b.id);
       if (!t) break;
-      if (b.type === "board.claimed") Object.assign(t, { status: "claimed", lane: b.lane, name: b.name, next: undefined, why: b.why, ...(b.branch ? { branch: b.branch } : {}) });
+      if (b.type === "board.claimed") Object.assign(t, { status: "claimed", lane: b.lane, name: b.name, next: undefined, waiting: undefined, why: b.why, ...(b.branch ? { branch: b.branch } : {}) });
       else if (b.type === "board.finished") Object.assign(t, { checked: undefined, status: b.status === "blocked" ? "blocked" : t.noReview ? "done" : "review", lane: b.lane, name: b.name, report: b.report });
       // An empty lane takes the reviewer off: the one asked ran out of usage, and another is found (agent-mesh boardRunEnded).
       else if (b.type === "board.review") t.reviewer = b.lane ? { lane: b.lane, name: b.name } : undefined;

@@ -55,8 +55,11 @@
 .ap-room { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .ap-room:hover { background: var(--hover); }
 .ap-room-text { display: flex; flex-direction: column; min-width: 0; font-size: 13.5px; }
-.ap-room-text b { font-weight: 600; color: var(--ink); }
-.ap-room-text span { font-size: 12px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ap-room-text b { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--ink); }
+/* At work, or asking the person (Teammates.tsx roomNow): its line in the state's ink. */
+.ap-room[data-tone="working"] .ap-room-text > span { color: var(--ink-2); }
+.ap-room[data-tone="waiting"] .ap-room-text > span { color: var(--amber); }
+.ap-room-text > span { font-size: 12px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ap-room-new { justify-content: flex-start; gap: 8px; border-style: dashed; border-color: var(--border-strong); color: var(--text-muted); font-size: 13px; }
 
 /* What finished today. */

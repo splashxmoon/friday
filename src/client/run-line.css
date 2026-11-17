@@ -1,0 +1,31 @@
+/* A run line's opened steps, each kind with its mark (run-line.tsx GroupIcon): the mark in the label's own muted ink, so the rows
+   read by kind at a glance without colour carrying the meaning. The label column widens for the mark beside "Looked at". */
+.rl-row:has(.rl-icon) { grid-template-columns: 108px minmax(0, 1fr) auto; align-items: center; }
+.rl-label:has(.rl-icon) { display: inline-flex; align-items: center; gap: 7px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rl-icon { flex: none; width: 14px; height: 14px; stroke-width: 1.8; color: var(--ink-3); }
+.rl-row:hover .rl-icon, .rl-row[aria-expanded="true"] .rl-icon { color: var(--ink-2); }
+/* Opened while it works, the steps' line drops from the middle of the grid that leads the head (14px Orb at the head's left edge),
+   with the rows where they were (Arun, 2026-11-17: "make sure the vertical line is lined up with the grid square thing"). */
+.rl[data-orb] > .rl-body { margin-left: 6.5px; padding-left: 11.5px; }
+
+/* While it works: how many steps so far, and ticks that answer a hover with the step and a press with its kind opened. */
+.rl-count { flex: none; color: var(--ink-4); font-size: 12px; font-weight: 400; font-variant-numeric: tabular-nums; }
+.rl-ticks i { cursor: pointer; transition: transform .12s var(--ease-out), background-color .12s; }
+.rl-ticks i:hover { transform: scale(1.5); background: var(--ink-2); }
+.rl-ticks i.bad:hover { background: var(--red); }
+
+/* An agent's question to you, in the chat under the reply that asked (Activity.tsx RunBlock), the same card as over the box. */
+.rsp-ask-inline { max-width: 620px; margin-top: 8px; }
+
+/* A crew mate's steps under its working line (Activity.tsx RunBlock; Arun, 2026-11-17: "show me the steps in the room"): no head of
+   their own, the line over them says the step under way; the kinds sit on a thin rule from under the name. */
+.rl.bare { margin-top: 6px; }
+.rl.bare > .rl-body { margin-left: 2px; padding-left: 12px; border-left: 1.5px solid var(--border); }
+
+/* An agent's question at the chat's end, when the reply that asked isn't here (Activity.tsx FeedQuestion): in the chat with the
+   rest, never over it (Arun, 2026-11-17: "make sure like the decisions card thing is on the chat and not hovering above it"). */
+.feed-ask { max-width: 620px; margin: 6px 0 10px; padding-left: 44px; }
+.feed-ask-who { display: flex; align-items: center; gap: 8px; margin: 0 0 8px -32px; color: var(--ink-3); font-size: 13px; line-height: 20px; }
+.feed-ask-who b { color: var(--ink); font-weight: 600; }
+.feed-ask-mark { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--card-2); }
+@media (max-width: 640px) { .feed-ask { padding-left: 0; } .feed-ask-who { margin-left: 0; } }

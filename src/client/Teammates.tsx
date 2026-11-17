@@ -6,6 +6,9 @@
  * A teammate's chat is its lane of the team session, focused (agentFocus.ts); the Team room is that session's every-agent view.
  *
  */
+import { WorkLine, doingOfWords } from "./work-line.js";
+import { projectBody, projectError, projectText } from "./room-project-text.js";
+import { ProjectField } from "./RoomProject.js";
 import { leaving } from "./leave-guard.js";
 import { lazy, memo, Suspense, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
 import { ArrowUpIcon, CheckIcon, ChevronRightIcon, CopyIcon, EllipsisIcon, EyeIcon, HandIcon, ZapIcon, MessageSquareIcon, MessageSquareReplyIcon, UsersIcon, Settings2Icon, FolderGit2Icon, GitBranchIcon, PlusIcon, ShuffleIcon, TriangleAlertIcon, UserPlusIcon, XIcon } from "lucide-react";
@@ -60,6 +63,7 @@ import { BudgetFields } from "./TeammateBudget.js";
 import type { MateBudget, RunBudget } from "../team-budget.js";
 const SaveAsSkill = lazy(() => import("./CrewSkills.js").then((m) => ({ default: m.SaveAsSkill })));
 import "./teammates.css";
+import "./thread-panel.css";
 
 /** A team's size (teammates.ts MAX_TEAMMATES). */
 const MAX = 12;
@@ -87,6 +91,37 @@ export interface RoomView {
   doing?: Record<string, string>;
   /** A crew mate's thread, by its id: listed in that crew mate's chat, never with the rooms (teammates.ts Room.thread). */
   thread?: string;
+  /** The repo its work is on, and the branch it starts from (room-project.ts). Absent: No project. */
+  project?: { repo: string; branch?: string };
+}
+
+/**
+ * How a room stands, as a crew mate's row says it (Arun, 2026-11-17: "also add working states / status for the crew rooms too"):
+ * whom it waits on first, then who is at work and on what; its faces the ones asking or at work first, wearing it; at rest, its
+ * last words and when. `crew` is everyone's views; the room's members are picked from it.
+ */
+export function roomNow(r: RoomView, crew: TeammateView[]): { seeds: string[]; states: (TeammateView["status"] | undefined)[]; line: string; at?: number; state?: { word: string; tone: "working" | "waiting" }; ring?: TeammateView["status"] } {
+  const inIt = crew.filter((m) => r.lanes[m.id]);
+  const busy = (m: TeammateView) => r.doing?.[r.lanes[m.id]!] !== undefined;
+  // Its own status says whom it waits on anywhere; in a room that waits on the person, those are the ones first.
+  const asks = (m: TeammateView) => r.waiting > 0 && m.status === "waiting";
+  const order = (m: TeammateView) => (asks(m) ? 0 : busy(m) ? 1 : 2);
+  const faces = [...inIt].sort((a, b) => order(a) - order(b)).slice(0, 4);
+  const working = inIt.filter(busy);
+  const said = r.last ? `${r.last.by}: ${r.last.text}` : `${inIt.length} in it`;
+  const base = { seeds: faces.map((m) => m.look ?? m.name), states: faces.map((m) => (asks(m) ? ("waiting" as const) : busy(m) ? ("working" as const) : undefined)) };
+  if (r.waiting > 0) {
+    const asking = inIt.filter(asks);
+    const who = asking.length ? `${asking[0]!.name}${asking.length > 1 ? ` and ${asking.length - 1} more` : ""}` : "";
+    return { ...base, line: who ? `${who} ${asking.length > 1 ? "are" : "is"} waiting on you` : said, state: { word: "Needs you", tone: "waiting" }, ring: "waiting" };
+  }
+  const n = Math.max(r.working, working.length);
+  if (n > 0) {
+    const first = working[0];
+    const what = first ? (r.doing?.[r.lanes[first.id]!] ?? "").trim() : "";
+    return { ...base, line: first ? `${first.name}${n > 1 ? ` and ${n - 1} more` : ""} · ${what || "working"}` : said, state: { word: n > 1 ? `${n} working` : "Working", tone: "working" }, ring: "working" };
+  }
+  return { ...base, line: said, ...(r.last?.at ? { at: r.last.at } : {}) };
 }
 
 /** A crew mate's state as the small ring set after its name, the one a coding session's tabs wear; nothing at rest. */
@@ -1113,63 +1148,21 @@ const useLiveVersion = () =>
     () => liveVersion,
   );
 
-/**
- * A crew mate at work, said in its bubble one step at a time (Arun, 2026-11-15: "instead of just a message bubble thing with the
- * three dots, can we show the working state of the agent like it appears then disappears then like the next one"): the dots, and
- * what it is doing now, each new step rising in as the last fades out. A step is held a moment at least, so a run of quick ones
- * reads as a sequence rather than a flicker.
- */
-export function WorkBubble({ step, label }: { step: string; label: string }) {
-  const [shown, setShown] = useState<{ key: number; text: string; out?: true }[]>(() => [{ key: 0, text: step }]);
-  const at = useRef(Date.now());
-  useEffect(() => {
-    if (shown.at(-1)?.text === step) return;
-    const wait = Math.max(0, 900 - (Date.now() - at.current));
-    const t = setTimeout(() => {
-      at.current = Date.now();
-      setShown((s) => [...s.filter((x) => !x.out).map((x) => ({ ...x, out: true as const })), { key: (s.at(-1)?.key ?? 0) + 1, text: step }]);
-    }, wait);
-    return () => clearTimeout(t);
-  }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
-  // What faded out is let go once it has.
-  useEffect(() => {
-    if (!shown.some((x) => x.out)) return;
-    const t = setTimeout(() => setShown((s) => s.filter((x) => !x.out)), 320);
-    return () => clearTimeout(t);
-  }, [shown]);
-  return (
-    <div className="ct-bubble ct-work" role="status" aria-live="polite" aria-label={`${label}: ${step}`}>
-      <span className="ct-dots" aria-hidden="true">
-        <i />
-        <i />
-        <i />
-      </span>
-      <span className="ct-steps" aria-hidden="true">
-        {shown.map((x) => (
-          <span key={x.key} className={`ct-step${x.out ? " out" : ""}`}>
-            {x.text}
-          </span>
-        ))}
-      </span>
-    </div>
-  );
-}
-
-/** One crew mate typing: its face, its name, three dots. */
+/** One crew mate at work with no reply of its own here yet: its face, its name and what it is doing (work-line.tsx). */
 export function TypingRow({ sid, lane, m, doing }: { sid: string; lane: string; m: TeammateView; doing?: string }) {
   const seed = m.look ?? m.name;
-  const what = doing ? plainDoing(doing) : "";
+  const what = (doing ? plainDoing(doing) : "") || "Thinking";
   return (
     <div className="feed-item agent-lane" data-lane={lane} data-typing="">
       <div className="rsp tm-rsp rsp-chat ct-row" style={{ "--who": mascotColour(seed) } as CSSProperties}>
-        <button type="button" className="rsp-avatar ct-face" onClick={() => focusAgent(sid, lane)} aria-label={`Open ${m.name}'s chat`} title={`Open ${m.name}'s chat`}>
+        <button type="button" className="rsp-avatar ct-face" data-doing={doingOfWords(what) || undefined} onClick={() => focusAgent(sid, lane)} aria-label={`Open ${m.name}'s chat`} title={`Open ${m.name}'s chat`}>
           <Face seed={seed} size={32} />
         </button>
         <div className="rsp-main">
           <div className="rsp-head">
             <span className="rsp-who">{m.name}</span>
+            <WorkLine step={what} {...((s) => (s !== null ? { since: s } : {}))(workingSinceOf(m))} />
           </div>
-          <WorkBubble step={what || "Thinking"} label={`${m.name} is working`} />
         </div>
       </div>
     </div>
@@ -2651,6 +2644,11 @@ export function RoomDialog({ identity, team: t, editing, onClose, onMade }: { id
   const [name, setName] = useState(editing?.name ?? "");
   const [who, setWho] = useState<string[]>(editing ? Object.keys(editing.lanes) : []);
   const [purpose, setPurpose] = useState(editing?.purpose ?? "");
+  // Its project (room-project.ts): a crew's own rooms, on this computer, not a hosted team's.
+  let withProject = true;
+  const [repo, setRepo] = useState(projectText(editing?.project));
+  const [branch, setBranch] = useState(editing?.project?.branch ?? "");
+  const [repoErr, setRepoErr] = useState("");
   const [tried, setTried] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -2672,13 +2670,15 @@ export function RoomDialog({ identity, team: t, editing, onClose, onMade }: { id
     setBusy(true);
     setErr("");
     try {
-      const r = await api<Team & { room?: string }>(identity, editing ? `/api/teammates/rooms/${editing.id}` : "/api/teammates/rooms", { method: editing ? "PATCH" : "POST", body: JSON.stringify({ name, members: who, purpose }), headers: { "Content-Type": "application/json" } });
+      const r = await api<Team & { room?: string }>(identity, editing ? `/api/teammates/rooms/${editing.id}` : "/api/teammates/rooms", { method: editing ? "PATCH" : "POST", body: JSON.stringify({ name, members: who, purpose, ...(withProject && (editing || repo.trim()) ? { project: projectBody(repo, branch) } : {}) }), headers: { "Content-Type": "application/json" } });
       await refreshTeam(identity);
       onClose();
       const made = r.rooms?.find((x) => x.id === r.room);
       if (made) onMade(made);
     } catch (x) {
-      setErr((x as Error).message);
+      const m = (x as Error).message;
+      if (withProject && projectError(m)) setRepoErr(m);
+      else setErr(m);
     } finally {
       setBusy(false);
     }
@@ -2695,7 +2695,8 @@ export function RoomDialog({ identity, team: t, editing, onClose, onMade }: { id
         <form onSubmit={(e) => void save(e)} className="tm-form tm-room-form">
           <DialogHeader>
             <DialogTitle>{editing ? `Edit ${editing.name}` : "New room"}</DialogTitle>
-            <DialogDescription>{editing ? "Someone taken out stops working here; someone brought in starts with a conversation of its own for this room." : roomIntro}</DialogDescription>
+            {/* New: no intro under the title, said for screen readers only (Arun, 2026-11-17: "get rid of this"). */}
+            <DialogDescription className={editing ? undefined : "sr-only"}>{editing ? "Someone taken out stops working here; someone brought in starts with a conversation of its own for this room." : roomIntro}</DialogDescription>
           </DialogHeader>
           <label className="tm-field">
             <span>Name</span>
@@ -2710,6 +2711,7 @@ export function RoomDialog({ identity, team: t, editing, onClose, onMade }: { id
             <span>What it's for</span>
             <Textarea value={purpose} maxLength={2000} rows={2} placeholder="Optional. Told to its teammates with every message here." onChange={(e) => setPurpose(e.target.value)} />
           </label>
+          {withProject && <ProjectField identity={identity} repo={repo} branch={branch} err={repoErr} onRepo={(v) => (setRepo(v), setRepoErr(""))} onBranch={(v) => (setBranch(v), setRepoErr(""))} />}
           <div className="tm-field tm-room-who">
             <span>Who's in it</span>
             <div ref={pickBox} className="tm-pick" role="group" aria-label="Teammates in the room" aria-invalid={tried && !who.length} aria-describedby="tm-room-who">
@@ -3605,17 +3607,37 @@ function ThreadPanel({ sid, root, lane, events, send, onClose, meId, inPanel }: 
     setText("");
   };
   const said = (e: SessionEvent) => (e.body.type === "agent.message" || e.body.type === "instruction" ? e.body.text : "");
-  const row = (e: SessionEvent, isRoot = false) => {
+  // "You" for your own words, as the room says it (audit CREW-34).
+  const whoOf = (e: SessionEvent) => (e.body.type === "agent.message" ? (mate?.name ?? e.actor.name) : e.actor.id === meId ? "You" : e.actor.name);
+  /**
+   * The thread laid out as a chat of its own (Arun, 2026-11-17: "design this better...", of the message set loose over an empty
+   * page): what it is on, in a card at its top; a line with how many replies; the crew mate's replies in bubbles under its face and
+   * the person's at the right; and, with none yet, a word on where a reply goes.
+   */
+  const row = (e: SessionEvent) => {
     const agent = e.body.type === "agent.message";
+    if (!agent)
+      return (
+        <div key={e.seq} className="tth-mine">
+          <div className="tth-bubble">{said(e)}</div>
+          <time className="tth-time">
+            {whoOf(e) === "You" ? "" : `${whoOf(e)} · `}
+            {agoShort(e.ts)}
+          </time>
+        </div>
+      );
     return (
-      <div key={e.seq} className={`tt-thread-msg${agent ? "" : " mine"}${isRoot ? " root" : ""}`}>
-        <span className="tt-thread-who">
-          {agent && mate ? <Face seed={mate.look ?? mate.name} size={18} /> : null}
-          {/* "You" for your own replies, as the room says it (audit CREW-34). */}
-          <b>{agent ? (mate?.name ?? e.actor.name) : e.actor.id === meId ? "You" : e.actor.name}</b>
-          <span>{agoShort(e.ts)}</span>
-        </span>
-        <div className="tt-thread-text">{agent ? <LazyAnswer text={said(e).trim()} /> : said(e)}</div>
+      <div key={e.seq} className="tth-row">
+        {mate ? <Face seed={mate.look ?? mate.name} size={24} /> : <span />}
+        <div className="tth-main">
+          <span className="tth-who">
+            <b>{whoOf(e)}</b>
+            <time>{agoShort(e.ts)}</time>
+          </span>
+          <div className="tth-bubble">
+            <LazyAnswer text={said(e).trim()} />
+          </div>
+        </div>
       </div>
     );
   };
@@ -3628,11 +3650,28 @@ function ThreadPanel({ sid, root, lane, events, send, onClose, meId, inPanel }: 
           <XIcon className="size-4" />
         </button>
       </header>
-      <div className="tt-thread-body">
-        {first && row(first, true)}
-        <div className="tt-thread-count">{list.length ? `${list.length} ${list.length === 1 ? "reply" : "replies"}` : "No replies yet"}</div>
+      <div className="tt-thread-body tth">
+        {first && (
+          <article className="tth-root">
+            <header className="tth-who">
+              {first.body.type === "agent.message" && mate ? <Face seed={mate.look ?? mate.name} size={24} /> : null}
+              <b>{whoOf(first)}</b>
+              <time>{agoShort(first.ts)}</time>
+            </header>
+            <div className="tth-root-text">{first.body.type === "agent.message" ? <LazyAnswer text={said(first).trim()} /> : said(first)}</div>
+          </article>
+        )}
+        <div className="tth-sep" role="separator">
+          <span>{list.length ? `${list.length} ${list.length === 1 ? "reply" : "replies"}` : "No replies yet"}</span>
+        </div>
         {list.map((e) => row(e))}
-        {standing && <div className="tt-thread-typing">{standing}</div>}
+        {!list.length && !standing && <p className="tth-empty">A reply here goes to {mate?.name ?? "it"} in this thread, apart from the room's chat.</p>}
+        {standing && (
+          <div className="tth-typing">
+            {mate && <Face seed={mate.look ?? mate.name} size={18} />}
+            <span>{standing}</span>
+          </div>
+        )}
         <div ref={end} />
       </div>
       <form
@@ -3646,7 +3685,7 @@ function ThreadPanel({ sid, root, lane, events, send, onClose, meId, inPanel }: 
         <div className="tt-thread-field">
         <Textarea
           value={text}
-          rows={2}
+          rows={1}
           autoFocus
           placeholder={`Reply to ${mate?.name ?? "it"} in this thread…`}
           onChange={(e) => setText(e.target.value)}

@@ -26,7 +26,11 @@ import { roomBrief } from "./room-brief.js";
 import { checkedIn, claimOf, claimWords, commandFor } from "./claims.js";
 import { readFailed } from "./project-rules.js";
 import { parseRepo } from "./runner/repo.js";
-import { Runner } from "./runner/runner.js";
+import { Runner, toolBusy } from "./runner/runner.js";
+import { finishSignin } from "./runner/connections.js";
+import { signedInPage } from "./mcp-signed-in-page.js";
+import { connectionTools } from "./connection-tools.js";
+import { startToolUpdates } from "./runner/tool-updates.js";
 import { joinCommand, joinScript, joinSshResult, logTailScript, SSH_HOST, sshConfigHosts } from "./local/add-computer.js";
 import { copyIncluded, worktreeChange } from "./runner/git.js";
 import { setupStack, stackFor } from "./runner/stack.js";
@@ -113,6 +117,8 @@ import { findWork, listWork, namedIn, pathParam, serveWork, shownFile, siteIcon,
 import { FRAME_TTL_MS, frameDir, inFrame, signFrame, verifyFrame } from "./work-frame.js";
 import type { PeerNote } from "./types.js";
 import { ago as agoOf, LocalPeers, LOOK_AT as SESSIONS_LOOKED_AT, MODE_RANK, newId, placeOf as placeOfSession, scheduleOf } from "./app-tools.js";
+import { genUiTool } from "./gen-ui.js";
+import { branchesAt, branchRef, cleanProject, isFolderProject, parseLsRemote, projectNote, repoAt, repoKey, repoName, resolveMember, type MemberRepo, type RoomProject } from "./room-project.js";
 import { backAt, backupText, offBackup, onBackup, backupOf, backupsOf, cleanBackups, checkInDue, checkInText, missedSlot, quietCheckIns, type CheckIn, cleanRoom, cleanTrust, cleanTeammate, MEMORY_FILE, MEMORY_MAX, memoryText, defaultFolder, makeFolder, MAX_ROOMS, MAX_TEAMMATES, MAX_THREADS, NEW_THREAD, onOwnModel, projectsOf, roomKeep, runsOnName, teammateNote, TeammateStore, worktreeHolding, type Room, type Teammate, type TeammateView } from "./teammates.js";
 import { limitHit, planLimitHit } from "./limit-reset.js";
 import { RESUME_NUDGE } from "./limit-handoff.js";
@@ -384,6 +390,11 @@ export interface AppOptions {
     outside?: { token: string; shim: string };
     /** Where voice input's model is kept once downloaded (voice-models.ts): `<FRIDAY_HOME>/models`. Without it, no voice routes. */
     models?: string;
+    /**
+     * Keep this computer's coding tools up to date by themselves (tool-updates.ts): the app on a person's own computer, never a
+     * test's server, and never with FRIDAY_NO_TOOL_UPDATES set.
+     */
+    toolUpdates?: boolean;
   };
   /** Where teammates' own folders go when none is picked (teammates.ts defaultFolder): the home folder unless said, as tests do. */
   teammatesHome?: string;
@@ -1712,6 +1723,8 @@ export async function createApp(o: AppOptions) {
   if (o.decisionLog) mesh.repoChecks = repoChecksFor;
   // save_lesson and search_lessons (agent-mesh.ts LESSON_TOOLS): any agent keeps a lesson in its repository's project memory the
   // moment it learns it, and looks one up mid-task (org memory, 2026-10-31). The same brain the runs teach and the briefings read.
+  // show_ui (gen-ui.ts): cards an agent draws in the chat, in Friday on this computer (Arun, 2026-11-17: "add the generative UI to the release").
+  if (o.local) mesh.genUi = genUiTool(store);
   if (o.decisionLog)
     mesh.lessons = {
       call: async (sid, lane, name, args) => {
@@ -1831,6 +1844,7 @@ export async function createApp(o: AppOptions) {
   };
   /** Runners this server started for its own machine's user (desktop app, local dev). */
   const localRunners = new Map<string, Runner>();
+  if (o.local?.toolUpdates && process.env.FRIDAY_NO_TOOL_UPDATES !== "1") startToolUpdates({ busy: toolBusy, log: (l) => console.log(`[tools] ${l}`) });
   /** Whether this server may run things on the machine it is on: the desktop app, or local development. */
   const localHost = () => process.env.FRIDAY_LOCAL_RUNNER === "1" || (process.env.FRIDAY_LOCAL_RUNNER !== "0" && /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(selfUrl));
   const hostCtx = (user: { id: string; name: string }) => ({ serverUrl: selfUrl, user, runners: localRunners, log: (l: string) => console.log(`[runner] ${l}`) });
@@ -2207,6 +2221,58 @@ export async function createApp(o: AppOptions) {
     return Promise.all(views.map(async (v) => ((hold) => (hold ? { ...v, hold } : v))(await crewBudget.hold(v, places.flatMap((p) => (p.lanes[v.id] ? [{ sid: p.sid, lane: p.lanes[v.id]! }] : []))))));
   };
   /** Each room as the app shows it: who is in it (their lanes there) and how many of them are working or need the person. */
+  /**
+   * Each room member's copy of the room's project (room-project.ts; splashxmoon/friday#24), on the computer it runs on: this one's
+   * folders read with git, looked at again after ten seconds. Another computer's can't be read from here yet: away, a task on the
+   * repo waits for it; linked, it may take the task and finds its own copy.
+   */
+  const repoLooks = new Map<string, { at: number; v: Promise<MemberRepo> }>();
+  const memberRepo = (p: RoomProject, t: Teammate): Promise<MemberRepo> => {
+    if (t.machine) {
+      // A folder is this computer's: another one can't work in it.
+      if (isFolderProject(p)) return Promise.resolve({ state: "unchecked", why: `${t.name} runs on another computer, and the folder is on this one`, away: true });
+      const on = localLinks?.current(t.machine);
+      return Promise.resolve(on && localLinks!.connected(on) ? { state: "unchecked", why: `${t.name} runs on another computer, whose folders Friday can't look in from here` } : { state: "unchecked", why: `${t.name}'s computer isn't connected`, away: true });
+    }
+    const key = `${t.id}|${p.repo}|${p.branch ?? ""}|${projectsOf(t).join("\n")}|${t.folder}`;
+    const had = repoLooks.get(key);
+    if (had && Date.now() - had.at < 10_000) return had.v;
+    const v = resolveMember(p, { projects: projectsOf(t), own: t.folder }, git, async (d) => (await stat(d)).isDirectory()).catch((): MemberRepo => ({ state: "unresolved" }));
+    repoLooks.set(key, { at: Date.now(), v });
+    return v;
+  };
+  /**
+   * A repo's branches on its remote, for the room's branch picker: git ls-remote from a copy (its own remote's address and
+   * sign-in), else from the repo's address. Never prompts (GIT_TERMINAL_PROMPT=0, BatchMode ssh), gives up after 12 seconds, and is
+   * kept a minute per repo. Null when the remote can't be reached or read.
+   */
+  const lsRemoteSeen = new Map<string, { at: number; v: Promise<{ branches: string[]; default?: string } | null> }>();
+  const remoteBranches = (key: string, repo: string, copy?: string): Promise<{ branches: string[]; default?: string } | null> => {
+    const had = lsRemoteSeen.get(key);
+    if (had && Date.now() - had.at < 60_000) return had.v;
+    const ls = (cwd: string, target: string) =>
+      new Promise<string>((resolve, reject) =>
+        execFileCb("git", ["-C", cwd, "ls-remote", "--symref", target, "HEAD", "refs/heads/*"], { timeout: 12_000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_SSH_COMMAND: "ssh -o BatchMode=yes -o ConnectTimeout=8" } }, (e, out) => (e ? reject(e) : resolve(String(out)))),
+      );
+    const canonical = (() => {
+      try {
+        return cleanProject(repo)?.repo ?? null;
+      } catch {
+        return null;
+      }
+    })();
+    const v = (copy ? ls(copy, "origin").catch(() => (canonical ? ls(copy, canonical) : Promise.reject(new Error("no remote")))) : canonical ? ls(osTmp(), canonical) : Promise.reject(new Error("no address")))
+      .then((out) => parseLsRemote(out))
+      .catch(() => null);
+    lsRemoteSeen.set(key, { at: Date.now(), v });
+    return v;
+  };
+  /** A room's members and the project (its own, or a board's, which keeps the one it was posted under), by teammate id. */
+  const roomRepos = async (r: Room, p: RoomProject | undefined = r.project): Promise<Record<string, MemberRepo>> => {
+    if (!p) return {};
+    const list = await teammates!.list();
+    return Object.fromEntries(await Promise.all(Object.keys(r.lanes).map(async (id): Promise<[string, MemberRepo]> => { const t = list.find((x) => x.id === id); return [id, t ? await memberRepo(p, t) : { state: "unresolved" }]; })));
+  };
   const roomViews = async () => Promise.all((await teammates!.rooms()).map((r) => teamLooks.room(r, signInvite(o.secret, r.sid, "owner"))));
   /**
    * The Team room's own counts, as each room's are: its teammates at work there and those waiting on the person there (Arun,
@@ -2425,7 +2491,7 @@ export async function createApp(o: AppOptions) {
       if (!thread && all.filter((x) => !x.thread).length >= MAX_ROOMS) return `A crew keeps up to ${MAX_ROOMS} rooms. Take one away first.`;
       const stop = await gate?.();
       if (stop) return stop;
-      const made: Room = { id: randomBytes(5).toString("hex"), name: c.name!, sid: randomBytes(6).toString("base64url"), lanes: {}, ...(c.purpose ? { purpose: c.purpose } : {}), ...(thread ? { thread } : {}), ...(thread && work ? { work } : {}), created: Date.now() };
+      const made: Room = { id: randomBytes(5).toString("hex"), name: c.name!, sid: randomBytes(6).toString("base64url"), lanes: {}, ...(c.purpose ? { purpose: c.purpose } : {}), ...(!thread && c.project ? { project: c.project } : {}), ...(thread ? { thread } : {}), ...(thread && work ? { work } : {}), created: Date.now() };
       // Kept from the start and after each teammate joins: a join that fails leaves a room to fix, not a session nobody lists
       // with tools running in it.
       await store.create(made.sid, made.name, { id: owner.id, name: owner.name, role: "owner" }, { team: true, controlMode: "ask", mcp: true }, workspaceId);
@@ -3084,6 +3150,14 @@ export async function createApp(o: AppOptions) {
       // Its own name where git has none set (a fresh Mac), rather than the commit failing.
       await git(dir, ["commit", "-q", "--no-verify", "-m", why]).catch(() => git(dir, ["-c", "user.name=Friday", "-c", "user.email=friday@localhost", "commit", "-q", "--no-verify", "-m", why]));
     };
+    // A room's project for its boards, and each crew mate's copy of it (room-project.ts): a board's tasks go only to one with a copy.
+    mesh.roomProject = async (sid) => (await teammates.rooms()).find((r) => r.sid === sid && !r.thread)?.project ?? null;
+    mesh.laneRepo = async (sid, lane, p) => {
+      const r = (await teammates.rooms()).find((x) => x.sid === sid);
+      const id = r && Object.entries(r.lanes).find(([, l]) => l === lane)?.[0];
+      const t = id ? await teammates.get(id) : null;
+      return t ? memberRepo(p, t) : undefined;
+    };
     mesh.prepareTask = async (sid, lane, task, board, idle) => {
       const place = await placeOf(sid, lane).catch(() => null);
       // In a coding session it works in that session's folder, as its other agents do: no copy of its own to prepare.
@@ -3094,8 +3168,17 @@ export async function createApp(o: AppOptions) {
       if (!copy) return null;
       const top = (await git(copy.repo, ["rev-parse", "--show-toplevel"]).catch(() => "")).trim();
       if (!top) return null;
+      // On a project: only in its copy of that repo (else the task's line names where its copy is), from the board's branch.
+      let from = "HEAD";
+      if (board.project) {
+        const m = await memberRepo(board.project, t);
+        const common = async (d: string) => path.resolve(d, (await git(d, ["rev-parse", "--git-common-dir"]).catch(() => "")).trim() || ".");
+        if (m.state !== "resolved" || (await common(top)) !== (await common(m.path))) return null;
+        if (board.project.branch) from = (await branchRef(git, top, board.project.branch)) ?? "";
+        if (!from) return null;
+      }
       const key = `${sid}:${board.seq}`;
-      const base = boardBases.get(key) ?? (await git(top, ["rev-parse", "HEAD"]).catch(() => "")).trim();
+      const base = boardBases.get(key) ?? (await git(top, ["rev-parse", from]).catch(() => "")).trim();
       if (!base) return null;
       boardBases.set(key, base);
       const branch = taskBranch(sid, board.seq, task.id);
@@ -3132,7 +3215,7 @@ export async function createApp(o: AppOptions) {
         await store.append(sid, FRIDAY, { type: "folder.switched", branch, from: now, noticed: true }, { lane }).catch(() => undefined);
         const said = exists
           ? `[Friday] You're on this task's own branch, ${branch}, with the work already done on it.`
-          : `[Friday] You're on this task's own branch, ${branch}, cut from ${short}, where the board started${merged.length ? `, with ${merged.join(" and ")} merged in so you build on ${merged.length === 1 ? "it" : "them"}` : ""}.`;
+          : `[Friday] You're on this task's own branch, ${branch}, cut from ${short}, ${board.project?.branch ? `${board.project.branch} as the board started` : "where the board started"}${merged.length ? `, with ${merged.join(" and ")} merged in so you build on ${merged.length === 1 ? "it" : "them"}` : ""}.`;
         // Refused on its way (an own-plan rule, a held lane): back to the branch it was on, its leftovers kept on what they were on.
         const undo = async () => {
           if (now && (await git(copy.path, ["branch", "--show-current"]).catch(() => "")).trim() === branch) {
@@ -3715,7 +3798,9 @@ export async function createApp(o: AppOptions) {
       // with the turn, when they change, as the Crew room's teammates have them.
       const rooms = await roomsBrief(list);
       const crewRoom = team && team !== sid ? `\n- The Crew room (session ${team}): the whole crew.` : "";
-      return { t, note, preamble: [{ key: "rooms", text: rooms ? `[Friday] ${rooms}${crewRoom}` : "" }, { key: "elsewhere", text: await elsewhereBrief(t, sid) }, ...memoryPart(m, t), { key: "back", text: (await backBrief(sid, lane)).trim() }, ...(await awayPart(sid, lane))] };
+      // Its project, and this crew mate's own copy of it (room-project.ts): told when that changes.
+      const project = r.project && !r.thread ? `[Friday] ${projectNote(r.project, await memberRepo(r.project, t))}` : "";
+      return { t, note, preamble: [{ key: "project", text: project }, { key: "rooms", text: rooms ? `[Friday] ${rooms}${crewRoom}` : "" }, { key: "elsewhere", text: await elsewhereBrief(t, sid) }, ...memoryPart(m, t), { key: "back", text: (await backBrief(sid, lane)).trim() }, ...(await awayPart(sid, lane))] };
     };
     hub.teammate = async (sid, lane) => {
       const on = await noteOn(sid, lane);
@@ -5710,6 +5795,29 @@ export async function createApp(o: AppOptions) {
 
 
 
+    // An MCP server's sign-in, back from the person's browser to this computer's Friday (runner/connections.ts startSignin): the
+    // one-time `state` is what lets it in, as for the hosted callback below, and the page says how it went in a line.
+    // At /callback too, for a sign-in server whose app takes this computer's address only there (connections.ts CALLBACK_AT_ROOT).
+    if (o.local && req.method === "GET" && (url.pathname === "/api/mcp/signed-in" || (url.pathname === "/callback" && url.searchParams.has("state")))) {
+      // The page it lands on (mcp-signed-in-page.ts): Friday's faces beside the service's logo, and how it went.
+      const said = async (ok: boolean, text: string, c?: { name: string; catalog?: string }) => {
+        const html = await signedInPage({ ok, text, ...(c ? { server: c } : {}) });
+        res.writeHead(ok ? 200 : 400, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+        res.end(html);
+      };
+      const err = url.searchParams.get("error");
+      if (err) return said(false, url.searchParams.get("error_description") ?? `The sign-in was stopped (${err}).`);
+      const code = url.searchParams.get("code");
+      const state = url.searchParams.get("state");
+      if (!code || !state) return said(false, "This page needs the sign-in's code. Start it again from Friday.");
+      try {
+        const c = await finishSignin(state, code);
+        return said(!!c.status?.ok, c.status?.ok ? `${c.status.tools} tool${c.status.tools === 1 ? "" : "s"}, ready for every coding tool here on its next turn.` : `It signed in, but didn't answer: ${c.status?.error ?? "the test failed"}. It's off for now; try it again in Friday.`, c);
+      } catch (e) {
+        return said(false, (e as Error).message);
+      }
+    }
+
 
 
     const audit = url.pathname.match(/^\/api\/sessions\/([\w-]+)\/audit$/);
@@ -5993,6 +6101,94 @@ export async function createApp(o: AppOptions) {
           });
           return json(res, 200, { brief });
         }
+        // The repos in the crew's folders on this computer, for a room's Project field: each one's address (never one with a
+        // sign-in in it), the folder it is in and whose. A room's project, and where each of its crew mates stands with it.
+        if (url.pathname === "/api/teammates/repos" && req.method === "GET") {
+          const seen = new Map<string, { repo: string; name: string; folders: { path: string; who: string }[] }>();
+          for (const t of (await teammates.list()).filter((x) => !x.machine)) {
+            for (const dir of [...projectsOf(t), t.folder]) {
+              const at = await repoAt(git, dir).catch(() => null);
+              for (const u of at?.urls ?? []) {
+                let p: RoomProject | null | undefined;
+                try {
+                  p = cleanProject(u);
+                } catch {
+                  continue;
+                }
+                const k = p && repoKey(p.repo);
+                if (!p || !k) continue;
+                const one = seen.get(k) ?? { repo: p.repo, name: repoName(p.repo), folders: [] };
+                if (!one.folders.some((f) => f.path === at!.top && f.who === t.name)) one.folders.push({ path: at!.top, who: t.name });
+                seen.set(k, one);
+              }
+            }
+          }
+          return json(res, 200, { repos: [...seen.values()].slice(0, 40) });
+        }
+        // A folder picked for a room's Project: the repo it is a copy of, by its remote (origin first). Nothing is stored or cloned.
+        // `folder`: a folder with no repo to name (not git, or no remote) is the project itself (Arun, 2026-11-17: "also add support for folders too").
+        if (url.pathname === "/api/teammates/repo-of" && req.method === "POST") {
+          const body = (await readJson(req)) as { dir?: unknown; folder?: unknown };
+          const dir = String(body.dir ?? "").trim();
+          if (!dir || !path.isAbsolute(dir)) return json(res, 400, { error: "Pick a folder." });
+          if (!(await stat(dir).then((x) => x.isDirectory()).catch(() => false))) return json(res, 400, { error: "That folder isn't there. Pick it again." });
+          const asFolder = () => json(res, 200, { project: cleanProject(dir), name: path.basename(dir), folder: dir });
+          const at = await repoAt(git, dir).catch(() => null);
+          if (!at && body.folder === true) return asFolder();
+          if (!at) return json(res, 400, { error: "That folder isn't a git repo, so there's no repo to name. Type the repo's address instead." });
+          const origin = (await git(at.top, ["remote", "get-url", "origin"]).catch(() => "")).trim();
+          let signed = false;
+          for (const u of [...new Set([origin, ...at.urls].filter(Boolean))]) {
+            try {
+              const p = cleanProject(u);
+              if (p) return json(res, 200, { project: p, name: repoName(p.repo), folder: at.top });
+            } catch (e) {
+              if (/sign-in/.test((e as Error).message)) signed = true;
+            }
+          }
+          if (body.folder === true && !signed) return asFolder();
+          return json(res, 400, { error: signed ? "That folder's remote has a sign-in in its address, so Friday won't use it. Type the repo's address instead." : "That folder's repo has no remote to name it by. Push it somewhere first, or type its address." });
+        }
+        // A room's repo's branches, for its branch picker (Arun, 2026-11-17: "show branches and stuff and not just from the crews"):
+        // the crew's copies of it, any other folder on this computer that is a copy (the picker sends the ones it knows), and the
+        // repo's remote itself (git ls-remote, with the person's own git sign-in, never a prompt; a minute's cache), each branch
+        // once, with where it was seen. Nothing is fetched into any copy.
+        if (url.pathname === "/api/teammates/repo-branches" && req.method === "POST") {
+          const body = (await readJson(req)) as { repo?: unknown; dirs?: unknown };
+          const repo = String(body.repo ?? "");
+          const want = repoKey(repo);
+          if (!want) return json(res, 400, { error: "Say which repo." });
+          const seen = new Map<string, "crew" | "here" | "remote">();
+          let dflt: string | undefined;
+          const tops = new Set<string>();
+          const from = async (dir: string, where: "crew" | "here") => {
+            const at = await repoAt(git, dir).catch(() => null);
+            if (!at?.keys.has(want) || tops.has(at.top)) return;
+            tops.add(at.top);
+            const b = await branchesAt(git, at.top);
+            dflt ??= b.default;
+            for (const x of b.branches) if (!seen.has(x)) seen.set(x, where);
+          };
+          for (const t of (await teammates.list()).filter((x) => !x.machine)) for (const dir of [...projectsOf(t), t.folder]) await from(dir, "crew");
+          const crewCopies = tops.size;
+          const dirs = Array.isArray(body.dirs) ? body.dirs.filter((d): d is string => typeof d === "string" && path.isAbsolute(d)).slice(0, 20) : [];
+          for (const dir of dirs) await from(dir, "here");
+          const remote = await remoteBranches(want, repo, [...tops][0]);
+          if (remote) {
+            dflt = remote.default ?? dflt;
+            for (const x of remote.branches) if (!seen.has(x)) seen.set(x, "remote");
+          }
+          const branches = [...seen].map(([name, where]) => ({ name, where }));
+          return json(res, 200, { branches: branches.slice(0, 200), ...(dflt ? { default: dflt } : {}), copies: crewCopies, here: tops.size - crewCopies, remote: remote ? "ok" : "unreachable" });
+        }
+        const projectPath = url.pathname.match(/^\/api\/teammates\/rooms\/([\w-]{4,40})\/project$/);
+        if (projectPath && req.method === "GET") {
+          const r = await teammates.room(projectPath[1]!);
+          if (!r || r.thread) return json(res, 404, { error: "That room isn't there any more." });
+          const list = await teammates.list();
+          const by = await roomRepos(r);
+          return json(res, 200, { project: r.project ?? null, members: Object.keys(r.lanes).flatMap((id) => { const t = list.find((x) => x.id === id); return t ? [{ id, name: t.name, ...(r.project ? { repo: by[id] } : {}) }] : []; }) });
+        }
         // Rooms: some of the team, picked, in a session of their own (teammates.ts Room).
         const roomPath = url.pathname.match(/^\/api\/teammates\/rooms(?:\/([\w-]{4,40}))?$/);
         if (roomPath) {
@@ -6025,6 +6221,11 @@ export async function createApp(o: AppOptions) {
               r.name = c.name;
             }
             if (c.purpose !== undefined) r.purpose = c.purpose || undefined;
+            // Its project (a thread has none): new tasks find their crew mate by it; boards already posted keep theirs.
+            if (c.project !== undefined && !r.thread) {
+              r.project = c.project ?? undefined;
+              repoLooks.clear();
+            }
             // Its own folders for the crew mates in it: each one there, and each one's tool started again on them (as for a crew
             // mate's own folders, restartEverywhere), one at work when its turn ends.
             if (c.folders && c.folders.join("\n") !== (r.folders ?? []).join("\n")) {

@@ -104,7 +104,7 @@ const SUGGESTED = ["Work", "Personal", "Side project", "Team"];
  * Naming a new account and signing in to it: a few names to pick from (the first free one already picked, so the button is
  * ready), a field for another, and one line on what happens next.
  */
-function AddAccount({ identity, tool, taken, onAdded, onCancel }: { identity: Identity; tool: EngineTool; taken: string[]; onAdded: (id: string, login: Login) => void; onCancel: () => void }) {
+export function AddAccount({ identity, tool, taken, onAdded, onCancel }: { identity: Identity; tool: EngineTool; taken: string[]; onAdded: (id: string, login: Login) => void; onCancel: () => void }) {
   const free = SUGGESTED.filter((s) => !taken.some((t) => t.toLowerCase() === s.toLowerCase()));
   const [label, setLabel] = useState(free[0] ?? "");
   const [busy, setBusy] = useState(false);
@@ -163,7 +163,7 @@ function AddAccount({ identity, tool, taken, onAdded, onCancel }: { identity: Id
 }
 
 /** A sign-in under way, on its account's row: where to finish it, and a way back to the page. */
-function Pending({ login, tool }: { login: Login; tool: EngineTool }) {
+export function Pending({ login, tool }: { login: Login; tool: EngineTool }) {
   return (
     <p className="acct-pending">
       <span className="spinner tiny" aria-hidden />
@@ -190,8 +190,12 @@ function Pending({ login, tool }: { login: Login; tool: EngineTool }) {
  * its 5 hours and its week are used, where it stands, and a menu of its own: use it for new sessions, rename it, sign in
  * again, sign out or remove it. "Add account" last, and one line that Friday never switches by itself.
  */
-export function AccountList({ identity, tool, onChanged }: { identity: Identity; tool: LocalTool; onChanged: () => void }) {
-  const usage = useAccountUsage(identity, tool.tool);
+/**
+ * A tool's accounts and what can be done to each, for every list of them (the computer's tool list here, the Usage page's
+ * accounts): which one new sessions use, adding one and signing in to it, signing in again or out, renaming and removing, and the
+ * menu of all that for a row.
+ */
+export function useAccountActions(identity: Identity, tool: LocalTool, onChanged: () => void) {
   const rows: Row[] = tool.accounts?.length ? tool.accounts : [{ id: "default", label: "Main", loggedIn: tool.loggedIn }];
   const preferred = usePreferredAccount(tool.tool, rows);
   const [adding, setAdding] = useState(false);
@@ -205,7 +209,6 @@ export function AccountList({ identity, tool, onChanged }: { identity: Identity;
   useEffect(() => {
     if (done) setSigning(null);
   }, [done]);
-  if (!ACCOUNT_TOOLS.includes(tool.tool) || !tool.path) return null;
   const name = ENGINE_NAMES[tool.tool];
   const pick = rows.find((a) => a.id === preferred) ?? rows[0]!;
   const many = rows.length > 1;
@@ -240,6 +243,13 @@ export function AccountList({ identity, tool, onChanged }: { identity: Identity;
     a.loggedIn !== false && { label: "Sign in again", icon: "refresh" as const, sub: "To switch it to another login", onSelect: () => void signIn(a.id) },
     a.id === "default" ? { label: `Sign out of ${name}`, icon: "logout" as const, danger: true, onSelect: () => setConfirm(a.id) } : { label: "Remove", icon: "trash" as const, sub: "From this computer: its conversations stay", danger: true, onSelect: () => setConfirm(a.id) },
   ];
+  return { rows, preferred, pick, many, name, adding, setAdding, signing, setSigning, confirm, setConfirm, renaming, setRenaming, busy, err, signIn, signOut, remove, rename, menu };
+}
+
+export function AccountList({ identity, tool, onChanged }: { identity: Identity; tool: LocalTool; onChanged: () => void }) {
+  const usage = useAccountUsage(identity, tool.tool);
+  const { rows, pick, many, name, adding, setAdding, signing, setSigning, confirm, setConfirm, renaming, setRenaming, busy, err, signIn, signOut, remove, rename, menu } = useAccountActions(identity, tool, onChanged);
+  if (!ACCOUNT_TOOLS.includes(tool.tool) || !tool.path) return null;
   /** Where it stands, as one quiet word on its line: Back 3 PM, Signed out, or how much of its fullest window is used. */
   const status = (a: Row) => {
     const st = standing(a);

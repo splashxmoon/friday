@@ -43,6 +43,7 @@ import { DownloadIcon, ExternalLinkIcon, UploadIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { chooseLimitAlerts, limitAlertsOn } from "./limitHistory.js";
 import { Choice, dangerOutline, Note, SettingsGroup, SettingsRow as Row, StateBadge } from "@/components/dass";
 import { sendFeedback } from "./feedback.js";
 import { UsageSharingSetting } from "./UsageSharing.js";
@@ -529,6 +530,7 @@ export function NotificationsTab({ identity }: { identity: Identity }) {
   const [on, setOn] = useState(notificationsOn);
   const [sound, setSound] = useState(chimeOn);
   const [doneSound, setDoneSound] = useState(doneChimeOn);
+  const [limitAlerts, setLimitAlerts] = useState(limitAlertsOn);
   const supported = typeof Notification !== "undefined";
   const [perm, setPerm] = useState<NotificationPermission>(
     supported ? Notification.permission : "denied",
@@ -585,6 +587,10 @@ export function NotificationsTab({ identity }: { identity: Identity }) {
               onCheckedChange={(v) => (setDoneSound(v), chooseDoneChime(v), v && doneChime())}
             />
           </span>
+        </Row>
+        {/* Moved here from the Usage page's summary, which is gone (Arun, 2026-11-17: "get rid of this"). */}
+        <Row label="When a 5-hour limit passes 80%" hint={limitAlerts ? "Once a window, for any coding tool, with when it resets." : "Off."}>
+          <Switch aria-label="Tell me when a 5-hour limit passes 80%" checked={limitAlerts} onCheckedChange={(v) => (setLimitAlerts(v), chooseLimitAlerts(v))} />
         </Row>
         <Row
           label="Permission"

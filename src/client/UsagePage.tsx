@@ -7,13 +7,12 @@ import { hostApi, useMachine } from "./local.js";
 import { refreshToolLimits, useToolLimits } from "./toolLimits.js";
 import type { Identity } from "./storage.js";
 import { ENGINE_NAMES, toolList } from "../types.js";
-import { Skeleton, SkeletonCards, SkeletonRows, barHeight, relTime } from "./ui.js";
-import { ArrowRightIcon, ArrowRightLeftIcon, ChartColumnIcon, CircleAlertIcon, RefreshCwIcon } from "lucide-react";
+import { Skeleton, SkeletonCards, SkeletonRows, barHeight } from "./ui.js";
+import { ChartColumnIcon, CircleAlertIcon, RefreshCwIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Choice, EmptyState, PageHeader, SectionHeader, surface } from "@/components/dass";
 import { LimitsHub } from "./LimitsHub.js";
-import { RoutingLearned } from "./RoutingLearned.js";
 
 /**
  * Every agent a workspace runs, in tokens: Friday's own and the coding tools people bring (Claude Code, Codex, Cursor), side by
@@ -124,8 +123,6 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
     };
   }, [range, tries]);
 
-  // "Arun's Claude Code" is "Claude Code" when everything here is yours.
-  const own = (name: string) => (solo ? name.replace(/^[^']+'s /, "") : name);
   const days = data?.days ?? [];
   const totals = useMemo(() => {
     const by: Record<UsageTool, Tokens & { turns: number }> = Object.fromEntries(USAGE_TOOLS.map((t) => [t, { input: 0, cached: 0, output: 0, turns: 0 }])) as never;
@@ -171,7 +168,7 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
               {rereading ? "Reading…" : "Refresh"}
             </Button>
           </div>
-          <LimitsHub read={read} />
+          <LimitsHub read={read} identity={identity} />
         </section>
 
         <section aria-label="Activity" className="flex flex-col gap-6">
@@ -309,39 +306,6 @@ export function UsagePage({ identity, solo = false }: { identity: Identity; solo
                   </div>
                 </div>
               </div>
-
-              <div>
-                <h3 className="mt-0 mb-1 flex items-baseline gap-2 text-[13px] font-semibold text-[var(--ink)]">
-                  Tokens saved
-                  {data.recent.length > 0 && <span className="font-normal tabular-nums text-[var(--text-muted)]">{data.recent.length}</span>}
-                </h3>
-                <p className="mt-0 mb-3 max-w-[70ch] text-[13px] leading-relaxed text-[var(--text-muted)]">
-                  When an agent joins or takes over, Friday hands it the work so far instead of starting from scratch. Saved is what that work cost, minus what was handed over. Cache re-reads don't count.
-                </p>
-                {data.recent.length === 0 ? (
-                  <EmptyState small icon={<ArrowRightLeftIcon />} title="No hand-offs in this range yet" className="py-8">
-                    The first time one agent picks up from another, what it saved shows here.
-                  </EmptyState>
-                ) : (
-                  <ul className={cn(surface, "m-0 list-none divide-y divide-[var(--border)] px-4 py-0")}>
-                    {data.recent.map((r) => (
-                      <li key={`${r.sid}-${r.at}`} className="flex items-center gap-3 py-2.5 text-[13px]">
-                        <ArrowRightIcon className="size-3.5 shrink-0 text-[var(--text-muted)]" />
-                        <span className="min-w-0 flex-1 truncate text-[var(--ink-2)]" title={`${own(r.to)} ${r.kind === "handoff" ? "took over from" : "caught up on"} ${r.from.map(own).join(", ")} · ${r.title}`}>
-                          <b className="font-medium text-[var(--ink)]">{own(r.to)}</b> {r.kind === "handoff" ? "took over from" : "caught up on"} {r.from.map(own).join(", ")}
-                          <span className="text-[var(--text-muted)]"> · {r.title}</span>
-                        </span>
-                        <span className="shrink-0 font-medium tabular-nums text-[var(--ink)]" title={`${r.spent.toLocaleString()} tokens spent before, ${r.sent.toLocaleString()} passed on`}>
-                          ≈{shortTokens(Math.max(0, r.spent - r.sent))} saved
-                        </span>
-                        <span className="w-16 shrink-0 text-right text-[12px] text-[var(--text-muted)]">{relTime(r.at)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-
-              <RoutingLearned identity={identity} />
 
               <p className="m-0 max-w-[80ch] text-[12px] leading-relaxed text-[var(--text-muted)]">
                 Counted from what each tool reports at the end of every turn: its tokens, not what they cost.{" "}

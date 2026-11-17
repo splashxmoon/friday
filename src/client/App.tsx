@@ -33,6 +33,7 @@ const pages = {
   automations: () => import("./Automations.js"),
   board: () => import("./Board.js"),
   deepdive: () => import("./DeepDive.js"),
+  mcp: () => import("./McpServers.js"),
   review: () => import("./CodeReview.js"),
   needs: () => import("./NeedsYou.js"),
   usage: () => import("./UsagePage.js"),
@@ -51,6 +52,7 @@ function SessionView(p: ComponentProps<typeof LazySessionView>) {
 // Only for someone opening a recording link, who has no account and needs nothing else here.
 const Board = lazy(() => pages.board().then((m) => ({ default: m.Board })));
 const DeepDivePage = lazy(() => pages.deepdive().then((m) => ({ default: m.DeepDivePage })));
+const McpServersPage = lazy(() => pages.mcp().then((m) => ({ default: m.McpServersPage })));
 // Search opens on a press, so its code comes then: the room it left in the first load is what Deep Dive's page took (2026-11-12).
 const SearchModal = lazy(() => import("./SearchModal.js").then((m) => ({ default: m.SearchModal })));
 const AutomationsPage = lazy(() => pages.automations().then((m) => ({ default: m.AutomationsPage })));
@@ -68,6 +70,7 @@ import { applyTheme, readTheme } from "./theme.js";
 const UsagePage = lazy(() => pages.usage().then((m) => ({ default: m.UsagePage })));
 import { ALL, useFocusedAgent } from "./agentFocus.js";
 import { isLocal, ownModel, planLimits, planNow } from "./edition.js";
+import { listYield } from "./list-yield.js";
 import type { SkillTemplate } from "../skill-catalog.js";
 import type { WorkspaceUsage } from "./workspace-types.js";
 import { Icon } from "./icons.js";
@@ -120,6 +123,8 @@ type Route =
   | { kind: "board" }
   /** Deep Dive: the repos explained, and questions about their code (DeepDive.tsx). */
   | { kind: "deepdive" }
+  /** MCP servers set up once for every coding tool on this computer (McpServers.tsx, runner/connections.ts). */
+  | { kind: "mcp" }
   | { kind: "review" }
   /** Everything waiting on you, ranked, with Friday's suggested answers (NeedsYou.tsx). */
   | { kind: "needs" }
@@ -146,6 +151,7 @@ function parseRoute(search: string): Route {
   if (p.get("view") === "library") return isLocal() ? { kind: "home" } : { kind: "library" };
   if (p.get("view") === "board") return { kind: "board" };
   if (p.get("view") === "deepdive") return { kind: "deepdive" };
+  if (p.get("view") === "mcp") return { kind: "mcp" };
   if (p.get("view") === "review") return { kind: "review" };
   if (p.get("view") === "needs") return { kind: "needs" };
   if (p.get("view") === "settings") return { kind: "settings", section: settingsSection(p.get("section")) };
@@ -184,6 +190,7 @@ function routeUrl(r: Route): string {
   if (r.kind === "board") return "/?view=board";
   // The repo open in it is the page's own to keep in the address (DeepDive.tsx), so a reload lands on it.
   if (r.kind === "deepdive") return "/?view=deepdive";
+  if (r.kind === "mcp") return "/?view=mcp";
   if (r.kind === "review") return "/?view=review";
   if (r.kind === "needs") return "/?view=needs";
   if (r.kind === "settings") return `/?view=settings&section=${encodeURIComponent(r.section)}`;
@@ -501,7 +508,8 @@ export function App() {
       if (mac) {
         root.classList.add("desktop-mac");
         // An app that moved its window buttons lower says so, and the toolbar and header move down with them.
-        if (d?.trafficLightY) root.classList.add("lights-low");
+        // Where their centre is (`--lights-cy`, 6px below the top it gives), so the header lines up with however low they sit.
+        if (d?.trafficLightY) root.classList.add("lights-low"), root.style.setProperty("--lights-cy", `${d.trafficLightY + 6}px`);
         setMac(true);
         // In full screen macOS hides the traffic lights, so the back and forward buttons and the header beside them move into
         // the room kept for them (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL"). The window says when
@@ -600,6 +608,7 @@ export function App() {
       clearTimeout(timer);
       cancelAnimationFrame(frame);
       root.classList.remove("desktop", "desktop-mac", "lights-low", "win-full", "drag-nudge", "drag-debug");
+      root.style.removeProperty("--lights-cy");
       document.getElementById("drag-debug")?.remove();
     };
   }, []);
@@ -775,7 +784,7 @@ export function App() {
       if (r.kind !== "session" && parseRoute(location.search).kind === r.kind) dispatchEvent(new CustomEvent("friday:same-page", { detail: r.kind }));
       history.pushState(null, "", routeUrl(r));
       setRoute(r);
-      if (r.kind !== "session") document.title = r.kind === "connections" ? "Connections · Friday" : r.kind === "agents" ? "Saved agents · Friday" : r.kind === "automations" ? "Automations · Friday" : r.kind === "settings" ? "Settings · Friday" : r.kind === "usage" ? "Usage · Friday" : r.kind === "new-teammate" ? "New agent · Friday" : r.kind === "review" ? "Code Review · Friday" : r.kind === "needs" ? "Needs you · Friday" : r.kind === "board" ? "Agent Board · Friday" : r.kind === "deepdive" ? "Deep Dive · Friday" : r.kind === "library" ? "Library · Friday" : r.kind === "people" ? "People · Friday" : (r.kind as string) === "crew" ? "Crew · Friday" : "Friday";
+      if (r.kind !== "session") document.title = r.kind === "connections" ? "Connections · Friday" : r.kind === "agents" ? "Saved agents · Friday" : r.kind === "automations" ? "Automations · Friday" : r.kind === "settings" ? "Settings · Friday" : r.kind === "usage" ? "Usage · Friday" : r.kind === "new-teammate" ? "New agent · Friday" : r.kind === "review" ? "Code Review · Friday" : r.kind === "needs" ? "Needs you · Friday" : r.kind === "board" ? "Agent Board · Friday" : r.kind === "deepdive" ? "Deep Dive · Friday" : r.kind === "mcp" ? "MCP servers · Friday" : r.kind === "library" ? "Library · Friday" : r.kind === "people" ? "People · Friday" : (r.kind as string) === "crew" ? "Crew · Friday" : "Friday";
       if (isNarrow(innerWidth)) setLayout({ sidebarCollapsed: true });
     },
     [setLayout],
@@ -1236,12 +1245,15 @@ export function App() {
   // The sidebar's button folds the session list, never the rail of places beside it (Arun, 2026-11-12: "make sure the side bar
   // close thing doesnt close the button rail at all"): in the open-source build at a desktop width the rail stays, as on a place's
   // own page, and only a narrow window, where the sidebar is a sheet over the page, puts the whole of it away.
-  const listOpen = !layout.sidebarCollapsed;
+  // Folded for the side panel while a small window has no room for both (list-yield.ts); never saved.
+  const yielded = useSyncExternalStore(listYield.sub, listYield.folded, () => false);
+  const listOpen = !layout.sidebarCollapsed && !yielded;
   const keepRail = useSyncExternalStore(wideSub, wideNow, () => false) && isLocal();
   const panelOpen = listOpen || keepRail;
   // The Chat button's own rule, shared with the Mac window's toolbar: on a chat page it folds the list, anywhere else it goes to the chats.
   const toggleChats = () => {
     if (inChat) {
+      if (yielded) return listYield.keep();
       setLayout({ sidebarCollapsed: !layout.sidebarCollapsed });
       return;
     }
@@ -1251,7 +1263,7 @@ export function App() {
   // The sidebar button folds the sidebar, on whatever page (Arun, 2026-10-22: on the Agent Board its first press went to a new
   // session and only the second folded it). The sidebar is the same on every page now there is no rail, so there is no list
   // of chats to go to first.
-  const togglePanel = () => setLayout({ sidebarCollapsed: !layout.sidebarCollapsed });
+  const togglePanel = () => (yielded ? listYield.keep() : setLayout({ sidebarCollapsed: !layout.sidebarCollapsed }));
   // A narrow window's sidebar floats over the page, as a drawer: the focus goes into it as it opens and back to its button as it
   // closes, and Escape closes it (2026-10-27 audit: Escape did nothing, and Tab went on into the page behind the scrim).
   useEffect(() => {
@@ -1309,7 +1321,7 @@ export function App() {
         onSavedAgents={() => navigate({ kind: "agents" })}
       />
     );
-  const fullBleed = crewWorkflows || route.kind === "agents" || route.kind === "automations" || route.kind === "connections" || route.kind === "people" || route.kind === "library" || route.kind === "board" || route.kind === "deepdive" || route.kind === "review" || route.kind === "needs" || route.kind === "usage" || route.kind === "new-teammate" || route.kind === "settings";
+  const fullBleed = crewWorkflows || route.kind === "agents" || route.kind === "automations" || route.kind === "connections" || route.kind === "people" || route.kind === "library" || route.kind === "board" || route.kind === "deepdive" || route.kind === "mcp" || route.kind === "review" || route.kind === "needs" || route.kind === "usage" || route.kind === "new-teammate" || route.kind === "settings";
   useLayoutEffect(() => {
     if (!fullBleed) return;
     // When the band comes, not only if it is there as this opens: after a reload it came later, and the page stood 12px lower.
@@ -1391,6 +1403,7 @@ export function App() {
           onOpenLibrary={() => navigate({ kind: "library" })}
           onOpenBoard={() => navigate({ kind: "board" })}
           onOpenDeepDive={() => navigate({ kind: "deepdive" })}
+          onOpenMcp={isLocal() ? () => navigate({ kind: "mcp" }) : undefined}
           onOpenReview={() => navigate({ kind: "review" })}
           onOpenNeeds={() => navigate({ kind: "needs" })}
           reviewsWaiting={reviewPrs?.available ? reviewPrs.review.length : 0}
@@ -1500,6 +1513,8 @@ export function App() {
           />
         ) : route.kind === "deepdive" ? (
           <DeepDivePage identity={identity} />
+        ) : route.kind === "mcp" ? (
+          <McpServersPage identity={identity} />
         ) : route.kind === "review" ? (
           <CodeReview
             identity={identity}

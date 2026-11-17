@@ -1,3 +1,6 @@
+import { DecisionCard } from "./decision-card.js";
+import { CrewTalk, type TalkEntry } from "./crew-talk.js";
+import { WorkLine } from "./work-line.js";
 import { showDiffSoon } from "./focusDiff.js";
 import { MODE_ICON } from "./StartControls.js";
 import { StateRing, useNow } from "./presence.js";
@@ -164,7 +167,7 @@ const narrowBox = () => typeof matchMedia === "function" && matchMedia("(max-wid
 import { BriefCard, HoldsLifted, SelfRunLine, ProposedMate } from "./TeamBrief.js";
 import { ProposedSkill } from "./CrewSkills.js";
 import { BudgetLine } from "./TeammateBudget.js";
-import { CheckInLine, HandoffLine, FoldersGiven, TeammateChanged, FridayLine, teamEmpty, mateOn, mergeSends, reconnectTeammate, useTeamVersion, isCheckIn, quietCheckIns, ToolSwitched, MentionBackdrop, MentionText, RoomsNow, namesSomeone, plumbing, teamReply, TeamRun, TeamWorking, TeammateBoxPicker, TeammateFolderCard, RoomFolderCard, TeammateHeader, teammateAgents, teammateMark, teammatesNamed, TeamRecipients, ThreadChip, ThreadHost, foldTeamTalk, pieceOf, TalkGroup, CrewWorkLine, CrewTyping, TypingRow, useLiveHere, WorkBubble, isTeamSid, RoomReplyActions, MateChatTop, MateSwitchCard, threadLaneOf, teamEventKind, type TalkPiece, useSentTo, noteLaneRuns, forgetLaneRuns, useSendCopies, learnLanes, queueWhy, queueWhyAll, crewLeadName, RoomIntro, isAgentTalk , matesIn, teamKnown, teamSid, useMateTab, refreshTeam} from "./Teammates.js";
+import { CheckInLine, HandoffLine, FoldersGiven, TeammateChanged, FridayLine, teamEmpty, mateOn, mergeSends, reconnectTeammate, useTeamVersion, isCheckIn, quietCheckIns, ToolSwitched, MentionBackdrop, MentionText, RoomsNow, namesSomeone, plumbing, teamReply, TeamRun, TeamWorking, TeammateBoxPicker, TeammateFolderCard, RoomFolderCard, TeammateHeader, teammateAgents, teammateMark, teammatesNamed, TeamRecipients, ThreadChip, ThreadHost, foldTeamTalk, pieceOf, TalkGroup, CrewWorkLine, CrewTyping, TypingRow, useLiveHere, isTeamSid, RoomReplyActions, MateChatTop, MateSwitchCard, threadLaneOf, teamEventKind, type TalkPiece, useSentTo, noteLaneRuns, forgetLaneRuns, useSendCopies, learnLanes, queueWhy, queueWhyAll, crewLeadName, RoomIntro, isAgentTalk , matesIn, teamKnown, teamSid, useMateTab, refreshTeam} from "./Teammates.js";
 import { WorkflowAsks } from "./WorkflowAsks.js";
 import { useRoomRuns, WorkflowRunCard } from "./WorkflowRunCard.js";
 import { threadsOf } from "./team-threads.js";
@@ -187,7 +190,7 @@ import { jumpPlaces, recapStats, type JumpPlace } from "../session-line.js";
 import { leftOff } from "../left-off.js";
 import { editPreview, failingTests, foldLine } from "../step-extras.js";
 import { stepKind } from "../run-strip.js";
-import { RunLine, doingKind, liveWord } from "./run-line.js";
+import { RunLine, doingKind, plainStep } from "./run-line.js";
 import { webSourcesIn, webUrl } from "../web-sources.js";
 import { Mascot, runMood } from "./Mascot.js";
 import { AgentSwitch, EngineMark, switchesAgent } from "./AgentSwitch.js";
@@ -200,6 +203,8 @@ import { useCrewAddRows, visitOn } from "./crew-add-local.js";
 import { groupAt, laneAt } from "./lane-at.js";
 import { askWheel, handStraight, KeepGoingAction, mentionCrew, openKeepGoing, useCrewTargets } from "./crew-at.js";
 import { lazy, Suspense } from "react";
+// Cards an agent draws, loaded with the first one a chat has: most chats have none (GenUI.tsx).
+const GenCard = lazy(() => import("./GenUI.js").then((m) => ({ default: m.GenCard })));
 // A hand-off's line, and its styles, load with the first one shown (crew-carry.tsx).
 const HandedLine = lazy(() => import("./crew-carry.js").then((m) => ({ default: m.HandedLine })));
 const RoomHandedLine = lazy(() => import("./crew-carry.js").then((m) => ({ default: m.RoomHandedLine })));
@@ -310,6 +315,8 @@ interface RunItem {
   lane: string;
   key: number;
   messages: Ev<"agent.message">[];
+  /** What the agent drew in the chat as it worked, in its reply under its words. */
+  drawn?: SessionEvent[];
   /** What a coding agent changed during this run, shown under its steps. */
   diffs: Ev<"agent.diff">[];
   ended: Ev<"run.ended"> | null;
@@ -556,6 +563,8 @@ const HIDDEN = new Set<string>([
   "crew.brought",
   "board.released",
   "board.cancelled",
+  // Said on the task's own row on the board (TeamBoard.tsx): why it waits for a copy of the board's project.
+  "board.waiting",
   // A proposed team started: its board card turns into the ordinary one, which says so (TeamCard.tsx ProposedTeam).
   "board.started",
   "board.checking",
@@ -809,6 +818,15 @@ export function group(events: SessionEvent[], streaming: boolean | ReadonlySet<s
     // A yes or no to what the run is waiting on, answered while it runs (Claude Code asks mid-turn): the run carries on, in
     // the same block. It is drawn as nothing, and the card it answers leaves the feed.
     if (t === "instruction" && (ev.body as Extract<EventBody, { type: "instruction" }>).approval && runs.get(lane)) continue;
+    // A card the agent draws as it works, or its update, closes nothing: its turn goes on in the same block, steps and all, and the
+    // card is drawn in that reply, under its words (Arun, 2026-11-17: "make sure everything is lined up properly"). One drawn with no
+    // turn open is a row of its own.
+    if (t === "ui.card") {
+      const open = runs.get(lane);
+      if (open) (open.drawn ??= []).push(ev);
+      else items.push({ kind: "event", ev });
+      continue;
+    }
     // An agent brought in is a note beside the work, not something done to this lane: it closes nothing.
     if (t === "lane.added") {
       items.push({ kind: "event", ev });
@@ -1404,6 +1422,8 @@ export function Activity({
   shownOrder.current = feedOrder;
   const byKey = new Map(finishing.map((it) => [feedKey(it), it] as const));
   let visible = feedOrder.map((k) => byKey.get(k)!);
+  // A press on a card an agent drew is said in the card itself (GenUI.tsx), not again as a message of the person's.
+  visible = visible.filter((it) => !(it.kind === "event" && it.ev.body.type === "instruction" && it.ev.body.card));
   // Who is speaking over an agent's items: in a team its mascot and name already head every message.
   let tags = true;
   if (state.options.team) tags = false;
@@ -1472,7 +1492,11 @@ export function Activity({
     for (const k of leadShown.current) if (k.startsWith(`${sid}:`)) answers.add(Number(k.slice(sid.length + 1)));
     // In a crew mate's own chat, a turn on work the crew handed it (the lead's, a teammate's) is the Crew room's: one line here,
     // live or done, unless it waits on the person (Arun, 2026-11-15: "their work doesnt appear in their own agent chat").
-    const runKind = (it: RunItem) => ((k) => (!room && k !== "hide" && blockFor(it, turns) === "team" && !isWaiting(it, now(it.lane)) ? "talk" : k))(roomRunKind(it, { room, now: now(it.lane), turns, lead: state.lead, leadAnswers: answers, switched: switched(it) }));
+    // In the open-source edition a crew mate's turn shows while it works, its steps open under its line, in a room and in its own
+    // chat alike, crew work too, rather than only "Thinking" (Arun, 2026-11-17: "where is the step stuff in the proposed design???",
+    // "Steps need to show as the agent is working not after it is done"); done, it goes by the rules below.
+    const liveInRoom = (it: RunItem) => isLocal() && isLive(it, now(it.lane));
+    const runKind = (it: RunItem) => liveInRoom(it) ? "show" as const : ((k) => (!room && k !== "hide" && blockFor(it, turns) === "team" && !isWaiting(it, now(it.lane)) ? "talk" : k))(roomRunKind(it, { room, now: now(it.lane), turns, lead: state.lead, leadAnswers: answers, switched: switched(it) }));
     const keyOf = (it: FeedItem) => (it.kind === "run" ? it.key : it.kind === "event" ? it.ev.seq : it.evs[0]!.seq);
     // A room reads as a group chat: what the teammates say to each other and hand back is said in it, each as its own post, rather
     // than folded to a line to open (Arun, 2026-11-01, after OpenBot's channels: "i want to be simplier and easy to digest as a
@@ -1491,7 +1515,6 @@ export function Activity({
       visible = visible.filter((it) => !(it.kind === "run" && ((said) => said.length > 0 && said.every((m) => repeats.has(m.seq)))(it.messages.filter((m) => m.body.text.trim()))));
     }
     const folded = foldTeamTalk(visible, (it) => kindIn(it.kind === "run" ? runKind(it) : it.kind === "event" ? teamEventKind(it.ev, room) : "show", it), keyOf);
-    const lastGroup = [...folded.groups.keys()].at(-1);
     visible = folded.items;
     const pieceOfItem = (it: FeedItem): TalkPiece => (it.kind === "run" ? { who: [{ lane: it.lane, name: agentNameFor(state, it.lane) }], text: it.messages.findLast((m) => m.body.text.trim())?.body.text ?? "", turn: true } : it.kind === "event" ? pieceOf(it.ev) : { who: [], text: "" });
     teamGroup = (it) => {
@@ -1499,10 +1522,14 @@ export function Activity({
       if (!g) return null;
       // Crew work goes to the Crew room; Friday's own notes to this crew mate (a switch to its fallback, a carry-on) stay here, folded.
       if (room && isLocal()) {
-        // Working on it now: the newest stretch of their talk while one of them is at work.
-        const lanes = new Set(g.flatMap((x) => pieceOfItem(x).who.map((w) => w.lane)).filter(Boolean));
-        const live = keyOf(it) === lastGroup && [...lanes].some((l) => runOf(state, l).status === "running");
-        return <CrewWorkLine room pieces={g.map(pieceOfItem)} times={g.map((x) => (x.kind === "event" ? x.ev.ts : x.kind === "run" ? x.messages.at(-1)?.ts : undefined))} live={live} />;
+        // Said in the room as a group chat, a row per message (crew-talk.tsx CrewTalk): an agent's message or update by its event,
+        // anything else in the stretch as it is drawn on its own.
+        const entries: TalkEntry[] = g.map((x) =>
+          x.kind === "event" && ((x.ev.body.type === "instruction" && !!x.ev.body.mesh) || x.ev.body.type === "mesh.posted")
+            ? { key: keyOf(x), ev: x.ev }
+            : { key: keyOf(x), node: x.kind === "run" ? <RunBlock item={x} ctx={ctx} folded active={false} latest={false} typing={null} /> : x.kind === "event" ? <EventItem ev={x.ev} ctx={ctx} /> : null },
+        );
+        return <CrewTalk entries={entries} state={state} delivered={ctx.delivered} events={events} />;
       }
       if (!room && g.map(pieceOfItem).some((p) => !p.note))
         return (
@@ -1830,6 +1857,7 @@ export function Activity({
     <PatchSource.Provider value={patchSource}>
     <section
       className={`activity-main${pin ? " is-column" : ""}${tuiOn ? " is-tui" : ""}`}
+      data-crew={isLocal() && state.options.team ? "" : undefined}
       aria-label={pin ? `${laneLabel(state, pin)} chat` : "Activity"}
       {...(pin && onFocusLane ? { onPointerDownCapture: () => onFocusLane(pin), onFocusCapture: () => onFocusLane(pin) } : {})}
       // "It's up at http://localhost:5174/" opens in the Preview browser beside
@@ -2286,6 +2314,14 @@ export function Activity({
             ))}
           {/* Crew mates at work with no live reply here yet: typing, under the last message (open-source edition). */}
           {isLocal() && ctx.state.options.team && filter !== "team" && <CrewTyping sid={ctx.sid} {...(laneFilter !== ALL ? { only: laneFilter } : {})} />}
+          {/* An agent's question to you, in the chat, never floating over it (Arun, 2026-11-17: "make sure like the decisions card thing
+              is on the chat and not hovering above it or overlapping it"): under the reply that asked when that reply is here, else
+              at the chat's end, with who is asking. */}
+          {questionsTo(state, me.id)
+            .filter((q) => !pin || q.lane === pin)
+            .map((q) => (
+              <FeedQuestion key={q.lane} ctx={ctx} q={q} />
+            ))}
           {/* The end: what it came to, in a line and in numbers, with the recording a press away. */}
           {merged && !pin && (
             <div className="feed-merged" role="status">
@@ -2342,12 +2378,6 @@ export function Activity({
           <Redirects ctx={ctx} />
           <PinBar state={state} me={me} sid={sid} invite={invite} send={send} lane={target} open={pinning} onClose={() => setPinning(false)} />
           <PlanApproval ctx={ctx} events={events} lane={target} />
-          {/* One card per agent that asked you: each answer goes to the agent that asked it. */}
-          {questionsTo(state, me.id).filter((q) => !pin || q.lane === pin).map((q) => (
-            <div key={q.lane} data-needs={q.lane} className="needs-anchor">
-              <AgentQuestion ctx={ctx} q={q} />
-            </div>
-          ))}
           {/* In a crew's room, a teammate's questions at the end of its answer, docked here as its chat has them under the answer: the
               same card from the same ask, so answering in either place (or in Needs you) clears both (audit CREW-1, 2026-11-04). */}
           {state.options.team && laneFilter === ALL && !pin && roomAsks(state, (l) => reviewVia(state, me, l) === "instruct").map((a) => (
@@ -3965,8 +3995,9 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   const loginLine = item.ended?.body.outcome === "error" && signedOut(item.ended.body.error) && finalMsg && /not logged in|please run \/login/i.test(finalMsg.body.text) ? finalMsg : null;
   // Second opinion (Asides): another model asked about this turn, from the answer's strip; the form opens under the answer.
   const [opinion, setOpinion] = useState(false);
-  // A teammate's finished turn shows its steps folded into one line until that line is pressed (Crew overhaul 3A).
-  const [stepsOpen, setStepsOpen] = useState(false);
+  // A crew mate's steps show while it works, open from the start, and fold away once it is done (Arun, 2026-11-17: "where is the
+  // step stuff in the proposed design???", "make it open on default then close when the agent is done"); its line still folds them.
+  const [stepsOpen, setStepsOpen] = useState(true);
   // Asked of one of Friday's own models: the hosted Friday's, so none in the open-source edition.
   let opinionBtn: React.ReactNode = null;
   // What the run left that has a home of its own.
@@ -4010,6 +4041,9 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   const since = active ? liveSince(ctx.sid, lane, item.startedTs ?? msgs[0]?.ts) : undefined;
   // An older run: the facts that decide whether to open it, on one line. Before the steps, the receipt and the hand-off are
   // worked out, since none of them are shown: a long session is mostly folded runs.
+  // What the agent drew as it worked, in its reply under its words (and still there when the reply is folded).
+  let drawn: ReactNode = null;
+  drawn = item.drawn?.length ? <div className={cn("rsp-drawn", folded && !unfolded && "folded")}>{item.drawn.map((ev) => <Suspense key={ev.seq} fallback={null}><GenCard ev={ev} state={ctx.state} events={ctx.events} send={ctx.send} sid={ctx.sid} invite={ctx.invite} /></Suspense>)}</div> : null;
   if (folded && !unfolded) {
     const line = foldLine({ changed: changed.length, tests: tests?.status ?? null, failed: stillFailing.length, ms: item.ended && item.startedTs ? item.ended.ts - item.startedTs : 0, answer: finalMsg?.body.text });
     return (
@@ -4023,6 +4057,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
           <span className="rsp-folded-line">{line}</span>
           <Icon name="chevronRight" size={12} />
         </button>
+        {drawn}
       </div>
     );
   }
@@ -4598,7 +4633,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
       {/* The tool's mark beside a reply is identity only, with no ring: the header's agent tab, the status bar and the reply's own
           live line already say how it stands, and a reply waiting on you says "Needs you" in its head (Arun, 2026-10-29: "i dont
           like the ring/circle thing around the claude icon in the chat... since it is already shown in the header"). */}
-      <span className="rsp-avatar" aria-hidden data-doing={doing || undefined}>
+      <span className="rsp-avatar" aria-hidden data-doing={(chatty && active && typing === "answering" ? "type" : doing) || undefined}>
         {mate ?? (ctx.state.engines[lane]?.tool ? (
           <EngineMark tool={ctx.state.engines[lane]!.tool!} size={15} />
         ) : <FridayFace state={ctx.state} lane={lane} mood={runMood({ active, outcome: item.ended?.body.outcome, failing: stillFailing.length })} size={26} still={!active} />)}
@@ -4614,7 +4649,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
         {/* Stopped to ask: it is waiting on a person, not thinking, and saying "Thinking" sent people looking for nothing. While it
             works the ring on its mark and the one live line under the reply say so; the head says only what needs you. A teammate's
             reply keeps its own words (its face is not a tool's mark). */}
-        {active && (!typing || typing === "waiting") && (waitsOnPerson(ctx.state, lane) ? (approving ? null : ((n) => <span className={cn("rsp-needs", !n.needsYou && "is-theirs")} role="status">{n.held ? n.word : "Waiting on a person"}</span>)(agentState(ctx.state, lane, ctx.me.id))) : mate && !hasWork ? <Working label="Thinking" /> : null)}
+        {active && (!typing || typing === "waiting") && (waitsOnPerson(ctx.state, lane) ? (approving ? null : ((n) => <span className={cn("rsp-needs", !n.needsYou && "is-theirs")} role="status">{n.held ? n.word : "Waiting on a person"}</span>)(agentState(ctx.state, lane, ctx.me.id))) : chatty ? <WorkLine {...((p) => ({ step: p.words, title: p.full }))(plainStep(blocks))} {...(metaStart !== undefined ? { since: metaStart } : {})} {...(hasWork ? { open: stepsOpen, onOpen: () => setStepsOpen((o) => !o) } : {})} /> : mate && !hasWork ? <Working label="Thinking" /> : null)}
         {status && <span className={cn("rsp-status", ended?.outcome === "error" && (limitHit(ended.error) || signedOut(ended.error) ? "limit" : "err"))}>{status}</span>}
         {msgs[0] && (
           <span className="rsp-time">
@@ -4631,11 +4666,13 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
       {blocks.map((x) => (x.kind === "say" ? sayBlock(x) : null))}
       {/* A crew mate's work is its one line under its name, closed until pressed (Arun, 2026-11-15: "like this should be shown by
           default not fully opened"). */}
-      {/* A crew mate at work: its bubble says what it is doing, one step after another (WorkBubble); its answer streams below it. */}
-      {chatty && active && typing !== "answering" && <WorkBubble step={liveWord(blocks, waitsOnPerson(ctx.state, lane), false)} label={`${name} is working`} />}
-      {hasWork && !(chatty && active) && (
+      {/* A crew mate at work says what it is doing after its name (work-line.tsx WorkLine), and its steps unfold here when that is
+          pressed; its answer streams below. */}
+      {chatty && active && stepsOpen && hasWork && <RunLine plain bare blocks={blocks} live {...(metaStart !== undefined ? { since: metaStart } : {})} took={took} waiting={waitsOnPerson(ctx.state, lane)} writing={typing === "answering"} />}
+      {/* Done, a crew mate's reply is its words alone: no "Worked 26s · ran 2 commands" under them (Arun, 2026-11-17: "get rid of
+          this tooo"). A coding session keeps its line, its record of the steps. */}
+      {hasWork && !chatty && (
         <RunLine
-          {...(chatty ? { plain: true } : {})}
           blocks={blocks}
           live={active}
           {...(metaStart !== undefined ? { since: metaStart } : {})}
@@ -4660,17 +4697,24 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
         </div>
       )}
       {made.length > 0 && <MadeFiles files={made} lane={lane} {...(ctx.onOpen ? { onMore: () => ctx.onOpen!("tree") } : {})} />}
+      {/* Asked you to decide (ask_human): the card in the chat, under the reply that asked, as well as docked over the box; the same
+          question either way, so answering one clears both (Arun, 2026-11-17: "when an agent asks for a decision as well, make sure
+          we load the decision card in the chat too"). */}
+      {active && ((q) => (q ? <div className="rsp-ask-inline" data-needs={lane} data-ask={q.seq}><ChatQuestion ctx={ctx} q={q} /></div> : null))(questionsTo(ctx.state, ctx.me.id).find((x) => x.lane === lane))}
       {typing && typing !== "waiting" && <LiveStream sid={ctx.sid} lane={lane} {...(!runLog && since !== undefined ? { since } : {})} />}
       {verdict && finalMsg && !resulted && !chatty && (
         <span className={`rsp-verdict ${verdict.tone}`} title={tests?.command ?? "No test command ran in this run"}>
           <Icon name={verdict.tone === "pass" ? "check" : verdict.tone === "fail" ? "x" : "help"} size={12} /> {verdict.text}
         </span>
       )}
+      {/* No closing words yet (a turn under way, waiting on a card): what it drew, here. */}
+      {!(finalMsg && finalMsg !== loginLine) && drawn}
       {finalMsg && finalMsg !== loginLine && (
         <StreamingResponse
           status="complete"
           contentClassName="rsp-answer"
           actionsClassName="rsp-actions !gap-0.5"
+          below={drawn}
           showActions={!active}
           copyText={finalMsg.body.text}
           onCopy={copy}
@@ -6719,6 +6763,7 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
             return state.options.team && isWorkflowBoard(ev) ? <FlowBoard ev={ev} ctx={ctx} fallback={<BoardCard ev={ev} state={state} stamp={<Stamp ev={ev} />} />} /> : <BoardCard ev={ev} state={state} stamp={<Stamp ev={ev} />} />;
     case "mesh.posted":
       return <AgentUpdateCard ev={ev} state={state} stamp={<Stamp ev={ev} />} />;
+    case "ui.card": return <Suspense fallback={null}><GenCard ev={ev} state={state} events={ctx.events} send={ctx.send} sid={ctx.sid} invite={ctx.invite} /></Suspense>;
     case "teammate.folders":
       return <FoldersGiven ev={ev} stamp={<Stamp ev={ev} />} />;
     case "teammate.changed":
@@ -8141,43 +8186,48 @@ function Redirects({ ctx }: { ctx: Ctx }) {
  * people allowed to suggest post a redirect that waits for the driver;
  * everyone else just watches.
  */
-/**
- * One agent's open question, docked directly above the composer. Inline
- * choices in the question text become real options; the free-text field stays
- * open so an answer that isn't on the list is always possible. Either way the
- * answer goes out as the next instruction, which is what ask_human awaits.
- */
-function AgentQuestion({ ctx, q }: { ctx: Ctx; q: OpenQuestion }) {
-  const { state, send } = ctx;
-  // "sending" while it goes, "sent" once it is in the queue: "Sending…" stayed on the button for as long as the agent took to
-  // read the answer, which for an agent mid-step or offline was indefinitely (2026-10-29 verify).
-  const [busy, setBusy] = useState<false | "sending" | "sent">(false);
-  // Options the agent gave are the options. Only a question that arrived as
-  // one lump of prose gets cut up by the parser, and that is now the fallback
-  // rather than the normal path.
-  const parsed = useMemo(() => {
-    if (q.options?.length) return { prompt: q.question, options: q.options.map((o) => ({ value: o, label: o })) };
-    return parseChoices(q.question);
-  }, [q.question, q.options]);
-  useEffect(() => setBusy(false), [q.seq]);
-
+/** An agent's question in the chat, under the reply that asked: its words and its choices as replies (decision-card.tsx). */
+function ChatQuestion({ ctx, q }: { ctx: Ctx; q: OpenQuestion }) {
+  const parsed = useMemo(() => (q.options?.length ? { prompt: q.question, options: q.options } : ((p) => ({ prompt: p.prompt, options: p.options.map((o) => o.label) }))(parseChoices(q.question))), [q.question, q.options]);
   return (
-    <ApprovalCard
-      className={cn("agent-question", busy && "is-busy")}
-      variant="questions"
-      mark={agentLook(state, q.lane, 18).mark}
-      title={`${agentNameFor(state, q.lane)} is asking`}
-      questions={[{ id: "answer", prompt: [parsed.prompt, q.detail].filter(Boolean).join("\n\n"), options: parsed.options.map((o) => o.label), ...(q.recommended ? { recommended: q.recommended } : {}) }]}
-      approveLabel={busy === "sending" ? "Sending…" : busy === "sent" ? "Sent" : "Answer"}
-      onApprove={(payload) => {
-        const text = (payload?.answers?.answer ?? "").trim();
-        if (!text || busy) return;
-        setBusy("sending");
-        // Free again if it didn't go (offline, say): left busy, the question could never be answered after reconnecting.
-        // To the agent that asked: sent without its lane, a second agent's answer went to the main one.
-        void send({ type: "instruct", text, lane: q.lane }).then((r) => setBusy(r.ok ? "sent" : false));
-      }}
+    <DecisionCard
+      id={q.seq}
+      question={parsed.prompt}
+      {...(q.detail ? { detail: q.detail } : {})}
+      options={parsed.options}
+      {...(q.recommended ? { recommended: q.recommended } : {})}
+      // To the agent that asked, as the docked card sends it.
+      onAnswer={(text) => ctx.send({ type: "instruct", text, lane: q.lane }).then((r) => r.ok)}
     />
+  );
+}
+
+/**
+ * An agent's question docked over the box, stepping aside while the same card in the chat (RunBlock, .rsp-ask-inline) is in view, so
+ * the two never stand one over the other; scrolled away from it, or with no reply of its own on screen (a room), it is back. Answered
+ * from the chat's card, it stays aside.
+ */
+function FeedQuestion({ ctx, q }: { ctx: Ctx; q: OpenQuestion }) {
+  const [under, setUnder] = useState(false);
+  useEffect(() => {
+    // Under its reply already (RunBlock's card for it): said there once. Looked for again as the feed comes and goes.
+    const look = () => setUnder(!!document.querySelector(`.rsp-ask-inline[data-ask="${q.seq}"]`));
+    look();
+    const t = setInterval(look, 1000);
+    return () => clearInterval(t);
+  }, [q.seq]);
+  if (under) return null;
+  const mate = mateOn(q.lane);
+  const look = agentLook(ctx.state, q.lane, 14);
+  return (
+    <div className="feed-ask" data-needs={q.lane}>
+      <div className="feed-ask-who">
+        {mate ? <Face seed={mate.look ?? mate.name} size={20} /> : <span className="feed-ask-mark">{look.mark}</span>}
+        <b>{mate?.name ?? agentNameFor(ctx.state, q.lane)}</b>
+        <span>is asking you</span>
+      </div>
+      <ChatQuestion ctx={ctx} q={q} />
+    </div>
   );
 }
 

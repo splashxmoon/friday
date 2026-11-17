@@ -3,19 +3,15 @@ import type { Limits } from "../runner/limits.js";
 import { ENGINE_NAMES, ENGINE_TOOLS, type EngineTool } from "../types.js";
 import { EngineMark } from "./BrandMarks.js";
 import {
-  PRICES_CHECKED,
-  chooseLimitAlerts,
   cyclesOf,
   forecastOf,
   idOf,
   isFiveHour,
   isWeekly,
-  limitAlertsOn,
   listPrice,
   mostRoom,
   readCosts,
   readHistory,
-  rightSize,
   saveCost,
   weekGrid,
   windowsOf,
@@ -23,15 +19,15 @@ import {
   type History,
   type Win,
 } from "./limitHistory.js";
-import { notificationsOn } from "./prefs.js";
 import type { Read } from "./toolLimits.js";
 import { Skeleton } from "./ui.js";
 import { PlugIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
 import { EmptyState, surface } from "@/components/dass";
 import { AccountCardsView } from "./gauge.js";
+import { UsageAccounts } from "./usage-accounts.js";
+import type { Identity } from "./storage.js";
 
 /**
  * The coding tools' limits as one place to plan the day from: each tool's five-hour and weekly windows as rings, the pace
@@ -208,7 +204,7 @@ function CostLine({ tool, plan, cost, onCost }: { tool: EngineTool; plan: string
   );
 }
 
-export function LimitsHub({ read }: { read: Read }) {
+export function LimitsHub({ read, identity }: { read: Read; /** For the accounts and what can be done to them (account-glance.tsx). */ identity?: Identity }) {
   const limits = read && read !== "none" ? read : null;
   const [now, setNow] = useState(Date.now);
   // Countdowns move on the minute; the readings themselves come every two minutes (toolLimits.ts).
@@ -218,7 +214,6 @@ export function LimitsHub({ read }: { read: Read }) {
   }, []);
   const history = useMemo(() => readHistory(), [read]); // eslint-disable-line react-hooks/exhaustive-deps
   const [costs, setCosts] = useState(readCosts);
-  const [alerts, setAlerts] = useState(limitAlertsOn);
   const wins = useMemo(() => windowsOf(limits, now), [limits, now]);
 
   if (read === null)
@@ -241,16 +236,7 @@ export function LimitsHub({ read }: { read: Read }) {
   const claudeSaid = (limits.claudeWindows ?? []).filter((w) => w.kind !== "overage");
   const tools = ENGINE_TOOLS.filter((t) => wins.some((w) => w.tool === t) || planOf(t, limits) || (t === "claude" && claudeSaid.length > 0)).sort((a, b) => Number(wins.some((w) => w.tool === b)) - Number(wins.some((w) => w.tool === a)));
   const fives = wins.filter(isFiveHour);
-  const weeklies = wins.filter(isWeekly);
   const room = mostRoom(wins);
-  const costOf = (t: EngineTool) => costs[t] ?? listPrice(t, planOf(t, limits))?.usd;
-  const spend = tools.reduce((n, t) => n + (costOf(t) ?? 0), 0);
-  const hints = tools.flatMap((t) => {
-    const usd = costOf(t);
-    const week = weeklies.filter((w) => w.tool === t).sort((a, b) => b.used - a.used)[0];
-    const h = usd ? rightSize(t, usd, week, now) : null;
-    return h ? [{ tool: t, now: usd!, ...h }] : [];
-  });
 
   // One tool's week, hour by hour.
   const heat = (w: (typeof fives)[number]) => {
@@ -314,57 +300,30 @@ export function LimitsHub({ read }: { read: Read }) {
         {single && heat(fives[0]!)}
       </div>
 
-      {/* More than one account of a tool here (runner/accounts.ts): each one's windows, the next to refill first. */}
-      {accountTools.length > 0 && (
-        <section className="flex flex-col gap-2.5" aria-label="Your accounts">
-          <div className="lh-section-head">
-            <h3 className="m-0 text-[13px] font-semibold text-[var(--ink)]">Your accounts</h3>
-            <span className="text-[12px] text-[var(--text-muted)]">In the order they refill. Friday never moves an agent between them by itself.</span>
-          </div>
-          {accountTools.map((t) => (
-            <section key={t} className="flex flex-col gap-2" aria-label={`${ENGINE_NAMES[t]} accounts`}>
-              <header className="flex items-center gap-2 text-[13px] text-[var(--ink-2)]">
-                <EngineMark tool={t} size={14} />
-                <b className="font-semibold text-[var(--ink)]">{ENGINE_NAMES[t]}</b>
-                <span className="text-[var(--text-muted)]">{limits.accounts![t]!.length} accounts</span>
-              </header>
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-3">
-                <AccountCardsView limits={read} tool={t} className={cn(surface, "flex flex-col gap-2 p-4")} />
-              </div>
-            </section>
-          ))}
-        </section>
-      )}
-
-      {/* What the cards don't each say, on one line: what the plans cost together, whether one could be smaller, and the alert. */}
-      <div className="lh-sum">
-        <div className="lh-sum-cell">
-          <span className="lh-sum-k">Plans</span>
-          <span className="lh-sum-v num">{spend ? `$${spend % 1 ? spend.toFixed(2) : spend} a month` : "Not known"}</span>
-          <span className="lh-sum-s">List prices as of {PRICES_CHECKED}, unless you set your own on a card.</span>
-        </div>
-        <div className="lh-sum-cell">
-          <span className="lh-sum-k">Plan size</span>
-          <span className="lh-sum-v">{hints.length ? (hints.length === 1 ? "One could be smaller" : `${hints.length} could be smaller`) : "Each one fits"}</span>
-          <span className="lh-sum-s">
-            {hints.length
-              ? hints.map((h) => (
-                  <span key={h.tool} className="block">
-                    {ENGINE_NAMES[h.tool]} is on pace for {h.pace}% of its week: {h.tier} at ${h.usd} a month may do (now ${h.now}).
-                  </span>
-                ))
-              : "For how much you use it, or too early in the week to tell."}
-          </span>
-        </div>
-        <div className="lh-sum-cell">
-          <span className="lh-sum-k">Alert</span>
-          <label className="lh-sum-v lh-sum-switch">
-            <span>When a 5-hour limit passes 80%</span>
-            <Switch aria-label="Tell me when a 5-hour limit passes 80%" checked={alerts} onCheckedChange={(v) => (setAlerts(v), chooseLimitAlerts(v))} />
-          </label>
-          <span className="lh-sum-s">{notificationsOn() ? "One notification per window, with when it resets." : "Notifications are off in Settings › Notifications, so nothing will show."}</span>
-        </div>
-      </div>
+      {/* Each tool's accounts (runner/accounts.ts), with who each is, its week and its 5 hours, and its menu; with no identity,
+          the older cards of each one's windows. */}
+      {identity ? (
+        <UsageAccounts identity={identity} read={read} />
+      ) : accountTools.length > 0 ? (
+          <section className="flex flex-col gap-2.5" aria-label="Your accounts">
+            <div className="lh-section-head">
+              <h3 className="m-0 text-[13px] font-semibold text-[var(--ink)]">Your accounts</h3>
+              <span className="text-[12px] text-[var(--text-muted)]">In the order they refill. Friday never moves an agent between them by itself.</span>
+            </div>
+            {accountTools.map((t) => (
+              <section key={t} className="flex flex-col gap-2" aria-label={`${ENGINE_NAMES[t]} accounts`}>
+                <header className="flex items-center gap-2 text-[13px] text-[var(--ink-2)]">
+                  <EngineMark tool={t} size={14} />
+                  <b className="font-semibold text-[var(--ink)]">{ENGINE_NAMES[t]}</b>
+                  <span className="text-[var(--text-muted)]">{limits.accounts![t]!.length} accounts</span>
+                </header>
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-3">
+                  <AccountCardsView limits={read} tool={t} className={cn(surface, "flex flex-col gap-2 p-4")} />
+                </div>
+              </section>
+            ))}
+          </section>
+      ) : null}
 
       {fives.length > 0 && !single && (
         <section className="lh-history" aria-label="Five-hour limits through the week">

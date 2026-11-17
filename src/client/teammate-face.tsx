@@ -315,8 +315,10 @@ export const BlobFace = memo(function BlobFace({ seed, size, eyes = "open", brea
             )}
             {/* Its eyes as one group, for the blink and the glance teammates.css gives them (Arun, 2026-11-15: "make the mascots feel
                 alive and have some movement over hover"). */}
-            <g className="tm-eyes">
-              <EyesOf look={look} eyes={eyes} size={size} />
+            <g className="tm-look">
+              <g className="tm-eyes">
+                <EyesOf look={look} eyes={eyes} size={size} />
+              </g>
             </g>
             {/* Dozing, its shut eyes over the open ones, which a hover brings back (teammates.css). */}
             {dozing && eyes === "open" && (

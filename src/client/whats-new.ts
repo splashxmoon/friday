@@ -17,14 +17,14 @@ export interface WhatsNewNotes {
 }
 
 export const WHATS_NEW: WhatsNewNotes = {
-  version: "0.3.0",
-  title: "Threads for your coding agents",
-  summary: "Every project's sessions as threads, several agents in one, and proof of what each one did before it says done.",
+  version: "0.3.1",
+  title: "Connect your tools once",
+  summary: "MCP servers set up once for every coding tool, cards your agents draw in the chat, and your limits always in view.",
   items: [
-    { icon: "threadCard", title: "Threads, with a card", line: "A project's sessions as tabs. The thread card shows its branch, its git and every agent working in it." },
-    { icon: "check", title: "Proof before done", line: "A finished agent shows what backs it up: tests passed, files changed, what it ran." },
-    { icon: "gitPullRequest", title: "Start from an issue or PR", line: "Open a thread from a GitHub issue, a pull request or a branch, or let labelled issues start one." },
-    { icon: "glass", title: "Frosted, and the menu bar", line: "A frosted glass look beside Light and Dark, and Friday in your Mac's menu bar." },
+    { icon: "plug", title: "MCP servers, once for all", line: "Pick services from the directory or add your own, sign in once, and every coding agent here can use them." },
+    { icon: "grid", title: "Cards in the chat", line: "Agents show tables, charts, choices, plans and changes as cards you can press, not walls of text." },
+    { icon: "usage", title: "Every account, its limits", line: "Several accounts of a tool side by side, and a ring on the rail for how much of each window is left." },
+    { icon: "chat", title: "Crews you can follow", line: "Crew mates show their steps as they work, rooms say how they stand, and the talk reads as a group chat." },
   ],
 };
 

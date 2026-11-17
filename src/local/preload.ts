@@ -11,7 +11,7 @@ import { contextBridge, ipcRenderer, webUtils } from "electron";
 contextBridge.exposeInMainWorld("fridayDesktop", {
   platform: process.platform,
   /** Where the macOS window buttons sit (desktop.ts trafficLightPosition), so the page's header lines up with them. */
-  trafficLightY: 17,
+  trafficLightY: 14,
   /** Told when the window enters or leaves full screen, where macOS hides those buttons (desktop.ts). */
   onFullScreen: (fn: (full: boolean) => void): (() => void) => {
     const h = (_e: unknown, full: boolean) => fn(full);

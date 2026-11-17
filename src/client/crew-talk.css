@@ -1,0 +1,116 @@
+/* The crew talking to each other in a room, as a group chat (crew-talk.tsx CrewTalk): no box round it, each message a row of its own
+   on the room's grid (32px face, 10px gap), as a crew mate's reply is. */
+.ctk { display: flex; flex-direction: column; gap: 6px; container-type: inline-size; }
+.ctk-row { display: grid; grid-template-columns: 32px minmax(0, 1fr); column-gap: 10px; }
+.ctk-av { display: grid; place-items: start center; padding-top: 1px; }
+.ctk-av.small { padding-top: 0; }
+.ctk-main { min-width: 0; }
+.ctk-mark { display: grid; place-items: center; border-radius: 50%; background: var(--card-2); color: var(--ink); }
+
+/* Who to whom: "Nova → (Kit's face) Kit  handed a task  6:06". */
+.ctk-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-height: 22px; font-size: 13px; line-height: 20px; color: var(--ink-3); }
+.ctk-from { font-size: 14px; font-weight: 600; letter-spacing: -0.005em; color: var(--ink); }
+.ctk-arrow { flex: none; width: 13px; height: 13px; color: var(--ink-4); stroke-width: 2; }
+.ctk-to { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px 0 4px; border-radius: 999px; background: var(--card); box-shadow: inset 0 0 0 1px var(--border); color: var(--ink); font-size: 13px; font-weight: 500; }
+.ctk-to .tm-face-wrap, .ctk-to svg.tm-face { flex: none; }
+.ctk-to-crew { width: 13px; height: 13px; margin-left: 2px; color: var(--ink-2); }
+.ctk-verb { color: var(--ink-3); }
+.ctk-time { color: var(--ink-4); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+/* Its words whole, set as a crew mate's message is (14.5/23), hugging them. */
+/* In its bubble, as a crew mate's reply is (teammates.css .tm-rsp .rsp-say), hugging its words (Arun, 2026-11-17: "make sure the agent
+   responses and chat stuff are in a bubble too"). */
+.ctk-text { width: fit-content; max-width: min(640px, 100%); margin-top: 4px; padding: 9px 14px 10px; border-radius: 4px 16px 16px 16px; background: var(--hover); box-shadow: inset 0 0 0 1px var(--border); color: var(--ink); font-size: 14.5px; line-height: 23px; letter-spacing: -0.004em; }
+.ctk-text.small { padding: 7px 12px 8px; font-size: 14px; line-height: 22px; }
+.ctk-text :is(p, ul, ol) { max-width: none; margin: 0 0 8px; }
+.ctk-text :is(p, ul, ol):last-child { margin-bottom: 0; }
+.ctk-text :not(pre) > code { padding: 1px 5px; border-radius: 5px; background: color-mix(in srgb, var(--ink) 7%, transparent); font-size: 12.5px; }
+.ctk-text pre { margin: 8px 0; border-radius: 10px; font-size: 12.5px; line-height: 19px; }
+
+/* A task handed over: its card and where it stands, in the state's colour (style.css --st-*). */
+.ctk-task { display: flex; align-items: center; gap: 10px; max-width: 460px; margin-top: 8px; padding: 8px 12px 8px 10px; border-radius: 10px; background: var(--card); box-shadow: inset 0 0 0 1px var(--border); font-size: 13px; line-height: 19px; color: var(--ink); --st: var(--st-sent); }
+.ctk-task > svg { flex: none; width: 16px; height: 16px; color: var(--st); }
+.ctk-task-title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 500; }
+.ctk-task-st { flex: none; color: var(--st); font-size: 12px; white-space: nowrap; }
+:is(.ctk-task, .ctk-st)[data-how="work"] { --st: var(--st-working); }
+:is(.ctk-task, .ctk-st)[data-how="done"] { --st: var(--st-done); }
+:is(.ctk-task, .ctk-st)[data-how="review"] { --st: var(--st-review); }
+:is(.ctk-task, .ctk-st)[data-how="read"] { --st: var(--ink-3); }
+:is(.ctk-task, .ctk-st)[data-how="wait"] { --st: var(--st-queued); }
+:is(.ctk-task, .ctk-st)[data-how="hold"] { --st: var(--st-held); }
+:is(.ctk-task, .ctk-st)[data-how="bad"] { --st: var(--st-blocked); }
+:is(.ctk-task, .ctk-st)[data-how="quiet"] { --st: var(--ink-3); }
+
+/* Where it stands, under its words: a dot (or a tick, or a turning ring) and a few words. */
+.ctk-foot { margin-top: 7px; }
+.ctk-st { display: inline-flex; align-items: center; gap: 6px; color: var(--st, var(--ink-3)); font-size: 12px; line-height: 16px; white-space: nowrap; }
+.ctk-st > i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.ctk-st > svg { width: 13px; height: 13px; stroke-width: 2.2; }
+.ctk-st .ring-spin { width: 10px; height: 10px; }
+.ctk-head .ctk-st { margin-left: 2px; }
+.ctk-seen-faces { display: inline-flex; }
+.ctk-seen-faces > * + * { margin-left: -3px; }
+
+/* The answer, threaded under its question: a curved line from under the asker's face to the one who answered. */
+.ctk-thread { position: relative; display: grid; grid-template-columns: 20px minmax(0, 1fr); column-gap: 8px; margin-top: 10px; padding-left: 22px; }
+.ctk-thread::before { content: ""; position: absolute; left: -26px; top: -8px; width: 44px; height: 18px; border-left: 1.5px solid var(--border-strong); border-bottom: 1.5px solid var(--border-strong); border-bottom-left-radius: 10px; }
+.ctk-thread .ctk-head { min-height: 20px; }
+.ctk-thread .ctk-from { font-size: 13.5px; }
+
+/* A long back and forth, its middle folded to one line that opens in place. */
+.ctk-fold { display: flex; flex-direction: column; gap: 8px; margin: -4px 0; }
+.ctk-side { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 0; border: 0; background: none; color: var(--ink-3); font: 400 12.5px/18px var(--font); cursor: pointer; }
+.ctk-side::before, .ctk-side::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+.ctk-side:hover { color: var(--ink-2); }
+.ctk-side:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; border-radius: 6px; }
+.ctk-side-faces { display: inline-flex; }
+.ctk-side-faces > * + * { margin-left: -4px; }
+.ctk-side-chev { width: 13px; height: 13px; transition: transform .18s var(--ease-out); }
+.ctk-side[aria-expanded="true"] .ctk-side-chev { transform: rotate(180deg); }
+.ctk-minis { display: flex; flex-direction: column; gap: 8px; margin: 0 0 0 42px; padding: 10px 12px; border-radius: 10px; background: var(--card); box-shadow: inset 0 0 0 1px var(--border); list-style: none; }
+.ctk-mini { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; column-gap: 8px; align-items: start; font-size: 13px; line-height: 19px; color: var(--ink); }
+.ctk-mini b { font-weight: 600; }
+.ctk-mini .ctk-verb { color: var(--ink-3); }
+.ctk-mini-text { min-width: 0; }
+@media (max-width: 640px) { .ctk-row { grid-template-columns: 24px minmax(0, 1fr); } .ctk-minis { margin-left: 0; } }
+
+/* The person's own messages in a crew chat or room hug their words up to a group chat's measure, as the crew's do (Arun, 2026-11-17:
+   "same with mine too", of a long message running the row's width). */
+.activity-main[data-crew] .group.is-user .msg-bubble { max-width: min(560px, 78%); }
+
+/* Each message a one-line card (crew-talk.tsx Row; Arun, 2026-11-17: "make this into a one row card ... a summary rather than the
+   full message"): face, who to whom, what it was, its first sentence, where it stands, the time. Pressed, the card opens under its
+   line to the message whole. */
+.ctk-card { max-width: 760px; border-radius: 12px; background: var(--card); box-shadow: inset 0 0 0 1px var(--border); overflow: hidden; }
+.ctk-line { display: flex; align-items: center; gap: 7px; width: 100%; min-height: 40px; padding: 6px 10px 6px 9px; border: 0; background: none; color: var(--ink-3); font: 400 13px/20px var(--font); text-align: left; cursor: pointer; transition: background-color .12s; }
+.ctk-line:hover { background: var(--hover); }
+.ctk-line:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; border-radius: 12px; }
+.ctk-line > .tm-face-wrap, .ctk-line > svg.tm-face, .ctk-line > .ctk-mark { flex: none; }
+.ctk-line .ctk-from { flex: none; font-size: 13.5px; }
+.ctk-line .ctk-to { flex: none; height: 20px; font-size: 12.5px; }
+.ctk-line .ctk-verb { flex: none; white-space: nowrap; }
+.ctk-sum { flex: 1; min-width: 0; overflow: hidden; color: var(--ink); white-space: nowrap; text-overflow: ellipsis; }
+.ctk-end { flex: none; display: inline-flex; max-width: 200px; overflow: hidden; }
+.ctk-end .ctk-st { overflow: hidden; text-overflow: ellipsis; }
+.ctk-line .ctk-time { flex: none; }
+.ctk-chev { flex: none; width: 14px; height: 14px; color: var(--ink-4); transition: transform .18s var(--ease-out); }
+.ctk-card[data-open] .ctk-chev { transform: rotate(180deg); }
+.ctk-card[data-open] .ctk-line { border-bottom: 1px solid var(--border); }
+.ctk-card[data-open] .ctk-line .ctk-sum { visibility: hidden; }
+
+/* Opened: the message whole, set plainly in the card (no bubble in a bubble), lined up past the face. */
+.ctk-body { padding: 10px 14px 12px 38px; }
+.ctk-body .ctk-text { width: auto; max-width: none; margin: 0; padding: 0; border-radius: 0; background: none; box-shadow: none; font-size: 14px; line-height: 22px; }
+.ctk-body .ctk-task { margin-top: 8px; }
+.ctk-body .ctk-thread { margin-top: 12px; padding: 10px 0 0; border-top: 1px dashed var(--border); }
+.ctk-body .ctk-thread::before { content: none; }
+.ctk-body .ctk-foot { margin-top: 10px; }
+/* Narrow (a side panel open beside the room): the summary keeps its room; what it was and the time go, the end keeps its dot. */
+@container (max-width: 620px) { .ctk-line .ctk-verb, .ctk-line .ctk-time { display: none; } .ctk-end { max-width: 130px; } }
+@container (max-width: 440px) { .ctk-line .ctk-to { display: none; } .ctk-body { padding-left: 14px; } }
+@media (prefers-reduced-motion: reduce) { .ctk-line, .ctk-chev { transition: none; } }
+
+/* Crew work in a crew mate's own chat, on the messages' measure: under the name, as the replies and the cards over it are (Arun,
+   2026-11-17: "line up the agent to agent cards with the cards above it... like the messages"). */
+.activity-main[data-crew] .cw:not(.cw-room) { max-width: min(560px, calc(100% - 44px)); margin-left: 44px; }
+@media (max-width: 640px) { .activity-main[data-crew] .cw:not(.cw-room) { margin-left: 0; max-width: none; } }

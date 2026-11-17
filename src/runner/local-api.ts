@@ -14,7 +14,10 @@ import { listCliSessions } from "./imports.js";
 import { installFromRegistry, registryRows } from "./acp-registry.js";
 import { acpSignInState, callbackFromElsewhere, cancelAcpSignIn, forgetProof, settleSignIn, startAcpSignIn } from "./acp-signin.js";
 import { grouped, listModels, openConversation } from "./model-lists.js";
-import { holdAwake, knownModels, knownModelsAt, rememberModels, Runner, stayAttached } from "./runner.js";
+import { holdAwake, knownModels, knownModelsAt, rememberModels, Runner, stayAttached, toolBusy } from "./runner.js";
+import { autoUpdates, checkUpdates, setAutoUpdates, updateTool } from "./tool-updates.js";
+import { builtInKeys } from "./builtin-apps.js";
+import { addConnection, claudeCodeServers, fillDraft, nameFrom, parseConnection, readStore, removeConnection, retestConnection, setClaudeCodeShared, startSignin, updateConnection, viewOf, type Draft } from "./connections.js";
 import { askCli } from "./ask.js";
 import { findWork, shownFile, workKind, workType } from "../work-files.js";
 import { installSkill } from "./tool-commands.js";
@@ -136,6 +139,19 @@ export const HOST_METHODS = [
   "accounts.add",
   "accounts.rename",
   "accounts.remove",
+  // The coding tools kept up to date (tool-updates.ts): which are behind, one updated now, and updating by itself on or off.
+  "tools.updates",
+  "tools.update",
+  "tools.updates.auto",
+  // MCP servers set up once and handed to every coding tool here (connections.ts).
+  "connections",
+  "connections.parse",
+  "connections.add",
+  "connections.test",
+  "connections.update",
+  "connections.remove",
+  "connections.claude",
+  "connections.signin",
   "gh-login",
   "clone",
   "start",
@@ -666,6 +682,69 @@ export async function callHost(method: string, params: Record<string, unknown> =
       forgetLoginStatus();
       return { ok: true };
     }
+    // MCP servers set up once for every coding tool here (connections.ts). The page is never sent their keys, only their names.
+    case "connections": {
+      const st = await readStore();
+      const mine = await claudeCodeServers();
+      // builtInApps: the providers Friday signs in to with its own app, so the page asks for no app of the person's (builtin-apps.ts).
+      return { servers: st.servers.map(viewOf), claudeCode: !!st.claudeCode, claudeCodeNames: Object.keys(mine), builtInApps: builtInKeys() };
+    }
+    case "connections.parse":
+      return { drafts: parseConnection(str(params.text, 20_000)) };
+    case "connections.add": {
+      const d = params.draft as Draft | undefined;
+      if (!d || typeof d !== "object" || !["stdio", "http", "sse"].includes(String(d.transport))) throw new Error("Paste the server again.");
+      const values = params.values && typeof params.values === "object" ? (params.values as Record<string, string>) : {};
+      return { server: viewOf(await addConnection(fillDraft(d, values))) };
+    }
+    case "connections.test":
+      return { server: viewOf(await retestConnection(str(params.id, 40))) };
+    case "connections.update": {
+      const p = {
+        ...(typeof params.enabled === "boolean" ? { enabled: params.enabled } : {}),
+        ...(str(params.name, 60) ? { name: str(params.name, 60) } : {}),
+        ...(params.env && typeof params.env === "object" ? { env: params.env as Record<string, string> } : {}),
+        ...(params.headers && typeof params.headers === "object" ? { headers: params.headers as Record<string, string> } : {}),
+      };
+      const c = await updateConnection(str(params.id, 40), p);
+      // New keys are tested at once: "Fix the keys" ends in whether they work.
+      return { server: viewOf(p.env || p.headers ? await retestConnection(c.id) : c) };
+    }
+    case "connections.remove":
+      await removeConnection(str(params.id, 40));
+      return { ok: true };
+    // A sign-in to a remote server (OAuth): where to send the person's browser, which comes back to this Friday (app.ts).
+    case "connections.signin": {
+      const url = str(params.url, 2000);
+      if (!/^https?:\/\//i.test(url)) throw new Error("That isn't a server's address.");
+      const clientId = str(params.clientId, 400);
+      const r = await startSignin({
+        url,
+        name: str(params.name, 60) || nameFrom(url),
+        ...(str(params.catalog, 60) ? { catalog: str(params.catalog, 60) } : {}),
+        ...(str(params.id, 40) ? { id: str(params.id, 40) } : {}),
+        redirect: `${ctx.serverUrl.replace(/\/+$/, "")}/api/mcp/signed-in`,
+        ...(clientId ? { client: { id: clientId, secret: str(params.clientSecret, 400) } } : {}),
+      }).catch((e: Error & { needsClient?: boolean }) => {
+        throw Object.assign(new Error(e.message), e.needsClient ? { needsClient: true } : {});
+      });
+      return r;
+    }
+    case "connections.claude":
+      await setClaudeCodeShared(params.on === true);
+      return { ok: true };
+    case "tools.updates":
+      return { auto: await autoUpdates(), tools: await checkUpdates() };
+    case "tools.update": {
+      const tool = str(params.tool, 20) as EngineTool;
+      if (!ENGINE_TOOLS.includes(tool)) throw new Error("Unknown coding agent.");
+      if (toolBusy(tool)) throw new Error(`${ENGINE_NAMES[tool]} is working on a turn. Update it when it's done.`);
+      forgetLoginStatus();
+      return { update: await updateTool(tool) };
+    }
+    case "tools.updates.auto":
+      await setAutoUpdates(params.on !== false);
+      return { auto: await autoUpdates() };
     case "gh-login": {
       const gh = await ghBin();
       if (!gh) throw new Error("The GitHub CLI (gh) isn't installed. Install it from cli.github.com, then try again.");
