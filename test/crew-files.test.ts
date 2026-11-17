@@ -1,15 +1,18 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import test from "node:test";
 import { crewFileAt } from "../src/crew-files.js";
 import { kindOf, madeFilesOf, namedPaths, withNamed } from "../src/client/made-files.js";
 
 /** A file a crew mate made, found among the crew's folders on this computer (crew-files.ts), and shown as its message's files (made-files.tsx). */
-const on = (...files: string[]) => async (p: string) => files.includes(p);
+// Paths as this computer writes them (on Windows "/h/Sage" is D:\h\Sage), so the same tests hold there.
+const P = (p: string) => path.resolve(p);
+const on = (...files: string[]) => async (p: string) => files.map(P).includes(p);
 
 test("a whole path is read from the deepest crew folder that holds it, and nowhere else", async () => {
   const roots = ["/w/shop", "/h/Sage", "/h/Sage/copies/edge"];
-  assert.deepEqual(await crewFileAt(roots, "/h/Sage/pricing.md", on("/h/Sage/pricing.md")), { root: "/h/Sage", rel: "pricing.md" });
-  assert.deepEqual(await crewFileAt(roots, "/h/Sage/copies/edge/a.ts", on("/h/Sage/copies/edge/a.ts")), { root: "/h/Sage/copies/edge", rel: "a.ts" });
+  assert.deepEqual(await crewFileAt(roots, "/h/Sage/pricing.md", on("/h/Sage/pricing.md")), { root: P("/h/Sage"), rel: "pricing.md" });
+  assert.deepEqual(await crewFileAt(roots, "/h/Sage/copies/edge/a.ts", on("/h/Sage/copies/edge/a.ts")), { root: P("/h/Sage/copies/edge"), rel: "a.ts" });
   assert.equal(await crewFileAt(roots, "/etc/passwd", on("/etc/passwd")), null);
   assert.equal(await crewFileAt(roots, "/h/Sage/../Nova/x.md", on("/h/Nova/x.md")), null);
   assert.equal(await crewFileAt(roots, "/h/Sage/gone.md", on()), null);
@@ -17,8 +20,8 @@ test("a whole path is read from the deepest crew folder that holds it, and nowhe
 
 test("a relative path is looked for in each crew folder in turn, the lane's own first", async () => {
   const roots = ["/w/shop", "/h/Sage", "/h/Nova"];
-  assert.deepEqual(await crewFileAt(roots, "announcement.md", on("/h/Nova/announcement.md")), { root: "/h/Nova", rel: "announcement.md" });
-  assert.deepEqual(await crewFileAt(roots, "./pricing.md", on("/w/shop/pricing.md", "/h/Sage/pricing.md")), { root: "/w/shop", rel: "pricing.md" });
+  assert.deepEqual(await crewFileAt(roots, "announcement.md", on("/h/Nova/announcement.md")), { root: P("/h/Nova"), rel: "announcement.md" });
+  assert.deepEqual(await crewFileAt(roots, "./pricing.md", on("/w/shop/pricing.md", "/h/Sage/pricing.md")), { root: P("/w/shop"), rel: "pricing.md" });
   assert.equal(await crewFileAt(roots, "../secret", on("/w/secret")), null);
   assert.equal(await crewFileAt(roots, "nowhere.md", on()), null);
 });

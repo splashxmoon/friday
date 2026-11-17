@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import test from "node:test";
 import { roomBrief } from "../src/room-brief.js";
 import type { SessionState } from "../src/session/projection.js";
@@ -24,7 +25,7 @@ test("a room's brief: its goal, who, its board, what each found with its files, 
   assert.match(b, /Its board, 1 of 2 done:\n- \[done\] Price table \(Sage\)\n- \[claimed\] Announcement \(Nova\)/);
   assert.match(b, /Sage \(finished [^)]+\):\nTwo of five raised prices/);
   assert.match(b, /Files: `\/h\/Sage\/pricing.md`/);
-  assert.match(b, /Nova:\nFiles: `\/w\/shop\/copy\/announce.md`/, "a file of its folder's diff, as a whole path");
+  assert.ok(b.includes(`Nova:\nFiles: \`${path.join("/w/shop", "copy/announce.md")}\``), "a file of its folder's diff, as a whole path");
   assert.match(b, /Ivy:\nStill at work there now\./);
   assert.match(b, /- Sage to Ivy: Ivy, Linear is \$10 now\./);
 });
