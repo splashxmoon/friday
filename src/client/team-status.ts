@@ -108,7 +108,9 @@ export function sayMate(m: MateLike, opts: { here?: MateState; elsewhere?: strin
 export const ACCESS: Record<EngineMode, { label: string; short: string; blurb: string }> = {
   plan: { label: "Read only", short: "Read only", blurb: "Reads, plans and answers. Never changes a file." },
   edits: { label: "Ask before changes", short: "Asks first", blurb: "Asks you before changing a file or running a command. Decides alone while you're away." },
-  full: { label: "Full access", short: "Full access", blurb: "Changes files and runs commands in their folders without asking." },
+  // Past its folders too, since 2026-11-15 (guardrails.ts): only shipping, sending, spending, deleting what isn't its, keys and
+  // your computer's settings wait on you.
+  full: { label: "Full access", short: "Full access", blurb: "Changes files and runs commands anywhere on your computer without asking. Asks first only to ship, send, spend, delete what isn't its own, touch keys, or change your computer's settings." },
 };
 
 /** "Today", "Yesterday", "Monday, Oct 26": a day as a team chat's divider says it. */

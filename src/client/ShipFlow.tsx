@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { isLocal } from "./edition.js";
 import { driverOf, runOf, type SessionState } from "../session/projection.js";
 import type { Member, SessionEvent } from "../types.js";
 import { Icon } from "./icons.js";
@@ -64,7 +65,7 @@ export function ShipFlow({ state, me, sid, invite, send, lane, events }: { state
   const [skipped, setSkipped] = useState(false);
   const [shown, setShown] = useState<string | null>(null);
   useEffect(() => {
-    if (scripts || !canAct || !files.length) return;
+    if (isLocal() || scripts || !canAct || !files.length) return;
     let live = true;
     const read = (path: string) =>
       fetch(`/api/sessions/${encodeURIComponent(sid)}/repo?op=read&raw=1&path=${encodeURIComponent(path)}&invite=${encodeURIComponent(invite)}${lane ? `&lane=${encodeURIComponent(lane)}` : ""}`)
@@ -243,7 +244,9 @@ export function ShipFlow({ state, me, sid, invite, send, lane, events }: { state
 
   return (
     <section className="ship-dock" aria-label="Ship these changes">
-      {canAct && !!scripts?.length && (
+      {/* No Checks block in the open-source edition (Arun, 2026-11-16: "get rid of the checks thing too"): a crew mate's "the tests
+          pass" is checked on its own (claims.ts), and a pull request's checks are the Pull request panel's. */}
+      {!isLocal() && canAct && !!scripts?.length && (
         <div className="sd-checks">
           <div className="sd-checks-head">
             <b>Checks</b>

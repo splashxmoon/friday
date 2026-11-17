@@ -174,3 +174,38 @@
 .kg-asks .kg-link { font-size: 12.5px; }
 .kg-asks-chips { flex-basis: 100%; padding-top: 4px; }
 .kg-foot { gap: 8px; }
+
+/* "With the crew" (crew-carry.tsx HandedRows), in the agent status's list and the side panel's Agents: a heading that folds, each
+   hand-off as its crew mate's mascot (a room as its lead's, with how many more), and an × on the row's end that shows on hover or
+   focus, always on a touch screen (Arun, 2026-11-16). */
+.kg-crew { display: flex; flex-direction: column; }
+.kg-crew-head { display: flex; align-items: center; gap: 4px; width: 100%; height: 24px; margin: 4px 0 2px; padding: 0 8px 0 5px; border: 0; border-radius: 6px; background: none; color: var(--text-muted); font: 600 11px var(--font); text-align: left; cursor: pointer; }
+.kg-crew-head:hover, .kg-crew-head:focus-visible { background: var(--hover); color: var(--ink-2); outline: none; }
+.kg-crew-head svg { flex: none; }
+.kg-crew-n { margin-left: 2px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.kg-crew-list { margin: 0 0 4px; }
+.kg-crew-row { position: relative; display: flex; align-items: center; }
+.kg-crew-row > .stb-pop-row { flex: 1; min-width: 0; }
+.kg-crew-room { position: relative; }
+.kg-crew-more { position: absolute; right: -7px; bottom: -4px; min-width: 13px; height: 13px; padding: 0 2px; border: 1.5px solid var(--popover, var(--bg)); border-radius: 7px; background: var(--hover); color: var(--ink-2); font: 600 8.5px/10px var(--font); text-align: center; font-variant-numeric: tabular-nums; }
+.kg-crew-x { position: absolute; right: 4px; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 5px; background: none; color: var(--text-muted); cursor: pointer; opacity: 0; transition: opacity 0.12s, background-color 0.12s; }
+.kg-crew-row:hover .kg-crew-x, .kg-crew-row:focus-within .kg-crew-x { opacity: 1; }
+.kg-crew-x:hover, .kg-crew-x:focus-visible { background: var(--hover); color: var(--ink); outline: none; }
+.kg-crew-x:disabled { cursor: default; opacity: 0.4; }
+/* The word gives way to the × on hover, rather than sitting under it. */
+.kg-crew-row:hover .stb-pop-word, .kg-crew-row:focus-within .stb-pop-word { visibility: hidden; }
+@media (hover: none) {
+  .kg-crew-x { opacity: 1; }
+  .kg-crew-row .stb-pop-word { visibility: visible !important; }
+}
+@media (prefers-reduced-motion: reduce) { .kg-crew-x { transition: none; } }
+
+/* A hand-off's line in a narrow chat (Arun, 2026-11-16: "visual audits on stuff being like cramped"): its links never break ("Take
+   / back" was two lines), the status shortens with an ellipsis instead, and the room's chip keeps one line. */
+.kg-status > span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kg-status > :is(.kg-link, .kg-dot) { flex: none; white-space: nowrap; }
+.kg-link, .kg-bring { white-space: nowrap; }
+.kg-room-chip { min-width: 0; max-width: 100%; }
+.kg-room-chip > i { flex: none; }
+.kg-room-chip-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kg-room-acts { flex-wrap: wrap; row-gap: 4px; }

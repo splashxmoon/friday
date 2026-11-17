@@ -1,0 +1,175 @@
+/* Threads (threads.tsx): a project's sessions as tabs in the header, each with its ring, a card on hover, + for the next. */
+
+/* ── tabs ─────────────────────────────────────────────────────────────── */
+
+.thr-tabs { display: flex; align-items: center; gap: 2px; min-width: 0; flex: 1 1 auto; overflow-x: auto; scrollbar-width: none; margin-left: -2px; padding: 2px; }
+.thr-tabs::-webkit-scrollbar { display: none; }
+
+.thr-tab {
+  position: relative; display: inline-flex; align-items: center; gap: 7px; flex: 0 1 auto; min-width: 64px; max-width: 200px; height: 28px;
+  padding: 0 10px 0 9px; border-radius: var(--r-md); color: var(--text-muted);
+  font: 500 13px/1 var(--font); letter-spacing: -0.005em; cursor: pointer; white-space: nowrap;
+  transition: background-color var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out);
+}
+.thr-tab:hover { background: var(--hover); color: var(--ink); }
+/* The open one lifted off the strip, as the segmented controls' chip is: the card colour, a hairline and a soft shadow. */
+.thr-tab.on {
+  background: var(--card); color: var(--ink); cursor: text;
+  box-shadow: 0 1px 2px rgb(0 0 0 / .14), 0 0 0 1px var(--border-strong) inset;
+}
+.thr-tab.new .thr-name { color: var(--ink); font-weight: 600; }
+.thr-tab:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.thr-tab .state-ring { flex: none; }
+.thr-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; padding: 1px 0; }
+
+/* Close: no room kept for it. On the open tab it sits in the row; on another, it comes over the name's end on hover, the name
+   fading under it, so the tab never changes width. */
+.thr-x {
+  display: none; place-items: center; flex: none; width: 18px; height: 18px; padding: 0; border: 0; border-radius: var(--r-sm);
+  background: none; color: var(--faint); cursor: pointer;
+}
+.thr-x:hover { background: var(--hover-strong); color: var(--ink); }
+.thr-tab.on .thr-x { display: grid; margin: 0 -5px 0 -1px; }
+.thr-tab:not(.on):hover .thr-x, .thr-tab:not(.on) .thr-x:focus-visible { display: grid; position: absolute; right: 5px; top: 50%; translate: 0 -50%; }
+.thr-tab:not(.on):hover .thr-name { mask-image: linear-gradient(to right, #000 calc(100% - 34px), transparent calc(100% - 16px)); }
+
+.thr-new {
+  display: grid; place-items: center; flex: none; width: 28px; height: 28px; margin-left: 4px; padding: 0;
+  border: 1px solid var(--border); border-radius: var(--r-md); background: none; color: var(--text-muted); cursor: pointer;
+  transition: background-color var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out), border-color var(--t-hover) var(--ease-out);
+}
+.thr-new:hover, .thr-new.on { background: var(--hover); color: var(--ink); border-color: var(--border-strong); }
+.thr-new:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+/* ── a thread's card, from its tab ────────────────────────────────────── */
+
+.thr-card { z-index: 90; display: flex; flex-direction: column; gap: 12px; padding: 14px 14px 12px; border-radius: var(--r-lg); font: 400 12.5px/1.45 var(--font); color: var(--ink-2); cursor: default; }
+.thr-card-head { display: flex; align-items: flex-start; gap: 9px; min-width: 0; }
+.thr-card-head .state-ring { margin-top: 2px; }
+.thr-card-head b { flex: 1; min-width: 0; color: var(--ink); font-size: 14px; font-weight: 600; line-height: 1.35; letter-spacing: -0.01em; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.thr-card-when { flex: none; margin-top: 2px; color: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; }
+.thr-card-needs, .thr-card-now { margin: -2px 0 0; padding: 8px 10px; border-radius: var(--r-md); font-size: 12.5px; line-height: 1.45; }
+.thr-card-needs { background: color-mix(in srgb, var(--amber) 13%, transparent); color: color-mix(in srgb, var(--amber) 72%, var(--ink)); }
+.thr-card-needs.stopped { background: color-mix(in srgb, var(--red) 11%, transparent); color: color-mix(in srgb, var(--red) 78%, var(--ink)); }
+.thr-card-now { background: var(--hover); color: var(--ink-2); }
+
+.thr-kv { display: grid; grid-template-columns: 76px minmax(0, 1fr); align-items: start; gap: 6px 10px; margin: 0; }
+.thr-kv dt { color: var(--text-muted); font-size: 12px; line-height: 22px; }
+.thr-kv dd { margin: 0; min-width: 0; min-height: 22px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); line-height: 22px; }
+.thr-branch { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; padding: 0 6px; border-radius: var(--r-sm); background: var(--hover); color: var(--ink-2); font: 11.5px/1.5 var(--mono); }
+.thr-kv .thr-in { display: flex; align-items: center; gap: 6px; }
+.thr-in svg { color: var(--text-muted); flex: none; }
+.thr-kv .thr-agents { display: flex; flex-direction: column; gap: 4px; white-space: normal; }
+.thr-agents > span { display: flex; align-items: center; gap: 6px; min-width: 0; height: 22px; white-space: nowrap; }
+.thr-agent-name { flex: none; }
+.thr-word { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-muted); }
+.thr-agents .thr-word::before { content: "·"; margin-right: 6px; color: var(--faint); }
+.thr-kv .thr-asked { white-space: normal; line-height: 1.45; padding-top: 2px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; color: var(--ink-2); }
+
+/* ── new thread ───────────────────────────────────────────────────────── */
+
+.thr-pop { z-index: 90; display: flex; flex-direction: column; gap: 14px; padding: 14px; border-radius: var(--r-lg); font: 400 13px/1.4 var(--font); color: var(--ink-2); }
+.thr-pop-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.thr-pop-title { flex: none; color: var(--ink); font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+.thr-pop-in { display: inline-flex; align-items: center; gap: 5px; min-width: 0; padding: 2px 7px; border-radius: var(--r-sm); background: var(--hover); color: var(--ink-2); font-size: 12px; }
+.thr-pop-in svg { flex: none; color: var(--text-muted); }
+.thr-pop-in span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thr-pop-head .thr-kbd { margin-left: auto; }
+.thr-kbd {
+  display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border: 1px solid var(--border); border-radius: 5px;
+  background: transparent; color: var(--text-muted); font: 500 11px/1 var(--font);
+}
+
+/* The task and how it runs, in one box, as the composer has them. */
+.thr-box {
+  display: flex; flex-direction: column; border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--bg);
+  transition: border-color var(--t-hover) var(--ease-out), box-shadow var(--t-hover) var(--ease-out);
+}
+.thr-box:focus-within { border-color: var(--border-focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--border-focus) 18%, transparent); }
+.thr-task {
+  display: block; width: 100%; min-height: 52px; max-height: 168px; resize: none; padding: 11px 12px 4px; border: 0; background: none;
+  color: var(--ink); font: 400 13.5px/1.5 var(--font); outline: none;
+}
+.thr-task::placeholder { color: var(--faint); }
+.thr-box-foot { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 8px; }
+.thr-box-foot .thr-tool { height: 28px; border-color: transparent; background: none; font-size: 12.5px; }
+.thr-box-foot .thr-tool:hover, .thr-box-foot .thr-tool.on { background: var(--hover); }
+.thr-start {
+  display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 6px 0 11px; border: 0; border-radius: var(--r-md);
+  background: var(--ink); color: var(--bg); font: 500 12.5px/1 var(--font); cursor: pointer;
+  transition: background-color var(--t-hover) var(--ease-out), opacity var(--t-hover) var(--ease-out);
+}
+.thr-start:hover:not(:disabled) { background: color-mix(in srgb, var(--ink) 86%, var(--bg)); }
+.thr-start:disabled { opacity: .45; cursor: default; }
+.thr-start:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.thr-start kbd { display: inline-grid; place-items: center; width: 18px; height: 18px; border: 0; border-radius: 4px; background: color-mix(in srgb, var(--bg) 18%, transparent); color: inherit; font: 500 11px/1 var(--font); }
+.thr-start .spinner { width: 12px; height: 12px; margin-right: 2px; }
+.thr-grow { flex: 1; }
+
+.thr-where-block { display: flex; flex-direction: column; gap: 8px; }
+.thr-label { color: var(--text-muted); font-size: 12px; font-weight: 500; }
+/* A track with the choice lifted off it (style.css .segmented). */
+.thr-where { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 3px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--panel); }
+.thr-opt {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 0; padding: 8px 10px; border: 0; border-radius: var(--r-md);
+  background: transparent; color: var(--text-muted); font: inherit; text-align: left; cursor: pointer;
+  transition: background-color var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out);
+}
+.thr-opt:hover:not([aria-checked="true"]) { background: var(--hover); color: var(--ink); }
+.thr-opt[aria-checked="true"] { background: var(--card); color: var(--ink); box-shadow: 0 1px 2px rgb(0 0 0 / .14), 0 0 0 1px var(--border-strong) inset; }
+.thr-opt:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.thr-opt-name { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; }
+.thr-opt small { color: var(--text-muted); font-size: 11.5px; line-height: 1.35; }
+.thr-where-note { display: flex; align-items: baseline; gap: 6px; min-width: 0; margin: 0; color: var(--text-muted); font-size: 12px; }
+.thr-where-note > svg { flex: none; align-self: center; }
+.thr-where-note > span { line-height: 18px; }
+/* The branch on the words' own line: monospace sits higher in a line box of its own height, so both get the same 18px and the
+   name is nudged to the words' baseline (Arun, 2026-11-16: "please line up the text"). */
+.thr-where-note code { display: inline-block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font: 11.5px/18px var(--mono); }
+.thr-warn { display: inline-flex; align-items: center; gap: 7px; color: color-mix(in srgb, var(--amber) 75%, var(--ink)); }
+.thr-warn-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--amber); flex: none; }
+
+.thr-note { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; margin: -2px 0 0; padding-top: 12px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 11.5px; line-height: 1.4; }
+.thr-note.error { color: var(--red); }
+.thr-dot { color: var(--faint); margin: 0 2px; }
+.thr-said { display: inline-flex; align-items: center; gap: 5px; color: var(--green); }
+
+@media (max-width: 560px) {
+  .thr-where { grid-template-columns: 1fr; }
+  .thr-tab { max-width: 150px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .thr-tab, .thr-x, .thr-new, .thr-start, .thr-opt, .thr-box { transition: none; }
+}
+
+/* ── start from an issue, a pull request or a branch (Arun, 2026-11-16: Orca's Create worktree) ───────── */
+.thr-from-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.thr-from-row .thr-label { margin: 0 4px 0 0; }
+.thr-from-btn { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px; border: 1px solid var(--border); border-radius: var(--r-md); background: none; color: var(--ink-2); font: 500 12px/1 var(--font); cursor: pointer; white-space: nowrap; transition: background-color var(--t-hover) var(--ease-out), border-color var(--t-hover) var(--ease-out); }
+.thr-from-btn .fi { color: var(--text-muted); }
+.thr-from-btn:hover, .thr-from-btn.on { background: var(--hover); border-color: var(--border-strong); color: var(--ink); }
+.thr-from-btn.picked { border-color: color-mix(in srgb, var(--violet) 45%, var(--border)); color: var(--ink); }
+.thr-from-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+.thr-from-list { display: flex; flex-direction: column; margin-top: -6px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg); overflow: hidden; }
+.thr-from-find { height: 34px; padding: 0 10px; border: 0; border-bottom: 1px solid var(--border); background: none; color: var(--ink); font: 400 13px var(--font); outline: none; }
+.thr-from-find::placeholder { color: var(--faint); }
+.thr-from-rows { max-height: 216px; margin: 0; padding: 4px; overflow-y: auto; list-style: none; overscroll-behavior: contain; }
+.thr-from-item { display: flex; flex-direction: column; gap: 1px; width: 100%; padding: 6px 8px; border: 0; border-radius: 6px; background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.thr-from-item:hover, .thr-from-item:focus-visible { background: var(--hover); outline: none; }
+.thr-from-item.dim { opacity: .55; }
+.thr-from-item-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.thr-from-item-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 11.5px; }
+.thr-from-empty { display: flex; align-items: center; gap: 8px; padding: 10px; color: var(--text-muted); font-size: 12.5px; }
+.thr-from-empty .spinner { width: 12px; height: 12px; }
+
+.thr-from-chip { display: flex; align-items: center; gap: 6px; align-self: flex-start; max-width: 100%; height: 24px; margin: 8px 10px 0; padding: 0 4px 0 8px; border-radius: var(--r-pill); background: color-mix(in srgb, var(--violet) 14%, transparent); color: var(--ink); font: 500 12px var(--font); }
+.thr-from-chip .fi { flex: none; color: var(--violet); }
+.thr-from-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thr-from-x { display: grid; place-items: center; flex: none; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--text-muted); cursor: pointer; }
+.thr-from-x:hover { background: var(--hover); color: var(--ink); }
+.thr-from-where { margin: -4px 0 0; }
+html.desktop :is(.thr-from-btn, .thr-from-item, .thr-from-x) { cursor: pointer; }
+/* Nothing in the popover gives way to fit: it scrolls instead, so an open list never folds to nothing. */
+.thr-pop { overflow-y: auto; }
+.thr-pop > * { flex-shrink: 0; }

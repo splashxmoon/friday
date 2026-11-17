@@ -8,7 +8,7 @@ import { previewCommand, previewStatusLive, startPreview } from "./preview.js";
 import { iosCommand, iosRun, iosStatus } from "./ios.js";
 import { describeEnvironment, folderVars } from "./environment.js";
 import { killTree, NON_INTERACTIVE, readBackground, shellLine, startBackground, stopBackground } from "./background.js";
-import { applyPatch, baseCopy, treeOf, branchesOf, checkpoint, commitAll, compareOf, diffTrees, discardFiles, gitDiffOf, logOf, prFailures, prFeedback, prStatusJson, publish, pullOf, remoteOf, restore, showOf, stageFiles, statusOf, switchTo, unstageFiles, dropBaseCopy } from "./git.js";
+import { applyPatch, baseCopy, treeOf, branchesOf, checkpoint, commitAll, compareOf, diffTrees, discardFiles, gitDiffOf, logOf, prFailures, prFeedback, prStatusJson, publish, pullOf, renameBranchOf, remoteOf, restore, showOf, stageFiles, statusOf, switchTo, unstageFiles, dropBaseCopy } from "./git.js";
 
 /**
  * Reading the folder a coding agent is working in, for everyone else.
@@ -100,7 +100,7 @@ const envNames = (text: string) => [...envVars(text).values()].map((n) => `${n}=
 
 export type RepoOp = RepoCall["op"];
 /** What each op needs the host to have allowed. Anything above it is refused. */
-const NEEDS: Record<RepoOp, EngineMode> = { tree: "plan", read: "plan", search: "plan", write: "edits", edit: "edits", shell: "full", baseline: "full", checkpoint: "edits", restore: "edits", commit: "edits", publish: "full", remote: "plan", branches: "plan", switch: "edits", prcomments: "plan", prstatus: "plan", prchecks: "plan", preview: "full", ios: "full", environment: "plan", context: "plan", bgstart: "full", bgread: "plan", bgstop: "plan", diff: "plan", commands: "plan", terminal: "plan", apply: "edits", status: "plan", log: "plan", show: "plan", gitdiff: "plan", compare: "plan", stage: "edits", unstage: "edits", hunk: "edits", discard: "edits", pull: "edits" };
+const NEEDS: Record<RepoOp, EngineMode> = { tree: "plan", read: "plan", search: "plan", write: "edits", edit: "edits", shell: "full", baseline: "full", checkpoint: "edits", restore: "edits", commit: "edits", publish: "full", remote: "plan", branches: "plan", switch: "edits", prcomments: "plan", prstatus: "plan", prchecks: "plan", preview: "full", ios: "full", environment: "plan", context: "plan", bgstart: "full", bgread: "plan", bgstop: "plan", diff: "plan", commands: "plan", terminal: "plan", apply: "edits", status: "plan", log: "plan", show: "plan", gitdiff: "plan", compare: "plan", stage: "edits", unstage: "edits", hunk: "edits", discard: "edits", pull: "edits", renamebranch: "edits" };
 const RANK: Record<EngineMode, number> = { plan: 0, edits: 1, full: 2 };
 
 export interface RepoRequest extends RepoCall {
@@ -218,8 +218,9 @@ export async function readRepo(root: string, req: RepoRequest): Promise<string> 
   if (req.op === "checkpoint") return (await checkpoint(base, req.query ?? "run")) ?? "";
   // What is not yet committed, against HEAD or a checkpoint: the change a run made, to show and to review. Only reads.
   // The Git panel's reads and moves (git.ts), each answering in JSON so a refusal reaches the person as its reason.
-  if (req.op === "status" || req.op === "log" || req.op === "show" || req.op === "gitdiff" || req.op === "compare" || req.op === "stage" || req.op === "unstage" || req.op === "discard" || req.op === "hunk" || req.op === "pull") {
+  if (req.op === "status" || req.op === "log" || req.op === "show" || req.op === "gitdiff" || req.op === "compare" || req.op === "stage" || req.op === "unstage" || req.op === "discard" || req.op === "hunk" || req.op === "pull" || req.op === "renamebranch") {
     try {
+      if (req.op === "renamebranch") return JSON.stringify(await renameBranchOf(base, req.ref ?? ""));
       if (req.op === "status") return JSON.stringify(await statusOf(base));
       if (req.op === "log") return JSON.stringify({ commits: await logOf(base, req.limit ?? 30, req.path || undefined) });
       if (req.op === "show" || req.op === "gitdiff") {

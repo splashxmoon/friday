@@ -16,7 +16,7 @@ import { taskKind } from "../strengths.js";
 import { missedLast, type Learned } from "../route-learning.js";
 import { repoKeyOf } from "../repo-key.js";
 import { randomUUID } from "node:crypto";
-import { buildCatchUp, decidedSince, needsCatchUp } from "../session/catchup.js";
+import { buildCatchUp, decidedSince, missedSince, missedText, needsCatchUp } from "../session/catchup.js";
 import { lastRunStart, spentBefore, tokensIn, ToolUsage } from "../tool-usage.js";
 import { WebSocket } from "ws";
 import type { Bus, BusMessage } from "../bus.js";
@@ -91,7 +91,57 @@ const MODES: EngineMode[] = ["plan", "edits", "full"];
 /** How long a runner is given to say whether its tool took a message mid-turn before it goes with the next turn instead. */
 const STEER_ANSWER_MS = 15_000;
 /** Said with a person's message that reaches a coding tool mid-task. */
-export const STEER_NOTE = "[Friday] The person wrote this while you were working. If it is a question, answer it in one line; if it changes what you are doing, take it in; then carry on from where you are, without starting over.";
+export const STEER_NOTE = "[Friday] The person wrote this while you were working. If it is a question, answer it in one line; if it changes what you are doing, take it in; then carry on from where you are, without starting over. If it is a new task, finish what you are on first, then do it: tasks go in the order they were sent, and none is left out.";
+
+/** How Friday's check at the end of a run begins, the one asking after what a person wrote mid-turn (owedNote): found again by it. */
+export const OWED_HEAD = "[Friday] Before you finish:";
+
+/**
+ * A person's tasks, one a turn, in the order they were sent (Arun, 2026-11-16: "if i stack a bunch of tasks for the coding tool in
+ * the coding session or even the agents like it will work in order of what was said to be worked on and nothing gets skipped"):
+ * the queue up to its second message from a person, with the other agents' and Friday's messages around the first. Several of a
+ * person's tasks in one turn were one prompt the tool took as one job, did part of, and the rest was marked delivered and gone.
+ */
+export function oneTaskAhead(events: readonly SessionEvent[], queue: readonly number[]): number[] {
+  const bySeq = new Map(events.map((e) => [e.seq, e]));
+  const task = (q: number) => ((e) => e?.actor.kind === "human" && e.body.type === "instruction" && !e.body.approval)(bySeq.get(q));
+  const second = queue.findIndex((q, i) => task(q) && queue.slice(0, i).some(task));
+  return second < 0 ? [...queue] : queue.slice(0, second);
+}
+
+/**
+ * A person's messages handed to this run mid-turn (a steer) and not checked on since: what the end of the run asks after, and
+ * what a Stop or an error puts back in the queue, in their order, so none is lost with the turn it was slipped into. One the tool
+ * couldn't take (put back at once) isn't owed: it waits in the queue already.
+ */
+export function steeredOwed(events: readonly SessionEvent[], lane: string): number[] {
+  const mine = events.filter((e) => (e.lane ?? MAIN_LANE) === lane);
+  const start = mine.findLastIndex((e) => e.body.type === "run.started");
+  if (start < 0) return [];
+  const run = mine.slice(start);
+  const checked = run.findLastIndex((e) => e.body.type === "instruction" && !!e.body.keepGoing && e.body.text.startsWith(OWED_HEAD));
+  const bySeq = new Map(events.map((e) => [e.seq, e]));
+  const out: number[] = [];
+  run.forEach((e, j) => {
+    if (j <= checked || e.body.type !== "instructions.delivered" || !e.body.steer) return;
+    for (const q of e.body.seqs) {
+      const m = bySeq.get(q);
+      if (m?.actor.kind !== "human" || m.body.type !== "instruction" || m.body.approval) continue;
+      if (run.slice(j + 1).some((x) => x.body.type === "instructions.requeued" && x.body.seqs.includes(q))) continue;
+      if (!out.includes(q)) out.push(q);
+    }
+  });
+  return out;
+}
+
+/** The check at the end of a run that had a person's messages slipped into it: each one, in order, done or done now. */
+export function owedNote(events: readonly SessionEvent[], seqs: readonly number[]): string {
+  const bySeq = new Map(events.map((e) => [e.seq, e]));
+  const lines = seqs.flatMap((q) => ((e) => (e?.body.type === "instruction" ? [`${e.actor.name}: ${e.body.text.trim().replace(/\s+/g, " ").slice(0, 600)}`] : []))(bySeq.get(q)));
+  if (!lines.length) return "";
+  const list = lines.length === 1 ? lines[0]! : lines.map((l, i) => `${i + 1}. ${l}`).join("\n");
+  return `${OWED_HEAD} ${lines.length === 1 ? "this came in while you were working" : "these came in while you were working, in this order"}:\n${list}\n\nMake sure ${lines.length === 1 ? "it is" : "each one is"} done${lines.length === 1 ? "" : ", in that order"}. If it is done already, or was only a question you answered, say so in a line; if not, do it now. Then finish.`;
+}
 
 /**
  * A message that can be read mid-turn: words to the agent, from a person, another agent or another session's. Not a Stop or
@@ -279,12 +329,15 @@ export function cutTurnOf(events: SessionEvent[], lane: string): { seqs: number[
   const notTaken = (e: SessionEvent, j: number) => e.body.type === "instructions.delivered" && mine.slice(j + 1).some((x) => x.body.type === "instructions.requeued" && x.body.steer && e.body.type === "instructions.delivered" && e.body.seqs.every((q) => x.body.type === "instructions.requeued" && x.body.seqs.includes(q)));
   const i = mine.findLastIndex((e, j) => j >= start && e.body.type === "instructions.delivered" && !notTaken(e, j));
   if (i < 0) return { seqs: [] };
-  const d = mine[i]!.body;
   if (mine.slice(i + 1).some(dropped)) return { seqs: [] };
   // The turn they went in: this delivery's, or the turn's own delivery before a message handed to it mid-turn (a steer).
-  const own = mine.slice(start, i + 1).findLast((e) => e.body.type === "instructions.delivered" && !!e.body.turn);
+  const ownAt = mine.findLastIndex((e, j) => j >= start && j <= i && e.body.type === "instructions.delivered" && !!e.body.turn);
+  const own = ownAt >= 0 ? mine[ownAt] : undefined;
   const turn = own?.body.type === "instructions.delivered" ? own.body.turn : undefined;
-  return d.type === "instructions.delivered" ? { seqs: d.seqs, ...(turn ? { turn } : {}) } : { seqs: [] };
+  // Everything the turn held: its own delivery and every message slipped into it after, in order; only the last was put back
+  // before, and the ones before it were lost with a server that crashed mid-turn.
+  const seqs = mine.slice(ownAt >= 0 ? ownAt : i, i + 1).flatMap((e, k) => (e.body.type === "instructions.delivered" && !notTaken(e, (ownAt >= 0 ? ownAt : i) + k) ? e.body.seqs : []));
+  return { seqs: [...new Set(seqs)], ...(turn ? { turn } : {}) };
 }
 
 /**
@@ -1153,7 +1206,9 @@ class LaneHost {
    */
   private async steer(ev: SessionEvent): Promise<void> {
     const state = await this.store.state(this.sid);
-    if (!this.turn || !pendingFor(state, this.lane).includes(ev.seq)) return void this.pump();
+    // Only the oldest waiting, and none while an earlier one is still being handed over: one sent after a message still queued
+    // (files, a command), or after one the tool may yet turn down and put back first, goes after it, never past it.
+    if (!this.turn || this.steering.size || pendingFor(state, this.lane)[0] !== ev.seq) return void this.pump();
     // Somebody else's work never reaches a tool on its host's own plan mid-turn either: the queue says no to it (drain).
     if (ownPlan(state.engines[this.lane]) && refusal(state.engines[this.lane], whoseWork(await this.store.events(this.sid), ev))) return void this.pump();
     const capped = this.turnCap !== undefined;
@@ -1162,7 +1217,7 @@ class LaneHost {
     // On hold, finishing the turn it was told to stop: another agent's message waits for the person, as in drain (held.ts).
     if (!runnableQueue(events, this.lane, [ev.seq]).length) return void this.pump();
     const { prompt } = promptFor(events, [ev.seq], [], "");
-    if (!(await this.append({ type: "instructions.delivered", seqs: [ev.seq] })).ok) return void this.pump();
+    if (!(await this.append({ type: "instructions.delivered", seqs: [ev.seq], steer: true })).ok) return void this.pump();
     const id = randomUUID().slice(0, 8);
     this.steering.set(id, ev.seq);
     // A person's word mid-task comes with how to take it (after OpenBot's steer note; Arun, 2026-11-15): a question answered in a
@@ -1178,7 +1233,8 @@ class LaneHost {
     const seq = this.steering.get(id);
     if (seq === undefined) return;
     this.steering.delete(id);
-    if (ok) return;
+    // Taken into the turn running now: the turn's too, put back with it if its connection drops.
+    if (ok) return void (this.inFlight && !this.inFlight.includes(seq) && this.inFlight.push(seq));
     await this.append({ type: "instructions.requeued", seqs: [seq], steer: true }).catch((e) => console.error("[engine] requeue:", e));
     void this.pump();
   }
@@ -1252,7 +1308,7 @@ class LaneHost {
       if (state.terminals?.[this.lane]) return;
       // On hold as a person said (held.ts): the other agents' messages and Friday's wait in the queue for the next turn a person
       // starts, and never start one themselves.
-      const pending = runnableQueue(events, this.lane, pendingFor(state, this.lane));
+      let pending = runnableQueue(events, this.lane, pendingFor(state, this.lane));
       const guard: AppendGuard = { expectEpoch: epoch };
       // A team's queue held by the person's pause, or for a tool out of usage: it waits, and the app's re-pump starts it after.
       // No hourly budget: agents bouncing the same thing back and forth are stopped where they message (agent-mesh loopBetween).
@@ -1276,6 +1332,12 @@ class LaneHost {
           continue;
         }
       }
+      // What a person wrote while it worked, slipped into the turn just ended: asked after once, by name and in order, before
+      // anything newer, so none is left undone for having come in mid-task, nor done after what was sent after it.
+      if (run.status === "running") {
+        const owed = owedNote(events, steeredOwed(events, this.lane));
+        if (owed && (await this.store.append(this.sid, FRIDAY, { type: "instruction", text: owed, interrupt: false, keepGoing: true }, { ...guard, lane: this.lane })).ok) continue;
+      }
       if (!pending.length) {
         if (run.status !== "running") return;
         // Its turn ended short of its task (its plan still open, a "next I'll…" left hanging, a board task unfinished): told to
@@ -1290,6 +1352,11 @@ class LaneHost {
       // The turn's id, made now so it goes in the log with what it delivers: a server after this one, if this one crashes, knows
       // which turn it puts back (cutTurnOf), and a runner that finished it can say so.
       const turnId = randomUUID().slice(0, 8);
+      // One of a person's tasks a turn, in the order they were sent; the next is the turn after (oneTaskAhead).
+      const queued = pending;
+      // The check on what was slipped into the last turn goes first, ahead of anything newer queued.
+      const check = queued.find((q) => ((e) => e?.body.type === "instruction" && !!e.body.keepGoing && e.body.text.startsWith(OWED_HEAD))(events.find((x) => x.seq === q)));
+      pending = check !== undefined ? [check] : oneTaskAhead(events, queued);
       if (run.status !== "running") {
         // Anyone else's is asked for now. A machine in plan mode or a folder outside git answers with a sentence, not an
         // id, and that run simply has no undo.
@@ -1298,7 +1365,7 @@ class LaneHost {
         // gone, so the message waits for it to come back, as the room was told it would. And what is queued is read again:
         // a message taken back or edited meanwhile is not the one to run.
         if (this.closed) return;
-        if (!this.selfCheckpoint && pendingFor(await this.store.state(this.sid), this.lane).join() !== pending.join()) continue;
+        if (!this.selfCheckpoint && pendingFor(await this.store.state(this.sid), this.lane).join() !== queued.join()) continue;
         const checkpoint = /^[0-9a-f]{40}$/.test(sha) ? sha : undefined;
         // The start and what it delivers in one write, in that order: both under the epoch guard, or neither.
         const start: EventBody[] = [{ type: "run.started", causedBy: pending[0]!, ...(checkpoint ? { checkpoint } : {}) }, { type: "instructions.delivered", seqs: pending, turn: turnId }];
@@ -1338,6 +1405,9 @@ class LaneHost {
       const catchUp = first ? buildCatchUp(state, events, pending, this.lane) : "";
       // After that, what people marked as decided since its last turn (core.ts "decide"): it never argues a settled call again.
       const decided = first ? "" : decidedSince(state, events, this.lane, pending);
+      // Turned to after another agent here worked (several coding tools in one thread): told what the others did since its last
+      // turn, only that (missedSince). A crew's room has its own talk; an agent's message to it carries its own context.
+      const missed = first || state.options.team || Object.keys(state.engines).length < 2 || !pending.some((q) => events.find((e) => e.seq === q)?.actor.kind === "human") ? "" : missedText(missedSince(state, events, this.lane, pending));
       // Its first turn here also carries what the team learned on this repo before, from any agent: it starts briefed, not cold.
       // Asked now and waited on with the model and the note below: none of the three needs another's answer.
       const briefing = first && this.briefer ? this.briefer(this.lane, turn.prompt).catch(() => "") : "";
@@ -1358,7 +1428,7 @@ class LaneHost {
       const [brief, routed, note] = await Promise.all([briefing, routing, this.systemNote(events)]);
       slowly(`a turn's brief for ${this.sid}`, building, { events: events.length });
       // The shield hides typed keys from the agent too: told once, wherever in what it gets (a catch-up included) one is.
-      let prompt = withShieldNote(`${brief}${catchUp}${decided}${turn.prompt}`);
+      let prompt = withShieldNote(`${brief}${catchUp}${decided}${missed}${turn.prompt}`);
       const model = routed?.model;
       // The lane's pinned effort, as the log stood when this turn was built: a change made while it runs waits for the next.
       const effort = laneEffort(state, this.lane, this.info.tool, routed?.effort);
@@ -1435,7 +1505,7 @@ class LaneHost {
       if (state.options.team && !command) prompt = withShieldNote(`${brief}${catchUp}${decided}${this.preambleNow()}${modeNote}${turn.prompt}`);
       // A crew mate in a coding session: what changed since its last turn (its memory) leads it too.
       else if (this.matePreamble.length && !command) prompt = withShieldNote(`${brief}${catchUp}${decided}${this.preambleNow()}${turn.prompt}`);
-      this.inFlight = pending;
+      this.inFlight = [...pending];
       this.turnCap = cap;
       // Every instruction of it handed back after a dropped connection: the turn its runner may still have running, to take on
       // where it got to rather than start again (runner adopt).
@@ -1457,6 +1527,13 @@ class LaneHost {
       }
       this.inFlight = null;
       if (end.outcome === "error" && this.requeued) return;
+      // Stopped or failed: what a person slipped into it goes back in the queue, in its order, rather than with the turn. After a
+      // Stop it waits there, the run paused, for the person to carry on or take it back; after an error it is the next turn.
+      // Stopped for a message sent to cut in (the run goes on): the check at the run's end asks after them instead.
+      if (end.outcome === "error" || (end.outcome === "stopped" && runOf(await this.store.state(this.sid), this.lane).status !== "running")) {
+        const owed = steeredOwed(await this.store.events(this.sid), this.lane);
+        if (owed.length) await this.append({ type: "instructions.requeued", seqs: owed }).catch((e) => console.error("[engine] requeue:", e));
+      }
       if (end.outcome === "error") {
         // No checkpoint here: a run that failed has often lost its machine, and its undo can put back everything as before.
         await this.append({ type: "run.ended", outcome: "error", error: (end.error ?? "The coding agent failed.").slice(0, 2000) });

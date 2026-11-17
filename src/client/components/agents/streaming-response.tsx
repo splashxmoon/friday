@@ -56,6 +56,8 @@ export interface StreamingResponseProps {
   announce?: boolean;
   /** Hides the built-in completion actions without changing response status. */
   showActions?: boolean;
+  /** No thumbs under it: a crew mate's reply in the open-source edition (Activity.tsx). */
+  noFeedback?: boolean;
   /** More controls at the end of the same row, for what only this surface knows to offer. */
   extraActions?: ReactNode;
   /** Quiet words at the row's far end, right-aligned: what the turn used. */
@@ -114,6 +116,7 @@ export function StreamingResponse({
   onFeedbackChange,
   announce = true,
   showActions = true,
+  noFeedback = false,
   extraActions,
   actionsEnd,
   className,
@@ -218,7 +221,7 @@ export function StreamingResponse({
                   <RotateCcw className="size-3.5" />
                 </ResponseAction>
               ) : null}
-              {complete ? (
+              {complete && !noFeedback ? (
                 <>
                   <ResponseAction
                     label="Helpful"

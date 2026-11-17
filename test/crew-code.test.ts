@@ -9,7 +9,7 @@ import test from "node:test";
 import { laneAt } from "../src/client/lane-at.js";
 import { roleHint, visitKeep, visitNote, visitRefusal, type Visit } from "../src/crew-code.js";
 import { decisionsOf, memoryLine, offerNow, withDecisions } from "../src/decision-memory.js";
-import { initialState, type SessionState } from "../src/session/projection.js";
+import { handedCleared, initialState, type SessionState } from "../src/session/projection.js";
 import { MAIN_LANE, type EventBody } from "../src/types.js";
 
 process.env.FRIDAY_TEAMMATES_DRY = "1";
@@ -220,7 +220,7 @@ test("keep this going: the rules, the line and the brief", async () => {
   assert.match(bring, /These are changed here too/);
 });
 
-test("keep this going on this computer: Kit takes the rest as a lane in a copy of its own, the line keeps up, its result comes back, Take it back and Bring it in", async (t) => {
+test("keep this going on this computer: Kit takes the rest in a thread of its own on its page, in a copy of the folder, never a lane here; the line keeps up, its result comes back, Take it back and Bring it in", async (t) => {
   const { app, home, me, send } = await local(t);
   const kit = (await send("/api/teammates", "POST", { name: "Kit", role: "Finishes what a session leaves open.", tool: "claude", folder: path.join(home, "Kit") })).body.teammates[0]!;
   const agent = { id: "engine:local", name: "Codex", kind: "agent" as const };
@@ -236,28 +236,37 @@ test("keep this going on this computer: Kit takes the rest as a lane in a copy o
   const sheet = await call<Sheet>("/api/sessions/code1/keep-going");
   assert.equal(sheet.status, 200, sheet.body.error);
   assert.deepEqual([sheet.body.lane, sheet.body.own.map((m) => m.name), sheet.body.own[0]!.line, sheet.body.finisher, sheet.body.handed], [MAIN_LANE, ["Kit"], "Starts now on your computer", null, null]);
-  // Handed: Kit comes in as a lane, in a copy of the session's folder of its own, what's uncommitted carried in; told the work.
-  const handed = await call<{ job: { id: string; lane: string } }>("/api/sessions/code1/keep-going", "POST", { mate: kit.id, note: "finish the tax table", carry: {}, ask: ["pr", "merge"] });
+  // Handed: a thread of Kit's own on its page, named for the session, in a copy of the session's folder of its own, what's
+  // uncommitted carried in; told the work there. This session gets no lane of Kit's (Arun, 2026-11-16).
+  const lanesBefore = (await app.store.state("code1")).lanes.length;
+  const handed = await call<{ job: { id: string; lane: string; sid: string; thread: string } }>("/api/sessions/code1/keep-going", "POST", { mate: kit.id, note: "finish the tax table", carry: {}, ask: ["pr", "merge"] });
   assert.equal(handed.status, 200, handed.body.error);
   const job = handed.body.job;
+  assert.notEqual(job.sid, "code1");
+  assert.equal((await app.store.state("code1")).lanes.length, lanesBefore, "no lane of Kit's in the coding session");
+  const thread = (await app.teammates.rooms()).find((r) => r.id === job.thread)!;
+  assert.deepEqual([thread.thread, thread.sid, thread.lanes[kit.id], thread.name, thread.work?.from, thread.work?.carry], [kit.id, job.sid, job.lane, "Checkout rewrite", "code1", true]);
   const start = app.teammates.starts.at(-1)!;
-  assert.deepEqual([start.lane, start.worktree, start.copyName, start.carry, start.keepAs], [job.lane, "lane", "Kit", true, `${kit.id}.visit.code1`]);
-  const events = await app.store.events("code1");
-  const told = events.findLast((e) => e.lane === job.lane && e.body.type === "instruction");
+  assert.deepEqual([start.sid, start.lane, start.worktree, start.copyName, start.carry, start.keepAs], [job.sid, job.lane, "lane", "Kit", true, `${kit.id}.${thread.id}`]);
+  assert.equal(start.cwd, thread.work?.cwd, "the session's own folder, copied");
+  const told = (await app.store.events(job.sid)).findLast((e) => e.lane === job.lane && e.body.type === "instruction");
   assert.match(told?.body.type === "instruction" ? told.body.text : "", /^finish the tax table\n\n\(Me handed this on from the session "Checkout rewrite"\. Your result goes back there\.\)/);
   let st = await app.store.state("code1");
   const h = st.handed?.[job.id];
-  assert.deepEqual([h?.mateName, h?.lane, h?.jobLane, h?.ask], ["Kit", MAIN_LANE, job.lane, ["pr", "merge"]]);
+  assert.deepEqual([h?.mateName, h?.lane, h?.jobLane, h?.jobSid, h?.thread, h?.ask, h?.note], ["Kit", MAIN_LANE, job.lane, job.sid, job.thread, ["pr", "merge"], "finish the tax table"]);
+  // Open goes to that thread.
+  const opened = await call<{ sid: string; lane: string; mate: string; thread: string }>(`/api/sessions/code1/keep-going/${job.id}`);
+  assert.deepEqual([opened.body.sid, opened.body.lane, opened.body.mate, opened.body.thread], [job.sid, job.lane, kit.id, job.thread]);
   // The line keeps up: Kit working, then done with what it said and changed.
   const kitBot = { id: `engine:local`, name: "Kit", kind: "agent" as const };
-  await app.store.append("code1", kitBot, { type: "run.started", causedBy: told!.seq } as EventBody, { lane: job.lane });
+  await app.store.append(job.sid, kitBot, { type: "run.started", causedBy: told!.seq } as EventBody, { lane: job.lane });
   const until = async (ok: () => Promise<boolean>, what: string) => {
     for (let i = 0; i < 100; i++, await new Promise((r) => setTimeout(r, 30))) if (await ok()) return;
     throw new Error(`timed out: ${what}`);
   };
   await until(async () => (await app.store.state("code1")).handed?.[job.id]?.state === "running", "running");
-  await app.store.append("code1", kitBot, { type: "agent.message", text: "The tax table rounds per line now. Tests green: https://github.com/a/b/pull/7", toolCalls: [] } as EventBody, { lane: job.lane });
-  await app.store.append("code1", kitBot, { type: "run.ended", outcome: "done" }, { lane: job.lane });
+  await app.store.append(job.sid, kitBot, { type: "agent.message", text: "The tax table rounds per line now. Tests green: https://github.com/a/b/pull/7", toolCalls: [] } as EventBody, { lane: job.lane });
+  await app.store.append(job.sid, kitBot, { type: "run.ended", outcome: "done" }, { lane: job.lane });
   await until(async () => (await app.store.state("code1")).handed?.[job.id]?.state === "done", "done");
   st = await app.store.state("code1");
   assert.match(st.handed![job.id]!.result!.said, /^The tax table rounds per line now/);
@@ -281,14 +290,35 @@ test("keep this going on this computer: Kit takes the rest as a lane in a copy o
   assert.ok(after.some((e) => e.body.type === "crew.brought" && e.body.pieces[0]?.key === look.body.pieces[0]!.key));
   assert.equal((await call<All>(`/api/sessions/code1/keep-going?bringFrom=all`)).body.pieces.length, 0);
   assert.equal((await call<Pieces>(`/api/sessions/code1/keep-going?bringFrom=${encodeURIComponent(`mate:${kit.id}`)}`)).body.pieces.length, 0);
-  // Again, then Take it back: the lane's own again, Kit's run stopped.
-  const again = await call<{ job: { id: string; lane: string } }>("/api/sessions/code1/keep-going", "POST", { mate: kit.id, note: "and the receipts" });
+  // Again: a new thread of its own. Then Take it back: the lane's own again, its line cleared, and the person's words given back.
+  const again = await call<{ job: { id: string; lane: string; sid: string; thread: string } }>("/api/sessions/code1/keep-going", "POST", { mate: kit.id, note: "and the receipts" });
   assert.equal(again.status, 200, again.body.error);
-  assert.equal(again.body.job.lane, job.lane, "the lane it already has here");
+  assert.notEqual(again.body.job.thread, job.thread, "a thread of its own for each hand-off");
   assert.equal((await call("/api/sessions/code1/keep-going", "POST", { mate: kit.id })).status, 409, "already on it");
-  const back = await call<{ ok: boolean }>(`/api/sessions/code1/keep-going/${again.body.job.id}/back`, "POST", { how: "back" });
+  const back = await call<{ ok: boolean; note: string }>(`/api/sessions/code1/keep-going/${again.body.job.id}/back`, "POST", { how: "back" });
   assert.equal(back.status, 200, back.body.error);
-  assert.equal((await app.store.state("code1")).handed![again.body.job.id]!.back, "back");
+  assert.equal(back.body.note, "and the receipts", "what was written, for the box");
+  const cleared = (await app.store.state("code1")).handed![again.body.job.id]!;
+  assert.equal(cleared.back, "back");
+  assert.ok(handedCleared(cleared), "its line leaves the chat");
+  assert.ok(!handedCleared((await app.store.state("code1")).handed![job.id]!), "one brought in keeps its line");
+  // Taken back twice is still once.
+  assert.equal((await call<{ note: string }>(`/api/sessions/code1/keep-going/${again.body.job.id}/back`, "POST", { how: "back" })).body.note, "and the receipts");
+  assert.equal((await app.store.events("code1")).filter((e) => e.body.type === "crew.handed.back" && e.body.job === again.body.job.id).length, 1);
+
+  // Dynamic: a hand-off's thread deleted takes its line away; Kit taken off the crew takes every one of its lines away.
+  const third = await call<{ job: { id: string; thread: string } }>("/api/sessions/code1/keep-going", "POST", { mate: kit.id, note: "the refunds" });
+  assert.equal((await send(`/api/teammates/rooms/${third.body.job.thread}`, "DELETE")).status, 200);
+  assert.equal((await app.store.state("code1")).handed![third.body.job.id]!.back, "gone");
+  assert.equal((await call(`/api/sessions/code1/keep-going/${third.body.job.id}`)).status, 404, "nothing to open");
+  const fifth = await call<{ job: { id: string } }>("/api/sessions/code1/keep-going", "POST", { mate: kit.id, note: "the invoices" });
+  assert.equal(fifth.status, 200, fifth.body.error);
+  assert.equal((await send(`/api/teammates/${kit.id}`, "DELETE")).status, 200);
+  const st2 = await app.store.state("code1");
+  assert.equal(st2.handed![fifth.body.job.id]!.back, "gone");
+  assert.equal(st2.handed![job.id]!.back, "gone", "finished and brought in: its line goes too, the work brought in stays in the chat");
+  assert.ok((await app.store.events("code1")).some((e) => e.body.type === "instruction" && /brought Kit's finished work back/.test(e.body.text)));
+  assert.equal((await call("/api/sessions/code1/keep-going", "POST", { mate: kit.id })).status, 404, "Kit isn't there to hand to");
 });
 
 test("keep this going to a crew room: posted there as the person's message to its lead, its line reads how the room stands", async (t) => {
@@ -328,4 +358,20 @@ test("keep this going to a crew room: posted there as the person's message to it
   await app.store.append(r.sid, kitBot, { type: "run.ended", outcome: "done" }, { lane: r.lanes[kit.id]! });
   const newer = (await call<{ pieces: { what: string; who?: { name: string } }[] }>(all)).body.pieces;
   assert.deepEqual(newer.map((p) => [p.what, p.who?.name]), [["Receipts print the tax per line too.", "Kit"]]);
+
+  // Take it back before Kit reads it: its message in the room taken back, its line cleared, the words given back.
+  const more = await call("/api/sessions/code1/keep-going", "POST", { room: r.id, note: "now the refunds" });
+  assert.equal(more.status, 200);
+  const morePosted = (await app.store.events(r.sid)).findLast((e) => e.body.type === "instruction" && e.lane === r.lanes[kit.id])!;
+  const roomBack = await call<{ note: string }>(`/api/sessions/code1/keep-going?roomBack=${r.id}`, "POST", {});
+  assert.equal(roomBack.status, 200, roomBack.body.error);
+  assert.equal(roomBack.body.note, "now the refunds");
+  assert.ok((await app.store.state(r.sid)).withdrawn.includes(morePosted.seq), "taken back in the room before it was read");
+  assert.ok((await app.store.events("code1")).some((e) => e.body.type === "crew.handed.room.back" && e.body.room === r.id && e.body.how === "back"));
+  // Handed again, then the room taken away: its line goes with it.
+  assert.equal((await call("/api/sessions/code1/keep-going", "POST", { room: r.id, note: "the coupons" })).status, 200);
+  assert.equal((await fetch(`${app.url}/api/teammates/rooms/${r.id}`, { method: "DELETE", headers: { "x-friday-local": "1" } })).status, 200);
+  const last = (await app.store.events("code1")).findLast((e) => e.body.type === "crew.handed.room.back");
+  assert.deepEqual(last?.body.type === "crew.handed.room.back" ? [last.body.room, last.body.how] : [], [r.id, "gone"]);
+  assert.equal((await call(`/api/sessions/code1/keep-going?roomStatus=${r.id}`)).status, 404);
 });

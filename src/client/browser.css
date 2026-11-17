@@ -1,0 +1,67 @@
+/* The Browser panel (Preview.tsx), redesigned (Arun, 2026-11-16: "redesign browser panel too"): one band of chrome, its tabs as
+   chips that lift the one showing, the address in the interface's own type with what it is at its start, the page's tools grouped
+   at its end, and a new tab that offers what runs here instead of a blank page. */
+
+/* One band: tabs, then the address, on the panel's ground, a single line under it. */
+.preview-body .bw-tabs { gap: 3px; padding: 8px 10px 4px; background: var(--panel); scrollbar-width: none; }
+.preview-body .bw-tabs::-webkit-scrollbar { display: none; }
+.preview-body .bw-tab {
+  position: relative; display: inline-flex; align-items: center; flex: 0 1 auto; min-width: 72px; max-width: 200px; height: 28px; padding: 0;
+  border: 0; border-radius: var(--r-md); color: var(--text-muted);
+  transition: background-color var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out);
+}
+.preview-body .bw-tab:hover { background: var(--hover); color: var(--ink); }
+.preview-body .bw-tab.on { background: var(--card); color: var(--ink); box-shadow: 0 1px 2px rgb(0 0 0 / .14), 0 0 0 1px var(--border-strong) inset; }
+.preview-body .bw-tab-name {
+  display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: none; height: 28px; padding: 0 10px 0 9px;
+  font: 500 12.5px/1 var(--font); color: inherit;
+}
+.bw-tab-icon { flex: none; opacity: .75; }
+/* No room kept for close: it comes over the name's end on hover, and stays on the one showing. */
+.preview-body .bw-tab-x { display: none; width: 18px; height: 18px; margin-right: 5px; }
+.preview-body .bw-tab.on .bw-tab-x, .preview-body .bw-tab:hover .bw-tab-x, .preview-body .bw-tab-x:focus-visible { display: grid; }
+.preview-body .bw-tab:not(.on):hover .bw-tab-x { position: absolute; right: 0; }
+.preview-body .bw-tab:not(.on):hover .bw-tab-name { mask-image: linear-gradient(to right, #000 calc(100% - 34px), transparent calc(100% - 14px)); }
+.preview-body .bw-tab.on .bw-tab-name { padding-right: 4px; }
+.preview-body .bw-tabs > .icon-btn { width: 28px; height: 28px; margin-left: 2px; border-radius: var(--r-md); }
+
+.preview-body .browser-bar { gap: 6px; padding: 4px 10px 8px; border-bottom: 1px solid var(--border); background: var(--panel); }
+.bw-nav { display: inline-flex; align-items: center; gap: 1px; flex: none; }
+.preview-body .browser-bar .icon-btn.tiny { width: 28px; height: 28px; border-radius: var(--r-md); color: var(--text-muted); }
+.preview-body .browser-bar .icon-btn.tiny:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
+.preview-body .browser-bar .icon-btn.tiny:disabled { opacity: .35; }
+/* The address: the interface's type, what it is at its start (an icon laid over the field's padding). */
+.bw-url-icon { position: relative; z-index: 1; flex: none; margin-right: -28px; margin-left: 2px; color: var(--text-muted); pointer-events: none; }
+.preview-body .browser-url {
+  height: 30px; padding: 0 12px 0 30px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg);
+  color: var(--ink); font: 400 12.5px/1 var(--font); transition: border-color var(--t-hover) var(--ease-out), box-shadow var(--t-hover) var(--ease-out);
+}
+.preview-body .browser-url::placeholder { color: var(--faint); }
+.preview-body .browser-url:hover { border-color: var(--border-strong); }
+.preview-body .browser-url:focus { border-color: var(--border-focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--border-focus) 18%, transparent); }
+.preview-body .browser-bar .bw-servers { margin-left: 0; }
+
+/* A new tab: what runs here, the ways to start it, what else runs on this computer. */
+.bw-start { display: flex; flex-direction: column; gap: 20px; width: 100%; max-width: 520px; margin: 0 auto; padding: 36px 20px 24px; overflow: auto; font: 400 13px/1.45 var(--font); color: var(--ink-2); }
+.bw-start-head { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
+.bw-start-mark { display: grid; place-items: center; width: 40px; height: 40px; margin-bottom: 4px; border-radius: 12px; background: var(--hover); color: var(--text-muted); }
+.bw-start-head b { color: var(--ink); font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.bw-start-head span { max-width: 340px; color: var(--text-muted); font-size: 12.5px; line-height: 1.5; text-wrap: pretty; }
+.bw-start-sec { display: flex; flex-direction: column; gap: 4px; }
+.bw-start-sec h4 { margin: 0 0 4px; color: var(--text-muted); font-size: 12px; font-weight: 500; }
+.bw-start-row {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; height: 40px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--r-md);
+  background: var(--panel); color: inherit; font: inherit; text-align: left; cursor: pointer; transition: border-color var(--t-hover) var(--ease-out), background-color var(--t-hover) var(--ease-out);
+}
+.bw-start-row:hover { border-color: var(--border-strong); background: var(--hover); }
+.bw-start-row:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.bw-start-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--amber); }
+.bw-start-dot.on { background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 18%, transparent); }
+.bw-start-url { flex: none; color: var(--ink); font: 500 12.5px/1 var(--mono); }
+.bw-start-cmd { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 12px; }
+.bw-start-go { flex: none; margin-left: auto; color: var(--faint); }
+.bw-start-row:hover .bw-start-go { color: var(--ink); }
+.bw-start-starts { gap: 6px; }
+.bw-start-quiet { margin: 0; padding: 12px 14px; border: 1px dashed var(--border); border-radius: var(--r-md); color: var(--text-muted); font-size: 12.5px; text-align: center; text-wrap: pretty; }
+
+@media (prefers-reduced-motion: reduce) { .preview-body .bw-tab, .preview-body .browser-url, .bw-start-row { transition: none; } }

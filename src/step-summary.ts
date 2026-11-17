@@ -28,7 +28,7 @@ export function stepsSummary(all: StepLike[], thoughtSecs = 0): string {
   // Each kind collects what it touched, in the order the kinds first turned up.
   const kinds = new Map<string, string[]>();
   for (const s of steps) {
-    const k = s.verb === "Searched the web" ? "web" : s.verb === "Opened" ? "open" : stepKind(s) === "test" ? "run" : stepKind(s) === "other" ? `other:${s.verb}` : stepKind(s);
+    const k = s.mark === "@" ? "crew" : s.verb === "Searched the web" ? "web" : s.verb === "Opened" ? "open" : stepKind(s) === "test" ? "run" : stepKind(s) === "other" ? `other:${s.verb}` : stepKind(s);
     kinds.set(k, [...(kinds.get(k) ?? []), s.target ?? ""]);
   }
   const parts: string[] = [];
@@ -42,7 +42,9 @@ export function stepsSummary(all: StepLike[], thoughtSecs = 0): string {
     else if (k === "web") parts.push(c === 1 ? "Searched the web" : `Searched the web ${c} times`);
     else if (k === "open") parts.push(files.length === 1 ? `Opened ${files[0]}` : `Opened ${n(c, "a page", "pages")}`);
     else if (k === "ask") parts.push("Asked a question");
-    else parts.push(k.startsWith("other:") ? k.slice(6) : k);
+    // Friday's own tools for talking with the crew (Response.tsx fridayStep), as one part.
+    else if (k === "crew") parts.push("Talked with the crew");
+    else parts.push(k.startsWith("other:") ? (c > 1 && !/\d/.test(k) ? `${k.slice(6)} ${c} times` : k.slice(6)) : k);
   }
   // Three parts read as a sentence; past that it is a list, so the rest are counted.
   const shown = parts.length > 3 ? [...parts.slice(0, 3), `${parts.length - 3} more`] : parts;

@@ -4,6 +4,7 @@ import { Orb } from "@/components/aicss/Orb";
 import { currentTheme } from "./storage.js";
 import { ENGINE_NAMES, type EngineTool, type ToolCall } from "../types.js";
 import { Icon, type IconName } from "./icons.js";
+import { Face, useTeamNow } from "./Teammates.js";
 import type { Look } from "./handoff-ui.js";
 import { shortTokens } from "../tool-usage.js";
 import { Shine } from "./shine.js";
@@ -140,6 +141,54 @@ const hostOf = (u: string) => {
 };
 
 /** A tool call as a sentence: the verb, and what it touched. */
+/**
+ * A call to Friday's own tools (agent-mesh.ts), said as what it did: talking with the crew ("@", counted together in a run's line
+ * as "talked with the crew"), the board, notes and Friday's browser.
+ */
+function fridayStep(tool: string, s: (...keys: string[]) => string): Pick<Step, "mark" | "verb" | "target"> {
+  const to = s("to", "agent", "name", "to_agent");
+  switch (tool) {
+    case "message_agent":
+    case "steer_agent":
+      return { mark: "@", verb: to ? `Messaged ${to}` : "Messaged a teammate", target: s("message", "text") };
+    case "message_team":
+      return { mark: "@", verb: "Messaged the crew", target: s("message", "text") };
+    case "ask_agent":
+      return { mark: "@", verb: to ? `Asked ${to}` : "Asked a teammate", target: s("question", "message") };
+    case "reply_to_agent":
+      return { mark: "@", verb: "Answered a teammate", target: s("answer", "message", "text") };
+    case "post_update":
+      return { mark: "@", verb: "Posted an update", target: s("text", "update", "message") };
+    case "check_messages":
+    case "list_agents":
+    case "wait_for_agent":
+      return { mark: "@", verb: tool === "check_messages" ? "Checked its messages" : tool === "list_agents" ? "Looked at the crew" : "Waited for a teammate" };
+    case "message_session":
+    case "read_session":
+    case "list_sessions":
+      return { mark: "@", verb: tool === "message_session" ? "Messaged a session" : tool === "read_session" ? "Read a session" : "Looked at the sessions" };
+    case "write_note":
+    case "remember":
+    case "update_memory":
+      return { mark: "✎", verb: tool === "write_note" ? "Wrote a note" : "Noted", target: s("note", "text", "title") };
+    case "read_notes":
+      return { mark: "≡", verb: "Read", target: "the notes" };
+    case "claim_files":
+    case "release_files":
+      return { mark: "·", verb: tool === "claim_files" ? "Claimed files" : "Released files" };
+    case "propose_send":
+      return { mark: "·", verb: "Drafted a message to send", target: s("to", "subject") };
+    case "browser": {
+      const action = s("action");
+      if (action === "open") return { mark: "↗", verb: "Opened", target: hostOf(s("url")) };
+      return { mark: "↗", verb: action === "read" ? "Read a page" : action === "screenshot" ? "Looked at a page" : "Used the browser", target: "" };
+    }
+    default:
+      if (/task/.test(tool)) return { mark: "·", verb: "Updated the board", target: s("title", "task") };
+      return { mark: "·", verb: tool.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()) };
+  }
+}
+
 export function stepFor(call: ToolCall, args: Record<string, unknown>, askedName?: string): Pick<Step, "mark" | "verb" | "target"> {
   const s = (...keys: string[]) => {
     for (const k of keys) if (typeof args[k] === "string" && (args[k] as string).trim()) return (args[k] as string).trim();
@@ -182,8 +231,11 @@ export function stepFor(call: ToolCall, args: Record<string, unknown>, askedName
       return { mark: "◇", verb: "Used", target: s("name", "skill") };
     default: {
       if (call.name.startsWith("mcp__")) {
-        const [, server, tool] = call.name.split("__");
-        return { mark: "⇄", verb: `${server}`, target: tool };
+        const [, server = "", ...rest] = call.name.split("__");
+        const tool = rest.join("__");
+        // Friday's own tools, in plain words: "friday" alone stood for every one of them ("Worked 55s · ran 3 commands, friday").
+        if (server === "friday") return fridayStep(tool, s);
+        return { mark: "⇄", verb: `Used ${tool.replace(/_/g, " ")}`, target: server };
       }
       const first = Object.values(args).find((v) => typeof v === "string") as string | undefined;
       return { mark: "·", verb: call.name.replace(/_/g, " "), target: first };
@@ -699,8 +751,9 @@ export interface HandoffMore {
  * is the whole decision. Beyond the ones already here, "More" brings in a saved agent or a coding agent of your
  * own (Claude Code, Codex, Cursor) and hands the work to it as soon as it is in.
  */
-export function HandoffBar({ targets, active, onPick, more, label = "Pass on", onKeepGoing }: { targets: HandoffTarget[]; active: string | null; onPick: (id: string | null) => void; more?: HandoffMore; /** Its words, where a session says it its own way. */ label?: string; /** "Keep this going…": the rest to your crew, with where it stands (crew-carry.tsx). In this menu, not a second control beside it. */ onKeepGoing?: () => void }) {
+export function HandoffBar({ targets, active, onPick, more, label = "Pass on", onKeepGoing }: { targets: HandoffTarget[]; active: string | null; onPick: (id: string | null) => void; more?: HandoffMore; /** Its words, where a session says it its own way. */ label?: string; /** "Keep this going": the rest to your crew, with where it stands (crew-carry.tsx): a button of its own beside Pass on, with your crew's faces, and first in its menu (Arun, 2026-11-16: "make the keep it going more visible instead of being hidden"). */ onKeepGoing?: () => void }) {
   const [open, setOpen] = useState(false);
+  const crew = useTeamNow()?.teammates ?? [];
   const wrap = useRef<HTMLDivElement>(null);
   // Fixed to the window, placed from the button: the feed clips anything that hangs out of it.
   const [pos, setPos] = useState<React.CSSProperties>({});
@@ -772,10 +825,26 @@ export function HandoffBar({ targets, active, onPick, more, label = "Pass on", o
           Cancel
         </button>
       )}
+      {onKeepGoing && !sel && (
+        <button type="button" className="ho-btn ho-keep" data-tip="Hand the rest to your crew, with where it stands" onClick={onKeepGoing}>
+          {crew.length > 0 ? (
+            <span className="ho-keep-faces" aria-hidden="true">
+              {crew.slice(0, 3).map((m) => (
+                <Face key={m.id} seed={m.look ?? m.name} size={16} />
+              ))}
+            </span>
+          ) : (
+            <Icon name="users" size={14} />
+          )}
+          Keep this going
+        </button>
+      )}
       {open && (
         <div className="ho-menu" role="menu" style={pos}>
           {/* Who is already here first: the agents (the work switches to them, with what it knows), then the people (they take
               control of it, with a note), then anything new (audit B-22). */}
+          {onKeepGoing && <div className="ho-menu-h">Your crew</div>}
+          {onKeepGoing && row("keep-going", undefined, <Icon name="users" size={14} />, "Keep this going…", "Hand the rest to your crew, with where it stands", null, false, () => (setOpen(false), onKeepGoing()))}
           {targets.length > 0 && <div className="ho-menu-h">Agents here</div>}
           {targets.map((t) =>
             row(t.id, t.tint, t.mark, t.name, t.suggested && t.why ? t.why : t.auto ? "Wakes by itself when this finishes" : undefined,
@@ -795,8 +864,6 @@ export function HandoffBar({ targets, active, onPick, more, label = "Pass on", o
             )}
           {more && more.agents.length > 0 && <div className="ho-menu-h">Saved agents</div>}
           {more?.agents.map((a) => row(a.id, a.tint, <Icon name={a.icon} size={14} />, a.name, a.blurb, null, false, () => more.onAgent(a.id)))}
-          {onKeepGoing && <div className="ho-menu-h">Your crew</div>}
-          {onKeepGoing && row("keep-going", undefined, <Icon name="handoff" size={14} />, "Keep this going…", "Hand the rest on, with where it stands", null, false, () => (setOpen(false), onKeepGoing()))}
         </div>
       )}
     </div>

@@ -19,7 +19,7 @@ import { preferredAccount, useAccountChoice } from "./Accounts.js";
 import { EngineMark } from "./BrandMarks.js";
 import { savedCommands, useSavedCommands, useShortcuts } from "./Shortcuts.js";
 import { AgentModelPicker } from "./AgentModelPicker.js";
-import { MODE_BLURB, MODE_KEY, MODE_NAME } from "./StartControls.js";
+import { MODE_BLURB, MODE_ICON, MODE_KEY, MODE_NAME } from "./StartControls.js";
 import { canRoute, saveSmartRouting, smartRoutingOn, useRouteHint } from "./RouteWhy.js";
 import { keepAuto, reachForMessage } from "./smartReach.js";
 import type { Plan } from "../plan-types.js";
@@ -1140,17 +1140,22 @@ export function Code({
             />
             {/* Which of its accounts, for a tool with more than one on the computer: each with how much of it is used. */}
             {/* What the agent may do without asking: read and propose, ask before it runs a command, or run freely. Applies to whichever agent is chosen. */}
+            {/* Full access said as what it is: a shield, in amber (Arun, 2026-11-16: "add like a shield or something next to the full
+                access text and make the full access text yellow too and get rid of the secondary texts too"). Each choice its icon,
+                its name alone; what each means is in its tip. */}
             <MenuButton
-              className="agent-pill mode-pill"
+              className={`agent-pill mode-pill${mode === "full" ? " mode-full" : ""}`}
               label="Permissions"
               text={MODE_NAME[mode]}
+              {...(mode === "full" ? { mark: <Icon name="shield" size={13} /> } : {})}
               above
               items={() => [
                 { heading: "Permissions" },
                 ...(["plan", "edits", "full"] as EngineMode[]).map((m) => ({
                   label: MODE_NAME[m],
+                  icon: MODE_ICON[m],
                   // Codex and Cursor cannot ask about one command at a time, so for them Manual asks once for the whole turn.
-                  sub: m === "edits" && (engine === "codex" || engine === "cursor") ? "Asks you before any turn that changes something." : modeBlurb[m],
+                  title: m === "edits" && (engine === "codex" || engine === "cursor") ? "Asks you before any turn that changes something." : modeBlurb[m],
                   checked: mode === m,
                   onSelect: () => setMode(m),
                 })),

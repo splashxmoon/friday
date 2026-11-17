@@ -491,19 +491,32 @@ export function TasksPanel({
       {/* Wide (the panel extended or full screen), what is running and what finished sit side by side (style.css,
           @container tasks) instead of stretching edge to edge; narrow, one under the other as before. */}
       <div className="tasks-wrap">
-        <div className="tasks-head">
+        {items.length > 0 && <div className="tasks-head">
           <span className="muted small">
-            {running.length || "No"} running · {finished.length} finished{failed ? ` · ${failed} failed` : ""}
+            {running.length ? `${running.length} running` : "Nothing running"} · {finished.length} finished{failed ? ` · ${failed} failed` : ""}
           </span>
           {finished.length > 0 && (
             <button type="button" className="rsp-text-btn" onClick={() => setCleared((c) => new Set([...c, ...finished.map((i) => i.id)]))}>
               Clear finished
             </button>
           )}
-        </div>
+        </div>}
 
         {items.length === 0 ? (
-          <p className="muted small">Nothing here. Ask for something in the message box and it appears as a task.</p>
+          // Nothing yet (Arun, 2026-11-16: "better empty state please"): what will show here, and the one way to start it, laid out as
+          // the Pull request panel's own empty state is (PrPanel.tsx), centred in the panel, with no "Nothing running · 0 finished" over it.
+          <div className="tasks-empty">
+            <span className="tasks-empty-mark" aria-hidden="true">
+              <Icon name="list" size={20} />
+            </span>
+            <h3>Nothing running</h3>
+            <p>An agent's turn, the commands and servers it starts, and the helpers it hands work to show here while they run. Finished ones stay until you clear them.</p>
+            {document.getElementById("composer-input") && (
+              <button type="button" className="tasks-empty-go" onClick={() => document.getElementById("composer-input")?.focus()}>
+                Give an agent a task
+              </button>
+            )}
+          </div>
         ) : (
           <div className="tasks-cols">
             {/* Split, because the two halves are read for different reasons: one

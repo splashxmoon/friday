@@ -8,7 +8,8 @@ import { touchesSecrets } from "./command-class.js";
  *   Runs on its own: reading anything, its own folder and the projects it was given (edits, builds, tests, installs, commits,
  *   pushing its own branches, draft pull requests), the web, talking to the other teammates.
  *   Asks first (a go-ahead): speaking for you outside or sending data off your computer, shipping, deleting what isn't its own,
- *   money, keys and access (reading them too, since 2026-11-13, as Friday Teams asks), and your computer beyond its folders. Sign-ins, two-factor and CAPTCHAs are yours to do: a hand-off, not a yes.
+ *   money, keys and access (reading them too, since 2026-11-13, as Friday Teams asks), and your computer's own settings (sudo,
+ *   system settings). Writing past its folders runs on its own since 2026-11-15 (full access, Arun). Sign-ins, two-factor and CAPTCHAs are yours to do: a hand-off, not a yes.
  *   Never: the floor no yes opens (wiping a disk or your home folder, piping the web into a shell, your SSH keys, Friday's own data).
  *
  * Pure: the runner calls it for every step a teammate's coding tool wants to take and acts on the answer (runner.ts, "ask").
@@ -24,7 +25,7 @@ export const GO_AHEAD_WORDS: Record<GoAhead, string> = {
   delete: "Deletes what isn't its own",
   money: "Spends money",
   keys: "Keys or access",
-  computer: "Reaches past its folders",
+  computer: "Changes your computer's settings",
   takeover: "Needs you to sign in",
 };
 
@@ -95,7 +96,9 @@ export function guardPath(raw: string, at: GuardPlace, deleting = false): Verdic
   const project = at.given.map((r) => norm(r, at.home)).find((r) => under(p, r));
   if (project) return deleting && (p === project || under(p, `${project}/.git`)) ? ask("delete", `Deletes ${p === project ? "the whole project" : "the project's history"} (${short(p, at)}).`) : RUN;
   if (/^\/(tmp|private\/tmp|var\/folders)\//.test(p)) return RUN;
-  return deleting ? ask("delete", `Deletes ${short(p, at)}, outside its folders.`) : ask("computer", `Writes ${short(p, at)}, outside its folders.`);
+  // Full access past its folders too (Arun, 2026-11-15: "allow for full access for things outside of folders too"): it writes
+  // anywhere of yours on its own; deleting what isn't its own is still yours to say, and keys and the floor above still hold.
+  return deleting ? ask("delete", `Deletes ${short(p, at)}, outside its folders.`) : RUN;
 }
 
 const short = (p: string, at: GuardPlace) => p.replace(at.home.replace(/\/$/, ""), "~");

@@ -54,7 +54,7 @@ export type Command =
   /** Stop the agents here messaging each other, or let them again (agent-mesh.ts). */
   | { type: "mesh.pause"; on: boolean }
   /** A person's say over a task on the board, from the team's list: hand it to someone else, try it again, send it back, drop it. */
-  | { type: "board.task"; id: string; action: "reassign" | "retry" | "sendback" | "cancel"; to?: string; note?: string }
+  | { type: "board.task"; id: string; action: "reassign" | "retry" | "sendback" | "cancel" | "start" | "decline"; to?: string; note?: string }
   | { type: "lead.set"; lane: string | null; /** Friday's own pick, said as such (types.ts lead.set). */ auto?: boolean }
   /** A hub (hubs.ts): plan the work for several agents at once, approve the plan as changed, or call it off. */
   | { type: "hub.plan"; text: string }
@@ -127,7 +127,7 @@ export type Command =
   /** Bring an agent's work from its separate copy into the folder the copy was made from. */
   | { type: "folder.apply"; lane?: string }
   /** The Git panel's moves: stage or unstage files or one hunk, throw changes away, pull the branch. */
-  | { type: "folder.git"; action: "stage" | "unstage" | "discard" | "hunk" | "pull"; paths?: string[]; patch?: string; cached?: boolean; reverse?: boolean; untracked?: boolean; lane?: string; /** One of the folders the agent also works in, when the move is there. */ dir?: string };
+  | { type: "folder.git"; action: "stage" | "unstage" | "discard" | "hunk" | "pull" | "rename"; /** The new name, for a rename. */ name?: string; paths?: string[]; patch?: string; cached?: boolean; reverse?: boolean; untracked?: boolean; lane?: string; /** One of the folders the agent also works in, when the move is there. */ dir?: string };
 
 export type CommandResult = { ok: true; seq: number; /** The lane a lane.add made. */ lane?: string } | { ok: false; error: string };
 
@@ -255,7 +255,7 @@ export class SessionCore {
 
   /** The session's hubs (hubs.ts), set by the app: one plan, several agents at once. */
   /** The task board's controls (AgentMesh.control), for board.task. */
-  board: { control(sid: string, actor: ActorRef, req: { id: string; action: "reassign" | "retry" | "sendback" | "cancel"; to?: string; note?: string }): Promise<{ ok: true } | { ok: false; error: string }> } | null = null;
+  board: { control(sid: string, actor: ActorRef, req: { id: string; action: "reassign" | "retry" | "sendback" | "cancel" | "start" | "decline"; to?: string; note?: string }): Promise<{ ok: true } | { ok: false; error: string }> } | null = null;
   hubs: { plan(sid: string, goal: string, by: { id: string; name: string }): Promise<{ ok: true; id: string } | { ok: false; error: string }>; approve(sid: string, id: string, edits: { id: string; tool?: EngineTool }[] | undefined): Promise<{ ok: true; id: string } | { ok: false; error: string }>; cancel(sid: string, id: string): Promise<{ ok: true; id: string } | { ok: false; error: string }> } | null = null;
 
   /** Whether people other than this session's owner may work in it (Team), rather than only watch (Solo). */
@@ -756,6 +756,17 @@ export class SessionCore {
         // Staging changes no file, so it is fine mid-run; throwing changes away or pulling under a working agent is not.
         if (busy && (cmd.action === "discard" || cmd.action === "pull")) return fail("Wait for the run to finish first.");
         const paths = Array.isArray(cmd.paths) ? cmd.paths.map((f) => String(f)).filter((f) => f && !f.startsWith("-") && !f.includes("..")).slice(0, 500) : undefined;
+        // The branch checked out, renamed: said as the folder's move to it, so the header, the review card and the agents all name
+        // the new one (projection.ts folder.switched).
+        if (cmd.action === "rename") {
+          const name = String(cmd.name ?? "").trim().slice(0, 100);
+          if (!name) return fail("Name the branch first.");
+          const r = parseJson<{ from?: string; branch?: string; error?: string }>((await folderAt({ op: "renamebranch", ref: name })).output);
+          if (!r || r.error || !r.branch) return fail(r?.error ?? "Couldn't rename the branch.");
+          if (r.from === r.branch) return ok(0);
+          const a = await append({ type: "folder.switched", branch: r.branch, from: r.from ?? "" });
+          return a.ok ? ok(a.seq) : fail("Renamed, but it couldn't be recorded.");
+        }
         const call: RepoCall =
           cmd.action === "hunk" ? { op: "hunk", patch: String(cmd.patch ?? "").slice(0, 200_000), cached: !!cmd.cached, reverse: !!cmd.reverse }
           : cmd.action === "pull" ? { op: "pull" }
@@ -1127,7 +1138,18 @@ export class SessionCore {
         // Anyone who works in the session steers the team's work, as they can pause its talk.
         if (role === "viewer") return deny("change the team's tasks");
         if (!this.board) return fail("The task board isn't available here.");
-        if (!["reassign", "retry", "sendback", "cancel"].includes(String(cmd.action))) return fail("Unknown action.");
+        if (!["reassign", "retry", "sendback", "cancel", "start", "decline"].includes(String(cmd.action))) return fail("Unknown action.");
+        // Just you do it: the proposed team's tasks dropped, and the lead told, as the person, to do the whole of it itself.
+        if (cmd.action === "decline") {
+          const lead = state.board?.fromLane;
+          const r = await this.board.control(sid, actor, { id: "", action: "decline" });
+          if (!r.ok) return fail(r.error);
+          if (lead) {
+            const said = await this.store.append(sid, actor, { type: "instruction", text: "Do it yourself rather than with the team: carry on with the whole of it on your own.", interrupt: false, attachments: [] }, { lane: lead });
+            if (said.ok) this.wake(sid, lead);
+          }
+          return ok((await this.store.state(sid)).lastSeq);
+        }
         const r = await this.board.control(sid, actor, { id: String(cmd.id ?? "").slice(0, 40), action: cmd.action, ...(typeof cmd.to === "string" && cmd.to ? { to: cmd.to.slice(0, 80) } : {}), ...(typeof cmd.note === "string" && cmd.note ? { note: cmd.note.slice(0, 2000) } : {}) });
         return r.ok ? ok((await this.store.state(sid)).lastSeq) : fail(r.error);
       }

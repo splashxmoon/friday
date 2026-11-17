@@ -28,6 +28,8 @@ import { isLocal } from "./edition.js";
 import { describeCheckIn } from "../teammate-checkins.js";
 import { SkillsPanel, usable, useSkills } from "./CrewSkills.js";
 import { askRemove } from "./mate-menu.js";
+import { SpendPage } from "./SpendPage.js";
+import { DecisionsPage } from "./DecisionsPage.js";
 import { MateRoutines } from "./MateRoutines.js";
 import { MateMemory } from "./MateMemory.js";
 import { Icon } from "./icons.js";
@@ -50,8 +52,8 @@ let nextCat: MateCat = "profile";
 export const openMateSettings = (lane: string, cat: MateCat = "profile") => ((nextCat = cat), setMateTab(lane, "settings"));
 
 /** What a settings row opens: one of its categories, or its memory or skills, as a page of the panel. */
-type MatePage = MateCat | "memory" | "skills" | "look" | "activity" | "results" | "fallbacks";
-const PAGE_LABEL: Record<MatePage, string> = { ...Object.fromEntries(MATE_CATS.map((c) => [c.id, c.label])), memory: "Memory", skills: "Skills", look: "Face", activity: "Activity", results: "Results", fallbacks: "Fallbacks" } as Record<MatePage, string>;
+type MatePage = MateCat | "memory" | "skills" | "look" | "activity" | "results" | "fallbacks" | "spend" | "decisions";
+const PAGE_LABEL: Record<MatePage, string> = { ...Object.fromEntries(MATE_CATS.map((c) => [c.id, c.label])), memory: "Memory", skills: "Skills", look: "Face", activity: "Activity", results: "Results", fallbacks: "Fallbacks", spend: "Spend", decisions: "Decisions" } as Record<MatePage, string>;
 
 /**
  * A crew mate's settings, as a tab of its chat's side panel (Arun, 2026-11-13: "make the settings panel work like this"), laid out
@@ -97,6 +99,8 @@ export function MateSettingsBody({ identity, lane }: { identity: Identity; lane:
         { id: "activity", label: "Activity", icon: <Icon name="chart" size={16} />, ...(today?.turns ? { now: `${today.turns} ${today.turns === 1 ? "turn" : "turns"} today` } : {}) },
         { id: "results", label: "Results", icon: <Icon name="flag" size={16} /> },
         { id: "checkins", label: "Routines", icon: <Icon name="clock" size={16} />, now: m.checkins?.length ? `${m.checkins.filter((c) => !c.off).length} on${m.checkins.some((c) => c.off) ? ` · ${m.checkins.filter((c) => c.off).length} off` : ""}` : "None" },
+        // Every token it used, by kind, model, day and run, at list price (SpendPage.tsx).
+        { id: "spend", label: "Spend", icon: <Icon name="chart" size={16} />, ...(today?.tokens ? { now: `${shortTokens(today.tokens)} tokens today` } : {}) },
         { id: "budget", label: "Budget and hours", icon: <Icon name="usage" size={16} />, now: m.budget?.tokens ? `${shortTokens(m.budget.tokens)} tokens a day` : m.budget?.usd ? `$${m.budget.usd} a day` : "No caps" },
       ],
     },
@@ -104,6 +108,8 @@ export function MateSettingsBody({ identity, lane }: { identity: Identity; lane:
       name: "Rules",
       rows: [
         { id: "access", label: "Access", icon: <Icon name="shield" size={16} />, now: ACCESS[m.mode ?? "full"].label },
+        // What it may do on its own now, and every go-ahead it asked (DecisionsPage.tsx).
+        { id: "decisions", label: "Decisions", icon: <Icon name="check" size={16} />, ...(m.trust?.length ? { now: `${m.trust.length} on its own` } : {}) },
         { id: "where", label: "Folders", icon: <Icon name="folder" size={16} />, now: dirs.length ? `Its own and ${dirs.length} more` : "Its own" },
         { id: "computer", label: "Computer", icon: <Icon name="server" size={16} />, now: computer ? `${computer.label}${computer.connected ? "" : " · not connected"}` : "This computer" },
       ],
@@ -120,7 +126,7 @@ export function MateSettingsBody({ identity, lane }: { identity: Identity; lane:
           Back
         </button>
         <div className="msd-page" key={open} aria-label={PAGE_LABEL[open]}>
-          {open === "where" ? <MateFolders identity={identity} lane={lane} /> : open === "checkins" ? <MateRoutines identity={identity} lane={lane} /> : open === "fallbacks" ? <MateFallbacks identity={identity} lane={lane} /> : open === "activity" ? <ActivityTab identity={identity} id={m.id} lane={lane} /> : open === "results" ? <ResultsTab identity={identity} id={m.id} lane={lane} /> : open === "memory" ? <MateMemory identity={identity} id={m.id} name={m.name} /> : open === "skills" ? <SkillsPanel mate={m} /> : <TeammateForm inline only={open} identity={identity} editing={m} />}
+          {open === "where" ? <MateFolders identity={identity} lane={lane} /> : open === "checkins" ? <MateRoutines identity={identity} lane={lane} /> : open === "fallbacks" ? <MateFallbacks identity={identity} lane={lane} /> : open === "activity" ? <ActivityTab identity={identity} id={m.id} lane={lane} /> : open === "results" ? <ResultsTab identity={identity} id={m.id} lane={lane} /> : open === "memory" ? <MateMemory identity={identity} id={m.id} name={m.name} /> : open === "skills" ? <SkillsPanel mate={m} /> : open === "spend" ? <SpendPage identity={identity} query={`mate=${encodeURIComponent(m.id)}`} who={m.name} /> : open === "decisions" ? <DecisionsPage identity={identity} id={m.id} name={m.name} /> : <TeammateForm inline only={open} identity={identity} editing={m} />}
         </div>
       </section>
     );

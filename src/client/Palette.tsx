@@ -7,6 +7,7 @@ import { useDismiss } from "./ui.js";
 import { openWorkflows } from "./team-workflow-view.js";
 import { choosePlace } from "./WorkMode.js";
 import { byState } from "./presence.js";
+import { isLocal } from "./edition.js";
 
 export interface Action {
   id: string;
@@ -68,7 +69,7 @@ export function Palette({ actions, onClose, onNew }: { actions: Action[]; onClos
   const groups = useMemo(() => {
     const g = paletteGroups(actions, q);
     // ⌘K used to go straight to a new session: a task typed here still gets one, as the last row (the first when nothing else matches).
-    if (onNew && q.trim().length >= 2) g.push({ group: "Start", items: [{ id: "new-with", label: `New session: “${q.trim()}”`, icon: "plus", group: "Start", run: () => onNew(q.trim()) }] });
+    if (onNew && q.trim().length >= 2) g.push({ group: "Start", items: [{ id: "new-with", label: `${isLocal() ? "New thread" : "New session"}: “${q.trim()}”`, icon: "plus", group: "Start", run: () => onNew(q.trim()) }] });
     return g;
   }, [actions, q, onNew]);
   const flat = groups.flatMap((g) => g.items);
@@ -268,7 +269,7 @@ export function baseActions(p: {
   local?: boolean;
 }): Action[] {
   return [
-    { id: "new", label: "New session", hint: "↵", icon: "plus", group: "Session", run: p.newSession },
+    { id: "new", label: isLocal() ? "New thread" : "New session", hint: "↵", icon: "plus", group: "Session", run: p.newSession },
     ...(p.search ? [{ id: "search", label: "Search sessions and what was said", hint: shortcut("⌘⇧F"), icon: "search" as const, group: "Session", run: p.search }] : []),
     ...(p.newAgent ? [{ id: "new-agent", label: "New agent", icon: "agent" as const, group: "Create", run: p.newAgent }] : []),
     ...(p.invite && p.team !== false ? [{ id: "invite", label: "Invite someone by email", icon: "mail" as const, group: "Create", run: p.invite }] : []),

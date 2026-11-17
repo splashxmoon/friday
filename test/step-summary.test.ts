@@ -32,3 +32,8 @@ test("thinking alone, failures, and long mixed stretches", () => {
     "Read a.ts, ran a command, edited b.ts, 2 more",
   );
 });
+
+test("talking with the crew through Friday's own tools is one part of the line, never the server's name", () => {
+  const at = (verb: string) => ({ mark: "@", verb, state: "done" });
+  assert.equal(stepsSummary([{ mark: "›_", verb: "Ran", target: "npm test", state: "done" }, at("Messaged Ivy"), at("Posted an update")]), "Ran a command, talked with the crew");
+});

@@ -347,7 +347,11 @@ body[style*="pointer-events: none"] > .amp { pointer-events: auto; }
 .composer:has(> .team-box-mark) .prompt [data-slot="input-group"] > :not(.prompt-field):not([data-slot="input-group-addon"]) { flex: 1 0 100%; order: -2; }
 .composer:has(> .team-box-mark) .prompt [data-slot="input-group"] > [data-slot="input-group-addon"]:last-child,
 .composer:has(> .team-box-mark) .prompt [data-slot="input-group"] > [data-slot="input-group-addon"]:last-child > div { display: contents !important; }
-.composer:has(> .team-box-mark) .prompt .prompt-field { flex: 1 1 240px; width: auto !important; min-width: 0; order: 0; }
+/* The field gives way, never the row: at any width (the side panel open beside a room), +, the field, the mic and send stay on one
+   line, the field narrowing and its placeholder cut short on one line rather than breaking the box into two rows (Arun, 2026-11-15:
+   "fix this layout and design tooo"). */
+.composer:has(> .team-box-mark) .prompt .prompt-field { flex: 1 1 0; width: auto !important; min-width: 0; order: 0; }
+.composer:has(> .team-box-mark) .prompt .prompt-field textarea::placeholder { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .composer:has(> .team-box-mark) .prompt [data-slot="input-group"] > [data-slot="input-group-addon"]:last-child > div:first-child > :not([aria-label="Add files"]) { order: 1; margin-bottom: 8px; }
 /* Both ends alike (Arun, 2026-10-27: "make sure both sides are equal"): + and send the same 32px, the same edge and the same 6px
@@ -1676,10 +1680,19 @@ button.mt-tab { padding: 0 10px; border: 0; background: none; cursor: pointer; }
 .msd-row-now-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* New agent, as Arun's reference had it in Friday's own words (2026-11-15): a slim header with Cancel, Create alone under the form. */
-.nag-head { display: flex; align-items: center; justify-content: space-between; align-self: stretch; height: 44px; margin: -20px 0 0; border-bottom: 1px solid var(--border); }
-.nag-head h1 { margin: 0; color: var(--ink); font-size: 14px; font-weight: 600; }
-.nag-cancel { height: 28px; padding: 0 10px; border: 0; border-radius: 7px; background: none; color: var(--ink-2); font: 500 13px var(--font); cursor: pointer; }
-.nag-cancel:hover { background: var(--hover); color: var(--ink); }
+/* The New agent page's head, as the Agents page's (agents-page.css .ap-head): 52px, edge to edge, the crumb back to Agents, the title,
+   what the page is for, and Cancel as a button. */
+.page.nag-page { padding-top: 0; }
+.nag-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; align-self: stretch; min-height: 52px; margin: 0 -24px 24px; padding: 0 22px; border-bottom: 1px solid var(--border); background: var(--bg); }
+.nag-head h1 { margin: 0; color: var(--ink); font-size: 15px; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; }
+.nag-crumb { height: 26px; padding: 0 6px; margin-left: -6px; border: 0; border-radius: 6px; background: none; color: var(--text-muted); font: 500 15px var(--font); letter-spacing: -0.01em; cursor: pointer; transition: color var(--t-hover) var(--ease-out), background-color var(--t-hover) var(--ease-out); }
+.nag-crumb:hover { color: var(--ink); background: var(--hover); }
+.nag-crumb-sep { flex: none; width: 14px; height: 14px; color: var(--ink-3); }
+.nag-head-sub { overflow: hidden; margin-left: 4px; color: var(--text-muted); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.nag-cancel { display: inline-flex; flex: none; align-items: center; gap: 6px; height: 28px; margin-left: auto; padding: 0 11px 0 9px; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: transparent; color: var(--ink); font: 500 13px var(--font); cursor: pointer; transition: background-color var(--t-hover) var(--ease-out); }
+.nag-cancel svg { width: 13px; height: 13px; color: var(--ink-3); }
+.nag-cancel:hover { background: var(--hover); }
+@media (max-width: 640px) { .nag-head { margin: 0 -16px 20px; padding: 0 14px; } .nag-head-sub { display: none; } }
 .nag-acts { margin-top: 8px; }
 .nag-acts button { min-width: 132px; }
 
@@ -1969,3 +1982,146 @@ html.reduce-motion :is(.tm-face .tm-eyes, .tm-face-in) { animation: none !import
 :is(button, a, [role="button"], [role="tab"], .oss-crew-item, .aw-door, .rp-member, .msd-row, .tm-face-wrap):hover .tm-zz { display: none; }
 @media (prefers-reduced-motion: reduce) { .tm-face.tm-dozing .tm-blob-body, .tm-zz i { animation: none !important; } .tm-zz i { opacity: 0.7; } }
 html.reduce-motion :is(.tm-face.tm-dozing .tm-blob-body, .tm-zz i) { animation: none !important; }
+
+/* A crew mate's message, in the open-source edition (Activity.tsx chatty): its actions under it once it is pointed at, as a chat
+   app's are, so a room reads as messages and not as rows of buttons; one pressed stays. */
+.rsp-chat .rsp-actions { opacity: 0; transition: opacity var(--t-hover) var(--ease-out); }
+.rsp-chat:hover .rsp-actions, .rsp-chat:focus-within .rsp-actions, .rsp-chat .rsp-actions:has(.rsp-text-btn[aria-expanded="true"]) { opacity: 1; }
+@media (hover: none) { .rsp-chat .rsp-actions { opacity: 1; } }
+.rsp-chat .rl { margin-top: 2px; }
+
+/* The files it made, as attachments on its message (made-files.tsx). */
+.mf { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.mf-card { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: 10px; width: min(340px, 100%); padding: 7px 10px 7px 7px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); color: var(--ink); font: inherit; text-align: left; cursor: pointer; transition: border-color var(--t-hover) var(--ease-out), background-color var(--t-hover) var(--ease-out); }
+.mf-card:hover { border-color: var(--border-strong); background: color-mix(in srgb, var(--hover) 55%, var(--card)); }
+.mf-card:focus-visible { outline: 2px solid var(--ink-2); outline-offset: 2px; }
+.mf-tile { display: grid; place-items: center; width: 36px; height: 36px; border-radius: var(--r-md); background: var(--hover); box-shadow: inset 0 0 0 1px var(--border); }
+.mf-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.mf-name { overflow: hidden; font-size: 13px; font-weight: 500; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.mf-meta { overflow: hidden; color: var(--text-muted); font-size: 12px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
+.mf-go { display: grid; place-items: center; width: 26px; height: 26px; border-radius: var(--r-md); color: var(--ink-3); transition: color var(--t-hover) var(--ease-out), background-color var(--t-hover) var(--ease-out); }
+.mf-card:hover .mf-go { color: var(--ink); background: var(--hover); }
+.mf-more { padding: 2px 4px; border: 0; border-radius: 6px; background: none; color: var(--text-muted); font: 12.5px var(--font); cursor: pointer; }
+.mf-more:hover { color: var(--ink); background: var(--hover); }
+/* In a room, the crew's talk lines up with the messages around it: past the face column, where every reply's bubble starts (.rsp.tm-rsp:
+   34px face, 10px gap; Arun, 2026-11-15: "line up the agent to agent communication card with the agent reponse card"). */
+.cw.cw-room { margin-left: 44px; max-width: min(560px, calc(100% - 44px)); }
+
+/* A crew mate typing (Teammates.tsx TypingRow): its face, its name, and a bubble of three dots rising in turn, in its own colour. */
+.ct-face { padding: 0; border: 0; cursor: pointer; }
+.ct-face:focus-visible { outline: 2px solid var(--ink-2); outline-offset: 2px; border-radius: 50%; }
+.ct-bubble { display: inline-flex; align-self: flex-start; align-items: center; gap: 4px; height: 34px; padding: 0 14px; border-radius: 4px 16px 16px 16px; background: var(--hover); box-shadow: inset 0 0 0 1px var(--border); }
+.ct-bubble > i { width: 6px; height: 6px; border-radius: 50%; background: color-mix(in srgb, var(--who, var(--ink-3)) 70%, var(--ink-3)); animation: ct-dot 1.2s ease-in-out infinite; }
+.ct-bubble > i:nth-child(2) { animation-delay: 0.15s; }
+.ct-bubble > i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes ct-dot { 0%, 60%, 100% { transform: translateY(0); opacity: 0.45; } 30% { transform: translateY(-3px); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .ct-bubble > i { animation: ct-fade 1.6s ease-in-out infinite; }
+  @keyframes ct-fade { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
+}
+
+/* A room's folders (TeamControls.tsx RoomFolders): rows like its members', a folder of the room's own taken out with its ×. */
+.rf-row { cursor: default; }
+.rf-row:hover { background: none; }
+.rf-own { display: flex; align-items: center; }
+.rf-own > .msd-row { flex: 1; min-width: 0; }
+.rf-x { display: grid; flex: none; place-items: center; width: 26px; height: 26px; margin-right: 6px; padding: 0; border: 0; border-radius: var(--r-md); background: none; color: var(--ink-3); cursor: pointer; opacity: 0; transition: opacity var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out), background-color var(--t-hover) var(--ease-out); }
+.rf-x svg { width: 13px; height: 13px; }
+.rf-own:hover .rf-x, .rf-x:focus-visible { opacity: 1; }
+.rf-x:hover { color: var(--ink); background: var(--hover); }
+@media (hover: none) { .rf-x { opacity: 1; } }
+.rf-note { display: block; margin: 6px 2px 0; color: var(--text-muted); font-size: 12px; line-height: 17px; }
+
+/* ══ A crew mate's message, set as one (Arun, 2026-11-15: "add like better typography and format in the responses too") ══════════
+   Bubbles that hug their words up to a reading measure, steady 14.5/23 type, the bubbles of one reply drawn together as one
+   message, and what is inside them (a file named, code, a list, a table, a quote) set for a chat bubble, not a document page. */
+.rsp-chat :is(.rsp-say, .rsp-answer) { max-width: min(660px, 100%); font-size: 14.5px; line-height: 23px; letter-spacing: -0.004em; }
+.rsp-chat :is(.rsp-say, .rsp-answer) :is(p, ul, ol, blockquote, h1, h2, h3, h4) { max-width: none; }
+.rsp-chat :is(.rsp-say, .rsp-answer) p { margin: 0 0 9px; text-wrap: pretty; }
+.rsp-chat :is(.rsp-say, .rsp-answer) p:last-child { margin-bottom: 0; }
+/* One reply's bubbles together: close, the first with the tail corner by the face, the rest rounded where they meet it. */
+.rsp-chat .rsp-main > .rsp-say + .rsp-say, .rsp-chat .rsp-main > .rsp-say + .mf, .rsp-chat .rsp-main > .mf + :is(.rsp-say, [data-slot]) { margin-top: -4px; }
+.rsp-chat .rsp-main > .rsp-say ~ .rsp-say, .rsp-chat .rsp-main > .rsp-say ~ * .rsp-answer, .rsp-chat .rsp-main > .rsp-say ~ .rsp-answer { border-top-left-radius: 8px; }
+/* Headings, said as a line in bold, not a page's titles. */
+.rsp-chat :is(.rsp-say, .rsp-answer) :is(h1, h2, h3, h4, h5, h6) { margin: 14px 0 4px; font-size: 14.5px; font-weight: 600; line-height: 22px; letter-spacing: -0.005em; color: var(--ink); }
+.rsp-chat :is(.rsp-say, .rsp-answer) :is(h1, h2, h3, h4, h5, h6):first-child { margin-top: 0; }
+/* Lists: hung in the bubble, a little air between items, the markers quiet. */
+.rsp-chat :is(.rsp-say, .rsp-answer) :is(ul, ol) { margin: 4px 0 9px; padding-left: 20px; }
+.rsp-chat :is(.rsp-say, .rsp-answer) :is(ul, ol):last-child { margin-bottom: 0; }
+.rsp-chat :is(.rsp-say, .rsp-answer) li { margin: 3px 0; padding-left: 2px; }
+.rsp-chat :is(.rsp-say, .rsp-answer) li::marker { color: var(--ink-3); }
+/* A file or a bit of code named in a sentence: part of the line, not a box on it. */
+.rsp-chat :is(.rsp-say, .rsp-answer) .file-chip { gap: 4px; margin: 0; padding: 0 5px 0 4px; border-color: transparent; border-radius: 6px; background: color-mix(in srgb, var(--ink) 7%, transparent); vertical-align: -0.12em; line-height: 21px; }
+.rsp-chat :is(.rsp-say, .rsp-answer) .file-chip:hover { border-color: transparent; background: color-mix(in srgb, var(--ink) 12%, transparent); }
+.rsp-chat :is(.rsp-say, .rsp-answer) .file-chip code { font-size: 12.5px; }
+.rsp-chat :is(.rsp-say, .rsp-answer) .file-chip .file-icon { width: 12px; height: 12px; }
+.rsp-chat :is(.rsp-say, .rsp-answer) :not(pre) > code { padding: 1px 5px; border-radius: 5px; background: color-mix(in srgb, var(--ink) 7%, transparent); font-size: 12.5px; }
+.rsp-chat :is(.rsp-say, .rsp-answer) pre { margin: 8px 0; border-radius: 10px; font-size: 12.5px; line-height: 19px; }
+/* A quote: a rule in its crew mate's colour, the words set back a step. */
+.rsp-chat :is(.rsp-say, .rsp-answer) blockquote { margin: 8px 0; padding: 2px 0 2px 12px; border-left: 2px solid color-mix(in srgb, var(--who, var(--ink-3)) 70%, transparent); border-radius: 0; background: none; color: var(--ink-2); }
+/* A table: compact, lined, its numbers lined up, scrolling inside the bubble when it is wide. */
+.rsp-chat :is(.rsp-say, .rsp-answer) table { display: block; max-width: 100%; margin: 8px 0; overflow-x: auto; border-collapse: collapse; font-size: 13px; line-height: 19px; font-variant-numeric: tabular-nums; }
+.rsp-chat :is(.rsp-say, .rsp-answer) :is(th, td) { padding: 5px 10px; border: 0; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+.rsp-chat :is(.rsp-say, .rsp-answer) th { border-bottom-color: var(--border-strong); background: none; color: var(--ink-2); font-weight: 600; }
+.rsp-chat :is(.rsp-say, .rsp-answer) tr:last-child td { border-bottom: 0; }
+.rsp-chat :is(.rsp-say, .rsp-answer) hr { margin: 12px 0; border: 0; border-top: 1px solid var(--border); }
+.rsp-chat :is(.rsp-say, .rsp-answer) strong { font-weight: 600; }
+.rsp-chat :is(.rsp-say, .rsp-answer) a { color: var(--ink); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--ink) 30%, transparent); text-underline-offset: 3px; }
+.rsp-chat :is(.rsp-say, .rsp-answer) a:hover { text-decoration-color: currentColor; }
+/* The rendered Markdown's own spacing and table frame, set for a bubble: blocks 10px apart, not 16; a table without the framed
+   box round it, its copy and download tools there once it is pointed at. */
+.rsp-chat :is(.rsp-say, .rsp-answer) [class*="space-y-4"] > * + * { margin-top: 10px !important; }
+.rsp-chat :is(.rsp-say, .rsp-answer) [class*="space-y-4"] > p { margin-bottom: 0; }
+.rsp-chat :is(.rsp-say, .rsp-answer) [data-streamdown="table-wrapper"] { position: relative; gap: 0; margin: 6px 0 !important; padding: 0; border: 0; border-radius: 0; background: none; }
+.rsp-chat :is(.rsp-say, .rsp-answer) [data-streamdown="table-wrapper"] > div:first-child { position: absolute; top: -4px; right: 0; z-index: 1; opacity: 0; transition: opacity var(--t-hover) var(--ease-out); }
+.rsp-chat :is(.rsp-say, .rsp-answer) [data-streamdown="table-wrapper"]:is(:hover, :focus-within) > div:first-child { opacity: 1; }
+.rsp-chat :is(.rsp-say, .rsp-answer) [data-streamdown="table-wrapper"] > div:has(> table) { border: 0 !important; border-radius: 0; background: none !important; }
+.rsp-chat :is(.rsp-say, .rsp-answer) [data-streamdown="table-wrapper"] :is(thead, tr, th, td) { background: none !important; }
+.rsp-chat :is(.rsp-say, .rsp-answer) [data-streamdown="table-wrapper"] table { display: table; width: auto; margin: 0; }
+.rsp-chat :is(.rsp-say, .rsp-answer) [data-streamdown="table-wrapper"] :is(thead, tbody) { border: 0; }
+.rsp-chat :is(.rsp-say, .rsp-answer) [data-streamdown="table-wrapper"] :is(th, td) { padding: 5px 16px 5px 0; }
+
+/* What an answer claimed passes, held against its turn (Activity.tsx, claims.ts): one quiet line under it, its colour only on the
+   mark: green when backed, red when not so, amber when nothing checked it. */
+.rsp-claim { display: flex; align-items: flex-start; gap: 6px; margin: 2px 0 0; color: var(--text-muted); font-size: 12.5px; line-height: 18px; }
+.rsp-claim > svg { flex: none; margin-top: 3px; }
+.rsp-claim.backed > svg { color: var(--green); }
+.rsp-claim.contradicted > svg { color: var(--red); }
+.rsp-claim.contradicted { color: var(--ink-2); }
+.rsp-claim.unverified > svg { color: var(--amber, #d97706); }
+.rsp-claim code { padding: 0 4px; border-radius: 4px; background: color-mix(in srgb, var(--ink) 7%, transparent); font-size: 11.5px; }
+
+/* A crew mate gone quiet mid-turn (Activity.tsx QuietLine): the words, then Nudge and Restart on the same line. */
+.quiet-line { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.quiet-acts { display: inline-flex; gap: 10px; }
+
+/* Why a crew mate is working (run-why.ts), beside its name: quiet, a routine's or a wake's in its crew mate's colour. */
+.rsp-why { overflow: hidden; max-width: 260px; padding: 0 7px; border-radius: 6px; background: var(--hover); color: var(--ink-2); font-size: 11.5px; line-height: 19px; text-overflow: ellipsis; white-space: nowrap; }
+.rsp-why:is([data-kind="routine"], [data-kind="wake"]) { background: color-mix(in srgb, var(--who, var(--ink)) 14%, transparent); color: var(--ink); }
+
+/* A crew mate's working bubble (Teammates.tsx WorkBubble): the dots, then what it is doing now; each new step rises in as the last
+   fades up and out, in the same place. */
+.ct-work { gap: 10px; max-width: min(460px, 100%); height: auto; min-height: 34px; padding: 0 14px 0 12px; }
+.ct-dots { display: inline-flex; flex: none; align-items: center; gap: 4px; }
+.ct-dots > i { width: 6px; height: 6px; border-radius: 50%; background: color-mix(in srgb, var(--who, var(--ink-3)) 70%, var(--ink-3)); animation: ct-dot 1.2s ease-in-out infinite; }
+.ct-dots > i:nth-child(2) { animation-delay: 0.15s; }
+.ct-dots > i:nth-child(3) { animation-delay: 0.3s; }
+.ct-steps { position: relative; display: grid; min-width: 0; overflow: hidden; height: 20px; }
+.ct-step { grid-area: 1 / 1; overflow: hidden; color: var(--ink-2); font-size: 13px; line-height: 20px; text-overflow: ellipsis; white-space: nowrap; animation: ct-step-in 280ms var(--ease-out) both; }
+.ct-step.out { animation: ct-step-out 280ms var(--ease-out) both; }
+@keyframes ct-step-in { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: none; } }
+@keyframes ct-step-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-9px); } }
+@media (prefers-reduced-motion: reduce) {
+  .ct-step, .ct-step.out { animation: none; }
+  .ct-step.out { display: none; }
+  .ct-dots > i { animation: ct-fade 1.6s ease-in-out infinite; }
+}
+
+/* A room's work, sent on (TeamControls.tsx RoomSend): the brief it goes with, readable before it goes, then where to. */
+.rs { display: flex; flex-direction: column; gap: 14px; }
+.rs-brief { border: 1px solid var(--border); border-radius: 12px; background: var(--card); overflow: hidden; }
+.rs-brief > summary { padding: 9px 12px; color: var(--ink-2); font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.rs-brief pre { max-height: 260px; margin: 0; padding: 0 12px 12px; overflow: auto; color: var(--ink-2); font: 12px/18px var(--font); white-space: pre-wrap; overflow-wrap: anywhere; }
+.rs > .tm-pop-head { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 0; }
+.rs > .tm-pop-head b { font-size: 15px; }
+.rs > .tm-pop-head span { color: var(--text-muted); font-size: 12.5px; line-height: 18px; }

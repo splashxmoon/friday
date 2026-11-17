@@ -400,10 +400,10 @@ export function CrewWorkflowRow({ w, wf, onEdit }: { w: WorkflowView; wf: CrewWo
   const who = stepsLine(w.steps, wf.names);
   return (
     <li className="auto-row min-w-0" data-kind="crew">
-      <span className={cn("grid h-8 min-w-8 shrink-0 place-items-center rounded-lg bg-[var(--hover)] px-1", !w.on && "opacity-70")}>
+      <span className={cn("auto-row-mark grid h-8 min-w-8 shrink-0 place-items-center rounded-lg bg-[var(--hover)] px-1", !w.on && "opacity-70")}>
         <StepFaces steps={w.steps} room={w.room} names={wf.names} size={18} run={live} />
       </span>
-      <button type="button" className={cn("min-w-0 flex-1 text-left focus-visible:outline-none", !w.on && "opacity-70")} onClick={onEdit} aria-label={`Edit ${w.name}`}>
+      <button type="button" className={cn("auto-row-text min-w-0 flex-1 text-left focus-visible:outline-none", !w.on && "opacity-70")} onClick={onEdit} aria-label={`Edit ${w.name}`}>
         <span className="flex min-w-0 items-center gap-2">
           <span className="truncate text-[14px] font-medium">{w.name}</span>
           <span className="auto-when" style={{ "--tone": `var(${w.trigger.kind === "schedule" ? "--st-queued" : w.trigger.kind === "webhook" ? "--st-working" : w.trigger.kind === "manual" ? "--text-muted" : "--st-review"})` } as CSSProperties}>
@@ -417,11 +417,12 @@ export function CrewWorkflowRow({ w, wf, onEdit }: { w: WorkflowView; wf: CrewWo
         </span>
       </button>
       {last && !live && (
-        <span className="hidden shrink-0 items-center gap-1.5 text-[12px] text-[var(--text-muted)] sm:flex" title={last.note || RUN_WORD[last.status]}>
+        <span className="auto-row-last hidden shrink-0 items-center gap-1.5 text-[12px] text-[var(--text-muted)] sm:flex" title={last.note || RUN_WORD[last.status]}>
           <TaskMark state={runMark(last.status)} />
           {RUN_WORD[last.status]} · {relTime(last.at)}
         </span>
       )}
+      <span className="auto-row-acts">
       {!owner && (
         <Tip label="Run it now">
           <Button variant="ghost" size="icon-sm" aria-label={`Run ${w.name} now`} disabled={wf.busy === w.id} onClick={() => void wf.runNow(w)}>
@@ -430,6 +431,7 @@ export function CrewWorkflowRow({ w, wf, onEdit }: { w: WorkflowView; wf: CrewWo
         </Tip>
       )}
       <Switch checked={w.on} disabled={!!owner} onCheckedChange={(on) => void wf.setOn(w, on)} aria-label={owner ? `${w.name} is ${owner.name}'s, ${w.on ? "on" : "off"}` : w.on ? `Pause ${w.name}` : `Turn ${w.name} on`} />
+      </span>
     </li>
   );
 }

@@ -121,6 +121,8 @@ export function TreePanel({
   const [paths, setPaths] = useState<string[] | null>(() => treeCache.get(sid) ?? null);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
+  /** The listing has been asked for once, whatever came back: a file named in the chat opens after that, listed or not. */
+  const [listed, setListed] = useState(false);
   const [q, setQ] = useState("");
   const [onlyChanged, setOnlyChanged] = useState(false);
   const saved = useMemo(() => readLayout(sid), [sid]);
@@ -174,11 +176,15 @@ export function TreePanel({
   // Each ask once: the effect runs again whenever a tree kept in the workbench is shown, and must not take you back to it.
   const jumpTo = jump && paths ? resolvePath(paths, jump.path) : null;
   const jumped = useRef(0);
+  // Without a listing (a folder that can't be listed, a crew mate's file outside the lane's folder), the file is opened by its name
+  // all the same, once the listing has had its go: the read finds it in whichever crew folder has it (crew-files.ts). It waited for
+  // a listing that never came, and nothing opened.
   useEffect(() => {
-    if (!jump || !paths || jumped.current === jump.at) return;
+    if (!jump || jumped.current === jump.at) return;
+    if (!paths && where && !listed) return;
     jumped.current = jump.at;
-    openFile(resolvePath(paths, jump.path));
-  }, [jump, !!paths, openFile]); // eslint-disable-line react-hooks/exhaustive-deps
+    openFile(paths ? resolvePath(paths, jump.path) : jump.path);
+  }, [jump, !!paths, listed, openFile]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // A tree of a few hundred files is a slow way to reach the one whose name
   // you already know.
@@ -223,7 +229,7 @@ export function TreePanel({
         setPaths(next);
       })
       .catch((e: Error) => setErr(e.message))
-      .finally(() => setLoading(false));
+      .finally(() => (setLoading(false), setListed(true)));
   };
   // Once per session view, and again when a machine arrives: before that there
   // is nothing on the other end of the read.

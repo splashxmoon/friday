@@ -444,3 +444,6 @@ function Panel({ anchor, close, state, me, sid, invite, identity, lane, onOpen }
     document.body,
   );
 }
+
+/** The environment panel opened from somewhere other than its own button (ThreadCard.tsx, the thread card's place row). */
+export { Panel as EnvironmentPanel };

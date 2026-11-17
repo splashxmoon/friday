@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDownIcon, GitForkIcon } from "lucide-react";
+import { ChevronDownIcon } from "lucide-react";
+import { Icon } from "./icons.js";
 import type { EngineTool } from "../types.js";
 import { EngineMark } from "./BrandMarks.js";
 import { TaskMark, type TaskMarkState } from "./TaskMark.js";
@@ -167,7 +168,7 @@ export function Subagents({ rows }: { rows: SubagentRow[] }) {
     <section className="subs" aria-label={`${rows.length} subagent${rows.length === 1 ? "" : "s"}: ${t.text}`}>
       <header className="subs-head">
         <span className="subs-icon" aria-hidden="true">
-          <GitForkIcon className="size-3.5" />
+          <Icon name="gitFork" size={14} />
         </span>
         <span className="subs-title">{rows.length === 1 ? "Subagent" : `${rows.length} subagents`}</span>
         <span className="subs-state">{t.text}</span>
@@ -247,7 +248,7 @@ export function SubagentsTray({ tasks, slot, agentOf }: { tasks: SubTask[]; slot
           setOpen(!open);
         }}
       >
-        {t.working ? <span className="ring-spin" aria-hidden="true" /> : <GitForkIcon className="size-3.5" aria-hidden="true" />}
+        {t.working ? <span className="ring-spin" aria-hidden="true" /> : <Icon name="gitFork" size={14} />}
         {/* A phone's bar shows the count alone (style.css), so the run's state beside it keeps its word, not "W" (2026-10-28 QA). */}
         <span className="subs-label">{label}</span>
         <span className="subs-n" aria-hidden="true">{t.working || subs.length}</span>

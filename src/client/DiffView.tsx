@@ -280,12 +280,9 @@ export function DiffView({
             )}
             </span>
           </span>
-          {/* What happened to it, as a letter at the end of the row, where the editor's changes view puts it. */}
-          {change && (
-            <span className={`dv-badge ${change}`} title={BADGE[change][1]} aria-label={BADGE[change][1]}>
-              {BADGE[change][0]}
-            </span>
-          )}
+          {/* No letter for what happened to it (M, A, D, R): the counts beside it say it (Arun, 2026-11-16: "get rid of this M, A,
+              and whatever stuff there too"). A screen reader still hears it, on the row. */}
+          {change && <span className="sr-only">{BADGE[change][1]}</span>}
           <span className={`${styles.diffStat} dv-stat`}>
             <span className={`${styles.add} rsp-add`}>+{added}</span>
             <span className={`${styles.del} rsp-del`}>-{removed}</span>

@@ -105,8 +105,13 @@ export interface Handed {
   carried: string[];
   ask: string[];
   rule?: { id: string; text: string };
-  /** Where the crew mate works on it, on this computer: its lane in this session (crew-carry.ts). */
+  /** Where the crew mate works on it, on this computer: its lane in its thread (`jobSid`), or before 2026-11-16 in this session (crew-carry.ts). */
   jobLane?: string;
+  /** The crew mate's thread it works on it in, on its own page: its session, and the thread's id. */
+  jobSid?: string;
+  thread?: string;
+  /** The person's own line on top, put back in their box when they take it back. */
+  note?: string;
   /** How its work stands (crew-carry-rules.ts), as last said. */
   state: string;
   /** When it started working, for "18m". */
@@ -114,9 +119,12 @@ export interface Handed {
   done?: number;
   of?: number;
   result?: { said: string; files: number; added: number; removed: number; prs: string[] };
-  /** Taken back, stopped from the session, or its work brought in: its wheel is the lane's own again. */
-  back?: "back" | "stopped" | "brought";
+  /** Taken back, stopped from the session, its work brought in, or its crew mate or thread taken away: its wheel is the lane's own again. */
+  back?: "back" | "stopped" | "brought" | "gone";
 }
+
+/** A hand-off whose line has left the chat and the crew list: taken back (its words back in the box), or its crew mate or thread gone. */
+export const handedCleared = (h: Pick<Handed, "back">): boolean => h.back === "back" || h.back === "gone";
 
 /** The live hand-off on a lane, if its work is a crew mate's now: the person typing there is asked first. */
 export function handedOn(s: Pick<SessionState, "handed">, lane: string): Handed | null {
@@ -366,6 +374,8 @@ export interface BoardState {
   check?: string;
   /** Whose work it is, when Friday posted it for a person (board.posted `by`). */
   by?: { id: string; name: string };
+  /** Waiting on the person to start it (board.posted `proposed`): nothing is handed out until board.started. */
+  proposed?: true;
 }
 
 /** Tasks whose every dependency is done and that nobody has: the ones an agent can take now. */
@@ -973,7 +983,7 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       s.handover = null;
       break;
     case "crew.handed":
-      s.handed = { ...(s.handed ?? {}), [b.job]: { job: b.job, mate: b.mate, mateName: b.mateName, lane: b.lane, by: { id: ev.actor.id, name: ev.actor.name }, at: ev.ts, seq: ev.seq, carried: b.carried, ask: b.ask, ...(b.rule ? { rule: b.rule } : {}), ...(b.jobLane ? { jobLane: b.jobLane } : {}), state: "asked" } };
+      s.handed = { ...(s.handed ?? {}), [b.job]: { job: b.job, mate: b.mate, mateName: b.mateName, lane: b.lane, by: { id: ev.actor.id, name: ev.actor.name }, at: ev.ts, seq: ev.seq, carried: b.carried, ask: b.ask, ...(b.rule ? { rule: b.rule } : {}), ...(b.jobLane ? { jobLane: b.jobLane } : {}), ...(b.jobSid ? { jobSid: b.jobSid } : {}), ...(b.thread ? { thread: b.thread } : {}), ...(b.note ? { note: b.note } : {}), state: "asked" } };
       break;
     case "crew.handed.moved": {
       const h = s.handed?.[b.job];
@@ -1108,7 +1118,13 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       if (s.board && b.lane && s.board.fromLane !== MAIN_LANE && !s.lanes.some((l) => l.id === s.board!.fromLane)) s.board = { ...s.board, fromLane: b.lane, fromName: s.lanes.find((l) => l.id === b.lane)?.name ?? s.board.fromName };
       break;
     case "board.posted":
-      s.board = { fromLane: b.fromLane, fromName: b.fromName, seq: ev.seq, tasks: b.tasks.map((t) => ({ ...t, status: "open", rounds: 0 })), ...(b.check ? { check: b.check } : {}), ...(b.by ? { by: b.by } : {}) };
+      s.board = { fromLane: b.fromLane, fromName: b.fromName, seq: ev.seq, tasks: b.tasks.map((t) => ({ ...t, status: "open", rounds: 0 })), ...(b.check ? { check: b.check } : {}), ...(b.by ? { by: b.by } : {}), ...(b.proposed ? { proposed: true as const } : {}) };
+      break;
+    case "board.started":
+      if (s.board?.proposed) {
+        const { proposed: _started, ...rest } = s.board;
+        s.board = rest;
+      }
       break;
     case "board.checking":
     case "board.checked":

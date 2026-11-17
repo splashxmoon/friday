@@ -30,3 +30,14 @@
 .aw-starters-col > h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 2px; color: var(--ink-2); font-size: 12.5px; font-weight: 600; }
 
 /* A narrow page: the week scrolls sideways, each day keeping its width. */
+
+/* A crew template's tile: its two mascots set across the square, one up at the left and one down at the right, the second in front,
+   each whole, rather than squeezed side by side to the tile's edges (Arun, 2026-11-16: "fix these mascot layouts too"). */
+.automations-page .auto-tile.aw-tpl-faces { position: relative; width: 32px; height: 32px; overflow: hidden; }
+.aw-tpl-faces .aw-stack { position: absolute; inset: 0; display: block; }
+.aw-tpl-faces .aw-stack > span { position: absolute; display: flex; margin: 0; line-height: 0; }
+.aw-tpl-faces .aw-stack > span:first-child { top: 5px; left: 5px; }
+.aw-tpl-faces .aw-stack > span + span { right: 4px; bottom: 4px; margin: 0; }
+.aw-tpl-faces .aw-stack > span:only-child { top: 50%; left: 50%; transform: translate(-50%, -50%); }
+/* The coding tool's templates beside them at the same size, so both columns' names start in one line. */
+.automations-page .auto-tpl > .auto-tile { width: 32px; height: 32px; }

@@ -17,14 +17,14 @@ export interface WhatsNewNotes {
 }
 
 export const WHATS_NEW: WhatsNewNotes = {
-  version: "0.2.26",
-  title: "Crews, completely reworked",
-  summary: "Meet your AI team. Hand a teammate a job, research, writing, planning or code, and it gets it done and keeps going while you're away.",
+  version: "0.3.0",
+  title: "Threads for your coding agents",
+  summary: "Every project's sessions as threads, several agents in one, and proof of what each one did before it says done.",
   items: [
-    { icon: "users", title: "A team that works for you", line: "Each teammate has a role, its own memory and a profile. They run on the coding tools you already have." },
-    { icon: "chat", title: "Rooms like a group chat", line: "Whole replies, their back-and-forth in one card, and side threads beside the room." },
-    { icon: "clock", title: "Routines on their own", line: "Stand-ups, weekly reviews, an eye on new issues, on a schedule, while you sleep." },
-    { icon: "shield", title: "Never stuck on a limit", line: "Fallbacks in order, each with its model and effort. It can ask you before it switches." },
+    { icon: "threadCard", title: "Threads, with a card", line: "A project's sessions as tabs. The thread card shows its branch, its git and every agent working in it." },
+    { icon: "check", title: "Proof before done", line: "A finished agent shows what backs it up: tests passed, files changed, what it ran." },
+    { icon: "gitPullRequest", title: "Start from an issue or PR", line: "Open a thread from a GitHub issue, a pull request or a branch, or let labelled issues start one." },
+    { icon: "glass", title: "Frosted, and the menu bar", line: "A frosted glass look beside Light and Dark, and Friday in your Mac's menu bar." },
   ],
 };
 

@@ -6,29 +6,95 @@ import { useEffect, useState } from "react";
 import { kgPath, openBring } from "./crew-carry-open.js";
 import { carryReq as workReq } from "./crew-carry-req.js";
 import { handedLive, handedSub, progressLine, resultLine } from "../crew-carry-rules.js";
-import type { Handed, SessionState } from "../session/projection.js";
+import { handedCleared, type Handed, type SessionState } from "../session/projection.js";
 import type { SessionEvent } from "../types.js";
 import { Avatar, Icon } from "./icons.js";
-import { Face, useTeamNow } from "./Teammates.js";
+import { Face, setTeamTab, useTeamNow, type Team } from "./Teammates.js";
 import { roomsOut } from "./crew-at.js";
+import { focusAgent } from "./agentFocus.js";
+import { prefillComposer } from "./prefill.js";
 import { loadRecents } from "./storage.js";
 import "./crew-carry.css";
 
 const notice = (text: string) => dispatchEvent(new CustomEvent("friday:notice", { detail: text }));
 const first = (n: string) => n.split(/\s+/)[0] || n;
 
-type RoomNow = { state: "working" | "waiting" | "done" | "stopped" | "queued" | "unknown"; line: string; said: string; working: string[]; at: number | null; crew?: { name: string; look?: string; working: boolean; lead: boolean }[] };
+/**
+ * The person's own words back in their box once a hand-off is taken back (Arun, 2026-11-16: "it should be removed from the chat and
+ * be place in your input chat for you to send/edit to send again"): over anything already written there, never in its place.
+ */
+function backInBox(note: string) {
+  const text = note.trim();
+  if (!text) return;
+  const el = document.getElementById("composer-input") as HTMLTextAreaElement | null;
+  const had = el?.value.trim() ?? "";
+  prefillComposer(had && had !== text ? `${text}\n\n${had}` : text);
+}
+
+/** A crew mate's hand-off taken back: its work stops, its line leaves the chat, and what you wrote with it is back in your box. */
+export async function takeBack(sid: string, invite: string, job: string, opts: { refill?: boolean } = {}): Promise<void> {
+  const r = await workReq<{ note?: string }>(kgPath(sid, invite, `/${job}/back`), { method: "POST", body: JSON.stringify({ how: "back" }) });
+  // The sidebar's row says "Rio is on it" no longer, now rather than at its next read.
+  dispatchEvent(new Event("friday:attention"));
+  if (opts.refill !== false) backInBox(r.note ?? "");
+}
+
+/** Work handed to a crew room taken back: its message there taken back or its turn on it stopped, its line gone, your words back. */
+export async function takeRoomBack(sid: string, invite: string, room: string, opts: { refill?: boolean } = {}): Promise<void> {
+  const r = await workReq<{ note?: string }>(kgPath(sid, invite, "", `&roomBack=${encodeURIComponent(room)}`), { method: "POST", body: "{}" });
+  dispatchEvent(new Event("friday:attention"));
+  if (opts.refill !== false) backInBox(r.note ?? "");
+}
 
 /**
- * What this session handed to the crew, in the agent status's list (StatusBar.tsx): each crew mate's job and each room, how it
- * stands, and a press to open it (Arun, 2026-11-13: "show the current agents working in the coding session, plus any work that was
- * handed off in a crew or crew room"). Loaded when that list first opens.
+ * Whether a hand-off's line still has somewhere to point: taken back, or its crew mate, its thread or its room taken away, it leaves
+ * the chat and the crew list at once, from the crew as last read (Arun, 2026-11-16: "make it dynamic like if an room or agent gets
+ * deleted then it is there anymore"). The server says so in the session too (crew-carry.ts gone); this is for the seconds before.
+ */
+export function handedShown(h: Handed, team: Team | null): boolean {
+  if (handedCleared(h)) return false;
+  if (!team) return true;
+  if (!team.teammates.some((m) => m.id === h.mate)) return false;
+  return !h.thread || (team.rooms ?? []).some((r) => r.id === h.thread);
+}
+/** The same for a crew room: there while the crew as last read has it. */
+export const roomShown = (room: string, team: Team | null): boolean => !team || (team.rooms ?? []).some((r) => r.id === room && !r.thread);
+
+/** A crew mate's thread opened on its page, or its main chat, from a coding session: the Crew side in view, the thread focused. */
+function openMateThread(o: { sid: string; invite: string; lane: string; mate?: string }) {
+  if (o.mate) setTeamTab(true);
+  focusAgent(o.sid, o.lane);
+  dispatchEvent(new CustomEvent("friday:open-session", { detail: { sid: o.sid, invite: o.invite } }));
+}
+
+type RoomNow = { state: "working" | "waiting" | "done" | "stopped" | "queued" | "unknown"; line: string; said: string; working: string[]; at: number | null; crew?: { name: string; look?: string; working: boolean; lead: boolean }[] };
+
+/** Whether the "With the crew" list is folded, kept on this computer for every session (Arun, 2026-11-16: "make it collapseable"). */
+const FOLD_KEY = "friday.crewList.folded";
+const readFold = () => {
+  try {
+    return localStorage.getItem(FOLD_KEY) === "1";
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * What this session handed to the crew, in the agent status's list (StatusBar.tsx) and the side panel's Agents (ThreadCard.tsx):
+ * each crew mate's job and each room as its mascot, how it stands, and a press to open it (Arun, 2026-11-13: "show the current
+ * agents working in the coding session, plus any work that was handed off in a crew or crew room"). It folds, and each row comes off
+ * with its ×: still at work, that takes it back (its words back in the box); finished, it only leaves the list (Arun, 2026-11-16:
+ * "make the rio thing be the mascot too also be abel to remove them too from here and make it collapseable as well"). One whose
+ * crew mate, thread or room was taken away isn't listed.
  */
 export function HandedRows({ state, events, onPick }: { state: SessionState; events: readonly SessionEvent[]; onPick: () => void }) {
   const invite = loadRecents().find((r) => r.sid === state.id)?.invite ?? "";
-  const jobs = Object.values(state.handed ?? {}).sort((a, b) => b.at - a.at).slice(0, 6);
-  const rooms = roomsOut(events).slice(0, 4);
+  const team = useTeamNow();
+  const jobs = Object.values(state.handed ?? {}).filter((h) => handedShown(h, team)).sort((a, b) => b.at - a.at).slice(0, 6);
+  const rooms = roomsOut(events).filter((r) => roomShown(r.body.room, team)).slice(0, 4);
   const [now, setNow] = useState<Record<string, RoomNow>>({});
+  const [folded, setFolded] = useState(readFold);
+  const [busy, setBusy] = useState<string | null>(null);
   useEffect(() => {
     if (!invite) return;
     let live = true;
@@ -36,40 +102,100 @@ export function HandedRows({ state, events, onPick }: { state: SessionState; eve
     return () => void (live = false);
   }, [state.id, invite, rooms.map((r) => r.body.room).join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!jobs.length && !rooms.length) return null;
-  const openJob = (job: string) => void workReq<{ sid: string; invite: string }>(kgPath(state.id, invite, `/${job}`)).then((o) => dispatchEvent(new CustomEvent("friday:open-session", { detail: { sid: o.sid, invite: o.invite } })), (e: Error) => notice(e.message));
+  const fold = () =>
+    setFolded((f) => {
+      try {
+        localStorage.setItem(FOLD_KEY, f ? "0" : "1");
+      } catch {
+        /* this window only */
+      }
+      return !f;
+    });
+  const openJob = (job: string) => void workReq<{ sid: string; invite: string; lane: string; mate?: string }>(kgPath(state.id, invite, `/${job}`)).then(openMateThread, (e: Error) => notice(e.message));
   const openRoom = (room: string) => void workReq<{ sid: string; invite: string }>(kgPath(state.id, invite, "", `&room=${encodeURIComponent(room)}`)).then((o) => dispatchEvent(new CustomEvent("friday:open-session", { detail: { sid: o.sid, invite: o.invite } })), (e: Error) => notice(e.message));
+  const off = (key: string, go: () => Promise<void>, said: string) => {
+    setBusy(key);
+    void go().then(
+      () => (setBusy(null), said && notice(said)),
+      (e: Error) => (setBusy(null), notice(e.message)),
+    );
+  };
+  const lookOf = (id: string, name: string) => team?.teammates.find((m) => m.id === id)?.look ?? name;
+  const roomFaces = (room: string) => {
+    const r = team?.rooms?.find((x) => x.id === room);
+    const ids = r ? Object.keys(r.lanes) : [];
+    const lead = r ? ids.find((id) => r.lanes[id] === r.lead) ?? ids[0] : undefined;
+    const m = team?.teammates.find((x) => x.id === lead);
+    return { seed: m ? (m.look ?? m.name) : null, more: Math.max(0, ids.length - 1) };
+  };
+  const n = jobs.length + rooms.length;
   return (
-    <>
-      <p className="stb-pop-head">With the crew</p>
-      <ul className="stb-pop-list">
-        {jobs.map((h) => (
-          <li key={h.job}>
-            <button type="button" className="stb-pop-row" onClick={() => (onPick(), openJob(h.job))}>
-              <span className="stb-pop-mark">
-                <Avatar name={h.mateName} id={h.mate} size={16} />
-              </span>
-              <span className="stb-pop-main">
-                <span className="stb-pop-name">{h.mateName}</span>
-              </span>
-              <span className="stb-pop-word">{progressLine(h, Date.now()).replace(new RegExp(`^${h.mateName}\\s+`), "")}</span>
-            </button>
-          </li>
-        ))}
-        {rooms.map((r) => (
-          <li key={r.body.room}>
-            <button type="button" className="stb-pop-row" onClick={() => (onPick(), openRoom(r.body.room))}>
-              <span className="stb-pop-mark">
-                <Icon name="users" size={13} />
-              </span>
-              <span className="stb-pop-main">
-                <span className="stb-pop-name">{r.body.roomName}</span>
-              </span>
-              <span className="stb-pop-word">{now[r.body.room]?.line ?? "Open the room"}</span>
-            </button>
-          </li>
-        ))}
-      </ul>
-    </>
+    <div className="kg-crew">
+      <button type="button" className="kg-crew-head" aria-expanded={!folded} onClick={fold} title={folded ? "Show what's with the crew" : "Fold the crew list"}>
+        <Icon name={folded ? "chevronRight" : "chevronDown"} size={12} />
+        <span>With the crew</span>
+        <span className="kg-crew-n">{n}</span>
+      </button>
+      {!folded && (
+        <ul className="stb-pop-list kg-crew-list">
+          {jobs.map((h) => {
+            const live = handedLive(h);
+            return (
+              <li key={h.job} className="kg-crew-row">
+                <button type="button" className="stb-pop-row" onClick={() => (onPick(), openJob(h.job))} title={`Open ${h.mateName}'s thread on it`}>
+                  <span className="stb-pop-mark">
+                    <Face seed={lookOf(h.mate, h.mateName)} size={18} status={live ? "working" : "idle"} />
+                  </span>
+                  <span className="stb-pop-main">
+                    <span className="stb-pop-name">{h.mateName}</span>
+                  </span>
+                  <span className="stb-pop-word">{progressLine(h, Date.now()).replace(new RegExp(`^${h.mateName}\\s+`), "")}</span>
+                </button>
+                <button
+                  type="button"
+                  className="kg-crew-x"
+                  disabled={busy === h.job}
+                  aria-label={live ? `Take it back from ${h.mateName}` : `Remove ${h.mateName}'s hand-off from this list`}
+                  title={live ? `Take it back: ${first(h.mateName)} stops, and what you wrote goes back in your box` : "Remove from this list"}
+                  onClick={() => off(h.job, () => takeBack(state.id, invite, h.job, { refill: live }), live ? `Took it back from ${first(h.mateName)}.` : "")}
+                >
+                  <Icon name="x" size={12} />
+                </button>
+              </li>
+            );
+          })}
+          {rooms.map((r) => {
+            const st = now[r.body.room];
+            const live = !st || st.state === "working" || st.state === "waiting" || st.state === "queued";
+            const f = roomFaces(r.body.room);
+            return (
+              <li key={r.body.room} className="kg-crew-row">
+                <button type="button" className="stb-pop-row" onClick={() => (onPick(), openRoom(r.body.room))} title={`Open ${r.body.roomName}`}>
+                  <span className="stb-pop-mark kg-crew-room">
+                    {f.seed ? <Face seed={f.seed} size={18} status={st?.state === "working" ? "working" : "idle"} /> : <Icon name="users" size={13} />}
+                    {f.more > 0 && <span className="kg-crew-more">+{f.more}</span>}
+                  </span>
+                  <span className="stb-pop-main">
+                    <span className="stb-pop-name">{r.body.roomName}</span>
+                  </span>
+                  <span className="stb-pop-word">{st?.line ?? "Open the room"}</span>
+                </button>
+                <button
+                  type="button"
+                  className="kg-crew-x"
+                  disabled={busy === r.body.room}
+                  aria-label={live ? `Take it back from ${r.body.roomName}` : `Remove ${r.body.roomName} from this list`}
+                  title={live ? "Take it back: the room stops on it, and what you wrote goes back in your box" : "Remove from this list"}
+                  onClick={() => off(r.body.room, () => takeRoomBack(state.id, invite, r.body.room, { refill: live }), live ? `Took it back from ${r.body.roomName}.` : "")}
+                >
+                  <Icon name="x" size={12} />
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -78,9 +204,12 @@ export function HandedRows({ state, events, onPick }: { state: SessionState; eve
  * this to the room ... like who was working, status on whether it is done or not"): who in the room is working now, and whether
  * the work it was handed is done, read every 20 seconds until it is. With a way into the room for someone in it.
  */
-export function RoomHandedLine({ by, me, roomName, room, to, carried, sid, invite, stamp, brought = false }: { by: { id: string; name: string }; me: string; roomName: string; room: string; to: string; carried: string[]; sid: string; invite: string; stamp: React.ReactNode; /** Its work already brought in here. */ brought?: boolean }) {
+export function RoomHandedLine({ by, me, roomName, room, to, carried, sid, invite, stamp, brought = false, cleared = false }: { by: { id: string; name: string }; me: string; roomName: string; room: string; to: string; carried: string[]; sid: string; invite: string; stamp: React.ReactNode; /** Its work already brought in here. */ brought?: boolean; /** Taken back, or the room taken away (crew.handed.room.back): no line. */ cleared?: boolean }) {
   const [now, setNow] = useState<RoomNow | null>(null);
-  const settled = now?.state === "done" || now?.state === "stopped" || now?.state === "unknown";
+  const [busy, setBusy] = useState(false);
+  const team = useTeamNow();
+  const gone = cleared || !roomShown(room, team);
+  const settled = gone || now?.state === "done" || now?.state === "stopped" || now?.state === "unknown";
   useEffect(() => {
     if (settled) return;
     let live = true;
@@ -96,6 +225,14 @@ export function RoomHandedLine({ by, me, roomName, room, to, carried, sid, invit
       (e: Error) => notice(e.message),
     );
   const live = now?.state === "working" || now?.state === "waiting";
+  if (gone) return null;
+  const back = () => {
+    setBusy(true);
+    void takeRoomBack(sid, invite, room).then(
+      () => setBusy(false),
+      (e: Error) => (setBusy(false), notice(e.message)),
+    );
+  };
   const crew = now?.crew ?? [];
   const lead = crew.find((c) => c.lead) ?? crew[0];
   // Its crew as faces, the one it went to first (Arun, 2026-11-13: "design this better, like show the crew mascots and fix spacing"):
@@ -115,7 +252,7 @@ export function RoomHandedLine({ by, me, roomName, room, to, carried, sid, invit
         <div className="kg-room-meta">
           <span className="kg-room-chip" data-state={now?.state ?? "unknown"} role="status">
             {(live || now?.state === "queued") && <i aria-hidden="true" />}
-            {now ? now.line : "Checking…"}
+            <span className="kg-room-chip-text">{now ? now.line : "Checking…"}</span>
           </span>
           {crew.length > 1 && (
             <span className="kg-room-crew" title={crew.map((c) => `${c.name}${c.working ? " (working)" : ""}`).join(", ")}>
@@ -137,6 +274,11 @@ export function RoomHandedLine({ by, me, roomName, room, to, carried, sid, invit
           <button type="button" className="kg-link" onClick={go}>
             Open room
           </button>
+          {(live || now?.state === "queued") && by.id === me && (
+            <button type="button" className="kg-link" disabled={busy} onClick={back} title="The room stops on it, and what you wrote goes back in your box">
+              Take back
+            </button>
+          )}
           {brought && <span className="kg-room-brought">Brought in</span>}
           {now?.state === "done" && !brought && (
             <button type="button" className="kg-bring" onClick={() => openBring({ sid, invite, from: `room:${room}`, name: roomName })}>
@@ -158,8 +300,15 @@ export function RoomHandedLine({ by, me, roomName, room, to, carried, sid, invit
  */
 export function HandedLine({ h, me, sid, invite, stamp }: { h: Handed; me: string; sid: string; invite: string; stamp: React.ReactNode }) {
   const [now, setNow] = useState(() => Date.now());
-  const mateLook = useTeamNow()?.teammates.find((x) => x.id === h.mate)?.look;
+  const team = useTeamNow();
+  const mateLook = team?.teammates.find((x) => x.id === h.mate)?.look;
   const live = handedLive(h);
+  const shown = handedShown(h, team);
+  // Its crew mate or thread taken away: the sidebar's row that said "Rio is on it" is read again now, not at its next read.
+  const gone = !shown && !handedCleared(h);
+  useEffect(() => {
+    if (gone) setTimeout(() => dispatchEvent(new Event("friday:attention")), 500);
+  }, [gone]);
   useEffect(() => {
     if (!live) return;
     const t = setInterval(() => setNow(Date.now()), 30_000);
@@ -167,17 +316,19 @@ export function HandedLine({ h, me, sid, invite, stamp }: { h: Handed; me: strin
   }, [live]);
   const [busy, setBusy] = useState(false);
   const mine = h.by.id === me;
+  // Taken back, or its crew mate or thread taken away: the line leaves the chat (Arun, 2026-11-16).
+  if (!shown) return null;
   const act = (how: "back" | "stopped") => {
     setBusy(true);
-    void workReq(kgPath(sid, invite, `/${h.job}/back`), { method: "POST", body: JSON.stringify({ how }) }).then(
+    void (how === "back" ? takeBack(sid, invite, h.job) : workReq(kgPath(sid, invite, `/${h.job}/back`), { method: "POST", body: JSON.stringify({ how }) })).then(
       () => setBusy(false),
       (e: Error) => (setBusy(false), notice(e.message)),
     );
   };
-  // Where its crew mate works on it: its lane in this session, on this computer (crew-carry.ts).
+  // Where its crew mate works on it: its thread on its own page (crew-carry.ts); one handed before that, its lane in this session.
   const openJob = () =>
-    void workReq<{ sid: string; lane: string }>(kgPath(sid, invite, `/${h.job}`)).then(
-      (o) => dispatchEvent(new CustomEvent("friday:focus-lane", { detail: { lane: o.lane } })),
+    void workReq<{ sid: string; invite: string; lane: string; mate?: string }>(kgPath(sid, invite, `/${h.job}`)).then(
+      (o) => (o.sid === sid ? dispatchEvent(new CustomEvent("friday:focus-lane", { detail: { lane: o.lane } })) : openMateThread(o)),
       (e: Error) => notice(e.message),
     );
   const sub = handedSub(h);
@@ -202,7 +353,12 @@ export function HandedLine({ h, me, sid, invite, stamp }: { h: Handed; me: strin
             Stop
           </button>
         )}
-        <button type="button" className="kg-link" onClick={openJob}>
+        {live && mine && (
+          <button type="button" className="kg-link" disabled={busy} onClick={() => act("back")} title={`${first(h.mateName)} stops, this leaves the chat, and what you wrote goes back in your box`}>
+            Take back
+          </button>
+        )}
+        <button type="button" className="kg-link" onClick={openJob} title={h.jobSid ? `Open ${first(h.mateName)}'s thread on it` : undefined}>
           Open
         </button>
       </div>

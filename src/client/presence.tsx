@@ -72,6 +72,31 @@ export function StateRing({ state, title }: { state: Presence | null; title?: st
   );
 }
 
+/**
+ * A session tab's finished ring (Sidebar.tsx SessionRing): green where the ring turned, the presence ring's own size (10.5px
+ * across, a 1.75px line, in the 12px slot), lit while you haven't seen it, quieter once you have.
+ */
+export function DoneRing({ fresh = false, title }: { fresh?: boolean; title?: string | undefined }) {
+  return (
+    <span className={`state-ring sb-done${fresh ? " new" : ""}`} role="img" aria-label="Finished" title={title ?? (fresh ? "Finished while you were away" : "Finished")}>
+      <svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
+        <circle cx="6" cy="6" r="4.375" />
+      </svg>
+    </span>
+  );
+}
+
+/**
+ * The ring a session tab shows, for anything else that says how a thread or an agent stands (the menu bar's panel, the thread
+ * card's agents), so every ring in the app is the same one (Arun, 2026-11-16: "make sure we are using the same exact ring design
+ * … found on the coding session tabs"). Nothing to say keeps its 14px slot, empty.
+ */
+export function TabRing({ state, fresh = false, title }: { state: Presence | "done" | null; fresh?: boolean; title?: string | undefined }) {
+  if (state === "done") return <DoneRing fresh={fresh} title={title} />;
+  if (!state || state === "idle" || state === "asleep") return <span className="state-ring" aria-hidden="true" />;
+  return <StateRing state={state} title={title} />;
+}
+
 /** "now", "4m", "1h 5m", "3h": how long something has been at it, in tabular figures, counted up by the caller's tick. */
 export function elapsed(since: number, now = Date.now()): string {
   const m = Math.floor((now - since) / 60_000);

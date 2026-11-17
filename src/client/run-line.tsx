@@ -21,6 +21,7 @@ const clip = (s: string, n: number) => ((t) => (t.length > n ? `${t.slice(0, n -
 
 /** The kind a step's group is: what it looked at, searched, changed, ran, or anything else by its own verb. */
 function groupOf(s: Step): { key: string; label: string } {
+  if (s.mark === "@") return { key: "crew", label: "With the crew" };
   if (s.verb === "Searched the web") return { key: "web", label: "Searched the web" };
   if (s.verb === "Opened") return { key: "open", label: "Opened" };
   const k = stepKind(s);
@@ -42,6 +43,20 @@ export function doingKind(blocks: readonly Block[], live: boolean): string {
   return k === "test" ? "run" : k;
 }
 
+/**
+ * What a crew mate is doing this moment, for its typing bubble (Teammates.tsx WorkBubble): the step under way, else the last it
+ * took while it thinks of the next, else thinking; writing once its answer streams.
+ */
+export function liveWord(blocks: readonly Block[], waiting = false, writing = false): string {
+  if (waiting) return "Waiting for an answer";
+  if (writing) return "Writing";
+  const steps = blocks.flatMap((b) => (b.kind === "work" && "steps" in b ? b.steps : []));
+  const running = steps.findLast((s) => s.state === "running");
+  if (running) return doingOf(running);
+  if (blocks.at(-1)?.kind === "think" || !steps.length) return "Thinking";
+  return doingOf(steps.at(-1)!);
+}
+
 function Clock({ since }: { since: number }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -51,8 +66,8 @@ function Clock({ since }: { since: number }) {
   return <span className="rl-clock">{now - since >= 1000 ? tookFor(now - since) : ""}</span>;
 }
 
-export function RunLine({ blocks, live, since, took, waiting = false, writing = false, forecast, notes }: { blocks: readonly Block[]; live: boolean; since?: number; took: number; waiting?: boolean; writing?: boolean; forecast?: string; /** What it said along the way, shown when the line is opened. */ notes?: ReactNode }) {
-  const [open, setOpen] = useState(false);
+export function RunLine({ blocks, live, since, took, waiting = false, writing = false, forecast, notes, plain = false, startOpen = false }: { blocks: readonly Block[]; live: boolean; since?: number; took: number; waiting?: boolean; writing?: boolean; forecast?: string; /** What it said along the way, shown when the line is opened. */ notes?: ReactNode; /** A crew mate's: the step under way and the clock, without a tick per step. */ plain?: boolean; /** Shown opened (a crew mate's work, asked for from its message). */ startOpen?: boolean }) {
+  const [open, setOpen] = useState(startOpen);
   const [group, setGroup] = useState<string | null>(null);
   const body = useId();
   const steps = blocks.flatMap((b) => (b.kind === "work" && "steps" in b ? b.steps : []));
@@ -76,7 +91,9 @@ export function RunLine({ blocks, live, since, took, waiting = false, writing = 
     if (at) at.steps.push(s);
     else groups.push({ ...g, steps: [s] });
   }
-  const what = (g: { steps: Step[] }) => clip([...new Set(g.steps.map((s) => s.target).filter((t): t is string => !!t))].join(", "), 90);
+  // Who it talked with, for the crew's line ("Messaged Ivy, posted an update"); what it touched, for the rest.
+  const what = (g: { key?: string; steps: Step[] }) =>
+    g.key === "crew" ? clip([...new Set(g.steps.map((s) => s.verb))].map((v, i) => (i ? v.charAt(0).toLowerCase() + v.slice(1) : v)).join(", "), 90) : clip([...new Set(g.steps.map((s) => s.target).filter((t): t is string => !!t))].join(", "), 90);
   const side = (g: { key: string; steps: Step[] }) => {
     const bad = g.steps.filter((s) => s.state === "failed").length;
     const n = g.steps.length;
@@ -103,7 +120,7 @@ export function RunLine({ blocks, live, since, took, waiting = false, writing = 
             </span>
           )}
         </span>
-        {ticks.length > 1 && (
+        {ticks.length > 1 && !plain && (
           <span className="rl-ticks" aria-hidden="true">
             {ticks.map((s) => (
               <i key={s.id} className={s.state === "running" ? "now" : s.state === "failed" ? "bad" : s.state === "waiting" ? "skip" : "on"} />

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowLeftIcon, ArrowRightIcon, BugIcon, UsersIcon, CheckIcon, ClockIcon, CopyIcon, FolderOpenIcon, GitPullRequestIcon, InboxIcon, PlayIcon, PlusIcon, ScrollTextIcon, Trash2Icon, WebhookIcon, WrenchIcon, ZapIcon, type LucideIcon } from "lucide-react";
+import { ArrowLeftIcon, ArrowRightIcon, BugIcon, UsersIcon, CheckIcon, ChevronDownIcon, XIcon, ClockIcon, CopyIcon, FolderOpenIcon, GitPullRequestIcon, InboxIcon, PlayIcon, PlusIcon, ScrollTextIcon, Trash2Icon, WebhookIcon, WrenchIcon, ZapIcon, type LucideIcon } from "lucide-react";
 import type { AgentSchedule, AgentView } from "../agents.js";
 import type { Automation, AutomationRun } from "../automations.js";
 import { ENGINE_NAMES, type EngineMode, type EngineTool } from "../types.js";
@@ -9,6 +9,7 @@ import { AutoDoors, WhoMark as WeekWhoMark, type WeekItem, type WeekSched, type 
 import { useTeamNow } from "./Teammates.js";
 import { LEAD, WORKFLOW_TEMPLATES } from "../team-workflow-model.js";
 import { WorkflowAsks } from "./WorkflowAsks.js";
+import { WorkspaceCard } from "./Workspace.js";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { holdLeave } from "./leave-guard.js";
 import { isLocal } from "./edition.js";
@@ -388,7 +389,8 @@ export function AutomationsPage({
                 <h2 id="auto-list" className="auto-label">
                   On autopilot
                 </h2>
-                <ul className="grid gap-2" aria-label="Your automations">
+                {/* Cards, not full-width rows (Arun, 2026-11-16: "design this into a card instead of being a full width row"). */}
+                <ul className="auto-cards" aria-label="Your automations">
                   {list.map((a) => (
                     <Row key={a.id} a={a} busy={busy === a.id} onEdit={() => setEditing({ id: a.id, draft: toDraft(a) })} onRun={() => void runNow(a)} onToggle={(on) => void setOn(a, on)} onOpen={onOpen} />
                   ))}
@@ -432,7 +434,7 @@ export function AutomationsPage({
                   {WORKFLOW_TEMPLATES.map((t) => (
                     <button key={t.id} type="button" className="auto-tpl group" onClick={() => onWorkflow(`tpl:${t.id}`)}>
                       <span className="auto-tile aw-tpl-faces">
-                        <WeekWhoMark who={{ kind: "crew", seeds: (crewSeeds.length ? crewSeeds : [{ seed: "Sage" }, { seed: "Nova" }]).slice(0, 2).map((m) => m.seed), name: "" }} size={16} />
+                        <WeekWhoMark who={{ kind: "crew", seeds: (crewSeeds.length ? crewSeeds : [{ seed: "Sage" }, { seed: "Nova" }]).slice(0, 2).map((m) => m.seed), name: "" }} size={15} />
                       </span>
                       <span className="auto-tpl-text">
                         <span className="auto-tpl-title">{t.name}</span>
@@ -593,10 +595,10 @@ function Row({
     // An automation that is off reads dimmed, its controls not: a paused one's Hand to and Delete are what an admin is there for.
     // min-w-0: in the list's grid a long line used to widen the row past a phone's screen and push those controls off it.
     <li className="auto-row min-w-0">
-      <span className={cn("grid size-8 shrink-0 place-items-center rounded-lg bg-[var(--hover)]", !a.on && "opacity-70")}>
+      <span className={cn("auto-row-mark grid size-8 shrink-0 place-items-center rounded-lg bg-[var(--hover)]", !a.on && "opacity-70")}>
         <WhoMark tool={a.who.tool} />
       </span>
-      <button type="button" className={cn("min-w-0 flex-1 text-left focus-visible:outline-none", !a.on && "opacity-70")} onClick={onEdit} aria-label={`Edit ${a.name}`}>
+      <button type="button" className={cn("auto-row-text min-w-0 flex-1 text-left focus-visible:outline-none", !a.on && "opacity-70")} onClick={onEdit} aria-label={`Edit ${a.name}`}>
         <span className="flex min-w-0 items-center gap-2">
           <span className="truncate text-[14px] font-medium">{a.name}</span>
           <WhenChip when={a.when} />
@@ -617,7 +619,7 @@ function Row({
       {last && (
         <button
           type="button"
-          className="hidden shrink-0 items-center gap-1.5 text-[12px] text-[var(--text-muted)] hover:text-[var(--ink)] sm:flex"
+          className="auto-row-last hidden shrink-0 items-center gap-1.5 text-[12px] text-[var(--text-muted)] hover:text-[var(--ink)] sm:flex"
           disabled={!last.sid || !last.invite}
           onClick={() => last.sid && last.invite && onOpen(last.sid, last.invite)}
           title={last.note || RUN_WORD[last.status]}
@@ -626,6 +628,7 @@ function Row({
           {RUN_WORD[last.status]} · {relTime(last.at)}
         </button>
       )}
+      <span className="auto-row-acts">
       {handTo && (
         <Select value="" onValueChange={(to) => to && handTo(to)} disabled={busy}>
           <SelectTrigger size="sm" className="h-8 w-auto shrink-0 gap-1 text-[13px]" aria-label={`Hand ${a.name} to someone`}>
@@ -657,6 +660,7 @@ function Row({
           <Switch checked={a.on} onCheckedChange={onToggle} aria-label={a.on ? `Pause ${a.name}` : `Turn ${a.name} on`} />
         </>
       )}
+      </span>
     </li>
   );
 }
@@ -689,6 +693,48 @@ function Chip({ on, onClick, children, disabled }: { on: boolean; onClick: () =>
     >
       {children}
     </button>
+  );
+}
+
+/**
+ * Where an automation works: the same chooser as the message box's folder button, your repos and folders, search and Browse
+ * (Arun, 2026-11-16: "add support for like the folder thing we have like repos, folders, etc"), in place of a path typed in a
+ * box. Nothing picked is a new project folder each run, as before.
+ */
+function WherePick({ identity, tool, folder, onFolder }: { identity: Identity; tool: EngineTool; folder: string; onFolder: (folder: string) => void }) {
+  const btn = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  const name = folder.split(/[\\/]/).filter(Boolean).at(-1) ?? folder;
+  return (
+    <span className="auto-where">
+      <button ref={btn} type="button" className="auto-where-btn" aria-expanded={open} aria-label={folder ? `Works in ${name}, choose another folder` : "New folder each run, choose a folder"} title={folder || undefined} onClick={() => setOpen((o) => !o)}>
+        <FolderOpenIcon className="size-[15px] shrink-0 text-[var(--ink-3)]" />
+        <span className="auto-where-name">{folder ? name : "New folder"}</span>
+        <span className="auto-where-sub">{folder ? folder : "a new project folder each run"}</span>
+        <ChevronDownIcon className="size-3.5 shrink-0 text-[var(--ink-3)]" />
+      </button>
+      {folder && (
+        <Tip label="No folder: a new one each run">
+          <Button variant="ghost" size="icon-sm" aria-label="Remove this folder" onClick={() => onFolder("")}>
+            <XIcon />
+          </Button>
+        </Tip>
+      )}
+      {open && (
+        <WorkspaceCard
+          identity={identity}
+          tool={tool}
+          trigger={btn.current}
+          prefer="below"
+          only="repos"
+          onPick={(p) => {
+            if (p?.folder) onFolder(p.folder.path);
+            setOpen(false);
+          }}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </span>
   );
 }
 
@@ -1027,19 +1073,7 @@ function Editor({
 
           {!friday && (
             <Part label="Where" hint="The folder on your computer it works in.">
-              <div className="flex items-center gap-1.5">
-                <Input value={d.folder} onChange={(e) => set({ folder: e.target.value })} placeholder="No folder: a new project folder each run" aria-label="Folder" className="h-8 text-[13px] md:text-[13px]" />
-                {window.fridayDesktop?.pickFolder && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 border-[var(--border)] px-2.5 text-[13px] shadow-none"
-                    onClick={() => void window.fridayDesktop!.pickFolder().then((p) => p && set({ folder: p }))}
-                  >
-                    <FolderOpenIcon /> Choose
-                  </Button>
-                )}
-              </div>
+              <WherePick identity={identity} tool={d.who.tool as EngineTool} folder={d.folder} onFolder={(folder) => set({ folder })} />
               {d.folder && (
                 <label className="flex items-center gap-2 text-[13px]">
                   <Switch checked={d.copy} onCheckedChange={(copy) => set({ copy })} aria-label="Work on its own copy" />

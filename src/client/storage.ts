@@ -35,6 +35,10 @@ export interface RepoUse {
   live: boolean;
   /** A project folder Friday made for the session (~/Friday/Projects/…), not one somebody picked. */
   made?: boolean;
+  /** The folder on this computer, the main lane's (or the folder its worktree is a copy of): where a new thread in the project starts. */
+  path?: string;
+  /** The main lane works in a worktree of `path`, not in the folder itself. */
+  worktree?: boolean;
 }
 
 export interface Project {

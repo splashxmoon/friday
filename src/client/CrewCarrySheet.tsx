@@ -95,6 +95,9 @@ export function KeepGoingSheet({ ask, onClose }: { ask: KeepGoingAsk; onClose: (
       } else {
         await workReq(kgPath(ask.sid, ask.invite), { method: "POST", body: JSON.stringify({ mate: pick.id, lane: sheet.lane, carry, note, ask: [...asks] }) });
       }
+      // The sidebar's row and the crew's pages, now rather than at their next read: "Rio is on it", and Rio's new thread.
+      dispatchEvent(new Event("friday:attention"));
+      dispatchEvent(new Event("friday:teammates"));
       onClose();
     } catch (e) {
       setErr((e as Error).message);
@@ -219,7 +222,7 @@ export function WheelDialog({ ask, onClose }: { ask: { sid: string; invite: stri
   const go = async (how: "back" | "note") => {
     setBusy(true);
     try {
-      if (how === "back") await workReq(kgPath(ask.sid, ask.invite, `/${ask.job}/back`), { method: "POST", body: JSON.stringify({ how: "back" }) });
+      if (how === "back") (await workReq(kgPath(ask.sid, ask.invite, `/${ask.job}/back`), { method: "POST", body: JSON.stringify({ how: "back" }) }), dispatchEvent(new Event("friday:attention")));
       else await workReq(kgPath(ask.sid, ask.invite, `/${ask.job}/note`), { method: "POST", body: JSON.stringify({ text: ask.text }) });
       if (how === "note") notice(`Sent to ${ask.mateName}.`);
       onClose(how);

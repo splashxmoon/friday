@@ -70,8 +70,10 @@ for (const edition of ["hosted", "local"] as const) {
     // plan are chunks of their own, and the plain words for a teammate's ask stay with the Agents page: raised to 452 on purpose.
     // Nov 13 2026: 450.7 hosted, 452.4 local (448.9 and 450.6 before), with Code and Crew, connected in a coding session's box: your
     // crew in Add an agent, "@Kit" and "@Checkout" with their faces and colours, Keep this going from a run and a row (crew-at.tsx,
-    // mention-tint.tsx); the hand-off lines, the sheet and the fetches load on their own: raised to 454 on purpose.
-    assert.ok(kb < 454, `app.js and its static imports are ${kb.toFixed(0)} KB brotli, over the 454 KB budget`);
+    // mention-tint.tsx); the hand-off lines, the sheet and the fetches load on their own: raised to 454 on purpose; to 456 for the crew typing in the chat and a room's own folders (2026-11-15); to 458 for the menu bar's own page (its entry beside the app's) and the permissions' marks (2026-11-16); to 459 for the "@" list
+    // in a session's box following the crew live, a crew mate or room taken away never offered (crew-at.tsx useCrewTargets; 458.1
+    // local, 2026-11-16).
+    assert.ok(kb < 459, `app.js and its static imports are ${kb.toFixed(0)} KB brotli, over the 459 KB budget`);
     // A session link waits on the session screen too: CodeMirror (~150 KB packed) loads with the first file opened, not here
     // (mirror-editor.tsx). Nov 4 2026, merged with build/e2e-hardening: 890 KB hosted (1,048 KB before; Oct 22: 710 KB).
     assert.deepEqual(session.modules.filter((m) => /node_modules\/@codemirror\//.test(m)).slice(0, 3), [], "CodeMirror is in the session screen's first load: keep it in mirror-editor.tsx, loaded lazily");
@@ -88,7 +90,7 @@ for (const edition of ["hosted", "local"] as const) {
     // stay in the first load without the rest, and the crew's rows in the list load when it opens: raised to 949 on purpose.
     // Nov 15 2026: 949.8 hosted, 947.2 local, with a crew mate's chat as a teammate's: the line its crew work folds to, its threads
     // found by session, and "This chat" opened as it makes something (Activity.tsx, Teammates.tsx); the panel and the thread strip
-    // load on their own (ChatPanel.tsx, TeammatePage.tsx): raised to 952 on purpose; to 956 for room replies drawn as a crew mate's chat draws them and Friday's own time field (2026-11-15).
-    assert.ok(session.kb < 956, `a session screen's first load is ${session.kb.toFixed(0)} KB brotli, over the 956 KB budget`);
+    // load on their own (ChatPanel.tsx, TeammatePage.tsx): raised to 952 on purpose; to 956 for room replies drawn as a crew mate's chat draws them and Friday's own time field; to 962 for crew replies as chat messages (their files as cards, typing in the chat) and the crew's Browser tab; to 966 for the crew's audit (claims checked, quiet and why lines, Do this again) (2026-11-15); to 968 for the side panel's merge of Git into Changes and its opening by itself after a turn (the Pull request panel loads on its own) (2026-11-16); to 972 for several agents in one thread (the team card, the done row and the take-over line load on their own, only in a thread with two or more agents; the team's grouping, @all and @idle stay) (2026-11-16); to 976 for the thread card (it loads on its own; the environment panel it shares with the session screen becomes a chunk of its own, which packs a little worse) (2026-11-16); to 980 for a team put to you before it starts, @all and @idle, starting a thread from an issue, a pull request or a branch, and a done agent's proof on its row (each card loads on its own; their wiring stays) (2026-11-16).
+    assert.ok(session.kb < 980, `a session screen's first load is ${session.kb.toFixed(0)} KB brotli, over the 980 KB budget`);
   });
 }

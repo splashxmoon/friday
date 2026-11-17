@@ -206,7 +206,7 @@ export interface Crew {
    * `why` is the error's first line and `plain` what it means; out of usage, `until` when it lifts.
    */
   agents: { lane: string; name: string; tool?: EngineTool; /** Friday's own agent's face (agent-face.ts), the same one its tab and its replies wear. */ face?: number; state: CrewState; word: string; /** Held up on the person asking: only then is it amber. */ you?: true; plan?: string; doing?: { name: string; target?: string }; heardAt?: number; why?: string; plain?: string; until?: number | null }[];
-  /** A crew mate has its work now (crew.handed): "Kit is on it", and the lanes it works on it in here (crew-carry.ts). */
+  /** A crew mate has its work now (crew.handed): "Kit is on it", and the lanes it works on it in here, for one handed before it went to the crew mate's own thread (crew-carry.ts). */
   handed?: string;
   handedLanes?: string[];
 }
@@ -239,7 +239,7 @@ export function crewOf(state: SessionState, hostUp?: (hostId: string) => boolean
   // A lane handed on to a crew mate: the row's own line says who has it, no badge of its own (Code and Crew, connected, 2026-11-13:
   // "The sidebar row says 'Kit is on it'").
   const live = Object.values(state.handed ?? {}).filter((h) => !h.back && ["asked", "waiting", "queued", "running", "input"].includes(h.state));
-  const handed = live.length ? { handed: `${live[0]!.mateName} is on it`, handedLanes: live.flatMap((h) => (h.jobLane ? [h.jobLane] : [])) } : {};
+  const handed = live.length ? { handed: `${live[0]!.mateName} is on it`, handedLanes: live.flatMap((h) => (h.jobLane && !h.jobSid ? [h.jobLane] : [])) } : {};
   return agents.length ? { sid: state.id, agents: agents.slice(0, CREW_MAX), ...handed } : null;
 }
 

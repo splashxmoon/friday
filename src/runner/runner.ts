@@ -2086,7 +2086,7 @@ ${prompt}`;
         break;
       }
       case "usage":
-        this.send({ kind: "event", body: { type: "agent.usage", input: out.input, cached: out.cached, output: out.output, ...(out.context ? { context: out.context, ...(out.window ? { window: out.window } : {}) } : {}) } });
+        this.send({ kind: "event", body: { type: "agent.usage", input: out.input, cached: out.cached, output: out.output, ...(out.context ? { context: out.context, ...(out.window ? { window: out.window } : {}) } : {}), ...(out.cacheWrite ? { cacheWrite: out.cacheWrite } : {}), ...(out.reasoning ? { reasoning: out.reasoning } : {}), ...(out.model ? { model: out.model } : {}) } });
         break;
       case "models":
         if (this.opts.tool) rememberModels(this.opts.tool, out.list);

@@ -29,7 +29,7 @@ export interface HuddleInfo {
  * The huddles in what is on screen: every message between the same two agents, from one message of a person's to the next.
  * A message to the whole team keeps its own card (it is to everyone, not a conversation between two).
  */
-export function huddlesIn(events: readonly SessionEvent[], shown: (e: SessionEvent) => boolean): Map<number, HuddleInfo> {
+export function huddlesIn(events: readonly SessionEvent[], shown: (e: SessionEvent) => boolean, skip?: ReadonlyMap<number, unknown>): Map<number, HuddleInfo> {
   const out = new Map<number, HuddleInfo>();
   const open = new Map<string, HuddleInfo>();
   let round = 0;
@@ -39,7 +39,7 @@ export function huddlesIn(events: readonly SessionEvent[], shown: (e: SessionEve
       round++;
       continue;
     }
-    if (b.type !== "instruction" || !b.mesh || b.mesh.team || !shown(e)) continue;
+    if (b.type !== "instruction" || !b.mesh || b.mesh.team || !shown(e) || skip?.has(e.seq)) continue;
     const to = e.lane ?? MAIN_LANE;
     const key = `${[b.mesh.fromLane, to].sort().join("|")}#${round}`;
     let h = open.get(key);

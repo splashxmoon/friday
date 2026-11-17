@@ -9,7 +9,7 @@ import path from "node:path";
 import { ENGINE_NAMES, ENGINE_TOOLS, TOOL_INFO, toolList, type EngineMode, type EngineTool } from "../types.js";
 import { ADAPTERS, ANTIGRAVITY_MODELS, antigravityModels, childEnv, findBin, formatCommandLine, isClaudeAppBundled, launcher, loginStatus, noteSignInStarted, readCustomAcp, runCli, saveCustomAcp } from "./adapters.js";
 import { discoverAgentFiles, parseModelList } from "./agent-files.js";
-import { addWorktree, branchesOf, dropSpares, dropWorktree, primeSpares, remoteBranchesOf, repoInfo, startRepo, worktreeState } from "./git.js";
+import { addWorktree, branchesOf, dropSpares, dropWorktree, fetchBranch, primeSpares, remoteBranchesOf, repoInfo, repoItems, startRepo, worktreeState } from "./git.js";
 import { listCliSessions } from "./imports.js";
 import { installFromRegistry, registryRows } from "./acp-registry.js";
 import { acpSignInState, callbackFromElsewhere, cancelAcpSignIn, forgetProof, settleSignIn, startAcpSignIn } from "./acp-signin.js";
@@ -31,7 +31,7 @@ import { githubCancel, githubConnect, githubDisconnect, githubStatus } from "./g
 import { githubItem, localRepo, prAct, prFiles, prReview, type DraftComment, type PrAction } from "./pr-actions.js";
 import { savedDirs, startDirs } from "./extra-dirs.js";
 import { readRepo } from "./repo-read.js";
-import { citedLines, lineCounts, readForPage, surveyRepo } from "./dive.js";
+import { changedSince, citedLines, lineCounts, readForPage, surveyRepo } from "./dive.js";
 import { addOwnModels, detectLocal, discoverModels, listOwnModels, ownComplete, ownVision, removeOwnModel, saveOwnModel, testOwnModel } from "./own-models.js";
 
 /**
@@ -103,6 +103,8 @@ export const HOST_METHODS = [
   "github.cancel",
   "github.disconnect",
   "github.item",
+  // A folder's GitHub repository's open issues and pull requests, for a new thread to start from (threads.tsx).
+  "repo.items",
   "repo.local",
   "models.own.list",
   "models.own.save",
@@ -415,6 +417,11 @@ export async function callHost(method: string, params: Record<string, unknown> =
       return githubItem({ url: str(params.url, 300) });
     case "repo.local":
       return localRepo({ repo: str(params.repo, 200) });
+    case "repo.items": {
+      const p = at(params.path);
+      if (!(await isDir(p))) throw new Error(`There's no folder at ${p}.`);
+      return repoItems(p);
+    }
     // Your own models, kept on this computer with their keys (own-models.ts). Nothing here sends a key anywhere but its model's server.
     case "models.own.list":
       return listOwnModels();
@@ -727,6 +734,8 @@ export async function callHost(method: string, params: Record<string, unknown> =
         const ref = (v: unknown, n: number) => (/^[\w./-]+$/.test(str(v, n)) && !str(v, n).startsWith("-") ? str(v, n) : "");
         const aside = params.aside && typeof params.aside === "object" ? (params.aside as Record<string, unknown>) : null;
         const on = aside && ref(aside.branch, 108) ? { branch: ref(aside.branch, 108), ...(ref(aside.base, 108) ? { base: ref(aside.base, 108) } : {}) } : undefined;
+        // A pull request's branch, started on from New thread: fetched from origin first, so a branch only pushed is here too.
+        if (on && !on.base && aside?.fetch === true) await fetchBranch(cwd, on.branch);
         const w = await addWorktree(cwd, params.worktree === "lane" ? str(params.newLane, 40) || str(params.copyName, 40) || "agent" : undefined, params.carry === true, on).catch((e: Error) => {
           throw new Error(on ? `Couldn't make a separate copy on ${on.branch}: ${e.message}` : `Couldn't make a separate copy to race in: ${e.message}`);
         });
@@ -887,6 +896,11 @@ export async function callHost(method: string, params: Record<string, unknown> =
       const p = at(params.path);
       if (!(await isDir(p))) throw new Error(`There's no folder at ${p}.`);
       return { files: await readForPage(p, Array.isArray(params.files) ? params.files.filter((f): f is string => typeof f === "string").slice(0, 12) : []) };
+    }
+    case "dive.changed": {
+      const p = at(params.path);
+      if (!(await isDir(p))) throw new Error(`There's no folder at ${p}.`);
+      return await changedSince(p, str(params.since, 64));
     }
     case "dive.read": {
       const p = at(params.path);

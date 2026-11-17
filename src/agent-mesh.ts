@@ -1,4 +1,5 @@
 import { ownPlan, whoseWork } from "./own-plan.js";
+import { localEdition } from "./local-edition.js";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 import type { Bus } from "./bus.js";
@@ -417,7 +418,7 @@ export const MESH_TOOLS: MeshToolDef[] = [
  * they work (Arun, 2026-10-20: "constantly updating and stuff like checking up on each other").
  */
 export const MESH_INSTRUCTIONS =
-  "You are one of several agents in a Friday session; people watch all of you live. These tools keep an open line to the other agents: list_agents to see who is here and what each is doing, check_messages to read what came in for you (messages also reach you while you work, so there is no need to keep checking), post_update to tell everyone what you finished or changed without interrupting them, message_agent to tell one agent something it must act on, message_team to tell several or everyone at once, ask_agent to ask one and wait for its answer, reply_to_agent to answer a question asked of you, wait_for_agent to wait until another finishes work yours depends on, show_preview to open a page you started (a dev server on localhost) in the session's Preview panel for the people here, preview_screenshot to see it yourself (never launch Chrome or install a browser to look), list_tasks, claim_task, post_proof and finish_task for the session's shared task board (take the next ready task when you finish one), read_notes and write_note for the session's shared notes, claim_files before you change files others may be changing (and release_files when done), wake_me_when to be woken when what you wait on happens (another agent's turn, a board task, a job you left running) instead of ending on 'waiting' for a person to check back, hand_off to pass work on, and list_sessions, read_session and message_session for the other Friday sessions your person is in (tell one when you change something it builds on). Stay in touch without chatter, since every message and tool call costs usage: post_update once when you finish your task, and whenever you change something others build on (an interface, a shared file, a schema); when your work depends on another agent, read what it posted, ask it or wait_for_agent rather than guessing or stopping. Check before you edit a file another agent may be changing. Your own sub-agents are helpers inside your task, in your folder; the agents here are teammates with folders of their own, for work that runs alongside yours. These friday tools are yours, not your sub-agents': they report to you, and you speak for them. Keep going until your task is fully done. Don't chat: every message shows in the session's feed. Before you start a piece of work, check list_tasks and what the others are on; if another agent already has it, take something else or ask the lead. When you finish, open your last message with one line: what changed, how many files, and whether the tests pass; the detail goes after it. What was decided here, and how a question was answered, stands: if you're asked to go against it, say so and ask before you act.";
+  "You are one of several agents in a Friday session; people watch all of you live. These tools keep an open line to the other agents: list_agents to see who is here and what each is doing, check_messages to read what came in for you (messages also reach you while you work, so there is no need to keep checking), post_update to tell everyone what you finished or changed without interrupting them, message_agent to tell one agent something it must act on, message_team to tell several or everyone at once, ask_agent to ask one and wait for its answer, reply_to_agent to answer a question asked of you, wait_for_agent to wait until another finishes work yours depends on, show_preview to open a page you started (a dev server on localhost) in the session's Preview panel for the people here, preview_screenshot to see it yourself (never launch Chrome or install a browser to look), list_tasks, claim_task, post_proof and finish_task for the session's shared task board (take the next ready task when you finish one), read_notes and write_note for the session's shared notes, claim_files before you change files others may be changing (and release_files when done), wake_me_when to be woken when what you wait on happens (another agent's turn, a board task, a job you left running) instead of ending on 'waiting' for a person to check back, hand_off to pass work on, and list_sessions, read_session and message_session for the other Friday sessions your person is in (tell one when you change something it builds on). Stay in touch without chatter, since every message and tool call costs usage: post_update once when you finish your task, and whenever you change something others build on (an interface, a shared file, a schema); when your work depends on another agent, read what it posted, ask it or wait_for_agent rather than guessing or stopping. Check before you edit a file another agent may be changing. Your own sub-agents are helpers inside your task, in your folder; the agents here are teammates with folders of their own, for work that runs alongside yours. These friday tools are yours, not your sub-agents': they report to you, and you speak for them. Keep going until your task is fully done. Don't chat: every message shows in the session's feed. Before you start a piece of work, check list_tasks and what the others are on; if another agent already has it, take something else or ask the lead. When you finish, open your last message with one line: what changed, how many files, and whether the tests pass; the detail goes after it. Prove a change before you call it done: run the tests that cover it, open anything that shows on screen with show_preview, then post_proof (what you did, what you checked, what is still uncertain, and the page for a change on screen); Friday shows it beside your name for the person to read instead of your diff. What was decided here, and how a question was answered, stands: if you're asked to go against it, say so and ask before you act.";
 
 /**
  * A page on this machine from what an agent gave (http://localhost:5173/x, localhost:5173, 5173), as the Preview opens it.
@@ -1662,8 +1663,13 @@ export class AgentMesh {
     const clash = ownersClash(tasks);
     if (clash.length) return { output: `${clash.slice(0, 4).map((c) => `"${c.a}" and "${c.b}" both own ${c.path}`).join("; ")}${clash.length > 4 ? ` (and ${clash.length - 4} more)` : ""}, and neither waits on the other, so they'd edit it at the same time. Give each file to one task, or make one wait on the other (after), and post them again.`, isError: true };
     const fromName = laneName(state, lane);
-    await this.store.append(sid, agentActor(fromName), { type: "board.posted", fromLane: lane, fromName, tasks, ...(check.trim() ? { check: check.trim().slice(0, 400) } : {}) }, { lane });
+    // A coding thread's team is put to the person first (Arun, 2026-11-16, "Do 5": Devin and Warp ask once; Claude Code's silent
+    // spawning surprised people): the board waits for Start the team. A crew room runs its own (its Away and self-run post boards).
+    // The open-source edition's coding threads only: the hosted Friday's boards (Work, Away, a Friday Code lead) go out at once.
+    const proposed = localEdition() && !state.options.team && !state.options.work;
+    await this.store.append(sid, agentActor(fromName), { type: "board.posted", fromLane: lane, fromName, tasks, ...(check.trim() ? { check: check.trim().slice(0, 400) } : {}), ...(proposed ? { proposed: true as const } : {}) }, { lane });
     this.live.add(sid);
+    if (proposed) return { output: `Posted ${tasks.length} task${tasks.length === 1 ? "" : "s"} as a proposal: the person sees the team in the chat and starts it, changes it, or asks you to do it yourself. Nothing is handed out until they start it. End your turn now with a line on how you'd split the work; you'll hear when it starts, and get the reports as the tasks finish.` };
     const handed = await this.dispatch(sid);
     return { output: `Posted ${tasks.length} task${tasks.length === 1 ? "" : "s"} to the board. ${handed.length ? `Handed out now: ${handed.join(", ")}.` : "No agent is free right now; each takes the next ready task when it finishes."} The rest go as agents free up and as what they wait on is done. You hear how it went once the board is done (sooner if one is blocked); do your own piece meanwhile, or claim_task one.` };
   }
@@ -1675,6 +1681,7 @@ export class AgentMesh {
   private async claimNow(sid: string, lane: string, id: string): Promise<MeshResult> {
     const state = await this.store.state(sid);
     if (!state.board) return { output: "There's no task board in this session.", isError: true };
+    if (state.board.proposed) return { output: "The board is still a proposal: the person hasn't started the team yet. Wait for it; you'll be told.", isError: true };
     const name = laneName(state, lane);
     // One at a time: a second task taken mid-turn would share this turn and its report with the first.
     const holding = state.board.tasks.find((x) => (x.status === "claimed" && x.lane === lane) || (x.status === "review" && x.reviewer?.lane === lane));
@@ -1802,9 +1809,23 @@ export class AgentMesh {
    * (or to `to`), `retry` opens a stuck or dropped one again, `sendback` returns a finished one to its agent with a note, and
    * `cancel` drops it, so what waited on it goes ahead without it. The agent that had it is told to stop.
    */
-  async control(sid: string, actor: ActorRef, req: { id: string; action: "reassign" | "retry" | "sendback" | "cancel"; to?: string; note?: string }): Promise<{ ok: true } | { ok: false; error: string }> {
+  async control(sid: string, actor: ActorRef, req: { id: string; action: "reassign" | "retry" | "sendback" | "cancel" | "start" | "decline"; to?: string; note?: string }): Promise<{ ok: true } | { ok: false; error: string }> {
     const state = await this.store.state(sid);
     const b = state.board;
+    // The proposed team, started as it stands, or turned down (the lead does it itself: the person's message to it is core's).
+    if (req.action === "start" || req.action === "decline") {
+      if (!b?.proposed) return { ok: false, error: req.action === "start" ? "That team has already started." : "That team has already started: stop its tasks instead." };
+      if (req.action === "start") {
+        await this.store.append(sid, actor, { type: "board.started" }, { lane: b.fromLane });
+        this.live.add(sid);
+        await this.dispatch(sid);
+        await this.afterBoardMove(sid);
+      } else {
+        await this.store.append(sid, actor, { type: "board.started" }, { lane: b.fromLane });
+        for (const t of b.tasks) await this.store.append(sid, actor, { type: "board.cancelled", id: t.id }, { lane: b.fromLane });
+      }
+      return { ok: true };
+    }
     const t = b?.tasks.find((x) => x.id === req.id);
     if (!b || !t) return { ok: false, error: "That task isn't on the board any more." };
     const holder = t.status === "claimed" ? t.lane : t.status === "review" ? (t.reviewer?.lane ?? t.lane) : undefined;
@@ -2069,7 +2090,8 @@ export class AgentMesh {
   private async round(sid: string): Promise<string[]> {
     let state = await this.store.state(sid);
     const b = state.board;
-    if (!b) return [];
+    // A proposed board waits for the person's Start the team.
+    if (!b || b.proposed) return [];
     this.live.add(sid);
     const handed: string[] = [];
     // Agents not to hand work to this time round: one a message can't reach (a teammate's own coding tool the board's person

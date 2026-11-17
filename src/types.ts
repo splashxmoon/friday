@@ -361,7 +361,7 @@ export interface RepoCall {
   /** `apply`: a separate copy's work, brought into the folder it was copied from. */
   /** `terminal`: the line that carries the lane's conversation on in the person's own terminal (terminal-line.ts); with `query` "closed", that it is back. */
   /** `baseline`: `command` run in a throwaway copy at the commit `ref`, never in the folder (baseline.ts). */
-  op: "tree" | "read" | "search" | "write" | "edit" | "shell" | "baseline" | "checkpoint" | "restore" | "commit" | "publish" | "remote" | "branches" | "switch" | "prcomments" | "prstatus" | "prchecks" | "preview" | "ios" | "environment" | "context" | "bgstart" | "bgread" | "bgstop" | "diff" | "commands" | "apply" | "status" | "log" | "show" | "gitdiff" | "stage" | "unstage" | "discard" | "hunk" | "pull" | "compare" | "terminal";
+  op: "tree" | "read" | "search" | "write" | "edit" | "shell" | "baseline" | "checkpoint" | "restore" | "commit" | "publish" | "remote" | "branches" | "switch" | "prcomments" | "prstatus" | "prchecks" | "preview" | "ios" | "environment" | "context" | "bgstart" | "bgread" | "bgstop" | "diff" | "commands" | "apply" | "status" | "log" | "show" | "gitdiff" | "stage" | "unstage" | "discard" | "hunk" | "pull" | "compare" | "terminal" | "renamebranch";
   /** For `stage`, `unstage` and `discard`: the files. */
   paths?: string[];
   /** For `hunk`: one hunk as a unified diff with its file header, applied to the index (`cached`) or taken back (`reverse`). */
@@ -906,6 +906,11 @@ export type EventBody =
    * either way so a person can see it ran (Arun, 2026-11-13: "give more on what was reviewed/checked"). `run`: that run's end.
    */
   | { type: "repo.checked"; run: number; command: string; ok: boolean; timedOut?: true; output?: string }
+  /**
+   * What a crew mate's answer claimed passes (claims.ts), checked against its turn: "backed" by a command it ran that passed,
+   * "checked" by Friday running the project's own, "contradicted" by one that failed, or "unverified" when nothing could check it.
+   */
+  | { type: "claim.checked"; run: number; claim: string; kind: "tests" | "build" | "lint" | "types"; verdict: "backed" | "checked" | "contradicted" | "unverified"; command?: string }
   | { type: "review.done"; runSeq: number; round: number; findings: ReviewFinding[]; sent: boolean; error?: string; /** The model that read it. */ model?: string; /** How much it read: files whole of all of them, and whether some were cut (second-review.ts coverage). */ read?: { files: number; of: number; cut: boolean } }
   /** A person handed the pull request to Friday to see through to merge, or took it back. */
   | { type: "pr.shepherd"; on: boolean; prUrl: string }
@@ -939,7 +944,11 @@ export type EventBody =
    * lead, when there is one). Agents claim ready tasks themselves, idle ones are handed them, a finished task unlocks what waits
    * on it and is checked by another agent before it counts (Arun, 2026-10-19: "a shared task board… and peer review").
    */
-  | { type: "board.posted"; fromLane: string; fromName: string; tasks: BoardTaskDef[]; /** What proves a task works, run in its agent's folder when it is done (each task's own `check` first). */ check?: string; /** Whose work it is, when Friday posts it for a person (a hosted crew workflow's owner): its hand-outs carry them (own-plan.ts). */ by?: { id: string; name: string } }
+  | { type: "board.posted"; fromLane: string; fromName: string; tasks: BoardTaskDef[]; /** Put to the person first (Arun, 2026-11-16, "Do 5"): nothing is handed out until they start it (board.started). */ proposed?: true; /** What proves a task works, run in its agent's folder when it is done (each task's own `check` first). */ check?: string; /** Whose work it is, when Friday posts it for a person (a hosted crew workflow's owner): its hand-outs carry them (own-plan.ts). */ by?: { id: string; name: string } }
+  /** The person started a proposed board: its tasks go out now (agent-mesh round). */
+  /** An agent opened a new thread in the project (agent-mesh start_thread): where it is, to open it and file it with the others. */
+  | { type: "thread.started"; sid: string; title: string; tool: string; invite: string; fromName: string }
+  | { type: "board.started" }
   | { type: "board.claimed"; id: string; lane: string; name: string; /** Why this agent, when the board picked it: "best at tests here", "the others are nearly out of usage". */ why?: string; /** The task's own branch, readied in the agent's copy of the repo (agent-mesh prepareTask). */ branch?: string }
   | { type: "board.finished"; id: string; lane: string; name: string; status: "done" | "blocked"; report: string }
   | { type: "board.review"; id: string; lane: string; name: string }
@@ -1053,20 +1062,27 @@ export type EventBody =
   /**
    * The rest of a lane's work handed to a crew mate ("Keep this going", Code and Crew, connected, 2026-11-13): said once here by
    * whoever handed it. `carried`: what went with it, in words; `ask`: what it asks them before ("Opening a PR"). On this computer
-   * the crew mate takes it as a lane of this session (`jobLane`), in a copy of the folder of its own (crew-carry.ts).
+   * the crew mate takes it in a thread of its own on its page (`thread`, its session `jobSid`, its lane there `jobLane`), in a copy
+   * of the folder of its own (crew-carry.ts); before 2026-11-16 it was a lane of this session (`jobLane`, no `jobSid`). `note`: the
+   * person's own line on top, put back in their box when they take it back.
    */
-  | { type: "crew.handed"; job: string; mate: string; mateName: string; lane: string; carried: string[]; ask: string[]; rule?: { id: string; text: string }; jobLane?: string }
+  | { type: "crew.handed"; job: string; mate: string; mateName: string; lane: string; carried: string[]; ask: string[]; rule?: { id: string; text: string }; jobLane?: string; jobSid?: string; thread?: string; note?: string }
   /** How that job stands now: folded into the one line `crew.handed` drew, never a line of its own. `result` once it is done. */
   | { type: "crew.handed.moved"; job: string; state: string; done?: number; of?: number; result?: { said: string; files: number; added: number; removed: number; prs: string[] } }
   /**
    * The rest of a lane's work handed to a crew room: posted there as the person's own message to the room's lead, said once here.
    * The room's own rules run it from there.
    */
-  | { type: "crew.handed.room"; room: string; roomName: string; roomSid: string; lane: string; to: string; carried: string[]; /** Its message in the room: what the line's status is read from. */ seq?: number; roomLane?: string }
-  /** The lane taken back from the job (`back`), the job stopped from the session's line (`stopped`), or its work brought in. */
-  | { type: "crew.handed.back"; job: string; how: "back" | "stopped" | "brought" }
+  | { type: "crew.handed.room"; room: string; roomName: string; roomSid: string; lane: string; to: string; carried: string[]; /** Its message in the room: what the line's status is read from. */ seq?: number; roomLane?: string; note?: string }
+  /**
+   * The lane taken back from the job (`back`), the job stopped from the session's line (`stopped`), its work brought in, or its
+   * crew mate or thread taken away (`gone`). Taken back or gone, its line leaves the chat and the session's crew list.
+   */
+  | { type: "crew.handed.back"; job: string; how: "back" | "stopped" | "brought" | "gone" }
   /** A room's finished work brought into this session (crew-carry.ts): its line says so. */
   | { type: "crew.handed.room.brought"; room: string }
+  /** Work handed to a room taken back here (`back`), or the room taken away (`gone`): its line leaves the chat and the crew list. */
+  | { type: "crew.handed.room.back"; room: string; how: "back" | "gone" }
   /** Finished crew work brought into this session (crew-carry.ts bringPick): each piece by its place and when it finished. */
   | { type: "crew.brought"; pieces: { key: string; at: number }[] }
   | { type: "control.requested" }
@@ -1124,7 +1140,7 @@ export type EventBody =
   // are placed in the context here, not at the position they were sent, so the
   // log records exactly what the agent knew at each step.
   // `turn`: the id of the turn they were handed to the tool in, so a server after one that crashed knows which turn it puts back.
-  | { type: "instructions.delivered"; seqs: number[]; turn?: string }
+  | { type: "instructions.delivered"; seqs: number[]; turn?: string; /** Handed to a turn already running (engine/hub.ts steer), not one of its own. */ steer?: true }
   /**
    * A coding tool's machine dropped in the middle of a turn (a lost connection, a server restart): what it was working on waits
    * again, first in line, for when it is back. `steer`: no drop, a message handed to the turn running that its tool couldn't take
@@ -1263,6 +1279,11 @@ export type EventBody =
       /** How full its context was at the end of the turn (its last model call's input), and that model's window, when the tool says. */
       context?: number;
       window?: number;
+      /** Of `input`, what was written to its cache; of `output`, what went on reasoning; and the model that did the turn's work,
+       * when the tool says: for the spend audit (spend.ts). */
+      cacheWrite?: number;
+      reasoning?: number;
+      model?: string;
     }
   /**
    * What the router picked for Friday's agent or a coding tool, and why (see routing.ts): said when the pick changes, not every
@@ -1355,7 +1376,14 @@ export type EventBody =
   /** Friday paused this lane's run: it had used more tokens than the workspace allows one run (run-budget.ts). */
   | { type: "run.capped"; spent: number; cap: number }
   /** Friday paused this lane's run: the agent was repeating the same failing command (runaway.ts). */
-  | { type: "run.guarded"; command: string; times: number; kind: "stuck" | "many" }
+  | { type: "run.guarded"; command: string; times: number; kind: "stuck" | "many" | "circles" | "repeat" }
+  /**
+   * A crew mate mid-turn with nothing happening on its lane since `since` (the watchdog, app.ts watchQuiet): said once a quiet
+   * spell, with Nudge and Restart under it; `command`, when it is waiting on one it ran; `nudged`, when Friday asked it how it stands.
+   */
+  | { type: "run.quiet"; since: number; command?: string; nudged?: boolean }
+  /** A go-ahead (engine.approval `id`) Friday said yes to as the person, the crew mate being trusted with its kind (Teammate.trust). */
+  | { type: "goahead.trusted"; id: string; tag: string; name: string }
   /** Somebody set this lane's agent to carry on by itself at `at`: its coding tool ran out of usage and that is when it comes back. */
   | { type: "resume.scheduled"; at: number; /** Set by Friday, for the person who asked: the agent ran out of usage and no other could take it (limit-handoff.ts). */ auto?: true }
   /** That timed carry-on is off: called off by a person, or it couldn't go ahead (`why`). */

@@ -193,7 +193,7 @@ test("the real Preview keeps its tabs and pages through the Diff, a swap, anothe
   await menu(s.el, "Changes"); // Changes as the second panel
   await menu(s.el, "Swap the two"); // Preview below, Diff on top
   assert.ok(pages()[0]!.closest("bench-body")!.className.includes("split"), "the Preview is now second");
-  await menu(s.el, "Git"); // another second panel: the Preview is put away
+  await menu(s.el, "Files"); // another second panel: the Preview is put away
   await menu(s.el, "Just one panel");
   await s.draw({ bench: false }); // closed
   await s.draw({ history: true }); // History in its place

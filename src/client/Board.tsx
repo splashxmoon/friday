@@ -760,7 +760,7 @@ export function Board({ identity, recents, projects, onOpen, onNew, onReview, so
             </span>
           </EmptyState>
         ) : cards !== null && cards.length === 0 ? (
-          <EmptyState icon={<LayoutGridIcon />} title="No agents yet" action={<Button onClick={onNew}>New session</Button>}>
+          <EmptyState icon={<LayoutGridIcon />} title="No agents yet" action={<Button onClick={onNew}>{isLocal() ? "New thread" : "New session"}</Button>}>
             Start a session and the agents working in it show up here, sorted by what needs you.
           </EmptyState>
         ) : (

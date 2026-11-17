@@ -1,0 +1,113 @@
+/* The side panel's Pull request (PrPanel.tsx): which one, where it stands, Friday seeing it through, and what happened since. */
+
+.prp { display: flex; flex-direction: column; gap: 14px; min-height: 0; flex: 1 1 auto; overflow: auto; padding: 16px 16px 24px; font: 400 13px/1.45 var(--font); color: var(--ink-2); }
+.prp-grow { flex: 1; }
+
+/* Which one. */
+.prp-head { display: flex; flex-direction: column; gap: 8px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+.prp-head-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.prp-pill { flex: none; display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px 0 7px; border-radius: 11px; font-size: 12px; font-weight: 600; }
+.prp-pill.open { background: color-mix(in srgb, var(--green) 16%, transparent); color: color-mix(in srgb, var(--green) 82%, var(--ink)); }
+.prp-pill.draft { background: var(--hover-strong); color: var(--ink-2); }
+.prp-pill.merged { background: color-mix(in srgb, #a855f7 18%, transparent); color: color-mix(in srgb, #a855f7 82%, var(--ink)); }
+.prp-pill.closed { background: color-mix(in srgb, var(--red) 14%, transparent); color: color-mix(in srgb, var(--red) 82%, var(--ink)); }
+.prp-num { display: inline-flex; align-items: baseline; gap: 4px; min-width: 0; font-size: 13px; color: var(--text-muted); }
+.prp-num b { color: var(--ink-2); font-weight: 600; font-variant-numeric: tabular-nums; }
+.prp-repo { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prp-icon { display: grid; place-items: center; flex: none; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-md); background: none; color: var(--text-muted); cursor: pointer; }
+.prp-icon:hover { background: var(--hover); color: var(--ink); }
+.prp-title-text { margin: 0; color: var(--ink); font-size: 16px; font-weight: 600; line-height: 1.35; letter-spacing: -0.012em; text-wrap: pretty; }
+.prp-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; color: var(--text-muted); font-size: 12px; }
+.prp-branches { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.prp-branches code { max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 1px 6px; border-radius: var(--r-sm); background: var(--hover); color: var(--ink-2); font: 11.5px/1.5 var(--mono); }
+.prp-branches svg { flex: none; color: var(--faint); }
+.prp-size { font-variant-numeric: tabular-nums; }
+.prp-size .add { color: var(--green); font-weight: 600; }
+.prp-size .del { color: var(--red); font-weight: 600; }
+
+.prp-quiet { margin: 0; color: var(--text-muted); font-size: 12.5px; }
+
+/* Where it stands: the verdict over checks, review and merge. */
+.prp-card { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--panel); overflow: hidden; }
+.prp-verdict { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--ink); font-size: 13px; font-weight: 600; }
+.prp-verdict-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
+.prp-verdict.ok { background: color-mix(in srgb, var(--green) 8%, transparent); }
+.prp-verdict.ok .prp-verdict-dot { background: var(--green); }
+.prp-verdict.bad { background: color-mix(in srgb, var(--red) 8%, transparent); }
+.prp-verdict.bad .prp-verdict-dot { background: var(--red); }
+.prp-verdict.wait { background: color-mix(in srgb, var(--amber) 8%, transparent); }
+.prp-verdict.wait .prp-verdict-dot { background: var(--amber); }
+.prp-src { margin-left: auto; color: var(--faint); font-size: 11px; font-weight: 500; }
+
+.prp-steps { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.prp-step { position: relative; display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 12px; padding: 12px 14px; }
+/* The line the three hang on, from one mark to the next. */
+.prp-step:not(:last-child)::after { content: ""; position: absolute; left: 23.25px; top: 34px; bottom: -10px; width: 1.5px; border-radius: 1px; background: var(--border); }
+.prp-step-mark { position: relative; z-index: 1; display: grid; place-items: center; width: 20px; height: 20px; margin-top: 0; border-radius: 50%; border: 1.5px solid var(--border-strong); background: var(--panel); color: var(--text-muted); }
+.prp-step.ok .prp-step-mark { border-color: var(--green); background: var(--green); color: var(--bg); }
+.prp-step.bad .prp-step-mark { border-color: var(--red); background: var(--red); color: var(--bg); }
+.prp-step.wait .prp-step-mark { border-color: color-mix(in srgb, var(--amber) 45%, transparent); }
+.prp-spin { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid color-mix(in srgb, var(--amber) 30%, transparent); border-top-color: var(--amber); animation: prp-spin 1s linear infinite; }
+.prp-spin.live { border-color: color-mix(in srgb, var(--green) 30%, transparent); border-top-color: var(--green); width: 12px; height: 12px; }
+@keyframes prp-spin { to { transform: rotate(360deg); } }
+.prp-step-text { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 0; }
+.prp-step-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; line-height: 20px; }
+.prp-step-name { flex: none; color: var(--text-muted); font-size: 12.5px; width: 52px; }
+.prp-step-word { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-weight: 600; }
+.prp-step.bad .prp-step-word { color: color-mix(in srgb, var(--red) 82%, var(--ink)); }
+.prp-step-sub { padding-left: 60px; color: var(--text-muted); font-size: 12px; line-height: 1.45; }
+.prp-step-text > .prp-btn { margin: 6px 0 0 60px; }
+
+.prp-fails { display: flex; flex-direction: column; align-self: stretch; margin: 6px 0 0 60px; padding: 2px 0; list-style: none; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg); }
+.prp-fails li { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 8px 6px 10px; }
+.prp-fails li + li { border-top: 1px solid var(--border); }
+.prp-fail-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--red); }
+.prp-fail-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-size: 12.5px; }
+.prp-fail-wf { color: var(--text-muted); }
+.prp-fail-link { display: inline-flex; align-items: center; gap: 3px; flex: none; height: 22px; padding: 0 6px; border-radius: var(--r-sm); color: var(--text-muted); font-size: 11.5px; text-decoration: none; }
+.prp-fail-link:hover { background: var(--hover); color: var(--ink); }
+
+/* Friday seeing it through: a card of its own, lit while it is on. */
+.prp-see { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--r-lg); }
+.prp-see.on { border-color: color-mix(in srgb, var(--green) 40%, var(--border)); background: color-mix(in srgb, var(--green) 7%, transparent); }
+.prp-see-mark { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 9px; background: var(--hover); color: var(--text-muted); }
+.prp-see.on .prp-see-mark { background: color-mix(in srgb, var(--green) 14%, transparent); }
+.prp-see-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.prp-see-text b { color: var(--ink); font-size: 13px; font-weight: 600; }
+.prp-see-text span { color: var(--text-muted); font-size: 12px; line-height: 1.45; }
+
+.prp-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: none; height: 28px; padding: 0 11px;
+  border: 1px solid var(--border); border-radius: var(--r-md); background: none; color: var(--ink); font: 500 12.5px/1 var(--font); cursor: pointer; text-decoration: none;
+  transition: background-color var(--t-hover) var(--ease-out), border-color var(--t-hover) var(--ease-out);
+}
+.prp-btn.small { height: 26px; padding: 0 9px; font-size: 12px; }
+.prp-btn:hover:not(:disabled) { background: var(--hover); border-color: var(--border-strong); }
+.prp-btn.primary { border-color: transparent; background: var(--ink); color: var(--bg); }
+.prp-btn.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--ink) 86%, var(--bg)); }
+.prp-btn:disabled { opacity: .5; cursor: default; }
+.prp-btn:focus-visible, .prp-link:focus-visible, .prp-icon:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.prp-btn .spinner { width: 12px; height: 12px; }
+.prp-link { padding: 0; border: 0; background: none; color: var(--text-muted); font: inherit; font-size: 12.5px; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.prp-link:hover { color: var(--ink); }
+.prp-note { margin: -4px 0 0; color: var(--text-muted); font-size: 12.5px; }
+
+/* Since it opened: a short feed, newest first. */
+.prp-sec { display: flex; flex-direction: column; gap: 8px; }
+.prp-sec h4 { margin: 0; color: var(--text-muted); font-size: 12px; font-weight: 500; }
+.prp-feed { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.prp-feed li { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: start; gap: 8px; padding: 5px 0; }
+.prp-feed-mark { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--hover); color: var(--text-muted); }
+.prp-feed li.ok .prp-feed-mark { background: color-mix(in srgb, var(--green) 16%, transparent); color: var(--green); }
+.prp-feed-text { padding-top: 2px; color: var(--ink-2); font-size: 12.5px; line-height: 1.45; }
+.prp-feed-when { padding-top: 3px; color: var(--faint); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.prp-earlier { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.prp-earlier a { color: var(--ink-2); font-size: 12.5px; }
+
+/* None yet: centred, as the panel card is. */
+.prp-empty { align-items: center; justify-content: center; text-align: center; gap: 10px; padding: 32px 24px; }
+.prp-empty h3 { margin: 4px 0 0; color: var(--ink); font-size: 14px; font-weight: 600; }
+.prp-empty p { max-width: 300px; margin: 0 0 6px; color: var(--text-muted); font-size: 12.5px; line-height: 1.5; }
+.prp-empty-mark { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: var(--hover); color: var(--text-muted); }
+
+@media (prefers-reduced-motion: reduce) { .prp-spin { animation: none; } }

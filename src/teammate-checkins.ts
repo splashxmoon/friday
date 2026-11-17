@@ -108,6 +108,23 @@ export function checkInDue(c: CheckIn, now: Date): string | null {
   return p.date;
 }
 
+/**
+ * A slot that came round while this computer slept (Arun, 2026-11-15: "Routines missed while the laptop slept should run on wake
+ * and say so"): one of its times between `from` (the last time the routines were looked at) and `to` (now), at most a day back, not
+ * the one it last ran for. Only for a real gap: a routine turned on after its time today still waits for tomorrow (checkInDue).
+ */
+export function missedSlot(c: CheckIn, from: Date, to: Date): { slot: string; at: Date } | null {
+  if (c.off) return null;
+  const end = to.getTime();
+  // A slot already due as it fell asleep isn't one it slept through: it came round while awake.
+  const before = checkInDue(c, from);
+  for (let t = Math.max(from.getTime(), end - 24 * 3_600_000); t < end; t += 5 * 60_000) {
+    const slot = checkInDue(c, new Date(t));
+    if (slot && slot !== c.last && slot !== before) return { slot, at: new Date(t) };
+  }
+  return null;
+}
+
 /** "every weekday at 09:00": a check-in's schedule in words. */
 export function describeCheckIn(c: Pick<CheckIn, "every" | "at" | "days" | "hours">): string {
   const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -170,8 +187,8 @@ export function quietCheckIns(events: readonly SessionEvent[]): { quiet: Set<num
 }
 
 /** What a teammate is told when a check-in is due. */
-export const checkInText = (c: CheckIn) =>
-  `[Check-in] ${c.text}\n\n(Your ${describeCheckIn(c)} routine${c.name ? `, "${c.name}"` : ""}, set by the person. Do it, then say what you found in a few lines.${c.quiet === false ? "" : ` If there is nothing new since the last one, reply with exactly ${NO_UPDATE} and nothing else.`})`;
+export const checkInText = (c: CheckIn, missed?: { due: string; now: string }) =>
+  `[Check-in] ${c.text}${missed ? `\n\n(It was due at ${missed.due}, while this computer was asleep; it runs now, at ${missed.now}. Say so in a few words when you report.)` : ""}\n\n(Your ${describeCheckIn(c)} routine${c.name ? `, "${c.name}"` : ""}, set by the person. Do it, then say what you found in a few lines.${c.quiet === false ? "" : ` If there is nothing new since the last one, reply with exactly ${NO_UPDATE} and nothing else.`})`;
 
 /**
  * When a routine runs next, from `now`: the first five-minute mark in the next eight days its schedule is due at, or null (off,

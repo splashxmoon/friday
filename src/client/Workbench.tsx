@@ -4,6 +4,9 @@ import { Activity as Keep, lazy, Suspense, useEffect, useLayoutEffect, useMemo, 
 import { mateOn, openThread, ThreadInPanel, useOpenThread } from "./Teammates.js";
 import { ALL, useFocusedAgent } from "./agentFocus.js";
 import { RoomProfile } from "./TeamControls.js";
+import "./panels.css";
+// The Pull request panel loads when it is first opened: most sessions never open one (bundle budget, client-bundle.test.ts).
+const PrPanel = lazy(() => import("./PrPanel.js").then((m) => ({ default: m.PrPanel })));
 const MateSettingsBody = lazy(() => import("./TeammatePage.js").then((m) => ({ default: m.MateSettingsBody })));
 /** A crew mate's settings as a side panel tab (TeammatePage.tsx MateSettingsBody). */
 const MateSettingsPane = ({ identity, lane }: { identity: Parameters<typeof MateSettingsBody>[0]["identity"]; lane: string }) => (
@@ -33,7 +36,7 @@ import { commandsIn, TerminalPanel } from "./Terminal.js";
 import { TreePanel } from "./Tree.js";
 import { GitPanel } from "./GitPanel.js";
 import type { Identity } from "./storage.js";
-import { ContextMenu, MenuButton, relTime } from "./ui.js";
+import { ContextMenu, isTyping, MenuButton, relTime } from "./ui.js";
 import { sourcesIn } from "./WorkPanels.js";
 import { isWorkSid } from "./WorkMode.js";
 
@@ -51,7 +54,7 @@ import { isWorkSid } from "./WorkMode.js";
  * sentence, not four panels to cross-reference.
  */
 export type Tab =
-  | "agents" | "overview" | "tree" | "files" | "git" | "terminal" | "preview" | "usage" | "rules"
+  | "agents" | "overview" | "tree" | "files" | "git" | "pr" | "terminal" | "preview" | "usage" | "rules"
   // A crew mate's settings, in its own chat (Arun, 2026-11-13: "make the settings panel work like this").
   | "mate"
   // A room's profile, in the Crew room or a room (TeamControls.tsx RoomProfile).
@@ -61,25 +64,31 @@ export type Tab =
   ;
 
 export const TAB_LABEL: Record<Tab, string> = {
-  agents: "Agents", mate: "Profile", room: "Profile", thread: "Thread", overview: "Tasks", tree: "Tree", files: "Changes", git: "Git", terminal: "Terminal", preview: "Preview", usage: "Usage", rules: "Rules",
+  agents: "Agents", mate: "Profile", room: "Profile", thread: "Thread", overview: "Tasks", tree: "Files", files: "Changes", git: "Git", pr: "Pull request", terminal: "Terminal", preview: "Preview", usage: "Usage", rules: "Rules",
   ...(isLocal() ? { preview: "Browser" } : {}), // the agents browse in it too (local/desktop-browser.ts)
 };
 /** The panels in the side panel's card, in the order people reach for them. */
 // Usage is the workspace's allowance and what each run cost on it: the hosted Friday's, so not offered in the local edition.
 // No Agents or Rules panel (Arun, 2026-11-03: "get rid of the agents side panel too and rules and all panels button too"): the
 // header's tabs say who is there and how each stands, and a tab or panel kept from before opens as Tasks.
-const GONE: ReadonlySet<Tab> = new Set<Tab>(["agents", "rules"]);
-const offered = (t: string): t is Tab => t in TAB_LABEL && !GONE.has(t as Tab);
-const PANEL_ORDER: Tab[] = ["overview", "files", "git", "terminal", "preview", "tree", "usage"];
+// Nor Usage in the open-source edition (Arun, 2026-11-16: "get rid of the usage panel too"): the Spend pages and the status bar's
+// limits ring say it.
+const GONE: ReadonlySet<Tab> = new Set<Tab>(["agents", "rules", ...(isLocal() ? (["usage"] as Tab[]) : [])]);
+/** Git is a view of Changes now (ChangesPanel): one place for what changed and how it is committed (Arun, 2026-11-16: "combine some
+ *  of the panels we have, be smart"). A Git tab kept from before, or asked for anywhere, opens Changes on its Git view. */
+const MERGED: Partial<Record<Tab, Tab>> = { git: "files" };
+const offered = (t: string): t is Tab => t in TAB_LABEL && !GONE.has(t as Tab) && !MERGED[t as Tab];
+const PANEL_ORDER: Tab[] = ["overview", "files", "pr", "terminal", "preview", "tree", ...(isLocal() ? [] : (["usage"] as Tab[]))];
 /** What each panel holds, under its name in the card. */
 
 const PANEL_SAYS: Record<Tab, string> = {
   overview: "What's running and what finished",
-  files: "What the agents changed, its checks, and the commit",
+  files: "What the agents changed, the folder's git, and the commit",
   git: "Stage, commit, pull and the branch's history",
+  pr: "Its checks, reviews and merge, and Friday seeing it through",
   terminal: "A shell in the agents' folder",
   preview: "The app as it runs",
-  tree: "The project's files",
+  tree: "The project's files, to open and read",
   agents: "Who is here and what each is doing",
   usage: "Tokens, limits and what each run cost",
   mate: "This crew mate's profile: who it is, how it works, and what it does on its own",
@@ -89,7 +98,7 @@ const PANEL_SAYS: Record<Tab, string> = {
   ...(isLocal() ? { preview: "Your pages and the web, where the agents browse too" } : {}),
 };
 const TAB_ICON: Record<Tab, IconName> = {
-  agents: "agent", mate: "user", room: "users", thread: "chat", overview: "list", tree: "folderOpen", files: "file", git: "gitBranch", terminal: "terminalSquare", preview: "play", usage: "chart", rules: "book",
+  agents: "agent", mate: "user", room: "users", thread: "chat", overview: "list", tree: "folderOpen", files: "file", git: "gitBranch", pr: "gitPullRequest", terminal: "terminalSquare", preview: "play", usage: "chart", rules: "book",
   ...(isLocal() ? { preview: "webBrowser" as IconName } : {}),
 };
 
@@ -367,7 +376,7 @@ export function Workbench({
   const [openTabs, setOpenTabs] = useState<Tab[]>(() => {
     try {
       const v = JSON.parse(localStorage.getItem(tabsKey) ?? "[]") as unknown;
-      return Array.isArray(v) ? (v.filter((t) => typeof t === "string" && offered(t)) as Tab[]) : [];
+      return Array.isArray(v) ? ([...new Set(v.map((t) => (typeof t === "string" && MERGED[t as Tab]) || t).filter((t) => typeof t === "string" && offered(t)))] as Tab[]) : [];
     } catch {
       return [];
     }
@@ -428,21 +437,27 @@ export function Workbench({
   // A file it names, pressed in its chat, opens beside it as Files, with Profile one press back (Arun, 2026-11-15: "also be able to
   // click and view the files and stuff too").
   const [filesOpen, setFilesOpen] = useState(false);
+  // And its Browser, once a page is opened there: a crew mate using Friday's browser opens it beside its chat, where the person
+  // watches (Arun, 2026-11-15: "make sure the agents also have access to the browser too"). The crew's panels had no room for it,
+  // so the page the mate opened was put back behind its Profile and it worked on a page nobody saw.
+  const [browserOpen, setBrowserOpen] = useState(false);
   useEffect(() => {
     if (tab === "tree") setFilesOpen(true);
+    if (tab === "preview") setBrowserOpen(true);
   }, [tab]);
+  const crewExtra: Tab[] = [...(tab === "tree" || filesOpen ? (["tree"] as Tab[]) : []), ...(tab === "preview" || browserOpen ? (["preview"] as Tab[]) : [])];
   // A room's panel, in the open-source edition, is its profile (Arun, 2026-11-15: "we need to have the profile be for the team
   // room too and we need to move those things over to the side panel").
   const roomHere = isLocal() && !!state.options.team && !mateHere;
-  if (mateHere) (order = ["mate"]), (tabs = tab === "tree" || filesOpen ? ["mate", "tree"] : ["mate"]);
+  if (mateHere) (order = ["mate"]), (tabs = ["mate", ...crewExtra]);
   // The room's open thread, a tab of its own while it is open.
   const openTh = useOpenThread();
   const threadHere = roomHere && openTh?.sid === sid;
-  if (roomHere) (order = ["room"]), (tabs = ["room", ...(threadHere ? (["thread"] as Tab[]) : []), ...(tab === "tree" || filesOpen ? (["tree"] as Tab[]) : [])]);
+  if (roomHere) (order = ["room"]), (tabs = ["room", ...(threadHere ? (["thread"] as Tab[]) : []), ...crewExtra]);
   else tabs = tabs.filter((t) => t !== "mate" && t !== "room" && t !== "thread");
   useEffect(() => {
-    if (mateHere && tab !== "mate" && tab !== "tree") onPick?.("mate");
-    else if (roomHere && tab !== "room" && tab !== "tree" && !(tab === "thread" && threadHere)) onPick?.("room");
+    if (mateHere && tab !== "mate" && tab !== "tree" && tab !== "preview") onPick?.("mate");
+    else if (roomHere && tab !== "room" && tab !== "tree" && tab !== "preview" && !(tab === "thread" && threadHere)) onPick?.("room");
     else if (!mateHere && !roomHere && (tab === "mate" || tab === "room" || tab === "thread")) onPick?.(order[0]!);
     if ((mateHere || roomHere) && split) setSplit(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -555,6 +570,22 @@ export function Workbench({
     };
   }, [open, over]);
   const tabRow = useTabRow(tab, tabs.length);
+  // The card of panels, opened by a key (as T3 Code's empty panel is): 1 to 9 in the card's order, while the card shows and nothing
+  // is being typed.
+  useEffect(() => {
+    if (!picking || !open) return;
+    const on = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || isTyping(e.target)) return;
+      const n = Number(e.key);
+      const t = Number.isInteger(n) && n >= 1 ? order[n - 1] : undefined;
+      if (!t) return;
+      e.preventDefault();
+      onPick?.(t);
+    };
+    addEventListener("keydown", on);
+    return () => removeEventListener("keydown", on);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [picking, open, order.join()]);
   // Closed from over the chat (Back to chat, Escape), the focus goes back to whatever opened the panel. Noted before the
   // chat goes inert below, since the opener can be in the chat (a diff card, a file chip).
   const opener = useRef<HTMLElement | null>(null);
@@ -859,6 +890,17 @@ export function Workbench({
                   </button>
                 </span>
               )}
+              {tabs.includes("preview") && (
+                <span className={`bench-tab${tab === "preview" ? " on" : ""}`}>
+                  <button type="button" role="tab" aria-selected={tab === "preview"} className="bench-tab-btn" onClick={() => onPick?.("preview")}>
+                    <Icon name={TAB_ICON.preview} size={13} />
+                    <span className="bench-tab-name">Browser</span>
+                  </button>
+                  <button type="button" className="bench-tab-x" aria-label="Close the browser" title="Close the browser" onClick={() => (setBrowserOpen(false), onPick?.(tabs.includes("tree") ? "tree" : roomHere ? "room" : "mate"))}>
+                    <Icon name="x" size={11} />
+                  </button>
+                </span>
+              )}
               {tabs.includes("tree") ? (
                 <span className={`bench-tab${tab === "tree" ? " on" : ""}`}>
                   <button type="button" role="tab" aria-selected={tab === "tree"} className="bench-tab-btn" onClick={() => onPick?.("tree")}>
@@ -888,8 +930,8 @@ export function Workbench({
       {picking && (
         <div className="bench-picker">
           <nav className="bench-picker-card" aria-label="Panels">
-            {order.map((t) => (
-              <button key={t} type="button" className="bench-picker-item" onClick={() => onPick?.(t)}>
+            {order.map((t, i) => (
+              <button key={t} type="button" className="bench-picker-item" onClick={() => onPick?.(t)} {...(i < 9 ? { "aria-keyshortcuts": String(i + 1) } : {})}>
                 <span className="bench-picker-icon">
                   <Icon name={TAB_ICON[t]} size={16} />
                 </span>
@@ -899,6 +941,7 @@ export function Workbench({
                 </span>
                 {t === "files" && !!badges?.files && <i className="bench-switch-n">{badges.files > 999 ? "999+" : badges.files}</i>}
                 {t === "overview" && badges?.working && <i className="bench-switch-dot" aria-label="running" />}
+                {i < 9 && <kbd className="bench-picker-key">{i + 1}</kbd>}
               </button>
             ))}
             {onHistory && (
@@ -1007,8 +1050,21 @@ export function Workbench({
     if (which === "usage") return <UsagePanel state={state} events={events} identity={identity} solo={headless || isLocal()} />;
     if (which === "rules") return <RulesPanel state={state} sid={sid} invite={invite} me={me} send={send} {...(lane ? { lane } : {})} />;
     if (which === "tree") return <TreePanel state={state} events={laneEvents} {...(lane ? { lane } : {})} sid={sid} invite={invite} onClose={onClose} bare send={send} me={me} jump={jump} />;
-    if (which === "git") return <GitPanel state={state} sid={sid} invite={invite} send={send} me={me} {...(lane ? { lane } : {})} />;
-    if (which === "files") return <FilesPanel state={state} events={events} {...(lane ? { lane } : {})} onClose={onClose} bare ship={{ me, sid, invite, send }} />;
+    if (which === "files" || which === "git")
+      return (
+        <ChangesPanel
+          sid={sid}
+          count={badges?.files ?? 0}
+          agents={<FilesPanel state={state} events={events} {...(lane ? { lane } : {})} onClose={onClose} bare ship={{ me, sid, invite, send }} />}
+          git={<GitPanel state={state} sid={sid} invite={invite} send={send} me={me} {...(lane ? { lane } : {})} />}
+        />
+      );
+    if (which === "pr")
+      return (
+        <Suspense fallback={null}>
+          <PrPanel state={state} events={events} sid={sid} invite={invite} send={send} me={me} shown={on} onTab={onTab} />
+        </Suspense>
+      );
     // An uploaded folder has no path on anybody's machine, so the session
     // is what names it. Passing the prose "12 files uploaded to this
     // session" as a cwd is what used to happen, and it previewed nothing.
@@ -1229,11 +1285,69 @@ function Overview({ facts, onTab }: { facts: Facts; onTab: (t: Tab) => void }) {
   );
 }
 
+const VIEW_KEY = (sid: string) => `friday.changes.view.${sid}`;
+/** Which of Changes' two views a session shows: what the agents changed, or the folder's git. */
+function setChangesView(sid: string, v: "agents" | "git"): void {
+  try {
+    localStorage.setItem(VIEW_KEY(sid), v);
+  } catch {
+    /* a preference */
+  }
+  dispatchEvent(new CustomEvent("friday:changes-view", { detail: { sid, v } }));
+}
+
+/**
+ * Changes: what the agents changed (its diff, its checks, the commit) and the folder's git (staged and not, the branch, pull and
+ * history), one panel with the two as views of it. They were two tabs that each listed changed files and each had a Commit
+ * (Arun, 2026-11-16: "combine some of the panels we have, be smart"). The view is kept per session.
+ */
+function ChangesPanel({ sid, count, agents, git }: { sid: string; count: number; agents: ReactNode; git: ReactNode }) {
+  const [view, setView] = useState<"agents" | "git">(() => {
+    try {
+      return localStorage.getItem(VIEW_KEY(sid)) === "git" ? "git" : "agents";
+    } catch {
+      return "agents";
+    }
+  });
+  useEffect(() => {
+    const on = (e: Event) => {
+      const d = (e as CustomEvent<{ sid: string; v: "agents" | "git" }>).detail;
+      if (d.sid === sid) setView(d.v);
+    };
+    addEventListener("friday:changes-view", on);
+    return () => removeEventListener("friday:changes-view", on);
+  }, [sid]);
+  // Drawn once each, then kept: switching back finds the git panel as it was, its open files and scroll.
+  const seen = useRef(new Set<string>()).current;
+  seen.add(view);
+  return (
+    <div className="chg">
+      <div className="chg-views" role="tablist" aria-label="Changes">
+        <button type="button" role="tab" aria-selected={view === "agents"} className="chg-view" title="What the agents changed, to review and commit" onClick={() => setChangesView(sid, "agents")}>
+          <Icon name="agent" size={13} />
+          Agents' changes
+          {count > 0 && <span className="chg-n">{count > 999 ? "999+" : count}</span>}
+        </button>
+        <button type="button" role="tab" aria-selected={view === "git"} className="chg-view" title="The folder's git: stage, commit, pull and history" onClick={() => setChangesView(sid, "git")}>
+          <Icon name="gitBranch" size={13} />
+          Git
+        </button>
+      </div>
+      {[...seen].map((v) => (
+        <div key={v} className="chg-body" hidden={v !== view}>
+          {v === "agents" ? agents : git}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** The tab a session opens on: the one you left it on, else the last one you used anywhere. */
 export function useTab(sid = ""): [Tab, (t: Tab) => void] {
   const [tab, setTab] = useState<Tab>(() => {
     try {
       const v = localStorage.getItem(`mpa.bench.${sid}`) ?? localStorage.getItem("mpa.bench");
+      if (v && MERGED[v as Tab]) return MERGED[v as Tab]!;
       return v && offered(v) ? v : "overview";
     } catch {
       return "overview";
@@ -1242,7 +1356,8 @@ export function useTab(sid = ""): [Tab, (t: Tab) => void] {
   return [
     tab,
     (asked: Tab) => {
-      const t = GONE.has(asked) ? "overview" : asked;
+      if (MERGED[asked]) setChangesView(sid, "git");
+      const t = GONE.has(asked) ? "overview" : (MERGED[asked] ?? asked);
       setTab(t);
       try {
         let everyone = true;

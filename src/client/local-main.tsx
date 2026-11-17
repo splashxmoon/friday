@@ -2,6 +2,7 @@
 // Nothing paid is plugged in, so none of it is in this build; scripts/oss-export.mts checks that it stays that way.
 // First, so every page loads already knowing it is the local edition (local-edition.ts).
 import "./local-edition.js";
+import { lazy, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { freeScrollInPopups } from "./scroll-free.js";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -31,6 +32,10 @@ watchChunkErrors();
 freeScrollInPopups();
 
 
+// The menu bar's panel (desktop-tray.ts): its own small page, never the whole app a second time.
+const TrayRoot = lazy(() => import("./TrayPanel.js").then((m) => ({ default: m.TrayRoot })));
+const tray = new URLSearchParams(location.search).get("view") === "tray";
+
 createRoot(document.getElementById("root")!, {
   onUncaughtError: (error, info) => {
     if (reloadForChunk(error)) return;
@@ -40,6 +45,12 @@ createRoot(document.getElementById("root")!, {
   },
 }).render(
   <TooltipProvider delayDuration={300}>
-    <App />
+    {tray ? (
+      <Suspense fallback={null}>
+        <TrayRoot />
+      </Suspense>
+    ) : (
+      <App />
+    )}
   </TooltipProvider>,
 );

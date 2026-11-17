@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import "./browser.css";
 import { createPortal } from "react-dom";
 import { BrowserStart } from "./WorkRail.js";
 import type { PreviewInfo } from "../runner/preview.js";
@@ -880,6 +881,7 @@ export function PreviewPanel({
               {tabs.map((t, i) => (
                 <span key={t.id} className={`bw-tab ${i === at ? "on" : ""}`}>
                   <button type="button" role="tab" aria-selected={i === at} tabIndex={i === at ? 0 : -1} className="bw-tab-name" title={addressOf(t.seen ?? t.url) || "New tab"} onClick={() => setAt(i)}>
+                    <Icon name={addressOf(t.seen ?? t.url) && isLocalUrl(addressOf(t.seen ?? t.url)) ? "server" : "globe"} size={12} className="bw-tab-icon" />
                     {
                       work ? siteLabel(addressOf(t.seen ?? t.url)) :
                       label(addressOf(t.seen ?? t.url))
@@ -905,6 +907,7 @@ export function PreviewPanel({
                 go(typed);
               }}
             >
+              <span className="bw-nav">
               <button type="button" className="icon-btn tiny" title="Back" aria-label="Back" onClick={back} disabled={!desktopView && !active?.past?.length}>
                 <Icon name="navBack" size={15} />
               </button>
@@ -914,9 +917,12 @@ export function PreviewPanel({
               <button type="button" className="icon-btn tiny" title="Reload" aria-label="Reload" onClick={reload}>
                 <Icon name="navReload" size={15} />
               </button>
+              </span>
               <button type="button" className={`icon-btn tiny ${pointing ? "on" : ""}`} title={pointing ? "Stop pointing (Esc)" : asNote ? "Leave a note on something in the page" : "Point at something in the page"} aria-label={asNote ? "Leave a note on something in the page" : "Point at something in the page"} aria-pressed={pointing} onClick={() => void point()}>
                 <Icon name="navPoint" size={15} />
               </button>
+              {/* What the address is, at its start: this computer's own server, or the web. */}
+              <Icon name={addressOf(active?.seen ?? shown) && isLocalUrl(addressOf(active?.seen ?? shown)) ? "server" : "globe"} size={13} className="bw-url-icon" />
               <input
                 className="browser-url"
                 value={typed || addressOf(active?.seen ?? shown)}
@@ -1090,10 +1096,50 @@ export function PreviewPanel({
                   )}
                 </div>
               ) : (
-                <div className="preview-note">
-                  <div className="preview-starts">
-                    {starts()}
+                // A new tab: what runs here to open, the ways to start the app, what else runs on this computer.
+                <div className="bw-start">
+                  <div className="bw-start-head">
+                    <span className="bw-start-mark" aria-hidden="true">
+                      <Icon name="webBrowser" size={18} />
+                    </span>
+                    <b>New tab</b>
+                    <span>Open your app or any page above. The agents browse here too, and the pages they open show as tabs.</span>
                   </div>
+                  {ours.length > 0 && (
+                    <section className="bw-start-sec" aria-label="Running here">
+                      <h4>Running here</h4>
+                      {ours.map((x) => (
+                        <button key={x.url} type="button" className="bw-start-row" onClick={() => (x.preview && src ? setUrl(src) : go(x.url))}>
+                          <span className={`bw-start-dot${x.ready ? " on" : ""}`} aria-hidden="true" />
+                          <span className="bw-start-url">{x.url.replace(/^https?:\/\//, "")}</span>
+                          {x.command && <span className="bw-start-cmd">{x.command}</span>}
+                          <Icon name="arrowRight" size={13} className="bw-start-go" />
+                        </button>
+                      ))}
+                    </section>
+                  )}
+                  {!info && options && (options.scripts.length > 0 || options.static) && (
+                    <section className="bw-start-sec" aria-label="Start the app">
+                      <h4>Start the app</h4>
+                      <div className="preview-starts bw-start-starts">{starts()}</div>
+                    </section>
+                  )}
+                  {others.length > 0 && (
+                    <section className="bw-start-sec" aria-label="Elsewhere on this computer">
+                      <h4>Elsewhere on this computer</h4>
+                      {others.slice(0, 5).map((x) => (
+                        <button key={x.url} type="button" className="bw-start-row" onClick={() => go(x.url)}>
+                          <span className={`bw-start-dot${x.ready ? " on" : ""}`} aria-hidden="true" />
+                          <span className="bw-start-url">{x.url.replace(/^https?:\/\//, "")}</span>
+                          {x.command && <span className="bw-start-cmd">{x.command}</span>}
+                          <Icon name="arrowRight" size={13} className="bw-start-go" />
+                        </button>
+                      ))}
+                    </section>
+                  )}
+                  {!ours.length && !others.length && !(options && (options.scripts.length > 0 || options.static)) && (
+                    <p className="bw-start-quiet">Nothing is running yet. Type an address above, such as localhost:3000, or ask an agent to start the app.</p>
+                  )}
                 </div>
               ))}
           </>

@@ -71,7 +71,13 @@ import { clearDiffRequest, readDiffRequest, showDiffSoon } from "./focusDiff.js"
 import { HandoverDialog } from "./Handover.js";
 import { StatusBar, useSessionLayout } from "./StatusBar.js";
 import { EnvironmentButton } from "./Environment.js";
+import { cardShown, setCardWide, useThreadCard } from "./thread-card-store.js";
+// The thread card, only in a coding thread of the open-source edition: loaded on its own.
+const ThreadCard = lazy(() => import("./ThreadCard.js").then((m) => ({ default: m.ThreadCard })));
+const ThreadCardToggle = lazy(() => import("./ThreadCard.js").then((m) => ({ default: m.ThreadCardToggle })));
 import { folderName } from "./Workspace.js";
+// Threads load on their own, after the session: the title stands in for their tabs until then (budget, client-bundle.test.ts).
+const ThreadTabs = lazy(() => import("./threads.js").then((m) => ({ default: m.ThreadTabs })));
 
 export interface DocLayout {
   open: boolean;
@@ -165,16 +171,66 @@ export function SessionView({
     const busy = st.run.status === "running" || st.run.status === "waiting_for_human" || Object.values(st.laneRuns).some((r) => r.status === "running");
     if (busy || questionsTo(st, s.me.id).length) return;
   }, [s.state, s.me, s.partial]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Opened or closed by a person in this session: from then on the panel is theirs, and nothing opens it by itself (as T3 Code's
+  // panel is, after a turn that changed files or a pull request that appeared).
+  const chosenKey = `friday.panel.chosen.${sid}`;
   const setBench = (open: boolean) => {
     setBenchState(open);
     try {
       if (open) localStorage.setItem(`mpa.benchOpen.${sid}`, "1");
       else localStorage.removeItem(`mpa.benchOpen.${sid}`);
+      localStorage.setItem(chosenKey, "1");
     } catch {
       // A preference: losing it costs a click.
     }
   };
   const [tab, setTab] = useTab(sid);
+  /**
+   * The panel opening by itself on what just happened (Arun, 2026-11-16: "let's add these", after T3 Code): Changes when a turn
+   * ends having changed files, Pull request when the session's commit opens one. Only in a coding session, only while the panel is
+   * closed, and never in one where a person has opened or closed it: their choice wins. What happened before the page opened is
+   * history, not news.
+   */
+  const autoFrom = useRef<number | null>(null);
+  useEffect(() => {
+    const st = s.state;
+    if (!st || s.partial) return;
+    if (autoFrom.current === null) return void (autoFrom.current = st.lastSeq);
+    if (st.options.team || st.options.work) return;
+    const fresh = s.events.filter((e) => e.seq > autoFrom.current!);
+    if (!fresh.length) return;
+    autoFrom.current = st.lastSeq;
+    let chosen = false;
+    try {
+      chosen = localStorage.getItem(chosenKey) === "1";
+    } catch {
+      chosen = true;
+    }
+    if (chosen || bench) return;
+    const pr = fresh.some((e) => e.body.type === "folder.committed" && !e.body.error && !!e.body.prUrl);
+    // A turn that ended having changed files: its lane's diff came after its run started.
+    const changed = fresh.some((e) => {
+      if (e.body.type !== "run.ended" || e.body.outcome !== "done") return false;
+      const lane = e.lane ?? MAIN_LANE;
+      const started = s.events.findLast((x) => x.seq < e.seq && (x.lane ?? MAIN_LANE) === lane && x.body.type === "run.started");
+      return s.events.some((x) => x.seq > (started?.seq ?? 0) && x.seq < e.seq && (x.lane ?? MAIN_LANE) === lane && x.body.type === "agent.diff" && x.body.files.length > 0);
+    });
+    if (!pr && !changed) return;
+    // As the one to show here, without making it every session's: the panel a session opens on next is still the one last picked.
+    let was: string | null = null;
+    try {
+      was = localStorage.getItem("mpa.bench");
+    } catch {}
+    setTab(pr ? "pr" : "files");
+    try {
+      if (was === null) localStorage.removeItem("mpa.bench");
+      else localStorage.setItem("mpa.bench", was);
+      localStorage.setItem(`mpa.benchOpen.${sid}`, "1");
+    } catch {}
+    setPicking(false);
+    setHistory(false);
+    setBenchState(true);
+  }, [s.state?.lastSeq, s.partial]); // eslint-disable-line react-hooks/exhaustive-deps
   // The side panel opens on a card of every panel until one has been picked in this session (on this computer); after that it
   // opens on the one used last (Arun, 2026-10-24: "make the side panel when you click the side panel button page blank with a
   // vertical card with all of the options", "it will be like that unless the user already clicked an option prior to it").
@@ -254,8 +310,9 @@ export function SessionView({
     addEventListener("friday:open-thread", on);
     return () => removeEventListener("friday:open-thread", on);
   }, [sid]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Its width per session (a thread with a wide diff open, another with a narrow terminal), else the last one set anywhere.
   const [benchWidth, setBenchWidth] = useState(() => {
-    const v = Number(localStorage.getItem("mpa.benchWidth"));
+    const v = Number(localStorage.getItem(`mpa.benchWidth.${sid}`) ?? localStorage.getItem("mpa.benchWidth"));
     return v >= 320 && v <= 980 ? v : 560;
   });
   // Opened from the agents menu as well as from the engine bar, so it lives here.
@@ -671,6 +728,16 @@ export function SessionView({
   // Focus, the layout with the status bar along the foot, on Solo and Team alike; Classic is one switch away in Settings.
   const focus = useSessionLayout() === "focus";
   const [statusSlot, setStatusSlot] = useState<HTMLElement | null>(null);
+  // The thread card (ThreadCard.tsx): open by default and docked beside the chat while the chat keeps a reading width beside
+  // it (Arun, 2026-11-16: "have the thread card be open on default too"); over the chat, a press away, only where it can't.
+  const [mainEl, setMainEl] = useState<HTMLDivElement | null>(null);
+  const threadCard = useThreadCard();
+  useEffect(() => {
+    if (!mainEl) return;
+    const ro = new ResizeObserver(([e]) => setCardWide((e?.contentRect.width ?? 0) >= 820));
+    ro.observe(mainEl);
+    return () => ro.disconnect();
+  }, [mainEl]);
   // Stable, so the feed can skip redrawing what didn't change.
   const onConnect = useCallback((lane: string, tool?: EngineTool | "", from?: string) => setConnect({ lane, ...(tool !== undefined ? { tool } : {}), ...(from ? { from } : {}) }), []);
   const onOpen = useCallback((what: "files" | "tree" | "preview") => {
@@ -783,6 +850,9 @@ export function SessionView({
    */
   const replaying = replayAt !== null;
   const state = replayState ?? s.state;
+  // A coding thread in the open-source edition has the thread card in place of the agents' strip and the status bar.
+  const cardHere = isLocal() && !state.options.team && !state.options.work;
+  const cardDocked = cardHere && !split && replayAt === null && threadCard.wide && cardShown(threadCard);
 
   // Two agents' chats side by side: from an agent tab's menu now (Activity), the header's button gone (Arun, 2026-10-24). With a
   // lane, that agent opens beside the one in view; without, the next agent here does.
@@ -914,7 +984,8 @@ export function SessionView({
           had to say first. */}
       <div className="sv-body">
         <div
-          className="sv-main"
+          ref={setMainEl}
+          className={`sv-main${cardDocked ? " tc-docked" : ""}`}
           onDragOver={(e) => {
             if (!wide || replaying || !e.dataTransfer.types.includes(AGENT_DRAG)) return;
             e.preventDefault();
@@ -1031,10 +1102,28 @@ export function SessionView({
             }
             return <Activity {...activityProps} />;
           })()}
+          {cardHere && replayAt === null && (
+            <Suspense fallback={null}>
+            <ThreadCard
+              state={state}
+              events={s.events}
+              me={me}
+              sid={sid}
+              invite={invite}
+              send={send}
+              identity={identity}
+              onOpen={(tab) => (tab === "files" ? onOpen("files") : (setTab(tab), setBench(true), setHistory(false)))}
+              onConnect={(tool) => setConnect({ lane: "", ...(tool ? { tool } : {}) })}
+              slot={focus ? setStatusSlot : () => {}}
+            />
+            </Suspense>
+          )}
         </div>
         {/* A crew room's plan beside its chat (TeamPlan.tsx, Crew overhaul 3B): the room itself, not a teammate's own chat, and not
             while a panel or the replay has the side. */}
-        {state.options.team && focused === ALL && !split && !bench && replayAt === null && (
+        {/* Not in the open-source edition: the room is its chat and its profile, the board its own page (Arun, 2026-11-15: "get rid of
+            this", of the plan beside a room and its folded strip of faces). */}
+        {state.options.team && !isLocal() && focused === ALL && !split && !bench && replayAt === null && (
           <Suspense fallback={null}>
             <TeamPlan state={state} events={s.events} send={send} />
           </Suspense>
@@ -1060,6 +1149,7 @@ export function SessionView({
             onWidth={(w) => {
               setBenchWidth(w);
               try {
+                localStorage.setItem(`mpa.benchWidth.${sid}`, String(w));
                 localStorage.setItem("mpa.benchWidth", String(w));
               } catch {
                 // A preference; losing it costs nothing.
@@ -1097,6 +1187,8 @@ export function SessionView({
       {focus &&
         // A team's chats have no coding status bar: what each teammate is on is in its header and the sidebar (teammates.ts).
         !s.state.options.team &&
+        // A coding thread in the open-source edition has none: its place, git and agents are in the thread card, its gauge too.
+        !(isLocal() && !s.state.options.work) &&
         (s.state.options.work ? (
           <WorkBar state={s.state} events={s.events} me={s.me.id} sid={sid} invite={invite} slot={setStatusSlot} onRail={() => setBench(false)} />
         ) : (
@@ -1477,10 +1569,21 @@ function TopBar({
   const owner = me.role === "owner";
   const agent = state.options.agent;
   const repo = repoOf(state);
+  // Threads: a coding session in a folder on this computer shows the folder's other sessions as tabs (threads.tsx).
+  const project = ((p) => (p?.path ? { ...p, path: p.path } : null))(reposOf(state)[0]);
+  const threadsOn = isLocal() && !state.options.team && !state.options.work && !!project;
   // Any agent's question holds it up, not only the main one's: with two asking, both people are named.
   const asked = [...new Set(Object.values(state.openQuestions).map((q) => q.toName))];
   const waiting = state.run.status === "waiting_for_human" || asked.length > 0;
   const label = `Waiting for ${asked.join(" and ") || "a human"}`;
+  // Said once it has been down a moment, never for the second a session takes to connect as it opens: switching threads flashed
+  // "Reconnecting…" at the header's end each time (Arun, 2026-11-16: "a slight blinking/flashing on the right side").
+  const [connDown, setConnDown] = useState(false);
+  useEffect(() => {
+    if (conn === "live") return void setConnDown(false);
+    const t = setTimeout(() => setConnDown(true), 1500);
+    return () => clearTimeout(t);
+  }, [conn]);
 
   const left = (
       <div className={`tb-left${focus ? " focus" : ""}`}>
@@ -1501,6 +1604,11 @@ function TopBar({
         ) : isLocal() && state.options.team && identity && mateLane && mateOn(mateLane) ? (
           // A crew mate's chat: its face, name and thread, the thread a menu of its threads (TeammatePage.tsx MateTitle).
           <MateHeaderTitle lane={mateLane} identity={identity} notify={notify} fallback={<h1>{shownTitle}</h1>} />
+        ) : threadsOn && project ? (
+          // A project's threads as tabs, this one open, its name pressed to rename it as the title was (threads.tsx).
+          <Suspense fallback={<h1>{shownTitle}</h1>}>
+            <ThreadTabs sid={sid} title={shownTitle} project={project} identity={identity} tool={state.engines[MAIN_LANE]?.tool} running={anyRunning(state)} onRename={owner && !named ? () => setEditing(true) : undefined} />
+          </Suspense>
         ) : (
           // Renamed from the keyboard too, where a click renames it (2026-10-27 audit: it couldn't be reached by Tab).
           <h1
@@ -1586,6 +1694,9 @@ function TopBar({
             links in a second button beside it (Arun, 2026-10-24: "get rid of the share button in the header and add the dropdown
             content in the people's dropdown"); on Solo it was the only way to them, so the People panel is there on Solo too. */}
         {/* The terminal view's switch in a hosted Code session too, beside the people (the local edition keeps it in SessionMenu). */}
+        {/* The thread card's button (ThreadCard.tsx), with the agents' faces while it is closed: before the terminal switch (Arun,
+            2026-11-16: "swap placements with the terminal button thing"). */}
+        {isLocal() && !state.options.team && !state.options.work && <Suspense fallback={null}><ThreadCardToggle state={state} /></Suspense>}
         {/* The local edition's in its place: this session's settings, and the line about Friday Team (SessionMenu). */}
         {isLocal() && gear && (
           <SessionMenu button={!!state.options.work} settings={owner ? <SettingsBody solo state={state} send={send} meter={{ on: meterOn, set: (v) => (setMeterOn(v), localStorage.setItem("mpa.meter", v ? "1" : "0")) }} /> : undefined}>
@@ -1626,7 +1737,7 @@ function TopBar({
         })()}
         {/* Only when it isn't. "Live" was a permanent badge saying the normal
             thing was happening, which is the state nobody needs telling about. */}
-        {conn !== "live" && (
+        {connDown && (
           <span className={`conn ${conn}`} title="Reconnecting">
             Reconnecting…
           </span>
@@ -1738,7 +1849,10 @@ export function reposOf(state: SessionState | null | undefined): RepoUse[] {
     // The main lane's branch is the one to show; a lane's own worktree branch is a detail of that lane.
     // Made by Friday for the session, when nobody picked a folder: ~/Friday/Projects/<what was asked> (audit CODE-20).
     const made = /[\\/]Friday[\\/]Projects[\\/][^\\/]+[\\/]?$/.test(e.cwd);
-    if (!had || lane === MAIN_LANE) by.set(name, { name, branch: lane === MAIN_LANE || !had ? e.branch : had.branch, live: !!had?.live || e.online, ...(made || had?.made ? { made: true } : {}) });
+    // The folder itself, so a new thread in the project can start there; the main lane's when it has one.
+    const path = lane === MAIN_LANE || !had?.path ? (e.copyOf ?? e.cwd) : had.path;
+    const worktree = lane === MAIN_LANE || !had ? !!e.copyOf : !!had.worktree;
+    if (!had || lane === MAIN_LANE) by.set(name, { name, branch: lane === MAIN_LANE || !had ? e.branch : had.branch, live: !!had?.live || e.online, ...(made || had?.made ? { made: true } : {}), path, ...(worktree ? { worktree: true } : {}) });
     else had.live = had.live || e.online;
   }
   return [...by.values()];
@@ -1953,12 +2067,12 @@ const MAIN_PANELS: Tab[] = ["overview", "files", "terminal", "preview"];
 
 const VIEWS: { tab: Tab; icon: IconName; label: string }[] = [
   { tab: "overview", icon: "list", label: "Tasks" },
-  { tab: "tree", icon: "folderOpen", label: "Tree" },
   { tab: "files", icon: "file", label: "Changes" },
-  { tab: "git", icon: "gitBranch", label: "Git" },
+  { tab: "pr", icon: "gitPullRequest", label: "Pull request" },
+  { tab: "tree", icon: "folderOpen", label: "Files" },
   { tab: "terminal", icon: "terminalSquare", label: "Terminal" },
   { tab: "preview", icon: "play", label: "Preview" },
-  { tab: "usage", icon: "usage", label: "Usage" },
+  ...(isLocal() ? [] : [{ tab: "usage" as Tab, icon: "usage" as IconName, label: "Usage" }]),
 ];
 
 // ── control strip ───────────────────────────────────────────────────

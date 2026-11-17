@@ -1,0 +1,85 @@
+/* A crew mate's or a room's spend (SpendPage.tsx): one quiet column, numbers in tabular figures, the kinds of token in four
+   steady tones of ink so the page reads as an account, not a dashboard. */
+.sp { display: flex; flex-direction: column; gap: 14px; min-width: 0; font-variant-numeric: tabular-nums; }
+.sp-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.sp-head h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.sp-span { flex-wrap: nowrap; }
+.sp-quiet, .sp-err { margin: 6px 0; color: var(--text-muted); font-size: 13px; }
+.sp-err { color: color-mix(in srgb, var(--red) 80%, var(--ink)); }
+.sp-total { display: flex; flex-direction: column; gap: 2px; }
+.sp-usd { color: var(--ink); font-size: 28px; font-weight: 600; letter-spacing: -0.02em; line-height: 34px; }
+.sp-total-sub { color: var(--text-muted); font-size: 12.5px; }
+
+/* The four kinds, each its own colour (Arun, 2026-11-15: "add better color coding for this"): fresh input blue, written to the
+   cache violet, read back from it green (the cheap one, the saving), output amber. */
+/* Vibrant, the same in both themes (Arun, 2026-11-15: "make the colors more vibrant please"). */
+.sp { --sp-input: #3b82f6; --sp-write: #a855f7; --sp-read: #22c55e; --sp-output: #f59e0b; }
+.sp-k-input { background: var(--sp-input); }
+.sp-k-cacheWrite { background: var(--sp-write); }
+.sp-k-cacheRead { background: var(--sp-read); }
+.sp-k-output { background: var(--sp-output); }
+.sp-note-saved { color: var(--sp-read); font-weight: 600; }
+.sp-bar { display: flex; gap: 2px; height: 10px; overflow: hidden; border-radius: 5px; }
+.sp-bar > i { flex-basis: 0; min-width: 3px; border-radius: 2px; }
+.sp-kinds { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.sp-kinds li { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto 64px; align-items: center; gap: 8px; min-height: 26px; font-size: 13px; }
+.sp-dot { width: 9px; height: 9px; border-radius: 3px; }
+.sp-sub .sp-dot { background: color-mix(in srgb, var(--sp-output) 45%, transparent); }
+.sp-kind-label { color: var(--ink-2); }
+.sp-kind-n { color: var(--text-muted); }
+.sp-kind-usd { color: var(--ink); text-align: right; }
+.sp-sub { padding-left: 18px; font-size: 12px !important; }
+.sp-sub .sp-kind-label { color: var(--text-muted); }
+.sp-note { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 17px; }
+
+.sp-sec { display: flex; flex-direction: column; gap: 6px; }
+.sp-sec h4 { margin: 4px 0 0; color: var(--ink-2); font-size: 12.5px; font-weight: 600; }
+.sp-days { display: flex; align-items: flex-end; gap: 4px; height: 72px; padding-top: 4px; }
+.sp-day { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; height: 100%; min-width: 0; }
+.sp-day i { width: 100%; max-width: 22px; border-radius: 3px; background: color-mix(in srgb, var(--ink) 30%, transparent); }
+.sp-day:hover i { background: var(--ink); }
+.sp-day small { color: var(--text-muted); font-size: 10.5px; white-space: nowrap; }
+
+.sp-rows, .sp-runs { display: flex; flex-direction: column; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 12px; list-style: none; overflow: hidden; }
+.sp-rows li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto 64px; align-items: center; gap: 8px; min-height: 36px; padding: 0 12px; font-size: 13px; }
+.sp-rows li + li, .sp-runs li + li { border-top: 1px solid var(--border); }
+.sp-row-mark { display: inline-grid; place-items: center; min-width: 0; }
+.sp-row-label { overflow: hidden; color: var(--ink); text-overflow: ellipsis; white-space: nowrap; }
+.sp-mono { font-family: var(--mono); font-size: 12px; }
+.sp-row-n { color: var(--text-muted); font-size: 12.5px; }
+.sp-row-usd { color: var(--ink); font-size: 13px; text-align: right; }
+
+.sp-run { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; width: 100%; padding: 9px 12px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out); }
+.sp-run:hover, .sp-runs li.on .sp-run { background: var(--hover); }
+.sp-run:focus-visible { outline: 2px solid var(--ink-2); outline-offset: -2px; }
+.sp-run-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.sp-run-ask { overflow: hidden; color: var(--ink); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.sp-run-meta { overflow: hidden; color: var(--text-muted); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.sp-run-num { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+.sp-run-num small { color: var(--text-muted); font-size: 11px; }
+.sp-run-detail { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 12px; margin: 0; padding: 4px 12px 12px 40px; background: var(--hover); font-size: 12px; }
+.sp-run-detail dt { color: var(--text-muted); }
+.sp-run-detail dd { margin: 1px 0 0; color: var(--ink); }
+.sp-run-detail .sp-wide { grid-column: 1 / -1; }
+.sp-run-detail .sp-wide dd { font-family: var(--mono); font-size: 11.5px; overflow-wrap: anywhere; }
+.sp-runs-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; }
+.sp-why { display: flex; flex-wrap: wrap; gap: 4px; }
+.sp-why button { height: 24px; padding: 0 9px; border: 1px solid var(--border); border-radius: 7px; background: none; color: var(--ink-2); font: 500 12px var(--font); cursor: pointer; }
+.sp-why button:hover { background: var(--hover); color: var(--ink); }
+.sp-why button[aria-checked="true"] { border-color: var(--border-strong); background: var(--card); color: var(--ink); }
+
+/* A crew mate's decisions (DecisionsPage.tsx): what it may do on its own as chips, then each go-ahead with what came of it. */
+.dc-trust { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.dc-trust li { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 4px 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); font-size: 12.5px; }
+.dc-trust button { display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 5px; background: none; color: var(--ink-3); cursor: pointer; }
+.dc-trust button:hover { background: var(--hover); color: var(--ink); }
+.dc-trust button svg { width: 12px; height: 12px; }
+.dc-n { margin-left: 5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.dc-row { display: grid; grid-template-columns: 86px minmax(0, 1fr); align-items: center; gap: 10px; padding: 9px 12px; }
+.dc-answer { justify-self: start; padding: 1px 7px; border-radius: 6px; background: var(--hover); color: var(--ink-2); font-size: 11.5px; line-height: 18px; white-space: nowrap; }
+.dc-answer.allowed { color: color-mix(in srgb, var(--green) 85%, var(--ink)); }
+.dc-answer.denied { color: color-mix(in srgb, var(--red) 85%, var(--ink)); }
+.dc-answer.trusted { background: color-mix(in srgb, var(--green) 14%, transparent); color: var(--ink); }
+.dc-answer.waiting, .dc-answer.unanswered { color: color-mix(in srgb, var(--amber, #d97706) 85%, var(--ink)); }
+.dc-tag { margin-right: 4px; color: var(--ink-2); font-weight: 500; }
+.dc-row code { font-size: 12px; }

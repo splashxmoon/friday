@@ -6,7 +6,7 @@ import { Tooltips } from "./Tooltips.js";
 import { TextMenu } from "./TextMenu.js";
 import { BuildWatch } from "./BuildWatch.js";
 import type { Role } from "../types.js";
-import { lazy, Suspense, type ComponentProps, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { lazy, Suspense, type ComponentProps, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { isNarrow } from "./narrow.js";
 import { readTabNow, setTeamTab, TeamHome, TeammateForm, useTeamNow, useTeamTab } from "./Teammates.js";
 import { choosePlace, usePlaceFollows, usePlaceLeaves, useWorkSessions } from "./WorkMode.js";
@@ -79,7 +79,7 @@ import { quickText, sendQuickTo, startQuick } from "./quick-send.js";
 import { ShortcutList } from "./Shortcuts.js";
 import { Palette, baseActions, paletteOrder, type Action } from "./Palette.js";
 import type { Plan } from "../plan-types.js";
-import { Sidebar } from "./Sidebar.js";
+import { Sidebar, ThreadRing } from "./Sidebar.js";
 import { PrWatch, usePrs } from "./prWatch.js";
 import {
   loadLayout,
@@ -98,6 +98,7 @@ import { WaitingOnYou, askToNotify, useAttention } from "./Attention.js";
 import { DailyBriefHost } from "./DailyBrief.js";
 import { clearUnread, markUnread, useUnread, workingChanges } from "./unread.js";
 import { DoneToasts } from "./DoneToasts.js";
+import { NEW_THREAD, ThreadsCtx } from "./threads-data.js";
 
 /**
  * The desktop app linking this computer to the hosted Friday, and why signing out of it didn't work (desktop-link.ts). The local
@@ -950,6 +951,14 @@ export function App() {
         if (go(e.shiftKey ? order[order.length - 1] : order[0])) e.preventDefault();
         return;
       }
+      // ⌘N: a new thread in the open coding session's project (threads.tsx), else a new session (Arun, 2026-11-15, threads).
+      if (mod && !e.shiftKey && !e.altKey && k === "n") {
+        e.preventDefault();
+        const ask = new CustomEvent(NEW_THREAD, { detail: { handled: false } });
+        if (here) dispatchEvent(ask);
+        if (!ask.detail.handled) navigate({ kind: "home" });
+        return;
+      }
       // ⌘⇧Y: everything waiting on you, in one queue (NeedsYou.tsx).
       if (mod && e.shiftKey && !e.altKey && k === "y") {
         e.preventDefault();
@@ -1042,6 +1051,18 @@ export function App() {
     },
     [],
   );
+  // Issues with a project's label start threads by themselves, in the open-source edition (issue-intake.ts).
+  const rememberRef = useRef(remember);
+  rememberRef.current = remember;
+  useEffect(() => {
+    if (!isLocal() || !identity.id) return;
+    let stop: (() => void) | null = null;
+    let gone = false;
+    void import("./issue-intake.js").then((m) => !gone && (stop = m.startIntake(identity, () => rememberRef.current)));
+    return () => ((gone = true), stop?.());
+  }, [identity.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // What a coding session's thread tabs read (threads.tsx): how each session stands, the list, and adding to it.
+  const threadsData = useMemo(() => ({ attention, recents, remember, ring: (sid: string, active: boolean) => <ThreadRing attention={attention} sid={sid} active={active} /> }), [attention, recents, remember]);
   // A fork is filed straight under the chat it came from (the list is newest first, so one tick older); forkSession opens it.
   useEffect(() => {
     const on = (e: Event) => {
@@ -1433,6 +1454,7 @@ export function App() {
             onOpenBoard={() => navigate({ kind: "board" })}
           />
         ) : route.kind === "session" ? (
+          <ThreadsCtx.Provider value={threadsData}>
           <SessionView
             key={route.sid}
             onRemove={removeRecent}
@@ -1456,6 +1478,7 @@ export function App() {
             doc={{ open: layout.docOpen, width: layout.docWidth }}
             onDocChange={(d) => setLayout({ ...(d.open !== undefined ? { docOpen: d.open } : {}), ...(d.width !== undefined ? { docWidth: d.width } : {}) })}
           />
+          </ThreadsCtx.Provider>
         ) : route.kind === "automations" ? (
           automations()
         ) : route.kind === "board" ? (

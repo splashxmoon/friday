@@ -1,0 +1,249 @@
+/* The thread card (ThreadCard.tsx): at the top right of a coding thread, docked beside the chat where there is room for it, over
+   it (until a press elsewhere) where there isn't. Rows of one height, an icon column, quiet words, the agents' rings. */
+
+.sv-main { position: relative; }
+.tc {
+  position: absolute; z-index: 30; top: 12px; right: 12px; width: 288px; max-height: calc(100% - 24px); overflow-y: auto; overscroll-behavior: contain;
+  display: flex; flex-direction: column; border: 1px solid var(--border-strong); border-radius: 14px; background: var(--panel);
+  box-shadow: 0 16px 40px -18px rgb(0 0 0 / .45); font: 400 13px/1.35 var(--font); color: var(--ink-2);
+}
+.tc.over { box-shadow: var(--shadow-pop), 0 0 0 1px rgb(0 0 0 / .04); }
+/* Docked: the chat and its box keep clear of it. Past the width the chat's column (720) and the card need, the two stay together
+   as one group in the middle of the window, the room left over shared on both sides (Arun, 2026-11-16: "fix the placement and
+   spacing of the thread card as the window gets bigger", "add some space between the right side of the thread card, there is
+   alot of empty space on the left"), so a wide window never leaves the card stranded at its edge. */
+.sv-main.tc-docked { container-type: inline-size; --tc-side: max(0px, 50cqw - 540px); }
+.sv-main.tc-docked .activity-main { padding-left: var(--tc-side); padding-right: calc(var(--tc-side) + 324px); }
+.sv-main.tc-docked .tc { right: calc(12px + var(--tc-side)); }
+
+.tc-sec { display: flex; flex-direction: column; gap: 1px; flex: none; padding: 6px; }
+/* Every row the same height, whatever wraps it (the git menu's span, the branch's pill): none gives way in the column. */
+.tc-sec > *, .tc-row, .tc-row-wrap { flex: none; }
+.tc-row { min-height: 32px; }
+.tc-sec + .tc-sec, .tc-slot:not(:empty) { border-top: 1px solid var(--border); }
+
+.tc-row-wrap { position: relative; display: flex; align-items: center; }
+.tc-row { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; height: 32px; padding: 0 8px; border: 0; border-radius: 8px; background: none; color: var(--ink-2); font: inherit; text-align: left; cursor: pointer; }
+.tc-row:hover:not(:disabled), .tc-row.on, .tc-row:focus-visible { background: var(--hover); color: var(--ink); outline: none; }
+.tc-row:disabled { cursor: default; color: var(--text-muted); }
+.tc-ic { position: relative; display: grid; place-items: center; flex: none; width: 18px; color: var(--text-muted); }
+.tc-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-dim { color: var(--text-muted); }
+.tc-chev { flex: none; color: var(--text-muted); }
+.tc-end-btn { display: grid; place-items: center; flex: none; width: 28px; height: 28px; margin-left: 2px; border: 0; border-radius: 7px; background: none; color: var(--text-muted); cursor: pointer; }
+.tc-end-btn:hover, .tc-end-btn:focus-visible { background: var(--hover); color: var(--ink); outline: none; }
+.tc-env-dot { position: absolute; right: -2px; bottom: -2px; width: 6px; height: 6px; border-radius: 50%; box-shadow: 0 0 0 2px var(--panel); background: var(--faint); }
+.tc-env-dot.on { background: var(--green); }
+.tc-env-dot.off { background: var(--amber); }
+.tc-note { margin: 2px 8px 4px; color: var(--amber); font-size: 12px; }
+.tc-nums { display: inline-flex; gap: 6px; flex: none; font: 500 12px var(--mono); font-variant-numeric: tabular-nums; }
+.tc-add { color: var(--green); }
+.tc-del { color: var(--red); }
+
+/* The branch is Branches' own pill, drawn as a row of the card. */
+.tc-branch .branch-pill { flex: 1; justify-content: flex-start; gap: 10px; height: 32px; padding: 0 8px; border: 0; border-radius: 8px; background: none; color: var(--ink); font: 500 12px var(--mono); }
+.tc-branch .branch-pill > svg { width: 14px; height: 14px; color: var(--text-muted); flex: none; }
+.tc-branch .branch-pill:hover, .tc-branch .branch-pill.on { background: var(--hover); color: var(--ink); }
+.tc-branch .branch-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+/* The git menu wraps its button: the row still runs the card's width. */
+.tc-sec > span:has(> .tc-row) { display: flex; }
+.tc-sec > span > .tc-row { flex: 1; }
+.tc-branch .branch-card { right: -6px; width: 286px; }
+
+/* The agents. */
+.tc-head { display: flex; align-items: center; min-width: 0; }
+.tc-head-btn { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; height: 28px; padding: 0 8px 0 6px; border: 0; border-radius: 7px; background: none; color: var(--text-muted); font: 400 12px var(--font); text-align: left; cursor: pointer; white-space: nowrap; }
+.tc-head-btn:hover, .tc-head-btn:focus-visible { background: var(--hover); outline: none; }
+.tc-head-btn b { color: var(--ink); font-weight: 600; font-size: 12.5px; }
+.tc-head-btn > svg { flex: none; }
+.tc-head-sum { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tc-need-word { color: var(--amber); }
+
+.tc-list { display: flex; flex-direction: column; gap: 1px; margin: 2px 0 0; padding: 0; list-style: none; }
+.tc-agent { display: grid; grid-template-columns: 12px 20px minmax(0, 1fr) auto; align-items: center; gap: 9px; min-height: 44px; padding: 5px 8px; border-radius: 8px; cursor: pointer; }
+.tc-agent:hover, .tc-agent:focus-visible { background: var(--hover); outline: none; }
+.tc-agent.on { background: var(--hover-strong); box-shadow: inset 0 0 0 1px var(--border); }
+.tc-mark { --tint: var(--text-muted); display: grid; place-items: center; width: 20px; height: 20px; border-radius: 6px; color: var(--tint); background: color-mix(in srgb, var(--tint) 16%, transparent); }
+.tc-mark .agent-mark { width: 100%; height: 100%; background: none; color: var(--tint); }
+.tc-mark svg { width: 13px; height: 13px; }
+.tc-agent-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.tc-agent-name { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink); font-weight: 500; }
+.tc-trunc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-lead { display: inline-grid; place-items: center; flex: none; }
+/* The lead's crown, the gold the agent tabs gave it. */
+.tc .tc-lead .fi { color: #d99a00; }
+.dark .tc .tc-lead .fi { color: #f5c542; }
+.tc-agent-sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 12px; }
+.tc-agent.is-need .tc-agent-sub { color: var(--amber); }
+.tc-agent.is-done .tc-agent-sub { color: var(--green); }
+.tc-agent.is-bad .tc-agent-sub { color: var(--red); }
+.tc-time { min-width: 30px; color: var(--faint); font-size: 11.5px; text-align: right; font-variant-numeric: tabular-nums; }
+.tc-answer { height: 24px; padding: 0 9px; border: 0; border-radius: 7px; background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--ink); font: 500 12px var(--font); cursor: pointer; }
+.tc-answer:hover { background: color-mix(in srgb, var(--amber) 28%, transparent); }
+
+/* Where an agent stands, the agent tabs' ring: turning at work, amber waiting on you, green done, red stopped, quiet at rest. */
+.tc-ring { justify-self: center; width: 11px; height: 11px; border-radius: 50%; border: 1.6px solid color-mix(in srgb, var(--ink) 18%, transparent); }
+.tc-ring.is-work { border-top-color: var(--live); border-right-color: var(--live); animation: tc-spin 1.1s linear infinite; }
+.tc-ring.is-need, .tc-ring.is-wait { border-color: var(--amber); }
+.tc-ring.is-need { background: color-mix(in srgb, var(--amber) 28%, transparent); }
+.tc-ring.is-done { border-color: var(--green); }
+.tc-ring.is-bad { border-color: var(--red); }
+@keyframes tc-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .tc-ring.is-work { animation: none; } }
+
+.tc-foot { display: flex; gap: 6px; padding: 6px 2px 2px; }
+.tc-foot-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: 1; height: 28px; border: 1px solid var(--border); border-radius: 8px; background: none; color: var(--ink-2); font: 500 12px var(--font); cursor: pointer; }
+.tc-foot-btn:hover, .tc-foot-btn:focus-visible { background: var(--hover); color: var(--ink); outline: none; }
+.tc-foot-btn svg { color: var(--text-muted); }
+
+/* The chat's jump menu, gauge and subagents, drawn into the card (Focus). */
+.tc-slot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 8px; }
+.tc-slot:not(:empty) { padding: 8px; }
+
+/* The header's button: the card's mark, or with it closed and agents here, their faces. */
+.tc-stack { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 10px 0 6px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--panel); color: var(--ink-2); font: 500 12px var(--font); white-space: nowrap; cursor: pointer; }
+.tc-stack:hover, .tc-stack:focus-visible { background: var(--hover); color: var(--ink); outline: none; }
+.tc-faces { display: flex; }
+.tc-face { --tint: var(--text-muted); position: relative; display: grid; place-items: center; width: 20px; height: 20px; margin-left: -5px; border-radius: 6px; color: var(--tint); background: color-mix(in srgb, var(--tint) 22%, var(--panel)); box-shadow: 0 0 0 2px var(--panel); }
+.tc-face:first-child { margin-left: 0; }
+.tc-face svg { width: 12px; height: 12px; }
+.tc-dot { position: absolute; right: -2px; bottom: -2px; width: 7px; height: 7px; border-radius: 50%; box-shadow: 0 0 0 2px var(--panel); background: var(--faint); }
+.tc-dot.is-work { background: var(--live); }
+.tc-dot.is-need, .tc-dot.is-wait { background: var(--amber); }
+.tc-dot.is-done { background: var(--green); }
+.tc-dot.is-bad { background: var(--red); }
+.tc-stack-need { color: var(--amber); }
+.tc-stack-dim { color: var(--text-muted); }
+.tc-toggle .tc-need-dot { background: var(--amber); }
+
+/* One agent's work in view: said once at the top of the chat, × back to everything (Activity.tsx). */
+.agent-only { display: flex; justify-content: center; padding: 0 16px; }
+.agent-only:empty { display: none; }
+.agent-only-chip { margin-top: 8px; display: inline-flex; align-items: center; gap: 7px; height: 26px; padding: 0 6px 0 8px; border: 1px solid var(--border); border-radius: var(--r-pill); background: var(--panel); color: var(--ink-2); font: 500 12px var(--font); }
+.agent-only-chip .tc-mark { width: 16px; height: 16px; border-radius: 5px; }
+.agent-only-chip .tc-mark svg { width: 11px; height: 11px; }
+.agent-only-x { display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--text-muted); cursor: pointer; }
+.agent-only-x:hover { background: var(--hover); color: var(--ink); }
+
+html.desktop .tc :is(button, [role="button"]):not(:disabled), html.desktop :is(.tc-stack, .tc-toggle, .agent-only-x) { cursor: pointer; }
+
+/* The rows' end marks in one column: the branch's ⇅, the git menu's chevron, the changes' count all end 8px in, 14px wide. */
+.tc-branch .branch-pill > svg:first-child { margin: 0 2px; }
+.tc-branch .branch-pill > svg:last-child:not(:first-child) { width: 14px; height: 14px; margin: 0; }
+.tc-chev { width: 14px !important; height: 14px !important; margin: 0; }
+
+/* Two columns down the card (Arun, 2026-11-16: "line up the chevron better with the other icons too, also the same for the
+   three dot button"): on the left, every row's icon, the Agents chevron and the agents' rings centred in one 18px column 8px in;
+   on the right, the folder, the chevrons, the ⇅, the counts and ⋯ all ending 8px in, 14px wide. */
+.tc-end-btn { width: auto; height: 32px; margin-left: 0; padding: 0 8px 0 7px; }
+.tc-end-btn .fi { width: 14px; height: 14px; }
+.tc-head-btn { gap: 10px; height: 32px; padding: 0 8px; font-size: 12px; }
+/* "Agents" and its count on one baseline, the count 8px after it, not 6 (Arun, 2026-11-16: "line up the number properly and add
+   some more space"): both the same size on one line height, the count's figures even. */
+.tc-head-btn b { margin-right: -2px; line-height: 16px; }
+.tc-head-btn > .tc-dim, .tc-head-btn .tc-head-sum { font-size: 12.5px; line-height: 16px; font-variant-numeric: tabular-nums; }
+.tc-agent { grid-template-columns: 18px 20px minmax(0, 1fr) auto; gap: 10px; }
+.tc-agent .tc-ring { justify-self: center; }
+
+/* The faces in the header: side by side, each its own state dot in its corner, none over another. */
+.tc-faces { display: flex; gap: 4px; }
+.tc-face { margin-left: 0; width: 20px; height: 20px; border-radius: 6px; box-shadow: none; background: color-mix(in srgb, var(--tint) 16%, transparent); overflow: visible; }
+.tc-face svg { width: 13px; height: 13px; }
+.tc-dot { right: -2px; bottom: -2px; width: 7px; height: 7px; box-shadow: 0 0 0 1.5px var(--panel); }
+.tc-stack { gap: 8px; padding: 0 10px 0 5px; }
+
+/* Another stylesheet's .tc-head pads in its own way: the card's head starts where its rows do. */
+.tc .tc-head { height: auto; margin: 0; padding: 0; border: 0; background: none; justify-content: flex-start; }
+
+/* Issues labelled friday start threads (IntakeRow): a switch at the row's end, in the end column. */
+.tc-code { padding: 0 4px; border-radius: 4px; background: var(--hover); color: var(--ink-2); font: 11.5px var(--mono); }
+.tc-switch { position: relative; flex: none; width: 24px; height: 14px; border-radius: 7px; background: color-mix(in srgb, var(--ink) 18%, transparent); transition: background-color .15s ease; }
+.tc-switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: var(--panel); box-shadow: 0 1px 2px rgb(0 0 0 / .3); transition: transform .15s ease; }
+.tc-switch.on { background: var(--green); }
+.tc-switch.on::after { transform: translateX(10px); }
+@media (prefers-reduced-motion: reduce) { .tc-switch, .tc-switch::after { transition: none; } }
+
+/* A done agent's line is its proof (ThreadCard proofLine): pressed, the checks, changes, picture and its own review beside the card. */
+.tc-proof { display: block; max-width: 100%; padding: 0; border: 0; background: none; color: var(--green); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.tc-proof:hover, .tc-proof:focus-visible { text-decoration: underline; text-underline-offset: 2px; outline: none; }
+.tc-agent.is-done .tc-proof.is-warn { color: var(--amber); }
+.tc-agent.is-done .tc-proof.is-bad { color: var(--red); }
+
+/* The threads the agents opened (ThreadCard OpenedList), under the agents. */
+.tc-opened { display: flex; flex-direction: column; gap: 1px; margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--border); }
+.tc-opened-head { padding: 4px 8px 2px; color: var(--text-muted); font-size: 11.5px; }
+
+/* Add agent and Stop all under a rule the card's full width (Arun, 2026-11-16), as every other section's is; another stylesheet's
+   .tc-foot drew it inside the section's padding. The buttons stay where they were. */
+.tc .tc-foot { margin: 6px -6px -6px; padding: 10px 14px 12px 18px; border-top: 1px solid var(--border); }
+
+/* A done agent's proof beside the card (ThreadProof; Arun, 2026-11-16: "have proper typography and better refinement in design",
+   "a more refined and better typography design and more details"). One type ladder: the name at 14/600, words at 13/1.55, meta
+   at 12, section heads small capitals at 10.5 with tracking; figures tabular; every row on one 16px inset. */
+.tc-proof-pop { z-index: 60 !important; width: 392px !important; max-width: calc(100vw - 32px); max-height: min(640px, calc(100dvh - 48px)); overflow-y: auto; padding: 0 !important; border: 1px solid var(--border-strong) !important; border-radius: 14px !important; background: var(--panel) !important; box-shadow: var(--shadow-pop) !important; }
+.tpf { display: flex; flex-direction: column; color: var(--ink-2); font: 400 13px/1.55 var(--font); font-feature-settings: "tnum" 1, "cv11" 1; }
+.tpf-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: 11px; padding: 15px 16px 13px; }
+.tpf-head .tc-mark { width: 30px; height: 30px; border-radius: 9px; }
+.tpf-head .tc-mark svg { width: 17px; height: 17px; }
+.tpf-who { display: flex; flex-direction: column; min-width: 0; }
+.tpf-who b { overflow: hidden; color: var(--ink); font-size: 14px; font-weight: 600; line-height: 1.3; letter-spacing: -.005em; text-overflow: ellipsis; white-space: nowrap; }
+.tpf-who span { color: var(--text-muted); font-size: 12px; line-height: 1.4; }
+.tpf-verdict { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px 0 8px; border-radius: var(--r-pill); font: 600 11.5px/1 var(--font); letter-spacing: .01em; white-space: nowrap; }
+.tpf-verdict-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 22%, transparent); }
+.tpf-verdict.is-ok { background: color-mix(in srgb, var(--green) 13%, transparent); color: var(--green); }
+.tpf-verdict.is-warn { background: color-mix(in srgb, var(--amber) 15%, transparent); color: var(--amber); }
+.tpf-verdict.is-bad { background: color-mix(in srgb, var(--red) 13%, transparent); color: var(--red); }
+
+.tpf-said { margin: 0 16px 2px; padding: 9px 12px; border-left: 2px solid var(--border-strong); border-radius: 0 8px 8px 0; background: color-mix(in srgb, var(--ink) 3.5%, transparent); color: var(--ink-2); font-size: 12.5px; line-height: 1.5; font-style: normal; text-wrap: pretty; }
+
+.tpf-review { display: flex; flex-direction: column; gap: 13px; margin: 0; padding: 14px 16px 16px; }
+.tpf-review div { display: grid; grid-template-columns: 20px minmax(0, 1fr); column-gap: 10px; row-gap: 3px; }
+.tpf-review dt { display: contents; }
+.tpf-ic { grid-row: 1 / span 2; display: grid; place-items: center; width: 20px; height: 20px; margin-top: 1px; border-radius: 6px; background: color-mix(in srgb, var(--ink) 7%, transparent); color: var(--text-muted); }
+.tpf-review .is-did .tpf-ic { background: color-mix(in srgb, var(--green) 14%, transparent); color: var(--green); }
+.tpf-review .is-checked .tpf-ic { background: color-mix(in srgb, var(--live) 14%, transparent); color: var(--live); }
+.tpf-review .is-unsure .tpf-ic { background: color-mix(in srgb, var(--amber) 15%, transparent); color: var(--amber); }
+.tpf-review dt::after { content: none; }
+.tpf-review dt { color: var(--text-muted); }
+.tpf-review div > dt { font-size: 12px; font-weight: 500; line-height: 22px; }
+.tpf-review dd { grid-column: 2; margin: 0; color: var(--ink); font-size: 13px; line-height: 1.55; text-wrap: pretty; overflow-wrap: anywhere; }
+
+.tpf-sec { padding: 13px 16px 15px; border-top: 1px solid var(--border); }
+.tpf-sec h4 { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 0 0 10px; color: var(--text-muted); font: 600 10.5px/1.2 var(--font); letter-spacing: .07em; text-transform: uppercase; }
+.tpf-sec h4 > span { font: 500 11.5px var(--font); letter-spacing: 0; text-transform: none; }
+.tpf-list { display: flex; flex-direction: column; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.tpf-check { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; column-gap: 9px; }
+.tpf-state { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: color-mix(in srgb, var(--ink) 8%, transparent); color: var(--text-muted); }
+.tpf-check.is-ok .tpf-state { background: color-mix(in srgb, var(--green) 16%, transparent); color: var(--green); }
+.tpf-check.is-bad .tpf-state { background: color-mix(in srgb, var(--red) 16%, transparent); color: var(--red); }
+.tpf-state .fi { stroke-width: 2.2; }
+.tpf-check code { overflow: hidden; color: var(--ink); font: 500 12.5px/1.4 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.tpf-meta { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+.tpf-out { grid-column: 2 / -1; max-height: 150px; margin: 6px 0 0; padding: 9px 11px; overflow: auto; border-radius: 8px; background: color-mix(in srgb, var(--red) 7%, var(--bg)); color: var(--ink-2); font: 11.5px/1.55 var(--mono); white-space: pre-wrap; }
+
+.tpf-file { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto auto; align-items: center; column-gap: 9px; min-width: 0; }
+.tpf-st { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 5px; font: 700 10px/1 var(--mono); }
+.tpf-st.is-M { background: color-mix(in srgb, var(--amber) 15%, transparent); color: var(--amber); }
+.tpf-st.is-A { background: color-mix(in srgb, var(--green) 15%, transparent); color: var(--green); }
+.tpf-st.is-D { background: color-mix(in srgb, var(--red) 15%, transparent); color: var(--red); }
+.tpf-st.is-R { background: color-mix(in srgb, var(--live) 15%, transparent); color: var(--live); }
+.tpf-path { display: flex; align-items: baseline; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; }
+.tpf-base { flex: none; color: var(--ink); font: 500 12.5px/1.4 var(--mono); }
+.tpf-dir { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--faint); font: 11.5px/1.4 var(--mono); direction: rtl; text-align: left; }
+.tpf-nums { display: inline-flex; gap: 5px; font: 500 12px var(--mono); font-variant-numeric: tabular-nums; }
+.tpf-bar { display: inline-flex; gap: 2px; }
+.tpf-bar i { width: 6px; height: 6px; border-radius: 1.5px; background: color-mix(in srgb, var(--ink) 12%, transparent); }
+.tpf-bar i.is-add { background: var(--green); }
+.tpf-bar i.is-del { background: var(--red); }
+.tpf-note { margin: 0; color: var(--text-muted); font-size: 12.5px; }
+.tpf-pad { padding: 12px 16px 14px; }
+.tpf-shot { display: block; overflow: hidden; border: 1px solid var(--border); border-radius: 9px; }
+.tpf-shot img { display: block; width: 100%; height: auto; }
+.tpf-flags { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 11px 16px 13px; border-top: 1px solid var(--border); list-style: none; color: var(--amber); font-size: 12.5px; }
+.tpf-flags li { display: flex; align-items: center; gap: 7px; }
+.tpf-foot { display: flex; gap: 8px; padding: 11px 16px 14px; border-top: 1px solid var(--border); }
+.tpf-btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; flex: 1; height: 30px; border: 1px solid var(--border); border-radius: 8px; background: color-mix(in srgb, var(--ink) 3%, transparent); color: var(--ink); font: 500 12.5px/1 var(--font); cursor: pointer; }
+.tpf-btn .fi { color: var(--text-muted); }
+.tpf-btn:hover, .tpf-btn:focus-visible { background: var(--hover); border-color: var(--border-strong); outline: none; }
+/* An agent's ring is the session tab's (presence.tsx TabRing), centred in its column. */
+.tc-ring-slot { display: grid; place-items: center; justify-self: center; }

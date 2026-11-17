@@ -1,0 +1,33 @@
+/* The side panel's own pieces (Workbench.tsx): Changes' two views, and the card of panels' keys. */
+
+/* Changes (Workbench.tsx ChangesPanel): the agents' changes and the folder's git, two views of one panel, a segmented track above. */
+.chg { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+.chg-views { display: flex; align-items: stretch; flex: none; gap: 18px; height: 38px; padding: 0 16px; border-bottom: 1px solid var(--border); }
+.chg-view {
+  position: relative; display: inline-flex; align-items: center; gap: 7px; padding: 0 1px; border: 0; background: none;
+  color: var(--text-muted); font: 500 12.5px/1 var(--font); cursor: pointer; transition: color var(--t-hover) var(--ease-out);
+}
+.chg-view svg { flex: none; opacity: .8; }
+.chg-view:hover { color: var(--ink); }
+/* The one showing: its words in ink and a line under it, on the row's own rule. */
+.chg-view[aria-selected="true"] { color: var(--ink); }
+.chg-view[aria-selected="true"]::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; border-radius: 2px 2px 0 0; background: var(--ink); }
+.chg-view:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--r-sm); }
+.chg-n { min-width: 18px; height: 17px; padding: 0 5px; border-radius: 9px; background: var(--hover-strong); color: var(--ink-2); font-size: 11px; font-weight: 600; line-height: 17px; text-align: center; font-variant-numeric: tabular-nums; }
+.chg-view[aria-selected="true"] .chg-n { background: var(--ink); color: var(--bg); }
+.chg-body { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+.chg-body[hidden] { display: none; }
+
+/* The card of panels' keys (Workbench.tsx): 1 to 9, a keycap at each row's end, brighter on the row under the pointer. */
+.bench-picker-key {
+  display: inline-grid; place-items: center; flex: none; min-width: 20px; height: 20px; margin-left: auto; padding: 0 5px;
+  border: 1px solid var(--border); border-radius: 5px; background: transparent; color: var(--faint); font: 500 11px/1 var(--font);
+}
+.bench-picker-item:hover .bench-picker-key, .bench-picker-item:focus-visible .bench-picker-key { color: var(--ink-2); border-color: var(--border-strong); }
+.bench-picker-item .bench-switch-n, .bench-picker-item .bench-switch-dot { margin-left: auto; }
+.bench-picker-item .bench-switch-n + .bench-picker-key, .bench-picker-item .bench-switch-dot + .bench-picker-key { margin-left: 8px; }
+
+/* A changed file's body meets the row's own edges: the module pulls it out by 16px to meet the 16px padding of a card of its own, and
+   in the panel and the chat's change cards the rows have 12px at the sides and none at the foot, so the last 16px of every file was
+   cut off, its last line and a stray line number with it (2026-11-16 audit). */
+:is(.dp-card, .diff-card) .rsp-diff [class*="diffBody"] { margin: 0 -12px; }

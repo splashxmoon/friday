@@ -1,4 +1,5 @@
 import { showDiffSoon } from "./focusDiff.js";
+import { MODE_ICON } from "./StartControls.js";
 import { StateRing, useNow } from "./presence.js";
 import { GO_AHEAD_WORDS } from "../guardrails.js";
 import { shortTokens } from "../tool-usage.js";
@@ -52,6 +53,7 @@ import { GitMergeIcon,
   Trash2Icon,
   UserMinusIcon,
   UserPlusIcon,
+  UsersIcon,
   WrenchIcon,
   XIcon,
   ZapIcon,
@@ -66,6 +68,7 @@ import { useNear } from "./feed-near.js";
 import { GoalPill } from "./GoalPill.js";
 import { useFocus } from "./focusStore.js";
 import { HuddleCard, huddlesIn, type HuddleInfo } from "./Huddle.js";
+import { teamsIn, type TeamInfo } from "./team-thread.js";
 import { AgentTalkCard, AgentUpdateCard, BoardCard, MeshPauseCard, MeshPauseText, teamTasks, type TaskAction } from "./AgentTalk.js";
 import { showDiff } from "./focusDiff.js";
 import { argsOf } from "./args.js";
@@ -74,6 +77,8 @@ import { Checkpoint, CheckpointIcon } from "@/components/ai-elements/checkpoint"
 import { Conversation, ConversationContent, ConversationEmptyState, ConversationScrollButton } from "@/components/ai-elements/conversation";
 import { Message, MessageAction, MessageActions, MessageAttachments, MessageContent, MessageResponse } from "@/components/ai-elements/message";
 import { ANSWER, streamSplitter } from "./AnswerParts.js";
+import { MadeFiles, madeFilesOf, namedPaths, useNamedFiles, withNamed } from "./made-files.js";
+import { startOf, whyRun } from "../run-why.js";
 
 /** An agent's words, with what it shows drawn live: pages, drawings, diagrams and pictures. A person's own messages stay as written. */
 const LIVE = ANSWER;
@@ -159,7 +164,7 @@ const narrowBox = () => typeof matchMedia === "function" && matchMedia("(max-wid
 import { BriefCard, HoldsLifted, SelfRunLine, ProposedMate } from "./TeamBrief.js";
 import { ProposedSkill } from "./CrewSkills.js";
 import { BudgetLine } from "./TeammateBudget.js";
-import { CheckInLine, HandoffLine, FoldersGiven, TeammateChanged, FridayLine, teamEmpty, mateOn, mergeSends, reconnectTeammate, useTeamVersion, isCheckIn, quietCheckIns, ToolSwitched, MentionBackdrop, MentionText, RoomsNow, namesSomeone, plumbing, teamReply, TeamRun, TeamWorking, TeammateBoxPicker, TeammateFolderCard, TeammateHeader, teammateAgents, teammateMark, teammatesNamed, TeamRecipients, ThreadChip, ThreadHost, foldTeamTalk, pieceOf, TalkGroup, CrewWorkLine, RoomReplyActions, MateChatTop, MateSwitchCard, threadLaneOf, teamEventKind, type TalkPiece, useSentTo, noteLaneRuns, forgetLaneRuns, useSendCopies, learnLanes, queueWhy, queueWhyAll, crewLeadName, RoomIntro, isAgentTalk , matesIn, teamKnown, teamSid, useMateTab, refreshTeam} from "./Teammates.js";
+import { CheckInLine, HandoffLine, FoldersGiven, TeammateChanged, FridayLine, teamEmpty, mateOn, mergeSends, reconnectTeammate, useTeamVersion, isCheckIn, quietCheckIns, ToolSwitched, MentionBackdrop, MentionText, RoomsNow, namesSomeone, plumbing, teamReply, TeamRun, TeamWorking, TeammateBoxPicker, TeammateFolderCard, RoomFolderCard, TeammateHeader, teammateAgents, teammateMark, teammatesNamed, TeamRecipients, ThreadChip, ThreadHost, foldTeamTalk, pieceOf, TalkGroup, CrewWorkLine, CrewTyping, TypingRow, useLiveHere, WorkBubble, isTeamSid, RoomReplyActions, MateChatTop, MateSwitchCard, threadLaneOf, teamEventKind, type TalkPiece, useSentTo, noteLaneRuns, forgetLaneRuns, useSendCopies, learnLanes, queueWhy, queueWhyAll, crewLeadName, RoomIntro, isAgentTalk , matesIn, teamKnown, teamSid, useMateTab, refreshTeam} from "./Teammates.js";
 import { WorkflowAsks } from "./WorkflowAsks.js";
 import { useRoomRuns, WorkflowRunCard } from "./WorkflowRunCard.js";
 import { threadsOf } from "./team-threads.js";
@@ -182,7 +187,7 @@ import { jumpPlaces, recapStats, type JumpPlace } from "../session-line.js";
 import { leftOff } from "../left-off.js";
 import { editPreview, failingTests, foldLine } from "../step-extras.js";
 import { stepKind } from "../run-strip.js";
-import { RunLine, doingKind } from "./run-line.js";
+import { RunLine, doingKind, liveWord } from "./run-line.js";
 import { webSourcesIn, webUrl } from "../web-sources.js";
 import { Mascot, runMood } from "./Mascot.js";
 import { AgentSwitch, EngineMark, switchesAgent } from "./AgentSwitch.js";
@@ -192,13 +197,20 @@ import { runnableQueue } from "../held.js";
 import { FridayTui } from "./Tui.js";
 import { isLocal, startTeam } from "./edition.js";
 import { useCrewAddRows, visitOn } from "./crew-add-local.js";
-import { laneAt } from "./lane-at.js";
+import { groupAt, laneAt } from "./lane-at.js";
 import { askWheel, handStraight, KeepGoingAction, mentionCrew, openKeepGoing, useCrewTargets } from "./crew-at.js";
 import { lazy, Suspense } from "react";
 // A hand-off's line, and its styles, load with the first one shown (crew-carry.tsx).
 const HandedLine = lazy(() => import("./crew-carry.js").then((m) => ({ default: m.HandedLine })));
 const RoomHandedLine = lazy(() => import("./crew-carry.js").then((m) => ({ default: m.RoomHandedLine })));
 const BringReady = lazy(() => import("./crew-carry.js").then((m) => ({ default: m.BringReady })));
+// Several agents in one thread (TeamCard.tsx): fetched only in a thread that has two or more.
+const TeamCard = lazy(() => import("./TeamCard.js").then((m) => ({ default: m.TeamCard })));
+const TeamChip = lazy(() => import("./TeamCard.js").then((m) => ({ default: m.TeamChip })));
+const ProposedTeam = lazy(() => import("./TeamCard.js").then((m) => ({ default: m.ProposedTeam })));
+const OpenedThread = lazy(() => import("./TeamCard.js").then((m) => ({ default: m.OpenedThread })));
+const TakeOver = lazy(() => import("./TeamCard.js").then((m) => ({ default: m.TakeOver })));
+const severalAgents = (state: SessionState) => !state.options.team && Object.keys(state.engines).length > 1;
 import { openBring } from "./crew-carry-open.js";
 import { TintedMentions, type Tinted } from "./mention-tint.js";
 import { teamColour } from "./teammate-block.js";
@@ -380,6 +392,8 @@ interface Ctx {
   delivered: Set<number>;
   /** Agents' talk folded into huddles (Huddle.tsx), by each message's seq, for what is on screen. Absent in a crew's room. */
   huddles?: Map<number, HuddleInfo>;
+  /** The lead's handouts to two or more agents (TeamCard.tsx), by each folded message's seq. Everything only. */
+  teams?: Map<number, TeamInfo>;
   send: Send;
   sid: string;
   invite: string;
@@ -454,6 +468,19 @@ function describesAChange(b: Extract<EventBody, { type: "session.updated" }>): b
  * each one still produced an empty row: no text, no icon, and a gap where the
  * eye expects something.
  */
+/**
+ * Set-up lines the open-source build keeps out of the chat (Arun, 2026-11-16: "get rid of this random stuff too"): a coding tool
+ * connecting ("You connected your Claude Code on … · auto mode") and its effort changed ("You set Claude Code effort to High, from
+ * the next message"). The thread card says where it runs and the box shows the effort. A connection that carries on an earlier
+ * chat, or that put the effort back, still says so.
+ */
+function setupLine(ev: SessionEvent): boolean {
+  if (!isLocal()) return false;
+  const b = ev.body;
+  if (b.type === "lane.effort") return true;
+  return b.type === "engine.attached" && !b.engine.resumedFrom && !b.effortReset;
+}
+
 const HIDDEN = new Set<string>([
   // The terminal view switched on and off: how an agent is looked at, not something that happened (Arun, 2026-10-30).
   "lane.terminal",
@@ -524,16 +551,23 @@ const HIDDEN = new Set<string>([
   "crew.handed.moved",
   "crew.handed.back",
   "crew.handed.room.brought",
+  "crew.handed.room.back",
   // Said by the brought-in message itself.
   "crew.brought",
   "board.released",
   "board.cancelled",
+  // A proposed team started: its board card turns into the ordinary one, which says so (TeamCard.tsx ProposedTeam).
+  "board.started",
   "board.checking",
   "board.checked",
   // Said on its run's card instead (RunReview failedWords).
   "tests.base",
   // Said on its run's card ("Friday ran npm test after this run: passed").
   "repo.checked",
+  // Said under its answer ("Unverified: it said the tests pass…"), claims.ts.
+  "claim.checked",
+  // Said where its card was ("Allowed on its own…"), PermissionCard.
+  "goahead.trusted",
   "instructions.requeued",
   "crew.applied",
 ]);
@@ -623,7 +657,7 @@ export function group(events: SessionEvent[], streaming: boolean | ReadonlySet<s
     if (t === "instruction" && edited.has(ev.seq)) continue;
     const lane = ev.lane ?? MAIN_LANE;
     // Auto's own picks are lines in the feed; what it would have picked elsewhere (`shadow`) is not (see HIDDEN).
-    const shown = t === "model.routed" ? !(ev.body as Extract<EventBody, { type: "model.routed" }>).shadow : !HIDDEN.has(t);
+    const shown = (t === "model.routed" ? !(ev.body as Extract<EventBody, { type: "model.routed" }>).shadow : !HIDDEN.has(t)) && !setupLine(ev);
     if (t !== "agent.diff" && shown) prevType = t;
     if (t === "run.started") {
       const sha = (ev.body as Extract<EventBody, { type: "run.started" }>).checkpoint;
@@ -1039,6 +1073,9 @@ export function Activity({
   let bar = true;
   // The team has the sidebar's Team tab to move between teammates, and the header names who is in view: no tabs here.
   if (state.options.team) bar = false;
+  // A coding thread in the open-source edition: its agents are in the thread card at its top right (ThreadCard.tsx; Arun,
+  // 2026-11-16), not a strip of tabs over the chat. What is left here is a chip while one agent's work is in view, and the menus.
+  const cardHere = isLocal() && !state.options.team && !state.options.work;
   // Every agent's work at once, as a filter says it: "All", or what it is filtered to (audit B-21: "All agents" read as a list of
   // agents, and the menu under it chose what kind of message shows).
   // "Everything" for every agent's work at once (Arun, 2026-11-09, option C: no ambiguous "All").
@@ -1136,6 +1173,13 @@ export function Activity({
   const crewAddRows = useCrewAddRows(state, me, identity);
   /** The agent tab menu, and which agent it is for: the one in view, or the tab right-clicked. */
   const [kindMenu, setKindMenu] = useState<{ x: number; y: number; lane?: string } | null>(null);
+  // An agent's menu asked for from the thread card (ThreadCard.tsx): this chat's own, where it was pressed.
+  useEffect(() => {
+    if (pin) return;
+    const on = (e: Event) => setKindMenu((e as CustomEvent<{ x: number; y: number; lane?: string }>).detail);
+    addEventListener("friday:agent-menu", on);
+    return () => removeEventListener("friday:agent-menu", on);
+  }, [pin]);
   const [askRemove, removeUI] = useConfirm();
   // Which agent the composer is writing to. Filtering the feed to one follows
   // through to the box, since that is almost always what you meant.
@@ -1607,10 +1651,12 @@ export function Activity({
   // text, so every run block and notice in the feed redrew (and re-read every tool call) sixty times a second.
   // `state` is changed in place by each event, which changes `events` too, so `events` stands for both.
   // Two agents' messages to each other since the person last wrote, as one card at the latest (Huddle.tsx); a crew's room keeps its own talk.
-  const huddles = useMemo(() => (state.options.team ? undefined : huddlesIn(events, (e) => laneFilter === ALL || (e.lane ?? MAIN_LANE) === laneFilter)), [events, laneFilter, state.options.team]);
+  // One agent handing work to two or more others: the whole team as one live card where it was handed out (TeamCard.tsx), shown in Everything.
+  const teams = useMemo(() => (state.options.team || laneFilter !== ALL ? undefined : teamsIn(events, () => true)), [events, laneFilter, state.options.team]);
+  const huddles = useMemo(() => (state.options.team ? undefined : huddlesIn(events, (e) => laneFilter === ALL || (e.lane ?? MAIN_LANE) === laneFilter, teams)), [events, laneFilter, state.options.team, teams]);
   const ctx: Ctx = useMemo(
-    () => ({ me, plan, ...(solo ? { solo } : {}), ...(soloSure ? { soloSure } : {}), connections, state, ...index, ...(huddles ? { huddles } : {}), send, sid, invite, notify, identity, echo, quote, quoteBox, lastCommitSeq, lastApplySeq, lastRestoreSeq, undone, rewinds, checkpoints, events, ...(onOpen ? { onOpen } : {}), ...(onConnect ? { onConnect } : {}), ...(agents ? { agents } : {}), ...(presence ? { presence } : {}), ...(replayLink ? { replayLink } : {}), ...(replaying ? { replaying } : {}), ...(inRoom ? { room: true } : {}) }),
-    [me, plan, solo, soloSure, connections, state, index, huddles, send, sid, invite, notify, identity, echo, quote, quoteBox, lastCommitSeq, lastApplySeq, lastRestoreSeq, undone, rewinds, checkpoints, events, onOpen, onConnect, agents, presence, replayLink, replaying, inRoom],
+    () => ({ me, plan, ...(solo ? { solo } : {}), ...(soloSure ? { soloSure } : {}), connections, state, ...index, ...(huddles ? { huddles } : {}), ...(teams?.size ? { teams } : {}), send, sid, invite, notify, identity, echo, quote, quoteBox, lastCommitSeq, lastApplySeq, lastRestoreSeq, undone, rewinds, checkpoints, events, ...(onOpen ? { onOpen } : {}), ...(onConnect ? { onConnect } : {}), ...(agents ? { agents } : {}), ...(presence ? { presence } : {}), ...(replayLink ? { replayLink } : {}), ...(replaying ? { replaying } : {}), ...(inRoom ? { room: true } : {}) }),
+    [me, plan, solo, soloSure, connections, state, index, huddles, teams, send, sid, invite, notify, identity, echo, quote, quoteBox, lastCommitSeq, lastApplySeq, lastRestoreSeq, undone, rewinds, checkpoints, events, onOpen, onConnect, agents, presence, replayLink, replaying, inRoom],
   );
   // "Reconnect" from an agent's card in the Agents hub: the same start this view's own Reconnect makes.
   const ctxRef = useRef(ctx);
@@ -1836,11 +1882,20 @@ export function Activity({
       )}
       {/* One agent on Solo has nothing to switch between and no one else's messages to filter out: no bar for it. Except in the
           local edition, where the bar's + is how a second agent joins, and a team of agents is the point. */}
-      {!pin && bar && (filter !== "all" || lanes.length > 0 || startingNow.length > 0 || needs.length > 0 || (!solo && events.length > 15) || (isLocal() && Object.keys(state.engines).length > 0)) && (
+      {!pin && bar && (cardHere || filter !== "all" || lanes.length > 0 || startingNow.length > 0 || needs.length > 0 || (!solo && events.length > 15) || (isLocal() && Object.keys(state.engines).length > 0)) && (
       // The agents' switch, pinned at the top of the chat column and centred over it (Arun, 2026-11-09, option C: the header holds
       // only the session and its people). Above the feed's scroller, so it stays as the chat scrolls and never lies over a message.
-      <div className="feed-toolbar agent-switch" data-slot="session.agents">
-        {(
+      <div className={cardHere ? "agent-only" : "feed-toolbar agent-switch"} data-slot="session.agents">
+        {cardHere && laneFilter !== ALL && (
+          <span className="agent-only-chip">
+            <span className="tc-mark" style={{ "--tint": agentLook(state, laneFilter, 11).tint } as React.CSSProperties}>{agentLook(state, laneFilter, 11).mark}</span>
+            Showing {agentNameFor(state, laneFilter)} only
+            <button type="button" className="agent-only-x" aria-label="Show every agent's work" title="Show every agent's work" onClick={() => setLaneFilter(ALL)}>
+              <Icon name="x" size={12} />
+            </button>
+          </span>
+        )}
+        {!cardHere && (
           <div className="lane-tabs-wrap">
           <div className={`lane-tabs${tabsOver ? " over" : ""}${tabsEdge}`} ref={tabsEl} role="tablist" aria-label="Filter by agent" onKeyDown={tabListKeys} onScroll={(e) => edgesOf(e.currentTarget)}>
             {[...([["all", allLabel], ...shownIds.map((id) => [id, agentNameFor(state, id)])] as [string, string][]).map(([id, name]) => {
@@ -1934,7 +1989,7 @@ export function Activity({
         )}
         {/* Everything any agent here is held up on you for, one press (or ⌘J) from each in turn. */}
         {/* Each agent in sight says it needs you on its own card: the pill is for those behind +N, and for ⌘J. */}
-        {needs.some((a) => hiddenIds.includes(a.lane)) && (
+        {!cardHere && needs.some((a) => hiddenIds.includes(a.lane)) && (
           <button type="button" className="needs-pill" data-tip={`${needs.map((a) => a.name).join(", ")} · ${nextKey()} goes to the next`} onClick={() => jumpToNeeds(sid, hubAgents)}>
             <AgentState status="waiting" needsYou />
             <span>{needs.length === 1 ? `${needs[0]!.name} needs you` : `${needs.length} need you`}</span>
@@ -2197,7 +2252,7 @@ export function Activity({
                   )}
                   {it.kind === "run" ? (
                     <>
-                      {teamGroup?.(it) ?? teamRun?.(it) ?? <RunBlock item={it} ctx={ctx} folded={!!it.ended && !(recentRunKeys.get(it.lane) ?? []).includes(it.key)} latest={it.key === lastRunKeys.get(it.lane)} active={!it.ended && it.key === lastRunKeys.get(it.lane) && it.closedBy !== "run.pause" && it.closedBy !== "run.cancel" && runOf(state, it.lane).status !== "idle" && runOf(state, it.lane).status !== "error"} typing={it.streaming ? typingOf(streams[it.lane]) : null} />}
+                      {teamGroup?.(it) ?? teamRun?.(it) ?? <RunBlock item={it} ctx={ctx} folded={!!it.ended && !(recentRunKeys.get(it.lane) ?? []).includes(it.key)} latest={it.key === lastRunKeys.get(it.lane)} handed={it.key === lastRunKeys.get(it.lane) && !!handedLane(state, it.lane)} active={!it.ended && it.key === lastRunKeys.get(it.lane) && it.closedBy !== "run.pause" && it.closedBy !== "run.cancel" && runOf(state, it.lane).status !== "idle" && runOf(state, it.lane).status !== "error"} typing={it.streaming ? typingOf(streams[it.lane]) : null} />}
                       {state.options.team && it.key === lastShownRun.get(it.lane) && ((at) => at && <PlanStopped ctx={ctx} lane={it.lane} at={at} />)(it.ended ?? it.messages.at(-1))}
                     </>
                   ) : it.kind === "notes" ? (
@@ -2229,6 +2284,8 @@ export function Activity({
             .map((e) => (
               <PendingRun key={e.id} ctx={ctx} lane={e.lane} since={e.at} />
             ))}
+          {/* Crew mates at work with no live reply here yet: typing, under the last message (open-source edition). */}
+          {isLocal() && ctx.state.options.team && filter !== "team" && <CrewTyping sid={ctx.sid} {...(laneFilter !== ALL ? { only: laneFilter } : {})} />}
           {/* The end: what it came to, in a line and in numbers, with the recording a press away. */}
           {merged && !pin && (
             <div className="feed-merged" role="status">
@@ -2299,6 +2356,7 @@ export function Activity({
             </div>
           ))}
           {/* ⌘F in this chat (ChatFind.tsx). */}
+          {ctx.teams && !pin && <Suspense fallback={null}><TeamChip /></Suspense>}
           <ChatFind primary={!secondary} />
           {/* Words selected in the chat, quoted into the box and sent to whoever wrote them (QuoteSelection). */}
           {me.role !== "viewer" && <QuoteSelection onQuote={quote} />}
@@ -2340,6 +2398,9 @@ export function Activity({
             // Nor Work's: a context ring is coding chrome, and hidden it still carried its "Context: not reported yet" (Arun,
             // 2026-10-28: "iron everything and ensure we are good").
             if (state.options.work) gauge = null;
+            // Nor in the open-source build: the usage under the box is gone (Arun, 2026-11-16: "remove this usage limit thing"); the
+            // thread card's foot and Usage still say it.
+            if (isLocal()) gauge = null;
             // The goal for the agent the box is aimed at, beside its context ring rather than in the box's own row of pills, where it
             // crowded the agent and model (Arun, 2026-11-04: "move the goal button somewhere else… properly placed and accessible").
             const goal: ReactNode = null;
@@ -2372,6 +2433,10 @@ export function Activity({
  * as the reply the server's start draws (RunBlock) looks before it has anything to say, so one gives way to the other unseen.
  */
 function PendingRun({ ctx, lane, since }: { ctx: Ctx; lane: string; since: number }) {
+  // A crew mate just asked is typing, as it will be until its reply comes (open-source edition).
+  const mateNow = isLocal() && ctx.state.options.team ? mateOn(lane) : undefined;
+  useLiveHere(ctx.sid, lane, !!mateNow);
+  if (mateNow) return <TypingRow sid={ctx.sid} lane={lane} m={mateNow} />;
   const tool = ctx.state.engines[lane]?.tool;
   const extra = ctx.state.lanes.some((l) => l.id === lane);
   return (
@@ -3842,7 +3907,7 @@ function LiveAnswer({ text }: { text: string }) {
   );
 }
 
-const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, folded = false }: { item: RunItem; ctx: Ctx; active: boolean; latest: boolean; /** Null when the run isn't streaming. The words themselves are drawn by LiveStream, so this block doesn't redraw for each one. */ typing: Typing | null; /** An older finished run: one line until it is opened. */ folded?: boolean }) {
+const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, folded = false, handed = false }: { item: RunItem; ctx: Ctx; active: boolean; latest: boolean; /** A crew mate has this lane's work now (handedOn): given, so the run's row redraws the moment it is handed or taken back. */ handed?: boolean; /** Null when the run isn't streaming. The words themselves are drawn by LiveStream, so this block doesn't redraw for each one. */ typing: Typing | null; /** An older finished run: one line until it is opened. */ folded?: boolean }) {
   const [unfolded, setUnfolded] = useState(false);
   /** The reason box under the answer, open after a thumb down. */
   const [reasonOpen, setReasonOpen] = useState(false);
@@ -3923,6 +3988,22 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   if (ctx.state.options.team) mate = teammateMark(lane, 18)?.mark ?? null;
   // In a team a reply reads as a group chat (Teammates.tsx): its mascot, moving while it works, its name in its colour, bubbles.
   if (ctx.state.options.team) [mate, look] = teamReply(lane, active, mate);
+  // A crew mate's reply, in the open-source edition, is a chat message: what it says, the files it made as attachments, and its work
+  // behind one icon, not the coding session's run line, verdict and review card (Arun, 2026-11-15: "make the agent responses in
+  // crew and crew rooms feel like responses like short ... NOT FULL WORK FLOW THINGS ... THE CHAT NEEDS TO FEEL CLEAN AND SIMPLE").
+  const chatty = isLocal() && !!mate;
+  // Live here, it says so itself: the typing rows at the foot of the chat leave it out (Teammates.tsx CrewTyping).
+  useLiveHere(ctx.sid, lane, chatty && active);
+  // Why it is working (run-why.ts): said in its head unless it is the person reading who asked (Arun, 2026-11-15).
+  const why = useMemo(() => {
+    if (!chatty) return null;
+    const start = startOf(ctx.events, lane, item.key);
+    const w = start ? whyRun(ctx.events, start, ctx.me.id) : null;
+    return w && w.label !== "You asked" ? w : null;
+  }, [chatty, ctx.events.length, lane, item.key, ctx.me.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The files its message names that it made this turn, however it wrote them (made-files.tsx useNamedFiles).
+  const named = useNamedFiles(ctx.sid, ctx.invite, lane, chatty && item.ended ? namedPaths(msgs.map((m) => m.body.text)) : [], item.startedTs ?? msgs[0]?.ts, chatty && !!item.ended && !ctx.replaying);
+  const [reviewOpen, setReviewOpen] = useState(false);
   // About how long is left while it works (runForecast.ts): asked before the folded return, so the hooks run in the same order.
   const forecast = useRunForecast(ctx.identity, ctx.state, ctx.events, lane, active, ctx.me.id, ctx.replaying);
   // When its live clock starts: the press that sent it, when this page sent it.
@@ -3971,6 +4052,8 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
    * timeline — a line per step, a verb and what it touched.
    */
   const steps: Step[] = [];
+  /** What it wrote by name, done: a file it made outside its folder's diff (its own folder while it works in a project). */
+  const wrote: { path: string; lines: number }[] = [];
   type Work = { kind: "work"; id: string; steps: Step[] };
   /** A stretch of thinking, as its own line in the reply: "Thought for 12s", which opens to what it thought. */
   type Think = { kind: "think"; key: string; thought: string; secs: number };
@@ -4065,6 +4148,10 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
       };
       if (result && stepKind(d) === "test") step.fails = failingTests(output);
       if (/^(edit|edit_file|write|write_file)$/.test(call.name)) step.preview = editPreview(args) ?? undefined;
+      if (/^(write|write_file|create_file)$/i.test(call.name) && result && !failed) {
+        const at = typeof args.file_path === "string" ? args.file_path : typeof args.path === "string" ? args.path : "";
+        if (at) wrote.push({ path: at, lines: typeof args.content === "string" ? args.content.split("\n").length : 0 });
+      }
       step.onAsk = () => prefillComposer(`Explain why you ${d.verb.toLowerCase()}${d.target ? ` ${d.target}` : ""} in your last run, in two or three sentences. Don't change anything.`);
       steps.push(step);
       if (!work) {
@@ -4332,15 +4419,130 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   // line of its own (audit CODE-19). Its files go back from its change card's Undo, or from the message's own rewind.
   const rewindIcon = rewindable && !retryable && !!finalMsg;
   // The rest handed on from the end of a run (Code and Crew, connected, 2026-11-13): on the lane's newest finished run, for whoever
-  // may steer it, while no crew mate has it. In the run's Hand off menu when that shows (one control, not two beside each other),
+  // may steer it, while no crew mate has it. Only while one has it: a hand-off made after this run that has since finished, been
+  // taken back or gone hid it for good (Arun, 2026-11-16: "keep this going isnt appearing on mine"). In the run's Hand off menu when that shows (one control, not two beside each other),
   // else an action on its own row, not a card of its own.
-  const keepGoing = isLocal() && !!item.ended && ended?.outcome === "done" && !active && latest && !ctx.state.options.team && ctx.me.role !== "viewer" && !visitOn(teamNow(), ctx.sid, lane) && !handedLane(ctx.state, lane) && !Object.values(ctx.state.handed ?? {}).some((h) => h.lane === lane && h.seq > item.ended!.seq);
+  const keepGoing = isLocal() && !!item.ended && ended?.outcome === "done" && !active && latest && !ctx.state.options.team && ctx.me.role !== "viewer" && !visitOn(teamNow(), ctx.sid, lane) && !handed;
   const handBar = !active && !!item.ended && !mate && (others.length > 0 || !!more) && !passOffered;
   const roomActs = ctx.room && !!mateOn(lane) && !!finalMsg;
+  // What it changed, reviewed as a coding session's is: under a crew mate's chat message, only for work on a project's branch, a
+  // press away (its own documents are files to open, not changes to review).
+  const review =
+    item.ended && turnFiles.length > 0 ? (
+      <ReviewCard
+        files={turnFiles}
+        tests={tests}
+        receipt={receipt ?? undefined}
+        explain={explain}
+        state={ctx.state}
+        me={ctx.me}
+        lane={lane}
+        sid={ctx.sid}
+        invite={ctx.invite}
+        send={ctx.send}
+        endSeq={item.ended.seq}
+        second={secondReviewOf(ctx.events, item.ended.seq)}
+        via={via}
+        notify={ctx.notify}
+        lastCommitSeq={ctx.lastCommitSeq}
+        lastApplySeq={ctx.lastApplySeq}
+        lastRestoreSeq={ctx.lastRestoreSeq}
+        {...(item.checkpoint ? { undone: ctx.undone.has(item.checkpoint.sha) } : {})}
+        undo={item.checkpoint && canUndo(ctx, item.checkpoint.lane) ? () => ctx.send({ type: "folder.restore", sha: item.checkpoint!.sha, lane: item.checkpoint!.lane }) : undefined}
+        contended={contendedPaths(ctx.state, lane)}
+        {...(ctx.onOpen ? { onReview: (path?: string) => (ctx.onOpen!("files"), path && showDiffSoon(path, [0, 350, 900, 1700])) } : {})}
+      />
+    ) : null;
+  const branchNow = branchAt(ctx.events, lane, item.ended?.seq ?? Infinity) ?? ctx.state.engines[lane]?.branch;
+  const reviewable = chatty && !!review && !!branchNow && !ctx.state.options.work;
+  // A finished run of a crew mate's, asked by a person: offered again as a routine (AGAIN).
+  const againMate = chatty && !!item.ended && ended?.outcome === "done" && !active && !!item.ask?.text?.trim() && !/^\[(Check-in|Friday)\]/.test(item.ask.text) ? mateOn(lane) : undefined;
+  const againable = !!againMate && ctx.me.role !== "viewer" && (againMate.checkins?.length ?? 0) < 12;
+  const doAgain = async (a: (typeof AGAIN)[number]) => {
+    const m = againMate!;
+    const ask = item.ask!.text.trim();
+    const did = (finalMsg?.body.text ?? "").split("\n").find((l) => l.trim())?.trim().slice(0, 240) ?? "";
+    const on = new Date(item.ended!.ts).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
+    const routine = {
+      id: Math.random().toString(36).slice(2, 10),
+      name: ask.split("\n")[0]!.slice(0, 48),
+      text: `${ask}\n\nDo it the way you did on ${on}${did ? `, when you reported: ${did}` : ""}`,
+      every: a.every,
+      at: "09:00",
+      days: a.days,
+      ...(a.hours ? { hours: a.hours } : {}),
+      tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    };
+    try {
+      await api(ctx.identity, `/api/teammates/${m.id}`, { method: "PATCH", body: JSON.stringify({ checkins: [...(m.checkins ?? []), routine] }), headers: { "Content-Type": "application/json" } });
+      await refreshTeam(ctx.identity);
+      ctx.notify(`${m.name} will do this again ${a.label.toLowerCase()}. Change it in its Routines.`);
+    } catch (e) {
+      ctx.notify((e as Error).message || "Couldn't make the routine.");
+    }
+  };
+  // Sent on (sendItems): a crew mate's finished answer, to a coding session or another room.
+  const sendable = chatty && !!item.ended && !active && !!finalMsg && ctx.me.role !== "viewer";
+  const sendItems = (): MenuItem[] => {
+    const team = teamNow();
+    const room = team?.rooms?.find((r) => r.sid === ctx.sid && !r.thread);
+    const m = mateOn(lane);
+    const from = room ? `room:${room.id}` : m ? `mate:${m.id}` : "all";
+    const fromName = room ? room.name : (m?.name ?? "your crew");
+    const where = room ? room.name : ctx.sid === team?.sid ? "the Crew room" : `${m?.name ?? "its"}'s chat`;
+    const coding = loadRecents()
+      .filter((r) => r.sid !== ctx.sid && !isTeamSid(r.sid) && !r.settledAt)
+      .sort((a, b) => b.openedAt - a.openedAt)
+      .slice(0, 6);
+    const rooms = [...(team && team.sid !== ctx.sid ? [{ sid: team.sid, invite: team.invite, name: "Crew room", lead: null as string | null }] : []), ...(team?.rooms ?? []).filter((r) => !r.thread && r.sid !== ctx.sid).map((r) => ({ sid: r.sid, invite: r.invite, name: r.name, lead: r.lead ?? null }))];
+    const toRoom = async (r: (typeof rooms)[number]) => {
+      const files = made.map((f) => `- \`${f.path}\``).join("\n");
+      const text = `From ${where}, ${name}'s work:\n\n${finalMsg!.body.text.trim()}${files ? `\n\nIts files:\n${files}` : ""}\n\nTake this in here.`;
+      try {
+        await api(ctx.identity, `/api/sessions/${encodeURIComponent(r.sid)}/instruct?invite=${encodeURIComponent(r.invite)}`, { method: "POST", body: JSON.stringify({ text: text.slice(0, 7900), ...(r.lead ? { lane: r.lead } : {}) }), headers: { "Content-Type": "application/json" } });
+        ctx.notify(`Sent to ${r.name}.`);
+      } catch (e) {
+        ctx.notify((e as Error).message || `Couldn't send it to ${r.name}.`);
+      }
+    };
+    return [
+      { heading: "Into a coding session" },
+      ...(coding.length ? coding.map((r): MenuItem => ({ label: r.alias || r.title || "Untitled", icon: "code", sub: "Bring it in: look first, then it comes in", onSelect: () => openBring({ sid: r.sid, invite: r.invite, from, name: fromName }) })) : [{ label: "No coding sessions yet", onSelect: () => {}, disabled: true } as MenuItem]),
+      ...(rooms.length ? [{ heading: "To a crew room" } as MenuItem, ...rooms.map((r): MenuItem => ({ label: r.name, icon: "users", sub: "As a message to its lead", onSelect: () => void toRoom(r) }))] : []),
+    ];
+  };
   const nextActions =
-    changed.length > 0 || stillFailing.length > 0 || rewindIcon || (keepGoing && !handBar) || roomActs ? (
+    changed.length > 0 || stillFailing.length > 0 || rewindIcon || (keepGoing && !handBar) || roomActs || againable || sendable ? (
       <>
         {roomActs && <RoomReplyActions sid={ctx.sid} lane={lane} root={finalMsg!.seq} events={ctx.events} done={!!item.ended && ended?.outcome === "done"} />}
+        {/* Its work taken on elsewhere (Arun, 2026-11-15: "add easy bring it in to other coding sessions or crew rooms too from
+            crews/crew rooms"): into a coding session, looked at first there (Bring it in), or to another room as a message to its lead. */}
+        {sendable && (
+          <MenuButton
+            className="-ml-0.5 grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+            label="Send to…"
+            icon="send"
+            items={() => sendItems()}
+          />
+        )}
+        {/* "Do it like you did Monday" (Arun, 2026-11-15): this run as a routine of its crew mate's, its schedule picked here. */}
+        {againable && (
+          <MenuButton
+            className="-ml-0.5 grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+            label="Do this again"
+            icon="refresh"
+            compact
+            items={() => [
+              { heading: "Do this again" },
+              ...AGAIN.map((a): MenuItem => ({ label: a.label, onSelect: () => void doAgain(a) })),
+            ]}
+          />
+        )}
+        {reviewable && (
+          <button type="button" className="rsp-text-btn" aria-expanded={reviewOpen} onClick={() => setReviewOpen((o) => !o)}>
+            {reviewOpen ? "Hide the changes" : "Review changes"}
+          </button>
+        )}
         {rewindIcon && (
           <button
             type="button"
@@ -4353,7 +4555,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
           </button>
         )}
         {/* Not when the review card below already lists them: the same count three times in one answer is noise. */}
-        {changed.length > 0 && ctx.onOpen && !(item.ended && didChange(item.diffs.at(-1)?.body.files)) && (
+        {changed.length > 0 && ctx.onOpen && !chatty && !(item.ended && didChange(item.diffs.at(-1)?.body.files)) && (
           <button type="button" className="rsp-text-btn" data-tip="Open the changes" onClick={() => ctx.onOpen!("files")}>
             {changed.length} file{changed.length === 1 ? "" : "s"} changed
           </button>
@@ -4382,6 +4584,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   // Every reply's work as one line (Friday Teams 566e73d9; Arun, 2026-11-14, direction A): the step under way while it works, one
   // summary once it's done.
   const hasWork = blocks.some((x) => x.kind === "work" || x.kind === "think");
+  const made = chatty ? withNamed(madeFilesOf(turnFiles, wrote), named) : [];
   const doing = doingKind(blocks, active && !waitsOnPerson(ctx.state, lane));
   const sayBlock = (x: { key: string; note: string }) => (
     <div key={x.key} className="rsp-say">
@@ -4390,7 +4593,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   );
 
   return (
-    <div className={`rsp ${landed ? "landed" : ""}${look ? ` ${look.className}` : ""}`} style={look?.style}>
+    <div className={`rsp ${landed ? "landed" : ""}${look ? ` ${look.className}` : ""}${chatty ? " rsp-chat" : ""}`} style={look?.style}>
       {confirmUI}
       {/* The tool's mark beside a reply is identity only, with no ring: the header's agent tab, the status bar and the reply's own
           live line already say how it stands, and a reply waiting on you says "Needs you" in its head (Arun, 2026-10-29: "i dont
@@ -4403,6 +4606,11 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
       <div className="rsp-main">
       <div className="rsp-head">
         <span className="rsp-who">{name}</span>
+        {why && (
+          <span className="rsp-why" data-kind={why.kind}>
+            {why.label}
+          </span>
+        )}
         {/* Stopped to ask: it is waiting on a person, not thinking, and saying "Thinking" sent people looking for nothing. While it
             works the ring on its mark and the one live line under the reply say so; the head says only what needs you. A teammate's
             reply keeps its own words (its face is not a tool's mark). */}
@@ -4421,8 +4629,13 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
       {/* What it said along the way stays in reading order, then and after (Friday Teams 6028ee8c): folding it away at the end shrank
           the feed under whoever was following it. Only the steps fold, into the line under it. */}
       {blocks.map((x) => (x.kind === "say" ? sayBlock(x) : null))}
-      {hasWork && (
+      {/* A crew mate's work is its one line under its name, closed until pressed (Arun, 2026-11-15: "like this should be shown by
+          default not fully opened"). */}
+      {/* A crew mate at work: its bubble says what it is doing, one step after another (WorkBubble); its answer streams below it. */}
+      {chatty && active && typing !== "answering" && <WorkBubble step={liveWord(blocks, waitsOnPerson(ctx.state, lane), false)} label={`${name} is working`} />}
+      {hasWork && !(chatty && active) && (
         <RunLine
+          {...(chatty ? { plain: true } : {})}
           blocks={blocks}
           live={active}
           {...(metaStart !== undefined ? { since: metaStart } : {})}
@@ -4446,8 +4659,9 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
           {forecast && <span className="rsp-live-fc">{forecast}</span>}
         </div>
       )}
+      {made.length > 0 && <MadeFiles files={made} lane={lane} {...(ctx.onOpen ? { onMore: () => ctx.onOpen!("tree") } : {})} />}
       {typing && typing !== "waiting" && <LiveStream sid={ctx.sid} lane={lane} {...(!runLog && since !== undefined ? { since } : {})} />}
-      {verdict && finalMsg && !resulted && (
+      {verdict && finalMsg && !resulted && !chatty && (
         <span className={`rsp-verdict ${verdict.tone}`} title={tests?.command ?? "No test command ran in this run"}>
           <Icon name={verdict.tone === "pass" ? "check" : verdict.tone === "fail" ? "x" : "help"} size={12} /> {verdict.text}
         </span>
@@ -4461,7 +4675,10 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
           copyText={finalMsg.body.text}
           onCopy={copy}
           // The whole answer as a quote, as it reads, a press beside Copy (Arun, 2026-11-04: "make clicking quote easier too").
-          {...(ctx.me.role !== "viewer"
+          // A crew mate's reply reads as a chat message: Copy and its own few, no quote and no thumbs (Arun, 2026-11-16: "get rid of
+          // this for the agents too").
+          noFeedback={isLocal() && !!ctx.state.options.team}
+          {...(ctx.me.role !== "viewer" && !(isLocal() && ctx.state.options.team)
             ? {
                 onQuote: (from: HTMLElement) => {
                   const row = from.closest(".feed-item");
@@ -4531,7 +4748,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
             ))}
         </div>
       )}
-      {runLog}
+      {!chatty && runLog}
 
       {/* No reply to hang the actions on: they stand alone under the log. */}
       {!active && !finalMsg && item.ended && (nextActions || opinionBtn) && <div className="rsp-actions">{nextActions}{opinionBtn}</div>}
@@ -4631,6 +4848,35 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
               ))}
             </ul>
           ))(ctx.events.filter((e): e is SessionEvent & { body: { type: "repo.checked" } } => e.body.type === "repo.checked" && e.body.run === item.ended!.seq))}
+      {/* What its answer claimed passes, held against its turn (claims.ts): backed by what it ran, or not. Friday's own run of the
+          check is the line above. */}
+      {item.ended &&
+        ((c) =>
+          c && c.body.type === "claim.checked" && c.body.verdict !== "checked" ? (
+            <p className={`rsp-claim ${c.body.verdict}`} role="note">
+              <Icon name={c.body.verdict === "backed" ? "check" : c.body.verdict === "contradicted" ? "x" : "help"} size={12} />
+              {c.body.verdict === "backed" ? (
+                <span>
+                  Checked: <code>{c.body.command}</code> passed in this turn
+                </span>
+              ) : c.body.verdict === "contradicted" ? (
+                <span>
+                  Not so: it said {claimSaid(c.body.kind)}, but <code>{c.body.command}</code> failed{" "}
+                </span>
+              ) : (
+                <span>
+                  Unverified: it said {claimSaid(c.body.kind)}, but nothing in its turn ran {c.body.kind === "tests" ? "them" : "it"}
+                  {c.body.command ? (
+                    <>
+                      {" "}and Friday couldn't run <code>{c.body.command}</code> here
+                    </>
+                  ) : (
+                    " and Friday found no command to check it"
+                  )}
+                </span>
+              )}
+            </p>
+          ) : null)(ctx.events.findLast((e) => e.body.type === "claim.checked" && e.body.run === item.ended!.seq && (e.lane ?? MAIN_LANE) === lane))}
       {item.ended && !didChange(item.diffs.at(-1)?.body.files) && item.asked.some((a) => a.answer !== "yes" && a.answer !== "no") && (
         <ul className="rsp-asked" aria-label="What it asked before running">
           {item.asked.filter((a) => a.answer !== "yes" && a.answer !== "no").map((a, i) => (
@@ -4644,41 +4890,88 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
       )}
       {item.ended &&
         turnFiles.length > 0 &&
+        !chatty &&
         // Only a run that did something here: one with no words and no steps was a tool's folder report, its whole change set
         // measured from wherever it stands, not this run's work (Arun, 2026-11-13).
         msgs.some((m) => m.body.text.trim() || m.body.toolCalls.length) &&
         !ctx.state.options.work && // A Work session's changes are its outputs, in the rail: no diff to review (Arun, 2026-10-26: "get rid of this for work").
         (
-        <MateResult on={resulted} lane={lane} title={plainLine(item.ask?.text ?? "")} files={turnFiles} tests={tests} failing={stillFailing.length} branch={branchAt(ctx.events, lane, item.ended?.seq ?? Infinity) ?? ctx.state.engines[lane]?.branch} sid={ctx.sid} page={finalMsg?.body.text.match(/https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?[^\s)>\]`'"]*/)?.[0]}>
-          <ReviewCard
-            files={turnFiles}
-            tests={tests}
-            receipt={receipt ?? undefined}
-            explain={explain}
-            state={ctx.state}
-            me={ctx.me}
-            lane={lane}
-            sid={ctx.sid}
-            invite={ctx.invite}
-            send={ctx.send}
-            endSeq={item.ended.seq}
-            second={secondReviewOf(ctx.events, item.ended.seq)}
-            via={via}
-            notify={ctx.notify}
-            lastCommitSeq={ctx.lastCommitSeq}
-            lastApplySeq={ctx.lastApplySeq}
-            lastRestoreSeq={ctx.lastRestoreSeq}
-            {...(item.checkpoint ? { undone: ctx.undone.has(item.checkpoint.sha) } : {})}
-            undo={item.checkpoint && canUndo(ctx, item.checkpoint.lane) ? () => ctx.send({ type: "folder.restore", sha: item.checkpoint!.sha, lane: item.checkpoint!.lane }) : undefined}
-            contended={contendedPaths(ctx.state, lane)}
-            {...(ctx.onOpen ? { onReview: (path?: string) => (ctx.onOpen!("files"), path && showDiffSoon(path, [0, 350, 900, 1700])) } : {})}
-          />
+        <MateResult on={resulted} lane={lane} title={plainLine(item.ask?.text ?? "")} files={turnFiles} tests={tests} failing={stillFailing.length} branch={branchNow} sid={ctx.sid} page={finalMsg?.body.text.match(/https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?[^\s)>\]`'"]*/)?.[0]}>
+          {review}
         </MateResult>
       )}
+      {reviewable && reviewOpen && <div className="change-set mr-review">{review}</div>}
       </div>
     </div>
   );
 });
+
+/**
+ * A crew mate gone quiet mid-turn (app.ts watchQuiet): while it still is, how long, with Nudge (a word asking how it stands) and
+ * Restart (its turn stopped and started again from where it was); once it carries on, a quiet line that it was.
+ */
+function QuietLine({ ev, ctx }: { ev: Ev<"run.quiet">; ctx: Ctx }) {
+  const b = ev.body;
+  const lane = ev.lane ?? MAIN_LANE;
+  const name = agentNameFor(ctx.state, lane);
+  const now = useNow(30_000);
+  const [busy, setBusy] = useState(false);
+  const still = runOf(ctx.state, lane).status === "running" && !ctx.events.some((e) => e.seq > ev.seq && (e.lane ?? MAIN_LANE) === lane && e.body.type !== "run.quiet" && !(e.body.type === "instruction" && e.actor.kind === "system"));
+  const mins = Math.max(1, Math.round(((still ? now : ev.ts) - b.since) / 60_000));
+  const act = async (restart: boolean) => {
+    setBusy(true);
+    if (restart) await ctx.send({ type: "run.cancel", lane });
+    const r = await ctx.send({ type: "instruct", lane, text: restart ? "Your last turn stalled and was stopped. Carry on from where you were, and say in one line where that is." : "Are you stuck? Say in one line where you are and what you are waiting on, then carry on." });
+    if (!r.ok) ctx.notify(r.error ?? "Couldn't reach it.");
+    setBusy(false);
+  };
+  if (!still)
+    return (
+      <Notice ev={ev} icon={ClockIcon}>
+        {name} was quiet for {mins} min{b.command ? <> while <code>{b.command}</code> ran</> : null}, then carried on.
+      </Notice>
+    );
+  return (
+    <Notice ev={ev} icon={ClockIcon} tone="warn">
+      <span className="quiet-line">
+        <span>
+          {b.command ? (
+            <>
+              {name} has been running <code>{b.command}</code> for {mins} min
+            </>
+          ) : (
+            <>
+              {name} has been quiet for {mins} min{b.nudged ? ". Friday asked how it stands." : "."}
+            </>
+          )}
+        </span>
+        {ctx.me.role !== "viewer" && (
+          <span className="quiet-acts">
+            {!b.command && (
+              <button type="button" className="rsp-text-btn" disabled={busy} onClick={() => void act(false)}>
+                Nudge
+              </button>
+            )}
+            <button type="button" className="rsp-text-btn" disabled={busy} onClick={() => void act(true)}>
+              Restart
+            </button>
+          </span>
+        )}
+      </span>
+    </Notice>
+  );
+}
+
+/** The schedules "Do this again" offers: each a routine of its crew mate's at 09:00 in this computer's zone. */
+const AGAIN = [
+  { label: "Every weekday at 9:00", every: "weekdays" as const, days: [] as number[] },
+  { label: "Every day at 9:00", every: "daily" as const, days: [] as number[] },
+  { label: "Every Monday at 9:00", every: "weekly" as const, days: [1] },
+  { label: "Every hour", every: "hourly" as const, days: [] as number[], hours: undefined as number | undefined },
+];
+
+/** A claim said plainly: "the tests pass". */
+const claimSaid = (k: string) => (k === "tests" ? "the tests pass" : k === "build" ? "the build passes" : k === "lint" ? "the linter passes" : "the types check");
 
 /** The branch a lane's run ended on, from the log (a folder switched or committed to a new branch, its tool attached): not the lane's now. */
 function branchAt(events: readonly SessionEvent[], lane: string, seq: number): string | undefined {
@@ -5523,9 +5816,12 @@ export function DiffCard({
               </button>
             )}
           </label>
-          <button type="button" className={cn("dp-tool", hideViewed && "on")} aria-pressed={hideViewed} title={hideViewed ? "Show reviewed files" : "Hide reviewed files"} onClick={() => setHideViewed((v) => !v)}>
-            <Icon name="eye" size={14} />
-          </button>
+          {/* No marking files reviewed in the open-source edition (Arun, 2026-11-16: "get rid of the review thing for the changes"). */}
+          {!isLocal() && (
+            <button type="button" className={cn("dp-tool", hideViewed && "on")} aria-pressed={hideViewed} title={hideViewed ? "Show reviewed files" : "Hide reviewed files"} onClick={() => setHideViewed((v) => !v)}>
+              <Icon name="eye" size={14} />
+            </button>
+          )}
           <span className="dp-seg" role="radiogroup" aria-label="Diff layout">
             <button type="button" role="radio" aria-checked={mode === "unified"} className={cn("dp-tool", mode === "unified" && "on")} title="Unified: one column" onClick={() => setMode("unified")}>
               <Icon name="list" size={14} />
@@ -5539,7 +5835,7 @@ export function DiffCard({
           </button>
         </div>
       )}
-      {panel && files.length > 1 && (
+      {panel && files.length > 1 && !isLocal() && (
         <div className="dp-progress">
           <div className="dp-progress-track" role="progressbar" aria-valuemin={0} aria-valuemax={files.length} aria-valuenow={reviewedCount} aria-label="Files reviewed">
             <div className="dp-progress-fill" style={{ width: `${(reviewedCount / files.length) * 100}%` }} />
@@ -5576,7 +5872,7 @@ export function DiffCard({
             <span className="diff-del">−{dels}</span>
           </button>
         )}
-        {files.length > 1 && (
+        {files.length > 1 && !isLocal() && (
           <span className="diff-progress" title="Files you have marked as reviewed">
             {files.filter((f) => viewed.seen.has(viewedSig(f))).length} of {files.length} reviewed
           </span>
@@ -5687,8 +5983,8 @@ export function DiffCard({
             mode={panel ? mode : "unified"}
             {...(panel ? { expand } : {})}
             copyText={f.patch}
-            viewed={viewed.seen.has(viewedSig(f))}
-            {...(files.length > 1 ? { onViewed: (on: boolean) => viewed.set(viewedSig(f), on) } : {})}
+            viewed={!isLocal() && viewed.seen.has(viewedSig(f))}
+            {...(files.length > 1 && !isLocal() ? { onViewed: (on: boolean) => viewed.set(viewedSig(f), on) } : {})}
             marked={marked}
             {...(attribution && attribution.has(f.path)
               ? { by: (l: DiffLine) => (l.type === "added" && byHand(attribution, f.path, l.content) ? (attribution.get(f.path)?.by ?? "hand") : null), note: handWord(attribution, f.path) }
@@ -6138,6 +6434,14 @@ function PermissionCard({ ev, ctx }: { ev: Ev<"engine.approval">; ctx: Ctx }) {
   const careful = b.scope === "commands" && !!carefulClass(b.items);
   const who = agentNameFor(state, lane);
   const [busy, setBusy] = useState(false);
+  // Said yes to by Friday, its crew mate trusted with its kind (Teammate.trust): a receipt that says so, where the card was.
+  const trusted = ctx.events.find((e) => e.body.type === "goahead.trusted" && e.body.id === b.id);
+  if (trusted && trusted.body.type === "goahead.trusted")
+    return (
+      <Notice ev={ev} icon={ShieldIcon}>
+        Allowed on its own: you trust {trusted.body.name} to {(GO_AHEAD_WORDS[b.guard!] ?? "do this").toLowerCase()}. <code>{b.items[0] ?? ""}</code>
+      </Notice>
+    );
   const said = waiting ? undefined : ctx.events.find((e): e is Ev<"instruction"> => e.body.type === "instruction" && e.body.approval?.id === b.id);
   if (said) return <ApprovalReceipt ask={ev} said={said} ctx={ctx} />;
   const answer = async (approve: boolean, task = false) => {
@@ -6239,6 +6543,20 @@ function PermissionCard({ ev, ctx }: { ev: Ev<"engine.approval">; ctx: Ctx }) {
  * that means for you in a sentence, the command itself, and the answers: Allow once, Allow for this task (commands like it, until
  * this run ends: projection taskAllow) and Deny. A for allow and D for deny while it has focus, as the session's card.
  */
+/** Whether this kind of go-ahead on this lane was said yes to the last three times it was asked, with no no among them. */
+function trustOffer(events: readonly SessionEvent[], lane: string, tag: string, before: number): boolean {
+  let yes = 0;
+  for (let i = events.length - 1; i >= 0 && yes < 3; i--) {
+    const e = events[i]!;
+    if (e.seq >= before || (e.lane ?? MAIN_LANE) !== lane || e.body.type !== "engine.approval" || e.body.guard !== tag) continue;
+    const id = e.body.id;
+    const said = events.find((x) => x.seq > e.seq && x.body.type === "instruction" && x.body.approval?.id === id);
+    if (!said || said.body.type !== "instruction" || !said.body.approval?.approve) return false;
+    yes += 1;
+  }
+  return yes >= 3;
+}
+
 function MatePermission({ ev, ctx, who, waiting, may, hostWait, busy, answer }: { ev: Ev<"engine.approval">; ctx: Ctx; who: string; waiting: boolean; may: boolean; hostWait: string | null; busy: boolean; answer: (approve: boolean, task?: boolean) => Promise<void> }) {
   const b = ev.body;
   const lane = ev.lane ?? MAIN_LANE;
@@ -6287,6 +6605,23 @@ function MatePermission({ ev, ctx, who, waiting, may, hostWait, busy, answer }: 
                 Allow for this task
               </button>
             )}
+            {/* Trust that grows (Arun, 2026-11-15): after three yeses in a row to this kind, it may take it on its own from now. */}
+            {b.guard && b.guard !== "takeover" && trustOffer(ctx.events, lane, b.guard, ev.seq) && !mateOn(lane)?.trust?.includes(b.guard) && (
+              <button
+                type="button"
+                className="mp-btn"
+                disabled={busy}
+                title={`From now on ${who} doesn't ask for this kind: Friday says yes for you and leaves a receipt. Take it back in its profile, under Decisions.`}
+                onClick={() => {
+                  const m = mateOn(lane)!;
+                  void api(ctx.identity, `/api/teammates/${m.id}`, { method: "PATCH", body: JSON.stringify({ trust: [...(m.trust ?? []), b.guard] }), headers: { "Content-Type": "application/json" } })
+                    .then(() => refreshTeam(ctx.identity))
+                    .then(() => answer(true), (e: Error) => ctx.notify(e.message || "Couldn't save that."));
+                }}
+              >
+                Always allow
+              </button>
+            )}
             <button type="button" className="mp-btn quiet" disabled={busy} aria-keyshortcuts="D" title="Don't run it (D)" onClick={() => void answer(false)}>
               Deny
             </button>
@@ -6313,7 +6648,7 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
     case "crew.handed":
       return state.handed?.[b.job] ? <Suspense fallback={null}><HandedLine h={state.handed[b.job]!} me={me.id} sid={ctx.sid} invite={ctx.invite} stamp={<Stamp ev={ev} />} /></Suspense> : null;
     case "crew.handed.room":
-      return <Suspense fallback={null}><RoomHandedLine by={ev.actor} me={me.id} room={b.room} roomName={b.roomName} to={b.to} carried={b.carried} sid={ctx.sid} invite={ctx.invite} stamp={<Stamp ev={ev} />} brought={ctx.events.some((x) => x.body.type === "crew.handed.room.brought" && x.body.room === b.room && x.seq > ev.seq)} /></Suspense>;
+      return <Suspense fallback={null}><RoomHandedLine by={ev.actor} me={me.id} room={b.room} roomName={b.roomName} to={b.to} carried={b.carried} sid={ctx.sid} invite={ctx.invite} stamp={<Stamp ev={ev} />} brought={ctx.events.some((x) => x.body.type === "crew.handed.room.brought" && x.body.room === b.room && x.seq > ev.seq)} cleared={ctx.events.some((x) => x.body.type === "crew.handed.room.back" && x.body.room === b.room && x.seq > ev.seq)} /></Suspense>;
     case "instruction":
     case "suggestion":
       // Clicking Run it / Don't answers the agent; it is not something the person typed, so it is not shown as a message.
@@ -6327,6 +6662,8 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
         // A message to the team (message_team) is one card with everyone it went to, under the first of its copies.
         const copies = b.mesh.team ? ctx.events.filter((e) => e.body.type === "instruction" && e.body.mesh?.team === b.mesh!.team) : [];
         if (copies.length > 1 && copies[0]!.seq !== ev.seq) return null;
+        const t = ctx.teams?.get(ev.seq);
+        if (t) return t.anchor === ev.seq ? <Suspense fallback={null}><TeamCard info={t} state={state} events={ctx.events} send={ctx.send} notify={ctx.notify} sid={ctx.sid} /></Suspense> : null;
         const h = !b.mesh.team ? ctx.huddles?.get(ev.seq) : undefined;
         if (h) return h.anchor === ev.seq ? <HuddleCard h={h} state={state} delivered={ctx.delivered} events={ctx.events} /> : null;
         const team = copies.length > 1 ? copies.map((e) => (e.body.type === "instruction" ? (e.body.mesh?.toName ?? "") : "")) : undefined;
@@ -6340,7 +6677,12 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
             {b.text.slice("[session] ".length).split(/\r?\n/)[0]}
           </Notice>
         );
-      return <HumanMessage ev={ev as Ev<"instruction">} ctx={ctx} />;
+      return (
+        <>
+          <HumanMessage ev={ev as Ev<"instruction">} ctx={ctx} />
+          {b.type === "instruction" && !ctx.room && ev.actor.kind === "human" && severalAgents(state) && <Suspense fallback={null}><TakeOver ev={ev} state={state} events={ctx.events} /></Suspense>}
+        </>
+      );
     case "chat":
       return <ChatMessage ev={ev as Ev<"chat">} ctx={ctx} />;
     case "peer.sent":
@@ -6368,9 +6710,13 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
           {ev.actor.name} opened {b.ios ? "the iOS app" : <span className="mono">{(b.url ?? "").replace(/^https?:\/\//, "").replace(/\/$/, "")}</span>} in the Preview{b.newTab ? ", in a new tab" : ""}
         </Notice>
       );
+    case "thread.started":
+      return <Suspense fallback={null}><OpenedThread ev={ev} state={state} /></Suspense>;
     case "board.posted":
       // A crew workflow's board is its run card where its run began, and nothing where a later stage of it was posted.
-      return state.options.team && isWorkflowBoard(ev) ? <FlowBoard ev={ev} ctx={ctx} fallback={<BoardCard ev={ev} state={state} stamp={<Stamp ev={ev} />} />} /> : <BoardCard ev={ev} state={state} stamp={<Stamp ev={ev} />} />;
+      // The lead's team, put to you before it starts (TeamCard.tsx ProposedTeam).
+      if (b.type === "board.posted" && state.board?.seq === ev.seq && state.board.proposed) return <Suspense fallback={null}><ProposedTeam ev={ev} state={state} send={ctx.send} notify={ctx.notify} /></Suspense>;
+            return state.options.team && isWorkflowBoard(ev) ? <FlowBoard ev={ev} ctx={ctx} fallback={<BoardCard ev={ev} state={state} stamp={<Stamp ev={ev} />} />} /> : <BoardCard ev={ev} state={state} stamp={<Stamp ev={ev} />} />;
     case "mesh.posted":
       return <AgentUpdateCard ev={ev} state={state} stamp={<Stamp ev={ev} />} />;
     case "teammate.folders":
@@ -6570,6 +6916,8 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
           {agentNameFor(state, b.lane)}'s plan changes <code>{b.path}</code>, which {b.with.length === 1 ? b.with[0] : `${b.with.slice(0, -1).join(", ")} and ${b.with.at(-1)}`} {b.with.length === 1 ? "is" : "are"} also working on. Settle who does it before either writes, or they'll meet in a merge conflict.
         </Notice>
       );
+    case "run.quiet":
+      return <QuietLine ev={ev as Ev<"run.quiet">} ctx={ctx} />;
     case "run.guarded":
       return (
         // A pause that protects the run, not a failure: said like the pause it is, with the command as code.
@@ -8065,26 +8413,36 @@ function ReachPill({ ctx, lane }: { ctx: Ctx; lane: string }) {
   const why = switchedWhy.get(`${ctx.sid}|${lane}`);
   return (
     <MenuButton
-      className="reach-pill"
+      className={`reach-pill${now.id === "full" && !busy ? " mode-full" : ""}`}
       label={why && why.startsWith(`${now.label},`) ? `What it may do in your folder: ${why}` : "What it may do in your folder"}
       text={busy ? "…" : now.label}
+      {...(now.id === "full" && !busy ? { mark: <Icon name="shield" size={13} /> } : {})}
       items={() => [
         { heading: "In your folder, it may" },
         ...REACH.map((r) => {
           let sub = r.id === "edits" && (engine.tool === "codex" || engine.tool === "cursor") ? "Asks before any turn that changes something." : r.hint;
           // In Work, what each means for pieces, not files and commands (QA, 2026-10-28; the home page already said it so).
           if (state.options.work) sub = WORK_MODE_BLURB[r.id];
+          // In the open-source edition each its icon and its name alone, what it means in its tip, as the home page's (Arun,
+          // 2026-11-16: "get rid of the secondary texts").
+          if (isLocal()) return { label: r.label, icon: MODE_ICON[r.id], title: sub, checked: r.id === now.id, onSelect: () => void set(r.id) };
           return { label: r.label, sub, checked: r.id === now.id, onSelect: () => void set(r.id) };
         }),
         // Whose messages may run it how far on this computer (Security R2, R3): anyone else's, an app's and another person's agent
         // included, stops at Edits unless the host raises it (Arun, 2026-11-04). Said plainly, since raising it lets other people
         // run commands on this computer.
-        { heading: "Others' messages on your computer" },
-        // By the mode's own name, Manual, not "Edits" (QA, 2026-10-28); in Work, in its words.
-        { label: "Up to Manual", sub: othersSub, checked: !othersFull, onSelect: () => void setOthers(false) },
-        held
-          ? { label: "As far as yours", sub: "This workspace keeps teammates' messages to Manual. An admin can change that in Settings.", disabled: true, onSelect: () => {} }
-          : { label: "As far as yours", sub: "Teammates, their agents and apps can run commands on this computer without asking you, in the mode you picked.", checked: othersFull, onSelect: () => void setOthers(true) },
+        // Not in the open-source edition (Arun, 2026-11-16: "get rid of this"): nobody else's messages reach your computer there,
+        // and the choice stays as it was, up to Manual.
+        ...(isLocal()
+          ? []
+          : [
+              { heading: "Others' messages on your computer" },
+              // By the mode's own name, Manual, not "Edits" (QA, 2026-10-28); in Work, in its words.
+              { label: "Up to Manual", sub: othersSub, checked: !othersFull, onSelect: () => void setOthers(false) },
+              held
+                ? { label: "As far as yours", sub: "This workspace keeps teammates' messages to Manual. An admin can change that in Settings.", disabled: true, onSelect: () => {} }
+                : { label: "As far as yours", sub: "Teammates, their agents and apps can run commands on this computer without asking you, in the mode you picked.", checked: othersFull, onSelect: () => void setOthers(true) },
+            ]),
       ]}
       above
     />
@@ -8486,6 +8844,11 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
   // Crew, connected, ported from Friday Teams 6e231ada and 79b27a67).
   const atLanes = state.options.team ? [] : [MAIN_LANE, ...state.lanes.map((l) => l.id)].map((id) => ({ id, name: laneLabel(state, id) }));
   if (atLanes.length > 1) agents = atLanes.map((l) => ({ id: l.id, name: l.name, mark: agentLook(state, l.id, 14).mark, hint: runOf(state, l.id).status === "running" ? "Working" : runOf(state, l.id).status === "waiting_for_human" ? "Needs you" : "" }));
+  // And the two groups of them (lane-at.ts groupAt): every agent here, or those not at work now.
+  if (atLanes.length > 1) {
+    const idle = atLanes.filter((l) => runOf(state, l.id).status !== "running").length;
+    agents = [...agents, { id: "*all", name: "all", mark: <UsersIcon className="size-3.5" />, hint: `All ${atLanes.length} agents` }, ...(idle ? [{ id: "*idle", name: "idle", mark: <UsersIcon className="size-3.5" />, hint: idle === atLanes.length ? "All of them: none is working" : `The ${idle} not working now` }] : [])];
+  }
   // Picked, its name goes in the box and the words send it there (lane-at.ts); pointing the box at it as well redrew the box and
   // took the name straight back out, so a press seemed to do nothing (Arun, 2026-11-13: "i cannot click on any of these").
   if (atLanes.length > 1) pickPoints = false;
@@ -8572,7 +8935,11 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
   // Another folder for this agent's coding tool to work in, added from the chat as it runs (Arun, 2026-11-03: "be able to add
   // folders, to the coding sessions while in the chat too"): its own coding tool on this computer, from its next message on.
   const desktopApp = typeof window !== "undefined" ? window.fridayDesktop : undefined;
-  const myTool = !!state.engines[lane]?.tool && state.engines[lane]!.hostId === me.id && !!desktopApp?.pickFolder;
+  // Not in a crew of the open-source edition: a crew mate's folders are in its profile (Give … a folder or repo), and a second kind
+  // here, as a chip in the box with its own note, was one too many (Arun, 2026-11-15: "why is the folder thing still there????").
+  // A room of the open-source edition, seen whole: a folder from its box is for everyone in it (Room.folders), not its lead's own.
+  const roomHere = isLocal() && state.options.team && inView === ALL ? (teamNow()?.rooms?.find((r) => r.sid === sid && !r.thread) ?? null) : null;
+  const myTool = !!state.engines[lane]?.tool && state.engines[lane]!.hostId === me.id && !!desktopApp?.pickFolder && !(isLocal() && state.options.team);
   const laneAccounts = useLaneAccountChoice(ctx, lane);
   // The folders it has been given, shown in the box as chips you can take back (Arun, 2026-11-05: "add something to show that the
   // folder was uploaded"): a toast that went was the only sign.
@@ -8907,7 +9274,9 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
       throw new Error("key in the draft");
     }
     // "@Rex " picked from the @ list points the box at Rex and stays in the words: Rex is told what follows, not its own name.
-    const at = atLanes.length > 1 ? laneAt(own, atLanes) : null;
+    const group = atLanes.length > 1 ? groupAt(own) : null;
+    const at = atLanes.length > 1 && !group ? laneAt(own, atLanes) : null;
+    if (group) text = held.length ? withQuotes(held, group.text) : group.text;
     // Its name stays in the box now, so the words are sent without it, to whichever agent it names.
     if (at?.text) text = held.length ? withQuotes(held, at.text) : at.text;
     // Yours, on screen, now. Uploading two hundred files takes a while and the
@@ -8950,6 +9319,9 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
       let toLanes = [lane];
       // "@Codex …" in a coding session's box goes to Codex, wherever the box points (lane-at.ts).
       if (!state.options.team && at && at.lane !== lane) toLanes = [at.lane];
+      // "@all …" goes to every agent here, "@idle …" to those not working now (lane-at.ts groupAt).
+      if (group) toLanes = atLanes.map((l) => l.id).filter((id) => group.group === "all" || runOf(state, id).status !== "running");
+      if (group && !toLanes.length) return putBack("Every agent here is working now. It's back in the box: send it with @all, or when one is free.");
       // In a crew "@Kit …" goes to Kit, and "@Kit and @Nova …" to both, wherever the box points (Teammates.tsx).
       if (state.options.team) toLanes = teammatesNamed(sid, own, lane);
       if (!toLanes.length) return putBack("Nobody is in this room yet. Add a teammate to it from its menu at the top.");
@@ -8991,7 +9363,8 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
             a pill that opens onto a list of one. */}
         {/* On Solo with one agent the picker in the box is the only one: this pill was the same agent again, plus an upsell. */}
         {state.options.team && <TeamRecipients sid={sid} text={typed} />}
-        {state.options.team && inView === ALL && !namesSomeone(sid, typed) && <TeamWorking sid={sid} />}
+        {/* In the open-source edition they are typing in the chat instead (CrewTyping). */}
+        {state.options.team && inView === ALL && !isLocal() && !namesSomeone(sid, typed) && <TeamWorking sid={sid} />}
         {/* Who it goes to is the first half of the box's own "agent | model" control now (SendPick), not a pill over the box. */}
         {/* Who has the wheel of that agent is the other half of the same question, so it sits beside it: pick who to write to, and
             here is whether you may, and the one press to take or ask for it. */}
@@ -9126,7 +9499,7 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
                   )}
                   {state.options.team && (
                     <PromptInputActionMenuItem onSelect={() => setGiving(true)}>
-                      <Icon name="folder" size={14} /> <span className="ml-2">Give {agentNameFor(state, lane)} a folder or repo</span>
+                      <Icon name="folder" size={14} /> <span className="ml-2">{roomHere ? "Add a folder for this room" : `Give ${agentNameFor(state, lane)} a folder or repo`}</span>
                     </PromptInputActionMenuItem>
                   )}
                   {onPin && (
@@ -9175,7 +9548,7 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
                   ))}
               </span>
             )}
-            {giving && <TeammateFolderCard identity={ctx.identity} lane={lane} trigger={textarea.current} onClose={() => setGiving(false)} notify={notify} />}
+            {giving && (roomHere ? <RoomFolderCard identity={ctx.identity} room={roomHere} trigger={textarea.current} onClose={() => setGiving(false)} notify={notify} /> : <TeammateFolderCard identity={ctx.identity} lane={lane} trigger={textarea.current} onClose={() => setGiving(false)} notify={notify} />)}
             {canUpload && (
               <input
                 ref={folderInput}

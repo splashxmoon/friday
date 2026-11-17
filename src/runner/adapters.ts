@@ -57,6 +57,11 @@ export type AdapterOut =
       /** How full its context is now: what its last model call was handed, and the window that model has, when the tool says. */
       context?: number;
       window?: number;
+      /** Of `input`, what was written to its cache (priced apart); of `output`, what went on reasoning; and the model that did the
+       * turn's work, when the tool says (spend.ts). */
+      cacheWrite?: number;
+      reasoning?: number;
+      model?: string;
     }
   /** A subagent or background task the tool started, or a change in where one stands (see the `agent.task` event). */
   | {
@@ -360,8 +365,10 @@ function taskTracker() {
 
 const count = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.round(v) : 0);
 /** A turn's tokens as the session counts them: `input` read fresh (cache writes included), `cached` read from a cache. */
-const usage = (input: number, cached: number, output: number, ctx?: { context: number; window?: number }): AdapterOut[] =>
-  input + cached + output > 0 ? [{ kind: "usage", input, cached, output, ...(ctx && ctx.context > 0 ? { context: ctx.context, ...(ctx.window ? { window: ctx.window } : {}) } : {}) }] : [];
+const usage = (input: number, cached: number, output: number, ctx?: { context: number; window?: number }, more: { cacheWrite?: number; reasoning?: number; model?: string } = {}): AdapterOut[] =>
+  input + cached + output > 0
+    ? [{ kind: "usage", input, cached, output, ...(ctx && ctx.context > 0 ? { context: ctx.context, ...(ctx.window ? { window: ctx.window } : {}) } : {}), ...(more.cacheWrite ? { cacheWrite: more.cacheWrite } : {}), ...(more.reasoning ? { reasoning: more.reasoning } : {}), ...(more.model ? { model: more.model } : {}) }]
+    : [];
 
 const firstLine = (s: string) => (s.split("\n").find((l) => l.trim()) ?? "").trim().slice(0, 120);
 
@@ -673,9 +680,9 @@ export const claude: Adapter = {
           const u = m.usage ?? {};
           // The window of the model that did the turn's work: the one that read the most, of those it reports (a background
           // Haiku reads little).
-          const models: any[] = Object.values(m.modelUsage && typeof m.modelUsage === "object" ? m.modelUsage : {});
-          const main = models.sort((a, b) => count(b?.inputTokens) + count(b?.cacheReadInputTokens) - count(a?.inputTokens) - count(a?.cacheReadInputTokens))[0];
-          out.push(...usage(count(u.input_tokens) + count(u.cache_creation_input_tokens), count(u.cache_read_input_tokens), count(u.output_tokens), { context, window: count(main?.contextWindow) }));
+          const models: [string, any][] = Object.entries(m.modelUsage && typeof m.modelUsage === "object" ? m.modelUsage : {});
+          const [mainId, main] = models.sort(([, a], [, b]) => count(b?.inputTokens) + count(b?.cacheReadInputTokens) - count(a?.inputTokens) - count(a?.cacheReadInputTokens))[0] ?? ["", undefined];
+          out.push(...usage(count(u.input_tokens) + count(u.cache_creation_input_tokens), count(u.cache_read_input_tokens), count(u.output_tokens), { context, window: count(main?.contextWindow) }, { cacheWrite: count(u.cache_creation_input_tokens), ...(mainId ? { model: mainId } : {}) }));
           // Said while its background tasks still run: it carries on by itself when they finish (see noteBackground).
           const held = running.size > 0 && !m.is_error;
           if (held) out.push({ kind: "delta", channel: "reasoning", text: `\nWaiting for ${running.size === 1 ? "a background task" : `${running.size} background tasks`} to finish…\n` });
@@ -779,9 +786,12 @@ export const codexExec: Adapter = {
      */
     // So on Windows its shell commands are NOT confined to the folder once it may write: only its own file changes are held to it.
     const sandbox = !writes ? "read-only" : process.platform === "win32" ? "danger-full-access" : "workspace-write";
+    // A benchmark's container (bench/friday_harbor): Codex's own sandbox doesn't run inside Docker, so there it runs without one,
+    // as the benchmark's own Codex agent does (--dangerously-bypass-approvals-and-sandbox). Only from that variable, never by default.
+    const bypass = writes && process.env.FRIDAY_CODEX_SANDBOX === "bypass";
     // One argument for the whole setting, so its quotes reach Codex as written on Windows too.
-    const base = [...(t.friday ? codexConfig(t.friday) : []), ...codexExtras(t), "exec", "--json", "--skip-git-repo-check", ...(t.model ? ["--model", t.model] : []), ...(t.effort ? ["-c", `model_reasoning_effort="${codexEffort(t.effort, t.model)}"`] : []), "--sandbox", sandbox];
-    if (t.mode === "full" && sandbox === "workspace-write") base.push("-c", "sandbox_workspace_write.network_access=true");
+    const base = [...(t.friday ? codexConfig(t.friday) : []), ...codexExtras(t), "exec", "--json", "--skip-git-repo-check", ...(t.model ? ["--model", t.model] : []), ...(t.effort ? ["-c", `model_reasoning_effort="${codexEffort(t.effort, t.model)}"`] : []), ...(bypass ? ["--dangerously-bypass-approvals-and-sandbox"] : ["--sandbox", sandbox])];
+    if (t.mode === "full" && sandbox === "workspace-write" && !bypass) base.push("-c", "sandbox_workspace_write.network_access=true");
     // The folders beside its own, writable as the folder is. Read-only reads them anyway, and danger-full-access holds it to none.
     if (sandbox === "workspace-write") for (const d of t.dirs ?? []) base.push("--add-dir", d);
     // Attached pictures as pictures. `--image` takes several values, so each is given with `=`: written apart, the next one
@@ -842,7 +852,7 @@ export const codexExec: Adapter = {
           // Its input counts what it read from the cache as well.
           const u = m.usage ?? {};
           const cached = count(u.cached_input_tokens);
-          return [...usage(Math.max(0, count(u.input_tokens) - cached), cached, count(u.output_tokens)), ...(blocked.length ? [{ kind: "blocked" as const, scope: "turn" as const, items: [...new Set(blocked)].slice(0, 6) }] : []), { kind: "done" }];
+          return [...usage(Math.max(0, count(u.input_tokens) - cached), cached, count(u.output_tokens), undefined, { reasoning: count(u.reasoning_output_tokens) }), ...(blocked.length ? [{ kind: "blocked" as const, scope: "turn" as const, items: [...new Set(blocked)].slice(0, 6) }] : []), { kind: "done" }];
         }
         case "turn.failed":
           return [{ kind: "done", error: str(m.error?.message) || "Codex couldn't finish the turn." }];
@@ -933,6 +943,9 @@ function appPolicy(t: TurnSpec): { sandboxPolicy: Record<string, unknown>; appro
   // On Windows its sandbox runs commands as another account that can't look at the person's own profile folder (see codexExec).
   // dangerFullAccess there confines nothing to the folder: whenever it writes, approvalPolicy is "never", so Codex never asks and
   // the grantRoot check in `approval` (in `codex`) never runs. Neither its shell commands nor its file changes are held to the folder.
+  // A benchmark's container (bench/friday_harbor, FRIDAY_CODEX_SANDBOX=bypass): Codex's sandbox doesn't run inside Docker, so there it
+  // runs without one and is never asked, as the benchmark's own Codex agent runs (--dangerously-bypass-approvals-and-sandbox).
+  if (writes && process.env.FRIDAY_CODEX_SANDBOX === "bypass") return { sandboxPolicy: { type: "dangerFullAccess" }, approvalPolicy: "never" };
   const sandboxPolicy: Record<string, unknown> = !writes ? { type: "readOnly", networkAccess: true } : process.platform === "win32" ? { type: "dangerFullAccess" } : { type: "workspaceWrite", networkAccess: t.mode === "full", writableRoots: t.dirs ?? [] };
   // A Work session reaches the web whenever it may write, in Edits as in Auto.
   if (t.work && sandboxPolicy.type === "workspaceWrite") sandboxPolicy.networkAccess = true;

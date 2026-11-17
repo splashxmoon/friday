@@ -114,7 +114,13 @@ export function OwnModelsSection({ identity, workspace }: { identity: Identity; 
   const { state: machine } = useMachine(identity);
   const linked = machine.mode === "local" || machine.mode === "linked";
   const models = useOwnModels(machine.mode === "none" ? undefined : identity);
-  const [draft, setDraft] = useState<Draft | null>(null);
+  // The form is open from the start, ready for a first model (Arun, 2026-11-16: "have this be open by default too"); once models
+  // turn up it closes again while untouched, and Add a model opens it.
+  const blank = useRef<Draft>({ provider: "openai", baseUrl: PRESETS[0]!.baseUrl, apiKey: "", model: "", name: "" });
+  const [draft, setDraft] = useState<Draft | null>(blank.current);
+  useEffect(() => {
+    if (models.length) setDraft((d) => (d === blank.current ? null : d));
+  }, [models.length]);
   const [local, setLocal] = useState<Local[]>([]);
   /** What a test said, for the model as it was tested: changed since (edited, moved, another model), it is gone (audit REST-7). */
   const [notes, setNotes] = useState<Record<string, { text: string; bad?: boolean; of: string }>>({});
@@ -129,7 +135,7 @@ export function OwnModelsSection({ identity, workspace }: { identity: Identity; 
   }, [linked, identity.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Only when there is no computer at all: a slow check of one already shown keeps the page (and a half-filled form) as it is.
-  if (machine.mode === "none" && !models.length && !draft) {
+  if (machine.mode === "none" && !models.length && (!draft || draft === blank.current)) {
     return (
       <section className="settings-section">
         <p className="muted">Your own models are kept on your computer, with their keys, and Friday's agent reaches them through it.</p>

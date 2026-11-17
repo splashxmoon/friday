@@ -36,3 +36,13 @@ test("what it is asked: quiet by default, and saying it always when set so", () 
   assert.match(checkInText(c), /NO_UPDATE/);
   assert.doesNotMatch(checkInText({ ...c, quiet: false }), /NO_UPDATE/);
 });
+
+test("a routine whose time came while the computer slept runs on waking; one turned on after its time does not", async () => {
+  const { missedSlot, cleanCheckIn, checkInText } = await import("../src/teammate-checkins.js");
+  const c = cleanCheckIn({ text: "Stand-up", every: "daily", at: "09:00", tz: "UTC" }, "s")!;
+  assert.deepEqual(missedSlot(c, new Date("2026-11-16T07:00:00Z"), new Date("2026-11-16T13:12:00Z"))?.slot, "2026-11-16", "asleep from 7:00 to 13:12: the 9:00 is missed");
+  assert.equal(missedSlot(c, new Date("2026-11-16T10:00:00Z"), new Date("2026-11-16T13:12:00Z")), null, "asleep only after it was due and done");
+  assert.equal(missedSlot({ ...c, last: "2026-11-16" }, new Date("2026-11-16T07:00:00Z"), new Date("2026-11-16T13:12:00Z")), null, "already run for that day");
+  assert.equal(missedSlot({ ...c, off: true }, new Date("2026-11-16T07:00:00Z"), new Date("2026-11-16T13:12:00Z")), null);
+  assert.match(checkInText(c, { due: "09:00", now: "1:12 PM" }), /due at 09:00, while this computer was asleep; it runs now, at 1:12 PM/);
+});

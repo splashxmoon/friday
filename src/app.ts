@@ -20,6 +20,10 @@ import { callHost } from "./runner/local-api.js";
 import { usageCounts } from "./usage.js";
 import { readRepo as readFolder } from "./runner/repo-read.js";
 import { cleanFolders, readFolders } from "./crew-folders.js";
+import { crewFileAt } from "./crew-files.js";
+import { spendOf } from "./spend.js";
+import { roomBrief } from "./room-brief.js";
+import { checkedIn, claimOf, claimWords, commandFor } from "./claims.js";
 import { readFailed } from "./project-rules.js";
 import { parseRepo } from "./runner/repo.js";
 import { Runner } from "./runner/runner.js";
@@ -57,10 +61,10 @@ import type { ToolOption, ToolWindow } from "./routing.js";
 import { breaches as ruleBreaches, breachText, draftRule, DRAFT_SYSTEM, globsOf, parseDraft, STANDING, type RuleCheck } from "./rules.js";
 import { baselineOf, commandKey, compare, failingTests, onlyPre, preNote, type Baseline } from "./baseline.js";
 import { commandFailed, TEST_CMD } from "./receipt.js";
-import { answerAsk, buildDive, DeepDives, DIVE_MODELS, newAskId, type Dive, type DiveHost } from "./deep-dive.js";
+import { answerAsk, buildDive, DeepDives, DIVE_MODELS, diveBrief, newAskId, pageStale, writePage, type Dive, type DiveChanges, type DiveHost } from "./deep-dive.js";
 import { AFTER_RUN_TRIES, BRIEF_BUDGET, BrainRegistry, clipText, correctionOf, extractLessons, pickBrief, repoKeyOf, repoNameOf, type BrainEntry, type BrainKind } from "./brain.js";
 import { MIN_TOOL_CALLS, transcriptOf } from "./decision-log.js";
-import { runawayIn } from "./runaway.js";
+import { runawayIn, runawayText } from "./runaway.js";
 import { dailyBriefs, type CrewInput, type DailyBrief } from "./daily-brief.js";
 import { fromGh, fromGithubApi, rerequestReview, statusOf, type PrStatus } from "./github-status.js";
 import { commitPaths, FRIDAY, fixMessage, fromPerson, MAX_CHECK_ROUNDS, prBranch, shepherdNext } from "./shepherd.js";
@@ -109,7 +113,7 @@ import { findWork, listWork, namedIn, pathParam, serveWork, shownFile, siteIcon,
 import { FRAME_TTL_MS, frameDir, inFrame, signFrame, verifyFrame } from "./work-frame.js";
 import type { PeerNote } from "./types.js";
 import { ago as agoOf, LocalPeers, LOOK_AT as SESSIONS_LOOKED_AT, MODE_RANK, newId, placeOf as placeOfSession, scheduleOf } from "./app-tools.js";
-import { backAt, backupText, offBackup, onBackup, backupOf, backupsOf, cleanBackups, checkInDue, checkInText, quietCheckIns, type CheckIn, cleanRoom, cleanTeammate, MEMORY_FILE, MEMORY_MAX, memoryText, defaultFolder, makeFolder, MAX_ROOMS, MAX_TEAMMATES, MAX_THREADS, NEW_THREAD, onOwnModel, projectsOf, roomKeep, runsOnName, teammateNote, TeammateStore, worktreeHolding, type Room, type Teammate, type TeammateView } from "./teammates.js";
+import { backAt, backupText, offBackup, onBackup, backupOf, backupsOf, cleanBackups, checkInDue, checkInText, missedSlot, quietCheckIns, type CheckIn, cleanRoom, cleanTrust, cleanTeammate, MEMORY_FILE, MEMORY_MAX, memoryText, defaultFolder, makeFolder, MAX_ROOMS, MAX_TEAMMATES, MAX_THREADS, NEW_THREAD, onOwnModel, projectsOf, roomKeep, runsOnName, teammateNote, TeammateStore, worktreeHolding, type Room, type Teammate, type TeammateView } from "./teammates.js";
 import { limitHit, planLimitHit } from "./limit-reset.js";
 import { RESUME_NUDGE } from "./limit-handoff.js";
 import { noteRunEnd } from "./limited.js";
@@ -121,7 +125,7 @@ import { handoffBrief } from "./handoff.js";
 import { ENGINE_MODEL_INFO } from "./types.js";
 import { hubOf } from "./agents-hub.js";
 import { distinctLook } from "./teammate-look.js";
-import { budgetPatch, cleanRunBudget, CrewBudget, runOver, type RunBudget } from "./team-budget.js";
+import { budgetPatch, clockIn, cleanRunBudget, CrewBudget, runOver, type RunBudget } from "./team-budget.js";
 import { movedSince, NUDGE_GAP_MS, QUIET_MS, saysGoalReached, selfRunAnswer, selfRunNote, selfRunNudge, STALL_NUDGES, leadSaid } from "./team-selfrun.js";
 import { awayAnswer, awayNote, briefLine, briefWorthPosting, clockOf, endsOnQuestion, roomNews, runsIn, teamBrief as awayBrief, usageOf, type LaneRun, type Place } from "./team-away.js";
 import { boardBusy, verifiedAt } from "./session/projection.js";
@@ -433,6 +437,8 @@ export async function createApp(o: AppOptions) {
     // A coding tool that couldn't answer is a line, not a stack trace each run (2026-11-04 end-to-end check: 33 of them).
     if (o.decisionLog) void learnFromRun(sid, lane).catch((e) => console.warn(`[brain] couldn't learn from ${sid}/${lane}: ${errorHead(String((e as Error)?.message ?? e))}`));
     if (o.decisionLog) void checkAfterRun(sid, lane).catch((e) => closingOr("[checks]", e));
+    // A crew mate's "the tests pass", checked against its turn, and run when nothing in it backs the claim (claims.ts).
+    if (o.local && teammates) void checkClaim(sid, lane).catch((e) => closingOr("[claims]", e));
     // Its own failing tests, against the commit its copy started from: which were already failing there (baseline.ts).
     void testsAfterRun(sid, lane).catch((e) => closingOr("[baseline]", e));
     // A hub's task, or the main lane's conflict work for one (hubs.ts): the hub moves on.
@@ -532,8 +538,24 @@ export async function createApp(o: AppOptions) {
     const start = events.findLast((e) => (e.lane ?? MAIN_LANE) === lane && (e.body.type === "run.started" || e.body.type === "run.resume"))?.seq ?? 0;
     if (!(await redis.set(`${o.prefix}runaway:${sid}:${lane}:${start}`, "1", "EX", 86_400, "NX"))) return;
     await store.append(sid, FRIDAY, { type: "run.guarded", command: loop.command, times: loop.times, kind: loop.kind }, { lane });
+    // A crew mate stops and says where it got to (Arun, 2026-11-15: "It should stop, say what it tried, and ask you"): its turn is
+    // cut short by a word from Friday that it answers in three lines, touching nothing. Any other agent is paused, as before.
+    if (await mateLane(sid, lane)) {
+      const said = await store.append(sid, { id: "friday", name: "Friday", kind: "system" }, { type: "instruction", text: `[Friday] ${runawayText(loop).replace(/ Tell it to carry on.*$/, "")} Don't try it again and don't change anything. In three short lines say what you tried, what went wrong each time, and what you need from the person to go on.`, interrupt: true }, { lane });
+      if (said.ok) void bus.wake(sid, lane);
+      return;
+    }
     await store.append(sid, FRIDAY, { type: "run.pause" }, { lane });
   };
+  /** Whether a lane is a crew mate's: in the Crew room, a room, one of its threads, or a coding session it was brought into. */
+  const mateLane = async (sid: string, lane: string): Promise<boolean> => {
+    if (!teammates) return false;
+    if ((await teammates.list().catch(() => [] as Teammate[])).some((t) => t.lane === lane)) return true;
+    if ((await teammates.rooms().catch(() => [] as Room[])).some((r) => r.sid === sid && Object.values(r.lanes).includes(lane))) return true;
+    return (await visits.inSession(sid).catch(() => [] as { lane: string }[])).some((v) => v.lane === lane);
+  };
+  /** When each lane was last looked at for a loop, so a check on every step stays cheap (a failed command is always looked at). */
+  const loopLooked = new Map<string, number>();
 
   /**
    * Every finished run's record, for forecasts and for what routing learns per repo and kind of task (forecast.ts, run-log.ts);
@@ -702,7 +724,19 @@ export async function createApp(o: AppOptions) {
         }
       })().catch((e) => console.error("[overlap]", e));
     }
-    if (ev.body.type === "tool.result" && ev.body.isError && (ev.body.name === "shell" || ev.body.name === "run_command")) void guardRunaway(sid, ev.lane ?? MAIN_LANE).catch((e) => console.error("[runaway]", e));
+    // A go-ahead its crew mate is trusted with: answered yes as the person, with a receipt (Teammate.trust).
+    if (ev.body.type === "engine.approval" && ev.body.guard) void trustAnswer(sid, ev as SessionEvent).catch((e) => console.error("[trust]", e));
+    // Every step is looked at for a loop (the same failure, edits in circles, the same call over): a failure at once, the rest at most
+    // every few seconds a lane.
+    if (ev.body.type === "tool.result") {
+      const k = `${sid} ${ev.lane ?? MAIN_LANE}`;
+      const failedCmd = ev.body.isError && (ev.body.name === "shell" || ev.body.name === "run_command");
+      if (failedCmd || Date.now() - (loopLooked.get(k) ?? 0) > 3_000) {
+        loopLooked.set(k, Date.now());
+        if (loopLooked.size > 2_000) loopLooked.clear();
+        void guardRunaway(sid, ev.lane ?? MAIN_LANE).catch((e) => console.error("[runaway]", e));
+      }
+    }
     // A teammate's go-ahead (guardrails.ts): skipped at once while the person is away, given up after a while when no one is
     // watching, and three no's in a row stop the task.
     if (ev.body.type === "engine.approval" && ev.body.guard) void crewGoAhead(sid, ev as SessionEvent).catch((e) => console.error("[go-ahead]", e));
@@ -950,10 +984,31 @@ export async function createApp(o: AppOptions) {
   const linkRefusal = (link: "yes" | "no" | "anon" | "other"): string | null =>
     link === "anon" ? "Sign in to use the linked machine." : link === "other" ? "This machine is linked to another account. Sign in as that account, or link it again from this one." : null;
 
+  /**
+   * The crew's folders on this computer, the lane's own first (crew-files.ts): each agent's folder in the session, each crew mate's
+   * own folder and projects, and the folders rooms add. Empty outside the open-source edition.
+   */
+  const crewRoots = async (sid: string, lane?: string): Promise<string[]> => {
+    if (!o.local || !teammates) return [];
+    const st = await store.state(sid).catch(() => null);
+    const own = (e: { cwd?: string; computer?: string } | undefined) => (e?.cwd && !e.computer ? [e.cwd] : []);
+    const mates = await teammates.list().catch(() => [] as Teammate[]);
+    const roomFolders = (await teammates.rooms().catch(() => [] as Room[])).flatMap((r) => r.folders ?? []);
+    return [...own(lane ? st?.engines[lane] : undefined), ...Object.values(st?.engines ?? {}).flatMap(own), ...mates.flatMap((t) => [t.folder, ...projectsOf(t)]), ...roomFolders];
+  };
   const openFolder = async (sid: string, req: RepoCall, lane?: string, by?: string, forPerson?: string | null): Promise<{ output: string; where?: { host: string; cwd: string; branch?: string } }> => {
     // Looking at a crew mate's folder on this computer while its coding tool is asleep (the open-source edition): read from the disk
     // below, read-only. The hub says "isn't connected" for such a lane so nothing is done in another folder in its place, which is
     // right for an Undo or a commit, not for opening a file (Arun, 2026-11-14: "i cannot see the tree file stuff").
+    // A file any crew mate made, read from whichever of the crew's folders on this computer it is in (crew-files.ts): a path
+    // outside the lane's own folder, or named in another mate's message, read "not found" from the lane it was opened in.
+    if (o.local && teammates && req.op === "read" && req.path) {
+      const at = await crewFileAt(await crewRoots(sid, lane), req.path, (p) => stat(p).then((s) => s.isFile(), () => false));
+      if (at) {
+        const out = await readFolder(at.root, { ...req, path: at.rel, mode: "plan" }).catch(() => null);
+        if (out !== null) return { output: out, where: { host: "This computer", cwd: at.root } };
+      }
+    }
     const asleep = o.local && !!lane && READ_OPS.has(req.op) && ((e) => !!e && !e.online && !e.computer)((await store.state(sid).catch(() => null))?.engines[lane]);
     const live = asleep ? null : await hub.readRepo(sid, req, lane, by, forPerson);
     if (live) return live;
@@ -1297,6 +1352,50 @@ export async function createApp(o: AppOptions) {
    * rule that is run rather than read ("back up your rules with scripts"). At most AFTER_RUN_TRIES in a row before it's left to
    * the person, who sees each failure in the session.
    */
+  /**
+   * "Done", checked rather than claimed (Arun, 2026-11-15): a crew mate's answer that says the tests (build, linter, types) pass is
+   * read against its turn. A command it ran backs it or contradicts it; with none, Friday runs the project's own in its folder and
+   * says how it went. Said once a turn, under the answer; a contradicted claim goes back to the crew mate to fix, once.
+   */
+  async function checkClaim(sid: string, lane: string): Promise<void> {
+    if (!(await mateLane(sid, lane))) return;
+    const events = await store.events(sid);
+    const onLane = (e: SessionEvent) => (e.lane ?? MAIN_LANE) === lane;
+    const end = events.findLast((e) => onLane(e) && e.body.type === "run.ended");
+    if (!end || end.body.type !== "run.ended" || end.body.outcome !== "done") return;
+    const start = events.findLast((e) => e.seq < end.seq && onLane(e) && e.body.type === "run.started")?.seq ?? 0;
+    const said = events.findLast((e) => e.seq > start && e.seq < end.seq && onLane(e) && e.body.type === "agent.message" && !!e.body.text.trim());
+    const claim = said?.body.type === "agent.message" ? claimOf(said.body.text) : null;
+    if (!claim) return;
+    if (!(await redis.set(`${o.prefix}claim:${sid}:${end.seq}`, "1", "EX", 3600, "NX"))) return;
+    const note = (verdict: "backed" | "checked" | "contradicted" | "unverified", command?: string) => store.append(sid, FRIDAY, { type: "claim.checked", run: end.seq, claim: claim.words, kind: claim.kind, verdict, ...(command ? { command } : {}) }, { lane });
+    const tell = async (command: string, output: string) => {
+      const sent = await store.append(sid, FRIDAY, { type: "instruction", text: `[Friday] You said ${claimWords(claim.kind)}, but \`${command}\` failed:\n\n${clipText(output, 3000)}\n\nFix it and run it again, then say plainly where it stands.`, interrupt: false, check: command }, { lane });
+      if (sent.ok) void bus.wake(sid, lane);
+    };
+    const ran = checkedIn(events, lane, start, end.seq, claim.kind);
+    if (ran) {
+      await note(ran.ok ? "backed" : "contradicted", ran.command);
+      return;
+    }
+    // Nothing in its turn checked it: the project's own command, run where it works.
+    if (!mesh.repo) return void (await note("unverified"));
+    const read = async (file: string) => {
+      const out = await mesh.repo!(sid, lane, { op: "read", path: file, raw: true } as RepoCall).catch(() => null);
+      return out && !readFailed(out) ? out : null;
+    };
+    const tree = (await mesh.repo(sid, lane, { op: "tree", path: "" } as RepoCall).catch(() => "")) ?? "";
+    const top = new Set(tree.split("\n").map((l) => l.trim().replace(/^\.\//, "")).filter((l) => l && !l.includes("/")));
+    const command = commandFor(claim.kind, await read("package.json"), (f) => top.has(f));
+    if (!command) return void (await note("unverified"));
+    const out = await mesh.repo(sid, lane, { op: "shell", command, timeoutSec: CHECK_SECONDS } as RepoCall).catch((e: Error) => `Couldn't run it: ${e.message}`);
+    const verdict = checkVerdict(out);
+    if (verdict === "skipped") return void (await note("unverified", command));
+    await store.append(sid, FRIDAY, { type: "repo.checked", run: end.seq, command, ok: verdict === "passed", ...(verdict === "failed" ? { output: clipText(out ?? "", 3000) } : {}) }, { lane });
+    await note(verdict === "passed" ? "checked" : "contradicted", command);
+    if (verdict === "failed") await tell(command, out ?? "");
+  }
+
   async function checkAfterRun(sid: string, lane: string): Promise<void> {
     const events = await store.events(sid);
     const onLane = (e: SessionEvent) => (e.lane ?? MAIN_LANE) === lane;
@@ -1357,16 +1456,21 @@ export async function createApp(o: AppOptions) {
     const ws = workspaceOf(state);
     if (!ws) return "";
     const brain = tenant(ws).brain;
-    // Nothing learned anywhere yet, or learning off: nothing to ask the folder about.
-    if (!(await brain.enabled()) || !(await brain.repos()).length) return "";
+    const learned = (await brain.enabled()) && (await brain.repos()).length > 0;
+    const dives = tenant(ws).dives;
+    // Nothing learned anywhere yet, or learning off, and no Deep Dive written: nothing to ask the folder about.
+    if (!learned && !(await dives.list()).some((d) => d.status === "ready")) return "";
     const repo = await repoFor(sid, lane, state);
-    const b = repo ? await brain.brief(repo.key, task) : null;
-    if (!repo || !b) return "";
+    if (!repo) return "";
+    // The repo's Deep Dive, when it has one (deep-dive.ts diveBrief): its overview and where each part lives.
+    const dive = await dives.get(repo.key).then(async (d) => (d ? diveBrief(d, await dives.pages(repo.key)) : ""), () => "");
+    const b = learned ? await brain.brief(repo.key, task) : null;
+    if (!b) return dive;
     const events = await store.events(sid);
     if (!events.some((e) => e.body.type === "brain.briefed" && (e.lane ?? MAIN_LANE) === lane)) {
       await store.append(sid, FRIDAY, { type: "brain.briefed", repo: repo.name, count: b.count, sessions: b.sessions, tools: b.tools }, { lane });
     }
-    return b.text;
+    return `${dive}${b.text}`;
   }
 
 
@@ -1913,11 +2017,15 @@ export async function createApp(o: AppOptions) {
     const list = await teammates!.list();
     const sharers = list.filter((x) => projectsOf(x).some((d) => d.toLowerCase() === repo.toLowerCase()));
     if (sharers.length < 2) return (copies.delete(t.id), null);
-    const lead = (await store.state(sid).catch(() => null))?.lead;
-    const home = sharers.find((x) => x.lane === lead) ?? sharers[0]!;
-    if (home.id === t.id) return (copies.delete(t.id), null);
+    const st = await store.state(sid).catch(() => null);
     const top = (await git(repo, ["rev-parse", "--show-toplevel"]).catch(() => "")).trim();
     if (!top) return null;
+    // Who works in the repo itself: one of the others already there, online in it, keeps it, whoever leads (Arun, 2026-11-16, "look
+    // into agents being offline": Kit was started in ~/Friday/edge while Rio, made the lead since, held it, and was turned away as
+    // "already editing that folder"); else the lead; else the first to join.
+    const inRepo = (x: Teammate) => ((e) => !!e?.online && e.mode !== "plan" && !e.copyOf && !!e.cwd && path.resolve(e.cwd).toLowerCase().startsWith(path.resolve(top).toLowerCase()))(st?.engines[x.lane]);
+    const home = sharers.find((x) => x.id !== t.id && inRepo(x)) ?? sharers.find((x) => x.lane === st?.lead) ?? sharers[0]!;
+    if (home.id === t.id) return (copies.delete(t.id), null);
     const name = defaultFolder(t.name, "/").split("/").pop()!.toLowerCase().replace(/[^a-z0-9._-]+/g, "-") || "teammate";
     const copy = { repo, path: path.join(o.teammatesHome ?? osHome(), "Friday", "worktrees", `${path.basename(top)}-${name}-${t.id.slice(0, 4)}`), branch: `friday/team-${name}` };
     const there = (dir: string) => stat(path.join(dir, ".git")).then(() => true, () => false);
@@ -1944,8 +2052,20 @@ export async function createApp(o: AppOptions) {
   const startFailed = new Map<string, string>();
   const startTeammate = async (sid: string, owner: { id: string; name: string }, t: Teammate, more: Record<string, unknown> = {}, at?: { lane: string; keepAs: string }) => {
     const tool = t.tool === "friday" ? undefined : t.tool;
-    // In a coding session it works in that session's folder (crew-code.ts visitPlace), never a copy of its own project.
-    const copy = at?.keepAs.includes(".visit.") ? null : await copyFor((await teammates!.team()) ?? sid, t).catch(() => null);
+    // In a room, the folders the room adds for its crew mates, after its own (Room.folders).
+    const roomId = at && !at.keepAs.includes(".visit.") ? at.keepAs.split(".")[1] : undefined;
+    const room = roomId ? await teammates!.room(roomId).catch(() => null) : null;
+    const roomDirs = room?.folders ?? [];
+    // A thread for work handed on from a coding session (Room.work): in a copy of that session's folder of its own, made on its
+    // first start and kept after, as a crew mate brought into the session itself works (visitPlace), not its own project.
+    if (room?.work && !t.machine && !more.cwd) {
+      const had = (await store.state(sid).catch(() => null))?.engines[at!.lane];
+      more = { ...(had?.cwd && had.copyOf ? { cwd: had.cwd, copyOf: had.copyOf } : { cwd: room.work.cwd, worktree: "lane", copyName: t.name, ...(room.work.carry ? { carry: true } : {}) }), dirs: [...new Set([t.folder, ...roomDirs])], ...more };
+    }
+    // In a coding session, or a thread on one's work, it works in that session's folder, never a copy of its own project.
+    const copy = at?.keepAs.includes(".visit.") || more.cwd ? null : await copyFor((await teammates!.team()) ?? sid, t).catch(() => null);
+    const ownDirs = projectsOf(t).length ? [...projectsOf(t).slice(1), t.folder] : [];
+    const dirs = [...new Set([...ownDirs, ...roomDirs])].filter((d) => d !== (copy?.path ?? projectsOf(t)[0] ?? t.folder));
     const params = {
       sid,
       invite: signInvite(o.secret, sid, "owner"),
@@ -1961,7 +2081,7 @@ export async function createApp(o: AppOptions) {
       // Its conversation, kept whatever port the app opens on and whichever project it is pointed at (Runner keepAs); in a room,
       // the one it has there.
       keepAs: at?.keepAs ?? t.id,
-      ...(projectsOf(t).length ? { dirs: [...projectsOf(t).slice(1), t.folder] } : {}),
+      ...(dirs.length ? { dirs } : {}),
       // The model is its tool's to run; an own model is Friday Code's, asked for by the lane (laneOwn), never the runner's.
       ...(tool && t.model ? { model: t.model } : {}),
       // Always the account picked: never another one, whatever happens to this one (own-plan.ts).
@@ -1986,13 +2106,18 @@ export async function createApp(o: AppOptions) {
       teammateStarts.push(params);
       if (params.tool) return { lane: params.lane };
     }
+    // Only its own chat's start speaks for the crew mate as a whole: one place it couldn't start (a room, a thread, a coding session
+    // it was brought into) is said on that lane there, never as the crew mate offline everywhere (Arun, 2026-11-16: "look into agents
+    // being offline for some reasons too").
+    const own = !at || (at.lane === t.lane && !at.keepAs.includes("."));
     try {
       const started = (await callHost("start", params, hostCtx(owner))) as { lane: string };
-      startFailed.delete(t.id);
+      if (own) startFailed.delete(t.id);
       return started;
     } catch (e) {
       // Why it couldn't start, for its row (teammateViews): "Codex isn't signed in on this computer", not a bare Offline.
-      startFailed.set(t.id, (e as Error).message ?? "");
+      if (own) startFailed.set(t.id, (e as Error).message ?? "");
+      else console.error(`[teammates] ${t.name} didn't start in ${sid} (${at!.lane}): ${(e as Error).message}`);
       throw e;
     }
   };
@@ -2096,6 +2221,12 @@ export async function createApp(o: AppOptions) {
   let routineNow: (id: string, routine: string) => Promise<string | null> = async () => "Routines aren't on here.";
   /** Asks each teammate its check-ins that are due at `now` (a timer calls it; tests call it with a time). */
   let runCheckIns: (now?: Date) => Promise<void> = async () => {};
+  /** A go-ahead a crew mate is trusted with, answered yes as the person (trustAnswer, in the crew's setup). */
+  let trustAnswer: (sid: string, ev: SessionEvent) => Promise<void> = async () => {};
+  /** The watchdog's round (watchQuiet), for its timer and tests. */
+  let runQuiet: (now?: number) => Promise<void> = async () => {};
+  /** When the routines were last looked at (runCheckIns): a long gap since is this computer asleep. 0 until the first look. */
+  let lastLooked = 0;
   /** A teammate's effort on one of its lanes (its tool's level, or none for Auto): its record's, set as the lane's own. */
   // A coding tool's alone: Friday Code on an own model takes no level (a teammate's record never has one there).
   const setEffort = async (sid: string, owner: { id: string; name: string }, lane: string, t: Teammate) =>
@@ -2272,7 +2403,7 @@ export async function createApp(o: AppOptions) {
    * A new room: some of the team, picked, in a session of their own (teammates.ts Room), from the page or an agent's ask. The room
    * made, with what didn't work when someone didn't join (`failed`); or only what is wrong, with no room made.
    */
-  const makeRoom = async (owner: { id: string; name: string }, workspaceId: string, body: Record<string, unknown>, gate?: () => Promise<string | null>): Promise<{ room: Room; failed: string } | string> => {
+  const makeRoom = async (owner: { id: string; name: string }, workspaceId: string, body: Record<string, unknown>, gate?: () => Promise<string | null>, /** Set by the server only: a hand-off's thread (Room.work). */ work?: Room["work"]): Promise<{ room: Room; failed: string } | string> => {
     const list = await teammates!.list();
     // A crew mate's thread: a room of that one crew mate, named when the person first writes in it (teammates.ts Room.thread).
     const thread = typeof body.thread === "string" ? body.thread : "";
@@ -2294,7 +2425,7 @@ export async function createApp(o: AppOptions) {
       if (!thread && all.filter((x) => !x.thread).length >= MAX_ROOMS) return `A crew keeps up to ${MAX_ROOMS} rooms. Take one away first.`;
       const stop = await gate?.();
       if (stop) return stop;
-      const made: Room = { id: randomBytes(5).toString("hex"), name: c.name!, sid: randomBytes(6).toString("base64url"), lanes: {}, ...(c.purpose ? { purpose: c.purpose } : {}), ...(thread ? { thread } : {}), created: Date.now() };
+      const made: Room = { id: randomBytes(5).toString("hex"), name: c.name!, sid: randomBytes(6).toString("base64url"), lanes: {}, ...(c.purpose ? { purpose: c.purpose } : {}), ...(thread ? { thread } : {}), ...(thread && work ? { work } : {}), created: Date.now() };
       // Kept from the start and after each teammate joins: a join that fails leaves a room to fix, not a session nobody lists
       // with tools running in it.
       await store.create(made.sid, made.name, { id: owner.id, name: owner.name, role: "owner" }, { team: true, controlMode: "ask", mcp: true }, workspaceId);
@@ -2333,6 +2464,20 @@ export async function createApp(o: AppOptions) {
    * doesn't cut its work off (2026-10-28 audit: editing a teammate's role restarted it mid-turn everywhere). Where it waits for
    * that, by the room's name ("the Team room" for the team's).
    */
+  /** Each crew mate in a room started again there, on the room's folders as they are now; one at work, when its turn ends. */
+  const restartInRoom = async (r: Room, owner: { id: string; name: string }) => {
+    for (const [id, lane] of Object.entries(r.lanes)) {
+      const t = await teammates!.get(id);
+      if (!t) continue;
+      const st = await store.state(r.sid).catch(() => null);
+      if (st && (runOf(st, lane).status === "running" || runOf(st, lane).status === "waiting_for_human" || !!st.approvals[lane])) {
+        restartLater.set(`${r.sid} ${lane}`, t.id);
+        continue;
+      }
+      await stopOnMachine(r.sid, owner, lane).catch(() => {});
+      await startTeammate(r.sid, owner, t, {}, { lane, keepAs: roomKeep(t.id, r.id) }).catch((e: Error) => console.error(`[teammates] ${t.name} didn't start in ${r.name}: ${e.message}`));
+    }
+  };
   const restartEverywhere = async (team: string, owner: { id: string; name: string }, was: Teammate, now: Teammate): Promise<string[]> => {
     const later: string[] = [];
     const busy = async (sid: string, lane: string) => {
@@ -2395,6 +2540,18 @@ export async function createApp(o: AppOptions) {
     const ownerIn = (state: SessionState) => {
       const o = Object.entries(state.members).find(([, m]) => m.role === "owner");
       return o ? { id: o[0], name: o[1].name } : null;
+    };
+    trustAnswer = async (sid, ev) => {
+      if (ev.body.type !== "engine.approval" || !ev.body.guard || ev.body.guard === "takeover") return;
+      const lane = ev.lane ?? MAIN_LANE;
+      const place = await placeOf(sid, lane);
+      const t = place ? await teammates.get(place.id) : null;
+      if (!t?.trust?.includes(ev.body.guard)) return;
+      const state = await store.state(sid);
+      const owner = ownerIn(state);
+      if (!owner || state.approvals[lane]?.id !== ev.body.id) return;
+      await store.append(sid, FRIDAY, { type: "goahead.trusted", id: ev.body.id, tag: ev.body.guard, name: t.name }, { lane });
+      await core.handle(sid, owner, { type: "approval.answer", lane, id: ev.body.id, approve: true });
     };
     /** The teammate on a lane of a team session, and how its tool there keeps its conversation (the team's, or that room's). */
     const placeOf = async (sid: string, lane: string): Promise<{ id: string; keepAs?: string } | null> => {
@@ -2838,13 +2995,24 @@ export async function createApp(o: AppOptions) {
       store,
       crew: teammates,
       visitsIn: (sid) => visits.inSession(sid),
-      bringInto: (by, t, sid, carried) => visitInto(by, t, sid, { copy: true, carry: carried }),
+      handThread: async (by, t, sid, h) => {
+        const state = await store.state(sid).catch(() => null);
+        if (!state) throw Object.assign(new Error("That session isn't there any more."), { status: 404 });
+        // Where the session works: its own agents' folder (visitPlace), copied for the crew mate on its thread's first start.
+        const place = visitPlace(state, t, "", true, await visits.inSession(sid), h.carry) as { cwd?: string };
+        const made = await makeRoom(by, LOCAL_WORKSPACE.id, { thread: t.id, name: h.title.replace(/\s+/g, " ").trim().slice(0, 48) || "Handed work" }, undefined, place.cwd ? { cwd: place.cwd, from: sid, ...(h.carry ? { carry: true } : {}) } : undefined);
+        if (typeof made === "string") throw Object.assign(new Error(made), { status: made.includes("isn't in the crew") ? 404 : 409 });
+        const lane = made.room.lanes[t.id];
+        if (!lane) throw new Error(`${t.name} didn't start in its new thread.${made.failed ? ` ${made.failed}` : ""}`);
+        return { sid: made.room.sid, lane, thread: made.room.id, started: !made.failed, ...(made.failed ? { why: made.failed } : {}) };
+      },
       post: async (sid, by, text, lane) => {
         const r = await core.handle(sid, by, { type: "instruct", text, lane });
         if (!r.ok) throw new Error(r.error ?? "That didn't go.");
         return r.seq;
       },
       stop: async (sid, by, lane) => void (await core.handle(sid, by, { type: "run.pause", lane })),
+      withdraw: async (sid, by, seq, lane) => (await core.handle(sid, by, { type: "instruction.withdraw", seq, ...(lane !== MAIN_LANE ? { lane } : {}) })).ok,
       where: (t) => (t.machine && localLinks ? { connected: localLinks.connected(localLinks.current(t.machine)), label: "its computer" } : { connected: true, label: "your computer" }),
       invite: (sid) => signInvite(o.secret, sid, "owner"),
       log: (l) => console.log(`[crew-carry] ${l}`),
@@ -3320,7 +3488,15 @@ export async function createApp(o: AppOptions) {
                 // tools out in the night left the work where it stopped).
                 const st = await store.state(l.sid).catch(() => null);
                 const end = events.findLast((e) => (e.lane ?? MAIN_LANE) === l.lane && (e.body.type === "run.ended" || e.body.type === "run.started"));
-                if (st && end?.body.type === "run.ended" && end.body.outcome === "error" && limitHit(end.body.error, end.ts) && !pendingFor(st, l.lane).length) {
+                // Something queued behind it since: the turn that ran out goes back at the front of the queue, its own words, ahead
+                // of what came after it, rather than dropped (Arun, 2026-11-16: "it will work in order ... and nothing gets skipped").
+                if (st && end?.body.type === "run.ended" && end.body.outcome === "error" && limitHit(end.body.error, end.ts) && pendingFor(st, l.lane).length) {
+                  const start = events.findLast((e) => e.seq < end.seq && (e.lane ?? MAIN_LANE) === l.lane && e.body.type === "run.started");
+                  const given = events.filter((e) => e.seq > (start?.seq ?? end.seq) && e.seq < end.seq && (e.lane ?? MAIN_LANE) === l.lane && e.body.type === "instructions.delivered").flatMap((e) => (e.body.type === "instructions.delivered" ? e.body.seqs : []));
+                  const first = start?.body.type === "run.started" ? [start.body.causedBy] : [];
+                  const again = [...new Set([...first, ...given])].filter((q) => ((x) => x?.body.type === "instruction" && !x.body.approval && !x.body.keepGoing)(events.find((e) => e.seq === q)));
+                  if (again.length) await store.append(l.sid, FRIDAY_SAYS, { type: "instructions.requeued", seqs: again }, { lane: l.lane });
+                } else if (st && end?.body.type === "run.ended" && end.body.outcome === "error" && limitHit(end.body.error, end.ts) && !pendingFor(st, l.lane).length) {
                   // A resume set for its backup's reset is overtaken: it goes now.
                   if ((st.resumes[l.lane]?.at ?? 0) > Date.now()) await store.append(l.sid, FRIDAY_SAYS, { type: "resume.cancelled", why: "Back on its own tool." }, { lane: l.lane });
                   const start = events.findLast((e) => e.seq < end.seq && (e.lane ?? MAIN_LANE) === l.lane && e.body.type === "run.started");
@@ -3344,6 +3520,10 @@ export async function createApp(o: AppOptions) {
     );
     // Check-ins (teammates.ts CheckIn): each due one asked of its teammate in the Team room, once per slot.
     runCheckIns = async (now = new Date()) => {
+        // A gap since the routines were last looked at, longer than a few rounds of the timer: this computer slept through it.
+        const was = lastLooked;
+        lastLooked = now.getTime();
+        const slept = was && now.getTime() - was > 10 * 60_000 ? new Date(was) : null;
         const team = await teammates.team();
         if (!team) return;
         // The team paused: nobody is asked, and the slots wait for it to go on.
@@ -3373,25 +3553,31 @@ export async function createApp(o: AppOptions) {
           }
           // What is due is read and its slot written under the teammate's lock, from the record as it is then: a check-in is
           // asked once a slot however the clock ticks, and never of a teammate removed meanwhile.
-          let due: { c: CheckIn; slot: string }[] = [];
+          let due: { c: CheckIn; slot: string; missed?: Date }[] = [];
           const next = await teammates.update(t.id, (cur) => {
-            due = (cur.checkins ?? []).flatMap((c) => ((slot) => (slot && slot !== c.last ? [{ c, slot }] : []))(checkInDue(c, now)));
+            due = (cur.checkins ?? []).flatMap((c) => {
+              const slot = checkInDue(c, now);
+              if (slot && slot !== c.last) return [{ c, slot }];
+              // Missed while asleep: run now, and said so.
+              const m = slept ? missedSlot(c, slept, now) : null;
+              return m ? [{ c, slot: m.slot, missed: m.at }] : [];
+            });
             return due.length ? { ...cur, checkins: cur.checkins!.map((c) => ({ ...c, ...((d) => (d ? { last: d.slot } : {}))(due.find((x) => x.c.id === c.id)) })) } : null;
           });
           if (!next || !due.length || quietSince) continue;
           // As Friday, on the person's schedule, and a turn of its own: handed into a turn under way, its answer was never read as
           // the check-in's (teammate-checkins.ts quietCheckIns).
-          for (const { c } of due) await runRoutine(next, c).catch((e) => closingOr("[teammates] routine", e));
+          for (const { c, missed } of due) await runRoutine(next, c, missed ? { due: c.every === "hourly" || c.every === "every" ? clockIn(missed.getTime(), c.tz) : c.at, now: clockIn(now.getTime(), c.tz, now.getTime()) } : undefined).catch((e) => closingOr("[teammates] routine", e));
         }
     };
     /**
      * One run of a routine: asked of the crew mate as Friday, a turn of its own, in its main chat or, set so, in a new thread of
      * its own named for the routine and the day (teammates.ts Room.thread), so each run is a conversation to open by itself.
      */
-    const runRoutine = async (t: Teammate, c: CheckIn): Promise<string | null> => {
+    const runRoutine = async (t: Teammate, c: CheckIn, missed?: { due: string; now: string }): Promise<string | null> => {
       const team = await teammates.team();
       if (!team) return "There is no crew yet.";
-      if (c.where !== "thread") return (await tellTeammate(team, t.lane, checkInText(c), { ownTurn: true }), null);
+      if (c.where !== "thread") return (await tellTeammate(team, t.lane, checkInText(c, missed), { ownTurn: true }), null);
       const owner = ownerIn(await store.state(team));
       if (!owner) return "The crew has nobody to run it for.";
       const day = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" });
@@ -3399,7 +3585,7 @@ export async function createApp(o: AppOptions) {
       if (typeof made === "string") return made;
       const lane = made.room.lanes[t.id];
       if (!lane) return `${t.name} didn't start in its new thread.${made.failed ? ` ${made.failed}` : ""}`;
-      await tellTeammate(made.room.sid, lane, checkInText(c), { ownTurn: true });
+      await tellTeammate(made.room.sid, lane, checkInText(c, missed), { ownTurn: true });
       return null;
     };
     routineNow = async (id, routine) => {
@@ -3408,8 +3594,46 @@ export async function createApp(o: AppOptions) {
       if (!t || !c) return "That routine isn't there any more.";
       return runRoutine(t, { ...c, off: undefined });
     };
+    /**
+     * A crew mate stuck mid-turn (Arun, 2026-11-15, after other products' agents stuck "running" for good): nothing on its lane for
+     * MATE_QUIET_MS while its turn is under way, and not waiting on the person. Said once a quiet spell, in its chat, with Nudge and
+     * Restart; and asked once, as Friday, how it stands, unless it is waiting on a command it ran (a long build is work).
+     */
+    const MATE_QUIET_MS = 12 * 60_000;
+    const watchQuiet = async (now = Date.now()) => {
+      const team = await teammates.team();
+      if (!team) return;
+      const places = [{ sid: team, lanes: (await teammates.list()).map((t) => t.lane) }, ...(await teammates.rooms()).map((r) => ({ sid: r.sid, lanes: Object.values(r.lanes) }))];
+      for (const p of places) {
+        const state = await store.state(p.sid).catch(() => null);
+        if (!state) continue;
+        const running = p.lanes.filter((l) => state.laneRuns[l]?.status === "running" && !state.approvals[l]);
+        if (!running.length) continue;
+        const events = await store.events(p.sid);
+        for (const lane of running) {
+          // Its own last sign of life: not the watchdog's line, nor Friday's word asking how it stands.
+          const last = events.findLast((e) => (e.lane ?? MAIN_LANE) === lane && e.body.type !== "run.quiet" && !(e.body.type === "instruction" && e.actor.kind === "system"));
+          if (!last || now - last.ts < MATE_QUIET_MS) continue;
+          if (!(await redis.set(`${o.prefix}quiet:${p.sid}:${lane}:${last.seq}`, "1", "EX", 86_400, "NX"))) continue;
+          // Waiting on a command it ran, its answer not back yet.
+          const results = new Set(events.filter((e) => (e.lane ?? MAIN_LANE) === lane && e.body.type === "tool.result").map((e) => (e.body as { callId: string }).callId));
+          const asked = events.findLast((e) => (e.lane ?? MAIN_LANE) === lane && e.body.type === "agent.message" && e.body.toolCalls.some((c) => !results.has(c.id)));
+          const open = asked?.body.type === "agent.message" ? asked.body.toolCalls.find((c) => !results.has(c.id) && (c.name === "shell" || c.name === "run_command")) : undefined;
+          let command = "";
+          try {
+            command = open ? String((JSON.parse(open.arguments || "{}") as { command?: unknown }).command ?? "").slice(0, 160) : "";
+          } catch {
+            command = "";
+          }
+          await store.append(p.sid, FRIDAY, { type: "run.quiet", since: last.ts, ...(command ? { command } : { nudged: true }) }, { lane });
+          if (!command) await tellTeammate(p.sid, lane, `[Friday] Nothing has happened on your turn for ${Math.round((now - last.ts) / 60_000)} minutes. If you are stuck or waiting on something, say what in one line; otherwise carry on.`);
+        }
+      }
+    };
+    runQuiet = watchQuiet;
     let checking = false;
     teamTimers.push(
+      setInterval(() => void watchQuiet().catch((e) => closingOr("[teammates] watchdog", e)), 60_000),
       setInterval(() => {
         // One round at a time: a slow one isn't run again over itself.
         if (checking) return;
@@ -3486,8 +3710,12 @@ export async function createApp(o: AppOptions) {
       if (!r || !t) return null;
       const others = Object.keys(r.lanes).filter((x) => x !== t.id).flatMap((x) => list.find((y) => y.id === x)?.name ?? []);
       const m = await memoryAsOf(sid, lane, t);
-      const note = teammateNote(t, list, { name: (await store.state(sid).catch(() => null))?.title || r.name, with: others, ...(r.purpose ? { purpose: r.purpose } : {}), ...(team ? { team } : {}), ...(r.thread ? { thread: true } : {}) }, m.memory, copies.get(t.id));
-      return { t, note, preamble: [{ key: "elsewhere", text: await elsewhereBrief(t, sid) }, ...memoryPart(m, t), { key: "back", text: (await backBrief(sid, lane)).trim() }, ...(await awayPart(sid, lane))] };
+      const note = teammateNote(t, list, { name: (await store.state(sid).catch(() => null))?.title || r.name, with: others, ...(r.purpose ? { purpose: r.purpose } : {}), ...(r.folders?.length ? { folders: r.folders } : {}), ...(team ? { team } : {}), ...(r.thread ? { thread: true } : {}) }, m.memory, copies.get(t.id));
+      // Every room, so a crew mate in one reaches the others (Arun, 2026-11-15: "ensure we have cross rooms and stuff communication"):
+      // with the turn, when they change, as the Crew room's teammates have them.
+      const rooms = await roomsBrief(list);
+      const crewRoom = team && team !== sid ? `\n- The Crew room (session ${team}): the whole crew.` : "";
+      return { t, note, preamble: [{ key: "rooms", text: rooms ? `[Friday] ${rooms}${crewRoom}` : "" }, { key: "elsewhere", text: await elsewhereBrief(t, sid) }, ...memoryPart(m, t), { key: "back", text: (await backBrief(sid, lane)).trim() }, ...(await awayPart(sid, lane))] };
     };
     hub.teammate = async (sid, lane) => {
       const on = await noteOn(sid, lane);
@@ -3722,7 +3950,10 @@ export async function createApp(o: AppOptions) {
           startedBy.set(key, { n: n + 1, at: now });
           const giveBack = () => startedBy.set(key, { n, at: now });
           const tool = (ENGINE_TOOLS as string[]).includes(arg("tool").toLowerCase()) ? (arg("tool").toLowerCase() as EngineTool) : (here.engines[lane]?.tool ?? "claude");
-          const folder = arg("folder");
+          // A Code session with no folder named works in the asking agent's own project (Arun, 2026-11-16, "Also work on 8": a thread
+          // an agent opens is the project's next thread), not a new empty folder; a Work session keeps its own.
+          const engineHere = here.engines[lane];
+          const folder = arg("folder") || (arg("kind") !== "work" ? (engineHere?.copyOf || engineHere?.cwd || "") : "");
           if (folder && !(await stat(folder).then((x) => x.isDirectory(), () => false))) return (giveBack(), { output: `There's no folder at ${folder} on this computer.`, isError: true });
           if (!(await startsLeft(me.id))) return (giveBack(), { output: `Agents have started ${AGENT_STARTS_PER_HOUR} sessions or runs for the person in the last hour. Say what else you'd start in your reply, and let them decide.`, isError: true });
           // A repo gets a copy of its own (a git worktree), as an automation does: two tools in one checkout lose each other's work.
@@ -3736,6 +3967,8 @@ export async function createApp(o: AppOptions) {
           const from: PeerNote = { fromSid: sid, fromTitle: here.title, fromLane: lane, fromName: asker, by: me };
           await store.append(newSid, { id: "agent", name: asker, kind: "agent" }, { type: "instruction", text: `${task}\n\n(Started by ${asker} from "${here.title}". When you're done or stuck, tell it with message_session, to "${sid}" and agent "${asker}".)`, interrupt: false, peer: from });
           void bus.wake(newSid, MAIN_LANE);
+          // Said in the session it came from: a line there to open it, and the thread filed with the project's others (ThreadCard).
+          await store.append(sid, { id: "agent", name: asker, kind: "agent" }, { type: "thread.started", sid: newSid, title, tool, invite: signInvite(o.secret, newSid, "owner"), fromName: asker }, { lane });
           try {
             await startTool(newSid, me, { tool, cwd: folder, mode: askerMode, copy: repo, project: title });
           } catch (e) {
@@ -4860,6 +5093,34 @@ export async function createApp(o: AppOptions) {
         if (!found) return json(res, 404, { error: "There's no Deep Dive of that repo." });
         const d = await settled(found);
         if (req.method === "GET" && url.pathname === "/api/deepdive/repo") return json(res, 200, { dive: d, pages: await dives.pages(key), asks: await dives.asks(key) });
+        // Which pages may be out of date (Arun, 2026-11-16, "Do 4"): their files changed since each was written. No model.
+        if (req.method === "GET" && url.pathname === "/api/deepdive/stale") {
+          if (d.status !== "ready") return json(res, 200, { stale: [] });
+          const host = diveHost(ctx.me.id);
+          const pages = (await dives.pages(key)).filter((p) => p.status === "done");
+          const bySince = new Map<string, Promise<DiveChanges & { head: string }>>();
+          const changes = (since: string) => bySince.get(since) ?? (bySince.set(since, host("dive.changed", { path: d.folder, since }, 30_000) as Promise<DiveChanges & { head: string }>), bySince.get(since)!);
+          const stale: string[] = [];
+          for (const p of pages) if (pageStale(p, await changes(p.head ?? d.head))) stale.push(p.id);
+          return json(res, 200, { stale });
+        }
+        // One page written again, as the build writes it, at the commit the folder is on now.
+        if (req.method === "POST" && url.pathname === "/api/deepdive/refresh") {
+          const b = await readJson(req);
+          const id = str(b.id, 80);
+          const pages = await dives.pages(key);
+          const page = pages.find((p) => p.id === id);
+          if (!page) return json(res, 404, { error: "That page isn't in this Deep Dive." });
+          if (page.status === "writing") return json(res, 409, { error: "That page is being written already." });
+          const host = diveHost(ctx.me.id);
+          const now = (await host("dive.changed", { path: d.folder, since: d.head }, 30_000)) as { head: string };
+          await dives.savePage(key, { ...page, status: "writing", at: Date.now() });
+          void writePage(host, d, page, pages, d.name).then(
+            (w) => dives.savePage(key, { ...page, ...w, status: "done", at: Date.now(), ...(now.head ? { head: now.head } : {}) }),
+            (e: Error) => dives.savePage(key, { ...page, status: page.body ? "done" : "failed", at: page.at, error: e.message.slice(0, 300) }),
+          );
+          return json(res, 202, { ok: true });
+        }
         if (req.method === "DELETE" && url.pathname === "/api/deepdive/repo") {
           await dives.remove(key);
           return json(res, 200, { ok: true });
@@ -5080,8 +5341,17 @@ export async function createApp(o: AppOptions) {
       const events = await store.events(sid);
       const commit = events.findLast((e) => e.body.type === "folder.committed" && !e.body.error && !!e.body.prUrl);
       if (!commit || commit.body.type !== "folder.committed" || !commit.body.prUrl) return json(res, 200, { pr: null });
-      const status = await prStatusSoon(sid, commit.lane ?? MAIN_LANE, (await store.state(sid)).workspaceId ?? "", commit.body.prUrl);
-      return json(res, 200, { pr: { url: commit.body.prUrl, at: commit.ts, status } });
+      const prLane = commit.lane ?? MAIN_LANE;
+      const status = await prStatusSoon(sid, prLane, (await store.state(sid)).workspaceId ?? "", commit.body.prUrl);
+      // The side panel's Pull request (PrPanel.tsx) asks for the checks too: which failed, with their links, and how many still run.
+      let checks: { failures: { name: string; workflow?: string; link?: string; outcome?: string }[]; pending: number } | { error: string } | undefined;
+      if (url.searchParams.get("checks") === "1" && status && status.state === "open" && status.checks !== "none") {
+        const r = await Promise.race([openFolder(sid, { op: "prchecks", query: commit.body.prUrl }, prLane).catch(() => null), new Promise<null>((done) => setTimeout(() => done(null), 20_000).unref?.())]);
+        const got = r ? (asJson(r.output) as { failures?: CheckFailure[]; pending?: number; error?: string } | null) : null;
+        if (got?.error) checks = { error: got.error };
+        else if (got) checks = { failures: (got.failures ?? []).map((f) => ({ name: f.name, ...(f.workflow ? { workflow: f.workflow } : {}), ...(f.link ? { link: f.link } : {}), ...(f.outcome ? { outcome: f.outcome } : {}) })), pending: got.pending ?? 0 };
+      }
+      return json(res, 200, { pr: { url: commit.body.prUrl, at: commit.ts, lane: prLane, status, ...(checks ? { checks } : {}) } });
     }
 
     // The daily brief: on demand, the latest scheduled one, and its times (daily-brief.ts).
@@ -5645,6 +5915,84 @@ export async function createApp(o: AppOptions) {
           await runAway();
           return team();
         }
+        // What a crew mate (everywhere it works), a room or the Crew room spent: every token by kind, by model, by day and by run,
+        // priced at list price (spend.ts). ?mate=<id> | ?room=<id> | ?crew=1, &days=1|7|30, &tz=<zone>.
+        if (url.pathname === "/api/teammates/spend" && req.method === "GET") {
+          const days = Math.min(90, Math.max(1, Number(url.searchParams.get("days")) || 7));
+          const tz = str(url.searchParams.get("tz") ?? "", 60) || undefined;
+          const mateId = url.searchParams.get("mate");
+          const roomId = url.searchParams.get("room");
+          const list = await teammates.list();
+          const rooms = await teammates.rooms();
+          const at: { sid: string; lanes: string[] }[] = [];
+          if (mateId) {
+            const m = list.find((x) => x.id === mateId);
+            if (!m) return json(res, 404, { error: "That crew mate isn't in your crew any more." });
+            at.push({ sid, lanes: [m.lane] });
+            for (const r of rooms) if (r.lanes[m.id]) at.push({ sid: r.sid, lanes: [r.lanes[m.id]!] });
+            for (const v of await visits.ofMate(m.id)) at.push({ sid: v.sid, lanes: [v.lane] });
+          } else if (roomId) {
+            const r = rooms.find((x) => x.id === roomId);
+            if (!r) return json(res, 404, { error: "That room isn't there any more." });
+            at.push({ sid: r.sid, lanes: Object.values(r.lanes) });
+          } else at.push({ sid, lanes: list.map((x) => x.lane) });
+          const places = await Promise.all(
+            at.map(async (p) => {
+              const st = await store.state(p.sid).catch(() => null);
+              return { ...p, events: await store.events(p.sid).catch(() => [] as SessionEvent[]), engines: Object.fromEntries(Object.entries(st?.engines ?? {}).map(([l, e]) => [l, { ...(e.tool ? { tool: e.tool } : {}), ...(e.model ? { model: e.model } : {}) }])) };
+            }),
+          );
+          // From the start of the day `days - 1` days ago, in the person's zone (near enough: a day of 24 hours back from now).
+          const from = Date.now() - days * 86_400_000;
+          const spent = spendOf(places, from, tz);
+          // Who each lane is, and what each place is called, for the page.
+          const names = Object.fromEntries([...list.map((x) => [x.lane, x.name]), ...rooms.flatMap((r) => Object.entries(r.lanes).map(([id, l]) => [l, list.find((x) => x.id === id)?.name ?? "A crew mate"]))]);
+          const placeNames = Object.fromEntries([[sid, "Crew room"], ...rooms.map((r) => [r.sid, r.thread ? `${list.find((x) => x.id === r.thread)?.name ?? "A crew mate"}'s thread` : r.name])]);
+          return json(res, 200, { days, ...spent, names, places: placeNames, runs: spent.runs.slice(0, 200) });
+        }
+        // A crew mate's decision log (Arun, 2026-11-15: "Add a decision log"): every go-ahead it asked, everywhere it works, and what
+        // came of it: allowed, denied, allowed on its own (trusted), or still waiting. ?mate=<id>&days=N.
+        if (url.pathname === "/api/teammates/decisions" && req.method === "GET") {
+          const days = Math.min(90, Math.max(1, Number(url.searchParams.get("days")) || 30));
+          const m = (await teammates.list()).find((x) => x.id === url.searchParams.get("mate"));
+          if (!m) return json(res, 404, { error: "That crew mate isn't in your crew any more." });
+          const rooms = await teammates.rooms();
+          const at: { sid: string; lane: string; place: string }[] = [{ sid, lane: m.lane, place: "Its chat" }];
+          for (const r of rooms) if (r.lanes[m.id]) at.push({ sid: r.sid, lane: r.lanes[m.id]!, place: r.thread ? "A thread" : r.name });
+          for (const v of await visits.ofMate(m.id)) at.push({ sid: v.sid, lane: v.lane, place: "A coding session" });
+          const from = Date.now() - days * 86_400_000;
+          const out: { sid: string; place: string; ts: number; tag: string; items: string[]; why: string; answer: "allowed" | "denied" | "trusted" | "waiting" | "unanswered"; by?: string }[] = [];
+          for (const p of at) {
+            const [events, state] = await Promise.all([store.events(p.sid).catch(() => [] as SessionEvent[]), store.state(p.sid).catch(() => null)]);
+            for (const e of events) {
+              if (e.ts < from || (e.lane ?? MAIN_LANE) !== p.lane || e.body.type !== "engine.approval" || !e.body.guard) continue;
+              const id = e.body.id;
+              const trusted = events.some((x) => x.body.type === "goahead.trusted" && x.body.id === id);
+              const said = events.find((x) => x.seq > e.seq && x.body.type === "instruction" && x.body.approval?.id === id);
+              const answer = trusted ? "trusted" : said && said.body.type === "instruction" ? (said.body.approval!.approve ? "allowed" : "denied") : state?.approvals[p.lane]?.id === id ? "waiting" : "unanswered";
+              out.push({ sid: p.sid, place: p.place, ts: e.ts, tag: e.body.guard, items: e.body.items.slice(0, 4), why: (e.body.why ?? "").replace(/^[^:]+:\s*/, "").slice(0, 200), answer, ...(said && !trusted ? { by: said.actor.name } : {}) });
+            }
+          }
+          return json(res, 200, { trust: m.trust ?? [], decisions: out.sort((a, b) => b.ts - a.ts).slice(0, 300) });
+        }
+        // A room's work, whole, as a brief to carry on with elsewhere (room-brief.ts). ?room=<id>, or ?crew=1 for the Crew room.
+        if (url.pathname === "/api/teammates/brief" && req.method === "GET") {
+          const list = await teammates.list();
+          const r = url.searchParams.get("crew") ? null : (await teammates.rooms()).find((x) => x.id === url.searchParams.get("room"));
+          if (!r && !url.searchParams.get("crew")) return json(res, 404, { error: "That room isn't there any more." });
+          const at = r ? r.sid : sid;
+          const [state, events, runs] = await Promise.all([store.state(at), store.events(at), teammates.selfRuns()]);
+          const lanes = r ? Object.entries(r.lanes).map(([id, lane]) => ({ id, lane })) : list.map((t) => ({ id: t.id, lane: t.lane }));
+          const brief = roomBrief({
+            name: r ? state.title || r.name : "Crew room",
+            ...(r?.purpose ? { purpose: r.purpose } : {}),
+            ...(runs[at]?.goal ? { goal: runs[at]!.goal } : {}),
+            members: lanes.map((x) => ({ name: list.find((t) => t.id === x.id)?.name ?? "A crew mate", lane: x.lane, lead: state.lead === x.lane })),
+            state,
+            events,
+          });
+          return json(res, 200, { brief });
+        }
         // Rooms: some of the team, picked, in a session of their own (teammates.ts Room).
         const roomPath = url.pathname.match(/^\/api\/teammates\/rooms(?:\/([\w-]{4,40}))?$/);
         if (roomPath) {
@@ -5658,10 +6006,14 @@ export async function createApp(o: AppOptions) {
           if (!roomPath[1] || (req.method !== "PATCH" && req.method !== "DELETE")) return json(res, 405, { error: "Not allowed" });
           const body = req.method === "PATCH" ? await readJson(req) : {};
           // One change to a room at a time, from what is stored now: two at once each added the same teammate.
+          let refolded = false;
           const said = await teammates.locked(`room:${roomPath[1]}`, async (): Promise<string | null> => {
             const r = await teammates.room(roomPath[1]!);
             if (!r) return "That room isn't there any more.";
             if (req.method === "DELETE") {
+              // Its hand-offs' lines first, while it is still there to say so: a thread's (its crew mate's work handed from a
+              // coding session), or a room's (crew-carry.ts gone).
+              await (r.thread ? carry?.gone({ mate: r.thread, thread: r.id }) : carry?.gone({ room: r.id, sid: r.sid }))?.catch((e) => closingOr("[crew-carry] gone", e));
               for (const id of Object.keys(r.lanes)) await leaveRoom(r, owner, id);
               await teammates.removeRoom(r);
               return null;
@@ -5673,6 +6025,14 @@ export async function createApp(o: AppOptions) {
               r.name = c.name;
             }
             if (c.purpose !== undefined) r.purpose = c.purpose || undefined;
+            // Its own folders for the crew mates in it: each one there, and each one's tool started again on them (as for a crew
+            // mate's own folders, restartEverywhere), one at work when its turn ends.
+            if (c.folders && c.folders.join("\n") !== (r.folders ?? []).join("\n")) {
+              const missing = await missingDirOf(c.folders.filter((d) => !(r.folders ?? []).includes(d)));
+              if (missing) return `There's no folder at ${missing}.`;
+              r.folders = c.folders.length ? c.folders : undefined;
+              refolded = true;
+            }
             try {
               // A thread is its crew mate's alone: nobody joins it or leaves it.
               if (c.members && !r.thread) {
@@ -5692,6 +6052,10 @@ export async function createApp(o: AppOptions) {
             await leadRoom(r, owner);
             return null;
           });
+          if (!said && refolded) {
+            const r = await teammates.room(roomPath[1]!);
+            if (r) void restartInRoom(r, owner).catch((e: Error) => console.error(`[teammates] ${r.name}'s folders: ${e.message}`));
+          }
           return said ? json(res, said.startsWith("That room") ? 404 : 400, { error: said }) : team();
         }
         const one = url.pathname.match(/^\/api\/teammates\/([\w-]{4,40})(\/reconnect|\/stop|\/lead|\/memory|\/activity|\/visit|\/remember|\/switch|\/routine)?$/);
@@ -5828,7 +6192,7 @@ export async function createApp(o: AppOptions) {
             // An account is its tool's: a new tool drops the old one's, unless the edit names one (2026-10-28 audit: Codex started
             // as Claude's account). Back on its own tool, the account it had there.
             const model = c.model ?? back?.fromModel, account = back ? (c.account ?? back.fromAccount) : c.tool !== t2.tool && !("account" in body) ? undefined : c.account, effort = c.effort ?? (back && !("effort" in body) ? back.fromEffort : undefined);
-            const next: Teammate = { ...t2, ...budgetPatch(body), ...("machine" in c ? { machine: c.machine } : {}), name: c.name, role: c.role, tool: c.tool, model, account, ...(c.mode ? { mode: c.mode === "full" ? undefined : c.mode } : {}), ...(c.look ? { look: c.look } : {}), ...(c.projects ? { projects: c.projects, project: undefined } : {}), ...("effort" in body || c.tool !== t2.tool ? { effort } : {}), ...("backup" in body ? { backup } : {}), ...("backups" in body ? { backups: cleanBackups(body.backups, own) } : {}), ...("onLimit" in body ? { onLimit: body.onLimit === "ask" ? ("ask" as const) : undefined } : {}), ...(c.tool !== t2.tool ? { switchAsk: undefined } : {}), ...(c.checkins ? { checkins: c.checkins.map((x) => ({ ...x, ...(t2.checkins?.find((y) => y.id === x.id)?.last ? { last: t2.checkins.find((y) => y.id === x.id)!.last } : {}) })) } : {}), ...(c.tool !== t2.tool ? { switched: undefined } : {}), ...(body.keep === true ? { madeBy: undefined } : {}) };
+            const next: Teammate = { ...t2, ...budgetPatch(body), ...("machine" in c ? { machine: c.machine } : {}), name: c.name, role: c.role, tool: c.tool, model, account, ...(c.mode ? { mode: c.mode === "full" ? undefined : c.mode } : {}), ...(c.look ? { look: c.look } : {}), ...(c.projects ? { projects: c.projects, project: undefined } : {}), ...("effort" in body || c.tool !== t2.tool ? { effort } : {}), ...("backup" in body ? { backup } : {}), ...("backups" in body ? { backups: cleanBackups(body.backups, own) } : {}), ...("onLimit" in body ? { onLimit: body.onLimit === "ask" ? ("ask" as const) : undefined } : {}), ...("trust" in body ? { trust: cleanTrust(body.trust) } : {}), ...(c.tool !== t2.tool ? { switchAsk: undefined } : {}), ...(c.checkins ? { checkins: c.checkins.map((x) => ({ ...x, ...(t2.checkins?.find((y) => y.id === x.id)?.last ? { last: t2.checkins.find((y) => y.id === x.id)!.last } : {}) })) } : {}), ...(c.tool !== t2.tool ? { switched: undefined } : {}), ...(body.keep === true ? { madeBy: undefined } : {}) };
             // Folders on another computer of yours are that computer's to have: not looked for here.
             const missing = next.machine ? null : await missingDirOf(c.projects?.filter((d) => !projectsOf(t2).includes(d)));
             if (missing) return `There's no folder at ${missing} on this computer.`;
@@ -5873,6 +6237,8 @@ export async function createApp(o: AppOptions) {
             return led;
           });
           if (led === null) return team();
+          // Its hand-offs leave the sessions that handed them (crew-carry.ts gone): it and its threads aren't there to open.
+          await carry?.gone({ mate: t.id }).catch((e) => closingOr("[crew-carry] gone", e));
           // Out of every room it was in, each under that room's lock and as it is stored then; a room it was the last one in is
           // kept, empty, for the person to fill or take away.
           for (const r of await teammates.rooms()) {
@@ -6000,6 +6366,26 @@ export async function createApp(o: AppOptions) {
         return json(res, 409, { error: got.error ?? "That agent's computer didn't answer.", ...(/middle of a turn/.test(got.error ?? "") ? { busy: true } : {}) });
       }
       return json(res, 200, { tool: got.tool, cwd: got.cwd, line: got.line });
+    }
+    // The files a crew mate named in its message, found in the crew's folders on this computer, with their size and when they last
+    // changed: its message shows those it made in its turn as files, however it wrote them (a command, a patch), not only those
+    // its folder's diff or a write step caught (Arun, 2026-11-15: a post Juno drafted with commands showed no file).
+    const namedRoute = url.pathname.match(/^\/api\/sessions\/([\w-]+)\/crew-files$/);
+    if (req.method === "GET" && namedRoute && o.local) {
+      const sid = namedRoute[1]!;
+      const inv = verifyInvite(o.secret, url.searchParams.get("invite"));
+      if (!inv || inv.sid !== sid) return json(res, 403, { error: "Invalid invite for this session" });
+      if (!(await memberOnly(req, res, sid))) return;
+      const lane = str(url.searchParams.get("lane") ?? "", 40) || undefined;
+      const asked = url.searchParams.getAll("path").map((p) => str(p, 400)).filter(Boolean).slice(0, 12);
+      const roots = await crewRoots(sid, lane);
+      const files = [];
+      for (const p of asked) {
+        const at = await crewFileAt(roots, p, (x) => stat(x).then((s) => s.isFile(), () => false));
+        const s = at ? await stat(path.join(at.root, at.rel)).catch(() => null) : null;
+        if (at && s) files.push({ asked: p, path: path.join(at.root, at.rel), size: s.size, changed: Math.round(s.mtimeMs) });
+      }
+      return json(res, 200, { files });
     }
     const repoRoute = url.pathname.match(/^\/api\/sessions\/([\w-]+)\/repo$/);
     if (req.method === "GET" && repoRoute) {
@@ -7060,7 +7446,7 @@ export async function createApp(o: AppOptions) {
     resumes: { tick: tickResumes },
     boards: { tick: tickBoards },
     mesh,
-    teammates: { starts: teammateStarts, dry: teammateDry, checkIns: (now: Date) => runCheckIns(now), back: () => runBack(), away: (now?: number) => runAway(now), awake: () => awake(), note: async (sid: string, lane: string) => ((n) => (n ? [n.note, ...n.preamble.map((p) => p.text).filter(Boolean)].join("\n\n") : null))(await (hub.teammate?.(sid, lane) ?? Promise.resolve(null))) },
+    teammates: { starts: teammateStarts, dry: teammateDry, rooms: async () => (await teammates?.rooms()) ?? [], checkIns: (now: Date) => runCheckIns(now), quiet: (now?: number) => runQuiet(now), back: () => runBack(), away: (now?: number) => runAway(now), awake: () => awake(), note: async (sid: string, lane: string) => ((n) => (n ? [n.note, ...n.preamble.map((p) => p.text).filter(Boolean)].join("\n\n") : null))(await (hub.teammate?.(sid, lane) ?? Promise.resolve(null))) },
     workflows: { tick: (now?: Date) => workflows?.tick(now) ?? Promise.resolve([]), engine: () => workflows },
     briefs: { tick: (now?: number) => briefs.tick(now) },
     async close() {

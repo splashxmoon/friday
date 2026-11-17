@@ -192,3 +192,28 @@ export async function citedLines(root: string, file: string, start: number, end 
   const hi = Math.min(all.length, Math.max(start, end) + around, lo + 400);
   return { file: slash(file), from: lo, lines: all.slice(lo - 1, hi), total: all.length };
 }
+
+/**
+ * What changed in a repo since a Deep Dive's page was written (Arun, 2026-11-16, "Do 4": pages that know they are out of date):
+ * the files commits since `since` touched, and the files changed in the folder now with when each was last written, so a page
+ * refreshed after an edit isn't still called out of date for it. No model, a couple of git calls.
+ */
+export async function changedSince(root: string, since: string): Promise<{ head: string; committed: string[]; dirty: { path: string; mtime: number }[] }> {
+  const base = path.resolve(root);
+  const head = (await run(base, ["rev-parse", "HEAD"])).trim();
+  const ok = /^[0-9a-f]{7,40}$/i.test(since);
+  const committed = ok && head && since !== head ? (await run(base, ["diff", "--name-only", "-z", `${since}..${head}`])).split("\0").filter(Boolean).map(slash) : [];
+  const status = (await run(base, ["status", "--porcelain=v1", "-z", "--untracked-files=normal"])).split("\0").filter(Boolean);
+  const dirty: { path: string; mtime: number }[] = [];
+  for (let i = 0; i < status.length && dirty.length < 2000; i++) {
+    const row = status[i]!;
+    const code = row.slice(0, 2);
+    const rel = slash(row.slice(3));
+    // A rename's old name follows as its own entry: skipped.
+    if (code[0] === "R" || code[0] === "C") i++;
+    if (skipped(rel)) continue;
+    const s = await stat(path.join(base, rel)).catch(() => null);
+    dirty.push({ path: rel, mtime: s ? s.mtimeMs : Date.now() });
+  }
+  return { head, committed, dirty };
+}

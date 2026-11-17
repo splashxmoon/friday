@@ -8,6 +8,8 @@ import type { EngineMode } from "../types.js";
 export const MODE_KEY = "friday.newSession.mode";
 /** How the choice is named on the button and in the list. */
 export const MODE_NAME: Record<EngineMode, string> = { plan: "Read only", edits: "Edits", full: "Full access" };
+/** Each permission's mark: reading only, editing, and full access a shield (Code.tsx, Activity.tsx ReachPill). */
+export const MODE_ICON: Record<EngineMode, "eye" | "pencil" | "shield"> = { plan: "eye", edits: "pencil", full: "shield" };
 export const MODE_BLURB: Record<EngineMode, string> = {
   plan: "Reads and proposes, and asks before it runs a command. Changes nothing.",
   edits: "Edits files, and asks before it runs a command.",

@@ -5,6 +5,7 @@ import { mkdir } from "node:fs/promises";
 import { CUT_OFF_CHECK } from "./handoff.js";
 import { homedir } from "node:os";
 import path from "node:path";
+import type { GoAhead } from "./guardrails.js";
 import type { Redis } from "ioredis";
 import { isOwnModel, ownModelParts } from "./own-model-id.js";
 import { cleanCheckIn, MAX_CHECKINS, type CheckIn } from "./teammate-checkins.js";
@@ -91,6 +92,11 @@ export interface Teammate {
    */
   mode?: EngineMode;
   /**
+   * The go-aheads it may take on its own (Arun, 2026-11-15: "Trust that grows"): asked of it no more, Friday answering yes as the
+   * person and leaving a receipt (app.ts trustAnswer). Given after a run of yeses, from its card, and taken back in its Decisions.
+   */
+  trust?: GoAhead[];
+  /**
    * The agent that added it (manage_teammate create), when one did: the person keeps it or removes it (teammate.proposed), and it
    * works meanwhile. Cleared once they keep it.
    */
@@ -176,6 +182,12 @@ export interface Room {
   lanes: Record<string, string>;
   /** What it is for, in the person's words: told to its teammates with every turn there. */
   purpose?: string;
+  /**
+   * Folders every crew mate in it may work in here, on top of those from its own page, which it brings with it (Arun, 2026-11-15:
+   * "be able to add and remove folders the agents can work in ... but by default they will carry over the folders they work in
+   * from their own individual pages"). Whole paths on this computer.
+   */
+  folders?: string[];
   created: number;
   /** Who made it, on the hosted service: its rooms are capped per person (crew-room-cap.ts). */
   by?: string;
@@ -185,6 +197,12 @@ export interface Room {
    * conversation with its tool (roomKeep), and listed in that crew mate's chat rather than with the rooms.
    */
   thread?: string;
+  /**
+   * A thread made for work handed on from a coding session ("Keep this going", crew-carry.ts): its crew mate works in a copy of that
+   * session's folder of its own (`cwd`, copied on its first start, what is uncommitted carried in with `carry`), not its own
+   * project, and keeps that copy when it starts again. `from` is the coding session.
+   */
+  work?: { cwd: string; carry?: boolean; from: string };
 }
 
 /** What a new thread is called until the person's first message names it (team-views.ts). */
@@ -199,7 +217,17 @@ export const MAX_ROOMS = 20;
 export const roomKeep = (teammateId: string, roomId: string) => `${teammateId}.${roomId}`;
 
 /** A room's details as sent by the page, checked; throws with what is wrong. */
-export function cleanRoom(body: Record<string, unknown>, known: readonly string[]): { name?: string; members?: string[]; purpose?: string } {
+/** A crew mate's trust as the page sends it: go-aheads only, once each, never a sign-in (that is a hand-off, not a yes). */
+export function cleanTrust(v: unknown): GoAhead[] | undefined {
+  const all: GoAhead[] = ["outside", "ship", "delete", "money", "keys", "computer"];
+  const t = Array.isArray(v) ? [...new Set(v.filter((x): x is GoAhead => typeof x === "string" && (all as string[]).includes(x)))] : [];
+  return t.length ? t : undefined;
+}
+
+/** How many folders a room adds for its crew mates. */
+export const MAX_ROOM_FOLDERS = 12;
+
+export function cleanRoom(body: Record<string, unknown>, known: readonly string[]): { name?: string; members?: string[]; purpose?: string; folders?: string[] } {
   const name = typeof body.name === "string" ? body.name.trim().slice(0, 60) : undefined;
   if (name !== undefined && !name) throw new Error("Give the room a name.");
   const members = Array.isArray(body.members) ? [...new Set(body.members.filter((m): m is string => typeof m === "string"))] : undefined;
@@ -207,7 +235,14 @@ export function cleanRoom(body: Record<string, unknown>, known: readonly string[
   if (members && members.length > MAX_TEAMMATES) throw new Error(`A room has up to ${MAX_TEAMMATES} crew mates.`);
   if (members?.some((m) => !known.includes(m))) throw new Error("One of those isn't in your crew any more.");
   const purpose = typeof body.purpose === "string" ? body.purpose.trim().slice(0, 2000) : undefined;
-  return { ...(name !== undefined ? { name } : {}), ...(members ? { members } : {}), ...(purpose !== undefined ? { purpose } : {}) };
+  let folders: string[] | undefined;
+  if (body.folders !== undefined) {
+    if (!Array.isArray(body.folders)) throw new Error("Folders are a list of folders.");
+    folders = [...new Set(body.folders.filter((f): f is string => typeof f === "string").map((f) => f.trim().replace(/^~(?=$|[\\/])/, homedir()).replace(/[\\/]+$/, "")).filter(Boolean))];
+    if (folders.some((f) => !path.isAbsolute(f) || f.split(/[\\/]/).includes(".."))) throw new Error("Give each folder as its whole path on this computer.");
+    if (folders.length > MAX_ROOM_FOLDERS) throw new Error(`A room adds up to ${MAX_ROOM_FOLDERS} folders.`);
+  }
+  return { ...(name !== undefined ? { name } : {}), ...(members ? { members } : {}), ...(purpose !== undefined ? { purpose } : {}), ...(folders ? { folders } : {}) };
 }
 
 /** The tool a teammate switches to when its own runs out: the one it picked, or the other of Claude Code and Codex. */
@@ -216,7 +251,7 @@ export const backupOf = (t: Pick<Teammate, "tool" | "backup" | "backups" | "swit
 export { backupsOf, cleanBackups, fallbackFor, fallbacksOf, MAX_BACKUPS, type Fallback } from "./teammate-backups.js";
 import { backupsOf, fallbackFor, type Fallback } from "./teammate-backups.js";
 
-export { checkInDue, checkInText, cleanCheckIn, describeCheckIn, MAX_CHECKINS, NO_UPDATE, quietCheckIns, type CheckIn } from "./teammate-checkins.js";
+export { checkInDue, checkInText, cleanCheckIn, describeCheckIn, MAX_CHECKINS, missedSlot, NO_UPDATE, quietCheckIns, type CheckIn } from "./teammate-checkins.js";
 
 /**
  * A teammate put on its backup tool as its own runs out of usage (the open-source edition's and the hosted service's one rule): the
@@ -355,7 +390,7 @@ export async function makeFolder(folder: string): Promise<void> {
  * What a teammate's tool is told with every turn, besides Friday's own note: who it is, what it is for, where it works and how
  * the team works. Read from its record each turn, so a changed role applies from the next.
  */
-export function teammateNote(t: Teammate, team: readonly Pick<Teammate, "name" | "tool" | "role">[], room?: { name: string; with: string[]; purpose?: string; /** The Team room's session, where the rest of the team is reached. */ team?: string; /** One of its own threads with the person, not a room. */ thread?: boolean }, memory = "", copy?: { repo: string; path: string; branch: string }, /** Said another way where Friday keeps it elsewhere: who it is, and where its memory is and how it adds to it. */ kept?: { intro: string; memory: string; how: string }): string {
+export function teammateNote(t: Teammate, team: readonly Pick<Teammate, "name" | "tool" | "role">[], room?: { name: string; with: string[]; purpose?: string; /** The Team room's session, where the rest of the team is reached. */ team?: string; /** One of its own threads with the person, not a room. */ thread?: boolean; /** Folders the room adds for its crew mates (Room.folders). */ folders?: string[] }, memory = "", copy?: { repo: string; path: string; branch: string }, /** Said another way where Friday keeps it elsewhere: who it is, and where its memory is and how it adds to it. */ kept?: { intro: string; memory: string; how: string }): string {
   const others = team.filter((o) => o.name !== t.name);
   const who = (o: Pick<Teammate, "name" | "tool" | "role">) => `${o.name} (${o.tool === "friday" ? "own model" : ENGINE_NAMES[o.tool]}${o.role ? `: ${o.role.split("\n")[0]!.slice(0, 80)}` : ""})`;
   // In a room only its members are lanes beside it, reachable with message_agent; the rest of the team is in the Team room
@@ -364,14 +399,14 @@ export function teammateNote(t: Teammate, team: readonly Pick<Teammate, "name" |
   const away = room ? others.filter((o) => !room.with.includes(o.name)) : [];
   return [
     ...(room?.thread ? [`This is one of your threads with the person${room.name !== NEW_THREAD ? `, "${room.name}"` : ""}: a conversation of its own, apart from your main chat and your other threads. Your folder, notes and memory are the same in all of them.`] : []),
-    ...(room && !room.thread ? [`You are in the room "${room.name}"${room.with.length ? ` with ${room.with.join(", ")}` : ", on your own"}: what is said here is about this room's work. You have a conversation of your own in each room you are in; your folder and notes are the same in all of them.${room.purpose ? ` The room is for: ${room.purpose}` : ""}`] : []),
+    ...(room && !room.thread ? [`You are in the room "${room.name}"${room.with.length ? ` with ${room.with.join(", ")}` : ", on your own"}: what is said here is about this room's work. You have a conversation of your own in each room you are in; your folder and notes are the same in all of them.${room.purpose ? ` The room is for: ${room.purpose}` : ""}${room.folders?.length ? ` In this room you may also work in ${room.folders.join(", ")}.` : ""}`] : []),
     kept ? kept.intro : `You are ${t.name}, one of the person's AI teammates in Friday, running on their ${runsOnName(t)} on their own computer.`,
     t.role ? `Your role, in their words: ${t.role}` : "You have no set role: help with whatever you are given.",
     projectsOf(t).length
       ? `You work in ${projectsOf(t)[0]}${projectsOf(t).length > 1 ? `, and also in ${projectsOf(t).slice(1).join(", ")}` : ""}: the person's project${projectsOf(t).length > 1 ? "s" : ""}, where the work is done. Your own folder, ${t.folder}, is for your notes and anything of yours.`
       : `Your own folder is ${t.folder}: keep your notes and anything of yours there, and do the work in it until the person gives you a project.`,
     here.length ? `${room ? "Your teammates in this room" : "Your teammates"}: ${here.map(who).join("; ")}. Message, ask or hand them work with Friday's agent tools when it is theirs to do, and answer them when they ask.` : room ? "Nobody else is in this room." : "You are the only teammate for now.",
-    ...(away.length ? [`The rest of the crew isn't in this room: ${away.map(who).join("; ")}. Reach them with message_session to the Crew room${room?.team ? ` (session ${room.team})` : ""}, naming them as agent.`] : []),
+    ...(away.length ? [`The rest of the crew isn't in this room: ${away.map(who).join("; ")}. Reach them with message_session to the Crew room${room?.team ? ` (session ${room.team})` : ""}, naming them as agent, or to the room they are working in (the rooms are listed with your turns); read_session reads where another room stands.`] : []),
     // Its own copy of a repo it shares with other teammates (a git worktree), so none of them edits over another (2026-10-28).
     ...(copy ? [`Other teammates work in ${copy.repo} too, so you have a copy of your own: ${copy.path}, on the branch ${copy.branch}. Work and commit there, on that branch, never in ${copy.repo} itself. Before a new task, bring it up to date with the branch the crew's goal is on (git merge it). The lead merges everyone's branches into one pull request.`] : []),
     "Finish what you are given: what the person sends you, what your teammates ask, and the check-ins the person set. When nothing is left, stop and say so in one line. Never start new work of your own accord.",
@@ -379,6 +414,12 @@ export function teammateNote(t: Teammate, team: readonly Pick<Teammate, "name" |
     // What reaches the room, as OpenBot's channels have it (Arun, 2026-10-27: "keep the room chat clean and clear"): the answer,
     // once; the coordination among teammates kept to the agent tools, where the room folds it to a line.
     "What you say ends up in the crew's chat, which the person reads. Lead with the answer and give the shortest complete one: the outcome, what blocks you, what you need from them, in a few lines; no setup, no narration, no acknowledgements, no recap of what others said. Say your result once and end the turn: don't repeat it, and don't add a closing line. Keep the coordination with your teammates to Friday's agent tools (message, ask, post_update, tasks) rather than your reply. When nothing needs the person to read it (a routine check, nothing new, still waiting), end without any text. Your steps stay in your own chat. Name a file you made, a picture or a video by its path in backticks and it shows there.",
+    // A reply is a chat message, and what it made is a file attached to it (Arun, 2026-11-15: "make the agent responses in crew and
+    // crew rooms feel like responses like short ... THE CHAT NEEDS TO FEEL CLEAN AND SIMPLE AND EASY TO UNDERSTAND NOT EXTRA BS").
+    "Write as you would in a chat with a colleague: plain sentences, usually under 80 words, no headings, a list only when the answer is a list. Anything longer (a plan, a report, research, a draft, a table of more than a few rows) goes in a file in your folder, Markdown unless they asked for another kind, and your reply says in a sentence or two what is in it and names it by its path in backticks: the file shows under your message for the person to open.",
+    // Friday's browser, which the person watches beside the chat (agent-mesh.ts BROWSER_TOOL; Arun, 2026-11-15: "make sure the agents
+    // also have access to the browser too").
+    "To look something up, read a page or check a site, use Friday's browser tool when you have it: the page opens beside your chat, where the person can watch. Never launch or install a browser of your own.",
     // How it works and replies as a teammate, after Rakazo's and OpenBot's agents (Arun, 2026-11-15: "look at their github repos, i
     // want to see how their agents function and reply, we need ours to be the same"; "do all five").
     "On a task that will take minutes, start with one line: what you understood, what you look at first, and about how long it takes. A quick answer gets no preface. While you work, post an update only when a finding changes the plan, something fails, or you need the person; never only to say you are still working.",

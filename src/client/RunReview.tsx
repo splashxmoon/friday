@@ -474,7 +474,8 @@ export function ReviewCard({
         <button type="button" className="cc-toggle" aria-expanded={!folded} title={folded ? "Show the files" : "Fold it away"} onClick={fold}>
           <Icon name="chevronRight" size={13} className="cc-fold" />
           <b>
-            {files.length} file{files.length === 1 ? "" : "s"} changed
+            {files.length} file{files.length === 1 ? "" : "s"}
+            <span className="cc-long"> changed</span>
           </b>
           {adds > 0 && <span className="diff-add">+{adds}</span>}
           {dels > 0 && <span className="diff-del">−{dels}</span>}
@@ -495,7 +496,12 @@ export function ReviewCard({
               })()
             ))}
           {/* Folded, what wants looking at is still said on its line, so folding never hides a warning. */}
-          {folded && (receipt?.flags.length || second?.findings?.length) ? <span className="cc-warn">{(receipt?.flags.length ?? 0) + (second?.findings?.length ?? 0)} to look at</span> : null}
+          {folded && (receipt?.flags.length || second?.findings?.length) ? (
+            <span className="cc-warn" title={`${(receipt?.flags.length ?? 0) + (second?.findings?.length ?? 0)} to look at`}>
+              {(receipt?.flags.length ?? 0) + (second?.findings?.length ?? 0)}
+              <span className="cc-long"> to look at</span>
+            </span>
+          ) : null}
         </button>
         <span className="cc-sp" />
         {outcome ? (
@@ -528,8 +534,9 @@ export function ReviewCard({
         ) : (
           <>
             {/* Review B (Arun, 2026-11-05: "commit menu B"): Ask for changes, then Commit with the other ways to commit and Undo under its arrow. */}
-            <button type="button" className="cc-btn line" title="Tell the agent what to change" onClick={() => prefillComposer("")}>
-              Ask for changes
+            <button type="button" className="cc-btn line" title="Tell the agent what to change" aria-label="Ask for changes" onClick={() => prefillComposer("")}>
+              <span className="cc-long">Ask for changes</span>
+              <span className="cc-short" aria-hidden="true">Ask</span>
             </button>
             {may ? (
               <span className="cc-split">

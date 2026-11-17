@@ -19,3 +19,12 @@ export function laneAt(text: string, lanes: readonly { id: string; name: string 
   }
   return null;
 }
+
+/**
+ * "@all fix the lint" and "@idle pick up the tests" (Arun, 2026-11-16, multi-agent mockup B): a group of the session's agents named
+ * at the start, then a space or a comma, and the words after it for each of them. Only at the start, as an agent's name is.
+ */
+export function groupAt(text: string): { group: "all" | "idle"; text: string } | null {
+  const m = /^\s*@(all|idle)[\s,:;]+/i.exec(text);
+  return m ? { group: m[1]!.toLowerCase() as "all" | "idle", text: text.slice(m[0].length) } : null;
+}

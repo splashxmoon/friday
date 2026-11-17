@@ -35,6 +35,7 @@ const KEYS = {
   sessionLayout: "mpa.sessionLayout",
   accent: "mpa.accent",
   contrast: "mpa.contrast",
+  glass: "mpa.glass",
 } as const;
 
 /** What an import may write: these keys and nothing else, whatever the file says. */
@@ -116,6 +117,23 @@ export function chooseAccent(a: Accent): void {
   write(KEYS.accent, a === "ink" ? null : a);
   applyPrefs();
 }
+/**
+ * Frosted glass (Arun, 2026-11-16: "a frosted glass effect, I want all of the components nicely designed to accommodate it"): on
+ * light or dark alike, the window's ground is the desktop behind it through the system's blur where the desktop app has one
+ * (html.glass-native), else a soft ground of the page's own; every surface on it is tinted glass rather than a solid fill.
+ */
+export const glassOn = (): boolean => read(KEYS.glass) === "1";
+export function applyGlass(on = glassOn()): void {
+  if (typeof document === "undefined") return;
+  const root = document.documentElement;
+  root.classList.toggle("glass", on);
+  root.classList.toggle("glass-native", on && !!window.fridayDesktop?.glassNative);
+  window.fridayDesktop?.setGlass?.(on);
+}
+export function chooseGlass(on: boolean): void {
+  write(KEYS.glass, on ? "1" : null);
+  applyGlass(on);
+}
 export const contrast = (): Contrast => (read(KEYS.contrast) === "more" ? "more" : "standard");
 export function chooseContrast(c: Contrast): void {
   write(KEYS.contrast, c === "more" ? "more" : null);
@@ -146,6 +164,7 @@ export function applyPrefs(): void {
   if (accent() === "ink") delete root.dataset.accent;
   else root.dataset.accent = accent();
   root.classList.toggle("contrast-more", contrast() === "more");
+  applyGlass();
   followSystemTheme();
 }
 

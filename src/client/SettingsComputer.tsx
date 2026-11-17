@@ -1,4 +1,4 @@
-import { Facts, SettingsGroup } from "@/components/dass";
+import { Facts, SettingsGroup, SettingsRow } from "@/components/dass";
 import { GitHubConnect } from "./GitHubConnect.js";
 import { MachineBadge } from "./MachineBadge.js";
 import { pickedMachine, useMachine } from "./local.js";
@@ -53,13 +53,17 @@ export function ComputerSection({ identity, part = "this" }: { identity: Identit
     return (
       <section className="flex flex-col gap-5">
         {machine.mode === "local" ? (
+          // What always holds is a row of the group, not a loose line under it (Arun, 2026-11-16: "design better tooo").
           <SettingsGroup title="On this computer">
             <ComputerUseRow identity={identity} flush />
+            <SettingsRow label="Where agents work" hint="Only in the folders you give them. What each session may do without asking is chosen in the box you start it from." />
           </SettingsGroup>
         ) : (
-          <Facts className="px-0.5" items={[{ term: "On this computer", detail: "Open Friday on the computer agents run on to choose what they may do there." }]} />
+          <>
+            <Facts className="px-0.5" items={[{ term: "On this computer", detail: "Open Friday on the computer agents run on to choose what they may do there." }]} />
+            <Facts className="px-0.5" items={[{ term: "Always", detail: "Agents work in the folders you give them. What each session may do without asking is chosen in the box you start it from." }]} />
+          </>
         )}
-        <Facts className="px-0.5" items={[{ term: "Always", detail: "Agents work in the folders you give them. What each session may do without asking is chosen in the box you start it from." }]} />
       </section>
     );
   return (

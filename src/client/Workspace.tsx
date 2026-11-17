@@ -102,6 +102,10 @@ declare global {
       setBadge?(n: number): void;
       /** Tell the app which theme is showing, so the window buttons match it. */
       setTheme?(theme: "dark" | "light", choice?: "system" | "dark" | "light"): void;
+      /** Frosted glass: the system's blur behind the window (desktop.ts setGlass). */
+      setGlass?(on: boolean): void;
+      /** Whether this system has that blur (macOS vibrancy, Windows 11 acrylic); else the page draws its own glass ground. */
+      glassNative?: boolean;
       /** Real shells on this computer, drawn by the terminal panel. */
       terminal?: {
         start(opts: { id: string; cols: number; rows: number; cwd?: string }): Promise<{ ok: boolean; shell?: string; cwd?: string; resumed?: boolean; replay?: string; error?: string }>;

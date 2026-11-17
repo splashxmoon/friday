@@ -28,6 +28,8 @@ import { sayDone } from "./DoneToasts.js";
  */
 
 const EVERY_MS = 15_000;
+/** The menu bar's panel (TrayPanel.tsx) reads the same, and says nothing: the main window is the one that notifies and chimes. */
+const QUIET = typeof location !== "undefined" && new URLSearchParams(location.search).get("view") === "tray";
 /** While something waits on you, looked at this often, so one answered elsewhere (a teammate, another device, the agent moving
  *  on) leaves the badge and the list within a few seconds rather than a quarter of a minute (Arun, 2026-10-20). */
 const WAITING_MS = 4_000;
@@ -181,6 +183,7 @@ export function useAttention(identity: Identity, recents: RecentSession[], withS
         let said = it;
         // A teammate asking: titled by who and where, not the team session's own title.
         said = teamAttention(it);
+        if (QUIET) continue;
         notify(said);
         if (chimeOn()) chime();
       }
@@ -189,6 +192,7 @@ export function useAttention(identity: Identity, recents: RecentSession[], withS
         if (nowWorking.has(sid) || got.items.some((it) => it.sid === sid)) continue;
         let title = recents.find((r) => r.sid === sid)?.title ?? "A session";
         title = teamDoneTitle(sid, title);
+        if (QUIET) continue;
         notifyDone(title, w.what, sid);
         // In the window too: a soft sound and a toast, unless it is the session on screen (DoneToasts.tsx).
         sayDone({ sid, title, what: w.what });
@@ -243,7 +247,7 @@ export function useAttention(identity: Identity, recents: RecentSession[], withS
   // A session waits on you while the page lists something of it that isn't put off: its row, its ring and its toast follow that.
   const shown = useMemo(() => items.filter((i) => here.has(i.sid) && (!marks || needSids.has(i.sid))), [items, here, marks, needSids]);
   // No count on the dock icon: Needs you says it once (audit CODE-1 B). Cleared, in case an earlier build left one.
-  useEffect(() => window.fridayDesktop?.setBadge?.(0), []);
+  useEffect(() => void (!QUIET && window.fridayDesktop?.setBadge?.(0)), []);
   return { items: shown, working, previews, crews, prs, overlaps, summaries, since, loaded, gone, needs, needSids, off };
 }
 

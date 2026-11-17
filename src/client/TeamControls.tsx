@@ -15,7 +15,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "./icons.js";
 import { TimeField } from "./time-field.js";
-import { ChevronLeftIcon, ChevronRightIcon, EllipsisIcon, PencilIcon, PlusIcon, XIcon, InfinityIcon, PanelRightIcon, ListChecksIcon, FileCodeIcon, FileTextIcon, GitPullRequestIcon, ImageIcon, PackageIcon, CirclePauseIcon, KanbanSquareIcon, MessagesSquareIcon, MoonIcon, PlayIcon, SquareIcon, SunIcon, WorkflowIcon } from "lucide-react";
+import { ChartColumnIcon, SendIcon, ChevronLeftIcon, ChevronRightIcon, EllipsisIcon, PencilIcon, PlusIcon, XIcon, InfinityIcon, PanelRightIcon, ListChecksIcon, FileCodeIcon, FileTextIcon, GitPullRequestIcon, ImageIcon, PackageIcon, CirclePauseIcon, KanbanSquareIcon, MessagesSquareIcon, MoonIcon, PlayIcon, SquareIcon, SunIcon, WorkflowIcon } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
@@ -32,7 +32,12 @@ import { comeBack, nextAt, nextEight, setAway, setPaused, setSelfRun, stopAll, u
 import { threadsOf } from "./team-threads.js";
 import { teamCommand } from "./team-commands.js";
 import { plainLine } from "./team-room.js";
-import { agoShort, Face, MateRing, markStopped, mateOn, mateStatus, openThread, ownOf, refreshTeam, RoomFaces, threadSaid, useTeamNow } from "./Teammates.js";
+import { agoShort, Face, foldersOf, MateRing, markStopped, mateOn, mateStatus, openThread, ownOf, refreshTeam, RoomFaces, short, threadSaid, useTeamNow, isTeamSid, type RoomView } from "./Teammates.js";
+import type { TeammateView } from "../teammates.js";
+import { WorkspaceCard } from "./Workspace.js";
+import { SpendPage } from "./SpendPage.js";
+import { openBring } from "./crew-carry-open.js";
+import { loadRecents } from "./storage.js";
 import { assignedTasks, TeamBoard } from "./TeamBoard.js";
 import { proofsIn } from "../team-proof.js";
 import { ProofToggle } from "./ProofCard.js";
@@ -333,7 +338,7 @@ function RoomMore({ identity, sid, events, notify, board, panel }: { panel?: { o
 export function RoomProfile({ identity, state, events, send, notify }: { identity: Identity; state: SessionState; events: SessionEvent[]; send: Send; notify: (m: string) => void }) {
   const t = useTeamNow();
   const sid = state.id;
-  const [page, setPage] = useState<null | "results" | "run" | "away" | "threads">(null);
+  const [page, setPage] = useState<null | "results" | "run" | "away" | "threads" | "spend" | "send">(null);
   const [board, setBoard] = useState(false);
   const [skills, setSkills] = useState(false);
   const [ask, confirmUI] = useConfirm();
@@ -370,6 +375,8 @@ export function RoomProfile({ identity, state, events, send, notify }: { identit
           {page === "threads" && <ThreadsList sid={sid} list={threads} onOpen={done} />}
           {page === "run" && <SelfRunSwitch identity={identity} sid={sid} notify={notify} embedded={done} />}
           {page === "away" && <AwaySwitch identity={identity} notify={notify} embedded={done} />}
+          {page === "send" && <RoomSend identity={identity} sid={sid} roomId={crew ? null : r!.id} name={crew ? "the Crew room" : r!.name} notify={notify} />}
+          {page === "spend" && <SpendPage identity={identity} query={crew ? "crew=1" : `room=${encodeURIComponent(r!.id)}`} who={crew ? "The crew" : r!.name} />}
         </div>
       </section>
     );
@@ -377,6 +384,8 @@ export function RoomProfile({ identity, state, events, send, notify }: { identit
   const rows: Row[] = [
     ...(tasks.length ? [{ key: "board", label: "Board", icon: <KanbanSquareIcon />, now: `${open} open of ${tasks.length}`, n: open, onClick: () => setBoard(true) }] : []),
     ...(threads.length ? [{ key: "threads", label: "Threads", icon: <MessagesSquareIcon />, now: `${threads.length}`, n: threads.filter((x) => x.state === "answering").length, onClick: () => setPage("threads") }] : []),
+    { key: "send", label: "Send its work", icon: <SendIcon />, onClick: () => setPage("send") },
+    { key: "spend", label: "Spend", icon: <ChartColumnIcon />, onClick: () => setPage("spend") },
     { key: "results", label: "Results", icon: <PackageIcon />, now: results.handed.length + results.count ? `${results.handed.length + results.count}` : "Nothing yet", onClick: () => setPage("results") },
     { key: "run", label: "Run on its own", icon: <InfinityIcon />, now: selfRun ? "On" : "Off", onClick: () => setPage("run") },
     { key: "away", label: "Away and pause", icon: paused ? <CirclePauseIcon /> : <MoonIcon />, now: away ? `Away until ${untilOf(away.until!)}` : paused ? "Paused" : "Here", onClick: () => setPage("away") },
@@ -442,6 +451,7 @@ export function RoomProfile({ identity, state, events, send, notify }: { identit
           )}
         </ul>
       </div>
+      {!crew && <RoomFolders identity={identity} room={r!} members={members.map((x) => x.m)} patch={patch} notify={notify} />}
       <div className="msd-group">
         <h3 className="msd-group-name">The room</h3>
         <ul className="msd-rows">
@@ -477,6 +487,177 @@ export function RoomProfile({ identity, state, events, send, notify }: { identit
       {skills && <SkillsDialog onClose={() => setSkills(false)} />}
       {confirmUI}
     </section>
+  );
+}
+
+/**
+ * A room's work, whole, taken on elsewhere (Arun, 2026-11-15: "allow for like crew work in a room to be send too.. with proper
+ * context and stuff as well.... not just individual agent work"): the brief it goes with, to read first (room-brief.ts), then into a
+ * coding session (Bring it in there: the room's finished work, looked at before it comes in) or to another room's lead with the brief.
+ */
+function RoomSend({ identity, sid, roomId, name, notify }: { identity: Identity; sid: string; roomId: string | null; name: string; notify: (m: string) => void }) {
+  const t = useTeamNow();
+  const [brief, setBrief] = useState<string | null>(null);
+  const [err, setErr] = useState("");
+  const [sent, setSent] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    api<{ brief: string }>(identity, `/api/teammates/brief?${roomId ? `room=${encodeURIComponent(roomId)}` : "crew=1"}`)
+      .then((b) => live && setBrief(b.brief))
+      .catch((e: Error) => live && setErr(e.message || "Couldn't put its work together."));
+    return () => void (live = false);
+  }, [identity, roomId]);
+  const coding = loadRecents()
+    .filter((x) => x.sid !== sid && !isTeamSid(x.sid) && !x.settledAt)
+    .sort((a, b) => b.openedAt - a.openedAt)
+    .slice(0, 6);
+  const rooms = [...(t && t.sid !== sid ? [{ sid: t.sid, invite: t.invite, name: "Crew room", lead: null as string | null }] : []), ...(t?.rooms ?? []).filter((x) => !x.thread && x.sid !== sid).map((x) => ({ sid: x.sid, invite: x.invite, name: x.name, lead: x.lead ?? null }))];
+  const toRoom = async (x: (typeof rooms)[number]) => {
+    if (!brief) return;
+    try {
+      await api(identity, `/api/sessions/${encodeURIComponent(x.sid)}/instruct?invite=${encodeURIComponent(x.invite)}`, { method: "POST", body: JSON.stringify({ text: brief, ...(x.lead ? { lane: x.lead } : {}) }), headers: { "Content-Type": "application/json" } });
+      setSent(x.name);
+      notify(`Sent ${name}'s work to ${x.name}.`);
+    } catch (e) {
+      notify((e as Error).message || `Couldn't send it to ${x.name}.`);
+    }
+  };
+  return (
+    <div className="rs">
+      <div className="tm-pop-head">
+        <b>Send its work</b>
+        <span>Everything {name} did, with what it is for, its board, what each crew mate found and their files.</span>
+      </div>
+      {err && <p className="sp-err">{err}</p>}
+      <details className="rs-brief" open>
+        <summary>What goes with it</summary>
+        {brief ? <pre>{brief}</pre> : !err && <p className="sp-quiet">Putting it together…</p>}
+      </details>
+      <div className="msd-group">
+        <h3 className="msd-group-name">Into a coding session</h3>
+        <ul className="msd-rows">
+          {coding.length ? (
+            coding.map((x) => (
+              <li key={x.sid}>
+                <button type="button" className="msd-row" onClick={() => openBring({ sid: x.sid, invite: x.invite, from: roomId ? `room:${roomId}` : "all", name })}>
+                  <span className="msd-row-icon" aria-hidden="true">
+                    <Icon name="code" size={14} />
+                  </span>
+                  <span className="msd-row-label">{x.alias || x.title || "Untitled"}</span>
+                  <span className="msd-row-now">Look, then bring it in</span>
+                  <ChevronRightIcon className="msd-row-chev" aria-hidden="true" />
+                </button>
+              </li>
+            ))
+          ) : (
+            <li>
+              <span className="msd-row rf-row">
+                <span className="msd-row-label">No coding sessions yet</span>
+              </span>
+            </li>
+          )}
+        </ul>
+      </div>
+      {rooms.length > 0 && (
+        <div className="msd-group">
+          <h3 className="msd-group-name">To a crew room</h3>
+          <ul className="msd-rows">
+            {rooms.map((x) => (
+              <li key={x.sid}>
+                <button type="button" className="msd-row" disabled={!brief} onClick={() => void toRoom(x)}>
+                  <span className="msd-row-icon" aria-hidden="true">
+                    <Icon name="users" size={14} />
+                  </span>
+                  <span className="msd-row-label">{x.name}</span>
+                  <span className="msd-row-now">{sent === x.name ? "Sent" : "To its lead, with the brief"}</span>
+                  <ChevronRightIcon className="msd-row-chev" aria-hidden="true" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The folders a room's crew mates work in (Arun, 2026-11-15: "be able to add and remove folders the agents can work in ... but by
+ * default they will carry over the folders they work in from their own individual pages"): each one's own, from its page, said as
+ * whose and changed there; and the room's own for all of them here, added and taken away here (teammates.ts Room.folders).
+ */
+function RoomFolders({ identity, room, members, patch, notify }: { identity: Identity; room: RoomView; members: TeammateView[]; patch: (body: Record<string, unknown>) => Promise<unknown>; notify: (m: string) => void }) {
+  const [adding, setAdding] = useState(false);
+  const addRow = useRef<HTMLButtonElement>(null);
+  const own = room.folders ?? [];
+  // Carried over: each folder from the members' own pages, once, with whose it is.
+  const carried = new Map<string, string[]>();
+  for (const m of members) for (const d of foldersOf(m)) if (!own.includes(d)) carried.set(d, [...(carried.get(d) ?? []), m.name]);
+  const names = (who: string[]) => (who.length > 2 ? `${who.slice(0, 2).join(", ")} and ${who.length - 2} more` : who.join(" and "));
+  const add = (dir: string) => {
+    if (own.includes(dir)) return notify(`${short(dir)} is already in this room.`);
+    if (carried.has(dir)) return notify(`${short(dir)} is already ${names(carried.get(dir)!)}'s, from ${carried.get(dir)!.length === 1 ? "its" : "their"} own page.`);
+    void patch({ folders: [...own, dir] }).then(() => notify(`Everyone in ${room.name} can work in ${short(dir)} now.`));
+  };
+  const pick = async () => {
+    const desk = window.fridayDesktop;
+    if (!desk?.pickFolder) return setAdding(true);
+    const dir = await desk.pickFolder();
+    if (dir) add(dir);
+  };
+  return (
+    <div className="msd-group">
+      <h3 className="msd-group-name">Folders</h3>
+      <ul className="msd-rows">
+        {[...carried].map(([dir, who]) => (
+          <li key={`c:${dir}`}>
+            <span className="msd-row rf-row" title={`${dir}\nFrom ${names(who)}'s own page: change it there.`}>
+              <span className="msd-row-icon" aria-hidden="true">
+                <Icon name="folder" size={14} />
+              </span>
+              <span className="msd-row-label">{short(dir)}</span>
+              <span className="msd-row-now">From {names(who)}</span>
+            </span>
+          </li>
+        ))}
+        {own.map((dir) => (
+          <li key={`o:${dir}`} className="rf-own">
+            <span className="msd-row rf-row" title={dir}>
+              <span className="msd-row-icon" aria-hidden="true">
+                <Icon name="folder" size={14} />
+              </span>
+              <span className="msd-row-label">{short(dir)}</span>
+              <span className="msd-row-now">This room</span>
+            </span>
+            <button type="button" className="rf-x" aria-label={`Take ${short(dir)} out of this room`} title="Take it out of this room" onClick={() => void patch({ folders: own.filter((x) => x !== dir) }).then(() => notify(`${short(dir)} is out of ${room.name}.`))}>
+              <XIcon aria-hidden="true" />
+            </button>
+          </li>
+        ))}
+        <li>
+          <button ref={addRow} type="button" className="msd-row rp-add" onClick={() => void pick()}>
+            <span className="msd-row-icon" aria-hidden="true">
+              <PlusIcon />
+            </span>
+            <span className="msd-row-label">Add a folder for this room</span>
+          </button>
+        </li>
+      </ul>
+      <small className="rf-note">{carried.size ? "Each crew mate brings the folders from its own page. " : ""}Folders added here are for everyone in this room.</small>
+      {adding && (
+        <WorkspaceCard
+          identity={identity}
+          tool="claude"
+          trigger={addRow.current}
+          only="repos"
+          onClose={() => setAdding(false)}
+          onPick={(p) => {
+            setAdding(false);
+            if (p) add(p.folder.path);
+          }}
+        />
+      )}
+    </div>
   );
 }
 

@@ -27,6 +27,7 @@ import { isAuto, routeFriday, taskTier } from "../routing.js";
 import type { Learned } from "../route-learning.js";
 import type { AgentMesh } from "../agent-mesh.js";
 import { taskOwner } from "../own-plan.js";
+import { browserDriver } from "../browser-driver.js";
 import { toolSchemas, useSkillTool, type AgentTool } from "./tools.js";
 
 const AGENT: ActorRef = { id: "agent", name: "Agent", kind: "agent" };
@@ -544,6 +545,8 @@ export class AgentRuntime {
       // changelog or API reference is exactly what it needs.
       if (t.name === "fetch_url") return searchable && state.options.webSearch && (at?.webSearch ?? true);
       if (t.name === "ask_human") return at?.askHuman ?? true;
+      // Friday's browser only where the desktop app draws it, as for the coding tools (agent-mesh.ts meshListing).
+      if (t.name === "browser") return !!this.opts.mesh && !!browserDriver();
       // Handing off needs somebody to hand to.
       if (t.name === "hand_off") return state.lanes.length > 0;
       // So does talking to another agent here.

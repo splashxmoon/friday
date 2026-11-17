@@ -7,15 +7,18 @@ import type { SessionState } from "../session/projection.js";
 import type { SessionEvent } from "../types.js";
 import { kgPath, openKeepGoing } from "./crew-carry-open.js";
 import { carryReq as workReq } from "./crew-carry-req.js";
+import { teamNow, useTeamNow, type Team } from "./Teammates.js";
 
-/** Rooms handed work from here in the last three days, not brought in yet. */
+/** Rooms handed work from here in the last three days, not brought in, taken back, or taken away since. */
 export const roomsOut = (events: readonly SessionEvent[]) => {
   const brought = new Set(events.flatMap((e) => (e.body.type === "crew.handed.room.brought" ? [e.body.room] : [])));
+  // Taken back or gone after its latest hand-off; handed again after that, it is out again.
+  const clearedAt = new Map(events.flatMap((e) => (e.body.type === "crew.handed.room.back" ? [[e.body.room, e.seq] as const] : [])));
   const seen = new Set<string>();
   return events
     .filter((e) => e.body.type === "crew.handed.room" && Date.now() - e.ts < 3 * 86_400_000)
     .reverse()
-    .filter((e) => e.body.type === "crew.handed.room" && !brought.has(e.body.room) && !seen.has(e.body.room) && !!seen.add(e.body.room)) as (SessionEvent & { body: Extract<SessionEvent["body"], { type: "crew.handed.room" }> })[];
+    .filter((e) => e.body.type === "crew.handed.room" && !seen.has(e.body.room) && !!seen.add(e.body.room) && !brought.has(e.body.room) && (clearedAt.get(e.body.room) ?? -1) < e.seq) as (SessionEvent & { body: Extract<SessionEvent["body"], { type: "crew.handed.room" }> })[];
 };
 
 /** How much is out with the crew from this session: hand-offs still at work, and rooms whose work hasn't come back in. */
@@ -26,29 +29,41 @@ export function handedCount(state: SessionState, events: readonly SessionEvent[]
 /** What "@" in a session's box can hand work to: your crew mates and the crew rooms you're in (Arun, 2026-11-13). */
 export type CrewTarget = { kind: "mate" | "room"; id: string; name: string; /** What it is written as after "@": a room's name has no spaces. */ at: string; hint: string; /** A crew mate's mascot. */ look?: string };
 const atName = (n: string) => n.trim().replace(/\s+/g, "-");
-const targetCache = new Map<string, { at: number; list: CrewTarget[] }>();
-/** Your crew mates and crew rooms, from the sheet's own read, kept a little while per session. */
+const targetCache = new Map<string, { at: number; list: CrewTarget[]; crew: string }>();
+/** Who is in a crew: its crew mates and rooms by id, or "" before it is read. */
+const crewIds = (t: Team | null) => (t ? [...t.teammates.map((m) => m.id), ...(t.rooms ?? []).filter((r) => !r.thread).map((r) => r.id)].sort().join(",") || "none" : "");
+/** Who is in the crew as last read (Teammates.tsx, every few seconds). */
+const crewNow = () => crewIds(teamNow());
+/**
+ * Your crew mates and crew rooms, from the sheet's own read, kept a little while per session, and read again at once when the crew
+ * changes: one taken away is never offered after "@", and one just made is (Arun, 2026-11-16: "make it dynamic like if an room or
+ * agent gets deleted then it is there anymore").
+ */
 export async function myCrewTargets(sid: string, invite: string): Promise<CrewTarget[]> {
   const hit = targetCache.get(sid);
-  if (hit && Date.now() - hit.at < 60_000) return hit.list;
+  const crew = crewNow();
+  if (hit && Date.now() - hit.at < 60_000 && (!crew || hit.crew === crew)) return hit.list;
   const r = await workReq<{ own?: { id: string; name: string; line: string; look?: string }[]; rooms?: { id: string; name: string; line: string }[] }>(kgPath(sid, invite)).catch(() => ({ own: [], rooms: [] }));
   const list: CrewTarget[] = [
     ...(r.own ?? []).map((m) => ({ kind: "mate" as const, id: m.id, name: m.name, at: atName(m.name), hint: m.line, ...(m.look ? { look: m.look } : {}) })),
     ...(r.rooms ?? []).map((m) => ({ kind: "room" as const, id: m.id, name: m.name, at: atName(m.name), hint: `Crew room · ${m.line}` })),
   ];
-  targetCache.set(sid, { at: Date.now(), list });
+  targetCache.set(sid, { at: Date.now(), list, crew });
   return list;
 }
 /** The @ list's crew entries for a session's box, read once it is shown and kept up a minute at a time. */
 export function useCrewTargets(sid: string, invite: string, on: boolean): CrewTarget[] {
   const [list, setList] = useState<CrewTarget[]>(() => targetCache.get(sid)?.list ?? []);
+  // Read again as the crew changes, and one taken away is left out at once, before the read is back (Arun, 2026-11-16).
+  const crew = crewIds(useTeamNow());
   useEffect(() => {
     if (!on || !invite) return;
     let live = true;
     void myCrewTargets(sid, invite).then((l) => live && setList(l));
     return () => void (live = false);
-  }, [sid, invite, on]);
-  return on ? list : [];
+  }, [sid, invite, on, crew]);
+  const here = crew ? new Set(crew.split(",")) : null;
+  return on ? (here ? list.filter((t) => here.has(t.id)) : list) : [];
 }
 
 /**
@@ -73,6 +88,9 @@ export async function mentionCrew(sid: string, invite: string, text: string, lan
 export async function handStraight(sid: string, invite: string, lane: string, at: { target: CrewTarget; words: string }): Promise<void> {
   const body = at.target.kind === "room" ? { room: at.target.id, lane, carry: { ...CARRY_DEFAULT }, note: at.words } : { mate: at.target.id, lane, carry: { ...CARRY_DEFAULT }, note: at.words, ask: [...ASK_DEFAULT] };
   await workReq(kgPath(sid, invite), { method: "POST", body: JSON.stringify(body) });
+  // The sidebar's row and the crew's pages, now rather than at their next read: "Rio is on it", and Rio's new thread.
+  dispatchEvent(new Event("friday:attention"));
+  dispatchEvent(new Event("friday:teammates"));
 }
 
 

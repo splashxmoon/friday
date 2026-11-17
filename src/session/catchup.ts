@@ -133,3 +133,58 @@ export function decidedSince(state: Pick<SessionState, "memory">, events: readon
   if (!keys.length) return "";
   return `[Friday] Decided in this session since your last turn. It stands: if you're asked to go against it, say so and ask before you act.\n${keys.map((k) => `- ${cut(standing.get(k)!, 300)}`).join("\n")}\n\n`;
 }
+
+/** One run another agent finished since this lane's last turn: who, its last words, the files it changed. */
+export interface Missed {
+  lane: string;
+  name: string;
+  said: string;
+  files: string[];
+  ts: number;
+}
+
+/**
+ * What the other agents of a coding session finished since this lane's last turn (Arun, 2026-11-16, multi-agent mockup B: "given
+ * what it missed"): an agent the person turns to after another has worked is told only what it missed, not the whole session.
+ * Runs that ended done, each with its last words and the files it changed, oldest first, up to `until`. [] on the lane's first
+ * turn (its catch-up has all of it) or when nothing happened elsewhere.
+ */
+export function missedSince(state: Pick<SessionState, "engines" | "lanes">, events: readonly SessionEvent[], lane: string, pending: readonly number[], until = Infinity): Missed[] {
+  const now = new Set(pending);
+  const first = pending.length ? Math.min(...pending) : Infinity;
+  const last = events.findLast((e) => e.seq < first && (e.lane ?? MAIN_LANE) === lane && e.body.type === "instructions.delivered" && !e.body.seqs.some((q) => now.has(q)));
+  if (!last) return [];
+  const nameOf = (id: string) => {
+    const tool = state.engines[id]?.tool;
+    return tool ? ENGINE_NAMES[tool] : id === MAIN_LANE ? "Main" : (state.lanes.find((l) => l.id === id)?.name ?? "Another agent");
+  };
+  const open = new Map<string, { said: string; files: Set<string> }>();
+  const out: Missed[] = [];
+  for (const e of events) {
+    if (e.seq <= last.seq) continue;
+    if (e.seq > until) break;
+    const l = e.lane ?? MAIN_LANE;
+    if (l === lane) continue;
+    const b = e.body;
+    if (b.type === "run.started") open.set(l, { said: "", files: new Set() });
+    else if (b.type === "agent.message" && b.text.trim()) open.get(l) && (open.get(l)!.said = b.text);
+    else if (b.type === "agent.diff") for (const f of b.files) open.get(l)?.files.add(f.path);
+    else if (b.type === "run.ended") {
+      const run = open.get(l);
+      open.delete(l);
+      if (run && b.outcome === "done" && (run.said || run.files.size)) out.push({ lane: l, name: nameOf(l), said: run.said, files: [...run.files], ts: e.ts });
+    }
+  }
+  return out;
+}
+
+/** The brief an agent is handed at the top of its turn from missedSince, "" when it missed nothing. */
+export function missedText(missed: readonly Missed[]): string {
+  if (!missed.length) return "";
+  const lines = missed.slice(-6).map((m) => {
+    const said = m.said ? cut(m.said, 260) : "";
+    const files = m.files.length ? ` Changed: ${m.files.slice(0, 8).join(", ")}${m.files.length > 8 ? ` and ${m.files.length - 8} more` : ""}.` : "";
+    return `- ${m.name}: ${said}${files}`;
+  });
+  return `[Friday] Since your last turn, the other agents in this session did this. Read those files before you change them, and build on their work rather than redoing it.\n${lines.join("\n")}\n\n`;
+}

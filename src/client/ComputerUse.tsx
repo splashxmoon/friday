@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { SettingsRow } from "@/components/dass";
 import { Switch as Toggle } from "@/components/ui/switch";
 import type { ComputerStatus } from "../runner/computer.js";
+import { Icon } from "./icons.js";
 import { hostApi } from "./local.js";
 import type { Identity } from "./storage.js";
 
@@ -40,15 +41,19 @@ export function ComputerUseRow({ identity, flush = false }: { identity: Identity
           {s.on
             ? "They can see the screen and use the mouse and keyboard, for apps nothing else reaches. Each session asks you first, and a bar shows while one does, with Stop."
             : `Agents and your crew see the screen and use the mouse and keyboard on ${s.os}, when you allow it in the session. Only your own agents, never a teammate's.`}
+          {/* What the system still needs, as one notice with its button (Arun, 2026-11-16: "design better tooo"). */}
           {s.on && s.needs.length > 0 && (
-            <span className="cu-needs">
-              {s.needs.map((n) => (
-                <span key={n} className="cu-need">
-                  {n}
-                </span>
-              ))}
+            <span className="cu-needs" role="status">
+              <Icon name="shield" size={14} className="cu-needs-mark" />
+              <span className="cu-needs-text">
+                {s.needs.map((n) => (
+                  <span key={n} className="cu-need">
+                    {n}
+                  </span>
+                ))}
+              </span>
               {s.canAllow && (
-                <button type="button" className="link-btn" disabled={busy} onClick={() => void ask("computerUse.allow", {})}>
+                <button type="button" className="btn small cu-allow" disabled={busy} onClick={() => void ask("computerUse.allow", {})}>
                   Allow…
                 </button>
               )}

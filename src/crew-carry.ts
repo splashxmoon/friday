@@ -14,13 +14,18 @@ import { MAIN_LANE, type SessionEvent } from "./types.js";
  * step, from where the person already is (the session's menu, a row's menu, the end of a run, "@Kit finish this" in the box),
  * carrying where it stands.
  *
- * - To one of your crew mates: it comes into this session as a lane (crew-code.ts), in a copy of the session's folder of its own on
- *   its own branch, the uncommitted changes carried in, and is told where it stands. The hosted edition opens a crew job of its own
- *   for this (crew-jobs.ts); on this computer the crew mate's lane is the job, the session's line keeps up with it from its runs.
+ * - To one of your crew mates: it goes to that crew mate's own page, as a thread of its own named for the session, in a copy of the
+ *   session's folder of its own on its own branch, the uncommitted changes carried in, and is told where it stands. It joins this
+ *   session only when the person brings it in themselves (Arun, 2026-11-16: "i want the work to go their agent page and not make
+ *   them be added to the thread, they only get added to the thread if the user actually adds them too"). The hosted edition opens
+ *   a crew job of its own for this (crew-jobs.ts); on this computer the thread is the job, the session's line keeps up with it.
  * - To a crew room: posted there as the person's own message to the room's lead; the room runs it by its own rules.
  * - The session says once who took it (crew.handed, crew.handed.room), then keeps that one line up to date (crew.handed.moved) and
  *   shows the result there; its row in the sidebar says "Kit is on it".
- * - The wheel moves: typing in the lane again asks "Take it back" or "Send Kit a note" (the client), answered here.
+ * - The wheel moves: typing in the lane again asks "Take it back" or "Send Kit a note" (the client), answered here. Taken back, its
+ *   line leaves the chat and the person's own words go back in their box (Arun, 2026-11-16: "it shouldnt just stay there in chat it
+ *   should be removed from the chat and be place in your input chat"). A crew mate, its thread or a room taken away takes its
+ *   hand-offs' lines with it (gone), so nothing points at what isn't there.
  * - Bring it in: a crew mate's or a room's finished work back into this session, with a look first (piecesFor): weighed against
  *   this session, the files changed here too named, only the picked files coming in, for this session's agent to merge.
  *
@@ -36,12 +41,17 @@ export interface CarryDeps {
   crew: { list(): Promise<Teammate[]>; get(id: string): Promise<Teammate | null>; rooms(): Promise<Room[]>; team(): Promise<string | null> };
   /** The crew mates brought into a session (crew-code.ts). */
   visitsIn: (sid: string) => Promise<Visit[]>;
-  /** A crew mate into this session for the hand-off, in a copy of its folder of its own (app.ts visitInto). */
-  bringInto: (by: Person, t: Teammate, sid: string, carry: boolean) => Promise<{ lane: string; started: boolean; why?: string }>;
+  /**
+   * A thread of the crew mate's own for the hand-off, on its page, named `title`, its tool started in a copy of the session's
+   * folder of its own (app.ts handThread): the thread's session and its lane there.
+   */
+  handThread: (by: Person, t: Teammate, sid: string, o: { title: string; carry: boolean }) => Promise<{ sid: string; lane: string; thread: string; started: boolean; why?: string }>;
   /** A message in a session as the person's own, to the lane named: core's instruct. Its seq. */
   post: (sid: string, by: Person, text: string, lane: string) => Promise<number>;
   /** A lane's run stopped, its queue kept (core's run.pause). */
   stop: (sid: string, by: Person, lane: string) => Promise<void>;
+  /** A message not yet read taken back (core's instruction.withdraw); false when it was read already. */
+  withdraw: (sid: string, by: Person, seq: number, lane: string) => Promise<boolean>;
   /** Where a crew mate runs, for what its row on the sheet says. */
   where: (t: Teammate) => { connected: boolean; label: string };
   /** A link into a session (its invite), for the room's line to open it. */
@@ -64,6 +74,11 @@ interface Link {
   lane: string;
   job: string;
   jobLane: string;
+  /** The session it is worked on in: the crew mate's thread; absent (this session) for one handed before 2026-11-16. */
+  jobSid?: string;
+  /** The crew mate, and its thread, for taking the line away when either goes. */
+  mate?: string;
+  thread?: string;
   /** The seq of the work as it was given to the crew mate: its runs from then on are this hand-off's. */
   from: number;
   by: Person;
@@ -84,8 +99,11 @@ export function crewCarry(d: CarryDeps) {
     const raw = await d.redis.get(k(`job:${job}`));
     return raw ? (JSON.parse(raw) as Link) : null;
   };
+  const at = (l: Link) => l.jobSid ?? l.sid;
   const putLink = async (l: Link) => {
-    await d.redis.multi().set(k(`job:${l.job}`), JSON.stringify(l), "EX", 30 * 86_400).hset(k(`sid:${l.sid}`), l.jobLane, l.job).expire(k(`sid:${l.sid}`), 30 * 86_400).exec();
+    const m = d.redis.multi().set(k(`job:${l.job}`), JSON.stringify(l), "EX", 30 * 86_400).hset(k(`sid:${at(l)}`), l.jobLane, l.job).expire(k(`sid:${at(l)}`), 30 * 86_400);
+    if (l.mate) m.sadd(k(`mate:${l.mate}`), l.job).expire(k(`mate:${l.mate}`), 30 * 86_400);
+    await m.exec();
   };
   /** The hand-off a crew mate's lane in a session is working on, if any. */
   const linkOn = async (sid: string, lane: string): Promise<Link | null> => {
@@ -193,29 +211,36 @@ export function crewCarry(d: CarryDeps) {
     const live = handedOn(state, lane);
     if (live) throw new CarryError(409, `${live.mateName} is already on this. Take it back first, or send it a note.`);
     const t = await d.crew.get(str(b.mate, 40));
-    if (!t) throw new CarryError(404, "Pick one of your crew mates.");
+    if (!t) throw new CarryError(404, "That crew mate isn't in your crew any more. Pick another.");
     const ask = cleanAsk(b.ask);
     const carry = cleanCarry(b.carry);
     const note = str(b.note, 2000);
-    // Its lane here: the one it already has, else a new one in a copy of its own (crew-code.ts), what is uncommitted carried in.
-    const had = (await d.visitsIn(sid)).find((v) => v.mate === t.id && state.lanes.some((l) => l.id === v.lane));
-    if (had && runOf(state, had.lane).status === "running") throw new CarryError(409, `${t.name} is busy in this session. Wait for it to finish, or stop it first.`);
-    const jobLane = had?.lane ?? (await d.bringInto(me, t, sid, carry.branch)).lane;
-    const { text, carried } = briefOf(state, events, lane, me, carry, note, ask, !had);
-    const from = await d.post(sid, me, text, jobLane);
+    // A thread of its own on its page, named for this session, in a copy of the folder of its own, what is uncommitted carried in.
+    let place: Awaited<ReturnType<CarryDeps["handThread"]>>;
+    try {
+      place = await d.handThread(me, t, sid, { title: state.title || "Handed work", carry: carry.branch });
+    } catch (e) {
+      throw new CarryError((e as { status?: number }).status ?? 400, (e as Error).message);
+    }
+    const { text, carried } = briefOf(state, events, lane, me, carry, note, ask, true);
+    const from = await d.post(place.sid, me, text, place.lane);
     const job = randomBytes(5).toString("hex");
-    await putLink({ sid, lane, job, jobLane, from, by: me, ask, mateName: t.name });
-    await d.store.append(sid, { ...me, kind: "human" }, { type: "crew.handed", job, mate: t.id, mateName: t.name, lane, carried, ask, jobLane }, { lane });
-    await sync(sid, jobLane).catch((e: Error) => d.log(`hand ${job}: ${e.message}`));
-    return { job: { id: job, mate: { id: t.id, name: t.name }, lane: jobLane }, lane };
+    await putLink({ sid, lane, job, jobLane: place.lane, jobSid: place.sid, mate: t.id, thread: place.thread, from, by: me, ask, mateName: t.name });
+    await d.store.append(sid, { ...me, kind: "human" }, { type: "crew.handed", job, mate: t.id, mateName: t.name, lane, carried, ask, jobLane: place.lane, jobSid: place.sid, thread: place.thread, ...(note ? { note } : {}) }, { lane });
+    await sync(place.sid, place.lane).catch((e: Error) => d.log(`hand ${job}: ${e.message}`));
+    return { job: { id: job, mate: { id: t.id, name: t.name }, lane: place.lane, sid: place.sid, thread: place.thread }, lane, ...(place.started ? {} : { why: place.why }) };
   };
 
-  /** How a hand-off's work stands now, from its crew mate's lane since it was handed: said on the session's line when it moves. */
-  const sync = async (sid: string, jobLane: string): Promise<void> => {
-    const l = await linkOn(sid, jobLane);
+  /**
+   * How a hand-off's work stands now, from its crew mate's lane since it was handed (`where`: the session that lane is in, its
+   * thread): said on the handing session's line when it moves.
+   */
+  const sync = async (where: string, jobLane: string): Promise<void> => {
+    const l = await linkOn(where, jobLane);
     if (!l) return;
-    const [state, events] = await Promise.all([d.store.state(sid), d.store.events(sid)]);
-    const h = state.handed?.[l.job];
+    const sid = l.sid;
+    const [home, state, events] = await Promise.all([d.store.state(sid), d.store.state(where), d.store.events(where)]);
+    const h = home.handed?.[l.job];
     if (!h || h.back || ENDS.includes(h.state)) return;
     const mine = events.filter((e) => e.seq > l.from && (e.lane ?? MAIN_LANE) === jobLane);
     const started = mine.some((e) => e.body.type === "run.started");
@@ -251,15 +276,55 @@ export function crewCarry(d: CarryDeps) {
   };
 
   // ── The wheel ─────────────────────────────────────────────────────────────────────────────────────────────────────────
-  /** "Take it back" (its work stops, its branch stays) or Stop from the line: the lane's own again. */
+  /**
+   * "Take it back" (its work stops, its branch and thread stay, its line leaves the chat, and the person's words are given back for
+   * their box) or Stop from the line: the lane's own again.
+   */
   const back = async (sid: string, me: Person, jobId: string, how: "back" | "stopped") => {
     const l = await linkOf(jobId);
-    if (!l || l.sid !== sid) throw new CarryError(404, "That hand-off isn't there any more.");
     const state = await d.store.state(sid);
     steer(state, me, "Only people who can steer this session take it back.");
-    if (runOf(state, l.jobLane).status === "running") await d.stop(sid, me, l.jobLane);
-    await d.store.append(sid, { ...me, kind: "human" }, { type: "crew.handed.back", job: jobId, how }, { lane: l.lane });
-    return { ok: true };
+    const h = state.handed?.[jobId];
+    // Its link kept for 30 days: an older line is still taken off the chat, with nothing to stop.
+    if (!l && !h) throw new CarryError(404, "That hand-off isn't there any more.");
+    if (l && l.sid !== sid) throw new CarryError(404, "That hand-off isn't there any more.");
+    if (h?.back === "back" || h?.back === "gone") return { ok: true, note: h.note ?? "" };
+    if (l) {
+      const js = await d.store.state(at(l)).catch(() => null);
+      if (js && runOf(js, l.jobLane).status === "running") await d.stop(at(l), me, l.jobLane).catch((e: Error) => d.log(`back ${jobId}: ${e.message}`));
+    }
+    await d.store.append(sid, { ...me, kind: "human" }, { type: "crew.handed.back", job: jobId, how }, { lane: h?.lane ?? l!.lane });
+    return { ok: true, note: h?.note ?? "" };
+  };
+
+  /**
+   * A crew mate, one of its threads, or a crew room taken away: every hand-off to it, live or finished, leaves its session's chat
+   * and crew list (Arun, 2026-11-16: "make it dynamic like if an room or agent gets deleted then it is there anymore"). Called
+   * before the crew mate's or room's lanes go, so a run still under way is said as gone, not as stopped.
+   */
+  const gone = async (what: { mate: string; thread?: string } | { room: string; sid: string }): Promise<void> => {
+    if ("mate" in what) {
+      for (const job of await d.redis.smembers(k(`mate:${what.mate}`))) {
+        const l = await linkOf(job);
+        if (!l) {
+          await d.redis.srem(k(`mate:${what.mate}`), job);
+          continue;
+        }
+        if (what.thread && l.thread !== what.thread) continue;
+        const h = (await d.store.state(l.sid).catch(() => null))?.handed?.[job];
+        if (h && h.back !== "back" && h.back !== "gone") await d.store.append(l.sid, FRIDAY, { type: "crew.handed.back", job, how: "gone" }, { lane: l.lane }).catch((e: Error) => d.log(`gone ${job}: ${e.message}`));
+        await d.redis.multi().srem(k(`mate:${what.mate}`), job).hdel(k(`sid:${at(l)}`), l.jobLane).exec();
+      }
+      return;
+    }
+    // Every session that handed work to the room.
+    for (const sid of await d.redis.smembers(k(`room:${what.room}`))) {
+      const evs = await d.store.events(sid).catch(() => [] as SessionEvent[]);
+      const handed = evs.findLast((e) => e.body.type === "crew.handed.room" && e.body.room === what.room);
+      const cleared = evs.findLast((e) => e.body.type === "crew.handed.room.back" && e.body.room === what.room);
+      if (handed && (!cleared || cleared.seq < handed.seq)) await d.store.append(sid, FRIDAY, { type: "crew.handed.room.back", room: what.room, how: "gone" }, { lane: handed.lane ?? MAIN_LANE }).catch((e: Error) => d.log(`gone room ${what.room}: ${e.message}`));
+    }
+    await d.redis.del(k(`room:${what.room}`));
   };
 
   /** "Send Kit a note": the words typed in the lane go to the crew mate instead, as the person's. */
@@ -268,15 +333,18 @@ export function crewCarry(d: CarryDeps) {
     if (!l || l.sid !== sid) throw new CarryError(404, "That hand-off isn't there any more.");
     if (!text) throw new CarryError(400, "Write the note first.");
     steer(await d.store.state(sid), me, "Only people who can steer this session send it notes.");
-    await d.post(sid, me, text, l.jobLane);
+    if (l.mate && !(await d.crew.get(l.mate))) throw new CarryError(404, `${l.mateName} isn't in your crew any more.`);
+    await d.post(at(l), me, text, l.jobLane);
     return { ok: true };
   };
 
-  /** Where the crew mate works on it, to open from the line: its lane in this session. */
+  /** Where the crew mate works on it, to open from the line: its thread on its page (or, handed before that, its lane here). */
   const open = async (sid: string, jobId: string) => {
     const l = await linkOf(jobId);
     if (!l || l.sid !== sid) throw new CarryError(404, "That hand-off isn't there any more.");
-    return { sid, lane: l.jobLane, invite: d.invite(sid) };
+    if (l.mate && !(await d.crew.get(l.mate))) throw new CarryError(404, `${l.mateName} isn't in your crew any more.`);
+    if (l.thread && !(await d.crew.rooms()).some((r) => r.id === l.thread)) throw new CarryError(404, `That thread of ${l.mateName}'s was deleted.`);
+    return { sid: at(l), lane: l.jobLane, invite: d.invite(at(l)), ...(l.mate ? { mate: l.mate } : {}), ...(l.thread ? { thread: l.thread } : {}) };
   };
 
   // ── A crew room ───────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -289,15 +357,49 @@ export function crewCarry(d: CarryDeps) {
     if (!r) throw new CarryError(404, "Pick one of your crew rooms.");
     const events = await d.store.events(sid);
     const lane = await laneFor(state, events, me.id, str(b.lane, 40) || undefined);
-    const { text, carried } = briefOf(state, events, lane, me, cleanCarry(b.carry), str(b.note, 2000), [], false);
+    const note = str(b.note, 2000);
+    const { text, carried } = briefOf(state, events, lane, me, cleanCarry(b.carry), note, [], false);
     let seq: number;
     try {
       seq = await d.post(r.sid, me, text, r.lane);
     } catch (err) {
       throw new CarryError(400, (err as Error).message);
     }
-    await d.store.append(sid, { ...me, kind: "human" }, { type: "crew.handed.room", room: r.id, roomName: r.name, roomSid: r.sid, lane, to: r.to, carried, roomLane: r.lane, seq }, { lane });
+    await d.redis.multi().sadd(k(`room:${r.id}`), sid).expire(k(`room:${r.id}`), 30 * 86_400).exec();
+    await d.store.append(sid, { ...me, kind: "human" }, { type: "crew.handed.room", room: r.id, roomName: r.name, roomSid: r.sid, lane, to: r.to, carried, roomLane: r.lane, seq, ...(note ? { note } : {}) }, { lane });
     return { room: { id: r.id, name: r.name, to: r.to }, lane };
+  };
+
+  /**
+   * Work handed to a room taken back: its message there taken back if its lead hasn't read it yet, or its turn on it stopped if it
+   * is on it now; its line leaves the chat, and the person's words are given back for their box. A room taken away meanwhile only
+   * loses its line.
+   */
+  const roomBack = async (sid: string, me: Person, id: string) => {
+    const state = await d.store.state(sid);
+    steer(state, me, "Only people who can steer this session take it back.");
+    const evs = await d.store.events(sid);
+    const handed = evs.findLast((e) => e.body.type === "crew.handed.room" && e.body.room === id);
+    const h = handed?.body;
+    if (!handed || h?.type !== "crew.handed.room") throw new CarryError(404, "Nothing was handed to that room here.");
+    const cleared = evs.findLast((e) => e.body.type === "crew.handed.room.back" && e.body.room === id);
+    if (cleared && cleared.seq > handed.seq) return { ok: true, note: h.note ?? "" };
+    const room = (await d.crew.rooms()).find((x) => x.id === id);
+    if (room && h.seq !== undefined) {
+      const lane = h.roomLane ?? Object.values(room.lanes)[0] ?? MAIN_LANE;
+      const taken = await d.withdraw(room.sid, me, h.seq, lane).catch(() => false);
+      if (!taken) {
+        // Read already: stopped only if the turn it is on now began after it, so other work in the room isn't cut short.
+        const rs = await d.store.state(room.sid).catch(() => null);
+        const re = await d.store.events(room.sid).catch(() => [] as SessionEvent[]);
+        const started = re.findLast((e) => (e.lane ?? MAIN_LANE) === lane && e.body.type === "run.started");
+        const ended = re.findLast((e) => (e.lane ?? MAIN_LANE) === lane && e.body.type === "run.ended");
+        const onIt = rs && runOf(rs, lane).status === "running" && !!started && started.seq > h.seq && (!ended || ended.seq < started.seq);
+        if (onIt) await d.stop(room.sid, me, lane).catch((e: Error) => d.log(`room back ${id}: ${e.message}`));
+      }
+    }
+    await d.store.append(sid, { ...me, kind: "human" }, { type: "crew.handed.room.back", room: id, how: "back" }, { lane: h.lane ?? MAIN_LANE });
+    return { ok: true, note: h.note ?? "" };
   };
 
   /**
@@ -385,7 +487,7 @@ export function crewCarry(d: CarryDeps) {
       for (const e of events) {
         if (e.body.type !== "crew.handed" || !e.body.jobLane || (t && e.body.mate !== t.id)) continue;
         const m = t ?? mates.find((x) => x.id === (e.body as { mate: string }).mate);
-        if (m) places.push({ sid, lane: e.body.jobLane, from: `${m.name}, handed from here`, handedAt: e.ts, job: e.body.job, ...whoOf(m) });
+        if (m) places.push({ sid: e.body.jobSid ?? sid, lane: e.body.jobLane, from: `${m.name}, handed from here`, handedAt: e.ts, job: e.body.job, ...whoOf(m) });
       }
     };
     // Everything there is to bring in, from every crew mate and every room, and what was handed from here (Friday Teams ffdd8820;
@@ -487,7 +589,8 @@ export function crewCarry(d: CarryDeps) {
    * GET  /api/sessions/:sid/keep-going?lane=                     the sheet
    * POST /api/sessions/:sid/keep-going {mate | room, lane, carry, note, ask}   handed on
    * GET  /api/sessions/:sid/keep-going/:job                      where its crew mate works on it, to open
-   * POST /api/sessions/:sid/keep-going/:job/back {how}            taken back, or stopped
+   * POST /api/sessions/:sid/keep-going/:job/back {how}            taken back (its line gone, {note} for the box), or stopped
+   * POST ?roomBack=<room>                                         work handed to a room taken back
    * POST /api/sessions/:sid/keep-going/:job/note {text}           a note to its crew mate instead
    * GET  ?roomStatus= · ?room= · ?bringFrom=; POST ?bringFrom=     a room's line, a way into it, and Bring it in
    */
@@ -511,6 +614,7 @@ export function crewCarry(d: CarryDeps) {
       if (method === "GET" && query.get("room")) return { status: 200, body: await roomOpen(query.get("room")!) };
       if (method === "GET") return { status: 200, body: await sheet(sid, me, query.get("lane") ?? undefined) };
       if (method === "POST" && query.get("bringFrom")) return { status: 200, body: await bringPick(sid, me, query.get("bringFrom")!, await body()) };
+      if (method === "POST" && query.get("roomBack")) return { status: 200, body: await roomBack(sid, me, query.get("roomBack")!) };
       if (method === "POST") return { status: 200, body: await ((b) => (typeof b.room === "string" && b.room ? handRoom(sid, me, b) : hand(sid, me, b)))(await body()) };
       return { status: 405, body: { error: "Not allowed" } };
     } catch (e) {
@@ -519,7 +623,7 @@ export function crewCarry(d: CarryDeps) {
     }
   };
 
-  return { sheet, hand, handRoom, roomStatus, back, note, open, piecesFor, bringPick, hear, sync, route, linkOf };
+  return { sheet, hand, handRoom, roomStatus, roomBack, back, gone, note, open, piecesFor, bringPick, hear, sync, route, linkOf };
 }
 
 export type CrewCarry = ReturnType<typeof crewCarry>;

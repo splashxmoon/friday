@@ -1,5 +1,6 @@
 import { MAIN_LANE, type EventBody, type RepoCall, type SkillBrief } from "../types.js";
 import { MESH_TOOLS } from "../agent-mesh.js";
+import { BROWSER_TOOL } from "../browser-driver.js";
 import { testFailedInChain } from "../receipt.js";
 import { driverOf, type SessionState } from "../session/projection.js";
 import type { LLM, ToolSchema } from "./llm.js";
@@ -781,6 +782,23 @@ export const meshTools: AgentTool[] = MESH_TOOLS.filter((t) => ["list_agents", "
   },
 }));
 
+/**
+ * Friday's own browser (browser-driver.ts), for a crew mate on Friday's own model as for every coding tool here: offered only where
+ * the desktop app draws it (runtime.ts), and done through the mesh, which acts as this lane (Arun, 2026-11-15: "make sure the agents
+ * also have access to the browser too").
+ */
+export const browserTool: AgentTool = {
+  name: BROWSER_TOOL.name,
+  description: BROWSER_TOOL.description,
+  parameters: BROWSER_TOOL.inputSchema,
+  cancellable: true,
+  async run(args, ctx) {
+    if (!ctx.mesh) return { output: "Friday's browser isn't reachable from here.", isError: true };
+    const r = await ctx.mesh.call("browser", args, ctx.signal);
+    return { output: r.output, ...(r.isError ? { isError: true } : {}) };
+  },
+};
+
 /** A hub: the work split into pieces that several coding agents do at once, each in its own copy of the folder (hubs.ts). */
 export const startHub: AgentTool = {
   name: "start_hub",
@@ -801,4 +819,4 @@ export const startHub: AgentTool = {
   },
 };
 
-export const defaultTools: AgentTool[] = [webSearch, fetchUrl, askHuman, remember, updatePlan, handOff, deployAgent, ...meshTools, listSessions, readSession, messageSession, startHub, addSkillsFromGithub, ...repoTools];
+export const defaultTools: AgentTool[] = [webSearch, fetchUrl, askHuman, remember, updatePlan, handOff, deployAgent, ...meshTools, browserTool, listSessions, readSession, messageSession, startHub, addSkillsFromGithub, ...repoTools];

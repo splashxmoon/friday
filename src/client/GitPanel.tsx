@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import "./git-panel.css";
 import type { RepoStatus, StatusEntry, LogEntry } from "../runner/git.js";
 import type { SessionState } from "../session/projection.js";
 import { MAIN_LANE, type DiffFile, type Member } from "../types.js";
@@ -169,31 +170,35 @@ export function GitPanel({ state, sid, invite, send, me, lane }: { state: Sessio
     const key: Key = `${kind}:${path}`;
     const on = open === key;
     const got = patches[key];
+    const name = path.split("/").pop() ?? path;
+    const folder = path.slice(0, path.length - name.length).replace(/\/$/, "");
+    const letter = entry ? LETTER[entry.status] : "N";
+    const tone = entry?.status ?? "added";
     return (
-      <li key={key} className={`gitp-file${on ? " on" : ""}`}>
-        <div className="gitp-file-row">
-          <button type="button" className="gitp-file-main" aria-expanded={on} onClick={() => toggle(key)}>
-            <span className={`gitp-letter is-${entry?.status ?? "untracked"}`}>{entry ? LETTER[entry.status] : "?"}</span>
-            <span className="gitp-path" title={entry?.from ? `${entry.from} → ${path}` : path}>
-              {entry?.from ? <><span className="muted">{entry.from.split("/").pop()} → </span>{path}</> : path}
-            </span>
-            <Icon name={on ? "chevronUp" : "chevronDown"} size={12} />
+      <li key={key} className={`gitp-file gx-file${on ? " on" : ""}`}>
+        <div className="gx-row">
+          <button type="button" className="gx-main" aria-expanded={on} onClick={() => toggle(key)} title={entry?.from ? `${entry.from} → ${path}` : path}>
+            <Icon name="chevronRight" size={12} className="gx-caret" />
+            <span className={`gx-letter is-${tone}`} title={entry ? entry.status : "new, not in git yet"}>{letter}</span>
+            <span className="gx-name">{name}</span>
+            {folder && <span className="gx-dir">{folder}</span>}
+            {entry?.from && <span className="gx-dir">from {entry.from.split("/").pop()}</span>}
           </button>
           {mayWork && (
-            <span className="gitp-file-acts">
+            <span className="gx-acts">
+              {kind !== "staged" && (
+                <button type="button" className="gx-icon" title={kind === "untracked" ? "Delete this file" : "Throw the changes away"} aria-label={kind === "untracked" ? `Delete ${path}` : `Throw away the changes to ${path}`} disabled={!!busy} onClick={() => discard([path], kind === "untracked")}>
+                  <Icon name={kind === "untracked" ? "trash" : "refresh"} size={13} />
+                </button>
+              )}
               {kind === "staged" ? (
-                <button type="button" className="btn ghost small" disabled={!!busy} onClick={() => void act("unstage", { action: "unstage", paths: [path] })}>
-                  Unstage
+                <button type="button" className="gx-icon" title="Unstage: leave it out of the commit" aria-label={`Unstage ${path}`} disabled={!!busy} onClick={() => void act("unstage", { action: "unstage", paths: [path] })}>
+                  <Icon name="minus" size={14} />
                 </button>
               ) : (
-                <>
-                  <button type="button" className="btn ghost small" disabled={!!busy} onClick={() => void act("stage", { action: "stage", paths: [path] })}>
-                    Stage
-                  </button>
-                  <button type="button" className="icon-btn tiny gitp-discard" title={kind === "untracked" ? "Delete this file" : "Throw the changes away"} aria-label={kind === "untracked" ? `Delete ${path}` : `Throw away the changes to ${path}`} disabled={!!busy} onClick={() => discard([path], kind === "untracked")}>
-                    <Icon name="x" size={12} />
-                  </button>
-                </>
+                <button type="button" className="gx-icon" title="Stage: put it in the commit" aria-label={`Stage ${path}`} disabled={!!busy} onClick={() => void act("stage", { action: "stage", paths: [path] })}>
+                  <Icon name="plus" size={14} />
+                </button>
               )}
             </span>
           )}
@@ -245,168 +250,209 @@ export function GitPanel({ state, sid, invite, send, me, lane }: { state: Sessio
     );
   };
 
-  const section = (title: string, count: number, actions: ReactNode, children: ReactNode) =>
+  const section = (title: string, hint: string, count: number, actions: ReactNode, children: ReactNode, tone = "") =>
     count > 0 ? (
-      <section className="gitp-section">
-        <header className="gitp-section-head">
+      <section className={`gx-sec${tone ? ` ${tone}` : ""}`}>
+        <header className="gx-sec-head">
           <h3>
-            {title} <span className="gitp-count">{count}</span>
+            {title} <span className="gx-count">{count}</span>
           </h3>
-          {mayWork && <span className="gitp-section-acts">{actions}</span>}
+          {mayWork && <span className="gx-sec-acts">{actions}</span>}
         </header>
-        <ul className="gitp-list">{children}</ul>
+        <p className="gx-hint">{hint}</p>
+        <ul className="gx-list">{children}</ul>
       </section>
     ) : null;
 
+  const unpushed = log?.filter((c) => c.pushed === false).length ?? 0;
+  const staged = status?.staged.length ?? 0;
+
   return (
-    <div className="gitp">
+    <div className="gitp gx">
       {confirmUI}
       {dialog}
-      <header className="gitp-head">
-        {others.length > 0 && (
-          <label className="gitp-dir" title="Which folder: the agent's own, or one it also works in">
-            <Picker value={dir} label="Which folder" onChange={setDir} options={[{ value: "", label: (engine?.cwd ?? "This folder").split(/[\\/]/).filter(Boolean).pop() ?? "This folder" }, ...others.map((d) => ({ value: d, label: d.split(/[\\/]/).filter(Boolean).pop() ?? d, sub: d }))]} />
-          </label>
-        )}
-        <BranchButton sid={sid} invite={invite} send={send} lane={laneId} branch={branch} idle={state.run.status !== "running"} />
-        {status?.upstream ? (
-          <span className="gitp-sync" title={`Against ${status.upstream}`}>
-            {status.ahead > 0 && <span className="gitp-pill up">↑{status.ahead}</span>}
-            {status.behind > 0 && <span className="gitp-pill down">↓{status.behind}</span>}
-            {!status.ahead && !status.behind && <span className="gitp-pill even">in step</span>}
-          </span>
-        ) : status ? (
-          <span className="gitp-pill even" title="No upstream branch yet: a push sets one">not pushed yet</span>
-        ) : null}
-        {compare && (compare.ahead > 0 || compare.behind > 0) && (
-          <span className="gitp-compare" title={`${compare.ahead} commit${compare.ahead === 1 ? "" : "s"} ahead of ${compare.base}, ${compare.behind} behind`}>
-            vs {compare.base}: {compare.files} file{compare.files === 1 ? "" : "s"} <b className="diff-add">+{compare.additions}</b> <b className="diff-del">−{compare.deletions}</b>
-            {compare.behind > 0 && <span className="muted"> · {compare.behind} behind</span>}
-          </span>
-        )}
-        <span className="gitp-head-acts">
-          <button type="button" className="icon-btn tiny" title="Look again" aria-label="Refresh" disabled={!!busy} onClick={() => void refresh()}>
+      {/* Where the branch stands, in words: what is waiting to go up or come down, and how it compares with main. */}
+      <header className="gx-head">
+        <div className="gx-branch">
+          {others.length > 0 && (
+            <label className="gitp-dir" title="Which folder: the agent's own, or one it also works in">
+              <Picker value={dir} label="Which folder" onChange={setDir} options={[{ value: "", label: (engine?.cwd ?? "This folder").split(/[\\/]/).filter(Boolean).pop() ?? "This folder" }, ...others.map((d) => ({ value: d, label: d.split(/[\\/]/).filter(Boolean).pop() ?? d, sub: d }))]} />
+            </label>
+          )}
+          <BranchButton sid={sid} invite={invite} send={send} lane={laneId} branch={branch} idle={state.run.status !== "running"} />
+          <span className="gx-grow" />
+          <button type="button" className="gx-icon" title="Look again" aria-label="Refresh" disabled={!!busy} onClick={() => void refresh()}>
             <Icon name="refresh" size={13} />
           </button>
-          {mayWork && status?.upstream && status.behind > 0 && (
-            <button type="button" className="btn ghost small" disabled={!!busy} title="Bring in the upstream's new commits (fast-forward only)" onClick={() => void act("pull", { action: "pull" })}>
-              {busy === "pull" ? "Pulling…" : `Pull ${status.behind}`}
-            </button>
-          )}
-          {mayWork && (
-            <button type="button" className="btn primary small gitp-commit" aria-label="Commit" title="Commit" disabled={!!busy || !changed} onClick={() => setShipping(true)}>
-              <Icon name="commit" size={13} /> <span className="gitp-commit-word">Commit</span>
-            </button>
-          )}
-        </span>
+        </div>
+        {status && (
+          <div className="gx-sync">
+            {status.upstream ? (
+              status.ahead || status.behind ? (
+                <>
+                  {status.ahead > 0 && (
+                    <span className="gx-chip up" title={`On this computer, not on ${status.upstream} yet`}>
+                      <Icon name="arrowUp" size={11} /> {status.ahead} to push
+                    </span>
+                  )}
+                  {status.behind > 0 && (
+                    <span className="gx-chip down" title={`On ${status.upstream}, not here yet`}>
+                      <Icon name="arrowDown" size={11} /> {status.behind} to pull
+                    </span>
+                  )}
+                </>
+              ) : (
+                <span className="gx-chip even">
+                  <Icon name="check" size={11} /> Up to date with {status.upstream}
+                </span>
+              )
+            ) : (
+              <span className="gx-chip">Not pushed anywhere yet: the first push publishes it</span>
+            )}
+            {mayWork && status.upstream && status.behind > 0 && (
+              <button type="button" className="gx-btn" disabled={!!busy} title="Bring in the upstream's new commits (fast-forward only)" onClick={() => void act("pull", { action: "pull" })}>
+                {busy === "pull" ? <span className="spinner" /> : <Icon name="download" size={12} />} {busy === "pull" ? "Pulling" : `Pull ${status.behind}`}
+              </button>
+            )}
+          </div>
+        )}
+        {compare && (compare.ahead > 0 || compare.behind > 0) && (
+          <p className="gx-vs">
+            Against <code>{compare.base}</code>: {compare.ahead} commit{compare.ahead === 1 ? "" : "s"} ahead{compare.behind > 0 ? `, ${compare.behind} behind` : ""} · {compare.files} file{compare.files === 1 ? "" : "s"} <b className="diff-add">+{compare.additions}</b> <b className="diff-del">−{compare.deletions}</b>
+          </p>
+        )}
       </header>
       {error && <p className="form-error gitp-error">{error}</p>}
-      {!status ? (
-        <p className="muted small gitp-note">Reading the folder's git…</p>
-      ) : changed === 0 ? (
-        <p className="muted small gitp-note">Nothing to commit. The working files match the last commit.</p>
-      ) : (
-        <>
-          {status.conflicted.length > 0 && (
-            <section className="gitp-section">
-              <header className="gitp-section-head">
-                <h3 className="gitp-conflict">
-                  Conflicts <span className="gitp-count">{status.conflicted.length}</span>
-                </h3>
-              </header>
-              <ul className="gitp-list">
-                {status.conflicted.map((p) => (
-                  <li key={p} className="gitp-file">
-                    <div className="gitp-file-row">
-                      <span className="gitp-file-main">
-                        <span className="gitp-letter is-conflict">!</span>
-                        <span className="gitp-path">{p}</span>
+      <div className="gx-body">
+        {!status ? (
+          <p className="gx-quiet">Reading the folder's git…</p>
+        ) : changed === 0 ? (
+          <div className="gx-clean">
+            <span className="gx-clean-mark" aria-hidden="true">
+              <Icon name="check" size={14} />
+            </span>
+            <div>
+              <b>Nothing to commit</b>
+              <span>The folder matches the last commit.</span>
+            </div>
+          </div>
+        ) : (
+          <>
+            {status.conflicted.length > 0 &&
+              section(
+                "Conflicts",
+                "Both sides changed these lines. Settle them in the files, then stage them.",
+                status.conflicted.length,
+                null,
+                status.conflicted.map((p) => (
+                  <li key={p} className="gitp-file gx-file">
+                    <div className="gx-row">
+                      <span className="gx-main">
+                        <span className="gx-letter is-conflict">!</span>
+                        <span className="gx-name">{p.split("/").pop()}</span>
+                        <span className="gx-dir">{p.slice(0, p.lastIndexOf("/"))}</span>
                       </span>
                     </div>
                   </li>
-                ))}
-              </ul>
-            </section>
-          )}
-          {section(
-            "Staged",
-            status.staged.length,
-            <button type="button" className="btn ghost small" disabled={!!busy} onClick={() => void act("unstage", { action: "unstage", paths: status.staged.map((e) => e.path) })}>
-              Unstage all
-            </button>,
-            status.staged.map((e) => fileRow("staged", e.path, e)),
-          )}
-          {section(
-            "Changes",
-            status.unstaged.length,
-            <>
-              <button type="button" className="btn ghost small" disabled={!!busy} onClick={() => void act("stage", { action: "stage", paths: status.unstaged.map((e) => e.path) })}>
+                )),
+                "bad",
+              )}
+            {section(
+              "Ready to commit",
+              "Staged: these go in the next commit.",
+              status.staged.length,
+              <button type="button" className="gx-link" disabled={!!busy} onClick={() => void act("unstage", { action: "unstage", paths: status.staged.map((e) => e.path) })}>
+                Unstage all
+              </button>,
+              status.staged.map((e) => fileRow("staged", e.path, e)),
+              "ok",
+            )}
+            {section(
+              "Changed",
+              "Not staged yet: press + to put one in the commit.",
+              status.unstaged.length,
+              <>
+                <button type="button" className="gx-link" disabled={!!busy} onClick={() => void act("stage", { action: "stage", paths: status.unstaged.map((e) => e.path) })}>
+                  Stage all
+                </button>
+                <button type="button" className="gx-link danger" disabled={!!busy} onClick={() => discard(status.unstaged.map((e) => e.path), false)}>
+                  Throw all away
+                </button>
+              </>,
+              status.unstaged.map((e) => fileRow("unstaged", e.path, e)),
+            )}
+            {section(
+              "New files",
+              "Not in git yet.",
+              status.untracked.length,
+              <button type="button" className="gx-link" disabled={!!busy} onClick={() => void act("stage", { action: "stage", paths: status.untracked })}>
                 Stage all
-              </button>
-              <button type="button" className="btn ghost small gitp-danger" disabled={!!busy} onClick={() => discard(status.unstaged.map((e) => e.path), false)}>
-                Throw all away
-              </button>
-            </>,
-            status.unstaged.map((e) => fileRow("unstaged", e.path, e)),
-          )}
-          {section(
-            "Untracked",
-            status.untracked.length,
-            <button type="button" className="btn ghost small" disabled={!!busy} onClick={() => void act("stage", { action: "stage", paths: status.untracked })}>
-              Stage all
-            </button>,
-            status.untracked.map((p) => fileRow("untracked", p)),
-          )}
-        </>
-      )}
-      <section className="gitp-section gitp-history">
-        <header className="gitp-section-head">
-          <h3>
-            History {log && <span className="gitp-count">{log.length}</span>}
-          </h3>
-          {log?.some((c) => c.pushed === false) && <span className="muted small">{log.filter((c) => c.pushed === false).length} not pushed</span>}
-        </header>
-        {!log ? (
-          <p className="muted small gitp-note">Reading…</p>
-        ) : log.length === 0 ? (
-          <p className="muted small gitp-note">No commits yet.</p>
-        ) : (
-          <ul className="gitp-list">
-            {log.map((c) => {
-              const key: Key = `commit:${c.sha}`;
-              const on = open === key;
-              const got = patches[key];
-              return (
-                <li key={c.sha} className={`gitp-file gitp-commit${on ? " on" : ""}`}>
-                  <button type="button" className="gitp-file-main" aria-expanded={on} onClick={() => toggle(key)}>
-                    <span className={`gitp-dot${c.pushed === false ? " unpushed" : ""}`} title={c.pushed === false ? "Not pushed yet" : c.pushed ? "Pushed" : ""} />
-                    <code className="gitp-sha">{c.sha.slice(0, 7)}</code>
-                    <span className="gitp-path" title={c.subject}>
-                      {c.subject}
-                    </span>
-                    <span className="gitp-when" title={new Date(c.at).toLocaleString()}>
-                      {c.author.split(/\s+/)[0]} · {relTime(c.at)}
-                    </span>
-                    <Icon name={on ? "chevronUp" : "chevronDown"} size={12} />
-                  </button>
-                  {on && (
-                    <div className="gitp-hunks">
-                      {got === "loading" || !got ? (
-                        <p className="muted small">Reading…</p>
-                      ) : got === "none" ? (
-                        <p className="muted small">No file changes in this commit.</p>
-                      ) : (
-                        got.map((f) => <DiffView key={f.path} path={f.path} status={f.status} lines={patchLines(f.patch)} defaultOpen={got.length <= 3} maxHeight={320} />)
-                      )}
-                    </div>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+              </button>,
+              status.untracked.map((p) => fileRow("untracked", p)),
+            )}
+          </>
         )}
-      </section>
-      {me.role === "viewer" && <p className="muted small gitp-note">You're watching: only the driver or an owner can stage, commit or pull.</p>}
+        {/* The branch's commits, newest first, on a line: hollow ones are only on this computer. */}
+        <section className="gx-sec gx-history">
+          <header className="gx-sec-head">
+            <h3>
+              History {log && log.length > 0 && <span className="gx-count">{log.length}</span>}
+            </h3>
+            {unpushed > 0 && <span className="gx-unpushed">{unpushed} not pushed</span>}
+          </header>
+          {!log ? (
+            <p className="gx-quiet">Reading…</p>
+          ) : log.length === 0 ? (
+            <p className="gx-quiet">No commits yet.</p>
+          ) : (
+            <ol className="gx-log">
+              {log.map((c) => {
+                const key: Key = `commit:${c.sha}`;
+                const on = open === key;
+                const got = patches[key];
+                return (
+                  <li key={c.sha} className={`gx-commit${c.pushed === false ? " local" : ""}${on ? " on" : ""}`}>
+                    <button type="button" className="gx-commit-main" aria-expanded={on} onClick={() => toggle(key)}>
+                      <span className="gx-dot" aria-hidden="true" />
+                      <span className="gx-commit-text">
+                        <span className="gx-subject" title={c.subject}>
+                          {c.subject}
+                        </span>
+                        <span className="gx-commit-meta" title={new Date(c.at).toLocaleString()}>
+                          {c.author.split(/\s+/)[0]} · {relTime(c.at)} · <code>{c.sha.slice(0, 7)}</code>
+                          {c.pushed === false && <span className="gx-local">Not pushed</span>}
+                        </span>
+                      </span>
+                      <Icon name="chevronRight" size={12} className="gx-caret" />
+                    </button>
+                    {on && (
+                      <div className="gitp-hunks gx-hunks">
+                        {got === "loading" || !got ? (
+                          <p className="muted small">Reading…</p>
+                        ) : got === "none" ? (
+                          <p className="muted small">No file changes in this commit.</p>
+                        ) : (
+                          got.map((f) => <DiffView key={f.path} path={f.path} status={f.status} lines={patchLines(f.patch)} defaultOpen={got.length <= 3} maxHeight={320} />)
+                        )}
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+        </section>
+        {me.role === "viewer" && <p className="gx-quiet">You're watching: only the driver or an owner can stage, commit or pull.</p>}
+      </div>
+      {/* Commit, at the foot where it is always in reach, saying what it will take. */}
+      {mayWork && status && changed > 0 && (
+        <footer className="gx-foot">
+          <span className="gx-foot-text">{staged ? `${staged} staged, ${changed - staged} not` : `${changed} change${changed === 1 ? "" : "s"}, none staged yet`}</span>
+          <button type="button" className="gx-btn primary" disabled={!!busy} onClick={() => setShipping(true)}>
+            <Icon name="commit" size={13} /> Commit
+          </button>
+        </footer>
+      )}
     </div>
   );
 }

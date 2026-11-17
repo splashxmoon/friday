@@ -56,7 +56,9 @@ test("deleting what isn't its own asks; its own is its own", () => {
 
 test("keys, access and your computer ask", () => {
   for (const c of ["crontab -e", "launchctl load ~/Library/LaunchAgents/x.plist", "git config --global user.email x@y", "gh auth login", "gh secret set TOKEN", "echo 'export X=1' >> ~/.zshrc"]) assert.equal(kind(c), "ask:keys", c);
-  for (const c of ["sudo npm i -g x", "defaults write com.apple.dock autohide -bool true", "osascript -e 'tell app \"Mail\" to quit'", "brew uninstall node", `cp build.zip ${home}/Desktop/`, `echo x > ${home}/code/other/notes.md`]) assert.equal(kind(c), "ask:computer", c);
+  for (const c of ["sudo npm i -g x", "defaults write com.apple.dock autohide -bool true", "osascript -e 'tell app \"Mail\" to quit'", "brew uninstall node"]) assert.equal(kind(c), "ask:computer", c);
+  // Writing past its folders is full access since 2026-11-15 (Arun: "allow for full access for things outside of folders too").
+  for (const c of [`cp build.zip ${home}/Desktop/`, `echo x > ${home}/code/other/notes.md`]) assert.equal(kind(c), "run", c);
   assert.equal(kind("crontab -l"), "run");
 });
 
@@ -75,8 +77,9 @@ test("files a tool writes: its folders run, keys ask, the floor holds", () => {
   assert.equal(guardPath(`${home}/.friday/data.json`, at).kind, "never");
   const zsh = guardPath("~/.zshrc", at);
   assert.equal(zsh.kind === "ask" && zsh.tag, "keys");
-  const out = guardPath(`${home}/Desktop/x.txt`, at);
-  assert.equal(out.kind === "ask" && out.tag, "computer");
+  assert.equal(guardPath(`${home}/Desktop/x.txt`, at).kind, "run", "past its folders: full access");
+  const gone = guardPath(`${home}/Desktop/x.txt`, at, true);
+  assert.equal(gone.kind === "ask" && gone.tag, "delete", "deleting what isn't its own still asks");
   assert.equal(guardTool("Write", { file_path: `${home}/code/shop/a.ts` }, at).kind, "run");
   assert.equal(guardTool("Bash", { command: "git push origin main" }, at).kind, "ask");
 });

@@ -582,8 +582,11 @@ export function AgentModelPicker({
           </div>
           </div>
         )}
-        {power && <div className="ampd-power">{power}</div>}
-        {routing}
+        {/* Choosing a tool or an account, the list has the card's room: Effort and Smart routing step aside until it is chosen, and
+            come back for the tool picked (Arun, 2026-11-16: "fix this the effort being cutoff, make sure it disappears when you
+            click to select another tool"). */}
+        {power && row === "model" && <div className="ampd-power">{power}</div>}
+        {row === "model" && routing}
       </div>,
     );
   }

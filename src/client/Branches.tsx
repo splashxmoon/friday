@@ -165,7 +165,22 @@ export function BranchCard({
     onClose();
   };
 
-  const typed = q.trim();
+  // Renaming the branch the folder is on (Arun, 2026-11-16: "be able to rename the branch and stuff too"): the box takes its new
+  // name, Enter renames it, Esc goes back to finding.
+  const [renaming, setRenaming] = useState(false);
+  const rename = async () => {
+    const to = branchName(q.trim());
+    if (!to || to === on) return setRenaming(false);
+    setBusy("rename");
+    setErr("");
+    const r = await send({ type: "folder.git", action: "rename", name: to, lane, quiet: true });
+    setBusy("");
+    if (!r.ok) return setErr(r.error ?? "Couldn't rename the branch.");
+    setOn(to);
+    setRenaming(false);
+    onClose();
+  };
+  const typed = renaming ? "" : q.trim();
   // A name nothing matches is a branch you are asking for, not a search that failed, made one git takes.
   const named = branchName(typed);
   const hits = (list ?? []).filter((b) => !typed || b.name.toLowerCase().includes(typed.toLowerCase()) || b.name === named);
@@ -176,22 +191,26 @@ export function BranchCard({
   const place = placeCard(trigger?.getBoundingClientRect(), 300, { want: 360, min: 160, prefer: "below" });
   return createPortal(
     <div ref={ref} className="branch-card surface" role="dialog" aria-label="Branches" style={{ ...place, position: "fixed", right: "auto", marginTop: 0 }}>
-      <div className="branch-find">
-        <Icon name="search" size={13} />
+      <div className={`branch-find${renaming ? " renaming" : ""}`}>
+        <Icon name={renaming ? "pencil" : "search"} size={13} />
         <input
           autoFocus
+          key={renaming ? "rename" : "find"}
           value={q}
           spellCheck={false}
-          placeholder="Find or name a branch"
-          aria-label="Find or name a branch"
+          placeholder={renaming ? `A new name for ${on ?? "this branch"}` : "Find or name a branch"}
+          aria-label={renaming ? `A new name for ${on ?? "this branch"}` : "Find or name a branch"}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => {
+            if (renaming && e.key === "Escape") return void (e.preventDefault(), e.stopPropagation(), setRenaming(false), setQ(""));
             if (e.key !== "Enter") return;
             e.preventDefault();
+            if (renaming) return void rename();
             if (isNew) void go(named, true);
             else if (hits[0]) void go(hits[0].name);
           }}
         />
+        {renaming && (busy === "rename" ? <span className="spinner" /> : <span className="branch-key">↵</span>)}
       </div>
       <div className="branch-list">
         {err && <p role="alert" className="error small branch-note">{err}</p>}
@@ -227,7 +246,13 @@ export function BranchCard({
         ))}
         {list?.length === 0 && !isNew && <p className="muted small branch-note">This folder has no branches yet.</p>}
       </div>
-      <p className="branch-foot muted small">Uncommitted work stays where it is; git refuses the switch if it would be overwritten.</p>
+      {on && !renaming && (
+        <button type="button" className="branch-row branch-rename" disabled={!!busy} onClick={() => (setRenaming(true), setQ(on), setErr(""))}>
+          <Icon name="pencil" size={13} />
+          <span className="branch-name">Rename {on}</span>
+        </button>
+      )}
+      <p className="branch-foot muted small">{renaming ? "Only here: one already pushed keeps its old name on GitHub until you push again." : "Uncommitted work stays where it is; git refuses the switch if it would be overwritten."}</p>
     </div>,
     document.body,
   );

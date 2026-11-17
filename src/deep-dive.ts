@@ -55,6 +55,8 @@ export interface DivePage extends DivePlan {
   badDiagrams: number;
   at: number;
   error?: string;
+  /** The commit it was last written at, when refreshed on its own (else the Deep Dive's head). */
+  head?: string;
 }
 export interface DiveAsk {
   id: string;
@@ -593,3 +595,39 @@ export class DeepDives {
 }
 
 export const newAskId = () => randomBytes(6).toString("hex");
+
+/**
+ * What an agent starting work in a repo is told from its Deep Dive (Arun, 2026-11-16, "Do 4": the spec's speed case, an agent
+ * briefed from the pages instead of grepping its first minutes away): the overview, cut short and without its diagrams, and every
+ * other page by its title, what it is for and the files it covers, so the agent opens the right files first. "" until it is ready.
+ */
+export function diveBrief(d: Pick<Dive, "status" | "head" | "branch" | "name">, pages: readonly Pick<DivePage, "title" | "purpose" | "files" | "body" | "status">[]): string {
+  if (d.status !== "ready") return "";
+  const done = pages.filter((p) => p.status === "done" && p.body.trim());
+  if (!done.length) return "";
+  const [overview, ...rest] = done;
+  const plain = (md: string, n: number) => {
+    const t = md.replace(/```mermaid[\s\S]*?```/g, "").replace(/\n{3,}/g, "\n\n").trim();
+    return t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t;
+  };
+  const list = rest.slice(0, 20).map((p) => `- ${p.title}: ${clipLine(p.purpose, 140)}${p.files.length ? ` (${p.files.slice(0, 6).join(", ")}${p.files.length > 6 ? ", …" : ""})` : ""}`).join("\n");
+  return `[Friday] ${d.name} has a Deep Dive, written at ${d.head.slice(0, 7)}${d.branch ? ` on ${d.branch}` : ""}: start from it rather than exploring from scratch, and open the files the page for your task names first. A page whose files changed since may be out of date; the code wins.\n\n${plain(overview!.body, 2400)}${list ? `\n\nIts other pages:\n${list}` : ""}\n\n`;
+}
+const clipLine = (s: string, n: number) => {
+  const t = s.replace(/\s+/g, " ").trim();
+  return t.length > n ? `${t.slice(0, n - 1)}…` : t;
+};
+
+/** What changed since a page was written (runner/dive.ts changedSince). */
+export interface DiveChanges {
+  committed: string[];
+  dirty: { path: string; mtime: number }[];
+}
+/**
+ * Whether a page may be out of date: one of its files (or a file under one of its folders) changed in a commit since it was
+ * written, or was edited in the folder after it was. Its own words are never compared: this is about the code under it.
+ */
+export function pageStale(page: Pick<DivePage, "files" | "at">, c: DiveChanges): boolean {
+  const under = (file: string, own: string) => file === own || file.startsWith(own.replace(/\/+$/, "") + "/");
+  return page.files.some((f) => c.committed.some((x) => under(x, f)) || c.dirty.some((x) => under(x.path, f) && x.mtime > page.at));
+}

@@ -50,11 +50,12 @@ import { Face, isTeamSid, MateRing, mateStatus, newTeammate, openRoom, openTeamm
 import { roleWord, rowState } from "./team-status.js";
 import { byDay } from "./sidebar-days.js";
 import { ALL as ALL_AGENTS, useFocusedAgent } from "./agentFocus.js";
-import { byState, StateRing, useFlip, useNow, type Presence } from "./presence.js";
+import { byState, DoneRing, StateRing, useFlip, useNow, type Presence } from "./presence.js";
 import { api } from "./api.js";
 import { markUnread, useUnread } from "./unread.js";
 import { noticeDue, UsageNotice, useUsageSharing } from "./UsageSharing.js";
 import { folderName } from "./Workspace.js";
+import { NEW_THREAD, NEW_THREAD_ON_OPEN } from "./threads-data.js";
 
 /** `fresh`: a project just made, whose name box was never confirmed: Escape takes it away again. */
 type Renaming = { kind: "session" | "project"; id: string; fresh?: boolean } | null;
@@ -271,10 +272,17 @@ function RepoTile({ name }: { name: string }) {
  * How a group stands, said on its own line even folded: how many are working. What waits on you is said once, in Needs you at
  * the top, never again as an amber badge on the group it left (audit CODE-1 B, Arun 2026-11-04).
  */
-function GroupState({ working }: { working: number }) {
-  if (working) return <span className="sb-gstate live" title={`${working} working`}><span className="sb-gspin" aria-hidden />{working > 1 ? working : ""}</span>;
-  return null;
+function GroupState({ working, needs = 0 }: { working: number; /** Its sessions waiting on you (they show under Needs you): said on the folder too, as a project's threads (threads.tsx). */ needs?: number }) {
+  const live = working ? <span className="sb-gstate live" title={`${working} working`}><span className="sb-gspin" aria-hidden />{working > 1 ? working : ""}</span> : null;
+  if (!needs) return live;
+  return (
+    <>
+      <span className="sb-gstate needs" title={`${needs} waiting on you, under Needs you`}>{needs} needs you</span>
+      {live}
+    </>
+  );
 }
+
 
 export function Sidebar(p: SidebarProps) {
   // On a place's own page (Needs you, the Board, Automations, Code review, Usage, Settings) the open-source build shows the rail
@@ -286,6 +294,15 @@ export function Sidebar(p: SidebarProps) {
     document.documentElement.classList.toggle("rail-only", railOnly);
     return () => document.documentElement.classList.remove("rail-only");
   }, [railOnly]);
+  // The new-thread page is a panel under the window's row with the list open too, as it is beside the rail alone (Arun,
+  // 2026-11-16: "make the new session page has this same layout thing when the side bar is open too"). style.css html.page-panel.
+  // The Crew's Agents page too, as it is with the list folded (Arun, 2026-11-16: "i want this layout when the side bar is also open
+  // for this page"); a room or a crew mate is already one, under its header in the window's row.
+  const pagePanel = isLocal() && !railOnly && p.view === "home";
+  useEffect(() => {
+    document.documentElement.classList.toggle("page-panel", pagePanel);
+    return () => document.documentElement.classList.remove("page-panel");
+  }, [pagePanel]);
   return (
     <aside className={`sb-panel ${p.panelOpen ? "open" : ""}`} aria-label="Sidebar" aria-hidden={!p.panelOpen} inert={!p.panelOpen}>
       {p.panelOpen && !railOnly && <PanelResize />}
@@ -357,14 +374,21 @@ function SessionRing({ state, crew, working, title, unread = false, stopped = fa
   // since, quieter once you have.
   if (!pr && (unread || a.some((x) => x.state === "done")))
     return (
-      <span className={`state-ring sb-done${unread ? " new" : ""}`} role="img" aria-label="Finished" title={unread ? "Finished while you were away" : "Finished"}>
-        {/* The presence ring's own size: 10.5px across, a 1.75px line, in the 12px slot (presence.tsx .pr-ring). */}
-        <svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
-          <circle cx="6" cy="6" r="4.375" />
-        </svg>
-      </span>
+      <DoneRing fresh={unread} />
     );
   return <StateRing state={pr} title={title} />;
+}
+
+/** A thread tab's ring (threads.tsx), worked out as its sidebar row's is (ChatRow), so a tab and its row never disagree. */
+export function ThreadRing({ attention: a, sid, active }: { attention: AttentionState; sid: string; active: boolean }) {
+  const now = useNow(30_000);
+  const unread = useUnread().has(sid);
+  const needs = a.items.find((i) => i.sid === sid) ?? null;
+  const working = a.working.get(sid) ?? null;
+  const crew = a.crews.get(sid) ?? null;
+  const state = needs || (a.needSids.has(sid) && !working) ? "needs" : working ? "working" : "idle";
+  const quiet = working && !needs && crewQuiet(crew, now) && working.heardAt ? quietFor(working.heardAt, now) : undefined;
+  return <SessionRing state={state} crew={crew} working={working} unread={unread && !active && state === "idle"} stopped={needs?.kind === "stopped"} quiet={quiet} title={needs ? `${needs.kind === "stopped" ? "" : "Needs you: "}${shortPaths(needs.detail ?? needs.text)}` : working ? `Working now: ${working.what}` : undefined} />;
 }
 
 /** A working agent unheard for QUIET_AFTER_MS: said as quiet, never as working or done (step-words.ts). */
@@ -380,7 +404,7 @@ export const crewQuiet = (crew: Crew | null | undefined, now: number): boolean =
  * who has gone quiet and for how long, what the one at work is doing this minute ("Codex · Editing Sidebar.tsx"), then how the
  * agents stand. Said agent first, so a line cut short keeps who and loses the detail. What needs you is the row's own line (ChatRow).
  */
-export function CrewLine({ crew, now }: { crew: Crew; now: number }) {
+export function CrewLine({ crew, now, lead }: { crew: Crew; now: number; /** What fills the line's left when the agents are all done or ready and their marks alone are on the right: what was last asked. */ lead?: ReactNode }) {
   const a = crew.agents;
   const short = (n: string, tool?: EngineTool) => agentWord(n.replace(/^[^']+'s /, ""), tool);
   const of = (st: CrewState) => a.filter((x) => x.state === st);
@@ -413,6 +437,9 @@ export function CrewLine({ crew, now }: { crew: Crew; now: number }) {
     const said = `${a.length} agents, ${a.some((x) => x.state === "done") ? "done" : "ready"}`;
     return (
       <span className="sb-crew sb-crew-end">
+        {/* Not an empty left half (Arun, 2026-11-16: "need more details and info here there is empty space on the left"): what was
+            last asked, else how they stand in words. */}
+        <span className="sb-crew-lead truncate">{lead ?? `${a.length} agents · ${a.some((x) => x.state === "done") ? "done" : "ready"}`}</span>
         <CrewTools agents={a.map((x) => ({ key: x.lane, tool: x.tool, face: x.face }))} names={a.map((x) => short(x.name, x.tool))} label={`${said}: ${a.map((x) => short(x.name, x.tool)).join(", ")}`} />
       </span>
     );
@@ -437,7 +464,7 @@ export function CrewLine({ crew, now }: { crew: Crew; now: number }) {
 function Head({ p }: { p: SidebarProps }) {
   const agents = p.view === "agents";
   let onNew: () => void = agents ? p.onNewAgent : () => p.onNew();
-  let label = agents ? "New agent" : "New session";
+  let label = agents ? "New agent" : isLocal() ? "New thread" : "New session";
   let kbd = !agents;
   // On the Team tab (Teammates.tsx) the button adds a teammate.
   // With the rail (the open-source build), New session stays itself in the Crew too: New agent is the Agents section's +.
@@ -1356,7 +1383,7 @@ function SessionsList({ p }: { p: SidebarProps }) {
   ];
 
   const projectMenu = (proj: Project, count: number): MenuItem[] => [
-    { label: "New session here", icon: "plus", onSelect: () => p.onNew(proj.id) },
+    { label: isLocal() ? "New thread here" : "New session here", icon: "plus", onSelect: () => p.onNew(proj.id) },
     { label: "Rename", icon: "pencil", onSelect: () => setRenaming({ kind: "project", id: proj.id }) },
     { heading: "" },
     {
@@ -1511,7 +1538,7 @@ function SessionsList({ p }: { p: SidebarProps }) {
                   <button
                     type="button"
                     className="dass-rail-btn size-6"
-                    aria-label={`New session in ${proj.name}`}
+                    aria-label={`${isLocal() ? "New thread" : "New session"} in ${proj.name}`}
                     onClick={(e) => {
                       e.stopPropagation();
                       p.onNew(proj.id);
@@ -1528,7 +1555,7 @@ function SessionsList({ p }: { p: SidebarProps }) {
                     <div className="dass-row" data-active="true" aria-current="page">
                       <div className="flex items-center gap-2">
                         <span className="dass-dot" data-state="idle" />
-                        <span className="dass-row-title">New session</span>
+                        <span className="dass-row-title">{isLocal() ? "New thread" : "New session"}</span>
                         <span className="chip-mini">Draft</span>
                       </div>
                     </div>
@@ -1557,8 +1584,31 @@ function SessionsList({ p }: { p: SidebarProps }) {
         open={isOpen(id)}
         onToggle={() => toggle(id)}
         count={g.chats.length}
-        status={<GroupState working={g.chats.filter((c) => p.attention.working.has(c.sid)).length} />}
+        status={<GroupState working={g.chats.filter((c) => p.attention.working.has(c.sid)).length} needs={loose.filter((c) => inNeeds.has(c.sid) && c.repos?.[0]?.name === g.name).length} />}
         drag={dragSection(id)}
+        className={isLocal() && g.chats.some((c) => c.repos?.[0]?.path) ? "sb-repo-group" : ""}
+        action={
+          isLocal() && g.chats.some((c) => c.repos?.[0]?.path) ? (
+            <SidebarGroupAction
+              title={`New thread in ${folderName({ name: g.name, path: "" })} (${/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘N" : "Ctrl+N"})`}
+              className="sb-thr-add top-1"
+              onClick={() => {
+                // The newest of its threads, with New thread open in its header.
+                const to = [...g.chats].filter((c) => c.repos?.[0]?.path).sort((a, b) => b.openedAt - a.openedAt)[0]!;
+                // Open already: its tabs take it now.
+                if (to.sid === p.activeSid) return void dispatchEvent(new CustomEvent(NEW_THREAD, { detail: { handled: false } }));
+                try {
+                  sessionStorage.setItem(NEW_THREAD_ON_OPEN, to.sid);
+                } catch {
+                  /* it opens without */
+                }
+                p.onOpen(to);
+              }}
+            >
+              <Icon name="plus" size={14} />
+            </SidebarGroupAction>
+          ) : undefined
+        }
       >
         {byDay(g.chats, now).map((x) => (typeof x === "string" ? <div key={`day:${x}`} className="sb-day">{x}</div> : row(x)))}
       </Group>,
@@ -1614,7 +1664,7 @@ function SessionsList({ p }: { p: SidebarProps }) {
           at={panelCtx}
           items={() => [
             { label: "New project", icon: "folder", onSelect: newProject },
-            { label: "New session", icon: "compose", onSelect: () => p.onNew() },
+            { label: isLocal() ? "New thread" : "New session", icon: "compose", onSelect: () => p.onNew() },
           ]}
           onClose={() => setPanelCtx(null)}
         />
@@ -1859,7 +1909,7 @@ function ChatRow({
             // A stopped run says who stopped and how, from what happened (audit CODE-4: "Claude Code stopped with an error").
             <span className="truncate text-[var(--ink)]">{withCode(shortPaths(needs.kind === "stopped" ? `${stopper(crew, needs)} ${lowerWord(needs.text)}` : isRawError(needs.text) ? "Needs you" : needs.text))}</span>
           ) : compact && !short ? null : crew ? (
-            <CrewLine crew={crew} now={now} />
+            <CrewLine crew={crew} now={now} {...(preview ? { lead: <><span className="text-sidebar-foreground">{who}:</span> {preview.text}</> } : {})} />
           ) : summary ? (
             <>
               <span className={`truncate ${summary.column === "working" ? "text-[var(--ink-2)]" : ""}`}>

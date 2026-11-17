@@ -22,6 +22,9 @@ contextBridge.exposeInMainWorld("fridayDesktop", {
   /** Which theme the page shows, so Windows and Linux draw the window buttons in its colours. */
   /** `choice` is what was picked, System included, so the app's own sheets follow it (desktop.ts nativeTheme). */
   setTheme: (theme: "dark" | "light", choice?: "system" | "dark" | "light"): void => ipcRenderer.send("friday:theme", theme, choice),
+  /** Frosted glass: the window's own system blur behind the page (desktop.ts setGlass), where the system has one. */
+  setGlass: (on: boolean): void => ipcRenderer.send("friday:glass", on),
+  glassNative: process.platform === "darwin" || process.platform === "win32",
   /** Open a folder, or a file at a line, in this computer's own editor, file manager or terminal (desktop-native.ts). */
   openTargets: (): Promise<{ id: string; label: string; editor: boolean }[]> => ipcRenderer.invoke("friday:open-targets"),
   openIn: (target: string, path: string, line?: number): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke("friday:open-in", { target, path, line }),
@@ -35,6 +38,20 @@ contextBridge.exposeInMainWorld("fridayDesktop", {
       const h = (_e: unknown, ask: { sid: string; url: string }) => fn(ask);
       ipcRenderer.on("friday:browser-open", h);
       return () => void ipcRenderer.off("friday:browser-open", h);
+    },
+  },
+  /** The menu bar's panel (desktop-tray.ts, TrayPanel.tsx): how things stand for its mark, its height, opening the window. */
+  tray: {
+    state: (working: number, needs: number): void => ipcRenderer.send("friday:tray-state", working, needs),
+    size: (height: number): void => ipcRenderer.send("friday:tray-size", height),
+    hide: (): void => ipcRenderer.send("friday:tray-hide"),
+    open: (where: { sid?: string; invite?: string; view?: "needs" }): void => ipcRenderer.send("friday:tray-open", where),
+    /** The Mac's own menu under a picker in the panel; what was picked, or null. */
+    menu: (items: { id: string; label: string; sub?: string; checked?: boolean }[], at: { x: number; y: number }): Promise<string | null> => ipcRenderer.invoke("friday:tray-menu", items, at),
+    onShown: (fn: () => void): (() => void) => {
+      const h = () => fn();
+      ipcRenderer.on("friday:tray-shown", h);
+      return () => void ipcRenderer.off("friday:tray-shown", h);
     },
   },
   /** How many things wait on you, on the dock icon; 0 clears it. */

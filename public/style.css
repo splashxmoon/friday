@@ -2180,8 +2180,9 @@ select { cursor: pointer; }
   font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap;
   transition: color .15s ease, background .15s ease, border-color .15s ease;
 }
-/* In a narrow chat the pills wrap to a second row; they never break their own label. */
-.prompt div:has(> .menu-pill) { flex-wrap: wrap; min-width: 0; }
+/* In a narrow chat the pills stay on one row with Send (Arun, 2026-11-16, the side panel open: Auto and Send each dropped to a row
+   of their own): they shrink, their words shorten, then the lesser ones go to their icon (the box's own rules, below). */
+.prompt div:has(> .menu-pill) { flex-wrap: nowrap; min-width: 0; }
 .menu-pill:hover, .menu-pill.on { color: var(--violet); background: var(--hover); border-color: var(--violet-border); }
 .menu-pill-caret { transition: transform .15s var(--ease-out); }
 .menu-pill.on .menu-pill-caret { transform: rotate(180deg); }
@@ -3509,6 +3510,15 @@ a.rsp-chip.link:hover { color: var(--ink); background: var(--hover); }
 .tasks { display: flex; flex-direction: column; gap: 6px; }
 .tasks-head { display: flex; align-items: center; gap: 10px; padding: 2px 2px 6px; }
 .tasks-head .rsp-text-btn { margin-left: auto; }
+/* Nothing yet: what shows here and how to start it, centred a little above the middle (Tasks.tsx), as the Pull request panel's. */
+.tasks-wrap:has(> .tasks-empty) { flex: 1; }
+.tasks-empty { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 32px 16px 12%; text-align: center; }
+.tasks-empty h3 { margin: 4px 0 0; color: var(--ink); font-size: 14px; font-weight: 600; }
+.tasks-empty p { max-width: 300px; margin: 0 0 6px; color: var(--text-muted); font-size: 12.5px; line-height: 1.5; text-wrap: pretty; }
+.tasks-empty-mark { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: var(--hover); color: var(--text-muted); }
+.tasks-empty-go { height: 30px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--ink); font: 500 12.5px var(--font); cursor: pointer; }
+.tasks-empty-go:hover { background: var(--hover); }
+.tasks-empty-go:focus-visible { outline: 2px solid var(--ring, var(--accent)); outline-offset: 2px; }
 .task { display: flex; align-items: flex-start; gap: 10px; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--panel); }
 .task.go { border-color: var(--violet-border); }
 /* A failure is said by its mark and its last words, not a red frame: five red boxes in a row read as an alarm, and the one
@@ -12796,6 +12806,7 @@ body.resizing-panel .shell, body.resizing-panel .main, body.resizing-panel .sb-p
 body.resizing-panel { cursor: col-resize; user-select: none; }
 /* A folder's tile, and how its sessions stand on its own row. */
 .sb-tile { display: inline-grid; flex: none; place-items: center; width: 16px; height: 16px; border-radius: 4px; color: #141414; font: 700 12px/1 var(--font); }
+.sb-gstate + .sb-gstate { margin-left: 6px; }
 .sb-gstate { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 500; white-space: nowrap; }
 .sb-gstate.needs { padding: 0 6px; border-radius: 6px; background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--amber); line-height: 18px; }
 .sb-gstate.live { color: var(--text-muted); font-variant-numeric: tabular-nums; }
@@ -12807,7 +12818,11 @@ body.resizing-panel { cursor: col-resize; user-select: none; }
 .ftui-screen.many .ftui-you .ftui-tag { min-width: 10ch; }
 .ftui-to { flex: none; font-weight: 600; }
 /* The terminal switch where a Code session's gear was: the header's own button size. */
-.view-toggle.in-head { width: 32px; height: 32px; margin: 0; border-radius: 8px; color: var(--text-muted); }
+/* A block of its own in its menu's anchor (a plain block): inline, it sat on that line's text baseline, the descent under it made
+   the anchor taller, and the terminal button rode above the two beside it (Arun, 2026-11-16: "terminal isnt lined up properly on
+   the height"). */
+.view-toggle.in-head { display: grid; width: 32px; height: 32px; margin: 0; border-radius: 8px; color: var(--text-muted); }
+.pop-anchor:has(> .view-toggle.in-head) { display: flex; }
 .view-toggle.in-head:hover { color: var(--ink); }
 .view-toggle.in-head.on { color: var(--ink); background: var(--hover-strong, var(--card-2)); }
 /* The terminal view is the chat's whole place: flush with its left, right and foot, square, a line above it only (Arun,
@@ -13153,7 +13168,23 @@ a.sd-go { padding-right: 14px; }
    a row per file, a few changed lines opened in place. */
 .change-card { margin-top: 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); overflow: hidden; }
 .change-card.settled { background: transparent; }
-.cc-head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; min-height: 44px; padding: 7px 8px 7px 12px; font-size: 13px; }
+.change-card { container: change-card / inline-size; }
+/* One row at any width (Arun, 2026-11-16, the side panel open: Commit dropped under the rest): what it changed gives way first,
+   its words shortening ("1 file", "1" to look at, "Ask"), never the buttons. */
+.cc-head { display: flex; align-items: center; flex-wrap: nowrap; gap: 4px 10px; min-height: 44px; padding: 7px 8px 7px 12px; font-size: 13px; }
+.cc-head > .cc-toggle { flex: 0 1 auto; flex-wrap: nowrap; min-width: 0; overflow: hidden; white-space: nowrap; }
+.cc-head > .cc-toggle > * { flex: none; }
+.cc-head > .cc-toggle > b { flex: none; }
+.cc-head > :not(.cc-toggle, .cc-sp) { flex: none; }
+.cc-short { display: none; }
+@container change-card (max-width: 600px) {
+  .cc-head { gap: 4px 8px; }
+  .cc-head .cc-long { display: none; }
+  .cc-head .cc-short { display: inline; }
+}
+/* Narrower still: the line counts go (the file count stays), then Ask, which only puts you in the box below. */
+@container change-card (max-width: 340px) { .cc-head .cc-toggle > :is(.diff-add, .diff-del) { display: none; } }
+@container change-card (max-width: 260px) { .cc-head > .cc-btn.line:has(> .cc-short) { display: none; } }
 .cc-head > b { color: var(--ink); font-weight: 600; }
 .cc-head .diff-add, .cc-head .diff-del { font-size: 13px; }
 .cc-tests { padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--green) 12%, transparent); color: var(--green); font-size: 12px; }
@@ -13814,6 +13845,10 @@ html.rail-only .shell .sb-panel .sb-panel-inner.dass-panel.dass-panel.dass-panel
    OPEN"). The 40px is the white bar drawn above the page (html.desktop .shell::after), so bar and page stay one surface. */
 /* Square where the bar meets the rail, not rounded (Arun, 2026-11-12: "dont make this curved"). */
 html.desktop.rail-only .shell.with-panel::after { border-top-left-radius: 0 !important; }
+/* A session with its list folded, on a Mac: the window's bar runs across the top with no edge of its own at the rail, so no line
+   runs up between the window's buttons and the sidebar button; the line between the rail and the page starts under the bar, where
+   the page's own edge begins (Arun, 2026-11-16: "fix this vertical line thing at the top by the window buttons"). */
+html.desktop-mac.rail-only[data-band="session"] .shell.with-panel::after { border-left-color: transparent !important; }
 
 /* Every page sits under the window's row, as Friday Teams has it (Arun, 2026-11-14: "i said i wanted it like the production build
    UI layout"): the 2026-11-12 block that ran each page's header up into the window's bar, with clearances for its buttons, is
@@ -14184,3 +14219,460 @@ button.cd-row:hover, .cd-rw[data-open] > .cd-row { background: var(--hover); }
 .rv-pile-chip[aria-checked="true"] { border-color: var(--ink); background: var(--ink); color: var(--bg); }
 .rv-pile-chip[aria-checked="true"] > span { color: color-mix(in srgb, var(--bg) 70%, transparent); }
 .rv-pile-chip:focus-visible { outline: 2px solid var(--ink-2); outline-offset: 1px; }
+/* A folder's + in the sidebar (threads.tsx): there on hover, where the folder's state was, so the two never overlap. */
+.sb-repo-group .sb-thr-add { opacity: 0; transition: opacity var(--t-hover) var(--ease-out); }
+.sb-repo-group .group\/label:hover .sb-thr-add, .sb-repo-group .sb-thr-add:focus-visible { opacity: 1; }
+.sb-repo-group .group\/label:hover .sb-gstate { visibility: hidden; }
+
+/* ── The message box as a calm card (Arun, 2026-11-16, design A of four: "A"): one raised surface on the page, a quiet hairline
+   that firms up when you type rather than a bright ring, the words at 14px with room around them, and one even row of controls
+   along its foot (the + and the pills 30px and quiet until pointed at, the mic beside a solid send that dims to a filled tile, not
+   an outline, while there is nothing to send). The home box is the same card. ───────────────────────────────────────────────── */
+.composer-inner, .prompt [data-slot="input-group"] {
+  background: var(--card) !important; border: 1px solid var(--border-strong) !important; border-radius: 16px !important;
+  box-shadow: 0 1px 2px rgb(0 0 0 / .05), 0 10px 28px -20px rgb(0 0 0 / .4) !important;
+}
+.composer-inner:hover, .prompt [data-slot="input-group"]:hover { border-color: color-mix(in srgb, var(--ink) 22%, transparent) !important; }
+.composer-inner:focus-within, .prompt [data-slot="input-group"]:focus-within {
+  border-color: color-mix(in srgb, var(--ink) 30%, transparent) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink) 6%, transparent), 0 10px 28px -18px rgb(0 0 0 / .45) !important;
+}
+.prompt [data-slot="input-group"] textarea { padding: 13px 16px 4px !important; min-height: 50px; font-size: 14px !important; line-height: 1.5; }
+.prompt [data-slot="input-group"] textarea::placeholder { color: var(--faint); }
+.prompt [data-slot="input-group-addon"] { padding: 2px 8px 8px !important; }
+.prompt [data-slot="input-group-addon"] :is(.menu-pill, .agent-pill, .reach-pill) { height: 30px; padding: 0 9px; border: 0 !important; border-radius: 8px; background: transparent; }
+.prompt [data-slot="input-group-addon"] :is(.menu-pill, .agent-pill, .reach-pill):hover, .prompt [data-slot="input-group-addon"] :is(.menu-pill, .agent-pill, .reach-pill).on { background: var(--hover); color: var(--ink); }
+.prompt [data-slot="input-group-addon"] > div:first-child > button:first-child, .prompt .voice-mic { width: 30px; height: 30px; border-radius: 8px; color: var(--text-muted); }
+.prompt [data-slot="input-group-addon"] > div:first-child > button:first-child:hover, .prompt .voice-mic:hover { background: var(--hover); color: var(--ink); }
+.prompt .composer-send > button:last-child {
+  width: 32px; height: 32px; min-width: 32px; border: 0 !important; border-radius: 10px; background: var(--ink) !important; color: var(--bg) !important;
+  box-shadow: 0 1px 2px rgb(0 0 0 / .18); transition: background-color var(--t-hover, 120ms) ease, opacity var(--t-hover, 120ms) ease;
+}
+.prompt .composer-send > button:last-child:hover:not(:disabled) { background: color-mix(in srgb, var(--ink) 86%, var(--bg)) !important; }
+.prompt .composer-send > button:last-child:disabled, .composer-bar .send:disabled { background: var(--hover-strong) !important; color: var(--faint) !important; box-shadow: none !important; opacity: 1; }
+.composer-bar .send:not(:disabled) { background: var(--ink); color: var(--bg); }
+.prompt button[aria-label="Suggest"] { width: auto !important; padding: 0 12px; }
+.composer-bar .send { border-radius: 10px; }
+/* Full access, said as what it is: a shield before it and the words in amber, on the home page's Permissions and a session's own
+   pill (Arun, 2026-11-16: "add like a shield or something next to the full access text and make the full access text yellow"). */
+.menu-pill.mode-full, .menu-pill.mode-full:hover, .menu-pill.mode-full.on { color: color-mix(in srgb, var(--amber) 88%, var(--ink)) !important; }
+.menu-pill.mode-full { gap: 5px !important; }
+.menu-pill.mode-full .menu-pill-mark { display: inline-grid; place-items: center; margin: 0 !important; color: inherit; }
+.menu-pill.mode-full .menu-pill-caret { color: color-mix(in srgb, var(--amber) 60%, var(--text-muted)); }
+/* Renaming the branch (Branches.tsx): the box says so with its pencil, the row to start it under the list. */
+.branch-find.renaming { color: var(--ink-2); }
+.branch-key { flex: none; color: var(--faint); font-size: 11px; border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; }
+.branch-row.branch-rename { margin: 0 5px 2px; width: calc(100% - 10px); border-top: 1px solid var(--border); border-radius: 0 0 var(--r-md) var(--r-md); color: var(--text-muted); }
+.branch-row.branch-rename:hover:not(:disabled) { color: var(--ink); }
+
+/* The agents all done or ready: what was last asked on the left, their marks on the right (Sidebar.tsx CrewLine). */
+.sb-row > .dass-row-sub > .sb-crew.sb-crew-end { gap: 8px; }
+.sb-crew-end > .sb-crew-lead { flex: 1 1 auto; min-width: 0; margin-right: auto; color: var(--text-muted); text-align: left; }
+/* The time on the title's own baseline, not centred in its box (Arun, 2026-11-16: "line up the time stamp with the thread title
+   and status ring"): 12px text centred in the title's 18px line sat a hair above the 13px name. */
+.sb-row > .flex { align-items: baseline; }
+.sb-row > .flex > :not(.dass-row-title):not(.sb-row-end):not(.sb-rename) { align-self: center; }
+.sb-row .sb-row-end { align-self: baseline; align-items: baseline; }
+
+/* ── Frosted glass (prefs.ts applyGlass; Arun, 2026-11-16: "a frosted glass effect, I want all of the components nicely designed
+   to accommodate this") ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+   The ground is the desktop behind the window, through the system's own blur (html.glass-native: macOS vibrancy, Windows
+   acrylic), or else a soft ground of the page's own. Every surface on it is tinted glass, never clear: the sidebar the most
+   see-through, the page a step firmer, panels and cards firmer again, and anything that floats over the page (menus,
+   popovers, dialogs, the thread card) frosted on its own so what is behind it never shows through its words. The glass
+   sidebar of 2026-10-25 went back to solid as too faint (2026-10-27: "make the side more opaque"): these keep text at the
+   contrast the solid look has. Somewhat opaque, the desktop seen only slightly through it (Arun, 2026-11-16: "should be
+   somewhat opaque on the background so you can see the desktop slightly"). */
+html.glass.dark {
+  --bg: rgb(24 24 27 / .56);
+  --sidebar: rgb(14 14 17 / .44);
+  --panel: rgb(28 28 31 / .58);
+  --card: rgb(255 255 255 / .055);
+  --card-2: rgb(255 255 255 / .08);
+  --hover: rgb(255 255 255 / .07);
+  --hover-strong: rgb(255 255 255 / .1);
+  --muted: rgb(255 255 255 / .06);
+  --code-bg: rgb(0 0 0 / .28);
+  --violet-hover: rgb(255 255 255 / .08);
+  --border: rgb(255 255 255 / .09);
+  --border-strong: rgb(255 255 255 / .15);
+  --glass-float: rgb(34 34 38 / .74);
+  --glass-edge: rgb(255 255 255 / .14);
+  --glass-hi: rgb(255 255 255 / .06);
+  --text-muted: #a3a3a8;
+  --faint: #a3a3a8;
+}
+html.glass:not(.dark) {
+  --bg: rgb(252 252 251 / .6);
+  --sidebar: rgb(246 246 244 / .46);
+  --panel: rgb(255 255 255 / .55);
+  --card: rgb(255 255 255 / .62);
+  --card-2: rgb(0 0 0 / .045);
+  --hover: rgb(0 0 0 / .05);
+  --hover-strong: rgb(0 0 0 / .075);
+  --muted: rgb(0 0 0 / .045);
+  --code-bg: rgb(255 255 255 / .55);
+  --violet-hover: rgb(0 0 0 / .05);
+  --border: rgb(0 0 0 / .08);
+  --border-strong: rgb(0 0 0 / .13);
+  --glass-float: rgb(255 255 255 / .78);
+  --glass-edge: rgb(255 255 255 / .7);
+  --glass-hi: rgb(255 255 255 / .55);
+  --text-muted: #5d5d63;
+  --faint: #5d5d63;
+}
+
+/* The ground: the desktop itself where the window has the system's blur; otherwise a soft one drawn here, fixed behind the app. */
+html.glass, html.glass body, html.glass #root, html.glass .shell { background: transparent !important; }
+html.glass:not(.glass-native) body {
+  background:
+    radial-gradient(1200px 800px at 12% 8%, color-mix(in srgb, #6a7cff 34%, transparent), transparent 62%),
+    radial-gradient(1000px 760px at 88% 18%, color-mix(in srgb, #d96bd0 26%, transparent), transparent 60%),
+    radial-gradient(1100px 900px at 60% 100%, color-mix(in srgb, #3fb6a8 24%, transparent), transparent 62%),
+    #1b1b22 !important;
+  background-attachment: fixed !important;
+}
+html.glass:not(.glass-native):not(.dark) body {
+  background:
+    radial-gradient(1200px 800px at 12% 8%, color-mix(in srgb, #8fa0ff 40%, transparent), transparent 62%),
+    radial-gradient(1000px 760px at 88% 18%, color-mix(in srgb, #f3a6e6 34%, transparent), transparent 60%),
+    radial-gradient(1100px 900px at 60% 100%, color-mix(in srgb, #8fe0d2 36%, transparent), transparent 62%),
+    #eef0f6 !important;
+  background-attachment: fixed !important;
+}
+
+/* Whatever floats over the page is frosted on its own, firmer than what it lies on, with a lit top edge. */
+html.glass :is(.surface, .ctx-menu, [role="menu"], [role="listbox"]:not(.thr-from-rows):not(.tc-list), .shortcut-pop, .tm-pop, .tc-proof-pop, .stb-pop, .branch-card, .thr-pop, .pf-pop, [data-radix-popper-content-wrapper] > [role="dialog"], .modal, .dialog, [role="dialog"][aria-modal="true"] > div:first-child) {
+  background: var(--glass-float) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(1.6);
+  backdrop-filter: blur(28px) saturate(1.6);
+  border-color: var(--glass-edge) !important;
+  box-shadow: inset 0 1px 0 var(--glass-hi), 0 18px 48px -16px rgb(0 0 0 / .45) !important;
+}
+/* Cards that sit in the page: tinted glass of their own, the blur of the window behind them already. */
+html.glass :is(.tc, .team-card, .opened-thread, .tk-card, .peer-card, .board-card, .thr-box, .rv-card, .dd-article .dd-files) {
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  backdrop-filter: blur(18px) saturate(1.4);
+  box-shadow: inset 0 1px 0 var(--glass-hi);
+}
+html.glass .tc { background: var(--glass-float) !important; border-color: var(--glass-edge) !important; }
+/* The message box reads as the one solid-ish thing at the foot: its rounded field, not the dock around it. */
+html.glass .composer-box :is([data-slot="input-group"], .group\/input-group) { background: var(--glass-float) !important; border-color: var(--glass-edge) !important; -webkit-backdrop-filter: blur(24px) saturate(1.5); backdrop-filter: blur(24px) saturate(1.5); box-shadow: inset 0 1px 0 var(--glass-hi), 0 14px 36px -18px rgb(0 0 0 / .45); }
+/* The sidebar and the rail let the most through; their rows' hover and selection a soft wash. */
+html.glass :is(.dass-sidebar, .sidebar, [data-slot="sidebar"]) { background: var(--sidebar) !important; }
+@media (prefers-reduced-transparency: reduce) {
+  html.glass.dark { --bg: #1b1b1e; --sidebar: #151518; --panel: #1d1d20; --glass-float: #232327; }
+  html.glass:not(.dark) { --bg: #fafaf9; --sidebar: #f2f2f0; --panel: #fafaf9; --glass-float: #ffffff; }
+}
+
+/* Glass, the details (Arun, 2026-11-16: "also better details too"). Light catches the top edge of everything raised; what is
+   chosen is a brighter pane rather than a grey fill; quiet buttons are glass too; the drawn ground has a fine grain so its
+   colours never band. */
+html.glass.dark { --glass-pane: rgb(255 255 255 / .065); --glass-pane-hover: rgb(255 255 255 / .1); --glass-pane-on: rgb(255 255 255 / .12); --glass-line: rgb(255 255 255 / .1); --glass-ring: rgb(255 255 255 / .16); }
+html.glass:not(.dark) { --glass-pane: rgb(255 255 255 / .5); --glass-pane-hover: rgb(255 255 255 / .7); --glass-pane-on: rgb(255 255 255 / .82); --glass-line: rgb(0 0 0 / .07); --glass-ring: rgb(0 0 0 / .12); }
+
+/* The grain over the drawn ground (none over the system's own blur, which has its own). */
+html.glass:not(.glass-native) body::before {
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none; opacity: .07; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* The sidebar's edge where it meets the page: a hairline with light on it. */
+html.glass .sb-panel { border-right: 1px solid var(--glass-line) !important; box-shadow: inset -1px 0 0 var(--glass-hi); }
+html.glass header.topbar { border-bottom: 1px solid var(--glass-line); }
+
+/* Chosen: a brighter pane with a lit top edge. */
+html.glass .sb-row[data-active="true"], html.glass .thr-tab.on, html.glass .tc-agent.on {
+  background: var(--glass-pane-on) !important; border-color: transparent !important;
+  box-shadow: inset 0 1px 0 var(--glass-hi), 0 1px 2px rgb(0 0 0 / .12) !important;
+}
+html.glass .sb-row:not([data-active="true"]):hover, html.glass .tc-row:hover, html.glass .tc-agent:not(.on):hover { background: var(--glass-pane) !important; }
+
+/* Your messages: a pane of glass with light on its top edge. */
+html.glass .is-user > .msg-bubble { background: var(--glass-pane-on) !important; box-shadow: inset 0 1px 0 var(--glass-hi), 0 0 0 1px var(--glass-line) !important; }
+
+/* Quiet buttons and pills are glass too, one step brighter under the pointer; the primary stays solid. */
+html.glass :is(.team-stop, .tc-foot-btn, .sb-new, .thr-from-btn, .dd-refresh, .tc-stack, .team-pick, .panel-tab.on) {
+  background: var(--glass-pane) !important; border-color: var(--glass-line) !important; box-shadow: inset 0 1px 0 var(--glass-hi);
+}
+html.glass :is(.team-stop, .tc-foot-btn, .sb-new, .thr-from-btn, .dd-refresh, .tc-stack, .team-pick):hover { background: var(--glass-pane-hover) !important; }
+
+/* What floats at the foot of the chat (Team tasks) is frosted like the box under it. */
+html.glass .dock-todo > section { background: var(--glass-float) !important; border-color: var(--glass-edge) !important; -webkit-backdrop-filter: blur(24px) saturate(1.5); backdrop-filter: blur(24px) saturate(1.5); box-shadow: inset 0 1px 0 var(--glass-hi), 0 10px 30px -14px rgb(0 0 0 / .4); }
+
+/* The box, written in: a soft glow rather than a hard ring. */
+html.glass .composer-box :is([data-slot="input-group"], .group\/input-group):focus-within { box-shadow: inset 0 1px 0 var(--glass-hi), 0 0 0 1px var(--glass-ring), 0 0 0 5px color-mix(in srgb, var(--accent) 7%, transparent), 0 16px 40px -20px rgb(0 0 0 / .45) !important; }
+
+/* Scrollbars that don't sit on the glass as grey bars. */
+html.glass.dark { scrollbar-color: rgb(255 255 255 / .16) transparent; }
+html.glass:not(.dark) { scrollbar-color: rgb(0 0 0 / .2) transparent; }
+html.glass ::-webkit-scrollbar-thumb { background: rgb(127 127 127 / .3); border-radius: 8px; border: 3px solid transparent; background-clip: content-box; }
+html.glass ::-webkit-scrollbar-track { background: transparent; }
+
+/* Code on glass: a well, not a slab. */
+html.glass :is(pre, .ans-code) { border: 1px solid var(--glass-line); }
+
+/* A thread's top bar (its tabs, +, and the buttons at its right) in the sidebar's colour, in every theme (Arun, 2026-11-16: "make
+   this top part match the color of the side bar", "same for all of the themes", and with the sidebar folded too): the bar and the
+   sidebar read as one frame around the chat. Frosted glass paints the page's colour under the bar, not over it, so the bar's
+   see-through matches the sidebar's rather than doubling on the page's. */
+.session-view > .topbar { background: var(--sidebar); }
+/* Not in frosted glass: a see-through page let the window keep old frames behind it, the chat drawn twice as it moved (Arun,
+   2026-11-16: "background is bugging out on frosted glass"). The page keeps its own tint there. */
+
+/* The list beside the rail as a panel under the window's row, as a place's own page is (html.desktop.rail-only .main above; Arun,
+   2026-11-16: "push the contents of the sidebar down slightly and have that vertical line on the left curve then connect to the
+   vertical line on the right too"): the rail's line starts 38px down, curves ("make this corner curved") and
+   runs along the list's top to the sidebar's edge, and the list's first row sits a little lower inside it. */
+html.desktop:not(.rail-only) .sb-panel-inner.sb-rail-on::before { content: ""; position: absolute; top: 38px; left: var(--oss-rail-w); right: 0; bottom: 0; z-index: 1; border-top: 1px solid var(--border); border-left: 1px solid var(--border); border-top-left-radius: var(--r-shell, 14px); pointer-events: none; }
+html.desktop:not(.rail-only) .oss-rail::after { display: none; }
+html.desktop:not(.rail-only) .sb-panel-inner.sb-rail-on > .sb-list { padding-top: 10px; }
+/* The new-thread page with the list open: a panel under the window's row, its top and left edges drawn, its corner square,
+   as html.desktop.rail-only has it (Sidebar.tsx page-panel). The list's own frame meets it at the sidebar's edge. */
+html.desktop.page-panel .shell.with-panel::after { border-top-left-radius: 0 !important; }
+html.desktop.page-panel .shell.shell.with-panel > .main.main.main { margin-top: 38px !important; border-top: 1px solid var(--border) !important; border-left: 1px solid var(--border) !important; border-radius: 0 !important; }
+html.desktop.page-panel .shell.with-panel .main { --head-l: 0px; --head-r: 0px; }
+/* The window's header row in the open-source desktop window, beside the rail: one surface in the sidebar's colour, ending on one
+   line at 38px wherever the page is, a thread, a room, a crew mate or Agents (Arun, 2026-11-16: "the right side header needs to be
+   the same color as it is on the left side too", "needs the horiztonal lines lined up", "a more visible horizontal line at the top
+   for the page thing by the header"). The line is the stronger border, the same on the list's frame and the page's edge. */
+html.desktop .shell.with-panel:has(.sb-rail-on)::after { height: 38px; background: var(--sidebar); border-left-color: var(--border-strong); }
+/* The bar is 38px, not 40: drawn over the page, at 40 it covered the page's top line on a thread and a room (Arun, 2026-11-16: "i
+   need an horinztonal line for seperating the header! needs to be visible"). The Agents page is a panel under it, as with the list
+   folded (Sidebar.tsx page-panel), its own 52px header inside. */
+html.desktop:not(.rail-only)[data-band="session"] .shell.shell.with-panel:has(.sb-rail-on) > .main.main.main { margin-top: 38px !important; }
+html.desktop .shell.shell.with-panel:has(.sb-rail-on) > .main.main.main { border-top-color: var(--border-strong) !important; border-left-color: var(--border-strong) !important; }
+html.desktop:not(.rail-only) .sb-panel-inner.sb-rail-on::before { border-color: var(--border-strong); }
+/* The thread's header icons, one size, one colour, one stroke (Arun, 2026-11-16: "make sure they are all the same in size and in
+   color and stroke too"): the Terminal view toggle was 32px, the thread card's 28 by 26 and bright while open. */
+:is(#band-slot, .session-view > .topbar) :is(.view-toggle.in-head, .panel-tab.icon:not(:has(> .tm-hd-n))) { width: 28px; height: 28px; margin: 0; padding: 0; border-radius: 7px; background: none; box-shadow: none; color: var(--text-muted); }
+:is(#band-slot, .session-view > .topbar) :is(.view-toggle.in-head, .panel-tab.icon) > svg:first-child { width: 17px; height: 17px; stroke-width: 1.5; opacity: 1; }
+:is(#band-slot, .session-view > .topbar) :is(.view-toggle.in-head, .panel-tab.icon):hover { color: var(--ink); background: var(--hover); }
+/* A thread row keeps its height as the pointer passes (Arun, 2026-11-16: "the tab doesnt change in height on hover"): the time
+   stays in its slot, unseen, under the row's buttons, so the slot keeps the title's line to sit on; with it gone the slot fell
+   to the bottom of the line and the row grew 5px. The pin's head sits high in its glyph: 1px down, level with the ⋯ beside it. */
+.sb-row:is(:hover, :focus-visible, :has(:focus-visible), [data-menu="true"]) .sb-row-end .dass-row-time { display: block !important; visibility: hidden; }
+.sb-row .sb-row-pin svg { transform: translateY(1px); }
+/* Room for the unread dot (Arun, 2026-11-16: "add some space between the blue dot and text please looks so squished"): a row's
+   name starts 4px further in, and the dot sits 5px clear of it and 4px in from the row's edge, rather than 2px from both. */
+.sb-row { padding-left: 14px !important; }
+.sb-unread-dot { left: -10px; width: 5px; height: 5px; margin-top: -2.5px; }
+/* The groups' chevrons follow the rows' names in by the same 4px, so each name still starts under its group's chevron. */
+.sb-tray [data-sidebar="group-label"] { padding-left: 12px !important; }
+
+/* ── Settings: Your models, On this computer, Voice (Arun, 2026-11-16: "design better") ─────────────────────────────────────
+   Your models is one group, its rows on the group's own panel: the card it was in drew a second box inside the group, with its
+   text and button on that box's edge. The form is a row of the group, its fields 32px like every input in Settings, its two side
+   buttons (List models, Get a key) bordered fields of the same height rather than loose text, the note on the key beside the
+   buttons. */
+.tray .own-models > .set-card.set-card { padding: 0 !important; border: 0 !important; border-radius: 0 !important; background: none !important; box-shadow: none !important; }
+.tray .own-models > .set-card > .set-row + .set-row, .tray .own-models > .set-card > * + .own-form { border-top: 1px solid var(--border); }
+.tray .own-models .own-form { gap: 16px; padding: 16px 0 18px; }
+.tray .own-models .own-form-head { font-size: 13px; }
+.tray .own-models .own-form-grid { gap: 16px 16px; }
+.tray .own-models .own-form-grid label, .tray .own-models .own-form-grid .own-field { gap: 7px; font-size: 12.5px; }
+.tray .own-models .own-select { height: 32px; padding: 0 10px; border-radius: 8px; background: var(--bg); font-size: 13px; }
+.tray .own-models :is(.own-pick-btn, .own-key .btn) { height: 32px; padding: 0 11px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg); color: var(--ink-2); font-size: 12.5px; }
+.tray .own-models :is(.own-pick-btn, .own-key .btn):hover:not(:disabled) { border-color: var(--border-hover); color: var(--ink); }
+.tray .own-models .own-form-actions { flex-wrap: nowrap; gap: 8px; padding-top: 2px; }
+.tray .own-models .own-form-actions .muted { flex: 1 1 auto; min-width: 0; }
+@media (max-width: 560px) { .tray .own-models .own-form-actions { flex-wrap: wrap; } .tray .own-models .own-form-actions .muted { flex-basis: 100%; } }
+
+/* On this computer: what the system still needs is one notice under the row's line, its words and its Allow button together,
+   not orange bullets and a bare link. */
+.cu-needs { display: flex; flex-direction: row; align-items: center; gap: 10px; margin-top: 10px; padding: 9px 10px 9px 12px; border: 1px solid color-mix(in oklab, var(--st-queued) 30%, transparent); border-radius: 10px; background: color-mix(in oklab, var(--st-queued) 8%, transparent); }
+.cu-needs-mark { flex: none; color: var(--st-queued); }
+.cu-needs-text { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; color: var(--ink-2); font-size: 12.5px; line-height: 18px; }
+.cu-needs .cu-need { display: block; color: inherit; }
+.cu-needs .cu-need::before { content: none; }
+.cu-needs .cu-allow { flex: none; }
+
+/* Voice: the two ways side by side, under their label, each a card with its radio. */
+.voice-picks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; width: 100%; max-width: none; }
+.voice-pick { flex-direction: row; align-items: flex-start; gap: 10px; padding: 12px 14px; border-radius: 10px; border-color: var(--border-strong); transition: border-color var(--t-hover) var(--ease-out), background-color var(--t-hover) var(--ease-out); }
+.voice-pick:hover { border-color: var(--border-hover); }
+.voice-pick[data-on] { border-color: var(--ink-3, var(--border-focus)); box-shadow: none; background: var(--hover); }
+.voice-pick-dot { flex: none; width: 14px; height: 14px; margin-top: 2px; border: 1.5px solid var(--border-hover); border-radius: 50%; }
+.voice-pick[data-on] .voice-pick-dot { border-color: var(--ink); background: radial-gradient(circle, var(--ink) 0 3.5px, transparent 4px); }
+.voice-pick-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+@media (max-width: 560px) { .voice-picks { grid-template-columns: 1fr; } }
+
+/* Frosted glass in the open-source window (Arun, 2026-11-16: "make them connect and not have the rail background thing go all the
+   way up", "make sure the vertical line on the right is the same width and size as the vertical line on the left"): the window's
+   top row is one see-through bar, over the rail as over the page, and the rail's tint starts under it, where the page does. The
+   sidebar's own glass edge (a hairline with a lit inner line, from the window's top) is not drawn: the page's edge and the list's
+   frame are the lines, one hairline each, from the bar down. */
+html.glass .shell.with-panel:has(.sb-rail-on) > .sb-panel { border-right: 0 !important; box-shadow: none !important; background: linear-gradient(to bottom, transparent 38px, var(--sidebar) 38px) !important; }
+html.glass.desktop .shell.with-panel:has(.sb-rail-on)::after { background: transparent; }
+/* One tint, not two: the sidebar's inner panel painted the sidebar's colour over the outer's, a darker rail than the bar. */
+html.glass .shell.with-panel:has(.sb-rail-on) .sb-panel-inner.dass-panel { background: transparent !important; }
+
+/* On autopilot as cards, not full-width rows (Arun, 2026-11-16: "design this into a card instead of being a full width row"):
+   its mark and its controls along the top, its name, when and who under them, its last run at the foot. Elsewhere (a team's
+   list) the row is as it was, its controls in line. */
+.auto-row-acts { display: contents; }
+.automations-page ul.auto-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(272px, 1fr)); gap: 12px !important; margin: 0; padding: 0; list-style: none; }
+.automations-page .auto-cards > .auto-row { flex-wrap: wrap; align-items: center; align-content: flex-start; gap: 12px 10px; min-height: 128px; padding: 14px 14px 12px; border: 1px solid var(--border) !important; border-radius: 14px !important; background: var(--raised, var(--card)); }
+.automations-page .auto-cards > .auto-row:hover { border-color: var(--border-strong) !important; background: var(--raised, var(--card)); }
+.automations-page .auto-cards > .auto-row + .auto-row { border-top: 1px solid var(--border) !important; border-radius: 14px !important; }
+.automations-page .auto-cards .auto-row-acts { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.automations-page .auto-cards .auto-row-text { order: 2; flex: 1 1 100%; }
+.automations-page .auto-cards .auto-row-last { order: 3; display: flex; flex: 1 1 100%; align-self: flex-end; margin-top: auto; padding-top: 10px; border-top: 1px solid var(--border); }
+
+/* Where an automation works: one field that opens the repo and folder chooser, its folder's name and path in it. */
+.auto-where { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.auto-where-btn { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; height: 34px; padding: 0 10px 0 11px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg); color: var(--ink); font: 400 13px/18px var(--font); text-align: left; cursor: pointer; transition: border-color var(--t-hover) var(--ease-out); }
+.auto-where-btn:is(:hover, [aria-expanded="true"]) { border-color: var(--border-hover); }
+.auto-where-btn:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.auto-where-name { flex: none; max-width: 45%; overflow: hidden; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.auto-where-sub { flex: 1; min-width: 0; overflow: hidden; color: var(--text-muted); text-overflow: ellipsis; white-space: nowrap; }
+
+/* Frosted is the fourth look, beside System, Light and Dark (SettingsPrefs.tsx; Arun, 2026-11-16: "make it like a theme instead of
+   a toggle thing"): four pictures in the row, Frosted's a see-through window on a soft ground of colour. */
+.look-picks { grid-template-columns: repeat(4, minmax(0, 1fr)); max-width: 680px; }
+@media (max-width: 560px) { .look-picks { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.look-frosted { background: radial-gradient(120% 90% at 10% 0%, #6a7cff 0, transparent 60%), radial-gradient(110% 90% at 100% 20%, #d96bd0 0, transparent 58%), radial-gradient(120% 100% at 60% 110%, #3fb6a8 0, transparent 60%), #1b1b22; }
+.look-frosted .look-win { -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+
+/* In the desktop app's frosted window the system already blurs the desktop behind it: a second blur in the page, on every card,
+   menu and the message box, was the lag, and, redrawn over a see-through window, left old copies of them behind as they moved
+   (Arun, 2026-11-16: "frosted still feels laggy", "background is bugging out"). There the page draws no blur of its own; what
+   floats over it is near solid instead, so a menu still reads over the chat. */
+html.glass-native *, html.glass-native *::before, html.glass-native *::after { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+html.glass-native.dark :is(.surface, .ctx-menu, [role="menu"], [role="listbox"]:not(.thr-from-rows):not(.tc-list), .shortcut-pop, .tm-pop, .tc-proof-pop, .stb-pop, .branch-card, .thr-pop, .pf-pop, [data-radix-popper-content-wrapper] > [role="dialog"], .modal, .dialog, [role="dialog"][aria-modal="true"] > div:first-child) { background: var(--float-solid) !important; }
+html.glass-native:not(.dark) :is(.surface, .ctx-menu, [role="menu"], [role="listbox"]:not(.thr-from-rows):not(.tc-list), .shortcut-pop, .tm-pop, .tc-proof-pop, .stb-pop, .branch-card, .thr-pop, .pf-pop, [data-radix-popper-content-wrapper] > [role="dialog"], .modal, .dialog, [role="dialog"][aria-modal="true"] > div:first-child) { background: var(--float-solid) !important; }
+/* "cut short" on one line beside the file's name, not broken over two and squeezing the name. */
+.rsp-diff-status { flex: none; white-space: nowrap; }
+
+/* The side panel and a Work session's rail, docked beside a thread, run up into the window's top row: their tab row ends on the
+   page's top line (38px down), as the thread's own header does, rather than 3px under it (Arun, 2026-11-16: "line up horizontal
+   line properly for the side panels in coding and agents pages too"). */
+html.desktop-mac[data-band="session"].bench-docked .shell:has(.sb-rail-on) .bench-panel .bench-tabs:not(.split-tabs) { height: 39px; min-height: 39px; padding-top: 4px; }
+html.desktop-mac[data-band="session"].rail-docked .shell:has(.sb-rail-on) .sv-body > .wr :is(.wr-head, .work-doc-head) { height: 39px; min-height: 39px; padding-top: 3px; }
+/* Open files' tabs sit on a line, the one open running into the file under it (Arun, 2026-11-16: "add a horizontal line under the
+   tab things for the files side panel"). */
+.tree-tabs { box-shadow: inset 0 -1px 0 var(--border); }
+.tree-tab { position: relative; }
+.tree-tab.on { box-shadow: 0 1px 0 var(--code-bg); }
+
+/* ── The message box at any width (Arun, 2026-11-16: "fix this design when the side panel is open to a certain size too") ──
+   Its tools and Send are one row: a folder's chip, who it goes to and the model shorten with an ellipsis, and in a narrow box the
+   reach pill ("Auto") and a model pill keep only their mark, their words in the title as before. */
+.prompt { container: prompt / inline-size; }
+.prompt [data-slot="input-group-addon"][data-align="block-end"]:not(:empty) { flex-wrap: nowrap; }
+.prompt [data-slot="input-group-addon"][data-align="block-end"]:not(:empty) > :first-child { flex-wrap: nowrap; overflow: visible; }
+.prompt [data-slot="input-group-addon"][data-align="block-end"] > :first-child > :is(.menu-pill, .send-pick, .box-dirs, span:has(> .menu-pill)) { flex: 0 1 auto; min-width: 0; }
+.prompt .send-pick > .menu-pill, .prompt .send-pick > span { min-width: 0; }
+.prompt .menu-pill > span:not(.menu-pill-mark) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prompt .box-dirs { flex-wrap: nowrap; overflow: hidden; }
+.prompt .box-dir { flex: 0 1 auto; min-width: 0; }
+.prompt .box-dir-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prompt .composer-send { flex: none; }
+@container prompt (max-width: 520px) {
+  .prompt .reach-pill > span:not(.menu-pill-mark), .prompt .reach-pill > .menu-pill-caret, .prompt .reach-pill > svg:last-child:not(:first-child) { display: none; }
+  .prompt .reach-pill { padding: 0 7px; }
+  .prompt .box-dir { max-width: 110px; }
+}
+@container prompt (max-width: 400px) {
+  .prompt .menu-pill .menu-pill-caret { display: none; }
+  .prompt .box-dir { max-width: 84px; }
+}
+
+/* Keep this going beside Pass on, with your crew's faces (Response.tsx HandoffBar; Arun, 2026-11-16: "make the keep it going more
+   visible instead of being hidden"): the same quiet button, its faces overlapping a little. */
+.ho-keep { flex: none; }
+.ho-keep-faces { display: inline-flex; align-items: center; }
+.ho-keep-faces > * + * { margin-left: -5px; }
+.ho-keep-faces > * { border-radius: 50%; box-shadow: 0 0 0 1.5px var(--bg); }
+
+/* ── Frosted glass, everything that lies over something (Arun, 2026-11-16: "audit the frosted theme, there are components that are
+   way less opque ... where i can see through them it is bad because things behind are still visible and overlap it") ──────────
+   The rules above made the menus, dialogs' insides and a handful of popovers firm; this is the rest, found by listing every
+   component that floats (fixed, sticky, or layered over the page) on a see-through colour: the app's own dialogs and sheets (their
+   content, not a child of it), hover cards, the thread card, the side panel's sticky tabs, the popovers and tips of the sidebar,
+   the run, the terminal, workflows and Deep Dive, and the sticky heads that a list scrolls under. In the browser's frosted look
+   they are frosted glass, firm enough with their blur; in the desktop window, where the page draws no blur, they are near solid. */
+html.glass :is(
+  [data-slot="dialog-content"], [data-slot="sheet-content"], [data-slot="popover-content"], [data-slot="dropdown-menu-content"],
+  [data-slot="dropdown-menu-sub-content"], [data-slot="select-content"], [data-slot="hover-card-content"],
+  .tc, .ho-menu, .cd-pop, .ag-ready-pop, .ag-chat-open, .pin-picker, .rail-pop, .rail-tip, .rsp-err-pop, .rt-tf-pop, .sb-menu,
+  .term-find, .usage-tip, .goal-pop, .hint-bubble, .subs-pop, .env-pop, .tour-card, .chat-find, .nav-open, .build-pill, .quick,
+  .tt-thread-panel, .mb-inline:not(.mb-welcome) .mb-tools > .mb-more, .paywall, .kg-ready, .dock-plan .ap-steps, .wf-inspector,
+  .wf-live, .wf-error, .wf-connect-note, .wf-loop, .wf-zoom, .ag-zoom, .ps-thumb, .tk-pop, .tm-pop
+) {
+  background: var(--glass-float) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(1.6);
+  backdrop-filter: blur(28px) saturate(1.6);
+}
+/* Heads and bars a list scrolls under: as firm as what floats, so a row passing under them never shows through their words. */
+html.glass :is(
+  .bench-tabs, .ap-head, .attach-inside-head, .gitp-head, .nag-head, .wsp-head, .plan-rows-head, .page-inner > .status-bar,
+  .board-page .bd-status-bar, .tl-day, .si-group, .sheet th, .sheet .sheet-key, .sheet .sheet-n, .dp-card .rsp-diff:not(.rsp-diff-closed) > .rsp-diff-top,
+  .diff-review-bar, .db-note, .dd-code, .menu-node:has(> .own-pick-filter), .rsp [data-streamdown="table"] th
+) {
+  background: var(--glass-float) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  backdrop-filter: blur(20px) saturate(1.4);
+}
+html.glass-native.dark :is(
+  [data-slot="dialog-content"], [data-slot="sheet-content"], [data-slot="popover-content"], [data-slot="dropdown-menu-content"],
+  [data-slot="dropdown-menu-sub-content"], [data-slot="select-content"], [data-slot="hover-card-content"],
+  .tc, .ho-menu, .cd-pop, .ag-ready-pop, .ag-chat-open, .pin-picker, .rail-pop, .rail-tip, .rsp-err-pop, .rt-tf-pop, .sb-menu,
+  .term-find, .usage-tip, .goal-pop, .hint-bubble, .subs-pop, .env-pop, .tour-card, .chat-find, .nav-open, .build-pill, .quick,
+  .tt-thread-panel, .mb-inline:not(.mb-welcome) .mb-tools > .mb-more, .paywall, .kg-ready, .dock-plan .ap-steps, .wf-inspector,
+  .wf-live, .wf-error, .wf-connect-note, .wf-loop, .wf-zoom, .ag-zoom, .ps-thumb, .tk-pop, .tm-pop,
+  .bench-tabs, .ap-head, .attach-inside-head, .gitp-head, .nag-head, .wsp-head, .plan-rows-head, .page-inner > .status-bar,
+  .board-page .bd-status-bar, .tl-day, .si-group, .sheet th, .sheet .sheet-key, .sheet .sheet-n, .dp-card .rsp-diff:not(.rsp-diff-closed) > .rsp-diff-top,
+  .diff-review-bar, .db-note, .dd-code, .menu-node:has(> .own-pick-filter), .rsp [data-streamdown="table"] th
+) { background: var(--float-solid) !important; }
+html.glass-native:not(.dark) :is(
+  [data-slot="dialog-content"], [data-slot="sheet-content"], [data-slot="popover-content"], [data-slot="dropdown-menu-content"],
+  [data-slot="dropdown-menu-sub-content"], [data-slot="select-content"], [data-slot="hover-card-content"],
+  .tc, .ho-menu, .cd-pop, .ag-ready-pop, .ag-chat-open, .pin-picker, .rail-pop, .rail-tip, .rsp-err-pop, .rt-tf-pop, .sb-menu,
+  .term-find, .usage-tip, .goal-pop, .hint-bubble, .subs-pop, .env-pop, .tour-card, .chat-find, .nav-open, .build-pill, .quick,
+  .tt-thread-panel, .mb-inline:not(.mb-welcome) .mb-tools > .mb-more, .paywall, .kg-ready, .dock-plan .ap-steps, .wf-inspector,
+  .wf-live, .wf-error, .wf-connect-note, .wf-loop, .wf-zoom, .ag-zoom, .ps-thumb, .tk-pop, .tm-pop,
+  .bench-tabs, .ap-head, .attach-inside-head, .gitp-head, .nag-head, .wsp-head, .plan-rows-head, .page-inner > .status-bar,
+  .board-page .bd-status-bar, .tl-day, .si-group, .sheet th, .sheet .sheet-key, .sheet .sheet-n, .dp-card .rsp-diff:not(.rsp-diff-closed) > .rsp-diff-top,
+  .diff-review-bar, .db-note, .dd-code, .menu-node:has(> .own-pick-filter), .rsp [data-streamdown="table"] th
+) { background: var(--float-solid) !important; }
+/* The sidebar as a sheet over the page in a narrow window: firm, as anything over the page is. */
+@media (max-width: 1000px) {
+  html.glass .sb-panel { background: var(--glass-float) !important; -webkit-backdrop-filter: blur(28px) saturate(1.6); backdrop-filter: blur(28px) saturate(1.6); }
+  html.glass-native.dark .sb-panel { background: var(--float-solid) !important; }
+  html.glass-native:not(.dark) .sb-panel { background: var(--float-solid) !important; }
+}
+
+/* ── Frosted glass, what floats is the rail's own tone (Arun, 2026-11-16: "frosted is still see through not properly designed it
+   needs to follow like the same color/design concept for example the rail background") ─────────────────────────────────────────
+   In the desktop window the rail is the window's own frosted material, a quiet grey; a menu, picker or popover in the page can't
+   have that material (the page draws no blur there), so it takes the rail's tone as a solid colour instead: the same grey, never
+   a tint over the chat. And it is caught by what it is, not a list of names: anything that is a dialog, a menu, a list to pick
+   from or a tip, anything Radix floats, and the app's own popovers (the model picker was a dialog a list didn't name). */
+html.glass-native.dark { --float-solid: rgb(42 42 46); }
+html.glass-native:not(.dark) { --float-solid: rgb(237 237 235); }
+html.glass-native :is(
+  [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]:not(.thr-from-rows):not(.tc-list), [role="tooltip"],
+  [data-radix-popper-content-wrapper] > *, [class$="-pop"]:not(.quote-pop, .in-pop), [class*="-pop "]:not(.quote-pop, .in-pop), [class*="popover"], .amp, .ctx-menu, .surface
+) {
+  background: var(--float-solid) !important;
+  border-color: var(--glass-edge) !important;
+}
+/* What sits inside a floating surface is on that surface: a menu or list inside a picker or dialog (the model list in the agent
+   picker) draws no box of its own, no fill, edge, shadow or blur (Arun, 2026-11-16: "get rid of this box thing too"). */
+/* (The :not()s only raise its weight over the float rules above, whose longest selector counts for all of them.) */
+html.glass :is([role="dialog"], [role="alertdialog"], [role="menu"], .amp, [data-radix-popper-content-wrapper] > *) :is([role="menu"], [role="listbox"]):not(.x-a):not(.x-b):not(.x-c):not(.x-d):not(.x-e) {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+/* ── Windows and Linux: the window's own buttons (Arun, 2026-11-16: "audit the layout and stuff for windows and linux too") ──────
+   There the window draws minimise, maximise and close over the page's top right, 40px tall (desktop.ts titleBarOverlay), about
+   138px wide. A thread's header ran to the window's edge, and its thread card, terminal and side panel buttons sat under them:
+   the bar keeps their room at its right, as the band's own slot does (--band-right). */
+html.desktop:not(.desktop-mac):not(.rail-only) .session-view > .topbar { padding-right: calc(var(--band-right, 146px) + 4px); }
+/* With the sidebar folded, or in a narrow window, the page sits under the band, a row of its own: nothing to keep room for. */
+@media (max-width: 1000px) { html.desktop:not(.desktop-mac) .session-view > .topbar { padding-right: 16px; } }

@@ -926,15 +926,26 @@ export function envNamesOnly(f: DiffFile): DiffFile {
   return { ...f, patch };
 }
 
-/** Keep the log small: big generated files cost everyone bandwidth, forever. The files past the cap are kept by name. */
-function capDiff(files: DiffFile[]): ChangeSet {
-  let total = 0;
-  const kept: ChangeSet = files.slice(0, MAX_FILES).map(envNamesOnly).map((f) => {
-    const room = Math.max(0, Math.min(MAX_FILE_PATCH, MAX_TOTAL - total));
-    const truncated = f.patch.length > room;
-    const patch = truncated ? f.patch.slice(0, room) : f.patch;
-    total += patch.length;
-    return truncated ? { ...f, patch, truncated } : f;
+/**
+ * Keep the log small: big generated files cost everyone bandwidth, forever. The files past the cap are kept by name.
+ *
+ * The room is shared out smallest file first, so a big change set cuts its biggest files rather than whichever came last in the
+ * list: given in list order, one large file early on took the whole room and every file after it, however small, came through
+ * empty and "cut short", and would not open (Arun, 2026-11-16: "fix this cutshort error stuff and the changes not loading").
+ */
+export function capDiff(files: DiffFile[]): ChangeSet {
+  const list = files.slice(0, MAX_FILES).map(envNamesOnly);
+  const room = new Array<number>(list.length).fill(0);
+  let left = MAX_TOTAL;
+  const bySize = list.map((f, i) => i).sort((a, b) => list[a]!.patch.length - list[b]!.patch.length);
+  bySize.forEach((i, n) => {
+    const share = Math.floor(left / (bySize.length - n));
+    room[i] = Math.max(0, Math.min(MAX_FILE_PATCH, share, list[i]!.patch.length));
+    left -= room[i]!;
+  });
+  const kept: ChangeSet = list.map((f, i) => {
+    const truncated = f.patch.length > room[i]!;
+    return truncated ? { ...f, patch: f.patch.slice(0, room[i]), truncated } : f;
   });
   const more = files.slice(MAX_FILES).flatMap((f) => (f.from ? [f.path, f.from] : [f.path]));
   if (more.length) kept.more = more;
@@ -1964,6 +1975,27 @@ export async function applyPatch(cwd: string, patch: string, o: { cached?: boole
   return { applied: true };
 }
 
+/**
+ * The branch checked out here, renamed (Arun, 2026-11-16: "be able to rename the branch and stuff too"): `git branch -m`, the name
+ * checked as git checks one first. Only the local branch: one already pushed keeps its old name on the remote until the next push
+ * publishes the new one.
+ */
+export async function renameBranchOf(cwd: string, name: string): Promise<{ renamed: true; from: string; branch: string }> {
+  const root = await toplevel(cwd);
+  const to = name.trim();
+  if (!to || !BRANCH_NAME.test(to)) throw new Error("That isn't a branch name git takes. Use letters, numbers, /, - and _.");
+  await git(root, ["check-ref-format", "--branch", to]).catch(() => {
+    throw new Error(`git won't take “${to}” as a branch name.`);
+  });
+  const from = (await git(root, ["symbolic-ref", "--short", "-q", "HEAD"]).catch(() => "")).trim();
+  if (!from) throw new Error("No branch is checked out here to rename.");
+  if (from === to) return { renamed: true, from, branch: to };
+  await git(root, ["branch", "-m", from, to]).catch((e: Error) => {
+    throw new Error(/already exists/.test(e.message) ? `A branch called “${to}” is here already.` : e.message);
+  });
+  return { renamed: true, from, branch: to };
+}
+
 /** The upstream's new commits brought in, fast-forward only: a merge is a person's to do, with the conflicts in front of them. */
 export async function pullOf(cwd: string): Promise<{ pulled: true; output: string }> {
   const root = await toplevel(cwd);
@@ -2013,4 +2045,41 @@ export async function compareOf(cwd: string, base: string): Promise<Compare> {
     deletions += Number(del) || 0;
   }
   return { base: ref.replace(/^origin\//, ""), ahead: Number(a) || 0, behind: Number(b) || 0, files, additions, deletions };
+}
+
+/** One of a repository's open issues or pull requests, for a new thread to start from (threads.tsx New thread). */
+export interface RepoItem {
+  number: number;
+  title: string;
+  url: string;
+  /** A pull request's branch and the one it goes into; from a fork, its branch isn't on origin. */
+  head?: string;
+  base?: string;
+  fork?: boolean;
+  labels?: string[];
+  author?: string;
+  updatedAt?: string;
+}
+
+/**
+ * The folder's GitHub repository's open issues and pull requests, newest activity first, through the `gh` this computer is
+ * already signed in with. Read-only. `{ error }` when there is no gh, no sign-in, or the folder isn't a GitHub repository.
+ */
+export async function repoItems(cwd: string): Promise<{ issues: RepoItem[]; prs: RepoItem[] } | { error: string }> {
+  const labels = (l: unknown) => (Array.isArray(l) ? l.map((x) => String((x as { name?: unknown })?.name ?? "")).filter(Boolean).slice(0, 6) : []);
+  const who = (a: unknown) => String((a as { login?: unknown } | null)?.login ?? "");
+  try {
+    const [iss, prs] = await Promise.all([
+      gh(cwd, ["issue", "list", "--state", "open", "--limit", "40", "--json", "number,title,url,labels,author,updatedAt"]),
+      gh(cwd, ["pr", "list", "--state", "open", "--limit", "40", "--json", "number,title,url,headRefName,baseRefName,isCrossRepository,labels,author,updatedAt"]),
+    ]);
+    const rows = (s: string) => (JSON.parse(s) as Record<string, unknown>[]).filter((x) => typeof x?.number === "number");
+    return {
+      issues: rows(iss).map((x) => ({ number: x.number as number, title: String(x.title ?? "").slice(0, 200), url: String(x.url ?? ""), labels: labels(x.labels), author: who(x.author), updatedAt: String(x.updatedAt ?? "") })),
+      prs: rows(prs).map((x) => ({ number: x.number as number, title: String(x.title ?? "").slice(0, 200), url: String(x.url ?? ""), head: String(x.headRefName ?? ""), base: String(x.baseRefName ?? ""), fork: x.isCrossRepository === true, labels: labels(x.labels), author: who(x.author), updatedAt: String(x.updatedAt ?? "") })),
+    };
+  } catch (e) {
+    const m = (e as Error).message;
+    return { error: /ENOENT/.test(m) ? "The GitHub CLI (gh) isn't installed on this computer." : /no git remotes|not a git repository|none of the git remotes/i.test(m) ? "This folder isn't on GitHub." : /auth|login/i.test(m) ? "Sign in to GitHub with gh first." : m };
+  }
 }

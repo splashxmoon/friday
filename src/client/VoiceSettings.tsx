@@ -60,12 +60,16 @@ export function VoiceSection({ identity }: { identity: Identity }) {
   return (
     <section className="flex flex-col gap-5">
       <SettingsGroup>
-        <Row label="Turn your voice into text" hint="Where your speech is made into words">
+        {/* The two ways side by side under their label, each with its radio (Arun, 2026-11-16: "design better"). */}
+        <Row stack label="Turn your voice into text" hint="Where your speech is made into words">
           <div className="voice-picks" role="radiogroup" aria-label="Turn your voice into text">
             {options.map(([v, name, sub]) => (
               <button key={v} type="button" role="radio" aria-checked={prefs.engine === v} className="voice-pick" data-on={prefs.engine === v || undefined} onClick={() => setVoicePrefs({ engine: v })}>
-                <span className="voice-pick-name">{name}</span>
-                <span className="voice-pick-sub">{sub}</span>
+                <span className="voice-pick-dot" aria-hidden />
+                <span className="voice-pick-text">
+                  <span className="voice-pick-name">{name}</span>
+                  <span className="voice-pick-sub">{sub}</span>
+                </span>
               </button>
             ))}
           </div>

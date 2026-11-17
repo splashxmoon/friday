@@ -8,6 +8,8 @@ import { openOutside } from "./openOutside.js";
 import {
   chooseNotifications,
   chooseReduceMotion,
+  chooseGlass,
+  glassOn,
   chooseTextSize,
   chooseTheme,
   exportPrefs,
@@ -111,6 +113,7 @@ export function AppearanceTab() {
   fontsNow.current = fonts;
   const [size, setSize] = useState<TextSize>(textSize);
   const [calm, setCalm] = useState(reduceMotion);
+  const [glass, setGlass] = useState(glassOn);
   const [layout, setLayout] = useState<SessionLayout>(sessionLayout);
   // The gallery opens by itself when one of its themes is on, so the one in use is never hidden.
   const [more, setMore] = useState(() => !!readTheme());
@@ -119,7 +122,18 @@ export function AppearanceTab() {
   }, [custom, making]);
   const [tint, setTint] = useState<Accent>(accent);
   const [firm, setFirm] = useState<Contrast>(contrast);
-  const pickLook = (v: ThemeChoice) => (setTheme(v), applyTheme(null), setCustom(null), setThemeErr(""), chooseTheme(v));
+  // Frosted is a look of its own beside System, Light and Dark (Arun, 2026-11-16: "make it like a theme instead of a toggle"): the
+  // system's light or dark, frosted. Picking one of the other three turns it off.
+  const pickLook = (v: ThemeChoice | "frosted") => {
+    const base = v === "frosted" ? "system" : v;
+    setTheme(base);
+    applyTheme(null);
+    setCustom(null);
+    setThemeErr("");
+    chooseTheme(base);
+    setGlass(v === "frosted");
+    chooseGlass(v === "frosted");
+  };
   return (
     // Appearance after Synara's honest token set (DIRECTION.md §9.10; Arun, 2026-10-29: "so clean and beautiful really with a
     // clear direction in design language"): the look as three pictures, then accent, contrast, size and the two fonts; motion and
@@ -132,13 +146,17 @@ export function AppearanceTab() {
             ["system", "System"],
             ["light", "Light"],
             ["dark", "Dark"],
+            ["frosted", "Frosted"],
           ] as const
-        ).map(([v, name]) => (
-          <button key={v} type="button" role="radio" aria-checked={!custom && theme === v} className="look-pick" data-on={(!custom && theme === v) || undefined} onClick={() => pickLook(v)}>
+        ).map(([v, name]) => {
+          const on = !custom && (v === "frosted" ? glass : !glass && theme === v);
+          return (
+          <button key={v} type="button" role="radio" aria-checked={on} className="look-pick" data-on={on || undefined} onClick={() => pickLook(v)}>
             <LookThumb look={v} />
             <span className="look-pick-name">{name}</span>
           </button>
-        ))}
+          );
+        })}
       </div>
       {custom && <p className="set-note -mt-3 mb-0 text-[12px] text-[var(--text-muted)]">{custom.name} is on, from More themes. Picking System, Light or Dark goes back to Friday's own.</p>}
       <SettingsGroup title="Look">
@@ -334,7 +352,7 @@ export function AppearanceTab() {
 const ACCENT_NAMES: Record<Accent, string> = { ink: "Ink (Friday's own)", violet: "Violet", indigo: "Indigo", teal: "Teal", rose: "Rose" };
 
 /** Friday's look as a small window: its sidebar, a few lines of text and the primary pill. System is half light, half dark. */
-function LookThumb({ look }: { look: ThemeChoice }) {
+function LookThumb({ look }: { look: ThemeChoice | "frosted" }) {
   const win = (p: Palette) => (
     <span className="look-win" style={{ background: p.bg }}>
       <span className="look-win-side" style={{ background: p.sidebar }}>
@@ -350,6 +368,8 @@ function LookThumb({ look }: { look: ThemeChoice }) {
       </span>
     </span>
   );
+  // Frosted: the window see-through on a soft ground of colour, as the desktop shows through it.
+  if (look === "frosted") return <span className="look-thumb look-frosted" aria-hidden>{win({ ...FRIDAY_PALETTES.dark, bg: "rgb(24 24 27 / .5)", sidebar: "rgb(14 14 17 / .42)" })}</span>;
   if (look !== "system") return <span className="look-thumb" aria-hidden>{win(FRIDAY_PALETTES[look])}</span>;
   return (
     <span className="look-thumb look-split" aria-hidden>

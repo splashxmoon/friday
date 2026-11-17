@@ -14,22 +14,26 @@ let ctx: AudioContext | null = null;
  */
 const PEAK = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform || navigator.userAgent) ? 0.2 : 0.09;
 
+/**
+ * Something needs you: two falling notes, at full loudness. The two sounds were swapped (Arun, 2026-11-15: "swap the audios for
+ * the finished and needs you"): this was the done sound, and the rising pair below was this one.
+ */
 export function chime(): void {
   play([
-    [880, 0, 0.32],
-    [1174.66, 0.16, 0.48],
+    [783.99, 0, 0.22],
+    [659.25, 0.11, 0.34],
   ]);
 }
 
 /**
- * The softer sound for an agent that finished somewhere you weren't looking (Herdr's "done" chime, 2026-11-01): two falling notes,
- * quieter and shorter than the rising pair that means something needs you, so the two are never mistaken for each other.
+ * The softer sound for an agent that finished somewhere you weren't looking (Herdr's "done" chime, 2026-11-01): two rising notes,
+ * quieter than the falling pair that means something needs you, so the two are never mistaken for each other.
  */
 export function doneChime(): void {
   play(
     [
-      [783.99, 0, 0.22],
-      [659.25, 0.11, 0.34],
+      [880, 0, 0.32],
+      [1174.66, 0.16, 0.48],
     ],
     0.55,
   );

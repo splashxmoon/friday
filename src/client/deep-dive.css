@@ -363,3 +363,9 @@
   .dd-code { position: fixed; inset: auto 8px 8px; z-index: 30; max-height: 58vh; margin: 0; box-shadow: var(--shadow-pop); }
   .dd-top { flex-wrap: wrap; }
 }
+
+/* A page whose files changed since it was written (Arun, 2026-11-16, "Do 4"): a dot in the list, a line on the page with Refresh. */
+.dd-stale-dot { flex: none; width: 6px; height: 6px; margin-left: auto; border-radius: 50%; background: var(--amber); }
+.dd-stale { align-items: center; }
+.dd-refresh { display: inline-flex; align-items: center; gap: 6px; flex: none; height: 26px; margin-left: auto; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--panel); color: var(--ink); font: 500 12px/1 var(--font); cursor: pointer; }
+.dd-refresh:hover { background: var(--hover); }

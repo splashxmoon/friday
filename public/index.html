@@ -14,6 +14,8 @@
       var a = localStorage.getItem("mpa.accent");
       if (a) document.documentElement.setAttribute("data-accent", a);
       if (localStorage.getItem("mpa.contrast") === "more") document.documentElement.classList.add("contrast-more");
+      // Frosted glass (prefs.ts applyGlass): on before the first paint, so the window never flashes solid first.
+      if (localStorage.getItem("mpa.glass") === "1") document.documentElement.classList.add("glass"), window.fridayDesktop && window.fridayDesktop.glassNative && document.documentElement.classList.add("glass-native");
     } catch (e) {}
   </script>
   <script>

@@ -81,6 +81,8 @@ export interface RoomView {
   news?: number;
   /** What it is for, in the person's words. */
   purpose?: string;
+  /** Folders it adds for its crew mates, on top of those from each one's own page (teammates.ts Room.folders). */
+  folders?: string[];
   /** What each of its teammates working now is on, by lane. */
   doing?: Record<string, string>;
   /** A crew mate's thread, by its id: listed in that crew mate's chat, never with the rooms (teammates.ts Room.thread). */
@@ -609,6 +611,32 @@ export function TeammateFolderCard({ identity, lane, trigger, onClose, notify }:
 }
 
 
+/**
+ * A folder for everyone in a room, picked from the room's message box (the room's profile has the same, with what each crew mate
+ * brings from its own page): added to the room's own folders (teammates.ts Room.folders).
+ */
+export function RoomFolderCard({ identity, room, trigger, onClose, notify }: { identity: Identity; room: RoomView; trigger: HTMLElement | null; onClose: () => void; notify: (m: string) => void }) {
+  return (
+    <WorkspaceCard
+      identity={identity}
+      tool="claude"
+      trigger={trigger}
+      only="repos"
+      onClose={onClose}
+      onPick={(p) => {
+        if (!p) return;
+        const dir = p.folder.path;
+        const own = room.folders ?? [];
+        if (own.includes(dir)) return notify(`${short(dir)} is already in ${room.name}.`);
+        void api(identity, `/api/teammates/rooms/${room.id}`, { method: "PATCH", body: JSON.stringify({ folders: [...own, dir] }), headers: { "Content-Type": "application/json" } })
+          .then(() => refreshTeam(identity))
+          .then(() => notify(`Everyone in ${room.name} can work in ${short(dir)} now.`))
+          .catch((e: Error) => notify(e.message));
+      }}
+    />
+  );
+}
+
 const COPIED = ["fontFamily", "fontSize", "fontWeight", "fontStyle", "lineHeight", "letterSpacing", "wordSpacing", "textIndent", "tabSize", "whiteSpace", "overflowWrap", "wordBreak", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth", "boxSizing", "textTransform"] as const;
 
 /**
@@ -1051,6 +1079,118 @@ export function CheckInLine({ text, lane, stamp }: { text: string; lane: string;
  * its chat (Arun, 2026-11-01, after OpenBot: "i want to be simplier and easy to digest as a user for crew"). It was a "Waiting for
  * replies" head over a row per teammate.
  */
+/**
+ * Crew mates at work, said in the chat itself as a chat app says it: each one's face and name with a bubble of three dots, typing,
+ * under the last message, what it is on said on hover (Arun, 2026-11-15: "instead of this we will have the mascot in the chat with
+ * the three dots loading thing like it is typing", of the "Ivy · Writing its answer" pill over the box).
+ *
+ * Once per crew mate: one whose reply is already in the chat, live, says it there (its run line), so it isn't typing here as well.
+ * Those replies say so through `useLiveHere`.
+ */
+const liveHere = new Map<string, number>();
+const liveSubs = new Set<() => void>();
+let liveVersion = 0;
+const liveTell = () => ((liveVersion += 1), liveSubs.forEach((f) => f()));
+/** A crew mate's live reply, in the chat: while `on`, the typing rows leave it out. */
+export function useLiveHere(sid: string, lane: string, on: boolean): void {
+  useEffect(() => {
+    if (!on) return;
+    const k = `${sid}|${lane}`;
+    liveHere.set(k, (liveHere.get(k) ?? 0) + 1);
+    liveTell();
+    return () => {
+      const n = (liveHere.get(k) ?? 1) - 1;
+      if (n > 0) liveHere.set(k, n);
+      else liveHere.delete(k);
+      liveTell();
+    };
+  }, [sid, lane, on]);
+}
+const useLiveVersion = () =>
+  useSyncExternalStore(
+    (f) => (liveSubs.add(f), () => void liveSubs.delete(f)),
+    () => liveVersion,
+    () => liveVersion,
+  );
+
+/**
+ * A crew mate at work, said in its bubble one step at a time (Arun, 2026-11-15: "instead of just a message bubble thing with the
+ * three dots, can we show the working state of the agent like it appears then disappears then like the next one"): the dots, and
+ * what it is doing now, each new step rising in as the last fades out. A step is held a moment at least, so a run of quick ones
+ * reads as a sequence rather than a flicker.
+ */
+export function WorkBubble({ step, label }: { step: string; label: string }) {
+  const [shown, setShown] = useState<{ key: number; text: string; out?: true }[]>(() => [{ key: 0, text: step }]);
+  const at = useRef(Date.now());
+  useEffect(() => {
+    if (shown.at(-1)?.text === step) return;
+    const wait = Math.max(0, 900 - (Date.now() - at.current));
+    const t = setTimeout(() => {
+      at.current = Date.now();
+      setShown((s) => [...s.filter((x) => !x.out).map((x) => ({ ...x, out: true as const })), { key: (s.at(-1)?.key ?? 0) + 1, text: step }]);
+    }, wait);
+    return () => clearTimeout(t);
+  }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
+  // What faded out is let go once it has.
+  useEffect(() => {
+    if (!shown.some((x) => x.out)) return;
+    const t = setTimeout(() => setShown((s) => s.filter((x) => !x.out)), 320);
+    return () => clearTimeout(t);
+  }, [shown]);
+  return (
+    <div className="ct-bubble ct-work" role="status" aria-live="polite" aria-label={`${label}: ${step}`}>
+      <span className="ct-dots" aria-hidden="true">
+        <i />
+        <i />
+        <i />
+      </span>
+      <span className="ct-steps" aria-hidden="true">
+        {shown.map((x) => (
+          <span key={x.key} className={`ct-step${x.out ? " out" : ""}`}>
+            {x.text}
+          </span>
+        ))}
+      </span>
+    </div>
+  );
+}
+
+/** One crew mate typing: its face, its name, three dots. */
+export function TypingRow({ sid, lane, m, doing }: { sid: string; lane: string; m: TeammateView; doing?: string }) {
+  const seed = m.look ?? m.name;
+  const what = doing ? plainDoing(doing) : "";
+  return (
+    <div className="feed-item agent-lane" data-lane={lane} data-typing="">
+      <div className="rsp tm-rsp rsp-chat ct-row" style={{ "--who": mascotColour(seed) } as CSSProperties}>
+        <button type="button" className="rsp-avatar ct-face" onClick={() => focusAgent(sid, lane)} aria-label={`Open ${m.name}'s chat`} title={`Open ${m.name}'s chat`}>
+          <Face seed={seed} size={32} />
+        </button>
+        <div className="rsp-main">
+          <div className="rsp-head">
+            <span className="rsp-who">{m.name}</span>
+          </div>
+          <WorkBubble step={what || "Thinking"} label={`${m.name} is working`} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Every crew mate at work in this chat (or the one it is focused on), with no live reply of its own in it, typing. */
+export function CrewTyping({ sid, only }: { sid: string; only?: string }) {
+  useTeamNow();
+  useLiveVersion();
+  const busy = matesIn(sid).filter(({ lane, m }) => (!only || only === lane) && statusIn(sid, lane, m) === "working" && !liveHere.has(`${sid}|${lane}`));
+  if (!busy.length) return null;
+  return (
+    <>
+      {busy.slice(0, 4).map(({ lane, m }) => (
+        <TypingRow key={m.id} sid={sid} lane={lane} m={m} doing={mateStatus(m, { sid, lane }).line} />
+      ))}
+    </>
+  );
+}
+
 export function TeamWorking({ sid }: { sid: string }) {
   useTeamNow();
   const now = useNow(10_000);
@@ -1288,9 +1428,7 @@ export function RoomReplyActions({ sid, lane, root, events, done }: { sid: strin
   if (!m) return null;
   return (
     <>
-      <button type="button" className="grid size-7 place-items-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring" aria-label={`Open ${m.name}'s chat`} data-tip={`Open ${m.name}'s chat`} onClick={() => focusAgent(sid, lane)}>
-        <MessageSquareIcon className="size-3.5" aria-hidden="true" />
-      </button>
+      {/* No "Open its chat" bubble under a reply (Arun, 2026-11-16: "get rid of this"): its face in the room's list opens it. */}
       {root !== null && <ThreadChip sid={sid} root={root} lane={lane} events={events} icon />}
       {done && (
         <Suspense fallback={null}>
@@ -3133,10 +3271,20 @@ export function TeammateForm({ identity, editing, onClose = () => {}, inline, on
     );
   return (
     <div className="page nag-page px-6! max-[640px]:px-4!">
+      {/* As the Agents page's head (agents-page.css .ap-head): where you are, what this is for, and the way back (Arun, 2026-11-15:
+          "also fix this header design too please"). */}
       <header className="nag-head">
+        {!first && (
+          <button type="button" className="nag-crumb" onClick={onClose}>
+            Agents
+          </button>
+        )}
+        {!first && <ChevronRightIcon className="nag-crumb-sep" aria-hidden="true" />}
         <h1>{first ? "Your first agent" : "New agent"}</h1>
+        <span className="nag-head-sub">A face, a name, a job, and what it runs on</span>
         {!first && (
           <button type="button" className="nag-cancel" onClick={onClose}>
+            <XIcon aria-hidden="true" />
             Cancel
           </button>
         )}
@@ -3647,7 +3795,9 @@ export function CrewWorkLine({ pieces, times = [], live, onOpen, room }: { piece
   // As a group chat (Arun, 2026-11-15: "design this better and more interactive and fun and informational please this kinda needs
   // to feel like a group chat"): who is in it as faces, its last words each under who said them in their colour, someone typing while
   // it goes on, and the whole of it opened in place; the Crew room a press from its foot.
-  const [open, setOpen] = useState(false);
+  // In a room it is open from the start, every message whole under who said it, and folds on its head (Arun, 2026-11-15: "have it
+  // like this by default"); in a crew mate's own chat it stays one line that takes you to the room.
+  const [open, setOpen] = useState(!!room);
   const who = new Map<string, string>();
   for (const p of pieces) for (const t of p.who) if (t.name && t.name !== "everyone" && t.name !== "The board") who.set((t.lane && mateOn(t.lane)?.name) || t.name, t.lane);
   const people = [...who.entries()];
@@ -3658,9 +3808,10 @@ export function CrewWorkLine({ pieces, times = [], live, onOpen, room }: { piece
     const m = w?.lane ? mateOn(w.lane) : null;
     return { name: m?.name ?? w?.name ?? "Someone", seed: m ? (m.look ?? m.name) : (w?.name ?? "") };
   };
-  const working = live ? (people.find(([, lane]) => lane && mateOn(lane)?.status === "working")?.[0] ?? people.at(-1)?.[0]) : null;
+  // Who is at work, typing at its foot; not in a room of the open-source edition, where they type in the chat itself (CrewTyping).
+  const working = live && !(room && isLocal()) ? (people.find(([, lane]) => lane && mateOn(lane)?.status === "working")?.[0] ?? people.at(-1)?.[0]) : null;
   return (
-    <section className="cw" data-open={open ? "" : undefined} data-live={live ? "" : undefined} aria-label="Crew work">
+    <section className={`cw${room ? " cw-room" : ""}`} data-open={open ? "" : undefined} data-live={live ? "" : undefined} aria-label="Crew work">
       <button type="button" className="cw-head" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         <span className="cw-faces" aria-hidden="true">
           {people.slice(0, 3).map(([name, lane]) => (

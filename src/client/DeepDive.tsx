@@ -311,8 +311,23 @@ function Repo({ identity, repo, onBack }: { identity: Identity; repo: string; on
     }
   }, [identity, q]);
   useEffect(() => void load(), [load]);
+  // Pages whose files changed since they were written (Arun, 2026-11-16, "Do 4"): asked once it is ready, and after a refresh.
+  const [stale, setStale] = useState<Set<string>>(new Set());
+  const ready = detail?.dive.status === "ready";
+  const writingNow = detail?.pages.filter((p) => p.status === "writing").map((p) => p.id).join(",") ?? "";
+  useEffect(() => {
+    if (!ready || writingNow) return;
+    let gone = false;
+    void api<{ stale: string[] }>(identity, `/api/deepdive/stale?key=${q}`).then((r) => !gone && setStale(new Set(r.stale)), () => {});
+    return () => void (gone = true);
+  }, [ready, writingNow, identity, q]);
+  const refresh = (id: string) =>
+    void api(identity, `/api/deepdive/refresh?key=${q}`, { method: "POST", body: JSON.stringify({ id }) }).then(
+      () => load(),
+      (e: Error) => setError(e.message),
+    );
   // While it is being written, or a question is being answered, it is read again every few seconds.
-  const busy = !!detail && (detail.dive.status === "building" || detail.asks.some((a) => a.status === "asking"));
+  const busy = !!detail && (detail.dive.status === "building" || detail.asks.some((a) => a.status === "asking") || detail.pages.some((p) => p.status === "writing"));
   useEffect(() => {
     if (!busy) return;
     const t = setInterval(() => void load(), 2500);
@@ -514,6 +529,7 @@ function Repo({ identity, repo, onBack }: { identity: Identity; repo: string; on
                     {i + 1}
                   </span>
                   <span className="dd-side-name">{navTitle(p.title)}</span>
+                  {stale.has(p.id) && p.status === "done" && <span className="dd-stale-dot" title="Its files changed since it was written" aria-label="may be out of date" />}
                   <PageMark p={p} />
                 </button>
               </li>
@@ -555,7 +571,7 @@ function Repo({ identity, repo, onBack }: { identity: Identity; repo: string; on
             <AnswerView a={ask} tool={dive.tool} writer={modelName(dive.tool, ask.model) ?? dive.writer} onDelete={() => drop(ask)} />
           ) : current ? (
             <>
-              <PageView key={current.id} p={current} uncovered={current.id === "overview" && dive.status === "ready" ? dive.uncovered : []} />
+              <PageView key={current.id} p={current} uncovered={current.id === "overview" && dive.status === "ready" ? dive.uncovered : []} stale={stale.has(current.id)} onRefresh={() => refresh(current.id)} />
               <Pager pages={pages} at={current.id} onShow={(id) => show({ kind: "page", id })} />
             </>
           ) : dive.status === "building" ? (
@@ -801,7 +817,7 @@ function Warn({ bad, diagrams }: { bad: number; diagrams: number }) {
   );
 }
 
-function PageView({ p, uncovered }: { p: DivePage; uncovered: Dive["uncovered"] }) {
+function PageView({ p, uncovered, stale = false, onRefresh }: { p: DivePage; uncovered: Dive["uncovered"]; /** Its files changed since it was written. */ stale?: boolean; onRefresh?: () => void }) {
   const prose = useProse(p.body);
   return (
     <article className="dd-article" aria-labelledby={`dd-page-${p.id}`}>
@@ -811,6 +827,18 @@ function PageView({ p, uncovered }: { p: DivePage; uncovered: Dive["uncovered"] 
       {p.purpose && <p className="dd-purpose">{p.purpose}</p>}
       {p.status === "done" ? (
         <>
+          {stale && (
+            <p className="dd-warn dd-stale" role="note">
+              <span className="dd-mark warn" aria-hidden="true" />
+              <span>Its files changed since it was written, so parts of it may be out of date.</span>
+              {onRefresh && (
+                <button type="button" className="dd-refresh" onClick={onRefresh}>
+                  <Icon name="refresh" size={13} />
+                  Refresh this page
+                </button>
+              )}
+            </p>
+          )}
           <Warn bad={p.bad.length} diagrams={p.badDiagrams} />
           {p.files.length > 0 && (
             <details className="dd-files">

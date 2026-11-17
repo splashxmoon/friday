@@ -6,7 +6,8 @@ import type { Crew, CrewState } from "../src/attention.js";
 import { CrewLine } from "../src/client/Sidebar.js";
 
 // A session row's second line with several agents (Arun, 2026-11-10: "instead of 3 agents done text can we have the coding tool
-// icons on the right side and get rid of the text"): finished or ready, only their marks, said in words to a screen reader; any
+// icons on the right side and get rid of the text"): finished or ready, their marks at the right, what was last asked at the left
+// (2026-11-16), said in words to a screen reader; any
 // other case keeps its words.
 const agent = (lane: string, name: string, tool: "claude" | "codex" | undefined, state: CrewState): Crew["agents"][number] => ({ lane, name, ...(tool ? { tool } : { face: 0 }), state, word: state });
 const line = (agents: Crew["agents"]) => {
@@ -15,9 +16,11 @@ const line = (agents: Crew["agents"]) => {
 };
 const three = (state: CrewState, last: CrewState = state) => [agent("a", "Claude Code", "claude", state), agent("b", "Claude Code 2", "claude", state), agent("c", "Codex", "codex", last)];
 
-test("several agents done: a mark each at the line's end and no words, what they said in the marks' label", () => {
+test("several agents done: a mark each at the line's end, what was last asked on its left (else how they stand), what they said in the marks' label", () => {
   const html = line(three("done"));
-  assert.doesNotMatch(html, /agents · done/);
+  // The left of the line is not left empty (Arun, 2026-11-16: "need more details and info here there is empty space on the left").
+  assert.match(html, /class="sb-crew-lead truncate">3 agents · done</);
+  assert.match(renderToStaticMarkup(createElement(CrewLine, { crew: { sid: "s", agents: three("done") }, now: 0, lead: "You: tidy the README" })), /class="sb-crew-lead truncate">You: tidy the README</);
   assert.match(html, /class="sb-crew sb-crew-end"/);
   assert.match(html, /role="img" aria-label="3 agents, done: Claude Code, Claude Code 2, Codex"/);
   assert.equal(html.match(/<span title="/g)?.length, 3, "a mark per agent");

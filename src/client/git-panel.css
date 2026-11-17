@@ -1,0 +1,99 @@
+/* The Git view of Changes (GitPanel.tsx), redesigned to read plainly (Arun, 2026-11-16: "redesign the git panel better too more
+   clearer and understandable"): where the branch stands in words, what goes in the commit and what doesn't, the history on a line,
+   and Commit always in reach at the foot. */
+
+.gitp.gx { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; overflow: hidden; padding: 0; font: 400 13px/1.45 var(--font); color: var(--ink-2); }
+.gx-body { display: flex; flex-direction: column; gap: 18px; min-height: 0; flex: 1 1 auto; overflow: auto; padding: 14px 14px 20px; }
+.gx-grow { flex: 1; }
+.gx-quiet { margin: 0; color: var(--text-muted); font-size: 12.5px; }
+
+/* Where the branch stands. */
+.gx-head { display: flex; flex-direction: column; gap: 8px; flex: none; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.gx-branch { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.gx-branch .branch-pill { min-width: 0; max-width: 100%; height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--r-md); background: none; color: var(--ink); font: 500 12.5px/1 var(--mono); }
+.gx-branch .branch-pill:hover, .gx-branch .branch-pill.on { background: var(--hover); border-color: var(--border-strong); }
+.gx-sync { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.gx-chip { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 11px; background: var(--hover); color: var(--ink-2); font-size: 12px; font-weight: 500; white-space: nowrap; }
+.gx-chip.up { background: color-mix(in srgb, var(--blue, #3b82f6) 14%, transparent); color: color-mix(in srgb, var(--blue, #3b82f6) 80%, var(--ink)); }
+.gx-chip.down { background: color-mix(in srgb, var(--amber) 15%, transparent); color: color-mix(in srgb, var(--amber) 78%, var(--ink)); }
+.gx-chip.even { background: color-mix(in srgb, var(--green) 12%, transparent); color: color-mix(in srgb, var(--green) 80%, var(--ink)); }
+.gx-vs { margin: 0; color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.gx-vs code { padding: 0 5px; border-radius: var(--r-sm); background: var(--hover); color: var(--ink-2); font: 11.5px/1.6 var(--mono); }
+.gx-vs b { font-weight: 600; }
+
+/* Nothing to commit. */
+.gx-clean { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--r-lg); }
+.gx-clean-mark { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 50%; background: color-mix(in srgb, var(--green) 14%, transparent); color: var(--green); }
+.gx-clean div { display: flex; flex-direction: column; }
+.gx-clean b { color: var(--ink); font-size: 13px; font-weight: 600; }
+.gx-clean span { color: var(--text-muted); font-size: 12px; }
+
+/* A group of files: its name and count, what it means, its actions. */
+.gx-sec { display: flex; flex-direction: column; }
+.gx-sec-head { display: flex; align-items: center; gap: 8px; min-height: 24px; }
+.gx-sec-head h3 { display: inline-flex; align-items: center; gap: 6px; margin: 0; color: var(--ink); font-size: 13px; font-weight: 600; }
+.gx-sec.ok .gx-sec-head h3::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+.gx-sec.bad .gx-sec-head h3 { color: var(--red); }
+.gx-count { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--hover-strong); color: var(--ink-2); font-size: 11px; font-weight: 600; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
+.gx-sec-acts { display: inline-flex; gap: 2px; margin-left: auto; }
+.gx-hint { margin: 1px 0 6px; color: var(--text-muted); font-size: 12px; }
+.gx-link { height: 24px; padding: 0 7px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-muted); font: 500 12px/1 var(--font); cursor: pointer; }
+.gx-link:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
+.gx-link.danger:hover:not(:disabled) { color: var(--red); }
+
+.gx-list { display: flex; flex-direction: column; margin: 0; padding: 2px; list-style: none; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--panel); }
+.gx-file + .gx-file { border-top: 1px solid var(--border); }
+.gx-row { display: flex; align-items: center; gap: 4px; min-width: 0; padding-right: 4px; }
+.gx-main { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; height: 34px; padding: 0 8px; border: 0; border-radius: var(--r-md); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.gx-main:hover { background: var(--hover); }
+.gx-caret { flex: none; color: var(--faint); transition: transform var(--t-hover) var(--ease-out); }
+.gx-file.on .gx-caret, .gx-commit.on .gx-caret { transform: rotate(90deg); }
+.gx-letter { display: grid; place-items: center; flex: none; width: 18px; height: 18px; border-radius: 5px; font: 700 10.5px/1 var(--mono); }
+.gx-letter.is-modified { background: color-mix(in srgb, var(--amber) 18%, transparent); color: color-mix(in srgb, var(--amber) 80%, var(--ink)); }
+.gx-letter.is-added { background: color-mix(in srgb, var(--green) 16%, transparent); color: color-mix(in srgb, var(--green) 80%, var(--ink)); }
+.gx-letter.is-deleted, .gx-letter.is-conflict { background: color-mix(in srgb, var(--red) 15%, transparent); color: color-mix(in srgb, var(--red) 80%, var(--ink)); }
+.gx-letter.is-renamed { background: color-mix(in srgb, var(--blue, #3b82f6) 15%, transparent); color: color-mix(in srgb, var(--blue, #3b82f6) 80%, var(--ink)); }
+.gx-name { flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-weight: 500; }
+.gx-dir { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 12px; }
+.gx-acts { display: inline-flex; gap: 2px; flex: none; opacity: 0; transition: opacity var(--t-hover) var(--ease-out); }
+.gx-file:hover .gx-acts, .gx-file:focus-within .gx-acts, .gx-file.on .gx-acts { opacity: 1; }
+@media (hover: none) { .gx-acts { opacity: 1; } }
+.gx-icon { display: grid; place-items: center; flex: none; width: 26px; height: 26px; padding: 0; border: 0; border-radius: var(--r-md); background: none; color: var(--text-muted); cursor: pointer; }
+.gx-icon:hover:not(:disabled) { background: var(--hover-strong); color: var(--ink); }
+.gx-icon:disabled { opacity: .45; cursor: default; }
+.gx-icon:focus-visible, .gx-main:focus-visible, .gx-link:focus-visible, .gx-btn:focus-visible, .gx-commit-main:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.gx-file .gitp-hunks { padding: 4px 8px 10px 34px; }
+
+/* History on a line: filled dots are on the upstream, hollow amber ones only here. */
+.gx-history .gx-sec-head { margin-bottom: 6px; }
+.gx-unpushed { margin-left: auto; color: color-mix(in srgb, var(--amber) 80%, var(--ink)); font-size: 12px; font-weight: 500; }
+.gx-log { position: relative; display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.gx-commit { position: relative; }
+.gx-commit:not(:last-child)::after { content: ""; position: absolute; left: 13.25px; top: 24px; bottom: -14px; width: 1.5px; border-radius: 1px; background: var(--border); }
+.gx-commit-main { position: relative; z-index: 1; display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 6px 8px; border: 0; border-radius: var(--r-md); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.gx-commit-main:hover { background: var(--hover); }
+.gx-dot { flex: none; width: 11px; height: 11px; margin: 4px 0 0; border-radius: 50%; border: 2px solid var(--text-muted); background: var(--text-muted); box-shadow: 0 0 0 3px var(--bg); }
+.gx-commit.local .gx-dot { border-color: var(--amber); background: var(--bg); }
+.gx-commit-text { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
+.gx-subject { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-weight: 500; }
+.gx-commit-meta { display: flex; align-items: center; gap: 4px; min-width: 0; color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+.gx-commit-meta code { font: 11.5px/1 var(--mono); color: var(--text-muted); }
+.gx-local { margin-left: 4px; padding: 1px 6px; border-radius: 8px; background: color-mix(in srgb, var(--amber) 14%, transparent); color: color-mix(in srgb, var(--amber) 80%, var(--ink)); font-size: 11px; font-weight: 500; }
+.gx-commit .gx-caret { margin-top: 4px; }
+.gx-hunks { padding: 4px 0 10px 29px; }
+
+/* Commit, always in reach. */
+.gx-foot { display: flex; align-items: center; gap: 10px; flex: none; padding: 10px 14px; border-top: 1px solid var(--border); background: var(--bg); }
+.gx-foot-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 12.5px; }
+.gx-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: none; height: 28px; padding: 0 11px;
+  border: 1px solid var(--border); border-radius: var(--r-md); background: none; color: var(--ink); font: 500 12.5px/1 var(--font); cursor: pointer;
+  transition: background-color var(--t-hover) var(--ease-out), border-color var(--t-hover) var(--ease-out);
+}
+.gx-btn:hover:not(:disabled) { background: var(--hover); border-color: var(--border-strong); }
+.gx-btn.primary { border-color: transparent; background: var(--ink); color: var(--bg); }
+.gx-btn.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--ink) 86%, var(--bg)); }
+.gx-btn:disabled { opacity: .5; cursor: default; }
+.gx-btn .spinner { width: 12px; height: 12px; }
+
+@media (prefers-reduced-motion: reduce) { .gx-caret, .gx-acts, .gx-btn { transition: none; } }

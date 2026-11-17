@@ -97,6 +97,10 @@ test("from any session a coding tool sees, reads, searches and tells the others 
   assert.ok(id, started.output);
   const s = await app.store.state(id!);
   assert.equal(s.options.work, true);
+  // Said in the session it came from, to open it there and file it with the project's threads (Arun, 2026-11-16, "Also work on 8").
+  const opened = (await app.store.events(code.sessionId)).find((e) => e.body.type === "thread.started");
+  assert.equal(opened?.body.type === "thread.started" && opened.body.sid, id);
+  assert.equal(opened?.body.type === "thread.started" && opened.body.title, "Launch video script");
   const task = (await app.store.events(id!)).find((e) => e.body.type === "instruction");
   assert.equal(task?.actor.kind, "agent", "its task is the agent's, not said as the person's");
   assert.equal(task?.body.type === "instruction" && task.body.peer?.fromSid, code.sessionId);

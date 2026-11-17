@@ -206,7 +206,7 @@ export function spentOn(events: readonly SessionEvent[], lane: string, from: num
  * 2026-11-09), by Claude Code's aliases and ids. On a subscription this is what the work would have cost on the API, the only
  * dollar figure there is. Smart routing, a tool's own default and every other tool: not known, so no dollar cap applies.
  */
-const PRICES: Record<string, [number, number]> = {
+export const PRICES: Record<string, [number, number]> = {
   fable: [8, 40],
   "claude-fable-5-2": [8, 40],
   "claude-fable-5-1": [10, 50],

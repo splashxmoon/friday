@@ -13,6 +13,7 @@ import { MAC_CSS, THEME_WATCH, WIN_CSS } from "../desktop-chrome.js";
 import { registerNative } from "../desktop-native.js";
 import { feedbackUrl, osName } from "../feedback.js";
 import { registerBrowser } from "./desktop-browser.js";
+import { registerTray } from "./desktop-tray.js";
 import { registerScreen } from "../desktop-screen.js";
 import { registerTerminal, stopTerminals } from "../desktop-terminal.js";
 import { registerUpdates } from "../desktop-update.js";
@@ -64,14 +65,17 @@ async function syncAwake() {
 setInterval(() => void syncAwake(), 30_000).unref();
 
 /**
- * The window's own buttons in the page's colours, as the product app draws them (desktop/main.ts): on Windows and Linux the
- * title bar is hidden and its buttons drawn over the page, in these colours, 40px tall to fit the page's header. macOS keeps its
- * traffic lights, set into the header.
+ * The window's own buttons: on Windows and Linux the title bar is hidden and its minimise, maximise and close drawn over the page's
+ * top right, 40px tall to fit the page's header (macOS keeps its traffic lights, set into the header). On the top bar's colour (the
+ * sidebar's, style.css .session-view > .topbar), so they sit in the bar rather than in a block of their own (Arun, 2026-11-16:
+ * "audit the layout and stuff for windows and linux too"; they were the page's colour, #1c1c1c on #141414 and white on #f3f3f1).
  */
 const OVERLAY = {
-  dark: { color: "#1c1c1c", symbolColor: "#ededed", height: 40 },
-  light: { color: "#ffffff", symbolColor: "#18181b", height: 40 },
+  dark: { color: "#141414", symbolColor: "#ededed", height: 40 },
+  light: { color: "#f3f3f1", symbolColor: "#18181b", height: 40 },
 } as const;
+/** The window's own colour before the page paints: the page's (--bg). */
+const WINDOW_BG = { dark: "#1c1c1c", light: "#fafaf9" } as const;
 const themeFile = () => path.join(app.getPath("userData"), "theme");
 /** The theme the page last showed, so the window opens in it rather than flashing the other one. */
 function lastTheme(): "dark" | "light" {
@@ -82,6 +86,30 @@ function lastTheme(): "dark" | "light" {
     // Not chosen yet: the system's.
   }
   return nativeTheme.shouldUseDarkColors ? "dark" : "light";
+}
+
+/**
+ * Frosted glass (Arun, 2026-11-16: "a frosted glass effect"): the window shows the desktop behind it through the system's own
+ * blur, the macOS vibrancy the menu bar panel has, Windows 11's acrylic. Kept, so the window opens in it. Elsewhere the page draws
+ * its own soft ground instead (html.glass without .glass-native).
+ */
+const glassFile = () => path.join(app.getPath("userData"), "glass");
+const lastGlass = (): boolean => {
+  try {
+    return readFileSync(glassFile(), "utf8").trim() === "1";
+  } catch {
+    return false;
+  }
+};
+const GLASS_NATIVE = process.platform === "darwin" || process.platform === "win32";
+function setGlass(w: BrowserWindow, on: boolean, theme: "dark" | "light") {
+  try {
+    if (process.platform === "darwin") w.setVibrancy(on ? "under-window" : null);
+    else if (process.platform === "win32") w.setBackgroundMaterial(on ? "acrylic" : "none");
+    w.setBackgroundColor(on && GLASS_NATIVE ? "#00000000" : WINDOW_BG[theme]);
+  } catch {
+    // An older system without the material: the page's own glass ground stands in.
+  }
 }
 
 function open(url: string) {
@@ -95,7 +123,9 @@ function open(url: string) {
     minWidth: 1100,
     minHeight: 700,
     title: "Friday",
-    backgroundColor: OVERLAY[lastTheme()].color,
+    backgroundColor: lastGlass() && GLASS_NATIVE ? "#00000000" : WINDOW_BG[lastTheme()],
+    ...(lastGlass() && process.platform === "darwin" ? { vibrancy: "under-window" as const, visualEffectState: "followWindow" as const } : {}),
+    ...(lastGlass() && process.platform === "win32" ? { backgroundMaterial: "acrylic" as const } : {}),
     show: false,
     autoHideMenuBar: true,
     // No title bar: the page draws its own header there, as in the product app. On macOS the traffic lights sit in it, 17px down
@@ -266,6 +296,17 @@ else {
   registerNative(fromApp);
   registerScreen(); // computer use's screen, bar and permissions, for the runner in this process (desktop-screen.ts)
   registerBrowser(() => win, fromApp, () => friday?.url ?? null); // the agents' browser tool, on the session's Browser panel (desktop-browser.ts)
+  // Friday in the menu bar (desktop-tray.ts): its mark, how many work, and a panel to answer and start work without the window.
+  const tray = registerTray({
+    origin: () => friday?.url ?? null,
+    preload: path.join(here, "preload.cjs"),
+    showMain: () => {
+      if (!friday) return null;
+      open(friday.url);
+      return win && !win.isDestroyed() ? win : null;
+    },
+    trusted: fromApp,
+  });
   // The page's light or dark choice (preload.ts setTheme): the window buttons and background follow it where the OS draws them.
   ipcMain.on("friday:theme", (e, theme: unknown, choice: unknown) => {
     if (!win || e.sender !== win.webContents) return;
@@ -276,11 +317,20 @@ else {
     nativeTheme.themeSource = choice === "system" ? "system" : which;
     try {
       writeFileSync(themeFile(), which);
-      win.setBackgroundColor(OVERLAY[which].color);
+      if (!lastGlass()) win.setBackgroundColor(WINDOW_BG[which]);
       if (process.platform !== "darwin") win.setTitleBarOverlay(OVERLAY[which]);
     } catch {
       // Not every platform draws an overlay; the window is fine without one.
     }
+  });
+  ipcMain.on("friday:glass", (e, on: unknown) => {
+    if (!win || e.sender !== win.webContents) return;
+    try {
+      writeFileSync(glassFile(), on === true ? "1" : "0");
+    } catch {
+      // Not kept: it still shows now.
+    }
+    setGlass(win, on === true, lastTheme());
   });
   app.on("second-instance", () => friday && open(friday.url));
   app.whenReady().then(async () => {
@@ -292,6 +342,7 @@ else {
     await loginPath;
     if (!(await begin()) || !friday) return;
     open(friday.url);
+    tray.start();
     app.on("activate", () => friday && open(friday.url));
     // Updates as the product app has them (desktop-update.ts): checked in the background, downloaded, and offered once ready.
     registerUpdates();
