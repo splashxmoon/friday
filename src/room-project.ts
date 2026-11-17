@@ -148,8 +148,11 @@ export type Git = (cwd: string, args: string[]) => Promise<string>;
 
 /** A folder's repo as git sees it: its top folder and every remote's key. Null when it isn't in a repo. */
 export async function repoAt(git: Git, dir: string): Promise<{ top: string; keys: Set<string>; urls: string[] } | null> {
-  const top = (await git(dir, ["rev-parse", "--show-toplevel"]).catch(() => "")).trim();
-  if (!top) return null;
+  const said = (await git(dir, ["rev-parse", "--show-toplevel"]).catch(() => "")).trim();
+  if (!said) return null;
+  // Git on Windows says C:/Users/…; the rest of Friday (and every folder it is compared with) says C:\Users\…. Without node:path:
+  // the app's pages import this file too.
+  const top = /^[A-Za-z]:\//.test(said) ? said.replace(/\//g, "\\") : said;
   const remotes = await git(dir, ["remote", "-v"]).catch(() => "");
   const urls = [...new Set(remotes.split("\n").map((l) => l.split(/\s+/)[1] ?? "").filter(Boolean))];
   const keys = new Set(urls.map(repoKey).filter((k): k is string => !!k));

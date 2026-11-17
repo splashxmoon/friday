@@ -102,14 +102,16 @@ async function installedVersion(bin: string): Promise<string | null> {
 export function wayOf(tool: EngineTool, real: string, platform = process.platform): UpdateWay {
   const p = real.replace(/\\/g, "/");
   const win = platform === "win32";
+  // Paths as that platform writes them, whichever this runs on (Windows CI read a Mac path with backslashes).
+  const P = win ? path.win32 : path.posix;
   const npm = /^(.*?)\/(?:lib\/)?node_modules\/((?:@[^/]+\/)?[^/]+)\//.exec(p);
   if (npm) {
     // The npm that owns that folder: <prefix>/bin/npm (or <prefix>/npm.cmd on Windows), so it updates the copy that runs.
     const prefix = npm[1]!.replace(/\/lib$/, "");
-    return { kind: "npm", pkg: npm[2]!, npm: win ? path.join(prefix, "npm.cmd") : path.join(prefix, "bin", "npm"), prefix };
+    return { kind: "npm", pkg: npm[2]!, npm: win ? P.join(prefix, "npm.cmd") : P.join(prefix, "bin", "npm"), prefix };
   }
   const cellar = /^(.*?)\/(Cellar|Caskroom)\/([^/]+)\//.exec(p);
-  if (cellar) return { kind: "brew", name: cellar[3]!, cask: cellar[2] === "Caskroom", brew: path.join(cellar[1]!, "bin", "brew") };
+  if (cellar) return { kind: "brew", name: cellar[3]!, cask: cellar[2] === "Caskroom", brew: P.join(cellar[1]!, "bin", "brew") };
   if (tool === "claude") return { kind: "self", argv: ["update"] };
   return { kind: "manual" };
 }

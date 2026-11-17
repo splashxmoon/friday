@@ -17,7 +17,7 @@ export interface WhatsNewNotes {
 }
 
 export const WHATS_NEW: WhatsNewNotes = {
-  version: "0.3.1",
+  version: "0.3.2",
   title: "Connect your tools once",
   summary: "MCP servers set up once for every coding tool, cards your agents draw in the chat, and your limits always in view.",
   items: [
