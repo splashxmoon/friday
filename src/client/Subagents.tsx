@@ -6,6 +6,7 @@ import type { EngineTool } from "../types.js";
 import { EngineMark } from "./BrandMarks.js";
 import { TaskMark, type TaskMarkState } from "./TaskMark.js";
 import { duration, type SubTask } from "./Tasks.js";
+import "./subagents.css";
 import { Shine } from "./shine.js";
 import { revealSeq } from "./feed-window.js";
 
@@ -36,6 +37,8 @@ export interface SubagentRow {
   steps?: number;
   /** When the tool last said anything of it. */
   heard?: number;
+  /** Stopped because its coding tool's session ended under it. */
+  ended?: boolean;
 }
 
 /** A subagent at work this long without a word from its tool is said to have gone quiet: it may be stuck. */
@@ -47,18 +50,27 @@ export const QUIET_MS = 10 * 60_000;
  * what it is doing, and that it has gone quiet when nothing has come from it for a long while (it counted 40 minutes and more
  * with no sign it might be stuck).
  */
-export function subagentLine(r: Pick<SubagentRow, "state" | "summary" | "doing" | "heard">, now: number): { text: string; tone?: "bad" | "warn" } | null {
+export function subagentLine(r: Pick<SubagentRow, "state" | "summary" | "doing" | "heard" | "ended">, now: number): { text: string; tone?: "bad" | "warn" } | null {
   if (r.state === "working") {
     const quiet = r.heard ? now - r.heard : 0;
     return quiet >= QUIET_MS ? { text: `${r.doing ?? "Working"} · nothing from it for ${duration(quiet)}: it may be stuck`, tone: "warn" } : { text: r.doing ?? "Starting…" };
   }
   if (r.state === "blocked") return { text: r.summary ? `Failed: ${r.summary}` : r.doing ? `Failed while ${r.doing.charAt(0).toLowerCase()}${r.doing.slice(1)}` : "Failed, and its tool didn't say why", tone: "bad" };
-  if (r.state === "open" && !r.summary) return { text: "Stopped before it was done" };
+  if (r.state === "open" && !r.summary) return { text: r.ended ? "Stopped when its coding tool's session ended" : "Stopped before it was done" };
   return null;
 }
 
 const MARK: Record<SubTask["status"], TaskMarkState> = { running: "working", done: "done", error: "blocked", stopped: "open" };
 export const subagentState = (t: SubTask): TaskMarkState => MARK[t.status];
+
+/** What a coding tool says of one it was running when its session ended ("Background agent "Build the landing page" didn't
+ * finish before the previous session ended"): its errand again and the tool's own words, said instead in a few (Arun,
+ * 2026-11-17: "fix this"). */
+const endedNote = (t: SubTask) => t.status === "stopped" && /didn't finish before the previous session ended/i.test(t.summary ?? "");
+
+/** A report without the note Claude Code puts before one it screened ("[harness: subagent output matched instruction-shaped
+ * pattern(s): … neutralized …]"): the tool's bookkeeping, not what the subagent found (Arun, 2026-11-17: "fix"). */
+const report = (s: string) => s.replace(/^\s*\[harness:[^\]]*\]\s*/i, "");
 
 /** A subagent's record as a row of the card. */
 export const subagentRowOf = (t: SubTask): SubagentRow => ({
@@ -68,8 +80,9 @@ export const subagentRowOf = (t: SubTask): SubagentRow => ({
   state: subagentState(t),
   start: t.start,
   ...(t.end ? { end: t.end } : {}),
-  ...(t.summary ? { summary: t.summary } : {}),
+  ...(t.summary && !endedNote(t) && report(t.summary) ? { summary: report(t.summary) } : {}),
   ...(t.doing ? { doing: t.doing } : {}),
+  ...(endedNote(t) ? { ended: true } : {}),
   ...(t.steps ? { steps: t.steps } : {}),
   heard: t.heard,
 });
@@ -89,15 +102,16 @@ function useNow(on: boolean): number {
 }
 
 /**
- * "2 working · 3 back · 1 stopped · 1 failed": where a set of subagents stands, said once. One stopped before it was done isn't
- * back with anything, and is said apart (2026-10-27 audit: stopped ones were counted as back, and a stopped set read "All back").
+ * "2 working · 3 done · 1 stopped · 1 failed": where a set of subagents stands, said once. One stopped before it was done isn't
+ * done, and is said apart (2026-10-27 audit: stopped ones were counted as back, and a stopped set read "All back"). "Done", not
+ * "back" (Arun, 2026-11-17: "fix this", of "2 back · 2 stopped").
  */
 export function tallyOf(rows: SubagentRow[]): { working: number; back: number; stopped: number; failed: number; text: string } {
   const working = rows.filter((r) => r.state === "working").length;
   const failed = rows.filter((r) => r.state === "blocked").length;
   const stopped = rows.filter((r) => r.state === "open").length;
   const back = rows.length - working - failed - stopped;
-  const text = [working ? `${working} working` : "", back ? (working || failed || stopped ? `${back} back` : "All back") : "", stopped ? `${stopped} stopped` : "", failed ? `${failed} failed` : ""].filter(Boolean).join(" · ");
+  const text = [working ? `${working} working` : "", back ? (working || failed || stopped ? `${back} done` : "All done") : "", stopped ? `${stopped} stopped` : "", failed ? `${failed} failed` : ""].filter(Boolean).join(" · ");
   return { working, back, stopped, failed, text };
 }
 
@@ -125,7 +139,15 @@ function SubRow({ r, now, open, onToggle, onJump }: { r: SubagentRow; now: numbe
   return (
     <li className="sub" data-state={r.state}>
       <span className="sub-mark">
-        <TaskMark state={r.state} />
+        {/* Stopped: a stop sign in a ring, not the dashed circle of one still to do. */}
+        {r.state === "open" ? (
+          <svg className="sub-stopped" viewBox="0 0 14 14" aria-hidden="true">
+            <circle cx="7" cy="7" r="6" fill="none" stroke="currentColor" strokeWidth="1.3" />
+            <rect x="4.75" y="4.75" width="4.5" height="4.5" rx="1" fill="currentColor" />
+          </svg>
+        ) : (
+          <TaskMark state={r.state} />
+        )}
       </span>
       <div className="sub-body">
         <div className="sub-line">
@@ -143,7 +165,7 @@ function SubRow({ r, now, open, onToggle, onJump }: { r: SubagentRow; now: numbe
           ((l) => l && <Shine on={r.state === "working" && !l.tone} className={`sub-doing${l.tone ? ` ${l.tone}` : ""}`}>{l.text}</Shine>)(subagentLine(r, now))
         ) : r.summary ? (
           <>
-            <p className={`sub-summary${open ? " open" : ""}`}>{r.summary}</p>
+            <p className={`sub-summary${open ? " open" : ""}`}>{r.summary.split("`").map((part, i) => (i % 2 ? <code key={i}>{part}</code> : part))}</p>
             {long && (
               <button type="button" className="sub-more" aria-expanded={open} onClick={onToggle}>
                 {open ? "Show less" : "Show all"}
@@ -200,8 +222,7 @@ function jumpTo(seq: number) {
 }
 
 /**
- * Every agent's subagents in one place: an item in the status bar ("2 subagents working", or "5 subagents" once all are back)
- * that opens a list grouped by the agent that sent them, working ones first, each live, each a press away from where it was sent
+ * Every agent's subagents in one place: an item in the status bar ("2 subagents working"), there only while one works, that opens a list grouped by the agent that sent them, working ones first, each live, each a press away from where it was sent
  * off. Nothing is drawn while no agent has sent one. Background commands are the Tasks panel's.
  */
 export function SubagentsTray({ tasks, slot, agentOf }: { tasks: SubTask[]; slot: HTMLElement | null; /** The agent a lane is: its name and coding tool. */ agentOf: (lane: string) => { name: string; tool?: EngineTool } }) {
@@ -211,7 +232,7 @@ export function SubagentsTray({ tasks, slot, agentOf }: { tasks: SubTask[]; slot
   const now = useNow(t.working > 0);
   const [open, setOpen] = useState(false);
   const [more, setMore] = useState<Record<string, boolean>>({});
-  const [pos, setPos] = useState<{ left: number; bottom: number }>({ left: 16, bottom: 52 });
+  const [pos, setPos] = useState<{ left: number; bottom: number; maxHeight?: number }>({ left: 16, bottom: 52 });
   const at = useRef<HTMLSpanElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -225,17 +246,23 @@ export function SubagentsTray({ tasks, slot, agentOf }: { tasks: SubTask[]; slot
     addEventListener("keydown", esc);
     return () => (removeEventListener("pointerdown", away), removeEventListener("keydown", esc));
   }, [open]);
-  if (!slot || !subs.length) return null;
+  // Only while one is out (Arun, 2026-11-17: "make this disappear when all of the subagents are done", "done and some are
+  // stopped then make it disappear as well"): once none is working the bar has nothing to track, and each reply's own card
+  // still has its subagents' reports. Shut with it, so it doesn't open again by itself with the next one.
+  useEffect(() => {
+    if (!t.working) setOpen(false);
+  }, [t.working]);
+  if (!slot || !t.working) return null;
   // By agent, the one with work out first; inside each, working first, then the latest back.
   const lanes = [...new Set(subs.map((s) => s.lane))]
     .map((lane) => ({ lane, list: subs.filter((s) => s.lane === lane).sort((a, b) => Number(b.status === "running") - Number(a.status === "running") || (b.end ?? b.start) - (a.end ?? a.start)) }))
     .sort((a, b) => Number(b.list.some((s) => s.status === "running")) - Number(a.list.some((s) => s.status === "running")));
-  const label = t.working ? `${t.working} subagent${t.working === 1 ? "" : "s"} working` : `${subs.length} subagent${subs.length === 1 ? "" : "s"}`;
+  const label = `${t.working} subagent${t.working === 1 ? "" : "s"} working`;
   return createPortal(
     <span className="subs-tray" ref={at}>
       <button
         type="button"
-        className={`stb-item subs-item${open ? " on" : ""}${t.working ? " live" : ""}`}
+        className={`stb-item subs-item live${open ? " on" : ""}`}
         aria-expanded={open}
         aria-label={label}
         title="Every agent's subagents"
@@ -244,14 +271,16 @@ export function SubagentsTray({ tasks, slot, agentOf }: { tasks: SubTask[]; slot
           // card appears above the subagents button in the footer"); it used to sit over the message box, off to one side.
           const r = e.currentTarget.getBoundingClientRect();
           const w = Math.min(460, innerWidth - 32);
-          setPos({ left: Math.max(16, Math.min(r.right - w, innerWidth - w - 16)), bottom: innerHeight - r.top + 8 });
+          // Never taller than the room above the button, under the window's own row at the top (Arun, 2026-11-17: its head was
+          // off the top of the window).
+          setPos({ left: Math.max(16, Math.min(r.right - w, innerWidth - w - 16)), bottom: innerHeight - r.top + 8, maxHeight: Math.max(160, Math.min(580, r.top - 8 - 52)) });
           setOpen(!open);
         }}
       >
-        {t.working ? <span className="ring-spin" aria-hidden="true" /> : <Icon name="gitFork" size={14} />}
+        <span className="ring-spin" aria-hidden="true" />
         {/* A phone's bar shows the count alone (style.css), so the run's state beside it keeps its word, not "W" (2026-10-28 QA). */}
         <span className="subs-label">{label}</span>
-        <span className="subs-n" aria-hidden="true">{t.working || subs.length}</span>
+        <span className="subs-n" aria-hidden="true">{t.working}</span>
       </button>
       {open && (
         <div className="subs-pop" style={pos} role="dialog" aria-label="Every agent's subagents">

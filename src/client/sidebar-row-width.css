@@ -1,0 +1,7 @@
+/* A session's name gets the row's width (Arun, 2026-11-17: "try to utilize more width of the side bar"): the time's slot is only as
+   wide as the time ("10m", "now"), where it kept 50px all the time for the pin and ⋯ that show on hover. On hover those two sit
+   out over the state ring and the space before it (the ring hidden, as the time is), so the name still never changes length as
+   the pointer passes. A row with a pull request's mark keeps the wide slot: its mark stays where it can be pressed. */
+.sb-row > .flex > .sb-row-end { width: auto; min-width: 24px; }
+.sb-row > .flex:has(> .sb-pr) > .sb-row-end { width: 50px; }
+.sb-row:is(:hover, :focus-visible, :has(:focus-visible), [data-menu="true"]) > .flex:not(:has(> .sb-pr)) > .state-ring { visibility: hidden; }

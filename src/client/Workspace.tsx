@@ -1197,10 +1197,13 @@ export function scratchSub(folder: { name: string; path: string }): string | nul
 
 /**
  * A folder by the name a person would give it: a coding app's own scratch folder ("scratch-2026-11-03-c0317b" under Claude's
- * scratch-workspaces) is a "Scratch folder", not its generated name.
+ * scratch-workspaces) is a "Scratch folder", not its generated name, and one named after a link loses the link's "https-".
  */
 export function folderName(folder: { name: string; path: string }): string {
-  return /[\\/]scratch-workspaces[\\/]/.test(folder.path) || /^scratch-\d{4}-\d{2}-\d{2}\b/.test(folder.name) ? "Scratch folder" : folder.name;
+  if (/[\\/]scratch-workspaces[\\/]/.test(folder.path) || /^scratch-\d{4}-\d{2}-\d{2}\b/.test(folder.name)) return "Scratch folder";
+  // A folder a coding tool named after a link it was given, "https-paper-design-recreate": "paper-design-recreate" (Arun,
+  // 2026-11-17: "also fix formatting problems too").
+  return folder.name.replace(/^https?-(www-)?(?=\w)/i, "") || folder.name;
 }
 
 /**

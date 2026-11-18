@@ -1,5 +1,6 @@
 import { ChevronRightIcon, FolderGit2Icon, PlusIcon, SearchIcon, SettingsIcon, LogOutIcon, MoonIcon, SunIcon, XIcon } from "lucide-react";
 import "./working-dot.css";
+import "./sidebar-row-width.css";
 import { openKeepGoing } from "./crew-carry-open.js";
 import { plainLine } from "./team-room.js";
 import { mateItems, roomItems } from "./mate-menu.js";
@@ -63,6 +64,8 @@ import { NEW_THREAD, NEW_THREAD_ON_OPEN } from "./threads-data.js";
 /** `fresh`: a project just made, whose name box was never confirmed: Escape takes it away again. */
 type Renaming = { kind: "session" | "project"; id: string; fresh?: boolean } | null;
 const DRAG_TYPE = "application/x-mpa-session";
+/** A title that starts with a web address, as people read one: no scheme or www. ("https://paper.design/x" is "paper.design/x"). */
+const linkTitle = (t: string) => t.replace(/^\s*https?:\/\/(www\.)?(?=\S)/i, "");
 /** What is carried when a whole section of the list is dragged, as opposed to one chat. */
 const SECTION_TYPE = "application/x-mpa-section";
 
@@ -614,7 +617,8 @@ function OssRail({ p }: { p: SidebarProps }) {
         {o.id === "agents" ? <CrewIcon seeds={mates.map((m) => m.look ?? m.name)} /> : <Icon name={o.icon} size={20} />}
         {!!o.n && <span className={`oss-rail-n${o.needs ? " needs" : ""}`} aria-hidden="true">{o.n > 9 ? "9+" : o.n}</span>}
         {/* Someone at work: a small dot that breathes in its corner (Arun, 2026-11-17: "add a little dot on the top right corner when
-            an agent or room or whatever is working"); what waits on you, or just finished, comes first. */}
+            an agent or room or whatever is working"; only here since "get rid of the working dot for the mascots", the list's faces
+            showing it already); what waits on you, or just finished, comes first. */}
         {!o.n && (o.id === "agents" && mates.some((m) => m.status === "working") ? <span className="oss-rail-dot wk" aria-hidden="true" /> : o.dot && <span className="oss-rail-dot" aria-hidden="true" />)}
       </button>
     );
@@ -839,10 +843,7 @@ function CrewList({ p }: { p: SidebarProps }) {
           const roomRow = (r: (typeof rooms)[number]) => (
             <div key={r.key} className="oss-crew-item" {...dragOf(`room:${r.key}`)} onContextMenu={(e) => (e.preventDefault(), setMenuAt({ id: `room:${r.key}`, x: e.clientX, y: e.clientY }))}>
               <button type="button" className="oss-crew-row" data-active={r.here || undefined} onClick={r.open}>
-                <span className="wk-wrap">
-                  <RoomFaces seeds={r.seeds} size={30} states={r.states} />
-                  {r.ring === "working" && <i className="wk-dot" aria-hidden="true" />}
-                </span>
+                <RoomFaces seeds={r.seeds} size={30} states={r.states} />
                 <span className="oss-crew-text">
                   <span className="oss-crew-top">
                     <b>{r.name}</b>
@@ -871,10 +872,7 @@ function CrewList({ p }: { p: SidebarProps }) {
               // AGENTS?"). No ⋯ beside its words ("get rid of that .... by the texts"): the Agents page has one beside Message.
               <div key={m.id} className="oss-crew-item" {...dragOf(`mate:${m.id}`)} onContextMenu={(e) => (e.preventDefault(), setMenuAt({ id: `mate:${m.id}`, x: e.clientX, y: e.clientY }))}>
                 <button type="button" className="oss-crew-row" data-active={(p.activeSid === t.sid && focused === m.lane) || undefined} onClick={() => openTeammate(t, m.lane, p.onOpen)} aria-label={`${m.name}${chip ? `, ${chip}` : ""}: ${st.word}${st.line ? `, ${st.line}` : ""}`}>
-                  <span className="wk-wrap">
-                    <Face seed={m.look ?? m.name} size={30} status={m.status} lead={t.lead === m.lane} />
-                    {m.status === "working" && <i className="wk-dot" aria-hidden="true" />}
-                  </span>
+                  <Face seed={m.look ?? m.name} size={30} status={m.status} lead={t.lead === m.lane} />
                   <span className="oss-crew-text">
                     <span className="oss-crew-top">
                       <b>{m.name}</b>
@@ -1252,7 +1250,9 @@ function SessionsList({ p }: { p: SidebarProps }) {
     onDragEnd: () => (setDragSec(null), setSecOver(null)),
   });
 
-  const label = (r: RecentSession) => r.alias || r.title;
+  // A link as its title shows as the address people read, "paper.design/recreate", not "https://paper.desi…" (Arun, 2026-11-17:
+  // "also fix formatting problems too"): its scheme and www. take the row's room and say nothing.
+  const label = (r: RecentSession) => r.alias || linkTitle(r.title);
   // The clock the snoozes and settling read, moved on once a minute so a snooze ends while the sidebar is up.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -1320,10 +1320,12 @@ function SessionsList({ p }: { p: SidebarProps }) {
     setRenaming({ kind: "project", id, fresh: true });
   };
 
-  // Drag a session onto a project (or onto Recent to unfile it).
+  // Drag a session onto a project (or onto Recent to unfile it). A session row's own drag (DRAG_TYPE), not the crew list's
+  // (CREW_DRAG): with the crew's, no session could be dropped in a project (Arun, 2026-11-17: "i cant drag and drop the tabs into
+  // say a folder").
   const dropZone = (target: string | null) => ({
     onDragOver: (e: DragEvent) => {
-      if (!e.dataTransfer.types.includes(CREW_DRAG)) return;
+      if (!e.dataTransfer.types.includes(DRAG_TYPE)) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
       setDrop(target ?? "__recent");
@@ -1332,7 +1334,7 @@ function SessionsList({ p }: { p: SidebarProps }) {
       if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) setDrop(null);
     },
     onDrop: (e: DragEvent) => {
-      const sid = e.dataTransfer.getData(CREW_DRAG);
+      const sid = e.dataTransfer.getData(DRAG_TYPE);
       setDrop(null);
       if (!sid) return;
       e.preventDefault();

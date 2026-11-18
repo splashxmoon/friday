@@ -34,3 +34,11 @@
 }
 html.reduce-motion .wl-phrase { animation: none; }
 html.reduce-motion .rsp-avatar[data-doing] .tm-look { animation: none; transform: none; }
+
+/* Why a crew mate is working ("From Nova", run-why.ts) sat between its name and its line, invisible (style.css hides it until a
+   coding session's step is hovered, which a crew reply never is) yet holding its width, so the line stood far off (Arun,
+   2026-11-17: "why is the thinking/ working things so far away???"). Now it comes after the line and the time, and shows while the
+   reply is hovered. */
+.tm-rsp .rsp-head > .rsp-why { order: 3; transition: opacity .15s var(--ease-out); }
+.tm-rsp .rsp-head > .rsp-time { order: 2; }
+.tm-rsp:hover .rsp-head > .rsp-why, .tm-rsp .rsp-head > .rsp-why:focus-visible { opacity: 1; }

@@ -11,7 +11,7 @@ import type { Identity } from "./storage.js";
 import { planLimits, startTeam } from "./edition.js";
 import { floating, placeCard, Switch, uiZoom, useDismiss } from "./ui.js";
 import { splitTools, toolOrder } from "./engines.js";
-import { TierMeter, costMark, type RouteHint } from "./RouteWhy.js";
+import { costMark, type RouteHint } from "./RouteWhy.js";
 import { forValue } from "../routing.js";
 
 /**
@@ -500,14 +500,8 @@ export function AgentModelPicker({
         {head("model", "Model", <>{!engine && frontierVendor && <VendorMark vendor={frontierVendor} size={14} />}{modelText || "Default"}</>)}
         {row === "model" && (
           <div className="ampd-models amp-main" onKeyDown={walk}>
-            {route && (
-              <div className="amp-head">
-                <span className="amp-route" title={route.why}>
-                  <TierMeter tier={route.tier} />
-                </span>
-                {engine && route.forecasts[engine as EngineTool] && <span className="amp-forecast">{route.forecasts[engine as EngineTool]}</span>}
-              </div>
-            )}
+            {/* No line above the models saying how hard the task reads and what it would take ("Everyday ~2 min · about 1% of your
+                Claude window"; Arun, 2026-11-17: "get rid of this"): a tool's tooltip still says it. */}
             {modelCount > 6 && (
               <div className="amp-search">
                 <Icon name="search" size={13} />

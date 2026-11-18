@@ -1,10 +1,11 @@
 /* At work: a small dot in the top right corner of what is working, breathing (Arun, 2026-11-17: "add a little dot on the top right
-   corner when an agent or room or whatever is working"). The rail's Agents button, and each room's and crew mate's faces in the
-   list (Sidebar.tsx). The crew's working colour, ringed in the surface under it so it reads on any face. */
-.wk-wrap { position: relative; display: inline-flex; flex: none; }
-.wk-dot { position: absolute; top: -1px; right: -1px; width: 8px; height: 8px; border-radius: 50%; background: var(--mate-working, var(--green)); box-shadow: 0 0 0 2px var(--sidebar-bg, var(--bg)); animation: wk-breathe 1.8s ease-in-out infinite; pointer-events: none; }
+   corner when an agent or room or whatever is working"). The rail's Agents button only (Sidebar.tsx): the list's room and crew faces
+   lost theirs ("get rid of the working dot for the mascots"), their rings and words already saying so. */
 .oss-rail-dot.wk { background: var(--mate-working, var(--green)); animation: wk-breathe 1.8s ease-in-out infinite; }
 @keyframes wk-breathe { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .55; transform: scale(.82); } }
-@media (prefers-reduced-motion: reduce) { .wk-dot, .oss-rail-dot.wk { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .oss-rail-dot.wk { animation: none; } }
 /* The rail's waiting-on-you count in the same golden yellow (teammates.css --badge-need). */
 .oss-rail-n.needs { color: #3d2a00; background: var(--badge-need, #ffc53d); }
+/* The rail's dots sit out in the button's corner, clear of the crew's faces (Arun, 2026-11-17: "make it more up and the right a little
+   bit more"); style.css had them 8px in, over the faces. */
+.oss-rail-btn .oss-rail-dot { top: 3px; right: 3px; }

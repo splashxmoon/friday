@@ -1,0 +1,4 @@
+/* A stopped subagent's mark (Subagents.tsx): a stop sign in a ring, quiet, not the dashed circle of one still to do (Arun,
+   2026-11-17: "fix this"). And a report's `code` as code, as the reply's own words show it. */
+.sub-stopped { display: block; width: 14px; height: 14px; color: var(--text-muted); }
+.sub-summary code { padding: 0 4px; border-radius: 4px; background: var(--hover-strong); font: 500 12px/1.4 var(--font-mono, ui-monospace, monospace); color: var(--ink); }

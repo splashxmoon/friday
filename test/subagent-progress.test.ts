@@ -48,11 +48,11 @@ test("a command is said by what it runs, not by the imperative it was described 
   assert.equal(subagentDoing({ name: "shell", args: { command: "npm test -- --reporter dot", description: "Run the tests" } }), "Running npm test -- --reporter dot");
 });
 
-test("the subagents' tally says stopped ones apart: not back, and never \"All back\" for a set that was stopped", async () => {
+test("the subagents' tally says stopped ones apart: not done, and never \"All done\" for a set that was stopped", async () => {
   const { tallyOf } = await import("../src/client/Subagents.js");
   const r = (state: "working" | "done" | "blocked" | "open") => ({ key: state, description: state, state });
-  assert.equal(tallyOf([r("done"), r("done")]).text, "All back");
-  assert.equal(tallyOf([r("done"), r("open")]).text, "1 back · 1 stopped");
+  assert.equal(tallyOf([r("done"), r("done")]).text, "All done");
+  assert.equal(tallyOf([r("done"), r("open")]).text, "1 done · 1 stopped");
   assert.equal(tallyOf([r("open"), r("open")]).text, "2 stopped");
   assert.equal(tallyOf([r("working"), r("open"), r("blocked")]).text, "1 working · 1 stopped · 1 failed");
 });
