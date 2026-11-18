@@ -924,6 +924,16 @@ export const MCP_CATALOG: CatalogEntry[] = [
     category: "Data and money",
   },
   {
+    id: "exa",
+    name: "Exa",
+    domain: "exa.ai",
+    mark: "search",
+    blurb: "Search the web and read pages designed for LLMs.",
+    url: "https://mcp.exa.ai/mcp",
+    auth: "oauth",
+    category: "Data and money",
+  },
+  {
     id: "mapbox",
     name: "Mapbox",
     domain: "mapbox.com",
