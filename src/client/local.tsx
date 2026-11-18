@@ -301,7 +301,8 @@ function remember(id: string, state: MachineState | null): void {
 
 type ToolsAnswer = { tools: LocalTool[]; home: string; machine?: MachineInfo; where?: "local" | "linked" };
 /** One look at the computer: what answered, the link, and (for a linked one) whether this computer could also run things. */
-type Probe = { answer: ToolsAnswer | null; link: LinkStatus | null; here: Promise<boolean> | null };
+/** `slow`: nothing answered because the server didn't in time (twice), not because it refused or isn't there. */
+type Probe = { answer: ToolsAnswer | null; link: LinkStatus | null; here: Promise<boolean> | null; slow?: boolean };
 
 /** Why the server last refused this computer, in its words, when it said why. */
 let lastRefusal = "";
@@ -356,7 +357,7 @@ export async function probe(identity: Identity): Promise<Probe> {
           () => false,
         )
       : null;
-  return { answer, link, here };
+  return { answer, link, here, ...(!answer && timedOut ? { slow: true } : {}) };
 }
 
 /**
@@ -369,6 +370,8 @@ export async function probe(identity: Identity): Promise<Probe> {
 let shared: { id: string; at: number; p: Promise<Probe> } | null = null;
 /** After a look that found a coding tool's sign-in not known yet: when to look again, from that look (one per entry). */
 export const UNKNOWN_LOOKS_MS = [3_000, 7_000];
+/** Looks in a row the server may answer too late before the computer is said to be lost: a busy server is still there. */
+const SLOW_LOOKS = 2;
 const LOOK_MS = 20_000;
 
 function look(identity: Identity, maxAge: number): Promise<Probe> {
@@ -388,14 +391,25 @@ export function useMachine(identity: Identity): { state: MachineState; refresh: 
   const lastCheck = useRef(0);
   /** How many follow-up looks this run of unknown sign-ins has had (UNKNOWN_LOOKS_MS). */
   const followedUp = useRef(0);
+  /** Looks in a row that the server didn't answer in time (SLOW_LOOKS). */
+  const slowLooks = useRef(0);
 
   useEffect(() => {
     let live = true;
     void (async () => {
-      const { answer, link, here } = await look(identity, maxAge.current);
+      const { answer, link, here, slow } = await look(identity, maxAge.current);
       if (!live) return;
       lastCheck.current = Date.now();
       const linkInfo = link ? { connected: !!link.connected, machine: link.machine } : undefined;
+      // Slow is not gone (Arun, 2026-11-18: "Reconnecting…" over a session whose agents were still streaming): a server busy
+      // past the look's deadline keeps the computer as it was and is asked again shortly. Refused, or slow three looks running
+      // (about 45 seconds), it is lost, and the page says so.
+      if (!answer && slow && slowLooks.current < SLOW_LOOKS) {
+        slowLooks.current++;
+        setTimeout(() => live && ((maxAge.current = 0), setN((x) => x + 1)), 3_000);
+        return;
+      }
+      slowLooks.current = 0;
       if (!answer) {
         remember(identity.id, null);
         return setState({ mode: "none", tools: [], home: "", link: linkInfo });

@@ -409,8 +409,8 @@ const bandOf = (used: number) => (used >= 90 ? "red" : used >= 70 ? "orange" : "
  * figure) the inner, its mark in the middle; a 5-hour window used up says when it starts over instead. Null with no
  * reading at all, where the rail keeps its plain Usage icon.
  */
-export function useRailLimits(identity: Identity): { tool: EngineTool; outer: number; inner: number | null; back: string; label: string; accounts: number }[] {
-  const limits = useToolLimits(identity);
+export function useRailLimits(identity: Identity, off = false): { tool: EngineTool; outer: number; inner: number | null; back: string; label: string; accounts: number; /** The outer figure's window, short: "5h", "wk", or a tool's own ("Chat"). */ outerShort: string; /** Its 5-hour and weekly figures, or its own two (a month's allowances), short-named: the "+N" card's rows. */ windows: { short: string; used: number; resets: string }[] }[] {
+  const limits = useToolLimits(identity, off);
   const read = limits && limits !== "none" ? limits.tools ?? {} : {};
   // The account new sessions use (Accounts.tsx preferredAccount), followed as it changes.
   const [, again] = useState(0);
@@ -434,7 +434,20 @@ export function useRailLimits(identity: Identity): { tool: EngineTool; outer: nu
     const outerName = five ? "5-hour" : first ? first.label : "Weekly";
     const who = account ? ` (${many.find((a) => a.id === account)?.label ?? "Main"}, 1 of ${many.length} accounts)` : "";
     const label = `${ENGINE_NAMES[tool]}${who}: ${outerName} ${Math.round(outer)}% used${inner !== null ? `, weekly ${Math.round(inner)}% used` : ""}${back ? `, back in ${back}` : ""}`;
-    return [{ tool, outer, inner, back, label, accounts: Math.max(1, many.length) }];
+    // A tool's own allowance ("Cursor models", "Chat") reads by when it resets: days away is the month's.
+    const outerShort = five ? "5h" : !first || /week/i.test(first.label) ? "wk" : /\d+d\b/.test(first.resets) ? "mo" : (first.label.split(/\s+/)[0] ?? "").slice(0, 6);
+    // The 5 hours and the week, as the ring has them (Arun, 2026-11-18: "make sure it shws like the hourly and wkeely"). A tool with
+    // no 5 hours shows two of its weeks (Antigravity's Gemini and its Claude and GPT), named by what each is for; one with neither,
+    // its own first two (Copilot's Chat and Completions).
+    const all = rowsFor(tool, limits, account).filter((r) => r.used !== null && r.win !== "out");
+    const isHour = (r: Row) => r.win === "5h" || /^5h\b|5-hour/i.test(r.label);
+    const isWeek = (r: Row) => r.win === "week" || /^weekly\b|\bweek\b/i.test(r.label);
+    const weeks = all.filter(isWeek);
+    const named = (r: Row) => (r.label.split("·")[1] ?? "").trim().split(/\s+/)[0] ?? "";
+    const hour = five ? { short: "5h", used: five.used, resets: five.resets ?? "" } : (([r]) => (r ? { short: "5h", used: r.used!, resets: r.resets } : null))(all.filter(isHour));
+    const weekRows = (week ? [week, ...weeks.filter((r) => r.label !== week.label)] : weeks).map((r) => ({ short: weeks.length > 1 && named(r) ? `${named(r)} wk` : "wk", used: r.used!, resets: r.resets }));
+    const windows = (hour || weekRows.length ? [...(hour ? [hour] : []), ...weekRows] : all.map((r) => ({ short: /\d+d\b/.test(r.resets) && all.length === 1 ? "mo" : r.label, used: r.used!, resets: r.resets }))).slice(0, 2);
+    return [{ tool, outer, inner, back, label, accounts: Math.max(1, many.length), outerShort, windows }];
   });
 }
 
@@ -449,8 +462,11 @@ export function inUseAccount(tool: EngineTool, ids: string[]): string {
   return ids.includes(id) ? id : "default";
 }
 
-/** One tool's twin ring for the rail: the week outside, 5 hours inside, its mark (or when it's back) in the middle. */
-export function RailRing({ tool, outer, inner, back }: { tool: EngineTool; outer: number; inner: number | null; back: string }) {
+/**
+ * One tool's twin ring for the rail: the week outside, 5 hours inside, its mark in the middle, always: a full one says when it is
+ * back in its label and card, not in the ring (Arun, 2026-11-18: "get rid of this time thing and just keep the icon").
+ */
+export function RailRing({ tool, outer, inner }: { tool: EngineTool; outer: number; inner: number | null }) {
   const R1 = 16.5;
   const R2 = 11.75;
   const arc = (r: number, used: number, w: number, band: string) => {
@@ -476,7 +492,7 @@ export function RailRing({ tool, outer, inner, back }: { tool: EngineTool; outer
           arc(R1, outer, 3, bandOf(outer))
         )}
       </svg>
-      {back ? <b className="rr-back">{back}</b> : <EngineMark tool={tool} size={inner !== null ? 13 : 16} className="rr-mark" />}
+      <EngineMark tool={tool} size={inner !== null ? 13 : 16} className="rr-mark" />
     </span>
   );
 }

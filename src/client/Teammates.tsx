@@ -56,7 +56,7 @@ const SinceYouLeft = lazy(() => import("./TeamBrief.js").then((m) => ({ default:
 // The Agents page loads when shown (AgentsPage.tsx), not with the app.
 const AgentsPage = lazy(() => import("./AgentsPage.js"));
 import { prefillComposer } from "./prefill.js";
-import { notificationsOn } from "./prefs.js";
+import { awayFromApp, notificationsOn } from "./prefs.js";
 import { setMateTab, useMateTab } from "./mate-tab.js";
 const TeammatePage = lazy(() => import("./TeammatePage.js").then((m) => ({ default: m.TeammatePage })));
 import { BudgetFields } from "./TeammateBudget.js";
@@ -414,7 +414,7 @@ export async function refreshTeam(identity: Identity): Promise<Team | null> {
  * Friday posts a deterministic brief in the Team room and notifies"): what got done and what needs the person, a press from it.
  */
 async function briefReady(identity: Identity, since: number, sid: string): Promise<void> {
-  if (typeof Notification === "undefined" || Notification.permission !== "granted" || document.visibilityState === "visible" || !notificationsOn()) return;
+  if (typeof Notification === "undefined" || Notification.permission !== "granted" || !awayFromApp() || !notificationsOn()) return;
   const b = await readSince(identity, since);
   const says = b ? [b.done.length && `${b.done.length} done`, b.waiting.length && `${b.waiting.length} need${b.waiting.length === 1 ? "s" : ""} you`, b.failed.length && `${b.failed.length} didn't finish`].filter(Boolean).join(" · ") : "";
   try {

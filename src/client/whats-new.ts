@@ -17,14 +17,14 @@ export interface WhatsNewNotes {
 }
 
 export const WHATS_NEW: WhatsNewNotes = {
-  version: "0.3.2",
-  title: "Connect your tools once",
-  summary: "MCP servers set up once for every coding tool, cards your agents draw in the chat, and your limits always in view.",
+  version: "0.3.4",
+  title: "Pictures in the chat",
+  summary: "Coding tools show you pictures, threads ask each other, a team's tasks get a tab of their own, and picking a model takes a click.",
   items: [
-    { icon: "plug", title: "MCP servers, once for all", line: "Pick services from the directory or add your own, sign in once, and every coding agent here can use them." },
-    { icon: "grid", title: "Cards in the chat", line: "Agents show tables, charts, choices, plans and changes as cards you can press, not walls of text." },
-    { icon: "usage", title: "Every account, its limits", line: "Several accounts of a tool side by side, and a ring on the rail for how much of each window is left." },
-    { icon: "chat", title: "Crews you can follow", line: "Crew mates show their steps as they work, rooms say how they stand, and the talk reads as a group chat." },
+    { icon: "image", title: "Pictures in the chat", line: "Screenshots and images your agents make show in the chat, open large, and step through with the arrow keys." },
+    { icon: "handoff", title: "Threads ask each other", line: "An agent can ask another thread on the same project what it knows, and gets the answer back." },
+    { icon: "list", title: "A team's tasks, in reach", line: "The side panel's Tasks tab shows every task with who has it; stop any of them, and a finished list clears itself." },
+    { icon: "key", title: "A simpler model picker", line: "Search every model, star your favourites, and switch between a subscription and your own keys or local models in a click." },
   ],
 };
 

@@ -28,6 +28,7 @@ import { EmptyState, surface } from "@/components/dass";
 import { AccountCardsView } from "./gauge.js";
 import { UsageAccounts } from "./usage-accounts.js";
 import type { Identity } from "./storage.js";
+import "./limits-group.css";
 
 /**
  * The coding tools' limits as one place to plan the day from: each tool's five-hour and weekly windows as rings, the pace
@@ -61,19 +62,22 @@ function paceLine(w: Win, f: Forecast | null, now: number): string {
   return f.atReset !== null ? `At this pace, ${f.atReset}% when it resets` : `${Math.round(f.perHour)}% an hour`;
 }
 
-/** A window's name in a few words: "5-hour", "Week", "Opus week", "Month". */
+/** What a window is of, after its "·": "Opus" in "Weekly · Opus", "Gemini" in "5h · Gemini"; "" for the tool's own. */
+const groupOf = (w: Win) => {
+  const of = w.label.includes("·") ? w.label.slice(w.label.indexOf("·") + 1).trim() : "";
+  return of ? `${of[0]!.toUpperCase()}${of.slice(1)}` : "";
+};
+/** A window's name in a few words: "5-hour", "Week", "Opus week", "Gemini 5-hour", "Month". */
 function shortName(w: Win): string {
-  if (isFiveHour(w)) return "5-hour";
-  if (isWeekly(w)) {
-    const of = w.label.replace(/^Weekly\s*·?\s*/i, "").trim();
-    return of ? `${of[0]!.toUpperCase()}${of.slice(1)} week` : "Week";
-  }
+  const of = groupOf(w);
+  if (isFiveHour(w)) return of ? `${of} 5-hour` : "5-hour";
+  if (isWeekly(w)) return of ? `${of} week` : "Week";
   if (w.minutes && w.minutes >= 40_000) return "Month";
   return w.label;
 }
-/** The same, as said in a sentence: "of its 5 hours", "of its week". */
+/** The same, as said in a sentence: "of its 5 hours", "of its week", "of its Gemini 5 hours". */
 function ofName(w: Win): string {
-  if (isFiveHour(w)) return "5 hours";
+  if (isFiveHour(w)) return groupOf(w) ? `${groupOf(w)} 5 hours` : "5 hours";
   const n = shortName(w);
   return n === "Week" || n === "Month" ? n.toLowerCase() : n;
 }
@@ -212,6 +216,7 @@ export function LimitsHub({ read, identity }: { read: Read; /** For the accounts
     const t = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(t);
   }, []);
+  // A tool still being read when a reading was sent is asked again shortly by toolLimits.ts, for the rail as well as here.
   const history = useMemo(() => readHistory(), [read]); // eslint-disable-line react-hooks/exhaustive-deps
   const [costs, setCosts] = useState(readCosts);
   const wins = useMemo(() => windowsOf(limits, now), [limits, now]);
@@ -246,12 +251,13 @@ export function LimitsHub({ read, identity }: { read: Read; /** For the accounts
         <div className="lh-heat-head">
           <EngineMark tool={w.tool} size={14} />
           <b>{ENGINE_NAMES[w.tool]}</b>
+          {groupOf(w) && <span className="lh-heat-of">{groupOf(w)}</span>}
           <span className="lh-heat-stats">
             {g.hits > 0 && <span className={g.hits > 1 ? "hot" : "warm"}>{g.hits}× full</span>}
             {g.busiest && g.busiest.used > 0 && <span>Peak {g.busiest.day} {g.busiest.hour % 12 || 12} {g.busiest.hour < 12 ? "AM" : "PM"}</span>}
           </span>
         </div>
-        <div className="lh-heat-grid" role="img" aria-label={`${ENGINE_NAMES[w.tool]}'s 5-hour limit each hour this week${g.hits ? `, full ${g.hits} times` : ""}`}>
+        <div className="lh-heat-grid" role="img" aria-label={`${ENGINE_NAMES[w.tool]}'s ${groupOf(w) ? `${groupOf(w)} ` : ""}5-hour limit each hour this week${g.hits ? `, full ${g.hits} times` : ""}`}>
           <span aria-hidden />
           {[0, 6, 12, 18].map((h) => (
             <span key={h} className="lh-heat-hour" aria-hidden style={{ gridColumn: `${h + 2} / span 6` }}>

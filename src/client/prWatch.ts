@@ -5,7 +5,7 @@ import { ENGINE_TOOLS, type EngineTool, type ReviewFinding } from "../types.js";
 import { machineError } from "./GitHubConnect.js";
 import { askToNotify } from "./Attention.js";
 import { hostApi, useMachine } from "./local.js";
-import { notificationsOn } from "./prefs.js";
+import { awayFromApp, notificationsOn } from "./prefs.js";
 import type { Identity } from "./storage.js";
 
 /**
@@ -94,7 +94,7 @@ function changed(identity: Identity, prs: PullRequests) {
 
 /** Said outside the app, while its window is hidden: the rail already says it to somebody looking. */
 function notify(a: PrAlert) {
-  if (typeof Notification === "undefined" || document.visibilityState === "visible" || !notificationsOn() || Notification.permission !== "granted") return;
+  if (typeof Notification === "undefined" || !awayFromApp() || !notificationsOn() || Notification.permission !== "granted") return;
   try {
     const n = new Notification(a.title, { body: a.body, tag: `${a.pr.url}:${a.kind}` });
     n.onclick = () => {

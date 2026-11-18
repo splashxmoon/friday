@@ -298,6 +298,7 @@ export function Workbench({
   addAgent,
   open = true,
   badges,
+  taskBoard,
   onHistory,
   picking = false,
   onPick,
@@ -308,7 +309,9 @@ export function Workbench({
   onPick?: (t: Tab) => void;
   onPicker?: () => void;
   /** What the panels hold, on their buttons in the card: the diff's count, and whether an agent is working. */
-  badges?: { files: number; working: boolean };
+  badges?: { files: number; working: boolean; /** The team's tasks, done of all ("3/7"), on the Tasks tab (TaskBoard.tsx). */ tasks?: string | null };
+  /** The team's tasks with their controls, at the top of the Tasks tab (TaskBoard.tsx). */
+  taskBoard?: ReactNode;
   /** The session's history, which is a panel of its own beside these: opened from the card too. */
   onHistory?: () => void;
   /** Open. Closed, it stays drawn but hidden, so its panels are as they were when it opens again. */
@@ -853,12 +856,14 @@ export function Workbench({
                     >
                       <Icon name={TAB_ICON[t]} size={13} />
                       {TAB_LABEL[t]}
+                      {t === "overview" && badges?.tasks && <i className="bench-tab-n" title={`Team tasks: ${badges.tasks.replace("/", " of ")} done`}>{badges.tasks}</i>}
                       <Icon name="chevronDown" size={12} className="bench-here-caret" />
                     </MenuButton>
                   ) : (
                     <button type="button" role="tab" aria-selected={false} className="bench-tab-btn" title={`${TAB_LABEL[t]} · ${PANEL_SAYS[t]}`} onClick={() => onPick?.(t)} onAuxClick={(e) => e.button === 1 && closeTab(t)}>
                       <Icon name={TAB_ICON[t]} size={13} />
                       <span className="bench-tab-name">{TAB_LABEL[t]}</span>
+                      {t === "overview" && badges?.tasks && <i className="bench-tab-n" title={`Team tasks: ${badges.tasks.replace("/", " of ")} done`}>{badges.tasks}</i>}
                     </button>
                   )}
                   {tabs.length > 1 &&
@@ -1032,6 +1037,8 @@ export function Workbench({
         <TasksPanel
           state={state}
           events={events}
+          top={taskBoard}
+          hasTop={!!badges?.tasks}
           onTab={onTab}
           me={me}
           send={send}
@@ -1039,6 +1046,13 @@ export function Workbench({
           onStopPreview={() => void stopDev()}
           background={bgTasks.tasks}
           onStopBackground={(id) => void bgTasks.stop(id)}
+          // One command an agent runs, stopped on this computer while the agent carries on (runner command.stop).
+          onStopCommand={(lane, command) =>
+            void hostApi<{ stopped: number }>(identity, "/api/runner/command.stop", { method: "POST", body: JSON.stringify({ sid: state.id, lane, command }) }).then(
+              (r) => !r.stopped && dispatchEvent(new CustomEvent("friday:notice", { detail: "That command had already finished." })),
+              (e: Error) => dispatchEvent(new CustomEvent("friday:notice", { detail: e.message || "Couldn't stop that command." })),
+            )
+          }
           // A command is shown where it can be read: the Terminal, on that one.
           onOpenCommand={(id) => {
             setFocusCmd({ id, at: Date.now() });

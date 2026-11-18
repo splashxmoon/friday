@@ -186,10 +186,12 @@ function Card({ card, onOpen, solo, focused, onFocus, action }: { card: BoardCar
   return (
     // An article holding a button and the card's own buttons beside it, rather than one big role="button": a button's
     // contents are read as plain text, so its actions couldn't be reached by a screen reader, and Enter on them opened the
-    // session too. The title is the way in; its press area covers the card (::after).
+    // session too. The title is the way in; its press area covers the card (::after). Its own layer (isolate): the action row's
+    // z-10, over that press area, stays inside the card and never over the page's footer (Arun, 2026-11-18: a risk chip drawn
+    // over the Board's status bar as the cards scrolled under it).
     <article
       className={cn(
-        "board-card group/card relative flex cursor-pointer flex-col gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 pt-2.5 pb-2.5 transition-[border-color,box-shadow] duration-[var(--dass-fast)] ease-[var(--dass-ease)] hover:border-[var(--border-strong)] hover:shadow-[0_1px_2px_rgb(0_0_0/0.04)]",
+        "board-card group/card relative isolate flex cursor-pointer flex-col gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 pt-2.5 pb-2.5 transition-[border-color,box-shadow] duration-[var(--dass-fast)] ease-[var(--dass-ease)] hover:border-[var(--border-strong)] hover:shadow-[0_1px_2px_rgb(0_0_0/0.04)]",
         "has-[[data-open]:focus-visible]:border-[var(--border-focus)] has-[[data-open]:focus-visible]:shadow-[var(--dass-ring)]",
         needsYou && "border-[color-mix(in_srgb,var(--dass-needs)_45%,var(--border))] hover:border-[color-mix(in_srgb,var(--dass-needs)_70%,var(--border))]",
       )}

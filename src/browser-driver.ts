@@ -6,6 +6,7 @@
  * The page is drawn by the desktop app, which registers the driver (local/desktop-browser.ts); without it (Friday in a terminal,
  * the hosted product) the tool isn't offered.
  */
+import { testPage } from "./test-page.js";
 import { MAIN_LANE } from "./types.js";
 
 export type BrowserAction = "open" | "read" | "click" | "type" | "press" | "scroll" | "back" | "screenshot";
@@ -19,6 +20,8 @@ export interface BrowserAsk {
   key?: string;
   direction?: "up" | "down";
   new_tab?: boolean;
+  /** open: out of the person's sight, on the agent's background page: its own test pages, never the Browser panel (test-page.ts). */
+  background?: boolean;
 }
 
 export interface BrowserAnswer {
@@ -42,7 +45,7 @@ const ACTIONS: BrowserAction[] = ["open", "read", "click", "type", "press", "scr
 export const BROWSER_TOOL = {
   name: "browser",
   description:
-    "Use the web in Friday's own browser, the Browser panel beside the chat, where the people in this session watch what you do. action: open (url; new_tab for a tab of its own), read (the page's text and its links, buttons and fields, each with a number), click (ref: that number), type (ref, text; submit to press Enter after), press (key: Enter, Escape, Tab, ArrowDown…), scroll (direction up or down), back, screenshot (see the page as an image). Read after you open or click to see what is there now. Use it for any site: research, checking a page, filling a form the person asked for. It has its own cookies, not the person's: for something that needs their accounts, use their own browser (Claude in Chrome, Codex's browser) if you have it. Never type passwords, card numbers or other secrets, and ask the person before you submit, send, post, buy or delete anything.",
+    "Use the web in Friday's own browser, the Browser panel beside the chat, where the people in this session watch what you do. action: open (url; new_tab for a tab of its own), read (the page's text and its links, buttons and fields, each with a number), click (ref: that number), type (ref, text; submit to press Enter after), press (key: Enter, Escape, Tab, ArrowDown…), scroll (direction up or down), back, screenshot (see the page as an image). Read after you open or click to see what is there now. Use it for any site: research, checking a page, filling a form the person asked for. It has its own cookies, not the person's: for something that needs their accounts, use their own browser (Claude in Chrome, Codex's browser) if you have it. Never type passwords, card numbers or other secrets, and ask the person before you submit, send, post, buy or delete anything. A page only you need, such as a test or check page you wrote that prints its results, opens with background: true, out of the person's sight (a page named like check.html or test.html always does): read or screenshot it there as usual.",
   inputSchema: {
     type: "object",
     properties: {
@@ -54,6 +57,7 @@ export const BROWSER_TOOL = {
       key: { type: "string", description: "press: the key." },
       direction: { type: "string", enum: ["up", "down"], description: "scroll: which way (a screen at a time)." },
       new_tab: { type: "boolean", description: "open: in a tab of its own rather than the one you used last." },
+      background: { type: "boolean", description: "open: out of the person's sight, for a page only you need (your own test or check page and its logs). The next open without it goes back to the Browser panel." },
     },
     required: ["action"],
     additionalProperties: false,
@@ -73,6 +77,8 @@ export function browserAsk(args: Record<string, unknown>): BrowserAsk | string {
     if (!/^https?:\/\//i.test(url)) return "Only http and https pages open here.";
     ask.url = url;
     if (args.new_tab === true) ask.new_tab = true;
+    // An agent's own test page never comes up in front of the person, asked for or not (Arun, 2026-11-18).
+    if (args.background === true || testPage(url)) ask.background = true;
   }
   if (action === "click" || action === "type") {
     const ref = Number(args.ref);

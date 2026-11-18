@@ -7,7 +7,7 @@ import type { Overlap } from "../collisions.js";
 import type { SessionSummary } from "../board.js";
 import { api } from "./api.js";
 import type { Identity, RecentSession } from "./storage.js";
-import { notificationsOn, chimeOn } from "./prefs.js";
+import { awayFromApp, notificationsOn, chimeOn } from "./prefs.js";
 import { chime } from "./chime.js";
 import { setServerUnread } from "./unread.js";
 import { sayDone } from "./DoneToasts.js";
@@ -258,7 +258,7 @@ export function useAttention(identity: Identity, recents: RecentSession[], withS
  * about is noise, and the row in the sidebar has already said it.
  */
 function notify(it: Attention): void {
-  if (typeof Notification === "undefined" || document.visibilityState === "visible" || !notificationsOn()) return;
+  if (typeof Notification === "undefined" || !awayFromApp() || !notificationsOn()) return;
   if (Notification.permission !== "granted") return;
   try {
     const n = new Notification(it.title, { body: `${WHY[it.kind]} · ${it.text}`, tag: it.sid });
@@ -281,7 +281,7 @@ function notify(it: Attention): void {
 
 /** A run that finished while the window was hidden: nothing is waiting, but it is worth coming back for. */
 function notifyDone(title: string, what: string, sid: string): void {
-  if (typeof Notification === "undefined" || document.visibilityState === "visible" || !notificationsOn()) return;
+  if (typeof Notification === "undefined" || !awayFromApp() || !notificationsOn()) return;
   if (Notification.permission !== "granted") return;
   try {
     const n = new Notification(title, { body: `Finished · ${what}`, tag: `${sid}:done` });

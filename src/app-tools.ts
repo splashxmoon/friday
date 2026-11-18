@@ -107,6 +107,10 @@ export class LocalPeers implements Peers {
     return { me, near, team: await this.teamSid().catch(() => null) };
   }
 
+  async nearby(sid: string): Promise<{ s: SessionState; at: number }[]> {
+    return (await this.around(sid)).near;
+  }
+
   async list(sid: string): Promise<string> {
     const { near, team } = await this.around(sid);
     if (!near.length) return "There are no other sessions on this computer yet.";
@@ -158,7 +162,7 @@ export class LocalPeers implements Peers {
     };
   }
 
-  async send(sid: string, lane: string, req: { to: string; agent?: string; text: string }): Promise<{ ok: true; sid: string; title: string; lane: string; name: string; held: boolean; text: string } | { ok: false; error: string }> {
+  async send(sid: string, lane: string, req: { to: string; agent?: string; text: string; ask?: string }): Promise<{ ok: true; sid: string; title: string; lane: string; name: string; held: boolean; text: string } | { ok: false; error: string }> {
     const text = req.text.trim().slice(0, MAX_TEXT);
     if (!text) return { ok: false, error: "The message is empty." };
     const { me, near } = await this.around(sid);
@@ -186,7 +190,7 @@ export class LocalPeers implements Peers {
     const since = runOf(me, lane).sinceSeq;
     const thisRun = events.filter((e) => e.seq > since && (e.lane ?? MAIN_LANE) === lane && e.body.type === "peer.sent").length;
     if (thisRun >= MAX_PER_RUN) return { ok: false, error: `This run has already sent ${thisRun} messages to other sessions. Finish your own work, or ask the person.` };
-    const from: PeerNote = { fromSid: sid, fromTitle: me.title, fromLane: lane, fromName: laneName(me, lane), by: { id: me.ownerId, name: me.members[me.ownerId]?.name ?? "" }, hop };
+    const from: PeerNote = { fromSid: sid, fromTitle: me.title, fromLane: lane, fromName: laneName(me, lane), by: { id: me.ownerId, name: me.members[me.ownerId]?.name ?? "" }, hop, ...(req.ask ? { ask: req.ask } : {}) };
     await this.store.append(s.id, agent(from.fromName), { type: "instruction", text, interrupt: false, peer: from }, { lane: at });
     void this.bus.wake(s.id, at);
     // On hold as its person said: it waits in its queue, and starts nothing until they say (held.ts runnableQueue).
@@ -257,7 +261,7 @@ export const APP_TOOLS: MeshToolDef[] = [
 ];
 
 export const APP_INSTRUCTIONS =
-  " The whole app is yours to use for the person, from any session: list_sessions, read_session and search_sessions see every session on this computer (Code, the Crew room and its rooms) and what was said in them, so look there before working out again what another session already knows; message_session tells an agent in any of them something (a teammate in the Team room by its name, the agent in a Code session), start_session starts a new Code session with a task and a coding tool, manage_automation lists, makes, changes, pauses and runs automations, and manage_teammate lists the team, adds a teammate the person asked for and changes one's role. Use these when the person asks, or when the work needs them; say what you did in your reply.";
+  " The whole app is yours to use for the person, from any session: list_sessions, read_session and search_sessions see every session on this computer (Code, the Crew room and its rooms) and what was said in them, so look there before working out again what another session already knows; message_session tells an agent in any of them something (a teammate in the Team room by its name, the agent in a Code session), ask_session asks one a question and waits for its answer, start_session starts a new Code session with a task and a coding tool, manage_automation lists, makes, changes, pauses and runs automations, and manage_teammate lists the team, adds a teammate the person asked for and changes one's role. Use these when the person asks, or when the work needs them; say what you did in your reply.";
 
 /** "every weekday at 9:00" as an automation's schedule (agents.ts AgentSchedule), from the tool's {days, time, every}. Null when none was given. */
 export function scheduleOf(raw: unknown, tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"): AgentSchedule | null {

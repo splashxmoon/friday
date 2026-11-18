@@ -463,7 +463,9 @@ export function CodeReview({
             </aside>
             <section className="rv-pane" aria-label="Pull request">
               {/* The page's tabs and buttons, level with the top of the list beside it (Arun, 2026-10-19). */}
-              {ready && <div className="page-top mb-4 flex shrink-0 items-center justify-end gap-2">{controls}</div>}
+              {/* The same height and padding as the search bar beside it, so the two rows share one centre line (Arun, 2026-11-18:
+                  "tese need to be lined up properly"). */}
+              {ready && <div className="page-top mb-4 flex min-h-12 shrink-0 items-center justify-end gap-2 py-2">{controls}</div>}
               {current ? (
                 <Pane key={current.pr.url} pr={current.pr} kind={current.kind} ctx={ctx} cmd={cmd} risk={risks.get(current.pr.url)} />
               ) : (

@@ -5,7 +5,7 @@ import path from "node:path";
 import { childEnv, copilotSignedIn, findBin, launcher } from "./adapters.js";
 import { codexRoots } from "./imports.js";
 import { ghBin } from "./workspace.js";
-import { readOtherTools, type ToolAllowance } from "./tool-limits.js";
+import { readOtherTools, stillReading, type ToolAllowance } from "./tool-limits.js";
 import type { EngineTool } from "../types.js";
 import { ACCOUNT_TOOLS, accountDir, accountEnv, DEFAULT_ACCOUNT, isOut, listAccounts, toolHome, type AccountTool } from "./accounts.js";
 
@@ -114,6 +114,8 @@ export interface Limits {
   claudeKept?: boolean;
   /** The other tools signed in on this machine, each read the way it asks itself (see tool-limits.ts). */
   tools?: Partial<Record<EngineTool, ToolAllowance>>;
+  /** Tools whose reading was still coming when this was sent (Antigravity starts to answer): asked again shortly. */
+  toolsReading?: EngineTool[];
   /** Each account of a tool that has more than one on this computer (accounts.ts), with its own windows. */
   accounts?: Partial<Record<AccountTool, AccountUsage[]>>;
 }
@@ -577,9 +579,19 @@ function codexWindow(kind: string, w: Record<string, unknown> | null | undefined
 /** A rate-limit snapshot (Codex's own `codex` bucket), as windows and the plan it is on. */
 export function codexFromSnapshot(snap: Record<string, any> | null | undefined, at = Date.now(), eventAt = at): { windows: LimitWindow[]; plan: string | null } | null {
   if (!snap) return null;
-  const windows = [codexWindow("primary", snap.primary, at, eventAt), codexWindow("secondary", snap.secondary, at, eventAt)].filter((w): w is LimitWindow => !!w);
-  if (!windows.length) return null;
   const plan = (snap.planType ?? snap.plan_type) as unknown;
+  const windows = [codexWindow("primary", snap.primary, at, eventAt), codexWindow("secondary", snap.secondary, at, eventAt)].filter((w): w is LimitWindow => !!w);
+  // A window that doesn't say its length: the five hours first and the week second, a month on Free and Go (as T3 Code reads it).
+  for (const w of windows) {
+    if (w.windowMinutes !== null) continue;
+    w.windowMinutes = w.kind === "secondary" ? 10_080 : /^(free|go)$/i.test(String(plan ?? "")) ? 43_200 : 300;
+    w.label = windowName(w.windowMinutes);
+  }
+  // A plan with a monthly credit limit instead (Business and Enterprise seats).
+  const ind = snap.individualLimit ?? snap.individual_limit;
+  const left = num(ind?.remainingPercent) ?? num(ind?.remaining_percent);
+  if (left !== null) windows.push({ kind: "individual", windowMinutes: 43_200, label: "Monthly", usedPercent: Math.max(0, Math.min(100, 100 - left)), resetsAt: num(ind.resetsAt) ?? num(ind.reset_at), at });
+  if (!windows.length) return null;
   return { windows, plan: typeof plan === "string" && plan ? plan[0]!.toUpperCase() + plan.slice(1) : null };
 }
 
@@ -597,7 +609,7 @@ function askCodex(home?: string): Promise<{ windows: LimitWindow[]; plan: string
     if (!bin) return null;
     const l = await launcher(bin);
     return new Promise<{ windows: LimitWindow[]; plan: string | null } | null>((resolve) => {
-      const child = spawn(l.command, [...l.prefix, "app-server"], { env: { ...childEnv(), ...(l.env ?? {}), ...(home ? { CODEX_HOME: home } : {}) }, windowsHide: true, stdio: ["pipe", "pipe", "ignore"] });
+      const child = spawn(l.command, [...l.prefix, "-c", "approval_policy=never", "-s", "read-only", "-a", "never", "app-server"], { env: { ...childEnv(), ...(l.env ?? {}), ...(home ? { CODEX_HOME: home } : {}) }, windowsHide: true, stdio: ["pipe", "pipe", "ignore"] });
       let buf = "";
       let settled = false;
       const done = (v: { windows: LimitWindow[]; plan: string | null } | null) => {
@@ -611,7 +623,8 @@ function askCodex(home?: string): Promise<{ windows: LimitWindow[]; plan: string
         }
         resolve(v);
       };
-      const timer = setTimeout(() => done(null), 10_000);
+      // Its first start can take a while (it loads its plugins and signs in); Orca and T3 Code give it twenty to thirty seconds.
+      const timer = setTimeout(() => done(null), 25_000);
       const send = (m: unknown) => child.stdin.write(`${JSON.stringify(m)}\n`);
       child.on("error", () => done(null));
       child.on("exit", () => done(null));
@@ -706,9 +719,36 @@ async function newestRollouts(root: string, n: number): Promise<{ file: string; 
   return out.sort((a, b) => b.at - a.at).slice(0, n);
 }
 
-/** Codex's windows: asked of Codex, else its newest log. */
+/** The usage answer ChatGPT's server gives Codex (`wham/usage`), in the same shape as its app server's. */
+export function codexFromWham(j: Record<string, any> | null, at = Date.now()): { windows: LimitWindow[]; plan: string | null } | null {
+  const rl = j?.rate_limit;
+  const win = (w: any) => (w ? { used_percent: w.used_percent, window_minutes: num(w.limit_window_seconds) === null ? null : Math.round(num(w.limit_window_seconds)! / 60), resets_at: num(w.reset_at) ?? (num(w.reset_after_seconds) === null ? null : Math.round(at / 1000 + num(w.reset_after_seconds)!)) } : null);
+  return codexFromSnapshot({ primary: win(rl?.primary_window), secondary: win(rl?.secondary_window), plan_type: j?.plan_type, individual_limit: j?.spend_control?.individual_limit }, at);
+}
+
+/**
+ * Asked of ChatGPT's server directly, with the sign-in Codex keeps in its auth.json, as Orca does when the app server can't answer.
+ * Read as it is, never refreshed: a lapsed one is Codex's to renew, and then this says nothing and its log is read.
+ */
+async function askCodexServer(): Promise<{ windows: LimitWindow[]; plan: string | null } | null> {
+  try {
+    const auth = JSON.parse(await readFile(path.join(process.env.CODEX_HOME || path.join(homedir(), ".codex"), "auth.json"), "utf8")) as { tokens?: { access_token?: unknown; account_id?: unknown } };
+    const token = auth.tokens?.access_token;
+    if (typeof token !== "string" || !usable(token)) return null;
+    const r = await fetch("https://chatgpt.com/backend-api/wham/usage", {
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/json", "User-Agent": "codex-cli", "OpenAI-Beta": "codex-1", originator: "Codex Desktop", ...(typeof auth.tokens?.account_id === "string" ? { "ChatGPT-Account-Id": auth.tokens.account_id } : {}) },
+      redirect: "manual",
+      signal: AbortSignal.timeout(8000),
+    });
+    return r.ok ? codexFromWham((await r.json()) as Record<string, any>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Codex's windows: asked of Codex, else of its server with its own sign-in, else its newest log. */
 async function readCodex(): Promise<{ windows: LimitWindow[]; plan: string | null; from: "account" | "log" } | null> {
-  const asked = await askCodex();
+  const asked = (await askCodex()) ?? (await askCodexServer());
   if (asked) return { ...asked, from: "account" };
   const logged = await readCodexLog();
   return logged ? { windows: logged.windows, plan: logged.plan, from: "log" } : null;
@@ -765,14 +805,25 @@ async function cursorAgentToken(): Promise<string | null> {
       const out = await new Promise<string>((resolve, reject) =>
         execFile("security", ["find-generic-password", "-s", "cursor-access-token", "-a", "cursor-user", "-w"], { timeout: 5000 }, (e, stdout) => (e ? reject(e) : resolve(stdout))),
       );
-      return out.trim() || null;
+      if (out.trim()) return out.trim();
     }
-    const base = process.platform === "win32" ? process.env.APPDATA || path.join(homedir(), "AppData", "Roaming") : process.env.XDG_CONFIG_HOME || path.join(homedir(), ".config");
-    const j = JSON.parse(await readFile(path.join(base, process.platform === "win32" ? "Cursor" : "cursor", "auth.json"), "utf8")) as { accessToken?: unknown };
-    return typeof j.accessToken === "string" ? j.accessToken : null;
   } catch {
-    return null;
+    /* its files, then */
   }
+  // Its files: ~/.cursor on a Mac and Linux, the config folder on Linux and Windows (as Orca finds them).
+  const files =
+    process.platform === "win32"
+      ? [path.join(process.env.APPDATA || path.join(homedir(), "AppData", "Roaming"), "Cursor", "auth.json")]
+      : [path.join(homedir(), ".cursor", "auth.json"), path.join(process.env.XDG_CONFIG_HOME || path.join(homedir(), ".config"), "cursor", "auth.json")];
+  for (const f of files) {
+    try {
+      const j = JSON.parse(await readFile(f, "utf8")) as { accessToken?: unknown };
+      if (typeof j.accessToken === "string" && j.accessToken) return j.accessToken;
+    } catch {
+      /* the next */
+    }
+  }
+  return null;
 }
 
 const cents = (v: unknown) => (typeof v === "string" ? Number(v) : typeof v === "number" ? v : NaN);
@@ -863,7 +914,8 @@ let copilotAsked: { at: number; read: Promise<CopilotUsage | null> } | null = nu
 function readCopilot(): Promise<CopilotUsage | null> {
   if (copilotAsked && Date.now() - copilotAsked.at < 5 * 60_000) return copilotAsked.read;
   const read = (async (): Promise<CopilotUsage | null> => {
-    if (!(await findBin("copilot")) || (await copilotSignedIn()) !== true) return null;
+    // Signed out for certain only: Copilot CLI 1.0.100 and later keep no sign-in in its config, using the GitHub CLI's (gh).
+    if (!(await findBin("copilot")) || (await copilotSignedIn()) === false) return null;
     const gh = await ghBin();
     if (!gh) return { plan: null, windows: [], why: "Install the GitHub CLI (gh) and sign in to see this here." };
     const out = await new Promise<string | null>((resolve) =>
@@ -952,7 +1004,7 @@ export async function readLimits(opts: { askClaude?: boolean } = {}): Promise<Li
     askClaude ? within("claude", () => askClaudeUsage(), SOURCE_BUDGET_MS, undefined) : undefined,
     within("cursor", readCursor, SOURCE_BUDGET_MS, null),
     within("copilot", readCopilot, SOURCE_BUDGET_MS, null),
-    within("tools", () => readOtherTools(), SOURCE_BUDGET_MS, {} as Awaited<ReturnType<typeof readOtherTools>>),
+    within(askClaude ? "tools" : "tools-kept", () => readOtherTools({ start: askClaude }), SOURCE_BUDGET_MS, {} as Awaited<ReturnType<typeof readOtherTools>>),
     within(askClaude ? "accounts" : "accounts-kept", () => readAccounts(Date.now(), { askClaude }), SOURCE_BUDGET_MS, {} as Awaited<ReturnType<typeof readAccounts>>),
   ]);
   const first = codexRead?.windows[0];
@@ -972,6 +1024,7 @@ export async function readLimits(opts: { askClaude?: boolean } = {}): Promise<Li
     claudeFrom: claudeWindows.length ? (asked?.available ? "account" : "runs") : null,
     ...(why ? { claudeWhy: why } : {}),
     tools,
+    ...(askClaude && stillReading().length ? { toolsReading: stillReading() } : {}),
     ...(Object.keys(accounts).length ? { accounts } : {}),
   };
 }

@@ -1,3 +1,4 @@
+import { picturesIn, withoutPictures, type Picture } from "./tool-pictures.js";
 import { noteClaudeEvent } from "./limits.js";
 import { acpSignInState, wasProven } from "./acp-signin.js";
 import { access, mkdir, readdir, readFile, realpath, unlink, writeFile } from "node:fs/promises";
@@ -30,7 +31,8 @@ export type AdapterOut =
   | { kind: "session"; id: string }
   | { kind: "delta"; text: string; channel: "text" | "reasoning" }
   | { kind: "message"; text: string; toolCalls: ToolCall[]; reasoning?: string }
-  | { kind: "result"; callId: string; name: string; output: string; isError: boolean }
+  /** `pictures`: the pictures its answer carried (tool-pictures.ts), kept as files by the runner, never sent as they are. */
+  | { kind: "result"; callId: string; name: string; output: string; isError: boolean; pictures?: Picture[] }
   /** A non-fatal problem worth reporting if the process then fails. */
   | { kind: "note"; text: string }
   /**
@@ -375,7 +377,7 @@ const json = (line: string): Record<string, any> | null => {
   }
 };
 const call = (id: string, name: string, args: Record<string, unknown>): ToolCall => ({ id, name, arguments: cut(JSON.stringify(args), MAX_ARGS) });
-const result = (callId: string, name: string, output: string, isError: boolean): AdapterOut => ({ kind: "result", callId, name, output: cut(output, MAX_OUTPUT), isError });
+const result = (callId: string, name: string, output: string, isError: boolean, pictures: Picture[] = []): AdapterOut => ({ kind: "result", callId, name, output: cut(output, MAX_OUTPUT), isError, ...(pictures.length ? { pictures } : {}) });
 
 /** A subagent's status in each tool's words, as the session says it. */
 const TASK_STATUS: Record<string, AgentTaskStatus> = {
@@ -589,6 +591,9 @@ export const claude: Adapter = {
         : []),
     // From a file when it is too long for the command line (the runner decides): Windows caps a whole one at 32,767 characters,
     // and an imported conversation alone came close to that. Others stay inline, which every version takes.
+    // Auto asks nobody, so its question tool isn't offered: asked anyway, it was refused (DECIDE_YOURSELF) and the turn spent a
+    // step on it (benchmarks, 2026-11-17). Plan and Manual keep it, for a person who is there.
+    ...(t.mode === "full" ? ["--disallowedTools", "AskUserQuestion"] : []),
     // Friday's MCP server beside the person's own, its tools allowed in every mode: they only talk to the other agents here.
     ...(t.friday ? ["--mcp-config", claudeConfig(t.friday), "--allowedTools", "mcp__friday"] : []),
     // The servers set up in Friday's Connections, from a file only this person can read (it holds their keys).
@@ -701,7 +706,7 @@ export const claude: Adapter = {
             .map((b) => {
               const id = str(b.tool_use_id);
               const out = blockText(b.content);
-              return result(id, names.get(id) ?? "tool", out, !!b.is_error || testFailedInChain(commands.get(id), out));
+              return result(id, names.get(id) ?? "tool", out, !!b.is_error || testFailedInChain(commands.get(id), out), picturesIn(b.content));
             });
         }
         case "rate_limit_event":
@@ -968,7 +973,8 @@ function codexResult(it: Record<string, any>, name: string): AdapterOut {
       return result(id, name, changes.map((c) => `${str(c.kind) || "update"} ${str(c.path)}`).join("\n") || "No files changed.", failed);
     }
     case "mcp_tool_call":
-      return result(id, name, JSON.stringify(it.error ?? it.result ?? {}), failed || !!it.error);
+      // A picture in its answer is shown with the step, not written out as base64 in its words.
+      return result(id, name, JSON.stringify(withoutPictures(it.error ?? it.result ?? {})), failed || !!it.error, picturesIn(it.result));
     default:
       return result(id, name, failed ? "Failed." : "Done.", failed);
   }
@@ -2066,7 +2072,7 @@ function acp(p: AcpProfile): Adapter {
               const said = acpOutput(tc);
               const shell = card.name === "shell";
               const refused = (Array.isArray(tc.rawOutput) ? tc.rawOutput : [tc.rawOutput]).some((x: any) => x?.success === false);
-              out.push(result(id, card.name, said, tc.status === "failed" || refused || (shell && (testFailedInChain(str(card.args.command), said) || (exitOf(tc, said) ?? 0) !== 0))));
+              out.push(result(id, card.name, said, tc.status === "failed" || refused || (shell && (testFailedInChain(str(card.args.command), said) || (exitOf(tc, said) ?? 0) !== 0)), picturesIn(tc.content)));
             }
             return out;
           }

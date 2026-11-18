@@ -33,13 +33,12 @@ function Bar({ name, row }: { name: string; row: AccountView["five"] }) {
 }
 
 /** "Resets in 2h 05m" → "2h", for the ring's middle when a used-up 5 hours says when it's back. */
-const backIn = (v: AccountView) => (v.five && (v.five.used ?? 0) >= 100 ? (/in (\d+[dhm])/.exec(v.five.resets)?.[1] ?? "") : "");
 
 export function AccountRow({ tool, v, inUse, page = false, end }: { tool: EngineTool; v: AccountView; inUse: boolean; page?: boolean; end?: ReactNode }) {
   const five = v.out ? 100 : (v.five?.used ?? null);
   return (
     <li className={`acg-acct${page ? " page" : ""}`} aria-label={`${v.label} account`}>
-      {page && (five !== null || v.week?.used != null ? <RailRing tool={tool} outer={five ?? v.week!.used!} inner={five !== null ? (v.week?.used ?? null) : null} back={backIn(v)} /> : <span className="acg-ring-none" aria-hidden="true" />)}
+      {page && (five !== null || v.week?.used != null ? <RailRing tool={tool} outer={five ?? v.week!.used!} inner={five !== null ? (v.week?.used ?? null) : null} /> : <span className="acg-ring-none" aria-hidden="true" />)}
       <div className="acg-who">
         <div className="acg-top">
           {/* The one new sessions use: a green dot before its name (Arun, 2026-11-17: "instead of the in use tag … a green dot"). */}

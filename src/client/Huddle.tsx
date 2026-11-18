@@ -148,7 +148,8 @@ export function HuddleCard({ h, state, delivered, events }: { h: HuddleInfo; sta
   const when = first.ts && last.ts && clock.format(first.ts) !== clock.format(last.ts) ? `${clock.format(first.ts)} to ${clock.format(last.ts)}` : clock.format(last.ts);
   const live = pill.tone !== "done" && pill.tone !== "read" && pill.tone !== "quiet";
   const [, redraw] = useState(0);
-  const isOpen = opened.get(h.key) ?? live;
+  // Closed until opened, live or not (Arun, 2026-11-18: "have this be closed by default"): its line and pill say where it stands.
+  const isOpen = opened.get(h.key) ?? false;
   const toggle = () => {
     opened.set(h.key, !isOpen);
     redraw((n) => n + 1);

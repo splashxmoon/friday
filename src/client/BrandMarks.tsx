@@ -14,9 +14,9 @@
  * 2026-10-29: "can we bring back some for the coding tool icons like their actual icons like claude should be that orange").
  */
 
-import { BotIcon, FactoryIcon, InfinityIcon } from "lucide-react";
+import { BotIcon, FactoryIcon } from "lucide-react";
 import { ENGINE_NAMES, type EngineTool } from "../types.js";
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 
 interface MarkProps {
   size?: number;
@@ -203,12 +203,28 @@ export function EngineMark({ tool, size = 15, className }: { tool: EngineTool | 
   if (tool === "copilot") return <CopilotMark size={size} className={className} />;
   // Factory has no mark in an open set: a factory, beside its name, says which tool it is.
   if (tool === "droid") return <FactoryIcon size={size} className={className} aria-label={ENGINE_NAMES.droid} style={{ flex: "none" }} />;
-  // Muse Code has no mark in an open set either: an infinity sign, Meta's own shape, in the text colour.
-  if (tool === "muse") return <InfinityIcon size={size} className={className} aria-label={ENGINE_NAMES.muse} style={{ flex: "none" }} />;
+  // Muse Code's own mark, the blue scribbled "M" (Arun, 2026-11-18: "use this for the muse code icon as well").
+  if (tool === "muse") return <MuseMark size={size} className={className} />;
   if (tool === "antigravity") return <AntigravityMark size={size} className={className} />;
   if (tool === "acp") return <BotIcon size={size} className={className} aria-label={ENGINE_NAMES.acp} style={{ flex: "none" }} />;
   if (tool && TOOL_PATHS[tool]) return <PathMark d={TOOL_PATHS[tool]!} label={ENGINE_NAMES[tool]} size={size} className={className} />;
   return <FridayMark size={size} className={className} />;
+}
+
+/** Muse Code's mark: a scribbled "M" in a blue that brightens along it, as its own icon draws it. */
+function MuseMark({ size = 15, className }: MarkProps) {
+  const id = `muse-${useId().replace(/:/g, "")}`;
+  return (
+    <svg className={className} width={size} height={size} viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" role="img" aria-label={ENGINE_NAMES.muse} style={{ flex: "none" }}>
+      <defs>
+        <linearGradient id={id} x1="2" y1="18" x2="22" y2="6" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#1d4ed8" />
+          <stop offset="1" stopColor="#3b9bff" />
+        </linearGradient>
+      </defs>
+      <path d="M3.2 18.4C4.3 13.6 5.6 7.4 7 6.2c1.3-1.1 1.2 3.9.6 7.4-.5 3 .4 3.7 1.6 1C10.6 11.4 12 6.8 13.4 6.6c1.5-.2.4 5.6-.2 8.4-.6 2.9.6 3.3 1.8.6 1.3-2.9 2.7-7.2 4-7.1 1.2.1.6 4.5.4 6.6-.2 2.2.7 3.2 1.8 3.4" fill="none" stroke={`url(#${id})`} strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
 }
 
 /** Google's "G" in its own colors: the sign-in button people already know. */

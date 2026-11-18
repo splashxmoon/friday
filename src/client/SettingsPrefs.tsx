@@ -544,7 +544,7 @@ export function NotificationsTab({ identity }: { identity: Identity }) {
             on && supported && perm === "denied"
               ? "On, but notifications are blocked for Friday on this device, so no banner can show: allow them (Permission, below)."
               : on
-                ? "A banner appears when a session needs you."
+                ? "A banner when a session needs you or an agent finishes, while you're in another app."
                 : "Nothing leaves the app. The sidebar still marks sessions that need you."
           }
         >
@@ -613,6 +613,24 @@ export function NotificationsTab({ identity }: { identity: Identity }) {
               }
             >
               Allow
+            </Button>
+          )}
+          {/* One press shows a banner now, so you can see Friday's notifications reach you (Arun, 2026-11-18). */}
+          {supported && perm === "granted" && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                try {
+                  const n = new Notification("Friday", { body: "Notifications are on. You'll get one when an agent needs you or finishes while you're in another app.", tag: "friday-test" });
+                  n.onclick = () => (window.focus(), n.close());
+                } catch {
+                  setPerm("denied");
+                }
+              }}
+            >
+              Send a test
             </Button>
           )}
           {supported && perm !== "default" && (

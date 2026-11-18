@@ -1,4 +1,4 @@
-import { useContext, useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { ENGINE_NAMES, ENGINE_TOOLS, type EngineTool } from "../types.js";
 import { NEW_THREAD, NEW_THREAD_ON_OPEN, ThreadsCtx, type ThreadsData } from "./threads-data.js";
@@ -99,6 +99,10 @@ export function ThreadTabs({ sid, title, project, identity, tool, running, onRen
     addEventListener(NEW_THREAD, on);
     return () => removeEventListener(NEW_THREAD, on);
   }, []);
+  const [listing, setListing] = useState(false);
+  const allBtn = useRef<HTMLButtonElement>(null);
+  const strip = useRef<HTMLDivElement>(null);
+  const over = useOverflow(strip, sid);
   if (!d) return null;
   const here: RecentSession = d.recents.find((r) => r.sid === sid) ?? { sid, title, invite: "", role: "owner", openedAt: now };
   // The project's sessions you have: the one open here always, the others unless closed from the strip, settled or snoozed.
@@ -119,11 +123,35 @@ export function ThreadTabs({ sid, title, project, identity, tool, running, onRen
   // Another of the project's threads at work in the folder itself, not a worktree of its own: a new one goes in a worktree.
   const inFolder = [...(running && !project.worktree ? [here] : []), ...threads.filter((r) => r.sid !== sid && !r.repos?.[0]?.worktree && d.attention.working.has(r.sid))];
   const name = folderName({ name: project.name, path: project.path });
+  const labelFor = (r: RecentSession) => (r.sid === sid ? title : labelOf(r));
+  // A thread scrolled out of sight that waits on you: the All threads button says so, since its tab can't.
+  const hiddenNeeds = over.hidden.some((x) => standing(d, x).state === "needs");
   return (
-    <div className="thr-tabs" role="tablist" aria-label={`Threads in ${name}`}>
-      {threads.map((r) => (
-        <ThreadTab key={r.sid} d={d} r={r} label={r.sid === sid ? title : labelOf(r)} active={r.sid === sid} unread={unread.has(r.sid)} closable={threads.length > 1} onOpen={() => (r.sid === sid ? onRename?.() : openSession(r.sid, r.invite))} onClose={() => close(r)} renamable={r.sid === sid && !!onRename} />
-      ))}
+    <div className="thr-tabs">
+      <div ref={strip} className="thr-strip" role="tablist" aria-label={`Threads in ${name}`} data-l={over.left || undefined} data-r={over.right || undefined}>
+        {threads.map((r) => (
+          <ThreadTab key={r.sid} d={d} r={r} label={labelFor(r)} active={r.sid === sid} unread={unread.has(r.sid)} closable={threads.length > 1} onOpen={() => (r.sid === sid ? onRename?.() : openSession(r.sid, r.invite))} onClose={() => close(r)} renamable={r.sid === sid && !!onRename} quiet={listing} />
+        ))}
+      </div>
+      {/* More threads than the strip can show: every one of them, in a list to pick from (Arun, 2026-11-18: "we need to add design
+          support for large amount of threads too"). */}
+      {(over.any || listing) && (
+        <button
+          ref={allBtn}
+          type="button"
+          className={`thr-all${listing ? " on" : ""}`}
+          aria-label={`All ${threads.length} threads in ${name}${hiddenNeeds ? ", one out of sight needs you" : ""}`}
+          title={`All ${threads.length} threads in ${name}`}
+          aria-haspopup="dialog"
+          aria-expanded={listing}
+          onClick={() => setListing((v) => !v)}
+        >
+          <span className="thr-all-n">{threads.length}</span>
+          <Icon name="chevronDown" size={12} />
+          {hiddenNeeds && <span className="thr-all-dot" aria-hidden="true" />}
+        </button>
+      )}
+      {listing && <AllThreads trigger={allBtn.current} d={d} threads={threads} sid={sid} labelFor={labelFor} unread={unread} name={name} onPick={(r) => (setListing(false), r.sid !== sid && openSession(r.sid, r.invite))} onClose={() => setListing(false)} />}
       <button ref={plus} type="button" className={`thr-new${adding ? " on" : ""}`} aria-label={`New thread in ${name}`} title={`New thread in ${name} (${/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘N" : "Ctrl+N"})`} aria-haspopup="dialog" aria-expanded={adding} onClick={() => setAdding((v) => !v)}>
         <Icon name="plus" size={14} />
       </button>
@@ -132,22 +160,161 @@ export function ThreadTabs({ sid, title, project, identity, tool, running, onRen
   );
 }
 
-function ThreadTab({ d, r, label, active, unread, closable, renamable, onOpen, onClose }: { d: ThreadsData; r: RecentSession; label: string; active: boolean; unread: boolean; closable: boolean; renamable: boolean; onOpen: () => void; onClose: () => void }) {
+/** How far the strip runs past its edges: whether it does at all, on which side, and which tabs are out of sight (by sid). */
+type Overflow = { any: boolean; left: boolean; right: boolean; hidden: string[] };
+const FITS: Overflow = { any: false, left: false, right: false, hidden: [] };
+/** A tab counts as out of sight once less than this much of it shows, under the edge's fade. */
+const PEEK = 24;
+
+/**
+ * The strip of a project with many threads (Arun, 2026-11-18: "we need to add design support for large amount of threads too"): its
+ * tabs keep a readable width and scroll sideways, a fade on the side that has more, a mouse's wheel scrolling it too, and the open
+ * tab always in sight. Measured after every render (cheap: a few rectangles), and on scroll and resize.
+ */
+function useOverflow(ref: RefObject<HTMLDivElement | null>, sid: string): Overflow {
+  const [over, setOver] = useState<Overflow>(FITS);
+  const measure = useRef(() => {});
+  measure.current = () => {
+    const el = ref.current;
+    if (!el) return;
+    const any = el.scrollWidth > el.clientWidth + 1;
+    const box = el.getBoundingClientRect();
+    const hidden = any
+      ? [...el.querySelectorAll<HTMLElement>(".thr-tab")].filter((t) => ((r) => r.right < box.left + PEEK || r.left > box.right - PEEK)(t.getBoundingClientRect())).map((t) => t.dataset.sid ?? "")
+      : [];
+    const next = { any, left: any && el.scrollLeft > 1, right: any && el.scrollLeft + el.clientWidth < el.scrollWidth - 1, hidden };
+    setOver((o) => (o.any === next.any && o.left === next.left && o.right === next.right && o.hidden.join() === next.hidden.join() ? o : next));
+  };
+  useLayoutEffect(() => measure.current());
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const on = () => measure.current();
+    const ro = new ResizeObserver(on);
+    ro.observe(el);
+    el.addEventListener("scroll", on, { passive: true });
+    // A mouse's wheel goes up and down: over the strip it scrolls along it. A trackpad's sideways swipe is left as it is.
+    const wheel = (e: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+      e.preventDefault();
+      el.scrollLeft += e.deltaY;
+    };
+    el.addEventListener("wheel", wheel, { passive: false });
+    return () => (ro.disconnect(), el.removeEventListener("scroll", on), el.removeEventListener("wheel", wheel));
+  }, [ref]);
+  // The open tab in sight, clear of the fades: on opening a thread, and when the strip's width changes under it.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const tab = el?.querySelector<HTMLElement>(".thr-tab.on");
+    if (!el || !tab || el.scrollWidth <= el.clientWidth) return;
+    const box = el.getBoundingClientRect();
+    const r = tab.getBoundingClientRect();
+    if (r.left < box.left + PEEK) el.scrollLeft -= box.left + PEEK - r.left;
+    else if (r.right > box.right - PEEK) el.scrollLeft += r.right - (box.right - PEEK);
+  }, [ref, sid, over.any]);
+  return over;
+}
+
+/**
+ * Every thread of the project, from the All threads button: its ring, its name, and where it stands, in the strip's order. A box
+ * to narrow them by name once there are more than a glance takes in; the arrow keys and Enter pick one.
+ */
+function AllThreads({ trigger, d, threads, sid, labelFor, unread, name, onPick, onClose }: { trigger: HTMLElement | null; d: ThreadsData; threads: RecentSession[]; sid: string; labelFor: (r: RecentSession) => string; unread: ReadonlySet<string>; name: string; onPick: (r: RecentSession) => void; onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  useDismiss(ref, onClose, trigger);
+  const [q, setQ] = useState("");
+  const filtering = threads.length > 8;
+  const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = threads.filter((r) => words.every((w) => labelFor(r).toLowerCase().includes(w)));
+  const rows = () => [...(list.current?.querySelectorAll<HTMLElement>(".thr-row") ?? [])];
+  // Opened on the one you are in, in sight; without the box, the keyboard starts on it.
+  useLayoutEffect(() => {
+    const on = list.current?.querySelector<HTMLElement>(".thr-row.on");
+    on?.scrollIntoView({ block: "nearest" });
+    if (!filtering) (on ?? rows()[0])?.focus();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const move = (e: ReactKeyboardEvent, from: number) => {
+    const all = rows();
+    const to = e.key === "ArrowDown" ? from + 1 : e.key === "ArrowUp" ? from - 1 : e.key === "Home" ? 0 : e.key === "End" ? all.length - 1 : null;
+    if (to === null) return;
+    e.preventDefault();
+    all[Math.max(0, Math.min(all.length - 1, to))]?.focus();
+  };
+  const place = placeCard(trigger?.getBoundingClientRect(), 320, { want: 440, min: 180, prefer: "below", end: true });
+  return createPortal(
+    <div ref={ref} className="thr-list surface" role="dialog" aria-label={`All threads in ${name}`} style={{ ...place, position: "fixed" }}>
+      <div className="thr-list-head">
+        <span className="thr-pop-title">Threads</span>
+        <span className="thr-list-count">{threads.length}</span>
+      </div>
+      {filtering && (
+        <label className="thr-find">
+          <Icon name="search" size={13} />
+          <input
+            autoFocus
+            value={q}
+            placeholder="Find a thread"
+            aria-label="Find a thread by name"
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowDown") (e.preventDefault(), rows()[0]?.focus());
+              if (e.key === "Enter" && shown[0]) (e.preventDefault(), onPick(shown[0]));
+            }}
+          />
+        </label>
+      )}
+      <div ref={list} className="thr-rows" role="listbox" aria-label="Threads">
+        {shown.map((r, i) => {
+          const { state, needs, working } = standing(d, r.sid);
+          const since = d.attention.since.get(r.sid) ?? r.openedAt;
+          const active = r.sid === sid;
+          return (
+            <button
+              key={r.sid}
+              type="button"
+              role="option"
+              aria-selected={active}
+              className={`thr-row${active ? " on" : ""}${unread.has(r.sid) && !active ? " new" : ""}`}
+              onClick={() => onPick(r)}
+              onKeyDown={(e) => (e.key === "ArrowUp" && i === 0 && filtering ? (e.preventDefault(), ref.current?.querySelector("input")?.focus()) : move(e, i))}
+            >
+              {/* A slot of its own, ring or not, so every name starts in one place. */}
+              <span className="thr-row-ring">
+                <Ring d={d} sid={r.sid} active={active} />
+              </span>
+              <span className="thr-row-name">{labelFor(r)}</span>
+              <span className={`thr-row-meta${state === "needs" ? " needs" : ""}`}>{state === "needs" ? (needs?.kind === "stopped" ? "Stopped" : "Needs you") : working ? "Working" : relTime(since)}</span>
+            </button>
+          );
+        })}
+        {!shown.length && <p className="thr-rows-none">No thread called “{q.trim()}”</p>}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+function ThreadTab({ d, r, label, active, unread, closable, renamable, quiet, onOpen, onClose }: { d: ThreadsData; r: RecentSession; label: string; active: boolean; unread: boolean; closable: boolean; renamable: boolean; /** The All threads list is open: no card from a tab under it. */ quiet: boolean; onOpen: () => void; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const [card, setCard] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const hover = (on: boolean) => {
     clearTimeout(timer.current);
-    // The open one's card would say what the page already shows.
-    if (active) return;
+    // The open one's card would say what the page already shows; with the All threads list open, a card would lie under it.
+    if (active || (on && quiet)) return;
     timer.current = setTimeout(() => setCard(on), on ? 450 : 160);
   };
   useEffect(() => () => clearTimeout(timer.current), []);
+  useEffect(() => {
+    if (quiet) (clearTimeout(timer.current), setCard(false));
+  }, [quiet]);
   return (
     <div
       ref={ref}
       role="tab"
       aria-selected={active}
+      data-sid={r.sid}
       tabIndex={0}
       className={`thr-tab${active ? " on" : ""}${unread && !active ? " new" : ""}`}
       title={active && renamable ? `${label}: rename` : undefined}

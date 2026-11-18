@@ -1,6 +1,6 @@
-import { useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useState } from "react";
 import { ThreadsCtx } from "./threads-data.js";
-import { ArrowRightIcon, ArrowUpIcon, UsersIcon } from "lucide-react";
+import { ArrowRightIcon, UsersIcon } from "lucide-react";
 import { MenuButton } from "./ui.js";
 import { lanesOf } from "../agent-state.js";
 import { cn } from "@/lib/utils";
@@ -95,11 +95,6 @@ export function TeamCard({ info, state, events, send, notify, sid }: { info: Tea
   const now = useNow(live ? 1000 : 60_000);
   const start = info.tasks[0]!.ts;
   const end = live ? now : Math.max(start, ...rows.map((r) => r.end ?? 0));
-  const ref = useRef<HTMLDivElement>(null);
-  // The box's chip (TeamChip) reads where the newest team stands off the card.
-  useEffect(() => {
-    ref.current?.dispatchEvent(new CustomEvent("team-card", { bubbles: true }));
-  }, [working, needs]);
   const sum = [working ? `${working} working` : "", needs ? `${needs} need${needs > 1 ? "" : "s"} you` : "", !live ? (rows.every((r) => r.state === "done") ? "all done" : "stopped") : ""].filter(Boolean).join(" · ");
   const stopAll = () => {
     const lanes = rows.filter((r) => r.state === "work").map((r) => r.lane);
@@ -107,7 +102,7 @@ export function TeamCard({ info, state, events, send, notify, sid }: { info: Tea
   };
   const open = (lane: string) => focusAgent(sid, lane);
   return (
-    <div ref={ref} className={cn("team-card", live && "live")} data-team-working={working} data-team-needs={needs}>
+    <div className={cn("team-card", live && "live")}>
       <div className="team-head">
         <UsersIcon className="size-3.5 team-head-icon" aria-hidden />
         <b>Team of {rows.length}</b>
@@ -159,54 +154,6 @@ export function TeamCard({ info, state, events, send, notify, sid }: { info: Tea
         })}
       </ul>
     </div>
-  );
-}
-
-/**
- * By the box, when the newest team's card has scrolled out of sight while its agents work or wait on the person: "2 working ·
- * 1 needs you ↑", a press back to the card (mockup A's chip).
- */
-export function TeamChip() {
-  const ref = useRef<HTMLButtonElement | null>(null);
-  const anchor = useRef<HTMLSpanElement>(null);
-  const [card, setCard] = useState<HTMLElement | null>(null);
-  const [seen, setSeen] = useState(true);
-  const [counts, setCounts] = useState({ working: 0, needs: 0 });
-  useEffect(() => {
-    const feed = () => anchor.current?.closest("[data-slot='session.box']")?.parentElement?.querySelector<HTMLElement>("[data-slot='session.feed']") ?? null;
-    const read = () => {
-      const all = feed()?.querySelectorAll<HTMLElement>(".team-card");
-      const last = all?.length ? all[all.length - 1]! : null;
-      setCard(last);
-      setCounts({ working: Number(last?.dataset.teamWorking ?? 0), needs: Number(last?.dataset.teamNeeds ?? 0) });
-    };
-    read();
-    document.addEventListener("team-card", read);
-    const t = setInterval(read, 4000);
-    return () => (document.removeEventListener("team-card", read), clearInterval(t));
-  }, []);
-  useEffect(() => {
-    if (!card) return;
-    const io = new IntersectionObserver(([e]) => setSeen(!!e?.isIntersecting), { threshold: 0.15 });
-    io.observe(card);
-    return () => io.disconnect();
-  }, [card]);
-  const show = !!card && !seen && counts.working + counts.needs > 0;
-  return (
-    <>
-      <span ref={anchor} hidden />
-      {show && (
-        <button ref={ref} type="button" className="team-chip" onClick={() => card!.scrollIntoView({ block: "center", behavior: "smooth" })} title="Back to the team's card">
-          <span className={cn("team-ring", counts.needs ? "is-need" : "is-work")} aria-hidden />
-          <span>
-            {counts.working > 0 && `${counts.working} working`}
-            {counts.working > 0 && counts.needs > 0 && " · "}
-            {counts.needs > 0 && <span className="team-chip-need">{counts.needs} need{counts.needs > 1 ? "" : "s"} you</span>}
-          </span>
-          <ArrowUpIcon className="size-3" aria-hidden />
-        </button>
-      )}
-    </>
   );
 }
 

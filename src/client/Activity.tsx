@@ -211,7 +211,6 @@ const RoomHandedLine = lazy(() => import("./crew-carry.js").then((m) => ({ defau
 const BringReady = lazy(() => import("./crew-carry.js").then((m) => ({ default: m.BringReady })));
 // Several agents in one thread (TeamCard.tsx): fetched only in a thread that has two or more.
 const TeamCard = lazy(() => import("./TeamCard.js").then((m) => ({ default: m.TeamCard })));
-const TeamChip = lazy(() => import("./TeamCard.js").then((m) => ({ default: m.TeamChip })));
 const ProposedTeam = lazy(() => import("./TeamCard.js").then((m) => ({ default: m.ProposedTeam })));
 const OpenedThread = lazy(() => import("./TeamCard.js").then((m) => ({ default: m.OpenedThread })));
 const TakeOver = lazy(() => import("./TeamCard.js").then((m) => ({ default: m.TakeOver })));
@@ -243,6 +242,7 @@ import { openOutside } from "./openOutside.js";
 import { modeOf, reachFor, reachForHandoff, reachForMessage, REACH_NAME, revertTo, settle, type Reach } from "./smartReach.js";
 import { splitTools } from "./engines.js";
 import { Lightbox } from "./Lightbox.js";
+import { PictureStrip } from "./ChatPictures.js";
 import { loadRecents, type Identity } from "./storage.js";
 import { useLaneStream, type Send } from "./useSession.js";
 import { EngineModelPill } from "./EngineModelPill.js";
@@ -520,6 +520,9 @@ const HIDDEN = new Set<string>([
   "instruction.withdrawn",
   // A held message's card says itself whether it was let through.
   "peer.settled",
+  // An answer to an ask_session is said on the question's own card (PeerCard), and the asker stopping waiting changes only that.
+  "peer.answer",
+  "peer.unwaited",
   // An agent's answer to another's question is drawn under the question; the asker stopping waiting is in that card's note.
   "mesh.replied",
   "mesh.unwaited",
@@ -563,6 +566,12 @@ const HIDDEN = new Set<string>([
   "crew.brought",
   "board.released",
   "board.cancelled",
+  // A person's own steering of the board (TaskBoard.tsx): seen on its rows in the Tasks tab; an agent it touches is told in its chat.
+  "board.added",
+  "board.edited",
+  "board.moved",
+  "board.held",
+  "board.done",
   // Said on the task's own row on the board (TeamBoard.tsx): why it waits for a copy of the board's project.
   "board.waiting",
   // A proposed team started: its board card turns into the ordinary one, which says so (TeamCard.tsx ProposedTeam).
@@ -2372,6 +2381,17 @@ export function Activity({
           {state.options.team && <TeamBanner identity={identity} notify={ctx.notify} />}
           {/* One panel per agent that has something waiting: each has its own queue and its own driver. A column of a split
               shows its own agent's only: three columns each repeating every agent's queue and questions buried the chats. */}
+          {/* A team the lead put to you, kept in sight over the box until it is started or declined (Arun, 2026-11-18). */}
+          {!secondary && !pin && state.board?.proposed && (() => {
+            const posted = events.find((e) => e.seq === state.board!.seq);
+            return posted ? (
+              <div className="proposed-dock">
+                <Suspense fallback={null}>
+                  <ProposedTeam ev={posted} state={state} send={send} notify={ctx.notify} />
+                </Suspense>
+              </div>
+            ) : null;
+          })()}
           {queuesShown.filter((id) => !pin || id === pin).map((id) => (
             <QueuedInstructions key={id} ctx={ctx} events={events} lane={id} />
           ))}
@@ -2386,11 +2406,10 @@ export function Activity({
             </div>
           ))}
           {/* ⌘F in this chat (ChatFind.tsx). */}
-          {ctx.teams && !pin && <Suspense fallback={null}><TeamChip /></Suspense>}
           <ChatFind primary={!secondary} />
           {/* Words selected in the chat, quoted into the box and sent to whoever wrote them (QuoteSelection). */}
           {me.role !== "viewer" && <QuoteSelection onQuote={quote} />}
-          <Composer ctx={ctx} lane={target} locked={!!pin} onLane={(l) => (pick(l), laneFilter !== ALL && setLaneFilter(l))} onPin={() => setPinning(true)} events={events} plan={<LivePlan events={events} state={state} {...(pin ? { lane: pin } : laneFilter !== ALL && !state.options.team ? { lane: laneFilter } : {})} team={!secondary && boardHere} {...(me.role !== "viewer" ? { control: (id: string, action: TaskAction, to?: string) => void send({ type: "board.task", id, action, ...(to ? { to } : {}) }).then((r) => !r.ok && ctx.notify(r.error ?? "Couldn't change that task.")) } : {})} />} />
+          <Composer ctx={ctx} lane={target} locked={!!pin} onLane={(l) => (pick(l), laneFilter !== ALL && setLaneFilter(l))} onPin={() => setPinning(true)} events={events} plan={<LivePlan events={events} state={state} {...(pin ? { lane: pin } : laneFilter !== ALL && !state.options.team ? { lane: laneFilter } : {})} team={!secondary && boardHere && !!state.options.team} {...(me.role !== "viewer" ? { control: (id: string, action: TaskAction, to?: string) => void send({ type: "board.task", id, action, ...(to ? { to } : {}) }).then((r) => !r.ok && ctx.notify(r.error ?? "Couldn't change that task.")) } : {})} />} />
           {/* Under the box: the way back through the session on the left, and what the agent's context has cost on the right, under send.
               In the Focus layout both live in the status bar along the window's foot instead. */}
           {(() => {
@@ -3002,10 +3021,16 @@ function PeerCard({ ev, ctx }: { ev: Ev<"instruction"> | Ev<"peer.sent"> | Ev<"p
     icon = SendIcon;
     head = (
       <>
-        Sent to {b.to.name} in “{b.to.title}”
+        {b.ask ? "Asked" : "Sent to"} {b.to.name} in “{b.to.title}”
       </>
     );
     note = b.held ? "Waits there until someone who can steer that agent lets it through" : "";
+    // A question across threads (ask_session): its answer under it once it comes (Arun, 2026-11-18).
+    if (b.ask) {
+      const ans = ctx.events.find((e) => e.body.type === "peer.answer" && e.body.re === b.ask);
+      if (ans?.body.type === "peer.answer") note = `Answered: ${ans.body.text.split("\n").find((l) => l.trim())?.slice(0, 220) ?? ""}`;
+      else if (!b.held) note = "Waiting for its answer";
+    }
     actions = <OpenSession sid={b.to.sid} />;
   } else {
     const p = b.type === "peer.held" ? b.from : b.peer!;
@@ -4089,6 +4114,8 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   const steps: Step[] = [];
   /** What it wrote by name, done: a file it made outside its folder's diff (its own folder while it works in a project). */
   const wrote: { path: string; lines: number }[] = [];
+  /** Pictures its steps gave back (a screenshot, an image it read), on the computer its tool runs on (runner/tool-pictures.ts). */
+  const pictures: { path: string; name: string }[] = [];
   type Work = { kind: "work"; id: string; steps: Step[] };
   /** A stretch of thinking, as its own line in the reply: "Thought for 12s", which opens to what it thought. */
   type Think = { kind: "think"; key: string; thought: string; secs: number };
@@ -4178,10 +4205,16 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
         id: call.id,
         ...d,
         state: !result ? (active ? "running" : "waiting") : verdict === null ? "waiting" : failed ? "failed" : "done",
-        detail: result ? <pre className="rsp-output">{output.length > 6000 ? `${output.slice(0, 6000)}\n…` : output || "(no output)"}</pre> : undefined,
+        detail: result ? (
+          <>
+            {(output || !result.body.pictures?.length) && <pre className="rsp-output">{output.length > 6000 ? `${output.slice(0, 6000)}\n…` : output || "(no output)"}</pre>}
+            {result.body.pictures?.length ? <PictureStrip pictures={result.body.pictures.map((path) => ({ path, name: `${d.verb}${d.target ? ` ${d.target}` : ""}` }))} /> : null}
+          </>
+        ) : undefined,
         raise: <StepRaise ctx={ctx} lane={lane} call={call.id} step={`${d.verb}${d.target ? ` ${d.target}` : ""}`} via={via} />,
       };
       if (result && stepKind(d) === "test") step.fails = failingTests(output);
+      for (const path of result?.body.pictures ?? []) pictures.push({ path, name: `${d.verb}${d.target ? ` ${d.target}` : ""}` });
       if (/^(edit|edit_file|write|write_file)$/.test(call.name)) step.preview = editPreview(args) ?? undefined;
       if (/^(write|write_file|create_file)$/i.test(call.name) && result && !failed) {
         const at = typeof args.file_path === "string" ? args.file_path : typeof args.path === "string" ? args.path : "";
@@ -4696,6 +4729,8 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
           {forecast && <span className="rsp-live-fc">{forecast}</span>}
         </div>
       )}
+      {/* What its steps showed it (a screenshot it took, a picture it read), in the chat as well as in the step (Arun, 2026-11-18). */}
+      {pictures.length > 0 && <PictureStrip pictures={pictures} max={5} />}
       {made.length > 0 && <MadeFiles files={made} lane={lane} {...(ctx.onOpen ? { onMore: () => ctx.onOpen!("tree") } : {})} />}
       {/* Asked you to decide (ask_human): the card in the chat, under the reply that asked, as well as docked over the box; the same
           question either way, so answering one clears both (Arun, 2026-11-17: "when an agent asks for a decision as well, make sure
@@ -6413,7 +6448,8 @@ function AlwaysAllow({ items, allow, busy, send, ctx, answer }: { items: string[
         entries &&
         void send({ type: "settings.update", allow: [...new Set([...(allow ?? []), ...entries])] }).then((r) => {
           if (!r.ok) return ctx.notify(r.error ?? "Couldn't add that to the allow list.");
-          ctx.notify(`${said} runs without asking now. Take it back under Session settings.`);
+          // Nothing said over the chat after it (Arun, 2026-11-18: "i dont want this too appear after approving the command"): the
+          // button's tip says what it does, and the allow list is in Session settings.
           return answer(true);
         })
       }
@@ -6759,7 +6795,14 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
     case "board.posted":
       // A crew workflow's board is its run card where its run began, and nothing where a later stage of it was posted.
       // The lead's team, put to you before it starts (TeamCard.tsx ProposedTeam).
-      if (b.type === "board.posted" && state.board?.seq === ev.seq && state.board.proposed) return <Suspense fallback={null}><ProposedTeam ev={ev} state={state} send={ctx.send} notify={ctx.notify} /></Suspense>;
+      // While it waits for a Start, the card itself is docked over the box (ProposedDock), where later messages can't push it out
+      // of sight (Arun, 2026-11-18: "when the team board starts, i dont want it to get buried and hidden away"); here, a line.
+      if (b.type === "board.posted" && state.board?.seq === ev.seq && state.board.proposed)
+        return (
+          <Notice ev={ev} icon={UsersIcon}>
+            {b.fromName} proposed a team of {b.tasks.length} task{b.tasks.length === 1 ? "" : "s"}: it waits for you over the message box
+          </Notice>
+        );
             return state.options.team && isWorkflowBoard(ev) ? <FlowBoard ev={ev} ctx={ctx} fallback={<BoardCard ev={ev} state={state} stamp={<Stamp ev={ev} />} />} /> : <BoardCard ev={ev} state={state} stamp={<Stamp ev={ev} />} />;
     case "mesh.posted":
       return <AgentUpdateCard ev={ev} state={state} stamp={<Stamp ev={ev} />} />;
@@ -7872,6 +7915,7 @@ function QueuedInstructions({ ctx, events, lane = MAIN_LANE }: { ctx: Ctx; event
   const { state, me, send } = ctx;
   const [editing, setEditing] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
+  const [sendingNow, setSendingNow] = useState(false);
   // Folds to its header line, and stays folded until it is opened again (Arun, 2026-10-24: "make the instructions/queued panel
   // collapsable"): the count, what it waits for and Send now stay in sight.
   const [folded, setFolded] = useState(() => {
@@ -7921,6 +7965,21 @@ function QueuedInstructions({ ctx, events, lane = MAIN_LANE }: { ctx: Ctx; event
     const r = relTime(ts);
     return r === "now" ? "just now" : `${r} ago`;
   };
+  // Pressed, it says so at once, and says why when it couldn't (Arun, 2026-11-18: "the send now button is so delayed and not even
+  // functional at times"): it went quiet either way, and a refusal (the step had just ended, it was already on its way) was lost.
+  const sendNow = async () => {
+    if (sendingNow) return;
+    setSendingNow(true);
+    const r = await send({ type: "run.interrupt", ...(lane !== MAIN_LANE ? { lane } : {}) });
+    if (!r.ok) {
+      setSendingNow(false);
+      // Already gone or no step left to cut short: what was queued is being delivered anyway, and saying "failed" would be wrong.
+      if (!/isn't running|Nothing is queued/i.test(r.error ?? "")) ctx.notify(r.error ?? "Couldn't send it now. It's still queued and goes when this step finishes.");
+      return;
+    }
+    // A tool that takes a minute to stop: the button comes back if the queue is still here, so it can be pressed again.
+    window.setTimeout(() => setSendingNow(false), 20_000);
+  };
   return (
     <section className={`qi dock-queue ${folded ? "folded" : ""}`} aria-label="Instructions waiting">
       <header className="qi-head">
@@ -7962,8 +8021,8 @@ function QueuedInstructions({ ctx, events, lane = MAIN_LANE }: { ctx: Ctx; event
             each sent all of them. */}
         {/* Not while it waits on an answer: cutting a turn short that is waiting for you only drops its question. */}
         {driving && running && !away && !waitsOnPerson(state, lane) && (
-          <button type="button" className="qi-send" title="Cut the current step short and send what's queued now" onClick={() => send({ type: "run.interrupt", ...(lane !== MAIN_LANE ? { lane } : {}) })}>
-            Send {many ? "all " : ""}now
+          <button type="button" className="qi-send" disabled={sendingNow} aria-busy={sendingNow} title="Give it to the agent now, without waiting for this step to finish" onClick={() => void sendNow()}>
+            {sendingNow ? "Sending…" : `Send ${many ? "all " : ""}now`}
           </button>
         )}
         {/* What it waits for, a press away: the Reconnect in the feed had scrolled out of view behind this card. */}
@@ -9180,6 +9239,9 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
   let they = { picks: "It picks", its: "its", it: "it" };
   // A team's agents are "they" (Arun, 2026-10-28: "really iron out bugs and feature problems and gaps").
   if (state.options.team) they = { picks: "They pick", its: "their", it: "them" };
+  // What "@" offers here, said in the box (Arun, 2026-11-18: "also add @ for agents"): the other agents in the session and your crew,
+  // as well as the people here; only what it really lists.
+  const atFor = [atLanes.length > 1 || crewAt.length ? "agents" : "", people.length ? "people" : ""].filter(Boolean).join(" and ");
   const placeholder = toPeople
     ? "Say something to the people here. @name tells them…"
     : ctx.solo && fridayHere && !noPicker && (mode === "drive" || mode === "claim")
@@ -9202,7 +9264,7 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
         : state.options.work
         ? `Ask ${name} to research, write or make something… @ for people`
         : // Only what works here (2026-10-27 audit: "# for files" with no computer connected, "@ for people" with nobody else).
-          `Tell ${name} what to do… / for commands${hasFolder ? ", # for files" : ""}${people.length ? ", @ for people" : ""}`
+          `Tell ${name} what to do… / for commands${hasFolder ? ", # for files" : ""}${atFor ? `, @ for ${atFor}` : ""}`
       : mode === "suggest" && state.options.team
         ? // Someone else's teammate in a shared room: what is written goes to its keeper as an ask (CrewHosted.tsx), or straight to it on a key they share.
           inView !== ALL ? `Ask ${name}${theirPlan ? `: ${theirPlan.hostName} takes it on` : ""}…` : `Give ${sid === teamSid() ? "the crew" : "this room"} a goal (${name} leads${theirPlan ? `, ${theirPlan.hostName} takes it on` : ""}), or @ a teammate…`

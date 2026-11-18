@@ -143,6 +143,12 @@ export function chooseContrast(c: Contrast): void {
 /** On unless switched off: a notification you never asked for is worse than one you can mute. */
 export const notificationsOn = () => read(KEYS.notify) !== "0";
 export const chooseNotifications = (on: boolean) => write(KEYS.notify, on ? null : "0");
+/**
+ * Whether you are away from Friday, so a banner is worth showing: its window hidden, or another app in front of it. "Hidden" alone
+ * held every banner back while Friday's window sat behind an editor, which on a desktop is nearly always (Arun, 2026-11-18:
+ * "ensure friday can send desktop notifications too").
+ */
+export const awayFromApp = () => typeof document !== "undefined" && (document.visibilityState !== "visible" || !document.hasFocus());
 /** One soft sound when something needs you, window open or not; off is off. */
 export const chimeOn = () => read(KEYS.chime) !== "0";
 export const chooseChime = (on: boolean) => write(KEYS.chime, on ? null : "0");

@@ -29,7 +29,12 @@ let current: { at: number; limits: Read } | null = (() => {
   }
 })();
 let asking: Promise<void> | null = null;
+let followUp: ReturnType<typeof setTimeout> | undefined;
+let followUps = 0;
 let tick: ReturnType<typeof setInterval> | null = null;
+let front: (() => void) | null = null;
+/** Who limits are asked for: the latest signed-in identity anything showing them was given (useToolLimits). */
+let who: Identity | null = null;
 const listeners = new Set<(r: Read) => void>();
 
 /** A five-hour window past 80%: one quiet notification, when they are on and allowed. */
@@ -60,6 +65,12 @@ export function refreshToolLimits(identity: Identity, force = false): void {
         // The server's quiet "no machine is linked" (app.ts, /api/runner/), not a reading.
         if ((l as { linked?: boolean } | null)?.linked === false) return none();
         current = { at: Date.now(), limits: l as Limits };
+        // A tool still being read when this reading was sent (Antigravity started to answer, which takes seconds): asked again
+        // shortly, for everything showing limits (the rail's rings too), rather than at the next two-minute reading. A few times
+        // at most: a read gives up within half a minute.
+        clearTimeout(followUp);
+        if ((l as Limits).toolsReading?.length && followUps < 3) followUps++, (followUp = setTimeout(() => refreshToolLimits(identity, true), 12_000));
+        else if (!(l as Limits).toolsReading?.length) followUps = 0;
         // Kept for the Usage hub's pace and forecast, and checked for a five-hour window that just passed 80%.
         const before = readHistory();
         recordReading(l as Limits);
@@ -81,22 +92,37 @@ export function refreshToolLimits(identity: Identity, force = false): void {
 /** The limits now (the last reading, at once), asking again behind it when that reading is old. */
 export function useToolLimits(identity: Identity, off = false): Read {
   const [limits, setLimits] = useState<Read>(current?.limits ?? null);
+  // The timer and the window's return ask as whoever is signed in now: the first thing to show limits (the rail) can mount before
+  // the app knows who that is, and an identity kept from then (no id) made every later ask a no-op, so a tool signed in after
+  // launch showed only after a restart.
+  if (identity.id) who = identity;
   useEffect(() => {
     // `off`: somewhere nobody's computer can be asked (a recording's page), which reads as no reading at all.
     if (off) return;
     listeners.add(setLimits);
-    refreshToolLimits(identity);
     // Again every two minutes while anything shows them and the window is in front: a turn that spent some of a limit shows on
     // it. One timer for everything showing them, however many that is.
-    tick ??= setInterval(() => document.visibilityState === "visible" && refreshToolLimits(identity), EVERY_MS);
+    tick ??= setInterval(() => who && document.visibilityState === "visible" && refreshToolLimits(who), EVERY_MS);
+    // And as the window comes back to the front: a tool signed in or installed elsewhere meanwhile shows without waiting. Once a
+    // half-minute at most (FRESH_MS).
+    if (!front) {
+      front = () => who && document.visibilityState === "visible" && refreshToolLimits(who);
+      document.addEventListener("visibilitychange", front);
+      addEventListener("focus", front);
+    }
     return () => {
       listeners.delete(setLimits);
       if (!listeners.size && tick) {
         clearInterval(tick);
         tick = null;
       }
+      if (!listeners.size && front) document.removeEventListener("visibilitychange", front), removeEventListener("focus", front), (front = null);
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Asked as soon as who it is for is known, and again if that changes.
+  useEffect(() => {
+    if (!off && identity.id) refreshToolLimits(identity);
+  }, [identity.id]); // eslint-disable-line react-hooks/exhaustive-deps
   // Off, it reads as an ask that found no computer would (refreshToolLimits): an earlier reading kept, else none.
   return off ? (current?.limits && current.limits !== "none" ? current.limits : "none") : limits;
 }

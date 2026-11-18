@@ -1,3 +1,5 @@
+import { testPage } from "../test-page.js";
+
 /**
  * Opening an address in the Preview browser.
  *
@@ -62,7 +64,8 @@ export function servedUrlIn(text: string): string | undefined {
   return [...localUrlsIn(lines.join("\n")), ...ports]
     .filter((u) => {
       const url = new URL(u);
-      return !NOT_A_PAGE_PORTS.has(Number(url.port)) && !NOT_A_PAGE_PATH.test(url.pathname);
+      // Nor an agent's own test page, printing its PASS and FAIL lines (test-page.ts; Arun, 2026-11-18: "dont make this appear").
+      return !NOT_A_PAGE_PORTS.has(Number(url.port)) && !NOT_A_PAGE_PATH.test(url.pathname) && !testPage(u);
     })
     .at(-1);
 }
@@ -90,6 +93,8 @@ export function lookFailed(e: unknown): PageLook {
  * a page, and when there is no way to tell (the Preview then opens as it always did); false once every look found nothing.
  */
 export async function pageAppears(url: string, look: (port: number, path: string) => Promise<PageLook>, waits = [0, 2000, 5000, 10_000]): Promise<boolean> {
+  // An agent's own test page is never one to open by itself, however it was asked for (test-page.ts).
+  if (testPage(url)) return false;
   let port = 0;
   let at = "/";
   try {

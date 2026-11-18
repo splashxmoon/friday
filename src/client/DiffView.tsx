@@ -1,5 +1,7 @@
 import { FileIcon } from "./fileIcons.js";
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { PICTURE_FILE } from "./picture-url.js";
+import { localPicture } from "./picture-url.js";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import styles from "@/components/aicss/FileDiff.module.css";
 import { AgentCodeLine, useAgentCodeTokens, type AgentCodeLanguage, type AgentCodeToken } from "@/components/agents/agent-code";
 import { Checkbox } from "@/components/motion/checkbox";
@@ -9,6 +11,9 @@ import { watchersOf } from "../focus.js";
 import { diffHere, useFocus } from "./focusStore.js";
 import { takesShowDiff } from "./focusDiff.js";
 import { splitPath, splitRows, wordMarks } from "./diff-lines.js";
+
+// The picture view loads only when a picture file is opened (PictureView.tsx): never in the first load.
+const PictureView = lazy(() => import("./PictureView.js"));
 
 /**
  * The highlighter's language for a path.
@@ -183,6 +188,9 @@ export function DiffView({
   const marks = useMemo(() => (open ? wordMarks(lines) : new Map<string, [number, number]>()), [open, lines]);
   const rows = useMemo(() => (open && mode === "split" ? splitRows(lines) : []), [open, mode, lines]);
   const { dir, name } = splitPath(path);
+  // A changed picture shows as the picture it is now: its patch is bytes, or nothing (Arun, 2026-11-18: "be able to see in the side
+  // panels and stuff too"). Through the session, as the chat shows one (LiveBlock localPicture).
+  const picture = change !== "deleted" && PICTURE_FILE.test(path) ? localPicture(path) : null;
 
   const copy = async (text: string, done: (v: boolean) => void) => {
     try {
@@ -313,7 +321,13 @@ export function DiffView({
           )}
         </span>
       </div>
-      {open && (
+      {open && picture && (
+        <Suspense fallback={null}>
+          <PictureView src={picture} path={path} />
+        </Suspense>
+      )}
+      {/* An SVG is code as well: its change stays under the picture. */}
+      {open && (!picture || /\.svg$/i.test(path)) && (
         <>
           <div className={`${styles.diffBody} ${mode === "split" ? "dv-split-body" : ""}`} style={{ maxHeight, overflowY: "auto" }}>
             {mode === "split" ? (

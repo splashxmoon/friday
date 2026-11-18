@@ -32,12 +32,6 @@
 @keyframes team-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .team-ring.is-work { animation: none; } }
 
-/* By the box, when the team's card has scrolled away: where it stands, a press back to it. */
-.team-chip { align-self: flex-end; display: inline-flex; align-items: center; gap: 7px !important; height: 26px; margin: 0 4px 6px auto; padding: 0 11px 0 9px; border: 1px solid var(--border); border-radius: var(--r-pill); background: var(--panel); color: var(--ink); font: 500 12px/1 var(--font); font-variant-numeric: tabular-nums; cursor: pointer; box-shadow: 0 4px 14px -6px rgb(0 0 0 / .35); }
-.team-chip:hover { background: color-mix(in srgb, var(--ink) 5%, var(--panel)); }
-.team-chip .team-ring { width: 10px; height: 10px; }
-.team-chip .team-chip-need { color: var(--amber); }
-
 /* Another agent taking over the thread (TakeOver): a rule with both marks and what it was given. */
 .takeover { display: flex; align-items: center; gap: 7px; margin: 10px 0 2px; color: var(--text-muted); font-size: 12px; }
 .takeover::before, .takeover::after { content: ""; flex: 1; height: 1px; background: var(--border); }

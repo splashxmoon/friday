@@ -164,9 +164,10 @@ function fridayStep(tool: string, s: (...keys: string[]) => string): Pick<Step, 
     case "wait_for_agent":
       return { mark: "@", verb: tool === "check_messages" ? "Checked its messages" : tool === "list_agents" ? "Looked at the crew" : "Waited for a teammate" };
     case "message_session":
+    case "ask_session":
     case "read_session":
     case "list_sessions":
-      return { mark: "@", verb: tool === "message_session" ? "Messaged a session" : tool === "read_session" ? "Read a session" : "Looked at the sessions" };
+      return { mark: "@", verb: tool === "message_session" ? "Messaged a session" : tool === "ask_session" ? "Asked another session" : tool === "read_session" ? "Read a session" : "Looked at the sessions" };
     case "write_note":
     case "remember":
     case "update_memory":

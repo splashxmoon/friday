@@ -271,6 +271,10 @@ class ClaudeTurn extends KeptTurn {
  */
 export class WarmClaude {
   private proc: CliProcess | null = null;
+  /** The kept process's id, for stopping one command under it (stop-command.ts). */
+  get pid(): number | undefined {
+    return this.proc?.pid;
+  }
   private key = "";
   private turn: ClaudeTurn | null = null;
   private idle: ReturnType<typeof setTimeout> | undefined;

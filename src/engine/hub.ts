@@ -27,6 +27,7 @@ import { CUT_OFF_CHECK, cutOffBefore, handoffBrief } from "../handoff.js";
 import { startCheckpoint } from "../rewind.js";
 import { shellSeconds } from "../runner/repo-read.js";
 import { BROWSER_NOTE, TEAM_CODE_NOTE, TEAM_WORK_NOTE, taskMode, WORK_NOTE, type TaskMode } from "./work.js";
+import { capReason, modeLine } from "./mode-note.js";
 import { envNamesOnly } from "../runner/git.js";
 import type { AppendGuard, SessionStore } from "../session/store.js";
 import { hideSecretsIn, withShieldNote } from "../secrets.js";
@@ -91,6 +92,8 @@ const MODES: EngineMode[] = ["plan", "edits", "full"];
 /** How long a runner is given to say whether its tool took a message mid-turn before it goes with the next turn instead. */
 const STEER_ANSWER_MS = 15_000;
 /** Said with a person's message that reaches a coding tool mid-task. */
+/** Said with what a person sent with Send now: they cut in on purpose, so it comes before the step the agent was going to take next. */
+export const SEND_NOW_NOTE = "[Friday] The person pressed Send now while you were working: they want this taken in now, before you go on. Read it, act on it first, then carry on with your task from where you are, without starting over.";
 export const STEER_NOTE = "[Friday] The person wrote this while you were working. If it is a question, answer it in one line; if it changes what you are doing, take it in; then carry on from where you are, without starting over. If it is a new task, finish what you are on first, then do it: tasks go in the order they were sent, and none is left out.";
 
 /** How Friday's check at the end of a run begins, the one asking after what a person wrote mid-turn (owedNote): found again by it. */
@@ -985,7 +988,9 @@ class LaneHost {
   /** The runner can hand its tool a message mid-turn (Parser.steer): one for a busy agent is read at its next step. */
   steers = false;
   /** Messages handed to the turn running now, by the id they went with, until the runner says whether its tool took them. */
-  private steering = new Map<string, number>();
+  private steering = new Map<string, number[]>();
+  /** Steers a person sent with Send now: turned down, the turn is cut short instead, so what was sent still goes at once. */
+  private sentNow = new Set<string>();
   /** The most the turn running now may do (othersCap), so a message given to it mid-turn never takes it further. */
   private turnCap: EngineMode | undefined = undefined;
   /** Where its tool's `friday` MCP calls go (agent-mesh.ts), and those still being answered, to stop when the runner says so or goes. */
@@ -1180,7 +1185,11 @@ class LaneHost {
     else if (b.type === "run.cancel") why = `${ev.actor.name} cancelled the run`;
     else if (b.type === "run.interrupt") why = `${ev.actor.name} delivered queued instructions now`;
     else if (b.type === "instruction" && b.interrupt) why = `${ev.actor.name} interrupted with a new instruction`;
-    if (why && this.turn) (this.stopSent = true), this.sendRaw({ kind: "stop", reason: why });
+    // Send now, to a tool that takes messages mid-turn: the whole queue is handed to the turn running now, at once, rather than
+    // the turn being stopped and the tool started again with it, which took seconds and lost the step it was on (Arun,
+    // 2026-11-18: "the send now button is so delayed and not even functional at times"). Where it can't be, the turn stops.
+    if (b.type === "run.interrupt" && this.turn && this.steers) return void this.sendNow(why).catch((e) => (console.error("[engine] send now:", e), this.stopTurn(why)));
+    if (why) this.stopTurn(why);
     // An answer to something the tool is waiting on right now goes to it there and then, and is not a new turn.
     // A yes only its host may give (hostsOwn: their computer), from anyone or anything else, is no answer: the ask waits for them.
     if (b.type === "instruction" && b.approval?.approve && this.hostsOwn.has(b.approval.id) && !(ev.actor.kind === "human" && ev.actor.id === this.info.hostId)) {
@@ -1198,6 +1207,38 @@ class LaneHost {
     if (b.type === "instruction" || b.type === "run.resume" || b.type === "instructions.requeued" || (b.type === "lane.terminal" && !b.open)) void this.pump();
   }
 
+  private stopTurn(why: string): void {
+    if (this.turn && !this.stopSent) (this.stopSent = true), this.sendRaw({ kind: "stop", reason: why });
+  }
+
+  /**
+   * Send now: everything queued, handed to the turn running now in one message. Only when every message in it may go mid-turn as
+   * a lone one would (steer below): the host's own words, nothing a slash command, file or hand-off; otherwise the turn is stopped
+   * as before, and the next turn carries them.
+   */
+  private async sendNow(why: string): Promise<void> {
+    const state = await this.store.state(this.sid);
+    const events = await this.store.events(this.sid);
+    const queued = pendingFor(state, this.lane);
+    const seqs = runnableQueue(events, this.lane, queued);
+    const evs = seqs.map((q) => events.find((e) => e.seq === q)).filter((e): e is SessionEvent => !!e);
+    const fits =
+      !!this.turn &&
+      !this.steering.size &&
+      seqs.length > 0 &&
+      seqs.length === queued.length &&
+      evs.length === seqs.length &&
+      evs.every((e) => e.body.type === "instruction" && steerable(e.body) && e.actor.kind === "human" && !this.othersMessage(e, state));
+    if (!fits) return this.stopTurn(why);
+    const { prompt } = promptFor(events, seqs, [], "");
+    if (!(await this.append({ type: "instructions.delivered", seqs, steer: true })).ok) return this.stopTurn(why);
+    const id = randomUUID().slice(0, 8);
+    this.steering.set(id, seqs);
+    this.sentNow.add(id);
+    this.sendRaw({ kind: "steer", id, text: withShieldNote(`${SEND_NOW_NOTE}\n\n${prompt}`) });
+    setTimeout(() => void this.steered(id, false), STEER_ANSWER_MS).unref?.();
+  }
+
   /**
    * Hand a message to the turn running now (the runner's Parser.steer). Marked delivered first, so the turn after this one
    * doesn't take it too; put back at the front of the queue when the tool couldn't take it (a tool that has no way, its turn
@@ -1205,10 +1246,24 @@ class LaneHost {
    * messages the host holds to Edits waits for a turn of its own when this one isn't held to that already.
    */
   private async steer(ev: SessionEvent): Promise<void> {
+    // None while an earlier one is still being handed over, or put back: checked and the place taken before anything is read, so
+    // a second message can't read the queue from before the first was put back and go past it (engine.test.ts, "tasks stacked
+    // while a coding tool is busy": one, three, two, about one run in three).
+    if (!this.turn || this.steering.size) return void this.pump();
+    const place = `place:${ev.seq}`;
+    this.steering.set(place, []);
+    try {
+      await this.steerPlaced(ev);
+    } finally {
+      this.steering.delete(place);
+    }
+  }
+
+  private async steerPlaced(ev: SessionEvent): Promise<void> {
     const state = await this.store.state(this.sid);
-    // Only the oldest waiting, and none while an earlier one is still being handed over: one sent after a message still queued
-    // (files, a command), or after one the tool may yet turn down and put back first, goes after it, never past it.
-    if (!this.turn || this.steering.size || pendingFor(state, this.lane)[0] !== ev.seq) return void this.pump();
+    // Only the oldest waiting: one sent after a message still queued (files, a command), or after one the tool turned down and put
+    // back first, goes after it, never past it.
+    if (!this.turn || pendingFor(state, this.lane)[0] !== ev.seq) return void this.pump();
     // Somebody else's work never reaches a tool on its host's own plan mid-turn either: the queue says no to it (drain).
     if (ownPlan(state.engines[this.lane]) && refusal(state.engines[this.lane], whoseWork(await this.store.events(this.sid), ev))) return void this.pump();
     const capped = this.turnCap !== undefined;
@@ -1219,7 +1274,7 @@ class LaneHost {
     const { prompt } = promptFor(events, [ev.seq], [], "");
     if (!(await this.append({ type: "instructions.delivered", seqs: [ev.seq], steer: true })).ok) return void this.pump();
     const id = randomUUID().slice(0, 8);
-    this.steering.set(id, ev.seq);
+    this.steering.set(id, [ev.seq]);
     // A person's word mid-task comes with how to take it (after OpenBot's steer note; Arun, 2026-11-15): a question answered in a
     // line, a correction taken in, and the work carried on rather than started over.
     const steerNote = ev.actor.kind === "human" ? `${STEER_NOTE}\n\n` : "";
@@ -1230,13 +1285,34 @@ class LaneHost {
 
   /** The runner's word on a message handed to its turn: taken, or back in the queue for the next turn. */
   private async steered(id: string, ok: boolean): Promise<void> {
-    const seq = this.steering.get(id);
-    if (seq === undefined) return;
+    const seqs = this.steering.get(id);
+    if (seqs === undefined) return;
     this.steering.delete(id);
-    // Taken into the turn running now: the turn's too, put back with it if its connection drops.
-    if (ok) return void (this.inFlight && !this.inFlight.includes(seq) && this.inFlight.push(seq));
-    await this.append({ type: "instructions.requeued", seqs: [seq], steer: true }).catch((e) => console.error("[engine] requeue:", e));
+    const now = this.sentNow.delete(id);
+    // Taken into the turn running now: the turn's too, put back with it if its connection drops. The next one waiting, held back
+    // while this one was being handed over, goes the same way now (two sent quickly left the second queued for the whole turn).
+    if (ok) {
+      for (const seq of seqs) if (this.inFlight && !this.inFlight.includes(seq)) this.inFlight.push(seq);
+      return void this.steerNext().catch((e) => console.error("[engine] steer:", e));
+    }
+    // Still being handed over until it is back in the queue: a message that came meanwhile reads the queue with it there.
+    const back = `back:${id}`;
+    this.steering.set(back, []);
+    await this.append({ type: "instructions.requeued", seqs, steer: true }).catch((e) => console.error("[engine] requeue:", e));
+    this.steering.delete(back);
+    // Send now that the tool couldn't take mid-turn: the turn stops, and the next one carries them, as Send now always did.
+    if (now) this.stopTurn("Send now: the queued instructions go in a new turn");
     void this.pump();
+  }
+
+  /** The oldest message still waiting, to the turn running now, when it may go mid-turn on its own (steer's rules). */
+  private async steerNext(): Promise<void> {
+    if (!this.turn || !this.steers || this.steering.size) return;
+    const state = await this.store.state(this.sid);
+    const first = pendingFor(state, this.lane)[0];
+    if (first === undefined) return;
+    const ev = (await this.store.events(this.sid)).find((e) => e.seq === first);
+    if (ev?.body.type === "instruction" && steerable(ev.body)) await this.steer(ev);
   }
 
   /** Whether a message is anyone's but the host's own (othersIn in drain, for one message). */
@@ -1478,6 +1554,7 @@ class LaneHost {
         await this.append({ type: "context.compacted", tool: this.info.tool!, ...long }).catch((e) => console.error("[engine] compact:", e));
         this.toldBefore.clear();
         this.modeTold = "code";
+        this.modeSaid = "";
         this.compacting = true;
         const c = await this.runTurn("/compact", [], note, undefined, "/compact", model, undefined, cap, false).finally(() => (this.compacting = false));
         this.inFlight = null;
@@ -1505,6 +1582,21 @@ class LaneHost {
       if (state.options.team && !command) prompt = withShieldNote(`${brief}${catchUp}${decided}${this.preambleNow()}${modeNote}${turn.prompt}`);
       // A crew mate in a coding session: what changed since its last turn (its memory) leads it too.
       else if (this.matePreamble.length && !command) prompt = withShieldNote(`${brief}${catchUp}${decided}${this.preambleNow()}${turn.prompt}`);
+      // The other threads on its project, and to ask them (ask_session) rather than guess at what they know (agent-mesh threadsNote;
+      // Arun, 2026-11-18: "make the agents use ask_session automatically when they need info"): said when it changes, so a tool
+      // that has heard it isn't told again every turn.
+      const threads = this.info.tool && !command && this.mesh ? await this.mesh.threadsFor(this.sid, this.lane).catch(() => "") : "";
+      if (threads !== this.threadsSaid) {
+        if (threads) prompt = `${threads}\n\n${prompt}`;
+        this.threadsSaid = threads;
+      }
+      // The mode this turn really runs in, and why when it is held below the lane's (mode-note.ts): said whenever it differs from
+      // the last said here, this connection's first turn included, so the agent never asks for an Auto it already has.
+      const said = this.info.tool && !command ? modeLine(this.info.mode, { cap, host: this.info.hostName, ...(cap ? { why: capReason(events, pending, this.info.hostName, (e) => this.othersMessage(e, state)) } : {}), ...(this.info.handMode ? { hand: this.info.handMode } : {}) }) : "";
+      if (said && said !== this.modeSaid) {
+        prompt = `${said}\n\n${prompt}`;
+        this.modeSaid = said;
+      }
       this.inFlight = [...pending];
       this.turnCap = cap;
       // Every instruction of it handed back after a dropped connection: the turn its runner may still have running, to take on
@@ -1523,7 +1615,9 @@ class LaneHost {
         // Under the same turn's id: it is the same turn, carried on, and the id in the log (instructions.delivered) is the one a
         // server after a crash puts it back under, so a runner that finished it, and says so, isn't given it again (settleEnded).
         // The first attempt's end is over on both sides by now (heard and acknowledged), so the id is free to be used again.
-        end = await this.runTurn(withShieldNote(`${fresh}${prompt}`), [...(attachments ?? [])], told, approval && { ...approval, ...asked }, command, model, effort, cap, this.owesCheckpoint, false, turnId);
+        // Its mode too, said or not this turn: the fresh conversation never heard it.
+        const toldMode = said && !prompt.startsWith(said) ? `${said}\n\n` : "";
+        end = await this.runTurn(withShieldNote(`${fresh}${toldMode}${prompt}`), [...(attachments ?? [])], told, approval && { ...approval, ...asked }, command, model, effort, cap, this.owesCheckpoint, false, turnId);
       }
       this.inFlight = null;
       if (end.outcome === "error" && this.requeued) return;
@@ -1689,6 +1783,10 @@ class LaneHost {
    */
   private taskMode: TaskMode = "code";
   private modeTold: TaskMode = "code";
+  /** The mode line (mode-note.ts) last put in front of a turn on this connection: said again only when it changes. */
+  private modeSaid = "";
+  /** The threads note (agent-mesh threadsNote) last put in front of a turn on this connection: said again only when it changes. */
+  private threadsSaid = "";
   private turnWork = false;
 
   /** The model this Auto lane last ran on, which a switch is weighed against (stickyPick). */
@@ -2143,7 +2241,9 @@ function cleanBody(raw: unknown): EventBody | null {
   }
   if (b.type === "tool.result") {
     if (typeof b.callId !== "string") return null;
-    return { type: "tool.result", callId: s(b.callId, 120), name: s(b.name, 120) || "tool", output: s(b.output, MAX_TEXT), isError: !!b.isError };
+    // Pictures by where they are on the runner's computer: whole paths to an image file only, a few (runner/tool-pictures.ts).
+    const pictures = (Array.isArray(b.pictures) ? b.pictures : []).slice(0, 6).filter((p): p is string => typeof p === "string" && p.length <= 1000 && /^(\/|[A-Za-z]:[\\/])/.test(p) && /\.(png|jpe?g|gif|webp|svg)$/i.test(p) && !p.includes("\0"));
+    return { type: "tool.result", callId: s(b.callId, 120), name: s(b.name, 120) || "tool", output: s(b.output, MAX_TEXT), isError: !!b.isError, ...(pictures.length ? { pictures } : {}) };
   }
   if (b.type === "engine.approval") {
     const items = (Array.isArray(b.items) ? b.items : [])

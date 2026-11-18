@@ -9,7 +9,9 @@ import { limitHit, planLimitHit, signedOut } from "./limit-reset.js";
 export interface Peers {
   list(sid: string, lane: string): Promise<string>;
   read(sid: string, lane: string, to: string): Promise<{ ok: true; text: string } | { ok: false; error: string }>;
-  send(sid: string, lane: string, req: { to: string; agent?: string; text: string }): Promise<{ ok: true; sid: string; title: string; lane: string; name: string; held: boolean; text: string; /** That agent is on hold as a person said: the message waits for it. */ onHold?: boolean } | { ok: false; error: string }>;
+  /** The sessions this agent could message, with when each was last active (for the threads note: relatedThreads). */
+  nearby?(sid: string, lane: string): Promise<{ s: SessionState; at: number }[]>;
+  send(sid: string, lane: string, req: { to: string; agent?: string; text: string; /** A question its agent waits on (ask_session): the id its answer comes back with. */ ask?: string }): Promise<{ ok: true; sid: string; title: string; lane: string; name: string; held: boolean; text: string; /** That agent is on hold as a person said: the message waits for it. */ onHold?: boolean } | { ok: false; error: string }>;
 }
 import { limitedLanes, limitedTask, limitTargets, personBehind, type Limited } from "./limit-handoff.js";
 import { commandFailed, TEST_CMD } from "./receipt.js";
@@ -21,8 +23,9 @@ import { laneName } from "./session/core.js";
 import { isFolderProject, notReadyWhy, ready as repoReady, repoLine, repoName, type MemberRepo, type RoomProject } from "./room-project.js";
 import { boardBusy, canDriveLane, driverOf, folderMates, laneOf, meshOf, ownChanges, pendingFor, readyTasks, runOf, unreadPosts, type BoardTask, type TaskReview, type MeshAsk, type MeshPost, type SessionState } from "./session/projection.js";
 import type { SessionStore } from "./session/store.js";
-import { engineName, MAIN_LANE, type ActorRef, type BoardTaskDef, type EngineMode, type EventBody, type MeshNote, type RepoCall, type SessionEvent } from "./types.js";
+import { engineName, MAIN_LANE, type ActorRef, type BoardTaskDef, type EngineMode, type EventBody, type MeshNote, type PeerNote, type RepoCall, type SessionEvent } from "./types.js";
 import { BROWSER_TOOL, browserCall, browserDriver } from "./browser-driver.js";
+import { testPage } from "./test-page.js";
 import { COMPUTER_ACTIONS, type ComputerAct, type ComputerAction } from "./runner/computer.js";
 import { APP_INSTRUCTIONS, APP_TOOLS } from "./app-tools.js";
 import { loopBetween } from "./team-away.js";
@@ -392,7 +395,7 @@ export const MESH_TOOLS: MeshToolDef[] = [
   // other too fix any bugs").
   {
     name: "list_sessions",
-    description: "List the other Friday sessions in this workspace you can reach: the ones the person you work for is in, and teammates' sessions from the team's library (read only). Ones on the same repo, or that changed the same files as you, come first. Use it before read_session or message_session, and to check whether another session already worked something out.",
+    description: "List the other Friday sessions in this workspace you can reach: the ones the person you work for is in, and teammates' sessions from the team's library (read only). Ones on the same repo, or that changed the same files as you, come first. Use it before read_session, message_session or ask_session, and to check whether another session already worked something out.",
     inputSchema: obj({}, []),
   },
   {
@@ -412,6 +415,21 @@ export const MESH_TOOLS: MeshToolDef[] = [
       ["to", "text"],
     ),
   },
+  // Asking across threads and waiting for the answer, as ask_agent does inside one (Arun, 2026-11-18: "ensure we have cross thread
+  // communication as well"): message_session only told, and an answer written in the other agent's reply never came back.
+  {
+    name: "ask_session",
+    description: "Ask an agent in another Friday session (another thread) a question and wait for its answer: how it built something you now depend on, what it decided, whether it is done with a file or an API. Use it on your own, without checking with the person first, whenever you need something another thread knows: don't guess at another thread's work, and don't work out again what it already did. Returns its answer. Its answer is what it says at the end of its turn, or what it sends back with message_session. If it is busy or takes longer than the wait, you are told so, and its answer reaches you later as a message. Ask one clear question with what you need back.",
+    inputSchema: obj(
+      {
+        to: { type: "string", description: "The session's id or title, from list_sessions." },
+        agent: { type: "string", description: "Which agent there, by name. Leave empty for its main agent." },
+        question: { type: "string", description: "The question, with enough context that it can answer without asking back." },
+        wait_seconds: { type: "number", description: "How long to wait for the answer: 240 if left out, 900 at most." },
+      },
+      ["to", "question"],
+    ),
+  },
 ];
 
 /**
@@ -419,7 +437,7 @@ export const MESH_TOOLS: MeshToolDef[] = [
  * they work (Arun, 2026-10-20: "constantly updating and stuff like checking up on each other").
  */
 export const MESH_INSTRUCTIONS =
-  "You are one of several agents in a Friday session; people watch all of you live. These tools keep an open line to the other agents: list_agents to see who is here and what each is doing, check_messages to read what came in for you (messages also reach you while you work, so there is no need to keep checking), post_update to tell everyone what you finished or changed without interrupting them, message_agent to tell one agent something it must act on, message_team to tell several or everyone at once, ask_agent to ask one and wait for its answer, reply_to_agent to answer a question asked of you, wait_for_agent to wait until another finishes work yours depends on, show_preview to open a page you started (a dev server on localhost) in the session's Preview panel for the people here, preview_screenshot to see it yourself (never launch Chrome or install a browser to look), list_tasks, claim_task, post_proof and finish_task for the session's shared task board (take the next ready task when you finish one), read_notes and write_note for the session's shared notes, claim_files before you change files others may be changing (and release_files when done), wake_me_when to be woken when what you wait on happens (another agent's turn, a board task, a job you left running) instead of ending on 'waiting' for a person to check back, hand_off to pass work on, and list_sessions, read_session and message_session for the other Friday sessions your person is in (tell one when you change something it builds on). Stay in touch without chatter, since every message and tool call costs usage: post_update once when you finish your task, and whenever you change something others build on (an interface, a shared file, a schema); when your work depends on another agent, read what it posted, ask it or wait_for_agent rather than guessing or stopping. Check before you edit a file another agent may be changing. Your own sub-agents are helpers inside your task, in your folder; the agents here are teammates with folders of their own, for work that runs alongside yours. These friday tools are yours, not your sub-agents': they report to you, and you speak for them. Keep going until your task is fully done. Don't chat: every message shows in the session's feed. Before you start a piece of work, check list_tasks and what the others are on; if another agent already has it, take something else or ask the lead. When you finish, open your last message with one line: what changed, how many files, and whether the tests pass; the detail goes after it. Prove a change before you call it done: run the tests that cover it, open anything that shows on screen with show_preview, then post_proof (what you did, what you checked, what is still uncertain, and the page for a change on screen); Friday shows it beside your name for the person to read instead of your diff. What was decided here, and how a question was answered, stands: if you're asked to go against it, say so and ask before you act.";
+  "You are one of several agents in a Friday session; people watch all of you live. These tools keep an open line to the other agents: list_agents to see who is here and what each is doing, check_messages to read what came in for you (messages also reach you while you work, so there is no need to keep checking), post_update to tell everyone what you finished or changed without interrupting them, message_agent to tell one agent something it must act on, message_team to tell several or everyone at once, ask_agent to ask one and wait for its answer, reply_to_agent to answer a question asked of you, wait_for_agent to wait until another finishes work yours depends on, show_preview to open a page you started (a dev server on localhost) in the session's Preview panel for the people here, preview_screenshot to see it yourself (never launch Chrome or install a browser to look), list_tasks, claim_task, post_proof and finish_task for the session's shared task board (take the next ready task when you finish one), read_notes and write_note for the session's shared notes, claim_files before you change files others may be changing (and release_files when done), wake_me_when to be woken when what you wait on happens (another agent's turn, a board task, a job you left running) instead of ending on 'waiting' for a person to check back, hand_off to pass work on, and list_sessions, read_session, message_session and ask_session for the other Friday sessions (threads) your person is in: tell one when you change something it builds on, and when you need something another thread knows (what it changed or decided, how something it built works), ask it with ask_session on your own, without checking with the person first, rather than guessing or working it out again. Stay in touch without chatter, since every message and tool call costs usage: post_update once when you finish your task, and whenever you change something others build on (an interface, a shared file, a schema); when your work depends on another agent, read what it posted, ask it or wait_for_agent rather than guessing or stopping. Check before you edit a file another agent may be changing. Your own sub-agents are helpers inside your task, in your folder; the agents here are teammates with folders of their own, for work that runs alongside yours. These friday tools are yours, not your sub-agents': they report to you, and you speak for them. Keep going until your task is fully done. Don't chat: every message shows in the session's feed. Before you start a piece of work, check list_tasks and what the others are on; if another agent already has it, take something else or ask the lead. When you finish, open your last message with one line: what changed, how many files, and whether the tests pass; the detail goes after it. Prove a change before you call it done: run the tests that cover it, open anything that shows on screen with show_preview, then post_proof (what you did, what you checked, what is still uncertain, and the page for a change on screen); Friday shows it beside your name for the person to read instead of your diff. What was decided here, and how a question was answered, stands: if you're asked to go against it, say so and ask before you act.";
 
 /**
  * A page on this machine from what an agent gave (http://localhost:5173/x, localhost:5173, 5173), as the Preview opens it.
@@ -690,6 +708,45 @@ export function answerFrom(events: SessionEvent[], lane: string, after: number, 
   const said = events.filter((e) => e.seq > after && e.seq < before && (e.lane ?? MAIN_LANE) === lane && e.body.type === "agent.message" && !!e.body.text.trim());
   const last = said.findLast((e) => e.body.type === "agent.message" && !e.body.toolCalls.length) ?? said.at(-1);
   return last?.body.type === "agent.message" ? last.body.text.trim() : "";
+}
+
+/** Where a session's agents work, as projects: a repo by name, else the folder (a lane's own copy counts as the folder it copies). */
+function projectsOf(s: SessionState): Set<string> {
+  const out = new Set<string>();
+  for (const e of Object.values(s.engines)) {
+    if (!e.cwd) continue;
+    if (e.repo) out.add(`repo:${e.repo.toLowerCase()}`);
+    out.add(`dir:${(e.copyOf ?? e.cwd).replace(/[\\/]+$/, "").replace(/-[0-9a-f]{8}$/, "")}`);
+  }
+  return out;
+}
+
+/** How long a thread counts as going on, for the threads note. */
+const THREAD_ACTIVE_MS = 24 * 3600_000;
+
+/**
+ * The other threads on the same project as this one, active lately, newest first (Arun, 2026-11-18: "make the agents use
+ * ask_session automatically when they need info"): an agent that knows who else works on its project asks them, rather than
+ * guessing at what they changed or decided.
+ */
+export function relatedThreads(me: SessionState, near: readonly { s: SessionState; at: number }[], now = Date.now()): { s: SessionState; at: number }[] {
+  const mine = projectsOf(me);
+  if (!mine.size) return [];
+  return near
+    .filter(({ s, at }) => s.id !== me.id && now - at < THREAD_ACTIVE_MS && [...projectsOf(s)].some((k) => mine.has(k)))
+    .sort((a, b) => b.at - a.at)
+    .slice(0, 4);
+}
+
+/** The threads note put in front of a turn: who else works on this project, and to ask them rather than guess. Empty with none. */
+export function threadsNote(rows: readonly { s: SessionState; at: number }[]): string {
+  if (!rows.length) return "";
+  const said = rows.map(({ s }) => {
+    const lanes = [MAIN_LANE, ...s.lanes.map((l) => l.id)].filter((l) => !(s.options.team && l === MAIN_LANE));
+    const agents = lanes.map((l) => `${laneName(s, l)}${runOf(s, l).status === "running" ? ", working" : ""}`).join("; ");
+    return `"${s.title}" (${agents || "no agent yet"})`;
+  });
+  return `[Friday] Other threads on this project: ${said.join(", ")}. When you need something one of them knows (what it changed or decided, how something it built works, whether it is done with a file or an API), ask it with ask_session (it waits for the answer) instead of guessing or working it out again; read_session shows where it is. When you change something one of them builds on, tell it with message_session.`;
 }
 
 type Sent = { ok: true; id: string; to: string; toName: string; busy: boolean; offline: boolean; /** On hold as a person said: it reads it once they let it go on. */ held: boolean } | { ok: false; error: string };
@@ -985,8 +1042,20 @@ export class AgentMesh {
           const r = await this.peers.read(sid, lane, str(args.to));
           return r.ok ? { output: r.text } : { output: r.error, isError: true };
         }
+        case "ask_session": {
+          if (!this.peers) return { output: "Other sessions can't be reached from here.", isError: true };
+          const secs = Number(args.wait_seconds);
+          const wait = Number.isFinite(secs) && secs > 0 ? Math.min(secs * 1000, ASK_WAIT_MAX_MS) : ASK_WAIT_MS;
+          return await this.askSession(sid, lane, { to: str(args.to), agent: str(args.agent), question: str(args.question) }, wait, signal);
+        }
         case "message_session": {
           if (!this.peers) return { output: "Other sessions can't be reached from here.", isError: true };
+          // To a thread whose agent asked this one something (ask_session) and waits: this is the answer, handed to it there.
+          const asked = await this.openPeerAsk(sid, lane, str(args.to));
+          if (asked && (await this.answerPeer(sid, lane, asked, str(args.text)))) {
+            await this.store.append(sid, FRIDAY, { type: "peer.answer", re: asked.ask!, from: { sid: asked.fromSid, title: asked.fromTitle, lane: asked.fromLane, name: asked.fromName }, text: str(args.text).trim().slice(0, MAX_TEXT) }, { lane });
+            return { output: `Answered ${asked.fromName} in "${asked.fromTitle}". Carry on with your own work.` };
+          }
           const r = await this.peers.send(sid, lane, { to: str(args.to), agent: str(args.agent), text: str(args.text) });
           if (!r.ok) return { output: r.error, isError: true };
           // Its record lands here too, as Friday Code's does: what was said, and to which agent where.
@@ -1465,6 +1534,129 @@ export class AgentMesh {
     return { output: `${r.toName} hasn't answered yet${r.busy ? " (it was busy with other work when you asked)" : ""}. Its answer reaches you as a message when it comes. Carry on with what you can do without it.` };
   }
 
+  /** The threads note for a turn on this lane (threadsNote), or "" when no other thread works on its project lately. */
+  async threadsFor(sid: string, lane: string): Promise<string> {
+    if (!this.peers?.nearby) return "";
+    const [me, near] = await Promise.all([this.store.state(sid), this.peers.nearby(sid, lane)]);
+    return threadsNote(relatedThreads(me, near));
+  }
+
+  /**
+   * ask_session: a question to an agent in another thread, and the wait for its answer (peers.ts answer). Stopping the wait is
+   * logged (peer.unwaited), so an answer that comes later reaches this agent as a message instead, and one that came just before is
+   * handed over here.
+   */
+  async askSession(sid: string, lane: string, req: { to: string; agent: string; question: string }, wait: number, signal?: AbortSignal): Promise<MeshResult> {
+    if (!this.peers) return { output: "Other sessions can't be reached from here.", isError: true };
+    const id = randomBytes(5).toString("hex");
+    const r = await this.peers.send(sid, lane, { to: req.to, agent: req.agent, text: req.question, ask: id });
+    if (!r.ok) return { output: r.error, isError: true };
+    const name = laneName(await this.store.state(sid), lane);
+    // Subscribed before it is logged as asked, so an answer that comes at once isn't missed.
+    const got = this.waitPeer(sid, lane, id, r.held ? 0 : wait, signal);
+    await this.store.append(sid, agentActor(name), { type: "peer.sent", to: { sid: r.sid, title: r.title, lane: r.lane, name: r.name }, text: r.text, held: r.held, ask: id }, { lane });
+    const answer = await got;
+    if (answer !== null) return { output: `${r.name} in "${r.title}" answered:\n\n${answer}` };
+    const stop = await this.store.append(sid, FRIDAY, { type: "peer.unwaited", re: id }, { lane });
+    const before = stop.ok ? stop.seq : Infinity;
+    const late = (await this.store.events(sid)).find((e) => e.body.type === "peer.answer" && e.body.re === id && e.seq < before);
+    if (late?.body.type === "peer.answer") return { output: `${r.name} in "${r.title}" answered:\n\n${late.body.text}` };
+    if (r.held) return { output: `Asked ${r.name} in "${r.title}". The person you work for can't steer that agent, so the question waits there until someone who can lets it through; its answer reaches you as a message then. Carry on with your own work.` };
+    return { output: `${r.name} in "${r.title}" hasn't answered yet. Its answer reaches you as a message when it comes. Carry on with what you can do without it.` };
+  }
+
+  /** The answer to an ask_session (peer.answer with its id) logged in this session, or null once the wait runs out or the run stops. */
+  private waitPeer(sid: string, lane: string, id: string, wait: number, signal?: AbortSignal): Promise<string | null> {
+    return new Promise((resolve) => {
+      let done = false;
+      let unsub: (() => Promise<void>) | null = null;
+      const finish = (v: string | null) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
+        void unsub?.().catch(() => {});
+        resolve(v);
+      };
+      const timer = setTimeout(() => finish(null), wait);
+      timer.unref?.();
+      const onAbort = () => finish(null);
+      if (signal?.aborted || wait <= 0) return finish(null);
+      signal?.addEventListener("abort", onAbort);
+      void this.bus
+        .subscribe(sid, (m) => {
+          if (m.kind !== "event") return;
+          const b = m.event.body;
+          if (b.type === "peer.answer" && b.re === id) finish(b.text);
+          else if ((b.type === "run.cancel" || b.type === "run.pause") && (m.event.lane ?? MAIN_LANE) === lane) finish(null);
+        })
+        .then((u) => {
+          unsub = u;
+          if (done) void u().catch(() => {});
+        })
+        .catch(() => finish(null));
+    });
+  }
+
+  /** A question from the thread named `to` that this agent was handed and hasn't answered yet, newest first. */
+  private async openPeerAsk(sid: string, lane: string, to: string): Promise<PeerNote | null> {
+    const events = await this.store.events(sid);
+    const want = to.trim().replace(/^"|"$/g, "").toLowerCase();
+    const answered = new Set(events.flatMap((e) => (e.body.type === "peer.answer" && (e.lane ?? MAIN_LANE) === lane ? [e.body.re] : [])));
+    const delivered = new Set(events.flatMap((e) => (e.body.type === "instructions.delivered" && (e.lane ?? MAIN_LANE) === lane ? e.body.seqs : [])));
+    const ask = events.findLast((e) => {
+      const p = e.body.type === "instruction" ? e.body.peer : undefined;
+      return !!p?.ask && (e.lane ?? MAIN_LANE) === lane && delivered.has(e.seq) && !answered.has(p.ask) && (p.fromSid.toLowerCase() === want || p.fromTitle.toLowerCase() === want);
+    });
+    return ask?.body.type === "instruction" ? (ask.body.peer ?? null) : null;
+  }
+
+  /**
+   * An answer to another thread's ask_session. Logged in the asking thread as peer.answer, which the agent waiting there is handed;
+   * when it has stopped waiting (its wait ran out, its run ended), it goes to it as a message too, with where it came from. Exactly
+   * one of the two hands it over: the waiter checks for an answer logged before it stopped waiting, and this for a stop logged before
+   * the answer (as deliver does for asks inside a session).
+   */
+  private async answerPeer(sid: string, lane: string, ask: PeerNote, text: string): Promise<boolean> {
+    const said = text.trim().slice(0, MAX_TEXT);
+    if (!ask.ask || !said) return false;
+    const me = await this.store.state(sid).catch(() => null);
+    if (!me || !(await this.store.state(ask.fromSid).catch(() => null))) return false;
+    const from = { sid, title: me.title, lane, name: laneName(me, lane) };
+    const r = await this.store.append(ask.fromSid, agentActor(from.name), { type: "peer.answer", re: ask.ask, from, text: said }, { lane: ask.fromLane });
+    if (!r.ok) return false;
+    const [now, events] = await Promise.all([this.store.state(ask.fromSid), this.store.events(ask.fromSid)]);
+    const asked = events.find((e) => e.body.type === "peer.sent" && e.body.ask === ask.ask);
+    const stopped = events.some((e) => e.body.type === "peer.unwaited" && e.body.re === ask.ask && e.seq < r.seq);
+    const run = runOf(now, ask.fromLane);
+    if (!stopped && !!asked && run.status === "running" && run.sinceSeq <= asked.seq) return true;
+    const note: PeerNote = { fromSid: sid, fromTitle: me.title, fromLane: lane, fromName: from.name, by: { id: me.ownerId, name: me.members[me.ownerId]?.name ?? "" }, re: ask.ask, ...(ask.hop ? { hop: ask.hop + 1 } : {}) };
+    await this.store.append(ask.fromSid, agentActor(from.name), { type: "instruction", text: said, interrupt: false, peer: note }, { lane: ask.fromLane });
+    void this.bus.wake(ask.fromSid, ask.fromLane);
+    return true;
+  }
+
+  /** At the end of a turn, the questions other threads asked it (ask_session) get what it said last as their answer. */
+  private async answerPeerAsks(sid: string, lane: string): Promise<void> {
+    if (!this.peers) return;
+    const events = await this.store.events(sid);
+    const end = events.findLast((e) => e.body.type === "run.ended" && (e.lane ?? MAIN_LANE) === lane);
+    if (end?.body.type !== "run.ended" || end.body.outcome === "waiting") return;
+    const answered = new Set(events.flatMap((e) => (e.body.type === "peer.answer" && (e.lane ?? MAIN_LANE) === lane ? [e.body.re] : [])));
+    for (const e of events) {
+      const p = e.body.type === "instruction" ? e.body.peer : undefined;
+      if (!p?.ask || (e.lane ?? MAIN_LANE) !== lane || answered.has(p.ask) || e.seq > end.seq) continue;
+      const got = events.find((x) => x.body.type === "instructions.delivered" && (x.lane ?? MAIN_LANE) === lane && x.body.seqs.includes(e.seq));
+      if (!got || got.seq > end.seq) continue;
+      const said = answerFrom(events, lane, got.seq, end.seq);
+      const name = laneName(await this.store.state(sid), lane);
+      const text = said || (end.body.outcome === "error" ? `${name} stopped with an error before answering: ${clip(end.body.error ?? "", 400)}` : `${name} finished without saying anything.`);
+      if (!(await this.answerPeer(sid, lane, p, text))) continue;
+      // Said here too, so it is answered once: the next turn's end doesn't send it again.
+      await this.store.append(sid, FRIDAY, { type: "peer.answer", re: p.ask, from: { sid: p.fromSid, title: p.fromTitle, lane: p.fromLane, name: p.fromName }, text: text.slice(0, MAX_TEXT) }, { lane });
+    }
+  }
+
   /** Wait on the bus for the answer to `id`, or the asker's run being stopped. */
   private waitFor(sid: string, from: string, id: string, wait: number, signal?: AbortSignal): Promise<Waited> {
     return new Promise((resolve) => {
@@ -1637,6 +1829,8 @@ export class AgentMesh {
     }
     const url = localPage(args.url);
     if (!url.ok) return { output: url.error.replace("{what}", "opens in the Preview panel"), isError: true };
+    // An agent's own test page and its logs aren't something to show the people (test-page.ts; Arun, 2026-11-18).
+    if (testPage(url.url)) return { output: `${url.url} looks like a test page of your own, so it isn't shown in the Preview panel: open it with the browser tool (it stays out of the people's sight there) or preview_screenshot to read its results, and say what they were. show_preview is for the app itself.`, isError: true };
     const newTab = args.new_tab === true;
     await this.store.append(sid, agentActor(name), { type: "preview.asked", url: url.url, ...(newTab ? { newTab: true } : {}) }, { lane });
     return { output: `Opened ${url.url} in the Preview panel beside the chat${newTab ? ", in a tab of its own" : ""}; the people here can see it now. If it isn't serving yet it shows as soon as it is. Each page you open this way gets its own tab when it is on another server, so you can show several at once.` };
@@ -1825,9 +2019,12 @@ export class AgentMesh {
    * (or to `to`), `retry` opens a stuck or dropped one again, `sendback` returns a finished one to its agent with a note, and
    * `cancel` drops it, so what waited on it goes ahead without it. The agent that had it is told to stop.
    */
-  async control(sid: string, actor: ActorRef, req: { id: string; action: "reassign" | "retry" | "sendback" | "cancel" | "start" | "decline"; to?: string; note?: string }): Promise<{ ok: true } | { ok: false; error: string }> {
+  async control(sid: string, actor: ActorRef, req: { id: string; action: "reassign" | "retry" | "sendback" | "cancel" | "start" | "decline" | "add" | "edit" | "move" | "hold" | "resume" | "done"; to?: string; note?: string; title?: string; detail?: string; at?: number }): Promise<{ ok: true } | { ok: false; error: string }> {
     const state = await this.store.state(sid);
     const b = state.board;
+    // A person steering the board from its Tasks panel (Arun, 2026-11-18: "add more control over this"): add, reword, move, hold,
+    // let go, mark done (boardSteer). Handing on and trying again are below, as before.
+    if (["add", "edit", "move", "hold", "resume", "done"].includes(req.action)) return this.boardSteer(sid, actor, state, req);
     // The proposed team, started as it stands, or turned down (the lead does it itself: the person's message to it is core's).
     if (req.action === "start" || req.action === "decline") {
       if (!b?.proposed) return { ok: false, error: req.action === "start" ? "That team has already started." : "That team has already started: stop its tasks instead." };
@@ -1881,6 +2078,82 @@ export class AgentMesh {
       await this.afterBoardMove(sid);
       return { ok: false, error: why };
     }
+    await this.afterBoardMove(sid);
+    return { ok: true };
+  }
+
+  /**
+   * The board's own controls, for a person: put a task on it (a board is started for one when there is none, led by the session's
+   * lead), reword one, move one in the line (what is ready goes out in the board's order), hold one back or the whole board and
+   * let it go again, and mark one done. A task held or marked done while an agent has it is taken off that agent first, its work
+   * left as it is.
+   */
+  private async boardSteer(sid: string, actor: ActorRef, state: SessionState, req: { id: string; action: string; to?: string; title?: string; detail?: string; at?: number }): Promise<{ ok: true } | { ok: false; error: string }> {
+    const b = state.board;
+    if (b?.proposed && req.action !== "edit" && req.action !== "add" && req.action !== "move") return { ok: false, error: "Start the team first: its tasks aren't handed out yet." };
+    const from = b?.fromLane ?? state.lead ?? MAIN_LANE;
+    if (req.action === "add") {
+      const title = (req.title ?? "").trim();
+      if (!title) return { ok: false, error: "Give the task a name." };
+      const taken = new Set((b?.tasks ?? []).map((t) => t.id));
+      let n = (b?.tasks.length ?? 0) + 1;
+      while (taken.has(`t${n}`)) n++;
+      const id = `t${n}`;
+      const to = req.to ? lanesOf(state).find((l) => l === req.to || laneName(state, l).toLowerCase() === req.to!.toLowerCase()) : undefined;
+      if (req.to && !to) return { ok: false, error: `There's no agent called ${req.to} here.` };
+      await this.store.append(sid, actor, { type: "board.added", task: { id, title: title.slice(0, 200), detail: (req.detail ?? "").trim().slice(0, 4000), owns: [], after: [] }, fromName: laneName(state, from) }, { lane: from });
+      if (to) await this.store.append(sid, actor, { type: "board.released", id, why: "assigned", to: laneName(state, to) }, { lane: from });
+      this.live.add(sid);
+      await this.dispatch(sid);
+      await this.afterBoardMove(sid);
+      return { ok: true };
+    }
+    if (!b) return { ok: false, error: "There's no task board here yet." };
+    // The whole board: held, nothing more goes out; let go, what is ready goes out.
+    if (!req.id && (req.action === "hold" || req.action === "resume")) {
+      await this.store.append(sid, actor, { type: "board.held", on: req.action === "hold" }, { lane: from });
+      if (req.action === "resume") {
+        this.live.add(sid);
+        await this.dispatch(sid);
+      }
+      await this.afterBoardMove(sid);
+      return { ok: true };
+    }
+    const t = b.tasks.find((x) => x.id === req.id);
+    if (!t) return { ok: false, error: "That task isn't on the board any more." };
+    const finished = t.status === "done" || t.status === "cancelled";
+    const holder = t.status === "claimed" ? t.lane : t.status === "review" ? (t.reviewer?.lane ?? t.lane) : undefined;
+    const takeOff = async (why: string) => {
+      if (!holder) return;
+      await this.send(sid, from, { to: laneName(state, holder), toLane: holder, text: `${actor.name} ${why} the board task "${t.title}". Stop working on it and leave its files as they are; don't call finish_task for it.`, kind: "tell", system: true }).catch(() => undefined);
+    };
+    if (req.action === "edit") {
+      const title = req.title?.trim();
+      if (req.title !== undefined && !title) return { ok: false, error: "A task needs a name." };
+      await this.store.append(sid, actor, { type: "board.edited", id: t.id, ...(title ? { title: title.slice(0, 200) } : {}), ...(req.detail !== undefined ? { detail: req.detail.trim().slice(0, 4000) } : {}) }, { lane: from });
+      // Its agent hears the new words, so it works to them.
+      if (holder) await this.send(sid, from, { to: laneName(state, holder), toLane: holder, text: `${actor.name} changed the board task "${t.title}"${title && title !== t.title ? `, now "${title}"` : ""}:
+${(req.detail ?? t.detail).trim() || title || t.title}
+
+Work to this from here.`, kind: "tell", system: true }).catch(() => undefined);
+    } else if (req.action === "move") {
+      if (typeof req.at !== "number") return { ok: false, error: "Where to?" };
+      await this.store.append(sid, actor, { type: "board.moved", id: t.id, to: Math.max(0, Math.min(b.tasks.length - 1, req.at)) }, { lane: from });
+    } else if (req.action === "hold" || req.action === "resume") {
+      if (finished) return { ok: false, error: "It's already finished." };
+      if (req.action === "hold") {
+        if (t.held) return { ok: true };
+        await takeOff("held back");
+        if (holder) await this.store.append(sid, actor, { type: "board.released", id: t.id, why: "held back" }, { lane: from });
+      } else if (!t.held) return { ok: true };
+      await this.store.append(sid, actor, { type: "board.held", id: t.id, on: req.action === "hold" }, { lane: from });
+    } else {
+      if (t.status === "done") return { ok: false, error: "It's already done." };
+      await takeOff("marked done");
+      await this.store.append(sid, actor, { type: "board.done", id: t.id, by: actor.name }, { lane: from });
+    }
+    this.live.add(sid);
+    await this.dispatch(sid);
     await this.afterBoardMove(sid);
     return { ok: true };
   }
@@ -2029,10 +2302,12 @@ export class AgentMesh {
     const state = await this.store.state(sid);
     const b = state.board;
     if (!b || !boardBusy(state)) return;
+    // Held by a person: waiting is what they asked for, not the board being stuck.
+    if (b.held) return;
     if (b.tasks.some((t) => t.status === "claimed" || t.status === "review")) return;
     if (readyTasks(state).length) return;
     const stuck = b.tasks.filter((t) => t.status === "blocked" || t.status === "cancelled");
-    const waiting = b.tasks.filter((t) => t.status === "open");
+    const waiting = b.tasks.filter((t) => t.status === "open" && !t.held);
     if (!waiting.length) return;
     const key = `${sid}|wedged|${b.seq}|${waiting.map((t) => t.id).join(",")}|${stuck.map((t) => t.id).join(",")}`;
     if (this.quietTold.has(key)) return;
@@ -2582,6 +2857,7 @@ export class AgentMesh {
     if (this.teamSwitch && (await this.teamSwitch(sid, lane).catch(() => false))) return void (await this.dispatch(sid).catch(said("[board] dispatch:")));
     await this.boardRunEnded(sid, lane).catch(said("[board]"));
     await this.answerAsks(sid, lane);
+    await this.answerPeerAsks(sid, lane).catch(said("[peers] answer:"));
     // Whoever waited on this agent's turn is woken; and a turn that itself ended waiting gets its wake (wake_me_when).
     await this.wakeOnTurn(sid, lane).catch(said("[wake]"));
     await this.autoWake(sid, lane).catch(said("[wake]"));
@@ -2891,6 +3167,9 @@ function suits(t: BoardTask, name: string): boolean {
 function boardLine(t: BoardTask | undefined): string {
   if (!t) return "there is no such task.";
   if (t.checks?.running) return `checks running (${t.checks.command})`;
+  // A person's own hand on it (board.held, board.done): said, so no agent takes it or redoes it.
+  if (t.held && t.status === "open") return "held back by a person: leave it until they let it go";
+  if (t.status === "done" && t.doneBy) return `marked done by ${t.doneBy}`;
   return { open: "open, waiting on what it depends on", claimed: `being done by ${t.name}`, review: `in review${t.reviewer ? ` by ${t.reviewer.name}` : ""}`, done: `done by ${t.name}`, blocked: `blocked (${t.name})`, cancelled: "dropped" }[t.status];
 }
 

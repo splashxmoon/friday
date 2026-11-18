@@ -276,3 +276,55 @@ export function rehypeFileChips() {
     walk(tree);
   };
 }
+
+/**
+ * A picture's path written in the answer's words, not in backticks ("Saved the screenshot to docs/shot.png."): a path or a name
+ * ending in a picture's extension, standing on its own between spaces or punctuation. Whole paths too (/Users/…/shot.png,
+ * ~/shots/a.png, C:\shots\a.png), which a path in backticks isn't taken as (pathOf is for places in the repository).
+ */
+export const PICTURE_PATH = /(^|[\s("'“‘])((?:~|[A-Za-z]:)?[\\/]?(?:[\w@+%.-]+[\\/])*[\w@+%.-]*[\w-]\.(?:png|jpe?g|gif|webp|svg|avif))(?=$|[\s.,;:!?)"'”’])/gi;
+
+/** A whole path on a computer to a picture: one MediaChip shows from there, as a path in the folders is shown. */
+export const pictureAbs = (s: string): boolean => /^(\/|~\/|[A-Za-z]:[\\/]|file:\/\/)/.test(s) && /\.(png|jpe?g|gif|webp|svg|avif)$/i.test(s) && !/\s/.test(s);
+
+/**
+ * After the hardener: each picture path in the words made inline code naming it, which the answer draws as the picture under its
+ * name (AnswerParts MediaChip), marked `quiet` so a name that only mentions a picture that isn't there stays a name. Never inside a
+ * link, code or a heading's anchor. The one mark of punctuation straight after it goes with it (`after`), as after a picture named in
+ * backticks (mediaText): the picture closes the sentence, and a full stop under it opened a line of its own. Said again if no picture shows.
+ */
+export function rehypePicturePaths() {
+  return (tree: Node) => {
+    const walk = (n: Node) => {
+      const kids = n.children ?? [];
+      for (let i = 0; i < kids.length; i++) {
+        const c = kids[i]!;
+        if (c.type === "element") {
+          // A picture named in backticks closes its sentence too: the punctuation after it goes, as in the words below.
+          const next = kids[i + 1];
+          if (c.tagName === "code" && next?.type === "text" && /\.(png|jpe?g|gif|webp|svg|avif)$/i.test(textOf(c).trim()) && /^[.,;:](?=\s|$)/.test(next.value ?? "")) next.value = next.value!.slice(1);
+          if (!["a", "code", "pre", "button", "svg"].includes(c.tagName ?? "")) walk(c);
+          continue;
+        }
+        if (c.type !== "text" || !c.value || !/\.(png|jpe?g|gif|webp|svg|avif)\b/i.test(c.value)) continue;
+        const parts: Node[] = [];
+        let last = 0;
+        for (const m of c.value.matchAll(PICTURE_PATH)) {
+          const at = m.index! + m[1]!.length;
+          const path = m[2]!;
+          // A web address's tail ("example.com/a.png") is the link's, and "e.g.png" is no file.
+          if (/^[\w-]+\.(com|org|net|io|dev|ai|app|co)[\\/]/i.test(path) || path.split(/[\\/]/).some((p) => p === "..")) continue;
+          if (at > last) parts.push({ type: "text", value: c.value.slice(last, at) });
+          const after = /^[.,;:](?=\s|$)/.exec(c.value.slice(at + path.length))?.[0] ?? "";
+          parts.push({ type: "element", tagName: "code", properties: { dataPicture: "quiet", ...(after ? { dataAfter: after } : {}) }, children: [{ type: "text", value: path }] });
+          last = at + path.length + after.length;
+        }
+        if (!parts.length) continue;
+        if (last < c.value.length) parts.push({ type: "text", value: c.value.slice(last) });
+        kids.splice(i, 1, ...parts);
+        i += parts.length - 1;
+      }
+    };
+    walk(tree);
+  };
+}

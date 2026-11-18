@@ -106,8 +106,16 @@ export function Tooltips() {
       current = null;
       setTip(null);
     };
+    // After a press, no tip until the pointer really moves: what the press changed (a card answered and gone, a row redrawn)
+    // slid another control under a pointer that stayed put, and its tip went up and stayed there (Arun, 2026-11-18: "after
+    // approval there is like a tool tip that stays there on the right side for some bit").
+    let still: { x: number; y: number } | null = null;
+    const moved = (e: PointerEvent) => {
+      if (still && Math.hypot(e.clientX - still.x, e.clientY - still.y) > 4) still = null;
+    };
     const over = (e: PointerEvent) => {
       if (e.pointerType === "touch") return;
+      if (still) return;
       const el = targetOf(e);
       if (el === current) return;
       window.clearTimeout(timer);
@@ -145,9 +153,21 @@ export function Tooltips() {
       addEventListener("pointerup", back, true);
       addEventListener("pointercancel", back, true);
     };
+    const pressed = (e: PointerEvent) => {
+      still = { x: e.clientX, y: e.clientY };
+      hide();
+    };
+    // A tip whose control went (answered, folded away) or moved goes with it, whether or not the pointer moves.
+    const watch = window.setInterval(() => {
+      if (!current) return;
+      if (!current.isConnected) return hide();
+      const r = current.getBoundingClientRect();
+      if (`${Math.round(r.left)},${Math.round(r.top)}` !== at || (!r.width && !r.height)) hide();
+    }, 200);
     document.addEventListener("pointerover", over);
+    document.addEventListener("pointermove", moved, { passive: true });
     document.addEventListener("pointerdown", grip, true);
-    document.addEventListener("pointerdown", hide, true);
+    document.addEventListener("pointerdown", pressed, true);
     document.addEventListener("focusin", focus);
     document.addEventListener("focusout", hide);
     document.addEventListener("keydown", hide, true);
@@ -160,9 +180,11 @@ export function Tooltips() {
     window.addEventListener("blur", hide);
     return () => {
       window.clearTimeout(timer);
+      window.clearInterval(watch);
       document.removeEventListener("pointerover", over);
+      document.removeEventListener("pointermove", moved);
       document.removeEventListener("pointerdown", grip, true);
-      document.removeEventListener("pointerdown", hide, true);
+      document.removeEventListener("pointerdown", pressed, true);
       document.removeEventListener("focusin", focus);
       document.removeEventListener("focusout", hide);
       document.removeEventListener("keydown", hide, true);

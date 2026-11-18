@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { doingNow } from "../activity-line.js";
 import { MAIN_LANE, type AgentTaskStatus, type Member, type SessionEvent } from "../types.js";
 import { driverOf, runOf, type SessionState } from "../session/projection.js";
@@ -129,6 +129,8 @@ interface Item {
   open?: () => void;
   /** Stop it, when it is running and this person may. */
   stop?: () => void;
+  /** What its stop does, when that isn't plain "Stop". */
+  stopTip?: string;
   /** The text a copy button puts on the clipboard. */
   copy?: string;
   /** Why it failed, in its own last words: the line under a failed command, so it can be read without opening it. */
@@ -221,7 +223,14 @@ export function TasksPanel({
   onStopPreview,
   background = [],
   onStopBackground,
+  onStopCommand,
+  top,
+  hasTop,
 }: {
+  /** The team's tasks, over what is running (TaskBoard.tsx). */
+  top?: ReactNode;
+  /** It has tasks on it: the empty tray's large "Nothing running" gives way to it. */
+  hasTop?: boolean;
   state: SessionState;
   events: SessionEvent[];
   onTab: (t: "tree" | "files" | "terminal" | "preview") => void;
@@ -236,6 +245,8 @@ export function TasksPanel({
   /** What the agent left running on the machine, and the way to stop one. */
   background?: BackgroundTask[];
   onStopBackground?: (id: string) => void;
+  /** Stop one command an agent is running on this computer (the runner's command.stop), leaving the agent at work. */
+  onStopCommand?: (lane: string, command: string) => void;
 }) {
   const [cleared, setCleared] = useState<Set<string>>(new Set());
   const [copied, setCopied] = useState("");
@@ -252,6 +263,8 @@ export function TasksPanel({
     return () => clearInterval(t);
   }, [anyRunning]);
   const mayStop = (lane: string) => !!me && !!send && (me.role === "owner" || driverOf(state, lane)?.id === me.id);
+  // A command is stopped on the computer it runs on: this one's, by whoever may stop its agent.
+  const mayStopCommand = (lane: string) => !!onStopCommand && mayStop(lane) && state.engines[lane]?.hostId === me?.id;
 
   // When each run last changed, taken from the event it started at — the same
   // clock the feed uses, so the two never disagree by a few seconds.
@@ -332,6 +345,8 @@ export function TasksPanel({
       status: c.output === undefined ? "running" : c.isError ? "error" : "done",
       sub: `${crewWho(c.lane) ? c.by.replace(/^[^']+'s /, "") : c.by}${ago(c.ts)}${c.output === undefined ? ` · ${duration(now - c.ts)}` : c.endTs && c.endTs - c.ts >= 1000 ? ` · took ${duration(c.endTs - c.ts)}` : ""}`,
       copy: c.command,
+      // Still running, on this computer: it can be stopped on its own, the agent carrying on (Arun, 2026-11-18: "be able to stop any task").
+      ...(c.output === undefined && mayStopCommand(c.lane) ? { stop: () => onStopCommand!(c.lane, c.command) } : {}),
       // What it printed opens under the card; there is nowhere else to go to read it.
       ...(c.output !== undefined ? { output: c.output.trim() ? c.output.slice(-20_000) : "(no output)" } : {}),
     }));
@@ -388,6 +403,9 @@ export function TasksPanel({
         status,
         sub: `${kind} of ${t.by}${type}${status === "running" ? "" : ` · ${look.label}`}${took}`,
         ...(t.summary ? { output: t.summary } : {}),
+        // A background command stops on its own; a subagent can't be stopped apart from the task that started it, so its stop is
+        // its agent's (Arun, 2026-11-18: "be able to stop any task").
+        ...(status === "running" ? (command ? (mayStopCommand(t.lane) ? { stop: () => onStopCommand!(t.lane, t.description) } : {}) : mayStop(t.lane) ? { stop: () => void send!({ type: "run.cancel", ...(t.lane !== MAIN_LANE ? { lane: t.lane } : {}) }), stopTip: `Stop ${t.by}'s task: its subagents stop with it` } : {}) : {}),
       };
     });
   const items = [...dev, ...bg, ...lanes, ...subs, ...commands].filter((i) => !cleared.has(i.id));
@@ -459,7 +477,7 @@ export function TasksPanel({
         )}
         {i.stop && (
           // A square, as a stop button is everywhere (Arun, 2026-10-21: "make the stop text into the stop button svg icon").
-          <button type="button" className="task-stop" title="Stop" aria-label={`Stop ${i.name}`} onClick={i.stop}>
+          <button type="button" className="task-stop" title={i.stopTip ?? "Stop"} aria-label={i.stopTip ?? `Stop ${i.name}`} onClick={i.stop}>
             <svg viewBox="0 0 10 10" width="9" height="9" aria-hidden="true">
               <rect width="10" height="10" rx="2" fill="currentColor" />
             </svg>
@@ -491,6 +509,7 @@ export function TasksPanel({
       {/* Wide (the panel extended or full screen), what is running and what finished sit side by side (style.css,
           @container tasks) instead of stretching edge to edge; narrow, one under the other as before. */}
       <div className="tasks-wrap">
+        {top}
         {items.length > 0 && <div className="tasks-head">
           <span className="muted small">
             {running.length ? `${running.length} running` : "Nothing running"} · {finished.length} finished{failed ? ` · ${failed} failed` : ""}
@@ -502,7 +521,7 @@ export function TasksPanel({
           )}
         </div>}
 
-        {items.length === 0 ? (
+        {items.length === 0 && hasTop ? null : items.length === 0 ? (
           // Nothing yet (Arun, 2026-11-16: "better empty state please"): what will show here, and the one way to start it, laid out as
           // the Pull request panel's own empty state is (PrPanel.tsx), centred in the panel, with no "Nothing running · 0 finished" over it.
           <div className="tasks-empty">

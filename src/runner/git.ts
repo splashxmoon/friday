@@ -456,8 +456,15 @@ export async function addWorktree(cwd: string, name?: string, carry = false, on?
         } } : {}) };
 }
 
-/** A spare copy's branch, until a lane takes it and it is renamed for that lane. */
+/**
+ * A spare copy is detached until a lane takes it and makes its branch. It had a branch of its own (friday/spare-…), which the
+ * agents in the folder found in `git branch` and took for somebody's work (benchmarks, 2026-11-17). Only a runner from before
+ * that leaves one, and the sweep still clears those.
+ */
 const SPARE_BRANCH = "friday/spare-";
+/** The mark in a spare's own git folder (.git/worktrees/<name>), so the sweep knows a detached copy is a spare and nobody's work. */
+const SPARE_MARK = "friday-spare";
+const spareMark = async (dir: string): Promise<string> => path.join((await git(dir, ["rev-parse", "--absolute-git-dir"])).trim(), SPARE_MARK);
 /** How long a spare waits for a lane before it goes. */
 export const SPARE_IDLE_MS = 30 * 60_000;
 /** How long an attach waits for a spare still being made before it makes its own copy. */
@@ -502,7 +509,8 @@ function topUpSpares(root: string): Promise<void> {
     const id = randomUUID().slice(0, 8);
     const s: Spare = { id, dir: path.join(worktreeRoot(), `${slug(path.basename(root)) || "repo"}-${id}`), head: "" };
     s.head = (await git(root, ["rev-parse", "HEAD"])).trim();
-    await worktreeAdd(root, ["-q", "-b", `${SPARE_BRANCH}${id}`, s.dir, s.head]);
+    await worktreeAdd(root, ["-q", "--detach", s.dir, s.head]);
+    await writeFile(await spareMark(s.dir), "");
     if (epoch !== spareEpoch) return dropSpare(root, s);
     s.timer = setTimeout(() => {
       const list = spares.get(root) ?? [];
@@ -535,9 +543,11 @@ async function takeSpare(root: string, own: string): Promise<{ id: string; dir: 
   if (!s) return null;
   clearTimeout(s.timer);
   try {
-    const [head] = await Promise.all([git(root, ["rev-parse", "HEAD"]).then((o) => o.trim()), git(s.dir, ["branch", "-m", `friday/${own}-${s.id}`])]);
+    const [head, mark] = await Promise.all([git(root, ["rev-parse", "HEAD"]).then((o) => o.trim()), spareMark(s.dir)]);
     // Nothing is in a spare to lose: it was made clean and nobody has had it since.
     if (head !== s.head) await git(s.dir, ["reset", "-q", "--hard", head]);
+    await git(s.dir, ["checkout", "-q", "-b", `friday/${own}-${s.id}`]);
+    await rm(mark, { force: true });
     return s;
   } catch {
     void dropWorktree(s.dir, true).catch(() => {});
@@ -548,7 +558,6 @@ async function takeSpare(root: string, own: string): Promise<{ id: string; dir: 
 async function dropSpare(root: string, s: Spare): Promise<void> {
   clearTimeout(s.timer);
   await dropWorktree(s.dir, true).catch(() => false);
-  await git(root, ["branch", "-D", `${SPARE_BRANCH}${s.id}`]).catch(() => {});
 }
 
 /** Every spare copy goes, and any still being made goes once it is: when nothing on this machine is attached any more. */
@@ -790,10 +799,12 @@ export async function sweepWorktrees(olderThanMs = 3 * 24 * 60 * 60_000, inUse: 
     // A spare left by a runner that quit (or crashed) before it could take it away: past its idle limit and in no pool here.
     if (age >= SPARE_IDLE_MS && age < olderThanMs && ![...spares.values()].flat().some((s) => path.resolve(s.dir) === dir)) {
       const branch = (await git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]).catch(() => "")).trim();
-      const common = branch.startsWith(SPARE_BRANCH) ? (await git(dir, ["rev-parse", "--path-format=absolute", "--git-common-dir"]).catch(() => "")).trim() : "";
-      if (common && (await dropWorktree(dir, true).catch(() => false))) {
+      const marked = branch === "HEAD" && (await spareMark(dir).then((m) => access(m)).then(() => true, () => false));
+      const old = branch.startsWith(SPARE_BRANCH);
+      const common = old ? (await git(dir, ["rev-parse", "--path-format=absolute", "--git-common-dir"]).catch(() => "")).trim() : "";
+      if ((marked || common) && (await dropWorktree(dir, true).catch(() => false))) {
         gone++;
-        await git(common, ["--git-dir", common, "branch", "-D", branch]).catch(() => {});
+        if (common) await git(common, ["--git-dir", common, "branch", "-D", branch]).catch(() => {});
       }
       continue;
     }

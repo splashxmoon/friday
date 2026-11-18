@@ -1,0 +1,129 @@
+/* The team's tasks from the header (TeamTasks.tsx; Arun, 2026-11-18). The pill sits with the header's other buttons, the same
+   height as the thread card's faces button; its card under it, the app's popover. */
+.tt2-pill { position: relative; display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 10px 0 7px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--panel); color: var(--ink-2); font: 500 12px var(--font); white-space: nowrap; cursor: pointer; }
+.tt2-pill:hover, .tt2-pill:focus-visible, .tt2-pill.on { background: var(--hover); color: var(--ink); outline: none; }
+.tt2-pill-name { color: var(--ink); }
+.tt2-pill-n { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.tt2-pill-dot { position: absolute; top: -3px; right: -3px; width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 0 2px var(--bg, var(--panel)); }
+.tt2-pill-dot.is-warn { background: var(--amber); }
+.tt2-pill-dot.is-bad { background: var(--red); }
+
+.tt2-ring { flex: none; }
+.tt2-ring circle { fill: none; stroke-width: 2.2; }
+.tt2-ring-bg { stroke: color-mix(in srgb, var(--ink) 14%, transparent); }
+.tt2-ring-fg { stroke: var(--green); stroke-linecap: round; transition: stroke-dasharray .35s ease; }
+.tt2-ring.is-work .tt2-ring-fg { stroke: var(--live); }
+.tt2-ring.is-warn .tt2-ring-fg { stroke: var(--amber); }
+.tt2-ring.is-bad .tt2-ring-fg { stroke: var(--red); }
+
+.tt2-card { width: 380px; max-width: calc(100vw - 24px); padding: 0 !important; border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: var(--panel); box-shadow: var(--shadow-pop); overflow: hidden; }
+.tt2-head { display: flex; align-items: baseline; gap: 8px; padding: 12px 14px 8px; font-size: 13px; }
+.tt2-head b { color: var(--ink); font-weight: 600; }
+.tt2-head span { margin-left: auto; color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.tt2-bar { height: 3px; margin: 0 14px 6px; border-radius: 2px; background: color-mix(in srgb, var(--ink) 9%, transparent); overflow: hidden; }
+.tt2-bar i { display: block; height: 100%; border-radius: 2px; background: var(--green); transition: width .35s ease; }
+
+.tt2-list { max-height: min(60vh, 440px); overflow-y: auto; padding: 2px 6px 8px; }
+.tt2-group + .tt2-group { margin-top: 6px; }
+.tt2-group h4 { display: flex; align-items: center; gap: 6px; margin: 0; padding: 8px 8px 4px; color: var(--text-muted); font: 600 11px var(--font); letter-spacing: .02em; text-transform: uppercase; }
+.tt2-group h4 span { font-weight: 500; font-variant-numeric: tabular-nums; }
+.tt2-group ul { margin: 0; padding: 0; list-style: none; }
+.tt2-row { display: flex; align-items: flex-start; gap: 2px; border-radius: var(--r-md); }
+.tt2-row:hover { background: var(--hover); }
+.tt2-main { flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 10px; padding: 7px 8px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.tt2-main:disabled { cursor: default; }
+.tt2-main:focus-visible { outline: none; box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--ink) 25%, transparent); border-radius: var(--r-md); }
+.tt2-text { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.tt2-title { color: var(--ink); font-size: 13px; line-height: 18px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.is-done .tt2-title { color: var(--ink-2); }
+.tt2-meta { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--text-muted); font-size: 12px; line-height: 16px; }
+.tt2-who { display: inline-flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tt2-who + .tt2-note::before { content: "·"; margin-right: 6px; color: var(--text-muted); }
+.tt2-note { white-space: nowrap; }
+.tt2-note.is-warn { color: var(--amber); }
+.tt2-note.is-bad { color: var(--red); }
+.tt2-act { flex: none; padding: 4px 4px 0 0; }
+
+/* Where each task stands, in one 14px mark: a turning ring while it is worked on, a hollow one while it waits, a tick when done. */
+.tt2-glyph { position: relative; box-sizing: border-box; flex: none; width: 16px; height: 16px; margin-top: 2px; border-radius: 50%; border: 1.6px solid color-mix(in srgb, var(--ink) 28%, transparent); }
+.tt2-glyph.is-work { border-color: color-mix(in srgb, var(--live) 30%, transparent); border-top-color: var(--live); animation: tt2-turn .9s linear infinite; }
+.tt2-glyph.is-warn { border-color: var(--amber); background: color-mix(in srgb, var(--amber) 22%, transparent); }
+.tt2-glyph.is-bad { border-color: var(--red); background: color-mix(in srgb, var(--red) 22%, transparent); }
+.tt2-glyph.is-done { border-color: var(--green); background: var(--green); }
+/* Its tick white and bolder, drawn from the circle's centre (Arun, 2026-11-18: "make the checkmarks more visible and centered"): on
+   the panel's colour it was a faint mark set off to one side. */
+.tt2-glyph.is-done::after { content: ""; position: absolute; left: 50%; top: 50%; width: 3.6px; height: 7px; border: solid #fff; border-width: 0 2px 2px 0; border-radius: 0 0 1px 0; transform: translate(-50%, -62%) rotate(45deg); }
+.tt2-glyph.is-dropped { border-style: dashed; }
+@keyframes tt2-turn { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .tt2-glyph.is-work { animation: none; border-color: var(--live); } }
+
+.tt2-stuck { display: flex; align-items: center; gap: 8px; margin: 0 8px 8px; padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--red) 9%, transparent); font-size: 12px; color: var(--ink-2); }
+.tt2-stuck > span { flex: 1; color: var(--red); font-weight: 600; }
+.tt2-stuck button { padding: 4px 10px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--panel); color: var(--ink); font: 500 12px var(--font); cursor: pointer; }
+.tt2-stuck button:hover { background: var(--hover); }
+.tt2-stuck button.quiet { border-color: transparent; background: transparent; color: var(--ink-2); }
+
+/* On glass, both float over the chat: the tasks card and the docked proposed team. The shared float (74%) and the page's panel
+   (55%, no blur of its own) let the messages behind read through their rows; these are frosted firmer, the desktop's colour
+   still faintly there but no word behind them legible, and solid where the system asks for less transparency (Arun,
+   2026-11-18: "ensure the team tasks thing isnt transparent and is not too opaque"). The selectors outweigh style.css's
+   floating-surface rule. */
+html.glass.dark { --tt2-float: rgb(32 32 36 / .9); }
+html.glass:not(.dark) { --tt2-float: rgb(255 255 255 / .9); }
+@media (prefers-reduced-transparency: reduce) {
+  html.glass.dark { --tt2-float: #232327; }
+  html.glass:not(.dark) { --tt2-float: #ffffff; }
+}
+html.glass body .popper-layer [data-radix-popper-content-wrapper] > [role="dialog"].tt2-card,
+html.glass body .proposed-dock .team-card {
+  background: var(--tt2-float) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(1.6);
+  backdrop-filter: blur(28px) saturate(1.6);
+  border-color: var(--glass-edge) !important;
+}
+
+/* A proposed team, docked over the message box until it is started (Activity.tsx; Arun, 2026-11-18). */
+.proposed-dock .team-card { max-width: none; box-shadow: 0 6px 20px rgb(0 0 0 / .14); animation: tt2-rise .22s ease-out; }
+.proposed-dock .team-rows { max-height: 220px; overflow-y: auto; }
+@keyframes tt2-rise { from { opacity: 0; transform: translateY(6px); } }
+@media (prefers-reduced-motion: reduce) { .proposed-dock .team-card { animation: none; } }
+
+/* The team's tasks at the top of the side panel's Tasks tab (TaskBoard.tsx; Arun, 2026-11-18: moved from the header, with its
+   controls). The rows and marks are the header card's (tt2-), on the panel's own surface. */
+.tb { margin: 0 0 14px; padding: 4px 0 8px; border-bottom: 1px solid var(--border); }
+.tb-head { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 0 6px 6px; font-size: 13px; }
+.tb-head b { color: var(--ink); font-weight: 600; }
+.tb-count { color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tb-gap { flex: 1; }
+.tb-head .rsp-text-btn { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.tb .tt2-bar { margin: 0 6px 8px; }
+.tb-held { margin: 0 6px 8px; padding: 7px 10px; border-radius: var(--r-md); background: color-mix(in srgb, var(--amber) 12%, transparent); color: var(--ink-2); font-size: 12px; line-height: 17px; }
+.tb-empty { margin: 0 6px 4px; color: var(--text-muted); font-size: 12px; line-height: 17px; }
+.tb-list { padding: 0; }
+.tb .tt2-group h4 { padding: 8px 6px 4px; }
+.tb-fold { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
+.tb-fold span { font-weight: 500; }
+.tb-acts { display: inline-flex; align-items: center; gap: 0; flex: none; padding: 4px 4px 0 0; opacity: 0; transition: opacity .12s; }
+.tt2-row:hover .tb-acts, .tt2-row:focus-within .tb-acts, .tb-acts:has([aria-expanded="true"]) { opacity: 1; }
+@media (hover: none) { .tb-acts { opacity: 1; } }
+.tb-acts .icon-btn:disabled { opacity: .3; cursor: default; }
+.tt2-glyph.is-held { border-color: var(--amber); border-style: dashed; }
+.tt2-note.is-held { color: var(--amber); }
+.tt2-row.is-held .tt2-title { color: var(--ink-2); }
+.tb-adding { margin: 0 0 8px; }
+.tb-form { display: flex; flex-direction: column; gap: 6px; width: 100%; padding: 8px; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--panel); }
+.tb-editing { padding: 2px 0; }
+.tb-editing:hover { background: none; }
+.tb-input { width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--r-sm, 6px); background: var(--bg); color: var(--ink); font: 13px/18px var(--font); outline: none; }
+.tb-input:focus { border-color: var(--border-strong); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ink) 10%, transparent); }
+.tb-detail { resize: vertical; min-height: 38px; font-size: 12px; line-height: 17px; }
+.tb-form-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tb-form-gap { flex: 1; }
+.tb-for { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 12px; }
+.tb-for select { max-width: 160px; height: 26px; padding: 0 6px; border: 1px solid var(--border); border-radius: var(--r-sm, 6px); background: var(--bg); color: var(--ink); font: 12px var(--font); }
+/* The team's tasks done of all, on the Tasks tab (Workbench): the count the header pill used to carry. */
+.bench-tab-n { margin-left: 2px; padding: 0 5px; border-radius: 999px; background: color-mix(in srgb, var(--ink) 9%, transparent); color: var(--ink-2); font: 500 11px/16px var(--font); font-style: normal; font-variant-numeric: tabular-nums; }
+/* "For": the app's own menu, not the system's (Arun, 2026-11-18: "also no native controls"). */
+.tb-for-btn { display: inline-flex; align-items: center; gap: 6px; height: 26px; max-width: 180px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--r-sm, 6px); background: var(--bg); color: var(--ink); font: 12px var(--font); cursor: pointer; }
+.tb-for-btn:hover, .tb-for-btn[aria-expanded="true"] { background: var(--hover); }
+.tb-for-btn > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

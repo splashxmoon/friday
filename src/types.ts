@@ -698,6 +698,10 @@ export interface PeerNote {
   approvedBy?: string;
   /** How many agent-to-agent steps led to it, counted across sessions: the turn it starts goes on from there (agent-mesh behindRun). */
   hop?: number;
+  /** A question from another thread's agent (ask_session), by its id: what this agent says at the end of its turn goes back as the answer. */
+  ask?: string;
+  /** The answer to this agent's own ask_session, by the ask's id. */
+  re?: string;
 }
 
 /**
@@ -991,6 +995,17 @@ export type EventBody =
   | { type: "board.released"; id: string; why: string; /** Who it should go to next, when a person picked. */ to?: string; /** The agent that turned it down: not offered to it again. */ declined?: string }
   | { type: "board.cancelled"; id: string }
   /**
+   * A person steering the board from its Tasks panel (Arun, 2026-11-18: "add more control over this"): a task they put on it
+   * (`board.added`; it starts a board when there is none), one reworded, one moved in the line (`to`: its place among all the
+   * board's tasks, the first handed out first), one held back or let go (`board.held`, the whole board without an `id`), and one
+   * marked done by them.
+   */
+  | { type: "board.added"; task: BoardTaskDef; fromName: string }
+  | { type: "board.edited"; id: string; title?: string; detail?: string }
+  | { type: "board.moved"; id: string; to: number }
+  | { type: "board.held"; id?: string; on: boolean }
+  | { type: "board.done"; id: string; by: string }
+  /**
    * Proof of work (team-proof.ts): a teammate's own review of what it did, checked and is unsure of, with the page it touched
    * (post_proof), for the board task `id` or its run; and the picture of that page its runner took (`proof`: that post's seq).
    */
@@ -1171,6 +1186,8 @@ export type EventBody =
       output: string;
       isError: boolean;
       interrupted?: boolean;
+      /** Pictures the step gave back (a screenshot, an image it read), as files on its computer: never their bytes (runner/tool-pictures.ts). */
+      pictures?: string[];
     }
   /**
    * A decision the agent needs from a person. Options are separate from the
@@ -1363,7 +1380,11 @@ export type EventBody =
   | { type: "team.budget"; name: string; lane: string; why: "quiet" | "hours" | "tokens" | "usd" | "plan"; until: number | null; text: string }
   /** The agent on this lane has read the team updates up to `upTo`: it checked (check_messages) or a turn carried them to it. */
   | { type: "mesh.read"; upTo: number }
-  | { type: "peer.sent"; to: { sid: string; title: string; lane: string; name: string }; text: string; held: boolean }
+  | { type: "peer.sent"; to: { sid: string; title: string; lane: string; name: string }; text: string; held: boolean; /** Sent as a question its agent waits on (ask_session), by the ask's id. */ ask?: string }
+  /** The answer to an ask_session from this thread, logged here as it comes: the waiting agent is handed it, or it goes as a message. */
+  | { type: "peer.answer"; re: string; from: { sid: string; title: string; lane: string; name: string }; text: string }
+  /** The agent that asked another thread stopped waiting (its wait ran out): an answer after this goes to it as a message. */
+  | { type: "peer.unwaited"; re: string }
   /** A message from another session for an agent the sender's person may not steer: it waits here for someone who can. */
   | { type: "peer.held"; id: string; from: PeerNote; text: string }
   /** Someone who can steer that agent let a held message through, or turned it away. */

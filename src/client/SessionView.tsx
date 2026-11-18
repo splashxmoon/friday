@@ -62,6 +62,8 @@ import { setMateTab, useMateTab } from "./mate-tab.js";
 const TeamPlan = lazy(() => import("./TeamPlan.js"));
 const RememberOffer = lazy(() => import("./RememberOffer.js"));
 import { TeamHeaderControls } from "./TeamControls.js";
+import { taskCount } from "./task-count.js";
+import TaskBoard from "./TaskBoard.js";
 import { ALL, AgentsContext, agentKey, agentsStore, focusAgent, focusedAgent, jumpToNeeds, nextKey, openedAt, setColumns, syncAddress, useAgents, useColumns, useFocusedAgent, useSeen } from "./agentFocus.js";
 import { AGENT_DRAG, closeColumn, dropAgent, evenWidths, fitColumns, maxColumns, pickInColumn, resizeAt, unreadByLane } from "./agentNav.js";
 import { agentLook, laneLabel } from "./handoff-ui.js";
@@ -1159,7 +1161,8 @@ export function SessionView({
             picking={picking}
             onPick={pickPanel}
             onPicker={() => setPicking(true)}
-            badges={{ files: Object.values(state.diffs).reduce((n, d) => n + d.files.length, 0), working: state.run.status === "running" || Object.values(state.laneRuns).some((r) => r.status === "running") }}
+            badges={{ files: Object.values(state.diffs).reduce((n, d) => n + d.files.length, 0), working: state.run.status === "running" || Object.values(state.laneRuns).some((r) => r.status === "running"), tasks: taskCount(state) }}
+            taskBoard={<TaskBoard state={state} send={send} notify={s.notify} jump={jumpTo} readOnly={me.role === "viewer"} />}
             headless={solo}
             addAgent={<Lanes state={state} me={me} agents={agents} identity={identity} send={send} onConnect={(tool) => setConnect({ lane: "", ...(tool ? { tool } : {}) })} onRace={() => setRacing(true)} solo={solo} />}
           />
@@ -1696,6 +1699,8 @@ function TopBar({
         {/* The terminal view's switch in a hosted Code session too, beside the people (the local edition keeps it in SessionMenu). */}
         {/* The thread card's button (ThreadCard.tsx), with the agents' faces while it is closed: before the terminal switch (Arun,
             2026-11-16: "swap placements with the terminal button thing"). */}
+        {/* The team's tasks are at the top of the side panel's Tasks tab now, with their controls (TaskBoard.tsx; Arun, 2026-11-18:
+            "move this somewhere else and add more control over this as well"); the tab carries their count. */}
         {isLocal() && !state.options.team && !state.options.work && <Suspense fallback={null}><ThreadCardToggle state={state} /></Suspense>}
         {/* The local edition's in its place: this session's settings, and the line about Friday Team (SessionMenu). */}
         {isLocal() && gear && (

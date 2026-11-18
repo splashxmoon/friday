@@ -1,0 +1,5 @@
+/* The group a window is of, beside the tool's name on its week, hour by hour (Antigravity's Gemini and Claude and GPT). */
+.lh-heat-of { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+/* A card's rows share their columns, so the bars start in one place however long a window's name ("Claude and GPT 5-hour"). */
+ul.lh-wrows { display: grid; grid-template-columns: minmax(64px, max-content) minmax(48px, 1fr) 38px 50px; column-gap: 10px; row-gap: 11px; }
+ul.lh-wrows > .lh-wrow { grid-column: 1 / -1; grid-template-columns: subgrid; }

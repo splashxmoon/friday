@@ -478,6 +478,34 @@ export function App() {
   }, [libDone]);
 
   /**
+   * ⌘A / Ctrl+A outside a text box selects the chat being read, not the whole window (Arun, 2026-11-18: "make sure nothing can be
+   * highlighted like this too"): the window's select-all lit up the thread card, the tabs and the message box's prompt. In a box,
+   * an editor or the terminal it is theirs as before; with no chat in view it selects nothing.
+   */
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== "a") return;
+      if (!document.documentElement.classList.contains("desktop")) return;
+      const at = (document.activeElement ?? e.target) as HTMLElement | null;
+      if (at?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"]), .cm-editor, .xterm')) return;
+      e.preventDefault();
+      const sel = window.getSelection();
+      if (!sel) return;
+      // The chat the selection is already in, else the one on screen.
+      const from = sel.anchorNode instanceof Element ? sel.anchorNode : sel.anchorNode?.parentElement;
+      const item = from?.closest(".feed-item") ?? document.querySelector(".feed-item");
+      const feed = item?.parentElement;
+      sel.removeAllRanges();
+      if (!feed) return;
+      const range = document.createRange();
+      range.selectNodeContents(feed);
+      sel.addRange(range);
+    };
+    addEventListener("keydown", key);
+    return () => removeEventListener("keydown", key);
+  }, []);
+
+  /**
    * Tell the page it is in the desktop app, and on which desktop.
    *
    * macOS draws the window's close/minimise/zoom buttons over the top-left of

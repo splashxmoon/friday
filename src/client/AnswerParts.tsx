@@ -3,13 +3,14 @@ import remarkMath from "remark-math";
 import type { Pluggable } from "unified";
 import { defaultRehypePlugins, defaultRemarkPlugins, parseMarkdownIntoBlocks, useIsCodeFenceIncomplete, type Components } from "streamdown";
 import { AgentCodeLine, useAgentCodeTokens, type AgentCodeLanguage } from "@/components/agents/agent-code";
-import { pathOf, rehypeAnswer, rehypeFileChips, rehypeFileLinks } from "./answer-format.js";
+import { pathOf, pictureAbs, rehypeAnswer, rehypeFileChips, rehypeFileLinks, rehypePicturePaths } from "./answer-format.js";
 import { languageFor } from "./DiffView.js";
 import { FileIcon } from "./fileIcons.js";
 import { Icon } from "./icons.js";
 import { IS_MAC } from "./Shortcuts.js";
 import { LiveBlock, LiveImage } from "./LiveBlock.js";
 import { localPicture } from "./LiveBlock.js";
+import { Lightbox } from "./Lightbox.js";
 import { chipLabel, titlesChanged, titlesNow } from "./work-outputs.js";
 
 /**
@@ -50,11 +51,12 @@ function useCopy(text: string) {
  * A file the answer names: pressed, it opens in the session's file view; where there is none (a replay), it copies the path.
  * ⌘-pressed (Ctrl elsewhere) in the desktop app, it opens in your own editor at its line instead.
  */
-function FileChip({ text, path, line }: { text: string; path: string; line?: number }) {
+function FileChip({ text, path, line, onOpen }: { text: string; path: string; line?: number; /** A picture's: shown large here, not opened as a file. */ onOpen?: () => void }) {
   const [copied, copy] = useCopy(path);
   useSyncExternalStore(titlesChanged, titlesNow, titlesNow); // its title as the rail learns it, not as it was when first drawn
   const open = (e: { metaKey: boolean; ctrlKey: boolean; currentTarget: EventTarget }) => {
     const outside = e.metaKey || e.ctrlKey;
+    if (onOpen && !outside) return onOpen();
     // Whose message it is in: a path is in that agent's folder (a Crew teammate's own, another agent's copy), not the session's.
     const said = (e.currentTarget as HTMLElement).closest?.<HTMLElement>("[data-lane]")?.dataset.lane;
     const lane = said && said !== "main" ? said : undefined;
@@ -124,18 +126,31 @@ export const mediaText = (md: string): string => (chips.on ? md.replace(/(`[^`\n
 /** A picture or video an agent names in its answer: the name, and the thing itself under it, from this computer. */
 const MEDIA = /\.(png|jpe?g|gif|webp|avif|svg|mp4|mov|webm|m4v)$/i;
 chips.on = true;
-function MediaChip({ text, path }: { text: string; path: string }) {
-  const src = localPicture(path);
+function MediaChip({ text, path, quiet, after }: { text: string; path: string; /** Named in the words, not in backticks: a picture that isn't there leaves the name alone. */ quiet?: boolean; /** The punctuation straight after its name, said only if no picture shows. */ after?: string }) {
+  const src = localPicture(path.replace(/^file:\/\//i, ""));
+  // Its name pressed shows the picture large, as the picture pressed does (Arun, 2026-11-18: "allow us to handle to view images").
+  const [big, setBig] = useState(false);
+  const [missing, setMissing] = useState(false);
   const video = /\.(mp4|mov|webm|m4v)$/i.test(path);
   // A video still being written is asked for again twice before it is said to be missing (LiveImage does the same for pictures).
   const [tries, setTries] = useState(0);
   const [gone, setGone] = useState(false);
   const at = src && tries ? `${src}&try=${tries}` : src;
+  // Named in passing and not there: its name in the sentence, as any file's is.
+  // The mark of punctuation the picture would have closed comes back after it (rehypePicturePaths `after`).
+  if (missing)
+    return (
+      <>
+        <FileChip text={text.split(/[\\/]/).pop() || text} path={path} />
+        {after}
+      </>
+    );
   return (
     <span className="chat-media">
       {/* Its name, not its whole path: a long folder path broke across two lines over the picture. The path is in the tooltip. */}
-      <FileChip text={text.split("/").pop() || text} path={path} />
-      {at && !gone && <span className="chat-media-view">{video ? <video key={tries} src={`${at}#t=0.1`} controls preload="metadata" playsInline onError={() => (tries < 2 ? void window.setTimeout(() => setTries((n) => n + 1), 1500 * (tries + 1)) : setGone(true))} /> : <LiveImage src={src!} alt={text} />}</span>}
+      <FileChip text={text.split(/[\\/]/).pop() || text} path={path} {...(!video && src && !missing ? { onOpen: () => setBig(true) } : {})} />
+      {at && !gone && !missing && <span className="chat-media-view">{video ? <video key={tries} src={`${at}#t=0.1`} controls preload="metadata" playsInline onError={() => (tries < 2 ? void window.setTimeout(() => setTries((n) => n + 1), 1500 * (tries + 1)) : setGone(true))} /> : <LiveImage src={src!} alt={text} {...(quiet ? { "data-quiet": "", onMissing: () => setMissing(true) } : {})} />}</span>}
+      {big && src && <Lightbox src={src} alt={path} onClose={() => setBig(false)} />}
       {gone && (
         <span className="chat-media-gone">
           This video isn't on this computer, or isn't finished yet.{" "}
@@ -148,7 +163,7 @@ function MediaChip({ text, path }: { text: string; path: string }) {
   );
 }
 
-type CodeProps = { node?: unknown; className?: string; children?: ReactNode; "data-block"?: string; /** A link to a file, by its words (rehypeFileChips). */ "data-file-link"?: string };
+type CodeProps = { node?: unknown; className?: string; children?: ReactNode; "data-block"?: string; /** A link to a file, by its words (rehypeFileChips). */ "data-file-link"?: string; /** A picture's path in the words (rehypePicturePaths). */ "data-picture"?: string; "data-after"?: string };
 
 function Code({ node: _node, className, children, ...rest }: CodeProps) {
   const incomplete = useIsCodeFenceIncomplete();
@@ -159,6 +174,9 @@ function Code({ node: _node, className, children, ...rest }: CodeProps) {
     const linked = rest["data-file-link"];
     if (linked !== undefined && MEDIA.test(text)) return <MediaChip text={linked} path={text} />;
     if (linked !== undefined) return <FileChip text={linked} path={text} />;
+    if (rest["data-picture"] !== undefined) return <MediaChip text={text} path={text} quiet {...(rest["data-after"] ? { after: rest["data-after"] } : {})} />;
+    // A whole path on a computer to a picture (a screenshot a tool kept, /Users/…/shot.png): shown, as one in the folders is.
+    if (pictureAbs(text.trim())) return <MediaChip text={text.trim()} path={text.trim()} />;
     const file = pathOf(text);
     if (file && MEDIA.test(file.path)) return <MediaChip text={text} path={file.path} />;
     if (file) return <FileChip text={text} {...file} />;
@@ -176,7 +194,7 @@ function Code({ node: _node, className, children, ...rest }: CodeProps) {
 }
 
 // Re-drawn only when what it shows changes: the tree node is new on every parse of its block, its content isn't.
-const AnswerCodeTag = memo(Code, (a, b) => a.className === b.className && textOf(a.children) === textOf(b.children) && "data-block" in a === "data-block" in b && a["data-file-link"] === b["data-file-link"]);
+const AnswerCodeTag = memo(Code, (a, b) => a.className === b.className && textOf(a.children) === textOf(b.children) && "data-block" in a === "data-block" in b && a["data-file-link"] === b["data-file-link"] && a["data-picture"] === b["data-picture"] && a["data-after"] === b["data-after"]);
 
 /**
  * KaTeX, loaded the first time an answer has maths in it rather than with the feed: 340 KB of script that most sessions never
@@ -234,7 +252,7 @@ const REMARK: Pluggable[] = [...Object.values(defaultRemarkPlugins), [remarkMath
 // its words alone, never "[blocked]" (answer-format.ts rehypeFileLinks; Arun, 2026-10-29).
 const { raw, sanitize, harden, ...otherRehype } = defaultRehypePlugins as Record<string, Pluggable>;
 const hardened: Pluggable = Array.isArray(harden) ? [harden[0], { ...(harden[1] as object), linkBlockPolicy: "text-only" }] : harden!;
-const REHYPE: Pluggable[] = [raw!, rehypeFileLinks, sanitize!, hardened, ...Object.values(otherRehype), [rehypeKatexOnDemand, { throwOnError: false, strict: false }], rehypeFileChips, rehypeAnswer];
+const REHYPE: Pluggable[] = [raw!, rehypeFileLinks, sanitize!, hardened, ...Object.values(otherRehype), [rehypeKatexOnDemand, { throwOnError: false, strict: false }], rehypeFileChips, rehypePicturePaths, rehypeAnswer];
 const COMPONENTS = { img: LiveImage, code: AnswerCodeTag } as Components;
 
 /**

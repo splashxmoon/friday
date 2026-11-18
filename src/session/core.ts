@@ -54,7 +54,7 @@ export type Command =
   /** Stop the agents here messaging each other, or let them again (agent-mesh.ts). */
   | { type: "mesh.pause"; on: boolean }
   /** A person's say over a task on the board, from the team's list: hand it to someone else, try it again, send it back, drop it. */
-  | { type: "board.task"; id: string; action: "reassign" | "retry" | "sendback" | "cancel" | "start" | "decline"; to?: string; note?: string }
+  | { type: "board.task"; id: string; action: "reassign" | "retry" | "sendback" | "cancel" | "start" | "decline" | "add" | "edit" | "move" | "hold" | "resume" | "done"; to?: string; note?: string; /** add, edit: its words. move: its place in the line. */ title?: string; detail?: string; at?: number }
   | { type: "lead.set"; lane: string | null; /** Friday's own pick, said as such (types.ts lead.set). */ auto?: boolean }
   /** A hub (hubs.ts): plan the work for several agents at once, approve the plan as changed, or call it off. */
   | { type: "hub.plan"; text: string }
@@ -273,7 +273,7 @@ export class SessionCore {
 
   /** The session's hubs (hubs.ts), set by the app: one plan, several agents at once. */
   /** The task board's controls (AgentMesh.control), for board.task. */
-  board: { control(sid: string, actor: ActorRef, req: { id: string; action: "reassign" | "retry" | "sendback" | "cancel" | "start" | "decline"; to?: string; note?: string }): Promise<{ ok: true } | { ok: false; error: string }> } | null = null;
+  board: { control(sid: string, actor: ActorRef, req: { id: string; action: "reassign" | "retry" | "sendback" | "cancel" | "start" | "decline" | "add" | "edit" | "move" | "hold" | "resume" | "done"; to?: string; note?: string; title?: string; detail?: string; at?: number }): Promise<{ ok: true } | { ok: false; error: string }> } | null = null;
   hubs: { plan(sid: string, goal: string, by: { id: string; name: string }): Promise<{ ok: true; id: string } | { ok: false; error: string }>; approve(sid: string, id: string, edits: { id: string; tool?: EngineTool }[] | undefined): Promise<{ ok: true; id: string } | { ok: false; error: string }>; cancel(sid: string, id: string): Promise<{ ok: true; id: string } | { ok: false; error: string }> } | null = null;
 
   /** Whether people other than this session's owner may work in it (Team), rather than only watch (Solo). */
@@ -1156,7 +1156,7 @@ export class SessionCore {
         // Anyone who works in the session steers the team's work, as they can pause its talk.
         if (role === "viewer") return deny("change the team's tasks");
         if (!this.board) return fail("The task board isn't available here.");
-        if (!["reassign", "retry", "sendback", "cancel", "start", "decline"].includes(String(cmd.action))) return fail("Unknown action.");
+        if (!["reassign", "retry", "sendback", "cancel", "start", "decline", "add", "edit", "move", "hold", "resume", "done"].includes(String(cmd.action))) return fail("Unknown action.");
         // Just you do it: the proposed team's tasks dropped, and the lead told, as the person, to do the whole of it itself.
         if (cmd.action === "decline") {
           const lead = state.board?.fromLane;
@@ -1168,7 +1168,7 @@ export class SessionCore {
           }
           return ok((await this.store.state(sid)).lastSeq);
         }
-        const r = await this.board.control(sid, actor, { id: String(cmd.id ?? "").slice(0, 40), action: cmd.action, ...(typeof cmd.to === "string" && cmd.to ? { to: cmd.to.slice(0, 80) } : {}), ...(typeof cmd.note === "string" && cmd.note ? { note: cmd.note.slice(0, 2000) } : {}) });
+        const r = await this.board.control(sid, actor, { id: String(cmd.id ?? "").slice(0, 40), action: cmd.action, ...(typeof cmd.to === "string" && cmd.to ? { to: cmd.to.slice(0, 80) } : {}), ...(typeof cmd.note === "string" && cmd.note ? { note: cmd.note.slice(0, 2000) } : {}), ...(typeof cmd.title === "string" ? { title: cmd.title.slice(0, 200) } : {}), ...(typeof cmd.detail === "string" ? { detail: cmd.detail.slice(0, 4000) } : {}), ...(typeof cmd.at === "number" && Number.isInteger(cmd.at) ? { at: cmd.at } : {}) });
         return r.ok ? ok((await this.store.state(sid)).lastSeq) : fail(r.error);
       }
 

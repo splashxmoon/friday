@@ -182,6 +182,8 @@ export const HOST_METHODS = [
   "servers.list",
   "servers.stop",
   "background.stop",
+  // One command an agent of yours is running, stopped from the Tasks tab (stop-command.ts).
+  "command.stop",
   "usage",
   // A picture, video or sound shown in a hosted session's chat, read a piece at a time (app.ts mediaFromComputer).
   "workFile",
@@ -1106,6 +1108,13 @@ export async function callHost(method: string, params: Record<string, unknown> =
       const dirs = await startDirs(next, folder, at);
       r.setDirs(dirs);
       return { dirs, folder };
+    }
+    case "command.stop": {
+      const r = ctx.runners.get(`${str(params.sid, 64)}|${str(params.lane, 40) || "main"}`);
+      if (!r) throw new Error("No agent of yours is running there.");
+      const command = str(params.command, 4000);
+      if (!command) throw new Error("Say which command.");
+      return { stopped: await r.stopCommand(command) };
     }
     case "stop": {
       const key = `${str(params.sid, 64)}|${str(params.lane, 40) || "main"}`;

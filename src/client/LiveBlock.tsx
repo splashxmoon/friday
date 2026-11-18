@@ -434,25 +434,17 @@ export function LiveBlock({ code, language, isIncomplete }: CustomRendererProps)
 }
 
 
-/** A picture's address on this computer, as the session serves it; null for one on the web (or Friday's own). */
-/** The session the chat being drawn is, for a page whose address doesn't say (SessionView sets it). */
-export const pictureSession: { sid: string; invite: string } = { sid: "", invite: "" };
-
-export function localPicture(src: string): string | null {
-  const q = new URLSearchParams(location.search);
-  const sid = q.get("session") || pictureSession.sid;
-  const invite = q.get("invite") || pictureSession.invite;
-  if (!sid || !invite || /^(https?:|data:|blob:)/i.test(src) || src.startsWith("/api/")) return null;
-  const at = `/api/sessions/${encodeURIComponent(sid)}/work/file?invite=${encodeURIComponent(invite)}`;
-  const file = src.replace(/^file:\/\//i, "");
-  if (file.startsWith("/") || /^[a-z]:[\\/]/i.test(file) || file.startsWith("~/")) return `${at}&abs=${encodeURIComponent(decodeURI(file))}`;
-  return `${at}&path=${encodeURIComponent(decodeURI(file.replace(/^\.\//, "")))}`;
-}
+// Its address through the session, in a module of its own (picture-url.ts); here too for whoever reads it from here.
+export { localPicture, pictureSession } from "./picture-url.js";
+import { localPicture } from "./picture-url.js";
 
 /** A picture in a message: shown at its size up to the column's width, and large on a press. */
-export function LiveImage(props: React.ImgHTMLAttributes<HTMLImageElement>) {
+export function LiveImage(props: React.ImgHTMLAttributes<HTMLImageElement> & { /** Quiet (a name in the words): told it isn't there, instead of saying so. */ onMissing?: () => void }) {
   const [big, setBig] = useState(false);
-  const { node: _node, ...rest } = props as typeof props & { node?: unknown };
+  const { node: _node, onMissing, ...rest } = props as typeof props & { node?: unknown };
+  const quiet = "data-quiet" in rest;
+  // Quiet, it shows once it has loaded: a name that may be no picture never flashes a broken one while it is asked again.
+  const [loaded, setLoaded] = useState(false);
   let enlarge = () => setBig(true);
   // A picture an agent shows by where it is on this computer (/Users/…/shot.png, file://…, or a path in its folder): from there,
   // through the session (work-files.ts shownFile). The session is the page's own (?session=…&invite=…).
@@ -463,6 +455,11 @@ export function LiveImage(props: React.ImgHTMLAttributes<HTMLImageElement>) {
   const [gone, setGone] = useState(false);
   const own = src ?? (typeof rest.src === "string" && rest.src.startsWith("/api/") ? rest.src : null);
   if (own) (rest as { src?: string }).src = tries ? `${own}${own.includes("?") ? "&" : "?"}try=${tries}` : own;
+  // Named in passing, and not there: the name stands alone, with nothing said about a picture nobody asked to see.
+  useEffect(() => {
+    if (gone && quiet) onMissing?.();
+  }, [gone, quiet]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (gone && quiet) return null;
   if (gone)
     return (
       <span className="chat-media-gone">
@@ -482,8 +479,9 @@ export function LiveImage(props: React.ImgHTMLAttributes<HTMLImageElement>) {
   if (src && named && !/^(\/|~|[a-z]:[\\/])/i.test(named) && document.documentElement.classList.contains("work-session")) enlarge = () => dispatchEvent(new CustomEvent("friday:work-open", { detail: { path: named } }));
   return (
     <>
-      <img {...rest} className="live-img" loading="lazy" onClick={() => enlarge()} />
-      {big && props.src && <Lightbox src={props.src} alt={props.alt ?? ""} onClose={() => setBig(false)} />}
+      <img {...rest} className={`live-img${quiet && !loaded ? " quiet-wait" : ""}`} loading={quiet ? "eager" : "lazy"} onLoad={() => setLoaded(true)} onClick={() => enlarge()} />
+      {/* The picture as it was drawn here (a path in the folder, made the session's address above), not as the agent wrote it. */}
+      {big && (rest.src || props.src) && <Lightbox src={(rest.src || props.src)!} alt={props.alt || (typeof props.src === "string" ? props.src : "")} onClose={() => setBig(false)} />}
     </>
   );
 }

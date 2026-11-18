@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { stopCommand } from "./stop-command.js";
 import { realpathSync } from "node:fs";
 import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { GO_AHEAD_WORDS, guardTool, type GoAhead, type GuardPlace, type Verdict } from "../guardrails.js";
@@ -35,6 +36,7 @@ export { refusedFlag } from "./adapters.js";
 import { AUTO_MODE, autoModeRefused } from "./adapters.js";
 import { acpEntry, ensureCursorEntry, openFridayMcp, type FridayMcp, type MeshAnswer } from "./friday-mcp.js";
 import { canScreenshot, screenshot } from "./screenshot.js";
+import { keepPictures } from "./tool-pictures.js";
 import { firstWordMs, hungMs, isHung, neverStarted, quietMs, treeCpu } from "./hung.js";
 import { localEdition } from "../local-edition.js";
 
@@ -244,6 +246,17 @@ const MODE_RANK: Record<EngineMode, number> = { plan: 0, edits: 1, full: 2 };
 /** The lower of a machine's mode and a turn's cap: a cap never raises what the machine's host chose. */
 export function capMode(own: EngineMode, cap?: EngineMode): EngineMode {
   return cap && MODE_RANK[cap] !== undefined && MODE_RANK[cap] < MODE_RANK[own] ? cap : own;
+}
+
+/**
+ * Computer use refused below Auto, in words true to why: a lane on Auto whose turn is held lower (someone else's message,
+ * capMode) isn't told to ask for the Auto it already has (Arun, 2026-11-18: "the agent says like if you switch me to auto mode
+ * or something even though it is already on auto mode").
+ */
+export function computerRefused(own: EngineMode, now: EngineMode): string {
+  const name = now === "plan" ? "Plan" : "Manual";
+  if (own !== now) return `This turn runs in ${name}, although the lane is on ${own === "full" ? "Auto" : "Manual"}: it carries a message from someone other than this computer's owner, so it may not use the computer. Switching the lane won't change that; do it another way, or leave this step for the owner's own message.`;
+  return `This agent is in ${name}, so it may not use the computer. Do it another way, or ask the person to switch it to Auto.`;
 }
 
 const TERMINAL_ONLY = new Set(["doctor", "color"]);
@@ -964,7 +977,7 @@ export class Runner {
     // The bar, with Stop, is what the person is promised: no desktop app here (a runner on its own), no computer use.
     if (!canShowBar()) return { output: "Computer use needs Friday's desktop app open on this computer, to show the person the bar with Stop while you use it.", isError: true };
     // Plan and Edits change nothing outside the folder; a computer can do anything a person can.
-    if (this.mode !== "full") return { output: `This agent is in ${this.mode === "plan" ? "Plan" : "Edits"} mode${this.cap?.mode ? " for this turn" : ""}, so it may not use the computer. Do it another way, or ask the person to switch it to Auto.`, isError: true };
+    if (this.mode !== "full") return { output: computerRefused(this.opts.mode ?? "full", this.mode), isError: true };
     if (this.computerNo) return { output: "The person said no to you using their computer for this. Don't ask again: do it another way, or ask them what they'd rather.", isError: true };
     if (!this.computerOk) {
       // Answered whenever it is, even after this call gave up waiting: their yes still counts for the next.
@@ -1390,6 +1403,22 @@ export class Runner {
    */
   setDirs(dirs: string[]): void {
     this.opts.dirs = dirs;
+  }
+
+  /**
+   * Stop one command its coding tool is running (the Tasks tab's stop on a command row; stop-command.ts), under the tool's process
+   * now, the kept Claude Code's, or the turn it took on from the runner before it. How many processes were stopped.
+   */
+  async stopCommand(command: string): Promise<number> {
+    const roots = [this.child?.pid, this.warm?.pid, this.adopted?.child?.pid].filter((p): p is number => !!p);
+    for (const root of new Set(roots)) {
+      const n = await stopCommand(root, command);
+      if (n) {
+        this.log(`stopped a command at the person's say: ${command.slice(0, 80)}`);
+        return n;
+      }
+    }
+    return 0;
   }
 
   stop(): void {
@@ -2186,7 +2215,11 @@ ${prompt}`;
         });
         break;
       case "result":
-        this.send({ kind: "event", body: { type: "tool.result", callId: out.callId, name: out.name, output: out.output, isError: out.isError } });
+        // Its pictures as files on this computer, named by their paths (tool-pictures.ts): never their bytes in the log.
+        {
+          const pictures = out.pictures?.length ? keepPictures(out.pictures) : [];
+          this.send({ kind: "event", body: { type: "tool.result", callId: out.callId, name: out.name, output: out.output, isError: out.isError, ...(pictures.length ? { pictures } : {}) } });
+        }
         break;
       case "note":
         if (out.text) onNote(out.text);

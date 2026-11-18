@@ -1,4 +1,4 @@
-import { ChevronRightIcon, FolderGit2Icon, PlusIcon, SearchIcon, SettingsIcon, LogOutIcon, MoonIcon, SunIcon, XIcon } from "lucide-react";
+import { ChevronRightIcon, FolderGit2Icon, PinIcon, PlusIcon, SearchIcon, SettingsIcon, LogOutIcon, MoonIcon, SunIcon, XIcon } from "lucide-react";
 import "./working-dot.css";
 import "./sidebar-row-width.css";
 import { openKeepGoing } from "./crew-carry-open.js";
@@ -223,6 +223,9 @@ function PanelResize() {
       tabIndex={0}
       title="Drag to resize · double-click to reset"
       onDoubleClick={() => setPanelWidth(PANEL_START)}
+      // A press doesn't focus it (Arun, 2026-11-18): focused by the mouse, the next key pressed anywhere made it focus-visible,
+      // and its line stayed lit by the list's edge until something else was clicked. Tab still reaches it for the arrow keys.
+      onMouseDown={(e) => e.preventDefault()}
       onKeyDown={(e) => {
         if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
         e.preventDefault();
@@ -651,12 +654,85 @@ function OssRail({ p }: { p: SidebarProps }) {
   const onUsage = p.view === "usage";
   // Each ring hovered shows that tool's own limits; pressed, the Usage page. Not over the Usage page itself.
   const [ringCard, setRingCard] = useState<string | null>(null);
+  // Many tools, three rings at most (Arun, 2026-11-18: "add a design or something to handle alot of coding tool usage limits",
+  // picking "Top 3 + more"): the ones nearest their limit first, red then yellow, the rest in the order they always come; the others
+  // fold into one "+N" whose card lists every tool's limits. Four or more read as a column taller than the rail's own places.
+  const top = (r: (typeof rings)[number]) => Math.max(r.outer, r.inner ?? 0);
+  const ordered = rings
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => (top(a.r) >= 90 ? 0 : top(a.r) >= 70 ? 1 : 2) - (top(b.r) >= 90 ? 0 : top(b.r) >= 70 ? 1 : 2) || Math.round(top(b.r) / 10) - Math.round(top(a.r) / 10) || a.i - b.i)
+    .map((x) => x.r);
+  const RAIL_RINGS = 3;
+  const shownRings = ordered.length > RAIL_RINGS ? ordered.slice(0, RAIL_RINGS) : ordered;
+  const foldedRings = ordered.slice(shownRings.length);
+  const foldedHot = foldedRings.some((r) => top(r) >= 90) ? "hot" : foldedRings.some((r) => top(r) >= 70) ? "warm" : "";
+  const moreRings =
+    foldedRings.length > 0
+      ? (() => {
+          const label = `${foldedRings.length} more coding tool${foldedRings.length === 1 ? "" : "s"}: ${foldedRings.map((r) => r.label).join("; ")}`;
+          const button = (
+            <button type="button" className="oss-rail-btn oss-rail-more" data-active={onUsage || undefined} aria-label={label} onClick={() => (setRingCard(null), p.onOpenUsage())} onPointerEnter={() => p.onWarm?.("usage")} onFocus={() => p.onWarm?.("usage")}>
+              <span className="oss-rail-more-n">+{foldedRings.length}</span>
+              {foldedHot && <i className={`oss-rail-more-dot ${foldedHot}`} aria-hidden="true" />}
+            </button>
+          );
+          return onUsage ? (
+            <span key="more">{button}</span>
+          ) : (
+            <HoverCard key="more" openDelay={300} closeDelay={120} open={ringCard === "*more"} onOpenChange={(o) => setRingCard(o ? "*more" : (c) => (c === "*more" ? null : c))}>
+              <HoverCardTrigger asChild>{button}</HoverCardTrigger>
+              <HoverCardContent side="right" align="end" className="usage-card rlc-card w-72 p-0">
+                {/* The tools not on the rail, a row each (Arun, 2026-11-18: "this should just show the other tools not on the rails"):
+                    its mark, the bar of its fullest limit, how much and which. */}
+                <div className="rlc-head">
+                  <b>More limits</b>
+                  <span>
+                    {foldedRings.length} tool{foldedRings.length === 1 ? "" : "s"}
+                  </span>
+                </div>
+                <ul className="rlc-list">
+                  {foldedRings.map((r) => {
+                    // Its 5 hours and its week, each a bar of its own (Arun, 2026-11-18: "make sure it shws like the hourly and wkeely").
+                    const wins = r.windows.length ? r.windows : [{ short: r.outerShort, used: top(r), resets: "" }];
+                    return (
+                      <li key={r.tool}>
+                        <button type="button" className="rlc-row" onClick={() => (setRingCard(null), p.onOpenUsage())} title={r.label}>
+                          <span className="rlc-tool">
+                            <EngineMark tool={r.tool} size={14} />
+                            <span className="rlc-name">{ENGINE_NAMES[r.tool]}</span>
+                          </span>
+                          {/* Stacked, one under the other (Arun, 2026-11-18: "stack it vertically not horinxtonally"). */}
+                          {wins.map((w) => {
+                            const tone = w.used >= 90 ? "hot" : w.used >= 70 ? "warm" : "";
+                            return (
+                              <span key={w.short} className="rlc-win" title={w.resets ? `${w.short === "5h" ? "5-hour" : w.short === "wk" ? "Weekly" : w.short}: ${Math.round(w.used)}% used · ${w.resets}` : undefined}>
+                                <span className="rlc-win-name">{w.short}</span>
+                                <span className="rlc-bar" aria-hidden="true">
+                                  <i className={tone} style={{ width: `${Math.max(2, Math.min(100, w.used))}%` }} />
+                                </span>
+                                <span className={`rlc-n${tone ? ` ${tone}` : ""}`}>{Math.round(w.used)}%</span>
+                              </span>
+                            );
+                          })}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <button type="button" className="rlc-foot" onClick={() => (setRingCard(null), p.onOpenUsage())}>
+                  Open Usage
+                </button>
+              </HoverCardContent>
+            </HoverCard>
+          );
+        })()
+      : null;
   const railRings = (
     <div className="oss-rail-rings">
-      {rings.map((r) => {
+      {shownRings.map((r) => {
         const button = (
-          <button type="button" className="oss-rail-btn oss-rail-ring" data-active={onUsage || undefined} aria-current={onUsage ? "page" : undefined} aria-label={r.label} data-tour={r.tool === rings[0]!.tool ? "Usage" : undefined} onClick={() => (setRingCard(null), p.onOpenUsage())} onPointerEnter={() => p.onWarm?.("usage")} onFocus={() => p.onWarm?.("usage")}>
-            <RailRing tool={r.tool} outer={r.outer} inner={r.inner} back={r.back} />
+          <button type="button" className="oss-rail-btn oss-rail-ring" data-active={onUsage || undefined} aria-current={onUsage ? "page" : undefined} aria-label={r.label} data-tour={r.tool === shownRings[0]!.tool ? "Usage" : undefined} onClick={() => (setRingCard(null), p.onOpenUsage())} onPointerEnter={() => p.onWarm?.("usage")} onFocus={() => p.onWarm?.("usage")}>
+            <RailRing tool={r.tool} outer={r.outer} inner={r.inner} />
             {/* More than one account: how many, small at the ring's foot; the ring is the one new sessions use. */}
             {r.accounts > 1 && <span className="oss-rail-accts" aria-hidden="true">{r.accounts}</span>}
           </button>
@@ -672,6 +748,7 @@ function OssRail({ p }: { p: SidebarProps }) {
           </HoverCard>
         );
       })}
+      {moreRings}
     </div>
   );
   // Up and down move along the rail, as along any toolbar.
@@ -763,10 +840,22 @@ function CrewList({ p }: { p: SidebarProps }) {
   const [shut, flipShut] = useShutFolders();
   const [folderAt, setFolderAt] = useState<{ id: string; x: number; y: number } | null>(null);
   const [dropOn, setDropOn] = useState<string | null>(null);
+  // Pinned agents and how the list looks, kept in this browser (Arun, 2026-11-18: the clean Agents sidebar, "modern, easy to use").
+  const [pins, setPins] = useCrewPins();
+  const [view, setView] = useCrewView();
   if (!t) return <div className="sb-list oss-crew flex min-w-0 flex-1 flex-col" />;
   const has = (...words: (string | null | undefined)[]) => !q.trim() || words.some((w) => w?.toLowerCase().includes(q.trim().toLowerCase()));
   const rank = (s: string) => (s === "waiting" ? 0 : s === "stopped" ? 1 : s === "working" ? 2 : 3);
-  const mates = [...ownOf(t)].sort((a, b) => rank(a.status) - rank(b.status) || (b.lastAt ?? 0) - (a.lastAt ?? 0)).filter((m) => has(m.name, m.role));
+  const sorted = [...ownOf(t)].sort((a, b) => (view.sort === "name" ? a.name.localeCompare(b.name) : rank(a.status) - rank(b.status) || (b.lastAt ?? 0) - (a.lastAt ?? 0)));
+  // Pinned ones sit as faces at the top, out of the list below; a search looks through all of them.
+  const pinned = q.trim() ? [] : sorted.filter((m) => pins.has(m.id));
+  const mates = sorted.filter((m) => has(m.name, m.role) && !pinned.includes(m));
+  const pin = (id: string, on: boolean) => {
+    const next = new Set(pins);
+    if (on) next.add(id);
+    else next.delete(id);
+    setPins(next);
+  };
   type RoomRow = ReturnType<typeof roomNow> & { key: string; name: string; here: boolean; open: () => void };
   const roomRowOf = (r: RoomView): RoomRow => ({ ...roomNow(r, ownOf(t)), key: r.id, name: r.name, here: p.activeSid === r.sid, open: () => openRoom(r, p.onOpen) });
   const rooms: RoomRow[] = [
@@ -774,6 +863,25 @@ function CrewList({ p }: { p: SidebarProps }) {
     // home of each crew mate's main chat, and is reached from a crew mate's crew work line.
     ...roomsOf(t).map(roomRowOf),
   ].filter((r) => has(r.name));
+  /** What can be done to an agent, a room or the list, as its right-click and its ⋯ both offer it. */
+  const itemsFor = (id: string): MenuItem[] => {
+    if (id === "blank")
+      return [
+        { label: "New agent", icon: "agent", onSelect: newTeammate },
+        { label: "New room for a project", icon: "users", onSelect: () => setRooming(true) },
+        { label: "New group", icon: "folder", onSelect: () => askNewFolder(ask, folders, saveFolders) },
+        { label: "All agents", icon: "user", onSelect: () => (p.onNew(), choosePlace("team")) },
+      ];
+    const move = moveItems(id, folders, saveFolders, ask);
+    const m = id.startsWith("mate:") ? t.teammates.find((x) => `mate:${x.id}` === id) : null;
+    const pinItem = m ? { label: pins.has(m.id) ? "Unpin" : "Pin to the top", icon: "pin" as const, onSelect: () => pin(m.id, !pins.has(m.id)) } : null;
+    if (m) return [pinItem!, ...mateItems({ identity: p.identityForApi, team: t, mate: m, ask }).slice(0, -1), ...move, mateItems({ identity: p.identityForApi, team: t, mate: m, ask }).at(-1)];
+    // A room's own (the Crew room has no other): open, edit, remove, with the folders between.
+    const r = (t.rooms ?? []).find((x) => `room:${x.id}` === id);
+    if (!r) return [{ label: "Open", icon: "users", onSelect: () => openTeammate(t, null, p.onOpen) }, ...move];
+    const own = roomItems({ identity: p.identityForApi, room: r, ask, onOpen: () => openRoom(r, p.onOpen), onEdit: () => setEditingRoom(r), onRemoved: () => p.activeSid === r.sid && openTeammate(t, null, p.onOpen) });
+    return [...own.slice(0, -1), ...move, own.at(-1)];
+  };
   const onPage = !p.activeSid;
   return (
     <div
@@ -793,6 +901,22 @@ function CrewList({ p }: { p: SidebarProps }) {
         <button type="button" className="oss-crew-title mr-auto" data-active={onPage || undefined} onClick={() => (p.onNew(), choosePlace("team"))} title="All your agents, what needs you and what finished today">
           Agents
         </button>
+        {/* How the list looks: density, order, and unpinning every agent at once. */}
+        {/* The app's own menu, as every other ⋯ in it (Arun, 2026-11-18: "follow my app design language and consistency"). */}
+        <MenuButton
+          className="oss-agents-add"
+          label="View options"
+          items={() => [
+            { heading: "Density" },
+            { label: "Cozy", icon: "list", sub: "Face, name and what it's on", checked: view.density === "cozy", onSelect: () => setView({ ...view, density: "cozy" }) },
+            { label: "Compact", icon: "collapseAll", sub: "One line each, more in view", checked: view.density === "compact", onSelect: () => setView({ ...view, density: "compact" }) },
+            { heading: "Sort" },
+            { label: "Needs you first", icon: "hand", checked: view.sort === "attention", onSelect: () => setView({ ...view, sort: "attention" }) },
+            { label: "By name", icon: "user", checked: view.sort === "name", onSelect: () => setView({ ...view, sort: "name" }) },
+            pins.size > 0 && { heading: "Pinned" },
+            pins.size > 0 && { label: "Unpin all", icon: "pin", onSelect: () => setPins(new Set()) },
+          ]}
+        />
         {/* One + for both, a new agent or a new room (Arun, 2026-11-14: "link up the rooms plus button like remove it and add its
             function to the agents plus button at the top"). */}
         <DropdownMenu>
@@ -836,7 +960,36 @@ function CrewList({ p }: { p: SidebarProps }) {
         <SearchIcon aria-hidden="true" />
         <input type="search" placeholder="Search" aria-label="Search agents and rooms" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Escape" && setQ("")} />
       </label>
-      <div className="oss-crew-scroll">
+      {/* Pinned agents as faces, a press away whatever the list below is doing. */}
+      {pinned.length > 0 && (
+        <div className="crew-pins" role="list" aria-label="Pinned agents">
+          {pinned.map((m) => {
+            const st = rowState(m, mateStatus(m));
+            const on = p.activeSid === t.sid && focused === m.lane;
+            return (
+              <button
+                key={m.id}
+                type="button"
+                role="listitem"
+                className="crew-pin"
+                data-active={on || undefined}
+                title={`${m.name}: ${st.word}${st.line ? ` · ${st.line}` : ""}`}
+                aria-label={`${m.name}, ${st.word}`}
+                onClick={() => openTeammate(t, m.lane, p.onOpen)}
+                onContextMenu={(e) => (e.preventDefault(), e.stopPropagation(), setMenuAt({ id: `mate:${m.id}`, x: e.clientX, y: e.clientY }))}
+              >
+                <Face seed={m.look ?? m.name} size={34} status={m.status} lead={t.lead === m.lane} />
+                {/* Its ring just after its name (Arun, 2026-11-18: "actrually put it next to their names to the right"). */}
+                <span className="crew-pin-name">
+                  {m.name}
+                  <MateRing status={m.status} title={st.word} />
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <div className={`oss-crew-scroll${view.density === "compact" ? " compact" : ""}`}>
         {(() => {
           // Each crew mate and room as its row, carried by a drag onto a folder and opened from a right-click.
           const dragOf = (key: string) => ({ draggable: true, onDragStart: (e: DragEvent) => (e.dataTransfer.setData(CREW_DRAG, key), (e.dataTransfer.effectAllowed = "move")) });
@@ -863,28 +1016,30 @@ function CrewList({ p }: { p: SidebarProps }) {
             </div>
           );
           const mateRow = (m: (typeof mates)[number]) => {
-            // Its name and a word for what it is, how it stands on the right, and under them what it is on or did last (Arun,
-            // 2026-11-13: "show their current work status and add a tag of basically what their role is").
+            // One clean line (Arun, 2026-11-18: "clean and not so much info"): its face, its name with the small ring of how it stands,
+            // what it is on under it (amber when it needs you), and when; on hover, Message and Pin in place of when.
             const st = rowState(m, mateStatus(m));
-            const chip = t.lead === m.lane ? "Lead" : roleWord(m.role ?? "");
             return (
-              // What can be done to it, from a right-click: Remove among them (Arun, 2026-11-15: "WHY CANT I DELETE AND REMOVE
-              // AGENTS?"). No ⋯ beside its words ("get rid of that .... by the texts"): the Agents page has one beside Message.
-              <div key={m.id} className="oss-crew-item" {...dragOf(`mate:${m.id}`)} onContextMenu={(e) => (e.preventDefault(), setMenuAt({ id: `mate:${m.id}`, x: e.clientX, y: e.clientY }))}>
-                <button type="button" className="oss-crew-row" data-active={(p.activeSid === t.sid && focused === m.lane) || undefined} onClick={() => openTeammate(t, m.lane, p.onOpen)} aria-label={`${m.name}${chip ? `, ${chip}` : ""}: ${st.word}${st.line ? `, ${st.line}` : ""}`}>
-                  <Face seed={m.look ?? m.name} size={30} status={m.status} lead={t.lead === m.lane} />
+              <div key={m.id} className="oss-crew-item crew-mate" {...dragOf(`mate:${m.id}`)} onContextMenu={(e) => (e.preventDefault(), setMenuAt({ id: `mate:${m.id}`, x: e.clientX, y: e.clientY }))}>
+                <button type="button" className="oss-crew-row" data-active={(p.activeSid === t.sid && focused === m.lane) || undefined} onClick={() => openTeammate(t, m.lane, p.onOpen)} aria-label={`${m.name}: ${st.word}${st.line ? `, ${st.line}` : ""}`}>
+                  <Face seed={m.look ?? m.name} size={view.density === "compact" ? 22 : 28} status={m.status} lead={t.lead === m.lane} />
                   <span className="oss-crew-text">
                     <span className="oss-crew-top">
                       <b>{m.name}</b>
                       <MateRing status={m.status} title={st.word} />
-                      {chip && <span className="oss-crew-chip">{chip}</span>}
-                      <span className="oss-crew-state" data-tone={st.tone}>
-                        {st.word}
-                      </span>
+                      {m.lastAt ? <span className="crew-when">{shortAgo(m.lastAt)}</span> : null}
                     </span>
-                    {st.line && <span className={`oss-crew-line s-${st.tone}`} title={st.line}>{st.line}</span>}
+                    {st.line && view.density !== "compact" && <span className={`oss-crew-line s-${st.tone}`} title={st.line}>{st.line}</span>}
                   </span>
                 </button>
+                {/* On hover, the pin and the ⋯ the session rows have, in the time's place on the name line (Arun, 2026-11-18: "use the
+                    same svg icon design found for the coding tabs too, because theses are overlapping with the text behind it"). */}
+                <span className="crew-acts">
+                  <button type="button" className="icon-btn tiny sb-row-pin" aria-label={`Pin ${m.name} to the top`} title="Pin to top" onClick={() => pin(m.id, true)}>
+                    <Icon name="pin" size={13} />
+                  </button>
+                  <MenuButton label={`Actions for ${m.name}`} items={() => itemsFor(`mate:${m.id}`)} />
+                </span>
               </div>
             );
           };
@@ -935,9 +1090,10 @@ function CrewList({ p }: { p: SidebarProps }) {
                     void saveFolders({ ...folders, place });
                   }}
                 >
-                  <Icon name={open ? "chevronDown" : "chevronRight"} size={12} />
                   <span className="oss-folder-name">{name}</span>
                   <span className="oss-crew-count">{rs.length + ms.length}</span>
+                  <Icon name={open ? "chevronDown" : "chevronRight"} size={12} className="oss-folder-chev" />
+                  <span className="oss-folder-gap" />
                 </button>
                 {open && (
                   <div className="oss-folder-body">
@@ -973,23 +1129,7 @@ function CrewList({ p }: { p: SidebarProps }) {
       {menuAt && (
         <ContextMenu
           at={menuAt}
-          items={() => {
-            if (menuAt.id === "blank")
-              return [
-                { label: "New agent", icon: "agent", onSelect: newTeammate },
-                { label: "New room for a project", icon: "users", onSelect: () => setRooming(true) },
-                { label: "New group", icon: "folder", onSelect: () => askNewFolder(ask, folders, saveFolders) },
-                { label: "All agents", icon: "user", onSelect: () => (p.onNew(), choosePlace("team")) },
-              ];
-            const move = moveItems(menuAt.id, folders, saveFolders, ask);
-            const m = menuAt.id.startsWith("mate:") ? t.teammates.find((x) => `mate:${x.id}` === menuAt.id) : null;
-            if (m) return [...mateItems({ identity: p.identityForApi, team: t, mate: m, ask }).slice(0, -1), ...move, mateItems({ identity: p.identityForApi, team: t, mate: m, ask }).at(-1)];
-            // A room's own (the Crew room has no other): open, edit, remove, with the folders between.
-            const r = (t.rooms ?? []).find((x) => `room:${x.id}` === menuAt.id);
-            if (!r) return [{ label: "Open", icon: "users", onSelect: () => openTeammate(t, null, p.onOpen) }, ...move];
-            const own = roomItems({ identity: p.identityForApi, room: r, ask, onOpen: () => openRoom(r, p.onOpen), onEdit: () => setEditingRoom(r), onRemoved: () => p.activeSid === r.sid && openTeammate(t, null, p.onOpen) });
-            return [...own.slice(0, -1), ...move, own.at(-1)];
-          }}
+          items={() => itemsFor(menuAt.id)}
           onClose={() => setMenuAt(null)}
         />
       )}
@@ -1003,6 +1143,50 @@ function CrewList({ p }: { p: SidebarProps }) {
  * The Agents icon's dot (Arun, 2026-11-13: "add a notification dot or whatever for the agent tab too"): one that needs you is the
  * count beside it already; this is the quiet dot while one finished something since you last looked at the Agents side.
  */
+/** The agents pinned to the top of the Agents side, by id, kept in this browser. */
+const CREW_PINS = "friday.crew.pins";
+function useCrewPins(): [Set<string>, (s: Set<string>) => void] {
+  const [pins, set] = useState<Set<string>>(() => {
+    try {
+      const v = JSON.parse(localStorage.getItem(CREW_PINS) ?? "[]") as unknown;
+      return new Set(Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+    } catch {
+      return new Set();
+    }
+  });
+  const save = (s: Set<string>) => {
+    set(s);
+    try {
+      localStorage.setItem(CREW_PINS, JSON.stringify([...s]));
+    } catch {
+      // Private mode: pinned for now only.
+    }
+  };
+  return [pins, save];
+}
+/** How the Agents side's list looks: Cozy or Compact, who needs you first or by name. */
+type CrewView = { density: "cozy" | "compact"; sort: "attention" | "name" };
+const CREW_VIEW = "friday.crew.view";
+function useCrewView(): [CrewView, (v: CrewView) => void] {
+  const [v, set] = useState<CrewView>(() => {
+    try {
+      const got = JSON.parse(localStorage.getItem(CREW_VIEW) ?? "{}") as Partial<CrewView>;
+      return { density: got.density === "compact" ? "compact" : "cozy", sort: got.sort === "name" ? "name" : "attention" };
+    } catch {
+      return { density: "cozy", sort: "attention" };
+    }
+  });
+  const save = (n: CrewView) => {
+    set(n);
+    try {
+      localStorage.setItem(CREW_VIEW, JSON.stringify(n));
+    } catch {
+      // Private mode: for now only.
+    }
+  };
+  return [v, save];
+}
+
 const AGENTS_SEEN = "friday.agents.seen";
 function useAgentsDot(mates: { status: string; halted?: true; line?: string | null; lastAt?: number }[], looking: boolean): boolean {
   const seen = (() => {
@@ -1115,9 +1299,10 @@ function Group({ label, open, onToggle, count, status, action, drag, children, c
         <div className="group/label relative flex items-center" {...drag}>
           <SidebarGroupLabel asChild className="h-7 flex-1 cursor-pointer gap-1 px-2 text-[12px] font-medium normal-case tracking-normal text-[var(--text-muted)] hover:text-sidebar-accent-foreground">
             <CollapsibleTrigger>
-              <ChevronRightIcon className={`size-3 transition-transform duration-200 ${open ? "rotate-90" : ""}`} />
               <span className="flex min-w-0 items-center gap-1.5 truncate">{label}</span>
               {!!count && <span className="ml-1 font-normal normal-case tracking-normal">{count}</span>}
+              {/* The fold's chevron just after the name and count (Arun, 2026-11-18: "move the chevron to the right of the text"). */}
+              <ChevronRightIcon className={`sb-fold-chev ml-1 size-3 shrink-0 transition-transform duration-200 ${open ? "rotate-90" : ""}`} />
               {status && <span className="ml-auto flex items-center pl-2">{status}</span>}
             </CollapsibleTrigger>
           </SidebarGroupLabel>
@@ -1582,7 +1767,6 @@ function SessionsList({ p }: { p: SidebarProps }) {
                   setProjectCtx({ id: proj.id, x: e.clientX, y: e.clientY });
                 }}
               >
-                <ChevronRightIcon className={`size-3 shrink-0 text-[var(--text-muted)] transition-transform duration-200 ${open ? "rotate-90" : ""}`} />
                 <Icon name={open ? "folderOpen" : "folder"} size={14} />
                 {isRenaming ? (
                   <InlineEdit
@@ -1605,6 +1789,7 @@ function SessionsList({ p }: { p: SidebarProps }) {
                 )}
                 {/* Its count beside its name, as every group's is (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL"). */}
                 {!isRenaming && <span className="shrink-0 text-[12px] tabular-nums text-[var(--text-muted)]">{items.length || ""}</span>}
+                <ChevronRightIcon className={`sb-fold-chev size-3 shrink-0 text-[var(--text-muted)] transition-transform duration-200 ${open ? "rotate-90" : ""}`} />
                 <span className="flex-1" />
                 <span className="dass-row-act flex items-center">
                   <button

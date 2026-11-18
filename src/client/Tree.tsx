@@ -1,5 +1,6 @@
 import { FileIcon } from "./fileIcons.js";
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyEvent } from "react";
+import { PICTURE_FILE } from "./picture-url.js";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyEvent } from "react";
 import { MarkdownDoc } from "./MarkdownDoc.js";
 import { FileDiff } from "@/components/agents/file-diff";
 import { driverOf, type SessionState } from "../session/projection.js";
@@ -13,6 +14,9 @@ import { Icon, type IconName } from "./icons.js";
 import { ContextMenu, relTime } from "./ui.js";
 import { useFocus } from "./focusStore.js";
 import { unnumbered } from "../project-rules.js";
+
+// The picture view loads only when a picture file is opened (PictureView.tsx): never in the first load.
+const PictureView = lazy(() => import("./PictureView.js"));
 
 /**
  * The folder, as everyone in the room sees it.
@@ -538,6 +542,8 @@ function FileView({
   const [editing, setEditing] = useState(true);
   // A Markdown file opens as a page (MarkdownDoc.tsx), with no Formatted/Edit switch over it (Arun, 2026-11-05: "get rid of this").
   const markdown = /\.(md|markdown|mdx)$/i.test(path);
+  // A picture shows as itself, from the session's folders, not as text that can't be read (Arun, 2026-11-18).
+  const picture = PICTURE_FILE.test(path);
 
   // Another file starts fresh. Said while drawing: an effect would also run each time a kept Tree is shown again.
   const [viewOf, setViewOf] = useState(path);
@@ -550,7 +556,7 @@ function FileView({
 
   // The bytes, not the numbered rendering: an editor has to write back what it read.
   useEffect(() => {
-    if (change && !editing) return;
+    if ((change && !editing) || picture) return;
     let live = true;
     type Read = { output?: string; error?: string };
     const readIn = (l: string | undefined) =>
@@ -590,6 +596,17 @@ function FileView({
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
+
+  if (picture) {
+    const src = `/api/sessions/${encodeURIComponent(sid)}/work/file?invite=${encodeURIComponent(invite)}&path=${encodeURIComponent(path)}`;
+    return (
+      <div className="tree-open">
+        <Suspense fallback={null}>
+          <PictureView src={src} path={path} {...(change ? { note: <span>Changed by {agentNameFor(state, change.lane)}</span> } : {})} />
+        </Suspense>
+      </div>
+    );
+  }
 
   if (change && !editing) {
     return (

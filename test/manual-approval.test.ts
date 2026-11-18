@@ -26,6 +26,14 @@ test("Claude Code: Manual refuses commands, and a yes allows exactly the ones as
   assert.ok(auto.includes("Bash") && auto.includes("PowerShell"), "Auto allows any command, in either shell");
 });
 
+test("Claude Code: Auto doesn't offer its question tool, since nobody is asked; Manual and Plan still do", () => {
+  const disallowed = (a: string[]) => a.flatMap((x, i) => (x === "--disallowedTools" ? [a[i + 1]] : []));
+  assert.deepEqual(disallowed(ADAPTERS.claude.args(spec({ mode: "full" }))), ["AskUserQuestion"]);
+  assert.deepEqual(disallowed(ADAPTERS.claude.args(spec({ mode: "full", work: true, guarded: true }))), ["AskUserQuestion"], "a teammate's Auto too");
+  assert.deepEqual(disallowed(ADAPTERS.claude.args(spec())), [], "Manual: a person is there to answer");
+  assert.deepEqual(disallowed(ADAPTERS.claude.args(spec({ mode: "plan" }))), []);
+});
+
 test("Claude Code: the commands it was refused come back as something to ask about", () => {
   const out = feed("claude", [{ type: "result", session_id: "x", permission_denials: [{ tool_name: "Bash", tool_input: { command: "npm test" } }, { tool_name: "Bash", tool_input: { command: "npm test" } }, { tool_name: "Edit", tool_input: {} }] }]);
   assert.deepEqual(out.find((o) => o.kind === "blocked"), { kind: "blocked", scope: "commands", items: ["npm test"] });

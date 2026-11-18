@@ -23,6 +23,10 @@ const panels = new Map<string, Panel>();
 // (Arun, 2026-10-28: "iron everything and ensure we are good… any logic errors").
 /** The tab each agent last worked in, the panel's or a background page's. */
 const used = new Map<string, number>();
+/** The panel tab each agent last worked in: where it goes back to after a page of its own checks (aside). */
+const panelUsed = new Map<string, number>();
+/** Agents working on their background page by choice, a test page out of the person's sight, though the session is open (BrowserAsk.background). */
+const aside = new Set<string>();
 /** Each agent's background page, and when it was last used: closed after a while unused (see the sweep below). */
 const background = new Map<string, { win: BrowserWindow; at: number }>();
 /** Asks for a panel tab, waiting for the page to draw it: the session, and the tabs it had before. One per session at a time (opening). */
@@ -185,7 +189,12 @@ function current(sid: string, key: string): WebContents | null {
   return shown;
 }
 
-const where = (key: string, wc: WebContents) => (background.get(key)?.win.webContents === wc ? " (in the background: this session isn't open in Friday's window, so nobody sees this page but you)" : "");
+const where = (key: string, wc: WebContents) =>
+  background.get(key)?.win.webContents !== wc
+    ? ""
+    : aside.has(key)
+      ? " (out of sight: a page for your own checks, not shown in the person's Browser panel; read or screenshot it for its results)"
+      : " (in the background: this session isn't open in Friday's window, so nobody sees this page but you)";
 
 /** Marks what can be pressed or filled with a number, and says the page as text with them. */
 const READ = `(() => {
@@ -250,6 +259,20 @@ async function act(getWin: () => BrowserWindow | null, sid: string, lane: string
   if (wc) guard(wc);
   if (ask.action === "open") {
     if (ownApp(ask.url!)) return { output: "That is Friday's own address on this computer: its pages are the person's to use, not a page for an agent's browser.", isError: true };
+    const onBackground = (w: WebContents | null) => !!w && background.get(key)?.win.webContents === w;
+    if (ask.background) {
+      // Its own test page and its logs, out of the person's sight (Arun, 2026-11-18: "i just dont want those logs there"): on its
+      // background page, which it reads, clicks and screenshots as any other.
+      wc = backgroundPage(key);
+      guard(wc);
+      used.set(key, wc.id);
+      aside.add(key);
+      void wc.loadURL(ask.url!).catch(() => {});
+      await settled(wc);
+      return { output: `Opened ${wc.getURL()}: “${wc.getTitle()}”${where(key, wc)}. Read it to see what is there.` };
+    }
+    // Back from a page of its own checks: to the panel tab it had, or a new one, the session being open.
+    if (aside.delete(key) && onBackground(wc)) wc = ((t) => (t && !anotherHas(sid, key, t.id) ? t : null))(alive(panelUsed.get(key)));
     if (!wc || ask.new_tab) {
       const id = await panelTab(getWin, sid, ask.url!);
       wc = alive(id ?? undefined) ?? backgroundPage(key);
@@ -258,6 +281,8 @@ async function act(getWin: () => BrowserWindow | null, sid: string, lane: string
       // A panel tab is already on its way to the address; a background page is sent there.
       if (!id) void wc.loadURL(ask.url!).catch(() => {});
     } else void wc.loadURL(ask.url!).catch(() => {});
+    if (!onBackground(wc)) panelUsed.set(key, wc.id);
+    used.set(key, wc.id);
     await settled(wc);
     return { output: `Opened ${wc.getURL()}: “${wc.getTitle()}”${where(key, wc)}. Read it to see what is there.` };
   }

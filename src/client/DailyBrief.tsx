@@ -10,7 +10,7 @@ import { shortTokens } from "../tool-usage.js";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { api } from "./api.js";
 import { focusAgent } from "./agentFocus.js";
-import { notificationsOn } from "./prefs.js";
+import { awayFromApp, notificationsOn } from "./prefs.js";
 import type { Identity } from "./storage.js";
 import { Face } from "./Teammates.js";
 import { Switch } from "./ui.js";
@@ -341,7 +341,7 @@ export function DailyBriefHost({ identity }: { identity: Identity }) {
       // A scheduled brief not yet said on this device, and still fresh: said once.
       if (b && b.kind !== "now" && read(TOLD) !== b.id && Date.now() - b.until < 3 * 3600_000) {
         write(TOLD, b.id);
-        if (document.visibilityState !== "visible" && notificationsOn() && typeof Notification !== "undefined" && Notification.permission === "granted") {
+        if (awayFromApp() && notificationsOn() && typeof Notification !== "undefined" && Notification.permission === "granted") {
           try {
             const n = new Notification(TITLE[b.kind], { body: b.headline, tag: `brief:${b.id}` });
             n.onclick = () => (window.focus(), n.close(), openBrief(b));

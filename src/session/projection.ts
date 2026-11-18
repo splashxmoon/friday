@@ -364,6 +364,10 @@ export interface BoardTask extends BoardTaskDef {
   branch?: string;
   /** Why it waits though it is ready (board.waiting): its crew mate has no copy of the board's project, or nobody has. */
   waiting?: string;
+  /** Held back by a person (board.held): never handed out until it is let go. */
+  held?: true;
+  /** Marked done by a person, by name (board.done), rather than finished and checked. */
+  doneBy?: string;
 }
 
 export interface BoardState {
@@ -380,6 +384,8 @@ export interface BoardState {
   proposed?: true;
   /** The room's project when it was posted (room-project.ts): its tasks go only to a crew mate with a copy of it. */
   project?: { repo: string; branch?: string };
+  /** The whole board held by a person (board.held without an id): nothing more is handed out until it is let go. */
+  held?: true;
 }
 
 /** Tasks whose every dependency is done and that nobody has: the ones an agent can take now. */
@@ -388,7 +394,9 @@ export function readyTasks(s: SessionState): BoardTask[] {
   if (!b) return [];
   // A dropped task waits on nothing and holds nothing up: what waited on it goes ahead without it.
   const done = new Set(b.tasks.filter((t) => t.status === "done" || t.status === "cancelled").map((t) => t.id));
-  return b.tasks.filter((t) => t.status === "open" && t.after.every((d) => done.has(d)));
+  // Held, the board or the task, nothing goes out (board.held).
+  if (b.held) return [];
+  return b.tasks.filter((t) => t.status === "open" && !t.held && t.after.every((d) => done.has(d)));
 }
 
 /** Whether the board still has work on it: anything not done (a blocked task waits for the lead or a person). */
@@ -1124,6 +1132,40 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
     case "board.posted":
       s.board = { fromLane: b.fromLane, fromName: b.fromName, seq: ev.seq, tasks: b.tasks.map((t) => ({ ...t, status: "open", rounds: 0 })), ...(b.check ? { check: b.check } : {}), ...(b.by ? { by: b.by } : {}), ...(b.proposed ? { proposed: true as const } : {}), ...(b.project ? { project: b.project } : {}) };
       break;
+    case "board.added": {
+      const task: BoardTask = { ...b.task, status: "open", rounds: 0 };
+      if (!s.board) s.board = { fromLane: s.lead ?? MAIN_LANE, fromName: b.fromName, seq: ev.seq, tasks: [task] };
+      else if (!s.board.tasks.some((t) => t.id === task.id)) s.board.tasks = [...s.board.tasks, task];
+      break;
+    }
+    case "board.edited": {
+      const t = s.board?.tasks.find((x) => x.id === b.id);
+      if (t) Object.assign(t, { ...(b.title ? { title: b.title } : {}), ...(b.detail !== undefined ? { detail: b.detail } : {}) });
+      break;
+    }
+    case "board.moved": {
+      const at = s.board?.tasks.findIndex((x) => x.id === b.id) ?? -1;
+      if (!s.board || at < 0) break;
+      const tasks = [...s.board.tasks];
+      const [t] = tasks.splice(at, 1);
+      tasks.splice(Math.max(0, Math.min(tasks.length, b.to)), 0, t!);
+      s.board.tasks = tasks;
+      break;
+    }
+    case "board.held": {
+      if (!s.board) break;
+      if (!b.id) s.board = b.on ? { ...s.board, held: true } : (({ held: _h, ...rest }) => rest)(s.board);
+      else {
+        const t = s.board.tasks.find((x) => x.id === b.id);
+        if (t) t.held = b.on ? true : undefined;
+      }
+      break;
+    }
+    case "board.done": {
+      const t = s.board?.tasks.find((x) => x.id === b.id);
+      if (t) Object.assign(t, { status: "done", reviewer: undefined, waiting: undefined, held: undefined, doneBy: b.by });
+      break;
+    }
     case "board.waiting": {
       const t = s.board?.tasks.find((x) => x.id === b.id);
       if (t) t.waiting = b.why || undefined;
