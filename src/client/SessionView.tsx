@@ -338,11 +338,12 @@ export function SessionView({
     let live = true;
     const ask = () =>
       fetch(`/api/sessions/${encodeURIComponent(sid)}/pr?invite=${encodeURIComponent(invite)}`, { credentials: "same-origin" })
-        .then((r) => r.json() as Promise<{ pr: { url: string; at: number; status: { state: string } | null } | null }>)
+        .then((r) => r.json() as Promise<{ pr: { url: string; at: number; status: { state: string; mergedAt?: number } | null } | null }>)
         .then((d) => {
           if (!live) return;
           const st = d.pr?.status?.state;
-          if (st === "merged") setMerged({ url: d.pr!.url, at: Date.now() });
+          // When GitHub says it merged; from a runner older than that, when it was seen to.
+          if (st === "merged") setMerged({ url: d.pr!.url, at: d.pr!.status!.mergedAt ?? Date.now() });
           else if (st === "closed") setClosed(true);
         })
         .catch(() => {});

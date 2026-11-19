@@ -282,10 +282,10 @@ export function rehypeFileChips() {
  * ending in a picture's extension, standing on its own between spaces or punctuation. Whole paths too (/Users/…/shot.png,
  * ~/shots/a.png, C:\shots\a.png), which a path in backticks isn't taken as (pathOf is for places in the repository).
  */
-export const PICTURE_PATH = /(^|[\s("'“‘])((?:~|[A-Za-z]:)?[\\/]?(?:[\w@+%.-]+[\\/])*[\w@+%.-]*[\w-]\.(?:png|jpe?g|gif|webp|svg|avif))(?=$|[\s.,;:!?)"'”’])/gi;
+export const PICTURE_PATH = /(^|[\s("'“‘])((?:~|[A-Za-z]:)?[\\/]?(?:[\w@+%.-]+[\\/])*[\w@+%.-]*[\w-]\.(?:png|jpe?g|gif|webp|svg|avif|mp4|mov|webm|m4v))(?=$|[\s.,;:!?)"'”’])/gi;
 
 /** A whole path on a computer to a picture: one MediaChip shows from there, as a path in the folders is shown. */
-export const pictureAbs = (s: string): boolean => /^(\/|~\/|[A-Za-z]:[\\/]|file:\/\/)/.test(s) && /\.(png|jpe?g|gif|webp|svg|avif)$/i.test(s) && !/\s/.test(s);
+export const pictureAbs = (s: string): boolean => /^(\/|~\/|[A-Za-z]:[\\/]|file:\/\/)/.test(s) && /\.(png|jpe?g|gif|webp|svg|avif|mp4|mov|webm|m4v)$/i.test(s) && !/\s/.test(s);
 
 /**
  * After the hardener: each picture path in the words made inline code naming it, which the answer draws as the picture under its
@@ -302,11 +302,11 @@ export function rehypePicturePaths() {
         if (c.type === "element") {
           // A picture named in backticks closes its sentence too: the punctuation after it goes, as in the words below.
           const next = kids[i + 1];
-          if (c.tagName === "code" && next?.type === "text" && /\.(png|jpe?g|gif|webp|svg|avif)$/i.test(textOf(c).trim()) && /^[.,;:](?=\s|$)/.test(next.value ?? "")) next.value = next.value!.slice(1);
+          if (c.tagName === "code" && next?.type === "text" && /\.(png|jpe?g|gif|webp|svg|avif|mp4|mov|webm|m4v)$/i.test(textOf(c).trim()) && /^[.,;:](?=\s|$)/.test(next.value ?? "")) next.value = next.value!.slice(1);
           if (!["a", "code", "pre", "button", "svg"].includes(c.tagName ?? "")) walk(c);
           continue;
         }
-        if (c.type !== "text" || !c.value || !/\.(png|jpe?g|gif|webp|svg|avif)\b/i.test(c.value)) continue;
+        if (c.type !== "text" || !c.value || !/\.(png|jpe?g|gif|webp|svg|avif|mp4|mov|webm|m4v)\b/i.test(c.value)) continue;
         const parts: Node[] = [];
         let last = 0;
         for (const m of c.value.matchAll(PICTURE_PATH)) {

@@ -1,7 +1,8 @@
 /* The side panel's Pull request (PrPanel.tsx): which one, where it stands, Friday seeing it through, and what happened since. */
 
 .prp { display: flex; flex-direction: column; gap: 14px; min-height: 0; flex: 1 1 auto; overflow: auto; padding: 16px 16px 24px; font: 400 13px/1.45 var(--font); color: var(--ink-2); }
-.prp-grow { flex: 1; }
+/* Each part keeps its height: the panel scrolls rather than squeezing one (the status card, overflow hidden, went to nothing). */
+.prp > *, .prp .gx-body > * { flex-shrink: 0; }
 
 /* Which one. */
 .prp-head { display: flex; flex-direction: column; gap: 8px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
@@ -14,18 +15,8 @@
 .prp-num { display: inline-flex; align-items: baseline; gap: 4px; min-width: 0; font-size: 13px; color: var(--text-muted); }
 .prp-num b { color: var(--ink-2); font-weight: 600; font-variant-numeric: tabular-nums; }
 .prp-repo { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.prp-icon { display: grid; place-items: center; flex: none; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-md); background: none; color: var(--text-muted); cursor: pointer; }
-.prp-icon:hover { background: var(--hover); color: var(--ink); }
 .prp-title-text { margin: 0; color: var(--ink); font-size: 16px; font-weight: 600; line-height: 1.35; letter-spacing: -0.012em; text-wrap: pretty; }
-.prp-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; color: var(--text-muted); font-size: 12px; }
-.prp-branches { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
-.prp-branches code { max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 1px 6px; border-radius: var(--r-sm); background: var(--hover); color: var(--ink-2); font: 11.5px/1.5 var(--mono); }
-.prp-branches svg { flex: none; color: var(--faint); }
-.prp-size { font-variant-numeric: tabular-nums; }
-.prp-size .add { color: var(--green); font-weight: 600; }
-.prp-size .del { color: var(--red); font-weight: 600; }
 
-.prp-quiet { margin: 0; color: var(--text-muted); font-size: 12.5px; }
 
 /* Where it stands: the verdict over checks, review and merge. */
 .prp-card { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--panel); overflow: hidden; }
@@ -86,15 +77,12 @@
 .prp-btn.primary { border-color: transparent; background: var(--ink); color: var(--bg); }
 .prp-btn.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--ink) 86%, var(--bg)); }
 .prp-btn:disabled { opacity: .5; cursor: default; }
-.prp-btn:focus-visible, .prp-link:focus-visible, .prp-icon:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.prp-btn:focus-visible, .prp-link:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .prp-btn .spinner { width: 12px; height: 12px; }
 .prp-link { padding: 0; border: 0; background: none; color: var(--text-muted); font: inherit; font-size: 12.5px; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .prp-link:hover { color: var(--ink); }
-.prp-note { margin: -4px 0 0; color: var(--text-muted); font-size: 12.5px; }
 
 /* Since it opened: a short feed, newest first. */
-.prp-sec { display: flex; flex-direction: column; gap: 8px; }
-.prp-sec h4 { margin: 0; color: var(--text-muted); font-size: 12px; font-weight: 500; }
 .prp-feed { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
 .prp-feed li { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: start; gap: 8px; padding: 5px 0; }
 .prp-feed-mark { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--hover); color: var(--text-muted); }
@@ -109,5 +97,75 @@
 .prp-empty h3 { margin: 4px 0 0; color: var(--ink); font-size: 14px; font-weight: 600; }
 .prp-empty p { max-width: 300px; margin: 0 0 6px; color: var(--text-muted); font-size: 12.5px; line-height: 1.5; }
 .prp-empty-mark { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: var(--hover); color: var(--text-muted); }
+
+/* In full (2026-11-19), in the Git panel's own grammar (git-panel.css gx-*): its header strip with the facts as chips, then
+   sections headed by a name and a count, their rows in a bordered list, its commits on the history line. Only what gx doesn't
+   cover is here. */
+.prp.gx { gap: 0; padding: 0; overflow: hidden; }
+/* The header stays, the rest scrolls under it, as the Git panel's (Arun, 2026-11-19: "add scrollability too"): the body is the
+   one part that gives way. Held to its content by ".prp > *" it grew past the panel and was cut off under Description. */
+.prp.gx > .gx-body { flex: 1 1 0; flex-shrink: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.prp .gx-head.prp-head { padding: 12px 14px 12px; }
+.prp .prp-title-text { font-size: 15px; }
+.prp-by b { color: var(--ink); font-weight: 600; }
+.prp-by code { display: inline-block; max-width: 26ch; overflow: hidden; vertical-align: bottom; text-overflow: ellipsis; white-space: nowrap; }
+.prp-gh { height: 26px; padding: 0 9px; font-size: 12px; text-decoration: none; }
+.prp .gx-chip { text-decoration: none; font-variant-numeric: tabular-nums; }
+.prp-lines { gap: 6px; }
+.prp-lines .add, .prp-add { color: color-mix(in srgb, var(--green) 85%, var(--ink)); font-weight: 600; }
+.prp-lines .del, .prp-del { color: color-mix(in srgb, var(--red) 85%, var(--ink)); font-weight: 600; }
+a.prp-closes { background: color-mix(in srgb, #a855f7 14%, transparent); color: color-mix(in srgb, #a855f7 82%, var(--ink)); }
+a.prp-closes:hover { background: color-mix(in srgb, #a855f7 22%, transparent); }
+.prp-label { --label: #888; background: color-mix(in srgb, var(--label) 16%, transparent); color: color-mix(in srgb, var(--label) 62%, var(--ink)); }
+
+/* Rows that open on GitHub: the Git panel's row, as a link. */
+.prp a.gx-main, .prp a.gx-commit-main, .prp a.gx-link { color: inherit; text-decoration: none; }
+.prp a.gx-link { display: inline-flex; align-items: center; color: var(--text-muted); }
+.prp a.gx-link:hover { color: var(--ink); }
+.prp .gx-file .gx-main { padding-right: 10px; }
+.prp .gx-file .gx-dir { flex: 0 1 auto; }
+.prp-row .avatar { flex: none; }
+.prp-out { flex: none; color: var(--faint); opacity: 0; transition: opacity var(--t-hover) var(--ease-out); }
+.prp a.gx-main:hover .prp-out, .prp a.gx-main:focus-visible .prp-out { opacity: 1; }
+.prp-more { align-self: flex-start; margin-top: 6px; }
+
+/* A check: its mark, name and workflow, how long it took. */
+.prp-check-mark { display: grid; place-items: center; flex: none; width: 18px; height: 18px; border-radius: 50%; background: var(--hover); color: var(--text-muted); }
+.prp-check.pass .prp-check-mark { background: color-mix(in srgb, var(--green) 16%, transparent); color: color-mix(in srgb, var(--green) 85%, var(--ink)); }
+.prp-check.fail .prp-check-mark { background: color-mix(in srgb, var(--red) 15%, transparent); color: color-mix(in srgb, var(--red) 85%, var(--ink)); }
+.prp-check-mark .prp-spin { width: 9px; height: 9px; }
+.prp-took { flex: none; color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.prp-check.fail .prp-took { color: color-mix(in srgb, var(--red) 85%, var(--ink)); }
+.prp-file-lines { display: inline-flex; gap: 6px; flex: none; font-size: 12px; font-variant-numeric: tabular-nums; }
+
+/* A reviewer's say. */
+.prp-review.approved { background: color-mix(in srgb, var(--green) 12%, transparent); color: color-mix(in srgb, var(--green) 80%, var(--ink)); }
+.prp-review.changes { background: color-mix(in srgb, var(--red) 12%, transparent); color: color-mix(in srgb, var(--red) 80%, var(--ink)); }
+.prp-review.pending { background: color-mix(in srgb, var(--amber) 15%, transparent); color: color-mix(in srgb, var(--amber) 78%, var(--ink)); }
+
+/* Under Review, its action; under Merge, the merge commit. */
+.prp-step-text > .gx-link { margin: 4px 0 0 53px; }
+.prp-sha-link { margin: 2px 0 0 60px; text-decoration: none; }
+.prp-sha-link code { font: 11.5px/1.6 var(--mono); color: var(--text-muted); }
+.prp-sha-link:hover code { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+
+/* Merged reads purple, as GitHub and the chat's merged card say it. */
+.prp-verdict.merged { background: color-mix(in srgb, #a855f7 9%, transparent); }
+.prp-verdict.merged .prp-verdict-dot { background: #a855f7; }
+.prp-step.merged .prp-step-mark { border-color: #a855f7; background: #a855f7; color: #fff; }
+
+/* Its description, folded past a screenful with a fade. */
+/* The description's own headings sit under the panel's "Description", a step quieter than it, not level with it. */
+.prp .prp-desc :is(h1, h2, h3, h4, h5, h6) { margin: 14px 0 4px; color: var(--ink-2); font-size: 12.5px; font-weight: 600; line-height: 1.4; letter-spacing: 0; }
+.prp .prp-desc > * > :first-child, .prp .prp-desc :is(h1, h2, h3, h4, h5, h6):first-child { margin-top: 0; }
+.prp .prp-desc :is(p, ul, ol) { margin-block: 4px 8px; }
+/* A list in the description keeps its marks (the base styles strip them, so its items stood indented with nothing before them). */
+.prp .prp-desc ul { list-style: disc; padding-left: 18px; }
+.prp .prp-desc ol { list-style: decimal; padding-left: 20px; }
+.prp .prp-desc li::marker { color: var(--text-muted); }
+.prp-desc { position: relative; color: var(--ink-2); font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
+.prp-desc.folded { max-height: 220px; overflow: hidden; }
+.prp-desc-more { align-self: flex-start; margin-top: 6px; }
+.prp-desc.folded::after { content: ""; position: absolute; inset: auto 0 0; height: 56px; background: linear-gradient(to bottom, transparent, var(--bg)); pointer-events: none; }
 
 @media (prefers-reduced-motion: reduce) { .prp-spin { animation: none; } }

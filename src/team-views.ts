@@ -20,6 +20,8 @@ export interface MatePlace {
   sid: string;
   lanes: Record<string, string>;
   room?: { name: string } | null;
+  /** The team's own session, where each teammate's home chat is. */
+  home?: true;
 }
 
 /**
@@ -67,8 +69,8 @@ export class TeamLooks {
   async mates<T extends Teammate>(places: MatePlace[], list: T[], problems: Map<string, string> = new Map()): Promise<(T & TeammateView)[]> {
     const read = await Promise.all(
       places.map(async (p) => {
-        const { state, agents, runs, held } = await this.look(p.sid).catch(() => ({ state: null, agents: [] as Look["agents"], runs: [] as LaneRun[], held: new Set<string>() }));
-        return { ...p, state, agents, runs, held };
+        const { state, agents, runs, held, events } = await this.look(p.sid).catch(() => ({ state: null, agents: [] as Look["agents"], runs: [] as LaneRun[], held: new Set<string>(), events: [] as SessionEvent[] }));
+        return { ...p, state, agents, runs, held, events };
       }),
     );
     // Its usage today (since this server's midnight) and over the week, across everywhere it works.
@@ -109,7 +111,14 @@ export class TeamLooks {
       const problem = problems.get(t.id);
       // Stopped by a person where it last ran, and idle since: its face says stopped, never done (audit CREW-40).
       const halted = best.status === "idle" && read.some((p) => !!p.lanes[t.id] && p.state?.stopped?.[p.lanes[t.id]!] !== undefined);
-      const more = { ...(lastAt ? { lastAt } : {}), ...(halted ? { halted: true as const } : {}), mode: t.mode ?? ("full" as const), held: read.some((p) => !!p.lanes[t.id] && p.held.has(p.lanes[t.id]!)), usage: { today: usageFor(t.id, midnight), week: usageFor(t.id, week) } };
+      // Its home chat goes by the first thing the person said in it, as a thread does (Arun, 2026-11-18: "get rid of this main thread
+      // stuff, like this make it called new thread"); with nothing said yet the page calls it New thread.
+      const home = read.find((p) => p.home && p.lanes[t.id]);
+      // Deleted (lane.cleared): only what was said there since.
+      const from = home?.state?.cleared?.[home.lanes[t.id]!] ?? 0;
+      const first = home?.events.find((e) => e.seq > from && (e.lane ?? MAIN_LANE) === home.lanes[t.id] && e.body.type === "instruction" && e.actor.kind === "human" && !e.body.approval && !e.body.text.startsWith("[") && e.body.text.trim());
+      const homeTitle = first && first.body.type === "instruction" ? threadTitle(first.body.text) : "";
+      const more = { ...(lastAt ? { lastAt } : {}), ...(homeTitle ? { homeTitle } : {}), ...(halted ? { halted: true as const } : {}), mode: t.mode ?? ("full" as const), held: read.some((p) => !!p.lanes[t.id] && p.held.has(p.lanes[t.id]!)), usage: { today: usageFor(t.id, midnight), week: usageFor(t.id, week) } };
       // Mid-turn it is working whatever a ping says; otherwise a model that can't run leaves it offline, and says why.
       if (problem) return { ...t, ...(best.status === "working" ? best : { status: "offline" as const, line: problem }), queued, problem, ...more };
       return { ...t, ...best, queued, ...more };

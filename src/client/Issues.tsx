@@ -131,8 +131,12 @@ export function IssuesInbox({ data, controls, onWork, query, setQuery, search }:
           ) : (
             groups.map((g) => (
               <div key={g.title} className="flex flex-col gap-px">
-                <h2 className="m-0 flex items-center gap-1.5 px-2.5 pt-2.5 pb-1 text-[12px] font-medium tracking-[0.06em] text-[var(--text-muted)] uppercase">
-                  {g.title} <span className="tabular-nums">{g.items.length}</span>
+                {/* The pull request tabs' pile heading, in sentence case as every heading in the app (it was "YOU OPENED 7"). */}
+                <h2 className="rv-pile m-0">
+                  <span className="rv-pile-btn rv-pile-static">
+                    <span className="rv-pile-name">{g.title}</span>
+                    <span className="rv-pile-n">{g.items.length}</span>
+                  </span>
                 </h2>
                 {g.items.map((i) => (
                   <IssueRow key={i.key} issue={i} on={current?.key === i.key} working={!!started[i.key]} onPick={() => setSel(i.key)} />
@@ -143,7 +147,7 @@ export function IssuesInbox({ data, controls, onWork, query, setQuery, search }:
         </div>
       </aside>
       <section className="rv-pane" aria-label="Issue">
-        <div className="page-top mb-4 flex shrink-0 items-center justify-end gap-2">{controls}</div>
+        <div className="page-top mb-4 flex min-h-12 shrink-0 items-center justify-end gap-2 py-2 max-[720px]:hidden">{controls}</div>
         {current ? (
           <IssuePane key={current.key} issue={current} started={started[current.key]} onWork={() => onWork(issueBrief(current))} />
         ) : nothing ? (
@@ -199,15 +203,13 @@ function IssueRow({ issue: i, on, working, onPick }: { issue: InboxIssue; on: bo
       type="button"
       aria-current={on || undefined}
       onClick={onPick}
-      className="flex w-full min-w-0 items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors duration-[var(--dass-fast)] hover:bg-[var(--hover)] aria-[current=true]:bg-[var(--hover)]"
+      // As a pull request's row on the other tabs (QueueItem), so the five tabs read as one list (Arun, 2026-11-19: "it is not like
+      // the other tab pages"): the title, then where it lives and who, and its state at the right end with its ring.
+      className="flex w-full min-w-0 flex-col gap-1.5 rounded-lg px-2.5 py-2 text-left transition-colors duration-[var(--dass-fast)] hover:bg-[var(--hover)] aria-[current=true]:bg-[var(--hover)] aria-[current=true]:shadow-[inset_0_0_0_1px_var(--border)]"
     >
-      <Dot state={working ? "working" : i.stateType === "started" ? "needs" : "idle"} className="mt-[6px]" title={working ? "In a session" : i.state} />
-      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="line-clamp-2 text-[13px] leading-[18px] font-medium text-[var(--ink)]">{i.title}</span>
-        <span className="flex min-w-0 items-center gap-1.5 text-[12px] leading-[18px] text-[var(--text-muted)]">
-          {working ? <span className="shrink-0 font-medium text-[var(--dass-live)]">Friday is on it</span> : null}
+        <span className="line-clamp-2 min-w-0 text-[13px] leading-snug font-medium text-[var(--ink)]">{i.title}</span>
+        <span className="flex min-w-0 items-center gap-2 text-[12px] text-[var(--text-muted)]">
           <span className="min-w-0 truncate">
-            {working ? " · " : ""}
             {where}
             {i.author ? ` · ${i.author}` : ""}
             {linearState ? ` · ${linearState}` : ""}
@@ -218,16 +220,18 @@ function IssueRow({ issue: i, on, working, onPick }: { issue: InboxIssue; on: bo
               {i.comments}
             </span>
           ) : null}
-          <span className="ml-auto shrink-0 tabular-nums">{i.updatedAt ? relTime(Date.parse(i.updatedAt)) : ""}</span>
+          <span className={cn("ml-auto inline-flex min-w-0 shrink-0 items-center gap-1.5", working ? "font-medium text-[var(--dass-live)]" : i.stateType === "started" ? "font-medium text-[var(--dass-needs)]" : "tabular-nums")} title={working ? "In a session" : i.state}>
+            <Dot state={working ? "working" : i.stateType === "started" ? "needs" : "idle"} className="shrink-0" />
+            {working ? "Friday is on it" : i.updatedAt ? relTime(Date.parse(i.updatedAt)) : ""}
+          </span>
         </span>
-      </span>
     </button>
   );
 }
 
 /**
- * The issue picked, read as a page: its title with Start work beside it (the one action), one quiet line of facts, its labels, and
- * what it says at a reading width, with no heading over it.
+ * The issue picked, read as a page as a pull request is on the other tabs: its title with Start work at the right edge (the one
+ * action), one quiet line of facts, its labels, and what it says under a heading, at a reading width.
  */
 function IssuePane({ issue: i, started, onWork }: { issue: InboxIssue; started?: Started[string]; onWork: () => void }) {
   const body = i.body.trim();
@@ -239,8 +243,8 @@ function IssuePane({ issue: i, started, onWork }: { issue: InboxIssue; started?:
     i.updatedAt ? `updated ${relTime(Date.parse(i.updatedAt))}` : "",
   ].filter(Boolean);
   return (
-    <article className="flex max-w-[720px] flex-col gap-5 px-1 pt-1 pb-10">
-      <header className="flex flex-col gap-2.5">
+    <article className="flex flex-col gap-7 px-1 pt-1 pb-8">
+      <header className="flex flex-col gap-3">
         <div className="flex items-start gap-4">
           <h2 className="m-0 min-w-0 flex-1 text-[20px] leading-[28px] font-semibold tracking-[-0.015em] text-pretty text-[var(--ink)]">{i.title}</h2>
           <div className="flex shrink-0 items-center gap-1 pt-0.5">
@@ -296,9 +300,10 @@ function IssuePane({ issue: i, started, onWork }: { issue: InboxIssue; started?:
           </p>
         )}
       </header>
-      <div className="border-t border-[var(--border)] pt-5">
-        {body ? <div className="md max-w-[68ch] text-[14px] leading-[22px]" dangerouslySetInnerHTML={{ __html: md(body) }} /> : <p className="m-0 text-[13px] text-[var(--text-muted)]">Just the title.</p>}
-      </div>
+      <section className="flex flex-col gap-3">
+        <h3 className="m-0 text-[13px] font-semibold text-[var(--ink)]">Description</h3>
+        {body ? <div className="md max-w-[72ch] text-[14px] leading-[22px]" dangerouslySetInnerHTML={{ __html: md(body) }} /> : <p className="m-0 text-[13px] text-[var(--text-muted)]">Just the title.</p>}
+      </section>
     </article>
   );
 }

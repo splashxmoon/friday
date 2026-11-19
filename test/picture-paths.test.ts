@@ -53,3 +53,16 @@ test("a picture named in backticks takes the punctuation after it too, and code 
   assert.equal(p[2]!.value, " Run ");
   assert.equal(p[4]!.value, ".");
 });
+
+test("a video's path in the words is found as a picture's is, and a whole path to one too (2026-11-19)", async () => {
+  const t = run(para(text("Recorded the walk-through to docs/demo.mp4. The old cut is ~/clips/take2.mov, and the web one out/intro.webm!")));
+  assert.deepEqual(pictures(t), ["docs/demo.mp4", "~/clips/take2.mov", "out/intro.webm"]);
+  assert.deepEqual(after(t), [".", ",", ""]);
+  assert.equal(pictureAbs("/Users/me/Friday/screenshots/run.mp4"), true);
+  assert.equal(pictureAbs("/Users/me/notes.txt"), false);
+  const { isVideo, VIDEO_FILE, PICTURE_FILE } = await import("../src/client/picture-url.js");
+  assert.ok(VIDEO_FILE.test("a.MP4") && VIDEO_FILE.test("b.m4v") && !VIDEO_FILE.test("c.png"));
+  assert.ok(!PICTURE_FILE.test("a.mp4"), "a video isn't drawn as a picture");
+  assert.ok(isVideo("/api/sessions/x/work/file?invite=y&path=docs%2Fdemo.mp4"), "known by its address too");
+  assert.ok(!isVideo("/api/sessions/x/work/file?invite=y&path=docs%2Fshot.png"));
+});

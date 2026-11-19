@@ -23,7 +23,7 @@ import { findWork, shownFile, workKind, workType } from "../work-files.js";
 import { installSkill } from "./tool-commands.js";
 import { listBackground, startBackground, stopBackground } from "./background.js";
 import { listServers, stopServer } from "./ports.js";
-import { fetchPreview, previewOptions, previewStatusLive, startPreview, stopPreview } from "./preview.js";
+import { fetchPreview, NOT_LISTENING, previewOptions, previewStatusLive, startPreview, stopPreview } from "./preview.js";
 import { iosInput, iosRun, iosScreen, iosStatus, iosStop, type IosInput } from "./ios.js";
 import { iosLiveUrl } from "./ios-live.js";
 import { folderSetup, saveEnvironment } from "./environment.js";
@@ -406,7 +406,7 @@ export async function callHost(method: string, params: Record<string, unknown> =
     case "issues":
       return issues();
     case "prs.team":
-      return teamPullRequests((Array.isArray(params.repos) ? params.repos : String(params.repos ?? "").split(",")).map((r) => str(r, 140)).filter(Boolean));
+      return teamPullRequests((Array.isArray(params.repos) ? params.repos : String(params.repos ?? "").split(",")).map((r) => str(r, 140)).filter(Boolean), str(params.owner, 40));
     // Code Review's buttons: each one something the person pressed, done as them through this computer's GitHub login.
     case "pr.act":
       return prAct({
@@ -846,6 +846,9 @@ export async function callHost(method: string, params: Record<string, unknown> =
         mode: (["plan", "edits", "full"].includes(String(params.mode)) ? params.mode : "full") as EngineMode,
         // Chosen automatically for the host's own work: what was picked by hand, which everyone else's turns are held to.
         ...(["plan", "edits", "full"].includes(String(params.handMode)) ? { handMode: params.handMode as EngineMode } : {}),
+        // Auto without the go-ahead list, chosen by the person (EngineInfo.fullAccess); a teammate never runs so. A restart that
+        // doesn't say (a model or account switch, a reconnect) keeps what the lane had: only the mode menu says it either way.
+        ...((params.fullAccess === true || (params.fullAccess === undefined && ctx.runners.get(`${sid}|${str(params.lane, 40) || "main"}`)?.fullAccess)) && !str(params.keepAs, 40) ? { fullAccess: true } : {}),
         lane: str(params.lane, 40) || undefined,
         newLane: str(params.newLane, 40) || undefined,
         branch: raceBranch || str(params.branch, 100) || undefined,
@@ -1014,7 +1017,12 @@ export async function callHost(method: string, params: Record<string, unknown> =
       return { task: stopped ? { ...stopped, log: stopped.log.slice(-30) } : null };
     }
     case "preview.fetch":
-      return fetchPreview(Number(params.port) || 0, str(params.path, 2000) || "/", params.headers);
+      // A look before opening the Preview (Activity.tsx pageAppears) asks `probe`: nothing listening there yet is its answer,
+      // status 0, not a failure, which the page logged as a 503 every few seconds while a server came up.
+      return fetchPreview(Number(params.port) || 0, str(params.path, 2000) || "/", params.headers).catch((e: Error) => {
+        if (params.probe === true && e.message === NOT_LISTENING) return { status: 0, type: "", body: "" };
+        throw e;
+      });
     case "ios.status":
       return { ios: await iosStatus(at(params.cwd)) };
     case "ios.run":

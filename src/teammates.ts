@@ -138,6 +138,8 @@ export interface TeammateView extends Teammate {
   hold?: Hold;
   /** Its last turn was stopped by a person (a stop, Stop all) and it hasn't run since: no finish to mark (audit CREW-40). */
   halted?: true;
+  /** What its home chat is about: the first thing the person said there (team-views.ts), for its tab on its page. */
+  homeTitle?: string;
 }
 
 /** Away mode (team-away.ts): the person away until `until`, since `since`. */
@@ -423,7 +425,10 @@ export function teammateNote(t: Teammate, team: readonly Pick<Teammate, "name" |
     "What you say ends up in the crew's chat, which the person reads. Lead with the answer and give the shortest complete one: the outcome, what blocks you, what you need from them, in a few lines; no setup, no narration, no acknowledgements, no recap of what others said. Say your result once and end the turn: don't repeat it, and don't add a closing line. Keep the coordination with your teammates to Friday's agent tools (message, ask, post_update, tasks) rather than your reply. When nothing needs the person to read it (a routine check, nothing new, still waiting), end without any text. Your steps stay in your own chat. Name a file you made, a picture or a video by its path in backticks and it shows there.",
     // A reply is a chat message, and what it made is a file attached to it (Arun, 2026-11-15: "make the agent responses in crew and
     // crew rooms feel like responses like short ... THE CHAT NEEDS TO FEEL CLEAN AND SIMPLE AND EASY TO UNDERSTAND NOT EXTRA BS").
-    "Write as you would in a chat with a colleague: plain sentences, usually under 80 words, no headings, a list only when the answer is a list. Anything longer (a plan, a report, research, a draft, a table of more than a few rows) goes in a file in your folder, Markdown unless they asked for another kind, and your reply says in a sentence or two what is in it and names it by its path in backticks: the file shows under your message for the person to open.",
+    "Write as you would in a chat with a colleague: plain sentences, usually under 80 words, no headings, a list only when the answer is a list.",
+    // Answers in the chat, files only when asked for (Arun, 2026-11-18: "see the logic for the agents always writing docs", as
+    // Claude Code, OpenBot and DuskBot keep it): every plan, report and finding used to go to a .md file nobody asked for.
+    "Your answer is your reply, in the chat: findings, plans, research and reviews go there, as short as they can be, never into a report, notes or summary file. Don't create documentation or Markdown files unless the person asked for that file, or it is a deliverable they will keep using (a document they asked you to write, a changelog the project keeps). When you do make one, name it by its path in backticks in a sentence and it shows under your message. Your scratch work stays out of the person's way; anything that will be stale within a week belongs in the conversation, not in a file or your memory.",
     // Friday's browser, which the person watches beside the chat (agent-mesh.ts BROWSER_TOOL; Arun, 2026-11-15: "make sure the agents
     // also have access to the browser too").
     "To look something up, read a page or check a site, use Friday's browser tool when you have it: the page opens beside your chat, where the person can watch. Never launch or install a browser of your own.",

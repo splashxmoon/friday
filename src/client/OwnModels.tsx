@@ -24,7 +24,7 @@ import type { WorkspaceUsage } from "./workspace-types.js";
 /** Where people get models, with the address each one's OpenAI-compatible API lives at. */
 /** `keys`: where the provider hands out keys, for the form's "Get a key". `key`: "optional" where some servers take none. */
 const PRESETS: { id: string; name: string; baseUrl: string; key: boolean | "optional"; hint: string; keys?: string }[] = [
-  { id: "openai", name: "OpenAI", baseUrl: "https://api.openai.com/v1", key: true, hint: "gpt-6.1-sol, gpt-6-luna", keys: "https://platform.openai.com/api-keys" },
+  { id: "openai", name: "OpenAI", baseUrl: "https://api.openai.com/v1", key: true, hint: "gpt-6.2-sol, gpt-6-luna", keys: "https://platform.openai.com/api-keys" },
   { id: "anthropic", name: "Anthropic", baseUrl: "https://api.anthropic.com/v1", key: true, hint: "claude-sonnet-5-5, claude-opus-5-5", keys: "https://console.anthropic.com/settings/keys" },
   { id: "google", name: "Google Gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", key: true, hint: "gemini-3.8-flash", keys: "https://aistudio.google.com/apikey" },
   { id: "groq", name: "Groq", baseUrl: "https://api.groq.com/openai/v1", key: true, hint: "Fast open models", keys: "https://console.groq.com/keys" },

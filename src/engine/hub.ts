@@ -20,7 +20,7 @@ import { buildCatchUp, decidedSince, missedSince, missedText, needsCatchUp } fro
 import { lastRunStart, spentBefore, tokensIn, ToolUsage } from "../tool-usage.js";
 import { WebSocket } from "ws";
 import type { Bus, BusMessage } from "../bus.js";
-import { allowedCommand } from "../command-allow.js";
+import { allowedCommand, entriesAllow } from "../command-allow.js";
 import { can, canDriveLane, laneEffort, laneHeld, pendingFor, roleOf, runOf, unreadPosts, type MeshPost, type SessionState, effortResets } from "../session/projection.js";
 import { accessCommand, type SessionCore } from "../session/core.js";
 import { CUT_OFF_CHECK, cutOffBefore, handoffBrief } from "../handoff.js";
@@ -82,6 +82,8 @@ export const SYSTEM_NOTE = [
   // Arun, 2026-10-20: "they need to keep going and working and stuff unless they are fully finished".
   "Keep working until the task is completely done: don't stop halfway to report progress or to ask whether to go on. Stop only when it is finished, or for a question only a person can answer.",
   "When a request is done, finish with a short summary of what you changed and anything the team should check.",
+  // Answers in the chat, not in files (Arun, 2026-11-18, as Claude Code, OpenBot and DuskBot keep it).
+  "Answer in the chat. Don't create documentation, report, notes, summary or plan files (*.md, README) unless someone asked for that file: findings, plans and reviews go in your reply.",
   "When something is clearer shown than said (numbers over time, how parts connect, a comparison, a before-and-after, a small tool to try), show it in your reply: ```mermaid for a diagram, ```svg for a drawing, or ```html for a page such as a chart, a dashboard or a small interactive tool. These render live in the session's chat. The page already has Friday's look, so build on it rather than styling from scratch: the variables --fg, --muted, --surface, --border, --accent, --good, --bad and --series-1 to --series-8, and the parts .card, .grid, .stat (with .label, .value and .delta.up or .delta.down), tables with .num cells, .badge and button.primary. Chart.js from cdn.jsdelivr.net is themed automatically: put each chart's canvas in a div with class chart, and leave its colours to the theme. Label series directly rather than relying on colour alone. Other libraries load from cdn.jsdelivr.net, unpkg.com, cdnjs.cloudflare.com or esm.sh (D3, three.js, p5.js, Leaflet with its map tiles, and the like), so it can be more than a chart: a 3D scene, a simulation, a map, an animated explainer, a small game or tool to try. It runs sandboxed with no network access beyond loading those, so put the data in the page. The people watching can copy it, download it (a page as an .html file, a drawing or diagram as an .svg) or open it full screen, so make it work at any size. Show when it helps someone understand, not as decoration.",
   "The session has a Preview panel beside the chat. When someone asks to see, preview or load up the app or a page: start its dev server in the background (never in the foreground, where it blocks you), wait until it is serving, then call the friday show_preview tool with its address (or, without that tool, write the address on a line of its own as `Preview: http://localhost:PORT`), and Friday opens it in the Preview panel, where the people watching see it. To see a page yourself (to check your work after a change), call the friday preview_screenshot tool: Friday takes the picture on this computer without opening anything. Never launch Chrome or another browser, headless or not, or install one, to look: each opens an app on the person's computer. For an iOS app on a Mac, write `Preview: ios` on a line of its own instead: Friday builds the folder's Xcode project, runs it in an iOS simulator and shows its screen there.",
   "The chat also draws Markdown tables (figures right-aligned), numbered plans, callouts (> [!NOTE], > [!WARNING], or a line starting \"Note:\" or \"Warning:\") and file paths in backticks (`src/app.ts:42`, which open the file), so prefer them to long prose when they fit. Maths is typeset from LaTeX: \\( … \\) inline, \\[ … \\] or $$ … $$ on their own lines for an equation (a single $ stays a dollar sign).",
@@ -224,6 +226,8 @@ export interface RunnerParams {
   mode: string;
   /** The mode its host picked by hand, when `mode` was chosen automatically for the host's own work. */
   handMode?: string;
+  /** Auto without the go-ahead list (EngineInfo.fullAccess). */
+  fullAccess?: boolean;
   cwd: string;
   /** The folder `cwd` is a separate copy of, when it is one. */
   copyOf?: string;
@@ -294,6 +298,8 @@ export function parseEnded(raw: string | undefined): EndedTurn[] {
  * soak: every message Codex couldn't take mid-turn told its next turn the connection had dropped, to look at git and run the
  * tests again, and hid the turn under way from a restart after it).
  */
+/** A coding tool that stopped only because it hadn't finished starting: tried again shortly (runTurn's caller). */
+export const STILL_LOADING = /still loading your organization'?s settings/i;
 const dropped = (e: SessionEvent): boolean => e.body.type === "instructions.requeued" && !e.body.steer;
 
 /**
@@ -834,6 +840,7 @@ export class EngineHub {
       ...(p.apiKey === "1" ? { apiKey: true as const } : {}),
       mode,
       ...(handMode ? { handMode } : {}),
+      ...(p.fullAccess && mode === "full" ? { fullAccess: true as const } : {}),
       ...(p.branch ? { branch: p.branch.slice(0, 100) } : {}),
       ...(resumeId && sameTool ? { resumedFrom: { id: resumeId, title: (p.resumeTitle || "an earlier session").slice(0, 120), messages: Math.max(0, Math.min(100_000, Number(p.resumeMessages) || 0)) } } : {}),
       node: this.node,
@@ -1160,8 +1167,15 @@ class LaneHost {
       void this.usage.record(ws, this.info.tool, body);
     }
     if (!r.ok || body.type !== "engine.approval" || body.scope !== "commands") return;
-    const allowed = autoAllow(await this.store.state(this.sid), this.lane, body.items, this.info.hostId, {});
-    if (allowed) await this.store.append(this.sid, FRIDAY, { type: "instruction", text: allowed === "task" ? "Allowed for this task: go ahead." : "Allowed in advance: go ahead.", interrupt: false, approval: { id: body.id, approve: true } }, { lane: this.lane });
+    const state = await this.store.state(this.sid);
+    const allowed = autoAllow(state, this.lane, body.items, this.info.hostId, {});
+    if (allowed) return void (await this.store.append(this.sid, FRIDAY, { type: "instruction", text: allowed === "task" ? "Allowed for this task: go ahead." : "Allowed in advance: go ahead.", interrupt: false, approval: { id: body.id, approve: true } }, { lane: this.lane }));
+    // Always in this project (Arun, 2026-11-18, as Codex and OpenBot offer it): what its host allowed for the folder, in any session.
+    const folder = this.info.copyOf ?? this.info.cwd;
+    if (folder && roleOf(state, this.info.hostId) === "owner") {
+      const entries = await this.store.redis.smembers(projectAllowKey(this.store.prefix, this.info.hostId, folder)).catch(() => [] as string[]);
+      if (entries.length && body.items.every((i) => entriesAllow(entries, i))) await this.store.append(this.sid, FRIDAY, { type: "instruction", text: "Allowed in this project: go ahead.", interrupt: false, approval: { id: body.id, approve: true } }, { lane: this.lane });
+    }
   }
 
   // ── session → runner ─────────────────────────────────────────────
@@ -1618,6 +1632,15 @@ class LaneHost {
         // Its mode too, said or not this turn: the fresh conversation never heard it.
         const toldMode = said && !prompt.startsWith(said) ? `${said}\n\n` : "";
         end = await this.runTurn(withShieldNote(`${fresh}${toldMode}${prompt}`), [...(attachments ?? [])], told, approval && { ...approval, ...asked }, command, model, effort, cap, this.owesCheckpoint, false, turnId);
+      }
+      // Claude Code started before it had read its organization's settings, says so and stops; a few seconds later it starts
+      // fine. The same turn again, after 4, 8 and 12 seconds, rather than a failed run for the person to carry on (crew audit,
+      // 2026-11-19: "Claude Code is still loading your organization's settings… this usually takes a few seconds", four runs).
+      for (let i = 0; i < 3 && end.outcome === "error" && !this.requeued && !this.closed && STILL_LOADING.test(end.error ?? ""); i++) {
+        if (runOf(await this.store.state(this.sid), this.lane).status !== "running") break;
+        console.log(`[engine] ${this.actor.name} was still loading its settings; trying the turn again`);
+        await new Promise<void>((r) => void setTimeout(r, 4000 * (i + 1)).unref?.());
+        end = await this.runTurn(prompt, [...(attachments ?? [])], note, approval && { ...approval, ...asked }, command, model, effort, cap, this.owesCheckpoint, false, turnId);
       }
       this.inFlight = null;
       if (end.outcome === "error" && this.requeued) return;
@@ -2252,7 +2275,7 @@ function cleanBody(raw: unknown): EventBody | null {
       .filter(Boolean);
     if (!items.length || typeof b.id !== "string") return null;
     const why = s(b.why, 300);
-    const guard = typeof b.guard === "string" && /^(outside|ship|delete|money|keys|computer|takeover)$/.test(b.guard) ? (b.guard as "outside") : undefined;
+    const guard = typeof b.guard === "string" && /^(outside|ship|delete|money|keys|computer|takeover|safety)$/.test(b.guard) ? (b.guard as "outside") : undefined;
     return { type: "engine.approval", id: s(b.id, 40), scope: b.scope === "commands" ? "commands" : "turn", items, ...(b.live === true ? { live: true } : {}), ...(why ? { why } : {}), ...(guard ? { guard } : {}), ...(b.hostsOwn === true ? { hostsOwn: true } : {}) };
   }
   if (b.type === "agent.usage") {
@@ -2263,6 +2286,10 @@ function cleanBody(raw: unknown): EventBody | null {
     const context = Math.min(num(b.context), 10_000_000);
     const window = Math.min(num(b.window), 10_000_000);
     return u.input + u.cached + u.output ? { type: "agent.usage", ...u, ...(context ? { context, ...(window ? { window } : {}) } : {}) } : null;
+  }
+  if (b.type === "guard.refused") {
+    const item = s(b.item, MAX_ITEM);
+    return item ? { type: "guard.refused", item, why: s(b.why, 300) } : null;
   }
   if (b.type === "effort.skipped") return isEngineEffort(b.effort) ? { type: "effort.skipped", effort: b.effort } : null;
   if (b.type === "account.switched") {
@@ -2299,6 +2326,9 @@ function cleanBody(raw: unknown): EventBody | null {
   }
   return null;
 }
+
+/** Where a host's "Always in this project" entries for a folder are kept: one set per person and folder, across sessions. */
+export const projectAllowKey = (prefix: string, hostId: string, folder: string) => `${prefix}allow:project:${hostId}:${folder.replace(/[\\/]+$/, "")}`;
 
 /**
  * Whether a command a tool asks about is let through without a person: on the session's Always allow list ("advance") or what

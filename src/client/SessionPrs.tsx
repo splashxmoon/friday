@@ -50,7 +50,7 @@ export function SessionPrBadge({ urls }: { urls: string[] }) {
           }}
           onKeyDown={(e) => e.stopPropagation()}
         >
-          <Icon name={tone === "merged" ? "gitFork" : "gitPullRequest"} size={14} />
+          <Icon name={tone === "merged" ? "gitMerge" : "gitPullRequest"} size={14} />
           {urls.length > 1 && <span className="sb-pr-n">{urls.length}</span>}
         </button>
       </HoverCardTrigger>
@@ -62,7 +62,7 @@ export function SessionPrBadge({ urls }: { urls: string[] }) {
                 <span className="sb-pr-title">{pr?.title ?? (ref ? `${ref.repo} #${ref.number}` : url)}</span>
                 <span className="sb-pr-meta">
                   <span className={`sb-pr-stand s-${stand}`}>
-                    <Icon name={stand === "merged" ? "gitFork" : "gitPullRequest"} size={11} />
+                    <Icon name={stand === "merged" ? "gitMerge" : "gitPullRequest"} size={11} />
                     {WORD[stand]}
                   </span>
                   {ref && pr && (

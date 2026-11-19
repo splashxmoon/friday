@@ -20,3 +20,7 @@ export function localPicture(src: string): string | null {
 
 /** A file a side panel can show as a picture rather than read as text (work-files.ts serves these). */
 export const PICTURE_FILE = /\.(png|jpe?g|gif|webp|svg|avif)$/i;
+/** A video the chat and the side panels play (work-files.ts serves it with ranges, so it can be skipped through). */
+export const VIDEO_FILE = /\.(mp4|mov|webm|m4v)$/i;
+/** A video by its address too (the session's work/file?…&path=demo.mp4). */
+export const isVideo = (name: string) => VIDEO_FILE.test(name) || /\.(mp4|mov|webm|m4v)(?:$|[?&#])/i.test(decodeURIComponent(name));

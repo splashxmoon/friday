@@ -421,6 +421,11 @@ export interface PullRequest {
   /** GitHub's node id, for what only its GraphQL API does (marking a draft ready). */
   id?: string;
   repo: string;
+  /**
+   * Whether you can push to its repo (write, maintain or admin): a repo of your team's, not one you only sent a pull request to.
+   * Left out by a runner from before it was read.
+   */
+  canPush?: boolean;
   number: number;
   title: string;
   url: string;
@@ -471,7 +476,7 @@ export interface PullRequests {
 const PR_FIELDS = `fragment P on PullRequest {
   id number title url isDraft createdAt updatedAt mergedAt headRefName headRefOid baseRefName reviewDecision mergeable mergeStateStatus
   additions deletions changedFiles
-  repository { nameWithOwner }
+  repository { nameWithOwner viewerPermission }
   author { login avatarUrl }
   comments { totalCount }
   reviewThreads(first: 50) { nodes { isResolved } }
@@ -516,7 +521,7 @@ type Node = {
   id?: string; number?: number; title?: string; url?: string; isDraft?: boolean; createdAt?: string; updatedAt?: string; mergedAt?: string | null;
   headRefName?: string; headRefOid?: string; baseRefName?: string; reviewDecision?: string | null; mergeable?: string; mergeStateStatus?: string;
   additions?: number; deletions?: number; changedFiles?: number;
-  repository?: { nameWithOwner?: string }; author?: { login?: string; avatarUrl?: string } | null; comments?: { totalCount?: number };
+  repository?: { nameWithOwner?: string; viewerPermission?: string | null }; author?: { login?: string; avatarUrl?: string } | null; comments?: { totalCount?: number };
   reviewThreads?: { nodes?: { isResolved?: boolean }[] };
   files?: { nodes?: { path?: string; additions?: number; deletions?: number }[] };
   reviewRequests?: { nodes?: { requestedReviewer?: { login?: string; avatarUrl?: string; name?: string } | null }[] };
@@ -557,6 +562,7 @@ function prList(nodes?: Node[]): PullRequest[] {
       return {
         ...(n.id ? { id: n.id } : {}),
         repo: n.repository?.nameWithOwner ?? "",
+        ...(n.repository?.viewerPermission !== undefined ? { canPush: /^(WRITE|MAINTAIN|ADMIN)$/.test(n.repository.viewerPermission ?? "") } : {}),
         number: n.number!,
         title: n.title ?? "",
         url: n.url!,
@@ -618,12 +624,28 @@ export async function issues(): Promise<GithubIssues> {
   }
 }
 
-/** Everybody else's open pull requests in the repos you work in. */
-export async function teamPullRequests(repos: string[]): Promise<{ team: PullRequest[] }> {
-  const q = teamSearch(repos);
-  if (!q) return { team: [] };
-  const d = await githubGraphql<{ team?: { nodes?: Node[] } }>(TEAM_QUERY, { q });
-  return { team: prList(d?.team?.nodes) };
+/**
+ * Everybody else's open pull requests in the repos you work in: every repo of your own (`owner`, searched as user:), whether or
+ * not you ever sent a pull request there (Arun, 2026-11-19: an outside contributor's #31 on splashxmoon/friday never showed), and
+ * the other repos named. Two searches when there are both, newest first, each pull request once.
+ */
+export async function teamPullRequests(repos: string[], owner = ""): Promise<{ team: PullRequest[] }> {
+  const mine = /^[\w-]{1,39}$/.test(owner) ? owner : "";
+  const others = mine ? repos.filter((r) => r.split("/")[0]?.toLowerCase() !== mine.toLowerCase()) : repos;
+  const qs = [mine ? teamSearchOwner(mine) : null, teamSearch(others)].filter((q): q is string => !!q);
+  if (!qs.length) return { team: [] };
+  const found = await Promise.all(qs.map((q) => githubGraphql<{ team?: { nodes?: Node[] } }>(TEAM_QUERY, { q })));
+  const seen = new Set<string>();
+  const team = found
+    .flatMap((d) => prList(d?.team?.nodes))
+    .filter((p) => !seen.has(p.url) && seen.add(p.url))
+    .sort((a, b) => Date.parse(b.updatedAt ?? "") - Date.parse(a.updatedAt ?? ""));
+  return { team };
+}
+
+/** Everybody else's open pull requests in every repo `owner` owns, as GitHub's search box would take it. */
+export function teamSearchOwner(owner: string): string {
+  return `is:pr is:open archived:false -author:@me sort:updated-desc user:${owner}`;
 }
 
 /** Where cloned repos go unless the person picks somewhere else. */

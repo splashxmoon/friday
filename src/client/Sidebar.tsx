@@ -1,4 +1,4 @@
-import { ChevronRightIcon, FolderGit2Icon, PinIcon, PlusIcon, SearchIcon, SettingsIcon, LogOutIcon, MoonIcon, SunIcon, XIcon } from "lucide-react";
+import { ChevronRightIcon, FolderGit2Icon, ListFilterIcon, PinIcon, PlusIcon, SearchIcon, SettingsIcon, LogOutIcon, MoonIcon, SunIcon, XIcon } from "lucide-react";
 import "./working-dot.css";
 import "./sidebar-row-width.css";
 import { openKeepGoing } from "./crew-carry-open.js";
@@ -6,8 +6,9 @@ import { plainLine } from "./team-room.js";
 import { mateItems, roomItems } from "./mate-menu.js";
 import { askNewFolder, DRAG_TYPE as CREW_DRAG, folderItems, moveItems, useCrewFolders, useShutFolders } from "./crew-folders.js";
 import { dragEnds } from "./drag-end.js";
+import { leftFor, markDragging, springCancel, springHover } from "./sidebar-drag.js";
 import { SessionPrBadge } from "./SessionPrs.js";
-import { useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore, type DragEvent, type ReactNode } from "react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
@@ -24,7 +25,7 @@ import type { AgentView, PersonListing } from "../agents.js";
 import { useNeedsCount, withCode, type AttentionState } from "./Attention.js";
 import type { Attention } from "../attention.js";
 import { recordLine, useAgentRecords } from "./useAgentRecords.js";
-import type { Crew, CrewState, Preview, Working } from "../attention.js";
+import type { Crew, CrewState, Preview, RowFacts, Working } from "../attention.js";
 import { usePrs } from "./prWatch.js";
 import { hostApi } from "./local.js";
 import { openOutside } from "./openOutside.js";
@@ -32,9 +33,8 @@ import { chooseTheme } from "./prefs.js";
 import { applyTheme, readTheme } from "./theme.js";
 import { currentLook, loadFolded, loadSectionOrder, saveFolded, saveSectionOrder } from "./storage.js";
 import type { Identity, Project, RecentSession } from "./storage.js";
-import { buckets, snoozePresets, snoozeWord } from "./sidebar-buckets.js";
 import { teamColour } from "../teammate-look.js";
-import { ContextMenu, InlineEdit, MenuButton, relTime, useConfirm, type MenuItem } from "./ui.js";
+import { ContextMenu, InlineEdit, MenuButton, relTime, useConfirm, type Confirmation, type MenuItem } from "./ui.js";
 import type { WorkspaceUsage } from "./workspace-types.js";
 import { isLocal, planLimits, planNow } from "./edition.js";
 import { TeamTip } from "./TeamTip.js";
@@ -509,19 +509,52 @@ function Head({ p }: { p: SidebarProps }) {
           is in the window's bar (WindowNav), in a browser here. */}
       {!agents && !window.fridayDesktop && !isLocal() && <CodeCrewToggle className="in-sidebar" working={p.attention.working.keys()} needs={p.attention.needSids} />}
       {/* Not in the Crew: its faces end with their own Add (Teammates.tsx, Sidebar B). */}
-      {!crewTab && <button
-        type="button"
-        onClick={onNew}
-        className="sb-new group flex h-9 w-full items-center gap-2 rounded-lg border border-sidebar-border bg-[var(--card)] px-3 text-[13px] font-medium text-sidebar-accent-foreground shadow-xs outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring"
-      >
-        <PlusIcon className="size-4 text-[var(--text-muted)] group-hover:text-sidebar-accent-foreground" />
-        {label}
-        {kbd && <span className="dass-kbd">{shortcut("⌘K")}</span>}
-      </button>}
+      {!crewTab && (
+        <div className="sb-new-row">
+          <button
+            type="button"
+            onClick={onNew}
+            className="sb-new group flex h-9 min-w-0 flex-1 items-center gap-2 rounded-lg border border-sidebar-border bg-[var(--card)] px-3 text-[13px] font-medium text-sidebar-accent-foreground shadow-xs outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+          >
+            <PlusIcon className="size-4 text-[var(--text-muted)] group-hover:text-sidebar-accent-foreground" />
+            {label}
+            {kbd && <span className="dass-kbd">{shortcut("⌘K")}</span>}
+          </button>
+          {/* What the list shows, beside it (Arun, 2026-11-19: "make the new thread button above it more cleaner and simpler with a
+              filter button and have these as the dropdown choices"): All, Needs you, Working, Unread, each with how many. */}
+          {!agents && <ListFilter p={p} />}
+        </div>
+      )}
     </div>
   );
 }
 
+
+/** The Code list's filter button (Head): its menu the four choices with their counts; lit, with the choice's count, while it narrows. */
+function ListFilter({ p }: { p: SidebarProps }) {
+  const filter = useSbFilter();
+  const unread = useUnread();
+  const sids = p.recents.filter((r) => !isTeamSid(r.sid)).map((r) => r.sid);
+  const n = { all: sids.length, needs: sids.filter((x) => p.attention.needSids.has(x)).length, working: sids.filter((x) => p.attention.working.has(x)).length, unread: sids.filter((x) => unread.has(x)).length };
+  const word: Record<SbFilter, string> = { all: "All", needs: "Needs you", working: "Working", unread: "Unread" };
+  const on = filter !== "all";
+  return (
+    <MenuButton
+      label={on ? `Showing ${word[filter]}. Change what the list shows` : "Filter the list"}
+      className={`sb-filter-btn${on ? " on" : ""}`}
+      width={200}
+      end
+      items={() => [
+        { heading: "Show" },
+        ...(["all", "needs", "working", "unread"] as const).map((k): MenuItem => ({ label: word[k], icon: ({ all: "list", needs: "hand", working: "zap", unread: "mail" } as const)[k], checked: filter === k, hint: String(n[k]), onSelect: () => setSbFilter(k) })),
+      ]}
+    >
+      <ListFilterIcon aria-hidden="true" />
+      {/* Its count while it narrows, never a 0: the button lit already says a filter is on (Arun, 2026-11-19). */}
+      {on && n[filter] > 0 && <span className="sb-filter-n" data-kind={filter}>{n[filter]}</span>}
+    </MenuButton>
+  );
+}
 
 const NEEDS_CLOSED_KEY = "friday.sidebar.needsClosed";
 
@@ -828,6 +861,23 @@ function OssList({ p }: { p: SidebarProps }) {
  * the rooms with their faces and last words, then every agent with its role in a word, when it last spoke and its latest line,
  * who needs you first. No sessions: they are the Sessions side's.
  */
+/**
+ * A crew mate or room at work, in the Agents list: the thinking dot grid the chat shows (Response.tsx Working), blue and turning,
+ * in the row's bottom-right corner in place of the ring by its name (Arun, 2026-11-19: "make that the working state thing but blue
+ * for the agents side bar and place it like in the bottom right of the tab session thing").
+ */
+// Loaded once something is at work, not with the first screen (test/client-bundle.test.ts).
+const Orb = lazy(() => import("@/components/aicss/Orb").then((m) => ({ default: m.Orb })));
+function WorkingOrb({ who }: { who: string }) {
+  return (
+    <span className="crew-working-orb" title={`${who} is working`}>
+      <Suspense fallback={null}>
+        <Orb variant="S3" size={22} label={`${who} is working`} />
+      </Suspense>
+    </span>
+  );
+}
+
 function CrewList({ p }: { p: SidebarProps }) {
   const t = useTeam(p.identityForApi);
   const focused = useFocusedAgent(t?.sid ?? "");
@@ -840,6 +890,14 @@ function CrewList({ p }: { p: SidebarProps }) {
   const [shut, flipShut] = useShutFolders();
   const [folderAt, setFolderAt] = useState<{ id: string; x: number; y: number } | null>(null);
   const [dropOn, setDropOn] = useState<string | null>(null);
+  // A crew mate or room being dragged: while it is, a New group target shows at the foot, so it can go into a group not made yet.
+  const [dragKey, setDragKey] = useState<string | null>(null);
+  useEffect(() => {
+    const end = () => (setDragKey(null), setDropOn(null));
+    addEventListener("dragend", end);
+    addEventListener("drop", end);
+    return () => (removeEventListener("dragend", end), removeEventListener("drop", end));
+  }, []);
   // Pinned agents and how the list looks, kept in this browser (Arun, 2026-11-18: the clean Agents sidebar, "modern, easy to use").
   const [pins, setPins] = useCrewPins();
   const [view, setView] = useCrewView();
@@ -992,27 +1050,37 @@ function CrewList({ p }: { p: SidebarProps }) {
       <div className={`oss-crew-scroll${view.density === "compact" ? " compact" : ""}`}>
         {(() => {
           // Each crew mate and room as its row, carried by a drag onto a folder and opened from a right-click.
-          const dragOf = (key: string) => ({ draggable: true, onDragStart: (e: DragEvent) => (e.dataTransfer.setData(CREW_DRAG, key), (e.dataTransfer.effectAllowed = "move")) });
+          // Its own row dims while it is carried (sidebar-drag.ts); the New group target comes a moment after, never mid-dragstart.
+          const dragOf = (key: string) => ({
+            draggable: true,
+            onDragStart: (e: DragEvent<HTMLElement>) => {
+              e.dataTransfer.setData(CREW_DRAG, key);
+              e.dataTransfer.effectAllowed = "move";
+              markDragging(e.currentTarget);
+              setTimeout(() => setDragKey(key), 0);
+            },
+          });
           const roomRow = (r: (typeof rooms)[number]) => (
             <div key={r.key} className="oss-crew-item" {...dragOf(`room:${r.key}`)} onContextMenu={(e) => (e.preventDefault(), setMenuAt({ id: `room:${r.key}`, x: e.clientX, y: e.clientY }))}>
               <button type="button" className="oss-crew-row" data-active={r.here || undefined} onClick={r.open}>
-                <RoomFaces seeds={r.seeds} size={30} states={r.states} />
+                <RoomFaces seeds={r.seeds} size={view.density === "compact" ? 26 : 34} states={r.states} />
                 <span className="oss-crew-text">
                   <span className="oss-crew-top">
                     <b>{r.name}</b>
-                    {r.ring && <MateRing status={r.ring} title={r.state?.word} />}
+                    {r.ring && r.ring !== "working" && <MateRing status={r.ring} title={r.state?.word} />}
                     {r.state ? (
                       <span className="oss-crew-state" data-tone={r.state.tone}>
                         {r.state.word}
                       </span>
                     ) : r.at ? (
-                      <span className="oss-crew-when">{shortAgo(r.at)}</span>
+                      <span className="crew-when">{shortAgo(r.at)}</span>
                     ) : null}
                   </span>
                   {/* A room's last words as plain text: the lead's Markdown ("**Notes**", `code`, its lists) as words on one line. */}
                   <span className={`oss-crew-line${r.state ? ` s-${r.state.tone}` : ""}`}>{plainLine(r.line)}</span>
                 </span>
               </button>
+              {r.ring === "working" && <WorkingOrb who={r.name} />}
             </div>
           );
           const mateRow = (m: (typeof mates)[number]) => {
@@ -1022,16 +1090,17 @@ function CrewList({ p }: { p: SidebarProps }) {
             return (
               <div key={m.id} className="oss-crew-item crew-mate" {...dragOf(`mate:${m.id}`)} onContextMenu={(e) => (e.preventDefault(), setMenuAt({ id: `mate:${m.id}`, x: e.clientX, y: e.clientY }))}>
                 <button type="button" className="oss-crew-row" data-active={(p.activeSid === t.sid && focused === m.lane) || undefined} onClick={() => openTeammate(t, m.lane, p.onOpen)} aria-label={`${m.name}: ${st.word}${st.line ? `, ${st.line}` : ""}`}>
-                  <Face seed={m.look ?? m.name} size={view.density === "compact" ? 22 : 28} status={m.status} lead={t.lead === m.lane} />
+                  <Face seed={m.look ?? m.name} size={view.density === "compact" ? 22 : 34} status={m.status} lead={t.lead === m.lane} />
                   <span className="oss-crew-text">
                     <span className="oss-crew-top">
                       <b>{m.name}</b>
-                      <MateRing status={m.status} title={st.word} />
+                      {m.status !== "working" && <MateRing status={m.status} title={st.word} />}
                       {m.lastAt ? <span className="crew-when">{shortAgo(m.lastAt)}</span> : null}
                     </span>
                     {st.line && view.density !== "compact" && <span className={`oss-crew-line s-${st.tone}`} title={st.line}>{st.line}</span>}
                   </span>
                 </button>
+                {m.status === "working" && <WorkingOrb who={m.name} />}
                 {/* On hover, the pin and the ⋯ the session rows have, in the time's place on the name line (Arun, 2026-11-18: "use the
                     same svg icon design found for the coding tabs too, because theses are overlapping with the text behind it"). */}
                 <span className="crew-acts">
@@ -1043,6 +1112,26 @@ function CrewList({ p }: { p: SidebarProps }) {
               </div>
             );
           };
+          // While one is carried, a target at the foot that makes a new group with it in (askNewFolder), so dragging is the way to
+          // make groups too, not only to fill them.
+          const newGroup = dragKey && (
+            <div
+              className="oss-drop-new"
+              data-drop={dropOn === "__new" || undefined}
+              onDragOver={(e) => e.dataTransfer.types.includes(CREW_DRAG) && (e.preventDefault(), (e.dataTransfer.dropEffect = "move"), dropOn !== "__new" && setDropOn("__new"))}
+              onDragLeave={(e) => leftFor(e) && setDropOn((d) => (d === "__new" ? null : d))}
+              onDrop={(e) => {
+                e.preventDefault();
+                const item = e.dataTransfer.getData(CREW_DRAG);
+                setDropOn(null);
+                setDragKey(null);
+                if (item) askNewFolder(ask, folders, saveFolders, item);
+              }}
+            >
+              <Icon name="plus" size={13} />
+              <span>New group</span>
+            </div>
+          );
           // No folders yet: rooms, then the crew, as before.
           if (!folders.folders.length)
             return (
@@ -1058,6 +1147,7 @@ function CrewList({ p }: { p: SidebarProps }) {
                   <span className="oss-crew-count">{ownOf(t).length}</span>
                 </div>
                 {mates.map(mateRow)}
+                {newGroup}
               </>
             );
           // Project folders (Arun, 2026-11-15: "placing agents and like crew rooms into prodject folders too... like categories"):
@@ -1069,31 +1159,45 @@ function CrewList({ p }: { p: SidebarProps }) {
             if (q.trim() && !rs.length && !ms.length) return null;
             const key = id ?? "none";
             const open = !shut.has(key);
+            // The whole group takes a drop, its rows as much as its name, and a folded one opens once the drag rests on it
+            // (sidebar-drag.ts): only the name line took one, a thin strip to hit (Arun, 2026-11-19: "much more smoother and easier").
             return (
-              <div key={key} className="oss-folder" data-drop={dropOn === key || undefined}>
+              <div
+                key={key}
+                className="oss-folder"
+                data-drop={dropOn === key || undefined}
+                onDragOver={(e) => {
+                  if (!e.dataTransfer.types.includes(CREW_DRAG)) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  if (dropOn !== key) setDropOn(key);
+                  springHover(`crew:${key}`, !open, () => flipShut(key));
+                }}
+                onDragLeave={(e) => leftFor(e) && (setDropOn((d) => (d === key ? null : d)), springCancel(`crew:${key}`))}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDropOn(null);
+                  springCancel();
+                  const item = e.dataTransfer.getData(CREW_DRAG);
+                  if (!item) return;
+                  const place = { ...folders.place };
+                  if (id) place[item] = id;
+                  else delete place[item];
+                  void saveFolders({ ...folders, place });
+                }}
+              >
                 <button
                   type="button"
                   className="oss-folder-head"
                   aria-expanded={open}
                   onClick={() => flipShut(key)}
                   onContextMenu={(e) => id && (e.preventDefault(), setFolderAt({ id, x: e.clientX, y: e.clientY }))}
-                  onDragOver={(e) => e.dataTransfer.types.includes(CREW_DRAG) && (e.preventDefault(), setDropOn(key))}
-                  onDragLeave={() => setDropOn((d) => (d === key ? null : d))}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    setDropOn(null);
-                    const item = e.dataTransfer.getData(CREW_DRAG);
-                    if (!item) return;
-                    const place = { ...folders.place };
-                    if (id) place[item] = id;
-                    else delete place[item];
-                    void saveFolders({ ...folders, place });
-                  }}
                 >
+                  {/* Its name and chevron together, its count at the right edge (Arun, 2026-11-19: "move the numbers ... to the right"). */}
                   <span className="oss-folder-name">{name}</span>
-                  <span className="oss-crew-count">{rs.length + ms.length}</span>
                   <Icon name={open ? "chevronDown" : "chevronRight"} size={12} className="oss-folder-chev" />
                   <span className="oss-folder-gap" />
+                  <span className="oss-crew-count">{rs.length + ms.length}</span>
                 </button>
                 {open && (
                   <div className="oss-folder-body">
@@ -1108,6 +1212,7 @@ function CrewList({ p }: { p: SidebarProps }) {
             <>
               {folders.folders.map((f) => group(f.id, f.name))}
               {group(null, "Not in a group")}
+              {newGroup}
             </>
           );
         })()}
@@ -1300,10 +1405,15 @@ function Group({ label, open, onToggle, count, status, action, drag, children, c
           <SidebarGroupLabel asChild className="h-7 flex-1 cursor-pointer gap-1 px-2 text-[12px] font-medium normal-case tracking-normal text-[var(--text-muted)] hover:text-sidebar-accent-foreground">
             <CollapsibleTrigger>
               <span className="flex min-w-0 items-center gap-1.5 truncate">{label}</span>
-              {!!count && <span className="ml-1 font-normal normal-case tracking-normal">{count}</span>}
-              {/* The fold's chevron just after the name and count (Arun, 2026-11-18: "move the chevron to the right of the text"). */}
+              {/* The fold's chevron just after the name (Arun, 2026-11-18: "move the chevron to the right of the text"), and the count
+                  at the row's right end, after how it stands (Arun, 2026-11-19: "move the numbers ... on the right of section too"). */}
               <ChevronRightIcon className={`sb-fold-chev ml-1 size-3 shrink-0 transition-transform duration-200 ${open ? "rotate-90" : ""}`} />
-              {status && <span className="ml-auto flex items-center pl-2">{status}</span>}
+              {(status || !!count) && (
+                <span className={`ml-auto flex items-center gap-2 pl-2${action ? " sb-group-end" : ""}`}>
+                  {status}
+                  {!!count && <span className="sb-group-count font-normal tabular-nums">{count}</span>}
+                </span>
+              )}
             </CollapsibleTrigger>
           </SidebarGroupLabel>
           {action}
@@ -1390,6 +1500,65 @@ function SessionsList({ p }: { p: SidebarProps }) {
   // Deleting a project is the one thing in this list that is not undoable, so it asks first.
   const [ask, confirmUI] = useConfirm();
   const [drop, setDrop] = useState<string | null>(null);
+  // Show only what needs you, what works or what finished unseen (Arun, 2026-11-19: "Filter and keys"), set from the filter button
+  // beside New thread (Head).
+  const filter = useSbFilter();
+  const setFilter = setSbFilter;
+  // Several picked at once, to act on together (Arun, 2026-11-19: "Select several at once"): ⌘ or Ctrl-click adds one, Shift-click
+  // the run of rows from the last one picked; a plain click lets them go and opens the row, as Finder does. Escape lets them go.
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const anchor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!picked.size) return;
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && !e.defaultPrevented && setPicked(new Set());
+    addEventListener("keydown", esc);
+    return () => removeEventListener("keydown", esc);
+  }, [picked.size]);
+  const pickWith = (e: { metaKey: boolean; ctrlKey: boolean; shiftKey: boolean }, sid: string): boolean => {
+    if (e.metaKey || e.ctrlKey) {
+      const next = new Set(picked);
+      if (next.has(sid)) next.delete(sid);
+      else next.add(sid);
+      anchor.current = sid;
+      setPicked(next);
+      return true;
+    }
+    if (e.shiftKey) {
+      // The rows as they show, top to bottom, from the last one picked to this one.
+      const order = [...new Set([...document.querySelectorAll<HTMLElement>(".sb-scroll .dass-row[data-sid]")].filter((el) => el.offsetParent !== null).map((el) => el.dataset.sid!))];
+      const from = anchor.current ? order.indexOf(anchor.current) : -1;
+      const to = order.indexOf(sid);
+      const run = from < 0 || to < 0 ? [sid] : order.slice(Math.min(from, to), Math.max(from, to) + 1);
+      setPicked(new Set([...picked, ...run]));
+      if (!anchor.current) anchor.current = sid;
+      return true;
+    }
+    if (picked.size) setPicked(new Set());
+    anchor.current = sid;
+    return false;
+  };
+  // Holding ⌘⌥ (Ctrl+Alt elsewhere) numbers the first nine rows, the ones ⌘⌥1–9 open (App.tsx): the keys said where they work.
+  const [showKeys, setShowKeys] = useState(false);
+  useEffect(() => {
+    const on = (e: KeyboardEvent) => setShowKeys((e.metaKey || e.ctrlKey) && e.altKey && !e.getModifierState("AltGraph"));
+    const off = () => setShowKeys(false);
+    addEventListener("keydown", on);
+    addEventListener("keyup", on);
+    addEventListener("blur", off);
+    return () => (removeEventListener("keydown", on), removeEventListener("keyup", on), removeEventListener("blur", off));
+  }, []);
+  useEffect(() => {
+    const rows = [...document.querySelectorAll<HTMLElement>(".sb-scroll .dass-row[data-sid]")];
+    for (const el of rows) el.removeAttribute("data-jump");
+    if (!showKeys) return;
+    const seen = new Set<string>();
+    for (const el of rows) {
+      if (el.offsetParent === null || seen.has(el.dataset.sid!)) continue;
+      seen.add(el.dataset.sid!);
+      el.setAttribute("data-jump", String(seen.size));
+      if (seen.size === 9) break;
+    }
+  }, [showKeys]);
   // A session being dragged, from anywhere in the list: Recent stays out while that drag lasts, so a session can be dragged out
   // of a project onto it. It showed only while the pointer was over the project, and left again on the way to it (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
   const [dragging, setDragging] = useState(false);
@@ -1446,11 +1615,8 @@ function SessionsList({ p }: { p: SidebarProps }) {
   }, []);
   // Snoozed and settled sessions sit in folded groups at the foot (sidebar-buckets.ts); only one that needs you or has an
   // agent working comes back by itself.
-  // A session whose pull request has merged has landed its work: it settles by itself. The merge is known from the session's own
-  // log (a shepherded pull request) or from GitHub, through the pull requests your computer reads for Code Review.
+  // The pull requests your computer reads for Code Review, for a row's pull request marks.
   const { prs: github } = usePrs();
-  const mergedUrls = new Set((github?.merged ?? []).map((x) => x.url));
-  const merged = new Set([...p.attention.prs].filter(([, pr]) => pr.merged || mergedUrls.has(pr.url)).map(([sid]) => sid));
   // The sessions this list shows.
   let listed = p.recents;
   let teamTab = false;
@@ -1462,11 +1628,9 @@ function SessionsList({ p }: { p: SidebarProps }) {
   // The hosted service's Crew: its sessions (your own Crew room and the rooms) kept out of Code's list.
   // Every session but a Crew room, Work ones made before Work was taken out included (Arun, 2026-11-03).
   if (isLocal()) listed = p.recents.filter((r) => !isTeamSid(r.sid));
-  const beds = buckets(
-    [...listed].sort((a, b) => b.openedAt - a.openedAt),
-    { needs: p.attention.needSids, working: new Set(p.attention.working.keys()), merged },
-    now,
-  );
+  // Every session in the list, none put to bed (Arun, 2026-11-19: "get rid of the settled BS and stuff", "and snooze"): Snoozed and
+  // Settled, folded at the foot, hid sessions that were still yours.
+  const beds = { active: [...listed].sort((a, b) => b.openedAt - a.openedAt) };
   // Held in the order it stands while the pointer or the keyboard is in the list, so the row under them doesn't move as the list
   // re-sorts; a new session still goes on top, and the rest settle once they leave (Arun, 2026-10-28: "iron everything and
   // ensure we are good… any logic errors and fixes").
@@ -1508,25 +1672,48 @@ function SessionsList({ p }: { p: SidebarProps }) {
   // Drag a session onto a project (or onto Recent to unfile it). A session row's own drag (DRAG_TYPE), not the crew list's
   // (CREW_DRAG): with the crew's, no session could be dropped in a project (Arun, 2026-11-17: "i cant drag and drop the tabs into
   // say a folder").
-  const dropZone = (target: string | null) => ({
+  // A folded project opens once the drag rests on it (sidebar-drag.ts; Arun, 2026-11-19: "much more smoother and easier").
+  const dropZone = (target: string | null, folded = false) => ({
     onDragOver: (e: DragEvent) => {
       if (!e.dataTransfer.types.includes(DRAG_TYPE)) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
-      setDrop(target ?? "__recent");
+      const at = target ?? "__recent";
+      if (drop !== at) setDrop(at);
+      if (target) springHover(`project:${target}`, folded, () => p.updateProject(target, { collapsed: false }));
     },
     onDragLeave: (e: DragEvent) => {
-      if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) setDrop(null);
+      if (leftFor(e)) (setDrop(null), target && springCancel(`project:${target}`));
     },
     onDrop: (e: DragEvent) => {
       const sid = e.dataTransfer.getData(DRAG_TYPE);
       setDrop(null);
+      springCancel();
       if (!sid) return;
       e.preventDefault();
       p.updateRecent(sid, { projectId: target ?? undefined });
       if (target) p.updateProject(target, { collapsed: false });
     },
   });
+  // Dropped on New project: a project made with the session in it, its name ready to type (newProject).
+  const newProjectZone = {
+    onDragOver: (e: DragEvent) => {
+      if (!e.dataTransfer.types.includes(DRAG_TYPE)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      if (drop !== "__newProject") setDrop("__newProject");
+    },
+    onDragLeave: (e: DragEvent) => leftFor(e) && setDrop(null),
+    onDrop: (e: DragEvent) => {
+      const sid = e.dataTransfer.getData(DRAG_TYPE);
+      setDrop(null);
+      if (!sid) return;
+      e.preventDefault();
+      const id = p.createProject("New project");
+      p.updateRecent(sid, { projectId: id });
+      setRenaming({ kind: "project", id, fresh: true });
+    },
+  };
 
   /**
    * Renamed here: its owner renames the session itself, for everyone and everywhere it shows (the header, the tab, ⌘K, Search,
@@ -1577,7 +1764,7 @@ function SessionsList({ p }: { p: SidebarProps }) {
         const ready = !!pr && !isMerged && !pr.draft && pr.mergeable !== false;
         return {
           label: pr?.title ?? where,
-          icon: isMerged ? "gitFork" : "gitPullRequest",
+          icon: isMerged ? "gitMerge" : "gitPullRequest",
           sub: `${isMerged ? "Merged" : pr?.draft ? "Draft" : "Open"}${pr ? ` · ${where}` : ""}`,
           onSelect: () => openOutside(url),
           ...(ready ? { action: { icon: "check" as const, label: `Squash and merge #${pr!.number}`, onSelect: () => merge(pr!) } } : {}),
@@ -1616,15 +1803,6 @@ function SessionsList({ p }: { p: SidebarProps }) {
             }),
         }
       : { label: "Remove from recents", icon: "x", onSelect: () => p.removeRecent(r.sid) },
-    // Out of the way for a while, or for good until something happens in it (sidebar-buckets.ts).
-    { heading: r.snoozedUntil && r.snoozedUntil > now ? `Snoozed ${snoozeWord(r.snoozedUntil, now)}` : "Snooze" },
-    ...(r.snoozedUntil && r.snoozedUntil > now ? [{ label: "Wake it now", icon: "bell" as const, onSelect: () => p.updateRecent(r.sid, { snoozedUntil: undefined }) }] : []),
-    ...snoozePresets(now).map((s) => ({ label: s.label, icon: "clock" as const, onSelect: () => p.updateRecent(r.sid, { snoozedUntil: s.until, settledAt: undefined, pinnedAt: undefined }) })),
-    // Settling is not a snooze: a group of its own, not under Snooze's heading (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
-    { heading: "" },
-    r.settledAt
-      ? { label: "Back to the list", icon: "refresh" as const, onSelect: () => p.updateRecent(r.sid, { settledAt: undefined }) }
-      : { label: "Settle it", icon: "check" as const, title: "Done with it for now: it moves to Settled at the foot of the list, and comes back if anything in it needs you", onSelect: () => p.updateRecent(r.sid, { settledAt: now, snoozedUntil: undefined, pinnedAt: undefined }) },
     { heading: "Move to project" },
     ...p.projects.map((proj) => ({ label: proj.name, icon: "folder" as const, checked: r.projectId === proj.id, onSelect: () => p.updateRecent(r.sid, { projectId: proj.id }) })),
     {
@@ -1652,10 +1830,11 @@ function SessionsList({ p }: { p: SidebarProps }) {
     },
   ];
 
-  const row = (r: RecentSession, compact = false, quiet?: string) => (
+  const row = (r: RecentSession, compact = false, quiet?: string, group?: string) => (
     <ChatRow
       key={r.sid}
       r={r}
+      {...(group ? { group } : {})}
       {...(quiet ? { quiet } : {})}
       me={p.identity.name}
       active={r.sid === p.activeSid}
@@ -1676,6 +1855,9 @@ function SessionsList({ p }: { p: SidebarProps }) {
       crew={p.attention.crews.get(r.sid) ?? null}
       since={p.attention.since.get(r.sid)}
       prs={p.attention.prs.get(r.sid)?.urls ?? []}
+      facts={p.attention.facts.get(r.sid) ?? null}
+      picked={picked.has(r.sid)}
+      onPick={(e) => pickWith(e, r.sid)}
       onPin={() => pin(r)}
       menu={() => chatMenu(r)}
     />
@@ -1734,17 +1916,10 @@ function SessionsList({ p }: { p: SidebarProps }) {
   if (p.projects.length > 0)
     blocks.set(
       "projects",
-      <Group
-        label="Projects"
-        open={isOpen("projects")}
-        onToggle={() => toggle("projects")}
-        drag={dragSection("projects")}
-        action={
-          <SidebarGroupAction title="New project" onClick={newProject} className="top-1">
-            <PlusIcon />
-          </SidebarGroupAction>
-        }
-      >
+      // Each project as its own named group, with no "Projects" heading over them (Arun, 2026-11-19: "get rid of this extra
+      // projects thing ... since there is already the named project there"). A new one: right-click the list, a session's Move to
+      // project, or a session dropped on New project.
+      <div className="flex flex-col gap-px">
         {p.projects.map((proj) => {
           const items = sorted.filter((r) => r.projectId === proj.id && !r.pinnedAt && !inNeeds.has(r.sid));
           // The new session about to go in it (its "New session here"): drawn in it, so it's plain where it will go (Arun, 2026-10-28: "TEST EVERYTHING… EVERY INTERACTION, EVERY VISUAL").
@@ -1752,7 +1927,7 @@ function SessionsList({ p }: { p: SidebarProps }) {
           const open = !proj.collapsed || draft;
           const isRenaming = renaming?.kind === "project" && renaming.id === proj.id;
           return (
-            <div key={proj.id} className={`rounded-lg ${drop === proj.id ? "bg-sidebar-accent ring-1 ring-sidebar-ring" : ""}`} {...dropZone(proj.id)}>
+            <div key={proj.id} className={`rounded-lg ${drop === proj.id ? "bg-sidebar-accent ring-1 ring-sidebar-ring" : ""}`} {...dropZone(proj.id, !open)}>
               <div
                 className="dass-row flex-row items-center gap-2 py-1"
                 role="button"
@@ -1824,7 +1999,7 @@ function SessionsList({ p }: { p: SidebarProps }) {
             </div>
           );
         })}
-      </Group>,
+      </div>,
     );
   for (const g of repoGroups) {
     const id = `repo:${g.name}`;
@@ -1867,7 +2042,7 @@ function SessionsList({ p }: { p: SidebarProps }) {
           ) : undefined
         }
       >
-        {byDay(g.chats, now).map((x) => (typeof x === "string" ? <div key={`day:${x}`} className="sb-day">{x}</div> : row(x)))}
+        {byDay(g.chats, now).map((x) => (typeof x === "string" ? <div key={`day:${x}`} className="sb-day">{x}</div> : row(x, false, undefined, g.name)))}
       </Group>,
     );
   }
@@ -1881,6 +2056,12 @@ function SessionsList({ p }: { p: SidebarProps }) {
         {unfiled.length === 0 && !elsewhere ? <p className="px-2 py-1 text-xs text-[var(--text-muted)]">Sessions you start or join appear here.</p> : byDay(unfiled, now).map((x) => (typeof x === "string" ? <div key={`day:${x}`} className="sb-day">{x}</div> : row(x)))}
       </Group>
     </div>,
+  );
+  const newProjectTarget = (
+    <div className="sb-drop-new" data-drop={drop === "__newProject" || undefined} {...newProjectZone}>
+      <PlusIcon aria-hidden="true" />
+      <span>New project</span>
+    </div>
   );
   const defaults = [...(p.projects.length ? ["projects"] : []), ...repoGroups.map((g) => `repo:${g.name}`), "recent"];
   const ids = order.filter((id) => defaults.includes(id));
@@ -1926,6 +2107,22 @@ function SessionsList({ p }: { p: SidebarProps }) {
           onClose={() => setPanelCtx(null)}
         />
       )}
+      {filter !== "all" ? (
+        (() => {
+          const shown = sorted.filter((r) => (filter === "needs" ? needSet.has(r.sid) : filter === "working" ? p.attention.working.has(r.sid) : isDone(r.sid)));
+          return shown.length ? (
+            <div className="flex flex-col gap-px">{shown.map((r) => row(r))}</div>
+          ) : (
+            <p className="sb-filter-none">
+              {filter === "needs" ? "Nothing needs you." : filter === "working" ? "Nothing is working now." : "Nothing new since you looked."}{" "}
+              <button type="button" className="tm-link" onClick={() => setFilter("all")}>
+                Show all
+              </button>
+            </p>
+          );
+        })()
+      ) : (
+      <>
       {needing.length > 0 && (
         <Group
           label={
@@ -1965,6 +2162,8 @@ function SessionsList({ p }: { p: SidebarProps }) {
           {pinnedShown.map((r) => row(r))}
         </Group>
       )}
+      {/* While a session is carried, a New project target: under Projects, or at the top when there are none yet. */}
+      {dragging && !ids.includes("projects") && newProjectTarget}
       {ids.map((id) => (
         <div
           key={id}
@@ -1988,20 +2187,12 @@ function SessionsList({ p }: { p: SidebarProps }) {
           }}
         >
           {blocks.get(id)}
+          {id === "projects" && dragging && newProjectTarget}
         </div>
       ))}
-      {/* Put to bed (sidebar-buckets.ts): snoozed for a while, or settled; folded, counted, and back by themselves when something in
-          one needs you. Folded by default, so the list is the live sessions. */}
-      {beds.snoozed.length > 0 && (
-        <Group label="Snoozed" open={folded.includes("open:snoozed")} onToggle={() => toggle("open:snoozed")} count={beds.snoozed.length} className="dass-bed">
-          {beds.snoozed.map((r) => row(r, false, `Snoozed ${snoozeWord(r.snoozedUntil!, now)}`))}
-        </Group>
+      </>
       )}
-      {beds.settled.length > 0 && (
-        <Group label="Settled" open={folded.includes("open:settled")} onToggle={() => toggle("open:settled")} count={beds.settled.length} className="dass-bed">
-          {beds.settled.map((r) => row(r, false, merged.has(r.sid) ? "Pull request merged" : r.settledAt ? "Settled" : /[a-z]/i.test(relTime(r.openedAt)) && !/^\d+[mhd]$/.test(relTime(r.openedAt)) ? `Quiet since ${relTime(r.openedAt)}` : `Quiet for ${relTime(r.openedAt)}`))}
-        </Group>
-      )}
+      {picked.size > 0 && <PickBar picked={[...picked].map((sid) => p.recents.find((r) => r.sid === sid)).filter((r): r is RecentSession => !!r)} projects={p.projects} ask={ask} onDone={() => setPicked(new Set())} update={p.updateRecent} remove={p.removeRecent} del={p.deleteSession} createProject={p.createProject} setRenaming={setRenaming} />}
     </div>
   );
 }
@@ -2010,6 +2201,102 @@ function SessionsList({ p }: { p: SidebarProps }) {
  * One session: its state, its name and when you were last in it, and under them in one quiet line what it is doing. Compact
  * (in Needs you) it is the name and what waits on you.
  */
+/**
+ * Several threads picked at once, and what can be done to all of them (Arun, 2026-11-19: "Select several at once"): pin or unpin,
+ * settle, move to a project or a new one, delete. Deleting asks once for all of them: yours go for everyone in them, anyone else's
+ * only leave your list. At the list's foot while any are picked; × or Escape lets them go.
+ */
+function PickBar({ picked, projects, ask, onDone, update, remove, del, createProject, setRenaming }: { picked: RecentSession[]; projects: Project[]; ask: (c: Confirmation) => void; onDone: () => void; update: (sid: string, patch: Partial<RecentSession>) => void; remove: (sid: string) => void; del: (sid: string) => Promise<string | void>; createProject: (name: string) => string; setRenaming: (r: Renaming) => void }) {
+  const n = picked.length;
+  const allPinned = picked.every((r) => r.pinnedAt);
+  const now = Date.now();
+  const mine = picked.filter((r) => r.role === "owner");
+  const each = (patch: (r: RecentSession, i: number) => Partial<RecentSession>) => (picked.forEach((r, i) => update(r.sid, patch(r, i))), onDone());
+  const moveTo = (id: string | undefined) => each(() => ({ projectId: id }));
+  return (
+    <div className="sb-pickbar" role="toolbar" aria-label={`${n} selected`}>
+      <span className="sb-pick-n">{n} selected</span>
+      <button type="button" className="icon-btn tiny" title={allPinned ? "Unpin" : "Pin to top"} aria-label={allPinned ? "Unpin them" : "Pin them to the top"} onClick={() => each((_, i) => (allPinned ? { pinnedAt: undefined } : { pinnedAt: now + i, snoozedUntil: undefined, settledAt: undefined }))}>
+        <Icon name="pin" size={14} />
+      </button>
+      <MenuButton
+        label="Move them to a project"
+        icon="folder"
+        items={() => [
+          { heading: "Move to project" },
+          ...projects.map((proj): MenuItem => ({ label: proj.name, icon: "folder", checked: picked.every((r) => r.projectId === proj.id), onSelect: () => moveTo(proj.id) })),
+          {
+            label: "New project",
+            icon: "plus",
+            onSelect: () => {
+              const id = createProject("New project");
+              moveTo(id);
+              setRenaming({ kind: "project", id, fresh: true });
+            },
+          },
+          picked.some((r) => r.projectId) ? { label: "Out of their project", icon: "x", onSelect: () => moveTo(undefined) } : null,
+        ]}
+      />
+      <button
+        type="button"
+        className="icon-btn tiny sb-pick-del"
+        title="Delete"
+        aria-label="Delete them"
+        onClick={() =>
+          ask({
+            title: `Delete ${n} thread${n === 1 ? "" : "s"}?`,
+            body: mine.length === n ? "They're deleted for everyone in them, with their history and files. This can't be undone." : mine.length ? `The ${mine.length} that are yours are deleted for everyone in them, with their history and files; the others only leave your list. This can't be undone.` : "They only leave your list: they're other people's.",
+            action: mine.length ? "Delete" : "Remove",
+            onConfirm: async () => {
+              for (const r of picked) {
+                if (r.role === "owner") {
+                  const e = await del(r.sid);
+                  if (e) sayNotice(e);
+                } else remove(r.sid);
+              }
+              onDone();
+            },
+          })
+        }
+      >
+        <Icon name="trash" size={14} />
+      </button>
+      <button type="button" className="icon-btn tiny sb-pick-x" title="Done (Esc)" aria-label="Let them go" onClick={onDone}>
+        <Icon name="x" size={14} />
+      </button>
+    </div>
+  );
+}
+
+/** What the Code list shows: everything, or only what needs you, works, or finished unseen. */
+type SbFilter = "all" | "needs" | "working" | "unread";
+const FILTER_KEY = "friday.sidebar.filter";
+/** The list's filter, set from the filter button beside New thread (Head) and read by the list, kept in this browser. */
+let sbFilterNow: SbFilter = (() => {
+  try {
+    const v = localStorage.getItem(FILTER_KEY);
+    return v === "needs" || v === "working" || v === "unread" ? v : "all";
+  } catch {
+    return "all";
+  }
+})();
+const sbFilterWatch = new Set<() => void>();
+function setSbFilter(f: SbFilter) {
+  sbFilterNow = f;
+  try {
+    localStorage.setItem(FILTER_KEY, f);
+  } catch {
+    /* this window only */
+  }
+  for (const w of sbFilterWatch) w();
+}
+function useSbFilter(): SbFilter {
+  return useSyncExternalStore(
+    (f) => (sbFilterWatch.add(f), () => void sbFilterWatch.delete(f)),
+    () => sbFilterNow,
+  );
+}
+
 /** A row's time in words, for its tooltip: "Working for 4m", "Waiting on you since just now", "Finished 12m ago". */
 const stateFor = (st: "needs" | "working" | "done", t: string) =>
   st === "done" ? `Finished ${t === "now" ? "just now" : `${t} ago`}` : `${st === "needs" ? "Waiting on you" : "Working"} ${t === "now" ? "since just now" : `for ${t}`}`;
@@ -2035,7 +2322,19 @@ function ChatRow({
   since,
   prs = [],
   waiting = false,
+  facts = null,
+  picked = false,
+  onPick,
+  group,
 }: {
+  /** The folder whose group it is drawn in, if any: its row doesn't say that folder again. */
+  group?: string;
+  /** Picked with others, to act on together (SessionList's pickWith). */
+  picked?: boolean;
+  /** A click with ⌘, Ctrl or Shift picks it rather than opening it: true when it did. */
+  onPick?: (e: { metaKey: boolean; ctrlKey: boolean; shiftKey: boolean }) => boolean;
+  /** Its folder, branch and change size now (attention.ts rowFactsOf): the line under its name. */
+  facts?: RowFacts | null;
   /** The Needs you page lists something of it that isn't put off (Attention.tsx needSids): its ring says so, and only then. */
   waiting?: boolean;
   /** The pull requests it opened (projection.ts prs): a mark on its row, each on hover (SessionPrs.tsx). */
@@ -2068,14 +2367,16 @@ function ChatRow({
   // Ticks a minute at a time, for "no update in 14m" and when a quiet agent's ring turns dashed.
   const now = useNow(30_000);
   const quietRing = working && !needs && crewQuiet(crew, now) && working.heardAt ? quietFor(working.heardAt, now) : undefined;
-  const who = preview ? (preview.by === me ? "You" : preview.by.split(/\s+/)[0]) : "";
   const short = !needs && waiting && stoppedShort(crew, working);
   const state = needs || short || (waiting && !working) ? "needs" : working ? "working" : "idle";
   // Its agents finished while you were elsewhere, and you haven't opened it since (unread.ts).
   const unread = useUnread().has(r.sid) && !active && state === "idle";
   // The branch chip stays on the row (Arun, 2026-11-03: "keep the branch thing too"), with the room the agents' marks had, so
   // it is no longer cut to "2026-1…".
-  const branchChip = true as boolean;
+  // Where it works: the folder and a branch somebody named, from the latest read (attention.ts rowFactsOf), else what this list
+  // remembered when the session was last open.
+  const repo = r.repos?.find((u) => u.branch) ?? r.repos?.[0];
+  const place = { folder: facts?.folder || repo?.name || "", branch: [facts?.branch, repo?.branch].find((b) => namedBranch(b)) ?? "" };
   const ref = useRef<HTMLDivElement>(null);
   // The open session is scrolled into view when it changes, so the list always shows where you are.
   useEffect(() => {
@@ -2090,6 +2391,7 @@ function ChatRow({
       data-active={active}
       data-unread={unread || undefined}
       data-menu={menuOpen || !!ctx}
+      data-picked={picked || undefined}
       role="button"
       tabIndex={0}
       aria-current={active ? "page" : undefined}
@@ -2097,8 +2399,9 @@ function ChatRow({
       onDragStart={(e) => {
         e.dataTransfer.setData(DRAG_TYPE, r.sid);
         e.dataTransfer.effectAllowed = "move";
+        markDragging(e.currentTarget);
       }}
-      onClick={() => !renaming && onOpen()}
+      onClick={(e) => !renaming && !onPick?.(e) && onOpen()}
       onKeyDown={(e) => {
         if (renaming || e.target !== e.currentTarget) return;
         // Up and down move through the sessions, Home and End to either end, as a list does (2026-10-27 audit: Tab was the
@@ -2125,10 +2428,14 @@ function ChatRow({
         {/* New since you looked, or marked unread: an accent dot in the row's margin and its name in semibold, as a mail list does
             (audit CODE-8, Arun 2026-11-04: "Mark as unread" had changed nothing to see). */}
         {unread && !renaming && <span className="sb-unread-dot" aria-hidden="true" />}
+        {/* How it stands, first and a size up, in a slot of its own so every name starts in one column (Arun, 2026-11-19: "the
+            ring status too the placement of it ... make it slightly bigger"). */}
+        <span className="sb-lead" aria-hidden={renaming || undefined}>
+          {!renaming && <SessionRing state={state} crew={crew} working={working} unread={unread} stopped={needs?.kind === "stopped"} quiet={quietRing} title={needs ? `${needs.kind === "stopped" ? "" : "Needs you: "}${shortPaths(needs.detail ?? needs.text)}` : working ? `Working now: ${working.what}` : undefined} />}
+        </span>
         {/* The whole title line up to the time, opened at the name's start with the caret at its end (audit CODE-25, Arun 2026-11-04:
             a 135px field in a 260px row, scrolled to "tor the pricing table"). */}
-        {renaming ? <InlineEdit className="sb-rename" value={label} onSave={onRename} onCancel={onCancelRename} caretAtEnd /> : <span className="dass-row-title">{label}{unread && <span className="sr-only">, new since you looked</span>}</span>}
-        {!renaming && <SessionRing state={state} crew={crew} working={working} unread={unread} stopped={needs?.kind === "stopped"} quiet={quietRing} title={needs ? `${needs.kind === "stopped" ? "" : "Needs you: "}${shortPaths(needs.detail ?? needs.text)}` : working ? `Working now: ${working.what}` : undefined} />}
+        {renaming ? <InlineEdit className="sb-rename" value={label} onSave={onRename} onCancel={onCancelRename} caretAtEnd /> : <span className="dass-row-title">{label}{unread && <span className="sr-only">, new since you looked</span>}{picked && <span className="sr-only">, selected</span>}</span>}
         {/* No count beside the ring (Arun, 2026-11-03: "get rid of the 3 next to the ring"): the line under the name says "3 working". */}
         {!renaming && <span className="sb-row-gap" aria-hidden="true" />}
         {!compact && <SessionPrBadge urls={prs} />}
@@ -2159,50 +2466,55 @@ function ChatRow({
         )}
       </div>
       {(
-        <div className="dass-row-sub">
+        <div className="dass-row-sub" {...(working && !needs && !quiet ? { title: `Working now: ${working.what}` } : {})}>
           {quiet ? (
             <span className="truncate text-[var(--text-muted)]">{quiet}</span>
           ) : needs ? (
             // A stopped run says who stopped and how, from what happened (audit CODE-4: "Claude Code stopped with an error").
-            <span className="truncate text-[var(--ink)]">{withCode(shortPaths(needs.kind === "stopped" ? `${stopper(crew, needs)} ${lowerWord(needs.text)}` : isRawError(needs.text) ? "Needs you" : needs.text))}</span>
-          ) : compact && !short ? null : crew ? (
-            <CrewLine crew={crew} now={now} {...(preview ? { lead: <><span className="text-sidebar-foreground">{who}:</span> {preview.text}</> } : {})} />
-          ) : summary ? (
-            <>
-              <span className={`truncate ${summary.column === "working" ? "text-[var(--ink-2)]" : ""}`}>
-                {[summary.agent.replace(/^[^']+'s /, ""), summary.running > 1 ? `${summary.running} working` : summary.status, (summary.detail ? shortPaths(summary.detail) : "") || (summary.pr ? `PR ${summary.pr.number ? `#${summary.pr.number}` : "open"}` : "")].filter(Boolean).join(" · ")}
+            <span className="truncate sb-row-asks">{withCode(shortPaths(needs.kind === "stopped" ? `${stopper(crew, needs)} ${lowerWord(needs.text)}` : isRawError(needs.text) ? "Needs you" : needs.text))}</span>
+          ) : compact && !short ? null : crew && (short || crew.agents.some((x) => x.state === "failed")) ? (
+            // An agent stopped on an error or short of its plan: that, in its own words, before where it works.
+            <CrewLine crew={crew} now={now} />
+          ) : place.folder || place.branch || facts?.files ? (
+            // Where it works and how big its change is, not the last thing said (Arun, 2026-11-19: "getting rid of the last
+            // message, and replacing with like the repo or folder"; "Changes on the row").
+            <span className="sb-where">
+              {place.folder && (
+                <>
+                  <Icon name="folder" size={12} className="sb-where-icon" />
+                  <span className="sb-where-name truncate">{place.folder}</span>
+                </>
+              )}
+              {/* Only a branch somebody named: Friday's own generated ones say nothing a person chose (audit CODE-15 A). */}
+              {place.branch && (
+                <span className="sb-where-branch truncate" title={`On branch ${place.branch}`}>
+                  {place.folder ? <span className="sb-row-dot">· </span> : <Icon name="gitBranch" size={12} className="sb-where-icon" />}
+                  {place.branch}
+                </span>
+              )}
+              {/* At the line's end: how big its change is, as plain numbers, then its agents' marks. */}
+              <span className="sb-where-end">
+                {facts && facts.files > 0 && (
+                  <span className="sb-changes" title={`${facts.files} file${facts.files === 1 ? "" : "s"} changed: ${facts.added} line${facts.added === 1 ? "" : "s"} added, ${facts.removed} removed`}>
+                    {(facts.added > 0 || !facts.removed) && <span className="add">+{facts.added}</span>}
+                    {facts.removed > 0 && <span className="del">−{facts.removed}</span>}
+                  </span>
+                )}
+                {crew && crew.agents.length > 0 && <CrewTools className="sb-where-tools" agents={crew.agents.map((x) => ({ key: x.lane, tool: x.tool, face: x.face }))} names={crew.agents.map((x) => agentWord(x.name.replace(/^[^']+'s /, ""), x.tool))} label={crew.agents.map((x) => `${agentWord(x.name.replace(/^[^']+'s /, ""), x.tool)}: ${x.word}`).join(", ")} />}
               </span>
-            </>
+            </span>
+          ) : crew ? (
+            <CrewLine crew={crew} now={now} />
+          ) : summary ? (
+            <span className={`truncate ${summary.column === "working" ? "text-[var(--ink-2)]" : ""}`}>
+              {[summary.agent.replace(/^[^']+'s /, ""), summary.running > 1 ? `${summary.running} working` : summary.status, (summary.detail ? shortPaths(summary.detail) : "") || (summary.pr ? `PR ${summary.pr.number ? `#${summary.pr.number}` : "open"}` : "")].filter(Boolean).join(" · ")}
+            </span>
           ) : working ? (
-            // The agent at work by name, with its coding tool's mark beside it (Arun, 2026-10-20: "China" is a renamed agent, and
-            // the mark says what it runs on). Friday Code's own lane gets Friday's mark when it has a name to put it beside.
             <span className="flex min-w-0 items-center gap-1 text-[var(--ink-2)]">
               <span className="shrink-0">Working</span>
-              {working.lanes > 1 ? (
-                <span className="truncate">· {working.lanes} agents</span>
-              ) : working.what && (working.what !== "Main" || working.tool) ? (
-                <>
-                  <span className="shrink-0">·</span>
-                  <span className="truncate">{working.what === "Main" && working.tool ? ENGINE_NAMES[working.tool] : working.what}</span>
-                </>
-              ) : null}
+              {working.lanes > 1 ? <span className="truncate">· {working.lanes} agents</span> : working.what && (working.what !== "Main" || working.tool) ? <span className="truncate">· {working.what === "Main" && working.tool ? ENGINE_NAMES[working.tool] : working.what}</span> : null}
             </span>
-          ) : preview ? (
-            <span className="truncate">
-              <span className="text-sidebar-foreground">{who}:</span> {preview.text}
-            </span>
-          ) : // An idle session says nothing more than its dashed ring does: one line, as T3 Code's and Synara's rows are, so the ones
-          // at work stand out (Arun, 2026-10-27: "take some inspo from like t3, synara, orca"). Its branch or your role, if any, stay.
-          null}
-          {/* The branch its agents are on, as the other tools' rows carry it (Arun, 2026-10-25): where the work lands. */}
-          {/* Only a branch somebody named, as plain words after the status ("· dev"): Friday's own generated ones say nothing a
-              person chose, and as a boxed mono tag they were the loudest thing in the row (audit CODE-15 A, Arun 2026-11-04). */}
-          {branchChip && !compact && !quiet && namedBranch(r.repos?.find((u) => u.branch)?.branch) && (
-            <span className="sb-row-branch" title={`On branch ${r.repos!.find((u) => u.branch)!.branch}`}>
-              <span className="sb-row-dot">· </span>
-              {r.repos!.find((u) => u.branch)!.branch}
-            </span>
-          )}
+          ) : null}
           {r.role !== "owner" && (
             <span className="ml-auto shrink-0 rounded-full border border-sidebar-border px-1.5 text-[12px]" title={`You are ${r.role === "editor" ? "an editor" : "a viewer"} in this session`}>
               {r.role}

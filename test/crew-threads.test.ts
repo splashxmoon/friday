@@ -53,3 +53,43 @@ test("a crew mate's threads are rooms of its own, named by what you first say, k
   await call(`/api/teammates/${kit.id}`, "DELETE");
   assert.equal((await call("/api/teammates")).body.rooms.filter((r: any) => r.thread === kit.id).length, 0);
 });
+
+// Its home chat deleted (app.ts /api/teammates/:id/clear; Arun, 2026-11-19: "why cant i delete this thread?"): New thread again,
+// the conversation gone from view (projection's cleared), its coding tool on a fresh conversation, and never mid-turn.
+test("a crew mate's home chat deleted starts over: New thread again, a fresh conversation for its tool, never mid-turn", async (t) => {
+  const home = await mkdtemp(path.join(tmpdir(), "friday-crew-home-"));
+  const kv = await localKV(home);
+  const app = await createApp({ port: 0, redisUrl: "", prefix: "friday:", secret: "s", driverGraceMs: 15_000, llm: NO_MODELS, dataDir: path.join(home, "uploads"), local: { redis: kv.redis, sub: kv.sub, user: { id: "local", name: "Me" } }, teammatesHome: home });
+  t.after(async () => (await app.close(), await kv.close(), await rm(home, { recursive: true, force: true })));
+  const headers = { "Content-Type": "application/json", "x-friday-local": "1" };
+  const call = async (url: string, method = "GET", body?: unknown) => {
+    const r = await fetch(`${app.url}${url}`, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    return { status: r.status, body: (await r.json()) as any };
+  };
+  const got = (await call("/api/teammates", "POST", { name: "Ivy", role: "Writes.", tool: "claude", folder: path.join(home, "Ivy") })).body;
+  const ivy = got.teammates.find((x: any) => x.name === "Ivy");
+  const me = { id: "local", name: "Me", kind: "human" as const };
+  await app.store.append(got.sid, me, { type: "instruction", text: "Draft the launch notes", interrupt: false, attachments: [] }, { lane: ivy.lane });
+  assert.equal((await call("/api/teammates")).body.teammates.find((x: any) => x.id === ivy.id).homeTitle, "Draft the launch notes");
+  // Mid-turn, it waits.
+  await app.store.append(got.sid, { id: "agent", name: "Ivy", kind: "agent" }, { type: "run.started", causedBy: 0 } as any, { lane: ivy.lane });
+  const busy = await call(`/api/teammates/${ivy.id}/clear`, "POST");
+  assert.equal(busy.status, 409);
+  assert.match(busy.body.error, /Ivy is working in it/);
+  await app.store.append(got.sid, { id: "agent", name: "Ivy", kind: "agent" }, { type: "run.ended", outcome: "done" } as any, { lane: ivy.lane });
+  const before = app.teammates.starts.length;
+  const done = await call(`/api/teammates/${ivy.id}/clear`, "POST");
+  assert.equal(done.status, 200, JSON.stringify(done.body));
+  const after = done.body.teammates.find((x: any) => x.id === ivy.id);
+  assert.equal(after.homeTitle, undefined, "nothing said since: New thread");
+  const cut = (await app.store.state(got.sid)).cleared?.[ivy.lane];
+  assert.ok(cut, "the lane's conversation is cut there");
+  // Started again on a conversation of its own, never the old one.
+  const start = app.teammates.starts.slice(before).find((p: any) => p.lane === ivy.lane) as any;
+  assert.ok(start, "its tool started again");
+  assert.equal(start.keepAs, `${ivy.id.slice(0, 30)}#${cut}`);
+  assert.ok(start.keepAs.length <= 40 && !start.keepAs.includes("."));
+  // What it is told next is named again.
+  await app.store.append(got.sid, me, { type: "instruction", text: "Plan the blog post", interrupt: false, attachments: [] }, { lane: ivy.lane });
+  assert.equal((await call("/api/teammates")).body.teammates.find((x: any) => x.id === ivy.id).homeTitle, "Plan the blog post");
+});

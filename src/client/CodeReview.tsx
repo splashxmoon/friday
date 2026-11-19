@@ -17,7 +17,7 @@ import { ReviewTour } from "./ReviewTour.js";
 import { IssuesInbox, useIssues } from "./Issues.js";
 import type { Identity, RecentSession } from "./storage.js";
 import { ConfirmDialog, SkeletonRows, isTyping, relTime, type Confirmation } from "./ui.js";
-import { CheckIcon, ChevronDownIcon, EllipsisIcon, ExternalLinkIcon, FolderIcon, GitBranchIcon, GitPullRequestIcon, RefreshCwIcon, SearchIcon, ShieldIcon, UserIcon, XIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, EllipsisIcon, ExternalLinkIcon, FolderIcon, GitBranchIcon, GitPullRequestIcon, RefreshCwIcon, SearchIcon, ShieldIcon, TriangleAlertIcon, UserIcon, XIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -73,7 +73,6 @@ export function CodeReview({
   const { prs, error: prsError, busy } = usePrs();
   const [team, setTeam] = useState<PullRequest[] | null>(lastTeam);
   const [teamError, setTeamError] = useState("");
-  const error = prsError || teamError;
   const [n, setN] = useState(0);
   const [tab, setTabState] = useState<Tab | null>(() => {
     try {
@@ -129,17 +128,31 @@ export function CodeReview({
     return m;
   }, [cards]);
 
-  const repos = useMemo(() => [...new Set([...(prs?.mine ?? []), ...(prs?.review ?? []), ...(prs?.merged ?? [])].map((p) => p.repo))], [prs]);
+  // The Team tab's repos: the ones you can push to, and the ones somebody asked you to review in. Every repo you ever sent a pull
+  // request to (an awesome list, microsoft/winget-pkgs) isn't your team's, and searching them all made GitHub answer 502, so the
+  // tab could never load (Arun, 2026-11-19). A runner from before canPush was read sends none: then every repo, as before.
+  const repos = useMemo(() => {
+    const all = [...(prs?.mine ?? []), ...(prs?.review ?? []), ...(prs?.merged ?? [])];
+    const known = all.some((p) => p.canPush !== undefined);
+    const asked = new Set((prs?.review ?? []).map((p) => p.repo));
+    return [...new Set(all.filter((p) => !known || p.canPush || asked.has(p.repo)).map((p) => p.repo))];
+  }, [prs]);
   const shownTab: Tab = tab ?? ((prs?.review.length ?? 0) > 0 ? "you" : "mine");
+  // A failed read of the team's pull requests is the Team tab's to say, not every tab's (Arun's screenshots, 2026-11-19: "GitHub
+  // answered 502." over all five).
+  const error = prsError || (shownTab === "repos" ? teamError : "");
   useEffect(() => {
-    if (shownTab !== "repos" || !linked || !repos.length) return;
+    // Your login too: every repo of yours is your team's, a pull request of yours there or not (an outside contributor's on
+    // splashxmoon/friday never showed, Arun 2026-11-19). A runner from before that ignores it.
+    const owner = prs?.account ?? "";
+    if (shownTab !== "repos" || !linked || (!repos.length && !owner)) return;
     let live = true;
-    hostApi<{ team: PullRequest[] }>(identity, `/api/runner/prs.team?repos=${encodeURIComponent(repos.join(","))}`).then(
+    hostApi<{ team: PullRequest[] }>(identity, `/api/runner/prs.team?repos=${encodeURIComponent(repos.join(","))}${owner ? `&owner=${encodeURIComponent(owner)}` : ""}`).then(
       (r) => live && (setTeam((lastTeam = r.team)), setTeamError("")),
-      (e) => live && (setTeam([]), setTeamError(machineError(e))),
+      (e) => live && (setTeam((t) => t ?? []), setTeamError(machineError(e))),
     );
     return () => void (live = false);
-  }, [shownTab, linked, repos.join(","), n]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [shownTab, linked, repos.join(","), prs?.account, n]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const list = (shownTab === "you" ? prs?.review : shownTab === "mine" ? prs?.mine : shownTab === "merged" ? prs?.merged : team) ?? [];
   const tabRepos = [...new Set(list.map((p) => p.repo))];
@@ -181,7 +194,9 @@ export function CodeReview({
       : shownTab === "you"
         ? reviewable("review")
         : shownTab === "repos"
-          ? reviewable("team")
+          ? // Everyone's, newest first, one list (Arun, 2026-11-19: "make they are in order of the most recent please"): it isn't a
+            // queue of yours to work through, so neither riskiest-first nor the small ones held back to the end.
+            [{ title: "", items: [...shown].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)).map((pr) => ({ pr, kind: "team" as Kind })) }]
           : [{ title: "", items: shown.map((pr) => ({ pr, kind: "merged" as Kind })) }];
   /** Approve the quick ones together, on GitHub as you: those not approved yet and not drafts. */
   const approveQuick = (prs: PullRequest[]) => {
@@ -220,6 +235,9 @@ export function CodeReview({
   // Every pull request, folded or not: the one picked stays open beside the list, and all piles folded is still a list (Arun,
   // 2026-11-15: "if i collapse all of the categories everything disappears").
   const every = groups.flatMap((g) => g.items);
+  /** Nothing in this tab and nothing filtered out: the page says so across its width. */
+  const blank = !every.length && !query && !repo && !(shownTab === "repos" && team === null);
+  const teamFailed = shownTab === "repos" && !!teamError && !team?.length;
   const current = every.find((i) => i.pr.url === sel) ?? order[0] ?? every[0];
   const [cmd, setCmd] = useState<Cmd | null>(null);
   const search = useRef<HTMLInputElement>(null);
@@ -271,7 +289,7 @@ export function CodeReview({
           : "You have no open pull requests."
         : shownTab === "merged"
           ? "Nothing of yours merged this week."
-          : repos.length
+          : repos.length || prs?.account
             ? "Nobody else has a pull request open in your repos."
             : "Your repos show here once you have a pull request in one.";
 
@@ -357,10 +375,17 @@ export function CodeReview({
           )
         ) : !prs ? (
           <SkeletonRows rows={4} />
-        ) : shownTab === "issues" ? (
+        ) : (
+          <>
+          {/* A narrow window stacks the list over the open one: the tabs go first, not down between the two (they sat mid-page). */}
+          <div className="page-top mb-2 hidden shrink-0 flex-wrap items-center justify-end gap-2 max-[720px]:flex">{controls}</div>
+          {shownTab === "issues" ? (
           <IssuesInbox data={issues} controls={controls} onWork={(brief) => onWork(brief)} query={query} setQuery={setQuery} search={search} />
         ) : (
-          <div className="rv-split gap-5! min-[721px]:grid-cols-[clamp(320px,30%,460px)_minmax(0,1fr)]!">
+          // A tab with nothing in it is said once, across the page: no list column standing empty beside it with a search box
+          // for nothing (Arun, 2026-11-19: "fix the design of the code review pages").
+          <div className={cn("rv-split gap-5!", blank ? "min-[721px]:grid-cols-1!" : "min-[721px]:grid-cols-[clamp(320px,30%,460px)_minmax(0,1fr)]!")}>
+            {!blank && (
             <aside className="rv-queue" aria-label="Pull requests">
               <div className="page-top-in flex items-center gap-2 border-b border-[var(--border)] p-2">
                 <div className="relative min-w-0 flex-1">
@@ -420,11 +445,7 @@ export function CodeReview({
                     ))}
                 </div>
               )}
-              {error && (
-                <p role="alert" className="m-0 border-b border-[var(--border)] px-3 py-2 text-[13px] text-[var(--red)]">
-                  {error}
-                </p>
-              )}
+              {error && <Stale error={error} busy={busy} onRetry={refresh} />}
               {shownTab === "repos" && team && <Load prs={team} />}
               <div className="rv-queue-list">
                 {shownTab === "repos" && team === null ? (
@@ -461,13 +482,19 @@ export function CodeReview({
               </div>
               {shownTab === "you" && <AutoReview tools={tools} />}
             </aside>
+            )}
             <section className="rv-pane" aria-label="Pull request">
               {/* The page's tabs and buttons, level with the top of the list beside it (Arun, 2026-10-19). */}
               {/* The same height and padding as the search bar beside it, so the two rows share one centre line (Arun, 2026-11-18:
                   "tese need to be lined up properly"). */}
-              {ready && <div className="page-top mb-4 flex min-h-12 shrink-0 items-center justify-end gap-2 py-2">{controls}</div>}
+              {ready && <div className="page-top mb-4 flex min-h-12 shrink-0 items-center justify-end gap-2 py-2 max-[720px]:hidden">{controls}</div>}
+              {blank && error && !teamFailed && <Stale error={error} busy={busy} onRetry={refresh} className="mx-auto w-full max-w-[440px] rounded-lg border" />}
               {current ? (
                 <Pane key={current.pr.url} pr={current.pr} kind={current.kind} ctx={ctx} cmd={cmd} risk={risks.get(current.pr.url)} />
+              ) : shownTab === "repos" && team === null ? null /* Still reading: "nobody has one open" said beside the loading rows wasn't true yet. */ : teamFailed ? (
+                <DassEmpty className="mt-16" tone="bad" icon={<GitPullRequestIcon />} title="Couldn't read your team's pull requests" action={<Button variant="outline" size="sm" disabled={busy} onClick={refresh}>Try again</Button>}>
+                  {said(teamError)}
+                </DassEmpty>
               ) : (
                 <DassEmpty
                   className="mt-16"
@@ -487,7 +514,7 @@ export function CodeReview({
                           setTab("mine");
                           // This button goes with the empty tab it sat in, so a keyboard user would be dropped on the page body:
                           // focus follows them to the tab they just went to.
-                          requestAnimationFrame(() => document.querySelector<HTMLElement>('.review-page [role="tab"][aria-selected="true"]')?.focus());
+                          requestAnimationFrame(() => [...document.querySelectorAll<HTMLElement>('.review-page [role="tab"][aria-selected="true"]')].find((t) => t.offsetParent)?.focus());
                         }}
                       >
                         See yours · {prs!.mine.length}
@@ -500,8 +527,12 @@ export function CodeReview({
                   }
                 />
               )}
+              {/* Nobody waiting yet: whether your agents read each one first is the one thing to set here. */}
+              {blank && shownTab === "you" && !teamFailed && <AutoReview tools={tools} className="mx-auto mt-6 w-full max-w-[440px] rounded-lg border border-[var(--border)]" />}
             </section>
           </div>
+        )}
+          </>
         )}
         {confirm && <ConfirmDialog confirmation={confirm} onClose={() => setConfirm(null)} />}
         {ready && (
@@ -525,6 +556,25 @@ export function CodeReview({
         )}
       </div>
     </div>
+  );
+}
+
+/** A read that failed, in words: "GitHub answered 502." is GitHub not answering, which is what a person needs to know. */
+const said = (error: string) => (/GitHub answered 5\d\d/.test(error) ? "GitHub didn't answer just now. It usually does again in a moment." : error);
+
+/**
+ * GitHub didn't answer this time, though what it said before is still on screen: said once, quietly, with the way to ask again.
+ * It was a red line over the list on every tab (Arun's screenshots, 2026-11-19), louder than anything it was about.
+ */
+function Stale({ error, busy, onRetry, className }: { error: string; busy?: boolean; onRetry: () => void; className?: string }) {
+  return (
+    <p role="status" title={error} className={cn("m-0 flex items-center gap-2 border-[var(--border)] px-3 py-2 text-[12px] leading-snug text-[var(--text-muted)]", className ?? "border-b")}>
+      <TriangleAlertIcon className="size-3.5 shrink-0 text-[var(--amber)]" aria-hidden />
+      <span className="min-w-0 flex-1">{said(error)}</span>
+      <Button variant="ghost" size="xs" className="h-6 shrink-0 text-[12px] text-[var(--ink-2)]" disabled={busy} onClick={onRetry}>
+        Try again
+      </Button>
+    </p>
   );
 }
 
@@ -575,6 +625,8 @@ function standing(pr: PullRequest, kind: Kind): { text: string; tone: Tone } {
 function dotOf(tone: Tone, kind: Kind, working?: BoardCard): DotState {
   if (working?.shepherd) return "working";
   if (kind === "review") return "needs";
+  // Merged is finished, not waiting to start: the done ring, not the faint one a draft has.
+  if (kind === "merged") return "done";
   return tone === "bad" ? "bad" : tone === "ok" ? "done" : "idle";
 }
 const TONE_TEXT: Record<DotState, string> = {
@@ -657,7 +709,7 @@ function ToolChip({ tool, on, onClick }: { tool: EngineTool; on: boolean; onClic
  * Auto-review: somebody asks for your review, and your own agents read it before you open it. On this computer, since it
  * is this computer's Claude Code, Codex or Cursor doing the reading, and only for requests that arrive after it is on.
  */
-function AutoReview({ tools }: { tools: EngineTool[] }) {
+function AutoReview({ tools, className }: { tools: EngineTool[]; /** Its frame: a rule above it in the list, a card of its own on an empty tab. */ className?: string }) {
   const auto = useAuto();
   const usable = ENGINE_TOOLS.filter((t) => tools.includes(t));
   if (!usable.length) return null;
@@ -668,7 +720,7 @@ function AutoReview({ tools }: { tools: EngineTool[] }) {
   };
   const who = picked.map((t) => ENGINE_NAMES[t]).join(" and ");
   return (
-    <div className="flex flex-col gap-2.5 border-t border-[var(--border)] p-3">
+    <div className={cn("flex flex-col gap-2.5 p-3", className ?? "border-t border-[var(--border)]")}>
       <div className="flex items-center gap-3">
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="flex items-center gap-1.5 text-[13px] font-semibold text-[var(--ink)]">
@@ -696,7 +748,7 @@ function Load({ prs }: { prs: PullRequest[] }) {
   if (!load.length) return null;
   return (
     <div className="flex flex-wrap items-center gap-1.5 border-b border-[var(--border)] px-3 py-2" aria-label="Review requests per person">
-      <span className="mr-1 text-[12px] font-medium tracking-[0.06em] text-[var(--text-muted)] uppercase">Review load</span>
+      <span className="mr-1 text-[12px] font-medium text-[var(--text-muted)]">Review load</span>
       {load.slice(0, 6).map((l) => (
         <Badge key={l.login} variant="outline" className="h-6 gap-1.5 rounded-[6px] border-[var(--border)] pr-1 pl-1 text-[12px] font-medium text-[var(--ink-2)]" title={`${l.login}: asked to review ${l.count}`}>
           {l.avatar ? <img className="size-4 rounded-full" src={l.avatar} alt="" /> : <UserIcon />}
@@ -841,26 +893,27 @@ function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: 
   if (kind === "team") buttons.push(quietBtn("s", "Review in a session", () => ctx.onWork(briefs.review(pr))));
 
   const risky = new Set(files.filter((f) => risksOf({ files: [f] }).length).map((f) => f.path));
-  const nextDot: DotState = kind === "review" ? "needs" : next.tone === "bad" ? "bad" : next.tone === "ok" ? "done" : "idle";
+  const nextDot: DotState = kind === "review" ? "needs" : kind === "merged" ? "done" : next.tone === "bad" ? "bad" : next.tone === "ok" ? "done" : "idle";
 
   return (
     <div className="flex flex-col gap-7 px-1 pt-1 pb-8">
       <header className="flex flex-col gap-3">
         <div className="flex items-start gap-3">
-          <h2 className="m-0 min-w-0 flex-1 text-[20px] leading-tight font-semibold tracking-[-0.015em] text-[var(--ink)]" title={pr.title}>
+          <h2 className="m-0 min-w-0 flex-1 text-[20px] leading-[28px] font-semibold tracking-[-0.015em] text-pretty text-[var(--ink)]" title={pr.title}>
             {pr.title}
           </h2>
-          <div className="flex shrink-0 items-center gap-1">
-            {!merged && (
-              <Button variant="outline" size="sm" className="h-8 border-[var(--border)] bg-[var(--bg)] text-[13px] shadow-none" onClick={() => ctx.onWork(`${pr.url} `)}>
-                Open in a session
-              </Button>
-            )}
+          {/* The way out, then the action, as the Issues tab's pane has them: the button the eye ends on is the one to press. */}
+          <div className="flex shrink-0 items-center gap-1 pt-0.5">
             <Tip label="Open on GitHub" keys="G">
               <Button variant="ghost" size="icon-sm" aria-label="Open on GitHub" className="text-[var(--text-muted)] hover:text-[var(--ink)]" onClick={() => openOutside(pr.url)}>
                 <ExternalLinkIcon />
               </Button>
             </Tip>
+            {!merged && (
+              <Button variant="outline" size="sm" className="h-8 border-[var(--border)] bg-[var(--bg)] text-[13px] shadow-none" onClick={() => ctx.onWork(`${pr.url} `)}>
+                Open in a session
+              </Button>
+            )}
           </div>
         </div>
         {/* One quiet line of what it is (design A): where, who, which branch, its size, and what makes it worth a careful look.

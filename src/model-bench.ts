@@ -40,6 +40,10 @@ export const BENCH: Record<string, Bench> = {
   "codex:gpt-6.1-sol": { solve: 0.8, cost: 0.21, inPrice: 2, est: true },
   "codex:gpt-6-astra": { solve: 0.79, cost: 1.14, inPrice: 10, est: true },
   "codex:gpt-6-luna": { solve: 0.45, cost: 0.03, inPrice: 0.1, est: true },
+  // GPT-6.2 (2026-11-17), no SWE-bench Pro yet. Artificial Analysis's Coding Agent Index has Astra flat with 6 Astra and Sol 3 points
+  // under 6.1 Sol; Astra at $8 in (20% under 6 Astra) with 22% fewer output tokens, Sol at 6.1's price.
+  "codex:gpt-6.2-sol": { solve: 0.77, cost: 0.21, inPrice: 2, est: true },
+  "codex:gpt-6.2-astra": { solve: 0.79, cost: 0.71, inPrice: 8, est: true },
   // Friday's own agent: its everyday model (Nemotron 3 Ultra, free; SWE-bench Verified 70.7 puts it near 0.46 on Pro) and Friday Pro
   // (Claude Sonnet 5.5, SWE-bench Pro 81.3). Friday's model costs the person nothing; Friday Pro draws on a scarce window instead.
   "friday:base": { solve: 0.46, cost: 0, est: true },

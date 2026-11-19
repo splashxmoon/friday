@@ -19,7 +19,7 @@ import { preferredAccount, useAccountChoice } from "./Accounts.js";
 import { EngineMark } from "./BrandMarks.js";
 import { savedCommands, useSavedCommands, useShortcuts } from "./Shortcuts.js";
 import { AgentModelPicker } from "./AgentModelPicker.js";
-import { MODE_BLURB, MODE_ICON, MODE_KEY, MODE_NAME } from "./StartControls.js";
+import { FULL_ACCESS, MODE_BLURB, MODE_ICON, MODE_KEY, MODE_NAME, type Access } from "./StartControls.js";
 import { canRoute, saveSmartRouting, smartRoutingOn, useRouteHint } from "./RouteWhy.js";
 import { keepAuto, reachForMessage } from "./smartReach.js";
 import type { Plan } from "../plan-types.js";
@@ -255,17 +255,19 @@ export function Code({
    */
   // Auto unless picked otherwise, for every coding tool and Friday Code alike (Arun, 2026-10-18); then whatever was picked last,
   // on this computer: it went back to Auto at every visit to this page, without a word (2026-10-27 audit).
-  const [mode, setMode] = useState<EngineMode>(() => {
+  // Full access is kept as "bypass": the mode is full, without the go-ahead list (StartControls.tsx FULL_ACCESS).
+  const [access, setMode] = useState<Access>(() => {
     try {
       const kept = localStorage.getItem(MODE_KEY);
-      return kept === "plan" || kept === "edits" || kept === "full" ? kept : "full";
+      return kept === "plan" || kept === "edits" || kept === "full" || kept === "bypass" ? kept : "full";
     } catch {
       return "full";
     }
   });
+  const mode: EngineMode = access === "bypass" ? "full" : access;
   useEffect(() => {
     try {
-      localStorage.setItem(MODE_KEY, mode);
+      localStorage.setItem(MODE_KEY, access);
     } catch {
       // A preference: losing it costs nothing.
     }
@@ -680,6 +682,8 @@ export function Code({
               ...(folder && engine && dirs ? { dirs } : {}),
               // What the first message calls for, when it says clearly (smartReach.ts); otherwise what was picked.
               mode: keepAuto(reachForMessage(goal), mode)?.mode ?? mode,
+              // Full access, when picked: only while it runs in Auto (a first message that only reads stays in Plan).
+              ...(access === "bypass" && (keepAuto(reachForMessage(goal), mode)?.mode ?? mode) === "full" ? { fullAccess: true } : {}),
               // and the one picked, which everyone else's turns are held to and which it goes back to after that first run.
               handMode: mode,
               ...(model ? { model } : {}),
@@ -1144,10 +1148,10 @@ export function Code({
                 access text and make the full access text yellow too and get rid of the secondary texts too"). Each choice its icon,
                 its name alone; what each means is in its tip. */}
             <MenuButton
-              className={`agent-pill mode-pill${mode === "full" ? " mode-full" : ""}`}
+              className={`agent-pill mode-pill${access === "bypass" ? " mode-full" : ""}`}
               label="Permissions"
-              text={MODE_NAME[mode]}
-              {...(mode === "full" ? { mark: <Icon name="shield" size={13} /> } : {})}
+              text={access === "bypass" ? FULL_ACCESS.name : MODE_NAME[mode]}
+              {...(access === "bypass" ? { mark: <Icon name="shield" size={13} /> } : {})}
               above
               items={() => [
                 { heading: "Permissions" },
@@ -1156,9 +1160,10 @@ export function Code({
                   icon: MODE_ICON[m],
                   // Codex and Cursor cannot ask about one command at a time, so for them Manual asks once for the whole turn.
                   title: m === "edits" && (engine === "codex" || engine === "cursor") ? "Asks you before any turn that changes something." : modeBlurb[m],
-                  checked: mode === m,
+                  checked: access === m,
                   onSelect: () => setMode(m),
                 })),
+                { label: FULL_ACCESS.name, icon: FULL_ACCESS.icon, title: FULL_ACCESS.blurb, checked: access === "bypass", onSelect: () => setMode("bypass") },
               ]}
             />
             {!busy && <VoiceButton v={voice} kind="home" />}

@@ -105,9 +105,9 @@ export function ThreadTabs({ sid, title, project, identity, tool, running, onRen
   const over = useOverflow(strip, sid);
   if (!d) return null;
   const here: RecentSession = d.recents.find((r) => r.sid === sid) ?? { sid, title, invite: "", role: "owner", openedAt: now };
-  // The project's sessions you have: the one open here always, the others unless closed from the strip, settled or snoozed.
+  // The project's sessions you have: the one open here always, the others unless closed from the strip.
   const threads = d.recents
-    .filter((r) => r.sid !== sid && r.repos?.[0]?.name === project.name && !isTeamSid(r.sid) && !closed.includes(r.sid) && !r.settledAt && !(r.snoozedUntil && r.snoozedUntil > now))
+    .filter((r) => r.sid !== sid && r.repos?.[0]?.name === project.name && !isTeamSid(r.sid) && !closed.includes(r.sid))
     .concat(here)
     .sort((a, b) => a.openedAt - b.openedAt);
   const close = (r: RecentSession) => {

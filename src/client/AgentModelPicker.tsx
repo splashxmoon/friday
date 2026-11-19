@@ -600,10 +600,14 @@ export function AgentModelPicker({
         {ownGroups()}
       </>
     );
-    const toolList = (t: EngineTool) => {
-      const list = t === engine ? cliModels : ENGINE_MODEL_INFO[t];
+    /**
+     * A tool's models, by group. `starred`: those shown in Favourites above it, left out here so none is listed twice (Arun,
+     * 2026-11-19: "it shouldnt repeat"), and its first group headed, so its models don't read as more favourites.
+     */
+    const toolList = (t: EngineTool, starred?: Set<string>) => {
+      const list = (t === engine ? cliModels : ENGINE_MODEL_INFO[t]).filter((m) => !starred?.has(`${t}|${m.id}`));
       const out: ReactElement[] = [];
-      let label: string | null = null;
+      let label: string | null = starred ? "Models" : null;
       let rows: (ReactElement | false)[] = [];
       const flush = () => {
         const g = group(label, rows, `${t}:${label ?? "top"}`);
@@ -612,7 +616,7 @@ export function AgentModelPicker({
       };
       for (const m of list) {
         if (m.id === "auto") continue;
-        const g = m.group === "Latest" ? null : (m.group ?? null);
+        const g = m.group === "Latest" || !m.group ? (starred ? "Models" : null) : m.group;
         if (g !== label) (flush(), (label = g));
         rows.push(line(t, m.id, m.label, wordOf(m.blurb, m.id), cliOn(t, m.id), null, `${ENGINE_NAMES[t]} ${m.label} ${m.id}`, true, t === engine && !!route && route.tools[t]?.model === m.id));
       }
@@ -713,7 +717,7 @@ export function AgentModelPicker({
             ) : (
               <>
                 {modelOnly && favRows.some(Boolean) && group("Favourites", favRows, "favs")}
-                {engine && toolList(engine)}
+                {engine && toolList(engine, modelOnly && favRows.some(Boolean) ? new Set([...favs].filter((k) => k.startsWith(`${engine}|`))) : undefined)}
                 {engine && model && model !== "auto" && !cliKnown && group(null, [line(engine, model, model, "Typed", true, null, model)], "typed")}
                 {engine &&
                   (typing ? (

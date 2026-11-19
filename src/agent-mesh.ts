@@ -1897,6 +1897,13 @@ export class AgentMesh {
     // task stayed "blocked" for good, as nothing an agent could call moved a blocked task on). Never by one that turned it down.
     const key = id.trim().toLowerCase();
     const stuck = key ? state.board.tasks.find((x) => x.id === key && x.status === "blocked" && !(x.declined ?? []).includes(name)) : undefined;
+    if (stuck) {
+      const events = await this.store.events(sid);
+      const end = events.findLast((e) => e.body.type === "board.finished" && e.body.id === stuck.id && e.body.status === "blocked");
+      const need = end?.body.type === "board.finished" ? waitsOnYou(end.body.report ?? "") : null;
+      const answered = !!end && events.some((e) => e.seq > end.seq && e.body.type === "instruction" && e.actor.kind === "human");
+      if (need && !answered) return { output: `"${stuck.id}" waits on the person: ${need}. They've been asked; it isn't taken back until they answer. Leave it, and take other work.`, isError: true };
+    }
     const t = stuck ?? (key ? ready.find((x) => x.id === key) : (ready.find((x) => suits(x, name)) ?? ready[0]));
     if (!t) return { output: id ? `Task "${id}" isn't ready to take: ${boardLine(state.board.tasks.find((x) => x.id === id.trim().toLowerCase()))}` : "No task is ready right now: the rest wait on others or are taken.", isError: true };
     // On a project, only with a copy of it (room-project.ts): never in an unrelated folder.
@@ -1947,13 +1954,20 @@ export class AgentMesh {
     const text = `${report.trim() || "Finished without a report."}\n\n${facts}`.slice(0, MAX_TEXT);
     const by = forLead ? laneName(state, lane) : name;
     await this.store.append(sid, agentActor(by), { type: "board.finished", id: t.id, lane: doer, name, status: blocked ? "blocked" : "done", report: forLead ? `${by}, for ${name}: ${text}` : text }, { lane: doer });
+    // Stuck on what only the person can sort (a site that banned it, a sign-in it hasn't, a browser not connected, a folder it
+    // can't reach): asked of them once, as a question in its lane, and kept off the board until they answer (claimNow). Before,
+    // it went round the crew and back (crew audit, 2026-11-19: Reddit tasks retried into a ban, redone 15 times out of 21).
+    const need = blocked ? waitsOnYou(report) : null;
+    if (need && state.ownerId) {
+      await this.store.append(sid, agentActor(name), { type: "agent.question", callId: `board:${t.id}`, question: `${name} is stuck on "${t.title}": ${need}. Tell ${name} when it's sorted, or what to do instead.`, detail: clip(report.trim(), 600), to: state.ownerId, toName: state.members[state.ownerId]?.name ?? "you" }, { lane: doer });
+    }
     if (blocked) await this.reportBoard(sid, true);
     // Its checks first, in its own folder: a failure goes straight back, without spending a review on it.
     else if (await this.runChecks(sid, t.id)) await this.reviewOrPass(sid, t.id);
     const handed = await this.dispatch(sid);
     const next = readyTasks(await this.store.state(sid)).find((x) => suits(x, name)) ?? readyTasks(await this.store.state(sid))[0];
     const proved = events.some((e) => e.seq > since.seq && e.body.type === "proof.posted" && e.body.id === t.id);
-    return { output: `${blocked ? "Marked blocked; the lead (or whoever posted the board) hears it now. It stays yours: once it is unblocked, call finish_task on it again." : "Finished; another agent checks it."}${proved || blocked ? "" : ` It went in without proof: post_proof for "${t.id}" now, and before finish_task next time.`}${handed.length ? ` Handed out: ${handed.join(", ")}.` : ""}${next ? ` Next ready: "${next.id}" ${next.title}. claim_task to take it.` : ""}` };
+    return { output: `${need ? `Marked blocked, and the person is asked (${need}); nobody takes it until they answer. Don't retry it: wait for their reply, then finish_task on it again.` : blocked ? "Marked blocked; the lead (or whoever posted the board) hears it now. It stays yours: once it is unblocked, call finish_task on it again." : "Finished; another agent checks it."}${proved || blocked ? "" : ` It went in without proof: post_proof for "${t.id}" now, and before finish_task next time.`}${handed.length ? ` Handed out: ${handed.join(", ")}.` : ""}${next ? ` Next ready: "${next.id}" ${next.title}. claim_task to take it.` : ""}` };
   }
 
   /** A finished task is checked by another agent before it counts; one that changed nothing has nothing to check. */
@@ -1988,6 +2002,12 @@ export class AgentMesh {
       const broke = c.judge ? await c.judge().catch(() => null) : null;
       const out = c.judge ? (broke ? `$ ${c.command}\n(exited 1)\n${broke}` : `$ ${c.command}\n(exited 0)\n`) : await this.repo(sid, lane, { op: "shell", command: c.command, timeoutSec: CHECK_SECONDS } as RepoCall).catch((e: Error) => `Couldn't run it: ${e.message}`);
       let verdict = checkVerdict(out);
+      // A check that couldn't run here (no package.json where it ran, a script or test path the project hasn't got, a command
+      // not installed) says nothing about the work: it is skipped, the lead hears once that the check doesn't fit the project,
+      // and the task goes on to review rather than back round to its agent (crew audit, 2026-11-19: "npm run lint && node --test
+      // test/ && npm run build", made up for a project with no test/ folder, sent finished work back three times).
+      const broken = verdict === "failed" && !c.judge ? brokenCheck(out ?? "") : null;
+      if (broken) verdict = "skipped";
       // Timed out isn't "couldn't run there": it ran and never said it passed, so it is never a pass (said as timed out).
       const timedOut = verdict === "skipped" && /^\$ [^\n]*\n\(timed out/.test(out ?? "");
       // Failures that were already there at the commit the agent's copy started from aren't the task's (baseline.ts): only the
@@ -1997,6 +2017,7 @@ export class AgentMesh {
       if (onlyPre(vs)) verdict = "passed";
       await this.store.append(sid, FRIDAY, { type: "board.checked", id, lane, command: c.command, ok: verdict === "passed", output: ends(out ?? "", 6000), ...(verdict === "skipped" ? { skipped: true } : {}), ...(timedOut ? { timedOut: true as const } : {}), ...(vs?.pre.length ? { pre: vs.pre } : {}), ...(vs?.whole ? { whole: true } : {}), ...(at ? { sha: at.sha, ...(at.dirty ? { dirty: true as const } : {}) } : {}) }, { lane });
       if (verdict !== "skipped") await c.ran?.(verdict === "failed").catch(() => undefined);
+      if (broken) await this.tellLead(sid, `Friday couldn't run the check \`${c.command}\` for "${t.title}" in ${t.name ?? laneName(state, lane)}'s folder: ${broken}. That says nothing about the work, so it went on to review without it. Give the board a check that fits the project (one of its own scripts, run where its package.json is), or none.`).catch(() => undefined);
       if (verdict !== "failed") continue;
       const after = (await this.store.state(sid)).board?.tasks.find((x) => x.id === id);
       if (!after) return false;
@@ -3349,9 +3370,17 @@ export function whereWork(state: SessionState, doer: string, reviewer: string, n
 
 export function taskBrief(state: SessionState, t: BoardTask): string {
   const others = (state.board?.tasks ?? []).filter((x) => x.id !== t.id && (x.status === "claimed" || x.status === "review") && x.name);
+  // What this room decided, all of it and before the work rather than after a review (crew audit, 2026-11-19: a pitch said
+  // "Friday is macOS only" and leaned on a claim the crew had decided to keep out, and only the review caught it). An agent was
+  // handed only what was decided since its last turn began, so one starting later, or after a compaction, could miss it.
+  const decided = state.memory.filter((m) => m.key.startsWith("decision:") && m.text.trim()).slice(-12);
+  // What reviews on this board sent back on its other tasks: a mistake caught once isn't made again on the next one.
+  const caught = (state.board?.tasks ?? []).filter((x) => x.id !== t.id).flatMap((x) => (x.reviews ?? []).filter((r) => !r.ok && !r.unclear && r.note.trim()).map((r) => ({ id: x.id, note: r.note }))).slice(-5);
   return [
     `Board task "${t.id}": ${t.title}`,
     t.detail,
+    decided.length ? `Decided here (work from these; don't argue them again):\n${decided.map((m) => `- ${clip(m.text.replace(/\s+/g, " ").trim(), 300)}`).join("\n")}` : "",
+    caught.length ? `What reviews on this board sent back on other tasks, so it isn't repeated here:\n${caught.map((c) => `- "${c.id}": ${clip(c.note.replace(/\s+/g, " ").trim(), 300)}`).join("\n")}` : "",
     t.owns.length ? `Files it owns (only this task edits them): ${t.owns.join(", ")}` : "",
     // What the tasks it waited on came to, so it starts from their results rather than finding them again.
     ...t.after.flatMap((d) => {
@@ -3467,6 +3496,35 @@ export interface RepoCheck {
   ran?: (failed: boolean) => Promise<void>;
   /** A rule read off the change rather than run (rules.ts): what to send the agent when it breaks it, or null when it holds. */
   judge?: () => Promise<string | null>;
+}
+
+/** What only the person can sort, read off a blocked task's report: what to ask them for, in a few words. */
+const WAITS_ON_YOU: [RegExp, string][] = [
+  [/\b(?:temp(?:orary|orarily)? ?ban(?:ned)?|got banned|we(?:'re| are) banned|rate[- ]limit(?:ed)?|too many requests|HTTP 429)\b/i, "the site has it rate-limited or banned for now"],
+  [/\bbrowser\b[^.\n]{0,80}\b(?:unavailable|not connected|isn't connected|disconnected|reconnect)/i, "its signed-in browser isn't connected"],
+  [/\b(?:not (?:signed|logged) in|sign[- ]?in (?:is )?(?:needed|required)|log ?in (?:is )?(?:needed|required)|behind (?:a )?(?:log ?in|sign[- ]?in))/i, "it needs a sign-in it hasn't got"],
+  [/\b(?:outside (?:the|its|my) (?:writable )?(?:workspace|folders?)|permission denied|not allowed to (?:write|read))/i, "it can't reach a folder it needs"],
+  [/\b(?:needs?|waiting on|waits on|blocked on|until) (?:your|a person's) (?:yes|go-ahead|approval|key|token|password|access|login)/i, "it needs your go-ahead, a key or access"],
+];
+export function waitsOnYou(report: string): string | null {
+  for (const [re, why] of WAITS_ON_YOU) if (re.test(report)) return why;
+  return null;
+}
+
+/**
+ * Why a check that exited non-zero couldn't run here at all, when that is what happened: no package.json where it ran, a script
+ * or test path the project hasn't got, a command that isn't installed, a folder that isn't there. Null when it ran and failed.
+ */
+export function brokenCheck(out: string): string | null {
+  if (/npm (?:ERR!|error)[^\n]*enoent/i.test(out) && /package\.json/.test(out)) return "there's no package.json where it ran";
+  const script = out.match(/npm (?:ERR!|error) Missing script: "?([\w:.-]+)/i);
+  if (script) return `the project has no "${script[1]}" script`;
+  const path = out.match(/Could not find '([^']+)'/);
+  if (path) return `${path[1]} isn't in the project`;
+  const cmd = out.match(/(?:^|\n)(?:\/bin\/)?(?:sh|bash|zsh)(?::| line \d+:)* ([\w./-]+): (?:command )?not found/);
+  if (cmd) return `${cmd[1]} isn't installed there`;
+  if (/(?:^|\n)[^\n]*\bcd: [^\n]*(?:no such file or directory|can't cd)/i.test(out)) return "the folder it changes into isn't there";
+  return null;
 }
 
 export function checkVerdict(out: string | null): "passed" | "failed" | "skipped" {

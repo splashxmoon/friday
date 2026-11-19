@@ -2,7 +2,7 @@ import { DecisionCard } from "./decision-card.js";
 import { CrewTalk, type TalkEntry } from "./crew-talk.js";
 import { WorkLine } from "./work-line.js";
 import { showDiffSoon } from "./focusDiff.js";
-import { MODE_ICON } from "./StartControls.js";
+import { FULL_ACCESS, MODE_ICON } from "./StartControls.js";
 import { StateRing, useNow } from "./presence.js";
 import { GO_AHEAD_WORDS } from "../guardrails.js";
 import { shortTokens } from "../tool-usage.js";
@@ -186,7 +186,7 @@ import { DiffView, type DiffLine, type DiffMode } from "./DiffView.js";
 import { PinBar } from "./PinBar.js";
 import { commandFailed, receiptOf } from "../receipt.js";
 import { doneVerdict, explainRun } from "../explain.js";
-import { jumpPlaces, recapStats, type JumpPlace } from "../session-line.js";
+import { jumpPlaces, type JumpPlace } from "../session-line.js";
 import { leftOff } from "../left-off.js";
 import { editPreview, failingTests, foldLine } from "../step-extras.js";
 import { stepKind } from "../run-strip.js";
@@ -447,6 +447,55 @@ interface Ctx {
 
 
 /**
+ * The session's last card, once its pull request has merged: one slim card (Arun, 2026-11-18: "just make this simple and
+ * slimmer"), in the chat's own card colour with GitHub's purple merge mark (2026-11-19: "get rid of this play it back bs, and make
+ * this not green ... the standard card color with the purple merge icon ... add a little bit more detail"): "Merged #42" and what it
+ * was, then where it went, how big it was, how long and how many runs it took and when it merged, and the pull request beside them.
+ */
+function MergedCard({ merged, events, replayLink, sid, notify }: { merged: { url: string; at: number }; events: Parameters<typeof leftOff>[1]; replayLink?: string | undefined; sid: string; notify: (m: string) => void }) {
+  const pr = /\/pull\/(\d+)/.exec(merged.url)?.[1];
+  const runs = events.filter((e) => e.body.type === "run.ended").length;
+  const first = events.find((e) => e.body.type === "instruction" && e.actor.kind === "human");
+  const days = first ? Math.round((merged.at - first.ts) / 86_400_000) : 0;
+  // The commit that opened it: what it was called, its branch and base, and every push to that branch since.
+  const opened = events.findLast((e) => e.body.type === "folder.committed" && !e.body.error && e.body.prUrl === merged.url);
+  const ob = opened?.body.type === "folder.committed" ? opened.body : null;
+  const pushes = ob ? events.filter((e) => e.body.type === "folder.committed" && !e.body.error && e.body.branch === ob.branch && e.seq >= opened!.seq).length : 0;
+  const what = ob?.message.split("\n")[0]?.trim() ?? "";
+  const when = ((t) => (t === "now" ? "just now" : `${t} ago`))(relTime(merged.at));
+  const detail = [
+    ob?.base ? `into ${ob.base}` : "",
+    ob?.files ? `${ob.files} file${ob.files === 1 ? "" : "s"}` : "",
+    pushes > 1 ? `${pushes} pushes` : "",
+    days >= 1 ? `${days} day${days === 1 ? "" : "s"}` : "",
+    runs ? `${runs} run${runs === 1 ? "" : "s"}` : "",
+    `merged ${when}`,
+  ].filter(Boolean);
+  return (
+    <div className="feed-merged slim" role="status">
+      <span className="feed-merged-mark" aria-hidden="true">
+        <Icon name="gitMerge" size={14} />
+      </span>
+      <span className="feed-merged-body">
+        <span className="feed-merged-title" title={what || undefined}>
+          <b>Merged{pr ? ` #${pr}` : ""}</b>
+          {what && <span className="feed-merged-what"> · {what}</span>}
+        </span>
+        <span className="feed-merged-line">
+          {ob?.branch && <code>{ob.branch}</code>}
+          {detail.join(" · ")}
+        </span>
+      </span>
+      <span className="feed-merged-actions">
+        <a className="btn small" href={merged.url} onClick={(e) => (e.preventDefault(), window.open(merged.url, "_blank", "noopener"))}>
+          Open pull request
+        </a>
+      </span>
+    </div>
+  );
+}
+
+/**
  * Whether a settings change is worth a line in the feed.
  *
  * Kept beside the renderer that writes those lines: the two have to agree, or
@@ -539,6 +588,7 @@ const HIDDEN = new Set<string>([
   "suggestion.dismissed",
   "lane.removed",
   "lane.renamed",
+  "lane.cleared",
   "folder.switched",
   "folder.ran",
   "folder.edited",
@@ -1344,7 +1394,14 @@ export function Activity({
   // The names of lanes this log has had, for any since taken away (agentNameFor).
   laneNamesFrom(events);
   learnLanes(events);
-  const items = useMemo(() => foldNotes(group(quiet.size ? events.filter((e) => !quiet.has(e.seq)) : events, new Set(streamKey ? streamKey.split(",") : []))), [events, streamKey, quiet]);
+  // A crew mate's home chat deleted (lane.cleared): what came before it is gone from its conversation. Only the feed leaves it
+  // out; the session's state stays whole.
+  const cleared = state.cleared;
+  const items = useMemo(() => {
+    const cut = (e: SessionEvent) => !!cleared && e.seq <= (cleared[e.lane ?? MAIN_LANE] ?? 0);
+    const shown = quiet.size || cleared ? events.filter((e) => !quiet.has(e.seq) && !cut(e)) : events;
+    return foldNotes(group(shown, new Set(streamKey ? streamKey.split(",") : [])));
+  }, [events, streamKey, quiet, cleared]);
   // A run block belongs to the lane that produced it.
   const laneOfItem = (it: FeedItem) => (it.kind === "event" ? it.ev.lane : it.kind === "notes" ? it.evs[0]?.lane : it.lane) ?? MAIN_LANE;
   // Which permission requests somebody answered, by id: those stay as a one-line receipt saying who said what (ApprovalReceipt).
@@ -1588,7 +1645,7 @@ export function Activity({
   const shown = useRef(0);
   // Whether an address on the machine doing the work has a page to show, asked of its runner (preview.fetch): the Preview opens
   // by itself only on a page, never on a server with nothing to look at (Arun, 2026-10-20).
-  const lookAt = (port: number, path: string) => hostApi<{ status: number; type: string }>(identity, "/api/runner/preview.fetch", { method: "POST", body: JSON.stringify({ port, path }) }).then(lookOf);
+  const lookAt = (port: number, path: string) => hostApi<{ status: number; type: string }>(identity, "/api/runner/preview.fetch", { method: "POST", body: JSON.stringify({ port, path, probe: true }) }).then(lookOf);
   const openIfPage = (url: string, tab?: "auto" | "new") =>
     void pageAppears(url, lookAt).then((page) => {
       if (!page) return;
@@ -2331,35 +2388,8 @@ export function Activity({
             .map((q) => (
               <FeedQuestion key={q.lane} ctx={ctx} q={q} />
             ))}
-          {/* The end: what it came to, in a line and in numbers, with the recording a press away. */}
-          {merged && !pin && (
-            <div className="feed-merged" role="status">
-              <div className="feed-merged-head">
-                <span className="feed-merged-mark">
-                  <Icon name="gitPullRequest" size={15} />
-                </span>
-                <div className="feed-merged-body">
-                  <b>Merged. This session's work is in.</b>
-                  <span className="feed-merged-line">{leftOff(state, events).status.line}</span>
-                </div>
-              </div>
-              <div className="feed-merged-stats">
-                {recapStats(events, merged.at).map((t) => (
-                  <span key={t}>{t}</span>
-                ))}
-              </div>
-              <div className="feed-merged-actions">
-                <a className="btn small" href={merged.url} onClick={(e) => (e.preventDefault(), window.open(merged.url, "_blank", "noopener"))}>
-                  Open the pull request
-                </a>
-                {onPlayBack && (
-                  <button type="button" className="btn ghost small" onClick={onPlayBack}>
-                    <Icon name="play" size={12} /> Play it back
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
+          {/* The end: one slim row, with the pull request and the recording a press away. */}
+          {merged && !pin && <MergedCard merged={merged} events={events} replayLink={replayLink} sid={sid} notify={notify} />}
           {/* Who it asked or handed work to and how each stands, while any hasn't answered (crew-waiting.tsx). */}
           {isLocal() && state.options.team && laneFilter !== ALL && <CrewWaiting events={events} state={state} lane={laneFilter} />}
           {/* Something it would send, waiting on the person's yes (crew-waiting.tsx DraftCard). */}
@@ -2621,7 +2651,7 @@ async function reconnectLane(ctx: Ctx, lane: string, quiet = false): Promise<voi
       // Brought back by itself (quiet): only if this computer doesn't already have it on the way back. Every window showing the
       // session asked, and each start took the lane from the one before mid-turn (Edge Defense, 2026-10-25: Codex attached
       // three times in six seconds, its turn stopped each time).
-      body: JSON.stringify({ sid: ctx.sid, invite: ctx.invite, ...(e.tool ? { tool: e.tool } : {}), cwd: e.cwd, mode: modeOf(e), ...(e.handMode ? { handMode: e.handMode } : {}), lane, ...(e.model ? { model: e.model } : {}), ...(e.account ? { account: e.account.id } : {}), ...(e.copyOf ? { copyOf: e.copyOf } : {}), ...(e.shared ? { share: true } : {}), ...(quiet ? { ifOffline: true } : {}) }),
+      body: JSON.stringify({ sid: ctx.sid, invite: ctx.invite, ...(e.tool ? { tool: e.tool } : {}), cwd: e.cwd, mode: modeOf(e), ...(e.handMode ? { handMode: e.handMode } : {}), ...(e.fullAccess ? { fullAccess: true } : {}), lane, ...(e.model ? { model: e.model } : {}), ...(e.account ? { account: e.account.id } : {}), ...(e.copyOf ? { copyOf: e.copyOf } : {}), ...(e.shared ? { share: true } : {}), ...(quiet ? { ifOffline: true } : {}) }),
     });
   } catch (err) {
     if (!quiet) ctx.notify(`Couldn't reconnect: ${(err as Error).message}`);
@@ -4020,9 +4050,9 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   const loginLine = item.ended?.body.outcome === "error" && signedOut(item.ended.body.error) && finalMsg && /not logged in|please run \/login/i.test(finalMsg.body.text) ? finalMsg : null;
   // Second opinion (Asides): another model asked about this turn, from the answer's strip; the form opens under the answer.
   const [opinion, setOpinion] = useState(false);
-  // A crew mate's steps show while it works, open from the start, and fold away once it is done (Arun, 2026-11-17: "where is the
-  // step stuff in the proposed design???", "make it open on default then close when the agent is done"); its line still folds them.
-  const [stepsOpen, setStepsOpen] = useState(true);
+  // A crew mate's steps fold under its one work line, closed until that line is pressed (Arun, 2026-11-18: "actually have the steps
+  // closed by default"; before, 2026-11-17, they opened while it worked). They still fold away once it is done.
+  const [stepsOpen, setStepsOpen] = useState(false);
   // Asked of one of Friday's own models: the hosted Friday's, so none in the open-source edition.
   let opinionBtn: React.ReactNode = null;
   // What the run left that has a home of its own.
@@ -4559,7 +4589,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
     const fromName = room ? room.name : (m?.name ?? "your crew");
     const where = room ? room.name : ctx.sid === team?.sid ? "the Crew room" : `${m?.name ?? "its"}'s chat`;
     const coding = loadRecents()
-      .filter((r) => r.sid !== ctx.sid && !isTeamSid(r.sid) && !r.settledAt)
+      .filter((r) => r.sid !== ctx.sid && !isTeamSid(r.sid))
       .sort((a, b) => b.openedAt - a.openedAt)
       .slice(0, 6);
     const rooms = [...(team && team.sid !== ctx.sid ? [{ sid: team.sid, invite: team.invite, name: "Crew room", lead: null as string | null }] : []), ...(team?.rooms ?? []).filter((r) => !r.thread && r.sid !== ctx.sid).map((r) => ({ sid: r.sid, invite: r.invite, name: r.name, lead: r.lead ?? null }))];
@@ -4927,18 +4957,15 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
               ))}
             </ul>
           ))(ctx.events.filter((e): e is SessionEvent & { body: { type: "repo.checked" } } => e.body.type === "repo.checked" && e.body.run === item.ended!.seq))}
-      {/* What its answer claimed passes, held against its turn (claims.ts): backed by what it ran, or not. Friday's own run of the
-          check is the line above. */}
+      {/* What its answer claimed passes, held against its turn (claims.ts), said only when it isn't so: a claim it backed with what it
+          ran says nothing (Arun, 2026-11-18: "get rid of this too", a "Checked:" line carrying its whole command). Friday's own run
+          of the check is the line above. */}
       {item.ended &&
         ((c) =>
-          c && c.body.type === "claim.checked" && c.body.verdict !== "checked" ? (
+          c && c.body.type === "claim.checked" && c.body.verdict !== "checked" && c.body.verdict !== "backed" ? (
             <p className={`rsp-claim ${c.body.verdict}`} role="note">
-              <Icon name={c.body.verdict === "backed" ? "check" : c.body.verdict === "contradicted" ? "x" : "help"} size={12} />
-              {c.body.verdict === "backed" ? (
-                <span>
-                  Checked: <code>{c.body.command}</code> passed in this turn
-                </span>
-              ) : c.body.verdict === "contradicted" ? (
+              <Icon name={c.body.verdict === "contradicted" ? "x" : "help"} size={12} />
+              {c.body.verdict === "contradicted" ? (
                 <span>
                   Not so: it said {claimSaid(c.body.kind)}, but <code>{c.body.command}</code> failed{" "}
                 </span>
@@ -6459,6 +6486,31 @@ function AlwaysAllow({ items, allow, busy, send, ctx, answer }: { items: string[
   );
 }
 
+/**
+ * "Always in this project" on a go-ahead (Arun, 2026-11-18, as Codex and OpenBot offer it): run it, and from now on let commands like
+ * it through in every session in this folder. Taken back from the thread card's Go-aheads.
+ */
+function ProjectAllow({ items, lane, busy, ctx, answer }: { items: string[]; lane: string; busy: boolean; ctx: Ctx; answer: (yes: boolean) => Promise<unknown> }) {
+  const engine = ctx.state.engines[lane];
+  const name = (engine?.copyOf ?? engine?.cwd ?? "").split(/[\\/]/).filter(Boolean).pop() ?? "this project";
+  return (
+    <button
+      type="button"
+      className="btn small"
+      disabled={busy}
+      title={`Run it, and from now on let commands like it through in every session in ${name}`}
+      onClick={() =>
+        void api(ctx.identity, "/api/project-allow", { method: "POST", body: JSON.stringify({ sid: ctx.sid, lane, items }) }).then(
+          () => answer(true),
+          (e: Error) => ctx.notify(e.message || "Couldn't allow that for the project."),
+        )
+      }
+    >
+      Always in this project
+    </button>
+  );
+}
+
 function ApprovalReceipt({ ask, said, ctx }: { ask: Ev<"engine.approval">; said: Ev<"instruction">; ctx: Ctx }) {
   const b = ask.body;
   const yes = !!said.body.approval?.approve;
@@ -6597,6 +6649,8 @@ function PermissionCard({ ev, ctx }: { ev: Ev<"engine.approval">; ctx: Ctx }) {
             {/* One press, not a menu to choose from: what it allows follows from what the command is (alwaysAllowEntry), and the
                 tooltip and the note after say exactly that, with where to take it back. */}
             {b.scope === "commands" && mayDrive && me.role === "owner" && !hostWait && <AlwaysAllow items={b.items} allow={state.options.allow} busy={busy} send={send} ctx={ctx} answer={answer} />}
+            {/* A go-ahead, on the asker's own computer: allowed for every session in this project, not only this one. */}
+            {b.guard && b.scope === "commands" && me.role === "owner" && !hostWait && state.engines[lane]?.hostId === me.id && <ProjectAllow items={b.items} lane={lane} busy={busy} ctx={ctx} answer={answer} />}
             {hostWait ? (
               <span className="apv-note" title={`${hostWait}'s computer is in Manual, so only ${hostWait} can say yes to commands on it. Ask ${hostWait}, or ${hostWait} can switch it to Auto.`}>
                 Waiting for {hostWait} to say yes: it's {hostWait}'s computer, in Manual.
@@ -6884,6 +6938,9 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
       // they would be two more buttons saying the same (Arun, 2026-11-04: the line was crowded). Once at a time, they stay in the
       // Changes panel's dock; here they show only where seeing it through isn't on the table.
       const manual = !!pr && !offer && !seeing && canDriveLane(state, me.id, lane);
+      // Merged, the merged card says where it went and opens it: the commit's line is the commit alone, with no ways on to a pull
+      // request that is done (Arun, 2026-11-19: "get rid of this extra bs").
+      const done = !!b.prUrl && !!state.pr?.merged;
       return (
         <Notice ev={ev} icon={CheckIcon} tone={b.error ? "danger" : "control"}>
           {who} committed {b.files} file{b.files === 1 ? "" : "s"}
@@ -6891,7 +6948,7 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
           {b.prUrl && b.base && !/^(main|master|trunk|develop)$/.test(b.base) ? ` · stacked on ${b.base}` : ""}
           {b.pushed && !b.prUrl && " · pushed"}
           {b.error && ` · not pushed: ${b.error}`}
-          {b.prUrl && (
+          {b.prUrl && !done && (
             <span className="cp-acts">
               <a className="link-btn" href={b.prUrl} target="_blank" rel="noreferrer">
                 {b.prCreated ? "Open pull request" : "Create pull request"}
@@ -6960,9 +7017,12 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
       // Said on the change it is about, on the review card, not as a line of its own.
       return null;
     case "pr.shepherd":
+      // Once it has merged, the merged card is the story: that Friday was asked to see it through is said by nothing more. Before
+      // then, in a line, not a paragraph on how it works (Arun, 2026-11-19: "get rid of this extra bs").
+      if (b.on && state.pr?.merged) return null;
       return (
         <Notice ev={ev} icon={GitPullRequestIcon} tone="control">
-          {b.on ? `${who} asked Friday to see the pull request through to merge. It hands red checks and new review comments to the agent and pushes the fixes.` : `${who} took the pull request back from Friday.`}
+          {b.on ? `${who} handed the pull request to Friday to see through to merge.` : `${who} took the pull request back from Friday.`}
         </Notice>
       );
     case "pr.shepherd.step":
@@ -6972,6 +7032,8 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
         </Notice>
       );
     case "pr.shepherd.ended":
+      // "Merged. Friday saw the pull request through." said the merged card under it again.
+      if (b.outcome === "merged") return null;
       return (
         <Notice ev={ev} icon={b.outcome === "stopped" ? CircleHelpIcon : GitPullRequestIcon} tone={b.outcome === "stopped" ? "danger" : "control"}>
           {b.text}
@@ -7006,6 +7068,14 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
       );
     case "run.quiet":
       return <QuietLine ev={ev as Ev<"run.quiet">} ctx={ctx} />;
+    case "guard.refused":
+      // A step the go-ahead list refuses outright (the floor: a disk wiped, the web piped into a shell): one quiet line where it
+      // happened, and kept in the thread card's Go-aheads.
+      return (
+        <Notice ev={ev} icon={PauseIcon} tone="warn">
+          {(ev as Ev<"guard.refused">).body.why} Refused <code>{(ev as Ev<"guard.refused">).body.item.slice(0, 120)}</code>.
+        </Notice>
+      );
     case "run.guarded":
       return (
         // A pause that protects the run, not a failure: said like the pause it is, with the command as code.
@@ -8394,7 +8464,7 @@ function workSummary(msgs: Ev<"agent.message">[], ctx: Ctx, active: boolean): st
 const REACH: { id: EngineMode; label: string; hint: string }[] = [
   { id: "plan", label: "Plan", hint: "Reads and proposes, and asks before it runs a command. Changes nothing." },
   { id: "edits", label: "Manual", hint: "Edits files, and asks you before it runs a command." },
-  { id: "full", label: "Auto", hint: "Edits and runs commands without asking." },
+  { id: "full", label: "Auto", hint: "Edits and runs commands without asking, except the go-ahead list: shipping, sending out, deleting what isn't its own, money and keys." },
 ];
 
 /**
@@ -8479,7 +8549,10 @@ function ReachPill({ ctx, lane }: { ctx: Ctx; lane: string }) {
   const engine = state.engines[lane];
   const [busy, setBusy] = useState(false);
   if (!engine || !engine.online) return null;
-  const now = REACH.find((r) => r.id === engine.mode) ?? REACH[2]!;
+  const reach = REACH.find((r) => r.id === engine.mode) ?? REACH[2]!;
+  // Full access: Auto without the go-ahead list (StartControls.tsx FULL_ACCESS), said by its own name.
+  const bypass = engine.mode === "full" && !!engine.fullAccess;
+  const now = bypass ? { ...reach, label: FULL_ACCESS.name, hint: FULL_ACCESS.blurb } : reach;
   // Everybody in the room can see what this agent may do; only the person whose machine it runs on can change it.
   if (engine.hostId !== me.id) {
     return (
@@ -8501,8 +8574,8 @@ function ReachPill({ ctx, lane }: { ctx: Ctx; lane: string }) {
 
   let othersSub = "Teammates, hand-offs and apps can change files, but not run anything you haven't allowed.";
   if (state.options.work) othersSub = "Teammates, hand-offs and apps can save pieces, but nothing more you haven't allowed.";
-  const set = async (m: EngineMode) => {
-    if (m === modeOf(engine) || busy) return;
+  const set = async (m: EngineMode, full = false) => {
+    if ((m === modeOf(engine) && full === bypass) || busy) return;
     // Changing it restarts the agent on the same folder, which would cut a turn off in the middle.
     if (running) return notify("Let the run finish, or pause it, before changing what it may do.");
     setBusy(true);
@@ -8510,7 +8583,7 @@ function ReachPill({ ctx, lane }: { ctx: Ctx; lane: string }) {
       await hostApi(identity, "/api/runner/start", {
         method: "POST",
         // The rest as it was: its model (or Smart routing) and the folder its copy was cut from.
-        body: JSON.stringify({ sid: ctx.sid, invite: ctx.invite, ...(engine.tool ? { tool: engine.tool } : {}), cwd: engine.cwd, mode: m, lane, ...(engine.model ? { model: engine.model } : {}), ...(engine.account ? { account: engine.account.id } : {}), ...(engine.copyOf ? { copyOf: engine.copyOf } : {}), ...(engine.shared ? { share: true } : {}) }),
+        body: JSON.stringify({ sid: ctx.sid, invite: ctx.invite, ...(engine.tool ? { tool: engine.tool } : {}), cwd: engine.cwd, mode: m, fullAccess: m === "full" && full, lane, ...(engine.model ? { model: engine.model } : {}), ...(engine.account ? { account: engine.account.id } : {}), ...(engine.copyOf ? { copyOf: engine.copyOf } : {}), ...(engine.shared ? { share: true } : {}) }),
       });
     } catch (e) {
       notify(`Couldn't change what it may do: ${(e as Error).message}`);
@@ -8522,10 +8595,10 @@ function ReachPill({ ctx, lane }: { ctx: Ctx; lane: string }) {
   const why = switchedWhy.get(`${ctx.sid}|${lane}`);
   return (
     <MenuButton
-      className={`reach-pill${now.id === "full" && !busy ? " mode-full" : ""}`}
+      className={`reach-pill${bypass && !busy ? " mode-full" : ""}`}
       label={why && why.startsWith(`${now.label},`) ? `What it may do in your folder: ${why}` : "What it may do in your folder"}
       text={busy ? "…" : now.label}
-      {...(now.id === "full" && !busy ? { mark: <Icon name="shield" size={13} /> } : {})}
+      {...(bypass && !busy ? { mark: <Icon name="shield" size={13} /> } : {})}
       items={() => [
         { heading: "In your folder, it may" },
         ...REACH.map((r) => {
@@ -8534,9 +8607,11 @@ function ReachPill({ ctx, lane }: { ctx: Ctx; lane: string }) {
           if (state.options.work) sub = WORK_MODE_BLURB[r.id];
           // In the open-source edition each its icon and its name alone, what it means in its tip, as the home page's (Arun,
           // 2026-11-16: "get rid of the secondary texts").
-          if (isLocal()) return { label: r.label, icon: MODE_ICON[r.id], title: sub, checked: r.id === now.id, onSelect: () => void set(r.id) };
-          return { label: r.label, sub, checked: r.id === now.id, onSelect: () => void set(r.id) };
+          if (isLocal()) return { label: r.label, icon: MODE_ICON[r.id], title: sub, checked: r.id === now.id && !bypass, onSelect: () => void set(r.id) };
+          return { label: r.label, sub, checked: r.id === now.id && !bypass, onSelect: () => void set(r.id) };
         }),
+        // Auto without the go-ahead list: the way out of it, for whoever wants everything unasked.
+        isLocal() ? { label: FULL_ACCESS.name, icon: FULL_ACCESS.icon, title: FULL_ACCESS.blurb, checked: bypass, onSelect: () => void set("full", true) } : { label: FULL_ACCESS.name, sub: FULL_ACCESS.blurb, checked: bypass, onSelect: () => void set("full", true) },
         // Whose messages may run it how far on this computer (Security R2, R3): anyone else's, an app's and another person's agent
         // included, stops at Edits unless the host raises it (Arun, 2026-11-04). Said plainly, since raising it lets other people
         // run commands on this computer.

@@ -449,14 +449,36 @@ function useOpenThreads(mate: string, threads: RoomView[]): string[] {
   const ids = new Set(threads.map((r) => r.id));
   return kept ? kept.filter((id) => ids.has(id)) : threads.slice(0, 3).map((r) => r.id).reverse();
 }
+/**
+ * A crew mate's home chat, a thread like the others (Arun, 2026-11-18: "get rid of this main thread stuff ... make it called new
+ * thread and stuff... because what if the user wants to get rid of main"): the name the person gave it, else the first thing they
+ * said there, else New thread; and whether its tab is closed. Kept on this computer, as the open tabs are.
+ */
+const HOME_KEY = (mate: string) => `friday.threads.home.${mate}`;
+function readHome(mate: string): { name?: string; closed?: true } {
+  try {
+    const v = JSON.parse(localStorage.getItem(HOME_KEY(mate)) ?? "null") as { name?: unknown; closed?: unknown } | null;
+    return { ...(typeof v?.name === "string" && v.name ? { name: v.name } : {}), ...(v?.closed === true ? { closed: true as const } : {}) };
+  } catch {
+    return {};
+  }
+}
+function writeHome(mate: string, v: { name?: string; closed?: true }) {
+  try {
+    localStorage.setItem(HOME_KEY(mate), JSON.stringify(v));
+  } catch {
+    /* private window: for now only */
+  }
+  openListeners.forEach((l) => l());
+}
 const openTab = (mate: string, id: string, now: string[]) => (now.includes(id) ? undefined : writeOpen(mate, [...now, id]));
 
 /**
  * A crew mate's chat's title, in the window's header (Arun, 2026-11-15: "move the threads and stuff to the header ... the agent
  * name left side with the mascot too"; "rather than being a dropdown why dont we make it like a row instead where you can click or
- * close it etc then we have a dropdown for like deleting a thread"): its face and name, then its threads as a row of tabs, Main
- * first, each closed with its ×, and + for a new one. A closed thread is kept: the menu at the row's end lists every thread, and
- * renames or removes the one you are in.
+ * close it etc then we have a dropdown for like deleting a thread"): its face and name, then its threads as a row of tabs, its home
+ * chat first and named like any thread (no "Main"), each closed with its ×, and + for a new one. A closed thread is kept: the menu
+ * at the row's end lists every thread, and renames or removes the one you are in.
  */
 export function MateTitle({ identity, lane, notify }: { identity: Identity; lane: string; notify?: (m: string) => void }) {
   const t = useTeamNow();
@@ -475,37 +497,76 @@ export function MateTitle({ identity, lane, notify }: { identity: Identity; lane
     void startThread(identity, m.id, (id) => openTab(m.id, id, readOpen(m.id) ?? openIds)).catch((e: Error) => say(e.message || "That thread didn't start. Try again."));
   const tabs = openIds.map((id) => threads.find((r) => r.id === id)).filter((r): r is RoomView => !!r);
   if (here && !tabs.includes(here)) tabs.push(here);
+  const home = readHome(m.id);
+  const homeName = home.name ?? (m.homeTitle || "New thread");
+  // The home chat's tab, unless it was closed and you are elsewhere: the one you are in is always a tab.
+  const homeTab = !home.closed || !here;
+  const goHome = () => (home.closed && writeHome(m.id, { ...(home.name ? { name: home.name } : {}) }), openThread(null, m.id));
   const close = (r: RoomView) => {
     const at = tabs.indexOf(r);
     writeOpen(m.id, openIds.filter((id) => id !== r.id));
-    // Closing the one you are in: its neighbour takes its place, or Main.
-    if (here?.id === r.id) openThread(tabs[at + 1] ?? tabs[at - 1] ?? null, m.id);
+    // Closing the one you are in: its neighbour takes its place, or the home chat, or with neither a new thread.
+    if (here?.id === r.id) {
+      const next = tabs[at + 1] ?? tabs[at - 1];
+      if (next) openThread(next, m.id);
+      else if (homeTab) openThread(null, m.id);
+      else fresh();
+    }
   };
+  const closeHome = () => {
+    writeHome(m.id, { ...(home.name ? { name: home.name } : {}), closed: true });
+    // In it: the first open thread takes its place, or a new one.
+    if (!here) tabs[0] ? openThread(tabs[0], m.id) : fresh();
+  };
+  const rename = (now: string, save: (n: string) => Promise<unknown>) =>
+    ask({
+      title: "Rename thread",
+      action: "Rename",
+      danger: false,
+      icon: "pencil",
+      input: { label: "Thread name", value: now, maxLength: 60 },
+      onConfirm: (name) => {
+        const n = name.replace(/\s+/g, " ").trim();
+        if (!n) return Promise.reject(new Error("Give it a name."));
+        return save(n);
+      },
+    });
   const s = mateStatus(m);
   const items = (): MenuItem[] => [
     { heading: "Threads" },
-    { label: "Main chat", icon: "chat", checked: !here, onSelect: () => openThread(null, m.id) },
+    { label: homeName, icon: "chat", checked: !here, onSelect: goHome },
     ...threads.slice(0, 20).map((r): MenuItem => ({ label: r.name, icon: "chat", checked: here?.id === r.id, ...(r.working ? { live: true } : {}), onSelect: () => (openTab(m.id, r.id, openIds), openThread(r, m.id)) })),
     { label: "Start a new thread", icon: "plus", onSelect: fresh },
+    ...(!here
+      ? [
+          { heading: homeName },
+          { label: "Rename…", icon: "pencil" as const, onSelect: () => rename(homeName, async (n) => writeHome(m.id, { name: n, ...(home.closed ? { closed: true as const } : {}) })) },
+          { label: "Close thread", icon: "x" as const, onSelect: closeHome },
+          // Deleted, it starts again empty: what was said goes, and its coding tool starts a fresh conversation (app.ts /clear).
+          {
+            label: "Delete thread…",
+            icon: "trash" as const,
+            danger: true,
+            onSelect: () =>
+              ask({
+                title: `Delete “${homeName}”?`,
+                body: `The thread and its conversation with ${m.name} go for good, and ${m.name} starts this chat fresh. Anything ${m.name} made or changed, its notes and its memory stay where they are.`,
+                action: "Delete thread",
+                onConfirm: () =>
+                  api(identity, `/api/teammates/${m.id}/clear`, { method: "POST" })
+                    .then(() => writeHome(m.id, {}))
+                    .then(() => refreshTeam(identity)),
+              }),
+          },
+        ]
+      : []),
     ...(here
       ? [
           { heading: here.name },
           {
             label: "Rename…",
             icon: "pencil" as const,
-            onSelect: () =>
-              ask({
-                title: "Rename thread",
-                action: "Rename",
-                danger: false,
-                icon: "pencil",
-                input: { label: "Thread name", value: here.name, maxLength: 60 },
-                onConfirm: (name) => {
-                  const n = name.replace(/\s+/g, " ").trim();
-                  if (!n) return Promise.reject(new Error("Give it a name."));
-                  return api(identity, `/api/teammates/rooms/${here.id}`, { method: "PATCH", body: JSON.stringify({ name: n }), headers: { "Content-Type": "application/json" } }).then(() => void refreshTeam(identity));
-                },
-              }),
+            onSelect: () => rename(here.name, (n) => api(identity, `/api/teammates/rooms/${here.id}`, { method: "PATCH", body: JSON.stringify({ name: n }), headers: { "Content-Type": "application/json" } }).then(() => void refreshTeam(identity))),
           },
           {
             label: "Delete thread…",
@@ -519,7 +580,13 @@ export function MateTitle({ identity, lane, notify }: { identity: Identity; lane
                 onConfirm: () =>
                   api(identity, `/api/teammates/rooms/${here.id}`, { method: "DELETE" })
                     .then(() => refreshTeam(identity))
-                    .then(() => (writeOpen(m.id, openIds.filter((id) => id !== here.id)), openThread(null, m.id))),
+                    .then(() => {
+                      writeOpen(m.id, openIds.filter((id) => id !== here.id));
+                      const next = tabs.find((r) => r.id !== here.id);
+                      if (homeTab) openThread(null, m.id);
+                      else if (next) openThread(next, m.id);
+                      else fresh();
+                    }),
               }),
           },
         ]
@@ -533,9 +600,16 @@ export function MateTitle({ identity, lane, notify }: { identity: Identity; lane
       <h1 className="mt-name">{m.name}</h1>
       <MateRing status={m.status} title={freeLine(m, s)} />
       <div className="mt-tabs" role="tablist" aria-label={`${m.name}'s threads`}>
-        <button type="button" role="tab" aria-selected={!here} className="mt-tab" onClick={() => here && openThread(null, m.id)}>
-          <span className="mt-tab-name">Main</span>
-        </button>
+        {homeTab && (
+          <div className="mt-tab" role="tab" aria-selected={!here}>
+            <button type="button" className="mt-tab-open" title={homeName} onClick={() => here && openThread(null, m.id)}>
+              <span className="mt-tab-name">{homeName}</span>
+            </button>
+            <button type="button" className="mt-tab-x" aria-label={`Close ${homeName}`} title="Close: it stays in the threads menu" onClick={closeHome}>
+              <XIcon aria-hidden="true" />
+            </button>
+          </div>
+        )}
         {tabs.map((r) => (
           <div key={r.id} className="mt-tab" role="tab" aria-selected={here?.id === r.id} data-working={r.working ? "" : undefined}>
             <button type="button" className="mt-tab-open" title={r.name} onClick={() => here?.id !== r.id && openThread(r, m.id)}>
@@ -674,6 +748,16 @@ export function TeammatePage({ lane, identity, notify, branch }: { lane: string;
             On hold: they wait until you lift it.{" "}
             <button type="button" className="tm-link" onClick={() => void api(identity, "/api/teammates/lift", { method: "POST", body: JSON.stringify({ id: m.id }), headers: { "Content-Type": "application/json" } }).then(() => refreshTeam(identity)).catch((e: Error) => notify?.(e.message))}>
               Lift the hold
+            </button>
+          </p>
+        )}
+        {/* Not on full access, it stops for you over and over: said where you look, with the way back (crew audit, 2026-11-19: a
+            mate on "Ask before changes" asked 90 times in 17 runs and couldn't run its own checks). */}
+        {(m.mode === "edits" || m.mode === "plan") && identity && mine && (
+          <p className="tm-head-held tm-slim-held">
+            {m.mode === "plan" ? "Read only: it can't change a file or run a command." : "Asks you before every change and command, so it stops often and can't run its own checks."}{" "}
+            <button type="button" className="tm-link" onClick={() => void api(identity, `/api/teammates/${m.id}`, { method: "PATCH", body: JSON.stringify({ mode: "full" }), headers: { "Content-Type": "application/json" } }).then(() => refreshTeam(identity)).catch((e: Error) => notify?.(e.message))}>
+              Give full access
             </button>
           </p>
         )}

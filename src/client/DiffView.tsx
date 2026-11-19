@@ -1,5 +1,5 @@
 import { FileIcon } from "./fileIcons.js";
-import { PICTURE_FILE } from "./picture-url.js";
+import { PICTURE_FILE, VIDEO_FILE } from "./picture-url.js";
 import { localPicture } from "./picture-url.js";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import styles from "@/components/aicss/FileDiff.module.css";
@@ -190,7 +190,7 @@ export function DiffView({
   const { dir, name } = splitPath(path);
   // A changed picture shows as the picture it is now: its patch is bytes, or nothing (Arun, 2026-11-18: "be able to see in the side
   // panels and stuff too"). Through the session, as the chat shows one (LiveBlock localPicture).
-  const picture = change !== "deleted" && PICTURE_FILE.test(path) ? localPicture(path) : null;
+  const picture = change !== "deleted" && (PICTURE_FILE.test(path) || VIDEO_FILE.test(path)) ? localPicture(path) : null;
 
   const copy = async (text: string, done: (v: boolean) => void) => {
     try {

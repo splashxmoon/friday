@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Lightbox } from "./Lightbox.js";
+import { VIDEO_FILE } from "./picture-url.js";
 /**
  * One picture file, open in a side panel (the file tree's viewer, a changed picture in the Changes panel): the picture itself,
  * fitted to the panel, its size and kind under it, and large in front of the page on a press (Arun, 2026-11-18: "also be able to
@@ -13,22 +14,36 @@ export default function PictureView({ src, path, note }: { src: string; path: st
   const name = path.split(/[\\/]/).pop() || path;
   const kind = /\.([a-z0-9]+)$/i.exec(path)?.[1]?.toUpperCase() ?? "Picture";
   const at = tries ? `${src}${src.includes("?") ? "&" : "?"}try=${tries}` : src;
+  // A video plays where it is, with its controls, its length and size under it; large on the button beside them (2026-11-19).
+  const video = VIDEO_FILE.test(path);
+  const [length, setLength] = useState(0);
   return (
     <div className="pic-view">
       {bad ? (
         <p className="muted small pic-view-gone">
-          {name} couldn't be shown: it isn't in this session's folders on a computer that's connected, or it isn't finished yet.{" "}
+          {name} couldn't be {video ? "played" : "shown"}: it isn't in this session's folders on a computer that's connected, or it isn't finished yet.{" "}
           <button type="button" className="link-btn" onClick={() => (setBad(false), setTries((n) => n + 1))}>
             Try again
           </button>
         </p>
       ) : (
+        video ? (
+          <div className="pic-view-frame video">
+            <video key={at} src={at} controls preload="metadata" playsInline onLoadedMetadata={(e) => (setSize([e.currentTarget.videoWidth, e.currentTarget.videoHeight]), setLength(e.currentTarget.duration))} onError={() => setBad(true)} />
+          </div>
+        ) : (
         <button type="button" className={`pic-view-frame${/\.svg$/i.test(path) ? " vector" : ""}`} title={`Show ${name} large`} onClick={() => setBig(true)}>
           <img key={at} src={at} alt={name} onLoad={(e) => setSize([e.currentTarget.naturalWidth, e.currentTarget.naturalHeight])} onError={() => setBad(true)} />
         </button>
+        )
       )}
       <div className="pic-view-meta muted small">
-        <span>{[kind, size && size[0] ? `${size[0]} × ${size[1]}` : ""].filter(Boolean).join(" · ")}</span>
+        <span>{[kind, video && length && Number.isFinite(length) ? `${Math.floor(length / 60)}:${String(Math.round(length % 60)).padStart(2, "0")}` : "", size && size[0] ? `${size[0]} × ${size[1]}` : ""].filter(Boolean).join(" · ")}</span>
+        {video && !bad && (
+          <button type="button" className="link-btn" onClick={() => setBig(true)}>
+            Play large
+          </button>
+        )}
         {note}
       </div>
       {big && <Lightbox src={at} alt={path} onClose={() => setBig(false)} />}

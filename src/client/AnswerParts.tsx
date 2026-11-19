@@ -148,8 +148,15 @@ function MediaChip({ text, path, quiet, after }: { text: string; path: string; /
   return (
     <span className="chat-media">
       {/* Its name, not its whole path: a long folder path broke across two lines over the picture. The path is in the tooltip. */}
-      <FileChip text={text.split(/[\\/]/).pop() || text} path={path} {...(!video && src && !missing ? { onOpen: () => setBig(true) } : {})} />
-      {at && !gone && !missing && <span className="chat-media-view">{video ? <video key={tries} src={`${at}#t=0.1`} controls preload="metadata" playsInline onError={() => (tries < 2 ? void window.setTimeout(() => setTries((n) => n + 1), 1500 * (tries + 1)) : setGone(true))} /> : <LiveImage src={src!} alt={text} {...(quiet ? { "data-quiet": "", onMissing: () => setMissing(true) } : {})} />}</span>}
+      <FileChip text={text.split(/[\\/]/).pop() || text} path={path} {...(src && !missing && !gone ? { onOpen: () => setBig(true) } : {})} />
+      {/* A video is a tile the size of a picture's, its first frame with a play mark, and plays large on a press, as a picture opens
+          (Arun, 2026-11-19: "handle support for videos like mp4"). Named only in passing and not there, it stays a name. */}
+      {at && !gone && !missing && <span className="chat-media-view">{video ? (
+        <button type="button" className="chat-video" title={`Play ${text.split(/[\\/]/).pop() || text}`} onClick={() => setBig(true)}>
+          <video key={tries} src={`${at}#t=0.1`} muted preload="metadata" playsInline tabIndex={-1} aria-hidden onError={() => (tries < 2 ? void window.setTimeout(() => setTries((n) => n + 1), 1500 * (tries + 1)) : quiet ? setMissing(true) : setGone(true))} />
+          <span className="chat-video-play" aria-hidden><Icon name="play" size={16} /></span>
+        </button>
+      ) : <LiveImage src={src!} alt={text} {...(quiet ? { "data-quiet": "", onMissing: () => setMissing(true) } : {})} />}</span>}
       {big && src && <Lightbox src={src} alt={path} onClose={() => setBig(false)} />}
       {gone && (
         <span className="chat-media-gone">

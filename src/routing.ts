@@ -169,7 +169,8 @@ export interface ModelFit {
 /** Each model a tool can be routed to, by its id in the tool, weighed for the task. Empty for a tool Friday has no figures for. */
 const ROUTABLE: Partial<Record<EngineTool, string[]>> = {
   claude: ["opus", "sonnet", "haiku", "fable"],
-  codex: ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-luna"],
+  // 6.2 Astra in 6 Astra's place (as able, for less); both Sols, so its figures decide between them (2026-11-19).
+  codex: ["gpt-6.2-sol", "gpt-6.1-sol", "gpt-6.2-astra", "gpt-6-luna"],
 };
 
 /**

@@ -78,6 +78,8 @@ export interface RunnerOptions {
    * the server then holds everyone else's turns to it (`turn.mode`).
    */
   handMode?: EngineMode;
+  /** Auto without the go-ahead list (EngineInfo.fullAccess): the person chose Full access. Never a teammate's. */
+  fullAccess?: boolean;
   /** Attach to an existing lane. Defaults to the main lane. */
   lane?: string;
   /** Or create a lane beside Friday Code, with this name (owners only). */
@@ -161,7 +163,7 @@ type ServerMsg =
 /** What Runner.start asks before connecting, as one object so a test can watch the order the questions are asked in. */
 export const startChecks = { findBin, loginStatusQuick, loginStatusCached, launcher, repoInfo, warmSnapshot };
 
-const READ_ONLY = new Set<string>(["tree", "read", "search", "remote", "branches", "prcomments", "prstatus", "commands", "context", "status", "log", "show", "gitdiff", "compare"]);
+const READ_ONLY = new Set<string>(["tree", "read", "search", "remote", "branches", "prcomments", "prstatus", "prdetail", "commands", "context", "status", "log", "show", "gitdiff", "compare"]);
 
 /** A run stopped by the account's allowance running out, not a rate limit a moment's wait clears (limit-reset.ts reads both). */
 export const OUT_OF_USAGE = /usage limit|session limit|weekly limit|5-hour limit|hit your limit|limit reached|out of (?:usage|credits)/i;
@@ -171,6 +173,12 @@ export const OUT_OF_USAGE = /usage limit|session limit|weekly limit|5-hour limit
  * Claude Code set to Fable stopped there before doing anything, and stayed stopped until a person reconnected it on another
  * model (Arun, 2026-10-25). Its turns run on MODEL_FALLBACK instead, from then on.
  */
+/**
+ * Whether a lane's Auto is held to the go-ahead list (guardrails.ts): a teammate's always; anyone else's unless they chose Full
+ * access (Arun, 2026-11-18: "i want my auto mode to follow their guidlines", as OpenBot, DuskBot, OpenClaw and Claude Code do).
+ */
+export const autoGuarded = (o: { keepAs?: string; fullAccess?: boolean }): boolean => !!o.keepAs || !o.fullAccess;
+
 export const MODEL_UNPAID = /requires (?:usage )?credits|switch to another model|(?:isn't|is not|not) (?:available|included) (?:on|in|with) your (?:plan|subscription)/i;
 const MODEL_FALLBACK: Partial<Record<EngineTool, string>> = { claude: "sonnet" };
 
@@ -721,6 +729,7 @@ export class Runner {
       ...(o.tool ? { tool: o.tool } : {}),
       mode: o.mode ?? "full",
       ...(o.handMode && o.handMode !== (o.mode ?? "full") ? { handMode: o.handMode } : {}),
+      ...(o.fullAccess && !o.keepAs && (o.mode ?? "full") === "full" ? { access: "full" } : {}),
       cwd: o.cwd,
       ...(o.copyOf ? { copyOf: o.copyOf } : {}),
       ...(o.share ? { share: "1" } : {}),
@@ -1244,8 +1253,9 @@ export class Runner {
       ...(thinks ? { effort: thinks } : {}),
       ...(mcp.length ? { mcp } : {}),
       ...(ask ? { ask: true } : {}),
-      // A teammate at full access is held to the go-ahead list (guardrails.ts; Arun, 2026-11-03).
-      ...(this.opts.keepAs && mode === "full" ? { guarded: true } : {}),
+      // Auto is held to the go-ahead list (guardrails.ts): a teammate's always (Arun, 2026-11-03), anyone's unless they chose Full
+      // access (2026-11-18: "i want my auto mode to follow their guidlines").
+      ...(this.guarded && mode === "full" ? { guarded: true } : {}),
       ...(this.acpMcp.length || (this.friday && acpTool) || (this.conns && acpTool) ? { acpMcp: [...this.acpMcp, ...(this.friday && acpTool ? [acpEntry(this.friday.spec)] : []), ...(this.conns && acpTool ? this.conns.acp : [])] } : {}),
       ...(this.friday ? { friday: this.friday.spec } : {}),
       ...(this.conns ? { connections: this.conns.spec } : {}),
@@ -2105,6 +2115,16 @@ ${prompt}`;
   private readonly waitingAsks: { scope: "commands" | "turn"; item: string; why?: string; guard?: GoAhead; hostsOwn?: boolean; requestId: string; input: Record<string, unknown>; reply?: (allow: boolean) => void }[] = [];
 
   /** Where a teammate works, for its go-ahead list: its own folder or copy, and the projects it was given. */
+  /** Whether this lane runs in Full access (Auto without the go-ahead list), for a restart that should keep it. */
+  get fullAccess(): boolean {
+    return !!this.opts.fullAccess && !this.opts.keepAs;
+  }
+
+  /** Whether Auto here is held to the go-ahead list: a teammate's always, anyone else's unless they chose Full access. */
+  private get guarded(): boolean {
+    return autoGuarded(this.opts);
+  }
+
   private guardPlace(): GuardPlace {
     const cwd = this.opts.cwd;
     const mine = !!this.opts.copyOf || /[\\/]Friday[\\/]teammates[\\/]/.test(cwd);
@@ -2162,11 +2182,13 @@ ${prompt}`;
         if (this.mode === "full") {
           // A teammate is held to the go-ahead list (guardrails.ts): most of what it does runs, a few things are asked of the
           // person, and the floor is refused outright with the reason, so it does it another way.
-          const v: Verdict = this.opts.keepAs && out.tool !== "AskUserQuestion" ? guardTool(out.tool, out.input, this.guardPlace()) : { kind: "run" };
+          const v: Verdict = this.guarded && out.tool !== "AskUserQuestion" ? guardTool(out.tool, out.input, this.guardPlace()) : { kind: "run" };
           if (v.kind === "never") {
             if (out.reply) out.reply(false);
             else this.warm?.answer(out.requestId, false, out.input, `${v.why} A teammate never does this, whoever asks. Do it another way, or tell the person what you needed and why.`);
             this.log(`${this.label}: refused (never): ${v.why}`);
+            // Kept in the thread's record, and counted: three in a row pause the run (runaway.ts).
+            this.send({ kind: "event", body: { type: "guard.refused", item: askedItem(out.tool, out.input).item || out.tool, why: v.why } });
             break;
           }
           if (v.kind === "ask") {

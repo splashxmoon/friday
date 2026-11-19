@@ -38,6 +38,8 @@ export function CrewTools({ agents, names, label, className = "" }: { agents: { 
         </span>
       ))}
       {agents.length > MARKS_MAX && <span className="sb-crew-more">+{agents.length - MARKS_MAX}</span>}
+      {/* A narrow sidebar shows the first mark and how many more (style.css .sb-crew-rest), so the folder keeps its room. */}
+      {agents.length > 1 && <span className="sb-crew-rest" aria-hidden="true">+{agents.length - 1}</span>}
     </span>
   );
 }

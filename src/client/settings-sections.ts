@@ -141,6 +141,15 @@ export const SECTIONS: SectionDef[] = [
     blurb: "The GitHub login your agents clone, push and open pull requests with.",
     keywords: "github git login sign in pull request pr repos clone push token gh",
   },
+  // Slack and Linear on your own computer (SettingsChannels.tsx, spec 08): the open-source edition's (Settings.tsx hides it elsewhere).
+  {
+    id: "channels",
+    label: "Integrations",
+    group: "Connections",
+    icon: "plug",
+    blurb: "Friday in the tools your team already works in. Ask it in Slack, hand it issues in Linear, and follow the work where it was asked.",
+    keywords: "slack linear mention dm socket thread issue issues agent delegate assign integration integrations",
+  },
 
 
   // ── Workspace: the team, and what it pays ──

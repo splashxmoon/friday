@@ -1,5 +1,5 @@
 import { FileIcon } from "./fileIcons.js";
-import { PICTURE_FILE } from "./picture-url.js";
+import { PICTURE_FILE, VIDEO_FILE } from "./picture-url.js";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyEvent } from "react";
 import { MarkdownDoc } from "./MarkdownDoc.js";
 import { FileDiff } from "@/components/agents/file-diff";
@@ -543,7 +543,7 @@ function FileView({
   // A Markdown file opens as a page (MarkdownDoc.tsx), with no Formatted/Edit switch over it (Arun, 2026-11-05: "get rid of this").
   const markdown = /\.(md|markdown|mdx)$/i.test(path);
   // A picture shows as itself, from the session's folders, not as text that can't be read (Arun, 2026-11-18).
-  const picture = PICTURE_FILE.test(path);
+  const picture = PICTURE_FILE.test(path) || VIDEO_FILE.test(path); // and a video plays (2026-11-19)
 
   // Another file starts fresh. Said while drawing: an effect would also run each time a kept Tree is shown again.
   const [viewOf, setViewOf] = useState(path);

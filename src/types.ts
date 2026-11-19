@@ -361,7 +361,7 @@ export interface RepoCall {
   /** `apply`: a separate copy's work, brought into the folder it was copied from. */
   /** `terminal`: the line that carries the lane's conversation on in the person's own terminal (terminal-line.ts); with `query` "closed", that it is back. */
   /** `baseline`: `command` run in a throwaway copy at the commit `ref`, never in the folder (baseline.ts). */
-  op: "tree" | "read" | "search" | "write" | "edit" | "shell" | "baseline" | "checkpoint" | "restore" | "commit" | "publish" | "remote" | "branches" | "switch" | "prcomments" | "prstatus" | "prchecks" | "preview" | "ios" | "environment" | "context" | "bgstart" | "bgread" | "bgstop" | "diff" | "commands" | "apply" | "status" | "log" | "show" | "gitdiff" | "stage" | "unstage" | "discard" | "hunk" | "pull" | "compare" | "terminal" | "renamebranch";
+  op: "tree" | "read" | "search" | "write" | "edit" | "shell" | "baseline" | "checkpoint" | "restore" | "commit" | "publish" | "remote" | "branches" | "switch" | "prcomments" | "prstatus" | "prchecks" | "prdetail" | "preview" | "ios" | "environment" | "context" | "bgstart" | "bgread" | "bgstop" | "diff" | "commands" | "apply" | "status" | "log" | "show" | "gitdiff" | "stage" | "unstage" | "discard" | "hunk" | "pull" | "compare" | "terminal" | "renamebranch";
   /** For `stage`, `unstage` and `discard`: the files. */
   paths?: string[];
   /** For `hunk`: one hunk as a unified diff with its file header, applied to the index (`cached`) or taken back (`reverse`). */
@@ -478,11 +478,15 @@ export const ENGINE_MODEL_INFO: Record<EngineTool, EngineModelInfo[]> = {
   // As Codex's own model list gives them (`model/list` over its app-server, codex-cli 0.166, November 11 2026): GPT-5.5 is
   // retired, and GPT-6.1 Terra, GPT-6 Sol and the 5.6 family are offered.
   codex: [
-    { group: "Smart routing", id: "auto", label: "Smart", blurb: "Luna or Sol, picked for each message" },
-    { group: "Latest", id: "gpt-6.1-sol", label: "GPT-6.1 Sol", blurb: "Codex's default: the workhorse for coding and everyday work." },
-    { group: "Latest", id: "gpt-6-astra", label: "GPT-6 Astra", blurb: "Frontier intelligence, for the most demanding work." },
+    { group: "Smart routing", id: "auto", label: "Smart", blurb: "Luna, Sol or Astra, picked for each message" },
+    // GPT-6.2 Astra and Sol (2026-11-17), as Codex 0.170 lists them (model/list): Sol its default now (Arun, 2026-11-19: "offer the
+    // latest models that came out").
+    { group: "Latest", id: "gpt-6.2-sol", label: "GPT-6.2 Sol", blurb: "Codex's default: the workhorse for coding and everyday work." },
+    { group: "Latest", id: "gpt-6.2-astra", label: "GPT-6.2 Astra", blurb: "Frontier intelligence, for the most demanding work, at a lower price than 6 Astra." },
     { group: "Latest", id: "gpt-6.1-terra", label: "GPT-6.1 Terra", blurb: "Balanced, for straightforward work at a lower cost." },
     { group: "Latest", id: "gpt-6-luna", label: "GPT-6 Luna", blurb: "Fast and affordable, for easier tasks." },
+    { group: "More models", id: "gpt-6.1-sol", label: "GPT-6.1 Sol", blurb: "gpt-6.1-sol" },
+    { group: "More models", id: "gpt-6-astra", label: "GPT-6 Astra", blurb: "gpt-6-astra" },
     { group: "More models", id: "gpt-6-sol", label: "GPT-6 Sol", blurb: "gpt-6-sol" },
     { group: "More models", id: "gpt-5.6-sol", label: "GPT-5.6 Sol", blurb: "gpt-5.6-sol" },
     { group: "More models", id: "gpt-5.6-terra", label: "GPT-5.6 Terra", blurb: "gpt-5.6-terra" },
@@ -650,6 +654,11 @@ export interface EngineInfo {
    * Only the host's turn runs in `mode`: anyone else's (a teammate, a hand-off, another agent) is held to this. Absent: hand-picked.
    */
   handMode?: EngineMode;
+  /**
+   * Auto without the go-ahead list: everything runs unasked, shipping, sending and deleting included (Arun, 2026-11-18: Auto
+   * follows the guidelines other agent apps keep, with this as the way out). Only ever with `mode` full; never a teammate's.
+   */
+  fullAccess?: true;
   /** The repo the lane was set up for, so another computer can clone it first. */
   repo?: string;
   /**
@@ -1014,6 +1023,8 @@ export type EventBody =
   | { type: "proof.shot"; proof: number; url: string; file: string; width?: number; height?: number }
   /** An agent given a name of its own ("Reviewer" for the second Claude Code); the main lane's too. */
   | { type: "lane.renamed"; laneId: string; name: string }
+  /** A crew mate's home chat deleted by the person (TeammatePage.tsx): its lane's conversation up to here is gone from view, and its coding tool starts a fresh one. */
+  | { type: "lane.cleared"; laneId: string }
   /**
    * The effort level this lane's coding tool runs at from its next message, set by someone who can steer it; null is Auto. Kept
    * per lane outside its engine (an attach replaces that), and read as each turn is built: a turn already running keeps its own.
@@ -1403,7 +1414,13 @@ export type EventBody =
   /** Friday paused this lane's run: it had used more tokens than the workspace allows one run (run-budget.ts). */
   | { type: "run.capped"; spent: number; cap: number }
   /** Friday paused this lane's run: the agent was repeating the same failing command (runaway.ts). */
-  | { type: "run.guarded"; command: string; times: number; kind: "stuck" | "many" | "circles" | "repeat" }
+  | { type: "run.guarded"; command: string; times: number; kind: "stuck" | "many" | "circles" | "repeat" | "refused" }
+  /**
+   * A step Friday's go-ahead list refused outright (guardrails.ts "never"): what it was and why, for the thread's record of what
+   * Auto did (Arun, 2026-11-18, as OpenBot's Activity and Claude Code's "Recently blocked" keep it). Three refusals in a row pause
+   * the run (runaway.ts "refused"), as Claude Code and OpenClaw hand back to a person.
+   */
+  | { type: "guard.refused"; item: string; why: string }
   /**
    * A crew mate mid-turn with nothing happening on its lane since `since` (the watchdog, app.ts watchQuiet): said once a quiet
    * spell, with Nudge and Restart under it; `command`, when it is waiting on one it ran; `nudged`, when Friday asked it how it stands.

@@ -180,6 +180,8 @@ export interface SessionState {
   finished?: Record<string, number>;
   /** Each lane whose last turn somebody stopped (run.pause), by seq, until its next turn starts: "stopped", not "done". */
   stopped?: Record<string, number>;
+  /** Each lane whose conversation a person deleted (lane.cleared), by that event's seq: what came before it is gone from view. */
+  cleared?: Record<string, number>;
   /** Agents to wake when what they wait on happens (wake.set), until it does (wake.fired) or they're called off. */
   wakes?: Record<string, { id: string; lane: string; on: { lane?: string; task?: string; at?: number }; then: string; seq: number; auto?: true }>;
   /** Files each lane's agent said it is about to change (files.held) and hasn't let go: until it releases them or its run ends. */
@@ -1108,6 +1110,9 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       break;
     case "hub.ended":
       if (s.hub?.id === b.id) Object.assign(s.hub, { status: b.outcome, ...(b.prUrl ? { prUrl: b.prUrl } : {}), ...(b.sha ? { sha: b.sha } : {}), ...(b.why ? { why: b.why } : {}) });
+      break;
+    case "lane.cleared":
+      (s.cleared ??= {})[b.laneId] = ev.seq;
       break;
     case "lane.renamed":
       if (b.laneId === MAIN_LANE) s.mainName = b.name;

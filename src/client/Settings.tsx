@@ -24,6 +24,7 @@ import {
   ShortcutsTab,
 } from "./SettingsPrefs.js";
 import { CodingToolsSection, ComputerSection } from "./SettingsComputer.js";
+import { ChannelsSection } from "./SettingsChannels.js";
 import type { WorkspaceUsage } from "./workspace-types.js";
 import { isLocal, planLimits, planNow, startTeam } from "./edition.js";
 import { GROUPS, SECTIONS, sectionsMatching, settingsSection, type Group, type SectionDef } from "./settings-sections.js";
@@ -127,11 +128,11 @@ export function SettingsPage({
           "integrations",
           "usage",
           ...(workspace?.personal !== false ? ["members"] : []),
-          ...(isLocal() ? [] : ["outside-agents", "other-computers", "voice"]),
+          ...(isLocal() ? [] : ["outside-agents", "other-computers", "voice", "channels"]),
         ]
       : isLocal()
         ? []
-        : ["outside-agents", "other-computers", "voice"],
+        : ["outside-agents", "other-computers", "voice", "channels"],
   );
   const sections = SECTIONS.filter((s) => !hidden.has(s.id));
   const current = sections.find((s) => s.id === section) ?? sections[0]!;
@@ -265,6 +266,7 @@ export function SettingsPage({
             {current.id === "computer" && <ComputerSection identity={identity} />}
             {current.id === "other-computers" && <ComputerSection identity={identity} part="others" />}
             {current.id === "github" && <ComputerSection identity={identity} part="github" />}
+            {current.id === "channels" && <ChannelsSection identity={identity} />}
             {current.id === "permissions" && <ComputerSection identity={identity} part="permissions" />}
             {current.id === "coding-tools" && <CodingToolsSection identity={identity} />}
             {/* One Models section (UX audit F10, 2026-11-07): Friday's models, on a plan with Friday's agent, then your own. */}

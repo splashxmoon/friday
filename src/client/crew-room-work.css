@@ -1,0 +1,23 @@
+/* A task one crew mate hands another, as one card in the room (crew-room-work.tsx). */
+
+/* ── A handed task ── */
+.tcard { display: flex; flex-direction: column; gap: 6px; width: 100%; margin: 4px 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--card); color: var(--ink); font: inherit; font-size: 13px; text-align: left; cursor: pointer; transition: border-color var(--t-hover) var(--ease-out); }
+.tcard:hover { border-color: var(--border-hover); }
+.tcard:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.tcard[data-how="needs"] { border-color: color-mix(in srgb, var(--amber) 45%, var(--border)); }
+.tcard-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tcard-head > b { flex: none; font-weight: 500; }
+.tcard-title { flex: 1; min-width: 0; overflow: hidden; color: var(--text-muted); text-overflow: ellipsis; white-space: nowrap; }
+.tcard-title::before { content: "· "; }
+.tcard-pill { flex: none; padding: 1px 7px; border-radius: 6px; background: var(--hover); color: var(--text-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tcard[data-how="work"] .tcard-pill { background: color-mix(in srgb, var(--green) 14%, transparent); color: var(--green); }
+.tcard[data-how="needs"] .tcard-pill { background: var(--amber-soft); color: var(--amber); }
+.tcard[data-how="done"] .tcard-pill { background: var(--hover); color: var(--text-muted); }
+.tcard-bar { display: block; height: 3px; overflow: hidden; border-radius: 2px; background: var(--hover); }
+.tcard-bar > b { display: block; height: 100%; border-radius: 2px; background: var(--green); transition: width 300ms var(--ease-out); }
+.tcard-foot { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--text-muted); font-size: 12px; }
+.tcard-foot > span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tcard-open { flex: none; }
+
+/* A row with nothing drawn in it takes no room. */
+.feed-item.agent-lane:empty { display: none; }

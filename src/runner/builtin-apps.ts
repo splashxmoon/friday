@@ -10,7 +10,7 @@
  * A provider with none falls back to the person's own app (mcp-directory.tsx), as before.
  */
 
-export type ProviderKey = "GOOGLE" | "SLACK" | "GITHUB" | "HUBSPOT" | "BOX" | "ZENDESK" | "PAGERDUTY";
+export type ProviderKey = "GOOGLE" | "SLACK" | "GITHUB" | "HUBSPOT" | "BOX" | "ZENDESK" | "PAGERDUTY" | "LINEAR";
 
 /** Put in by the desktop build from a file on the building computer (scripts/build-local-desktop.mts); absent from source. */
 declare const __FRIDAY_BUILT_IN_APPS__: Partial<Record<ProviderKey, { id: string; secret?: string }>> | undefined;
@@ -46,3 +46,9 @@ export function builtInApp(key: ProviderKey | null): { id: string; secret?: stri
 
 /** The providers Friday can sign in to with its own app now, for the page. */
 export const builtInKeys = (): ProviderKey[] => (["GOOGLE", "SLACK", "GITHUB", "HUBSPOT", "BOX", "ZENDESK", "PAGERDUTY"] as const).filter((k) => !!builtInApp(k));
+
+/**
+ * Friday's own Linear app (channels/linear-agent.ts, spec 08): public, signed in with PKCE and no secret, so "Connect Linear" is
+ * one button rather than an app of the person's own. Not an MCP provider, so not among builtInKeys.
+ */
+export const builtInLinear = () => builtInApp("LINEAR");

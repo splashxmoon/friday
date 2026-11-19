@@ -48,7 +48,7 @@ export function learnedSuccess(prior: number, ...levels: ({ n: number; ok: numbe
 }
 
 /** What each coding tool runs with no model picked: Claude Code's default is Opus on every plan, Codex's its recommended model. */
-export const TOOL_DEFAULT: Record<string, string> = { claude: "opus", codex: "gpt-6.1-sol" };
+export const TOOL_DEFAULT: Record<string, string> = { claude: "opus", codex: "gpt-6.2-sol" };
 
 type Routed = Extract<EventBody, { type: "model.routed" }>;
 

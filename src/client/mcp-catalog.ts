@@ -930,7 +930,8 @@ export const MCP_CATALOG: CatalogEntry[] = [
     mark: "search",
     blurb: "Search the web and read pages designed for LLMs.",
     url: "https://mcp.exa.ai/mcp",
-    auth: "oauth",
+    // Its hosted server answers without a sign-in (checked 2026-11-19: the handshake and its tools, no token), so none is asked.
+    auth: "none",
     category: "Data and money",
   },
   {

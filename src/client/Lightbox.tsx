@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "./icons.js";
+import { isVideo } from "./picture-url.js";
 
 /** `alt`: what it is called; `file`: where it is, when that isn't its name (a step's screenshot, called by the step). */
 export type LightboxPicture = { src: string; alt: string; file?: string };
@@ -49,6 +50,8 @@ export function Lightbox({ src, alt, onClose, items, start = 0 }: { src?: string
   const base = (p: string) => p.split(/[\\/]/).pop() || p;
   const name = pic.file ? pic.alt : base(pic.alt);
   const fileName = base(pic.file ?? pic.alt);
+  // A video plays here, with its controls, in the place a picture shows (Arun, 2026-11-19: "handle support for videos like mp4").
+  const video = isVideo(fileName) || isVideo(pic.src);
   return createPortal(
     <div className={`lightbox${actual ? " actual" : ""}`} role="dialog" aria-modal="true" aria-label={name || "Image"} onClick={onClose}>
       <div className="lightbox-bar" onClick={(e) => e.stopPropagation()}>
@@ -76,7 +79,11 @@ export function Lightbox({ src, alt, onClose, items, start = 0 }: { src?: string
       )}
       <figure className="lightbox-figure" onClick={(e) => e.stopPropagation()}>
         <div className="lightbox-stage">
+          {video ? (
+            <video key={pic.src} src={pic.src} className="lightbox-img lightbox-video" controls autoPlay playsInline aria-label={name || "Video"} />
+          ) : (
           <img key={pic.src} src={pic.src} alt={name} className={`lightbox-img${/\.svg$/i.test(fileName) || /\.svg(?:$|[?&#])/i.test(pic.src) ? " vector" : ""}`} title={actual ? "Fit to the window" : "Show at its own size"} onClick={() => setActual((a) => !a)} />
+          )}
         </div>
         {name && (
           <figcaption className="lightbox-name" title={pic.file ?? pic.alt}>

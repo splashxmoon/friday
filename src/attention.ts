@@ -258,13 +258,45 @@ export interface Preview {
   by: string;
 }
 
-/** The session's pull request, for the sidebar to settle the session once it merges (sidebar-buckets.ts). */
+/** The session's pull request, for the sidebar's marks on its row. */
 export interface SessionPr {
   sid: string;
   url: string;
   merged: boolean;
   /** Every pull request the session opened, oldest first (projection.ts prs): the sidebar's badge. */
   urls?: string[];
+}
+
+/**
+ * What a session's row in the Code sidebar says under its name (Arun, 2026-11-19: "getting rid of the last message, and replacing
+ * with like the repo or folder"; "Changes on the row"): the folder its agents work in, by name, the main lane's branch, and how big
+ * its change is now, across its agents. Null when it has no folder and no change.
+ */
+export interface RowFacts {
+  sid: string;
+  folder?: string;
+  branch?: string;
+  files: number;
+  added: number;
+  removed: number;
+}
+export function rowFactsOf(state: SessionState): RowFacts | null {
+  let files = 0;
+  let added = 0;
+  let removed = 0;
+  for (const d of Object.values(state.diffs))
+    for (const f of d.files) {
+      files++;
+      added += f.additions;
+      removed += f.deletions;
+    }
+  const e = state.engines[MAIN_LANE]?.cwd ? state.engines[MAIN_LANE] : Object.values(state.engines).find((x) => x.cwd);
+  // A worktree's folder is `<repo>-<id>`: the row names the repo (SessionView.tsx reposOf).
+  const at = e?.copyOf ?? e?.cwd;
+  const folder = at ? (at.split(/[\\/]/).filter(Boolean).pop() ?? "").replace(/-[0-9a-f]{8}$/, "") : (state.upload?.name ?? "");
+  const branch = e?.branch ?? "";
+  if (!folder && !files) return null;
+  return { sid: state.id, ...(folder ? { folder } : {}), ...(branch ? { branch } : {}), files, added, removed };
 }
 
 export function prOf(state: SessionState): SessionPr | null {

@@ -16,6 +16,8 @@ export interface PrStatus {
   mergeable: boolean | null;
   /** Which of the two answered. */
   source: "github" | "gh";
+  /** When it merged, from GitHub: the chat's merged card says so (MergedCard), not when Friday noticed. */
+  mergedAt?: number;
 }
 
 type Source = () => Promise<PrStatus | null>;
@@ -45,9 +47,12 @@ function rollup(items: { status?: string; conclusion?: string | null }[]): PrSta
   return pending ? "pending" : "passing";
 }
 
+/** A time GitHub gave, as a number, or undefined. */
+const mergedAt = (v: unknown): number | undefined => ((t) => (Number.isFinite(t) && t > 0 ? t : undefined))(typeof v === "string" && v ? Date.parse(v) : NaN);
+
 /** `gh pr view --json state,isDraft,reviewDecision,statusCheckRollup,mergeable`. */
 export function fromGh(j: unknown): PrStatus | null {
-  const o = j as { state?: string; isDraft?: boolean; reviewDecision?: string; statusCheckRollup?: { status?: string; conclusion?: string | null; state?: string }[]; mergeable?: string; error?: string } | null;
+  const o = j as { state?: string; isDraft?: boolean; reviewDecision?: string; statusCheckRollup?: { status?: string; conclusion?: string | null; state?: string }[]; mergeable?: string; mergedAt?: string; error?: string } | null;
   if (!o || o.error || !o.state) return null;
   const state = o.state.toUpperCase() === "MERGED" ? "merged" : o.state.toUpperCase() === "CLOSED" ? "closed" : "open";
   const decision = (o.reviewDecision ?? "").toUpperCase();
@@ -59,11 +64,12 @@ export function fromGh(j: unknown): PrStatus | null {
     checks: rollup((o.statusCheckRollup ?? []).map((c) => ({ status: c.status, conclusion: c.conclusion ?? c.state ?? null }))),
     mergeable: o.mergeable === "MERGEABLE" ? true : o.mergeable === "CONFLICTING" ? false : null,
     source: "gh",
+    ...(mergedAt(o.mergedAt) ? { mergedAt: mergedAt(o.mergedAt)! } : {}),
   };
 }
 
 /** GitHub's REST pieces for one pull request: the PR, its reviews, and the check runs on its head commit. */
-export function fromApi(pr: { state?: string; merged?: boolean; draft?: boolean; mergeable?: boolean | null }, reviews: { user?: { login?: string } | null; state?: string }[], runs: { status?: string; conclusion?: string | null }[]): PrStatus {
+export function fromApi(pr: { state?: string; merged?: boolean; draft?: boolean; mergeable?: boolean | null; merged_at?: string | null }, reviews: { user?: { login?: string } | null; state?: string }[], runs: { status?: string; conclusion?: string | null }[]): PrStatus {
   // Each reviewer's last say counts: an approval after a change request clears it.
   const last = new Map<string, string>();
   for (const r of reviews) {
@@ -78,6 +84,7 @@ export function fromApi(pr: { state?: string; merged?: boolean; draft?: boolean;
     checks: rollup(runs.map((r) => ({ status: r.status, conclusion: r.conclusion ?? null }))),
     mergeable: typeof pr.mergeable === "boolean" ? pr.mergeable : null,
     source: "github",
+    ...(mergedAt(pr.merged_at) ? { mergedAt: mergedAt(pr.merged_at)! } : {}),
   };
 }
 
@@ -107,7 +114,7 @@ export async function fromGithubApi(token: string, prUrl: string, fetchImpl: typ
     if (!r.ok) throw new Error(`GitHub answered ${r.status}`);
     return (await r.json()) as T;
   };
-  const pr = await get<{ state?: string; merged?: boolean; draft?: boolean; mergeable?: boolean | null; head?: { sha?: string } }>(`pulls/${num}`);
+  const pr = await get<{ state?: string; merged?: boolean; draft?: boolean; mergeable?: boolean | null; merged_at?: string | null; head?: { sha?: string } }>(`pulls/${num}`);
   const [reviews, runs] = await Promise.all([
     get<{ user?: { login?: string } | null; state?: string }[]>(`pulls/${num}/reviews?per_page=100`).catch(() => []),
     pr.head?.sha ? get<{ check_runs?: { status?: string; conclusion?: string | null }[] }>(`commits/${pr.head.sha}/check-runs?per_page=100`).then((x) => x.check_runs ?? []).catch(() => []) : Promise.resolve([]),

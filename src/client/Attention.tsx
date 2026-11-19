@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { teamAttention, teamDoneTitle, useTeam } from "./Teammates.js";
-import type { Attention, Crew, Preview, SessionPr, Working } from "../attention.js";
+import type { Attention, Crew, Preview, RowFacts, SessionPr, Working } from "../attention.js";
 import type { NeedMark } from "../needs-rank.js";
 import { usePrs } from "./prWatch.js";
 import type { Overlap } from "../collisions.js";
@@ -47,6 +47,8 @@ export interface AttentionState {
   crews: Map<string, Crew>;
   /** Each session's pull request, when its last commit opened one, and whether it merged. */
   prs: Map<string, SessionPr>;
+  /** Each session's folder, branch and change size, for the line under its name (attention.ts rowFactsOf). */
+  facts: Map<string, RowFacts>;
   /** Per session, the files another session is changing too. */
   overlaps: Map<string, Overlap[]>;
   /** Per session, when asked for (Solo): which agent, doing what, in one line. */
@@ -98,6 +100,7 @@ export function useAttention(identity: Identity, recents: RecentSession[], withS
   const [previews, setPreviews] = useState<Map<string, Preview>>(new Map());
   const [crews, setCrews] = useState<Map<string, Crew>>(new Map());
   const [prs, setPrs] = useState<Map<string, SessionPr>>(new Map());
+  const [facts, setFacts] = useState<Map<string, RowFacts>>(new Map());
   const [overlaps, setOverlaps] = useState<Map<string, Overlap[]>>(new Map());
   const [loaded, setLoaded] = useState(false);
   const [gone, setGone] = useState<string[]>([]);
@@ -138,7 +141,7 @@ export function useAttention(identity: Identity, recents: RecentSession[], withS
     let live = true;
 
     const ask = async () => {
-      const got = await api<{ items: Attention[]; needs?: NeedMark[]; off?: string[]; working?: Working[]; previews?: Preview[]; crews?: Crew[]; prs?: SessionPr[]; overlaps?: Record<string, Overlap[]>; summaries?: SessionSummary[]; gone?: string[]; unread?: string[]; since?: Record<string, number> }>(identity, "/api/attention", {
+      const got = await api<{ items: Attention[]; needs?: NeedMark[]; off?: string[]; working?: Working[]; previews?: Preview[]; crews?: Crew[]; prs?: SessionPr[]; facts?: RowFacts[]; overlaps?: Record<string, Overlap[]>; summaries?: SessionSummary[]; gone?: string[]; unread?: string[]; since?: Record<string, number> }>(identity, "/api/attention", {
         method: "POST",
         body: JSON.stringify({ sids: sids.split(","), ...(withSummaries ? { summaries: true } : {}) }),
       }).catch(() => null);
@@ -152,6 +155,7 @@ export function useAttention(identity: Identity, recents: RecentSession[], withS
       setPreviews(new Map((got.previews ?? []).map((p) => [p.sid, p])));
       setCrews(new Map((got.crews ?? []).map((c) => [c.sid, c])));
       setPrs(new Map((got.prs ?? []).map((x) => [x.sid, x])));
+      setFacts(new Map((got.facts ?? []).map((x) => [x.sid, x])));
       setOverlaps(new Map(Object.entries(got.overlaps ?? {})));
       setSummaries(new Map((got.summaries ?? []).map((s) => [s.sid, s])));
       setSince(new Map(Object.entries(got.since ?? {})));
@@ -248,7 +252,7 @@ export function useAttention(identity: Identity, recents: RecentSession[], withS
   const shown = useMemo(() => items.filter((i) => here.has(i.sid) && (!marks || needSids.has(i.sid))), [items, here, marks, needSids]);
   // No count on the dock icon: Needs you says it once (audit CODE-1 B). Cleared, in case an earlier build left one.
   useEffect(() => void (!QUIET && window.fridayDesktop?.setBadge?.(0)), []);
-  return { items: shown, working, previews, crews, prs, overlaps, summaries, since, loaded, gone, needs, needSids, off };
+  return { items: shown, working, previews, crews, prs, facts, overlaps, summaries, since, loaded, gone, needs, needSids, off };
 }
 
 /**

@@ -363,10 +363,12 @@ body > [data-float] { pointer-events: auto; z-index: 1100; }
 .menu-row-action:focus-visible { outline: 2px solid var(--violet-border); outline-offset: 1px; }
 .menu-row-action:disabled { opacity: .4; cursor: default; }
 .menu-spacer { width: 14px; flex: none; }
-.menu-check { color: var(--violet) !important; }
+/* Level with the row's words and numbers (Arun, 2026-11-19: "line up the check mark properly"): a tick's weight sits low in its box
+   and digits sit high in theirs, so at the same middle it read a pixel under the "2" beside it. */
+.menu-check { flex: none; color: var(--violet) !important; transform: translateY(-1px); }
 /* Every row in a menu that ticks anything keeps the tick's column, so the
    ticks line up with each other instead of trailing each label's hint. */
-.menu-tick { width: 13px; flex: none; }
+.menu-tick { width: 14px; flex: none; }
 
 /* Model and reasoning, side by side: the same decision taken twice — how much
    to spend on this run — so they open together rather than as two pills a
@@ -5800,6 +5802,15 @@ html[data-band="page"] .main:not(:has(> .home)) { padding-top: var(--band); box-
 .feed-merged-stats { display: flex; flex-wrap: wrap; gap: 6px; }
 .feed-merged-stats span { padding: 3px 9px; border-radius: var(--r-pill); background: var(--card); color: var(--ink-2); font-size: 12px; font-variant-numeric: tabular-nums; }
 .feed-merged-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+/* The slim one (MergedCard): the chat's own card, GitHub's purple merge mark, two lines and the pull request beside them. */
+.feed-merged.slim { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 10px 10px 12px; border-color: var(--border); background: var(--card); }
+.feed-merged.slim .feed-merged-mark { width: 30px; height: 30px; border-radius: 9px; background: color-mix(in srgb, #a855f7 14%, transparent); color: color-mix(in srgb, #a855f7 88%, var(--ink)); }
+.feed-merged.slim .feed-merged-body { min-width: 180px; }
+.feed-merged-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.feed-merged-what { color: var(--ink-2); }
+.feed-merged.slim .feed-merged-line { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.feed-merged-line code { max-width: 26ch; overflow: hidden; padding: 0 6px; border-radius: var(--r-sm); background: var(--hover); color: var(--ink-2); font: 11.5px/18px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.feed-merged.slim .feed-merged-actions { flex: none; margin-left: auto; flex-wrap: nowrap; gap: 4px; }
 
 /* ── collaboration: thumbs with reasons, who is reading which line, the brief, the driving clock ── */
 .react-reason { display: flex; align-items: center; gap: 8px; margin: 8px 0 6px; }
@@ -7119,6 +7130,17 @@ body:has(> .overlay, [data-slot="dialog-overlay"], [data-slot="sheet-overlay"]) 
 .pic-view-frame.vector { background: #fff; }
 .pic-view-frame.vector img { width: min(420px, 100%); padding: 16px; }
 .pic-view-frame:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* A video in the chat: a tile the size of a picture's, its first frame, a play mark in the middle; it plays large on a press. In a
+   side panel, it plays where it is (2026-11-19). */
+.chat-video { position: relative; display: block; padding: 0; border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; background: #000; cursor: pointer; }
+.chat-video video { display: block; width: var(--chat-pic-w); height: var(--chat-pic-h); max-width: 100%; object-fit: cover; pointer-events: none; }
+.chat-video-play { position: absolute; inset: 0; display: grid; place-items: center; margin: auto; width: 36px; height: 36px; border-radius: 50%; background: rgb(0 0 0 / .55); color: #fff; box-shadow: 0 0 0 1px rgb(255 255 255 / .18); transition: transform var(--t-hover, .12s) var(--ease-out, ease-out), background var(--t-hover, .12s); }
+.chat-video:hover { border-color: var(--border-strong, var(--text-muted)); }
+.chat-video:hover .chat-video-play { transform: scale(1.06); background: rgb(0 0 0 / .7); }
+.chat-video:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pic-view-frame.video { cursor: auto; background: #000; }
+.pic-view-frame.video video { display: block; max-width: 100%; max-height: min(70vh, 640px); }
+.pic-view-meta .link-btn { margin-left: auto; }
 .pic-view-meta { font-family: var(--font); display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 12px; }
 .pic-view-gone { max-width: 420px; text-align: center; }
 .att-pic-name { position: absolute; left: 8px; bottom: 8px; max-width: calc(100% - 16px); padding: 2px 8px; border-radius: var(--r-pill); background: rgb(0 0 0 / .55); color: #fff; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -9116,6 +9138,7 @@ html:not(.dark) .bd-dot.working, html:not(.dark) .bd-status.working i, html:not(
 .lightbox-nav.next { right: 14px; }
 /* A picture with no background of its own (an SVG's lines, a cut-out PNG) on a light checkerboard, readable on the dark page. */
 .lightbox-stage { display: grid; place-items: center; max-width: 100%; min-height: 0; }
+.lightbox-video { background: #000; }
 .lightbox-img { background: linear-gradient(45deg, #e8e8e8 25%, transparent 25%, transparent 75%, #e8e8e8 75%) 0 0 / 16px 16px, linear-gradient(45deg, #e8e8e8 25%, transparent 25%, transparent 75%, #e8e8e8 75%) 8px 8px / 16px 16px, #fff; cursor: zoom-in; }
 /* A drawing has no size of its own to speak of (300 × 150 by default): shown at least this wide, in proportion. */
 .lightbox-img.vector { min-width: min(420px, 80vw); }
@@ -13974,7 +13997,6 @@ html.dark .acg-bar-track > i.red { background: #f87171; }
 .oss-crew-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .oss-crew-top b { overflow: hidden; color: var(--ink); font-size: 13px; font-weight: 500; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
 .oss-crew-chip { flex: none; height: 18px; padding: 0 6px; border-radius: 5px; background: var(--hover); color: var(--ink-2); font-size: 11px; line-height: 18px; }
-.oss-crew-when { flex: none; margin-left: auto; color: var(--faint); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .oss-crew-line { overflow: hidden; color: var(--text-muted); font-size: 12px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
 .oss-crew-line.s-waiting, .oss-crew-line.s-needs { color: var(--amber); }
 .oss-crew-line.s-working { color: var(--ink-2); }
@@ -14400,6 +14422,8 @@ button.cd-row:hover, .cd-rw[data-open] > .cd-row { background: var(--hover); }
 .rv-pile[data-tone="waiting"] .rv-pile-dot { background: var(--amber); }
 .rv-pile-name { flex: 1 1 auto; min-width: 0; }
 .rv-pile-n { min-width: 22px; padding: 1px 7px; border-radius: 6px; background: var(--hover); color: var(--text-muted); font-size: 11.5px; font-weight: 500; font-variant-numeric: tabular-nums; text-align: center; }
+/* A pile heading that doesn't fold (the Issues tab's groups): the same line, nothing to press. */
+.rv-pile-static, .rv-pile-static:hover { cursor: default; background: transparent; color: var(--ink-2); }
 .rv-pile-btn[aria-expanded="false"] { color: var(--text-muted); }
 
 /* Code Review's pile chips over your own (CodeReview.tsx): every pile, or one alone, each with its dot and count. */
@@ -14949,6 +14973,14 @@ html.desktop :is(.composer, .composer-dock) :is(textarea, input, [contenteditabl
 .mpc-seg button[data-on] { background: var(--card); color: var(--ink); box-shadow: 0 0 0 1px var(--border); }
 .mpc-seg button[data-locked] { opacity: .45; }
 .mpc-seg button:disabled { opacity: .5; cursor: default; }
+/* Every level whole (Arun, 2026-11-19: Codex's seven ran "Ultra" off the edge): a level is never narrower than its word, and with
+   seven or more the label goes above and the levels take the whole width. Past that, the row scrolls rather than cutting a word. */
+.mpc-seg { min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.mpc-seg::-webkit-scrollbar { display: none; }
+.mpc-seg button { flex: 1 0 auto; }
+.mpc-foot:has(> .mpc-seg > button:nth-child(7)) { flex-wrap: wrap; row-gap: 5px; }
+.mpc-foot:has(> .mpc-seg > button:nth-child(7)) > .mpc-foot-k { flex-basis: 100%; padding-left: 2px; }
+.mpc-foot:has(> .mpc-seg > button:nth-child(7)) .mpc-seg button { padding-inline: 4px; }
 .mpc .ampd-route { border-top: 1px solid var(--border); margin: 0; padding: 7px 8px 7px 10px; }
 
 /* A crew folder's chevron just after its name and count, as the sessions' groups have it (Sidebar.tsx; Arun, 2026-11-18). */
@@ -14997,3 +15029,111 @@ html.desktop :is(.composer, .composer-dock) :is(textarea, input, [contenteditabl
 .crew-acts svg { width: 14px; height: 14px; }
 .crew-acts .sb-row-pin svg { transform: translateY(1px); }
 .oss-crew-scroll.compact .crew-acts { top: 50%; }
+
+/* Settings › Integrations (SettingsChannels.tsx): its pickers one width, so a column of them lines up. */
+.menu-pill.pick.int-pick { width: 210px; }
+
+/* Dragging in the sidebars (sidebar-drag.ts; Arun, 2026-11-19: "much more smoother and easier to drag"): the row carried dims
+   where it was; a group under the drag lights whole, rows and all; a New group / New project target shows while something is carried. */
+.oss-crew-item[data-dragging], .dass-row[data-dragging] { opacity: .4; }
+.oss-folder { transition: background-color 120ms var(--ease-out, ease-out), box-shadow 120ms var(--ease-out, ease-out); }
+.oss-folder[data-drop] { background: var(--hover); box-shadow: inset 0 0 0 1px var(--border-strong); }
+.oss-folder[data-drop] > .oss-folder-head { background: none; box-shadow: none; }
+.oss-folder[data-drop] > .oss-folder-head, .oss-folder[data-drop] .oss-folder-chev { color: var(--ink); }
+.oss-drop-new, .sb-drop-new { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; margin: 8px 2px 4px; padding: 0 10px; border: 1px dashed var(--border-strong); border-radius: 8px; color: var(--text-muted); font: 500 12px/18px var(--font); transition: background-color 120ms var(--ease-out, ease-out), color 120ms var(--ease-out, ease-out), border-color 120ms var(--ease-out, ease-out); animation: sb-drop-in 160ms var(--ease-out, ease-out); }
+.oss-drop-new svg, .sb-drop-new svg { width: 13px; height: 13px; flex: none; }
+.oss-drop-new[data-drop], .sb-drop-new[data-drop] { border-style: solid; border-color: var(--border-focus, var(--ink)); background: var(--hover); color: var(--ink); }
+@keyframes sb-drop-in { from { opacity: 0; transform: translateY(-3px); } }
+@media (prefers-reduced-motion: reduce) { .oss-drop-new, .sb-drop-new { animation: none; } }
+/* A section's count at its right end (Sidebar.tsx Group), clear of its + where the + always shows; where the + shows on hover
+   (a folder's group), the count steps aside for it then. */
+.sb-group-count { color: var(--text-muted); font-size: 12px; }
+.sb-group-end { padding-right: 22px; }
+.sb-repo-group .sb-group-end { padding-right: 0; transition: opacity var(--t-hover) var(--ease-out); }
+.sb-repo-group .group\/label:hover .sb-group-end { opacity: 0; }
+/* The Agents list's rows a size up (Arun, 2026-11-19: "make these tab session things bigger too"): bigger faces (Sidebar.tsx), a
+   taller row, the name and its line a step larger. Compact keeps its own smaller size. */
+.oss-crew-scroll:not(.compact) .oss-crew-row { gap: 12px; min-height: 58px; padding: 8px 10px; }
+.oss-crew-scroll:not(.compact) .oss-crew-text { gap: 2px; }
+.oss-crew-scroll:not(.compact) .oss-crew-top b { font-size: 14px; line-height: 20px; }
+.oss-crew-scroll:not(.compact) .oss-crew-line { font-size: 12.5px; line-height: 17px; }
+.oss-crew-scroll:not(.compact) .crew-acts { top: 19px; right: 6px; }
+/* Room between the Agents list's highlights (Arun, 2026-11-19: "add proper spacing between the hover highlight and selected
+   highlight"): rows 4px apart, so a hovered row and the selected one never touch, and a group's name clear of its first row. */
+.oss-crew-scroll, .oss-folder-body { gap: 4px; }
+.oss-folder-head { margin-bottom: 4px; }
+/* A crew mate or room at work (Sidebar.tsx WorkingOrb): the chat's thinking dot grid, blue and turning, in the row's bottom-right
+   corner; its line keeps clear of it. Under the hover actions' row, so the two never meet. */
+.crew-working-orb { position: absolute; right: 10px; bottom: 8px; display: inline-flex; color: var(--mate-working, var(--live)); pointer-events: none; }
+.crew-working-orb > span { color: inherit; }
+/* Its dots at rest a good deal stronger than the chat's, so it reads at a glance in a list. */
+.crew-working-orb { --orb-rest-ink: .38; --orb-dim-ink: .22; }
+.oss-crew-item:has(.crew-working-orb) .oss-crew-line { padding-right: 30px; }
+.oss-crew-scroll.compact .crew-working-orb { bottom: 50%; right: 12px; transform: translateY(50%); }
+.oss-crew-scroll.compact .oss-crew-item:has(.crew-working-orb) .crew-when { visibility: hidden; }
+
+/* The Code sidebar's rows, refined (Sidebar.tsx ChatRow; Arun, 2026-11-19: "a new redesign placement of things in the tabs ...
+   getting rid of the last message, and replacing with like the repo or folder ... the ring status too the placement of it ... make
+   it slightly bigger with better typography"): the ring first in a slot of its own, a size up, so every name starts in one column;
+   the name a touch larger; under it, in line with the name, where it works and how big its change is, its agents' marks at the end. */
+.sb-row .sb-lead { display: inline-grid; flex: none; place-items: center; width: 16px; height: 18px; margin-left: -2px; }
+.sb-row .sb-lead > .state-ring { margin: 0; transform: scale(1.22); }
+.sb-row .dass-row-title { font-size: 13.5px; letter-spacing: -.003em; }
+.sb-row > .dass-row-sub { display: flex; align-items: center; gap: 6px; min-width: 0; padding-left: 22px !important; font-size: 12px; color: var(--text-muted); }
+.sb-row .sb-row-asks { color: var(--amber); }
+.sb-row > .dass-row-sub > .sb-where { display: flex; flex: 1 1 0%; flex-wrap: nowrap; align-items: center; gap: 5px; width: 0; min-width: 0; color: var(--text-muted); white-space: nowrap; }
+.sb-where-icon { flex: none; width: 12px; height: 12px; opacity: .85; }
+.sb-where-name { flex: 0 1 auto; min-width: 0; color: var(--ink-2); }
+.sb-where-branch { flex: 0 1 auto; min-width: 0; }
+.sb-where-end { display: inline-flex; flex: none; align-items: center; gap: 8px; margin-left: auto; padding-left: 8px; }
+/* A narrow sidebar (Arun, 2026-11-19, at its least width: the folder's name squeezed to nothing beside "+2943 −611" and four marks):
+   the name keeps a few letters, and the agents' marks fold to the first one and how many more. */
+.sb-crew-tools > .sb-crew-rest { display: none; }
+.sb-row > .dass-row-sub { container: sb-sub / inline-size; }
+@container sb-sub (max-width: 250px) {
+  .sb-where-name { min-width: min(5ch, 100%); }
+  .sb-where-end { gap: 6px; padding-left: 6px; }
+  .sb-where-tools > span:not(:first-child) { display: none; }
+  .sb-where-tools > span.sb-crew-rest { display: inline; width: auto; color: var(--text-muted); font: 500 11px/16px var(--mono); font-variant-numeric: tabular-nums; }
+}
+.sb-changes { display: inline-flex; flex: none; gap: 5px; font: 500 11.5px/16px var(--mono); font-variant-numeric: tabular-nums; }
+.sb-changes .add { color: var(--green); }
+.sb-changes .del { color: var(--red); }
+
+
+/* The Code list's New thread with its filter beside it (Sidebar.tsx Head, ListFilter; Arun, 2026-11-19: "make the new thread button
+   above it more cleaner and simpler with a filter button and have these as the dropdown choices"): one flat row, the button and a
+   square of the same height; the filter lit, with how many, while it narrows the list. */
+.sb-new-row { display: flex; align-items: center; gap: 4px; margin: 0 0 6px; }
+/* Plain, no box (Arun, 2026-11-19: "make the new thread button more simpler"): its plus and words, ⌘K at the end, a tint under the
+   pointer; it takes the row up to the filter, never over it. */
+.dass-panel .sb-new-row .sb-new, .sb-new-row .sb-new { flex: 1 1 auto; width: auto; min-width: 0; height: 34px; margin: 0; padding: 0 10px; border: 0 !important; border-radius: 8px; background: transparent !important; box-shadow: none !important; color: var(--ink); font-size: 13.5px; }
+.dass-panel .sb-new-row .sb-new:hover, .sb-new-row .sb-new:hover { background: var(--hover) !important; }
+.sb-filter-btn { position: relative; display: grid; flex: none; place-items: center; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); cursor: pointer; transition: background-color var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out); }
+.sb-filter-btn:hover, .sb-filter-btn.on { background: var(--hover); color: var(--ink); }
+.sb-filter-btn:focus-visible { outline: 2px solid var(--border-focus, var(--ink)); outline-offset: 1px; }
+.sb-filter-btn svg { width: 16px; height: 16px; }
+.sb-filter-n { position: absolute; top: -5px; right: -5px; display: grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--ink); color: var(--card); font: 600 10px/1 var(--font); font-variant-numeric: tabular-nums; }
+.sb-filter-n[data-kind="needs"] { background: #facc15; color: #1a1a1a; }
+/* Its number in a solid ink of its own: var(--card) is all but clear on the frosted look, so a white badge showed no number
+   (Arun, 2026-11-19: "fix the white no number, and use a different color yellow"). */
+.sb-filter-n:not([data-kind="needs"]):not([data-kind="working"]) { color: #fff; }
+html.dark .sb-filter-n:not([data-kind="needs"]):not([data-kind="working"]) { color: #141416; }
+html:not(.dark) .sb-filter-n[data-kind="needs"] { background: #eab308; }
+.sb-filter-n[data-kind="working"] { background: var(--live); color: #fff; }
+.sb-filter-none { margin: 8px 10px; color: var(--text-muted); font-size: 12.5px; }
+
+/* Several picked (Sidebar.tsx PickBar; "Select several at once"): a picked row has the selected tint and a thin ring; the bar of
+   what to do with them sits at the list's foot. */
+html .sb-scroll .sb-row.dass-row[data-picked]:not(:focus-visible) { background: color-mix(in srgb, var(--live) 12%, transparent) !important; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--live) 45%, transparent) !important; }
+.sb-pickbar { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; gap: 2px; margin: 6px 2px 2px; padding: 4px 4px 4px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); box-shadow: 0 4px 14px color-mix(in srgb, var(--ink) 10%, transparent); animation: sb-drop-in 160ms var(--ease-out, ease-out); }
+.sb-pick-n { flex: 1; color: var(--ink); font: 500 12.5px var(--font); font-variant-numeric: tabular-nums; }
+.sb-pickbar :is(.icon-btn, button) { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 7px; background: none; color: var(--text-muted); }
+.sb-pickbar :is(.icon-btn, button):hover { background: var(--hover-strong); color: var(--ink); }
+.sb-pickbar .sb-pick-del:hover { color: var(--red); }
+.sb-pickbar svg { width: 14px; height: 14px; }
+
+/* Holding ⌘⌥ (Ctrl+Alt): each of the first nine rows shows the number that opens it, in the ring's place. */
+.sb-row[data-jump] { position: relative; }
+.sb-row[data-jump] .sb-lead > * { visibility: hidden; }
+.sb-row[data-jump]::before { content: attr(data-jump); position: absolute; top: 7px; left: 8px; display: grid; place-items: center; width: 16px; height: 16px; border: 1px solid var(--border); border-radius: 4px; background: var(--card); color: var(--ink); font: 500 10.5px/1 var(--mono); }

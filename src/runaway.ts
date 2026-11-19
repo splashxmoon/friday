@@ -47,8 +47,11 @@ export interface Runaway {
    * edited over and over while the checks keep failing (`command` is the file); "repeat": the same call again and again with
    * nothing changed (`command` says the call).
    */
-  kind: "stuck" | "many" | "circles" | "repeat";
+  kind: "stuck" | "many" | "circles" | "repeat" | "refused";
 }
+
+/** Refused this many times in a row (the go-ahead list's "never", or a person's no) and the agent is handed back to the person. */
+export const REFUSALS = 3;
 
 /** The file a call edits, from its arguments. */
 function pathOf(args: string | undefined): string {
@@ -85,8 +88,20 @@ export function runawayIn(events: SessionEvent[], lane: string): Runaway | null 
   let failedSince = 0;
   /** Each call, by what it is, since anything last changed. */
   const same = new Map<string, number>();
+  /** Refusals since a step last went through: Friday's "never" and a person's no to a go-ahead. */
+  let refused = 0;
+  /** What each go-ahead asked, by its id, to say what a no was to. */
+  const asked = new Map<string, string>();
   for (const e of run) {
     const b = e.body;
+    if (b.type === "engine.approval") asked.set(b.id, b.items[0] ?? "");
+    if (b.type === "guard.refused" || (b.type === "instruction" && b.approval && b.approval.approve === false)) {
+      refused += 1;
+      const what = b.type === "guard.refused" ? b.item : asked.get(b.approval!.id) || "what it asked";
+      if (refused >= REFUSALS) return { command: what, times: refused, kind: "refused" };
+      continue;
+    }
+    if (b.type === "tool.result" && !b.isError) refused = 0;
     if (b.type === "folder.edited") (streak.clear(), same.clear());
     if (b.type === "agent.message") {
       for (const c of b.toolCalls ?? []) {
@@ -143,6 +158,7 @@ export function runawayIn(events: SessionEvent[], lane: string): Runaway | null 
 /** What the session says when it pauses a looping agent, in a person's words. */
 export function runawayText(r: Runaway): string {
   const cmd = r.command.length > 70 ? `${r.command.slice(0, 69)}…` : r.command;
+  if (r.kind === "refused") return `Stopped: it was refused ${r.times} times in a row (last: \`${cmd}\`). Friday paused it rather than let it look for a way round. Tell it to carry on, or what to do instead.`;
   return r.kind === "stuck"
     ? `Stopped: it ran \`${cmd}\` ${r.times} times in a row, failing each time with nothing changed in between. Tell it to carry on, or what to try instead.`
     : r.kind === "circles"

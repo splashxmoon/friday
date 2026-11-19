@@ -250,9 +250,17 @@ export class SessionCore {
    * a host raised for a lane (lane.othersFull). Unset, each host decides alone.
    */
   othersHeld: ((state: SessionState) => Promise<boolean>) | null = null;
+  /**
+   * Set by the app on a person's own computer (the open-source edition): every message there is theirs or one of their own agents'
+   * (a hand-off, a thread asking a thread, a crew mate), so it runs in the lane's own mode rather than held to Manual, where every
+   * command asked (Arun, 2026-11-18: "messaging agents and stuff and everything is all good", "THIS IS SO ANNOYING TO APPROVE
+   * EVERYTHING").
+   */
+  othersAlways = false;
 
   /** Whether others' messages on this lane may go as far as its host's own mode: the host raised it, and nothing holds it lower. */
   async othersRaised(state: SessionState, lane: string): Promise<boolean> {
+    if (this.othersAlways) return true;
     if (state.othersFull?.[lane] !== true) return false;
     // A rule that can't be read holds it at Edits: the safe side of a host's computer.
     return !(await (this.othersHeld?.(state) ?? Promise.resolve(false)).catch(() => true));

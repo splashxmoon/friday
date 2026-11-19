@@ -574,7 +574,7 @@ function RoomSend({ identity, sid, roomId, name, notify }: { identity: Identity;
     return () => void (live = false);
   }, [identity, roomId]);
   const coding = loadRecents()
-    .filter((x) => x.sid !== sid && !isTeamSid(x.sid) && !x.settledAt)
+    .filter((x) => x.sid !== sid && !isTeamSid(x.sid))
     .sort((a, b) => b.openedAt - a.openedAt)
     .slice(0, 6);
   const rooms = [...(t && t.sid !== sid ? [{ sid: t.sid, invite: t.invite, name: "Crew room", lead: null as string | null }] : []), ...(t?.rooms ?? []).filter((x) => !x.thread && x.sid !== sid).map((x) => ({ sid: x.sid, invite: x.invite, name: x.name, lead: x.lead ?? null }))];

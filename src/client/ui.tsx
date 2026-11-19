@@ -575,7 +575,7 @@ function MenuPopup({ anchor, items, onClose, above, beside, compact, end, trigge
             {/* Working shows in the tick's column, so the dots line up with the ticks; on the ticked row the tick takes that place and the dot steps in beside the name. */}
             {it.live && it.checked && <span className="menu-live" title="Working" />}
             {it.hint && !below(it) && (/^\S( \S)+$/.test(it.hint) ? <span className="menu-keys">{it.hint.split(" ").map((k, i) => <kbd key={i} className="key">{k}</kbd>)}</span> : <kbd>{it.hint}</kbd>)}
-            {it.checked ? <Icon name="check" size={13} className="menu-check" /> : it.live ? <span className="menu-live slot" title="Working" /> : anyCheck || anyLive ? <span className="menu-tick" /> : null}
+            {it.checked ? <Icon name="check" size={14} className="menu-check" /> : it.live ? <span className="menu-live slot" title="Working" /> : anyCheck || anyLive ? <span className="menu-tick" /> : null}
           </button>
           </MenuRow>
         ),

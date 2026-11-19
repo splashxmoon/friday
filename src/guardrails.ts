@@ -1,5 +1,11 @@
 import { touchesSecrets } from "./command-class.js";
 /**
+ * Since 2026-11-18 (Arun: "it can do anything, but will wait for you on sensitive stuff like PRs, Merges, handling money", "FRIDAY
+ * SHOULDNT BE SO STRICT", "EVEN THE CODING SESSIONS TOO"): Auto, a teammate's or a coding session's, runs everything but a short
+ * list: opening or merging a pull request, landing on main (a push there, a force-push), publishing and deploying, money, speaking
+ * as you to people, and changing who has access. Deleting, reading keys, sending data, your computer's settings and the rest run.
+ * The floor below still holds, and Full access lifts the list too. What follows is the earlier note, kept for its history.
+ *
  * What a teammate with full access may do on its own, what it asks you first, and what it never does (Arun, 2026-11-03: "they
  * have full automatic bypass permissions and will only ask for go aheads on certain things, you will have to decide the
  * guardrails"). Drawn from Grok Bot's suggested boundaries, OpenClaw's auto-reviewer, Hermes Agent's hardline list, Claude Code's
@@ -15,7 +21,7 @@ import { touchesSecrets } from "./command-class.js";
  * Pure: the runner calls it for every step a teammate's coding tool wants to take and acts on the answer (runner.ts, "ask").
  */
 
-export type GoAhead = "outside" | "ship" | "delete" | "money" | "keys" | "computer" | "takeover";
+export type GoAhead = "outside" | "ship" | "delete" | "money" | "keys" | "computer" | "takeover" | "safety";
 export type Verdict = { kind: "run" } | { kind: "ask"; tag: GoAhead; why: string } | { kind: "never"; why: string };
 
 /** What each go-ahead is, as its card says it (the reason the teammate is asking). */
@@ -27,6 +33,7 @@ export const GO_AHEAD_WORDS: Record<GoAhead, string> = {
   keys: "Keys or access",
   computer: "Changes your computer's settings",
   takeover: "Needs you to sign in",
+  safety: "Turns off a safety check",
 };
 
 export interface GuardPlace {
@@ -48,6 +55,11 @@ const never = (why: string): Verdict => ({ kind: "never", why });
 
 /** A branch that is shared, or that ships: main, master, trunk, release, production, deploy, live, stable. */
 const SHARED_BRANCH = /^(?:(?:origin|upstream)\/)?(?:main|master|trunk|develop|release(?:[/-].*)?|prod(?:uction)?|deploy(?:[/-].*)?|live|stable|gh-pages)$/i;
+/**
+ * A branch whose push ships something by itself (a deploy, a release): asked. A push to main of its own repository runs, as Claude
+ * Code's auto mode lets it (Arun, 2026-11-18: "im basically baby sitting and having to approve so many commands for the agents").
+ */
+const SHIPPING_BRANCH = /^(?:(?:origin|upstream)\/)?(?:release(?:[/-].*)?|prod(?:uction)?|deploy(?:[/-].*)?|live|stable|gh-pages)$/i;
 
 const norm = (p: string, home: string, cwd?: string) => {
   let s = p.trim().replace(/^["']|["']$/g, "").replace(/\\/g, "/");
@@ -89,7 +101,8 @@ export function guardPath(raw: string, at: GuardPlace, deleting = false): Verdic
   const p = norm(raw, at.home, at.cwd ?? at.own[0]);
   const holy = sacred(p, at.home);
   if (holy) return never(`It won't touch ${holy}.`);
-  if (keyFile(p, at.home)) return ask("keys", `${deleting ? "Deletes" : "Changes"} ${p.split("/").slice(-2).join("/")}, which changes how your computer or accounts behave.`);
+  // Your shell's and Git's own files (.zshrc, .gitconfig, hooks) are its to change too since 2026-11-18; keyFile says which they are.
+  void keyFile;
   if (at.own.some((r) => under(p, norm(r, at.home)))) return RUN;
   // A project it was given is its to work in, deleting included: what it deletes there Git can bring back. Not the project itself,
   // nor its history.
@@ -98,7 +111,8 @@ export function guardPath(raw: string, at: GuardPlace, deleting = false): Verdic
   if (/^\/(tmp|private\/tmp|var\/folders)\//.test(p)) return RUN;
   // Full access past its folders too (Arun, 2026-11-15: "allow for full access for things outside of folders too"): it writes
   // anywhere of yours on its own; deleting what isn't its own is still yours to say, and keys and the floor above still hold.
-  return deleting ? ask("delete", `Deletes ${short(p, at)}, outside its folders.`) : RUN;
+  // Deleting past its folders runs too since 2026-11-18 ("it can do anything"); the floor above still holds.
+  return RUN;
 }
 
 const short = (p: string, at: GuardPlace) => p.replace(at.home.replace(/\/$/, ""), "~");
@@ -138,7 +152,7 @@ export function pieces(cmd: string): string[] {
 }
 
 /** The words of a simple command, quotes taken off, a leading `sudo`, `env X=…`, `command` or `time` left in for the rules to see. */
-const words = (s: string) => (s.match(/"[^"]*"|'[^']*'|\S+/g) ?? []).map((w) => w.replace(/^["']|["']$/g, ""));
+const words = (s: string) => (s.match(/(?:"[^"]*"|'[^']*'|[^\s"'])+/g) ?? []).map((w) => w.replace(/"([^"]*)"|'([^']*)'/g, "$1$2"));
 
 /** A shell command's verdict: the strictest of its parts. */
 export function guardCommand(cmd: string, at: GuardPlace): Verdict {
@@ -147,6 +161,10 @@ export function guardCommand(cmd: string, at: GuardPlace): Verdict {
   if (/\b(curl|wget|fetch)\b[^|]*\|\s*(sudo\s+)?(ba|z|da|k)?sh\b/.test(whole) || /\b(curl|wget)\b[^|]*\|\s*(sudo\s+)?(python3?|node|perl|ruby)\b/.test(whole)) return never("It won't pipe something from the web straight into a shell. Download it, read it, then run it.");
   if (/base64\s+(-d|--decode)[^|]*\|\s*(ba|z)?sh\b/.test(whole) || /\beval\s+["']?\$\((curl|wget)/.test(whole)) return never("It won't run code it decoded or downloaded on the fly.");
   if (/:\(\)\s*\{\s*:\|:&\s*\};:/.test(whole)) return never("That's a fork bomb.");
+  // A shell handed to another computer (a reverse shell), and the cloud's own credentials address: what Claude Code's auto mode
+  // blocks outright (Arun, 2026-11-18: Auto follows the guidelines other agent apps keep).
+  if (/\/dev\/(tcp|udp)\//.test(whole) || /\b(nc|ncat|netcat)\b[^|;&]*\s-(e|c)\s/.test(whole) || /\bsocat\b[^|;&]*\bexec:/i.test(whole)) return never("It won't open a shell for another computer to use.");
+  if (/169\.254\.169\.254|metadata\.google\.internal|fd00:ec2::254/i.test(whole)) return never("It won't read the cloud's credentials address.");
   let worst: Verdict = RUN;
   const rank = (v: Verdict) => (v.kind === "never" ? 2 : v.kind === "ask" ? 1 : 0);
   for (const piece of pieces(cmd)) {
@@ -183,27 +201,23 @@ function guardPiece(piece: string, at: GuardPlace): Verdict {
 
   // ── keys and access ──
   if (sudo) return ask("computer", `Runs ${clip(line)} as administrator.`);
-  if (cmd === "crontab" && !has(/^-l$/)) return ask("keys", "Changes what your computer runs on a schedule (crontab).");
-  if (cmd === "launchctl" && /^(load|bootstrap|enable|submit)$/.test(sub)) return ask("keys", "Adds something your computer runs by itself (launchctl).");
-  if (cmd === "git" && sub === "config" && has(/^--(global|system)$/)) return ask("keys", "Changes your Git settings for every repository.");
+  // Every secret in its environment at once (env, printenv, export -p): reading one it needs runs; printing them all is asked.
+  // Printing its environment, changing a remote, a tunnel, a skipped certificate check, crontab, launchctl and Git's settings run
+  // since 2026-11-18 ("it can do anything"). Who has access to what still asks, below.
   if (cmd === "gh" && (sub === "auth" || sub === "secret" || sub === "ssh-key" || sub === "gpg-key")) return ask("keys", `Changes your GitHub ${sub === "auth" ? "sign-in" : sub.replace("-", " ") + "s"}.`);
   if (cmd === "gh" && sub === "api" && /collaborators|permissions|\/keys|\/secrets|hooks/.test(line) && /-X\s*(PUT|POST|PATCH|DELETE)|--method\s+(PUT|POST|PATCH|DELETE)/i.test(line)) return ask("keys", "Changes who can reach one of your repositories.");
   if (cmd === "security" && /^(add|delete|set|import)-/.test(sub)) return ask("keys", "Changes your keychain.");
   if ((cmd === "npm" || cmd === "pnpm" || cmd === "yarn") && (sub === "token" || sub === "login" || sub === "adduser")) return ask("keys", `Changes your ${cmd} sign-in.`);
-  if (cmd === "chmod" && has(/^(-R|--recursive)$/) && has(/^(0?777|a\+w|o\+w)$/)) return ask("keys", "Opens a folder up to everyone on this computer.");
-
-  // ── your computer beyond its folders ──
-  if (cmd === "defaults" && /^(write|delete)$/.test(sub)) return ask("computer", "Changes a setting of your Mac or one of its apps.");
-  if (/^(networksetup|systemsetup|pmset|scutil|nvram|csrutil|spctl)$/.test(cmd)) return ask("computer", "Changes a system setting.");
-  if (cmd === "osascript") return ask("computer", "Drives one of your apps (AppleScript).");
-  if (cmd === "brew" && /^(uninstall|remove|rm|untap)$/.test(sub)) return ask("computer", "Removes something installed on your computer.");
-  if ((cmd === "npm" || cmd === "pnpm" || cmd === "yarn") && /^(uninstall|remove|rm|un)$/.test(sub) && has(/^(-g|--global)$/)) return ask("computer", "Removes something installed on your computer.");
+  // Your computer's settings, AppleScript and uninstalling run since 2026-11-18; sudo, above, still asks.
 
   // ── speaking for you outside ──
-  if (cmd === "gh" && sub === "pr" && /^(comment|review|close|reopen|edit|ready)$/.test(rest[0] ?? "")) return ask("outside", `Posts on a pull request as you (gh pr ${rest[0]}).`);
+  // Its own pull request's title, body and draft state run (gh pr edit, gh pr ready); speaking on one, or closing it, asks.
+  if (cmd === "gh" && sub === "pr" && /^(comment|review|close|reopen)$/.test(rest[0] ?? "")) return ask("outside", `Posts on a pull request as you (gh pr ${rest[0]}).`);
   if (cmd === "gh" && sub === "issue" && /^(create|comment|close|reopen|edit|delete|transfer|lock)$/.test(rest[0] ?? "")) return ask("outside", `Posts on an issue as you (gh issue ${rest[0]}).`);
   if (cmd === "gh" && (sub === "release" && /^(create|edit|delete|upload)$/.test(rest[0] ?? ""))) return ask("ship", "Publishes a release.");
   if (cmd === "gh" && sub === "pr" && rest[0] === "merge") return ask("ship", "Merges a pull request.");
+  // Opening one waits for you too (Arun, 2026-11-18: "will wait for you on sensitive stuff like PRs, Merges").
+  if (cmd === "gh" && sub === "pr" && rest[0] === "create") return ask("ship", "Opens a pull request.");
   if (cmd === "gh" && sub === "repo" && /^(create|delete|archive|rename|edit)$/.test(rest[0] ?? "")) return ask(rest[0] === "delete" ? "delete" : "outside", `Changes a repository on GitHub (gh repo ${rest[0]}).`);
   if (cmd === "gh" && sub === "api" && /-X\s*(POST|PATCH|PUT|DELETE)|--method\s+(POST|PATCH|PUT|DELETE)|\s-f\s|\s-F\s|--field|--raw-field|--input/i.test(` ${line} `)) return ask("outside", "Sends a change to GitHub as you (gh api).");
   if (/^(mail|mailx|sendmail|msmtp|mutt)$/.test(cmd)) return ask("outside", "Sends an email.");
@@ -211,15 +225,21 @@ function guardPiece(piece: string, at: GuardPlace): Verdict {
 
   // Sending data out of your computer: a request that carries a body or a file, or a copy to another machine. Reading the web, and
   // anything sent to this computer's own servers (an agent trying the app it started), runs on its own (Arun, 2026-11-13, as above).
-  if (sendsOut(cmd, args, line)) return ask("outside", `Sends data out of your computer (${clip(line)}).`);
+  // Sending data out of your computer runs since 2026-11-18 ("it can do anything"): only speaking as you, above, asks.
+  void sendsOut;
 
   // ── shipping ──
   if (cmd === "git" && sub === "push") {
     if (has(/^(-f|--force|--force-with-lease.*|--mirror)$/) || args.some((a) => /^\+/.test(a))) return ask("ship", "Force-pushes, rewriting history others may have.");
-    if (has(/^(-d|--delete)$/) || args.some((a) => /^:/.test(a))) return ask("delete", "Deletes a branch on GitHub.");
+    // To another repository than this one's own: a URL, or a remote that isn't origin or upstream (Claude Code asks this too).
+    // (`git push <remote> <branch>`: the first word after push is always the remote.)
+    const remote = args.filter((a) => !a.startsWith("-"))[1];
+    if (remote && !/^(origin|upstream)$/.test(remote)) return ask("ship", `Pushes to ${clip(remote)}, not this repository's own remote.`);
+    if (has(/^(-d|--delete)$/) || args.some((a) => /^:/.test(a))) return RUN;
     if (has(/^--tags$/) || args.some((a) => /^v?\d+\.\d+/.test(a))) return ask("ship", "Pushes release tags.");
     const named = args.filter((a) => !a.startsWith("-")).slice(1);
     const target = named.length ? named[named.length - 1]!.split(":").pop()! : (at.branch ?? "");
+    // Landing on main is a merge, which waits for you (Arun, 2026-11-18: "PRs, Merges"); a deploy or release branch ships.
     if (SHARED_BRANCH.test(target.replace(/^refs\/heads\//, ""))) return ask("ship", `Pushes to ${target.replace(/^refs\/heads\//, "")}.`);
     return RUN;
   }
@@ -240,6 +260,8 @@ function guardPiece(piece: string, at: GuardPlace): Verdict {
 
   // ── deleting what isn't its own ──
   if (cmd === "rm") {
+    // A folder named by a variable that may be empty: `rm -rf "$DIR"/` with DIR unset is `rm -rf /` (Claude Code asks this too).
+    if ((has(/^-[a-zA-Z]*r/) || has(/^--recursive$/)) && args.some((a) => /^\$\{?(?!HOME\b)\w+/.test(a))) return ask("delete", "Deletes a folder named by a variable that may be empty.");
     for (const t of args.filter((a) => !a.startsWith("-"))) {
       const v = guardPath(t, at, true);
       if (v.kind !== "run") return v;
@@ -247,7 +269,8 @@ function guardPiece(piece: string, at: GuardPlace): Verdict {
     return RUN;
   }
   if (cmd === "git" && ((sub === "reset" && has(/^--hard$/)) || (sub === "clean" && has(/^-[a-zA-Z]*f/)) || ((sub === "checkout" || sub === "restore") && has(/^\.$/)) || (sub === "stash" && /^(drop|clear)$/.test(rest[0] ?? "")))) {
-    return inOwn(at) ? RUN : ask("delete", `Throws away uncommitted work in your project (git ${sub}${rest[0] ? ` ${rest[0]}` : ""}).`);
+    void inOwn;
+    return RUN;
   }
   if (/\b(drop\s+(table|database|schema)|truncate\s+table)\b/i.test(line) || (/\bdelete\s+from\b/i.test(line) && !/\bwhere\b/i.test(line))) return ask("delete", "Deletes data from a database.");
   if ((cmd === "aws" && /\b(delete|rm|rb|terminate|remove|purge)/.test(line)) || (cmd === "gcloud" && /\bdelete\b/.test(line)) || (cmd === "az" && /\bdelete\b/.test(line))) return ask("delete", "Deletes something in the cloud.");
@@ -276,7 +299,8 @@ function guardPiece(piece: string, at: GuardPlace): Verdict {
   // (Arun, 2026-11-13: "only shipping, changes past their folders, sending data out and credentials ask"). Writing there is the
   // floor, above.
   // A Windows path says it with backslashes (Get-Content $HOME\.ssh\id_rsa, type C:\Users\me\.aws\credentials).
-  if (touchesSecrets(line.replace(/\\/g, "/"))) return ask("keys", `Reads your keys or credentials (${clip(line)}).`);
+  // Reading keys or credentials runs since 2026-11-18; writing to them is the floor, above.
+  void touchesSecrets;
   return RUN;
 }
 
@@ -298,13 +322,15 @@ function sendsOut(cmd: string, args: string[], line: string): boolean {
   cmd = cmd.replace(/\.exe$/i, "").toLowerCase() === "curl" || /^(wget|scp|rsync|sftp)(\.exe)?$/i.test(cmd) ? cmd.replace(/\.exe$/i, "").toLowerCase() : cmd;
   const targets = args.filter((a) => LOCAL_HOST.test(a) || /^(?:https?:\/\/|[\w.-]+\.[a-z]{2,}(?:[:/]|$))/i.test(a));
   const local = targets.length > 0 && targets.every((t) => LOCAL_HOST.test(t));
+  // A call to an API with a body runs, as Claude Code's auto mode lets it (Arun, 2026-11-18: "im basically baby sitting"); what
+  // carries a file off this computer asks: an upload, a form with a file, a body read from a file.
   if (cmd === "curl") {
     if (local) return false;
-    return args.some((a) => /^(-d|--data|--data-\w+|--json|-F|--form|--form-string|-T|--upload-file)$/.test(a) || /^--(data|json|form|upload-file)(-\w+)?=/.test(a) || /^-[a-zA-Z]*[dFT].+/.test(a)) || /(?:^|\s)(?:-X|--request)\s*["']?(POST|PUT|PATCH|DELETE)\b/i.test(` ${line}`);
+    return args.some((a, i) => /^(-T|--upload-file)$/.test(a) || /^--upload-file=/.test(a) || /^-T.+/.test(a) || (/^(-F|--form)$/.test(a) && /=@|=</.test(args[i + 1] ?? "")) || /^(-F|--form=).*=[@<]/.test(a) || (/^(-d|--data|--data-binary|--data-raw|--json)$/.test(a) && /^@[^-]/.test(args[i + 1] ?? "")) || /^--(data|data-binary|json)=@/.test(a));
   }
-  if (cmd === "wget") return !local && args.some((a) => /^--(post|body)-(data|file)(=|$)|^--method(=|$)/.test(a));
-  if (cmd === "http" || cmd === "https" || cmd === "xh") return !local && /^(POST|PUT|PATCH|DELETE)$/i.test(args[0] ?? "");
-  if (/^(Invoke-WebRequest|Invoke-RestMethod|iwr|irm)$/i.test(cmd)) return !local && /-Method\s+["']?(Post|Put|Patch|Delete)\b|-InFile\b|-Body\b/i.test(line);
+  if (cmd === "wget") return !local && args.some((a) => /^--(post|body)-file(=|$)/.test(a));
+  if (cmd === "http" || cmd === "https" || cmd === "xh") return !local && args.some((a) => /^[\w.-]+=?@/.test(a) || /^@/.test(a));
+  if (/^(Invoke-WebRequest|Invoke-RestMethod|iwr|irm)$/i.test(cmd)) return !local && /-InFile\b/i.test(line);
   // scp, rsync, sftp: a destination on another machine (user@host:path or host:path).
   if (/^(scp|rsync|sftp)$/.test(cmd)) {
     const dest = args.filter((a) => !a.startsWith("-")).at(-1) ?? "";
@@ -326,7 +352,7 @@ export function guardTool(name: string, input: Record<string, unknown>, at: Guar
     if (/(password|credential|2fa|mfa|totp|secret|token|permission|share|invite|grant|add_member|collaborator)/.test(verb)) return ask("keys", `Changes access (${name}).`);
     if (/(send|post|reply|comment|message|email|mail|tweet|publish|dm|notify|create_issue|create_pull_request_review|submit_review|react)/.test(verb)) return ask("outside", `Sends something as you (${name}).`);
     if (/(merge|deploy|release)/.test(verb)) return ask("ship", `Ships (${name}).`);
-    if (/(delete|remove|archive|destroy|drop|purge|trash)/.test(verb)) return ask("delete", `Deletes something (${name}).`);
+    // Deleting through a connector runs since 2026-11-18 ("it can do anything").
     return RUN;
   }
   const path = typeof input.file_path === "string" ? input.file_path : typeof input.path === "string" ? input.path : typeof input.notebook_path === "string" ? input.notebook_path : "";

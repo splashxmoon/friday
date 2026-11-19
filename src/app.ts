@@ -15,7 +15,8 @@ import { readdirSync, readFileSync, statSync, watch } from "node:fs";
 import { readdir, readFile, rm, stat } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
-import { EngineHub } from "./engine/hub.js";
+import { EngineHub, projectAllowKey } from "./engine/hub.js";
+import { entryFor } from "./command-allow.js";
 import { callHost } from "./runner/local-api.js";
 import { usageCounts } from "./usage.js";
 import { readRepo as readFolder } from "./runner/repo-read.js";
@@ -71,12 +72,13 @@ import { MIN_TOOL_CALLS, transcriptOf } from "./decision-log.js";
 import { runawayIn, runawayText } from "./runaway.js";
 import { dailyBriefs, type CrewInput, type DailyBrief } from "./daily-brief.js";
 import { fromGh, fromGithubApi, rerequestReview, statusOf, type PrStatus } from "./github-status.js";
+import { prDetailFromGh, type PrDetail } from "./pr-detail.js";
 import { commitPaths, FRIDAY, fixMessage, fromPerson, MAX_CHECK_ROUNDS, prBranch, shepherdNext } from "./shepherd.js";
 import { plainCommitMessage } from "./pr-body.js";
 import { checksText, type CheckFailure } from "./pr-checks.js";
 import { feedbackText, fromWriter, unseen, type PrComment } from "./pr-feedback.js";
 import type { EventBody, ReviewFinding } from "./types.js";
-import { attentionIn, crewOf, finishedSeq, prOf, previewOf, sinceOf as stateSince, sortAttention, workingIn, type Attention, type Crew, type Preview, type SessionPr, type Working } from "./attention.js";
+import { attentionIn, crewOf, finishedSeq, prOf, previewOf, rowFactsOf, sinceOf as stateSince, sortAttention, workingIn, type Attention, type Crew, type Preview, type RowFacts, type SessionPr, type Working } from "./attention.js";
 import { Bus, DELTA_ORIGIN, type BusMessage } from "./bus.js";
 import { cleanFocus } from "./focus.js";
 import { startMockFocus } from "./mock-focus.js";
@@ -151,6 +153,11 @@ import { validateSchedule } from "./agents.js";
 import { localEdition } from "./local-edition.js";
 import { OutsideAgents } from "./outside-agents.js";
 import { outsideCommand, outsideSetup } from "./local/outside-mcp.js";
+import { ChannelBridge } from "./channels/bridge.js";
+import { ChannelsConfig } from "./channels/config.js";
+import { LinearAgent } from "./channels/linear-agent.js";
+import { SlackAgent } from "./channels/slack-agent.js";
+import { slackNewAppUrl } from "./channels/slack.js";
 import { openInTerminal } from "./runner/terminal.js";
 import { rankTools, taskTier } from "./routing.js";
 
@@ -388,6 +395,8 @@ export interface AppOptions {
     };
     /** Agents outside Friday, over its MCP server (outside-agents.ts): this install's token, and the script they start (local/outside-mcp.ts). */
     outside?: { token: string; shim: string };
+    /** Slack and Linear (channels/): the file their tokens and choices are kept in, this person's alone. Without it, neither. */
+    channels?: string;
     /** Where voice input's model is kept once downloaded (voice-models.ts): `<FRIDAY_HOME>/models`. Without it, no voice routes. */
     models?: string;
     /**
@@ -721,6 +730,8 @@ export async function createApp(o: AppOptions) {
     // Every edition's: the open-source one runs automations too, and with this left out of it its runs stayed "Running" for good
     // and "An agent finishes" never fired (2026-10-27 QA).
     if (ev.body.type === "run.ended") automationsHear?.(sid, ev);
+    // A thread from Slack or Linear tells that side how it goes (channels/bridge.ts).
+    channels?.bridge.hear(sid, ev as SessionEvent);
     // Who is out of usage, whichever session said it, for every session's hand-offs (limited.ts).
     if (ev.body.type === "run.ended") void store.state(sid).then((s) => noteRunEnd(s.engines[ev.lane ?? MAIN_LANE], { ts: Date.now(), body: ev.body }), () => {});
     // A plan naming a file another agent is on: said in the feed now, before either writes it (collisions.ts plannedOverlapsFor).
@@ -739,6 +750,8 @@ export async function createApp(o: AppOptions) {
     if (ev.body.type === "engine.approval" && ev.body.guard) void trustAnswer(sid, ev as SessionEvent).catch((e) => console.error("[trust]", e));
     // Every step is looked at for a loop (the same failure, edits in circles, the same call over): a failure at once, the rest at most
     // every few seconds a lane.
+    // A refusal (the go-ahead list's, or a person's no) counts toward handing the agent back after three (runaway.ts "refused").
+    if (ev.body.type === "guard.refused" || (ev.body.type === "instruction" && ev.body.approval?.approve === false)) void guardRunaway(sid, ev.lane ?? MAIN_LANE).catch((e) => console.error("[runaway]", e));
     if (ev.body.type === "tool.result") {
       const k = `${sid} ${ev.lane ?? MAIN_LANE}`;
       const failedCmd = ev.body.isError && (ev.body.name === "shell" || ev.body.name === "run_command");
@@ -872,6 +885,8 @@ export async function createApp(o: AppOptions) {
     return made;
   };
   const prCache = new Map<string, { at: number; status: PrStatus | null }>();
+  /** A pull request in full for the Pull request panel (pr-detail.ts), by session and link, for half a minute. */
+  const prDetailCache = new Map<string, { at: number; detail: PrDetail | null }>();
   /**
    * Where a card's pull request stands on GitHub. Two ways to ask, each the other's backup: GitHub's API with the workspace's
    * GitHub connection, then `gh` on the machine linked to the session. Remembered for a minute (half that when nobody could
@@ -1712,6 +1727,8 @@ export async function createApp(o: AppOptions) {
   const hub = new EngineHub(store, bus, core);
   // A workspace that keeps teammates' messages to Edits on every member's computer (workspace-policy.ts), whatever a host raised:
   // the session core refuses raising past it and the hub holds every turn, steer and pressed command there.
+  // On a person's own computer, their own agents' messages run as far as their own (core.othersAlways).
+  if (o.local && localEdition()) core.othersAlways = true;
   // On your own computer there is one Friday: lanes a previous run of it held are gone with it (EngineHub.sole).
   if (o.local) hub.sole = true;
   // On someone's own computer, each of their sessions is looked over once the last run's leases are gone: a lane its runner left
@@ -1915,6 +1932,16 @@ export async function createApp(o: AppOptions) {
       for (const t of await teammates.list()) if (t.mode && t.mode !== "full") await teammates.update(t.id, (cur) => ({ ...cur, mode: undefined }));
       await redis.set(done, "1");
     })().catch((e) => console.error("[teammates] full access:", e));
+  // Once more, for the crew mates made on "Ask before changes" since (Arun, 2026-11-19, after the crew audit: Arun, the bug fixer,
+  // asked for a yes 90 times in 17 runs and couldn't run his own checks; "crew mates always run with full access"). Their page says
+  // so when one is set back.
+  if (teammates)
+    void (async () => {
+      const done = `${o.prefix}crew:fullAccess:v2`;
+      if (await redis.get(done)) return;
+      for (const t of await teammates.list()) if (t.mode && t.mode !== "full") await teammates.update(t.id, (cur) => ({ ...cur, mode: undefined }));
+      await redis.set(done, "1");
+    })().catch((e) => console.error("[teammates] full access:", e));
   /**
    * The "Needs you" queue (needs-you.ts): what waits on each person across their sessions, Crew rooms and teammates, ranked, each
    * with a suggested answer. The suggestion is the person's own work: on Friday's model where their plan has one (counted against
@@ -2080,6 +2107,9 @@ export async function createApp(o: AppOptions) {
     const copy = at?.keepAs.includes(".visit.") || more.cwd ? null : await copyFor((await teammates!.team()) ?? sid, t).catch(() => null);
     const ownDirs = projectsOf(t).length ? [...projectsOf(t).slice(1), t.folder] : [];
     const dirs = [...new Set([...ownDirs, ...roomDirs])].filter((d) => d !== (copy?.path ?? projectsOf(t)[0] ?? t.folder));
+    // Its home chat deleted (lane.cleared): a conversation of its own from then on, so its coding tool starts fresh there. Kept to
+    // the runner's 40 characters, with no "." (a room's or a visit's).
+    const cut = at ? undefined : (await store.state(sid).catch(() => null))?.cleared?.[t.lane];
     const params = {
       sid,
       invite: signInvite(o.secret, sid, "owner"),
@@ -2094,7 +2124,7 @@ export async function createApp(o: AppOptions) {
       lane: at?.lane ?? t.lane,
       // Its conversation, kept whatever port the app opens on and whichever project it is pointed at (Runner keepAs); in a room,
       // the one it has there.
-      keepAs: at?.keepAs ?? t.id,
+      keepAs: at?.keepAs ?? (cut ? `${t.id.slice(0, 30)}#${cut}` : t.id),
       ...(dirs.length ? { dirs } : {}),
       // The model is its tool's to run; an own model is Friday Code's, asked for by the lane (laneOwn), never the runner's.
       ...(tool && t.model ? { model: t.model } : {}),
@@ -2199,7 +2229,7 @@ export async function createApp(o: AppOptions) {
   const teammateViews = async (sid: string): Promise<TeammateView[]> => {
     // How each stands across everywhere it is, the team and its rooms (team-views.ts TeamLooks.mates).
     const [list, rooms] = await Promise.all([teammates!.list(), teammates!.rooms()]);
-    const places = [{ sid, lanes: Object.fromEntries(list.map((t) => [t.id, t.lane])) as Record<string, string> }, ...rooms.map((r) => ({ sid: r.sid, lanes: r.lanes }))];
+    const places = [{ sid, home: true as const, lanes: Object.fromEntries(list.map((t) => [t.id, t.lane])) as Record<string, string> }, ...rooms.map((r) => ({ sid: r.sid, lanes: r.lanes }))];
     // One on its own model is online only while that model can run: set up in Settings, and its server answering when it is on
     // this computer. The team's owner is the one person in its session.
     const owner = Object.entries((await store.state(sid)).members).find(([, m]) => m.role === "owner");
@@ -3956,6 +3986,47 @@ export async function createApp(o: AppOptions) {
           : {}),
       })
     : null;
+  // ── Slack and Linear (channels/, spec 08): asks from there become threads here, and the work goes back as each shows it ──
+  const channels = o.local?.channels
+    ? (() => {
+        const config = new ChannelsConfig(o.local!.channels!);
+        const bridge = new ChannelBridge({
+          store,
+          handle: (sid, actor, cmd) => core.handle(sid, actor, cmd),
+          me: async () => {
+            const me = await localNamed();
+            return { id: me.id, name: me.name };
+          },
+          workspaceId: LOCAL_WORKSPACE.id,
+          startTool: (sid, owner, p) => startTool(sid, owner, p),
+          pickTool: async (owner, task) => {
+            const tier = taskTier(task);
+            return rankTools(tier.tier, await toolOptionsFor(owner).catch(() => []), tier.why).find((r) => !r.out)?.tool ?? null;
+          },
+          folder: async (p) => ({ dir: path.isAbsolute(p) && (await stat(p).then((x) => x.isDirectory(), () => false)), repo: await stat(path.join(p, ".git")).then(() => true, () => false) }),
+        });
+        /** Folders worked in lately, newest first, each once: a lane's copy counts as the folder it was copied from. */
+        const projects = async () => {
+          const me = await localNamed();
+          const seen = new Map<string, { folder: string; repo?: string }>();
+          for (const r of await store.mine(me.id, 80)) {
+            const st = await store.state(r.sid).catch(() => null);
+            for (const e of Object.values(st?.engines ?? {})) {
+              const folder = e?.copyOf ?? e?.cwd;
+              if (folder && !seen.has(folder)) seen.set(folder, { folder, ...(e?.repo ? { repo: e.repo } : {}) });
+            }
+          }
+          return [...seen.values()];
+        };
+        const linear = new LinearAgent({ config, bridge, projects, ...(process.env.FRIDAY_LINEAR_POLL_MS ? { pollMs: Number(process.env.FRIDAY_LINEAR_POLL_MS) } : {}), ...(process.env.FRIDAY_LINEAR_CALLBACK_PORT ? { callbackPort: Number(process.env.FRIDAY_LINEAR_CALLBACK_PORT) } : {}) });
+        bridge.add(linear);
+        linear.start();
+        const slack = new SlackAgent({ config, bridge, projects });
+        bridge.add(slack);
+        slack.start();
+        return { config, bridge, linear, slack, projects };
+      })()
+    : null;
   // ── The app, for the agents in it (app-tools.ts) ─────────────────────────────────────────────────────────────────────
   // On this computer every coding tool, in any session, reaches the other sessions on this computer (Code, Work and the
   // team's), searches what was said in them, starts new ones, and makes and runs automations (Arun, 2026-10-27: "make the app
@@ -4474,6 +4545,70 @@ export async function createApp(o: AppOptions) {
         if (tool !== "claude" && tool !== "codex") return json(res, 400, { error: "Add works for Claude Code and Codex. Copy Cursor's lines into its file." });
         return json(res, 200, await openInTerminal(lines[tool].argv));
       }
+    }
+
+    // Settings › Slack and Linear (channels/, spec 08): whether each is connected, connecting, and what the person picks. Friday's
+    // own page only (localOnly, above); tokens never come back to the page.
+    if (url.pathname.startsWith("/api/channels") && channels) {
+      const { linear, slack, bridge } = channels;
+      const post = req.method === "POST";
+      if (post && req.headers.origin === undefined && req.headers["x-friday-local"] !== "1") return json(res, 403, { error: "From Friday's own page only." });
+      try {
+        if (url.pathname === "/api/channels" && req.method === "GET") return json(res, 200, { linear: linear.status(), slack: slack.status(), slackNewApp: slackNewAppUrl() });
+        if (url.pathname === "/api/channels/slack/connect" && post) {
+          const body = await readJson(req);
+          return json(res, 200, { slack: await slack.connect({ bot: str(body.bot, 300), app: str(body.app, 300) }) });
+        }
+        if (url.pathname === "/api/channels/slack/people" && req.method === "GET") return json(res, 200, { people: await slack.people() });
+        if (url.pathname === "/api/channels/slack" && post) {
+          const body = await readJson(req);
+          if (body.me && typeof body.me === "object") {
+            const m = body.me as Record<string, unknown>;
+            slack.setMe(typeof m.id === "string" && m.id ? { id: str(m.id, 80), name: str(m.name, 80) } : null);
+          }
+          if (typeof body.dms === "boolean") slack.setDms(body.dms);
+          if (body.channel && typeof body.channel === "object") {
+            const c = body.channel as Record<string, unknown>;
+            slack.setChannel(str(c.id, 80), typeof c.folder === "string" && c.folder.trim() ? str(c.folder, 1000) : null);
+          }
+          return json(res, 200, { slack: slack.status() });
+        }
+        if (url.pathname === "/api/channels/slack/disconnect" && post) {
+          await slack.disconnect();
+          return json(res, 200, { slack: slack.status() });
+        }
+        const link = url.pathname.match(/^\/api\/channels\/link\/([\w-]{4,40})$/);
+        if (link && req.method === "GET") {
+          const l = await bridge.link(link[1]!);
+          return json(res, 200, { link: l ? { side: l.side, label: l.label, url: l.url ?? null, by: l.by } : null });
+        }
+        if (url.pathname === "/api/channels/linear/connect" && post) {
+          const body = await readJson(req);
+          return json(res, 200, await linear.connect({ clientId: str(body.clientId, 120), clientSecret: str(body.clientSecret, 200) }));
+        }
+        if (url.pathname === "/api/channels/linear/people" && req.method === "GET") return json(res, 200, { people: await linear.people() });
+        if (url.pathname === "/api/channels/linear/teams" && req.method === "GET") return json(res, 200, { teams: await linear.teams() });
+        if (url.pathname === "/api/channels/linear/projects" && req.method === "GET") return json(res, 200, { projects: await channels.projects() });
+        if (url.pathname === "/api/channels/linear" && post) {
+          const body = await readJson(req);
+          if (body.me && typeof body.me === "object") {
+            const m = body.me as Record<string, unknown>;
+            linear.setMe(typeof m.id === "string" && m.id ? { id: str(m.id, 80), name: str(m.name, 80) } : null);
+          }
+          if (body.team && typeof body.team === "object") {
+            const t = body.team as Record<string, unknown>;
+            linear.setTeam(str(t.id, 80), typeof t.folder === "string" && t.folder.trim() ? str(t.folder, 1000) : null, typeof t.name === "string" ? str(t.name, 80) : undefined);
+          }
+          return json(res, 200, { linear: linear.status() });
+        }
+        if (url.pathname === "/api/channels/linear/disconnect" && post) {
+          await linear.disconnect();
+          return json(res, 200, { linear: linear.status() });
+        }
+      } catch (e) {
+        return json(res, 400, { error: (e as Error).message });
+      }
+      return json(res, 404, { error: "Not found" });
     }
 
     // A previewed page asking for "/_next/static/…" or "/src/main.tsx" from the root of the address it thinks it is on lands
@@ -5436,12 +5571,48 @@ export async function createApp(o: AppOptions) {
         if (got?.error) checks = { error: got.error };
         else if (got) checks = { failures: (got.failures ?? []).map((f) => ({ name: f.name, ...(f.workflow ? { workflow: f.workflow } : {}), ...(f.link ? { link: f.link } : {}), ...(f.outcome ? { outcome: f.outcome } : {}) })), pending: got.pending ?? 0 };
       }
-      return json(res, 200, { pr: { url: commit.body.prUrl, at: commit.ts, lane: prLane, status, ...(checks ? { checks } : {}) } });
+      // And with ?detail=1, the whole of it (pr-detail.ts): description, commits, files, every check, reviewers, labels, the issues
+      // it closes, through gh on the session's computer. Remembered for half a minute, as the panel asks every 45 seconds.
+      let detail: PrDetail | null | undefined;
+      if (url.searchParams.get("detail") === "1") {
+        const key = `${sid}|${commit.body.prUrl}`;
+        const hit = prDetailCache.get(key);
+        if (hit && Date.now() - hit.at < 30_000) detail = hit.detail;
+        else {
+          const r = await Promise.race([openFolder(sid, { op: "prdetail", query: commit.body.prUrl }, prLane).catch(() => null), new Promise<null>((done) => setTimeout(() => done(null), 15_000).unref?.())]);
+          detail = r ? prDetailFromGh(asJson(r.output)) : null;
+          prDetailCache.set(key, { at: Date.now(), detail });
+          if (prDetailCache.size > 200) prDetailCache.delete(prDetailCache.keys().next().value!);
+        }
+      }
+      return json(res, 200, { pr: { url: commit.body.prUrl, at: commit.ts, lane: prLane, status, ...(checks ? { checks } : {}), ...(detail ? { detail } : {}) } });
     }
 
     // The daily brief: on demand, the latest scheduled one, and its times (daily-brief.ts).
     if (await briefs.handle(req, res, url)) return;
 
+    // "Always in this project" (Arun, 2026-11-18, as Codex and OpenBot offer it): a go-ahead let through for every session in a
+    // project folder, by the person whose computer runs it. GET lists the folder's entries; POST adds a card's items or removes one.
+    if (url.pathname === "/api/project-allow") {
+      const me = await identity(req);
+      if (!me) return json(res, 401, { error: "Not signed in." });
+      const sid = req.method === "GET" ? str(url.searchParams.get("sid"), 40) : "";
+      const body = req.method === "POST" ? await readJson(req).catch(() => ({}) as Record<string, unknown>) : {};
+      const at = sid || str(body.sid, 40);
+      const lane = (req.method === "GET" ? str(url.searchParams.get("lane"), 40) : str(body.lane, 40)) || MAIN_LANE;
+      const state = at ? await store.state(at).catch(() => null) : null;
+      const engine = state?.engines[lane];
+      const folder = engine ? (engine.copyOf ?? engine.cwd) : "";
+      if (!state || !engine || !folder) return json(res, 404, { error: "That agent isn't here." });
+      if (engine.hostId !== me.id || roleOf(state, me.id) !== "owner") return json(res, 403, { error: "Only the person whose computer it runs on can allow this." });
+      const key = projectAllowKey(o.prefix, me.id, folder);
+      if (req.method === "POST") {
+        const items = Array.isArray(body.items) ? (body.items as unknown[]).filter((i): i is string => typeof i === "string" && !!i.trim()).slice(0, 8) : [];
+        if (items.length) await redis.sadd(key, ...items.map((i) => entryFor(i.trim().slice(0, 4000))));
+        if (typeof body.remove === "string") await redis.srem(key, body.remove);
+      } else if (req.method !== "GET") return json(res, 405, { error: "GET or POST." });
+      return json(res, 200, { folder, entries: (await redis.smembers(key)).sort() });
+    }
     if (req.method === "GET" && url.pathname === "/api/sessions/mine") {
       const me = await identity(req);
       if (!me) return json(res, 401, { error: "Not signed in." });
@@ -5608,6 +5779,8 @@ export async function createApp(o: AppOptions) {
       const previews: Preview[] = [];
       const crews: Crew[] = [];
       const prs: SessionPr[] = [];
+      // Each row's folder, branch and change size (attention.ts rowFactsOf).
+      const facts: RowFacts[] = [];
       // Only sessions this person is in, so what two of them share can be said
       // without telling anyone about a session they cannot see.
       const mine: SessionState[] = [];
@@ -5654,6 +5827,8 @@ export async function createApp(o: AppOptions) {
         if (crew) crews.push(crew);
         const pr = prOf(state);
         if (pr) prs.push(pr);
+        const fact = rowFactsOf(state);
+        if (fact) facts.push(fact);
         if (line) summaries.push(line);
       }
       const theirs: never[] = [];
@@ -5662,7 +5837,7 @@ export async function createApp(o: AppOptions) {
       const marks = await marking;
       const waitingIn = marks ? new Set(marks.needs.filter((n) => !n.putOff && n.sid).map((n) => n.sid!)) : null;
       const items = sortAttention(waitingIn ? found.filter((a) => waitingIn.has(a.sid)) : found);
-      return json(res, 200, { items, ...(marks ? { needs: marks.needs, off: marks.off } : {}), working, previews, crews, prs, unread, since, overlaps: Object.fromEntries(overlapsAcross([...mine, ...theirs])), ...(body.summaries === true ? { summaries } : {}), ...(gone.length ? { gone } : {}) });
+      return json(res, 200, { items, ...(marks ? { needs: marks.needs, off: marks.off } : {}), working, previews, crews, prs, facts, unread, since, overlaps: Object.fromEntries(overlapsAcross([...mine, ...theirs])), ...(body.summaries === true ? { summaries } : {}), ...(gone.length ? { gone } : {}) });
     }
     // Mark as unread: this person's place in it set back to before its last finished turn, so every device shows it as new again.
     const unreadRoute = url.pathname.match(/^\/api\/sessions\/([\w-]+)\/unread$/);
@@ -6259,7 +6434,7 @@ export async function createApp(o: AppOptions) {
           }
           return said ? json(res, said.startsWith("That room") ? 404 : 400, { error: said }) : team();
         }
-        const one = url.pathname.match(/^\/api\/teammates\/([\w-]{4,40})(\/reconnect|\/stop|\/lead|\/memory|\/activity|\/visit|\/remember|\/switch|\/routine)?$/);
+        const one = url.pathname.match(/^\/api\/teammates\/([\w-]{4,40})(\/reconnect|\/stop|\/lead|\/memory|\/activity|\/visit|\/remember|\/switch|\/routine|\/clear)?$/);
         if (!one) return json(res, 404, { error: "Not found" });
         const t = await teammates.get(one[1]!);
         if (!t) return json(res, 404, { error: "That teammate isn't in your crew any more." });
@@ -6353,6 +6528,17 @@ export async function createApp(o: AppOptions) {
           // Leads the Team room: what is said there without an @name goes to it.
           const r1 = await core.handle(sid, owner, { type: "lead.set", lane: t.lane });
           return r1.ok ? team() : json(res, 400, { error: r1.error ?? "Couldn't make it the lead." });
+        }
+        // Its home chat deleted (Arun, 2026-11-19: "why cant i delete this thread?"): what was said there is gone from view, and its
+        // coding tool starts a fresh conversation (startTeammate's keepAs). Its folder, notes and memory stay. Never mid-turn.
+        if (req.method === "POST" && one[2] === "/clear") {
+          const st = await store.state(sid);
+          const run = runOf(st, t.lane).status;
+          if (run === "running" || run === "waiting_for_human" || st.approvals[t.lane]) return json(res, 409, { error: `${t.name} is working in it. Stop it first.` });
+          await store.append(sid, { id: owner.id, name: owner.name, kind: "human" }, { type: "lane.cleared", laneId: t.lane }, { lane: t.lane });
+          await stopOnMachine(sid, owner, t.lane).catch(() => {});
+          await startTeammate(sid, owner, t).catch((e: Error) => console.error(`[teammates] ${t.name} didn't start again: ${e.message}`));
+          return team();
         }
         if (req.method === "POST" && one[2] === "/reconnect") {
           // One lane (the page bringing back one it found offline: only if it still is), or, asked for, all of them.
@@ -7156,6 +7342,7 @@ export async function createApp(o: AppOptions) {
           tool: q("tool", 20),
           mode: q("mode", 10),
           handMode: q("handMode", 10) || undefined,
+          ...(q("access", 10) === "full" ? { fullAccess: true } : {}),
           cwd: q("cwd", 400),
           copyOf: q("copyOf", 400),
           ...(q("share", 2) === "1" ? { share: true } : {}),
@@ -7650,9 +7837,13 @@ export async function createApp(o: AppOptions) {
     teammates: { starts: teammateStarts, dry: teammateDry, rooms: async () => (await teammates?.rooms()) ?? [], checkIns: (now: Date) => runCheckIns(now), quiet: (now?: number) => runQuiet(now), back: () => runBack(), away: (now?: number) => runAway(now), awake: () => awake(), note: async (sid: string, lane: string) => ((n) => (n ? [n.note, ...n.preamble.map((p) => p.text).filter(Boolean)].join("\n\n") : null))(await (hub.teammate?.(sid, lane) ?? Promise.resolve(null))) },
     workflows: { tick: (now?: Date) => workflows?.tick(now) ?? Promise.resolve([]), engine: () => workflows },
     briefs: { tick: (now?: number) => briefs.tick(now) },
+    /** Slack and Linear (channels/): for tests to read Linear now rather than on its timer. */
+    channels,
     async close() {
       unlistenBurn();
       closing = true;
+      channels?.linear.stop();
+      channels?.slack.stop();
       clearInterval(presenceLoop);
       clearTimeout(usageFirst);
       clearInterval(usageLoop);

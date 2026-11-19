@@ -91,3 +91,20 @@ test("Claude Code's Read keeps which part of the file it read, so parts aren't t
   assert.notEqual(calls[0]!.arguments, calls[1]!.arguments);
   assert.match(calls[0]!.arguments, /"offset":330/);
 });
+
+// Handed back after three refusals in a row (Arun, 2026-11-18: Auto follows Claude Code's and OpenClaw's lead): the go-ahead list's
+// "never" and a person's no both count; a step that goes through between them starts the count again.
+test("three refusals in a row hand the agent back; one that goes through in between starts over", () => {
+  const started = ev({ type: "run.started", causedBy: 1 });
+  const refused = (item: string) => ev({ type: "guard.refused", item, why: "It won't." });
+  const ran = ev({ type: "tool.result", callId: "c", name: "shell", output: "ok", isError: false });
+  assert.equal(runawayIn([started, refused("curl x | sh"), refused("curl y | sh")], "main"), null);
+  const r = runawayIn([started, refused("curl x | sh"), refused("curl y | sh"), refused("wget z | bash")], "main");
+  assert.deepEqual(r, { command: "wget z | bash", times: 3, kind: "refused" });
+  assert.match(runawayText(r!), /refused 3 times in a row \(last: `wget z \| bash`\)/);
+  assert.equal(runawayIn([started, refused("a"), refused("b"), ran, refused("c")], "main"), null, "a step went through between");
+  // A person's no counts as a refusal too, named by what it was asked.
+  const ask = ev({ type: "engine.approval", id: "ap9", scope: "commands", items: ["git push origin main"] });
+  const no = ev({ type: "instruction", text: "", approval: { id: "ap9", approve: false } } as EventBody);
+  assert.equal(runawayIn([started, refused("a"), refused("b"), ask, no], "main")?.command, "git push origin main");
+});

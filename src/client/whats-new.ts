@@ -17,14 +17,14 @@ export interface WhatsNewNotes {
 }
 
 export const WHATS_NEW: WhatsNewNotes = {
-  version: "0.3.4",
-  title: "Pictures in the chat",
-  summary: "Coding tools show you pictures, threads ask each other, a team's tasks get a tab of their own, and picking a model takes a click.",
+  version: "0.3.5",
+  title: "Friday in Slack and Linear",
+  summary: "Ask from Slack or hand an issue over in Linear, a crew you can leave to it, and agents that stop for less.",
   items: [
-    { icon: "image", title: "Pictures in the chat", line: "Screenshots and images your agents make show in the chat, open large, and step through with the arrow keys." },
-    { icon: "handoff", title: "Threads ask each other", line: "An agent can ask another thread on the same project what it knows, and gets the answer back." },
-    { icon: "list", title: "A team's tasks, in reach", line: "The side panel's Tasks tab shows every task with who has it; stop any of them, and a finished list clears itself." },
-    { icon: "key", title: "A simpler model picker", line: "Search every model, star your favourites, and switch between a subscription and your own keys or local models in a click." },
+    { icon: "connections", title: "Slack and Linear", line: "An @mention or /friday in Slack, or an issue handed to Friday in Linear, becomes a thread on this computer." },
+    { icon: "users", title: "A crew you can rely on", line: "Full access by default, tasks start from what the room decided, and anything only you can sort asks you once." },
+    { icon: "zap", title: "Auto stops for less", line: "Agents wait for you only on pull requests, merges, deploys, money and speaking as you, and answer in the chat." },
+    { icon: "play", title: "Videos and pull requests", line: "Videos play in the chat and side panels; Code Review and the Pull request panel are redone." },
   ],
 };
 

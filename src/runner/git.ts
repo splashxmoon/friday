@@ -1775,7 +1775,25 @@ export async function prFeedback(cwd: string, prUrl: string): Promise<{ comments
 export async function prStatusJson(cwd: string, prUrl: string): Promise<Record<string, unknown> | { error: string }> {
   if (!parsePrUrl(prUrl)) return { error: "That isn't a GitHub pull request link." };
   try {
-    return JSON.parse(await gh(cwd, ["pr", "view", prUrl, "--json", "state,isDraft,reviewDecision,statusCheckRollup,mergeable,mergeStateStatus"]));
+    return JSON.parse(await gh(cwd, ["pr", "view", prUrl, "--json", "state,isDraft,reviewDecision,statusCheckRollup,mergeable,mergeStateStatus,mergedAt"]));
+  } catch (e) {
+    const m = (e as Error).message;
+    return { error: /ENOENT|not found|command/i.test(m) && /gh/i.test(m) ? "The GitHub CLI (gh) isn't installed on this machine." : m };
+  }
+}
+
+/** What the Pull request panel shows of one (pr-detail.ts): GitHub's page, as `gh` reads it. */
+const PR_DETAIL_FIELDS = "number,title,body,url,state,isDraft,author,baseRefName,headRefName,createdAt,updatedAt,mergedAt,mergedBy,closedAt,additions,deletions,changedFiles,labels,assignees,reviewRequests,latestReviews,closingIssuesReferences,mergeCommit,commits,files,statusCheckRollup,comments,mergeStateStatus";
+
+/** One pull request in full, through the person's own `gh`: read-only, like prStatusJson. */
+export async function prDetailJson(cwd: string, prUrl: string): Promise<Record<string, unknown> | { error: string }> {
+  if (!parsePrUrl(prUrl)) return { error: "That isn't a GitHub pull request link." };
+  try {
+    const j = JSON.parse(await gh(cwd, ["pr", "view", prUrl, "--json", PR_DETAIL_FIELDS])) as Record<string, unknown>;
+    // Its comments as how many there are, and no commit author's email: neither is shown, so neither leaves this computer.
+    j.comments = Array.isArray(j.comments) ? j.comments.length : 0;
+    if (Array.isArray(j.commits)) for (const c of j.commits as { authors?: { email?: string }[] }[]) for (const a of c.authors ?? []) delete a.email;
+    return j;
   } catch (e) {
     const m = (e as Error).message;
     return { error: /ENOENT|not found|command/i.test(m) && /gh/i.test(m) ? "The GitHub CLI (gh) isn't installed on this machine." : m };

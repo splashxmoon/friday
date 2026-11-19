@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { TaskCard } from "./crew-room-work.js";
 import { ArrowRightIcon, CheckIcon, ChevronDownIcon, CircleCheckIcon, CircleDashedIcon, CircleDotIcon, UsersIcon } from "lucide-react";
 import { agentLook } from "./handoff-ui.js";
 import { laneLabel } from "../left-off.js";
@@ -244,7 +245,15 @@ function Mini({ state, f }: { state: SessionState; f: Facts }) {
 export function CrewTalk({ entries, state, delivered, events }: { entries: TalkEntry[]; state: SessionState; delivered: Set<number>; events: readonly SessionEvent[] }) {
   const [open, setOpen] = useState(false);
   const rows = entries.map((e) => ({ key: e.key, facts: e.ev ? factsOf(e.ev, state, delivered, events) : null, node: e.node }));
-  const draw = (r: (typeof rows)[number]) => (r.facts ? <Row key={r.key} state={state} f={r.facts} /> : r.node ? <div key={r.key} className="ctk-other">{r.node}</div> : null);
+  // A task handed to one mate is a card that updates in place, and opens that mate's chat (crew-room-work.tsx TaskCard).
+  const draw = (r: (typeof rows)[number]) =>
+    r.facts?.task && r.facts.to ? (
+      <TaskCard key={r.key} state={state} events={events} lane={r.facts.to} toName={r.facts.toName} title={r.facts.task.title} status={r.facts.task.status} from={{ seq: 0, ts: r.facts.ts }} />
+    ) : r.facts ? (
+      <Row key={r.key} state={state} f={r.facts} />
+    ) : r.node ? (
+      <div key={r.key} className="ctk-other">{r.node}</div>
+    ) : null;
   if (rows.length <= FOLD_OVER) return <section className="ctk" aria-label="The crew talking">{rows.map(draw)}</section>;
   const middle = rows.slice(KEEP, -KEEP);
   const who = [...new Set(middle.map((r) => r.facts?.fromName).filter((n): n is string => !!n))];
