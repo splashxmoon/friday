@@ -467,7 +467,8 @@ async function rename(p: { root: string; from: string; to: string }) {
   const a = await resolveIn(root, from, false);
   const b = await resolveIn(root, to, false);
   if (!(await exists(a))) throw new Error(`${from.join("/")} does not exist.`);
-  if (isInside(a, b) && a !== b) throw new Error("A folder cannot be moved into itself.");
+  // Only a place below the folder: a case-only rename on Windows (other.txt to Other.txt) is the same place, not inside it.
+  if (movesIntoItself(a, b)) throw new Error("A folder cannot be moved into itself.");
   if (a !== b && (await exists(b))) {
     // A case-only rename (Readme to README) looks like "already exists" on a case-insensitive disk: it is the same file then.
     const [sa, sb] = await Promise.all([fs.lstat(a), fs.lstat(b)]);

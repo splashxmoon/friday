@@ -17,7 +17,8 @@ const pkg = require(path.join(dir, "package.json"));
  * A test folder removed, waiting out a git the view started (an author being read) that still has it as its working folder: Windows
  * won't remove a folder a running program is in (EBUSY). The view never removes folders, so this is only the test's own cleanup.
  */
-const rmTmp = (p: string) => rmSync(p, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+// Windows keeps a folder a running program is in (a git blame the view started) for a moment: retried for up to 15 s.
+const rmTmp = (p: string) => rmSync(p, { recursive: true, force: true, maxRetries: 60, retryDelay: 250 });
 
 const scan = (text: string, file: string) => parse.scanText(text, file).map((h: { line: number; tag: string; who: string; text: string }) => `${h.line} ${h.tag}${h.who ? `(${h.who})` : ""} ${h.text}`);
 
@@ -264,20 +265,25 @@ function stand(root: string) {
     workspace: { getConfiguration: () => ({ get: (_k: string, d: unknown) => d }), textDocuments: [], createFileSystemWatcher: () => w },
   };
   const asked: Record<string, unknown>[] = [];
-  const api = todos.register(vscode, { subscriptions: [] as unknown[] }, { postAsk: async (b: Record<string, unknown>) => (asked.push(b), true), roots: () => [root], rootOf: () => root });
-  return { api, state, handlers, asked };
+  const subscriptions: { dispose?: () => void }[] = [];
+  const api = todos.register(vscode, { subscriptions }, { postAsk: async (b: Record<string, unknown>) => (asked.push(b), true), roots: () => [root], rootOf: () => root });
+  /** The view put away, as the IDE does on close: no rescan or blame starts in the folder after this. */
+  const stop = () => subscriptions.forEach((x) => x?.dispose?.());
+  return { api, state, handlers, asked, stop };
 }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 test("the view follows the disk: no badge, an agent's edit takes the row away, a handed row is checked against the file, authors stay, caps say so", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "todos-live-"));
+  let stopView = () => {};
   try {
     const git = (...a: string[]) => execFileSync("git", ["-c", "user.email=ann@x.dev", "-c", "user.name=Ann Lee", ...a], { cwd: root, stdio: "pipe" });
     git("init", "-q", "-b", "main");
     writeFileSync(path.join(root, ".gitignore"), "ignored.ts\n");
     writeFileSync(path.join(root, "a.ts"), "// TODO: first\nconst x = 1;\n// FIXME: second\n");
     git("add", "."), git("commit", "-q", "-m", "one");
-    const { api, state, handlers, asked } = stand(root);
+    const { api, state, handlers, asked, stop } = stand(root);
+    stopView = stop;
     assert.equal(state.contexts["friday.todosScanned"], undefined, "not looked yet");
     await api.scan();
     assert.equal(state.contexts["friday.todosScanned"], true);
@@ -328,6 +334,8 @@ test("the view follows the disk: no badge, an agent's edit takes the row away, a
     assert.deepEqual(state.provider!.getChildren().map((n) => n.file?.rel).filter(Boolean), ["b.ts"], "only the new, wanted file");
     assert.equal(api.state().length, 1);
   } finally {
+    stopView();
+    await sleep(300);
     rmTmp(root);
   }
 });
