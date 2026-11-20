@@ -160,6 +160,7 @@ test("the extension's wiring: the commands the package declares, the lens, the a
   const handlers: Record<string, (...a: unknown[]) => unknown> = {};
   const asked: Record<string, unknown>[] = [];
   const root = mkdtempSync(path.join(os.tmpdir(), "todos-ext-"));
+  let stopView = () => {};
   try {
     writeFileSync(path.join(root, "a.ts"), "// TODO: first\nconst x = 1;\n");
     let lens: { provideCodeLenses(d: unknown): { command: { command: string; title: string; arguments: unknown[] }; range: unknown }[] } | null = null;
@@ -179,8 +180,9 @@ test("the extension's wiring: the commands the package declares, the lens, the a
       window: { createTreeView: (_id: string, o: { treeDataProvider: typeof provider }) => ((provider = o.treeDataProvider), { dispose() {} }), setStatusBarMessage() {} },
       workspace: { getConfiguration: () => ({ get: (_k: string, d: unknown) => d }), textDocuments: [] as unknown[] },
     };
-    const context = { subscriptions: [] as unknown[] };
+    const context = { subscriptions: [] as { dispose?: () => void }[] };
     const api = todos.register(vscode, context, { postAsk: async (b: Record<string, unknown>) => (asked.push(b), true), roots: () => [root], rootOf: () => root });
+    stopView = () => context.subscriptions.forEach((x) => x?.dispose?.());
     await api.scan();
     assert.deepEqual(api.state().map((f: { rel: string }) => f.rel), ["a.ts"]);
     for (const c of ["friday.todo.hand", "friday.todo.open", "friday.todo.refresh"]) {
@@ -213,6 +215,8 @@ test("the extension's wiring: the commands the package declares, the lens, the a
     assert.ok(pkg.contributes.views.friday.some((v: { id: string }) => v.id === "friday.todos"));
     assert.ok(pkg.contributes.viewsWelcome.some((v: { view: string }) => v.view === "friday.todos"));
   } finally {
+    stopView();
+    await sleep(300);
     rmTmp(root);
   }
 });
@@ -342,12 +346,14 @@ test("the view follows the disk: no badge, an agent's edit takes the row away, a
 
 test("a save keeps the authors; the view says when the first look is not done, and when a cap stopped it", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "todos-save-"));
+  let stopView = () => {};
   try {
     const git = (...a: string[]) => execFileSync("git", ["-c", "user.email=ann@x.dev", "-c", "user.name=Ann Lee", ...a], { cwd: root, stdio: "pipe" });
     git("init", "-q", "-b", "main");
     writeFileSync(path.join(root, "a.ts"), "// TODO: one\n");
     git("add", "."), git("commit", "-q", "-m", "one");
-    const { api, state } = stand(root);
+    const { api, state, stop } = stand(root);
+    stopView = stop;
     await api.scan();
     const rows = () => state.provider!.getChildren(state.provider!.getChildren()[0]);
     for (let i = 0; i < 50 && state.provider!.getTreeItem(rows()[0]).description !== "Ann"; i++) await sleep(50);
@@ -362,6 +368,8 @@ test("a save keeps the authors; the view says when the first look is not done, a
     assert.deepEqual(api.capped(), { files: false, hits: false });
     assert.equal(state.provider!.getChildren().some((n) => n.note), false);
   } finally {
+    stopView();
+    await sleep(300);
     rmTmp(root);
   }
 });
