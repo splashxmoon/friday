@@ -144,16 +144,41 @@ const LOCAL = /^(localhost|127\.0\.0\.1|\[::1\])$/i;
 /** The tallest page drawn whole: taller is cut there, as preview_screenshot's (desktop/capture.ts). */
 const MAX_PAGE = 4000;
 
+/**
+ * The little of playwright-core used here, described rather than imported: the package is a developer's (devDependencies), and the
+ * open-source edition's typecheck has none (v0.4.0's release builds failed on `typeof import("playwright-core")`).
+ */
+interface PwPage {
+  on(event: "console", f: (m: { type(): string; text(): string }) => void): void;
+  on(event: "pageerror", f: (e: Error) => void): void;
+  goto(url: string, o: { waitUntil: "load"; timeout: number }): Promise<unknown>;
+  waitForLoadState(state: "networkidle", o: { timeout: number }): Promise<void>;
+  waitForTimeout(ms: number): Promise<void>;
+  evaluate(js: string): Promise<unknown>;
+  screenshot(o: { type: "jpeg"; quality: number; fullPage: boolean; clip: { x: number; y: number; width: number; height: number } }): Promise<Buffer>;
+}
+interface PwContext {
+  newPage(): Promise<PwPage>;
+  close(): Promise<void>;
+}
+interface PwBrowser {
+  newContext(o: { viewport: { width: number; height: number }; deviceScaleFactor: number }): Promise<PwContext>;
+  close(): Promise<void>;
+}
+interface Pw {
+  chromium: { launch(o: { headless: boolean; channel?: string }): Promise<PwBrowser> };
+}
+
 /** Chrome through playwright-core, when this runner is run from source (a developer's, the test suite): the packaged runner has none. */
 async function withBrowser(url: string): Promise<Look> {
   const name = "playwright-core";
-  let pw: typeof import("playwright-core");
+  let pw: Pw;
   try {
-    pw = (await import(name)) as typeof import("playwright-core");
+    pw = (await import(name)) as Pw;
   } catch {
     return { shots: [], errors: [], consoleChecked: false, how: "browser", error: "Screenshots are taken by the Friday desktop app. Open this folder there to check the preview." };
   }
-  let browser: import("playwright-core").Browser | null = null;
+  let browser: PwBrowser | null = null;
   try {
     browser = await pw.chromium.launch({ headless: true, ...(process.env.E2E_CHANNEL ? { channel: process.env.E2E_CHANNEL } : {}) });
     const shots: LookShot[] = [];
