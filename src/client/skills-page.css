@@ -1,0 +1,232 @@
+/* Skills (Skills.tsx): what to look at down the left (as the MCP servers page has it, mcp-servers.css), the skills as rows, and
+   the one picked open beside them. Narrower, the open skill takes the list's place with a way back; at phone width the filters
+   are a row above. */
+.skl-head { align-items: center; }
+.skl-search { position: relative; width: 340px; }
+.skl-kbd { display: inline-grid; min-width: 18px; height: 18px; place-items: center; padding: 0 4px; border: 1px solid var(--border); border-radius: 5px; background: var(--card); color: var(--text-muted); font: 500 11px/1 var(--mono, ui-monospace, monospace); }
+.skl-search > .skl-kbd { flex: none; }
+.skl-said { display: flex; align-items: flex-start; gap: 7px; margin: 0; padding: 9px 12px; border: 1px solid color-mix(in srgb, var(--green) 28%, var(--border)); border-radius: 10px; background: color-mix(in srgb, var(--green) 5%, var(--card)); color: var(--ink-2); font-size: 12.5px; line-height: 18px; animation: skl-in 160ms var(--ease-out, ease-out); }
+.skl-said > svg { flex: none; margin-top: 2px; color: var(--green); }
+@keyframes skl-in { from { opacity: 0; transform: translateY(-2px); } }
+
+.skl-shell { display: grid; grid-template-columns: 184px minmax(280px, 380px) minmax(0, 1fr); align-items: stretch; gap: 20px; }
+.skl-shell.no-detail { grid-template-columns: 184px minmax(0, 1fr); }
+.skl-shell > .mdir-filters { position: static; align-self: start; max-height: 100%; overflow-y: auto; scrollbar-width: none; }
+
+/* The list: rows grouped by where they are. */
+.skl-listcol { display: flex; flex-direction: column; gap: 18px; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 4px 24px 0; scrollbar-gutter: stable; }
+.skl-group { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.skl-pile { padding: 6px 0 2px; }
+.skl-pile .rv-pile-btn > svg:not(.rv-pile-chev) { flex: none; }
+.skl-rows { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
+/* A skill's row, as a pull request's in Code Review: name, then what it's for with its size at the end; picked, lit with a ring. */
+.skl-row { display: flex; flex-direction: column; gap: 6px; width: 100%; min-width: 0; padding: 10px 12px; border: 0; border-radius: 10px; background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out); }
+.skl-row:hover { background: var(--hover); }
+.skl-row[aria-selected="true"] { background: var(--hover); box-shadow: inset 0 0 0 1px var(--border); }
+.skl-row:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
+.skl-row-name { display: -webkit-box; overflow: hidden; overflow-wrap: anywhere; color: var(--ink); font-size: 13.5px; font-weight: 500; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.skl-row-sub { display: flex; align-items: center; gap: 10px; min-width: 0; color: var(--text-muted); font-size: 12px; line-height: 17px; }
+.skl-row-what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skl-mark { display: grid; flex: none; place-items: center; width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--ink-2); }
+html.dark .skl-mark { background: color-mix(in srgb, var(--ink) 7%, var(--bg)); }
+.skl-mark-lg { width: 40px; height: 40px; border-radius: 11px; }
+.skl-files { display: inline-flex; flex: none; align-items: center; gap: 5px; color: var(--ink-2); font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.skl-files > svg { color: var(--text-muted); }
+.skl-have { display: inline-flex; flex: none; align-items: center; gap: 5px; color: var(--green); font-size: 12px; font-weight: 500; }
+
+/* The skill open. */
+.skl-detail { min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; border: 1px solid var(--border); border-radius: 14px; background: var(--card); }
+.skl-detail-in { display: flex; flex-direction: column; gap: 14px; padding: 14px 20px 22px; }
+.skl-detail-bar { display: flex; align-items: center; gap: 6px; min-height: 32px; }
+.skl-detail-bar svg { margin-right: 2px; }
+.skl-grow { flex: 1; }
+.skl-back { display: inline-flex; align-items: center; gap: 5px; align-self: flex-start; justify-self: start; width: max-content; padding: 4px 8px 4px 4px; border: 0; border-radius: 7px; background: none; color: var(--ink-2); font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer; }
+.skl-back:hover { background: var(--hover); color: var(--ink); }
+.skl-back-narrow { display: none; }
+.skl-detail-head { display: flex; align-items: flex-start; gap: 12px; }
+.skl-detail-title { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.skl-detail-title > h2 { margin: 0; overflow-wrap: anywhere; color: var(--ink); font-size: 18px; font-weight: 600; letter-spacing: -.01em; line-height: 24px; }
+.skl-detail-title > p { margin: 0; color: var(--ink-2); font-size: 13px; line-height: 19px; text-wrap: pretty; }
+.skl-where { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; color: var(--text-muted); font-size: 12px; }
+.skl-path { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; padding: 3px 8px; border: 0; border-radius: 6px; background: var(--hover); color: var(--ink-2); cursor: pointer; }
+.skl-path:hover { color: var(--ink); }
+.skl-path > code { overflow: hidden; font: 11.5px/17px var(--mono, ui-monospace, monospace); text-overflow: ellipsis; white-space: nowrap; }
+.skl-path > svg { flex: none; }
+.skl-tool-note { margin: 0; }
+.skl-tabs { margin-top: 2px; }
+.msv-seg > button[aria-selected="true"] { background: var(--card); color: var(--ink); box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 12%, transparent); }
+html.dark .msv-seg > button[aria-selected="true"], html.dark .msv-seg > button[aria-checked="true"] { background: color-mix(in srgb, var(--ink) 12%, var(--card)); }
+.skl-md { min-width: 0; color: var(--ink); font-size: 13.5px; line-height: 21px; }
+.skl-md pre { max-width: 100%; overflow-x: auto; }
+.skl-filelist { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.skl-filelist button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 8px; border: 0; border-radius: 7px; background: none; color: var(--ink-2); font: 12.5px/18px var(--mono, ui-monospace, monospace); text-align: left; cursor: pointer; }
+.skl-filelist button:hover { background: var(--hover); color: var(--ink); }
+.skl-filelist button > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skl-file { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.skl-file > b { font: 600 12.5px/18px var(--mono, ui-monospace, monospace); }
+.skl-file > pre { max-height: 480px; margin: 0; padding: 12px; overflow: auto; border-radius: 9px; background: var(--hover); color: var(--ink-2); font: 12px/18px var(--mono, ui-monospace, monospace); white-space: pre; }
+.skl-pick { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 72px 24px; color: var(--text-muted); font-size: 12.5px; text-align: center; }
+.skl-pick > b { color: var(--ink-2); font-size: 13.5px; font-weight: 600; }
+.skl-pick .skl-kbd { margin: 0 2px; }
+
+/* None of your own yet: what a skill is, and the ways to have one. */
+.skl-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; max-width: 560px; padding: 22px 22px 20px; border: 1px dashed var(--border-strong); border-radius: 14px; }
+.skl-empty-mark { display: grid; place-items: center; width: 40px; height: 40px; margin-bottom: 4px; border-radius: 11px; background: var(--hover); color: var(--ink-2); }
+.skl-empty > b { color: var(--ink); font-size: 15px; font-weight: 600; }
+.skl-empty > p { margin: 0 0 6px; color: var(--ink-2); font-size: 13px; line-height: 19px; text-wrap: pretty; }
+.skl-empty-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.skl-empty-acts svg { margin-right: 2px; }
+.skl-crew { min-width: 0; }
+.skl-crew > .mdir-note { margin: 0 0 12px; }
+
+/* Writing one: the instructions get the room, Write and Preview beside the sections to start. */
+.skl-sheet { max-height: min(90vh, 900px); overflow-y: auto; }
+.skl-form textarea { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--border-strong); border-radius: 8px; background: transparent; color: var(--ink); font: inherit; font-size: 13px; line-height: 19px; resize: vertical; }
+.skl-form textarea:focus, .skl-idea:focus { border-color: var(--border-focus); outline: none; }
+.skl-form .skl-body { min-height: 260px; font: 12.5px/19px var(--mono, ui-monospace, monospace); tab-size: 2; }
+.skl-form small code { padding: 0 4px; border-radius: 4px; background: var(--hover); color: var(--ink-2); font: 11px/16px var(--mono, ui-monospace, monospace); }
+.skl-form .skl-warn { color: var(--amber); }
+.skl-body-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.skl-body-head > span:first-child { color: var(--ink-2); font-size: 12.5px; font-weight: 500; }
+.skl-starters { display: inline-flex; flex: 1; flex-wrap: wrap; gap: 4px; }
+.skl-starters > button { height: 24px; padding: 0 8px; border: 1px dashed var(--border-strong); border-radius: 6px; background: none; color: var(--text-muted); font: inherit; font-size: 11.5px; cursor: pointer; }
+.skl-starters > button:hover { border-style: solid; color: var(--ink); }
+.skl-mode > button { height: 24px; padding: 0 10px; font-size: 12px; }
+.skl-preview { min-height: 260px; max-height: 420px; padding: 10px 12px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+.skl-hint { display: inline-flex; align-items: center; gap: 3px; color: var(--text-muted); font-size: 11.5px; }
+.skl-hint > .skl-kbd:last-of-type { margin-right: 3px; }
+
+/* A new skill: where it starts from, then the editor. */
+.skl-starts, .skl-templates ul { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.skl-start { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); color: var(--ink); font: inherit; text-align: left; cursor: pointer; transition: border-color var(--t-hover) var(--ease-out), background-color var(--t-hover) var(--ease-out); }
+.skl-start:hover:not(:disabled) { border-color: var(--border-strong); background: color-mix(in srgb, var(--ink) 2.5%, var(--card)); }
+.skl-start:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.skl-start:disabled { cursor: default; opacity: .55; }
+.skl-start > svg:last-child { flex: none; color: var(--text-muted); }
+.skl-start-text { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
+.skl-start-text > b { font-size: 13.5px; font-weight: 600; }
+.skl-start-text > span { color: var(--text-muted); font-size: 12.5px; line-height: 18px; text-wrap: pretty; }
+.skl-templates { display: flex; flex-direction: column; gap: 14px; }
+.skl-templates h4 { margin: 0 0 6px 2px; color: var(--text-muted); font-size: 12px; font-weight: 600; }
+.skl-templates .skl-start { padding: 10px 12px; }
+.skl-idea { width: 100%; padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: 10px; background: transparent; color: var(--ink); font: inherit; font-size: 13.5px; line-height: 20px; resize: vertical; }
+.skl-drafter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--text-muted); font-size: 12.5px; }
+.skl-working { display: flex; align-items: center; gap: 9px; margin: 0; color: var(--ink-2); font-size: 12.5px; }
+.skl-dots { width: 14px; height: 14px; border: 2px solid color-mix(in srgb, var(--ink) 18%, transparent); border-top-color: var(--ink); border-radius: 50%; animation: skl-spin .8s linear infinite; }
+@keyframes skl-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .skl-dots { animation-duration: 2.4s; } .skl-said { animation: none; } }
+
+/* GitHub: the address, then the skills in it to tick. */
+.skl-url { display: flex; gap: 8px; min-width: 0; }
+.skl-url > input { flex: 1; min-width: 0; height: 34px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 8px; background: transparent; color: var(--ink); font-size: 13px; }
+.skl-url > input:focus { border-color: var(--border-focus); outline: none; }
+.skl-url > button { height: 34px; }
+.skl-try { margin: -4px 0 0; color: var(--text-muted); font-size: 12.5px; }
+.skl-try .link-btn { font-size: 12.5px; }
+.skl-found { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.skl-found-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--ink-2); font-size: 12.5px; font-weight: 500; }
+.skl-found-head .link-btn { font-size: 12.5px; }
+.skl-found-search { width: auto; }
+.skl-found-list { display: flex; flex-direction: column; max-height: 300px; margin: 0; padding: 4px; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; list-style: none; }
+.skl-found-list label { display: flex; align-items: flex-start; gap: 10px; padding: 8px; border-radius: 7px; cursor: pointer; }
+.skl-found-list label:hover { background: var(--hover); }
+.skl-found-list label.is-have { cursor: default; opacity: .7; }
+.skl-found-list label.is-have:hover { background: none; }
+.skl-found-list input { flex: none; width: 15px; height: 15px; margin-top: 2px; accent-color: var(--ink); }
+.skl-found-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.skl-found-text > b { color: var(--ink); font-size: 13px; font-weight: 600; }
+.skl-found-text > span { display: -webkit-box; overflow: hidden; color: var(--text-muted); font-size: 12px; line-height: 17px; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.skl-found-text > em { color: var(--green); font-size: 12px; font-style: normal; }
+
+/* Narrower: the skill open takes the list's place, with Skills to go back. */
+@media (max-width: 1180px) {
+  .skl-shell { grid-template-columns: 184px minmax(0, 1fr); }
+  .skl-shell.has-open > .skl-listcol { display: none; }
+  .skl-shell:not(.has-open) > .skl-detail { display: none; }
+  .skl-back-narrow { display: inline-flex; }
+
+}
+@media (max-width: 860px) {
+  .skl-shell, .skl-shell.no-detail { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: 10px; }
+  .skl-shell.has-open > .skl-detail, .skl-shell:not(.has-open) > .skl-listcol { grid-row: 2; }
+  .skl-shell > .mdir-filters { position: static; flex-direction: row; flex-wrap: nowrap; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+  .skl-shell > .mdir-filters::-webkit-scrollbar { display: none; }
+  .skl-shell > .mdir-filters .mdir-filter { flex: none; }
+  .skl-shell > .mdir-filters .mdir-sep { display: none; }
+  .skl-search { flex: 1 1 180px; width: auto; }
+  .skl-head { flex-wrap: wrap; }
+}
+@media (max-width: 640px) {
+  .skl-detail-in { padding: 12px 14px 18px; }
+  .skl-url { flex-wrap: wrap; }
+  .skl-url > input { flex-basis: 100%; }
+  .skl-hint { display: none; }
+}
+/* A skill's own headings read as sections of a page, not a chat answer's. */
+.skl-md :is(h1, h2) { margin: 18px 0 8px; font-size: 15px; font-weight: 600; line-height: 22px; letter-spacing: -.005em; }
+.skl-md :is(h3, h4) { margin: 14px 0 6px; font-size: 13.5px; font-weight: 600; }
+.skl-md > :first-child :is(h1, h2, h3):first-child, .skl-md :is(h1, h2):first-child { margin-top: 0; }
+/* Where a tool's skill comes from, when not its own folder: Built in, Synced, From VS Code, Plugin. */
+.skl-from { display: inline-block; margin-right: 6px; padding: 0 5px; border-radius: 4px; background: var(--hover); color: var(--ink-2); font-size: 11px; font-weight: 500; line-height: 16px; vertical-align: 1px; }
+/* Finding one: how many, where the search looks, the filters and the sort, over the list; the filters on as chips to take off. */
+.skl-tools { display: flex; align-items: center; gap: 6px; min-height: 30px; margin: 0 0 6px; padding: 0 2px 0 8px; }
+.skl-count { color: var(--text-muted); font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.skl-scope { height: 22px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--ink-2); font: 500 11.5px var(--font); cursor: pointer; }
+.skl-scope:hover { border-color: var(--border-strong); color: var(--ink); }
+.skl-scope[aria-pressed="true"] { border-color: transparent; background: var(--hover-strong); color: var(--ink); }
+.skl-tool-btn { color: var(--text-muted); }
+.skl-tool-btn.is-on { background: var(--hover-strong); color: var(--ink); }
+.skl-sort { height: 26px; font-size: 12px; }
+.skl-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 8px; padding: 0 6px; }
+.skl-chip { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 7px 0 9px; border: 0; border-radius: 6px; background: var(--hover-strong); color: var(--ink); font: 500 11.5px var(--font); cursor: pointer; }
+.skl-chip:hover { background: color-mix(in srgb, var(--ink) 14%, transparent); }
+.skl-chip > svg { color: var(--text-muted); }
+.skl-hl { padding: 0 1px; border-radius: 3px; background: color-mix(in srgb, var(--amber) 32%, transparent); color: inherit; }
+.skl-also { background: color-mix(in srgb, var(--live) 13%, transparent); color: var(--live); }
+
+/* The page fills the window and scrolls inside, as Code Review does (Arun, 2026-11-19: "fix scrolling on the skills page too, the
+   logic and stuff is bugged"): the header and the places stay, the list and the skill open each scroll on their own. */
+.page.conns-page.skl-page { overflow: hidden; padding-bottom: 24px; }
+.skl-page .page-inner { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.skl-page .msv { display: flex; flex: 1; flex-direction: column; min-height: 0; padding-bottom: 0; }
+.skl-page .mdir { flex: 1; min-height: 0; }
+.skl-page .skl-shell { flex: 1; min-height: 0; }
+.skl-page .skl-head, .skl-page .skl-said { flex: none; }
+.skl-shell.no-detail > .skl-empty { align-self: start; }
+
+/* The skill open: its name with Use it and Edit, a line of facts, what it's for in a box of its own, then its instructions beside
+   an outline of their sections. */
+.skl-detail-in { gap: 16px; padding: 20px 22px 28px; }
+.skl-head2 { display: flex; align-items: center; gap: 12px; }
+.skl-head2-text { display: flex; flex: 1; flex-direction: column; gap: 4px; min-width: 0; }
+.skl-head2-text > h2 { margin: 0; overflow-wrap: anywhere; color: var(--ink); font-size: 19px; font-weight: 600; letter-spacing: -.012em; line-height: 26px; }
+.skl-facts { display: flex; flex-wrap: wrap; gap: 2px 0; margin: -6px 0 0; color: var(--text-muted); font-size: 12.5px; line-height: 18px; }
+.skl-facts > span { white-space: nowrap; }
+.skl-facts > span + span::before { content: "·"; margin: 0 7px; color: var(--text-muted); opacity: .7; }
+.skl-head2-acts { display: flex; flex: none; align-items: center; gap: 6px; }
+.skl-head2-acts svg { margin-right: 2px; }
+.skl-copied { display: inline-flex; align-items: center; gap: 5px; align-self: flex-start; margin: -6px 0 0; color: var(--green); font-size: 12px; }
+.skl-when { display: flex; flex-direction: column; gap: 5px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 11px; background: color-mix(in srgb, var(--ink) 2.5%, transparent); }
+.skl-when-label { color: var(--text-muted); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.skl-when > p { margin: 0; color: var(--ink); font-size: 13.5px; line-height: 21px; overflow-wrap: anywhere; text-wrap: pretty; }
+.skl-when > p.is-clamped { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.skl-more { align-self: flex-start; font-size: 12.5px; }
+.skl-tabbar { display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--border); padding-top: 14px; }
+.skl-read { display: block; min-width: 0; }
+.skl-read.has-outline { display: grid; grid-template-columns: minmax(0, 1fr) 180px; align-items: start; gap: 28px; }
+.skl-read .skl-md { max-width: 72ch; font-size: 13.5px; line-height: 22px; }
+.skl-md :is(ul, ol) { padding-left: 20px; }
+.skl-md li + li { margin-top: 3px; }
+.skl-md :is(pre, [data-streamdown="code-block"]) { font-size: 12px; }
+.skl-outline { position: sticky; top: 12px; align-self: start; max-height: calc(100% - 24px); overflow-y: auto; display: flex; flex-direction: column; gap: 1px; padding-left: 12px; border-left: 1px solid var(--border); }
+.skl-outline > span { margin: 0 0 6px; color: var(--text-muted); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.skl-outline > button { display: block; overflow: hidden; padding: 4px 6px; border: 0; border-radius: 6px; background: none; color: var(--ink-2); font: 12.5px/17px var(--font); text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.skl-outline > button[data-depth="3"] { padding-left: 16px; color: var(--text-muted); }
+.skl-outline > button:hover { background: var(--hover); color: var(--ink); }
+@media (max-width: 1400px) { .skl-read.has-outline { grid-template-columns: minmax(0, 1fr); } .skl-outline { display: none; } }
+@media (max-width: 640px) { .skl-head2 { flex-wrap: wrap; } .skl-head2-acts { flex-basis: 100%; } }
+/* The filter button as big as the sort beside it (Arun, 2026-11-19: "make the show only button bigger and the same size"). */
+.skl-tools .skl-tool-btn.icon-btn, .skl-tools button.skl-tool-btn { display: grid; place-items: center; width: 30px !important; height: 30px !important; min-width: 30px; padding: 0; border: 1px solid var(--border); border-radius: 8px; }
+.skl-tools .skl-tool-btn svg { width: 16px; height: 16px; }
+.skl-tools .skl-sort { height: 30px; border-radius: 8px; }
+.skl-outline > button[aria-current="true"] { background: var(--hover); color: var(--ink); font-weight: 500; box-shadow: inset 2px 0 0 var(--ink); border-radius: 0 6px 6px 0; }

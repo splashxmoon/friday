@@ -3,7 +3,7 @@ import { isLocal } from "./edition.js";
 import { driverOf, runOf, type SessionState } from "../session/projection.js";
 import type { Member, SessionEvent } from "../types.js";
 import { Icon } from "./icons.js";
-import { commitPaths } from "../shepherd.js";
+import { commitPaths } from "../commit-paths.js";
 import { scriptsIn, type Script } from "./Problems.js";
 import type { Send } from "./useSession.js";
 import { Check } from "./ui.js";

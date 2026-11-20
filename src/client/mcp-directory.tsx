@@ -585,17 +585,14 @@ export function Directory({ identity, servers, builtInApps, actions, onChanged }
   );
   return (
     <section className="mdir" aria-label="Connect a service">
+      {/* Search on the left, what to add on the right, as the Agent Board and Skills have them (Arun, 2026-11-19: "move the search bar
+          on the mcp page to the left side of the page too, like how it is on other pages"). How many services is in its placeholder. */}
       <div className="mdir-head">
-        <h2 className="msv-h2">
-          Connect a service <span>{catalog.length}</span>
-        </h2>
-        <div className="mdir-head-acts">
-          {actions}
-          <label className="mdir-search">
-            <Icon name="search" size={14} />
-            <input type="search" placeholder="Search services" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search services" />
-          </label>
-        </div>
+        <label className="mdir-search">
+          <Icon name="search" size={14} />
+          <input type="search" placeholder={`Search ${catalog.length} services`} value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search services" />
+        </label>
+        <div className="mdir-head-acts">{actions}</div>
       </div>
       <div className="mdir-body">
         <nav className="mdir-filters" aria-label="Kinds of service">

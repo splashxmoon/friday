@@ -63,7 +63,7 @@ export interface BrainEntry {
   text: string;
   kind: BrainKind;
   /** Where it came from: the agent whose run taught it (a coding tool, Friday's agent), or a person who wrote it. */
-  from: { tool: string; name: string; sid?: string; title?: string };
+  from: { tool: string; name: string; sid?: string; title?: string; /** Which side of Friday it was learned in: Code's chats or Agents' sessions (code-brain.ts). */ surface?: "code" | "agents" };
   at: number;
   /** How many briefings it has been in: what keeps coming up rises. */
   uses: number;
@@ -283,6 +283,11 @@ export function offersCheck(before: BrainEntry | undefined, after: BrainEntry): 
 
 // ── where it is kept ─────────────────────────────────────────────────
 
+const withoutRetired = (e: BrainEntry): BrainEntry => {
+  const { retired: _gone, ...rest } = e;
+  return rest;
+};
+
 /** One workspace's brains, a hash of entries per repo, and the repos it knows. */
 export class BrainRegistry {
   constructor(
@@ -354,7 +359,8 @@ export class BrainRegistry {
     const now = Date.now();
     for (const l of lessons) {
       const same = have.find((e) => e.key === l.key || e.text.toLowerCase() === l.text.toLowerCase());
-      let entry: BrainEntry = same ? { ...same, text: l.text, kind: l.kind, from, at: now } : { id: randomBytes(5).toString("hex"), key: l.key, text: l.text, kind: l.kind, from, at: now, uses: 0 };
+      // A retired lesson taught again is current again: it leaves the retired list, back in the briefings.
+      let entry: BrainEntry = same ? { ...withoutRetired(same), text: l.text, kind: l.kind, from, at: now } : { id: randomBytes(5).toString("hex"), key: l.key, text: l.text, kind: l.kind, from, at: now, uses: 0 };
       if (l.kind === "correction") entry = corrected(same, entry, l.check, now);
       if (offered && offersCheck(same, entry)) {
         entry = { ...entry, check: { ...entry.check!, state: "proposed", at: now, ...(from.sid ? { sid: from.sid } : {}) } };
@@ -489,11 +495,11 @@ export class BrainRegistry {
   }
 
   /** Written by a person, from the brain's page. */
-  async add(repo: string, name: string, p: { text: string; kind?: BrainKind }, by: { id: string; name: string }): Promise<BrainEntry> {
+  async add(repo: string, name: string, p: { text: string; kind?: BrainKind }, by: { id: string; name: string }, surface?: "code" | "agents"): Promise<BrainEntry> {
     const text = p.text.trim().slice(0, MAX_TEXT);
     if (text.length < 3) throw new Error("Write what the team should know.");
     if (holdsSecret(text)) throw new Error(SECRET_REFUSED);
-    const [entry] = await this.learn(repo, name, [{ key: text.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40), kind: p.kind ?? "fact", text }], { tool: "person", name: by.name });
+    const [entry] = await this.learn(repo, name, [{ key: text.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40), kind: p.kind ?? "fact", text }], { tool: "person", name: by.name, ...(surface ? { surface } : {}) });
     return entry!;
   }
 

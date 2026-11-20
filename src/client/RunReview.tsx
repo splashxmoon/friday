@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { lazy, Suspense, useContext, useState, type ReactNode } from "react";
 import { commandFailed, TEST_CMD, type Receipt } from "../receipt.js";
 import type { DiffFile, ReviewFinding, SessionEvent } from "../types.js";
 import { driverOf, type SessionState } from "../session/projection.js";
@@ -6,9 +6,19 @@ import { MAIN_LANE, type Member } from "../types.js";
 import { argsOf } from "./args.js";
 import { Icon } from "./icons.js";
 import { MenuButton, useConfirm } from "./ui.js";
-import { ShipDialog, type Dest } from "./Ship.js";
+import { ShipDialog } from "./ShipLazy.js";
+import type { Dest } from "./Ship.js";
 import type { Send } from "./useSession.js";
 import { prefillComposer } from "./prefill.js";
+import { isLocal } from "./edition.js";
+import { IdeChatContext, openInCode } from "./ide/mode.js";
+import { isBig } from "../stack-big.js";
+import type { AskLane } from "./Activity.js";
+import { hasUiChange } from "../preview-check.js";
+import { IdeLink } from "./ide/IdeLink.js";
+
+// Only a Code chat's changes card has it, and only after a run that changed what a page draws: out of the first load.
+const PreviewCheck = lazy(() => import("./ide/PreviewCheck.js"));
 export { prefillComposer };
 
 /**
@@ -378,7 +388,10 @@ export function ReviewCard({
   notify,
   onReview,
   contended = {},
+  latest = true,
 }: {
+  /** Whether this is the lane's newest finished run: a check in the preview is offered only there. */
+  latest?: boolean;
   /** Files here another agent changed too, by path, and who (Activity contendedPaths). */
   contended?: Record<string, string>;
   /** What a second agent made of this change, when the session has it read. */
@@ -410,12 +423,16 @@ export function ReviewCard({
   /** The Changes panel, at this file when one is said. */
   onReview?: (path?: string) => void;
 }) {
+  // In Code's column the head's count opens Review changes in the IDE, not a list here (Arun, 2026-11-19: "make it more streamlined for code").
+  const inColumn = useContext(IdeChatContext) !== null;
   const [applying, setApplying] = useState(false);
   const [applyErr, setApplyErr] = useState("");
   const [more, setMore] = useState(false);
   /** The commit dialog, open at where the commit goes. */
   const [ship, setShip] = useState<Dest | null>(null);
   const [, redraw] = useState(0);
+  // "Split into a stack" (Arun, 2026-11-19, wave 3): asked of this chat's agent, and what came of the press.
+  const [stackSaid, setStackSaid] = useState("");
   const [ask, confirmUI] = useConfirm();
   const adds = files.reduce((n, f) => n + f.additions, 0);
   const dels = files.reduce((n, f) => n + f.deletions, 0);
@@ -436,6 +453,9 @@ export function ReviewCard({
   const copyOf = state.engines[lane]?.copyOf;
   const into = copyOf?.split(/[\\/]/).filter(Boolean).pop() ?? "your folder";
   const applied = !!copyOf && lastApplySeq > endSeq;
+  // A racer's copy in Code's column has one way into the folder, Keep on the race card (ide/race-column.tsx): Apply here moved the
+  // copy's base, so Keep then found nothing new, and Apply on two racers merged both (Arun, 2026-11-19, wave 2: "Race the tools").
+  const racing = inColumn && !!copyOf && !!state.lanes.find((l) => l.id === lane)?.name.startsWith("Race · ");
   const apply = async () => {
     setApplying(true);
     setApplyErr("");
@@ -467,11 +487,23 @@ export function ReviewCard({
     redraw((n) => n + 1);
   };
 
+  // A big change in Code's column is offered a split into small pull requests, each based on the last (the agent proposes, the card makes it).
+  const splitOffer = inColumn && may && !outcome && !racing && !copyOf && files.length > 0 && isBig(files);
+  const splitIntoStack = async () => {
+    setStackSaid("…");
+    const { STACK_ASK } = await import("../stack-plan.js");
+    const reply = (r: { ok: boolean; error?: string }) => setStackSaid(r.ok ? "Asked for a split" : r.error || "That didn't send");
+    const ask: AskLane = { lane, text: STACK_ASK, reply, sid };
+    window.dispatchEvent(new CustomEvent("friday:ask-lane", { detail: ask }));
+    if (!ask.handled) setStackSaid("Open the chat to send that");
+  };
+  const warns = (receipt?.flags.length ?? 0) + (second?.findings?.length ?? 0);
+  const footShows = !outcome && (!tests || (!second && state.lanes.length > 0));
   return (
     <div className={`change-card${outcome ? " settled" : ""}${folded ? " folded" : ""}`}>
       {confirmUI}
       <div className="cc-head">
-        <button type="button" className="cc-toggle" aria-expanded={!folded} title={folded ? "Show the files" : "Fold it away"} onClick={fold}>
+        <button type="button" className="cc-toggle" {...(inColumn ? { title: "Review the changes in the IDE", onClick: () => window.dispatchEvent(new CustomEvent("friday:vsc-command", { detail: "reviewChanges" })) } : { "aria-expanded": !folded, title: folded ? "Show the files" : "Fold it away", onClick: fold })}>
           <Icon name="chevronRight" size={13} className="cc-fold" />
           <b>
             {files.length} file{files.length === 1 ? "" : "s"}
@@ -496,14 +528,34 @@ export function ReviewCard({
               })()
             ))}
           {/* Folded, what wants looking at is still said on its line, so folding never hides a warning. */}
-          {folded && (receipt?.flags.length || second?.findings?.length) ? (
+          {folded && !inColumn && (receipt?.flags.length || second?.findings?.length) ? (
             <span className="cc-warn" title={`${(receipt?.flags.length ?? 0) + (second?.findings?.length ?? 0)} to look at`}>
               {(receipt?.flags.length ?? 0) + (second?.findings?.length ?? 0)}
               <span className="cc-long"> to look at</span>
             </span>
           ) : null}
         </button>
+        {/* In the column the count above goes to the IDE, so what wants looking at is its own button that opens the findings, flags and
+            the foot under the head (no file list: the files are in the IDE's review). */}
+        {inColumn && (warns > 0 || footShows) && (
+          <button type="button" className={warns > 0 ? "cc-warn cc-detail" : "cc-detail quiet"} aria-expanded={!folded} title={folded ? "Show what needs looking at" : "Fold it away"} onClick={fold}>
+            {warns > 0 ? (
+              <>
+                {warns}
+                <span className="cc-long"> to look at</span>
+              </>
+            ) : (
+              "Details"
+            )}
+          </button>
+        )}
         <span className="cc-sp" />
+        {/* The first changed file, in the Code view's editor (⌘E): its own button so it is the same in every state below. */}
+        {isLocal() && files.length > 0 && !files.every((f) => f.status === "deleted") && (
+          <button type="button" className="cc-btn line cc-code" title={`Open the changes in Code (${/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘E" : "Ctrl+E"})`} onClick={() => openInCode((files.find((f) => f.status !== "deleted") ?? files[0]!).path, undefined, { review: true })}>
+            Open in Code <kbd aria-hidden="true">{/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘E" : "Ctrl+E"}</kbd>
+          </button>
+        )}
         {outcome ? (
           <>
             <span className="cc-outcome">
@@ -515,7 +567,7 @@ export function ReviewCard({
               </button>
             )}
           </>
-        ) : copyOf ? (
+        ) : racing ? null : copyOf ? (
           <>
             {undo && (
               <button type="button" className="cc-btn quiet" title="Put these files back as they were before this turn" onClick={confirmUndo}>
@@ -568,12 +620,27 @@ export function ReviewCard({
           </>
         )}
       </div>
+      {splitOffer && (
+        <div className="cc-stack">
+          <span>{files.length} files, {adds + dels} lines: a lot to review at once.</span>
+          <button type="button" className="cc-btn line" disabled={stackSaid === "…" || stackSaid === "Asked for a split"} title="Ask the agent to split this into a stack of small pull requests, each based on the last" onClick={() => void splitIntoStack()}>
+            Split into a stack
+          </button>
+          {stackSaid && stackSaid !== "…" && <span className="cc-stack-said" role="status">{stackSaid}</span>}
+        </div>
+      )}
+      {/* Preview checks (Arun, 2026-11-19, wave 3): after a run that changed what a page draws, the app's pages in pictures and its console. */}
+      {inColumn && isLocal() && !racing && !undone && !!eng?.cwd && invite && hasUiChange(files) && (
+        <Suspense fallback={null}>
+          <PreviewCheck files={files} cwd={eng.cwd} sid={sid} invite={invite} lane={lane} endSeq={endSeq} send={send} via={via ?? null} offer={latest} />
+        </Suspense>
+      )}
       {!folded && (
         <>
       {said.length > 0 && <p className="cc-explain">{said.join(" ")}</p>}
       {second && <SecondReviewView r={second} via={via ?? null} lane={lane} sid={sid} endSeq={endSeq} send={send} {...(notify ? { notify } : {})} />}
       {receipt && receipt.flags.length > 0 && <ReceiptView receipt={receipt} />}
-      <ul className="cc-files">
+      {!inColumn && <ul className="cc-files">
         {shown.map((f) => {
           const open = openRows.has(rowKey(f.path));
           const cut = f.path.lastIndexOf("/");
@@ -608,6 +675,8 @@ export function ReviewCard({
                         Open in Changes <Icon name="arrowRight" size={12} />
                       </button>
                     )}
+                    {/* The file itself, in the IDE at its first changed line (Arun, 2026-11-20: "Every file mention opens in the IDE"). */}
+                    {f.status !== "deleted" && isLocal() && <IdeLink className="link-btn" arrow file={{ path: f.path, lane, line: mini?.lines.find((l) => l.kind === "add")?.n }} />}
                   </div>
                 </div>
               )}
@@ -621,7 +690,7 @@ export function ReviewCard({
             </button>
           </li>
         )}
-      </ul>
+      </ul>}
       {!outcome && (!tests || (!second && state.lanes.length > 0)) && (
         <div className="cc-foot">
           {!tests && (

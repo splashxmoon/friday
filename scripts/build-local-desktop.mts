@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 /**
  * The open-source edition's desktop app, built into dist/ for Electron (src/local/desktop.ts):
  *   dist/client/   the page, built ahead so the app needs no bundler
@@ -9,7 +10,7 @@
 import { build } from "esbuild";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import os from "node:os";
-import { rm } from "node:fs/promises";
+import { cp, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -31,6 +32,10 @@ if (existsSync(appsFile)) {
 
 await rm(dist, { recursive: true, force: true });
 await build(clientBuildOptions(path.join(dist, "client"), true));
+// The Friday extension for the optional VS Code (src/vscode-ext/): plain files beside main.mjs, where src/runner/vscode.ts looks.
+await cp(path.join(root, "src", "vscode-ext", "friday"), path.join(dist, "vscode-ext", "friday"), { recursive: true });
+// VS Code itself, packed per platform into build/code-server for electron-builder's extraResources (scripts/vscode-bundle.mts).
+execFileSync(process.execPath, [path.join(root, "node_modules", "tsx", "dist", "cli.mjs"), path.join(root, "scripts", "vscode-bundle.mts")], { cwd: root, stdio: "inherit" });
 await build({
   entryPoints: [path.join(root, "src/local/desktop.ts")],
   outfile: path.join(dist, "main.mjs"),

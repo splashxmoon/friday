@@ -8,7 +8,7 @@ import { DiffView } from "./DiffView.js";
 import { hunksOf } from "./git-hunks.js";
 import { Icon } from "./icons.js";
 import { patchLines } from "./patchLines.js";
-import { ShipDialog } from "./Ship.js";
+import { ShipDialog } from "./ShipLazy.js";
 import { Picker, relTime, useConfirm } from "./ui.js";
 import type { Send } from "./useSession.js";
 

@@ -6,6 +6,8 @@ import { ENGINE_NAMES } from "../types.js";
 import { FileIcon } from "./fileIcons.js";
 import { hostApi } from "./local.js";
 import { openOutside } from "./openOutside.js";
+import { isLocal } from "./edition.js";
+import { IdeLink } from "./ide/IdeLink.js";
 import { reviews, useReviews } from "./prWatch.js";
 import type { Identity } from "./storage.js";
 import { isTyping } from "./ui.js";
@@ -189,6 +191,8 @@ export function ReviewTour({ identity, pr, files, onClose }: { identity: Identit
                 <span className="text-[var(--text-muted)]">{dir(f.path)}</span>
                 {base(f.path)}
               </span>
+              {/* In the IDE (Arun, 2026-11-20: "Every file mention opens in the IDE"): the pull request checked out in a copy, this file open there. */}
+              {isLocal() && diffs?.get(f.path)?.status !== "removed" && <IdeLink className="link-btn shrink-0 text-[12px]" prFile={{ identity, url: pr.url, title: pr.title, path: f.path }} />}
               <span className="shrink-0 font-mono text-[12px] tabular-nums">
                 <span className="text-[var(--green)]">+{f.additions}</span> <span className="text-[var(--red)]">−{f.deletions}</span>
               </span>

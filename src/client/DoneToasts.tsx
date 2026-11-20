@@ -8,7 +8,7 @@ import "./done-toasts.css";
  * window is in sight a small toast that opens the session when pressed and goes by itself. Nothing for the session on screen,
  * whose own chat already shows it; with the window hidden the system notification says it (Attention.tsx notifyDone).
  */
-export type Done = { sid: string; title: string; what: string };
+export type Done = { sid: string; title: string; what: string; /** Said as it is, not as "Finished · …": the summary of what was held while you typed (ide/quiet.ts). */ plain?: boolean };
 
 /** Said by the attention poll as a run ends (Attention.tsx). */
 export const sayDone = (d: Done) => void window.dispatchEvent(new CustomEvent<Done>("friday:done", { detail: d }));
@@ -47,9 +47,21 @@ export function DoneToasts({ activeSid }: { activeSid: string | null }) {
       const t = setTimeout(() => (timers.delete(t), drop(id)), SHOWN_MS);
       timers.add(t);
     };
+    // What was held while you typed (ide/quiet.ts), as one toast: pressing it opens the one session, or Needs you when several.
+    const onHeld = (e: Event) => {
+      const d = (e as CustomEvent<{ title: string; what: string; sid: string | null }>).detail;
+      if (doneChimeOn()) doneChime();
+      if (document.visibilityState !== "visible") return;
+      const id = ++n;
+      setShown((s) => [...s.filter((x) => x.sid !== (d.sid ?? "")), { sid: d.sid ?? "", title: d.title, what: d.what, plain: true, id }].slice(-MAX));
+      const t = setTimeout(() => (timers.delete(t), drop(id)), SHOWN_MS);
+      timers.add(t);
+    };
     addEventListener("friday:done", on);
+    addEventListener("friday:held", onHeld);
     return () => {
       removeEventListener("friday:done", on);
+      removeEventListener("friday:held", onHeld);
       for (const t of timers) clearTimeout(t);
     };
   }, []);
@@ -62,12 +74,12 @@ export function DoneToasts({ activeSid }: { activeSid: string | null }) {
   return (
     <section className="done-toasts" aria-label="Finished" aria-live="polite" onPointerEnter={() => (held.current = true)} onPointerLeave={() => (held.current = false)}>
       {shown.map((d) => (
-        <button key={d.id} type="button" className="done-toast" onClick={() => (window.dispatchEvent(new CustomEvent("friday:open-session", { detail: { sid: d.sid } })), setShown((s) => s.filter((x) => x.id !== d.id)))}>
+        <button key={d.id} type="button" className="done-toast" onClick={() => (window.dispatchEvent(d.sid ? new CustomEvent("friday:open-session", { detail: { sid: d.sid } }) : new Event("friday:open-needs")), setShown((s) => s.filter((x) => x.id !== d.id)))}>
           <span className="done-toast-dot" aria-hidden="true" />
           <span className="done-toast-text">
             <span className="done-toast-title">{d.title}</span>
             {/* A lane by its name; the session's own agent ("Main") goes without saying. */}
-            <span className="done-toast-what">Finished{d.what && d.what !== "Main" ? ` · ${d.what}` : ""}</span>
+            <span className="done-toast-what">{d.plain ? d.what : `Finished${d.what && d.what !== "Main" ? ` · ${d.what}` : ""}`}</span>
           </span>
         </button>
       ))}

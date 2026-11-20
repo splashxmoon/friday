@@ -185,7 +185,7 @@ export async function startLocal(o: { home?: string; port?: number; /** A link f
     // Project memory (brain.ts): each finished run read by the coding tool that did it, on this computer, for what it taught.
     decisionLog: true,
     dataDir: path.join(home, "uploads"),
-    local: { redis: kv.redis, sub: kv.sub, user: { id: "local", name }, ...(o.atComputer ? { atComputer: o.atComputer } : {}), phone, outside, join, models: path.join(home, "models"), channels: path.join(home, "channels.json"),
+    local: { redis: kv.redis, sub: kv.sub, user: { id: "local", name }, ...(o.atComputer ? { atComputer: o.atComputer } : {}), phone, outside, join, models: path.join(home, "models"),
       // The coding tools on this computer kept up to date, a while after it starts and every six hours (tool-updates.ts).
       toolUpdates: true,
     },

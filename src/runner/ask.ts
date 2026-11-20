@@ -26,6 +26,12 @@ export interface AskInput {
    * so it reads and changes nothing. Without it, a scratch folder of Friday's own, as the agent builder needs nothing more.
    */
   cwd?: string;
+  /**
+   * Folders it may read besides its cwd (a pull request's copy, pr-ide.ts): given as the tool's own extra-folder flag, and named in
+   * the system note for a tool that has none. A folder it only reads is not its working folder, so the tool never loads that
+   * folder's own settings, hooks, MCP file or instructions: what a stranger wrote in it is data, not setup.
+   */
+  dirs?: string[];
 }
 
 /** onText hears the answer as the CLI writes it, a piece at a time; the whole answer is still what this returns. */
@@ -55,7 +61,9 @@ async function askOnce(input: AskInput, onText: ((chunk: string) => void) | unde
   if (!input.cwd) await mkdir(cwd, { recursive: true });
 
   // Never resumed, so never kept as a conversation of the tool's own (TurnSpec.ephemeral).
-  const spec = { prompt, resumeId: null, mode: "plan" as const, system: input.system, ephemeral: true, ...(skip.length ? { skip } : {}), ...(input.model ? { model: input.model } : {}) };
+  const dirs = (input.dirs ?? []).filter(Boolean);
+  const system = dirs.length && !adapter.dirs ? `${input.system}\n\nYou may read these folders too (read only): ${dirs.join(", ")}` : input.system;
+  const spec = { prompt, resumeId: null, mode: "plan" as const, system, ephemeral: true, ...(dirs.length ? { dirs } : {}), ...(skip.length ? { skip } : {}), ...(input.model ? { model: input.model } : {}) };
   const args = adapter.args(spec);
   // Cursor's answer streams as it is written (the adapter asks for that), and its own result line has it whole.
   const partial = input.tool === "cursor";

@@ -1,0 +1,16 @@
+/* Usage-aware routing in Code (Arun, 2026-11-20, wave 5): Auto in the tool picker and the bar over a running chat. Friday's own
+   variables, so both themes follow. The bar itself wears restore.css's .rb. */
+.rt-auto-line { display: flex; align-items: center; gap: 6px; min-width: 0; margin: 0; padding: 0 14px 9px; color: var(--text-muted); font: 400 11.5px/1.35 var(--font); }
+.rt-auto-line svg { flex: none; }
+.rt-auto-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rt-auto-card { margin: 2px 4px 6px; padding: 8px 10px; border-radius: var(--r-md, 8px); background: var(--hover); }
+.rt-auto-why { margin: 0 0 3px; color: var(--ink); font: 500 12.5px/1.4 var(--font); }
+.rt-auto-note { margin: 0; color: var(--text-muted); font: 400 11.5px/1.45 var(--font); }
+.rt-auto-off { margin: 6px 0 0; padding: 0; border: 0; background: none; color: var(--ink-2); font: 500 11.5px var(--font); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.rt-auto-off:hover { color: var(--ink); }
+.rt-auto-off:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; border-radius: 3px; }
+.rt-bar-dot { background: var(--amber); }
+.rt-note { flex: 1 0 100%; order: 3; color: var(--text-muted); }
+.rt-bar .rb-text { white-space: nowrap; }
+.rt-bar .rb-acts { flex-wrap: wrap; justify-content: flex-end; }
+.rt-bar .rb-btn { white-space: nowrap; }

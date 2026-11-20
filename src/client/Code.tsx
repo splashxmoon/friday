@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, memo, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentView } from "../agents.js";
 import type { CliSession } from "../runner/imports.js";
 import type { FolderInfo } from "../runner/workspace.js";
@@ -11,7 +11,6 @@ import { rememberAsk, walkAsks } from "./askHistory.js";
 import { NoMachine, connectThisComputer, hostApi, useMachine } from "./local.js";
 import { RunsOn } from "./Computers.js";
 import { HeroTitle } from "./HeroTitle.js";
-import { HomeActivity } from "./HomeActivity.js";
 import { MachineBadge } from "./MachineBadge.js";
 import type { Identity, RecentSession } from "./storage.js";
 import { InBand, MenuButton, Switch, useDismiss } from "./ui.js";
@@ -21,6 +20,7 @@ import { savedCommands, useSavedCommands, useShortcuts } from "./Shortcuts.js";
 import { AgentModelPicker } from "./AgentModelPicker.js";
 import { FULL_ACCESS, MODE_BLURB, MODE_ICON, MODE_KEY, MODE_NAME, type Access } from "./StartControls.js";
 import { canRoute, saveSmartRouting, smartRoutingOn, useRouteHint } from "./RouteWhy.js";
+import type { AutoCtl } from "./ide/auto-tool.js";
 import { keepAuto, reachForMessage } from "./smartReach.js";
 import type { Plan } from "../plan-types.js";
 import { isLocal, ownModel, planLimits } from "./edition.js";
@@ -35,6 +35,11 @@ import { DailyBriefCard, openBrief } from "./DailyBrief.js";
 import { GoalsCard } from "./Goals.js";
 import { GettingStarted, markOwnFolder } from "./GettingStarted.js";
 import { useVoice, VoiceBar, VoiceButton, VoiceLive } from "./VoiceMic.js";
+// Only Code's column shows it: loaded when it is drawn, not with the first screen (test/client-bundle.test.ts).
+// Auto in the tool picker, all of it (ide/auto-tool.tsx).
+const AutoTool = lazy(() => import("./ide/auto-tool.js"));
+const RunLater = lazy(() => import("./ide/RaceButton.js").then((m) => ({ default: m.RunLater })));
+const RaceButton = lazy(() => import("./ide/RaceButton.js").then((m) => ({ default: m.RaceButton })));
 
 // The message box is this page's state, so every keystroke draws the page again. These take nothing that changes as you type,
 // so they are left as they were. The template shelf is not among them: it is given what is in the box.
@@ -149,6 +154,8 @@ export function Code({
   onPresetUsed,
   initialAgentId,
   onStart,
+  inColumn = false,
+  quiet,
   recents = [],
   onOpenBoard,
   resumeLink,
@@ -168,12 +175,21 @@ export function Code({
   onPresetUsed?: () => void;
   /** An agent picked on the Agents page runs this session. */
   initialAgentId?: string;
-  onStart: (sid: string, invite: string) => void;
+  /** `meta.tool`: the coding tool it was started with ("" for Friday's own agent). */
+  onStart: (sid: string, invite: string, meta?: { tool?: string }) => void;
+  /** Code's chat column (ide/AgentPanel.tsx): the box only, in the folder Code has open (preset.folder), worked in as it is (no new
+   *  branch), with its own draft, never taking focus as it appears or a file dropped while it is out of sight. */
+  inColumn?: boolean;
+  /** A ⌘K edit (ide/mode.ts QuietStart): mounted out of sight, it fills the box with the task and sends it once it can. */
+  quiet?: { id: string; text: string; done: (failed?: string) => void };
 }) {
+  // Code's column keeps its own draft for each folder: Agents' home box and it never fill each other.
+  const draftKey = quiet ? `mpa.draft.code-quiet:${quiet.id}` : inColumn ? `mpa.draft.code:${preset?.folder ?? ""}` : DRAFT;
   const [goal, setGoal] = useState(() => {
+    if (quiet) return quiet.text;
     if (preset?.brief) return preset.brief;
     try {
-      return sessionStorage.getItem(DRAFT) ?? "";
+      return sessionStorage.getItem(draftKey) ?? "";
     } catch {
       return "";
     }
@@ -189,8 +205,8 @@ export function Code({
     saveDraft.current = () => {
       saveDraft.current = null;
       try {
-        if (goal) sessionStorage.setItem(DRAFT, goal);
-        else sessionStorage.removeItem(DRAFT);
+        if (goal) sessionStorage.setItem(draftKey, goal);
+        else sessionStorage.removeItem(draftKey);
       } catch {
         /* nothing kept: the box still works */
       }
@@ -287,7 +303,7 @@ export function Code({
   const [account, setAccount] = useState("");
   useEffect(() => setAccount(""), [engine]);
   const effortLevels = (engine && EFFORT_LEVELS[engine]) || [];
-  const [newBranch, setNewBranch] = useState(true);
+  const [newBranch, setNewBranch] = useState(!inColumn);
   // Carrying on from a conversation means carrying on where it was: the same folder, on the branch it was working on, not a new one. Whoever
   // wants a fresh branch turns that on again.
   useEffect(() => {
@@ -364,6 +380,8 @@ export function Code({
     const over = (e: DragEvent) => e.dataTransfer?.types.includes("Files") && e.preventDefault();
     const drop = (e: DragEvent) => {
       if (!e.dataTransfer?.types.includes("Files") || e.defaultPrevented) return;
+      // A box out of sight (Code's column behind Agents, or Agents' behind Code) leaves the drop to the one in view.
+      if (input.current && input.current.offsetParent === null) return;
       e.preventDefault();
       void droppedFiles(e.dataTransfer).then((got) => got.length && attach(filesNow.current, got, setFiles, setAttachNote));
     };
@@ -413,6 +431,8 @@ export function Code({
   );
   const folder = picked?.folder ?? null;
   const ready = ENGINE_TOOLS.filter((t) => machine.tools.some((x) => x.tool === t && x.path && x.loggedIn !== false && !x.unavailable));
+  // Auto picks the coding tool by what is left on each plan (ide/auto-tool.tsx; Arun, 2026-11-20, wave 5): opt-in, in Code's column.
+  const [auto, setAuto] = useState<AutoCtl | null>(null);
   // The folders beside it the coding tool may work in too, once changed here (see AlsoWorksIn); null keeps those kept for the folder.
   const [dirs, setDirs] = useState<string[] | null>(null);
   useEffect(() => setDirs(null), [folder?.path]);
@@ -428,7 +448,7 @@ export function Code({
     presetFolder.current = undefined;
     void hostApi<{ folder: FolderInfo }>(identity, `/api/runner/describe?path=${encodeURIComponent(p)}`).then(
       (r) => r.folder && setPicked({ folder: r.folder }),
-      () => {},
+      (e: Error) => inColumn && setErr(`Couldn't open ${p.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || p}: ${e.message}`),
     );
   }, [hasMachine]); // eslint-disable-line react-hooks/exhaustive-deps
   const wantRepo = pr?.repo ?? issue?.repo ?? linkRepo;
@@ -523,15 +543,16 @@ export function Code({
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Started: the draft has become a session, so it isn't offered here again.
-  const started = (sid: string, invite: string) => {
+  const started = (sid: string, invite: string, as?: EngineTool) => {
     // A save still waiting would put it back as the box goes away.
     saveDraft.current = null;
     try {
-      sessionStorage.removeItem(DRAFT);
+      sessionStorage.removeItem(draftKey);
     } catch {
       /* nothing was kept */
     }
-    onStart(sid, invite);
+    onStart(sid, invite, { tool: as ?? (engine || "") });
+    quiet?.done();
   };
 
 
@@ -570,6 +591,8 @@ export function Code({
     below: true,
   });
   const submit = async () => {
+    // In Code's column a chat starts only in the folder Code has open: not before that folder is known, never in one of its own.
+    if (inColumn && !folder) return setErr(hasMachine ? "Still opening the folder. Send again in a moment." : "Connect this computer first.");
     // "/brief": the daily brief, not a task (DailyBrief.tsx).
     if (goal.trim().toLowerCase() === "/brief") return void (setGoal(""), openBrief());
     if (blocked && goal.trim()) return setNudged(true);
@@ -638,7 +661,8 @@ export function Code({
         body: JSON.stringify({
           userId: identity.id,
           name: identity.name,
-          title: titleFrom(issue ? `#${issue.number} ${issue.title}` : pr ? `PR #${pr.number} ${pr.title}` : goal),
+          // In Code's column a chat is named by its first line ("Fix refunds.ts:24"), for its tab.
+          title: titleFrom(issue ? `#${issue.number} ${issue.title}` : pr ? `PR #${pr.number} ${pr.title}` : inColumn ? goal.trim().split("\n")[0]! : goal),
           ...(issue ? { issue: { url: issue.url, repo: issue.repo, number: issue.number, title: issue.title } } : {}),
           ...(pr ? { pr: { url: pr.url, repo: pr.repo, number: pr.number, title: pr.title, head: pr.head } } : {}),
           kind: "code",
@@ -680,10 +704,11 @@ export function Code({
               // No folder: a new project folder for it, named from what was asked, which is the session's code from then on.
               ...(folder ? { cwd: folder.path } : { noFolder: true, project: goal.trim().slice(0, 400) }),
               ...(folder && engine && dirs ? { dirs } : {}),
-              // What the first message calls for, when it says clearly (smartReach.ts); otherwise what was picked.
-              mode: keepAuto(reachForMessage(goal), mode)?.mode ?? mode,
+              // What the first message calls for, when it says clearly (smartReach.ts); otherwise what was picked (a ⌘K edit is never read-only: it exists to edit). Not for a ⌘K edit, whose
+              // words are the person's instruction inside ours ("don't touch the types" must not make it read-only).
+              mode: quiet && mode === "plan" ? "full" : (keepAuto(quiet ? null : reachForMessage(goal), mode)?.mode ?? mode),
               // Full access, when picked: only while it runs in Auto (a first message that only reads stays in Plan).
-              ...(access === "bypass" && (keepAuto(reachForMessage(goal), mode)?.mode ?? mode) === "full" ? { fullAccess: true } : {}),
+              ...(access === "bypass" && (keepAuto(quiet ? null : reachForMessage(goal), mode)?.mode ?? mode) === "full" ? { fullAccess: true } : {}),
               // and the one picked, which everyone else's turns are held to and which it goes back to after that first run.
               handMode: mode,
               ...(model ? { model } : {}),
@@ -773,6 +798,17 @@ export function Code({
   useEffect(() => {
     if (again) void submit();
   }, [again]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A quiet start (⌘K): sent once, as soon as the folder is open and the coding tool is picked and signed in; a failure is said to its
+  // caller (the box is out of sight, so nobody would read it here).
+  const quietSent = useRef(false);
+  useEffect(() => {
+    if (!quiet || quietSent.current || !hasMachine || !folder || !engine || blocked || busy || !goal.trim()) return;
+    quietSent.current = true;
+    void submit();
+  }, [quiet, hasMachine, folder?.path, engine, blocked, busy, goal]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (quiet && err) quiet.done(err);
+  }, [err]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => setDirtyOn(null), [folder?.path]);
 
   let placeholder = solo ? "Describe the change…" : "Describe the change. Teammates can join, watch the run and steer it live…";
@@ -1048,9 +1084,9 @@ export function Code({
           )}
           <textarea
             ref={input}
-            id="code-input"
+            id={inColumn ? "code-chat-input" : "code-input"}
             aria-label="Describe the change"
-            autoFocus
+            autoFocus={!inColumn}
             // Kept as it was sent while the session is being made: an edit now would not be what the agent is given.
             readOnly={busy}
             onPaste={pasteAttach(files, setFiles, setAttachNote)}
@@ -1127,7 +1163,8 @@ export function Code({
               route={route}
               engine={engine}
               // Friday Code is a choice too: not marking it let the next check of the computer switch back to a coding tool.
-              onEngine={(t) => ((chose.current = true), t ? setEngine(t) : (setEngine(""), setAgentId("")))}
+              onEngine={(t) => ((chose.current = true), auto?.on && auto.set(false), t ? setEngine(t) : (setEngine(""), setAgentId("")))}
+              auto={auto}
               model={model}
               // Choosing a model in the picker decides routing too, and is remembered: Auto turns it on, any other model off.
               onModel={(id) => (engine && canRoute(engine) && saveSmartRouting(id === "auto"), id !== "auto" && (pickedModel.current = id), setModel(id))}
@@ -1167,6 +1204,42 @@ export function Code({
               ]}
             />
             {!busy && <VoiceButton v={voice} kind="home" />}
+            {/* Race the tools (ide/RaceButton.tsx): this ask to two or three of the coding tools, only in Code's column. */}
+            {inColumn && !quiet && hasMachine && folder && (
+              <Suspense fallback={null}>
+              <RaceButton
+                identity={identity}
+                ready={ready}
+                current={engine || ""}
+                folder={folder.path}
+                ask={issue ? withIssue(goal, issue) : pr ? withPr(goal, pr) : goal.trim()}
+                box={{
+                  mode,
+                  fullAccess: access === "bypass",
+                  engine: engine || "",
+                  model,
+                  account: account || (engine ? ((ac) => (ac !== "default" && tool?.accounts?.some((x) => x.id === ac) ? ac : ""))(preferredAccount(engine, tool?.accounts)) : ""),
+                  effort: engine && effort && effortLevels.includes(effort) ? effort : null,
+                  typed: goal,
+                  session: {
+                    ...(issue ? { issue: { url: issue.url, repo: issue.repo, number: issue.number, title: issue.title } } : {}),
+                    ...(pr ? { pr: { url: pr.url, repo: pr.repo, number: pr.number, title: pr.title, head: pr.head } } : {}),
+                  },
+                }}
+                attached={files.length}
+                isRepo={!!folder.isRepo}
+                disabled={busy}
+                onBusy={setBusy}
+                onStarted={(sid, invite, t) => ((chose.current = true), started(sid, invite, t))}
+              />
+              </Suspense>
+            )}
+            {/* Run later (ide/RunLater.tsx): tonight or at a time, started as a chat while Friday is running, only in Code's column. */}
+            {inColumn && !quiet && hasMachine && folder && (
+              <Suspense fallback={null}>
+                <RunLater identity={identity} folder={folder.path} goal={goal} tool={engine || ""} mode={mode} fullAccess={access === "bypass"} model={model} box={{ account, accounts: tool?.accounts, effort, levels: effortLevels, issue, pr }} attached={files.length} disabled={busy} onQueued={() => setGoal("")} />
+              </Suspense>
+            )}
             <button
               className="send"
               type="submit"
@@ -1178,6 +1251,12 @@ export function Code({
               {busy ? <span className="spinner" /> : <Icon name="arrowUp" size={17} />}
             </button>
           </div>
+          {/* Auto's line, under the bar, inside the box: the column has no card under it (ide/auto-tool.tsx). */}
+          {inColumn && hasMachine && !quiet && (
+            <Suspense fallback={null}>
+              <AutoTool identity={identity} task={goal} engine={engine} setEngine={setEngine} chose={chose} onCtl={setAuto} />
+            </Suspense>
+          )}
         </div>
       </form>
         {/* Where it works, on a thin card of its own under the box (Arun, 2026-11-08: "add a rounded card thing below, thin but
@@ -1296,20 +1375,11 @@ export function Code({
       <DailyBriefCard />
       {/* Every goal you set, at risk first (goals.ts). */}
       {/* Every agent's finished work, proven first, one press from shipped (ready.ts). */}
-      {/* Ready to ship is in Right now, below (HomeActivity; audit CODE-17 B). */}
       <GoalsCard identity={identity} />
       {/* What happened while you were away, before what you might do next. */}
 
-      {/* Your agents right now, and how the last weeks went: in place of suggested prompts, what someone opening Friday wants first. */}
-      <HomeActivity
-        identity={identity}
-        recents={
-          isLocal() ? recents.filter((r) => !isTeamSid(r.sid)) : // never a Crew room, as the sidebar (Sidebar.tsx); in Work, nothing until the Work sessions are known (a Code task listed under Work's "Right now", the 2026-10-28 critique)
-          recents
-        }
-        onOpen={onStart}
-        {...(onOpenBoard ? { onBoard: onOpenBoard } : {})}
-      />
+      {/* No Right now or Your year under the box (Arun, 2026-11-20: "get rid of this", "get rid of the right now section too"): the
+          sidebar and the Agent Board say what each agent is doing. */}
     </div>
   );
 }

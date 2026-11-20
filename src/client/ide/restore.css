@@ -1,0 +1,21 @@
+/* The bar over Code's chat when a tool was cut off by Friday closing (RestoreBar.tsx). Friday's own variables, so both themes follow.
+   One row where the column is wide; in a narrow one the words take two lines and the buttons wrap under them, at the end. */
+.rb { display: flex; flex: none; flex-wrap: wrap; align-items: flex-start; gap: 4px 8px; min-width: 0; padding: 7px 8px 6px 12px; border-bottom: 1px solid var(--border); background: var(--bg); color: var(--ink-2); font: 400 11.5px/1.4 var(--font); }
+.rb-dot { flex: none; width: 6px; height: 6px; margin-top: 5px; border-radius: 50%; background: var(--amber); }
+.rb-text { display: -webkit-box; flex: 1 1 140px; min-width: 0; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
+.rb-text b { font-weight: 600; color: var(--ink); }
+.rb-what { color: var(--ink); }
+.rb-more { color: var(--text-muted); }
+.rb-acts { display: flex; flex: none; margin-left: auto; gap: 2px; }
+.rb-btn { flex: none; height: 22px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--ink-2); font: 500 11.5px/1 var(--font); white-space: nowrap; cursor: pointer; transition: background-color var(--t-hover, 120ms) ease; }
+.rb-btn:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
+.rb-btn:disabled { opacity: 0.55; cursor: default; }
+.rb-btn:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.rb-go { background: var(--hover); color: var(--ink); }
+.rb-go:hover:not(:disabled) { background: var(--hover-strong); }
+
+/* The start screen's line about the folder the last launch had open (AgentPanel.tsx). */
+.ia-missed { max-width: 260px; margin: 2px auto 0; color: var(--text-muted); font: 400 11.5px/1.4 var(--font); text-align: center; text-wrap: balance; }
+.ia-missed span { color: var(--ink-2); }
+.ia-link { margin-left: 6px; padding: 0; border: 0; background: none; color: var(--ink-2); font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.ia-link:hover { color: var(--ink); }

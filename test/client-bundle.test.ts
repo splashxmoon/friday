@@ -85,8 +85,15 @@ for (const edition of ["hosted", "local"] as const) {
     // composer's picker is on the first screen) and Muse Code's own mark: 471.6 local, 2026-11-18. To 474 for dragging in the
     // sidebars (sidebar-drag.ts: groups that open under a drag, New group and New project targets): 473.3 local, 2026-11-19. To 476
     // for the Code list's rows redone (their folder, branch and change, the filter beside New thread, several picked and acted on,
-    // ⌘⌥'s numbers): 475.4 local, 2026-11-19, from 473.6; all on the first screen.
-    assert.ok(kb < 476, `app.js and its static imports are ${kb.toFixed(0)} KB brotli, over the 476 KB budget`);
+    // ⌘⌥'s numbers): 475.4 local, 2026-11-19, from 473.6; all on the first screen. To 484 for Code's switch (ide/mode.ts, the
+    // Agents/Code dropdown and folder pill in WindowNav.tsx, App.tsx's hand-over to the IDE; ~5.5 KB: 480.6 local, 479 hosted,
+    // 2026-11-19): the IDE itself (IdeView, CodeMirror, the editor, git, terminal) is one lazy chunk and is not in this count.
+    // To 487 for Friday IDE's waves 1 and 2 on the first screen: the Code chats' links to Agents (one Waiting on you, Open in Code,
+    // Send to Agents: ide/code-chats.ts, ide/waiting.ts, Attention.tsx) and Code's box; the Race button and its picker load when
+    // drawn (Code.tsx lazy). 485.4 local, 483.3 hosted, 2026-11-20, from about 481 and 484.
+    // To 489 for Friday IDE's wave 4, pings that wait while you type (ide/quiet.ts, quiet-queue.ts, the held toast in DoneToasts.tsx and
+    // Attention.tsx's hold; the summary itself loads when one arrives: quiet-arrive.ts). 487.0 local, 2026-11-20.
+    assert.ok(kb < 489, `app.js and its static imports are ${kb.toFixed(0)} KB brotli, over the 489 KB budget`);
     // A session link waits on the session screen too: CodeMirror (~150 KB packed) loads with the first file opened, not here
     // (mirror-editor.tsx). Nov 4 2026, merged with build/e2e-hardening: 890 KB hosted (1,048 KB before; Oct 22: 710 KB).
     assert.deepEqual(session.modules.filter((m) => /node_modules\/@codemirror\//.test(m)).slice(0, 3), [], "CodeMirror is in the session screen's first load: keep it in mirror-editor.tsx, loaded lazily");
@@ -107,6 +114,11 @@ for (const edition of ["hosted", "local"] as const) {
     // To 1002 for the same compact model picker (1000.9 hosted, 2026-11-18); to 1004 for the thread card's Go-aheads, Full access
     // and where a thread came from (Slack, Linear) (1002.4 hosted, the same day).
     // To 1007 for the Crew room's shared working line, task cards and a mate's work beside the room (1004.5 hosted, the same day).
-    assert.ok(session.kb < 1007, `a session screen's first load is ${session.kb.toFixed(0)} KB brotli, over the 1007 KB budget`);
+    // To 1016 for Code's switch (the same ~5.5 KB as the first-load budget above: 1012.2 hosted, 2026-11-19).
+    // To 1028 for Friday IDE's waves 1 and 2: replies laid out for code in the IDE's column (ide/column-code.tsx, run-line.tsx), the
+    // rule card, the self-review, bisect and refactor blocks' wiring (their cards load when an answer has one: fence-cards.tsx) and a
+    // race's rows in Code (race-column.tsx loads when one is on screen). 1026.0 hosted, 1023.7 local, 2026-11-20.
+    // To 1030 for the same wave 4 pings that wait while you type (1028.1 hosted, 2026-11-20).
+    assert.ok(session.kb < 1030, `a session screen's first load is ${session.kb.toFixed(0)} KB brotli, over the 1030 KB budget`);
   });
 }

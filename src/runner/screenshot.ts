@@ -20,9 +20,11 @@ export interface Shot {
   width: number;
   height: number;
   fullPage: boolean;
+  /** Also say what the page logged as errors while it loaded (a preview check, preview-check.ts). A shell that doesn't know says none. */
+  console?: boolean;
 }
 
-interface Done {
+export interface Done {
   kind?: string;
   id: string;
   data?: string;
@@ -31,6 +33,8 @@ interface Done {
   height?: number;
   cut?: boolean;
   error?: string;
+  /** The page's console errors, from a shell that was asked for them (desktop/capture.ts). */
+  errors?: string[];
 }
 
 const waits = new Map<string, (d: Done) => void>();
@@ -46,9 +50,9 @@ function listen(): void {
   process.channel?.unref();
 }
 
-/** The page as an image for the tool that asked, or what went wrong. Never rejects. */
-export function screenshot(shot: Shot, signal?: AbortSignal): Promise<MeshAnswer> {
-  if (!viaDesktop) return Promise.resolve({ output: "Screenshots are taken by the Friday desktop app, and this runner isn't running in it.", isError: true });
+/** The shell's own answer to one capture: the picture and what the page logged, or what went wrong. Never rejects. */
+export function capture(shot: Shot, signal?: AbortSignal): Promise<Done> {
+  if (!viaDesktop) return Promise.resolve({ id: "", error: "Screenshots are taken by the Friday desktop app, and this runner isn't running in it." });
   listen();
   return new Promise((resolve) => {
     const id = randomUUID();
@@ -56,14 +60,7 @@ export function screenshot(shot: Shot, signal?: AbortSignal): Promise<MeshAnswer
       waits.delete(id);
       clearTimeout(timer);
       signal?.removeEventListener("abort", stop);
-      if (!d.data) return resolve({ output: d.error || "The screenshot couldn't be taken.", isError: true });
-      const size = d.width && d.height ? `${d.width}×${d.height}` : `${shot.width} wide`;
-      resolve({
-        content: [
-          { type: "image", data: d.data, mimeType: d.mimeType || "image/png" },
-          { type: "text", text: `${shot.url}, ${size}${shot.fullPage ? (d.cut ? `, the page down to ${d.height}px (it goes on below)` : ", the whole page") : ""}. Only you see this; show_preview shows the page to the people here.` },
-        ],
-      });
+      resolve(d.data ? d : { id, error: d.error || "The screenshot couldn't be taken." });
     };
     const stop = () => done({ id, error: "Stopped." });
     const timer = setTimeout(() => done({ id, error: "The page didn't load and draw within 45 seconds." }), 45_000);
@@ -72,4 +69,17 @@ export function screenshot(shot: Shot, signal?: AbortSignal): Promise<MeshAnswer
     signal?.addEventListener("abort", stop);
     process.send!({ kind: "capture", id, ...shot }, (e: Error | null) => e && done({ id, error: `The desktop app couldn't be asked: ${e.message}` }));
   });
+}
+
+/** The page as an image for the tool that asked, or what went wrong. Never rejects. */
+export async function screenshot(shot: Shot, signal?: AbortSignal): Promise<MeshAnswer> {
+  const d = await capture(shot, signal);
+  if (!d.data) return { output: d.error || "The screenshot couldn't be taken.", isError: true };
+  const size = d.width && d.height ? `${d.width}×${d.height}` : `${shot.width} wide`;
+  return {
+    content: [
+      { type: "image", data: d.data, mimeType: d.mimeType || "image/png" },
+      { type: "text", text: `${shot.url}, ${size}${shot.fullPage ? (d.cut ? `, the page down to ${d.height}px (it goes on below)` : ", the whole page") : ""}. Only you see this; show_preview shows the page to the people here.` },
+    ],
+  };
 }

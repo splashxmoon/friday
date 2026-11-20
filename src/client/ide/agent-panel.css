@@ -1,0 +1,370 @@
+/* Switching between Agents and Code (WindowNav's button) and the agent chat inside Code (AgentPanel.tsx). Only Friday's own
+   variables, so both themes follow. */
+
+/* The mode button in the window bar, after Search: "<icon> Agents ⌄". Wins over `.win-nav button`'s 26px square. */
+.win-nav .win-nav-mode { display: inline-flex; align-items: center; gap: 6px; width: auto; height: 24px; margin-left: 4px; padding: 0 7px 0 8px; border: 1px solid var(--border); border-radius: 7px; background: transparent; color: var(--ink); font: 500 12.5px/1 var(--font); white-space: nowrap; cursor: pointer; }
+.win-nav .win-nav-mode:hover:not(:disabled), .win-nav .win-nav-mode.on { background: var(--hover); border-color: var(--border-strong); color: var(--ink); }
+.win-nav .win-nav-mode .win-nav-caret { color: var(--text-muted); }
+/* VS Code's File menu beside it: a word, no border until pointed at, like a menu bar's title. */
+.win-nav .win-nav-file { margin-left: 2px; padding: 0 8px; border-color: transparent; color: var(--ink-2); font-weight: 400; }
+/* The menu's ⌘E hint sits at the row's end, small and quiet (ui.tsx draws `hint`). */
+
+/* Code fills the window: no rail or list, the IDE's own activity bar is its navigation. */
+/* The list isn't drawn, so the page is the grid's only child: it takes the one column (left at the usual 0px + 1fr it lands in the 0px). */
+html .shell.in-code { grid-template-columns: minmax(0, 1fr); }
+html .shell.in-code > .main { margin-left: 8px !important; padding: 0 !important; min-width: 0; }
+/* The session's own header would put its title and buttons in the window's band, where Code has its own. */
+.shell.in-code #band-left, .shell.in-code #band-slot { display: none; }
+/* A browser has no band and no sidebar to leave room for: the IDE sits flush with the window's edge, with no dead strip. */
+html:not(.desktop) .shell.in-code > .main { margin-left: 0 !important; }
+
+/* Code's area is never a window drag handle (Arun, 2026-11-19: "i cannot click this, it is bugged", of VS Code's first activity
+   bar icon): the window's drag strip (style.css html.desktop::before) is as tall as the band, and reached over the top of VS Code's
+   frame and the agent column, where a press moved the window instead of reaching the button. Later in the page, this wins over it. */
+html.desktop .shell.in-code .vsc, html.desktop .shell.in-code .vsc-stage, html.desktop .shell.in-code .vsc-frame, html.desktop .shell.in-code .ix-right { -webkit-app-region: no-drag; }
+
+/* Code kept loaded behind Agents (App.tsx codeKept): in the layout as if it weren't wrapped while shown, gone while hidden. */
+.code-keep:not([hidden]) { display: contents; }
+.win-nav-mode-wrap { display: contents; }
+
+/* Code's half of the window bar (WindowNav.tsx): the folder's quick-open pill in the middle, the layout buttons at the right.
+   Fixed like .win-nav, in the same band, and only where the desktop app has one. */
+.win-code-find, .win-code-views { display: none; }
+html.desktop .win-code-find, html.desktop .win-code-views { display: flex; position: fixed; align-items: center; z-index: 70; -webkit-app-region: no-drag; }
+/* On the left buttons' own line (.win-nav), in every state of the Mac window: the traffic lights low or not. */
+html.desktop-mac .win-code-find, html.desktop-mac .win-code-views { top: 5px; }
+html.desktop-mac.lights-low .win-code-find, html.desktop-mac.lights-low .win-code-views { top: calc(var(--lights-cy, 23px) - 12px); }
+html.desktop:not(.desktop-mac) .win-code-find, html.desktop:not(.desktop-mac) .win-code-views { top: 8px; }
+/* The folder's search, in the middle: a field to click, like the command centre it stands for. */
+.win-code-find { left: var(--code-pill-x, 50%); transform: translateX(-50%); box-sizing: border-box; width: 340px; max-width: calc(100vw - 600px); min-width: 180px; height: 24px; gap: 8px; padding: 0 4px 0 9px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--card); color: var(--text-muted); font: 400 12.5px/1 var(--font); cursor: pointer; transition: background-color var(--t-hover, 120ms) ease, border-color var(--t-hover, 120ms) ease, color var(--t-hover, 120ms) ease; }
+.win-code-find:hover { background: var(--hover); border-color: var(--border-hover); color: var(--ink-2); }
+.win-code-find:active { background: var(--hover-strong); }
+.win-code-find > svg { flex: none; }
+.win-code-find .wcf-name { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.win-code-find .wcf-name b { color: var(--ink-2); font-weight: 500; }
+.win-code-find kbd { flex: none; padding: 2px 5px; border-radius: 4px; background: var(--hover); color: var(--text-muted); font: 500 10.5px/1.3 var(--font); }
+.win-code-find:focus-visible, .win-code-views button:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+/* The layout buttons at the right: side bar, bottom panel, agent. The left buttons' size (.win-nav button) and 16px icons. */
+html.desktop-mac .win-code-views { right: 12px; }
+html.desktop:not(.desktop-mac) .win-code-views { right: var(--band-right, 146px); }
+.win-code-views { gap: 2px; height: 24px; }
+.win-code-views button { display: grid; place-items: center; width: 28px; height: 24px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--text-muted); cursor: pointer; transition: background-color var(--t-hover, 120ms) ease, color var(--t-hover, 120ms) ease; }
+.win-code-views button:hover { background: var(--hover); color: var(--ink); }
+.win-code-views button:active { background: var(--hover-strong); }
+.win-code-views button.on { color: var(--ink); }
+
+.ide-agent { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; background: var(--bg); }
+.ia-head { display: flex; align-items: center; flex: none; gap: 8px; height: 40px; padding: 0 10px 0 14px; border-bottom: 1px solid var(--border); min-width: 0; }
+.ia-mark { display: grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: 6px; color: var(--ink-2); }
+.ia-name { flex: none; font: 600 13px/1 var(--font); color: var(--ink); white-space: nowrap; }
+.ia-chip { flex: none; padding: 3px 7px; border-radius: 999px; background: var(--hover); color: var(--ink-2); font: 500 11px/1 var(--font); white-space: nowrap; }
+.ia-live { flex: none; display: inline-flex; align-items: center; gap: 6px; color: var(--live); font: 500 11.5px/1 var(--font); white-space: nowrap; }
+.ia-live::before { content: ""; width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
+.ia-sp { flex: 1 1 0; }
+.ia-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font: 400 12px/1 var(--font); }
+.ia-icon { display: grid; place-items: center; flex: none; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--text-muted); cursor: pointer; }
+.ide-agent .ia-icon { width: 26px; height: 26px; }
+.ia-icon:hover, .ia-icon.on { background: var(--hover); color: var(--ink); }
+.ia-icon:focus-visible, .ia-btn:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+
+.ia-chat { position: relative; flex: 1 1 0; min-height: 0; min-width: 0; overflow: hidden; }
+/* The session's screen, made to fit the column: its header is replaced by ours. What it opens beside the chat (the Changes panel
+   opens by itself once an agent has changed files, and covered the chat with "Back to chat") is left out: Code has its own
+   files, diffs, source control and terminal, and this column is for the conversation. */
+.ia-chat .session-view { height: 100%; }
+.ia-chat .session-view > .topbar { display: none; }
+.ia-chat .tc { display: none; }
+/* Already in Code: the card's "Open in Code" is for Agents, and in this narrow column it pushed Commit out of the card. */
+.ia-chat .cc-btn.cc-code { display: none; }
+.ia-chat .bench-panel { display: none !important; }
+
+.ia-empty { display: flex; flex: 1; flex-direction: column; align-items: flex-start; justify-content: center; gap: 8px; padding: 24px 22px; color: var(--text-muted); font: 400 13px/1.5 var(--font); }
+.ia-empty.ia-start { align-items: center; }
+.ia-empty p { margin: 0; max-width: 300px; }
+.ia-empty .ia-btn { margin-top: 6px; }
+.ia-empty-mark { display: grid; place-items: center; width: 36px; height: 36px; margin-bottom: 4px; border-radius: 10px; background: var(--hover); color: var(--ink-2); }
+.ia-empty-title { color: var(--ink); font: 600 14px/1.3 var(--font); }
+
+/* A new chat (AgentPanel, ide/code-chats.ts): a few words at the top, and the same box Agents starts sessions from at the foot of
+   the column, where a chat's own box sits, so starting one and carrying on look the same. Agents' page around that box (its
+   heading, the tools strip, "Runs on" and its folder picker) is left out: the folder is the one Code has open. */
+.ia-new { display: flex; flex-direction: column; overflow: hidden; }
+.ia-new-lede { display: flex; flex-direction: column; flex: 1 1 auto; justify-content: center; min-height: 0; padding: 24px 18px 16px; color: var(--text-muted); font: 400 13px/1.5 var(--font); overflow-y: auto; }
+.ia-new-lede p { margin: 0; }
+/* The empty states (AgentPanel): centred in the column, a mark, a line, and the few things to do. */
+.ia-start { align-items: center; text-align: center; gap: 10px; }
+.ia-hero { display: grid; place-items: center; width: 44px; height: 44px; margin-bottom: 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); color: var(--ink-2); box-shadow: var(--shadow-xs, 0 1px 2px rgb(0 0 0 / .06)); }
+.ia-start .ia-empty-title { font: 600 15px/1.3 var(--font); letter-spacing: -.01em; }
+.ia-start > p { max-width: 260px; text-wrap: pretty; }
+.ia-folder { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 3px 9px; border-radius: 999px; background: var(--hover); color: var(--ink-2); font: 500 12px/1.4 var(--font); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ia-folder svg { flex: none; color: var(--text-muted); }
+.ia-suggest { display: flex; flex-direction: column; gap: 4px; width: 100%; max-width: 300px; margin-top: 10px; }
+.ia-suggest-row { display: flex; align-items: center; gap: 10px; width: 100%; height: 36px; padding: 0 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--card); color: var(--ink-2); font: 500 12.5px/1 var(--font); text-align: left; cursor: pointer; transition: background-color var(--t-hover, 120ms) ease, border-color var(--t-hover, 120ms) ease, color var(--t-hover, 120ms) ease; }
+.ia-suggest-row svg { flex: none; color: var(--text-muted); }
+.ia-suggest-row:hover { background: var(--hover); border-color: var(--border-strong); color: var(--ink); }
+.ia-suggest-row:active { background: var(--hover-strong); }
+.ia-suggest-row:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.ia-tip { margin-top: 8px !important; color: var(--text-muted); font-size: 12px; }
+.ia-tip kbd { padding: 1px 5px; border-radius: 4px; background: var(--hover); color: var(--ink-2); font: 500 11px/1.3 var(--font); }
+/* The box in the column: Friday's quiet card, no blue ring when it has the cursor (Arun, 2026-11-19: "i dont want this blue thing"). */
+.ia-new .composer-card, .ia-new .composer-card:focus-within { outline: none !important; box-shadow: none !important; border-color: var(--border-strong) !important; }
+.ia-new .composer-card textarea, .ia-new .composer-card textarea:focus, .ia-new .composer-card textarea:focus-visible { outline: none !important; box-shadow: none !important; border-color: transparent !important; background: transparent !important; }
+.ia-new .home { flex: none; height: auto; overflow: visible; padding: 0 14px 14px; align-items: stretch; scrollbar-gutter: auto; }
+.ia-new .home > :not(.composer-card):not(.home-setup):not(.attach-note):not(.error):not(.modal) { display: none !important; }
+.ia-new .home > .attach-note, .ia-new .home > .error { margin: 8px 2px 0; }
+.ia-new .home .composer-card { width: 100%; max-width: none; margin: 0; }
+.ia-new .home-setup { margin: 0 0 10px; }
+.ia-btn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--card); color: var(--ink); font: 500 12.5px/1 var(--font); white-space: nowrap; cursor: pointer; }
+.ia-btn:hover { background: var(--hover); }
+
+/* "Open in Code" on a reply's files-changed card (RunReview.tsx). */
+.cc-btn.cc-code { display: inline-flex; align-items: center; gap: 6px; }
+.cc-btn.cc-code kbd { padding: 1px 4px; border-radius: 4px; background: var(--hover); color: var(--text-muted); font: 500 10.5px/1.3 var(--font); }
+
+/* The conversation in a column of about 340px: side padding 14px instead of 24, replies from the column's left edge instead of
+   beside an avatar's width, and the box's hint on one line. */
+.ia-chat [data-slot="session.feed"] [class*="px-6"], .ia-chat .feed-inner { padding-left: 14px; padding-right: 14px; }
+.ia-chat .agent-note .md { padding-left: 0; }
+.ia-chat .agent-note.streaming { padding-left: 4px; }
+.ia-chat #composer-input::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ia-chat #composer-input { text-overflow: ellipsis; }
+
+/* Open Folder over Code (App.tsx): the picker on a scrim. */
+.ide-pick { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; background: color-mix(in srgb, var(--bg) 55%, transparent); backdrop-filter: blur(2px); }
+.ide-pick .ix-rootpick { position: relative; width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 64px); height: auto; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--card); overflow: auto; }
+/* The folder's name as a plain label (Code with VS Code): no button look, nothing to press. */
+.win-code-find.static { cursor: default; background: transparent; border-color: transparent; justify-content: center; }
+.win-code-find.static:hover { background: transparent; border-color: transparent; }
+
+/* The box's controls stay on one row at the column's narrowest (240px, Arun 2026-11-19: "fix this when side panel is minimum
+   width too"): the tool and mode pickers give up room first, their names cut short, and the send button never drops to a line of
+   its own. Both boxes: a new chat's (.composer-bar) and a chat's own (the row holding .composer-send). */
+.ide-agent .composer-bar { flex-wrap: nowrap; min-width: 0; }
+.ide-agent .composer-bar > *, .ide-agent :has(> .composer-send) > * { min-width: 0; }
+.ide-agent :has(> .composer-send) { flex-wrap: nowrap; min-width: 0; }
+.ide-agent .composer-send, .ide-agent .composer-bar .send { flex: none; }
+.ide-agent .composer-bar button, .ide-agent :has(> .composer-send) > :first-child button { min-width: 0; max-width: 100%; }
+.ide-agent .composer-bar button span, .ide-agent :has(> .composer-send) > :first-child button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ide-agent :has(> .composer-send) > :first-child { flex-wrap: nowrap; overflow: hidden; }
+/* Only the pickers give up room; the mic and send keep theirs, pushed to the right edge as everywhere else (Arun, 2026-11-19: "why is
+   the send and voice buttons moving too? needs to be on the right"). */
+.ide-agent .composer-bar > .agent-pill, .ide-agent .composer-bar > .menu-pill, .ide-agent .composer-bar > [class*="pill"] { flex: 0 1 auto !important; }
+.ide-agent .composer-bar > .send { flex: none !important; }
+.ide-agent .composer-bar .agent-pill, .ide-agent .composer-bar .agent-select { flex: 0 1 auto !important; min-width: 0; overflow: hidden; }
+
+/* No "Session started by …" at the top of a Code chat (Arun, 2026-11-19: "get rid of this"): the chat is yours, started here; the
+   line, or the folded notes line that opens with it, is left out. Agents still shows it. */
+.ia-chat .cp-started, .ia-chat .notes-line:has(.cp-started) { display: none !important; }
+
+/* The column's header as chat tabs (AgentPanel): the height of VS Code's own tab bar beside it (35px), so the two rules under them
+   are one line across the window (Arun, 2026-11-19: "line up this horizontal line too"). Tabs scroll sideways when there are many;
+   the buttons at the right never move or get cut off. */
+.ide-agent .ia-head { gap: 0; height: 35px; padding: 0 6px 0 0; }
+.ia-tabs { display: flex; flex: 1 1 auto; align-items: stretch; min-width: 0; height: 100%; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.ia-tabs::-webkit-scrollbar { display: none; }
+.ia-tab { position: relative; display: flex; flex: 0 1 auto; align-items: center; gap: 6px; min-width: 108px; max-width: 200px; padding: 0 6px 0 12px; border-right: 1px solid var(--border); color: var(--text-muted); font: 500 12.5px/1 var(--font); white-space: nowrap; cursor: pointer; user-select: none; transition: background-color var(--t-hover, 120ms) ease, color var(--t-hover, 120ms) ease; }
+.ia-tab:hover { background: var(--hover); color: var(--ink-2); }
+.ia-tab.on { background: var(--bg); color: var(--ink); }
+/* The open tab sits on the chat: its own rule under it is lifted, as an editor's tab is. */
+.ia-tab.on::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: var(--bg); }
+.ia-tab:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
+.ia-tab-mark { display: grid; place-items: center; flex: none; width: 14px; color: var(--text-muted); }
+.ia-tab-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ia-tab-x { display: grid; place-items: center; flex: none; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--text-muted); cursor: pointer; opacity: 0; transition: opacity var(--t-hover, 120ms) ease, background-color var(--t-hover, 120ms) ease; }
+.ia-tab:hover .ia-tab-x, .ia-tab.on .ia-tab-x, .ia-tab-x:focus-visible { opacity: 1; }
+.ia-tab-x:hover { background: var(--hover-strong); color: var(--ink); }
+.ia-tab:only-child:not(:has(.ia-tab-x)) { padding-right: 12px; }
+.ia-head-acts { display: flex; flex: none; align-items: center; gap: 2px; padding-left: 6px; }
+
+/* The footer strip under the chat column: the IDE's status bar's own colours (Friday's themes, statusBar.*) and line. */
+.ia-foot { flex: none; height: 22px; background: #f1f1ef; border-top: 1px solid rgb(0 0 0 / .08); }
+html.dark .ia-foot { background: #181818; border-top-color: rgb(255 255 255 / .07); }
+/* The chat over the IDE's right side bar (VsCodeView.tsx "over"), exactly its box, so the IDE's own status bar runs under the editor
+   and the chat alike and is the window's one footer (Arun, 2026-11-20: "the native vscode footer needs to the be running across the
+   full length of the footer"). Its counts are in that status bar too (the extension's task line), so the column has no footer of
+   its own; its left edge is the IDE's sash, which resizes it. */
+.ix.vsc.over { position: relative; }
+.ix.vsc.over > .ix-right.over { position: absolute; z-index: 4; border-left: 1px solid var(--border); }
+.ix-right.over .ia-foot { display: none; }
+/* Before the IDE has said where its bar is (and with no IDE): a column beside it, its resize line stopping at the footer row, its
+   1px there in the status bar's own colour and top line. */
+.vsc .ix-split.x:has(+ .ix-right) {
+  --ia-sb: #f1f1ef;
+  --ia-sb-line: rgb(0 0 0 / .08);
+  background:
+    linear-gradient(var(--border), var(--border)) top / 100% calc(100% - 22px) no-repeat,
+    linear-gradient(var(--ia-sb-line), var(--ia-sb-line)) left 0 bottom 21px / 100% 1px no-repeat,
+    linear-gradient(var(--ia-sb), var(--ia-sb)) bottom / 100% 22px no-repeat;
+}
+html.dark .vsc .ix-split.x:has(+ .ix-right) { --ia-sb: #181818; --ia-sb-line: rgb(255 255 255 / .07); }
+/* "Take a ticket" (AgentPanel TicketPick): a starting point like the others, opening a list of the issues assigned to you. */
+.ia-suggest .ia-ticket { justify-content: flex-start; }
+.ia-suggest .ia-ticket .ia-ticket-caret { margin-left: auto; color: var(--text-muted); }
+
+/* The mode picker keeps its word in the IDE column (Arun, 2026-11-19: "the mode selector isnt there from a certain window size"):
+   style.css's narrow box (@container prompt, under 520px) keeps only a pill's mark, and the reach pill here has none, so it
+   vanished. The column is always that narrow; the coding tool's name shortens first instead. */
+.ide-agent .prompt .reach-pill > span:not(.menu-pill-mark), .ide-agent .prompt .reach-pill > .menu-pill-caret { display: revert !important; }
+.ide-agent .prompt .reach-pill { flex: none !important; padding: 0 9px !important; }
+
+/* Friday's task line on the right of the footer strip (AgentPanel TaskLine), in the status bar's own size and colours. */
+.ia-foot { display: flex; align-items: center; justify-content: flex-end; gap: 2px; min-width: 0; overflow: hidden; padding: 0 8px; }
+.ia-foot-line { display: inline-flex; align-items: center; gap: 10px; height: 18px; padding: 0 6px; border: 0; border-radius: 4px; background: transparent; color: #67676c; font: 400 11.5px/1 var(--font); cursor: pointer; }
+html.dark .ia-foot-line { color: #929292; }
+.ia-foot-line:hover { background: var(--hover); color: var(--ink); }
+.ia-foot-line > span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.ia-foot-line i { width: 6px; height: 6px; border-radius: 50%; }
+.ia-foot-line .w { background: var(--amber, #f2b453); }
+.ia-foot-line .r { background: var(--live, #5b8def); }
+.ia-foot-line .p { background: var(--green, #3fb67b); }
+
+/* ===== Replies laid out for code (Arun, 2026-11-19: "we may need to redesign the layout of the agent responses and stuff in the agent
+   chat too to make it more streamlined for code"). The column is 280 to 640px wide, so what Agents gives room (an avatar beside the
+   words, 15px reading type, a row of words per kind of step) is drawn denser here: the agent's name on a line with its mark, 13px
+   words, one line per step, blocks of code with their own header. Every rule is under .ia-chat; Agents is unchanged. ===== */
+
+/* The name row: the mark small beside a lighter name, the words under it from the column's edge. */
+.ia-chat .rsp { display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: 7px; row-gap: 6px; }
+.ia-chat .rsp-main { display: contents; }
+.ia-chat .rsp > .rsp-avatar { grid-column: 1; grid-row: 1; width: 16px; height: 16px; margin: 0; align-self: center; }
+.ia-chat .rsp > .rsp-avatar > svg, .ia-chat .rsp > .rsp-avatar > .menu-pill-mark, .ia-chat .rsp > .rsp-avatar > .menu-pill-mark svg { width: 16px; height: 16px; }
+.ia-chat .rsp-main > .rsp-head { grid-column: 2; grid-row: 1; min-height: 16px; gap: 8px; }
+.ia-chat .rsp-main > :not(.rsp-head) { grid-column: 1 / -1; min-width: 0; }
+.ia-chat .rsp-who { font: 500 12px/1 var(--font); color: var(--ink-2); letter-spacing: 0; }
+.ia-chat .rsp-time { font-size: 11px; }
+
+/* The words: 13px on a comfortable line, headings that stay in proportion, lists tight. */
+.ia-chat .rsp-answer, .ia-chat .rsp-say { font-size: 13px; line-height: 1.6; letter-spacing: 0; }
+.ia-chat .rsp-say { margin: 0 0 6px; }
+.ia-chat .rsp-answer p, .ia-chat .rsp-say p { margin: 0 0 .6em; }
+.ia-chat .rsp-answer :is(h1, h2, h3, h4, h5, h6), .ia-chat .rsp-say :is(h1, h2, h3) { margin: 1.1em 0 .35em; line-height: 1.35; letter-spacing: 0; }
+.ia-chat .rsp-answer h1, .ia-chat .rsp-say h1 { font-size: 1.18em; }
+.ia-chat .rsp-answer h2, .ia-chat .rsp-say h2 { font-size: 1.1em; }
+.ia-chat .rsp-answer h3, .ia-chat .rsp-say h3, .ia-chat .rsp-answer :is(h4, h5, h6) { font-size: 1em; margin-top: 1em; }
+.ia-chat .rsp-answer > .md > :first-child, .ia-chat .rsp-answer :is(h1, h2, h3):first-child { margin-top: 0; }
+.ia-chat .rsp-answer :is(ul, ol), .ia-chat .rsp-say :is(ul, ol) { margin: .2em 0 .6em; padding-left: 1.2em; }
+.ia-chat .rsp-answer li, .ia-chat .rsp-say li { margin: .12em 0; padding-left: .1em; }
+.ia-chat .rsp-answer li > :is(ul, ol), .ia-chat .rsp-say li > :is(ul, ol) { margin: .1em 0 .2em; padding-left: 1.1em; }
+.ia-chat .rsp-answer ol.steps > li, .ia-chat .rsp-say ol.steps > li { margin: .35em 0; padding-left: 1.8em; }
+.ia-chat .rsp-answer blockquote, .ia-chat .rsp-say blockquote { margin: .6em 0; padding: .4em .7em; }
+.ia-chat .rsp-answer [data-streamdown="inline-code"] { font-size: .92em; }
+.ia-chat .rsp-answer [data-streamdown="table"] :is(th, td), .ia-chat .rsp-say [data-streamdown="table"] :is(th, td) { font-size: 12px; }
+.ia-chat .file-chip { padding: 0 5px 0 4px; font-size: 12px; }
+
+/* Your own words: a right-aligned bubble, narrower. */
+.ia-chat .is-user { max-width: 86% !important; }
+.ia-chat .msg-bubble { font-size: 13px; line-height: 1.5; padding: 7px 11px !important; border-radius: 12px !important; }
+
+/* Steps: the line that sums the work up, and its rows, one line each in small type. */
+.ia-chat .rl-head { padding: 3px 8px; font: 500 12px/18px var(--font); }
+.ia-chat .rl-body { margin: 0 0 4px 4px; padding-left: 10px; gap: 0; }
+.ia-chat .rl-row, .ia-chat .rl-row:has(.rl-icon) { grid-template-columns: 14px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 2px 6px; font-size: 12px; line-height: 18px; }
+.ia-chat .rl-label:has(.rl-icon) { gap: 6px; overflow: hidden; }
+.ia-chat .rl-mk { display: inline-flex; flex: none; }
+.ia-chat .rl-lt:not([data-own]) { font-size: 12px; color: var(--ink-2); }
+.ia-chat .rl-row:has(.rl-lt:not([data-own])), .ia-chat .rl-row:has(.rl-icon):has(.rl-lt:not([data-own])) { grid-template-columns: auto minmax(0, 1fr) auto; }
+/* The kind's mark says it where the mark is its own and the row has words (data-own); its word stays for a screen reader. Kinds that share
+   the dot, and rows with nothing after them, keep the word. */
+.ia-chat .rl-lt[data-own] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.ia-chat .rl-what { font: 11.5px/18px var(--mono); color: var(--ink-2); }
+.ia-chat .rl-side { font-size: 11px; }
+.ia-chat .rsp-steps { margin: 0 0 2px !important; padding: 0 !important; gap: 0 !important; border: 0 !important; background: none !important; }
+.ia-chat .rsp-step-line { gap: 4px; padding-left: 2px; }
+.ia-chat .rsp-step-row { gap: 6px; width: auto; min-height: 22px; padding: 0 4px !important; border-radius: 6px !important; font: 12px/18px var(--font); }
+.ia-chat .rsp-step-line .rsp-step-row { flex: 1 1 auto; }
+.ia-chat .rsp-mark { width: 14px; font-size: 11px; }
+.ia-chat .rsp-chip { padding: 0 5px; font-size: 11.5px; line-height: 18px; }
+.ia-chat .rsp-step-detail { margin: 2px 0 6px 22px; }
+.ia-chat .rsp-output { padding: 6px 8px; font: 11.5px/1.5 var(--mono); max-height: 180px; }
+/* A step's file is a chip that opens it in the editor. */
+.ia-chat .rsp-step.file .rsp-step-row { flex: 0 0 auto; }
+.ia-chat .rsp-step .rsp-file { flex: 0 1 auto; min-width: 0; min-height: 20px; padding: 0 6px 0 5px; gap: 5px; border: 1px solid var(--border); background: transparent; font: 11.5px/18px var(--mono); }
+.ia-chat .rsp-step .rsp-file span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ia-chat .rsp-step .rsp-file:hover { background: var(--hover); border-color: var(--border-strong); }
+.ia-chat .rsp-step .rsp-file:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+
+/* Blocks of code (ide/column-code.tsx): mono and tight, a header with the file or language and plain actions, long ones cut short. */
+.ia-chat .rsp .ans-col { margin: 2px 0; border-radius: 8px !important; container-type: inline-size; }
+/* In the narrowest column the file's name needs the room more than the language beside it. */
+@container (max-width: 270px) { .ans-code-file + .ans-code-lang { display: none; } }
+.ia-chat .ans-col .ans-code-head { height: 28px; gap: 8px; padding: 0 4px 0 10px; }
+.ia-chat .ans-col .ans-code-file { display: inline-flex; align-items: center; flex: 0 1 auto; gap: 5px; min-width: 0; color: var(--ink-2); font: 500 11.5px/1 var(--mono); }
+.ia-chat .ans-col .ans-code-file > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ia-chat .ans-col .ans-code-file .file-icon { flex: none; }
+.ia-chat .ans-col .ans-code-lang { flex: none; font: 400 11px/1 var(--mono); color: var(--text-muted); }
+.ia-chat .ans-col .ans-code-acts { display: flex; flex: none; align-items: center; gap: 1px; margin-left: auto; }
+.ia-chat .ans-col .ans-code-act { height: 22px; padding: 0 7px; border: 0; border-radius: 5px; background: none; color: var(--text-muted); font: 500 11.5px/1 var(--font); white-space: nowrap; cursor: pointer; transition: background-color var(--t-hover, 120ms) ease, color var(--t-hover, 120ms) ease; }
+.ia-chat .ans-col .ans-code-act:hover { background: var(--hover); color: var(--ink); }
+.ia-chat .ans-col .ans-code-act:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.ia-chat .ans-col .ans-code-body { padding: 6px 10px 8px !important; font: 12px/1.55 var(--mono); max-height: 360px; }
+/* Cut short: lines wider than the column still scroll sideways; the fade stops above the scrollbar's line, so it only hides the next line. */
+.ia-chat .ans-col.cut .ans-code-body { overflow-y: hidden; overflow-x: auto; -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), rgba(0, 0, 0, .25) calc(100% - 14px), rgba(0, 0, 0, .25)); mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), rgba(0, 0, 0, .25) calc(100% - 14px), rgba(0, 0, 0, .25)); }
+/* "Show all" means all, up to most of a screen. */
+.ia-chat .ans-col:not(.cut) .ans-code-body { max-height: 70vh; }
+.ia-chat .ans-col .ans-code-more { display: block; width: 100%; height: 26px; padding: 0 10px; border: 0; border-top: 1px solid var(--border); background: none; color: var(--text-muted); font: 500 11.5px/1 var(--font); text-align: left; cursor: pointer; }
+.ia-chat .ans-col .ans-code-more:hover { background: var(--hover); color: var(--ink); }
+.ia-chat .ans-col .ans-code-more:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
+
+/* The changes card: its count opens Review changes in the IDE, so no chevron promising a list here. */
+.ia-chat .cc-toggle .cc-fold { display: none; }
+.ia-chat .cc-toggle:hover > b { text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--border-strong); }
+.ia-chat .cc-head { min-height: 38px; padding: 5px 6px 5px 10px; font-size: 12.5px; }
+.ia-chat .rsp .callout { margin: .6em 0; padding: .45em .7em .45em 2.1em; }
+.ia-chat .rsp .callout::before { left: .7em; top: calc(.45em + .8em - 8px); width: 14px; height: 14px; }
+/* Turns sit closer: the column is for the conversation, not the room Agents gives it. */
+.ia-chat [data-scroll-root] > div { gap: 14px; padding-top: 12px; padding-bottom: 12px; }
+/* What the card has to say, opened from its head (the count goes to the IDE's review): the warning count as a button, or plain "Details". */
+.ia-chat .cc-detail { flex: none; border: 0; font: inherit; font-size: 12px; cursor: pointer; }
+.ia-chat .cc-detail.quiet { padding: 1px 7px; border-radius: var(--r-sm, 6px); background: none; color: var(--text-muted); }
+.ia-chat .cc-detail.quiet:hover { background: var(--hover); color: var(--ink); }
+.ia-chat .cc-warn.cc-detail:hover { background: color-mix(in srgb, var(--amber) 20%, transparent); }
+.ia-chat .cc-detail:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.ia-review-note { padding: 6px 12px; border-bottom: 1px solid var(--border); color: var(--text-muted); font-size: 12px; }
+
+/* "N waiting in Agents" beside the task line (Arun, 2026-11-19: "one Waiting on you"): both may show at once, so each gives way
+   (shrinks, clips with an ellipsis) before the strip overflows, and a hairline tells them apart. */
+.ia-foot-line { min-width: 0; flex: 0 1 auto; overflow: hidden; }
+.ia-foot-line > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ia-foot-agents { margin-left: 2px; box-shadow: -1px 0 0 var(--border); border-radius: 0 4px 4px 0; padding-left: 8px; }
+
+/* An Agents session shown in Code (code-chats.ts linked): a small word on its tab, and a bar under the tabs with what can be done
+   with it. Flush, in the column's own colours. */
+.ia-tab-from { flex: none; padding: 2px 5px; border-radius: 999px; background: var(--hover); color: var(--text-muted); font: 500 10px/1 var(--font); letter-spacing: .01em; }
+.ia-tab.on .ia-tab-from { background: var(--hover-strong); color: var(--ink-2); }
+.ia-from { display: flex; flex: none; align-items: center; gap: 4px; min-width: 0; height: 30px; padding: 0 8px 0 8px; border-bottom: 1px solid var(--border); background: var(--bg); }
+.ia-from-text { flex: 1 1 auto; min-width: 0; padding-left: 6px; overflow: hidden; text-overflow: ellipsis; color: var(--text-muted); font: 500 11.5px/1 var(--font); white-space: nowrap; }
+.ia-from-btn { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; height: 22px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--ink-2); font: 500 11.5px/1 var(--font); white-space: nowrap; cursor: pointer; transition: background-color var(--t-hover, 120ms) ease; }
+.ia-from-btn:hover { background: var(--hover); color: var(--ink); }
+.ia-from-btn:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+
+/* "Moved to Agents": the small tab Send to Agents leaves, with its "open" link (Arun, 2026-11-19). */
+.ia-tab-moved { min-width: 176px; max-width: 240px; }
+.ia-tab-open { flex: none; padding: 2px 4px; border: 0; border-radius: 4px; background: transparent; color: var(--text-muted); font: 500 11.5px/1 var(--font); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.ia-tab-open:hover { color: var(--ink); background: var(--hover); }
+.ia-moved .ia-link { margin-top: 2px; padding: 4px 6px; border: 0; background: transparent; color: var(--text-muted); font: 500 12px/1 var(--font); cursor: pointer; }
+.ia-moved .ia-link:hover { color: var(--ink); }
+
+/* A big change's card offers a split into a stack of pull requests (RunReview, stack-plan.ts): a line under its head, never in it (the head is full). */
+.ia-chat .cc-stack { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0; padding: 7px 10px 8px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 12px; }
+.ia-chat .cc-stack > span:first-child { flex: 1 1 140px; min-width: 0; }
+.ia-chat .cc-stack-said { color: var(--text-muted); font-size: 12px; }
+
+/* After a rewind: a slim bar under the tabs, like the "From Agents" one, until the next message (rewind-column.tsx). */
+.ia-rewound { display: flex; flex: none; align-items: center; gap: 6px; min-width: 0; height: 30px; padding: 0 8px 0 14px; border-bottom: 1px solid var(--border); background: var(--bg); color: var(--ink-2); }
+.ia-rewound > svg { flex: none; color: var(--text-muted); }
+.ia-rewound-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font: 500 11.5px/1 var(--font); white-space: nowrap; }
+.ia-rewound-redo:disabled { opacity: 0.5; cursor: default; }
+.ia-rewound-done { padding-left: 14px; color: var(--text-muted); font: 500 11.5px/1 var(--font); }
+/* A message's "Rewind to here", in words, on hover: quiet beside Copy (ide column only). */
+.msg-actions .icon-btn.msg-rewind { display: inline-flex; flex: none; flex-direction: row; align-items: center; width: auto; gap: 4px; padding: 0 6px 0 4px; font: 500 11.5px/1 var(--font); white-space: nowrap; }
+.ia-hand { display: contents; }
+
+/* Code's box at its narrowest (Arun, 2026-11-20): Add, voice, Race, Run later and Send keep their size, and the tool's name gives way
+   first, down to its mark alone; nothing is crushed or pushed out of the box. */
+.ide-agent .composer-bar > *:not(:has(.agent-pill)):not(.agent-pill) { flex-shrink: 0; }
+.ide-agent .composer-bar > :is(.agent-pill, :has(.agent-pill)) { flex: 0 1 auto; min-width: 30px; overflow: hidden; }
+.ide-agent .composer-bar .agent-pill { max-width: 100%; min-width: 30px; }
+.ide-agent .composer-bar .agent-pill .amp-pill-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Under 300px there isn't room for all of them: the voice button goes (holding the voice key still talks), unless it is listening. */
+.ia-new { container: ianew / inline-size; }
+@container ianew (max-width: 300px) { .ide-agent .composer-bar .voice-right:not(:has(.voice-stop)) { display: none; } }

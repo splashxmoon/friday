@@ -165,6 +165,7 @@ const paths = {
   navReload: <path d="M2 10C2 10 4.005 7.268 5.634 5.638C7.263 4.008 9.514 3 12 3C16.971 3 21 7.029 21 12C21 16.971 16.971 21 12 21C7.897 21 4.435 18.254 3.352 14.5M2 10V4M2 10H8" />,
   navPoint: <path d="M4.5 4.5L10.8 20L13.1 13.1L20 10.8L4.5 4.5Z" />,
   arrowUpRight: <path d="M6 18L18 6M18 6H10M18 6V14" />,
+  arrowUpLeft: <path d="M18 18L6 6M6 6H14M6 6V14" />,
   chevronDown: <path d="m6 9 6 6 6-6" />,
   /** A picker: one of several, either way. */
   chevronsUpDown: <path d="M7 15L12 20L17 15M7 9L12 4L17 9" />,

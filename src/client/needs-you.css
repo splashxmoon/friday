@@ -3,6 +3,8 @@
    only filled one in the row. The row the keys are on is raised, as a selected sidebar row is. */
 
 .ny-page .page-inner { max-width: 760px; gap: 0; }
+/* Its room above and below as every rail page has it (Arun, 2026-11-19, page heights: the Agent Board's). */
+.page.ny-page { padding-top: 28px; padding-bottom: 64px; }
 .ny-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; padding: 0 12px 14px; }
 .ny-count { margin: 0; font-size: 15px; line-height: 22px; font-weight: 500; color: var(--ink); }
 .ny-keys { margin: 0; font-size: 12px; line-height: 18px; color: var(--faint); }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactElement } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactElement, type ReactNode } from "react";
 import { StarIcon } from "lucide-react";
 import { dragEnds } from "./drag-end.js";
 import { isOwnModel } from "../own-model-id.js";
@@ -143,6 +143,7 @@ export function AgentModelPicker({
   own: ownGiven,
   modelOnly = false,
   accounts = null,
+  auto = null,
 }: {
   /** The tool's accounts, when it has more than one here: a row of their own (design D). */
   accounts?: AccountChoice | null;
@@ -171,6 +172,8 @@ export function AgentModelPicker({
   onThinking?: (t: Thinking) => void;
   /** What suits the task being typed (useRouteHint): drawn on the rows, a bar of room left on each tool and Best on the pick. */
   route?: RouteHint | null;
+  /** Auto (ide/auto-tool.tsx; Arun, 2026-11-20): a row on the rail, and its card (what it picked and why) over the models while on. */
+  auto?: { on: boolean; set: (on: boolean) => void; card: ReactNode } | null;
   /** Given for a coding tool that takes an effort level: a column of its own beside the models, and a word on the pill. */
   effort?: EffortChoice | null;
   /**
@@ -647,7 +650,7 @@ export function AgentModelPicker({
 
     const railItem = (key: string, label: string, mark: ReactElement, on: boolean, pick: () => void, state?: ToolState) => {
       const off = !!state && (state.disabled || !!state.absent || state.ready === false);
-      const lim = key !== "fav" && key !== "own" ? limitOf(key as EngineTool) : null;
+      const lim = key !== "fav" && key !== "own" && key !== "auto" ? limitOf(key as EngineTool) : null;
       const tip = [label, state ? (state.disabled || state.absent ? "Not installed" : state.ready === false ? "Not set up" : "") : "", lim ? `${lim.used}% of its limit used` : ""].filter(Boolean).join(" · ");
       return (
         <button key={key} type="button" className="mpc-tab" data-on={on || undefined} data-off={off || undefined} disabled={!!state?.disabled} aria-pressed={on} aria-label={tip} title={tip} onClick={pick}>
@@ -675,6 +678,7 @@ export function AgentModelPicker({
           {!modelOnly && (
             <div className="mpc-rail" role="group" aria-label={machineName ? `Tools on ${machineName}` : "Tools"}>
               {railItem("fav", "Favourites", <StarIcon className="size-[15px]" aria-hidden />, shownKey === "fav", () => setBrowse("fav"))}
+              {auto && engine && railItem("auto", "Auto tool: the one with the most room on your plans", <Icon name="scale" size={15} />, auto.on, () => auto.set(!auto.on))}
               {/* Connected first, then your keys and local models, then the tools not connected (Arun, 2026-11-18: "place the local
                   models and subscriptions selector thing above the coding tools that are not connected"). */}
               {here.filter(connected).map((t) => railItem(t, ENGINE_NAMES[t], <EngineMark tool={t} size={16} />, shownKey === t, () => pickTool(t), toolState(t)))}
@@ -716,6 +720,7 @@ export function AgentModelPicker({
               </>
             ) : (
               <>
+                {auto?.on && auto.card}
                 {modelOnly && favRows.some(Boolean) && group("Favourites", favRows, "favs")}
                 {engine && toolList(engine, modelOnly && favRows.some(Boolean) ? new Set([...favs].filter((k) => k.startsWith(`${engine}|`))) : undefined)}
                 {engine && model && model !== "auto" && !cliKnown && group(null, [line(engine, model, model, "Typed", true, null, model)], "typed")}

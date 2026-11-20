@@ -433,3 +433,62 @@ export async function importChosen(fetcher: Fetcher, registry: Registry, user: P
   const done = await registry.importMany(user, skills);
   return { ...done, skipped, leftBehind: skills.reduce((n, x) => n + x.leftBehind, 0) };
 }
+
+// ── Whole folders, for the Skills page (runner/skill-library.ts) ───────────────
+
+/** The files a skill's folder brings along: its words, references and scripts as text. Images, archives and binaries stay behind. */
+const FOLDER_EXT = /\.(md|markdown|txt|json|ya?ml|csv|toml|xml|html?|css|js|mjs|cjs|ts|py|sh|rb|sql|ps1)$/i;
+const FOLDER_MAX_FILES = 40;
+const FOLDER_MAX_BYTES = 2_000_000;
+
+export interface SkillFolder {
+  /** Path of the SKILL.md within the repository. */
+  path: string;
+  /** Its folder's name: what it is called on this computer, and by the tools. */
+  folder: string;
+  /** SKILL.md as written. */
+  skill: string;
+  /** The other files, by their path inside the skill's folder. */
+  files: { path: string; text: string }[];
+  /** Files beside it that weren't brought along (binaries, anything large, past the limit). */
+  leftBehind: number;
+}
+
+/**
+ * The chosen skills as whole folders, each SKILL.md as its author wrote it with the text files beside it at their own paths, to
+ * be kept on this computer as they are (Arun, 2026-11-19: "import skills from either their coding tools or from github"). A
+ * folder inside a skill that is itself another skill isn't brought along with the first.
+ */
+export async function readSkillFolders(fetcher: Fetcher, input: string, paths: string[]): Promise<{ repo: string; folders: SkillFolder[]; skipped: string[] }> {
+  const repo = parseRepo(input);
+  const chosen = [...new Set(paths)].filter(isSkillFile).slice(0, MAX_PER_IMPORT);
+  if (!chosen.length) throw new AgentError(400, "Choose at least one skill to import.");
+  const { files } = await listFiles(fetcher, repo);
+  const have = new Set(files.map((f) => f.path));
+  const skillDirs = files.filter((f) => isSkillFile(f.path)).map((f) => dirOf(f.path));
+  const folders: SkillFolder[] = [];
+  const skipped: string[] = [];
+  for (const p of chosen) {
+    const text = have.has(p) ? await readText(fetcher, repo, p).catch(() => null) : null;
+    if (!text?.trim()) {
+      skipped.push(p);
+      continue;
+    }
+    const dir = dirOf(p);
+    const folder = (baseOf(dir) || repo.repo).slice(0, 60);
+    // Its own files: under its folder and not under another skill's inside it.
+    const own = files.filter((f) => f.path !== p && dir !== "" && under(f.path, dir) && !skillDirs.some((d) => d !== dir && d.startsWith(`${dir}/`) && under(f.path, d)));
+    const wanted = own.filter((f) => FOLDER_EXT.test(f.path) && f.size <= MAX_FILE).sort((a, b) => a.path.split("/").length - b.path.split("/").length || a.path.localeCompare(b.path));
+    const got: { path: string; text: string }[] = [];
+    let bytes = text.length;
+    for (const f of wanted) {
+      if (got.length >= FOLDER_MAX_FILES || bytes + f.size > FOLDER_MAX_BYTES) break;
+      const t = await readText(fetcher, repo, f.path).catch(() => null);
+      if (t === null) continue;
+      got.push({ path: f.path.slice(dir.length + 1), text: t });
+      bytes += t.length;
+    }
+    folders.push({ path: p, folder, skill: text, files: got, leftBehind: own.length - got.length });
+  }
+  return { repo: `${repo.owner}/${repo.repo}`, folders, skipped };
+}

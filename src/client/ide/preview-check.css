@@ -1,0 +1,47 @@
+/* Preview checks (PreviewCheck.tsx), under a Code chat's changes card: quiet and flush, Friday's variables so both themes follow.
+   The card measures its own width, not the window's: the column is 280px to 640px. */
+.pck { container-type: inline-size; margin: 0; border-top: 1px solid var(--border); }
+.pck-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-height: 36px; padding: 5px 8px 5px 12px; }
+.pck-go { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px; margin-left: -8px; border: 0; border-radius: 7px; background: none; color: var(--ink-2); font: 500 12.5px/1 var(--font); cursor: pointer; transition: background-color var(--t-hover, 120ms) ease, color var(--t-hover, 120ms) ease; }
+.pck-go:hover { background: var(--hover); color: var(--ink); }
+.pck-go:active { background: var(--hover-strong); }
+.pck-go:focus-visible, .pck-btn:focus-visible, .pck-thumb:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.pck-stage { color: var(--ink-2); font: 400 12.5px/1.4 var(--font); }
+.pck-dot { width: 6px; height: 6px; border-radius: 999px; background: var(--live, currentColor); animation: pck-pulse 1.4s ease-in-out infinite; }
+@keyframes pck-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .pck-dot { animation: none; } }
+.pck-err { min-width: 0; color: var(--ink-2); font: 400 12px/1.4 var(--font); overflow-wrap: anywhere; }
+.pck-lead { margin: 0; padding: 0 12px 8px; }
+.pck-head { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; min-height: 36px; padding: 5px 8px 5px 12px; color: var(--text-muted); }
+.pck-head b { color: var(--ink); font: 600 12.5px/1 var(--font); white-space: nowrap; }
+.pck-sum { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font: 400 12px/1 var(--font); font-variant-numeric: tabular-nums; }
+.pck-sum[data-tone="ok"] { color: var(--green, var(--ink-2)); }
+.pck-sum[data-tone="bad"] { color: var(--ink); font-weight: 500; }
+.pck-sp { flex: 1 1 0; }
+.pck-btn { display: inline-flex; flex: none; align-items: center; justify-content: center; height: 24px; padding: 0 8px; border: 0; border-radius: 6px; background: none; color: var(--text-muted); font: 500 12px/1 var(--font); white-space: nowrap; cursor: pointer; transition: background-color var(--t-hover, 120ms) ease, color var(--t-hover, 120ms) ease; }
+.pck-btn:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
+.pck-btn:disabled { opacity: .55; cursor: default; }
+.pck-x { width: 24px; padding: 0; }
+.pck-btn.pri { height: 26px; padding: 0 10px; background: var(--accent); color: var(--on-accent); }
+.pck-btn.pri:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); opacity: .9; }
+.pck-pages { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0 12px 12px; list-style: none; }
+.pck-page { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.pck-url { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font: 500 11.5px/1.2 var(--font-mono, ui-monospace, monospace); }
+.pck-thumbs { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.pck-thumb { position: relative; display: block; flex: none; padding: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: var(--hover); cursor: zoom-in; transition: border-color var(--t-hover, 120ms) ease; }
+.pck-thumb:hover { border-color: var(--border-strong); }
+/* A page's top, cropped to a fixed box: the desktop's wide, the phone's narrow, both the same height so the pair reads as one. */
+.pck-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top left; }
+.pck-thumb.wide { width: min(220px, calc(100% - 96px)); height: 138px; }
+.pck-thumb.phone { width: 64px; height: 138px; }
+.pck-cap { position: absolute; left: 4px; bottom: 4px; padding: 2px 5px; border-radius: 4px; background: color-mix(in srgb, var(--bg) 82%, transparent); color: var(--ink-2); font: 500 10px/1 var(--font); pointer-events: none; }
+@container (min-width: 460px) { .pck-thumb.wide { width: 260px; height: 163px; } .pck-thumb.phone { width: 75px; height: 163px; } }
+.pck-none { color: var(--text-muted); font: 400 12px/1.4 var(--font); }
+.pck-errors { display: flex; flex-direction: column; gap: 8px; padding: 0 12px 12px; }
+.pck-e { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.pck-e-page { color: var(--ink-2); font: 500 11.5px/1.2 var(--font-mono, ui-monospace, monospace); }
+.pck-e code { display: block; padding: 5px 8px; border-radius: 6px; background: var(--hover); color: var(--ink); font: 400 11.5px/1.45 var(--font-mono, ui-monospace, monospace); overflow-wrap: anywhere; white-space: pre-wrap; }
+.pck-fix { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.pck-note { margin: 0; padding: 0 12px 10px; color: var(--text-muted); font: 400 11.5px/1.5 var(--font); text-wrap: pretty; }
+/* Narrow, what it found goes under its title rather than being cut off beside it. */
+@container (max-width: 340px) { .pck-sum { order: 9; flex: 1 1 100%; padding-left: 20px; margin-top: -4px; padding-bottom: 4px; } }

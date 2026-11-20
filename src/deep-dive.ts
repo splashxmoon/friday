@@ -236,9 +236,11 @@ export function retryPrompt(page: DivePlan, bad: string[], badDiagrams: number):
     .join("\n");
 }
 
-export function askPrompt(question: string, plan: DivePlan[], overview: string, name: string): string {
+export function askPrompt(question: string, plan: DivePlan[], overview: string, name: string, about = ""): string {
   return [
     `Someone working on ${name} asks: ${question}`,
+    // The lines they had selected in the IDE when they asked (ask-code.ts).
+    ...(about ? ["", about] : []),
     "",
     plan.length ? `Deep Dive's pages for this repo, to see where to look first:\n${plan.map((p) => `- ${p.title}: ${p.purpose}${p.files.length ? ` (${p.files.slice(0, 6).join(", ")})` : ""}`).join("\n")}` : "",
     overview ? `\nIts overview:\n${overview.slice(0, 6000)}` : "",
@@ -417,7 +419,7 @@ export const diveModel = (tool: EngineTool, picked?: string): string | undefined
  * down (an older Codex without it, an account without it), the turn is asked again on the tool's own default, so a missing
  * small model never costs the Deep Dive.
  */
-async function askTool(host: DiveHost, d: Pick<Dive, "folder" | "tool" | "model">, prompt: string): Promise<{ text: string }> {
+export async function askTool(host: DiveHost, d: Pick<Dive, "folder" | "tool" | "model">, prompt: string): Promise<{ text: string }> {
   const go = (model?: string) => host("ask", { tool: d.tool, system: DIVE_SYSTEM, prompt, cwd: d.folder, timeoutMs: PAGE_MS, ...(model ? { model } : {}) }, PAGE_MS + 30_000) as Promise<{ text: string }>;
   const model = diveModel(d.tool, d.model);
   if (!model || d.model) return go(model);
@@ -485,11 +487,11 @@ export async function buildDive(store: DeepDives, host: DiveHost, d: Dive): Prom
 }
 
 /** A question answered by the person's tool in the repo, its citations checked as a page's are (struck through, not asked again). */
-export async function answerAsk(store: DeepDives, host: DiveHost, d: Dive, ask: DiveAsk): Promise<void> {
+export async function answerAsk(store: DeepDives, host: DiveHost, d: Dive, ask: DiveAsk, about = ""): Promise<void> {
   try {
     const pages = await store.pages(d.key);
     const overview = pages.find((p) => p.id === "overview")?.body ?? "";
-    const r = await askTool(host, d, askPrompt(ask.question, pages, overview, d.name));
+    const r = await askTool(host, d, askPrompt(ask.question, pages, overview, d.name, about));
     const text = cleanPage(r.text);
     const cites = citationsIn(text);
     const counts = cites.length ? ((await host("dive.lines", { path: d.folder, files: cites.map((c) => c.file) }, 60_000)) as { counts: Record<string, number | null> }).counts : {};

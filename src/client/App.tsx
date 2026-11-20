@@ -34,6 +34,7 @@ const pages = {
   board: () => import("./Board.js"),
   deepdive: () => import("./DeepDive.js"),
   mcp: () => import("./McpServers.js"),
+  skills: () => import("./Skills.js"),
   review: () => import("./CodeReview.js"),
   needs: () => import("./NeedsYou.js"),
   usage: () => import("./UsagePage.js"),
@@ -53,13 +54,20 @@ function SessionView(p: ComponentProps<typeof LazySessionView>) {
 const Board = lazy(() => pages.board().then((m) => ({ default: m.Board })));
 const DeepDivePage = lazy(() => pages.deepdive().then((m) => ({ default: m.DeepDivePage })));
 const McpServersPage = lazy(() => pages.mcp().then((m) => ({ default: m.McpServersPage })));
+const SkillsPage = lazy(() => pages.skills().then((m) => ({ default: m.SkillsPage })));
 // Search opens on a press, so its code comes then: the room it left in the first load is what Deep Dive's page took (2026-11-12).
+// Code: real VS Code beside the agent (ide/VsCodeView.tsx), in its own chunk, so the first load doesn't carry it.
+const CodeSurface = lazy(() => import("./ide/VsCodeView.js").then((m) => ({ default: m.CodeSurface })));
+const IdeRootPicker = lazy(() => import("./ide/RootPicker.js").then((m) => ({ default: m.RootPicker })));
 const SearchModal = lazy(() => import("./SearchModal.js").then((m) => ({ default: m.SearchModal })));
 const AutomationsPage = lazy(() => pages.automations().then((m) => ({ default: m.AutomationsPage })));
 const TeamWorkflowsPage = lazy(() => import("./TeamWorkflows.js").then((m) => ({ default: m.TeamWorkflowsPage })));
 const CodeReview = lazy(() => pages.review().then((m) => ({ default: m.CodeReview })));
 const NeedsYouPage = lazy(() => pages.needs().then((m) => ({ default: m.NeedsYou })));
 import { WindowNav } from "./WindowNav.js";
+import { folderOf, foldersOf, getMode, ideKey, IdeChatContext, restoredIdeRoot, setIdeRoot, setMode as setViewMode, swapMode, toggleMode, useIdeRoot, useMode, wantReview, type IdeChat } from "./ide/mode.js";
+import { addCodeChat, codeChatFor, dropLinkedChat, isCodeChat, linkCodeChat, loadCodeChats, showCodeChat, updateCodeChat } from "./ide/code-chats.js";
+import { toolName } from "../ready.js";
 import { askToShowDiff } from "./focusDiff.js";
 import { AgentForm } from "./AgentDialogs.js";
 // Settings' sections by name are all the app's start needs of Settings; the page loads when opened (or warmed, as the others).
@@ -81,6 +89,8 @@ import { QuickPrompt } from "./QuickPrompt.js";
 import { quickText, sendQuickTo, startQuick } from "./quick-send.js";
 import { ShortcutList } from "./Shortcuts.js";
 import { Palette, baseActions, paletteOrder, type Action } from "./Palette.js";
+import type { codeActions as CodeActions } from "./ide/palette-page.js";
+import { ideIsUp } from "./ide/ide-up.js";
 import type { Plan } from "../plan-types.js";
 import { Sidebar, ThreadRing } from "./Sidebar.js";
 import { PrWatch, usePrs } from "./prWatch.js";
@@ -125,6 +135,8 @@ type Route =
   | { kind: "deepdive" }
   /** MCP servers set up once for every coding tool on this computer (McpServers.tsx, runner/connections.ts). */
   | { kind: "mcp" }
+  /** Skills every coding tool and crew mate can use: the person's own, each tool's, and GitHub's (Skills.tsx, runner/skill-library.ts). */
+  | { kind: "skills" }
   | { kind: "review" }
   /** Everything waiting on you, ranked, with Friday's suggested answers (NeedsYou.tsx). */
   | { kind: "needs" }
@@ -152,6 +164,7 @@ function parseRoute(search: string): Route {
   if (p.get("view") === "board") return { kind: "board" };
   if (p.get("view") === "deepdive") return { kind: "deepdive" };
   if (p.get("view") === "mcp") return { kind: "mcp" };
+  if (p.get("view") === "skills") return { kind: "skills" };
   if (p.get("view") === "review") return { kind: "review" };
   if (p.get("view") === "needs") return { kind: "needs" };
   if (p.get("view") === "settings") return { kind: "settings", section: settingsSection(p.get("section")) };
@@ -191,6 +204,7 @@ function routeUrl(r: Route): string {
   // The repo open in it is the page's own to keep in the address (DeepDive.tsx), so a reload lands on it.
   if (r.kind === "deepdive") return "/?view=deepdive";
   if (r.kind === "mcp") return "/?view=mcp";
+  if (r.kind === "skills") return "/?view=skills";
   if (r.kind === "review") return "/?view=review";
   if (r.kind === "needs") return "/?view=needs";
   if (r.kind === "settings") return `/?view=settings&section=${encodeURIComponent(r.section)}`;
@@ -222,7 +236,8 @@ export function App() {
   /** The workspace in play: its plan decides which models and limits apply. */
   const [workspace, setWorkspace] = useState<WorkspaceUsage | null>(null);
   const [route, setRoute] = useState<Route>(readRoute);
-  const [recents, setRecents] = useState<RecentSession[]>(loadRecents);
+  // Agents' list never holds Code's chats (ide/code-chats.ts): they are Code's own, kept apart.
+  const [recents, setRecents] = useState<RecentSession[]>(() => loadRecents().filter((r) => !isCodeChat(r.sid)));
   // Setting this computer up again (Settings › About) happens on the start page, where the setup lives: from anywhere else it
   // goes there first, and asks again once it has (2026-10-27 audit: the button did nothing from Settings).
   useEffect(() => {
@@ -235,15 +250,23 @@ export function App() {
     addEventListener("friday:setup", setup);
     return () => removeEventListener("friday:setup", setup);
   }, []);
+  // A file named anywhere in Agents opens in the IDE on Shift-click (ide/file-links.ts).
+  // Loaded after the first paint: nobody has pressed a file yet.
+  useEffect(() => {
+    let undo = () => {};
+    let live = true;
+    void import("./ide/file-links.js").then((m) => live && (undo = m.installFileLinks()));
+    return () => ((live = false), undo());
+  }, []);
   // Another window or tab of Friday saved the list (a rename, a snooze, a session settled): take its copy, rather than writing this
   // window's older one over it at the next change (2026-10-27 audit: renames and snoozes were lost between two windows).
   useEffect(() => {
-    const heard = (e: StorageEvent) => e.key === "mpa.sessions" && setRecents(loadRecents());
+    const heard = (e: StorageEvent) => e.key === "mpa.sessions" && setRecents(loadRecents().filter((r) => !isCodeChat(r.sid)));
     addEventListener("storage", heard);
     return () => removeEventListener("storage", heard);
   }, []);
   // Sessions you are in on the server that this browser has never opened: another machine's, or one a schedule started.
-  type Mine = { sessions: { sid: string; title: string; role: Role; invite: string; at: number }[] };
+  type Mine = { sessions: { sid: string; title: string; role: Role; invite: string; at: number; later?: boolean }[] };
   const reloadMine = useCallback(
     (first = false) =>
       // The page asked already, while the app loaded; if that came back empty-handed (it asked before knowing who you were), ask again.
@@ -252,7 +275,7 @@ export function App() {
         .then((r) =>
           setRecents((prev) => {
             const known = new Set(prev.map((x) => x.sid));
-            const add = r.sessions.filter((s) => !known.has(s.sid)).map((s) => ({ sid: s.sid, title: s.title, invite: s.invite, role: s.role, openedAt: s.at }));
+            const add = r.sessions.filter((s) => !known.has(s.sid) && !isCodeChat(s.sid) && !s.later).map((s) => ({ sid: s.sid, title: s.title, invite: s.invite, role: s.role, openedAt: s.at }));
             // A session renamed somewhere else (a teammate, another computer) takes its new title here too, over a sidebar name.
             const title = new Map(r.sessions.map((s) => [s.sid, s.title]));
             let renamed = false;
@@ -289,7 +312,7 @@ export function App() {
   const [connections, setConnections] = useState<McpPublic[]>([]);
   // Where you are the thing that is missing, across every session you know of.
   // On Solo the sessions list says what each one is doing (which tool, and what it is at), not the last thing you typed.
-  const attention = useAttention(identity, recents, planLimits(planNow(workspace)).fridayAgent === "none");
+  const attention = useAttention(identity, recents, planLimits(planNow(workspace)).fridayAgent === "none", true);
   const unreadAll = useUnread();
   // Asked the first time there is something worth being told about, rather
   // than on launch: a permission prompt before the product has done anything
@@ -309,7 +332,7 @@ export function App() {
     if (!was) return;
     const { finished, started } = workingChanges(was, is);
     const here = route.kind === "session" ? route.sid : "";
-    markUnread(finished.filter((sid) => sid !== here));
+    markUnread(finished.filter((sid) => sid !== here && !isCodeChat(sid)));
     const moved = new Set([...finished, ...started]);
     if (!moved.size) return;
     const at = Date.now();
@@ -812,7 +835,7 @@ export function App() {
       if (r.kind !== "session" && parseRoute(location.search).kind === r.kind) dispatchEvent(new CustomEvent("friday:same-page", { detail: r.kind }));
       history.pushState(null, "", routeUrl(r));
       setRoute(r);
-      if (r.kind !== "session") document.title = r.kind === "connections" ? "Connections · Friday" : r.kind === "agents" ? "Saved agents · Friday" : r.kind === "automations" ? "Automations · Friday" : r.kind === "settings" ? "Settings · Friday" : r.kind === "usage" ? "Usage · Friday" : r.kind === "new-teammate" ? "New agent · Friday" : r.kind === "review" ? "Code Review · Friday" : r.kind === "needs" ? "Needs you · Friday" : r.kind === "board" ? "Agent Board · Friday" : r.kind === "deepdive" ? "Deep Dive · Friday" : r.kind === "mcp" ? "MCP servers · Friday" : r.kind === "library" ? "Library · Friday" : r.kind === "people" ? "People · Friday" : (r.kind as string) === "crew" ? "Crew · Friday" : "Friday";
+      if (r.kind !== "session") document.title = r.kind === "connections" ? "Connections · Friday" : r.kind === "agents" ? "Saved agents · Friday" : r.kind === "automations" ? "Automations · Friday" : r.kind === "settings" ? "Settings · Friday" : r.kind === "usage" ? "Usage · Friday" : r.kind === "new-teammate" ? "New agent · Friday" : r.kind === "review" ? "Code Review · Friday" : r.kind === "needs" ? "Needs you · Friday" : r.kind === "board" ? "Agent Board · Friday" : r.kind === "deepdive" ? "Deep Dive · Friday" : r.kind === "mcp" ? "MCP servers · Friday" : r.kind === "skills" ? "Skills · Friday" : r.kind === "library" ? "Library · Friday" : r.kind === "people" ? "People · Friday" : (r.kind as string) === "crew" ? "Crew · Friday" : "Friday";
       if (isNarrow(innerWidth)) setLayout({ sidebarCollapsed: true });
     },
     [setLayout],
@@ -988,6 +1011,29 @@ export function App() {
         if (go(e.shiftKey ? order[order.length - 1] : order[0])) e.preventDefault();
         return;
       }
+      // ⌘E: Agents or Code (open-source edition). Not while typing in a box (the chat's, a search field), but the editor is
+      // typing too and is where it is most wanted, so it counts as the IDE; and off the Mac Ctrl+E is the shell's "end of line",
+      // so it is left to the terminal.
+      if (mod && !e.shiftKey && !e.altKey && k === "e" && isLocal()) {
+        const t = e.target instanceof Element ? e.target : null;
+        const inEditor = !!t?.closest(".cm-editor");
+        const inTerminal = !!t?.closest(".xterm") && !e.metaKey;
+        const onMac = /Mac|iPhone|iPad/.test(navigator.platform);
+        // ⌘E (Meta) means nothing to a text box, so it works from the chat's message box too, where the keyboard usually is in Agents;
+        // Ctrl+E is "end of line" in one on a Mac (the editor's too), so there that one keeps the rules above. Off the Mac Ctrl+E is
+        // the only chord, and the editor counts as the IDE.
+        if ((e.metaKey || (!onMac && inEditor) || !isTyping(e.target)) && !inTerminal) {
+          e.preventDefault();
+          swapMode();
+        }
+        return;
+      }
+      // ⌘O in Code: Open Folder.
+      if (mod && !e.shiftKey && !e.altKey && k === "o" && isLocal() && getMode() === "code") {
+        e.preventDefault();
+        dispatchEvent(new Event("friday:ide-open-folder"));
+        return;
+      }
       // ⌘N: a new thread in the open coding session's project (threads.tsx), else a new session (Arun, 2026-11-15, threads).
       if (mod && !e.shiftKey && !e.altKey && k === "n") {
         e.preventDefault();
@@ -1064,6 +1110,8 @@ export function App() {
   const fileInto = useRef<{ sid: string; projectId: string } | null>(null);
   const remember = useCallback(
     (entry: RecentSession) => {
+      // One of Code's chats, opened anywhere: its title goes to Code's list, never into Agents'.
+      if (isCodeChat(entry.sid)) return void updateCodeChat(entry.sid, { title: entry.title });
       setRecents((prev) => {
         const old = prev.find((x) => x.sid === entry.sid);
         const next = [
@@ -1104,6 +1152,9 @@ export function App() {
   useEffect(() => {
     const on = (e: Event) => {
       const f = (e as CustomEvent<{ from: string; sid: string; invite: string; title: string }>).detail;
+      // A fork of one of Code's chats is Code's too: next to it in Code's history, and shown in its column.
+      const codeSrc = loadCodeChats().find((c) => c.sid === f.from && !c.linked);
+      if (codeSrc) return void addCodeChat({ sid: f.sid, invite: f.invite, folder: codeSrc.folder, title: f.title, at: Date.now(), ...(codeSrc.tool ? { tool: codeSrc.tool } : {}) });
       setRecents((prev) => {
         const src = prev.find((x) => x.sid === f.from);
         // Filed where the chat it came from is: in its project, and under its repo (not live, since nothing is connected to the copy).
@@ -1121,6 +1172,10 @@ export function App() {
     const on = (e: Event) => {
       const d = (e as CustomEvent<{ sid: string; invite?: string }>).detail;
       // Or one the card carries the way into itself (a teammates' room not opened here yet).
+      // One of Code's chats (a fork just made there, a card naming one): it shows in Code's column, not as a page of Agents.
+      // A linked one (an Agents session shown in Code) too, when Code is what is open: a card in its column names it.
+      const code = loadCodeChats().find((c) => c.sid === d.sid && (!c.linked || getMode() === "code"));
+      if (code) return void (showCodeChat(code.folder, code.sid), setIdeRoot(code.folder), setViewMode("code"));
       const r = loadRecents().find((x) => x.sid === d.sid) ?? (d.invite ? { sid: d.sid, invite: d.invite } : null);
       if (r) navigate({ kind: "session", sid: r.sid, invite: r.invite });
     };
@@ -1130,6 +1185,19 @@ export function App() {
     window.addEventListener("friday:open-needs", needs);
     return () => (window.removeEventListener("friday:open-session", on), window.removeEventListener("friday:open-needs", needs));
   }, [navigate]);
+  // A Code chat sent to Agents (ide/send-to-agents.tsx): filed in Agents' recents now it isn't Code's, and opened there when asked.
+  useEffect(() => {
+    const on = (e: Event) => {
+      const d = (e as CustomEvent<{ sid: string; invite: string; title: string; open?: boolean }>).detail;
+      if (!d.open) remember({ sid: d.sid, title: d.title, invite: d.invite, role: "owner", openedAt: Date.now() });
+      else {
+        setViewMode("agents");
+        navigate({ kind: "session", sid: d.sid, invite: d.invite });
+      }
+    };
+    window.addEventListener("friday:code-to-agents", on);
+    return () => window.removeEventListener("friday:code-to-agents", on);
+  }, [navigate, remember]);
   // The last teammate removed from the Team room: the Team tab's first run, not an empty room (Arun, 2026-10-28: "really iron
   // out bugs and feature problems and gaps").
   useEffect(() => {
@@ -1143,13 +1211,16 @@ export function App() {
       saveRecents(next);
       return next;
     });
-  const dropRecents = (sids: string[]) =>
+  const dropRecents = (sids: string[]) => {
+    // A session that leaves Agents' list takes its link in Code with it (a "From Agents" tab, a row in Code's history).
+    sids.forEach(dropLinkedChat);
     setRecents((prev) => {
       const next = prev.filter((x) => !sids.includes(x.sid));
       if (next.length === prev.length) return prev;
       saveRecents(next);
       return next;
     });
+  };
   // Removed on another device.
   useEffect(() => {
     if (attention.gone.length) dropRecents(attention.gone);
@@ -1227,6 +1298,249 @@ export function App() {
   usePlaceLeaves(activeSid, () => navigate({ kind: "home" }), !["home", "session", "automations", "crew", "new-teammate"].includes(route.kind));
   const inChat = route.kind === "home" || route.kind === "session";
   const inAgents = route.kind === "agents";
+  // Agents or Code. Code takes the window's main area (and the rail and list stay away), with the session last open in it.
+  const [viewMode] = useMode();
+  const inCode = isLocal() && viewMode === "code" && !!identity.id;
+  // Code's own palette actions (ide/palette-page.ts), loaded the first time Code shows: Agents' first screen doesn't carry them.
+  const [codeActions, setCodeActions] = useState<typeof CodeActions | null>(null);
+  useEffect(() => {
+    if (inCode && !codeActions) void import("./ide/palette-page.js").then((m) => setCodeActions(() => m.codeActions), () => {});
+  }, [inCode, codeActions]);
+  // Code stays loaded, hidden, after Agents is chosen, so switching back is instant (Arun, 2026-11-19: "smoother and faster loading
+  // of the IDE when switching between agents and code"): VS Code is a whole editor to boot each time. It is also started hidden when
+  // the pointer reaches the Agents / Code button (WindowNav, friday:code-warm), so even the first switch finds it on its way. Let go
+  // after a quarter of an hour in Agents, which frees what it holds.
+  const [codeKept, setCodeKept] = useState(false);
+  useEffect(() => {
+    if (inCode) return setCodeKept(true);
+    if (!codeKept) return;
+    const t = window.setTimeout(() => setCodeKept(false), 15 * 60_000);
+    return () => window.clearTimeout(t);
+  }, [inCode, codeKept]);
+  useEffect(() => {
+    if (!isLocal() || !identity.id) return;
+    const warm = () => setCodeKept(true);
+    window.addEventListener("friday:code-warm", warm);
+    // Someone who has used Code finds it ready (Arun, 2026-11-19: "the loading of VScode is fast and almost instant"): a few seconds
+    // after Friday opens, once its own first work is done, VS Code is started out of sight, so the switch shows it at once.
+    let used = false;
+    try {
+      used = localStorage.getItem("friday.code.used") === "1";
+    } catch {
+      // Not known: it warms when the pointer reaches the Agents / Code button instead.
+    }
+    const t = used ? window.setTimeout(warm, 4000) : undefined;
+    return () => (window.removeEventListener("friday:code-warm", warm), window.clearTimeout(t));
+  }, [identity.id]);
+  useEffect(() => {
+    if (!inCode) return;
+    try {
+      localStorage.setItem("friday.code.used", "1");
+    } catch {
+      // A preference: without it Code warms on the pointer instead.
+    }
+  }, [inCode]);
+  const codeMounted = isLocal() && !!identity.id && (inCode || codeKept);
+  const lastSid = useRef<string | null>(null);
+  if (activeSid) lastSid.current = activeSid;
+  // The folder Code shows: only one the person chose (mode.ts setIdeRoot). None at first: Code opens on its start screen.
+  const pickedRoot = useIdeRoot();
+  // The folder the last launch left Code on is checked to still be there (ide/restore.ts).
+  // Lazy: only a launch that has a folder to check loads it, and the first load stays small.
+  useEffect(() => {
+    if (!isLocal() || !identity.id || !restoredIdeRoot()) return;
+    let undo = () => {};
+    let live = true;
+    void import("./ide/restore.js").then((m) => live && (undo = m.checkRestoredRoot(identity)));
+    return () => ((live = false), undo());
+  }, [identity.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const ideRoot = pickedRoot;
+  // The session that works in that folder, if any: a folder nobody has used yet has none ("Start one here" in the chat column).
+  const ideFolders = useMemo(() => [...new Set(recents.flatMap((r) => foldersOf(r)))], [recents]);
+  const seenSid = useRef<string | null>(null);
+  useEffect(() => {
+    if (activeSid) seenSid.current = activeSid;
+  }, [activeSid]);
+  // "Open in Code" on a session's changes: that session's folder.
+  const sessionFolder = useRef<string | null>(null);
+  sessionFolder.current = folderOf(recents.find((r) => r.sid === (activeSid ?? lastSid.current)));
+  // From Agents, the session itself comes along as a linked tab "from Agents" in Code's column (ide/code-chats.ts linkCodeChat; Arun,
+  // 2026-11-19: "ensure code and agent platform can be interconnected and streamlined for easy passing of work"). It stays in
+  // Agents' list until "Move to Code".
+  const placeRef = useRef({ sid: "" as string | undefined, recents, root: null as string | null, route });
+  placeRef.current = { sid: route.kind === "session" ? route.sid : undefined, recents, root: ideRoot, route };
+  // `at`: the folder the caller knows the work is in (a lane's own, a pull request's), which the link and Code's root follow.
+  const linkSession = (review: boolean, at?: string): boolean => {
+    const { sid, recents: list } = placeRef.current;
+    const r = sid ? list.find((x) => x.sid === sid) : undefined;
+    const folder = at || folderOf(r);
+    if (getMode() !== "agents" || !r || !folder) return false;
+    setIdeRoot(folder);
+    linkCodeChat({ sid: r.sid, invite: r.invite, folder, title: r.alias || r.title || "Untitled", ...(toolsSeen.current.get(r.sid) ? { tool: toolsSeen.current.get(r.sid)! } : {}) });
+    if (review) wantReview(folder);
+    return true;
+  };
+  useEffect(() => {
+    const on = (e: Event) => {
+      const review = !!(e as CustomEvent<{ review?: boolean; folder?: string }>).detail?.review;
+      if (linkSession(review, (e as CustomEvent<{ folder?: string }>).detail?.folder)) return;
+      // Pressed in Code, on the card of the chat it shows: that chat is already in its folder, so the root stays (it used to go to
+      // the folder of whichever session Agents was last on).
+      if (getMode() === "code") return void (review && placeRef.current.root && wantReview(placeRef.current.root));
+      sessionFolder.current && setIdeRoot(sessionFolder.current);
+    };
+    addEventListener("friday:code-session-root", on);
+    return () => removeEventListener("friday:code-session-root", on);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // ⌘E keeps your place (mode.ts swapMode): from a session in Agents, Code on its folder with its linked tab; from Code, back to
+  // Agents where you were, or to the session itself when Code shows a linked chat.
+  useEffect(() => {
+    const on = (e: Event) => {
+      if (!isLocal()) return;
+      if (getMode() === "agents") {
+        if (!linkSession(false)) return;
+        e.preventDefault();
+        return void setViewMode("code");
+      }
+      const { root } = placeRef.current;
+      const shown = root ? codeChatFor(root) : null;
+      e.preventDefault();
+      setViewMode("agents");
+      // The linked session, when Agents still has it; one removed or deleted since is dropped, and Agents is where it was.
+      if (shown?.linked) {
+        if (placeRef.current.recents.some((x) => x.sid === shown.sid)) navigate({ kind: "session", sid: shown.sid, invite: shown.invite });
+        else dropLinkedChat(shown.sid);
+      }
+    };
+    addEventListener("friday:swap-mode", on);
+    return () => removeEventListener("friday:swap-mode", on);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // "Move to Code" on a linked tab: the session is Code's now and leaves Agents' list.
+  useEffect(() => {
+    const on = (e: Event) => {
+      const sid = (e as CustomEvent<{ sid: string }>).detail?.sid;
+      if (!sid) return;
+      setRecents((prev) => {
+        const next = prev.filter((x) => x.sid !== sid);
+        saveRecents(next);
+        return next;
+      });
+    };
+    addEventListener("friday:code-moved", on);
+    // Undo of Move to Code: the session is Agents' again, at the top of its list.
+    const back = (e: Event) => {
+      const c = (e as CustomEvent<{ chat?: { sid: string; invite: string; title: string } }>).detail?.chat;
+      if (!c) return;
+      rememberRef.current({ sid: c.sid, invite: c.invite, title: c.title, role: "owner", openedAt: Date.now() });
+    };
+    addEventListener("friday:code-handed-back", back);
+    return () => (removeEventListener("friday:code-moved", on), removeEventListener("friday:code-handed-back", back));
+  }, []);
+  // Agents shows a session that has since moved to Code (the route was left on it, or a reload): it has left Agents' list, so Agents
+  // goes home. Done where the mode changes, so every way back to Agents (⌘E, the window bar, the Mac menu) is covered.
+  useEffect(() => {
+    if (viewMode === "agents" && route.kind === "session" && isCodeChat(route.sid)) navigate({ kind: "home" });
+  }, [viewMode, route]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Anything of Agents' that isn't a session (new session, Crew, Automations, Board…) opened while in Code has nothing to show
+  // there: go to Agents so it is seen. Session to session stays in Code, where the root follows.
+  const lastKind = useRef(route.kind);
+  useEffect(() => {
+    const was = lastKind.current;
+    lastKind.current = route.kind;
+    if (was !== route.kind && route.kind !== "session" && getMode() === "code" && isLocal()) setViewMode("agents");
+  }, [route.kind]);
+  // Open Folder (⌘O, the palette): the picker over Code.
+  const [pickRoot, setPickRoot] = useState(false);
+  // Open Folder: the computer's own folder picker in the app, VS Code's own in a browser, never a screen of Friday's (Arun,
+  // 2026-11-19: "like i dont want this screen").
+  const openFolder = () => {
+    const pick = window.fridayDesktop?.pickFolder;
+    if (pick) void pick().then((p) => p && setIdeRoot(p), () => {});
+    else window.dispatchEvent(new CustomEvent("friday:vsc-run", { detail: "workbench.action.files.openFolder" }));
+  };
+  // Any folder opens, with or without a session in it: a session's own folder goes back to following the session.
+  const openIdeRoot = (folder: string) => {
+    setPickRoot(false);
+    setIdeRoot(folder);
+  };
+  useEffect(() => {
+    const on = () => openFolder();
+    addEventListener("friday:ide-open-folder", on);
+    return () => removeEventListener("friday:ide-open-folder", on);
+  }, []);
+  // VS Code's menus in the Mac menu bar while Code shows (desktop.ts setMenus, src/vscode-menu.ts): Friday's own items here, VS Code
+  // commands to VsCodeView (friday:vsc-run), which has the runner run them in VS Code.
+  useEffect(() => {
+    const desk = window.fridayDesktop;
+    if (!desk?.setCodeMenu) return;
+    desk.setCodeMenu(inCode, inCode ? ideFolders.slice(0, 10) : []);
+    if (!inCode) return;
+    const off = desk.onVscMenu?.((item) => {
+      if (item.command) window.dispatchEvent(new CustomEvent("friday:vsc-run", { detail: item.command }));
+      else if (item.friday === "open-folder") openFolder();
+      else if (item.friday === "close-folder" || item.friday === "new-window") setIdeRoot(null);
+      else if (item.friday === "open-recent" && item.path) setIdeRoot(item.path);
+      else if (item.friday === "new-agent-window") (setViewMode("agents"), navigate({ kind: "home" }));
+      else if (item.friday === "agent") window.dispatchEvent(new Event("friday:vsc-agent"));
+    });
+    return () => off?.();
+  }, [inCode, ideFolders]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Which coding tool works each session, remembered from when it was seen at work: the chat column names it (and wears its
+  // mark) even while it is idle.
+  const toolsSeen = useRef<Map<string, string>>(new Map());
+  if (inCode || attention.working.size) {
+    for (const [sid, w] of attention.working) if (w.tool && toolName(w.tool)) toolsSeen.current.set(sid, w.tool);
+  }
+  // Code's "New chat": the empty box in its own column, never Agents' new-session page.
+  useEffect(() => {
+    if (!isLocal()) return;
+    const on = (e: Event) => {
+      const folder = (e as CustomEvent<{ folder?: string }>).detail?.folder;
+      if (folder) showCodeChat(folder, "new");
+    };
+    addEventListener("friday:ide-new-session", on);
+    return () => removeEventListener("friday:ide-new-session", on);
+  }, []);
+  // What Code's agent column needs of this page (ide/AgentPanel.tsx): a chat's session screen, and the box that starts one. Both
+  // are the same as in Agents, but what they start and open is listed in Code (ide/code-chats.ts), not in Agents' sidebar.
+  const ideChat = useMemo<IdeChat | null>(() => {
+    if (!identity.id) return null;
+    return {
+      identity,
+      chat: (sid, invite) => (
+        <SessionView
+          key={sid}
+          sid={sid}
+          invite={invite}
+          identity={identity}
+          agents={agents}
+          onSeen={(e) => updateCodeChat(e.sid, { title: e.title })}
+          // Code's chat doesn't share its invites with Agents' header and People (they are another page's).
+          onInvites={() => {}}
+          plan={planNow(workspace)}
+          connections={connections}
+          // The IDE has no document column: the chat is all of this column.
+          doc={{ open: false, width: 0 }}
+          onDocChange={() => {}}
+        />
+      ),
+      start: (folder, quiet) => (
+        <Code
+          key={quiet ? `quiet:${quiet.id}` : folder}
+          identity={identity}
+          agents={agents}
+          plan={planNow(workspace)}
+          defaults={workspace?.defaults}
+          preset={{ folder }}
+          inColumn
+          {...(quiet ? { quiet } : {})}
+          onStart={(sid, invite, meta) => addCodeChat({ sid, invite, folder, title: "New chat", at: Date.now(), ...(meta?.tool ? { tool: meta.tool } : {}) }, quiet ? { background: true } : undefined)}
+          recents={[]}
+        />
+      ),
+      agentOf: (sid) => toolsSeen.current.get(sid) ?? "",
+    };
+  }, [identity, agents, workspace, connections]);
   // "new" is the builder with nothing yet; with no agents at all it is the only page there is.
   const selAgent = agentSel === "new" ? null : (agents.find((a) => a.id === agentSel) ?? agents[0] ?? null);
   const agentMenu = (a: AgentView): MenuItem[] => {
@@ -1349,7 +1663,7 @@ export function App() {
         onSavedAgents={() => navigate({ kind: "agents" })}
       />
     );
-  const fullBleed = crewWorkflows || route.kind === "agents" || route.kind === "automations" || route.kind === "connections" || route.kind === "people" || route.kind === "library" || route.kind === "board" || route.kind === "deepdive" || route.kind === "mcp" || route.kind === "review" || route.kind === "needs" || route.kind === "usage" || route.kind === "new-teammate" || route.kind === "settings";
+  const fullBleed = crewWorkflows || route.kind === "agents" || route.kind === "automations" || route.kind === "connections" || route.kind === "people" || route.kind === "library" || route.kind === "board" || route.kind === "deepdive" || route.kind === "mcp" || route.kind === "skills" || route.kind === "review" || route.kind === "needs" || route.kind === "usage" || route.kind === "new-teammate" || route.kind === "settings";
   useLayoutEffect(() => {
     if (!fullBleed) return;
     // When the band comes, not only if it is there as this opens: after a reload it came later, and the page stood 12px lower.
@@ -1372,11 +1686,11 @@ export function App() {
       </div>
     );
   return (
-    <div className={`shell ${panelOpen ? "with-panel" : ""}`}>
+    <div className={`shell ${panelOpen && !inCode ? "with-panel" : ""}${inCode ? " in-code" : ""}`}>
       {/* The first thing the keyboard reaches: straight to the page, past the rail and the list. */}
       <a className="skip-link" href="#main">Skip to the page</a>
       {/* Where a session puts its header in the desktop app: the band along the top of the window, which has the room. Fixed, so it takes no place in the grid. */}
-      <WindowNav open={listOpen} onToggle={togglePanel} what={inAgents ? "agents" : "sessions"} working={attention.working.keys()} needs={attention.needSids} />
+      <WindowNav open={inCode ? true : listOpen} onToggle={inCode ? () => ideKey("KeyB") : togglePanel} what={inAgents ? "agents" : "sessions"} working={attention.working.keys()} needs={attention.needSids} code={inCode ? { folder: ideRoot, recent: ideFolders } : undefined} />
       {/* In a browser the sidebar folds by itself on a narrow window, and the window bar's button (WindowNav) is the app's: with
           the sidebar folded there was no way back to it but ⌘B (Arun, 2026-10-24: UX gaps). */}
       {!panelOpen && !window.fridayDesktop && (
@@ -1395,7 +1709,7 @@ export function App() {
         {identity.id && <DoneToasts activeSid={activeSid} />}
         {/* Every agent blocked on you, across sessions, as toasts that stay until answered or closed. */}
         {/* Connecting the computer a browser is on: one dialog, opened from any "Connect this computer". */}
-        <Sidebar
+        {!inCode && <Sidebar
           identity={identity}
           email={email}
           workspace={workspace}
@@ -1432,6 +1746,7 @@ export function App() {
           onOpenBoard={() => navigate({ kind: "board" })}
           onOpenDeepDive={() => navigate({ kind: "deepdive" })}
           onOpenMcp={isLocal() ? () => navigate({ kind: "mcp" }) : undefined}
+          onOpenSkills={isLocal() ? () => navigate({ kind: "skills" }) : undefined}
           onOpenReview={() => navigate({ kind: "review" })}
           onOpenNeeds={() => navigate({ kind: "needs" })}
           reviewsWaiting={reviewPrs?.available ? reviewPrs.review.length : 0}
@@ -1454,9 +1769,9 @@ export function App() {
           // the last time they were here.
           onChat={() => (mac && inChat ? undefined : toggleChats())}
           chatToggles={!mac}
-        />
+        />}
         {/* Only where the list floats over the page, so clicking off it puts it away. */}
-        {panelOpen && <div className="sb-backdrop" onClick={() => setLayout({ sidebarCollapsed: true })} />}
+        {panelOpen && !inCode && <div className="sb-backdrop" onClick={() => setLayout({ sidebarCollapsed: true })} />}
         {/* Closed, the sidebar is gone, with no rail left in its place: the window's own sidebar button and ⌘B bring it back
             (Arun, 2026-11-03: "have the side bar fully close on close instead of being still there slightly"). */}
       </>
@@ -1470,7 +1785,27 @@ export function App() {
 
         {/* A page opened before its code has arrived shows its shape, not a blank. */}
         {/* Keyed on the workspace switches: every page is drawn again in the new workspace, and reads its own lists again. */}
-        <Suspense key={switches} fallback={route.kind === "session" ? <SessionSkeleton /> : <PageSkeleton />}>
+        {codeMounted && (
+          <div className="code-keep" hidden={!inCode}>
+          <Suspense fallback={null}>
+            <IdeChatContext.Provider value={ideChat}>
+              <CodeSurface identity={identity} sid={null} root={ideRoot} recent={ideFolders} onOpenRoot={openIdeRoot} />
+            </IdeChatContext.Provider>
+          </Suspense>
+          </div>
+        )}
+        {inCode && pickRoot && (
+          <div className="ide-pick" role="dialog" aria-modal="true" aria-label="Open a folder" onMouseDown={(e) => e.target === e.currentTarget && setPickRoot(false)} onKeyDown={(e) => e.key === "Escape" && setPickRoot(false)}>
+            <Suspense fallback={null}>
+              <IdeRootPicker
+                identity={identity}
+                recent={ideFolders.map((f) => ({ path: f, name: f.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || f }))}
+                onOpen={openIdeRoot}
+              />
+            </Suspense>
+          </div>
+        )}
+        {!inCode && <Suspense key={switches} fallback={route.kind === "session" ? <SessionSkeleton /> : <PageSkeleton />}>
         {!identity.id ? null : route.kind === "home" ? (
           teamTabOn ? <TeamHome identity={identity} needs={attention.items} onOpen={(r) => navigate({ kind: "session", sid: r.sid, invite: r.invite })} /> :
           <Code
@@ -1543,14 +1878,17 @@ export function App() {
           <DeepDivePage identity={identity} />
         ) : route.kind === "mcp" ? (
           <McpServersPage identity={identity} />
+        ) : route.kind === "skills" ? (
+          <SkillsPage identity={identity} onUse={(brief) => (setPreset({ brief }), toNewSession({ kind: "home" }, true))} />
         ) : route.kind === "review" ? (
           <CodeReview
             identity={identity}
             recents={recents}
             onWork={(brief, opts) => (setPreset({ brief, ...opts }), toNewSession({ kind: "home" }, true))}
-            onOpen={(sid) => {
+            onOpen={(sid, invite) => {
               const r = recents.find((x) => x.sid === sid);
-              if (r) navigate({ kind: "session", sid, invite: r.invite });
+              const link = r?.invite ?? invite;
+              if (link) navigate({ kind: "session", sid, invite: link });
             }}
           />
         ) : route.kind === "needs" ? (
@@ -1569,7 +1907,7 @@ export function App() {
           // Cancel goes back to the Crew room, where a new teammate is asked for.
           <TeammateForm identity={identity} editing={null} onClose={() => (setTeamTab(true), navigate({ kind: "home" }))} />
         ) : null}
-        </Suspense>
+        </Suspense>}
       </main>
         {/* After the page in the source, so Tab reaches the page first; they still sit fixed in the bottom-right corner. */}
         {/* Not over the queue itself, which lists the same waits with their answers. */}
@@ -1601,6 +1939,8 @@ export function App() {
       {palette && (
         <Palette
           onNew={(q) => {
+            // Over Code, the typed words start a Code chat (Agents' thread would start one nobody is looking at).
+            if (inCode && ideRoot && ideIsUp()) return void window.dispatchEvent(new CustomEvent("friday:ide-action", { detail: { id: "new-chat", words: q } }));
             toNewSession();
             setTimeout(() => {
               const el = document.getElementById("code-input") as HTMLTextAreaElement | null;
@@ -1610,15 +1950,15 @@ export function App() {
               el.focus();
             }, 0);
           }}
-          actions={paletteOrder(sessionActions, baseActions({
+          actions={(inCode && codeActions ? (rest: Action[]) => [...codeActions(ideRoot, recents.length, identity), ...rest] : (rest: Action[]) => rest)(paletteOrder(sessionActions, baseActions({
             recents,
             stateOf: (sid) => (attention.needSids.has(sid) ? "needs" : attention.working.has(sid) ? "working" : unreadAll.has(sid) ? "done" : null),
-            open: (r) => navigate({ kind: "session", sid: r.sid, invite: r.invite }),
+            open: (r) => (inCode && setViewMode("agents"), navigate({ kind: "session", sid: r.sid, invite: r.invite })),
             newSession: () => {
               toNewSession();
               setTimeout(() => document.getElementById("code-input")?.focus(), 0);
             },
-            goto: (where) => (where === "settings" && askPage("settings-search"), navigate(where === "settings" ? { kind: "settings", section: settingsSection(null) } : { kind: where })),
+            goto: (where) => (inCode && setViewMode("agents"), where === "settings" && askPage("settings-search"), navigate(where === "settings" ? { kind: "settings", section: settingsSection(null) } : { kind: where })),
             toggleSidebar: () => setLayout({ sidebarCollapsed: !layoutRef.current.sidebarCollapsed }),
             showShortcuts: () => setShortcuts(true),
             search: () => setSearch(true),
@@ -1627,7 +1967,8 @@ export function App() {
             team: planLimits(planNow(workspace)).team,
             ...(isLocal() ? {} : { newAgent: () => (navigate({ kind: "agents" }), setAgentSel("new")), invite: () => (askPage("invite"), navigate({ kind: "people" })) }),
             local: isLocal(),
-          }))}
+            // Over Code, "New chat" (Code's own) is the one that starts something; Agents' would start one nobody is looking at.
+          }).filter((a) => !(inCode && ideRoot && ideIsUp() && a.id === "new"))))}
           onClose={() => setPalette(false)}
         />
       )}

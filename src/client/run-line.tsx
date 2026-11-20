@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useContext, useEffect, useId, useState, type ReactNode } from "react";
 import { stepKind } from "../run-strip.js";
 import { doingVerb, stepsSummary } from "../step-summary.js";
 import { Shine } from "./shine.js";
@@ -7,6 +7,7 @@ import "./run-line.css";
 import { useHeldWords } from "./work-line.js";
 import { Orb } from "@/components/aicss/Orb";
 import { StepList, tookFor, type Step } from "./Response.js";
+import { IdeChatContext } from "./ide/mode.js";
 
 /**
  * A reply's work as one line (Arun, 2026-11-14, direction A of the working-state mockups: "instead of having so many of these",
@@ -45,10 +46,15 @@ export function plainStep(blocks: readonly Block[], waiting = false): { words: s
 }
 
 /** Each kind of step's mark in the opened line (Arun, 2026-11-17: "add svg icons next to the steps like looked at, searched, changed, ran"). */
-function GroupIcon({ k }: { k: string }) {
+function GroupIcon({ k, tip }: { k: string; tip?: string }) {
   const I = k === "think" ? BrainIcon : k === "read" ? EyeIcon : k === "search" ? SearchIcon : k === "edit" ? PencilLineIcon : k === "run" ? SquareTerminalIcon : k === "web" ? GlobeIcon : k === "open" ? SquareArrowOutUpRightIcon : k === "ask" ? MessageCircleQuestionIcon : k === "crew" ? UsersIcon : CircleDotIcon;
-  return <I className="rl-icon" data-k={k.split(":")[0]} aria-hidden="true" />;
+  const mark = <I className="rl-icon" data-k={k.split(":")[0]} aria-hidden="true" />;
+  // Code's column drops the kind's word beside its mark; the mark carries it as a tip (a span of its own: a tip is not given to an svg).
+  return tip ? <span className="rl-mk" title={tip}>{mark}</span> : mark;
 }
+
+/** The kinds whose mark is their own (the rest share the dot, so keep their word). */
+const OWN_MARK = new Set(["read", "search", "edit", "run", "web", "open", "think"]);
 
 /** The kind a step's group is: what it looked at, searched, changed, ran, or anything else by its own verb. */
 function groupOf(s: Step): { key: string; label: string } {
@@ -84,12 +90,14 @@ function Clock({ since }: { since: number }) {
 }
 
 export function RunLine({ blocks, live, since, took, waiting = false, writing = false, forecast, notes, plain = false, startOpen = false, bare = false }: { blocks: readonly Block[]; live: boolean; since?: number; took: number; waiting?: boolean; writing?: boolean; forecast?: string; /** What it said along the way, shown when the line is opened. */ notes?: ReactNode; /** A crew mate's: the step under way and the clock, without a tick per step. */ plain?: boolean; /** Shown opened (a crew mate's work, asked for from its message). */ startOpen?: boolean; /** Its steps alone, under a line that already says the one under way (work-line.tsx WorkLine): no head, each kind closed until pressed. */ bare?: boolean }) {
+  const inColumn = useContext(IdeChatContext) !== null;
   const [open, setOpen] = useState(startOpen || bare);
   // The group opened: undefined follows the step under way while it works (its group opens as the line does), null is none.
   const [group, setGroup] = useState<string | null | undefined>(undefined);
   const body = useId();
   const steps = blocks.flatMap((b) => (b.kind === "work" && "steps" in b ? b.steps : []));
   const thinks = blocks.filter((b): b is Extract<Block, { kind: "think" }> => b.kind === "think" && "thought" in b);
+  const thoughtOwn = thinks.some((t) => t.thought.trim());
   const thoughtSecs = thinks.reduce((n, t) => n + t.secs, 0);
   const running = steps.findLast((s) => s.state === "running");
   const failed = steps.filter((s) => s.state === "failed").length;
@@ -174,7 +182,7 @@ export function RunLine({ blocks, live, since, took, waiting = false, writing = 
           {thinks.length > 0 && (
             <div className="rl-group">
               <button type="button" className="rl-row" aria-expanded={opened === "think"} onClick={() => pick("think")}>
-                <span className="rl-label"><GroupIcon k="think" />Thought</span>
+                <span className="rl-label"><GroupIcon k="think" {...(inColumn && thoughtOwn ? { tip: "Thought" } : {})} /><span className="rl-lt" {...(thoughtOwn ? { "data-own": "" } : {})}>Thought</span></span>
                 <span className="rl-what">{clip(thinks.map((t) => t.thought).join(" "), 90)}</span>
                 <span className="rl-side">{thoughtSecs ? tookFor(thoughtSecs * 1000) : ""}</span>
               </button>
@@ -186,7 +194,8 @@ export function RunLine({ blocks, live, since, took, waiting = false, writing = 
             return (
               <div key={g.key} className="rl-group">
                 <button type="button" className="rl-row" aria-expanded={opened === g.key} onClick={() => pick(g.key)}>
-                  <span className="rl-label"><GroupIcon k={g.key} />{g.label}</span>
+                  {/* Code's column says the kind with its mark alone (data-own), where the mark is its own and the row has words to go with it. */}
+                  <span className="rl-label"><GroupIcon k={g.key} {...(inColumn && OWN_MARK.has(g.key) && what(g) ? { tip: g.label } : {})} /><span className="rl-lt" {...(OWN_MARK.has(g.key) && what(g) ? { "data-own": "" } : {})}>{g.label}</span></span>
                   <span className="rl-what">{what(g)}</span>
                   <span className={`rl-side${s.tone ? ` ${s.tone}` : ""}`}>{s.text}</span>
                 </button>

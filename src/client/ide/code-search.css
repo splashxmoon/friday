@@ -1,0 +1,10 @@
+/* One search for Code (CodeSearch.tsx): Friday's search window (.quick.srch, public/style.css) with rows for files, chats and sessions. */
+.cs .cs-row { gap: 10px; }
+.cs .cs-dir { flex: 0 1 auto; min-width: 0; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 12px; line-height: 18px; }
+.cs .cs-row.on .cs-dir { color: var(--ink-2); }
+.cs .cs-folder { max-width: 30%; }
+.cs .cs-ide { flex: none; }
+.cs .cs-q { flex: 1 1 auto; max-width: none; }
+.cs .cs-go { margin-left: auto; flex: none; }
+.cs .srch-title mark, .cs .cs-dir mark { padding: 0; background: none; color: var(--ink); font-weight: 700; }
+.cs .cs-dir mark { text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--ink) 40%, transparent); text-underline-offset: 2px; }

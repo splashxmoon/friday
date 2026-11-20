@@ -458,3 +458,13 @@ test("a run written as cut off by a lost connection, then learned to have finish
   assert.equal(shown.length, 1);
   assert.equal(shown[0]!.kind === "event" && shown[0]!.ev.body.type === "run.ended" && shown[0]!.ev.body.error, "Out of usage", "its real error, once");
 });
+
+test("a Remembered line landing mid-run closes nothing: the run stays one block", () => {
+  // save_lesson is called mid-run, and the lesson read after a run can land inside the next one (Arun, 2026-11-20: project memory).
+  const remembered: EventBody = { type: "brain.remembered", entry: "e1", repo: "folder:shop", kind: "convention", text: "Run npm test" } as EventBody;
+  const items = group([ev(1, { type: "instruction", text: "go", interrupt: false } as EventBody), ev(2, { type: "run.started" } as EventBody), ev(3, msg()), ev(4, remembered), ev(5, msg()), ev(6, { type: "run.ended", outcome: "done" })], false);
+  const runs = items.filter((i) => i.kind === "run") as Extract<(typeof items)[number], { kind: "run" }>[];
+  assert.equal(runs.length, 1, "one run, not two halves");
+  assert.equal(runs[0]!.ended !== null, true);
+  assert.ok(items.some((i) => i.kind === "event" && i.ev.body.type === "brain.remembered"), "the line is still in the feed");
+});

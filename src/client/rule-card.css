@@ -1,0 +1,19 @@
+/* "Save as a rule" under a message (RuleCard.tsx): quiet, flush, Friday's variables. Saved turns it green, as the Rules mock shows. */
+.rule-card { display: flex; align-items: flex-start; gap: 10px; margin: 6px 0 4px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); color: var(--ink-2, var(--ink)); font-size: 13px; line-height: 1.45; }
+.rule-card[data-saved] { border-color: color-mix(in srgb, var(--green) 35%, var(--border)); background: color-mix(in srgb, var(--green) 9%, var(--card)); }
+.rc-mark { flex: none; margin-top: 3px; color: var(--text-muted); }
+.rule-card[data-saved] .rc-mark { color: var(--green); }
+.rc-body { flex: 1; min-width: 0; }
+.rc-text { margin: 0; overflow-wrap: anywhere; }
+.rc-text b { color: var(--ink); font-weight: 600; }
+.rc-note { display: block; color: var(--text-muted); font-size: 12px; }
+.rc-err { margin: 4px 0 0; color: var(--red, #d33); font-size: 12px; }
+.rc-actions { display: flex; flex: none; gap: 2px; margin: -2px -4px -2px 0; align-self: center; }
+.rc-btn { appearance: none; border: 0; background: transparent; color: var(--ink-2, var(--ink)); font: inherit; font-size: 12.5px; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
+.rc-btn:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
+.rc-btn:disabled { opacity: 0.5; cursor: default; }
+.rc-btn:focus-visible, .rc-input:focus-visible { outline: 2px solid var(--ring, var(--accent)); outline-offset: -1px; }
+.rc-primary { color: var(--ink); font-weight: 600; }
+.rc-edit { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.rc-input { flex: 1 1 180px; min-width: 0; font: inherit; color: var(--ink); background: var(--bg, transparent); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; }
+@media (max-width: 520px) { .rule-card { flex-wrap: wrap; } .rc-actions { margin-left: 24px; } }

@@ -153,12 +153,29 @@ export function cyclesOf(samples: Sample[]): { resetsAt: number; peak: number }[
   return [...by].sort((a, b) => a[0] - b[0]).map(([resetsAt, peak]) => ({ resetsAt, peak }));
 }
 
-/** The tool with the most room in its five-hour window, among those whose week isn't nearly spent. */
+/** A tool's fullest window, the one its card leads with: the most used; between two as full, the one that resets later. */
+export function fullestOf(wins: Win[]): Win | undefined {
+  return [...wins].sort((a, b) => b.used - a.used || (b.resetsAt ?? 0) - (a.resetsAt ?? 0))[0];
+}
+
+/**
+ * The tool with the most room, by the figure each card shows: the share left of its fullest window, whatever its length (a week, a
+ * month, five hours). Per tool, not per window: Antigravity's two groups were two contestants, and a tool with only a weekly or
+ * monthly window (Grok, Cursor, Copilot) couldn't be one, so the badge and the cards disagreed (v0.3.5: Claude badged at 22% left
+ * beside Codex at 100%). At least two tools with a figure; a tie goes to the one whose fullest window resets sooner, as it refills
+ * first, and to none when that isn't known or is the same.
+ */
 export function mostRoom(wins: Win[]): { tool: EngineTool; left: number } | null {
-  const five = wins.filter(isFiveHour);
-  const weekFull = new Set(wins.filter((w) => isWeekly(w) && w.used >= 90).map((w) => w.tool));
-  const best = five.filter((w) => !weekFull.has(w.tool)).sort((a, b) => a.used - b.used)[0];
-  return five.length > 1 && best ? { tool: best.tool, left: Math.round(100 - best.used) } : null;
+  const tools = [...new Set(wins.map((w) => w.tool))];
+  const each = tools.map((tool) => ({ tool, w: fullestOf(wins.filter((w) => w.tool === tool))! })).map((x) => ({ ...x, left: Math.max(0, Math.round(100 - x.w.used)) }));
+  if (each.length < 2) return null;
+  const top = Math.max(...each.map((x) => x.left));
+  const tied = each.filter((x) => x.left === top);
+  if (tied.length === 1) return { tool: tied[0]!.tool, left: top };
+  if (tied.some((x) => !x.w.resetsAt)) return null;
+  const soonest = Math.min(...tied.map((x) => x.w.resetsAt!));
+  const first = tied.filter((x) => x.w.resetsAt === soonest);
+  return first.length === 1 ? { tool: first[0]!.tool, left: top } : null;
 }
 
 // ── what each plan costs ────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { lazy, memo, Suspense, useContext, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import remarkMath from "remark-math";
 import type { Pluggable } from "unified";
 import { defaultRehypePlugins, defaultRemarkPlugins, parseMarkdownIntoBlocks, useIsCodeFenceIncomplete, type Components } from "streamdown";
@@ -11,6 +11,20 @@ import { IS_MAC } from "./Shortcuts.js";
 import { LiveBlock, LiveImage } from "./LiveBlock.js";
 import { localPicture } from "./LiveBlock.js";
 import { Lightbox } from "./Lightbox.js";
+import { ColumnCode } from "./ide/column-code.js";
+import { ideCanOpen, IdeChatContext, useMode } from "./ide/mode.js";
+import { isLocal } from "./edition.js";
+import { IdeLink } from "./ide/IdeLink.js";
+// An agent's report blocks drawn as cards (fence-cards.tsx), loaded when an answer has one: the block's name and what it says
+// while it is still being written.
+const FenceCard = lazy(() => import("./fence-cards.js"));
+const CARD_FENCES: Record<string, { cls: string; writing: string }> = {
+  "friday-review": { cls: "sfr-writing", writing: "Writing the review…" },
+  "friday-bisect": { cls: "bsc-writing", writing: "Writing up what it found…" },
+  "friday-plan": { cls: "rfp-writing", writing: "Writing the plan…" },
+  "friday-refactor-done": { cls: "rfp-writing", writing: "Finishing up…" },
+  "friday-stack": { cls: "stk-writing", writing: "Writing the split…" },
+};
 import { chipLabel, titlesChanged, titlesNow } from "./work-outputs.js";
 
 /**
@@ -54,19 +68,41 @@ function useCopy(text: string) {
 function FileChip({ text, path, line, onOpen }: { text: string; path: string; line?: number; /** A picture's: shown large here, not opened as a file. */ onOpen?: () => void }) {
   const [copied, copy] = useCopy(path);
   useSyncExternalStore(titlesChanged, titlesNow, titlesNow); // its title as the rail learns it, not as it was when first drawn
-  const open = (e: { metaKey: boolean; ctrlKey: boolean; currentTarget: EventTarget }) => {
+  // "Open in the IDE" beside the plain click (Arun, 2026-11-20: "Every file mention opens in the IDE"): Shift-click does it too
+  // (ide/file-links.ts), and this is the menu for whoever doesn't know.
+  const [menu, setMenu] = useState<{ x: number; y: number; lane?: string } | null>(null);
+  // Offered only where a page will honour it (a session with a folder, a Deep Dive), and as the mode changes, not as it was drawn.
+  const [mode] = useMode();
+  const chipEl = useRef<HTMLButtonElement>(null);
+  const ide = isLocal() && mode === "agents" && ideCanOpen();
+  const open = (e: { metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; currentTarget: EventTarget }) => {
     const outside = e.metaKey || e.ctrlKey;
     if (onOpen && !outside) return onOpen();
     // Whose message it is in: a path is in that agent's folder (a Crew teammate's own, another agent's copy), not the session's.
     const said = (e.currentTarget as HTMLElement).closest?.<HTMLElement>("[data-lane]")?.dataset.lane;
     const lane = said && said !== "main" ? said : undefined;
     // The session view takes the event and says so; nobody taking it means there is no file view here.
-    const taken = !window.dispatchEvent(new CustomEvent("friday:open-file", { detail: { path, line, outside, ...(lane ? { lane } : {}) }, cancelable: true }));
+    const taken = !window.dispatchEvent(new CustomEvent("friday:open-file", { detail: { path, line, outside, ide: e.shiftKey, from: e.currentTarget as Element, ...(lane ? { lane } : {}) }, cancelable: true }));
     if (!taken) copy();
   };
   const ranged = /^(.+?):(\d+(?:[-–]\d+)?)$/.exec(text);
   return (
-    <button type="button" className="file-chip" onClick={open} title={copied ? "Path copied" : `Open ${path}${line ? ` at line ${line}` : ""}${window.fridayDesktop?.openIn ? ` · ${IS_MAC ? "⌘" : "Ctrl"}-click for your editor` : ""}`} aria-label={`Open ${text}`}>
+    <>
+    <button
+      ref={chipEl}
+      type="button"
+      className="file-chip"
+      onClick={open}
+      onContextMenu={(e) => {
+        const said = e.currentTarget.closest?.<HTMLElement>("[data-lane]")?.dataset.lane;
+        const lane = said && said !== "main" ? said : undefined;
+        if (onOpen || !(isLocal() && mode === "agents" && ideCanOpen())) return;
+        e.preventDefault();
+        setMenu({ x: e.clientX, y: e.clientY, ...(lane ? { lane } : {}) });
+      }}
+      title={copied ? "Path copied" : `Open ${path}${line ? ` at line ${line}` : ""}${ide ? " · Shift-click for the IDE" : ""}${window.fridayDesktop?.openIn ? ` · ${IS_MAC ? "⌘" : "Ctrl"}-click for your editor` : ""}`}
+      aria-label={`Open ${text}`}
+    >
       <FileIcon path={path} size={14} />
       {/* The lines apart from the path, so a page that wants them as a segment of their own (Deep Dive) can draw them so. */}
       <code>{ranged ? <>{ranged[1]}<span className="file-chip-range"><span className="file-chip-colon">:</span>{ranged[2]}</span></> : text}</code>
@@ -74,6 +110,8 @@ function FileChip({ text, path, line, onOpen }: { text: string; path: string; li
       {/* No space after it on its line: inside the button it was a gap before the full stop that followed ("playbook ."). */}
       <span className="file-chip-title">{chipLabel(text, path)}</span>
     </button>
+    {menu && <IdeLink menu={{ ...menu, from: chipEl.current, path, ...(line ? { line } : {}), copy, close: () => setMenu(null) }} />}
+    </>
   );
 }
 
@@ -174,6 +212,7 @@ type CodeProps = { node?: unknown; className?: string; children?: ReactNode; "da
 
 function Code({ node: _node, className, children, ...rest }: CodeProps) {
   const incomplete = useIsCodeFenceIncomplete();
+  const inColumn = useContext(IdeChatContext) !== null;
   // The renderer marks a fenced block's code with data-block; without it this is code inside a sentence.
   if (!("data-block" in rest)) {
     const text = textOf(children);
@@ -196,7 +235,20 @@ function Code({ node: _node, className, children, ...rest }: CodeProps) {
   const language = className?.match(/language-(\S+)/)?.[1] ?? "";
   const code = textOf(children);
   if (MEDIA.test(code.trim()) && !/\s/.test(code.trim())) return <MediaChip text={code.trim()} path={code.trim()} />;
+  // The agent's self-review, the commit a bisect found, a refactor's plan and its closing line: cards, once the block is whole.
+  const card = CARD_FENCES[language];
+  if (card) {
+    if (incomplete) return <p className={card.cls}>{card.writing}</p>;
+    const plain = <AnswerCode code={code} language={language} incomplete={false} />;
+    return (
+      <Suspense fallback={plain}>
+        <FenceCard fence={language} code={code} plain={plain} />
+      </Suspense>
+    );
+  }
   if (LIVE.has(language.toLowerCase())) return <LiveBlock code={code} language={language} isIncomplete={incomplete} />;
+  // Code's chat column draws its blocks its own way: the file, Copy, Open in file, long ones cut short (ide/column-code.tsx).
+  if (inColumn) return <ColumnCode code={code} fence={language} lang={codeLanguage} incomplete={incomplete} />;
   return <AnswerCode code={code} language={language} incomplete={incomplete} />;
 }
 

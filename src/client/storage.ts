@@ -39,6 +39,8 @@ export interface RepoUse {
   path?: string;
   /** The main lane works in a worktree of `path`, not in the folder itself. */
   worktree?: boolean;
+  /** With `worktree`: the worktree's folder, where the main lane really edits (Code opens this, not `path`). */
+  cwd?: string;
 }
 
 export interface Project {

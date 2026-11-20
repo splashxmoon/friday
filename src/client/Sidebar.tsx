@@ -21,6 +21,7 @@ import { CodingToolLimits, RailRing, useRailLimits } from "./gauge.js";
 import { AccountGlance } from "./account-glance.js";
 import type { McpPublic } from "../mcp-types.js";
 import { Avatar, Icon, type IconName } from "./icons.js";
+import { hiddenOf, isDefaultRail, moveInRail, readRail, saveRail, setShown, shownOf, useRailLayout, type RailPlace } from "./rail-layout.js";
 import type { AgentView, PersonListing } from "../agents.js";
 import { useNeedsCount, withCode, type AttentionState } from "./Attention.js";
 import type { Attention } from "../attention.js";
@@ -60,6 +61,7 @@ import { markUnread, useUnread } from "./unread.js";
 import { noticeDue, UsageNotice, useUsageSharing } from "./UsageSharing.js";
 import { folderName } from "./Workspace.js";
 import { NEW_THREAD, NEW_THREAD_ON_OPEN } from "./threads-data.js";
+import { isCodeChat } from "./ide/code-chats.js";
 
 /** `fresh`: a project just made, whose name box was never confirmed: Escape takes it away again. */
 type Renaming = { kind: "session" | "project"; id: string; fresh?: boolean } | null;
@@ -92,7 +94,7 @@ export interface SidebarProps {
   activeSid: string | null;
   /** On the new-session page opened from a project's "New session here": the project it will go in, shown in the list. */
   draftProject?: string | undefined;
-  view: "home" | "session" | "connections" | "agents" | "automations" | "people" | "library" | "crew" | "board" | "deepdive" | "mcp" | "review" | "needs" | "settings" | "usage";
+  view: "home" | "session" | "connections" | "agents" | "automations" | "people" | "library" | "crew" | "board" | "deepdive" | "mcp" | "skills" | "review" | "needs" | "settings" | "usage";
   /** Whether the chat list is showing beside the rail. */
   panelOpen: boolean;
   /** Whether the session list shows beside the rail: false when the sidebar's button folded it and the rail stayed. */
@@ -126,6 +128,7 @@ export interface SidebarProps {
   onOpenDeepDive?: () => void;
   /** MCP servers for every coding tool on this computer (McpServers.tsx). */
   onOpenMcp?: () => void;
+  onOpenSkills?: () => void;
   onOpenReview: () => void;
   /** The Needs you queue (NeedsYou.tsx). */
   onOpenNeeds?: () => void;
@@ -630,7 +633,7 @@ function OssRail({ p }: { p: SidebarProps }) {
   const mates = t ? ownOf(t) : [];
   const mateNeeds = mates.filter((m) => m.status === "waiting").length;
   const agentsDot = useAgentsDot(mates, crew);
-  const onPage = ["needs", "board", "deepdive", "mcp", "review", "automations", "agents", "usage", "settings"].includes(p.view ?? "");
+  const onPage = ["needs", "board", "deepdive", "mcp", "skills", "review", "automations", "agents", "usage", "settings"].includes(p.view ?? "");
   // A place's page is lit; else the list you are in, Sessions or Agents.
   // Agents always opens the Agents page; Sessions leaves a page, or a crew chat, for a new session.
   const go = (place: "code" | "team") => {
@@ -794,29 +797,109 @@ function OssRail({ p }: { p: SidebarProps }) {
     const to = e.key === "Home" ? 0 : e.key === "End" ? all.length - 1 : (i + (e.key === "ArrowDown" ? 1 : -1) + all.length) % all.length;
     all[to]?.focus();
   };
+  // Each place the rail can hold: what it shows, and whether this window offers it (Deep Dive, MCP servers and Skills are the
+  // open-source edition's).
+  type Place = { id: RailPlace; icon: IconName; label: string; go: () => void; on: boolean; render: () => React.ReactNode };
+  const all: Place[] = [];
+  const add = (o: Omit<Place, "render" | "on"> & { on?: boolean; render?: () => React.ReactNode }) => all.push({ on: p.view === o.id, render: () => item({ id: o.id, icon: o.icon, label: o.label, on: p.view === o.id, go: o.go, warm: o.id as SidebarProps["view"] }), ...o } as Place);
+  add({ id: "sessions", icon: "chat", label: "Sessions", go: () => go("code"), on: !crew && !onPage, render: () => item({ id: "sessions", icon: "chat", label: "Sessions", on: !crew && !onPage, go: () => go("code"), n: [...p.attention.needSids].filter((sid) => !isTeamSid(sid) && !isCodeChat(sid)).length || undefined, needs: true }) });
+  add({ id: "agents", icon: "agent", label: "Agents", go: () => go("team"), on: crew && !onPage, render: () => item({ id: "agents", icon: "agent", label: "Agents", tour: "Crew", on: crew && !onPage, go: () => go("team"), n: mateNeeds || undefined, needs: true, dot: agentsDot }) });
+  if (p.onOpenNeeds) {
+    const open = p.onOpenNeeds;
+    add({ id: "needs", icon: "hand", label: "Needs you", go: open, render: () => item({ id: "needs", icon: "hand", label: "Needs you", on: p.view === "needs", go: open, warm: "needs", n: waiting || undefined, needs: true }) });
+  }
+  add({ id: "automations", icon: "zap", label: "Automations", go: p.onOpenAutomations, on: p.view === "automations" || p.view === "agents", render: () => item({ id: "automations", icon: "zap", label: "Automations", on: p.view === "automations" || p.view === "agents", go: p.onOpenAutomations, warm: "automations" }) });
+  add({ id: "review", icon: "gitPullRequest", label: "Code Review", go: p.onOpenReview, render: () => item({ id: "review", icon: "gitPullRequest", label: "Code Review", on: p.view === "review", go: p.onOpenReview, warm: "review", n: p.reviewsWaiting || undefined, needs: true }) });
+  add({ id: "board", icon: "board", label: "Agent Board", go: p.onOpenBoard });
+  if (p.onOpenDeepDive) add({ id: "deepdive", icon: "puzzle", label: "Deep Dive", go: p.onOpenDeepDive });
+  if (p.onOpenMcp) add({ id: "mcp", icon: "wrench", label: "MCP servers", go: p.onOpenMcp });
+  if (p.onOpenSkills) add({ id: "skills", icon: "book", label: "Skills", go: p.onOpenSkills });
+  const placeOf = (id: RailPlace) => all.find((x) => x.id === id);
+  // Which sit on the rail, in what order, and which behind the ⋯: yours to choose (rail-layout.ts; Customize rail, from the ⋯ or a
+  // right-click on the rail).
+  const layout = useRailLayout();
+  const offered = (id: RailPlace) => !!placeOf(id);
+  const onRail = shownOf(layout, offered);
+  const more = hiddenOf(layout, offered).map((id) => placeOf(id)!);
+  const [customize, setCustomize] = useState<DOMRect | null>(null);
+  const [railCtx, setRailCtx] = useState<{ x: number; y: number; id?: RailPlace } | null>(null);
+  const navRef = useRef<HTMLElement>(null);
+  /** Beside the rail, level with where it was asked for. */
+  const openCustomize = (y: number) => {
+    const r = navRef.current?.getBoundingClientRect();
+    if (r) setCustomize(new DOMRect(r.left, Math.max(y - 20, 8), r.width - 10, 1));
+  };
+  const railMenu = (id?: RailPlace): MenuItem[] => {
+    const place = id && placeOf(id);
+    const at = id ? onRail.indexOf(id) : -1;
+    return [
+      ...(place
+        ? ([
+            { label: "Move up", icon: "arrowUp", disabled: at <= 0, onSelect: () => saveRail(moveInRail(readRail(), place.id, -1, offered)) },
+            { label: "Move down", icon: "arrowDown", disabled: at < 0 || at >= onRail.length - 1, onSelect: () => saveRail(moveInRail(readRail(), place.id, 1, offered)) },
+            place.id !== "sessions" && { label: "Hide from rail", icon: "more", onSelect: () => saveRail(setShown(readRail(), place.id, false)) },
+            { node: <i className="rail-menu-sep" />, height: 9 },
+          ] as MenuItem[])
+        : []),
+      { label: "Customize rail", icon: "sidebar", onSelect: () => openCustomize(railCtx?.y ?? 120) },
+      !isDefaultRail(layout) && { label: "Reset rail", icon: "refresh", onSelect: () => saveRail(null) },
+    ];
+  };
+  const moreHere = more.find((m) => p.view === m.id);
+  const morePlaces = (
+    <span key="more-places" onPointerEnter={() => more.forEach((m) => p.onWarm?.(m.id as SidebarProps["view"]))}>
+      <MenuButton
+        beside
+        label={moreHere ? `More places: ${moreHere.label}` : "More places"}
+        className={`oss-rail-btn oss-rail-more-places${moreHere ? " is-here" : ""}`}
+        items={() => [
+          ...more.map((m) => ({ label: m.label, icon: m.icon, checked: p.view === m.id, onSelect: m.go })),
+          ...(more.length ? [{ node: <i className="rail-menu-sep" />, height: 9 }] : []),
+          { label: "Customize rail", icon: "sidebar" as const, onSelect: () => openCustomize(navRef.current?.querySelector(".oss-rail-more-places")?.getBoundingClientRect().top ?? 200) },
+        ]}
+      >
+        <Icon name="more" size={20} />
+      </MenuButton>
+    </span>
+  );
   return (
-    <nav className="oss-rail" aria-label="Places" onKeyDown={onKey}>
+    <nav
+      ref={navRef}
+      className="oss-rail"
+      aria-label="Places"
+      onKeyDown={onKey}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        const id = (e.target as HTMLElement).closest<HTMLElement>("[data-place]")?.dataset.place as RailPlace | undefined;
+        setRailCtx({ x: e.clientX, y: e.clientY, ...(id ? { id } : {}) });
+      }}
+    >
       <div className="oss-rail-group">
-        {item({ id: "sessions", icon: "chat", label: "Sessions", on: !crew && !onPage, go: () => go("code"), n: [...p.attention.needSids].filter((sid) => !isTeamSid(sid)).length || undefined, needs: true })}
-        {item({ id: "agents", icon: "agent", label: "Agents", tour: "Crew", on: crew && !onPage, go: () => go("team"), n: mateNeeds || undefined, needs: true, dot: agentsDot })}
-      </div>
-      <span className="oss-rail-sep" aria-hidden="true" />
-      <div className="oss-rail-group">
-        {p.onOpenNeeds && item({ id: "needs", icon: "hand", label: "Needs you", on: p.view === "needs", go: p.onOpenNeeds, warm: "needs", n: waiting || undefined, needs: true })}
-        {item({ id: "board", icon: "board", label: "Agent Board", on: p.view === "board", go: p.onOpenBoard, warm: "board" })}
-        {p.onOpenDeepDive && item({ id: "deepdive", icon: "puzzle", label: "Deep Dive", on: p.view === "deepdive", go: p.onOpenDeepDive, warm: "deepdive" })}
-        {p.onOpenMcp && item({ id: "mcp", icon: "wrench", label: "MCP servers", on: p.view === "mcp", go: p.onOpenMcp, warm: "mcp" })}
-        {item({ id: "automations", icon: "zap", label: "Automations", on: p.view === "automations" || p.view === "agents", go: p.onOpenAutomations, warm: "automations" })}
-        {item({ id: "review", icon: "gitPullRequest", label: "Code Review", on: p.view === "review", go: p.onOpenReview, warm: "review", n: p.reviewsWaiting || undefined, needs: true })}
+        {/* One line after the first two places, as the rail always had it (Sessions and Agents, then the pages). */}
+        {onRail.map((s, i) => (
+          <span key={s} className="oss-rail-place" data-place={s}>
+            {i === 2 && <span className="oss-rail-sep" aria-hidden="true" />}
+            {placeOf(s)!.render()}
+          </span>
+        ))}
+        {morePlaces}
       </div>
       <div className="oss-rail-foot">
         <UpdateRailButton />
         {rings.length ? railRings : item({ id: "usage", icon: "usage", label: "Usage", on: p.view === "usage", go: p.onOpenUsage, warm: "usage" })}
         {item({ id: "settings", icon: "settings", label: "Settings", on: p.view === "settings", go: p.onOpenSettings })}
       </div>
+      {railCtx && <ContextMenu at={railCtx} items={() => railMenu(railCtx.id)} onClose={() => setRailCtx(null)} />}
+      {customize && (
+        <Suspense fallback={null}>
+          <RailCustomize places={all.map(({ id, icon, label }) => ({ id, icon, label }))} anchor={customize} onClose={() => setCustomize(null)} />
+        </Suspense>
+      )}
     </nav>
   );
 }
+
+const RailCustomize = lazy(() => import("./rail-customize.js").then((m) => ({ default: m.RailCustomize })));
 
 /** Three faces when the crew has fewer than three of its own, so the icon is always a group. */
 const CREW_ICON_SEEDS = ["v2:rail-a", "v2:rail-b", "v2:rail-c"];
@@ -837,7 +920,7 @@ function CrewIcon({ seeds }: { seeds: string[] }) {
 }
 
 /** Pages of their own, on the rail: none of them is the Sessions or the Agents list. */
-const RAIL_PAGES = ["needs", "board", "deepdive", "mcp", "review", "automations", "agents", "usage", "settings"];
+const RAIL_PAGES = ["needs", "board", "deepdive", "mcp", "skills", "review", "automations", "agents", "usage", "settings"];
 
 /**
  * The list beside the rail: the crew's own on the Agents side (CrewList), New session and your sessions on the other, with no

@@ -16,6 +16,10 @@ import { usePrs } from "./prWatch.js";
 import { QuickHeader, RiskChip, approveTogether, type Approvable } from "./reviewRisk.js";
 import { ChartLineIcon, CheckIcon, ChevronRightIcon, CopyIcon, GitPullRequestIcon, LayoutGridIcon, SearchIcon, XIcon } from "lucide-react";
 import { isLocal } from "./edition.js";
+import { codeForBoard } from "../vscode-board.js";
+import { useCodeChats } from "./ide/code-chats.js";
+import { foldersOf, useIdeRoot } from "./ide/mode.js";
+import { codeWhere, folderName, openWaiting } from "./ide/waiting.js";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -53,7 +57,8 @@ const COLUMNS: { id: Exclude<BoardColumn, "idle" | "needs">; title: string; hint
 const POLL_MS = 5000;
 const FILTERS = "mpa.board.filters";
 
-function useBoard(identity: Identity, recents: RecentSession[]) {
+function useBoard(identity: Identity, recents: RecentSession[], extra: string[] = []) {
+  // `extra` (Code's chats) is sent apart from Agents' sessions: the cards are read for both, the week counts Agents' alone.
   const [cards, setCards] = useState<BoardCard[] | null>(null);
   const [week, setWeek] = useState<Week | null>(null);
   // Why the last reading failed ("" when it didn't): with nothing read yet, the board says so instead of loading forever.
@@ -66,7 +71,8 @@ function useBoard(identity: Identity, recents: RecentSession[]) {
   // A retry in flight, so Try again says it is trying and a second failure doesn't look like nothing happened.
   const [trying, setTrying] = useState(false);
   const [hidden, setHidden] = useState(document.hidden);
-  const sids = recents.map((r) => r.sid).join(",");
+  const sids = [...recents.map((r) => r.sid), ...extra].join(",");
+  const codeIds = extra.join(",");
 
   useEffect(() => {
     if (!sids) {
@@ -77,7 +83,7 @@ function useBoard(identity: Identity, recents: RecentSession[]) {
     const ask = async (): Promise<boolean> => {
       if (document.hidden) return false;
       try {
-        const got = await api<{ cards: BoardCard[]; week?: Week }>(identity, "/api/board", { method: "POST", body: JSON.stringify({ sids: sids.split(",") }) });
+        const got = await api<{ cards: BoardCard[]; week?: Week }>(identity, "/api/board", { method: "POST", body: JSON.stringify({ sids: sids.split(","), ...(codeIds ? { code: codeIds.split(",") } : {}) }) });
         if (live) (setCards(got.cards), setWeek(got.week ?? null), setFailed(""), setAt(Date.now()));
         return true;
       } catch (e) {
@@ -156,7 +162,7 @@ type CardAction = { label: string; title: string; primary?: boolean; icon?: bool
  * stands, with a dot only when that means something: running, failing, ready); who and which branch, how big its change is, and
  * at most one action. `solo`: every agent here is yours and nobody else is in the room, so names lose their "Arun's".
  */
-function Card({ card, onOpen, solo, focused, onFocus, action }: { card: BoardCard; onOpen: (sid: string) => void; solo: boolean; focused: boolean; onFocus: () => void; action?: CardAction | null }) {
+function Card({ card, onOpen, solo, focused, onFocus, action, where }: { card: BoardCard; onOpen: (sid: string) => void; solo: boolean; focused: boolean; onFocus: () => void; action?: CardAction | null; /** One of Code's chats: marked "Code" and read-only here, opening in Code. */ where?: { folder: string } }) {
   const agent = solo ? card.agent.replace(/^[^']+'s /, "") : card.agent;
   const el = useRef<HTMLButtonElement>(null);
   const [copied, setCopied] = useState(false);
@@ -166,7 +172,7 @@ function Card({ card, onOpen, solo, focused, onFocus, action }: { card: BoardCar
   const stop = (e: React.SyntheticEvent) => e.stopPropagation();
   const needsYou = card.you && card.column === "needs";
   // Up for review or ready to ship: the reason it sits where it does in its column. The quick ones say it in their heading.
-  const risk = (card.column === "review" || card.column === "ready") && card.risk && !card.risk.quick ? card.risk : null;
+  const risk = !where && (card.column === "review" || card.column === "ready") && card.risk && !card.risk.quick ? card.risk : null;
   const failing = card.gh?.checks === "failing" && card.gh.state === "open";
   // The mark's ring and the lane already say running or ready; a dot on the line is kept for what the lane can't say: failing.
   const lineDot: DotState | null = failing ? "bad" : null;
@@ -208,7 +214,7 @@ function Card({ card, onOpen, solo, focused, onFocus, action }: { card: BoardCar
           onFocus={onFocus}
           onClick={(e) => (e.stopPropagation(), onOpen(card.sid))}
           title={card.task && card.task !== card.title ? card.task : card.title}
-          aria-label={`${card.title}, ${agent}: ${card.status}${card.you ? ", waiting on you" : ""}`}
+          aria-label={`${where ? "Code chat, " : ""}${card.title}, ${agent}: ${card.status}${card.you ? ", waiting on you" : ""}`}
         >
           {card.title}
         </button>
@@ -224,7 +230,13 @@ function Card({ card, onOpen, solo, focused, onFocus, action }: { card: BoardCar
         <span className="line-clamp-2 min-w-0">{card.detail ? shortPaths(card.detail) : card.status}</span>
       </p>
       <div className="flex min-h-6 min-w-0 items-center gap-2 pl-8 text-[12px] text-[var(--text-muted)]">
+        {where && (
+          <span className="shrink-0 rounded-[5px] border border-[var(--border)] px-1.5 text-[11px] leading-4 text-[var(--ink-2)]" title={`${codeWhere(where)}: opens in Code`} data-where="code">
+            Code
+          </span>
+        )}
         <span className="min-w-0 truncate" title={`${agent}${card.branch ? ` · ${card.branch}` : ""}`}>
+          {where && where.folder ? `${folderName(where.folder)} · ` : ""}
           {agent}
           {card.branch && (
             <>
@@ -465,8 +477,17 @@ function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; chi
   );
 }
 
-export function Board({ identity, recents, projects, onOpen, onNew, onReview, solo = false, needs = [], off }: { identity: Identity; recents: RecentSession[]; projects: Project[]; onOpen: (sid: string) => void; onNew: () => void; /** A pull request asked of you: Code Review. */ onReview?: () => void; solo?: boolean; /** What the Needs you page lists, not put off (Attention.tsx). */ needs?: NeedMark[]; off?: Set<string> }) {
-  const board = useBoard(identity, recents);
+export function Board({ identity, recents, projects, onOpen: openAgents, onNew, onReview, solo = false, needs = [], off }: { identity: Identity; recents: RecentSession[]; projects: Project[]; onOpen: (sid: string) => void; onNew: () => void; /** A pull request asked of you: Code Review. */ onReview?: () => void; solo?: boolean; /** What the Needs you page lists, not put off (Attention.tsx). */ needs?: NeedMark[]; off?: Set<string> }) {
+  // Code's chats in the folders these sessions work in (and the one Code has open), beside them, each marked "Code" and opening in
+  // Code, never as a page of Agents (Arun, 2026-11-20: "Agents' own board shows Code chats for the same folder, read-only rows
+  // that open in Code"). They are listed here only: App keeps them out of Agents' sidebar and its own list.
+  const codeChats = useCodeChats();
+  const ideRoot = useIdeRoot();
+  const codeHere = useMemo(() => (isLocal() ? codeForBoard(codeChats, recents.flatMap((r) => [...foldersOf(r), ...(r.repos ?? []).flatMap((x) => [x.path, x.cwd]).filter((f): f is string => !!f)]), ideRoot) : []), [codeChats, recents, ideRoot]);
+  const codeBySid = useMemo(() => new Map(codeHere.map((c) => [c.sid, c])), [codeHere]);
+  const codeSids = useMemo(() => codeHere.map((c) => c.sid), [codeHere]);
+  const onOpen = (sid: string) => (codeBySid.has(sid) ? openWaiting(sid) : openAgents(sid));
+  const board = useBoard(identity, recents, codeSids);
   // What waits on you, in full, to be answered on the board's strip (design A).
   const { items: needItems, load: loadNeeds } = useNeedItems(identity, recents);
   const [gone, setGone] = useState<Set<string>>(new Set());
@@ -547,6 +568,7 @@ export function Board({ identity, recents, projects, onOpen, onNew, onReview, so
   const approvable = (list: BoardCard[]): Approvable[] =>
     linked
       ? list
+          .filter((c) => !codeBySid.has(c.sid))
           .filter((c) => c.pr && c.column === "review" && c.gh?.state !== "merged" && c.gh?.state !== "closed" && c.gh?.review !== "approved" && !c.gh?.draft)
           .filter((c) => (prs ? !yours.has(c.pr!.url) : !c.mine))
           .map((c) => ({ url: c.pr!.url, title: c.title }))
@@ -684,13 +706,13 @@ export function Board({ identity, recents, projects, onOpen, onNew, onReview, so
         {/* One row: finding on the left, which cards and the week on the right, all 32px and centred on one line. */}
         <div className="page-top flex flex-wrap items-center gap-2">
           <div className="relative w-full max-w-[340px] min-w-[220px] flex-1">
-            <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-[var(--text-muted)]" />
+            <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-[var(--text-muted)]" />
             <Input
               ref={search}
               value={query}
               placeholder="Search agents, tasks, branches"
               aria-label="Search the board"
-              className="h-8 border-[var(--border)] bg-[var(--bg)] pr-9 pl-8 text-[13px] shadow-none md:text-[13px]"
+              className="h-8 rounded-[9px] border-[var(--border-strong)] bg-[var(--card)] pr-9 pl-8 text-[13px] shadow-none placeholder:text-[var(--text-muted)] focus-visible:border-[var(--border-focus)] focus-visible:ring-0 md:text-[13px]"
               onChange={(e) => setQuery(e.target.value)}
               // Escape clears the search and leaves it: left filled, the board stayed narrowed by a search no longer in view
               // (audit e2e, Arun 2026-11-04).
@@ -800,7 +822,7 @@ export function Board({ identity, recents, projects, onOpen, onNew, onReview, so
                       <NeedCard key={n.id} need={n} card={cardOf(n.where.sid)} solo={solo} busy={answering === n.id} error={needError?.id === n.id ? needError.text : ""} onAnswer={(v, edited) => void answer(n, v, edited)} onOpen={() => onOpen(n.where.sid ?? "")} />
                     ))}
                     {rest.map((c) => (
-                      <Card key={c.id} card={c} onOpen={onOpen} solo={solo} focused={focus === c.id} onFocus={() => setFocus(c.id)} action={actionOf(c)} />
+                      <Card key={c.id} card={c} onOpen={onOpen} solo={solo} focused={focus === c.id} onFocus={() => setFocus(c.id)} action={codeBySid.has(c.sid) ? null : actionOf(c)} where={codeBySid.get(c.sid)} />
                     ))}
                   </div>
                 )}
@@ -825,7 +847,7 @@ export function Board({ identity, recents, projects, onOpen, onNew, onReview, so
                     </Tip>
                     <div className={wide ? "grid grid-cols-1 gap-1.5 @min-[480px]:grid-cols-2 @min-[720px]:grid-cols-4" : "flex flex-col gap-1.5"}>
                       {list.filter((c) => !isQuick(c)).map((c) => (
-                        <Card key={c.id} card={c} onOpen={onOpen} solo={solo} focused={focus === c.id} onFocus={() => setFocus(c.id)} action={actionOf(c)} />
+                        <Card key={c.id} card={c} onOpen={onOpen} solo={solo} focused={focus === c.id} onFocus={() => setFocus(c.id)} action={codeBySid.has(c.sid) ? null : actionOf(c)} where={codeBySid.get(c.sid)} />
                       ))}
                       {(() => {
                         const quick = list.filter(isQuick);
@@ -843,7 +865,7 @@ export function Board({ identity, recents, projects, onOpen, onNew, onReview, so
                               )}
                             </QuickHeader>
                             {quick.map((c) => (
-                              <Card key={c.id} card={c} onOpen={onOpen} solo={solo} focused={focus === c.id} onFocus={() => setFocus(c.id)} action={actionOf(c)} />
+                              <Card key={c.id} card={c} onOpen={onOpen} solo={solo} focused={focus === c.id} onFocus={() => setFocus(c.id)} action={codeBySid.has(c.sid) ? null : actionOf(c)} where={codeBySid.get(c.sid)} />
                             ))}
                           </div>
                         );
@@ -882,7 +904,7 @@ export function Board({ identity, recents, projects, onOpen, onNew, onReview, so
               <CollapsibleContent>
                 <div className="grid grid-cols-1 gap-1.5 pt-2 @min-[480px]:grid-cols-2 @min-[720px]:grid-cols-4">
                   {idle.map((c) => (
-                    <Card key={c.id} card={c} onOpen={onOpen} solo={solo} focused={focus === c.id} onFocus={() => setFocus(c.id)} />
+                    <Card key={c.id} card={c} onOpen={onOpen} solo={solo} focused={focus === c.id} onFocus={() => setFocus(c.id)} where={codeBySid.get(c.sid)} />
                   ))}
                   {!idle.length && <div className="px-2 text-[13px] text-[var(--text-muted)]">Nothing idle</div>}
                 </div>

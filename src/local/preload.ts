@@ -22,6 +22,13 @@ contextBridge.exposeInMainWorld("fridayDesktop", {
   /** Which theme the page shows, so Windows and Linux draw the window buttons in its colours. */
   /** `choice` is what was picked, System included, so the app's own sheets follow it (desktop.ts nativeTheme). */
   setTheme: (theme: "dark" | "light", choice?: "system" | "dark" | "light"): void => ipcRenderer.send("friday:theme", theme, choice),
+  /** VS Code's menus in the Mac menu bar while Code shows (desktop.ts setMenus), and what is picked from them. */
+  setCodeMenu: (on: boolean, recent?: string[]): void => ipcRenderer.send("friday:code-menu", on, recent ?? []),
+  onVscMenu: (fn: (item: { command?: string; friday?: string; path?: string }) => void): (() => void) => {
+    const h = (_e: unknown, item: { command?: string; friday?: string; path?: string }) => fn(item);
+    ipcRenderer.on("friday:vsc-menu", h);
+    return () => void ipcRenderer.off("friday:vsc-menu", h);
+  },
   /** Frosted glass: the window's own system blur behind the page (desktop.ts setGlass), where the system has one. */
   setGlass: (on: boolean): void => ipcRenderer.send("friday:glass", on),
   glassNative: process.platform === "darwin" || process.platform === "win32",
@@ -58,6 +65,8 @@ contextBridge.exposeInMainWorld("fridayDesktop", {
   setBadge: (n: number): void => ipcRenderer.send("friday:badge", n),
   /** The system's folder picker, for where a coding agent works. */
   pickFolder: (): Promise<string | null> => ipcRenderer.invoke("friday:pick-folder"),
+  /** The system's open panel for a file, a folder, or either (VS Code's Open, Open File, Open Folder in Code). */
+  pickPath: (what: "file" | "folder" | "any"): Promise<{ path: string; dir: boolean } | null> => ipcRenderer.invoke("friday:pick-path", what),
   /** Where a file or folder dropped on the page is on this computer. */
   pathForFile: (file: File): string => {
     try {

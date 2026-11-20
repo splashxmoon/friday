@@ -4,7 +4,7 @@ import { MAIN_LANE } from "../types.js";
 import { BranchCard } from "./Branches.js";
 import { Icon } from "./icons.js";
 import { openInItems, openTargets, type OpenTarget } from "./openIn.js";
-import { ShipDialog } from "./Ship.js";
+import { ShipDialog } from "./ShipLazy.js";
 import type { Send } from "./useSession.js";
 import { ContextMenu, type MenuItem } from "./ui.js";
 

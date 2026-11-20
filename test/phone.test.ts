@@ -10,10 +10,10 @@ import net from "node:net";
 import { explicitCurve, passedHeaders, PhoneAccess, phoneAllowed, reachable, type PhoneKV } from "../src/local/phone.js";
 
 test("the phone may ask only what the phone app needs", () => {
-  for (const [m, p] of [["GET", "/api/sessions/mine"], ["POST", "/api/sessions/abc123/instruct"], ["POST", "/api/sessions/abc123/answer"], ["GET", "/api/sessions/abc123/history"], ["GET", "/api/teammates"], ["POST", "/api/teammates/away"], ["POST", "/api/teammates/selfrun"], ["POST", "/api/teammates/pause"], ["POST", "/api/teammates/stop-all"], ["POST", "/api/runner/tools"], ["POST", "/api/runner/start"], ["GET", "/ws"]] as const) {
+  for (const [m, p] of [["GET", "/api/sessions/mine"], ["POST", "/api/sessions/abc123/instruct"], ["POST", "/api/sessions/abc123/answer"], ["GET", "/api/sessions/abc123/history"], ["GET", "/api/teammates"], ["POST", "/api/teammates/away"], ["POST", "/api/teammates"], ["POST", "/api/teammates/rooms"], ["PATCH", "/api/teammates/abc123"], ["GET", "/api/sessions/abc123/repo"], ["GET", "/api/sessions/abc123/work"], ["GET", "/api/sessions/abc123/work/file"], ["GET", "/api/automations"], ["POST", "/api/automations"], ["GET", "/api/automations/au1234/runs"], ["POST", "/api/automations/au1234/run"], ["PATCH", "/api/automations/au1234"], ["GET", "/api/runner/prs"], ["POST", "/api/runner/pr.act"], ["POST", "/api/teammates/selfrun"], ["POST", "/api/teammates/pause"], ["POST", "/api/teammates/stop-all"], ["POST", "/api/runner/tools"], ["POST", "/api/runner/usage"], ["POST", "/api/runner/find"], ["POST", "/api/runner/browse"], ["POST", "/api/runner/github"], ["POST", "/api/runner/clone"], ["POST", "/api/runner/start"], ["POST", "/api/sessions/abc123/files"], ["GET", "/api/sessions/abc123/files/f1"], ["GET", "/ws"]] as const) {
     assert.ok(phoneAllowed(m, p), `${m} ${p}`);
   }
-  for (const [m, p] of [["POST", "/api/runner/login"], ["POST", "/api/runner/install"], ["POST", "/api/runner/stop"], ["POST", "/api/runner/clone"], ["POST", "/api/phone"], ["GET", "/api/phone"], ["POST", "/api/usage-sharing"], ["GET", "/api/preview/x"], ["POST", "/api/teammates"], ["DELETE", "/api/sessions/abc123"], ["GET", "/api/sessions/../phone"], ["GET", "/"]] as const) {
+  for (const [m, p] of [["POST", "/api/runner/login"], ["POST", "/api/runner/install"], ["POST", "/api/runner/stop"], ["POST", "/api/phone"], ["GET", "/api/phone"], ["POST", "/api/usage-sharing"], ["GET", "/api/preview/x"], ["PATCH", "/api/teammates/rooms/r1234"], ["PATCH", "/api/teammates/rooms"], ["DELETE", "/api/automations/au1234"], ["POST", "/api/runner/pr.review"], ["DELETE", "/api/teammates/rooms/r1234"], ["DELETE", "/api/teammates/abc123"], ["DELETE", "/api/sessions/abc123"], ["DELETE", "/api/sessions/abc123/files/f1"], ["POST", "/api/sessions/abc123/files/f1"], ["GET", "/api/sessions/../phone"], ["GET", "/"]] as const) {
     assert.ok(!phoneAllowed(m, p), `${m} ${p}`);
   }
 });
@@ -26,6 +26,19 @@ test("what is passed on carries nothing of who asked or from where", () => {
 test("the addresses offered are this computer's network's and Tailscale's, never its own loopback or a public one", () => {
   const got = reachable({ lo0: [{ address: "127.0.0.1", family: "IPv4", internal: true } as never], en0: [{ address: "192.168.1.20", family: "IPv4", internal: false } as never, { address: "fe80::1", family: "IPv6", internal: false } as never], utun4: [{ address: "100.101.5.6", family: "IPv4", internal: false } as never], en1: [{ address: "8.8.8.8", family: "IPv4", internal: false } as never] });
   assert.deepEqual(got, [{ address: "192.168.1.20", via: "wifi" }, { address: "100.101.5.6", via: "tailscale" }]);
+});
+
+test("networks only this computer is on are left out: VM and container bridges, and a network's own address", () => {
+  const v4 = (address: string, netmask: string) => ({ address, netmask, family: "IPv4", internal: false }) as never;
+  // A Mac with OrbStack and a VM running (2026-11-17), then a Windows machine with WSL and a Linux one with Docker.
+  const mac = reachable({ en1: [v4("192.168.1.180", "255.255.255.0")], bridge100: [v4("192.168.139.3", "255.255.254.0")], bridge101: [v4("192.168.155.0", "255.255.255.0")], en10: [v4("169.254.41.151", "255.255.0.0")], utun3: [v4("100.90.1.2", "255.255.255.255")] });
+  assert.deepEqual(mac, [{ address: "192.168.1.180", via: "wifi" }, { address: "100.90.1.2", via: "tailscale" }]);
+  const win = reachable({ "Wi-Fi": [v4("10.0.0.7", "255.255.255.0")], "vEthernet (WSL)": [v4("172.20.48.1", "255.255.240.0")], "VMware Network Adapter VMnet8": [v4("192.168.80.1", "255.255.255.0")] });
+  assert.deepEqual(win, [{ address: "10.0.0.7", via: "wifi" }]);
+  const linux = reachable({ wlp2s0: [v4("192.168.0.12", "255.255.255.0")], docker0: [v4("172.17.0.1", "255.255.0.0")], "br-1a2b": [v4("172.18.0.1", "255.255.0.0")], virbr0: [v4("192.168.122.1", "255.255.255.0")] });
+  assert.deepEqual(linux, [{ address: "192.168.0.12", via: "wifi" }]);
+  // A real /24 address that happens to end in .0 on a wider network is kept.
+  assert.deepEqual(reachable({ en0: [v4("10.1.2.0", "255.255.0.0")] }), [{ address: "10.1.2.0", via: "wifi" }]);
 });
 
 function memKV(): PhoneKV {

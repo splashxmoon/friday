@@ -1,0 +1,356 @@
+/* Code's shell (IdeView.tsx and the panels around the editor). Every colour is one of Friday's variables, so dark and light
+   flip with the app. The editor's own look is editor.css; the chat column's is agent-panel.css. Prefix: ix-. */
+
+.ix {
+  --ix-row: 24px;
+  --ix-purple: #7c4dbd;
+  --ix-active: color-mix(in srgb, var(--live) 17%, transparent);
+  --ix-focus: color-mix(in srgb, var(--live) 70%, var(--ink));
+  display: flex; flex-direction: column; flex: 1 1 auto; width: 100%; height: 100%; min-width: 0; min-height: 0;
+  background: var(--bg); color: var(--ink-2); font: 400 13px/1.4 var(--font); overflow: hidden; position: relative;
+}
+html.dark .ix { --ix-purple: #b180d7; }
+.ix:focus { outline: none; }
+.ix button { font-family: inherit; }
+.ix [hidden] { display: none !important; }
+.ix-sp { flex: 1; min-width: 0; }
+.ix-main { display: flex; flex: 1 1 auto; min-height: 0; min-width: 0; }
+
+/* A drag in progress: nothing underneath may take the pointer or select text. */
+html.ix-dragging, html.ix-dragging * { user-select: none !important; }
+html.ix-dragging .cm-editor, html.ix-dragging .xterm, html.ix-dragging iframe { pointer-events: none; }
+html.ix-dragging-x, html.ix-dragging-x * { cursor: col-resize !important; }
+html.ix-dragging-y, html.ix-dragging-y * { cursor: row-resize !important; }
+
+/* Keyboard focus: one ring for everything pressable in Code. */
+.ix :is(button, [role="button"], [role="tab"], [role="treeitem"], input, textarea, [role="separator"]):focus-visible { outline: 2px solid var(--ix-focus); outline-offset: -2px; }
+.ix .ix-tree:focus-visible, .ix .ix-tree:focus { outline: none; }
+
+/* ── Activity bar ─────────────────────────────────────────────────────────── */
+.ix-act { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: none; width: 48px; padding: 8px 0; background: var(--sidebar); border-right: 1px solid var(--border); }
+.ix-actbtn { position: relative; display: grid; place-items: center; width: 36px; height: 36px; border: 0; border-radius: var(--r-md); background: none; color: var(--text-muted); cursor: pointer; transition: background-color 120ms, color 120ms; }
+.ix-actbtn:hover { background: var(--hover); color: var(--ink); }
+.ix-actbtn.on { background: var(--hover-strong); color: var(--ink); }
+.ix-badge { position: absolute; top: 1px; right: 0; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--live); color: var(--bg); font: 600 10px/16px var(--font); text-align: center; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 2px var(--sidebar); }
+
+/* ── Side bar ─────────────────────────────────────────────────────────────── */
+.ix-side { display: flex; flex-direction: column; flex: none; min-width: 0; background: var(--sidebar); overflow: hidden; }
+.ix-sidehead { display: flex; align-items: center; gap: 2px; flex: none; height: 36px; padding: 0 8px 0 18px; }
+.ix-sidetitle { color: var(--text-muted); font: 600 11px/1 var(--font); letter-spacing: .07em; white-space: nowrap; }
+.ix-iconbtn, .ix .icon-btn.ix-iconbtn { display: inline-grid; place-items: center; flex: none; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-muted); cursor: pointer; transition: background-color 120ms, color 120ms; }
+.ix-iconbtn:hover:not(:disabled), .ix .icon-btn.ix-iconbtn:hover:not(:disabled) { background: var(--hover-strong); color: var(--ink); }
+.ix-iconbtn:disabled { opacity: .4; cursor: default; }
+.ix-iconbtn.sm { width: 20px; height: 20px; }
+.ix-count { display: inline-grid; place-items: center; min-width: 18px; height: 16px; padding: 0 5px; border-radius: 8px; background: var(--hover-strong); color: var(--ink-2); font: 500 10.5px/1 var(--font); font-variant-numeric: tabular-nums; }
+.ix-quiet { margin: 0; padding: 10px 18px; color: var(--text-muted); font-size: 12.5px; line-height: 1.5; }
+.ix-quiet.tight { padding: 4px 18px 8px; font-size: 12px; }
+.ix-quiet.err { color: var(--red); }
+.ix-chev { display: inline-grid; place-items: center; flex: none; width: 14px; height: 14px; color: var(--text-muted); transition: transform 120ms; }
+.ix-chev.open { transform: rotate(90deg); }
+
+/* Splitters: a hairline you can grab, with a wider hit area than it draws. */
+.ix-split { position: relative; flex: none; z-index: 3; background: transparent; }
+.ix-split.x { width: 1px; cursor: col-resize; background: var(--border); }
+.ix-split.y { height: 1px; cursor: row-resize; background: var(--border); }
+.ix-split::before { content: ""; position: absolute; inset: 0; transition: background-color 120ms; }
+.ix-split.x::before { left: -3px; right: -3px; }
+.ix-split.y::before { top: -3px; bottom: -3px; }
+.ix-split:hover::before, .ix-split:focus-visible::before, html.ix-dragging .ix-split:active::before { background: color-mix(in srgb, var(--live) 55%, transparent); }
+.ix-split.x:hover::before, .ix-split.x:focus-visible::before { left: -1px; right: -1px; }
+.ix-split.y:hover::before, .ix-split.y:focus-visible::before { top: -1px; bottom: -1px; }
+.ix-split:focus-visible { outline: none !important; }
+
+/* ── Explorer ─────────────────────────────────────────────────────────────── */
+.ix-tree { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 2px 0 12px; outline: none; }
+.ix-row { position: relative; display: flex; align-items: center; gap: 6px; height: var(--ix-row); padding-right: 10px; margin: 0 6px; padding-left: 10px; border-radius: var(--r-sm); color: var(--ink-2); cursor: pointer; white-space: nowrap; user-select: none; }
+.ix-row:hover { background: var(--hover); }
+.ix-row.on { background: var(--hover-strong); color: var(--ink); }
+.ix-tree:focus-within .ix-row.on { background: var(--ix-active); }
+/* The ring is for the keyboard only: after a mouse click the selected row is just the quiet fill. */
+.ix-tree:has(:focus-visible) .ix-row.focus, .ix-tree:focus-visible .ix-row.focus { box-shadow: inset 0 0 0 1px var(--ix-focus); }
+.ix-row.ignored { opacity: .5; }
+.ix-row.drop { background: var(--ix-active); box-shadow: inset 0 0 0 1px var(--ix-focus); }
+.ix-row.root { font-weight: 500; color: var(--ink); }
+.ix-row.new { cursor: default; }
+.ix-row.new .inline-edit, .ix-row .inline-edit { flex: 1; min-width: 0; height: 20px; padding: 0 6px; border: 1px solid var(--border-focus); border-radius: 4px; background: var(--bg); color: var(--ink); font: inherit; outline: none; }
+.ix-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ix-name.dir { color: var(--ink-2); }
+.ix-row.on .ix-name { color: var(--ink); }
+.ix-name.m-mod { color: var(--amber); } .ix-name.m-add { color: var(--green); } .ix-name.m-del { color: var(--red); text-decoration: line-through; } .ix-name.m-bad { color: var(--red); }
+.ix-mark { flex: none; width: 14px; text-align: center; font: 600 11px/1 var(--font); }
+.ix-mark.m-mod { color: var(--amber); } .ix-mark.m-add { color: var(--green); } .ix-mark.m-del { color: var(--red); } .ix-mark.m-bad { color: var(--red); }
+.ix-dirdot { flex: none; width: 6px; height: 6px; margin: 0 4px; border-radius: 50%; background: currentColor; }
+.ix-dirdot.m-mod { color: var(--amber); } .ix-dirdot.m-add { color: var(--green); } .ix-dirdot.m-del, .ix-dirdot.m-bad { color: var(--red); }
+.ix-spin { flex: none; width: 11px; height: 11px; border: 1.5px solid var(--border-strong); border-top-color: var(--ink-2); border-radius: 50%; animation: ix-spin .7s linear infinite; }
+@keyframes ix-spin { to { transform: rotate(360deg); } }
+
+/* A file's badge: its type in a hairline square, in its colour. */
+.ix-glyph { display: inline-grid; place-items: center; flex: none; min-width: 16px; padding: 0 2px; border: 1px solid color-mix(in srgb, var(--g) 70%, transparent); border-radius: 3px; color: var(--g); font: 700 7.5px/1 var(--mono); letter-spacing: -.02em; text-transform: uppercase; }
+
+/* Outline and Timeline at the foot. */
+.ix-foots { flex: none; display: flex; flex-direction: column; border-top: 1px solid var(--border); max-height: 55%; min-height: 0; }
+.ix-foot { display: flex; flex-direction: column; min-height: 0; border-top: 1px solid var(--border); }
+.ix-foot:first-child { border-top: 0; }
+.ix-foot.open { flex: 1 1 auto; }
+.ix-foot-head { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px 0 18px; border: 0; background: none; color: var(--text-muted); cursor: pointer; text-align: left; }
+.ix-foot-head:hover { color: var(--ink); background: var(--hover); }
+.ix-foot-title { font: 600 11px/1 var(--font); letter-spacing: .07em; }
+.ix-foot-body { flex: 1 1 auto; min-height: 0; max-height: 220px; overflow: auto; padding-bottom: 6px; }
+.ix-outline, .ix-timeline { margin: 0; padding: 0; list-style: none; }
+.ix-sym, .ix-commit-row2 { display: flex; align-items: center; gap: 7px; width: 100%; height: 22px; padding: 0 12px 0 12px; border: 0; background: none; color: var(--ink-2); text-align: left; cursor: pointer; }
+.ix-sym:hover, .ix-commit-row2:hover { background: var(--hover); color: var(--ink); }
+.ix-symglyph { display: inline-grid; place-items: center; flex: none; width: 16px; height: 16px; border-radius: 4px; font: 600 10.5px/1 var(--mono); }
+.ix-symglyph.fn { color: var(--ix-purple); background: color-mix(in srgb, var(--ix-purple) 16%, transparent); }
+.ix-symglyph.cls { color: var(--amber); background: color-mix(in srgb, var(--amber) 16%, transparent); }
+.ix-symglyph.const { color: var(--live); background: color-mix(in srgb, var(--live) 16%, transparent); }
+.ix-symglyph.type { color: var(--green); background: color-mix(in srgb, var(--green) 16%, transparent); }
+.ix-symglyph.head { color: var(--ink-2); background: var(--hover-strong); }
+.ix-symname, .ix-subject { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ix-symline, .ix-when, .ix-by { flex: none; color: var(--text-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.ix-by { max-width: 70px; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── Search view ──────────────────────────────────────────────────────────── */
+.ix-search, .ix-scm { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.ix-search-form { display: flex; gap: 2px; flex: none; padding: 2px 12px 8px 6px; }
+.ix-twist { display: grid; place-items: center; flex: none; width: 16px; margin-top: 4px; height: 22px; border: 0; background: none; color: var(--text-muted); cursor: pointer; border-radius: 4px; }
+.ix-twist:hover { background: var(--hover); color: var(--ink); }
+.ix-twist svg { transition: transform 120ms; } .ix-twist.open svg { transform: rotate(90deg); }
+.ix-search-fields { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
+.ix-field { display: flex; align-items: center; gap: 2px; min-width: 0; height: 28px; padding: 0 3px 0 0; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg); transition: border-color 120ms; }
+.ix-field:focus-within { border-color: var(--border-focus); }
+.ix-input { flex: 1; min-width: 0; height: 100%; padding: 0 8px; border: 0; background: none; color: var(--ink); font: 13px/1 var(--font); outline: none !important; }
+.ix-input::placeholder { color: var(--text-muted); }
+.ix-input.solo { height: 28px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg); transition: border-color 120ms; }
+.ix-input.solo:focus { border-color: var(--border-focus); }
+.ix-toggle { flex: none; display: inline-grid; place-items: center; min-width: 22px; height: 20px; padding: 0 3px; border: 1px solid transparent; border-radius: 4px; background: none; color: var(--text-muted); font: 600 11px/1 var(--mono); cursor: pointer; }
+.ix-toggle:hover:not(:disabled) { background: var(--hover-strong); color: var(--ink); }
+.ix-toggle.on { background: var(--ix-active); border-color: color-mix(in srgb, var(--live) 60%, transparent); color: var(--ink); }
+.ix-toggle:disabled { opacity: .4; cursor: default; }
+.ix-toggle.wide { padding: 0 6px; font-family: var(--font); }
+.ix-toggle u { text-underline-offset: 2px; }
+.ix-more { align-self: flex-start; padding: 0; border: 0; background: none; color: var(--text-muted); font-size: 12px; cursor: pointer; }
+.ix-more:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+.ix-results { flex: 1 1 auto; min-height: 0; overflow: auto; padding-bottom: 12px; }
+.ix-group-head, .ix-cgroup-head { display: flex; align-items: center; gap: 6px; height: 24px; padding: 0 12px 0 12px; cursor: pointer; user-select: none; }
+.ix-group-head:hover, .ix-cgroup-head:hover { background: var(--hover); }
+.ix-group-name { color: var(--ink); white-space: nowrap; }
+.ix-group-dir { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 11.5px; }
+.ix-group-head .ix-iconbtn { opacity: 0; } .ix-group-head:hover .ix-iconbtn, .ix-group-head:focus-within .ix-iconbtn { opacity: 1; }
+.ix-hit { display: block; width: 100%; padding: 0 12px 0 40px; height: 22px; border: 0; background: none; color: var(--ink-2); text-align: left; cursor: pointer; overflow: hidden; }
+.ix-hit:hover { background: var(--hover); }
+.ix-hit-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: pre; font: 12px/22px var(--mono); }
+.ix-hit mark { background: color-mix(in srgb, var(--amber) 32%, transparent); color: var(--ink); border-radius: 2px; }
+
+/* ── Source control ───────────────────────────────────────────────────────── */
+.ix-scm-branch { display: flex; align-items: center; gap: 6px; flex: none; padding: 2px 12px 8px 14px; }
+.ix-branchbtn { flex: 1 1 auto; display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 26px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: none; color: var(--ink); font: 500 12.5px/1 var(--mono); cursor: pointer; min-width: 0; }
+.ix-branchbtn:hover, .ix-branchbtn.on { background: var(--hover); border-color: var(--border-strong); }
+.ix-branchname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ix-syncbtn { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: none; color: var(--ink-2); font: 500 12px/1 var(--font); font-variant-numeric: tabular-nums; cursor: pointer; white-space: nowrap; }
+.ix-syncbtn:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
+.ix-syncbtn:disabled { opacity: .5; cursor: default; }
+.ix-commit { display: flex; flex-direction: column; gap: 8px; flex: none; padding: 0 12px 10px 14px; }
+.ix-msg { width: 100%; min-height: 34px; max-height: 140px; padding: 7px 9px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg); color: var(--ink); font: 13px/1.4 var(--font); resize: none; outline: none; transition: border-color 120ms; box-sizing: border-box; }
+.ix-msg:focus { border-color: var(--border-focus); }
+.ix-msg::placeholder { color: var(--text-muted); }
+.ix-commit-row { display: flex; gap: 1px; }
+.ix-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: 6px; background: none; color: var(--ink); font: 500 12.5px/1 var(--font); cursor: pointer; white-space: nowrap; transition: background-color 120ms, opacity 120ms; }
+.ix-btn:hover:not(:disabled) { background: var(--hover); }
+.ix-btn:disabled { opacity: .45; cursor: default; }
+.ix-btn.primary { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+.ix-btn.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--ink) 88%, var(--bg)); }
+.ix-btn.grow { flex: 1; border-radius: 6px 0 0 6px; }
+.ix-btn.caret { width: 30px; padding: 0; border-radius: 0 6px 6px 0; border-left-color: color-mix(in srgb, var(--bg) 30%, transparent); }
+.ix-notice { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.45; }
+.ix-notice.bad { color: var(--red); }
+.ix-changes { flex: 1 1 auto; min-height: 0; overflow: auto; padding-bottom: 12px; }
+.ix-cgroup-title { font: 600 11px/1 var(--font); letter-spacing: .07em; text-transform: uppercase; color: var(--ink-2); white-space: nowrap; }
+.ix-cgroup-head .ix-acts { margin-left: auto; }
+.ix-acts { display: inline-flex; gap: 1px; opacity: 0; }
+.ix-cgroup-head:hover .ix-acts, .ix-crow:hover .ix-acts, .ix-cgroup-head:focus-within .ix-acts, .ix-crow:focus-within .ix-acts { opacity: 1; }
+.ix-crow { display: flex; align-items: center; gap: 6px; height: var(--ix-row); padding: 0 12px 0 26px; cursor: pointer; }
+.ix-crow:hover { background: var(--hover); }
+.ix-crow .ix-name { flex: 0 1 auto; color: var(--ink-2); }
+.ix-crow .ix-cdir { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 11.5px; }
+.ix-crow .ix-acts { margin-left: auto; }
+.ix-calm, .ix-clean { display: flex; align-items: center; gap: 12px; }
+.ix-calm { flex-direction: column; text-align: center; gap: 8px; padding: 28px 22px; color: var(--text-muted); }
+.ix-calm b { color: var(--ink); font-weight: 600; }
+.ix-calm span { font-size: 12.5px; line-height: 1.5; }
+.ix-calm .ix-btn { margin-top: 6px; }
+.ix-clean { margin: 6px 14px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
+.ix-clean-mark { display: grid; place-items: center; flex: none; width: 24px; height: 24px; border-radius: 50%; background: color-mix(in srgb, var(--green) 15%, transparent); color: var(--green); }
+.ix-clean div { display: flex; flex-direction: column; } .ix-clean b { color: var(--ink); font-weight: 600; } .ix-clean span { color: var(--text-muted); font-size: 12px; }
+
+/* ── Centre: tabs, breadcrumbs, editor ──────────────────────────────────────── */
+.ix-center { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; min-height: 0; }
+.ix-editor { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; background: var(--bg); }
+.ix-tabs { display: flex; flex: none; height: 36px; overflow-x: auto; overflow-y: hidden; background: var(--sidebar); border-bottom: 1px solid var(--border); scrollbar-width: none; }
+.ix-tabs::-webkit-scrollbar { display: none; }
+.ix-tab { position: relative; display: flex; align-items: center; gap: 7px; flex: none; max-width: 220px; height: 100%; padding: 0 8px 0 12px; border-right: 1px solid var(--border); color: var(--text-muted); cursor: pointer; user-select: none; white-space: nowrap; transition: background-color 120ms, color 120ms; }
+.ix-tab:hover { background: var(--hover); color: var(--ink-2); }
+.ix-tab.on { background: var(--bg); color: var(--ink); box-shadow: inset 0 2px 0 var(--live); }
+.ix-tab.on::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: var(--bg); }
+.ix-tab.preview .ix-tab-name { font-style: italic; }
+.ix-tab.drag { opacity: .5; }
+.ix-tab.drop { box-shadow: inset 2px 0 0 var(--live); }
+.ix-tab-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* Tab names stay neutral: git state is shown in the Explorer, not here. */
+.ix-tab-x { position: relative; display: grid; place-items: center; flex: none; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--text-muted); cursor: pointer; }
+.ix-tab-x svg { opacity: 0; transition: opacity 100ms; }
+.ix-tab.on .ix-tab-x svg, .ix-tab:hover .ix-tab-x svg, .ix-tab-x:focus-visible svg { opacity: 1; }
+.ix-tab-x:hover { background: var(--hover-strong); color: var(--ink); }
+.ix-tab-x.pin svg { opacity: 1; }
+.ix-dot { position: absolute; width: 8px; height: 8px; border-radius: 50%; background: var(--ink-2); opacity: 0; }
+/* The dot stands in the close button's place until the pointer is on the tab. */
+.ix-tab-x.dirty .ix-dot { opacity: 1; }
+.ix-tab-x.dirty svg { opacity: 0 !important; }
+.ix-tab:hover .ix-tab-x.dirty .ix-dot, .ix-tab-x.dirty:hover .ix-dot { opacity: 0; }
+.ix-tab:hover .ix-tab-x.dirty svg, .ix-tab-x.dirty:hover svg { opacity: 1 !important; }
+
+.ix-crumbs { display: flex; align-items: center; flex: none; height: 27px; border-bottom: 1px solid var(--border); box-sizing: border-box; padding: 0 12px; gap: 0; overflow: hidden; white-space: nowrap; color: var(--text-muted); font-size: 12.5px; background: var(--bg); }
+.ix-crumb-wrap { display: inline-flex; align-items: center; }
+.ix-crumb { padding: 2px 4px; border: 0; border-radius: 4px; background: none; color: var(--text-muted); font: inherit; cursor: pointer; }
+.ix-crumb:hover { background: var(--hover); color: var(--ink); }
+.ix-crumb.cur { color: var(--ink-2); cursor: default; } .ix-crumb.cur:hover { background: none; color: var(--ink-2); }
+.ix-crumb.sym { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-2); }
+.ix-crumb-sep { opacity: .6; margin: 0 1px; flex: none; }
+.ix-fx { color: var(--ix-purple); font: italic 600 11px/1 var(--mono); }
+
+.ix-panes { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.ix-pane { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.ix-filepane { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.ix-filepane > .ide-cm { flex: 1 1 auto; min-height: 0; }
+.ix-bar { display: flex; align-items: center; gap: 8px; flex: none; height: 32px; padding: 0 12px; font-size: 12.5px; border-bottom: 1px solid var(--border); }
+.ix-bar.warn { background: color-mix(in srgb, var(--amber) 13%, var(--bg)); color: var(--ink); }
+.ix-bar.bad { background: color-mix(in srgb, var(--red) 12%, var(--bg)); color: var(--ink); }
+.ix-bar svg { flex: none; }
+.ix-barbtn { height: 22px; padding: 0 9px; border: 1px solid var(--border-strong); border-radius: 5px; background: var(--bg); color: var(--ink); font: 500 12px/1 var(--font); cursor: pointer; white-space: nowrap; }
+.ix-barbtn:hover { background: var(--hover); }
+.ix-barbtn.on { background: var(--hover-strong); }
+.ix-barbtn.danger { color: var(--red); }
+.ix-diffpane { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.ix-diffbar { display: flex; align-items: center; gap: 6px; flex: none; height: 32px; padding: 0 12px; border-bottom: 1px solid var(--border); }
+.ix-diff-what { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 12.5px; }
+.ix-diffbody { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.ix-note { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; flex: 1; padding: 32px; text-align: center; }
+.ix-note b { color: var(--ink); font-weight: 600; } .ix-note span { color: var(--text-muted); font-size: 12.5px; max-width: 46ch; }
+.ix-skel { display: flex; flex-direction: column; gap: 12px; padding: 24px 28px; }
+.ix-skel i { height: 10px; border-radius: 5px; background: linear-gradient(90deg, var(--hover) 0%, var(--hover-strong) 50%, var(--hover) 100%); background-size: 200% 100%; animation: ix-shimmer 1.4s ease-in-out infinite; }
+@keyframes ix-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+
+.ix-empty { display: grid; place-items: center; flex: 1; padding: 24px; }
+.ix-empty-card { display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: 360px; text-align: center; }
+.ix-empty-mark { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 15px; background: var(--hover); margin-bottom: 4px; }
+.ix-empty h2 { margin: 0; color: var(--ink); font: 600 16px/1.3 var(--font); }
+.ix-empty p { margin: 0 0 14px; color: var(--text-muted); font-size: 13px; line-height: 1.5; }
+.ix-empty-rows { display: flex; flex-direction: column; width: 100%; margin: 0; }
+.ix-empty-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; padding: 6px 6px; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: none; color: var(--ink-2); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out); }
+.ix-empty-row:hover { background: var(--hover); color: var(--ink); }
+.ix-empty-row:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; border-radius: 6px; }
+
+.ix-empty kbd { padding: 2px 6px; border: 1px solid var(--border-strong); border-radius: 5px; background: var(--hover); color: var(--ink-2); font: 500 11.5px/1.3 var(--font); white-space: nowrap; }
+
+/* ── Bottom panel ─────────────────────────────────────────────────────────── */
+.ix-bottom { flex: none; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--border); background: var(--bg); }
+.ix-bottom-panel { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.ix-bp-head { display: flex; align-items: center; gap: 2px; flex: none; height: 36px; padding: 0 10px 0 12px; }
+.ix-bp-tabs { display: flex; gap: 2px; height: 100%; }
+.ix-bp-tab { position: relative; display: inline-flex; align-items: center; gap: 7px; height: 100%; padding: 0 10px; border: 0; background: none; color: var(--text-muted); font: 600 11.5px/1 var(--font); letter-spacing: .06em; cursor: pointer; transition: color 120ms; }
+.ix-bp-tab:hover { color: var(--ink); }
+.ix-bp-tab.on { color: var(--ink); }
+.ix-bp-tab.on::after { content: ""; position: absolute; left: 10px; right: 10px; bottom: 0; height: 2px; border-radius: 1px; background: var(--ink); }
+.ix-bp-body { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.ix-bp-pane { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.ix-bp-pane.scroll { overflow: auto; padding: 4px 0 10px; }
+.ix-bp-pane.mono { font: 12px/1.6 var(--mono); padding: 6px 14px 10px; }
+.ix-bp-empty { display: flex; flex-direction: column; gap: 2px; padding: 14px 16px; }
+.ix-bp-empty b { color: var(--ink-2); font-weight: 500; } .ix-bp-empty span { color: var(--text-muted); font-size: 12.5px; }
+.ix-bp-pane.term .term-sides { display: none; }
+.ix-bp-pane.term > * { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.ix-bp-pane.term .term-side-pane { background: var(--bg); }
+.ix-bp-pane.term .term-shell-host { padding: 4px 16px 6px; }
+/* One quiet empty state on the 16px edge, like Problems and Output; the second paragraph only repeats it. */
+.ix-bp-pane.term .term-note { margin: 0; padding: 14px 16px 0; }
+.ix-bp-pane.term .term-note ~ .term-note { display: none; }
+.ix-prob-file { display: flex; align-items: center; gap: 7px; height: 24px; padding: 0 14px; color: var(--ink); }
+.ix-prob { display: flex; align-items: center; gap: 8px; width: 100%; height: 22px; padding: 0 14px 0 38px; border: 0; background: none; color: var(--ink-2); text-align: left; cursor: pointer; }
+.ix-prob:hover { background: var(--hover); }
+.ix-sev { flex: none; width: 14px; text-align: center; font-size: 10px; } .ix-sev.error { color: var(--red); } .ix-sev.warning { color: var(--amber); } .ix-sev.info { color: var(--live); font-style: italic; font-weight: 700; }
+.ix-prob-msg { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ix-prob-src, .ix-prob-at { flex: none; color: var(--text-muted); font-size: 11.5px; }
+.ix-log { display: flex; gap: 12px; white-space: pre-wrap; word-break: break-word; }
+.ix-log time { flex: none; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.ix-log.error span { color: var(--red); }
+
+/* ── Chat column ────────────────────────────────────────────────────────────── */
+.ix-right { display: flex; flex-direction: column; flex: none; min-width: 0; min-height: 0; border-left: 1px solid var(--border); background: var(--bg); overflow: hidden; }
+.ix-split.left + .ix-right { border-left: 0; }
+.ix-right > * { flex: 1 1 auto; min-height: 0; }
+
+/* ── Status bar ─────────────────────────────────────────────────────────────── */
+.ix-status { display: flex; align-items: center; justify-content: space-between; flex: none; height: 24px; padding: 0 6px; background: var(--sidebar); border-top: 1px solid var(--border); color: var(--text-muted); font-size: 12px; user-select: none; }
+.ix-st-left, .ix-st-right { display: flex; align-items: center; min-width: 0; height: 100%; }
+.ix-st { display: inline-flex; align-items: center; gap: 5px; height: 100%; padding: 0 8px; border: 0; background: none; color: inherit; font: inherit; font-variant-numeric: tabular-nums; white-space: nowrap; cursor: pointer; transition: background-color 120ms, color 120ms; }
+button.ix-st:hover:not(:disabled) { background: var(--hover-strong); color: var(--ink); }
+.ix-st:disabled { opacity: .6; cursor: default; }
+.ix-st.static { cursor: default; }
+.ix-st.working { color: var(--live); cursor: default; }
+.ix-st.bell { padding: 0 8px; }
+.ix-st-ico { display: inline-grid; place-items: center; } .ix-st-ico.bad { color: var(--red); } .ix-st-ico.warn { color: var(--amber); }
+.ix-live { width: 7px; height: 7px; border-radius: 50%; background: var(--live); animation: ix-pulse 1.6s ease-in-out infinite; }
+@keyframes ix-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .45; transform: scale(.8); } }
+@media (prefers-reduced-motion: reduce) { .ix-live, .ix-spin, .ix-skel i { animation: none; } }
+
+/* ── Toast ────────────────────────────────────────────────────────────────── */
+.ix-toast { position: absolute; left: 50%; bottom: 36px; z-index: 40; display: flex; align-items: center; gap: 10px; max-width: min(560px, calc(100% - 32px)); padding: 8px 8px 8px 14px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--card); color: var(--ink); font-size: 12.5px; box-shadow: var(--shadow-pop); transform: translateX(-50%); animation: ix-toast-in 180ms cubic-bezier(.2,.8,.2,1); }
+.ix-toast.bad { border-color: color-mix(in srgb, var(--red) 50%, var(--border-strong)); }
+.ix-toast span { min-width: 0; overflow-wrap: anywhere; }
+@keyframes ix-toast-in { from { opacity: 0; transform: translate(-50%, 6px); } }
+
+/* ── Quick open and the palette ─────────────────────────────────────────────── */
+.ix-qo-wrap { position: fixed; inset: 0; z-index: 96; display: flex; justify-content: center; align-items: flex-start; padding-top: 11vh; background: transparent; }
+.ix-qo { display: flex; flex-direction: column; width: min(600px, calc(100vw - 32px)); max-height: min(440px, 70vh); border: 1px solid var(--border-strong); border-radius: 12px; background: var(--card); box-shadow: var(--shadow-pop); overflow: hidden; animation: ix-qo-in 140ms cubic-bezier(.2,.8,.2,1); }
+@keyframes ix-qo-in { from { opacity: 0; transform: translateY(-6px) scale(.985); } }
+.ix-qo-input { flex: none; height: 44px; padding: 0 16px; border: 0; border-bottom: 1px solid var(--border); background: none; color: var(--ink); font: 14px/1 var(--font); outline: none; }
+.ix-qo-input::placeholder { color: var(--text-muted); }
+.ix-qo-list { margin: 0; padding: 4px; list-style: none; overflow: auto; flex: 1 1 auto; }
+.ix-qo-row { display: flex; align-items: center; gap: 9px; height: 32px; padding: 0 10px; border-radius: 7px; color: var(--ink-2); cursor: pointer; white-space: nowrap; }
+.ix-qo-row.on { background: var(--hover-strong); color: var(--ink); }
+.ix-qo-title { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
+.ix-qo-group { color: var(--text-muted); }
+.ix-qo-dir { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-muted); font-size: 12px; }
+.ix-qo-hint { flex: none; margin-left: auto; color: var(--text-muted); font-size: 11.5px; padding-left: 12px; }
+.ix-qo-row mark { background: none; color: var(--live); font-weight: 600; }
+.ix-qo-none { padding: 14px 12px; color: var(--text-muted); font-size: 13px; }
+.ix-qo-foot { flex: none; padding: 6px 14px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 11.5px; }
+
+/* ── Choice dialog, root picker ──────────────────────────────────────────────── */
+.ix-choice-actions { flex-wrap: wrap; justify-content: flex-end; }
+.ix-rootpick { align-items: center; justify-content: center; padding: 24px; overflow: auto; }
+.ix-rp-card { display: flex; flex-direction: column; gap: 8px; width: min(520px, 100%); }
+.ix-rp-mark { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; background: var(--hover); color: var(--ink-2); margin-bottom: 4px; }
+.ix-rp-card h2 { margin: 0; color: var(--ink); font: 600 18px/1.3 var(--font); }
+.ix-rp-card p { margin: 0 0 8px; color: var(--text-muted); line-height: 1.5; }
+.ix-rp-list { margin: 0 0 8px; padding: 0; list-style: none; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.ix-rp-list li + li { border-top: 1px solid var(--border); }
+.ix-rp-row { display: flex; align-items: center; gap: 10px; width: 100%; height: 38px; padding: 0 12px; border: 0; background: none; color: var(--ink-2); text-align: left; cursor: pointer; min-width: 0; }
+.ix-rp-row:hover:not(:disabled) { background: var(--hover); }
+.ix-rp-name { color: var(--ink); font-weight: 500; flex: none; }
+.ix-rp-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 12px; direction: rtl; text-align: left; }
+.ix-rp-form { display: flex; gap: 8px; }
+.ix-rp-form .ix-input.solo { flex: 1; height: 32px; }
+.ix-rp-form .ix-btn { height: 32px; }
+
+/* Narrow windows: the chat gives way first, then the side bar's width. */
+@media (max-width: 1100px) { .ix-right { max-width: 38vw; } }
+
+/* Every row in the side bar shares the Explorer's inset-pill shape, so switching views doesn't make hovers and text edges jump. */
+.ix-crow, .ix-group-head, .ix-cgroup-head, .ix-hit, .ix-sym, .ix-commit-row2, .ix-prob { margin: 0 6px; width: auto; border-radius: var(--r-sm, 6px); }
+.ix-prob { display: flex; }
+.ix-crow { padding-left: 20px; padding-right: 6px; }
+.ix-group-head, .ix-cgroup-head { padding-left: 6px; padding-right: 6px; }
+.ix-hit { padding-left: 34px; padding-right: 6px; }
+.ix-sym, .ix-commit-row2 { padding-left: 6px; padding-right: 6px; }
+.ix-prob { padding-left: 32px; padding-right: 8px; }
+.ix-crow:hover, .ix-hit:hover, .ix-sym:hover, .ix-commit-row2:hover, .ix-prob:hover { background: var(--hover); }

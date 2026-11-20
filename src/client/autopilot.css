@@ -1,0 +1,105 @@
+/* Pull request autopilot on Code Review (autopilot-ui.tsx): its bar over the Yours list, and what it did in the pane. */
+.ap-bar { display: flex; align-items: center; gap: 12px; margin: 4px 0 12px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
+.ap-tile { position: relative; display: grid; flex: none; place-items: center; width: 34px; height: 34px; border: 1px solid var(--border); border-radius: 10px; background: var(--hover); color: var(--text-muted); transition: background-color var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out); }
+.ap-bar[data-on] .ap-tile { border-color: color-mix(in srgb, var(--green) 30%, var(--border)); background: color-mix(in srgb, var(--green) 12%, var(--card)); color: var(--green); }
+.ap-tile-live { position: absolute; top: -3px; right: -3px; width: 9px; height: 9px; border: 2px solid var(--card); border-radius: 50%; background: var(--live); }
+.ap-bar-text { display: flex; flex: 1; flex-direction: column; gap: 3px; min-width: 0; }
+.ap-title { display: flex; align-items: center; gap: 7px; }
+.ap-title > b { color: var(--ink); font-size: 13.5px; font-weight: 600; }
+.ap-pill { padding: 0 6px; border-radius: 5px; background: var(--hover); color: var(--text-muted); font-size: 11px; font-weight: 600; line-height: 17px; }
+.ap-bar[data-on] .ap-pill { background: color-mix(in srgb, var(--green) 15%, transparent); color: var(--green); }
+.ap-line { display: -webkit-box; overflow: hidden; color: var(--text-muted); font-size: 12px; line-height: 17px; -webkit-box-orient: vertical; -webkit-line-clamp: 2; text-wrap: pretty; }
+.ap-stats { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.ap-stat { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-2); font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.ap-stat > i { width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); }
+.ap-stat[data-tone="working"] > i { background: var(--live); box-shadow: 0 0 0 3px color-mix(in srgb, var(--live) 20%, transparent); }
+.ap-stat[data-tone="watching"] > i { background: var(--green); }
+.ap-stat[data-tone="stopped"] > i { background: var(--amber); }
+.ap-menu-btn { flex: none; color: var(--text-muted); }
+.ap-switch { position: relative; flex: none; width: 30px; height: 18px; padding: 0; border: 0; border-radius: 9px; background: color-mix(in srgb, var(--ink) 22%, transparent); cursor: pointer; transition: background-color var(--t-hover) var(--ease-out); }
+.ap-switch > i { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / .25); transition: transform 160ms var(--ease-out, ease-out); }
+.ap-switch[aria-checked="true"] { background: var(--green); }
+.ap-switch[aria-checked="true"] > i { transform: translateX(12px); }
+.ap-switch:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .ap-switch > i { transition: none; } }
+
+.ap-tl { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
+.ap-tl-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ap-tl-head > h3 { margin: 0; color: var(--ink); font-size: 13px; font-weight: 600; }
+.ap-tl-state { padding: 1px 7px; border-radius: 6px; background: var(--hover); color: var(--ink-2); font-size: 11.5px; font-weight: 500; }
+.ap-tl-state[data-state="working"] { background: color-mix(in srgb, var(--live) 15%, transparent); color: var(--live); }
+.ap-tl-state[data-state="watching"], .ap-tl-state[data-state="done"] { background: color-mix(in srgb, var(--green) 14%, transparent); color: var(--green); }
+.ap-tl-state[data-state="stopped"] { background: color-mix(in srgb, var(--amber) 16%, transparent); color: var(--amber); }
+.ap-grow { flex: 1; }
+.ap-link { display: inline-flex; align-items: center; gap: 5px; padding: 3px 7px; border: 0; border-radius: 6px; background: none; color: var(--ink-2); font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer; }
+.ap-link > svg { flex: none; color: var(--text-muted); }
+.ap-link:hover > svg { color: var(--ink-2); }
+.ap-link:hover { background: var(--hover); color: var(--ink); }
+.ap-tl-list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.ap-tl-list > li { display: grid; grid-template-columns: 52px 18px minmax(0, 1fr); gap: 8px; padding: 6px 0; color: var(--ink-2); font-size: 12.5px; line-height: 18px; }
+.ap-tl-list > li + li { border-top: 1px solid var(--border); }
+.ap-tl-list time { color: var(--text-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ap-tl-ic { display: grid; place-items: center; height: 18px; color: var(--text-muted); }
+.ap-tl-list > li[data-kind="checks"] .ap-tl-ic, .ap-tl-list > li[data-kind="closed"] .ap-tl-ic { color: var(--red); }
+.ap-tl-list > li[data-kind="pushed"] .ap-tl-ic, .ap-tl-list > li[data-kind="merged"] .ap-tl-ic { color: var(--green); }
+.ap-tl-list > li[data-kind="stopped"] .ap-tl-ic, .ap-tl-list > li[data-kind="skipped"] .ap-tl-ic { color: var(--amber); }
+.ap-tl-text { min-width: 0; overflow-wrap: anywhere; text-wrap: pretty; }
+.ap-tl-text > code { margin-left: 6px; padding: 0 5px; border-radius: 4px; background: var(--hover); color: var(--ink-2); font: 11px/16px var(--mono, ui-monospace, monospace); }
+
+/* The bar and its runs, one card (Arun, 2026-11-20: "make it dynamic and actually good"): the bar its head, each pull request it is
+   on under it as a live row, with what it last did and its controls. */
+.ap-wrap { margin: 4px 0 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); overflow: hidden; }
+.ap-wrap > .ap-bar { margin: 0; padding-left: 14px; border: 0; border-radius: 0; background: transparent; }
+.ap-icon-btn { display: grid; flex: none; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 8px; background: none; color: var(--text-muted); cursor: pointer; }
+.ap-icon-btn:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
+.ap-icon-btn:disabled { cursor: default; }
+.ap-stat-quiet { color: var(--text-muted); font-weight: 400; }
+.ap-note { margin: 0; padding: 0 14px 10px; color: var(--amber); font-size: 12px; line-height: 17px; }
+.ap-tl .ap-note { padding: 0; }
+.ap-runs { margin: 0; padding: 4px 6px 6px; border-top: 1px solid var(--border); list-style: none; }
+.ap-run { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 8px 8px 8px 10px; border-radius: 9px; }
+.ap-run:hover { background: var(--hover); }
+.ap-run-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
+.ap-run[data-state="working"] .ap-run-dot { background: var(--live); box-shadow: 0 0 0 3px color-mix(in srgb, var(--live) 22%, transparent); animation: ap-pulse 1.6s var(--ease-out, ease-out) infinite; }
+.ap-run[data-state="watching"] .ap-run-dot { background: var(--green); }
+.ap-run[data-state="stopped"] .ap-run-dot { background: var(--amber); }
+.ap-run[data-state="done"] .ap-run-dot { background: color-mix(in srgb, #a855f7 80%, var(--ink)); }
+@keyframes ap-pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--live) 6%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .ap-run[data-state="working"] .ap-run-dot { animation: none; } }
+.ap-run-body { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
+.ap-run-top { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.ap-run-title { min-width: 0; overflow: hidden; color: var(--ink); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.ap-run-title > b { color: var(--ink-2); font-weight: 600; font-variant-numeric: tabular-nums; }
+.ap-run-line { display: flex; align-items: baseline; gap: 6px; min-width: 0; font-size: 12px; line-height: 17px; }
+.ap-run-state { flex: none; color: var(--ink-2); font-weight: 500; }
+.ap-run[data-state="working"] .ap-run-state { color: var(--live); }
+.ap-run[data-state="stopped"] .ap-run-state { color: var(--amber); }
+.ap-run-last { min-width: 0; overflow: hidden; color: var(--text-muted); text-overflow: ellipsis; white-space: nowrap; }
+.ap-run-time { flex: none; color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.ap-run-more { flex: none; color: var(--text-muted); }
+.ap-runs-more { padding: 2px 4px 0; }
+.ap-run-title { flex: 1; }
+.ap-menu-seg { padding: 2px 8px 6px; }
+.ap-menu-seg .segmented { display: flex; width: 100%; }
+.ap-menu-seg .segmented > * { flex: 1; }
+
+/* In Code Review's header (AutopilotButton): its state in a word, and its card under it. */
+.ap-head-btn { display: inline-flex; flex: none; align-items: center; gap: 7px; height: 30px; padding: 0 10px 0 11px; border: 1px solid var(--border); border-radius: 9px; background: var(--card); color: var(--ink-2); font: 500 12.5px var(--font); cursor: pointer; transition: background-color var(--t-hover) var(--ease-out), border-color var(--t-hover) var(--ease-out); }
+.ap-head-btn:hover, .ap-head-btn[aria-expanded="true"] { border-color: var(--border-strong); background: var(--hover); color: var(--ink); }
+.ap-head-btn:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+.ap-head-btn > svg { color: var(--text-muted); }
+.ap-head-name { color: var(--ink); font-weight: 600; }
+.ap-head-word { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.ap-head-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); opacity: .6; }
+.ap-head-btn[data-state="on"] .ap-head-dot { background: var(--green); opacity: 1; }
+.ap-head-btn[data-state="on"] .ap-head-word { color: var(--green); }
+.ap-head-btn[data-state="working"] .ap-head-dot { background: var(--live); opacity: 1; box-shadow: 0 0 0 3px color-mix(in srgb, var(--live) 22%, transparent); animation: ap-pulse 1.6s var(--ease-out, ease-out) infinite; }
+.ap-head-btn[data-state="working"] .ap-head-word { color: var(--live); }
+.ap-head-btn[data-state="stopped"] .ap-head-dot { background: var(--amber); opacity: 1; }
+.ap-head-btn[data-state="stopped"] .ap-head-word { color: var(--amber); }
+@media (prefers-reduced-motion: reduce) { .ap-head-btn[data-state="working"] .ap-head-dot { animation: none; } }
+.ap-pop { position: fixed; z-index: 90; display: flex; flex-direction: column; overflow: auto; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--card); box-shadow: 0 16px 40px -12px rgb(0 0 0 / .28), 0 2px 6px rgb(0 0 0 / .07); overscroll-behavior: contain; }
+.ap-pop > .ap-wrap { margin: 0; border: 0; border-radius: 0; background: transparent; }
+.ap-runs-more { display: flex; align-items: center; gap: 4px; padding: 4px 4px 0; }
+.ap-runs-more .ap-link[aria-expanded="true"] > svg { transform: rotate(180deg); }
+.ap-tl-more { align-self: flex-start; }

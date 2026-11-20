@@ -16,6 +16,10 @@ import { EngineMark } from "./BrandMarks.js";
 import { ENGINE_NAMES, type EngineTool } from "../types.js";
 import { Face, matesIn, openTeammate, ownOf, refreshTeam, RoomFaces, useTeam, type Team } from "./Teammates.js";
 import { NEEDS_CHANGED, publishNeeds, withCode } from "./Attention.js";
+import { codeChatOf, codeWhere, openWaiting, useCodeWatched, watchedSids } from "./ide/waiting.js";
+import { reviewInIde } from "./ide/pr-review.js";
+import { isLocal } from "./edition.js";
+import { machineError } from "./GitHubConnect.js";
 import type { Identity, RecentSession } from "./storage.js";
 import "./needs-you.css";
 
@@ -54,7 +58,9 @@ export function NeedsYou({ identity, recents, onReview, onCrew, onBoard }: { ide
 
   const team = useTeam(identity);
   const hidden = team?.hidden ?? [];
-  const sids = [...new Set([...recents.map((r) => r.sid), ...hidden])].join(",");
+  // Code's chats too (ide/waiting.ts), labelled "in Code" below, opened there.
+  const codeChats = useCodeWatched();
+  const sids = watchedSids(recents.map((r) => r.sid), hidden, codeChats).join(",");
   const load = useCallback(async () => {
     try {
       const got = await api<{ items: Need[]; reviewsOff?: string[] }>(identity, "/api/needs-you", { method: "POST", body: JSON.stringify({ sids: sids ? sids.split(",") : [] }) });
@@ -101,8 +107,9 @@ export function NeedsYou({ identity, recents, onReview, onCrew, onBoard }: { ide
       score: 0,
       why: "",
     }));
-    return rankNeeds([...(items ?? []), ...reviews].filter((n) => !gone.has(n.id)).map((n) => (offHere.has(n.id) ? { ...n, putOff: true as const } : n)), at || Date.now());
-  }, [items, prs, gone, offHere, at]);
+    const relabel = (n: Need): Need => { const c = codeChatOf(n.where.sid); return c ? { ...n, where: { ...n.where, title: codeWhere(c) } } : n; };
+    return rankNeeds([...(items ?? []).map(relabel), ...reviews].filter((n) => !gone.has(n.id)).map((n) => (offHere.has(n.id) ? { ...n, putOff: true as const } : n)), at || Date.now());
+  }, [items, prs, gone, offHere, at, codeChats]);
   // Put off with "Not now": kept under one "N put off · Show" row rather than gone (audit CREW-6, 2026-11-04), and out of every count,
   // this page's heading, the badge, the sidebar, the Board and Home alike (2026-11-04 retest).
   const offN = ranked.filter((n) => n.putOff).length;
@@ -130,7 +137,7 @@ export function NeedsYou({ identity, recents, onReview, onCrew, onBoard }: { ide
 
   const open = (n: Need) => {
     if (n.kind === "review") return onReview();
-    if (n.where.sid) return dispatchEvent(new CustomEvent("friday:open-session", { detail: { sid: n.where.sid } }));
+    if (n.where.sid) return openWaiting(n.where.sid);
     if (n.kind === "crew") onCrew?.();
   };
 
@@ -159,6 +166,20 @@ export function NeedsYou({ identity, recents, onReview, onCrew, onBoard }: { ide
       setRowError({ id: n.id, text });
       // Answered somewhere else meanwhile: it goes, with the reason said.
       if (/no longer waiting/.test(text)) setTimeout(() => (after(n), void load()), 1200);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  // A review asked of you, read in Code (ide/pr-review.ts): the branch checked out beside your own folder.
+  const reviewHere = async (n: Need) => {
+    if (busy || !n.url) return;
+    setBusy(n.id);
+    setRowError(null);
+    try {
+      await reviewInIde(identity, { url: n.url, title: n.text });
+    } catch (e) {
+      setRowError({ id: n.id, text: machineError(e) });
     } finally {
       setBusy("");
     }
@@ -366,6 +387,11 @@ export function NeedsYou({ identity, recents, onReview, onCrew, onBoard }: { ide
                       <button type="button" className="btn small ghost ny-quiet" onClick={() => open(n)} title="o">
                         Open
                       </button>
+                      {n.kind === "review" && n.url && isLocal() && (
+                        <button type="button" className="btn small ghost ny-quiet" aria-disabled={busy === n.id || undefined} onClick={() => void reviewHere(n)} title="Their branch checked out on the side, read in the IDE">
+                          {busy === n.id ? "Opening…" : "Review in the IDE"}
+                        </button>
+                      )}
                       <span className="ny-spacer" />
                       {n.free && (
                         <button type="button" className="btn small ghost" onClick={() => edit(n)} title="e">

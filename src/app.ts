@@ -4,6 +4,11 @@ import { TemplateError, TemplateRegistry } from "./templates-store.js";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { brotliCompress, constants as zlibConstants, gzip } from "node:zlib";
+import { vscodeToken } from "./runner/vscode.js";
+import { cleanFeed, isPageAction, type PaletteFeed } from "./vscode-palette.js";
+import { mergeTasks } from "./vscode-board.js";
+import { prRoute as prIdeRoute } from "./runner/pr-ide.js";
+import { ciCheckLog, ciFixText, ciOverview } from "./runner/ci-checks.js";
 import { fetchPreview, PREVIEW_FETCH_MS, previewHeadersFrom, previewLocation, previewOptions, previewStatus, previewTrouble, previewStatusLive, startPreview, stopPreview } from "./runner/preview.js";
 import { closeSaying, heartbeat } from "./heartbeat.js";
 import { PHONE_PAGE, phoneLog, phonePage } from "./phone-log.js";
@@ -18,6 +23,9 @@ import path from "node:path";
 import { EngineHub, projectAllowKey } from "./engine/hub.js";
 import { entryFor } from "./command-allow.js";
 import { callHost } from "./runner/local-api.js";
+import { stackOp } from "./runner/stack-pr.js";
+import { serversOp } from "./runner/dev-servers.js";
+import { readLibrary } from "./runner/skill-library.js";
 import { usageCounts } from "./usage.js";
 import { readRepo as readFolder } from "./runner/repo-read.js";
 import { cleanFolders, readFolders } from "./crew-folders.js";
@@ -45,6 +53,8 @@ import { ops } from "./ops.js";
 import { WebSocket, WebSocketServer } from "ws";
 import { fetchIssue, fetchPr, issueRef, parseIssueUrl, parsePrLink, prRef } from "./github-issue.js";
 import { hookPayload, hookUrlOk, NotifyHooks, postHook } from "./notify-hook.js";
+import { cleanLater, isNightAt, laterDue, laterWantsAwake, LATER_MAX, MISSED_NOTE, STARTING_STUCK_MS, type LaterTask } from "./later.js";
+import { LaterStore } from "./later-store.js";
 import { AutomationStore, cleanAutomation, describeWhen, describeWho, dueAutomation, promptFor as automationPrompt, WAIT_FOR_COMPUTER_MS, type Automation, type AutomationRun } from "./automations.js";
 import { ProviderError, type LLM } from "./agent/llm.js";
 import { OwnModelLLM } from "./agent/own-model.js";
@@ -67,14 +77,20 @@ import { breaches as ruleBreaches, breachText, draftRule, DRAFT_SYSTEM, globsOf,
 import { baselineOf, commandKey, compare, failingTests, onlyPre, preNote, type Baseline } from "./baseline.js";
 import { commandFailed, TEST_CMD } from "./receipt.js";
 import { answerAsk, buildDive, DeepDives, DIVE_MODELS, diveBrief, newAskId, pageStale, writePage, type Dive, type DiveChanges, type DiveHost } from "./deep-dive.js";
+import { diveOf, questionById, startQuestion } from "./ask-code.js";
+import { writeCommitMessage } from "./commit-ask.js";
+import { askTerminal } from "./term-ask.js";
+import { freshAllDirty, readDirty, rememberDirty, type DirtyFiles } from "./vscode-dirty.js";
+import { detectStyle, plainMessage } from "./commit-text.js";
+import { remembered, repoOfFolder, surfaceOf } from "./code-brain.js";
 import { AFTER_RUN_TRIES, BRIEF_BUDGET, BrainRegistry, clipText, correctionOf, extractLessons, pickBrief, repoKeyOf, repoNameOf, type BrainEntry, type BrainKind } from "./brain.js";
 import { MIN_TOOL_CALLS, transcriptOf } from "./decision-log.js";
 import { runawayIn, runawayText } from "./runaway.js";
 import { dailyBriefs, type CrewInput, type DailyBrief } from "./daily-brief.js";
 import { fromGh, fromGithubApi, rerequestReview, statusOf, type PrStatus } from "./github-status.js";
 import { prDetailFromGh, type PrDetail } from "./pr-detail.js";
-import { commitPaths, FRIDAY, fixMessage, fromPerson, MAX_CHECK_ROUNDS, prBranch, shepherdNext } from "./shepherd.js";
-import { plainCommitMessage } from "./pr-body.js";
+import { AutopilotStore, needsText, pilotBrief, reasonsFor, shouldStart, type PilotPr, type PilotPrRecord, type PilotReason } from "./autopilot.js";
+import { commitPaths, conflictsText, FRIDAY, fixMessage, fromPerson, MAX_CHECK_ROUNDS, MAX_CONFLICT_ROUNDS, prBranch, shepherdNext } from "./shepherd.js";
 import { checksText, type CheckFailure } from "./pr-checks.js";
 import { feedbackText, fromWriter, unseen, type PrComment } from "./pr-feedback.js";
 import type { EventBody, ReviewFinding } from "./types.js";
@@ -88,7 +104,7 @@ import { VoiceModels } from "./voice-models.js";
 import { voiceHttp } from "./voice-server.js";
 import { SkillRegistry } from "./skills.js";
 import type { SkillBrief } from "./types.js";
-import { discoverSkills, importChosen, importWholeRepo } from "./skill-import.js";
+import { discoverSkills, importChosen, importWholeRepo, readSkillFolders } from "./skill-import.js";
 import { FileStore, MAX_FILE_BYTES, MAX_MEDIA_BYTES, isMediaFile, isUsableFile, resolveAttachments, uploadedFileHeaders } from "./files.js";
 import { publicAccount, type Account, type Provider } from "./identity-types.js";
 import { LOCAL_WORKSPACE, localAccount } from "./local/identity.js";
@@ -113,6 +129,8 @@ import { learnedFrom, learnedView, revisionOf, type Learned } from "./route-lear
 import { burn, signInOf } from "./forecast.js";
 import { recordOf, RunLog } from "./run-log.js";
 import { moveAhead, type AheadDeps } from "./limit-ahead.js";
+import { planOf as taskPlan, taskRouting } from "./ide-routing-task.js";
+import { autoPick } from "./ide-routing.js";
 import { Strengths } from "./strengths.js";
 import { attachmentsIn, MAX_FOLDER_ARCHIVE, uploadsMayRun, UploadedFolders } from "./uploaded.js";
 import { findWork, listWork, namedIn, pathParam, serveWork, shownFile, siteIcon, workPath } from "./work-files.js";
@@ -136,7 +154,8 @@ import { distinctLook } from "./teammate-look.js";
 import { budgetPatch, clockIn, cleanRunBudget, CrewBudget, runOver, type RunBudget } from "./team-budget.js";
 import { movedSince, NUDGE_GAP_MS, QUIET_MS, saysGoalReached, selfRunAnswer, selfRunNote, selfRunNudge, STALL_NUDGES, leadSaid } from "./team-selfrun.js";
 import { awayAnswer, awayNote, briefLine, briefWorthPosting, clockOf, endsOnQuestion, roomNews, runsIn, teamBrief as awayBrief, usageOf, type LaneRun, type Place } from "./team-away.js";
-import { boardBusy, verifiedAt } from "./session/projection.js";
+import { boardBusy, sessionPr, verifiedAt } from "./session/projection.js";
+import { localSkillBriefs, localSkillText } from "./runner/skill-library.js";
 import { saysNoUpdate } from "./teammate-checkins.js";
 import type { MateNote } from "./engine/hub.js";
 import { visitKeep, visitNote, visitRefusal, visitStore, type Visit } from "./crew-code.js";
@@ -153,13 +172,9 @@ import { validateSchedule } from "./agents.js";
 import { localEdition } from "./local-edition.js";
 import { OutsideAgents } from "./outside-agents.js";
 import { outsideCommand, outsideSetup } from "./local/outside-mcp.js";
-import { ChannelBridge } from "./channels/bridge.js";
-import { ChannelsConfig } from "./channels/config.js";
-import { LinearAgent } from "./channels/linear-agent.js";
-import { SlackAgent } from "./channels/slack-agent.js";
-import { slackNewAppUrl } from "./channels/slack.js";
 import { openInTerminal } from "./runner/terminal.js";
 import { rankTools, taskTier } from "./routing.js";
+import { cutOff } from "./ide-restore.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // Resolved once: the traversal guard in serveStatic compares against this with
@@ -244,7 +259,7 @@ const TREE_LISTING = /^\d+ files under /;
 /** A preview link lasts six hours unused, and twelve at most however much it is used. */
 const PREVIEW_TICKET_IDLE_MS = 6 * 60 * 60_000;
 const PREVIEW_TICKET_MAX_MS = 12 * 60 * 60_000;
-const READ_OPS = new Set(["tree", "read", "branches", "remote", "commands", "environment", "context", "status", "log", "show", "gitdiff", "compare"]);
+const READ_OPS = new Set(["tree", "read", "branches", "remote", "commands", "environment", "context", "status", "log", "show", "gitdiff", "compare", "diff"]);
 
 /**
  * Developing (hot), every hashed chunk any build in this process made: a page that loaded app.js just before a rebuild asks
@@ -395,8 +410,6 @@ export interface AppOptions {
     };
     /** Agents outside Friday, over its MCP server (outside-agents.ts): this install's token, and the script they start (local/outside-mcp.ts). */
     outside?: { token: string; shim: string };
-    /** Slack and Linear (channels/): the file their tokens and choices are kept in, this person's alone. Without it, neither. */
-    channels?: string;
     /** Where voice input's model is kept once downloaded (voice-models.ts): `<FRIDAY_HOME>/models`. Without it, no voice routes. */
     models?: string;
     /**
@@ -719,7 +732,10 @@ export async function createApp(o: AppOptions) {
             : [],
       })
     : null;
+  /** Pull request autopilot's ear (autopilot.ts): its sessions' shepherd steps, as each pull request's log. Set below. */
+  let autopilotHear: ((sid: string, ev: SessionEvent) => void) | null = null;
   store.onAppended = (sid, ev) => {
+    autopilotHear?.(sid, ev as SessionEvent);
     if (usage && ev.body.type === "session.created") void usage.sessionStarted(ev.body.options?.team ? "crew" : ev.body.options?.work ? "work" : "code").catch(() => {});
     if (usage && ev.body.type === "run.ended" && ev.body.outcome === "done" && ev.actor.kind === "agent") void usage.once("first_turn").catch(() => {});
     teamHear?.(sid, ev as SessionEvent);
@@ -730,8 +746,6 @@ export async function createApp(o: AppOptions) {
     // Every edition's: the open-source one runs automations too, and with this left out of it its runs stayed "Running" for good
     // and "An agent finishes" never fired (2026-10-27 QA).
     if (ev.body.type === "run.ended") automationsHear?.(sid, ev);
-    // A thread from Slack or Linear tells that side how it goes (channels/bridge.ts).
-    channels?.bridge.hear(sid, ev as SessionEvent);
     // Who is out of usage, whichever session said it, for every session's hand-offs (limited.ts).
     if (ev.body.type === "run.ended") void store.state(sid).then((s) => noteRunEnd(s.engines[ev.lane ?? MAIN_LANE], { ts: Date.now(), body: ev.body }), () => {});
     // A plan naming a file another agent is on: said in the feed now, before either writes it (collisions.ts plannedOverlapsFor).
@@ -1076,8 +1090,9 @@ export async function createApp(o: AppOptions) {
   // The agents in a session talking to each other (agent-mesh.ts): coding tools through their runner, Friday Code directly. A
   // coding tool's hand_off is Friday Code's own, so the same lane rules and bounce limit hold for both.
   const mesh = new AgentMesh(store, bus, (sid, from, req) => handOff(store, bus, sid, from, req));
-  // Friday Code, only ever on one of your own models: nothing metered, and no skills, memory, hubs or other sessions to reach.
-  const runtime = new AgentRuntime(store, bus, llm, o.tools ?? defaultTools, { mesh, readRepo: openFolder, resolveFiles: (sid, atts) => resolveAttachments(files, sid, atts), works: (s) => isOwnModel(s.options.model) });
+  // Friday Code, only ever on one of your own models: nothing metered, and no memory, hubs or other sessions to reach. The skills on
+  // this computer it has (Arun, 2026-11-20: "make sure all of the codings tools and agent crews are able to use the skills").
+  const runtime = new AgentRuntime(store, bus, llm, o.tools ?? defaultTools, { mesh, readRepo: openFolder, resolveFiles: (sid, atts) => resolveAttachments(files, sid, atts), works: (s) => isOwnModel(s.options.model), userSkills: () => localSkillBriefs(), everyAgentSkills: true, skillBrief: (_ws, id) => localSkillText(id) });
   /** Only a model of your own, and only chosen by you: there is nothing else for Friday Code to run on here. */
   const allowedModel = async (_workspaceId: string, model: string, actorId?: string): Promise<string> => (isOwnModel(model) && ownModelParts(model)?.owner === actorId ? model : "");
 
@@ -1128,6 +1143,8 @@ export async function createApp(o: AppOptions) {
    * with a correction (brain.ts correctionOf) is read as the fix of a mistake, which becomes a rule; what the run found out of
    * date is retired; and a mistake back again after agents were told is offered as a check, here in the session.
    */
+  /** Which side a session is on: the page tells the server every Code chat (/api/vscode/tasks) and the sids are kept, so a restart or the hundredth chat is still Code's. */
+  const surfaceFor = async (sid: string) => (surfaceOf(codeTasks, sid) === "code" || (await redis.sismember(`${o.prefix}code-sids`, sid).catch(() => 0)) ? "code" : "agents") as "code" | "agents";
   async function learnFromRun(sid: string, lane: string): Promise<void> {
     const [state, events] = await Promise.all([store.state(sid), store.events(sid)]);
     const ws = workspaceOf(state);
@@ -1156,7 +1173,10 @@ export async function createApp(o: AppOptions) {
     const name = engine?.tool ? `${engine.hostName}'s ${ENGINE_NAMES[engine.tool]}` : (state.options.agent?.name ?? "Friday Code");
     if (repo) {
       const offered: BrainEntry[] = [];
-      if (kept.length) await brain.learn(repo.key, repo.name, kept, { tool: engine?.tool ?? "friday", name, sid, title: state.title }, offered);
+      // Which side it was learned on (code-brain.ts): the IDE's Memory view and Agents' page say "Code" or "Agents" beside it.
+      const saved = kept.length ? await brain.learn(repo.key, repo.name, kept, { tool: engine?.tool ?? "friday", name, sid, title: state.title, surface: await surfaceFor(sid) }, offered) : [];
+      // A quiet "Remembered: ... Undo" line in the chat for each lesson that is new or changed (Arun, 2026-11-20).
+      for (const r of remembered(known, saved)) await store.append(sid, FRIDAY, { type: "brain.remembered", repo: repo.key, repoName: repo.name, ...r }, { lane });
       await brain.retire(repo.key, stale.map((x) => ({ ...x, why: `${x.why} (found by ${name}${state.title ? ` in “${state.title}”` : ""})` })));
       for (const e of offered) await store.append(sid, FRIDAY, { type: "brain.check.proposed", repo: repo.key, repoName: repo.name, entry: e.id, command: e.check!.command, why: e.text, times: e.seen ?? 2 }, { lane });
     }
@@ -1555,13 +1575,26 @@ export async function createApp(o: AppOptions) {
           return "stopped";
         }
         const c = asJson((await openFolder(sid, { op: "commit", message, only }, lane)).output) as { sha?: string; branch?: string; files?: number; error?: string } | null;
-        if (!c?.sha) {
-          await say({ type: "pr.shepherd.ended", outcome: "stopped", text: `Friday couldn't commit the fix${c?.error ? `: ${c.error}` : ""}. A person needs to look.` });
-          return "stopped";
-        }
         // Pushed to the branch the pull request is on; the pull request itself is already there. The person who turned the
         // shepherd on allowed its pushes, so a Manual machine pushes too, when it was its host who did (see hub.readRepo).
         const by = events.find((e) => e.seq === watch.since)?.actor.id;
+        // A conflict the agent settled: it merged the base in and committed the merge itself (conflictsText), so there's nothing
+        // left for Friday to commit. That's the fix, not a failure: its push is made sure of and the watch goes on (Arun,
+        // 2026-11-20: autopilot stopped on "There's nothing to commit — the folder matches the last commit" after a resolved conflict).
+        if (!c?.sha && act.reason === "conflicts" && /nothing to commit/i.test(c?.error ?? "")) {
+          const out = (await openFolder(sid, { op: "publish", message, pr: false, approved: true, ...(by ? { approvedBy: by } : {}) }, lane)).output;
+          const pushed = asJson(out) as { pushed?: boolean; error?: string } | null;
+          if (!pushed?.pushed && !/up.to.date|nothing to (push|commit)/i.test(pushed?.error ?? out ?? "")) {
+            await say({ type: "pr.shepherd.ended", outcome: "stopped", text: `The agent resolved the conflict, but Friday couldn't push it${pushed?.error ? `: ${pushed.error.replace(/\.$/, "")}` : ""}. A person needs to look.` });
+            return "stopped";
+          }
+          await say({ type: "pr.shepherd.step", step: "pushed", text: "The agent merged the base in and resolved the conflict; it's pushed. Waiting for the checks." });
+          return "pushed";
+        }
+        if (!c?.sha) {
+          await say({ type: "pr.shepherd.ended", outcome: "stopped", text: `Friday couldn't commit the fix${c?.error ? `: ${c.error.replace(/\.$/, "")}` : ""}. A person needs to look.` });
+          return "stopped";
+        }
         const said = (await openFolder(sid, { op: "publish", message, pr: false, approved: true, ...(by ? { approvedBy: by } : {}) }, lane)).output;
         const p = asJson(said) as { pushed?: boolean; error?: string } | null;
         await say({ type: "folder.committed", sha: c.sha, branch: c.branch ?? "", message, files: c.files ?? 0, ...(p?.pushed ? { pushed: true } : { error: p?.error ?? (!p && said ? said.slice(0, 500) : "Committed, but it couldn't be pushed.") }) });
@@ -1582,6 +1615,13 @@ export async function createApp(o: AppOptions) {
         const said = await say({ type: "instruction", text: checksText(got.failures, watch.prUrl), interrupt: false });
         if (said.ok) void bus.wake(sid, lane);
         return "checks";
+      }
+      // A conflict with the base: the agent merges it in, resolves it, tests and pushes (shepherd.ts conflictsText).
+      case "conflicts": {
+        await say({ type: "pr.shepherd.step", step: "conflicts", text: `The pull request conflicts with its base branch. Handed to the agent to merge and resolve, try ${act.round} of ${MAX_CONFLICT_ROUNDS}.` });
+        const said = await say({ type: "instruction", text: conflictsText(watch.prUrl, state.options.pr?.base ?? ""), interrupt: false });
+        if (said.ok) void bus.wake(sid, lane);
+        return "conflicts";
       }
       case "comments": {
         const got = asJson((await openFolder(sid, { op: "prcomments", query: watch.prUrl }, lane)).output) as { comments?: PrComment[] } | null;
@@ -1764,8 +1804,10 @@ export async function createApp(o: AppOptions) {
         const engine = state.engines[lane];
         const by = engine?.tool ? `${engine.hostName}'s ${ENGINE_NAMES[engine.tool]}` : (state.options.agent?.name ?? "Friday Code");
         try {
-          const [kept] = await brain.learn(repo.key, repo.name, [{ key: text.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40), kind, text }], { tool: engine?.tool ?? "friday", name: by, sid, title: state.title });
+          const before = await brain.list(repo.key);
+          const [kept] = await brain.learn(repo.key, repo.name, [{ key: text.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40), kind, text }], { tool: engine?.tool ?? "friday", name: by, sid, title: state.title, surface: await surfaceFor(sid) });
           if (!kept) return { output: "That looks like a key or password, so it wasn't kept. Name its environment variable instead.", isError: true };
+          for (const r of remembered(before, [kept])) await store.append(sid, FRIDAY, { type: "brain.remembered", repo: repo.key, repoName: repo.name, ...r }, { lane });
           return { output: `Kept in ${repo.name}'s project memory as a ${kind}. Every agent working on ${repo.name} will be told it when it bears on their task.` };
         } catch (e) {
           return { output: (e as Error).message, isError: true };
@@ -1904,7 +1946,7 @@ export async function createApp(o: AppOptions) {
   // ── Automations (automations.ts): the coding tools working on their own ──────────────────────────
   const automations = new AutomationStore(redis, o.prefix);
   /** A coding tool started for an automation's run: on the main lane, or a lane of its own beside it; in its own copy of the folder, or a new project folder when there is none. */
-  const startTool = async (sid: string, owner: { id: string; name: string }, p: { tool: EngineTool; cwd: string; mode: EngineMode; copy: boolean; newLane?: string; project: string }) => {
+  const startTool = async (sid: string, owner: { id: string; name: string }, p: { tool: EngineTool; cwd: string; mode: EngineMode; copy: boolean; newLane?: string; project: string; /** A copy on this branch, fetched first, the folder's own work left where it is (autopilot's, on a pull request's branch). */ aside?: string }) => {
     const params = {
       sid,
       invite: signInvite(o.secret, sid, "owner"),
@@ -1912,7 +1954,7 @@ export async function createApp(o: AppOptions) {
       tool: p.tool,
       mode: p.mode,
       ...(p.cwd ? { cwd: p.cwd } : { noFolder: true, project: p.project }),
-      ...(p.cwd && p.copy ? { worktree: "lane", carry: true, copyName: p.newLane || ENGINE_NAMES[p.tool] } : {}),
+      ...(p.cwd && p.copy ? { worktree: "lane", carry: !p.aside, copyName: p.newLane || ENGINE_NAMES[p.tool], ...(p.aside ? { aside: { branch: p.aside, fetch: true } } : {}) } : {}),
       ...(p.newLane ? { newLane: p.newLane } : {}),
     };
     const token = links.tokenFor(owner.id);
@@ -3889,7 +3931,8 @@ export async function createApp(o: AppOptions) {
   if (teammates && o.local) {
     const me = o.local.user;
     // The crew's skills (team-skills.ts): the agents' tools, each teammate's note listing the ones it may use, and the page's API.
-    const skills = localSkills({ redis, prefix: o.prefix, teammates, store, person: me, wake: (sid, lane) => bus.wake(sid, lane) });
+    // The person's own skills (the Skills page's, ~/.agents/skills on this computer) beside the crew's in list_skills and use_skill.
+    const skills = localSkills({ redis, prefix: o.prefix, teammates, store, person: me, wake: (sid, lane) => bus.wake(sid, lane), library: async () => (await readLibrary()).mine.map((s) => ({ name: s.name, description: s.description, file: path.join(s.dir, "SKILL.md") })) });
     localSkillScope = skills.scope;
     mesh.skillTools = skills.tools;
     if (hub.teammate) hub.teammate = skills.tools.withNote(hub.teammate);
@@ -3951,6 +3994,201 @@ export async function createApp(o: AppOptions) {
       return await set({ status: "failed", note: (e as Error).message.slice(0, 300), ended: Date.now() });
     }
   };
+  // ── Pull request autopilot (autopilot.ts): the person's own pull requests fixed as they need it, on this computer ──────
+  // Every two minutes while it's on: a pull request with a red check, a reviewer's comment or a conflict, and nothing of autopilot's
+  // on it, gets a session on its branch in a copy of the person's clone, with the shepherd on to fix, push and keep watching.
+  const autopilot = o.local && localEdition() ? new AutopilotStore(redis, o.prefix) : null;
+  const AUTOPILOT_MS = 2 * 60_000;
+  /** At most this many started in one look; how many at once is the person's (settings.max). */
+  const AUTOPILOT_PER_LOOK = 2;
+  let autopilotBusy = false;
+  const startPilot = async (pr: PilotPr, reasons: PilotReason[], me: { id: string; name: string }, how: { tool: string; restarted?: boolean } = { tool: "auto" }): Promise<PilotPrRecord> => {
+    const now = Date.now();
+    const base: PilotPrRecord = { url: pr.url, repo: pr.repo, number: pr.number, title: pr.title.slice(0, 200), sid: null, state: "working", head: pr.head, log: (await autopilot!.get(pr.url))?.log ?? [], updated: now };
+    const ctx = hostCtx(me);
+    const found = ((await callHost("repo.local", { repo: pr.repo }, ctx).catch(() => null)) as { folder: { path: string } | null } | null)?.folder;
+    if (!found?.path) {
+      const rec = { ...base, state: "stopped" as const, log: [...base.log, { at: now, kind: "skipped" as const, text: `${pr.repo} isn't cloned on this computer, so autopilot can't work on it. Clone it, and it carries on.` }] };
+      await autopilot!.put(rec);
+      return rec;
+    }
+    const tier = taskTier(needsText(pr, reasons));
+    const options = await toolOptionsFor(me.id).catch(() => []);
+    // The person's pick when it is ready here; otherwise the one best placed for the task, as before.
+    const picked = how.tool !== "auto" ? options.find((t) => t.tool === how.tool && t.ready)?.tool : undefined;
+    const tool = picked ?? rankTools(tier.tier, options, tier.why).find((r) => !r.out)?.tool;
+    if (!tool) {
+      const rec = { ...base, state: "stopped" as const, log: [...base.log, { at: now, kind: "skipped" as const, text: "No coding tool is ready on this computer to fix it." }] };
+      await autopilot!.put(rec);
+      return rec;
+    }
+    const owner: Member = { id: me.id, name: me.name, role: "owner" };
+    const sid = randomBytes(6).toString("base64url");
+    await store.create(sid, `Autopilot: #${pr.number} ${pr.title}`.slice(0, 120), owner, { webSearch: false, controlMode: "ask", mcp: true, pr: { url: pr.url, repo: pr.repo, number: pr.number, title: pr.title.slice(0, 200), head: pr.branch, ...(pr.base ? { base: pr.base } : {}) } }, LOCAL_WORKSPACE.id);
+    await store.append(sid, { id: owner.id, name: owner.name, kind: "human" }, { type: "engine.expected", tool, hostId: owner.id, hostName: owner.name });
+    const rec: PilotPrRecord = { ...base, sid, log: [...base.log, { at: now, kind: how.restarted ? "restarted" : "started", text: `${how.restarted ? "Restarted by you" : "Started"}: ${needsText(pr, reasons)}. ${ENGINE_NAMES[tool]} works on ${pr.branch} in a copy of ${found.path.split(/[\\/]/).pop()}.` }] };
+    await autopilot!.put(rec);
+    await core.handle(sid, owner, { type: "instruct", text: pilotBrief(pr, reasons) });
+    await startTool(sid, owner, { tool, cwd: found.path, mode: "full", copy: true, project: pr.repo, aside: pr.branch });
+    // The shepherd takes it from here: each check, comment or conflict handed over, fixes committed and pushed (shepherd.ts).
+    const on = await core.handle(sid, owner, { type: "pr.shepherd", on: true });
+    if (!on.ok) await autopilot!.note(pr.url, { at: Date.now(), kind: "stopped", text: `Autopilot couldn't watch it: ${on.error ?? "the session had no folder"}.` }, "stopped", pr.head);
+    return rec;
+  };
+  const tickAutopilot = async (): Promise<Record<string, string>> => {
+    const done: Record<string, string> = {};
+    if (!autopilot || autopilotBusy) return done;
+    const s = await autopilot.settings();
+    if (!s.on || !localHost()) return done;
+    autopilotBusy = true;
+    try {
+      const me = await localNamed();
+      const got = (await callHost("prs", {}, hostCtx(me)).catch(() => null)) as { mine?: PilotPr[] } | null;
+      const mine = got?.mine ?? [];
+      const records = await autopilot.all();
+      // Its sessions still watching: one whose shepherd has ended says so in its log (autopilotHear); this catches one that didn't.
+      const live = new Set<string>();
+      for (const r of records) {
+        if (!r.sid || (r.state !== "working" && r.state !== "watching")) continue;
+        const st = await store.state(r.sid).catch(() => null);
+        if (st?.shepherd?.prUrl === r.url) live.add(r.url);
+        else await autopilot.note(r.url, { at: Date.now(), kind: "stopped", text: "Its session stopped watching the pull request." }, "stopped", "");
+      }
+      let started = 0;
+      for (const pr of mine) {
+        const reasons = reasonsFor(pr, s);
+        const rec = (await autopilot.get(pr.url)) ?? null;
+        // Stopped since the last look: the commit it stopped on is noted, and it starts again only once somebody pushes past it.
+        if (rec?.state === "stopped" && !rec.head) {
+          await autopilot.put({ ...rec, head: pr.head });
+          continue;
+        }
+        if (!shouldStart(pr, reasons, rec, live.has(pr.url))) continue;
+        if (live.size + started >= s.max || started >= AUTOPILOT_PER_LOOK) break;
+        const r = await startPilot(pr, reasons, me, { tool: s.tool }).catch((e: Error) => (console.error("[autopilot]", pr.url, e), null));
+        done[pr.url] = r?.state ?? "failed";
+        if (r?.state === "working") started++;
+      }
+    } finally {
+      autopilotBusy = false;
+    }
+    return done;
+  };
+  /**
+   * Its session put away once the pull request is done with: its agents stopped, and off the person's sidebar (Arun, 2026-11-20: "i
+   * think it should auto close its session or whatever when it is done"). Its history stays: Code Review's log opens it again.
+   */
+  const closePilotSession = async (rec: PilotPrRecord, why: string): Promise<void> => {
+    if (!autopilot || !rec.sid) return;
+    const me = await localNamed();
+    const st = await store.state(rec.sid).catch(() => null);
+    if (!st) return;
+    for (const lane of Object.keys(st.engines)) await stopOnMachine(rec.sid, me, lane).catch(() => {});
+    await store.forget(me.id, rec.sid);
+    await autopilot.note(rec.url, { at: Date.now(), kind: "tidied", text: why });
+  };
+  /** The person's own pull requests as Code Review reads them, for a press on one (restart). */
+  const pilotPrs = async (me: { id: string; name: string }): Promise<PilotPr[]> => ((await callHost("prs", {}, hostCtx(me)).catch(() => null)) as { mine?: PilotPr[] } | null)?.mine ?? [];
+  if (autopilot) {
+    autopilotHear = (sid, ev) => {
+      const b = ev.body;
+      if (b.type !== "pr.shepherd.step" && b.type !== "pr.shepherd.ended") return;
+      void (async () => {
+        const rec = await autopilot.bySession(sid);
+        if (!rec) return;
+        if (b.type === "pr.shepherd.step") {
+          const kind = b.step === "rerequested" ? "pushed" : b.step;
+          await autopilot.note(rec.url, { at: ev.ts || Date.now(), kind, text: b.text, ...(b.sha ? { sha: b.sha } : {}) }, b.step === "pushed" || b.step === "rerequested" ? "watching" : "working");
+        } else {
+          const after = await autopilot.note(rec.url, { at: ev.ts || Date.now(), kind: b.outcome, text: b.text }, b.outcome === "stopped" ? "stopped" : "done", b.outcome === "stopped" ? "" : undefined);
+          // Merged or closed: nothing more for its session to do. Stopped (a person is needed) keeps it open for them.
+          if (after && b.outcome !== "stopped" && (await autopilot.settings()).closeWhenDone) await closePilotSession(after, `Closed its session: the pull request ${b.outcome === "merged" ? "merged" : "was closed"}.`);
+        }
+      })().catch((e) => closingOr("[autopilot]", e));
+    };
+  }
+  const autopilotLoop = setInterval(() => void tickAutopilot().catch((e) => closingOr("[autopilot]", e)), AUTOPILOT_MS);
+  autopilotLoop.unref();
+  // ── What Friday keeps on this computer (runner/storage.ts) ─────────────────────────────────────────────────────────────
+  // Arun, 2026-11-19: "there is alot of stuff saved on disk that was either deleted or removed and stuff by the user and it is still
+  // there". The open-source app never ran the sweep the linked runner does (runner/cli.ts), so copies piled up: here it runs five
+  // minutes after the start and every six hours, a deleted session's copies and screenshots go with it, and Settings › Storage
+  // shows what is kept and cleans up now.
+  /**
+   * Every session that still exists, and every folder one of them names (its lanes'): what a clean-up must leave. `referenced`
+   * is null when a session couldn't be read, so no copy is taken for left behind on a guess.
+   */
+  const keptOnDisk = async (): Promise<{ referenced: string[] | null; liveSids: string[] }> => {
+    const sids: string[] = [];
+    let cursor = "0";
+    do {
+      const [next, keys] = await redis.scan(cursor, "MATCH", `${o.prefix}{*}:events`, "COUNT", 1000);
+      cursor = next;
+      for (const k of keys) {
+        const m = /\{(.+)\}:events$/.exec(k);
+        if (m) sids.push(m[1]!);
+      }
+    } while (cursor !== "0");
+    const referenced = new Set<string>();
+    let unsure = false;
+    for (const sid of sids) {
+      const st = await store.state(sid).catch(() => null);
+      if (!st) unsure = true;
+      else for (const e of Object.values(st.engines)) if (e?.cwd) referenced.add(e.cwd);
+    }
+    return { referenced: unsure ? null : [...referenced], liveSids: sids };
+  };
+  const storageCtx = () => hostCtx({ id: o.local!.user.id, name: "" });
+  /**
+   * The last measurement, so Settings › Storage opens on it at once (measuring 14 GB of copies takes about eight seconds), and
+   * one measuring at a time, shared by whoever asks while it runs. Measured again after every clean-up.
+   */
+  let storageSeen: { at: number; data: Record<string, unknown> } | null = null;
+  let storageMeasuring: Promise<{ at: number; data: Record<string, unknown> }> | null = null;
+  const measureDisk = () =>
+    (storageMeasuring ??= (async () => {
+      try {
+        const data = (await callHost("storage.measure", { referenced: (await keptOnDisk()).referenced }, storageCtx())) as Record<string, unknown>;
+        storageSeen = { at: Date.now(), data };
+        return storageSeen;
+      } finally {
+        storageMeasuring = null;
+      }
+    })());
+  const tidyDisk = async () => {
+    if (!o.local || !localHost()) return null;
+    const kept = await keptOnDisk();
+    const r = (await callHost("storage.tidy", { referenced: kept.referenced, liveSids: kept.liveSids }, storageCtx())) as { dropped: number; trashed: number; purged: number; files: number };
+    if (r.dropped || r.trashed || r.purged) console.log(`[storage] cleared ${r.dropped} copies, ${r.trashed} to the trash, ${r.purged} emptied from it, ${r.files} files`);
+    // Measured again behind it, so the next look at Settings › Storage is current and instant.
+    void measureDisk().catch(() => undefined);
+    return r;
+  };
+  /** A deleted session's copies, put away a few seconds on, together, and only those no other session still names. */
+  const retiring = { paths: new Set<string>(), sids: new Set<string>(), timer: null as ReturnType<typeof setTimeout> | null };
+  const retireLater = (sid: string, cwds: string[]) => {
+    if (!o.local || !localHost()) return;
+    retiring.sids.add(sid);
+    for (const c of cwds) retiring.paths.add(c);
+    if (retiring.timer) clearTimeout(retiring.timer);
+    retiring.timer = setTimeout(() => {
+      retiring.timer = null;
+      const paths = [...retiring.paths];
+      const sids = [...retiring.sids];
+      retiring.paths.clear();
+      retiring.sids.clear();
+      void (async () => {
+        const kept = await keptOnDisk();
+        const free = kept.referenced ? paths.filter((p) => !kept.referenced!.includes(p)) : [];
+        for (const sid of sids) await callHost("storage.retire", { sid, paths: sid === sids[0] ? free : [] }, storageCtx());
+      })().catch((e) => closingOr("[storage]", e));
+    }, 4000);
+    retiring.timer.unref?.();
+  };
+  const tidyStart = o.local ? setTimeout(() => void tidyDisk().catch((e) => closingOr("[storage]", e)), 5 * 60_000) : null;
+  tidyStart?.unref?.();
+  const tidyLoop = o.local ? setInterval(() => void tidyDisk().catch((e) => closingOr("[storage]", e)), 6 * 60 * 60_000) : null;
+  tidyLoop?.unref?.();
   // ── Agents outside Friday (outside-agents.ts): Claude Code, Codex, Cursor on this computer, over Friday's MCP server ──────
   // They act for the person at this computer, as its in-Friday agents do (below), and what they write says it came from them.
   const outsideAgents = o.local?.outside
@@ -3985,47 +4223,6 @@ export async function createApp(o: AppOptions) {
             }
           : {}),
       })
-    : null;
-  // ── Slack and Linear (channels/, spec 08): asks from there become threads here, and the work goes back as each shows it ──
-  const channels = o.local?.channels
-    ? (() => {
-        const config = new ChannelsConfig(o.local!.channels!);
-        const bridge = new ChannelBridge({
-          store,
-          handle: (sid, actor, cmd) => core.handle(sid, actor, cmd),
-          me: async () => {
-            const me = await localNamed();
-            return { id: me.id, name: me.name };
-          },
-          workspaceId: LOCAL_WORKSPACE.id,
-          startTool: (sid, owner, p) => startTool(sid, owner, p),
-          pickTool: async (owner, task) => {
-            const tier = taskTier(task);
-            return rankTools(tier.tier, await toolOptionsFor(owner).catch(() => []), tier.why).find((r) => !r.out)?.tool ?? null;
-          },
-          folder: async (p) => ({ dir: path.isAbsolute(p) && (await stat(p).then((x) => x.isDirectory(), () => false)), repo: await stat(path.join(p, ".git")).then(() => true, () => false) }),
-        });
-        /** Folders worked in lately, newest first, each once: a lane's copy counts as the folder it was copied from. */
-        const projects = async () => {
-          const me = await localNamed();
-          const seen = new Map<string, { folder: string; repo?: string }>();
-          for (const r of await store.mine(me.id, 80)) {
-            const st = await store.state(r.sid).catch(() => null);
-            for (const e of Object.values(st?.engines ?? {})) {
-              const folder = e?.copyOf ?? e?.cwd;
-              if (folder && !seen.has(folder)) seen.set(folder, { folder, ...(e?.repo ? { repo: e.repo } : {}) });
-            }
-          }
-          return [...seen.values()];
-        };
-        const linear = new LinearAgent({ config, bridge, projects, ...(process.env.FRIDAY_LINEAR_POLL_MS ? { pollMs: Number(process.env.FRIDAY_LINEAR_POLL_MS) } : {}), ...(process.env.FRIDAY_LINEAR_CALLBACK_PORT ? { callbackPort: Number(process.env.FRIDAY_LINEAR_CALLBACK_PORT) } : {}) });
-        bridge.add(linear);
-        linear.start();
-        const slack = new SlackAgent({ config, bridge, projects });
-        bridge.add(slack);
-        slack.start();
-        return { config, bridge, linear, slack, projects };
-      })()
     : null;
   // ── The app, for the agents in it (app-tools.ts) ─────────────────────────────────────────────────────────────────────
   // On this computer every coding tool, in any session, reaches the other sessions on this computer (Code, Work and the
@@ -4231,6 +4428,70 @@ export async function createApp(o: AppOptions) {
   };
   const automationLoop = setInterval(() => void tickAutomations().catch((e) => console.error("[automations]", e)), 30_000);
   automationLoop.unref();
+  // ── Run later (later.ts): a task from Code's box kept with its time, started then as a Code chat, only while Friday is running ──
+  const later = o.local && localEdition() ? new LaterStore(redis, o.prefix) : null;
+  /** A task of the person's, started now: a chat of its own in its folder, told what to do once its coding tool is there (the way Code's box starts one). */
+  const runLater = async (t: LaterTask): Promise<LaterTask> => {
+    const owner: Member = { id: t.ownerId, name: t.ownerName, role: "owner" };
+    // Only a task still "starting" is changed: what was settled, or taken another way, is not written over.
+    const settle = async (to: Partial<LaterTask>) => (await later!.mutate(t.id, (x) => (x.status === "starting" ? { ...x, ...to } : null))) ?? { ...t, ...to };
+    const fail = (note: string) => settle({ status: "failed", note: note.slice(0, 300) });
+    if (!computerHere(owner.id)) return await fail("Your computer wasn't connected.");
+    let sid = "";
+    try {
+      sid = randomBytes(6).toString("base64url");
+      await store.create(sid, t.title, owner, { webSearch: false, controlMode: "ask", mcp: true, model: "", ...(t.issue ? { issue: t.issue } : {}), ...(t.pr ? { pr: t.pr } : {}) }, LOCAL_WORKSPACE.id);
+      await store.append(sid, { id: owner.id, name: owner.name, kind: "human" }, { type: "engine.expected", tool: t.tool, hostId: owner.id, hostName: owner.name });
+      // The effort picked in the box, through the same check as any change of effort (as a session started from the page does).
+      if (t.effort && EFFORT_LEVELS[t.tool]?.includes(t.effort)) await core.handle(sid, owner, { type: "lane.effort", effort: t.effort });
+      const invite = signInvite(o.secret, sid, "owner");
+      // The account picked in the box, and no other: one that is gone here fails the start (accountParam), never runs on a different plan.
+      const params = { sid, invite, actorToken: signActor(o.secret, sid, owner.id), tool: t.tool, mode: t.mode, handMode: t.mode, ...(t.fullAccess ? { fullAccess: true } : {}), ...(t.model ? { model: t.model } : {}), ...(t.account ? { account: t.account } : {}), cwd: t.folder };
+      const token = links.tokenFor(owner.id);
+      if (token) await links.call(token, "start", params, 10 * 60_000);
+      else if (localHost()) await callHost("start", params, hostCtx(owner));
+      else throw new Error("Your computer isn't connected.");
+      const said = await core.handle(sid, owner, { type: "instruct", text: t.ask });
+      if (!said.ok) throw new Error(said.error);
+      return await settle({ status: "running", sid, invite, note: "" });
+    } catch (e) {
+      // Made, then its tool didn't come (or wouldn't take the words): not left behind as an empty chat.
+      if (sid) void endSession(sid, "This session was deleted").catch(() => {});
+      return await fail((e as Error).message || "It didn't start.");
+    }
+  };
+  /** Every 15 seconds: tasks whose time has come are started; ones whose time passed while Friday was closed (or the computer asleep) are marked missed; a start left half-done is called failed. */
+  const tickLater = async (now = Date.now()): Promise<LaterTask[]> => {
+    const started: LaterTask[] = [];
+    if (!later) return started;
+    // The grace is read here each time so a spec can shorten it (FRIDAY_LATER_GRACE_MS); a person never sets it.
+    const g = process.env.FRIDAY_LATER_GRACE_MS !== undefined && process.env.FRIDAY_LATER_GRACE_MS !== "" ? Number(process.env.FRIDAY_LATER_GRACE_MS) : undefined;
+    const grace = g !== undefined && Number.isFinite(g) ? g : undefined;
+    for (const t of await later.list().catch(() => [] as LaterTask[])) {
+      // Each change is made from the task as it is now (mutate), so a task cancelled, or started by Run now, between the list and here is left alone.
+      if (t.status === "starting") {
+        await later.mutate(t.id, (x) => (x.status === "starting" && x.startedAt && now - x.startedAt > STARTING_STUCK_MS ? { ...x, status: "failed", note: "Friday closed while it was starting." } : null));
+        continue;
+      }
+      const due = laterDue(t, now, grace);
+      if (due === "missed") {
+        await later.mutate(t.id, (x) => (laterDue(x, now, grace) === "missed" ? { ...x, status: "missed", note: MISSED_NOTE } : null));
+      } else if (due === "run") {
+        const mine = await later.claim(t.id, now);
+        if (mine) started.push(await runLater(mine));
+      }
+    }
+    await later.sweep(now).catch(() => {});
+    return started;
+  };
+  // The computer is kept from idle sleep for a task due soon, and while one starts (the desktop app asks teammates.awake), so the clock above is still ticking at its time.
+  if (later) {
+    const teamAwake = awake;
+    awake = async () => laterWantsAwake(await later.list().catch(() => [] as LaterTask[]), Date.now()) || (await teamAwake());
+  }
+  const laterLoop = later ? setInterval(() => void tickLater().catch((e) => console.error("[later]", e)), Number(process.env.FRIDAY_LATER_TICK_MS) || 15_000) : null;
+  laterLoop?.unref?.();
+  void tickLater().catch(() => {});
   /** A run's end: the automation's own run marked done or failed (and its owner told, if asked), and any automation watching the session started. */
   automationsHear = (sid, ev) => {
     // A run cut off by a lost connection carries on when the machine is back: neither the run's end nor a failure.
@@ -4401,8 +4662,10 @@ export async function createApp(o: AppOptions) {
 
   /** A session gone with its log, its members and presence, its tree, its files and its uploaded folder. */
   const removeSession = async (sid: string) => {
-    // Off its team's conflict radar too (radar.ts), read before its log goes.
-    const ws = await store.state(sid).then((s) => s.workspaceId, () => "");
+    // Off its team's conflict radar too (radar.ts), read before its log goes; and its lanes' folders, for their copies to go.
+    const was = await store.state(sid).catch(() => null);
+    const ws = was?.workspaceId ?? "";
+    const cwds = was ? Object.values(was.engines).flatMap((e) => (e?.cwd ? [e.cwd] : [])) : [];
     // From here a late write (a run's last step, a machine's last word) is refused instead of starting a new log under its id.
     await store.bury(sid);
     // Off the lists of sessions the server comes back to by itself: a pull request it watches, an agent to carry on later.
@@ -4414,6 +4677,8 @@ export async function createApp(o: AppOptions) {
     await delMatching(`${o.prefix}tree:${sid}*`);
     await files.removeSession(sid).catch(() => {});
     await rm(uploaded.rootFor(sid), { recursive: true, force: true }).catch(() => {});
+    // On this computer, its copies of folders and its screenshots (runner/storage.ts): a branch stays, uncommitted work to the trash.
+    retireLater(sid, cwds);
   };
 
   /**
@@ -4533,6 +4798,544 @@ export async function createApp(o: AppOptions) {
       }
       return;
     }
+    // Code's VS Code (runner/vscode.ts, ide/VsCodeView.tsx): ⌘L in the editor asks Friday's agent about the selected code. The
+    // Friday extension inside VS Code POSTs the ask with this start's token (it has no cookie and no Origin: a program on this
+    // computer); the page reads the latest one by polling. One ask is kept, with a number that grows, so a page that missed one
+    // while it was away asks for what is newer than the last it saw.
+    if (url.pathname === "/api/vscode/ask" && req.method === "POST" && o.local && localEdition()) {
+      const want = Buffer.from(vscodeToken() ?? "");
+      const given = Buffer.from(String(req.headers["x-friday-vscode"] ?? ""));
+      if (!want.length || given.length !== want.length || !timingSafeEqual(given, want)) return json(res, 401, { error: "Not from Friday's VS Code." });
+      return void readJson(req).then(
+        (body) => {
+          const path = str(body.path, 1000);
+          const text = typeof body.text === "string" ? body.text.slice(0, 20_000) : "";
+          // "fix" or "explain": a problem the IDE shows (a squiggle, a failed command) for Friday's column to take up. A failed
+          // command names no file; its problem is its output.
+          // "test" and "refactor" come from the actions above a function (extension lens.js), with the symbol's name and kind.
+          // "restructure": Friday: Refactor across the codebase… (extension refactor.js); the change asked for is its problem.
+          // "question": "Ask the codebase" (ask-code.ts), the person's question in `instruction`, the selection (if any) as the lines.
+          const kind = body.kind === "fix" || body.kind === "explain" || body.kind === "test" || body.kind === "refactor" || body.kind === "edit" || body.kind === "debug" || body.kind === "bisect" || body.kind === "cover" || body.kind === "restructure" || body.kind === "restack" || body.kind === "todo" || body.kind === "question" || body.kind === "ci" ? body.kind : "ask";
+          const symbol = str(body.symbol, 200);
+          const problem = typeof body.problem === "string" ? body.problem.slice(0, kind === "ci" ? 24_000 : 8000) : "";
+          // "edit": ⌘K, a change asked for in place on some lines (the instruction), which the agent makes and the IDE shows as Keep / Undo.
+          const instruction = typeof body.instruction === "string" ? body.instruction.trim().slice(0, 2000) : "";
+          if (kind === "edit" && (!path || !instruction)) return json(res, 400, { error: "Which lines, and what to change?" });
+          // "debug" with a stack and no readable file (every frame runtime code) is still something to read.
+          const debug = kind === "debug" ? debugBits(body) : null;
+          if (kind === "question" && !instruction) return json(res, 400, { error: "What do you want to know?" });
+          // "bisect" may have nothing said yet: the agent asks what broke.
+          if (!path && kind !== "question" && !(kind !== "ask" && (problem || kind === "bisect")) && !debug?.stack.length) return json(res, 400, { error: "No file." });
+          const line = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.max(1, Math.floor(v)) : 1);
+          const from = line(body.from);
+          // "debug": a stop in the debugger (extension debug.js), with its stack and variables, or the person's own words about what
+          // goes wrong (reproduce). Held to what the IDE says it keeps: 15 frames, 60 variables, 200 characters a value.
+          vscodeAsk = {
+            seq: vscodeAsk.seq + 1,
+            ask: { path, from, to: Math.max(from, line(body.to)), text, root: str(body.root, 1000), at: Date.now(), ...(kind !== "ask" ? { kind, problem, source: str(body.source, 600), ...(str(body.cwd, 1000) ? { cwd: str(body.cwd, 1000) } : {}), ...(symbol ? { symbol, symbolKind: str(body.symbolKind, 20) } : {}), ...(typeof body.line === "number" ? { line: line(body.line) } : {}), ...(instruction ? { instruction } : {}), ...(debug ?? {}) } : {}) },
+          };
+          wakeVscode();
+          return json(res, 200, { ok: true, seq: vscodeAsk.seq });
+        },
+        () => json(res, 400, { error: "That body is not JSON." }),
+      );
+    }
+    // A Friday key pressed inside VS Code (⌘E the Agents/Code switch, ⌘⌥B the agent column): the cross-origin frame keeps its keys
+    // from the page, so the extension forwards them here, by the same token, and the page picks them up beside the asks.
+    if (url.pathname === "/api/vscode/key" && req.method === "POST" && o.local && localEdition()) {
+      const want = Buffer.from(vscodeToken() ?? "");
+      const given = Buffer.from(String(req.headers["x-friday-vscode"] ?? ""));
+      if (!want.length || given.length !== want.length || !timingSafeEqual(given, want)) return json(res, 401, { error: "Not from Friday's VS Code." });
+      return void readJson(req).then(
+        (body) => {
+          // "needs": the status bar's "waiting in Agents", opening Agents' Needs you.
+          if (body.key !== "mode" && body.key !== "agent" && body.key !== "root" && body.key !== "task" && body.key !== "new" && body.key !== "needs" && body.key !== "action" && body.key !== "focus") return json(res, 400, { error: "Not a Friday key." });
+          // "action": one of Friday's palette in the IDE (vscode-palette.ts), run by the page; "open-session" carries the session.
+          if (body.key === "action") {
+            if (!isPageAction(body.action)) return json(res, 400, { error: "Not one of Friday's actions." });
+            const sid = str(body.sid, 64);
+            const invite = str(body.invite, 2000);
+            if (body.action === "open-session" && (!sid || !invite)) return json(res, 400, { error: "Which session?" });
+            vscodeKey = { seq: vscodeKey.seq + 1, key: "action", action: body.action, ...(sid ? { sid } : {}), ...(invite ? { invite } : {}) };
+            wakeVscode();
+            return json(res, 200, { ok: true, seq: vscodeKey.seq });
+          }
+          // "focus": the editor is being typed in (typing) and/or the quiet-while-typing setting (quiet), which holds Friday's pings
+          // (ide/quiet.ts). Kept apart from the one-shot key slot, so it never overwrites a task or root key and the setting is
+          // answered on every look, the first included.
+          if (body.key === "focus") {
+            const typing = typeof body.typing === "boolean" ? body.typing : undefined;
+            const quiet = typeof body.quiet === "boolean" ? body.quiet : undefined;
+            if (typing === undefined && quiet === undefined) return json(res, 400, { error: "focus takes a boolean typing or quiet." });
+            vscodeFocus = { seq: vscodeFocus.seq + 1, quiet: quiet ?? vscodeFocus.quiet, typedSeq: typing ? vscodeFocus.seq + 1 : vscodeFocus.typedSeq };
+            wakeVscode();
+            return json(res, 200, { ok: true, seq: vscodeFocus.seq });
+          }
+          // "task": a task picked on the IDE's board, shown in Code's column; "new": its New task.
+          if (body.key === "task") {
+            const sid = str(body.sid, 64);
+            if (!sid) return json(res, 400, { error: "Which task?" });
+            // `inCode`: an Agents session picked to open as a linked tab in Code, not in Agents (the board's context menu).
+            vscodeKey = { seq: vscodeKey.seq + 1, key: "task", sid, ...(body.inCode === true ? { inCode: true } : {}) };
+            wakeVscode();
+            return json(res, 200, { ok: true, seq: vscodeKey.seq });
+          }
+          // "root": the folder VS Code opened (its own Open Folder): Code takes it as its folder.
+          const root = body.key === "root" ? str(body.root, 4000) : "";
+          if (body.key === "root" && !root) return json(res, 400, { error: "Which folder?" });
+          vscodeKey = { seq: vscodeKey.seq + 1, key: body.key, ...(root ? { root } : {}) };
+          wakeVscode();
+          return json(res, 200, { ok: true, seq: vscodeKey.seq });
+        },
+        () => json(res, 400, { error: "That body is not JSON." }),
+      );
+    }
+    // "Ask the codebase" (ask-code.ts): the page starts a question the IDE asked (POST) and reads its answer back (GET ?id=). It rides
+    // Deep Dive's ask when this folder has a Deep Dive, else the person's coding tool reads the folder.
+    if (url.pathname === "/api/vscode/question" && o.local && localEdition()) {
+      const ctx = await context(req);
+      if (!ctx) return json(res, 401, { error: "Sign in first." });
+      if (req.method === "GET") {
+        // Whether this folder's repo has a Deep Dive yet, for the offer to build one (never offered over one that is there).
+        const asked = str(url.searchParams.get("folder"), 1000);
+        if (asked) return json(res, 200, { dive: (await diveOf(ctx.t.dives, diveHost(ctx.me.id), asked)).state });
+        const q = questionById(str(url.searchParams.get("id"), 40));
+        return q ? json(res, 200, { question: q }) : json(res, 404, { error: "That question is gone." });
+      }
+      if (req.method !== "POST") return json(res, 405, { error: "GET or POST." });
+      return void readJson(req).then(
+        async (body) => {
+          const folder = str(body.folder, 1000);
+          const question = str(body.question, 2000);
+          if (!folder || !question) return json(res, 400, { error: "Which folder, and what do you want to know?" });
+          const line = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.max(1, Math.floor(v)) : 1);
+          const path = str(body.path, 1000);
+          const from = line(body.from);
+          const text = typeof body.text === "string" ? body.text.slice(0, 20_000) : "";
+          try {
+            const q = await startQuestion({ dives: ctx.t.dives, host: diveHost(ctx.me.id), folder, question, by: ctx.me.id, tool: ENGINE_TOOLS.includes(body.tool as EngineTool) ? (body.tool as EngineTool) : null, selection: path && text ? { path, from, to: Math.max(from, line(body.to)), text } : null });
+            return json(res, 202, { question: q });
+          } catch (e) {
+            return json(res, 400, { error: (e as Error).message });
+          }
+        },
+        () => json(res, 400, { error: "That body is not JSON." }),
+      );
+    }
+    // "Write message" in the IDE's Source Control box (commit-ask.ts): the IDE sends the diff it sees and the last commits; the person's own
+    // coding tool writes the message in the repo's voice, with the why from the Code chat that made the changes. Text only: the box fills,
+    // nothing is committed.
+    if (url.pathname === "/api/vscode/commit-message" && req.method === "POST" && o.local && localEdition()) {
+      const want = Buffer.from(vscodeToken() ?? "");
+      const given = Buffer.from(String(req.headers["x-friday-vscode"] ?? ""));
+      if (!want.length || given.length !== want.length || !timingSafeEqual(given, want)) return json(res, 401, { error: "Not from Friday's IDE." });
+      return void readJson(req).then(
+        async (body) => {
+          const root = str(body.root, 4000);
+          if (!root) return json(res, 400, { error: "Which folder? (Or the request was too big to read.)" });
+          const files = (Array.isArray(body.files) ? body.files : []).filter((x: unknown): x is Record<string, unknown> => !!x && typeof x === "object").map((x) => ({ path: str(x.path, 1000), status: str(x.status, 20) })).filter((x) => x.path).slice(0, 500);
+          const log = (Array.isArray(body.log) ? body.log : []).filter((x: unknown): x is Record<string, unknown> => !!x && typeof x === "object").map((x) => ({ subject: str(x.subject, 300), body: x.body === true })).filter((x) => x.subject).slice(0, 60);
+          try {
+            const answer = await writeCommitMessage(diveHost(""), { list: () => codeTasks, state: (sid) => store.state(sid).catch(() => null), events: (sid) => store.events(sid) }, { root, diff: typeof body.diff === "string" ? body.diff.slice(0, 200_000) : "", files, log, staged: body.staged !== false });
+            return json(res, 200, answer);
+          } catch (e) {
+            return json(res, 500, { error: (e as Error).message });
+          }
+        },
+        () => json(res, 400, { error: "That body is not JSON." }),
+      );
+    }
+    // The terminal helper (term-ask.ts): "Friday: Write a command" sends a request in plain words, a command that failed sends itself and
+    // its output; the person's own coding tool answers read-only with a command and a line about it. Text only: the IDE puts the command
+    // in the terminal without pressing Enter.
+    if (url.pathname === "/api/vscode/terminal-help" && req.method === "POST" && o.local && localEdition()) {
+      const want = Buffer.from(vscodeToken() ?? "");
+      const given = Buffer.from(String(req.headers["x-friday-vscode"] ?? ""));
+      if (!want.length || given.length !== want.length || !timingSafeEqual(given, want)) return json(res, 401, { error: "Not from Friday's IDE." });
+      return void readJson(req).then(
+        async (body) => {
+          const mode = body.mode === "explain" ? "explain" : "write";
+          const f = body.failed && typeof body.failed === "object" ? (body.failed as Record<string, unknown>) : null;
+          const recent = (Array.isArray(body.recent) ? body.recent : []).filter((x: unknown): x is Record<string, unknown> => !!x && typeof x === "object").map((x) => ({ cmd: str(x.cmd, 300), exit: typeof x.exit === "number" ? x.exit : undefined })).filter((x) => x.cmd).slice(-8);
+          try {
+            const answer = await askTerminal(diveHost(""), {
+              mode,
+              request: str(body.request, 1000),
+              failed: f ? { cmd: str(f.cmd, 600), output: typeof f.output === "string" ? f.output.slice(-8000) : "", exit: typeof f.exit === "number" ? f.exit : undefined } : undefined,
+              shell: str(body.shell, 40),
+              os: str(body.os, 40),
+              cwd: str(body.cwd, 1000),
+              root: str(body.root, 4000),
+              recent,
+            });
+            return json(res, 200, answer);
+          } catch (e) {
+            return json(res, 500, { error: (e as Error).message });
+          }
+        },
+        () => json(res, 400, { error: "That body is not JSON." }),
+      );
+    }
+    if (url.pathname === "/api/vscode/asks" && req.method === "GET" && o.local && localEdition()) {
+      const since = Number(url.searchParams.get("since"));
+      const kSince = Number(url.searchParams.get("kseq"));
+      const s0 = Number.isFinite(since) ? since : 0;
+      const k0 = Number.isFinite(kSince) ? kSince : 0;
+      const fSince = Number(url.searchParams.get("fseq"));
+      const f0 = Number.isFinite(fSince) ? fSince : 0;
+      const answer = () => ({
+        fseq: vscodeFocus.seq,
+        ...(vscodeFocus.quiet !== null ? { quiet: vscodeFocus.quiet } : {}),
+        ...(vscodeFocus.typedSeq > f0 ? { typing: true } : {}),
+        seq: vscodeAsk.seq,
+        ask: vscodeAsk.ask && vscodeAsk.seq > s0 ? vscodeAsk.ask : null,
+        kseq: vscodeKey.seq,
+        key: vscodeKey.key && vscodeKey.seq > k0 ? vscodeKey.key : null,
+        ...(vscodeKey.root && vscodeKey.seq > k0 ? { root: vscodeKey.root } : {}),
+        ...(vscodeKey.sid && vscodeKey.seq > k0 ? { sid: vscodeKey.sid } : {}),
+        ...(vscodeKey.action && vscodeKey.seq > k0 ? { action: vscodeKey.action } : {}),
+        ...(vscodeKey.invite && vscodeKey.seq > k0 ? { invite: vscodeKey.invite } : {}),
+        ...(vscodeKey.inCode && vscodeKey.seq > k0 ? { inCode: true } : {}),
+      });
+      // A long poll: with nothing newer than what the page has, hold the reply (up to 25 s) and send it the moment an ask or a key
+      // arrives, so ⌘L lands in a few milliseconds and an idle Code window sends one request every 25 s, not one every second. A
+      // first look (the page's number is past ours: it has none yet, or this server started over) is answered at once.
+      const nothingNew = vscodeAsk.seq <= s0 && vscodeKey.seq <= k0 && vscodeFocus.seq <= f0;
+      const firstLook = s0 > vscodeAsk.seq || k0 > vscodeKey.seq || f0 > vscodeFocus.seq;
+      if (url.searchParams.get("wait") !== "1" || !nothingNew || firstLook) return json(res, 200, answer());
+      let finished = false;
+      const finish = (reply: boolean) => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        vscodeWaiters.delete(wake);
+        if (reply && !res.writableEnded && !res.destroyed) json(res, 200, answer());
+      };
+      const wake = () => finish(true);
+      const timer = setTimeout(wake, 25_000);
+      vscodeWaiters.add(wake);
+      res.on("close", () => finish(false));
+      return;
+    }
+
+    // The IDE's Memory view (Arun, 2026-11-20, wave 5: "one shared brain"): the open folder's repo in the project brain, read and put
+    // right from the IDE with its token. The same entries, under the same repo key, that Agents' memory page and every briefing use.
+    if (url.pathname === "/api/vscode/memory" && o.local && localEdition()) {
+      const want = Buffer.from(vscodeToken() ?? "");
+      const given = Buffer.from(String(req.headers["x-friday-vscode"] ?? ""));
+      if (!want.length || given.length !== want.length || !timingSafeEqual(given, want)) return json(res, 401, { error: "Not from Friday's IDE." });
+      const brain = tenant(LOCAL_WORKSPACE.id).brain;
+      const one = async (folder: string, remote: string, op: string, b: Record<string, unknown>) => {
+        const repo = repoOfFolder(folder, remote);
+        const enabled = await brain.enabled();
+        if (!repo) return { status: 200, body: { enabled, repo: null, entries: [] } };
+        const kindOf = (v: unknown) => (["correction", "decision", "pitfall", "convention", "fact"].includes(String(v)) ? (String(v) as BrainKind) : undefined);
+        if (op === "add") await brain.add(repo.key, repo.name, { text: String(b.text ?? ""), ...(kindOf(b.kind) ? { kind: kindOf(b.kind)! } : {}) }, o.local!.user, "code");
+        else if (op === "edit") await brain.update(repo.key, str(b.id, 20), { ...(typeof b.text === "string" ? { text: b.text } : {}), ...(kindOf(b.kind) ? { kind: kindOf(b.kind)! } : {}), ...(typeof b.pinned === "boolean" ? { pinned: b.pinned } : {}) });
+        else if (op === "forget") await brain.remove(repo.key, str(b.id, 20));
+        return { status: 200, body: { enabled, repo, entries: await brain.list(repo.key) } };
+      };
+      if (req.method === "GET") {
+        return void one(str(url.searchParams.get("folder"), 1000), str(url.searchParams.get("remote"), 500), "list", {}).then(
+          (r) => json(res, r.status, r.body),
+          (e) => json(res, 400, { error: (e as Error).message }),
+        );
+      }
+      if (req.method !== "POST") return json(res, 405, { error: "GET or POST." });
+      return void readJson(req).then(
+        (b) => one(str(b.folder, 1000), str(b.remote, 500), str(b.op, 10), b).then((r) => json(res, r.status, r.body), (e) => json(res, 400, { error: (e as Error).message })),
+        () => json(res, 400, { error: "That body is not JSON." }),
+      );
+    }
+
+    // Auto in Code's tool picker (Arun, 2026-11-20, wave 5): the tool with the most room left on the person's own plans for the task
+    // being typed, and why in a line (ide-routing.ts autoPick). The page asks as the words are typed; only the usage numbers the
+    // computer's runner already reports are read, never a tool's token, and only tools on this computer's own sign-ins are ranked.
+    if (url.pathname === "/api/vscode/auto" && o.local && localEdition()) {
+      if (req.method !== "POST") return json(res, 405, { error: "POST." });
+      return void readJson(req).then(
+        async (body) => {
+          const me = await identity(req).catch(() => null);
+          const ready = (await toolOptionsFor(me?.id ?? "").catch(() => [] as ToolOption[])).filter((t) => t.ready);
+          const usual = (ENGINE_TOOLS as readonly string[]).includes(String(body.usual)) ? (body.usual as EngineTool) : "";
+          const learned = await learnedFor(LOCAL_WORKSPACE.id).catch(() => ({}));
+          return json(res, 200, { pick: autoPick({ ready, text: str(body.task, 2000), usual, learned }) });
+        },
+        () => json(res, 400, { error: "That body is not JSON." }),
+      );
+    }
+
+    // The IDE's task board (Arun, 2026-11-19, the engineer loop: "every task at once, in Code"): the page says which sessions are
+    // Code's chats (they are kept in its own storage, code-chats.ts), and the IDE's Friday view and status bar read them back with
+    // where each stands, read from the session itself: waiting on you, running, a pull request open, or done.
+    if (url.pathname === "/api/vscode/tasks" && o.local && localEdition()) {
+      if (req.method === "POST") {
+        return void readJson(req).then(
+          (body) => {
+            const list = Array.isArray(body.tasks) ? body.tasks : [];
+            codeTasks = list
+              .filter((x: unknown): x is Record<string, unknown> => !!x && typeof x === "object")
+              .map((x) => ({ sid: str(x.sid, 64), title: str(x.title, 200), folder: str(x.folder, 1000), tool: str(x.tool, 40), at: typeof x.at === "number" ? x.at : 0, linked: x.linked === true }))
+              .filter((x) => x.sid);
+            const codeSids = codeTasks.filter((x) => !x.linked).map((x) => x.sid);
+            if (codeSids.length) void redis.sadd(`${o.prefix}code-sids`, ...codeSids).catch(() => {});
+            codeTasks = codeTasks.slice(0, 100);
+            // The Agents sessions working in this IDE folder, so the Tasks view lists them beside Code's own (vscode-board.ts).
+            codeAgentTasks = (Array.isArray(body.agents) ? body.agents : [])
+              .filter((x: unknown): x is Record<string, unknown> => !!x && typeof x === "object")
+              .map((x: Record<string, unknown>) => ({ sid: str(x.sid, 64), title: str(x.title, 200), folder: str(x.folder, 1000), tool: str(x.tool, 40), at: typeof x.at === "number" ? x.at : 0 }))
+              .filter((x: { sid: string }) => x.sid)
+              .slice(0, 50);
+            // What waits on the person in Agents, for the IDE's status bar (the page counts it from its Needs you).
+            codeAgentsWaiting = typeof body.agentsWaiting === "number" && Number.isFinite(body.agentsWaiting) ? Math.max(0, Math.min(999, Math.floor(body.agentsWaiting))) : 0;
+            return json(res, 200, { ok: true });
+          },
+          () => json(res, 400, { error: "That body is not JSON." }),
+        );
+      }
+      if (req.method !== "GET") return json(res, 405, { error: "GET or POST." });
+      // Read by the IDE (its token) and by Friday's own page (the footer's task line), as the page's other routes are.
+      if (req.headers["x-friday-vscode"] !== undefined) {
+        const want = Buffer.from(vscodeToken() ?? "");
+        const given = Buffer.from(String(req.headers["x-friday-vscode"]));
+        if (!want.length || given.length !== want.length || !timingSafeEqual(given, want)) return json(res, 401, { error: "Not from Friday's IDE." });
+      }
+      // Code's chats first, then the Agents sessions working in this folder, each saying where it lives (where: "code" | "agents").
+      // An Agents session carries its standing only: its files and cut-off are Agents' to show, not marked in this folder's Explorer.
+      // Usage-aware routing (Arun, 2026-11-20, wave 5): each chat's tool and what is left of its window (the IDE's status bar: from the
+      // state alone, no log read). The column's bar and hand-on line (`?sid=`, the one chat on screen) read that chat's log, and only
+      // when it has a tool at work or a run that ended in error: every Code chat's whole log was kept in memory by the list reading
+      // them all (store.ts HOT_MS). The computer is asked who else has room at most once a read, and only when a bar may show.
+      const meId = (await identity(req).catch(() => null))?.id ?? "";
+      const only = url.searchParams.get("sid");
+      let optionsRead: Promise<ToolOption[]> | null = null;
+      // The chats Run later started say so (the board marks them "Ran overnight", or "Ran later" when it began in the day): the server
+      // knows them, so the page doesn't send it. One look at the list serves both this and the Later group below.
+      const laterList = (await later?.list().catch(() => [] as LaterTask[])) ?? [];
+      const ranLater = new Map(laterList.flatMap((l) => (l.sid ? [[l.sid, isNightAt(l.startedAt ?? l.at, Intl.DateTimeFormat().resolvedOptions().timeZone) ? "Ran overnight" : "Ran later"] as const] : [])));
+      return void Promise.all(
+        mergeTasks(codeTasks, codeAgentTasks).map(async (t) => {
+          const st = await store.state(t.sid).catch(() => null);
+          if (t.where === "agents" && !t.linked) return { ...t, ...taskStanding(st) };
+          const cut = cutOff(st);
+          const windows = (lane: string) => hub.usage(t.sid, lane);
+          const routing = !st
+            ? {}
+            : only === t.sid
+              ? await taskRouting(st, () => store.events(t.sid), {
+                  now: Date.now(),
+                  windows,
+                  burnOf: aheadDeps.burnOf,
+                  records: () => runLog.records(workspaceOf(st) ?? ""),
+                  options: () => (optionsRead ??= toolOptionsFor(meId)),
+                }).catch(() => ({}))
+              : taskPlan(st, windows);
+          return { ...t, ...(ranLater.has(t.sid) ? { overnight: true, ran: ranLater.get(t.sid) } : {}), ...taskStanding(st), ...taskChanges(st), ...(cut ? { cut } : {}), ...routing };
+        }),
+      ).then(
+        (tasks) => json(res, 200, { tasks, agentsWaiting: codeAgentsWaiting, later: laterList.filter((t) => t.status === "queued").map((t) => ({ id: t.id, title: t.title, folder: t.folder, tool: t.tool, at: t.at })) }),
+        () => json(res, 200, { tasks: [], agentsWaiting: codeAgentsWaiting }),
+      );
+    }
+
+    // Tasks for later (later.ts): queued from Code's box, started at their time while Friday is running.
+    if ((url.pathname === "/api/later" || /^\/api\/later\/[0-9a-f]{10}(\/run)?$/.test(url.pathname)) && later && o.local && localEdition()) {
+      const me = await identity(req);
+      if (!me) return json(res, 401, { error: "Not signed in." });
+      if (req.method === "GET" && url.pathname === "/api/later") {
+        return json(res, 200, {
+          tasks: (await later.list()).map((t) => ({ id: t.id, title: t.title, folder: t.folder, tool: t.tool, mode: t.mode, at: t.at, status: t.status, ...(t.note ? { note: t.note } : {}), ...(t.sid ? { sid: t.sid, invite: t.invite, startedAt: t.startedAt } : {}) })),
+        });
+      }
+      if (req.method === "POST" && url.pathname === "/api/later") {
+        const made = cleanLater(await readJson(req));
+        if (!made.ok) return json(res, 400, { error: made.error });
+        // The folder has to be there now, on the computer it will run on: found out here, not as a failed task in the morning.
+        if (computerHere(me.id)) {
+          const token = links.tokenFor(me.id);
+          const seen = await (token ? links.call(token, "browse", { path: made.task.folder }, 20_000) : callHost("browse", { path: made.task.folder }, hostCtx(me))).then(() => true, () => false);
+          if (!seen) return json(res, 400, { error: "There's no folder at that path on this computer." });
+        }
+        if ((await later.list()).filter((t) => t.status === "queued").length >= LATER_MAX) return json(res, 400, { error: `${LATER_MAX} tasks are already waiting. Cancel one first.` });
+        return json(res, 201, { task: await later.add({ id: me.id, name: me.name }, made.task) });
+      }
+      const one = url.pathname.match(/^\/api\/later\/([0-9a-f]{10})(\/run)?$/);
+      const t = one ? await later.get(one[1]!) : null;
+      if (!t) return json(res, 404, { error: "That task isn't there any more." });
+      if (req.method === "DELETE" && !one![2]) {
+        if (!(await later.drop(t.id))) return json(res, 409, { error: "It is starting now, so it can't be cancelled." });
+        return json(res, 200, { ok: true });
+      }
+      if (req.method === "POST" && one![2]) {
+        if (t.status === "starting" || t.status === "running") return json(res, 409, { error: "It already started." });
+        // Taken from queued, missed or failed in one step: two clicks (or a click and the clock) start it once.
+        const mine = await later.claim(t.id, Date.now(), ["queued", "missed", "failed"]);
+        if (!mine) return json(res, 409, { error: "It already started." });
+        return json(res, 200, { task: await runLater(mine) });
+      }
+      return json(res, 405, { error: "Not that." });
+    }
+
+    // The files the IDE has unsaved edits in (vscode-dirty.ts): the extension posts them (its token), Friday's page reads them before it
+    // asks to rewind a chat, so the confirm can say which of the files going back the person is still typing in.
+    if (url.pathname === "/api/vscode/dirty" && o.local && localEdition()) {
+      if (req.method === "POST") {
+        const want = Buffer.from(vscodeToken() ?? "");
+        const given = Buffer.from(String(req.headers["x-friday-vscode"] ?? ""));
+        if (!want.length || given.length !== want.length || !timingSafeEqual(given, want)) return json(res, 401, { error: "Not from Friday's IDE." });
+        return void readJson(req).then(
+          (body) => (rememberDirty(vscodeDirty, readDirty(body, Date.now()), Date.now()), json(res, 200, { ok: true })),
+          () => json(res, 400, { error: "That body is not JSON." }),
+        );
+      }
+      if (req.method !== "GET") return json(res, 405, { error: "GET or POST." });
+      return json(res, 200, freshAllDirty(vscodeDirty, Date.now()));
+    }
+
+    // The IDE's Friday palette (Arun, 2026-11-19, wave 4: "one key for every Friday action from the IDE"): the page says what it holds
+    // that the IDE can't see (POST), and the IDE reads it when the palette opens (GET, by its token). The actions themselves go by
+    // /api/vscode/key.
+    if (url.pathname === "/api/vscode/palette" && o.local && localEdition()) {
+      if (req.method === "POST") {
+        // Only Friday's own page may say it: the feed carries session invites that the IDE then offers to open.
+        if (crossSite(req)) return json(res, 403, { error: "Not from Friday's page." });
+        return void readJson(req).then(
+          (body) => {
+            palettePage = cleanFeed(body);
+            return json(res, 200, { ok: true });
+          },
+          () => json(res, 400, { error: "That body is not JSON." }),
+        );
+      }
+      if (req.method !== "GET") return json(res, 405, { error: "GET or POST." });
+      const want = Buffer.from(vscodeToken() ?? "");
+      const given = Buffer.from(String(req.headers["x-friday-vscode"] ?? ""));
+      if (!want.length || given.length !== want.length || !timingSafeEqual(given, want)) return json(res, 401, { error: "Not from Friday's IDE." });
+      return json(res, 200, palettePage);
+    }
+
+    // The IDE's Stack view (Arun, 2026-11-19, wave 3: "Stacked PRs… kept rebased for you"): where each part of a folder's stacks stands (GET)
+    // and Restack (POST), by the IDE's token. The page's "Make the stack" goes by /api/runner/stack.make; the work is runner/stack-pr.ts.
+    if (url.pathname === "/api/vscode/stack" && o.local && localEdition()) {
+      const want = Buffer.from(vscodeToken() ?? "");
+      const given = Buffer.from(String(req.headers["x-friday-vscode"] ?? ""));
+      if (!want.length || given.length !== want.length || !timingSafeEqual(given, want)) return json(res, 401, { error: "Not from Friday's IDE." });
+      if (req.method === "GET") return void stackOp("stack.status", { root: url.searchParams.get("root") ?? "" }).then((v) => json(res, 200, v as object), (e) => json(res, 200, { stacks: [], error: (e as Error).message }));
+      if (req.method !== "POST") return json(res, 405, { error: "GET or POST." });
+      return void readJson(req).then(
+        (body) => stackOp("stack.restack", { root: str(body.root, 1000), ...(str(body.id, 120) ? { id: str(body.id, 120) } : {}) }).then((v) => json(res, 200, v as object), (e) => json(res, 200, { ok: false, error: (e as Error).message })),
+        () => json(res, 400, { error: "That body is not JSON." }),
+      );
+    }
+    // Dev servers managed (Arun, 2026-11-19, wave 4: "Friday starts your app's server, keeps it running across agent runs, shows its port and
+    // logs, and restarts it when it crashes."): the folder's servers and what is running, start / stop / restart, and a server's log from a
+    // line on, by the IDE's token. The runner owns the processes (runner/dev-servers.ts), so neither a run nor an IDE reload ends them.
+    if (url.pathname === "/api/vscode/servers" && o.local && localEdition()) {
+      const want = Buffer.from(vscodeToken() ?? "");
+      const given = Buffer.from(String(req.headers["x-friday-vscode"] ?? ""));
+      if (!want.length || given.length !== want.length || !timingSafeEqual(given, want)) return json(res, 401, { error: "Not from Friday's IDE." });
+      const fail = (e: unknown) => json(res, 200, { error: (e as Error).message });
+      if (req.method === "GET") {
+        const log = str(url.searchParams.get("log"), 200);
+        const root = url.searchParams.get("root") ?? "";
+        return void serversOp(log ? "log" : "list", { root, id: log, since: Number(url.searchParams.get("since")) || 0, external: url.searchParams.get("external") !== "0" }).then((v) => json(res, 200, v as object), (e) => json(res, 200, { servers: [], external: [], error: (e as Error).message }));
+      }
+      if (req.method !== "POST") return json(res, 405, { error: "GET or POST." });
+      return void readJson(req).then(
+        (body) => {
+          const op = ["start", "stop", "restart", "stop-port"].includes(String(body.op)) ? String(body.op) : "";
+          if (!op) return json(res, 400, { error: "Unknown call." });
+          return serversOp(op, { root: str(body.root, 4000), id: str(body.id, 200), port: Number(body.port) || 0 }).then((v) => json(res, 200, v as object), fail);
+        },
+        () => json(res, 400, { error: "That body is not JSON." }),
+      );
+    }
+    // CI in the IDE (Arun, 2026-11-19, wave 3: "the PR's checks in the status bar; a failure opens at the failing line with the log, and
+    // Fix with Friday"): the folder's branch, its open pull request and that pull request's checks, through this computer's own gh
+    // (runner/ci-checks.ts). ?log=<check name> is one check's failing log, ?fix=1 the words the agent is told for the failed ones.
+    // Read by the IDE with its token, as the task board is.
+    if (url.pathname === "/api/vscode/ci" && req.method === "GET" && o.local && localEdition()) {
+      const want = Buffer.from(vscodeToken() ?? "");
+      const given = Buffer.from(String(req.headers["x-friday-vscode"] ?? ""));
+      if (!want.length || given.length !== want.length || !timingSafeEqual(given, want)) return json(res, 401, { error: "Not from Friday's IDE." });
+      const folder = str(url.searchParams.get("folder"), 4000);
+      if (!folder) return json(res, 400, { error: "Which folder?" });
+      const name = str(url.searchParams.get("log"), 300);
+      if (name) return void ciCheckLog(folder, name).then((r) => json(res, 200, { log: r.log, link: r.link, found: !!r.check }), () => json(res, 200, { log: "", link: "", found: false }));
+      if (url.searchParams.get("fix") === "1") return void ciFixText(folder).then((r) => json(res, 200, r ?? { text: "", count: 0 }), () => json(res, 200, { text: "", count: 0 }));
+      return void ciOverview(folder, url.searchParams.get("fresh") === "1").then((r) => json(res, 200, r));
+    }
+
+    // The agent's self-review, to be shown in the IDE as read-only comment threads on the lines it names (Arun, 2026-11-19: "The agent
+    // reviews its own diff the way a senior engineer would… and fixes what it finds before you see it"): the page posts the findings
+    // of the newest review card, the IDE reads them back with its token.
+    if (url.pathname === "/api/vscode/review" && o.local && localEdition()) {
+      if (req.method === "POST") {
+        return void readJson(req).then(
+          (body) => {
+            const sev = ["bug", "security", "test", "style", "for-you"];
+            const list = Array.isArray(body.findings) ? body.findings : [];
+            const sid = str(body.sid, 200);
+            const at = typeof body.seq === "number" && Number.isFinite(body.seq) && body.seq > 0 ? Math.floor(body.seq) : 0;
+            // An older review of the chat already shown is stale (its lines no longer match the fixed code): kept out.
+            if (sid && sid === codeReview.sid && at < codeReview.at) return json(res, 200, { ok: true, seq: codeReview.seq, stale: true });
+            const next = {
+              sid,
+              at,
+              seq: codeReview.seq + 1,
+              folder: str(body.folder, 4000),
+              findings: list
+                .filter((x: unknown): x is Record<string, unknown> => !!x && typeof x === "object")
+                .map((x) => ({
+                  title: str(x.title, 200),
+                  severity: sev.includes(String(x.severity)) ? String(x.severity) : "style",
+                  status: x.status === "fixed" ? "fixed" : "open",
+                  detail: str(x.detail, 1000),
+                  file: str(x.file, 1000),
+                  line: typeof x.line === "number" && Number.isFinite(x.line) && x.line > 0 ? Math.floor(x.line) : 0,
+                }))
+                .filter((x) => x.title)
+                .slice(0, 50),
+            };
+            // The same review again changes nothing, so the IDE's open threads aren't folded and redrawn.
+            if (next.folder === codeReview.folder && JSON.stringify(next.findings) === JSON.stringify(codeReview.findings)) {
+              codeReview.sid = sid;
+              codeReview.at = Math.max(at, codeReview.at);
+              return json(res, 200, { ok: true, seq: codeReview.seq });
+            }
+            codeReview = next;
+            return json(res, 200, { ok: true, seq: codeReview.seq });
+          },
+          () => json(res, 400, { error: "That body is not JSON." }),
+        );
+      }
+      if (req.method !== "GET") return json(res, 405, { error: "GET or POST." });
+      if (req.headers["x-friday-vscode"] !== undefined) {
+        const want = Buffer.from(vscodeToken() ?? "");
+        const given = Buffer.from(String(req.headers["x-friday-vscode"]));
+        if (!want.length || given.length !== want.length || !timingSafeEqual(given, want)) return json(res, 401, { error: "Not from Friday's IDE." });
+      }
+      return json(res, 200, codeReview);
+    }
+
+    // Review a teammate's pull request in the IDE (pr-ide.ts, extension pr-review.js; Arun, 2026-11-19, wave 3). The extension asks
+    // by this start's token for what is in the copy it has open, never for a folder it names: the pull request is the one the copy
+    // was checked out for (read back from the copy's own git folder), and a folder that is not one of Friday's copies is nobody's.
+    // "context": which pull request, "threads": its review threads, "firstpass": the agent's draft comments, "submit": post the review
+    // as the person (the extension asks them first; it is the one button that speaks as them).
+    if (url.pathname === "/api/vscode/pr" && req.method === "POST" && o.local && localEdition()) {
+      const want = Buffer.from(vscodeToken() ?? "");
+      const given = Buffer.from(String(req.headers["x-friday-vscode"] ?? ""));
+      if (!want.length || given.length !== want.length || !timingSafeEqual(given, want)) return json(res, 401, { error: "Not from Friday's IDE." });
+      return void readJson(req).then(
+        async (body) => {
+          const r = await prIdeRoute(body);
+          return json(res, r.status, r.body);
+        },
+        () => json(res, 400, { error: "That body is not JSON." }),
+      );
+    }
+
     // Settings › Let other agents use Friday: the line for each agent, and Add, which runs that agent's own `mcp add` in a
     // Terminal window of the person's own, as Run in Terminal does for a tool's install (local-api.ts install). The line is made
     // here from the agent's name, never taken from the page. Friday's own page only (localOnly, above).
@@ -4547,69 +5350,6 @@ export async function createApp(o: AppOptions) {
       }
     }
 
-    // Settings › Slack and Linear (channels/, spec 08): whether each is connected, connecting, and what the person picks. Friday's
-    // own page only (localOnly, above); tokens never come back to the page.
-    if (url.pathname.startsWith("/api/channels") && channels) {
-      const { linear, slack, bridge } = channels;
-      const post = req.method === "POST";
-      if (post && req.headers.origin === undefined && req.headers["x-friday-local"] !== "1") return json(res, 403, { error: "From Friday's own page only." });
-      try {
-        if (url.pathname === "/api/channels" && req.method === "GET") return json(res, 200, { linear: linear.status(), slack: slack.status(), slackNewApp: slackNewAppUrl() });
-        if (url.pathname === "/api/channels/slack/connect" && post) {
-          const body = await readJson(req);
-          return json(res, 200, { slack: await slack.connect({ bot: str(body.bot, 300), app: str(body.app, 300) }) });
-        }
-        if (url.pathname === "/api/channels/slack/people" && req.method === "GET") return json(res, 200, { people: await slack.people() });
-        if (url.pathname === "/api/channels/slack" && post) {
-          const body = await readJson(req);
-          if (body.me && typeof body.me === "object") {
-            const m = body.me as Record<string, unknown>;
-            slack.setMe(typeof m.id === "string" && m.id ? { id: str(m.id, 80), name: str(m.name, 80) } : null);
-          }
-          if (typeof body.dms === "boolean") slack.setDms(body.dms);
-          if (body.channel && typeof body.channel === "object") {
-            const c = body.channel as Record<string, unknown>;
-            slack.setChannel(str(c.id, 80), typeof c.folder === "string" && c.folder.trim() ? str(c.folder, 1000) : null);
-          }
-          return json(res, 200, { slack: slack.status() });
-        }
-        if (url.pathname === "/api/channels/slack/disconnect" && post) {
-          await slack.disconnect();
-          return json(res, 200, { slack: slack.status() });
-        }
-        const link = url.pathname.match(/^\/api\/channels\/link\/([\w-]{4,40})$/);
-        if (link && req.method === "GET") {
-          const l = await bridge.link(link[1]!);
-          return json(res, 200, { link: l ? { side: l.side, label: l.label, url: l.url ?? null, by: l.by } : null });
-        }
-        if (url.pathname === "/api/channels/linear/connect" && post) {
-          const body = await readJson(req);
-          return json(res, 200, await linear.connect({ clientId: str(body.clientId, 120), clientSecret: str(body.clientSecret, 200) }));
-        }
-        if (url.pathname === "/api/channels/linear/people" && req.method === "GET") return json(res, 200, { people: await linear.people() });
-        if (url.pathname === "/api/channels/linear/teams" && req.method === "GET") return json(res, 200, { teams: await linear.teams() });
-        if (url.pathname === "/api/channels/linear/projects" && req.method === "GET") return json(res, 200, { projects: await channels.projects() });
-        if (url.pathname === "/api/channels/linear" && post) {
-          const body = await readJson(req);
-          if (body.me && typeof body.me === "object") {
-            const m = body.me as Record<string, unknown>;
-            linear.setMe(typeof m.id === "string" && m.id ? { id: str(m.id, 80), name: str(m.name, 80) } : null);
-          }
-          if (body.team && typeof body.team === "object") {
-            const t = body.team as Record<string, unknown>;
-            linear.setTeam(str(t.id, 80), typeof t.folder === "string" && t.folder.trim() ? str(t.folder, 1000) : null, typeof t.name === "string" ? str(t.name, 80) : undefined);
-          }
-          return json(res, 200, { linear: linear.status() });
-        }
-        if (url.pathname === "/api/channels/linear/disconnect" && post) {
-          await linear.disconnect();
-          return json(res, 200, { linear: linear.status() });
-        }
-      } catch (e) {
-        return json(res, 400, { error: (e as Error).message });
-      }
-      return json(res, 404, { error: "Not found" });
-    }
 
     // A previewed page asking for "/_next/static/…" or "/src/main.tsx" from the root of the address it thinks it is on lands
     // here, outside its ticket's prefix, and used to get Friday's own files or nothing: a blank page. Its referrer says which
@@ -5263,7 +6003,10 @@ export async function createApp(o: AppOptions) {
       const since = log.findLastIndex((e) => e.body.type === "folder.committed");
       const human = (e: SessionEvent) => e.body.type === "instruction" && e.actor.kind === "human";
       const asked = (log.slice(since + 1).find(human) ?? log.find(human))?.body;
-      const plain = plainCommitMessage(files, asked?.type === "instruction" ? asked.text : "");
+      // In the repo's own voice (conventional or plain, tense, capitals), read from its last commits (commit-text.ts).
+      // A plain-text answer (machine not connected, no folder yet) is not JSON: the default style then, not a failed route.
+      const style = detectStyle(await openFolder(sid, { op: "log", limit: 30 }, lane).then((r) => (JSON.parse(r.output) as { commits?: { subject: string }[] }).commits ?? []).catch(() => []));
+      const plain = plainMessage(files, asked?.type === "instruction" ? asked.text : "", style);
       let message = plain;
       const subject = message.split("\n")[0]!;
       const branch = `friday/${subject.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "changes"}`;
@@ -5489,6 +6232,12 @@ export async function createApp(o: AppOptions) {
             hidden: found.hidden,
           });
         }
+        // The Skills page's GitHub import: the chosen skills as whole folders, which the page has this computer keep as they are
+        // (runner/skill-library.ts writeFolders).
+        if (req.method === "POST" && url.pathname === "/api/skills/github/folders") {
+          const b = await readJson(req);
+          return json(res, 200, await readSkillFolders(fetch as never, String(b.url ?? ""), Array.isArray(b.paths) ? b.paths.map(String) : []));
+        }
         if (req.method === "POST" && url.pathname === "/api/skills/github/import") {
           const b = await readJson(req);
           const r = await importChosen(fetch as never, t.skills, user, String(b.url ?? ""), Array.isArray(b.paths) ? b.paths.map(String) : []);
@@ -5559,14 +6308,17 @@ export async function createApp(o: AppOptions) {
       const sid = prRoute[1]!;
       if (!(await memberOnly(req, res, sid))) return;
       const events = await store.events(sid);
-      const commit = events.findLast((e) => e.body.type === "folder.committed" && !e.body.error && !!e.body.prUrl);
-      if (!commit || commit.body.type !== "folder.committed" || !commit.body.prUrl) return json(res, 200, { pr: null });
-      const prLane = commit.lane ?? MAIN_LANE;
-      const status = await prStatusSoon(sid, prLane, (await store.state(sid)).workspaceId ?? "", commit.body.prUrl);
+      // Its newest (one an agent opened itself counts as much as one from Friday's commit), or the one the panel picked from its
+      // list, if this session opened it (sessionPr).
+      const current = sessionPr(events, url.searchParams.get("url") || undefined);
+      if (!current) return json(res, 200, { pr: null });
+      const prUrl = current.url;
+      const prLane = current.lane;
+      const status = await prStatusSoon(sid, prLane, (await store.state(sid)).workspaceId ?? "", prUrl);
       // The side panel's Pull request (PrPanel.tsx) asks for the checks too: which failed, with their links, and how many still run.
       let checks: { failures: { name: string; workflow?: string; link?: string; outcome?: string }[]; pending: number } | { error: string } | undefined;
       if (url.searchParams.get("checks") === "1" && status && status.state === "open" && status.checks !== "none") {
-        const r = await Promise.race([openFolder(sid, { op: "prchecks", query: commit.body.prUrl }, prLane).catch(() => null), new Promise<null>((done) => setTimeout(() => done(null), 20_000).unref?.())]);
+        const r = await Promise.race([openFolder(sid, { op: "prchecks", query: prUrl }, prLane).catch(() => null), new Promise<null>((done) => setTimeout(() => done(null), 20_000).unref?.())]);
         const got = r ? (asJson(r.output) as { failures?: CheckFailure[]; pending?: number; error?: string } | null) : null;
         if (got?.error) checks = { error: got.error };
         else if (got) checks = { failures: (got.failures ?? []).map((f) => ({ name: f.name, ...(f.workflow ? { workflow: f.workflow } : {}), ...(f.link ? { link: f.link } : {}), ...(f.outcome ? { outcome: f.outcome } : {}) })), pending: got.pending ?? 0 };
@@ -5575,17 +6327,17 @@ export async function createApp(o: AppOptions) {
       // it closes, through gh on the session's computer. Remembered for half a minute, as the panel asks every 45 seconds.
       let detail: PrDetail | null | undefined;
       if (url.searchParams.get("detail") === "1") {
-        const key = `${sid}|${commit.body.prUrl}`;
+        const key = `${sid}|${prUrl}`;
         const hit = prDetailCache.get(key);
         if (hit && Date.now() - hit.at < 30_000) detail = hit.detail;
         else {
-          const r = await Promise.race([openFolder(sid, { op: "prdetail", query: commit.body.prUrl }, prLane).catch(() => null), new Promise<null>((done) => setTimeout(() => done(null), 15_000).unref?.())]);
+          const r = await Promise.race([openFolder(sid, { op: "prdetail", query: prUrl }, prLane).catch(() => null), new Promise<null>((done) => setTimeout(() => done(null), 15_000).unref?.())]);
           detail = r ? prDetailFromGh(asJson(r.output)) : null;
           prDetailCache.set(key, { at: Date.now(), detail });
           if (prDetailCache.size > 200) prDetailCache.delete(prDetailCache.keys().next().value!);
         }
       }
-      return json(res, 200, { pr: { url: commit.body.prUrl, at: commit.ts, lane: prLane, status, ...(checks ? { checks } : {}), ...(detail ? { detail } : {}) } });
+      return json(res, 200, { pr: { url: prUrl, at: current.ts, lane: prLane, status, ...(checks ? { checks } : {}), ...(detail ? { detail } : {}) } });
     }
 
     // The daily brief: on demand, the latest scheduled one, and its times (daily-brief.ts).
@@ -5617,6 +6369,8 @@ export async function createApp(o: AppOptions) {
       const me = await identity(req);
       if (!me) return json(res, 401, { error: "Not signed in." });
       const rows = await store.mine(me.id);
+      // The chats Run later started are Code's (Code's history takes them in, marked): Agents' list leaves them out, the phone's shows them.
+      const ranLater = new Set(((await later?.list().catch(() => [] as LaterTask[])) ?? []).flatMap((l) => (l.sid ? [l.sid] : [])));
       const sessions = (
         await Promise.all(
           rows.map(async ({ sid, at }) => {
@@ -5624,7 +6378,15 @@ export async function createApp(o: AppOptions) {
             const m = state?.members[me.id];
             if (!state || !m || m.removed) return null;
             const row: Record<string, unknown> = { sid, title: state.title, role: m.role, invite: linkToken(sid, state, m.role), at };
+            if (ranLater.has(sid)) row.later = true;
             if (state.options.work) row.work = true; // the sidebar's Work list (client/WorkMode.tsx)
+            // Its project and coding tools, for the phone's Sessions filters (Arun, 2026-11-17: "add filters and stuff like status,
+            // projects"): the first agent's repository or folder name, and each tool once.
+            const engines = Object.values(state.engines ?? {});
+            const project = engines.map((e) => e?.repo || (e?.cwd ? e.cwd.split(/[\\/]/).filter(Boolean).pop() : "")).find(Boolean);
+            if (project) row.project = project;
+            const tools = [...new Set(engines.map((e) => e?.tool).filter(Boolean))];
+            if (tools.length) row.tools = tools;
             return row as { sid: string; title: string; role: typeof m.role; invite: string; at: number };
           }),
         )
@@ -5861,8 +6623,10 @@ export async function createApp(o: AppOptions) {
     if (req.method === "POST" && url.pathname === "/api/board") {
       const me = await identity(req);
       if (!me) return json(res, 401, { error: "Not signed in." });
-      const body = (await readJson(req)) as { sids?: unknown };
+      const body = (await readJson(req)) as { sids?: unknown; code?: unknown };
       const sids = listedSids(body.sids);
+      // Code's chats ride in `sids` too, so their cards show, and are named in `code` so the week leaves them out.
+      const codeSids = new Set(listedSids(body.code));
       // Sessions are read side by side: the first look at a long list is the slow one, and it is the sum of them otherwise.
       const workspaceOf = new Map<string, string>();
       const weeks: ReturnType<typeof weekOf>[] = [];
@@ -5876,7 +6640,7 @@ export async function createApp(o: AppOptions) {
           if (!m || m.removed) return [];
           const made = await cardsFor(state, me.id);
           if (state.workspaceId) workspaceOf.set(state.id, state.workspaceId);
-          weeks.push(made.week);
+          if (!codeSids.has(state.id)) weeks.push(made.week);
           // Who is in the room now is not in the log, so it is read fresh each time and never cached with the cards.
           const here = await store.presence(state.id).catch(() => ({}) as Record<string, number>);
           const waiting = waitingOn(state);
@@ -5903,6 +6667,109 @@ export async function createApp(o: AppOptions) {
     }
 
 
+    // What Friday keeps on this computer (Settings › Storage; runner/storage.ts): how much of what, a clean-up now, the trash
+    // emptied, the browser's cache cleared.
+    if (url.pathname === "/api/storage" || url.pathname.startsWith("/api/storage/")) {
+      const ctx = await context(req);
+      if (!ctx) return json(res, 401, { error: "Sign in first." });
+      if (!o.local || !localHost()) return json(res, 404, { error: "Storage is looked after in Friday on your own computer." });
+      // The last measurement at once (`at` says when), or a new one with ?fresh=1 or when there is none.
+      const measured = async (fresh = true) => {
+        const m = !fresh && storageSeen ? storageSeen : await measureDisk();
+        return { ...m.data, at: m.at };
+      };
+      if (req.method === "GET" && url.pathname === "/api/storage") return json(res, 200, await measured(url.searchParams.get("fresh") === "1"));
+      if (req.method === "POST" && url.pathname === "/api/storage/tidy") {
+        const done = await tidyDisk();
+        return json(res, 200, { done, ...((await measured()) as object) });
+      }
+      // The older copies (made before copies were marked, or by a linked Friday), put away because the person said so.
+      if (req.method === "POST" && url.pathname === "/api/storage/older") {
+        const kept = await keptOnDisk();
+        if (!kept.referenced) return json(res, 409, { error: "A session couldn't be read, so nothing was moved. Try again in a moment." });
+        const r = (await callHost("storage.retireOlder", { referenced: kept.referenced }, storageCtx())) as { dropped: number; trashed: number };
+        return json(res, 200, { ...r, ...((await measured()) as object) });
+      }
+      if (req.method === "POST" && url.pathname === "/api/storage/trash") {
+        const r = (await callHost("storage.emptyTrash", {}, storageCtx())) as { freed: number };
+        return json(res, 200, { freed: r.freed, ...((await measured()) as object) });
+      }
+      if (req.method === "POST" && url.pathname === "/api/storage/cache") {
+        const r = (await callHost("storage.clearCache", {}, storageCtx())) as { freed: number };
+        return json(res, 200, { freed: r.freed, ...((await measured()) as object) });
+      }
+      return json(res, 404, { error: "Not found" });
+    }
+
+    // Pull request autopilot (autopilot.ts): its switch and what it may do, each pull request's record, a look now, and stop one.
+    if (url.pathname === "/api/autopilot" || url.pathname.startsWith("/api/autopilot/")) {
+      const ctx = await context(req);
+      if (!ctx) return json(res, 401, { error: "Sign in first." });
+      if (!autopilot) return json(res, 404, { error: "Autopilot runs in Friday on your own computer." });
+      // Each with its session's link, so "Open its session" opens one that isn't on the sidebar (made here, or put away when done):
+      // it did nothing for those (Arun, 2026-11-20: "open its session doesnt work either").
+      const pilots = async () => (await autopilot.all()).map((r) => (r.sid ? { ...r, invite: signInvite(o.secret, r.sid, "owner") } : r));
+      if (req.method === "GET" && url.pathname === "/api/autopilot") return json(res, 200, { settings: await autopilot.settings(), prs: await pilots() });
+      if (req.method === "PATCH" && url.pathname === "/api/autopilot") {
+        const s = await autopilot.setSettings((await readJson(req)) as Record<string, unknown>);
+        // Turned on: a look straight away, not in two minutes.
+        if (s.on) void tickAutopilot().catch((e) => closingOr("[autopilot]", e));
+        return json(res, 200, { settings: s, prs: await pilots() });
+      }
+      if (req.method === "POST" && url.pathname === "/api/autopilot/look") return json(res, 200, { started: await tickAutopilot(), prs: await pilots() });
+      if (req.method === "POST" && url.pathname === "/api/autopilot/stop") {
+        const b = await readJson(req);
+        const rec = await autopilot.get(String(b.url ?? ""));
+        if (!rec) return json(res, 404, { error: "Autopilot isn't on that pull request." });
+        const me = await localNamed();
+        if (rec.sid) await core.handle(rec.sid, { id: me.id, name: me.name }, { type: "pr.shepherd", on: false }).catch(() => null);
+        await autopilot.note(rec.url, { at: Date.now(), kind: "stopped", text: "You stopped autopilot on it." }, "stopped", "");
+        return json(res, 200, { prs: await pilots() });
+      }
+      // Started again now, whatever it was doing (Arun, 2026-11-20: "more controls over the auto pilot, like restart"): the session it
+      // had stops watching and is put away, and a fresh one starts on what the pull request needs now.
+      if (req.method === "POST" && url.pathname === "/api/autopilot/restart") {
+        const b = await readJson(req);
+        const at = String(b.url ?? "");
+        const me = await localNamed();
+        const pr = (await pilotPrs(me)).find((p) => p.url === at);
+        if (!pr) return json(res, 404, { error: "That pull request isn't one of your open ones." });
+        const s = await autopilot.settings();
+        // What it may fix, as the person set it; one they had told it to leave alone is theirs to restart.
+        const reasons = reasonsFor(pr, { ...s, skip: [] });
+        if (!reasons.length) return json(res, 409, { error: pr.draft ? "It's a draft: mark it ready first." : pr.canPush === false ? "You can't push to its repository." : "Nothing on it needs fixing now: its checks pass, no review comment waits and it merges cleanly." });
+        const rec = await autopilot.get(at);
+        if (rec?.sid) {
+          await core.handle(rec.sid, { id: me.id, name: me.name }, { type: "pr.shepherd", on: false }).catch(() => null);
+          await closePilotSession(rec, "Put its session away to start again.");
+        }
+        if (s.skip.includes(at)) await autopilot.setSettings({ skip: s.skip.filter((u) => u !== at) });
+        const r = await startPilot(pr, reasons, me, { tool: s.tool, restarted: true });
+        return json(res, r.state === "working" ? 200 : 409, { ...(r.state === "working" ? {} : { error: r.log.at(-1)?.text ?? "It couldn't start." }), settings: await autopilot.settings(), prs: await pilots() });
+      }
+      // Off the list: one finished, or all of them ({ finished: true }).
+      if (req.method === "POST" && url.pathname === "/api/autopilot/forget") {
+        const b = await readJson(req);
+        await autopilot.forget(b.finished === true ? null : String(b.url ?? ""));
+        return json(res, 200, { settings: await autopilot.settings(), prs: await pilots() });
+      }
+      // Left alone, or let back: one it's on now stops too.
+      if (req.method === "POST" && url.pathname === "/api/autopilot/skip") {
+        const b = await readJson(req);
+        const at = String(b.url ?? "");
+        const s = await autopilot.settings();
+        const skip = b.skip === false ? s.skip.filter((u) => u !== at) : [...s.skip, at];
+        const next = await autopilot.setSettings({ skip });
+        const rec = b.skip === false ? null : await autopilot.get(at);
+        if (rec && (rec.state === "working" || rec.state === "watching")) {
+          const me = await localNamed();
+          if (rec.sid) await core.handle(rec.sid, { id: me.id, name: me.name }, { type: "pr.shepherd", on: false }).catch(() => null);
+          await autopilot.note(at, { at: Date.now(), kind: "stopped", text: "You told autopilot to leave it alone." }, "stopped", "");
+        }
+        return json(res, 200, { settings: next, prs: await pilots() });
+      }
+      return json(res, 404, { error: "Not found" });
+    }
     // Automations (automations.ts): everyone in the workspace sees them; only an automation's owner changes it, runs it, or
     // sees its webhook's address, which is its only credential.
     if (url.pathname === "/api/automations" || url.pathname.startsWith("/api/automations/")) {
@@ -5937,6 +6804,12 @@ export async function createApp(o: AppOptions) {
         }
         if (req.method === "POST" && url.pathname === "/api/automations") {
           const made: Automation = { id: randomBytes(6).toString("base64url"), ownerId: me.id, ownerName: me.name, created: Date.now(), ...(await inSession(cleanAutomation(await readJson(req)))) };
+          // Made on the phone (local/phone.ts): on a schedule or Run now only, and it asks before it edits, like everything a
+          // phone starts; more is given on the computer (Arun, 2026-11-17: "be able to setup automations too").
+          if (o.local && req.headers["x-friday-via"] === "phone") {
+            if (made.when.kind !== "schedule" && made.when.kind !== "manual") return json(res, 403, { error: "From your phone an automation runs on a schedule or when you press Run now." });
+            if (made.who.mode === "full") made.who = { ...made.who, mode: "edits" };
+          }
           await automations.put(ws, made);
           return json(res, 201, { automation: await view(made) });
         }
@@ -5946,13 +6819,18 @@ export async function createApp(o: AppOptions) {
         if (!a) return json(res, 404, { error: "That automation isn't there any more." });
         if (req.method === "GET" && one[2] === "/runs") return json(res, 200, { runs: await automations.runs(ws, a.id, 30) });
         if (a.ownerId !== me.id) return json(res, 403, { error: `This is ${a.ownerName}'s automation: only they can change or run it.` });
+        // From the phone (local/phone.ts): run as it asks before it edits, like everything a phone starts; only turned on or off.
+        const viaPhoneHere = !!o.local && req.headers["x-friday-via"] === "phone";
         if (req.method === "POST" && one[2] === "/run") {
           const body = (await readJson(req)) as { event?: unknown };
-          const run = await runAutomation(ws, a, "Run now", typeof body.event === "string" ? body.event.slice(0, 8000) : "");
+          const asked = viaPhoneHere && a.who.mode === "full" ? { ...a, who: { ...a.who, mode: "edits" as const } } : a;
+          const run = await runAutomation(ws, asked, "Run now", typeof body.event === "string" ? body.event.slice(0, 8000) : "");
           return json(res, 202, { run });
         }
         if (req.method === "PATCH" && !one[2]) {
-          const next: Automation = { ...a, ...(await inSession(cleanAutomation(await readJson(req), a))) };
+          const patch = (await readJson(req)) as Record<string, unknown>;
+          if (viaPhoneHere && (Object.keys(patch).some((k) => k !== "on") || typeof patch.on !== "boolean")) return json(res, 403, { error: "From your phone an automation can only be turned on or off." });
+          const next: Automation = { ...a, ...(await inSession(cleanAutomation(patch, a))) };
           // Its owner, back in the workspace, turning it on again: no longer paused for having left.
           if (next.on && next.paused) delete next.paused;
           await automations.put(ws, next, a);
@@ -6124,7 +7002,11 @@ export async function createApp(o: AppOptions) {
         }
         // A folder it is given has to be on this computer: a typo would start it in nothing.
         if (req.method === "POST" && url.pathname === "/api/teammates") {
-          const made = await addTeammate(sid, owner, await readJson(req));
+          const body = (await readJson(req)) as Record<string, unknown>;
+          // Made from the phone (local/phone.ts): it asks before it edits, as everything a phone starts does, and runs here; more
+          // access is given on the computer.
+          if (o.local && req.headers["x-friday-via"] === "phone") (body.mode = "edits"), delete body.machine, delete body.budget;
+          const made = await addTeammate(sid, owner, body);
           return typeof made === "string" ? json(res, 400, { error: made }) : team();
         }
         // Away mode (team-away.ts): until when, set or cleared; clearing it, or writing in any team chat, ends it with the brief.
@@ -6557,7 +7439,10 @@ export async function createApp(o: AppOptions) {
           return team(later.length ? { restartLater: later } : {});
         }
         if (req.method === "PATCH" && !one[2]) {
-          const body = await readJson(req);
+          const asked = (await readJson(req)) as Record<string, unknown>;
+          // From the phone (Arun, 2026-11-17: "be able to edit a crews profile and stuff too like their model"): its name, what it
+          // does, its tool and model, and its folders. Its access, budget, hours, computer and account stay the computer's to change.
+          const body = o.local && req.headers["x-friday-via"] === "phone" ? Object.fromEntries(Object.entries(asked).filter(([k]) => ["name", "role", "tool", "model", "effort", "projects"].includes(k))) : asked;
           // Under the teammate's lock, from what is stored now: a usage-limit switch or a check-in in between isn't undone.
           /** Where it was busy, and starts again on the change as that run ends (restartEverywhere): said in the answer. */
           const later: string[] = [];
@@ -6825,6 +7710,8 @@ export async function createApp(o: AppOptions) {
         : op === "show" ? { op: "show", ref }
         : op === "gitdiff" ? { op: "gitdiff", staged: url.searchParams.get("staged") === "1", ...(path ? { path } : {}) }
         : op === "compare" ? { op: "compare", ref }
+        // What differs from a checkpoint now (a rewind's confirm, ide/rewind-ide.ts): the runner's own diff op, which only reads.
+        : op === "diff" ? { op: "diff", ref }
         : { op: "tree", path };
       const dir = str(url.searchParams.get("dir") ?? "", 1000);
       const r = (await folderForPeople(sid, dir && !dir.includes("..") ? { ...call, dir } : call, str(url.searchParams.get("lane") ?? "", 40) || undefined)) as { output: string; where?: unknown; stale?: { at: number; reason: string } };
@@ -7837,17 +8724,17 @@ export async function createApp(o: AppOptions) {
     teammates: { starts: teammateStarts, dry: teammateDry, rooms: async () => (await teammates?.rooms()) ?? [], checkIns: (now: Date) => runCheckIns(now), quiet: (now?: number) => runQuiet(now), back: () => runBack(), away: (now?: number) => runAway(now), awake: () => awake(), note: async (sid: string, lane: string) => ((n) => (n ? [n.note, ...n.preamble.map((p) => p.text).filter(Boolean)].join("\n\n") : null))(await (hub.teammate?.(sid, lane) ?? Promise.resolve(null))) },
     workflows: { tick: (now?: Date) => workflows?.tick(now) ?? Promise.resolve([]), engine: () => workflows },
     briefs: { tick: (now?: number) => briefs.tick(now) },
-    /** Slack and Linear (channels/): for tests to read Linear now rather than on its timer. */
-    channels,
     async close() {
       unlistenBurn();
       closing = true;
-      channels?.linear.stop();
-      channels?.slack.stop();
       clearInterval(presenceLoop);
       clearTimeout(usageFirst);
       clearInterval(usageLoop);
       clearInterval(shepherdLoop);
+      clearInterval(autopilotLoop);
+      if (tidyLoop) clearInterval(tidyLoop);
+      if (tidyStart) clearTimeout(tidyStart);
+      if (retiring.timer) clearTimeout(retiring.timer);
       clearInterval(resumeLoop);
       clearInterval(wakeLoop);
       if (reapAtStart) clearTimeout(reapAtStart);
@@ -7952,6 +8839,88 @@ function shieldedOutput(output: string): string {
   }
 }
 
+/** What a debug ask keeps of its stack and variables, whatever was sent (15 frames, 60 variables, values to 200 characters). */
+function debugBits(body: Record<string, unknown>) {
+  const list = (v: unknown, max: number) => (Array.isArray(v) ? v.slice(0, max).filter((x): x is Record<string, unknown> => !!x && typeof x === "object") : []);
+  const stack = list(body.stack, 15).map((f) => ({ name: str(f.name, 120), path: str(f.path, 400), line: typeof f.line === "number" && Number.isFinite(f.line) ? Math.max(0, Math.floor(f.line)) : 0 }));
+  const vars = list(body.vars, 60).map((v) => ({ name: str(v.name, 120), value: typeof v.value === "string" ? v.value.slice(0, 200) : "", ...(str(v.type, 60) ? { type: str(v.type, 60) } : {}), ...(str(v.scope, 40) ? { scope: str(v.scope, 40) } : {}) }));
+  return { reason: str(body.reason, 40), ...(body.reproduce === true ? { reproduce: true } : {}), stack, vars };
+}
+
+/** The latest ask from VS Code (⌘L), numbered: see /api/vscode/ask. */
+let vscodeAsk: { seq: number; ask: { path: string; from: number; to: number; text: string; root: string; at: number; kind?: "fix" | "explain" | "test" | "refactor" | "edit" | "debug" | "bisect" | "cover" | "restructure" | "restack" | "todo" | "question" | "ci"; problem?: string; source?: string; cwd?: string; line?: number; symbol?: string; symbolKind?: string; instruction?: string; reason?: string; reproduce?: boolean; stack?: { name: string; path: string; line: number }[]; vars?: { name: string; value: string; type?: string; scope?: string }[] } | null } = { seq: 0, ask: null };
+/** Pages holding a long poll on /api/vscode/asks, woken by a new ask or key. */
+const vscodeWaiters = new Set<() => void>();
+const wakeVscode = () => {
+  for (const w of [...vscodeWaiters]) w();
+};
+/** The latest Friday key pressed inside VS Code, numbered: see /api/vscode/key. */
+let vscodeKey: { seq: number; key: "mode" | "agent" | "root" | "task" | "new" | "needs" | "action" | null; root?: string; sid?: string; action?: string; invite?: string; inCode?: boolean } = { seq: 0, key: null };
+/** What the page says for the IDE's Friday palette (/api/vscode/palette): Agents sessions to open and the chat Code's column shows. */
+let palettePage: PaletteFeed = { agents: [], chat: null };
+/** Whether the IDE's quiet-while-typing setting is on (null: never said), and the last number a key was typed at: see /api/vscode/key "focus". */
+let vscodeFocus: { seq: number; quiet: boolean | null; typedSeq: number } = { seq: 0, quiet: null, typedSeq: 0 };
+/** The newest self-review's findings, for the IDE's comment threads (/api/vscode/review). */
+let codeReview: { sid: string; at: number; seq: number; folder: string; findings: { title: string; severity: string; status: string; detail: string; file: string; line: number }[] } = { sid: "", at: 0, seq: 0, folder: "", findings: [] };
+/** Code's chats as the page last said them, for the IDE's task board (/api/vscode/tasks). */
+let codeTasks: { sid: string; title: string; folder: string; tool: string; at: number; linked?: boolean }[] = [];
+/** The Agents sessions working in the IDE's folder, as the page last said (/api/vscode/tasks): listed on the Tasks view beside Code's chats. */
+let codeAgentTasks: { sid: string; title: string; folder: string; tool: string; at: number; linked?: boolean }[] = [];
+/** How many of Agents' Needs you wait on the person, as the page last said: the IDE's status bar shows it beside Code's own. */
+let codeAgentsWaiting = 0;
+/** What each IDE window has unsaved (vscode-dirty.ts), by its folder, for a rewind's confirm. */
+const vscodeDirty = new Map<string, DirtyFiles>();
+
+/**
+ * The files a task's agents have changed and not committed, as full paths on this computer, with the newest report's number, so
+ * the IDE can mark them in its Explorer and say when more change (Arun, 2026-11-19: "it made some changes but idk if it is
+ * registering properly on the ide").
+ */
+function taskChanges(st: SessionState | null): { files: { path: string; status: string; add: number; del: number }[]; changeSeq: number; editing: string[]; base: string } {
+  if (!st) return { files: [], changeSeq: 0, editing: [], base: "" };
+  const files: { path: string; status: string; add: number; del: number }[] = [];
+  let changeSeq = 0;
+  // `editing`: the files the agents' current runs have named in their edit calls so far (a tool reports its change set only when its
+  // turn ends, so this is what says which file it is in now); `base`: the commit the change set is measured from, so the IDE can read
+  // a file as it was before the agent (Keep / Undo on each block).
+  const editing: string[] = [];
+  let base = "";
+  for (const [lane, list] of Object.entries(st.runWrote ?? {})) {
+    const cwd = st.engines?.[lane]?.cwd ?? "";
+    for (const p of list) editing.push(cwd && !path.isAbsolute(p) ? path.join(cwd, p) : p);
+  }
+  for (const [lane, d] of Object.entries(st.diffs ?? {})) {
+    const cwd = st.engines?.[lane]?.cwd ?? "";
+    changeSeq = Math.max(changeSeq, d.seq);
+    if (!base && /^[0-9a-f]{7,64}$/i.test(d.base ?? "")) base = d.base;
+    for (const f of d.files.slice(0, 300)) {
+      files.push({ path: cwd && !path.isAbsolute(f.path) ? path.join(cwd, f.path) : f.path, status: f.status, add: f.additions, del: f.deletions });
+    }
+  }
+  return { files: files.slice(0, 300), changeSeq, editing: editing.slice(0, 300), base };
+}
+
+/**
+ * Where a task stands, read from its session: waiting on you (a question, an approval, an agent stopped to ask), running, a pull
+ * request open (its number), or done. `since` is when it got there, for "18m"; `detail` is the line under its name.
+ */
+function taskStanding(st: SessionState | null): { status: "waiting" | "running" | "pr" | "done"; detail: string; since: number; pr?: string } {
+  if (!st) return { status: "done", detail: "", since: 0 };
+  const runs = [st.run, ...Object.values(st.laneRuns ?? {})];
+  const since = Math.max(0, ...runs.map((r) => r.sinceAt ?? 0));
+  const q = Object.values(st.openQuestions ?? {})[0] as { question?: string; text?: string } | undefined;
+  const ask = Object.values(st.asks ?? {})[0]?.questions?.[0] as { question?: string; text?: string } | undefined;
+  const approvals = Object.keys(st.approvals ?? {}).length;
+  if (q || ask || approvals || runs.some((r) => r.status === "waiting_for_human")) {
+    const words = (q?.question ?? q?.text ?? ask?.question ?? ask?.text ?? "").replace(/\s+/g, " ").trim();
+    return { status: "waiting", detail: approvals && !words ? "asks to run something" : words ? `asks: ${words.slice(0, 120)}` : "waiting on you", since };
+  }
+  if (runs.some((r) => r.status === "running")) return { status: "running", detail: "working", since };
+  if (runs.some((r) => r.status === "error")) return { status: "waiting", detail: `stopped: ${(runs.find((r) => r.status === "error")?.error ?? "an error").slice(0, 100)}`, since };
+  const pr = st.pr && !st.pr.merged ? st.pr.url : "";
+  if (pr) return { status: "pr", detail: `PR #${/\/pull\/(\d+)/.exec(pr)?.[1] ?? ""} open`.replace(" # ", " "), since, pr };
+  return { status: "done", detail: st.pr?.merged ? "merged" : "", since };
+}
 const str = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 
 /** A request from another site: its own page can't be trusted to speak for this one. */

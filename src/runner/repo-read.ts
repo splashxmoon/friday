@@ -8,7 +8,8 @@ import { previewCommand, previewStatusLive, startPreview } from "./preview.js";
 import { iosCommand, iosRun, iosStatus } from "./ios.js";
 import { describeEnvironment, folderVars } from "./environment.js";
 import { killTree, NON_INTERACTIVE, readBackground, shellLine, startBackground, stopBackground } from "./background.js";
-import { applyPatch, baseCopy, treeOf, branchesOf, checkpoint, commitAll, compareOf, diffTrees, discardFiles, gitDiffOf, logOf, prDetailJson, prFailures, prFeedback, prStatusJson, publish, pullOf, renameBranchOf, remoteOf, restore, showOf, stageFiles, statusOf, switchTo, unstageFiles, dropBaseCopy } from "./git.js";
+import { applyPatch, baseCopy, toplevel, treeOf, branchesOf, checkpoint, commitAll, compareOf, diffTrees, discardFiles, gitDiffOf, logOf, prDetailJson, prFailures, prFeedback, prStatusJson, publish, pullOf, renameBranchOf, remoteOf, restore, showOf, stageFiles, statusOf, switchTo, unstageFiles, dropBaseCopy } from "./git.js";
+import { templatedBody } from "./pr-template-read.js";
 
 /**
  * Reading the folder a coding agent is working in, for everyone else.
@@ -242,7 +243,7 @@ export async function readRepo(root: string, req: RepoRequest): Promise<string> 
     const ref = req.ref && /^[0-9a-f]{40}$/.test(req.ref) ? req.ref : "HEAD";
     try {
       const files = await diffTrees(base, ref);
-      return JSON.stringify({ base: ref, files, ...(files.more ? { more: files.more } : {}) });
+      return JSON.stringify({ base: ref, root: await toplevel(base).catch(() => ""), files, ...(files.more ? { more: files.more } : {}) });
     } catch (e) {
       return JSON.stringify({ error: (e as Error).message });
     }
@@ -255,7 +256,7 @@ export async function readRepo(root: string, req: RepoRequest): Promise<string> 
       if (req.op === "switch") return JSON.stringify(await switchTo(base, req.branch ?? "", !!req.create));
       if (req.op === "commit") return JSON.stringify(await commitAll(base, req.message ?? "", req.branch || undefined, req.only));
       const [title, ...rest] = (req.message ?? "").split("\n");
-      return JSON.stringify(await publish(base, { pr: !!req.pr, title: title ?? "", body: rest.join("\n").trim(), ...(req.base ? { base: req.base } : {}) }));
+      return JSON.stringify(await publish(base, { pr: !!req.pr, title: title ?? "", body: req.pr ? await templatedBody(base, rest.join("\n").trim(), req.prParts) : rest.join("\n").trim(), ...(req.base ? { base: req.base } : {}) }));
     } catch (e) {
       return JSON.stringify({ error: (e as Error).message });
     }

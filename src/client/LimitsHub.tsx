@@ -9,6 +9,7 @@ import {
   isFiveHour,
   isWeekly,
   listPrice,
+  fullestOf,
   mostRoom,
   readCosts,
   readHistory,
@@ -121,7 +122,7 @@ function ToolCard({ tool, wins, plan, note, roomy, history, now, cost, onCost }:
   // The five-hour first, then the week, then the rest (a model's own week, a month's allowance): the same order on every card.
   const order = [...wins.filter(isFiveHour), ...wins.filter((w) => isWeekly(w) && !isFiveHour(w)), ...wins.filter((w) => !isFiveHour(w) && !isWeekly(w))];
   // The one it meets first: the fullest; between two as full, the one that resets later holds it up longer.
-  const hero = [...order].sort((a, b) => b.used - a.used || (b.resetsAt ?? 0) - (a.resetsAt ?? 0))[0];
+  const hero = fullestOf(order);
   const f = hero ? forecastOf(hero, history[idOf(hero)] ?? [], now) : null;
   const out = !!hero && hero.used >= 100;
   const lv = hero ? level(hero.used) : "ok";
@@ -131,11 +132,17 @@ function ToolCard({ tool, wins, plan, note, roomy, history, now, cost, onCost }:
         <EngineMark tool={tool} size={16} />
         <b>{ENGINE_NAMES[tool]}</b>
         {roomy && (
-          <span className="lh-roomy" title="Of your coding tools, the one with the most of its 5 hours left">
+          <span className="lh-roomy" title="Of your coding tools, the one with the most left of its fullest limit">
             Most room
           </span>
         )}
-        {plan && <span className="lh-card-plan">{plan}</span>}
+        {/* Its plan without the tool's name again ("Antigravity Starter Quota" on Antigravity's card), and the first to give way: the
+            tool's own name read "A." beside it (Arun, 2026-11-20: "fix this design please"). */}
+        {plan && (
+          <span className="lh-card-plan" title={plan}>
+            {plan.replace(new RegExp(`^${ENGINE_NAMES[tool].split(/\s+/)[0]!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+`, "i"), "") || plan}
+          </span>
+        )}
       </header>
       {hero ? (
         <div className="lh-hero">

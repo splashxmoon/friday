@@ -95,3 +95,17 @@ test("the project brain never keeps a key or password: a run's lesson holding on
   await assert.rejects(b.update("github.com/acme/api", kept[0]!.id, { text: `Money is cents; key ${key}` }), /never keeps secrets/);
   assert.equal((await b.list("github.com/acme/api"))[0]!.text, "Money is integer cents.");
 });
+
+test("a retired lesson taught again is current again, in the list and the briefings", async () => {
+  const b = new BrainRegistry(fakeRedis(), "t:");
+  const repo = "github.com/acme/shop";
+  const from = { tool: "claude", name: "Bo's Claude Code", sid: "s1" };
+  const lesson = { key: "port", kind: "convention" as const, text: "The API listens on port 4000." };
+  await b.learn(repo, "acme/shop", [lesson], from);
+  await b.retire(repo, [{ key: "port", why: "moved" }]);
+  assert.ok((await b.list(repo))[0]!.retired, "retired first");
+  await b.learn(repo, "acme/shop", [lesson], { ...from, sid: "s2" });
+  const [again] = await b.list(repo);
+  assert.equal(again!.retired, undefined, "taught again, no longer retired");
+  assert.ok(await b.brief(repo, "start the api"), "and in the briefings");
+});

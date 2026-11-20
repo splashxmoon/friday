@@ -1,0 +1,33 @@
+/* "Ask the codebase" in Code's column (ask-code.tsx): an Ask tab and its answer. Friday's own variables only, so both themes follow. */
+.ia-tab-ask { min-width: 140px; max-width: 260px; }
+.ia-tab-ask .ia-tab-mark { width: 14px; }
+.aq-spin { display: block; width: 11px; height: 11px; border: 1.5px solid color-mix(in srgb, var(--ink) 18%, transparent); border-top-color: var(--ink); border-radius: 50%; animation: aq-spin .8s linear infinite; }
+@keyframes aq-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .aq-spin { animation-duration: 2.4s; } }
+
+.aq { flex: 1 1 0; min-height: 0; min-width: 0; display: flex; flex-direction: column; background: var(--bg); }
+.aq-scroll { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 18px 16px 20px; }
+.aq-q { margin: 0 0 8px; color: var(--ink); font: 600 15px/1.4 var(--font); letter-spacing: -.01em; text-wrap: pretty; overflow-wrap: anywhere; }
+.aq-about { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; margin: 0 0 12px; padding: 3px 8px 3px 7px; border: 0; border-radius: 999px; background: var(--hover); color: var(--ink-2); font: 500 11.5px/1.4 var(--font); cursor: pointer; }
+.aq-about:hover { background: var(--hover-strong); color: var(--ink); }
+.aq-about span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aq-about svg { flex: none; }
+.aq-wait { display: flex; align-items: center; gap: 8px; margin: 14px 0 0; color: var(--text-muted); font: 400 13px/1.5 var(--font); }
+.aq-fail { margin: 12px 0 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--card); color: var(--ink-2); font: 400 13px/1.5 var(--font); }
+.aq-body { margin-top: 4px; color: var(--ink); font: 400 13.5px/1.6 var(--font); overflow-wrap: anywhere; }
+.aq-body > :first-child { margin-top: 0; }
+.aq-sources { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 16px 0 0; padding-top: 12px; border-top: 1px solid var(--border); }
+.aq-label { margin-right: 2px; color: var(--text-muted); font: 500 11.5px/1 var(--font); }
+.aq-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 24px; padding: 0 9px 0 7px; border: 1px solid var(--border); border-radius: 7px; background: var(--card); color: var(--ink-2); font: 500 12px/1 var(--font); cursor: pointer; transition: background-color var(--t-hover, 120ms) ease, border-color var(--t-hover, 120ms) ease, color var(--t-hover, 120ms) ease; }
+.aq-chip:hover { background: var(--hover); border-color: var(--border-strong); color: var(--ink); }
+.aq-chip:active { background: var(--hover-strong); }
+.aq-chip:focus-visible, .aq-about:focus-visible, .aq-link:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.aq-chip svg { flex: none; }
+.aq-chip-name { display: inline-flex; min-width: 0; white-space: nowrap; }
+.aq-chip-file { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.aq-chip-range { flex: none; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.aq-foot { margin: 14px 0 0; color: var(--text-muted); font: 400 12px/1.5 var(--font); }
+.aq-link { padding: 0; border: 0; background: transparent; color: var(--text-muted); font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.aq-link:hover:not(:disabled) { color: var(--ink); }
+.aq-link:disabled { cursor: default; }
+.aq-err { color: var(--ink-2); }

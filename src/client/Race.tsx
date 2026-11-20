@@ -9,7 +9,7 @@ import { Icon } from "./icons.js";
 import { patchLines } from "./patchLines.js";
 import { DiffView } from "./DiffView.js";
 import { hostApi, useMachine } from "./local.js";
-import { ShipDialog } from "./Ship.js";
+import { ShipDialog } from "./ShipLazy.js";
 import type { Identity } from "./storage.js";
 import { Picker, useDismiss } from "./ui.js";
 import type { Send } from "./useSession.js";
@@ -26,8 +26,8 @@ import type { Send } from "./useSession.js";
  * prompt to several agents, compare, keep the winner).
  */
 
-/** A racing lane is named like this, so the session needs no new field to know about it. */
-export const RACE_PREFIX = "Race · ";
+import { RACE_PREFIX } from "./race-prefix.js";
+export { RACE_PREFIX };
 
 type Racer = "friday" | EngineTool;
 const label = (r: Racer) => (r === "friday" ? "Friday Code" : ENGINE_NAMES[r]);
@@ -181,7 +181,7 @@ export function RaceDialog({ state, me, identity, sid, invite, send, onClose, so
 }
 
 /** One lane's own calls, answers and diff, read the same way the review card reads a run. */
-function laneReceipt(events: SessionEvent[], state: SessionState, lane: string): Receipt {
+export function laneReceipt(events: SessionEvent[], state: SessionState, lane: string): Receipt {
   const failed = new Map<string, boolean | null>();
   for (const e of events) if (e.body.type === "tool.result" && (e.lane ?? MAIN_LANE) === lane) failed.set(e.body.callId, commandFailed(e.body));
   const calls = [];
@@ -196,10 +196,16 @@ function laneReceipt(events: SessionEvent[], state: SessionState, lane: string):
 
 const STATUS: Record<string, string> = { idle: "Finished", running: "Working", paused: "Paused", waiting_for_human: "Needs you", error: "Stopped" };
 
-export function RaceCard({ state, me, events, identity, sid, invite, send }: { state: SessionState; me: Member; events: SessionEvent[]; identity: Identity; sid: string; invite: string; send: Send }) {
+/** Throw away a racer: stop it, delete its copy, and take its lane out of the session. */
+export async function discardRacer(identity: Identity, sid: string, send: Send, cwd: string | undefined, lane: string): Promise<void> {
+  await hostApi(identity, "/api/runner/stop", { method: "POST", body: JSON.stringify({ sid, lane }) }).catch(() => {});
+  if (cwd) await hostApi(identity, "/api/runner/worktree.drop", { method: "POST", body: JSON.stringify({ path: cwd }) }).catch(() => {});
+  await send({ type: "lane.remove", laneId: lane });
+}
+
+/** The racers' rows, the numbers that compare them, and what the evidence leans toward: shared by the Agents card and Code's column. */
+export function useRaceRows(state: SessionState, events: SessionEvent[]) {
   const lanes = raceLanes(state);
-  const [shipping, setShipping] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   const rows = useMemo(
     () => lanes.map((l) => ({ ...l, receipt: laneReceipt(events, state, l.id), run: runOf(state, l.id), files: state.diffs[l.id]?.files ?? [] })),
     // The log only grows, so its length is all that tells the receipts they are stale.
@@ -231,6 +237,13 @@ export function RaceCard({ state, me, events, identity, sid, invite, send }: { s
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, events.length]);
   const scored = useMemo(() => (attempts ? scoreMany(attempts) : null), [attempts]);
+  return { lanes, rows, attempts, scored };
+}
+
+export function RaceCard({ state, me, events, identity, sid, invite, send }: { state: SessionState; me: Member; events: SessionEvent[]; identity: Identity; sid: string; invite: string; send: Send }) {
+  const [shipping, setShipping] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const { lanes, rows, attempts, scored } = useRaceRows(state, events);
   // Keeping one removes the other's lane, which leaves one: the commit dialog
   // it opens has to outlive the card.
   const dialog = shipping ? <ShipDialog state={state} sid={sid} invite={invite} send={send} lane={shipping} onClose={() => setShipping(null)} /> : null;
@@ -238,13 +251,7 @@ export function RaceCard({ state, me, events, identity, sid, invite, send }: { s
   const owner = me.role === "owner";
   const running = rows.some((r) => r.run.status === "running");
 
-  /** Throw away a racer: stop it, delete its copy, and take its lane out of the session. */
-  const discard = async (lane: string) => {
-    const cwd = state.engines[lane]?.cwd;
-    await hostApi(identity, "/api/runner/stop", { method: "POST", body: JSON.stringify({ sid, lane }) }).catch(() => {});
-    if (cwd) await hostApi(identity, "/api/runner/worktree.drop", { method: "POST", body: JSON.stringify({ path: cwd }) }).catch(() => {});
-    await send({ type: "lane.remove", laneId: lane });
-  };
+  const discard = (lane: string) => discardRacer(identity, sid, send, state.engines[lane]?.cwd, lane);
 
   const keep = async (lane: string) => {
     setBusy(true);

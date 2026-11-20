@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { FileIcon } from "./fileIcons.js";
 import { Icon } from "./icons.js";
+import { ideHint } from "./ide/mode.js";
 
 /**
  * What a crew mate made, as files attached to its message (Arun, 2026-11-15: "make the agent responses in crew and crew rooms feel
@@ -130,7 +131,7 @@ export function MadeFiles({ files, lane, onMore }: { files: readonly MadeFile[];
       {files.slice(0, SHOWN).map((f) => {
         const name = f.path.split(/[\\/]/).pop() ?? f.path;
         return (
-          <button key={f.path} type="button" role="listitem" className="mf-card" title={`Open ${f.path}`} onClick={() => open(f.path)}>
+          <button key={f.path} type="button" role="listitem" className="mf-card" title={`Open ${f.path}${ideHint()}`} onClick={() => open(f.path)}>
             <span className="mf-tile" aria-hidden="true">
               <FileIcon path={f.path} size={18} />
             </span>

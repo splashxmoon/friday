@@ -10,7 +10,10 @@ import { MAIN_LANE, type SessionEvent } from "./types.js";
  * So it gets the newest `perLane` of those per lane, with the bulky fields cut to what it shows: a screenful, so the session
  * opens at once, and the rest a page at a time as the person scrolls up (`phonePage`, `GET /api/sessions/:sid/history`).
  */
-export const PHONE_TYPES = new Set(["instruction", "suggestion", "agent.message", "tool.result", "run.ended", "folder.committed", "control.granted"]);
+export const PHONE_TYPES = new Set(["instruction", "suggestion", "agent.message", "tool.result", "run.ended", "folder.committed", "control.granted", "agent.task", "run.pause", "run.cancel", "mesh.posted", "peer.sent", "peer.held", "chat"]);
+/** Subagents and background commands (the phone's Background tasks sheet) and stops, kept apart from the per-lane count so a busy tray never pushes the chat out. */
+const SIDE_TYPES = new Set(["agent.task", "run.pause", "run.cancel"]);
+const SIDE_PER_LANE = 80;
 export const PHONE_PER_LANE = 40;
 export const PHONE_PAGE = 60;
 const OUTPUT_CHARS = 400;
@@ -22,9 +25,9 @@ export function phoneLog(events: SessionEvent[], perLane = PHONE_PER_LANE): Sess
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i];
     if (!PHONE_TYPES.has(e.body.type)) continue;
-    const lane = e.lane ?? MAIN_LANE;
+    const lane = SIDE_TYPES.has(e.body.type) ? `${e.lane ?? MAIN_LANE}\u0000side` : (e.lane ?? MAIN_LANE);
     const n = counts.get(lane) ?? 0;
-    if (n >= perLane) continue;
+    if (n >= (SIDE_TYPES.has(e.body.type) ? SIDE_PER_LANE : perLane)) continue;
     counts.set(lane, n + 1);
     kept.push(slim(e));
   }
@@ -57,9 +60,30 @@ function slim(e: SessionEvent): SessionEvent {
   if (b.type === "agent.message") {
     // The provider's reasoning blocks are replayed to the model, never read by a person.
     const { reasoning: _, ...rest } = b;
-    return { ...e, body: { ...rest, toolCalls: b.toolCalls.map((c) => ({ ...c, arguments: gistOnly(c.arguments) })) } };
+    return { ...e, body: { ...rest, toolCalls: b.toolCalls.map((c) => ({ ...c, arguments: PLAN_TOOL.test(c.name) ? planOnly(c.arguments) : gistOnly(c.arguments) })) } };
   }
   return e;
+}
+
+/** A plan tool (Claude Code's TodoWrite, Codex's update_plan, others' todo): the phone shows its steps under the header. */
+const PLAN_TOOL = /^(update_plan|todo|todowrite|todo_write|plan)$/i;
+
+/** A plan's steps as the phone shows them: each step's words (shortened) and where it stands, nothing else. */
+function planOnly(args: string): string {
+  try {
+    const a = JSON.parse(args) as Record<string, unknown>;
+    const raw = [a.todos, a.plan, a.steps, a.items].find(Array.isArray) as unknown[] | undefined;
+    if (!raw?.length) return gistOnly(args);
+    const cut = (v: unknown) => (typeof v === "string" ? v.slice(0, GIST_CHARS) : undefined);
+    return JSON.stringify({
+      todos: raw.slice(0, 30).map((t) => {
+        const o = (t && typeof t === "object" ? t : { content: t }) as Record<string, unknown>;
+        return { content: cut(o.content ?? o.step ?? o.text ?? o.title), status: cut(o.status), activeForm: cut(o.activeForm) };
+      }),
+    });
+  } catch {
+    return gistOnly(args);
+  }
 }
 
 /** A tool call's arguments as the phone uses them: the first text in them, shortened, still JSON. */

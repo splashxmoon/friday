@@ -117,12 +117,24 @@ export const PHONE_ROUTES: [string, RegExp][] = [
   ["POST", /^\/api\/sessions$/],
   ["GET", /^\/api\/sessions\/[\w-]{4,40}\/history$/],
   ["POST", /^\/api\/sessions\/[\w-]{4,40}\/(answer|instruct)$/],
+  // Photos and screenshots sent with a message, and seeing them again (Arun, 2026-11-17: the phone app "on par with t3, orca"):
+  // a file into the session's own store, the same check as the page's (an invite, upload permission, the kinds Friday reads).
+  ["POST", /^\/api\/sessions\/[\w-]{4,40}\/files$/],
+  ["GET", /^\/api\/sessions\/[\w-]{4,40}\/files\/[\w-]{1,80}$/],
   ["POST", /^\/api\/attention$/],
   ["GET", /^\/api\/morning$/],
   ["POST", /^\/api\/board$/],
   ["GET", /^\/api\/(agents|templates|workspace|machines)$/],
-  // Which tools and folders are here, for a new session: read only. Never the runner's other calls.
-  ["POST", /^\/api\/runner\/(tools|folders)$/],
+  // Which tools and folders are here, for a new session, and each tool's limits (the 5-hour and weekly windows the session's
+  // usage ring shows): read only. Never the runner's other calls.
+  ["POST", /^\/api\/runner\/(tools|folders|usage)$/],
+  // The desktop's folder finder (client/Workspace.tsx): a folder found by name, a folder's own folders, your GitHub repositories
+  // and one cloned to start in, for the phone's Where (Arun, 2026-11-17: "fetch and find ... repos, folders").
+  ["POST", /^\/api\/runner\/(find|browse|describe|github|clone)$/],
+  // Code Review from the phone: the pull requests waiting, their files, and approve / request changes / merge as the person's own
+  // GitHub (runner/pr-actions.ts). Never a review run by a coding tool from here.
+  ["GET", /^\/api\/runner\/(prs|pr\.files)$/],
+  ["POST", /^\/api\/runner\/(prs|pr\.files|pr\.act)$/],
   // A new task on this computer, from the phone (Arun, 2026-11-12, phase 1): an agent started in a folder here, never with full
   // access (app.ts holds a phone's to edits or plan, and every command it runs asks first).
   ["POST", /^\/api\/runner\/start$/],
@@ -130,6 +142,22 @@ export const PHONE_ROUTES: [string, RegExp][] = [
   // The crew from the phone: away, pause, stop all, lift holds, and a room run on its own or stopped (Arun, 2026-10-31: "so i can
   // watch and manage the crew pages too").
   ["POST", /^\/api\/teammates\/(away|stop-all|pause|lift|selfrun)$/],
+  // A new crew mate or room from the phone (Arun, 2026-11-17: "amke it easy to make and create agetns and rooms too"): never
+  // removed from here, and a mate made here asks before it edits (app.ts).
+  ["POST", /^\/api\/teammates(\/rooms)?$/],
+  // A crew mate's profile edited from the phone (Arun, 2026-11-17: "edit a crews profile ... like their model"): its name, role,
+  // tool, model and folders only (app.ts drops the rest: access, budget, hours, computer, account).
+  ["PATCH", /^\/api\/teammates\/(?!rooms$)[\w-]{4,40}$/],
+  // A file in a session's folder, read only (app.ts: this route only reads), for the phone's file viewer.
+  ["GET", /^\/api\/sessions\/[\w-]+\/repo$/],
+  // What a session's agents made (documents, pictures), listed and read, for the phone's Work page (app.ts workRoute: reads only).
+  ["GET", /^\/api\/sessions\/[\w-]+\/work(\/file)?$/],
+  // Automations from the phone: the list and their runs, run one now (asking before edits, app.ts), turn one on or off, and make
+  // a new one (on a schedule or Run now, asking before edits).
+  ["GET", /^\/api\/automations(\/[\w-]{4,40}\/runs)?$/],
+  ["POST", /^\/api\/automations$/],
+  ["POST", /^\/api\/automations\/[\w-]{4,40}\/run$/],
+  ["PATCH", /^\/api\/automations\/[\w-]{4,40}$/],
   // A session's live feed.
   ["GET", /^\/ws$/],
 ];
@@ -184,15 +212,30 @@ const PORT_TRIES = 5;
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 const sameHex = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a, "hex"), Buffer.from(b, "hex"));
 
+/**
+ * Networks only this computer is on: the ones virtual machines, containers and Internet Sharing make (macOS's bridge100 and
+ * up, VMware's vmnet, Docker's docker0 and br-…, libvirt's virbr, VirtualBox's vboxnet, Hyper-V and WSL's vEthernet). No phone
+ * is ever on them, and listing them cost every pairing a wait on each (2026-11-17: five such addresses ahead of the real one).
+ */
+const VIRTUAL = /^(bridge\d|vmnet|docker|br-|virbr|vboxnet|veth|lxcbr|lxdbr|cni|flannel|podman|vEthernet|VirtualBox|VMware)/i;
+
+/** An address that is its network's own (192.168.155.0 on a /24): no machine answers there. */
+function networkAddress(address: string, netmask?: string): boolean {
+  if (!netmask) return false;
+  const a = address.split(".").map(Number);
+  const m = netmask.split(".").map(Number);
+  return a.length === 4 && m.length === 4 && a.every((x, n) => (x & ~m[n]! & 255) === 0);
+}
+
 /** This computer's addresses the phone can reach: its network's, and Tailscale's (100.64.0.0/10) when it is up. */
 export function reachable(ifaces = os.networkInterfaces()): { address: string; via: "wifi" | "tailscale" }[] {
   const out: { address: string; via: "wifi" | "tailscale" }[] = [];
-  for (const list of Object.values(ifaces)) {
+  for (const [name, list] of Object.entries(ifaces)) {
     for (const i of list ?? []) {
       if (i.family !== "IPv4" || i.internal) continue;
       const [a, b] = i.address.split(".").map(Number) as [number, number];
       if (a === 100 && b >= 64 && b <= 127) out.push({ address: i.address, via: "tailscale" });
-      else if (a === 10 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31)) out.push({ address: i.address, via: "wifi" });
+      else if ((a === 10 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31)) && !VIRTUAL.test(name) && !networkAddress(i.address, i.netmask)) out.push({ address: i.address, via: "wifi" });
     }
   }
   return out;

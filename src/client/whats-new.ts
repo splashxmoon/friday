@@ -17,14 +17,14 @@ export interface WhatsNewNotes {
 }
 
 export const WHATS_NEW: WhatsNewNotes = {
-  version: "0.3.5",
-  title: "Friday in Slack and Linear",
-  summary: "Ask from Slack or hand an issue over in Linear, a crew you can leave to it, and agents that stop for less.",
+  version: "0.4.0",
+  title: "Friday IDE",
+  summary: "Code is a full IDE now, with your agents in it: they edit in place, check their own work, and pass work to Agents and back.",
   items: [
-    { icon: "connections", title: "Slack and Linear", line: "An @mention or /friday in Slack, or an issue handed to Friday in Linear, becomes a thread on this computer." },
-    { icon: "users", title: "A crew you can rely on", line: "Full access by default, tasks start from what the room decided, and anything only you can sort asks you once." },
-    { icon: "zap", title: "Auto stops for less", line: "Agents wait for you only on pull requests, merges, deploys, money and speaking as you, and answer in the chat." },
-    { icon: "play", title: "Videos and pull requests", line: "Videos play in the chat and side panels; Code Review and the Pull request panel are redone." },
+    { icon: "code", title: "A full IDE", line: "Your editor, terminal and extensions, with Friday's chat beside them and one status bar under both." },
+    { icon: "zap", title: "Agents in your editor", line: "⌘K changes the lines you select in place, with Keep and Undo; Explain, Test, Fix and Refactor sit above every function." },
+    { icon: "shield", title: "Work that checks itself", line: "A self-review before the pull request, find the commit that broke it, race tools, and CI failures at the failing line." },
+    { icon: "users", title: "Code and Agents as one", line: "One Waiting on you, one search, one task board and one project memory; ⌘E and Send to Agents move work between them." },
   ],
 };
 

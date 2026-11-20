@@ -8,7 +8,7 @@ import { splitPath } from "./diff-lines.js";
 import { Check, Segmented, useDismiss } from "./ui.js";
 import type { Send } from "./useSession.js";
 import type { Receipt } from "../receipt.js";
-import { commitPaths } from "../shepherd.js";
+import { commitPaths } from "../commit-paths.js";
 
 /**
  * Ship what the session made: commit, push, open a pull request.

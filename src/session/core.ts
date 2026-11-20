@@ -4,7 +4,7 @@ import { engineName, ENGINE_TOOLS, SESSION_LANES, hostOnlyYes, isEngineEffort, e
 import { canDriveLane, driverOf, freshLaneName, laneHeld, laneOf, meshOf, mergeOptions, pendingFor, roleOf, runOf, signoffStatus, uniqueLaneName, type SessionState, effortResets } from "./projection.js";
 import type { AppendGuard, AppendResult, SessionStore } from "./store.js";
 type PipelineDef = never;
-import { prBodyFor } from "../pr-body.js";
+import { prBodyFor, prPartsFor } from "../pr-body.js";
 import { mentionsIn } from "../mentions.js";
 import { checkpointBefore, runEndAfter, sharedWorkDuring } from "../rewind.js";
 import { overlaps, platformOf } from "../folder-key.js";
@@ -834,7 +834,9 @@ export class SessionCore {
           const why = cmd.pr ? prBodyFor(state, await this.store.events(sid), this.appUrl ? `${this.appUrl.replace(/\/$/, "")}/?session=${sid}` : undefined, await this.replayForPr(sid, state, folderAt)) : "";
           // Pressed for by a person, so a Manual machine pushes too.
           const base = cmd.pr && typeof cmd.base === "string" && cmd.base.trim() && !cmd.base.startsWith("-") ? cmd.base.trim().slice(0, 100) : undefined;
-          const said = (await folderAt({ op: "publish", message: why ? `${message}\n\n${why}` : message, pr: !!cmd.pr, approved: true, approvedBy: m.id, ...(base ? { base } : {}), ...(dir ? { dir } : {}) })).output;
+          // The repo's own pull-request template, when it has one, is filled from the same session on the computer the repo is on.
+          const prParts = cmd.pr ? JSON.stringify(prPartsFor(state, await this.store.events(sid))) : "";
+          const said = (await folderAt({ op: "publish", message: why ? `${message}\n\n${why}` : message, pr: !!cmd.pr, ...(prParts ? { prParts } : {}), approved: true, approvedBy: m.id, ...(base ? { base } : {}), ...(dir ? { dir } : {}) })).output;
           const p = parseJson<{ pushed?: boolean; prUrl?: string; prCreated?: boolean; prError?: string; error?: string; base?: string }>(said);
           if (p?.pushed) {
             Object.assign(body, { pushed: true, ...(p.prUrl ? { prUrl: p.prUrl, prCreated: !!p.prCreated, ...(p.base ? { base: p.base } : {}) } : {}) });

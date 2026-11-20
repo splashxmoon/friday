@@ -65,7 +65,7 @@ import { GitMergeIcon,
 } from "lucide-react";
 import { createPortal } from "react-dom";
 import { ChatFind } from "./ChatFind.js";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { attributionFor, byHand, handWord, type Attribution } from "../attribution.js";
 import { useNear } from "./feed-near.js";
 import { GoalPill } from "./GoalPill.js";
@@ -186,6 +186,9 @@ import { DiffView, type DiffLine, type DiffMode } from "./DiffView.js";
 import { PinBar } from "./PinBar.js";
 import { commandFailed, receiptOf } from "../receipt.js";
 import { doneVerdict, explainRun } from "../explain.js";
+import { RunFacts } from "./run-facts.js";
+import { GoAheadText } from "./RefactorPlanCard.js";
+import { isGoAhead } from "./refactor-plan.js";
 import { jumpPlaces, type JumpPlace } from "../session-line.js";
 import { leftOff } from "../left-off.js";
 import { editPreview, failingTests, foldLine } from "../step-extras.js";
@@ -206,6 +209,8 @@ import { lazy, Suspense } from "react";
 // Cards an agent draws, loaded with the first one a chat has: most chats have none (GenUI.tsx).
 const GenCard = lazy(() => import("./GenUI.js").then((m) => ({ default: m.GenCard })));
 // A hand-off's line, and its styles, load with the first one shown (crew-carry.tsx).
+const RuleCard = lazy(() => import("./RuleCard.js").then((m) => ({ default: m.RuleCard })));
+import { latestOwn } from "./rule-latest.js";
 const HandedLine = lazy(() => import("./crew-carry.js").then((m) => ({ default: m.HandedLine })));
 const RoomHandedLine = lazy(() => import("./crew-carry.js").then((m) => ({ default: m.RoomHandedLine })));
 const BringReady = lazy(() => import("./crew-carry.js").then((m) => ({ default: m.BringReady })));
@@ -225,6 +230,12 @@ import { isOwnModel } from "../own-model-id.js";
 import { agentLook, FridayFace, handoffTaskText, laneIdByName, laneLabel, reasonFor, suggestTarget, tintOfColor, tintOfEngine, wakesOnItsOwn, type Signals } from "./handoff-ui.js";
 import type { AgentView } from "../agents.js";
 import { RaceCard } from "./Race.js";
+// A race started from Code (ide/race-column.tsx): loaded when one is on screen.
+const RaceColumn = lazy(() => import("./ide/race-column.js").then((m) => ({ default: m.RaceColumn })));
+// The card a session ends on once its pull request has merged (MergedCard.tsx): loaded when one has.
+const MergedCard = lazy(() => import("./MergedCard.js").then((m) => ({ default: m.MergedCard })));
+import { isCodeChat } from "./ide/code-chats.js";
+import { IdeChatContext, ideHint } from "./ide/mode.js";
 import { agentNameFor, laneNamesFrom } from "./agent-name.js";
 import { agentState, lowerWord, phaseRing, plainError, PHASE_WORD, saysItAll, type AgentRing } from "../agent-state.js";
 import { askIosPreview, isLocalUrl, lookOf, openInPreview, pageAppears, servedUrlIn } from "./previewBus.js";
@@ -256,6 +267,9 @@ import { subTasksIn } from "./Tasks.js";
 import type { Plan } from "../plan-types.js";
 import type { McpPublic } from "../mcp-types.js";
 import { useVoice, VoiceBar, VoiceButton, VoiceLive } from "./VoiceMic.js";
+// Only a chat where an agent added to memory draws it: out of the first load (test/client-bundle.test.ts).
+const RememberedLine = lazy(() => import("./remembered-line.js").then((m) => ({ default: m.RememberedLine })));
+import { IdeLink } from "./ide/IdeLink.js";
 
 // The activity section, built from AI Elements: the team's messages are chat
 // bubbles, each agent run is a chain of thought whose steps hold the tool
@@ -445,55 +459,6 @@ interface Ctx {
   room?: boolean;
 }
 
-
-/**
- * The session's last card, once its pull request has merged: one slim card (Arun, 2026-11-18: "just make this simple and
- * slimmer"), in the chat's own card colour with GitHub's purple merge mark (2026-11-19: "get rid of this play it back bs, and make
- * this not green ... the standard card color with the purple merge icon ... add a little bit more detail"): "Merged #42" and what it
- * was, then where it went, how big it was, how long and how many runs it took and when it merged, and the pull request beside them.
- */
-function MergedCard({ merged, events, replayLink, sid, notify }: { merged: { url: string; at: number }; events: Parameters<typeof leftOff>[1]; replayLink?: string | undefined; sid: string; notify: (m: string) => void }) {
-  const pr = /\/pull\/(\d+)/.exec(merged.url)?.[1];
-  const runs = events.filter((e) => e.body.type === "run.ended").length;
-  const first = events.find((e) => e.body.type === "instruction" && e.actor.kind === "human");
-  const days = first ? Math.round((merged.at - first.ts) / 86_400_000) : 0;
-  // The commit that opened it: what it was called, its branch and base, and every push to that branch since.
-  const opened = events.findLast((e) => e.body.type === "folder.committed" && !e.body.error && e.body.prUrl === merged.url);
-  const ob = opened?.body.type === "folder.committed" ? opened.body : null;
-  const pushes = ob ? events.filter((e) => e.body.type === "folder.committed" && !e.body.error && e.body.branch === ob.branch && e.seq >= opened!.seq).length : 0;
-  const what = ob?.message.split("\n")[0]?.trim() ?? "";
-  const when = ((t) => (t === "now" ? "just now" : `${t} ago`))(relTime(merged.at));
-  const detail = [
-    ob?.base ? `into ${ob.base}` : "",
-    ob?.files ? `${ob.files} file${ob.files === 1 ? "" : "s"}` : "",
-    pushes > 1 ? `${pushes} pushes` : "",
-    days >= 1 ? `${days} day${days === 1 ? "" : "s"}` : "",
-    runs ? `${runs} run${runs === 1 ? "" : "s"}` : "",
-    `merged ${when}`,
-  ].filter(Boolean);
-  return (
-    <div className="feed-merged slim" role="status">
-      <span className="feed-merged-mark" aria-hidden="true">
-        <Icon name="gitMerge" size={14} />
-      </span>
-      <span className="feed-merged-body">
-        <span className="feed-merged-title" title={what || undefined}>
-          <b>Merged{pr ? ` #${pr}` : ""}</b>
-          {what && <span className="feed-merged-what"> · {what}</span>}
-        </span>
-        <span className="feed-merged-line">
-          {ob?.branch && <code>{ob.branch}</code>}
-          {detail.join(" · ")}
-        </span>
-      </span>
-      <span className="feed-merged-actions">
-        <a className="btn small" href={merged.url} onClick={(e) => (e.preventDefault(), window.open(merged.url, "_blank", "noopener"))}>
-          Open pull request
-        </a>
-      </span>
-    </div>
-  );
-}
 
 /**
  * Whether a settings change is worth a line in the feed.
@@ -888,6 +853,12 @@ export function group(events: SessionEvent[], streaming: boolean | ReadonlySet<s
     }
     // An agent brought in is a note beside the work, not something done to this lane: it closes nothing.
     if (t === "lane.added") {
+      items.push({ kind: "event", ev });
+      continue;
+    }
+    // "Remembered: ..." is the brain's note on what the agent just learned (always mid-run when it called save_lesson, and it
+    // can land inside the next run when the lesson is read after a run ends): it closes nothing (Arun, 2026-11-20: project memory).
+    if (t === "brain.remembered") {
       items.push({ kind: "event", ev });
       continue;
     }
@@ -1757,8 +1728,13 @@ export function Activity({
   useEffect(() => {
     if (pin) return;
     const on = (e: Event) => {
-      const lane = (e as CustomEvent<{ lane?: string }>).detail?.lane;
-      if (lane) void reconnectLane(ctxRef.current, lane);
+      const d = (e as CustomEvent<{ lane?: string; sid?: string; handled?: boolean; reply?: (r: { ok: boolean }) => void }>).detail;
+      const lane = d?.lane;
+      // Meant for one session (the IDE's restore bar): the others on the page let it go by.
+      if (d?.sid && d.sid !== ctxRef.current.sid) return;
+      if (!lane) return;
+      if (d?.sid) d.handled = true;
+      void reconnectLane(ctxRef.current, lane).then(() => d?.reply?.({ ok: true }));
     };
     window.addEventListener("friday:reconnect-lane", on);
     return () => window.removeEventListener("friday:reconnect-lane", on);
@@ -1770,12 +1746,35 @@ export function Activity({
     if (pin) return;
     const on = (e: Event) => {
       const d = (e as CustomEvent<AskLane>).detail;
+      // Something that needs the session's live state, not a message ("Hand on to Codex now", ide/hand-on.ts; Arun, 2026-11-20).
+      if (d?.run && d.sid === ctxRef.current.sid) return void ((d.handled = true), d.run(() => ctxRef.current, quickConnect));
       if (!d?.text) return;
+      // Meant for one session (a card's own, the header's button): the others on the page let it go by, unhandled.
+      if (d.sid && d.sid !== ctxRef.current.sid) return;
       d.handled = true;
-      void askLane(ctxRef.current, d.lane, d.text).then(d.reply);
+      // `whenIdle`: held until the lane's run is over (a plan card's Go ahead, pressed while the plan is still being written: sent
+      // at once it queued, and ran in whatever mode the plan run was in). Up to ten minutes, then it goes anyway.
+      const go = async () => {
+        for (let i = 0; i < 2000 && d.whenIdle && runOf(ctxRef.current.state, d.lane).status === "running"; i++) await new Promise((r) => setTimeout(r, 300));
+        return askLane(ctxRef.current, d.lane, d.text);
+      };
+      void go().then(d.reply);
     };
     window.addEventListener("friday:ask-lane", on);
     return () => window.removeEventListener("friday:ask-lane", on);
+  }, [pin]);
+  // "Leave it" on the IDE's restore bar (RestoreBar.tsx): the lane's cut run is ended for good, its queue cleared, so the tool is not
+  // handed the turn again when it is next brought back. (Review, 2026-11-19.)
+  useEffect(() => {
+    if (pin) return;
+    const on = (e: Event) => {
+      const d = (e as CustomEvent<{ sid: string; lane: string; reply: (r: { ok: boolean; error?: string }) => void; handled?: boolean }>).detail;
+      if (!d || d.sid !== ctxRef.current.sid) return;
+      d.handled = true;
+      void ctxRef.current.send({ type: "run.cancel", ...(d.lane !== MAIN_LANE ? { lane: d.lane } : {}) }).then(d.reply);
+    };
+    window.addEventListener("friday:stop-lane", on);
+    return () => window.removeEventListener("friday:stop-lane", on);
   }, [pin]);
 
   // Opening a session brings its coding tools back: an agent of mine that is offline is started again on its folder, if that
@@ -2333,7 +2332,7 @@ export function Activity({
               const seq = it.kind === "run" ? it.key : it.kind === "notes" ? it.evs[0]!.seq : it.ev.seq;
               return (
                 // data-seq anchors the catch-up panel's "jump to where you left off".
-                <FeedRow key={feedKey(it)} settled={it.kind !== "run" || !!it.ended} data-seq={seq} data-lane={laneId} className={`${lane ? "feed-item agent-lane" : "feed-item"}${isSetAside(rewinds, seq, laneId) ? " set-aside" : ""}`} style={lane ? ({ "--tint": agentLook(state, lane.id).tint } as React.CSSProperties) : undefined}>
+                <FeedRow key={feedKey(it)} settled={it.kind !== "run" || !!it.ended} data-seq={seq} data-lane={laneId} data-feed-sid={ctx.sid} className={`${lane ? "feed-item agent-lane" : "feed-item"}${isSetAside(rewinds, seq, laneId) ? " set-aside" : ""}`} style={lane ? ({ "--tint": agentLook(state, lane.id).tint } as React.CSSProperties) : undefined}>
                   {breaks[i] && <div className="tm-daybreak" role="separator">{breaks[i]}</div>}
                   {/* Where the new part starts: what arrived after this person last looked, as a line that stays where it was when they opened the room. */}
                   {i === unreadAt && <div className="feed-unread" role="separator" aria-label="New since you looked" {...(i === agentUnreadAt ? { "data-catchup": "" } : {})}><span>New since you looked</span></div>}
@@ -2389,7 +2388,16 @@ export function Activity({
               <FeedQuestion key={q.lane} ctx={ctx} q={q} />
             ))}
           {/* The end: one slim row, with the pull request and the recording a press away. */}
-          {merged && !pin && <MergedCard merged={merged} events={events} replayLink={replayLink} sid={sid} notify={notify} />}
+          {merged && !pin && (
+            <Suspense fallback={null}>
+              <MergedCard
+                merged={merged}
+                events={events}
+                replayLink={replayLink}
+                sid={sid}
+              />
+            </Suspense>
+          )}
           {/* Who it asked or handed work to and how each stands, while any hasn't answered (crew-waiting.tsx). */}
           {isLocal() && state.options.team && laneFilter !== ALL && <CrewWaiting events={events} state={state} lane={laneFilter} />}
           {/* Something it would send, waiting on the person's yes (crew-waiting.tsx DraftCard). */}
@@ -2406,7 +2414,8 @@ export function Activity({
       {/* Not under a teammate's Activity, Settings and the like: a box and its plans over a form (audit CREW-29). */}
       {!replaying && !tuiOn && mateTab === "chat" && (
         <div className="composer-dock" data-slot="session.box">
-          <RaceCard state={state} me={me} events={events} identity={identity} sid={sid} invite={invite} send={send} />
+          {/* A race started from Code is one row per racer (ide/race-column.tsx): the three columns of Agents' card don't fit its column. */}
+          {isCodeChat(sid) ? <Suspense fallback={null}><RaceColumn state={state} me={me} events={events} identity={identity} sid={sid} invite={invite} send={send} /></Suspense> : <RaceCard state={state} me={me} events={events} identity={identity} sid={sid} invite={invite} send={send} />}
           {/* Away or paused, said over every team chat's box with the one press that ends it (TeamControls.tsx). */}
           {state.options.team && <TeamBanner identity={identity} notify={ctx.notify} />}
           {/* One panel per agent that has something waiting: each has its own queue and its own driver. A column of a split
@@ -2537,7 +2546,7 @@ function PendingRun({ ctx, lane, since }: { ctx: Ctx; lane: string; since: numbe
   );
 }
 
-function FeedRow({ settled, children, ...div }: React.HTMLAttributes<HTMLDivElement> & { settled: boolean; "data-seq": number; "data-lane": string }) {
+function FeedRow({ settled, children, ...div }: React.HTMLAttributes<HTMLDivElement> & { settled: boolean; "data-seq": number; "data-lane": string; "data-feed-sid"?: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const near = useNear(ref);
   return (
@@ -2665,8 +2674,14 @@ export interface AskLane {
   lane: string;
   text: string;
   reply: (r: { ok: boolean; error?: string }) => void;
+  /** The one session it is for; without it, whichever session takes it first. */
+  sid?: string;
+  /** Wait for the lane's run to be over before sending. */
+  whenIdle?: boolean;
   /** Set by the session that took it; nobody did, and the caller sends it itself. */
   handled?: boolean;
+  /** Instead of a message: run this with the session's state as it is whenever it is read (ide/hand-on.ts). */
+  run?: (get: () => Ctx, connect: typeof quickConnect) => void;
 }
 
 /**
@@ -3314,6 +3329,8 @@ function sendAgain(ctx: Ctx, text: string) {
 function HumanMessage({ ev, ctx }: { ev: Ev<"instruction"> | Ev<"suggestion">; ctx: Ctx }) {
   const { me, state, delivered, send } = ctx;
   const [ask, confirmUI] = useConfirm();
+  // In Code's column, a rewind is the column's (ide/rewind-column.tsx): its confirm says which files go back and which are unsaved.
+  const inColumn = useContext(IdeChatContext) !== null;
   const b = ev.body;
   // Before any early return, as a hook must be; what it offers is what this message allows when it opens (can, below).
   const can = useRef<() => MessageActions>(() => ({}));
@@ -3344,6 +3361,8 @@ function HumanMessage({ ev, ctx }: { ev: Ev<"instruction"> | Ev<"suggestion">; c
   if (state.options.team && b.type === "instruction" && isCheckIn(b.text)) return <CheckInLine text={b.text} lane={ev.lane ?? MAIN_LANE} stamp={<Stamp ev={ev} />} />;
   if (state.options.team && b.type === "instruction" && b.text.startsWith("[Friday] ")) return <FridayLine text={b.text} lane={ev.lane ?? MAIN_LANE} stamp={<Stamp ev={ev} />} />;
   let shown: ReactNode = b.text;
+  // A refactor plan's "Go ahead" (RefactorPlanCard): said as the short line the person pressed, the full instruction a press away.
+  if (b.type === "instruction" && isGoAhead(b.text)) shown = <GoAheadText text={b.text} />;
   // In a team, each @Name in what was sent stays its teammate's pill (Arun, 2026-10-27: "make sure the tag is still there").
   if (state.options.team) shown = <MentionText sid={ctx.sid} text={b.text} />;
   // A quote it starts with, drawn as the room draws it: in a session it was sent as "> " lines and shown as them.
@@ -3355,7 +3374,7 @@ function HumanMessage({ ev, ctx }: { ev: Ev<"instruction"> | Ev<"suggestion">; c
     if (state.options.team) return <HandoffLine from={h.fromName} to={h.toName} fromLane={laneIdByName(state, h.fromName)} toLane={laneIdByName(state, h.toName)} task={handoffTaskText(b.text)} reason={h.reason} carried={h.carried} status={status === "queued" ? "Waiting for its turn" : status} stamp={<Stamp ev={ev} />} />;
     return (
       <div className="rsp-ho-wrap">
-        // Each end by the name its agent goes by everywhere (agent-name.ts): the log keeps the lane's, which read "Main" (audit B-20).
+        {/* Each end by the name its agent goes by everywhere (agent-name.ts): the log keeps the lane's, which read "Main" (audit B-20). */}
         <HandoffCard from={((id) => (id ? agentNameFor(state, id) : h.fromName))(laneIdByName(state, h.fromName))} to={((id) => (id ? agentNameFor(state, id) : h.toName))(laneIdByName(state, h.toName))} fromLook={agentLook(state, laneIdByName(state, h.fromName))} toLook={agentLook(state, laneIdByName(state, h.toName))} reason={h.reason} carried={h.carried} task={handoffTaskText(b.text)} by={ev.actor.kind === "human" ? (ev.actor.id === me.id ? "you" : ev.actor.name) : undefined} />
         <div className="rsp-ho-meta">
           <span>handoff</span>
@@ -3410,6 +3429,13 @@ function HumanMessage({ ev, ctx }: { ev: Ev<"instruction"> | Ev<"suggestion">; c
   const mayRewind = !!checkpoint && (me.role === "owner" || driving) && !anyRunning && !isSetAside(ctx.rewinds, ev.seq, said);
   const tool = state.engines[said]?.tool;
   const rewind = () => {
+    if (inColumn) {
+      // `onDone` puts the message back in the box its own way (a quote as a chip) once the files are back.
+      const asked = { sid: ctx.sid, seq: ev.seq, handled: false, onDone: () => b.type === "instruction" && sendAgain(ctx, b.text) };
+      window.dispatchEvent(new CustomEvent("friday:rewind-to", { detail: asked }));
+      // The column's own ran it; if it hasn't drawn yet, the confirm below does the same.
+      if (asked.handled) return;
+    }
     if (tool)
       return ask({
         title: "Put the files back to before this message?",
@@ -3745,6 +3771,8 @@ function useMessageMenu(text: string, actions: () => MessageActions = () => ({})
 /** Copy what was said, from under the message it belongs to. */
 function CopyMessage({ text, mine, fork, rewind }: { text: string; mine: boolean; fork?: () => void; rewind?: () => void }) {
   const [done, setDone] = useState(false);
+  // In Code's column the rewind says what it is, in words, on hover (Arun, 2026-11-19, wave 4: a quiet "Rewind to here").
+  const inColumn = useContext(IdeChatContext) !== null;
   return (
     <div className={cn("msg-actions", mine && "mine")}>
       <button
@@ -3770,8 +3798,9 @@ function CopyMessage({ text, mine, fork, rewind }: { text: string; mine: boolean
         </button>
       )}
       {rewind && (
-        <button type="button" className="icon-btn tiny msg-copy" title="Rewind to before this message" aria-label="Rewind to before this message" onClick={rewind}>
-          <Icon name="rewind" size={14} />
+        <button type="button" className={`icon-btn tiny msg-copy${inColumn ? " msg-rewind" : ""}`} title="Rewind to before this message" aria-label={inColumn ? "Rewind to here, before this message" : "Rewind to before this message"} onClick={rewind}>
+          <Icon name={inColumn ? "rewindTo" : "rewind"} size={14} />
+          {inColumn && <span>Rewind to here</span>}
         </button>
       )}
     </div>
@@ -4011,6 +4040,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   const toolLimits = useToolLimits(ctx.identity, ctx.replaying);
   const learned = useLearned(ctx.identity, ctx.replaying);
   const [ask, confirmUI] = useConfirm();
+  const inColumn = useContext(IdeChatContext) !== null;
   // The run just ended in front of this person: its verdict, answer and review arrive in order rather than all at once.
   // Only on the transition, so history and reloads draw instantly.
   const wasActive = useRef(active);
@@ -4246,6 +4276,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
       if (result && stepKind(d) === "test") step.fails = failingTests(output);
       for (const path of result?.body.pictures ?? []) pictures.push({ path, name: `${d.verb}${d.target ? ` ${d.target}` : ""}` });
       if (/^(edit|edit_file|write|write_file)$/.test(call.name)) step.preview = editPreview(args) ?? undefined;
+      if (/^(read|read_file|edit|edit_file|write|write_file)$/.test(call.name)) step.file = (typeof args.file_path === "string" ? args.file_path : typeof args.path === "string" ? args.path : "") || undefined;
       if (/^(write|write_file|create_file)$/i.test(call.name) && result && !failed) {
         const at = typeof args.file_path === "string" ? args.file_path : typeof args.path === "string" ? args.path : "";
         if (at) wrote.push({ path: at, lines: typeof args.content === "string" ? args.content.split("\n").length : 0 });
@@ -4488,7 +4519,13 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   // The run can be taken back from its own answer: the files go back to before it started, and the agent forgets it.
   const rewindable = !!item.checkpoint && !!item.ended && !active && canUndo(ctx, item.checkpoint.lane);
   const runTool = item.checkpoint ? ctx.state.engines[item.checkpoint.lane]?.tool : undefined;
-  const rewindHere = () =>
+  const rewindHere = () => {
+    // In Code's column a rewind is the column's (ide/rewind-column.tsx): the same confirm as on the message, with unsaved files named.
+    if (inColumn) {
+      const asked = { sid: ctx.sid, seq: item.checkpoint!.at ?? msgs[0]?.seq ?? item.key, handled: false };
+      window.dispatchEvent(new CustomEvent("friday:rewind-to", { detail: asked }));
+      if (asked.handled) return;
+    }
     ask({
       title: runTool ? "Put the files back to before this run?" : "Rewind to before this run?",
       body: runTool
@@ -4501,6 +4538,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
         if (!r.ok) ctx.notify(r.error ?? "Couldn't rewind. The folder may have moved on since; check the Changes panel, then try again.");
       },
     });
+  };
   // A finished run that changed something is worth showing someone: its recording, a press away, while the viewer link is on.
   const replayable = !!ctx.replayLink && !!item.ended && !active && changed.length > 0;
   // A turn that stopped on an error with no reply: "Retry" in words beside Pass on, sending its ask again, in place of a lone rewind
@@ -4548,6 +4586,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
         {...(item.checkpoint ? { undone: ctx.undone.has(item.checkpoint.sha) } : {})}
         undo={item.checkpoint && canUndo(ctx, item.checkpoint.lane) ? () => ctx.send({ type: "folder.restore", sha: item.checkpoint!.sha, lane: item.checkpoint!.lane }) : undefined}
         contended={contendedPaths(ctx.state, lane)}
+        latest={latest}
         {...(ctx.onOpen ? { onReview: (path?: string) => (ctx.onOpen!("files"), path && showDiffSoon(path, [0, 350, 900, 1700])) } : {})}
       />
     ) : null;
@@ -4691,6 +4730,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   );
 
   return (
+    <RunFacts.Provider value={item.ended ? { files: changed.length, tests: tests?.status ?? null } : { files: null, tests: null, pending: true }}>
     <div className={`rsp ${landed ? "landed" : ""}${look ? ` ${look.className}` : ""}${chatty ? " rsp-chat" : ""}`} style={look?.style}>
       {confirmUI}
       {/* The tool's mark beside a reply is identity only, with no ring: the header's agent tab, the status bar and the reply's own
@@ -5009,6 +5049,7 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
       {reviewable && reviewOpen && <div className="change-set mr-review">{review}</div>}
       </div>
     </div>
+    </RunFacts.Provider>
   );
 });
 
@@ -5113,7 +5154,7 @@ function MateResult({ on, lane, title, files, tests, failing, branch, sid, page,
       <div className="mr-strip-wrap">
         <div className="mr-strip" role="group" aria-label="What it changed">
           {files.slice(0, 4).map((f) => (
-            <button key={f.path} type="button" className="mr-file" title={f.path} onClick={() => dispatchEvent(new CustomEvent("friday:open-file", { detail: { path: f.path, lane }, cancelable: true }))}>
+            <button key={f.path} type="button" className="mr-file" title={`${f.path}${ideHint()}`} onClick={() => dispatchEvent(new CustomEvent("friday:open-file", { detail: { path: f.path, lane }, cancelable: true }))}>
               <Icon name="file" size={13} />
               <span className="mr-file-name">{f.path.split("/").pop() ?? f.path}</span>
               {f.additions + f.deletions > 0 && (
@@ -6815,6 +6856,11 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
         <>
           <HumanMessage ev={ev as Ev<"instruction">} ctx={ctx} />
           {b.type === "instruction" && !ctx.room && ev.actor.kind === "human" && severalAgents(state) && <Suspense fallback={null}><TakeOver ev={ev} state={state} events={ctx.events} /></Suspense>}
+          {b.type === "instruction" && isLocal() && !ctx.room && !ctx.replaying && ev.actor.id === me.id && !b.mesh && !b.peer && !b.handoff && state.engines[ev.lane ?? MAIN_LANE]?.hostId === me.id && !!state.engines[ev.lane ?? MAIN_LANE]?.cwd && (
+            <Suspense fallback={null}>
+              <RuleCard text={b.text} sid={ctx.sid} seq={ev.seq} cwd={state.engines[ev.lane ?? MAIN_LANE]!.cwd} identity={ctx.identity} from={state.title?.trim() || "a chat"} latest={latestOwn(ctx.events, me.id) === ev.seq} />
+            </Suspense>
+          )}
         </>
       );
     case "chat":
@@ -6953,6 +6999,7 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
               <a className="link-btn" href={b.prUrl} target="_blank" rel="noreferrer">
                 {b.prCreated ? "Open pull request" : "Create pull request"}
               </a>
+              {!!pr && isLocal() && newestPr(ctx.events) === ev.seq && <IdeLink className="link-btn" pr={{ folder: state.engines[lane]?.cwd, base: b.base, head: b.branch, url: b.prUrl }} />}
               {manual && (
                 <button
                   type="button"
@@ -7119,6 +7166,14 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
         </Notice>
       );
     }
+    case "brain.remembered":
+      return (
+        <Notice ev={ev} icon={BrainIcon} tone="control">
+          <Suspense fallback={null}>
+            <RememberedLine identity={ctx.identity} b={b} replaying={!!ctx.replaying} />
+          </Suspense>
+        </Notice>
+      );
     case "brain.check.proposed":
       return b.how ? <RuleOffer ev={ev as Ev<"brain.check.proposed">} ctx={ctx} /> : <CheckOffer ev={ev as Ev<"brain.check.proposed">} ctx={ctx} />;
     case "brain.check.answered": {
@@ -7180,11 +7235,14 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
       // second "undid a run" with its own Redo (Arun's e2e pass, 2026-11-04).
       const redo = isRedo(ctx.events, ev);
       const reversed = ctx.events.some((e) => e.seq > ev.seq && e.body.type === "folder.restored" && reversedBy(ctx.events, e)?.seq === ev.seq);
+      // A redo of a whole rewind says so, rather than "a run" between two rewinds (wave 4).
+      const undone = redo ? reversedBy(ctx.events, ev) : undefined;
+      const undoneRewind = undone?.body.type === "folder.restored" && undone.body.whole === true;
       const mayRedo = !redo && !reversed && (ctx.me.role === "owner" || driverOf(state, ev.lane ?? MAIN_LANE)?.id === me.id);
       return (
         <Notice ev={ev} icon={redo ? Redo2Icon : Undo2Icon} tone="control">
           {/* A redo changes the files again, as the run had them: "put back" was the undo's word (2026-11-04 retest). */}
-          {b.rewoundTo !== undefined ? `${who} rewound to before an earlier message` : redo ? `${who} redid a run` : `${who} undid a run`}: {b.restored} file{b.restored === 1 ? "" : "s"} {redo && b.rewoundTo === undefined ? "changed again" : "put back"}{b.removed ? `, ${b.removed} removed` : ""}
+          {b.rewoundTo !== undefined || (b.whole && !redo) ? `${who} rewound to before an earlier message` : redo ? `${who} redid ${undoneRewind ? "the rewind" : "a run"}` : `${who} undid a run`}: {b.restored} file{b.restored === 1 ? "" : "s"} {redo && b.rewoundTo === undefined ? "changed again" : "put back"}{b.removed ? `, ${b.removed} removed` : ""}
           {b.rewoundTo !== undefined && " · what followed is set aside"}
           {mayRedo && b.rewoundTo === undefined && (
             <button type="button" className="link-btn cp-action" onClick={() => ctx.send({ type: "folder.restore", sha: b.undo, lane: ev.lane ?? MAIN_LANE })}>
@@ -7196,7 +7254,7 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
     }
     case "session.created":
       return (
-        <Notice ev={ev} icon={SparklesIcon}>
+        <Notice ev={ev} icon={SparklesIcon} tone="cp-started">
           Session started by {b.ownerName}
           {b.options?.agent ? ` with ${b.options.agent.name}` : ""}
         </Notice>
@@ -7366,12 +7424,20 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
           {who} resumed the agent
         </Notice>
       );
-    case "run.cancel":
-      return (
+    case "run.cancel": {
+      // Stopped so the work could go on in another tool (usage-aware routing's Hand on): said so, not in red as if it went wrong.
+      const lane = ev.lane ?? MAIN_LANE;
+      const handed = ctx.events.some((e) => e.seq > ev.seq && e.body.type === "instruction" && e.body.handoff?.fromLane === lane);
+      return handed ? (
+        <Notice ev={ev} icon={StopFilled}>
+          {who} stopped the run to hand the work on
+        </Notice>
+      ) : (
         <Notice ev={ev} icon={StopFilled} tone="danger">
           {who} cancelled the run
         </Notice>
       );
+    }
     case "run.ended": {
       // Stopped before it ran because its tool isn't signed in (a first message on a fresh install, most often): the way to sign
       // in, where it stopped, as a finished turn has it, rather than red words saying to run a command in a terminal (Arun,
@@ -8548,11 +8614,20 @@ function ReachPill({ ctx, lane }: { ctx: Ctx; lane: string }) {
   const { state, me, identity, notify } = ctx;
   const engine = state.engines[lane];
   const [busy, setBusy] = useState(false);
-  if (!engine || !engine.online) return null;
+  if (!engine) return null;
   const reach = REACH.find((r) => r.id === engine.mode) ?? REACH[2]!;
   // Full access: Auto without the go-ahead list (StartControls.tsx FULL_ACCESS), said by its own name.
   const bypass = engine.mode === "full" && !!engine.fullAccess;
   const now = bypass ? { ...reach, label: FULL_ACCESS.name, hint: FULL_ACCESS.blurb } : reach;
+  // Its computer away for a moment: the pill stays where it is, saying what it will run as, rather than vanishing from the row
+  // (Arun, 2026-11-19: "the mode selector disappears.... as i resize the window when im chatting"). It changes once it's back.
+  if (!engine.online) {
+    return (
+      <span className="menu-pill agent-pill reach-pill model-pill-static" title={`${now.label}: ${now.hint} It can be changed once ${engine.tool ? "the coding tool" : "this agent"} is connected again.`}>
+        {now.label}
+      </span>
+    );
+  }
   // Everybody in the room can see what this agent may do; only the person whose machine it runs on can change it.
   if (engine.hostId !== me.id) {
     return (

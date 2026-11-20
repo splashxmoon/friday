@@ -59,7 +59,32 @@
 .prp-fail-link:hover { background: var(--hover); color: var(--ink); }
 
 /* Friday seeing it through: a card of its own, lit while it is on. */
-.prp-see { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--r-lg); }
+.prp-see { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--r-lg); }
+.prp-see-head { display: flex; align-items: center; gap: 12px; }
+.prp-see-btn { gap: 6px; }
+.prp-see-does { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 0 42px; padding: 0; list-style: none; }
+.prp-see-does > li { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: var(--r-pill, 999px); background: var(--hover); color: var(--ink-2); font-size: 11.5px; }
+.prp-see-does > li > svg { color: var(--text-muted); }
+.prp-see-last { margin: 0 0 0 42px; color: var(--ink-2); font-size: 12px; line-height: 1.45; }
+.prp-see-last.warn b { color: var(--amber); }
+.prp-see-when { color: var(--text-muted); }
+.prp-see-now { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: var(--r-md); background: color-mix(in srgb, var(--ink) 4%, transparent); }
+.prp-see-now-text { color: var(--ink); font-size: 12.5px; line-height: 1.45; }
+.prp-see-now-text > b { margin-right: 6px; color: var(--green); font-weight: 600; }
+.prp-see-now-text.bad > b { color: var(--red); }
+.prp-see-meters { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--text-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.prp-see-log { display: flex; flex-direction: column; gap: 6px; }
+.prp-see-log ol { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.prp-see-log li { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; padding: 5px 0; font-size: 12px; line-height: 1.45; }
+.prp-see-log li + li { border-top: 1px solid var(--border); }
+.prp-see-log-ic { display: grid; place-items: center; height: 17px; color: var(--text-muted); }
+.prp-see-log li[data-tone="ok"] .prp-see-log-ic { color: var(--green); }
+.prp-see-log li[data-tone="bad"] .prp-see-log-ic { color: var(--red); }
+.prp-see-log li[data-tone="warn"] .prp-see-log-ic { color: var(--amber); }
+.prp-see-log-text { min-width: 0; color: var(--ink-2); overflow-wrap: anywhere; }
+.prp-see-log-text code { margin-left: 6px; padding: 0 5px; border-radius: 4px; background: var(--hover); color: var(--ink-2); font: 11px/16px var(--mono, ui-monospace, monospace); }
+.prp-see-log-text a { text-decoration: none; }
+.prp-see-log time { color: var(--text-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .prp-see.on { border-color: color-mix(in srgb, var(--green) 40%, var(--border)); background: color-mix(in srgb, var(--green) 7%, transparent); }
 .prp-see-mark { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 9px; background: var(--hover); color: var(--text-muted); }
 .prp-see.on .prp-see-mark { background: color-mix(in srgb, var(--green) 14%, transparent); }
@@ -110,6 +135,9 @@
 .prp-by b { color: var(--ink); font-weight: 600; }
 .prp-by code { display: inline-block; max-width: 26ch; overflow: hidden; vertical-align: bottom; text-overflow: ellipsis; white-space: nowrap; }
 .prp-gh { height: 26px; padding: 0 9px; font-size: 12px; text-decoration: none; }
+/* Review in the IDE beside GitHub's link: the repository's name gives way to them in a narrow panel (Arun, 2026-11-20). */
+.prp-ide { height: 26px; padding: 0 9px; font-size: 12px; white-space: nowrap; flex: none; }
+.prp-head-row .prp-gh { flex: none; white-space: nowrap; }
 .prp .gx-chip { text-decoration: none; font-variant-numeric: tabular-nums; }
 .prp-lines { gap: 6px; }
 .prp-lines .add, .prp-add { color: color-mix(in srgb, var(--green) 85%, var(--ink)); font-weight: 600; }
@@ -169,3 +197,34 @@ a.prp-closes:hover { background: color-mix(in srgb, #a855f7 22%, transparent); }
 .prp-desc.folded::after { content: ""; position: absolute; inset: auto 0 0; height: 56px; background: linear-gradient(to bottom, transparent, var(--bg)); pointer-events: none; }
 
 @media (prefers-reduced-motion: reduce) { .prp-spin { animation: none; } }
+
+/* Back to every pull request the session opened (PrList), and that list. */
+.prp-back { margin-left: -6px; color: var(--ink-2); }
+.prp-back:hover { background: var(--hover); color: var(--ink); }
+.prp-list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.prp-list-row { display: flex; flex-direction: column; gap: 6px; width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--panel); color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.prp-list-row:hover { background: var(--hover); }
+/* The one shown: its edge a shade stronger, no bar down its side (Arun, 2026-11-20: "get rid of that weird heightligh on the left"). */
+.prp-list-row[aria-current="true"] { border-color: var(--border-strong); }
+.prp-list-top { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.prp-list-title { flex: 1; min-width: 0; overflow: hidden; color: var(--ink); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.prp-list-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.prp-list-meta b { color: var(--ink-2); font-weight: 600; }
+.prp-pill.small { height: 19px; padding: 0 7px 0 6px; font-size: 11px; }
+.prp-list .prp-lines { flex: none; font-size: 12px; font-variant-numeric: tabular-nums; }
+
+/* See it through, plainly (Arun, 2026-11-20: "get rid of the icon on the left and make it better with proper typography and less
+   secondary text"): a title, one line under it, the button; then, while it works, what it's doing and its log. */
+.prp-see { gap: 12px; padding: 14px 16px; }
+.prp-see-head { align-items: flex-start; gap: 16px; }
+.prp-see-text { gap: 4px; }
+.prp-see-text h4 { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--ink); font-size: 14px; font-weight: 600; line-height: 20px; letter-spacing: -0.005em; }
+.prp-see-text p { margin: 0; color: var(--ink-2); font-size: 13px; line-height: 1.5; text-wrap: pretty; }
+.prp-see-live { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 20%, transparent); }
+.prp-see-btn { flex: none; margin-top: 2px; }
+.prp-see-last { margin: 0; color: var(--ink-2); font-size: 12.5px; line-height: 1.45; }
+.prp-see-now { gap: 4px; padding: 10px 12px; }
+.prp-see-now-text { margin: 0; color: var(--ink); font-size: 13px; line-height: 1.45; }
+.prp-see-now-text.bad { color: color-mix(in srgb, var(--red) 80%, var(--ink)); }
+.prp-see-meters { margin: 0; color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.prp-see-log li { grid-template-columns: minmax(0, 1fr) auto; }

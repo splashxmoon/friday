@@ -80,7 +80,7 @@ export function prRef(v: unknown): PrRef | null {
   const o = v as Partial<PrRef> | null | undefined;
   const ref = typeof o?.url === "string" ? parsePrLink(o.url) : null;
   if (!ref) return null;
-  return { ...ref, title: typeof o?.title === "string" ? o.title.trim().slice(0, 200) : "", head: typeof o?.head === "string" ? o.head.trim().slice(0, 200) : "" };
+  return { ...ref, title: typeof o?.title === "string" ? o.title.trim().slice(0, 200) : "", head: typeof o?.head === "string" ? o.head.trim().slice(0, 200) : "", ...(typeof o?.base === "string" && o.base.trim() ? { base: o.base.trim().slice(0, 200) } : {}) };
 }
 
 /** The pull request through GitHub's API: title, text, and the branches it joins. */

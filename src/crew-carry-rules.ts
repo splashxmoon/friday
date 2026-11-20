@@ -64,18 +64,21 @@ export function carryRows(o: { open: number; decided: number; branch?: string; f
  * What the crew mate is told: the person's line on top, then the brief, the branch and the question, and what to ask first. On this
  * computer its copy of the session's folder is made from the branch, the uncommitted changes carried in (`copied`).
  */
-export function handBrief(o: { title: string; by: string; note: string; leftOff?: string; branch?: { name?: string; files: string[]; copied?: boolean }; question?: string; conversation?: string; ask: readonly string[] }): string {
+export function handBrief(o: { title: string; by: string; note: string; leftOff?: string; branch?: { name?: string; files: string[]; copied?: boolean }; question?: string; conversation?: string; /** The hand-off packet a Code chat writes (src/client/ide/handoff-packet.ts): ask, state, changes, rules; kept apart from the person's own line. */ packet?: string; ask: readonly string[] }): string {
   const asks = ASK_KEYS.filter((k) => o.ask.includes(k)).map((k) => ASK_WORDS[k].toLowerCase());
   const n = o.branch?.files.length ?? 0;
   const files = o.branch ? `${o.branch.files.slice(0, 20).join(", ")}${n > 20 ? "…" : ""}` : "";
   const branch = o.branch
     ? [
         o.branch.name ? (o.branch.copied ? `Your copy starts from the branch ${o.branch.name}: carry on from there, on your own branch.` : `It's on the branch ${o.branch.name}: carry on from there.`) : "",
-        n ? (o.branch.copied ? `The uncommitted changes in ${n} file${n === 1 ? "" : "s"} came with it: ${files}.` : `Uncommitted changes in ${n} file${n === 1 ? "" : "s"}: ${files}.`) : "",
+        // With a packet the files are listed there, with their counts: said once.
+        n ? (o.branch.copied ? `The uncommitted changes in ${n} file${n === 1 ? "" : "s"} came with it${o.packet ? "." : `: ${files}.`}` : `Uncommitted changes in ${n} file${n === 1 ? "" : "s"}${o.packet ? "." : `: ${files}.`}`) : "",
       ].filter(Boolean).join("\n")
     : "";
   return [
-    o.note.trim() || `Carry on with "${clip(o.title, 80)}".`,
+    // A packet starts with its own head line (what was handed, from where): it is read first, not after two generic lines.
+    o.packet ? o.note.trim() : o.note.trim() || `Carry on with "${clip(o.title, 80)}".`,
+    o.packet?.trim() ?? "",
     `(${o.by} handed this on from the session "${clip(o.title, 80)}". Your result goes back there.)`,
     o.leftOff?.trim() ?? "",
     branch,

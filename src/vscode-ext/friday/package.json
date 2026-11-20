@@ -1,0 +1,1117 @@
+{
+  "name": "friday",
+  "displayName": "Friday",
+  "description": "Friday's themes, its task board, Fix with Friday, and Keep / Undo on what an agent writes.",
+  "version": "0.1.0",
+  "publisher": "friday",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Themes",
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "themes": [
+      {
+        "label": "Friday Dark",
+        "uiTheme": "vs-dark",
+        "path": "./themes/friday-dark-color-theme.json"
+      },
+      {
+        "label": "Friday Light",
+        "uiTheme": "vs",
+        "path": "./themes/friday-light-color-theme.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "friday.askAgent",
+        "title": "Friday: Ask an agent about this"
+      },
+      {
+        "command": "friday.askCodebase",
+        "title": "Friday: Ask the codebase"
+      },
+      {
+        "command": "friday.askCodebaseSelection",
+        "title": "Friday: Ask the codebase about this selection"
+      },
+      {
+        "command": "friday.writeCommitMessage",
+        "title": "✳ Write message",
+        "category": "Friday",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "friday.switchMode",
+        "title": "Friday: Switch between Agents and Code"
+      },
+      {
+        "command": "friday.toggleAgent",
+        "title": "Friday: Show or hide the agent column"
+      },
+      {
+        "command": "friday.newTask",
+        "title": "New task",
+        "category": "Friday",
+        "icon": "$(add)"
+      },
+      {
+        "command": "friday.refreshTasks",
+        "title": "Refresh",
+        "category": "Friday",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "friday.openTask",
+        "title": "Open task",
+        "category": "Friday"
+      },
+      {
+        "command": "friday.openTaskInCode",
+        "title": "Open in Code",
+        "category": "Friday",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "friday.fixProblem",
+        "title": "Fix with Friday",
+        "category": "Friday"
+      },
+      {
+        "command": "friday.findBreak",
+        "title": "Find the commit that broke this",
+        "category": "Friday",
+        "icon": "$(git-commit)"
+      },
+      {
+        "command": "friday.openCommit",
+        "title": "Open a commit's changes",
+        "category": "Friday"
+      },
+      {
+        "command": "friday.showTasks",
+        "title": "Show tasks",
+        "category": "Friday"
+      },
+      {
+        "command": "friday.reviewChanges",
+        "title": "Review this branch's changes",
+        "category": "Friday",
+        "icon": "$(diff-multiple)"
+      },
+      {
+        "command": "friday.pr.reply",
+        "title": "Add to review",
+        "category": "Friday"
+      },
+      {
+        "command": "friday.pr.keepDraft",
+        "title": "Keep this draft",
+        "category": "Friday",
+        "icon": "$(check)"
+      },
+      {
+        "command": "friday.pr.editNote",
+        "title": "Edit",
+        "category": "Friday",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "friday.pr.dropNote",
+        "title": "Drop",
+        "category": "Friday",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "friday.pr.firstPass",
+        "title": "Agent's first pass on this pull request",
+        "category": "Friday",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "friday.pr.submit",
+        "title": "Submit review…",
+        "category": "Friday",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "friday.pr.refresh",
+        "title": "Refresh the pull request's comments",
+        "category": "Friday",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "friday.pr.openFile",
+        "title": "Open a pull request file's diff",
+        "category": "Friday"
+      },
+      {
+        "command": "friday.pr.reveal",
+        "title": "Show a pull request comment",
+        "category": "Friday"
+      },
+      {
+        "command": "friday.pr.loose",
+        "title": "Read an agent finding",
+        "category": "Friday"
+      },
+      {
+        "command": "friday.pr.openOnGitHub",
+        "title": "Open the pull request on GitHub",
+        "category": "Friday",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "friday.addRule",
+        "title": "Add rule",
+        "category": "Friday",
+        "icon": "$(add)"
+      },
+      {
+        "command": "friday.openRulesFile",
+        "title": "Open rules file",
+        "category": "Friday",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "friday.editRule",
+        "title": "Edit rule",
+        "category": "Friday",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "friday.removeRule",
+        "title": "Remove rule",
+        "category": "Friday",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "friday.refreshRules",
+        "title": "Refresh rules",
+        "category": "Friday",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "friday.toggleRule",
+        "title": "Switch this rule",
+        "category": "Friday"
+      },
+      {
+        "command": "friday.lensAction",
+        "title": "Friday: Act on a function",
+        "category": "Friday"
+      },
+      {
+        "command": "friday.editWithAgent",
+        "title": "Edit the selection with an agent",
+        "category": "Friday"
+      },
+      {
+        "command": "friday.refactorAcross",
+        "title": "Refactor across the codebase…",
+        "category": "Friday"
+      },
+      {
+        "command": "friday.toggleFollow",
+        "title": "Follow the agent: open the files it edits",
+        "category": "Friday"
+      },
+      {
+        "command": "friday.agentStatus",
+        "title": "The agent is editing this file",
+        "category": "Friday"
+      },
+      {
+        "command": "friday.marks.keep",
+        "title": "Keep this change",
+        "category": "Friday"
+      },
+      {
+        "command": "friday.marks.undo",
+        "title": "Undo this change",
+        "category": "Friday"
+      },
+      {
+        "command": "friday.marks.keepAll",
+        "title": "Keep all the agent's changes in this file",
+        "category": "Friday",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "friday.marks.undoAll",
+        "title": "Undo all the agent's changes in this file",
+        "category": "Friday",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "friday.marks.compare",
+        "title": "Compare with before the agent",
+        "category": "Friday",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "friday.marks.about",
+        "title": "About this change",
+        "category": "Friday"
+      },
+      {
+        "command": "friday.debugAsk",
+        "title": "Ask Friday about this stop",
+        "category": "Friday",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "friday.debugWithAgent",
+        "title": "Debug this with an agent",
+        "category": "Friday"
+      },
+      {
+        "command": "friday.showCoverage",
+        "title": "Show coverage",
+        "category": "Friday"
+      },
+      {
+        "command": "friday.coverChanged",
+        "title": "Write tests for what changed",
+        "category": "Friday"
+      },
+      {
+        "command": "friday.runCoverage",
+        "title": "Run coverage",
+        "category": "Friday",
+        "icon": "$(play)"
+      },
+      {
+        "command": "friday.refreshCoverage",
+        "title": "Refresh coverage",
+        "category": "Friday",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "friday.coverFunction",
+        "title": "Write tests for the uncovered lines of a function",
+        "category": "Friday"
+      },
+      {
+        "command": "friday.showStack",
+        "title": "Show the stack",
+        "category": "Friday"
+      },
+      {
+        "command": "friday.restack",
+        "title": "Restack",
+        "category": "Friday",
+        "icon": "$(repo-pull)"
+      },
+      {
+        "command": "friday.refreshStack",
+        "title": "Refresh the stack",
+        "category": "Friday",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "friday.openStackPr",
+        "title": "Open the pull request",
+        "category": "Friday"
+      },
+      {
+        "command": "friday.ciChecks",
+        "title": "Show the pull request's checks",
+        "category": "Friday"
+      },
+      {
+        "command": "friday.ciFix",
+        "title": "Fix the failing checks with Friday",
+        "category": "Friday"
+      },
+      {
+        "command": "friday.ciOpenCheck",
+        "title": "Open a check's log",
+        "category": "Friday"
+      },
+      {
+        "command": "friday.ciRefresh",
+        "title": "Refresh the pull request's checks",
+        "category": "Friday"
+      },
+      {
+        "command": "friday.todo.hand",
+        "title": "Hand this TODO to an agent",
+        "category": "Friday",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "friday.todo.open",
+        "title": "Open",
+        "category": "Friday",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "friday.todo.refresh",
+        "title": "Look for TODOs again",
+        "category": "Friday",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "friday.terminal.write",
+        "title": "Write a command",
+        "category": "Friday"
+      },
+      {
+        "command": "friday.terminal.explain",
+        "title": "Explain the last failed command",
+        "category": "Friday"
+      },
+      {
+        "command": "friday.servers.start",
+        "title": "Start",
+        "category": "Friday",
+        "icon": "$(play)"
+      },
+      {
+        "command": "friday.servers.stop",
+        "title": "Stop",
+        "category": "Friday",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "friday.servers.restart",
+        "title": "Restart",
+        "category": "Friday",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "friday.servers.open",
+        "title": "Open in the browser",
+        "category": "Friday",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "friday.servers.openInIde",
+        "title": "Open in the IDE's browser",
+        "category": "Friday",
+        "icon": "$(window)"
+      },
+      {
+        "command": "friday.servers.logs",
+        "title": "Show logs",
+        "category": "Friday",
+        "icon": "$(output)"
+      },
+      {
+        "command": "friday.servers.refresh",
+        "title": "Refresh the servers",
+        "category": "Friday",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "friday.servers.menu",
+        "title": "Servers",
+        "category": "Friday"
+      },
+      {
+        "command": "friday.showServers",
+        "title": "Show the servers",
+        "category": "Friday"
+      },
+      {
+        "command": "friday.palette",
+        "title": "Friday: Everything Friday can do here"
+      },
+      {
+        "command": "friday.memory.add",
+        "title": "Add to memory",
+        "category": "Friday",
+        "icon": "$(add)"
+      },
+      {
+        "command": "friday.memory.edit",
+        "title": "Edit memory",
+        "category": "Friday",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "friday.memory.forget",
+        "title": "Forget",
+        "category": "Friday",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "friday.memory.refresh",
+        "title": "Refresh memory",
+        "category": "Friday",
+        "icon": "$(refresh)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "friday.askAgent",
+        "key": "ctrl+l",
+        "mac": "cmd+l",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "friday.askCodebase",
+        "key": "ctrl+k ctrl+a",
+        "mac": "cmd+alt+a",
+        "when": "!terminalFocus"
+      },
+      {
+        "command": "friday.switchMode",
+        "key": "ctrl+e",
+        "mac": "cmd+e"
+      },
+      {
+        "command": "friday.toggleAgent",
+        "key": "ctrl+alt+b",
+        "mac": "cmd+alt+b"
+      },
+      {
+        "command": "friday.editWithAgent",
+        "key": "ctrl+k",
+        "mac": "cmd+k",
+        "when": "editorTextFocus && !editorReadonly && editorHasSelection"
+      },
+      {
+        "command": "friday.marks.keep",
+        "key": "ctrl+enter",
+        "mac": "cmd+enter",
+        "when": "editorTextFocus && friday.markAtCursor"
+      },
+      {
+        "command": "friday.marks.undo",
+        "key": "ctrl+backspace",
+        "mac": "cmd+backspace",
+        "when": "editorTextFocus && friday.markAtCursor"
+      },
+      {
+        "command": "friday.terminal.write",
+        "key": "ctrl+i",
+        "mac": "cmd+i",
+        "when": "terminalFocus"
+      },
+      {
+        "command": "friday.palette",
+        "key": "ctrl+shift+'",
+        "mac": "cmd+shift+'"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "friday.askAgent",
+          "group": "9_friday@1",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "friday.editWithAgent",
+          "group": "9_friday@2",
+          "when": "editorTextFocus && !editorReadonly"
+        },
+        {
+          "command": "friday.debugWithAgent",
+          "group": "9_friday@3",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "friday.refactorAcross",
+          "group": "9_friday@4",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "friday.askCodebaseSelection",
+          "group": "9_friday@5",
+          "when": "editorTextFocus && editorHasSelection"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "friday.askAgent",
+          "when": "editorIsOpen"
+        },
+        {
+          "command": "friday.findBreak",
+          "when": "true"
+        },
+        {
+          "command": "friday.openCommit",
+          "when": "false"
+        },
+        {
+          "command": "friday.askCodebaseSelection",
+          "when": "false"
+        },
+        {
+          "command": "friday.openTask",
+          "when": "false"
+        },
+        {
+          "command": "friday.openTaskInCode",
+          "when": "false"
+        },
+        {
+          "command": "friday.fixProblem",
+          "when": "false"
+        },
+        {
+          "command": "friday.editRule",
+          "when": "false"
+        },
+        {
+          "command": "friday.removeRule",
+          "when": "false"
+        },
+        {
+          "command": "friday.toggleRule",
+          "when": "false"
+        },
+        {
+          "command": "friday.lensAction",
+          "when": "false"
+        },
+        {
+          "command": "friday.editWithAgent",
+          "when": "editorIsOpen && !editorReadonly"
+        },
+        {
+          "command": "friday.agentStatus",
+          "when": "false"
+        },
+        {
+          "command": "friday.debugAsk",
+          "when": "friday.debugStopped"
+        },
+        {
+          "command": "friday.marks.keep",
+          "when": "false"
+        },
+        {
+          "command": "friday.marks.undo",
+          "when": "false"
+        },
+        {
+          "command": "friday.marks.about",
+          "when": "false"
+        },
+        {
+          "command": "friday.marks.compare",
+          "when": "friday.fileHasMarks"
+        },
+        {
+          "command": "friday.marks.keepAll",
+          "when": "friday.fileHasMarks"
+        },
+        {
+          "command": "friday.marks.undoAll",
+          "when": "friday.fileHasMarks"
+        },
+        {
+          "command": "friday.coverFunction",
+          "when": "false"
+        },
+        {
+          "command": "friday.pr.reply",
+          "when": "false"
+        },
+        {
+          "command": "friday.pr.keepDraft",
+          "when": "false"
+        },
+        {
+          "command": "friday.pr.editNote",
+          "when": "false"
+        },
+        {
+          "command": "friday.pr.dropNote",
+          "when": "false"
+        },
+        {
+          "command": "friday.pr.openFile",
+          "when": "false"
+        },
+        {
+          "command": "friday.pr.reveal",
+          "when": "false"
+        },
+        {
+          "command": "friday.pr.loose",
+          "when": "false"
+        },
+        {
+          "command": "friday.pr.firstPass",
+          "when": "friday.prReview"
+        },
+        {
+          "command": "friday.pr.submit",
+          "when": "friday.prReview"
+        },
+        {
+          "command": "friday.pr.refresh",
+          "when": "friday.prReview"
+        },
+        {
+          "command": "friday.pr.openOnGitHub",
+          "when": "friday.prReview"
+        },
+        {
+          "command": "friday.showStack",
+          "when": "true"
+        },
+        {
+          "command": "friday.restack",
+          "when": "friday.hasStack"
+        },
+        {
+          "command": "friday.refreshStack",
+          "when": "false"
+        },
+        {
+          "command": "friday.openStackPr",
+          "when": "false"
+        },
+        {
+          "command": "friday.ciOpenCheck",
+          "when": "false"
+        },
+        {
+          "command": "friday.todo.hand",
+          "when": "false"
+        },
+        {
+          "command": "friday.todo.open",
+          "when": "false"
+        },
+        {
+          "command": "friday.memory.edit",
+          "when": "false"
+        },
+        {
+          "command": "friday.memory.forget",
+          "when": "false"
+        }
+      ],
+      "scm/inputBox": [
+        {
+          "command": "friday.writeCommitMessage",
+          "when": "scmProvider == git"
+        }
+      ],
+      "scm/title": [
+        {
+          "command": "friday.writeCommitMessage",
+          "when": "scmProvider == git",
+          "group": "2_friday@0"
+        },
+        {
+          "command": "friday.findBreak",
+          "when": "scmProvider == git",
+          "group": "2_friday@1"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "friday.newTask",
+          "when": "view == friday.tasks",
+          "group": "navigation@1"
+        },
+        {
+          "command": "friday.refreshTasks",
+          "when": "view == friday.tasks",
+          "group": "navigation@2"
+        },
+        {
+          "command": "friday.addRule",
+          "when": "view == friday.rules",
+          "group": "navigation@1"
+        },
+        {
+          "command": "friday.openRulesFile",
+          "when": "view == friday.rules",
+          "group": "navigation@2"
+        },
+        {
+          "command": "friday.runCoverage",
+          "when": "view == friday.coverage",
+          "group": "navigation@1"
+        },
+        {
+          "command": "friday.refreshCoverage",
+          "when": "view == friday.coverage",
+          "group": "navigation@2"
+        },
+        {
+          "command": "friday.pr.firstPass",
+          "group": "navigation@1",
+          "when": "view == friday.pullRequest"
+        },
+        {
+          "command": "friday.pr.submit",
+          "group": "navigation@2",
+          "when": "view == friday.pullRequest"
+        },
+        {
+          "command": "friday.pr.refresh",
+          "group": "navigation@3",
+          "when": "view == friday.pullRequest"
+        },
+        {
+          "command": "friday.restack",
+          "when": "view == friday.stack",
+          "group": "navigation@1"
+        },
+        {
+          "command": "friday.refreshStack",
+          "when": "view == friday.stack",
+          "group": "navigation@2"
+        },
+        {
+          "command": "friday.todo.refresh",
+          "when": "view == friday.todos",
+          "group": "navigation@1"
+        },
+        {
+          "command": "friday.servers.refresh",
+          "when": "view == friday.servers",
+          "group": "navigation@1"
+        },
+        {
+          "command": "friday.memory.add",
+          "when": "view == friday.memory",
+          "group": "navigation@1"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "friday.openTaskInCode",
+          "when": "view == friday.tasks && viewItem == friday.task.agents",
+          "group": "inline@1"
+        },
+        {
+          "command": "friday.openTaskInCode",
+          "when": "view == friday.tasks && viewItem == friday.task.agents",
+          "group": "1_open@1"
+        },
+        {
+          "command": "friday.editRule",
+          "when": "view == friday.rules && viewItem == friday.rule",
+          "group": "inline@1"
+        },
+        {
+          "command": "friday.removeRule",
+          "when": "view == friday.rules && viewItem == friday.rule",
+          "group": "inline@2"
+        },
+        {
+          "command": "friday.restack",
+          "when": "view == friday.stack && viewItem == friday.stack",
+          "group": "inline@1"
+        },
+        {
+          "command": "friday.openStackPr",
+          "when": "view == friday.stack && viewItem == friday.stackPart.pr",
+          "group": "inline@1"
+        },
+        {
+          "command": "friday.todo.open",
+          "when": "view == friday.todos && viewItem == friday.todo",
+          "group": "inline@1"
+        },
+        {
+          "command": "friday.todo.hand",
+          "when": "view == friday.todos && viewItem == friday.todo",
+          "group": "inline@2"
+        },
+        {
+          "command": "friday.todo.hand",
+          "when": "view == friday.todos && viewItem == friday.todo",
+          "group": "1_friday@1"
+        },
+        {
+          "command": "friday.todo.open",
+          "when": "view == friday.todos && viewItem == friday.todo",
+          "group": "1_friday@2"
+        },
+        {
+          "command": "friday.servers.start",
+          "when": "view == friday.servers && viewItem == friday.server.down",
+          "group": "inline@1"
+        },
+        {
+          "command": "friday.servers.open",
+          "when": "view == friday.servers && viewItem == friday.server.up",
+          "group": "inline@1"
+        },
+        {
+          "command": "friday.servers.restart",
+          "when": "view == friday.servers && viewItem == friday.server.up",
+          "group": "inline@2"
+        },
+        {
+          "command": "friday.servers.stop",
+          "when": "view == friday.servers && viewItem == friday.server.up",
+          "group": "inline@3"
+        },
+        {
+          "command": "friday.servers.open",
+          "when": "view == friday.servers && viewItem == friday.server.external",
+          "group": "inline@1"
+        },
+        {
+          "command": "friday.servers.stop",
+          "when": "view == friday.servers && viewItem == friday.server.external",
+          "group": "inline@2"
+        },
+        {
+          "command": "friday.servers.logs",
+          "when": "view == friday.servers && viewItem == friday.server.down",
+          "group": "navigation@5"
+        },
+        {
+          "command": "friday.servers.logs",
+          "when": "view == friday.servers && viewItem == friday.server.up",
+          "group": "navigation@5"
+        },
+        {
+          "command": "friday.servers.openInIde",
+          "when": "view == friday.servers && viewItem == friday.server.up",
+          "group": "navigation@6"
+        },
+        {
+          "command": "friday.servers.openInIde",
+          "when": "view == friday.servers && viewItem == friday.server.external",
+          "group": "navigation@6"
+        },
+        {
+          "command": "friday.memory.edit",
+          "when": "view == friday.memory && viewItem == friday.memory.entry",
+          "group": "inline@1"
+        },
+        {
+          "command": "friday.memory.forget",
+          "when": "view == friday.memory && viewItem == friday.memory.entry",
+          "group": "inline@2"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "friday.debugAsk",
+          "when": "friday.debugStopped",
+          "group": "navigation@89"
+        },
+        {
+          "command": "friday.marks.compare",
+          "when": "friday.fileHasMarks",
+          "group": "navigation@90"
+        },
+        {
+          "command": "friday.marks.undoAll",
+          "when": "friday.fileHasMarks",
+          "group": "navigation@91"
+        },
+        {
+          "command": "friday.marks.keepAll",
+          "when": "friday.fileHasMarks",
+          "group": "navigation@92"
+        }
+      ],
+      "comments/commentThread/context": [
+        {
+          "command": "friday.pr.reply",
+          "group": "inline",
+          "when": "commentController == friday.prReview"
+        }
+      ],
+      "comments/comment/title": [
+        {
+          "command": "friday.pr.keepDraft",
+          "group": "inline@1",
+          "when": "commentController == friday.prReview && comment == friday.draft"
+        },
+        {
+          "command": "friday.pr.editNote",
+          "group": "inline@2",
+          "when": "commentController == friday.prReview && (comment == friday.draft || comment == friday.pending)"
+        },
+        {
+          "command": "friday.pr.dropNote",
+          "group": "inline@3",
+          "when": "commentController == friday.prReview && (comment == friday.draft || comment == friday.pending)"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "friday",
+          "title": "Friday",
+          "icon": "media/friday.svg"
+        }
+      ],
+      "secondarySidebar": [
+        {
+          "id": "fridayChat",
+          "title": "Agent",
+          "icon": "media/friday.svg"
+        }
+      ]
+    },
+    "views": {
+      "friday": [
+        {
+          "id": "friday.pullRequest",
+          "name": "Pull request",
+          "icon": "media/friday.svg",
+          "when": "friday.prReview"
+        },
+        {
+          "id": "friday.tasks",
+          "name": "Tasks",
+          "icon": "media/friday.svg"
+        },
+        {
+          "id": "friday.stack",
+          "name": "Stack",
+          "icon": "media/friday.svg",
+          "when": "friday.hasStack"
+        },
+        {
+          "id": "friday.rules",
+          "name": "Rules",
+          "icon": "media/friday.svg",
+          "when": "!friday.prReview"
+        },
+        {
+          "id": "friday.coverage",
+          "name": "Coverage",
+          "icon": "media/friday.svg",
+          "when": "!friday.prReview && friday.hasCoverage"
+        },
+        {
+          "id": "friday.todos",
+          "name": "TODOs",
+          "icon": "media/friday.svg",
+          "initialSize": 3,
+          "when": "!friday.prReview && friday.hasTodos"
+        },
+        {
+          "id": "friday.servers",
+          "name": "Servers",
+          "icon": "media/friday.svg",
+          "when": "friday.hasServers"
+        },
+        {
+          "id": "friday.memory",
+          "name": "Memory",
+          "icon": "media/friday.svg",
+          "when": "!friday.prReview"
+        }
+      ],
+      "fridayChat": [
+        {
+          "id": "friday.chatSpace",
+          "name": "Agent"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "friday.tasks",
+        "contents": "No tasks yet.\n[New task](command:friday.newTask)\nStart one from the chat beside the editor, a Fix with Friday on an error, or a failing command."
+      },
+      {
+        "view": "friday.rules",
+        "contents": "No rules yet.\nTell an agent once (\"we use pnpm\") and save it, or add one here. Every coding tool follows them in this repo.\n[Add rule](command:friday.addRule)\nThey are kept in .friday/rules.md, which the team gets with the repo.",
+        "when": "workspaceFolderCount > 0"
+      },
+      {
+        "view": "friday.rules",
+        "contents": "Open a folder first: rules are kept in the project's .friday/rules.md.",
+        "when": "workspaceFolderCount == 0"
+      },
+      {
+        "view": "friday.coverage",
+        "contents": "No coverage report yet.\n[Run coverage](command:friday.runCoverage)\nFriday reads coverage/lcov.info, coverage/coverage-final.json or coverage.xml in this folder, then writes tests for what no test runs, starting with what changed.",
+        "when": "!friday.hasCoverage"
+      },
+      {
+        "view": "friday.stack",
+        "contents": "No stack here.\nWhen a chat's changes are big, its changes card offers Split into a stack: small pull requests, each based on the last. Friday keeps them rebased here.",
+        "when": "!friday.hasStack"
+      },
+      {
+        "view": "friday.todos",
+        "contents": "No TODO, FIXME or HACK comments in this folder.\nWhen you leave one in the code, it is listed here, and one click hands it to an agent to do and to remove.\n[Look again](command:friday.todo.refresh)",
+        "when": "friday.todosScanned && !friday.hasTodos"
+      },
+      {
+        "view": "friday.todos",
+        "contents": "Looking for TODO comments…",
+        "when": "!friday.todosScanned"
+      },
+      {
+        "view": "friday.memory",
+        "contents": "Nothing remembered yet.\nAs agents work here, in Code or Agents, what they learn (how to run it, decisions, quirks) is kept and given to every tool. Add what you know too.\n[Add to memory](command:friday.memory.add)",
+        "when": "workspaceFolderCount > 0"
+      },
+      {
+        "view": "friday.memory",
+        "contents": "Open a folder first: memory is kept for the project.",
+        "when": "workspaceFolderCount == 0"
+      }
+    ],
+    "configuration": {
+      "title": "Friday",
+      "properties": {
+        "friday.functionActions": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Explain, Test, Fix and Refactor above each function, method and class."
+        },
+        "friday.quietWhileTyping": {
+          "type": "boolean",
+          "default": true,
+          "description": "While you type in the editor, hold Friday's chimes and toasts. They arrive as one quiet summary when you pause."
+        },
+        "friday.followAgent": {
+          "type": "boolean",
+          "default": false,
+          "description": "Open each file an agent edits, beside the editor, without taking focus."
+        },
+        "friday.coverage": {
+          "type": "boolean",
+          "default": false,
+          "description": "Mark the lines no test runs in the editor, and add Test above each function that has some, from the coverage report in the folder."
+        },
+        "friday.todoActions": {
+          "type": "boolean",
+          "default": true,
+          "description": "Add \"Do this\" above each TODO, FIXME and HACK comment in the editor, to hand it to an agent."
+        }
+      }
+    },
+    "colors": [
+      {
+        "id": "friday.uncoveredLine",
+        "description": "The mark for a line no test runs (Friday coverage).",
+        "defaults": {
+          "dark": "#d9a441",
+          "light": "#b7791f",
+          "highContrast": "#ffcc00",
+          "highContrastLight": "#7a5200"
+        }
+      }
+    ],
+    "configurationDefaults": {
+      "terminal.integrated.commandsToSkipShell": [
+        "friday.terminal.write"
+      ]
+    }
+  }
+}

@@ -27,6 +27,7 @@ import { shellName } from "./background.js";
 import { Prespawn, spawnCli, WarmAcp, WarmClaude, type AcpHow, type CliProcess } from "./spawn-cli.js";
 import { CODEX_BUILTINS, expandCommand, skillCommands, toolCommandsIn } from "./tool-commands.js";
 import { skillsNote } from "./shared-skills.js";
+import { rulesNoteFor } from "./repo-rules.js";
 import { parseContextReport, type ToolContext } from "./context-report.js";
 import { projectMcpServers, type AcpMcpServer } from "./mcp-servers.js";
 import { acpMount, claudeMountFile, codexMount, mountedServers } from "./connections.js";
@@ -523,6 +524,8 @@ export class Runner {
   private lost = false;
   /** The standing instructions the CLI's conversation was last given, so a tool that takes them in its prompt is told again only when they change. */
   private sentSystem: string | null = null;
+  /** The standing note as the tool last heard it, rules and skills in: a rule saved since is a change worth saying (Arun, 2026-11-19: "a rule every tool follows"). */
+  private sentNoted: string | null = null;
   /** The skills on this computer this tool doesn't load by itself, for its standing note (shared-skills.ts), and when they were looked at. */
   private skills = "";
   private skillsAt = 0;
@@ -1276,6 +1279,18 @@ export class Runner {
    * mid-session reaches the next turn without a read of every skill folder on each one.
    */
   private loadSkills(): Promise<void> {
+    // The repo's rules are read every time (a small file, and one edited a moment ago must reach the next turn), beside the skills.
+    return Promise.all([this.loadRules(), this.loadSkillNote()]).then(() => {});
+  }
+  private rules = "";
+  /** The folder's .friday/rules.md for this tool (Arun, 2026-11-19: "a rule every tool follows"). */
+  private loadRules(): Promise<void> {
+    return rulesNoteFor(this.opts.cwd, this.opts.tool).then(
+      (n) => void (this.rules = n),
+      () => {},
+    );
+  }
+  private loadSkillNote(): Promise<void> {
     const tool = this.opts.tool;
     // A look under way is waited for, not skipped: a turn right after the start would otherwise go without the note.
     if (!tool || Date.now() - this.skillsAt < 60_000) return this.skillsLook;
@@ -1289,7 +1304,9 @@ export class Runner {
   private skillsLook: Promise<void> = Promise.resolve();
   /** A standing note with the skills note after it; none to add to, none added. */
   private noted(system: string): string {
-    return system && this.skills ? `${system}\n\n${this.skills}` : system;
+    const extra = [this.rules, this.skills].filter(Boolean).join("\n\n");
+    // With no standing note the rules still go (a feature that promises every tool must not skip a chat), the skills note does not.
+    return system && extra ? `${system}\n\n${extra}` : system || this.rules;
   }
 
   private async systemFileFor(system: string): Promise<string | undefined> {
@@ -1662,7 +1679,8 @@ export class Runner {
     // hand before the tool hears anything. The folder's starting point follows it: the first one is that checkpoint (ensureBase).
     const based = (m.checkpoint && !retry ? this.turnCheckpoint(m.id) : Promise.resolve()).then(() => this.ensureBase());
     await this.loadSkills();
-    const systemFiling = this.systemFileFor(this.noted(m.system));
+    const notedNow = this.noted(m.system);
+    const systemFiling = this.systemFileFor(notedNow);
     systemFiling.catch(() => {}); // awaited below, where it fails the turn; a turn stopped before then leaves it unread
     // One of the tool's own `/` commands, typed alone: sent as the tool takes it, and nothing put in front of it.
     const own = m.command ? await this.ownCommand(m.command).catch(() => null) : null;
@@ -1726,7 +1744,7 @@ ${prompt}`;
       ...this.spec(prompt, m.system, mcp, grant, this.unpaid !== null && (m.model ?? "") === this.unpaid ? MODEL_FALLBACK[this.opts.tool] : m.model, m.effort),
       // A conversation picked up and resumed has never been told, and one that was told has not heard what changed since. A new
       // one always is: a turn the CLI gave no id for leaves the next to start another.
-      withSystem: !bare && (!this.resumeId || m.system !== this.sentSystem),
+      withSystem: !bare && (!this.resumeId || m.system !== this.sentSystem || notedNow !== this.sentNoted),
       ...(this.account && this.account.id !== DEFAULT_ACCOUNT ? { account: this.account.id } : {}),
       ...(systemFile ? { systemFile } : {}),
       ...(fork ? { fork } : {}),
@@ -1987,11 +2005,15 @@ ${prompt}`;
         this.resumeId = null;
         this.lost = true;
         this.sentSystem = null;
+        this.sentNoted = null;
         this.send({ kind: "resume.lost" });
       }
     }
     // Whatever the conversation is now, it was given these instructions, unless the tool failed before reading them.
-    if (outcome !== "error" && !bare) this.sentSystem = m.system;
+    if (outcome !== "error" && !bare) {
+      this.sentSystem = m.system;
+      this.sentNoted = notedNow;
+    }
     // A kept ACP tool that failed a turn may not get past it (signed in since, its conversation gone): the next starts it afresh.
     if (outcome === "error") this.acp?.reset();
 
@@ -2206,7 +2228,7 @@ ${prompt}`;
         // Plan changes nothing, so a change is refused without asking anyone; its commands are still put to a person.
         if (this.mode === "plan" && PLAN_REFUSES.includes(out.tool)) {
           if (out.reply) out.reply(false);
-          else this.warm?.answer(out.requestId, false, out.input, out.tool === "ExitPlanMode" ? "Plan mode: the plan you wrote is shown to the person, who decides when it is carried out. Stop here." : "Plan mode doesn't change files. Say what you would change instead.");
+          else this.warm?.answer(out.requestId, false, out.input, out.tool === "ExitPlanMode" ? "Plan mode: what you give this tool is not shown to the person, only your reply is, and they decide when the plan is carried out. If the plan is not already written in your reply, write it there now, in full, as text (with any block you were asked to end with). Then stop." : "Plan mode doesn't change files. Say what you would change instead.");
           break;
         }
         const { scope, item } = askedItem(out.tool, out.input);

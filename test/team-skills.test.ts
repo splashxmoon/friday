@@ -1,7 +1,7 @@
 // Crew skills (team-skills.ts): named, reusable procedures the crew keeps, listed in each teammate's note, fetched with use_skill,
 // proposed by a teammate with save_skill as a card the person keeps or drops (Arun, 2026-10-31: skills, the biggest repeat-work saver).
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -166,4 +166,27 @@ test("an out-of-date skill gets a teammate's change, kept in place; one kept for
     await kv.close();
     await rm(home, { recursive: true, force: true });
   }
+});
+
+test("a crew mate's list_skills and use_skill have the person's own skills too, the Skills page's, beside the crew's", async (t) => {
+  const home = await mkdtemp(path.join(tmpdir(), "friday-skills-lib-"));
+  const kv = await localKV(home);
+  t.after(async () => (await kv.close(), await rm(home, { recursive: true, force: true })));
+  const file = path.join(home, ".agents", "skills", "review-pr", "SKILL.md");
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file, '---\nname: review-pr\ndescription: "Reviewing a pull request against our standards."\n---\n\n1. Read the linked issue.\n');
+  const store = new SkillStore(kv.redis, "friday:");
+  const place = async () => ({ store, mate: { id: "nova", name: "Nova" }, name: "Nova", person: { id: "local", name: "Me" }, mateName: (id: string) => (id === "nova" ? "Nova" : undefined), card: async () => {} });
+  const tools = skillTools(place, async () => [{ name: "review-pr", description: "Reviewing a pull request against our standards.", file }]);
+  const list = await tools.call("s", "l", "list_skills", {});
+  assert.match(list.output, /The crew has no skills yet/);
+  assert.match(list.output, /The person's own, on this computer[^\n]*\nreview-pr: Reviewing a pull request against our standards\./);
+  const used = await tools.call("s", "l", "use_skill", { name: "review", inputs: "PR #42" });
+  assert.equal(used.isError, undefined);
+  assert.match(used.output, /The person's skill “review-pr”, from .*review-pr\/SKILL\.md/);
+  assert.match(used.output, /This time: PR #42/);
+  assert.match(used.output, /1\. Read the linked issue\./);
+  // Without the person's skills (the hosted service), as before.
+  assert.doesNotMatch((await skillTools(place).call("s", "l", "list_skills", {})).output, /person's own/);
+  assert.equal((await skillTools(place).call("s", "l", "use_skill", { name: "review-pr" })).isError, true);
 });

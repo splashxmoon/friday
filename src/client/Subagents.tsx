@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDownIcon } from "lucide-react";
 import { Icon } from "./icons.js";
@@ -181,26 +181,37 @@ function SubRow({ r, now, open, onToggle, onJump }: { r: SubagentRow; now: numbe
   );
 }
 
+/**
+ * The card folds to its one-line head once every subagent in it is back (Arun, 2026-11-20: "make sure the sub agents card
+ * collapses down when it is all done"): open while any works, folded when none does, and the head opens or folds it by hand,
+ * which then stays as it was put.
+ */
 export function Subagents({ rows }: { rows: SubagentRow[] }) {
   const t = tallyOf(rows);
   const now = useNow(t.working > 0);
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [shown, setShown] = useState<boolean | null>(null);
+  const listId = useId();
   if (!rows.length) return null;
+  const expanded = shown ?? t.working > 0;
   return (
-    <section className="subs" aria-label={`${rows.length} subagent${rows.length === 1 ? "" : "s"}: ${t.text}`}>
-      <header className="subs-head">
+    <section className="subs" data-open={expanded} aria-label={`${rows.length} subagent${rows.length === 1 ? "" : "s"}: ${t.text}`}>
+      <button type="button" className="subs-head" aria-expanded={expanded} aria-controls={listId} title={expanded ? "Fold" : "Show each subagent"} onClick={() => setShown(!expanded)}>
         <span className="subs-icon" aria-hidden="true">
           <Icon name="gitFork" size={14} />
         </span>
         <span className="subs-title">{rows.length === 1 ? "Subagent" : `${rows.length} subagents`}</span>
         <span className="subs-state">{t.text}</span>
         {rows.length > 1 && <TallyBar rows={rows} />}
-      </header>
-      <ol className="subs-list">
-        {rows.map((r) => (
-          <SubRow key={r.key} r={r} now={now} open={!!open[r.key]} onToggle={() => setOpen((o) => ({ ...o, [r.key]: !o[r.key] }))} />
-        ))}
-      </ol>
+        <ChevronDownIcon className="subs-chev size-3.5" aria-hidden="true" />
+      </button>
+      {expanded && (
+        <ol id={listId} className="subs-list">
+          {rows.map((r) => (
+            <SubRow key={r.key} r={r} now={now} open={!!open[r.key]} onToggle={() => setOpen((o) => ({ ...o, [r.key]: !o[r.key] }))} />
+          ))}
+        </ol>
+      )}
     </section>
   );
 }

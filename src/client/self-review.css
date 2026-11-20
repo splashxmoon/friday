@@ -1,0 +1,57 @@
+/* The agent's self-review card: quiet and flush, in Friday's own variables, both themes (SelfReviewCard.tsx). Roomy rather than
+   dense (Arun, 2026-11-20: "better spacing and visuals… this seems so cramped and information dense"): a summary first, what is
+   left for you apart from what it fixed, each finding its title, its words and one small line of where, and a long run of fixes
+   folded. */
+.sfr-card { margin: 12px 0; padding: 4px 16px 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); color: var(--ink); font: 400 13px/1.5 var(--font); }
+.sfr-head { display: flex; align-items: center; gap: 8px; padding: 12px 0 6px; min-width: 0; }
+.sfr-head b { font-weight: 600; font-size: 13.5px; }
+.sfr-head-mark { display: grid; place-items: center; color: var(--green); }
+.sfr-counts i { font-style: normal; margin-right: 6px; }
+.sfr-counts { color: var(--text-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sfr-none { margin: 4px 0 10px; color: var(--ink-2); }
+
+/* The summary: fixed and for you as two soft pills, then what kinds of things it found. */
+.sfr-sum { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 4px 0 14px; }
+.sfr-sum-n { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: 999px; font: 500 12px/1 var(--font); }
+.sfr-sum-n[data-kind="fixed"] { background: color-mix(in srgb, var(--green) 12%, transparent); color: var(--green); }
+.sfr-sum-n[data-kind="open"] { background: color-mix(in srgb, var(--amber) 16%, transparent); color: var(--amber); }
+.sfr-sum-kinds { color: var(--text-muted); font-size: 12px; }
+
+/* A section: its name small above its findings. */
+.sfr-sec { padding-top: 2px; }
+.sfr-sec + .sfr-sec { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
+.sfr-sec-h { display: flex; align-items: center; gap: 6px; margin: 0; padding: 6px 0 8px; color: var(--text-muted); font: 600 11px/1 var(--font); letter-spacing: .04em; text-transform: uppercase; }
+.sfr-sec-h span { color: var(--text-muted); font-weight: 500; letter-spacing: 0; }
+.sfr-list { list-style: none; margin: 0; padding: 0; }
+
+/* A finding: its mark, then the title on its own line, its words, and a line with the kind and the file. Findings are set apart
+   by space, not rules, so each reads as one piece. Scoped under the card: the chat's list styles don't reach in. */
+.sfr-card .sfr-list { display: flex; flex-direction: column; gap: 16px; padding: 6px 0 2px; }
+.sfr-card .sfr-row { display: flex; gap: 12px; margin: 0; padding: 0; border: 0; }
+.sfr-ico { flex: none; display: grid; place-items: center; width: 20px; height: 20px; margin-top: 0; border-radius: 50%; background: color-mix(in srgb, var(--green) 12%, transparent); color: var(--green); }
+.sfr-row[data-status="open"] .sfr-ico { background: color-mix(in srgb, var(--amber) 16%, transparent); color: var(--amber); }
+.sfr-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.sfr-title { color: var(--ink); font: 550 13.5px/20px var(--font); letter-spacing: -.005em; overflow-wrap: anywhere; text-wrap: pretty; }
+.sfr-card .sfr-detail { margin: 0; color: var(--text-muted); font: 400 12.5px/1.55 var(--font); overflow-wrap: anywhere; text-wrap: pretty; }
+.sfr-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 5px; }
+.sfr-tag { flex: none; padding: 0 7px; border-radius: 6px; background: var(--hover); color: var(--ink-2); font: 500 11px/19px var(--font); }
+.sfr-tag[data-sev="bug"], .sfr-tag[data-sev="security"] { background: var(--red-soft); color: var(--red); }
+.sfr-tag[data-sev="test"] { background: var(--amber-soft); color: var(--amber); }
+.sfr-tag[data-sev="for-you"] { background: var(--hover); color: var(--ink); }
+.sfr-file { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; height: 19px; padding: 0 6px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--ink-2); font: 400 11.5px/1 var(--mono, ui-monospace, monospace); cursor: pointer; }
+.sfr-file > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sfr-file:hover { background: var(--hover); color: var(--ink); }
+
+/* The rest of a long run of fixes, folded. */
+.sfr-more { display: block; margin: 14px 0 0 26px; padding: 4px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--ink-2); font: 500 12px/1.2 var(--font); cursor: pointer; }
+.sfr-more:hover { background: var(--hover); color: var(--ink); }
+
+.sfr-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
+.sfr-btn { height: 30px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--ink); font: 500 12.5px/1 var(--font); cursor: pointer; white-space: nowrap; }
+.sfr-btn:hover { background: var(--hover); }
+.sfr-btn.on { background: var(--ink); border-color: var(--ink); color: var(--bg, #fff); }
+.sfr-btn.on:hover { background: var(--ink); opacity: 0.88; }
+.sfr-btn.plain { border-color: transparent; padding: 0 8px; color: var(--ink-2); }
+.sfr-btn:focus-visible, .sfr-file:focus-visible, .sfr-more:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.sfr-said { color: var(--text-muted); font-size: 12px; }
+.sfr-writing { margin: 8px 0; color: var(--text-muted); font-size: 12.5px; }

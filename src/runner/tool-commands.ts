@@ -145,6 +145,9 @@ export function skillHomes(home = homedir()): Partial<Record<EngineTool, string>
     // Each tool's own folder, from its docs (October 2026). Several also read ~/.agents/skills, which is shared.
     opencode: path.join(home, ".config", "opencode", "skills"),
     gemini: path.join(process.env.GEMINI_CLI_HOME || home, ".gemini", "skills"),
+    // Antigravity CLI (agy), Gemini CLI's successor for Google AI plans since June 2026: its global skills folder, from its docs
+    // (antigravity.google/docs/skills, November 2026). It also reads ~/.gemini/skills and a repository's .agents/skills (nativeDirs).
+    antigravity: path.join(home, ".gemini", "config", "skills"),
     devin: process.platform === "win32" && process.env.APPDATA ? path.join(process.env.APPDATA, "devin", "skills") : path.join(home, ".config", "devin", "skills"),
     junie: path.join(home, ".junie", "skills"),
     kiro: path.join(home, ".kiro", "skills"),
@@ -153,6 +156,10 @@ export function skillHomes(home = homedir()): Partial<Record<EngineTool, string>
     cline: path.join(home, ".cline", "skills"),
     kilo: path.join(home, ".kilo", "skills"),
     amp: path.join(home, ".config", "amp", "skills"),
+    // Qwen Code's own folder, from its docs (November 2026); it reads ~/.agents/skills too.
+    qwen: path.join(home, ".qwen", "skills"),
+    // Pi's own folder, from its docs/skills.md (0.73); it reads ~/.agents/skills too.
+    pi: path.join(process.env.PI_CODING_AGENT_DIR || path.join(home, ".pi", "agent"), "skills"),
   };
 }
 

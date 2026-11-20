@@ -1,0 +1,20 @@
+/* Customize rail (rail-customize.tsx): a small card beside the rail, the menus' surface; a row per place. */
+.rc { position: fixed; z-index: 95; display: flex; flex-direction: column; overflow: hidden; padding: 6px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--card); box-shadow: 0 16px 40px -12px rgb(0 0 0 / .28), 0 2px 6px rgb(0 0 0 / .07); color: var(--ink); }
+.rc-head { display: flex; align-items: center; gap: 4px; padding: 4px 2px 6px 8px; }
+.rc-head > b { flex: 1; font-size: 13px; font-weight: 600; }
+.rc-reset { height: 24px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--ink-2); font: 500 12px var(--font); cursor: pointer; }
+.rc-reset:hover { background: var(--hover); color: var(--ink); }
+.rc-x { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); cursor: pointer; }
+.rc-x:hover { background: var(--hover); color: var(--ink); }
+.rc-list { flex: 1; min-height: 0; margin: 0; padding: 0; overflow-y: auto; list-style: none; overscroll-behavior: contain; }
+.rc-row { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 6px 0 2px; border-radius: 8px; }
+.rc-row:hover { background: var(--hover); }
+.rc-row.is-held { background: var(--hover-strong); }
+.rc-grip { display: grid; flex: none; place-items: center; width: 18px; height: 26px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--text-muted); opacity: .55; cursor: grab; touch-action: none; }
+.rc-row:hover .rc-grip, .rc-grip:focus-visible, .rc-row.is-held .rc-grip { opacity: 1; }
+.rc-row.is-held .rc-grip { cursor: grabbing; }
+.rc-grip:focus-visible { outline: 2px solid var(--border-focus, var(--ink)); outline-offset: 0; }
+.rc-ic { flex: none; color: var(--ink-2); }
+.rc-name { flex: 1; min-width: 0; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.rc-row.is-off .rc-ic, .rc-row.is-off .rc-name { color: var(--text-muted); }
+.rc-row .switch:disabled { opacity: .45; cursor: default; }

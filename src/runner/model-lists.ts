@@ -2,7 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { EngineTool } from "../types.js";
-import { ADAPTERS, childEnv, findBin, launcher, modelMenu, runCli, toolEnv, type TurnSpec } from "./adapters.js";
+import { ADAPTERS, childEnv, findBin, launcher, modelMenu, piModelList, runCli, toolEnv, type TurnSpec } from "./adapters.js";
 import { spawnCli } from "./spawn-cli.js";
 
 /**
@@ -60,8 +60,56 @@ export function listModels(tool: EngineTool): Promise<ListedModel[]> {
   return run;
 }
 
+/**
+ * Pi's models before its first turn here, from a Pi started for nothing else: no conversation kept (--no-session), nothing fetched
+ * (--offline). Its `--list-models` table has the ids but not the names, which is what a conversation's list shows later.
+ */
+async function piModels(bin: string): Promise<ListedModel[]> {
+  await mkdir(PROBE_DIR, { recursive: true });
+  const how = await launcher(bin);
+  const child = spawnCli(how.command, [...how.prefix, "--mode", "rpc", "--no-session", "--offline"], { cwd: PROBE_DIR, env: toolEnv("pi", { ...childEnv(), ...how.env, PI_SKIP_VERSION_CHECK: "1" }) });
+  return new Promise((resolve) => {
+    let buf = "";
+    let done = false;
+    const end = (models: ListedModel[]) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try {
+        child.stdin?.end();
+      } catch {}
+      child.kill("SIGTERM");
+      resolve(models);
+    };
+    const timer = setTimeout(() => end([]), LOOK_MS);
+    child.on("error", () => end([]));
+    child.on("exit", () => end([]));
+    child.stdin?.on("error", () => end([]));
+    child.stdout?.on("data", (d: Buffer) => {
+      buf += d.toString();
+      let i: number;
+      while ((i = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, i).trim();
+        buf = buf.slice(i + 1);
+        try {
+          const m = JSON.parse(line);
+          if (m?.type === "response" && m.id === "models") end(m.success ? piModelList(m.data) : []);
+        } catch {
+          // Not a line of its protocol.
+        }
+      }
+    });
+    child.stdin?.write(`${JSON.stringify({ id: "models", type: "get_available_models" })}\n`);
+  });
+}
+
 async function look(tool: EngineTool): Promise<ListedModel[]> {
   const a = ADAPTERS[tool];
+  // Pi lists its own without a conversation (see piModels).
+  if (tool === "pi") {
+    const bin = await findBin("pi");
+    return bin ? grouped(await piModels(bin)) : [];
+  }
   if (!a.interactive || a.dialect || a.perTurn || tool === "antigravity" || a.unavailable?.()) return [];
   const bin = await findBin(tool);
   if (!bin) return [];

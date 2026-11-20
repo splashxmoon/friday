@@ -247,6 +247,12 @@ export interface SessionState {
    */
   wrote?: Record<string, string[]>;
   /**
+   * The same, for each lane's current run only (cleared as a run starts): the files it is writing as it goes. A coding tool reports
+   * its change set when its turn ends, but names each file it edits as it calls the tool, so this is how the IDE knows which file an
+   * agent is in now (Arun, 2026-11-19, the five IDE features: "files mid-edit show who's in them").
+   */
+  runWrote?: Record<string, string[]>;
+  /**
    * Each lane's latest plan, counted: its steps and how many are finished (completed or cancelled), so a list of sessions can say
    * "stopped at 3 of 5" as the Work rail does, not "done" over a plan left short (QA, 2026-10-28; Arun: "TEST EVERYTHING").
    */
@@ -877,6 +883,7 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
     else s.laneRuns[lane] = next;
     // A new run, or one that ended, is doing nothing yet.
     if (s.doing) delete s.doing[lane];
+    if (status === "running" && s.runWrote) delete s.runWrote[lane];
   };
   // Only the agent itself: the system's own events (a machine coming online, a setting) would make a stuck agent look alive.
   if (ev.actor.kind === "agent") (s.heardAt ??= {})[lane] = ev.ts;
@@ -1534,6 +1541,9 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
         const mine = ((s.wrote ??= {})[lane] ??= []);
         if (!mine.includes(at)) mine.push(at);
         if (mine.length > 400) mine.shift();
+        const now = ((s.runWrote ??= {})[lane] ??= []);
+        if (!now.includes(at)) now.push(at);
+        if (now.length > 200) now.shift();
       }
       // The files a plan names are what the agent means to change: kept, so an overlap with another agent shows before it writes.
       {
@@ -1582,6 +1592,38 @@ export function openedPr(name: string, output: string, isError: boolean): string
   if (/create_?pull_?request/i.test(name)) return PR_URL.exec(output)?.[0] ?? null;
   const last = output.trimEnd().split(/\r?\n/).at(-1)?.trim() ?? "";
   return new RegExp(`^${PR_URL.source}$`).test(last) ? last : null;
+}
+
+type OpenedPr = { url: string; lane: string; ts: number; seq: number };
+/** The pull request an event opened, if it opened one: Friday's commit (folder.committed's prUrl) or an agent's own tool call. */
+function prOpenedBy(e: SessionEvent): OpenedPr | null {
+  const b = e.body;
+  const url = b.type === "folder.committed" ? (!b.error && b.prUrl) || "" : b.type === "tool.result" ? (openedPr(b.name, b.output, b.isError) ?? "") : "";
+  return url ? { url, lane: e.lane ?? MAIN_LANE, ts: e.ts, seq: e.seq } : null;
+}
+
+/**
+ * The pull request the side panel shows and the chat ends on: the newest the session opened, whether by a commit Friday made or
+ * by an agent's own `gh pr create` (Arun, 2026-11-20: "i opened a pull request but it is stuck at the merged thing"), or, given
+ * `url`, that one, if the session opened it. With the lane that opened it, to ask its computer. (state.pr stays the one Friday
+ * opened, which seeing it through and the commit box go by.)
+ */
+export function sessionPr(events: readonly SessionEvent[], url?: string): OpenedPr | null {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const o = prOpenedBy(events[i]!);
+    if (o && (!url || o.url === url)) return o;
+  }
+  return null;
+}
+
+/** Every pull request the session opened, newest first, each once (as of the last time it was opened or pushed to by Friday). */
+export function sessionPrs(events: readonly SessionEvent[]): OpenedPr[] {
+  const out: OpenedPr[] = [];
+  for (let i = events.length - 1; i >= 0; i--) {
+    const o = prOpenedBy(events[i]!);
+    if (o && !out.some((x) => x.url === o.url)) out.push(o);
+  }
+  return out;
 }
 
 function addPr(s: SessionState, url: string): void {

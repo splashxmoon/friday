@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import type { Redis } from "ioredis";
 import type { MeshResult, MeshToolDef } from "./agent-mesh.js";
 import type { AgentTool } from "./agent/tools.js";
@@ -257,13 +258,13 @@ const obj = (properties: Record<string, unknown>, required: string[]) => ({ type
 export const SKILL_TOOLS: MeshToolDef[] = [
   {
     name: "list_skills",
-    description: "The crew's skills you may use: reusable procedures that worked before, each with its name and when to use it. Your instructions list them too; this has them all.",
+    description: "The skills you may use: the crew's (reusable procedures that worked before) and the person's own on this computer (~/.agents/skills), each with its name and when to use it. Your instructions list them too; this has them all.",
     inputSchema: obj({}, []),
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   },
   {
     name: "use_skill",
-    description: "A crew skill's steps, by its name: call it when a skill fits the work you're given, then follow the steps and run its check before you say it's done.",
+    description: "A skill's steps, by its name (a crew skill's, or one of the person's own): call it when a skill fits the work you're given, then follow the steps and run its check before you say it's done.",
     inputSchema: obj({ name: { type: "string", description: "The skill's name, as listed." }, inputs: { type: "string", description: "What it is for this time, if it takes inputs: the version, the issue, the folder." } }, ["name"]),
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   },
@@ -312,8 +313,21 @@ export interface SkillPlace {
   card: (s: Skill, madeBy: { lane: string; name: string }, to: { id: string; name: string }) => Promise<void>;
 }
 
-/** The skills' tools and the note's line, for the app: `place` says where an agent is, null where there is no crew. */
-export function skillTools(place: (sid: string, lane: string) => Promise<SkillPlace | null>) {
+/** One of the person's own skills on this computer (runner/skill-library.ts): a folder with a SKILL.md. */
+export interface LibrarySkill {
+  name: string;
+  description: string;
+  /** Its SKILL.md. */
+  file: string;
+}
+
+/**
+ * The skills' tools and the note's line, for the app: `place` says where an agent is, null where there is no crew. `library`, where
+ * there is one, is the person's own skills (the Skills page's, ~/.agents/skills), which every crew mate may use beside the crew's
+ * (Arun, 2026-11-19: "ensure these skills can be used by all of the crew agents and stuff too").
+ */
+export function skillTools(place: (sid: string, lane: string) => Promise<SkillPlace | null>, library?: () => Promise<LibrarySkill[]>) {
+  const own = () => (library ? library().catch(() => [] as LibrarySkill[]) : Promise.resolve([] as LibrarySkill[]));
   const offered = async (sid: string) => !!(await place(sid, MAIN_LANE).catch(() => null));
 
   const call = async (sid: string, lane: string, name: string, args: Record<string, unknown>): Promise<MeshResult> => {
@@ -327,12 +341,30 @@ export function skillTools(place: (sid: string, lane: string) => Promise<SkillPl
     switch (name) {
       case "list_skills": {
         const mine = all.filter((s) => usableBy(s, me, live));
-        if (!mine.length) return { output: kept.length ? "No skills are kept for you. save_skill proposes one." : "The crew has no skills yet. save_skill proposes one after a run that went well." };
-        return { output: mine.map((s) => `${s.name}${forWho(s)}: ${s.when}${s.inputs ? `\n  Inputs: ${s.inputs}` : ""}`).join("\n") };
+        const lib = await own();
+        const crew = mine.length
+          ? mine.map((s) => `${s.name}${forWho(s)}: ${s.when}${s.inputs ? `\n  Inputs: ${s.inputs}` : ""}`).join("\n")
+          : kept.length
+            ? "No crew skills are kept for you. save_skill proposes one."
+            : "The crew has no skills yet. save_skill proposes one after a run that went well.";
+        if (!lib.length) return { output: crew };
+        return {
+          output: `The crew's:\n${crew}\n\nThe person's own, on this computer (use_skill with its name gives its SKILL.md; files it names are beside it):\n${lib.map((s) => `${s.name}: ${s.description.replace(/\s+/g, " ").slice(0, 200)}`).join("\n")}`,
+        };
       }
       case "use_skill": {
         const want = str(args.name, 80);
         const s = kept.find((x) => sameName(x.name, want)) ?? (want.length >= 3 ? kept.find((x) => x.name.toLowerCase().includes(want.toLowerCase())) : undefined);
+        // One of the person's own (a SKILL.md): as written, with where it is, so the files it names can be read.
+        if (!s) {
+          const lib = await own();
+          const l = lib.find((x) => sameName(x.name, want)) ?? (want.length >= 3 ? lib.find((x) => x.name.toLowerCase().includes(want.toLowerCase())) : undefined);
+          const text = l ? await readFile(l.file, "utf8").catch(() => null) : null;
+          if (l && text !== null) {
+            const extra = str(args.inputs, 2000);
+            return { output: `The person's skill “${l.name}”, from ${l.file}. Follow it; the scripts and references it names are in that folder.${extra ? `\n\nThis time: ${extra}` : ""}\n\n${text.slice(0, 60_000)}` };
+          }
+        }
         // Renamed or deleted since a workflow step or a note named it: what there is, so it carries on without.
         if (!s) {
           const mine = kept.filter((x) => usableBy(x, me, live));
@@ -478,7 +510,7 @@ const FRIDAY = { id: "friday", name: "Friday", kind: "system" as const };
  * Skills in the open-source edition: kept beside the person's teammates (the local store's prefix), proposals posted in the Crew
  * room for them. Whoever an agent here works for is the one person on this computer.
  */
-export function localSkills(d: { redis: Redis; prefix: string; teammates: TeammateStore; store: SessionStore; person: { id: string; name: string }; wake: (sid: string, lane: string) => Promise<void> }) {
+export function localSkills(d: { redis: Redis; prefix: string; teammates: TeammateStore; store: SessionStore; person: { id: string; name: string }; wake: (sid: string, lane: string) => Promise<void>; library?: () => Promise<LibrarySkill[]> }) {
   const store = new SkillStore(d.redis, d.prefix);
   /** The teammate on a lane of the Crew room or one of its rooms. */
   const mateOn = async (sid: string, lane: string) => {
@@ -503,7 +535,7 @@ export function localSkills(d: { redis: Redis; prefix: string; teammates: Teamma
         if (team) await d.store.append(team, FRIDAY, { type: "skill.proposed", id: s.id, name: s.name, when: s.when, madeBy, ...(s.revises ? { revises: s.revises } : {}) }, { lane: MAIN_LANE });
       },
     };
-  });
+  }, d.library);
   const scope = (me: { id: string; name: string }): SkillsScope => ({
     store,
     me,

@@ -17,6 +17,8 @@ export const FRIDAY = { id: "friday", name: "Friday", kind: "system" as const };
 
 /** Rounds of failing checks Friday will hand to the agent before saying a person is needed. */
 export const MAX_CHECK_ROUNDS = 3;
+/** Tries at a conflict with the base branch before saying a person is needed. */
+export const MAX_CONFLICT_ROUNDS = 2;
 /** How long a finished run is given for its second review to start. */
 export const REVIEW_GRACE_MS = 30_000;
 /** How long after a push GitHub is given to start checking the new commit, so the old commit's red is not read as new. */
@@ -28,7 +30,9 @@ export type ShepherdAction =
   | { kind: "wait"; why: string }
   | { kind: "end"; outcome: "merged" | "closed" | "stopped"; text: string }
   /** Commit and push what the agent changed since the hand-off at `since`. */
-  | { kind: "push"; reason: "checks" | "comments"; since: number }
+  | { kind: "push"; reason: "checks" | "comments" | "conflicts"; since: number }
+  /** The pull request conflicts with its base: hand the agent the merge (Arun, 2026-11-19, pull request autopilot). */
+  | { kind: "conflicts"; round: number }
   /** Read the failing checks and hand them to the agent. */
   | { kind: "checks"; round: number }
   /** Read the review comments and hand any new ones to the agent. */
@@ -56,19 +60,22 @@ export function shepherdNext(state: SessionState, events: SessionEvent[], status
   if (reviewing) return { kind: "wait", why: "the change is being reviewed" };
 
   const mine = events.filter((e) => laneOf(e) === lane && e.seq > watch.since);
-  const handOffs = mine.filter((e) => e.body.type === "pr.shepherd.step" && (e.body.step === "checks" || e.body.step === "comments"));
+  const handOffs = mine.filter((e) => e.body.type === "pr.shepherd.step" && (e.body.step === "checks" || e.body.step === "comments" || e.body.step === "conflicts"));
   const lastHand = handOffs.at(-1);
   const lastCommit = events.findLast((e) => e.body.type === "folder.committed" && !e.body.error);
+  // A push with no commit of Friday's: the agent's own merge of the base, pushed (app.ts, a resolved conflict).
+  const lastPushed = mine.findLast((e) => e.body.type === "pr.shepherd.step" && e.body.step === "pushed");
+  const doneAt = Math.max(lastCommit?.seq ?? 0, lastPushed?.seq ?? 0);
 
   // Work handed over and not yet pushed: see how it went.
-  if (lastHand && lastHand.seq > (lastCommit?.seq ?? 0)) {
+  if (lastHand && lastHand.seq > doneAt) {
     const after = mine.filter((e) => e.seq > lastHand.seq);
     const ended = after.findLast((e) => e.body.type === "run.ended");
     if (!ended) return { kind: "wait", why: "the agent hasn't started on it" };
     if (ended.body.type === "run.ended" && ended.body.outcome === "error") {
       return { kind: "end", outcome: "stopped", text: `The agent stopped with an error while fixing the pull request${ended.body.error ? `: ${ended.body.error}` : ""}. A person needs to look.` };
     }
-    const reason = lastHand.body.type === "pr.shepherd.step" && lastHand.body.step === "comments" ? "comments" : "checks";
+    const reason = lastHand.body.type === "pr.shepherd.step" && (lastHand.body.step === "comments" || lastHand.body.step === "conflicts") ? lastHand.body.step : "checks";
     const diff = after.findLast((e) => e.body.type === "agent.diff");
     const changed = diff?.body.type === "agent.diff" && diff.body.files.length > 0;
     if (changed) return pushOrStop(events, after, ended, diff, reason, lastHand.seq, now, opts);
@@ -77,7 +84,14 @@ export function shepherdNext(state: SessionState, events: SessionEvent[], status
   }
 
   if (lastCommit && lastCommit.actor.id === FRIDAY.id && now - lastCommit.ts < PUSH_SETTLE_MS) return { kind: "wait", why: "GitHub is picking up the push" };
-  if (status.mergeable === false) return { kind: "end", outcome: "stopped", text: "The pull request conflicts with its base branch. Friday doesn't resolve conflicts, so a person needs to." };
+  if (lastPushed && now - lastPushed.ts < PUSH_SETTLE_MS) return { kind: "wait", why: "GitHub is picking up the push" };
+  // A conflict with the base: the agent merges the base in, resolves it, runs the tests and pushes the merge itself (a merge commit
+  // isn't a diff Friday can commit for it). Twice at most; a conflict it couldn't settle is a person's.
+  if (status.mergeable === false) {
+    const rounds = handOffs.filter((e) => e.body.type === "pr.shepherd.step" && e.body.step === "conflicts").length;
+    if (rounds >= MAX_CONFLICT_ROUNDS) return { kind: "end", outcome: "stopped", text: `The pull request still conflicts with its base branch after ${MAX_CONFLICT_ROUNDS} tries. A person needs to resolve it.` };
+    return { kind: "conflicts", round: rounds + 1 };
+  }
   if (status.checks === "failing") {
     const rounds = handOffs.filter((e) => e.body.type === "pr.shepherd.step" && e.body.step === "checks").length;
     if (rounds >= MAX_CHECK_ROUNDS) return { kind: "end", outcome: "stopped", text: `The checks are still failing after ${MAX_CHECK_ROUNDS} fixes. A person needs to look.` };
@@ -87,7 +101,7 @@ export function shepherdNext(state: SessionState, events: SessionEvent[], status
 }
 
 /** A fix is waiting: push it, unless the second review or the run's receipt says a person should see it first. */
-function pushOrStop(events: SessionEvent[], after: SessionEvent[], ended: SessionEvent, diff: SessionEvent | undefined, reason: "checks" | "comments", since: number, now: number, opts: { reviewer: boolean }): ShepherdAction {
+function pushOrStop(events: SessionEvent[], after: SessionEvent[], ended: SessionEvent, diff: SessionEvent | undefined, reason: "checks" | "comments" | "conflicts", since: number, now: number, opts: { reviewer: boolean }): ShepherdAction {
   if (opts.reviewer) {
     const review = events.findLast((e) => e.body.type === "review.done" && e.body.runSeq === ended.seq);
     if (!review && now - ended.ts < REVIEW_GRACE_MS) return { kind: "wait", why: "the fix is about to be reviewed" };
@@ -113,8 +127,7 @@ function pushOrStop(events: SessionEvent[], after: SessionEvent[], ended: Sessio
   return { kind: "push", reason, since };
 }
 
-/** The paths a commit of these files names: each file, a renamed one's old path too, and the change set's unshown rest. */
-export const commitPaths = (files: DiffFile[], more: string[] = []): string[] => [...files.flatMap((f) => (f.from ? [f.path, f.from] : [f.path])), ...more];
+export { commitPaths } from "./commit-paths.js";
 
 /**
  * The branch a pull request is on, as this session knows it: the branch the commit that opened it went to, or the one
@@ -127,7 +140,18 @@ export function prBranch(state: SessionState, events: SessionEvent[], prUrl: str
 }
 
 /** What a fix is committed as. */
-export const fixMessage = (reason: "checks" | "comments") => (reason === "checks" ? "Fix the failing checks" : "Address review comments");
+export const fixMessage = (reason: "checks" | "comments" | "conflicts") => (reason === "checks" ? "Fix the failing checks" : reason === "conflicts" ? "Resolve conflicts with the base branch" : "Address review comments");
+
+/** What the agent is told when the pull request conflicts with its base. */
+export const conflictsText = (prUrl: string, base: string) =>
+  [
+    `The pull request ${prUrl} conflicts with its base branch, ${base || "the base branch"}. Resolve it on this branch:`,
+    `1. git fetch origin, then git merge origin/${base || "<base>"} into this branch${base ? "" : ` (the base is gh pr view ${prUrl} --json baseRefName)`}. Merge, don't rebase: the branch is already pushed and may be shared.`,
+    "2. Resolve every conflict keeping what both sides meant, not just one side. Read the other side's change before choosing.",
+    "3. Run the project's tests and type checks; fix what the merge broke.",
+    "4. Commit the merge and push this branch (never the base branch).",
+    "Say in a sentence or two what conflicted and how you resolved it.",
+  ].join("\n");
 
 /** Comments from bots are not review: a deploy preview or a coverage report is not something to act on. */
 export const fromPerson = (author: string) => !/\[bot\]$|^github-actions$/i.test(author);

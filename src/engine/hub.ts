@@ -16,7 +16,7 @@ import { taskKind } from "../strengths.js";
 import { missedLast, type Learned } from "../route-learning.js";
 import { repoKeyOf } from "../repo-key.js";
 import { randomUUID } from "node:crypto";
-import { buildCatchUp, decidedSince, missedSince, missedText, needsCatchUp } from "../session/catchup.js";
+import { buildCatchUp, decidedSince, isFirstTurn, missedSince, missedText } from "../session/catchup.js";
 import { lastRunStart, spentBefore, tokensIn, ToolUsage } from "../tool-usage.js";
 import { WebSocket } from "ws";
 import type { Bus, BusMessage } from "../bus.js";
@@ -1491,7 +1491,10 @@ class LaneHost {
        * after that its own memory has it, and repeating the session to it every
        * turn would be noise in a window it needs for the work.
        */
-      const first = needsCatchUp(events, this.lane, this.info.hostId);
+      // Read without this turn's own delivery: `events` is the store's live array, which already holds the delivery just written above, and
+      // a lane's first turn would then always look like its second, never catch up and never be briefed from project memory (Arun,
+      // 2026-11-20, wave 5: "given to every tool, in Code and Agents alike").
+      const first = isFirstTurn(events, this.lane, this.info.hostId, turnId);
       const catchUp = first ? buildCatchUp(state, events, pending, this.lane) : "";
       // After that, what people marked as decided since its last turn (core.ts "decide"): it never argues a settled call again.
       const decided = first ? "" : decidedSince(state, events, this.lane, pending);
@@ -2102,14 +2105,23 @@ class LaneHost {
      * the queue instead, and the tool picks it up again when it is back. Its run is left going rather than ended with an
      * error: back within the grace below, the same run carries on; not back by then, it is ended there, saying why.
      */
-    const cut = this.turn && DROPPED.has(reason) ? this.inFlight : null;
+    // Not one somebody has stopped (Stop, or "Leave it" on the IDE's restore bar): its run is idle, the tool is only slow to say it has
+    // stopped, and putting its messages back made the stopped turn run again at the next launch (review, 2026-11-19).
+    const stoppedByPerson = await (async () => {
+      if (!this.turn || !this.inFlight?.length) return false;
+      const st = await this.store.state(this.sid).catch(() => null);
+      return !!st && runOf(st, this.lane).status === "idle";
+    })();
+    const cut = this.turn && DROPPED.has(reason) && !stoppedByPerson ? this.inFlight : null;
     if (cut?.length) {
       // With the turn's id, unless it was a compaction: a runner back that finished it says so, and it isn't run again (settleEnded).
       const turn = this.turn && !this.compacting ? { turn: this.turn.id } : {};
       await this.append({ type: "instructions.requeued", seqs: cut, ...turn }).catch((e) => console.error("[engine] requeue:", e));
       this.requeued = reason !== "shutdown";
     }
-    this.turn?.resolve({ outcome: "error", error: reason === "shutdown" ? `The server restarted in the middle of ${this.actor.name}'s turn. It picks this up again when it reconnects.` : `${this.actor.name} disconnected in the middle of a turn.` });
+    // A stopped turn that was slow to say so ends as stopped, not as an error that would mark the run cut off again.
+    if (stoppedByPerson) this.turn?.resolve({ outcome: "stopped" });
+    else this.turn?.resolve({ outcome: "error", error: reason === "shutdown" ? `The server restarted in the middle of ${this.actor.name}'s turn. It picks this up again when it reconnects.` : `${this.actor.name} disconnected in the middle of a turn.` });
     this.turn = null;
     await this.unsub?.().catch(() => {});
     if (reason === "released") this.sendRaw({ kind: "released" });

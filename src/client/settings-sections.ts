@@ -69,7 +69,7 @@ export const SECTIONS: SectionDef[] = [
     group: "Agents",
     icon: "code",
     blurb: "The coding tools on this computer, and the accounts each one uses.",
-    keywords: "coding tools tool claude code codex cursor copilot opencode antigravity agy devin junie kiro droid amp muse sign in sign out install account accounts login acp other agent command fewer more",
+    keywords: "coding tools tool claude code codex cursor copilot opencode antigravity agy devin junie kiro droid amp muse pi sign in sign out install account accounts login acp other agent command fewer more editor vs code vscode remove download",
   },
   // One Models section in the hosted edition (UX audit F10, 2026-11-07): Friday's models and your own, in two groups
   // (Settings.tsx). "models", the old Friday's models section, opens it (settingsSection).
@@ -141,15 +141,8 @@ export const SECTIONS: SectionDef[] = [
     blurb: "The GitHub login your agents clone, push and open pull requests with.",
     keywords: "github git login sign in pull request pr repos clone push token gh",
   },
-  // Slack and Linear on your own computer (SettingsChannels.tsx, spec 08): the open-source edition's (Settings.tsx hides it elsewhere).
-  {
-    id: "channels",
-    label: "Integrations",
-    group: "Connections",
-    icon: "plug",
-    blurb: "Friday in the tools your team already works in. Ask it in Slack, hand it issues in Linear, and follow the work where it was asked.",
-    keywords: "slack linear mention dm socket thread issue issues agent delegate assign integration integrations",
-  },
+  // Slack and Linear on your own computer (SettingsChannels.tsx, spec 08): kept out of the open-source edition (Arun, 2026-11-20:
+  // "remove the linear and slack integration too").
 
 
   // ── Workspace: the team, and what it pays ──
@@ -162,6 +155,15 @@ export const SECTIONS: SectionDef[] = [
     icon: "eye",
     blurb: "What Friday sends about how it's used, and what it never sends.",
     keywords: "privacy analytics usage share telemetry anonymous data collect send tracking",
+  },
+  {
+    id: "storage",
+    label: "Storage",
+    group: "Privacy & data",
+    icon: "folder",
+    blurb: "What Friday keeps on this computer, and clearing what's no longer needed.",
+    // "screen" is Permissions' (screen recording): the agents' pictures are found as pictures here.
+    keywords: "storage disk space size clean up free delete copies worktrees trash cache pictures gb full",
   },
   {
     id: "data",

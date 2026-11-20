@@ -191,6 +191,8 @@ export interface PrRef {
   title: string;
   /** The branch the change is on. */
   head: string;
+  /** The branch it goes into, when known: what a conflict is resolved against (shepherd.ts conflictsText). */
+  base?: string;
 }
 export type SessionOptionsPatch = Partial<Omit<SessionOptions, "policy">> & { policy?: PolicyPatch };
 
@@ -199,7 +201,7 @@ export type SessionOptionsPatch = Partial<Omit<SessionOptions, "policy">> & { po
  * holds a key for these: the CLI runs on the host's machine, under their login,
  * and a small runner relays the session to it.
  */
-export type EngineTool = "claude" | "codex" | "cursor" | "copilot" | "opencode" | "gemini" | "antigravity" | "devin" | "junie" | "kiro" | "droid" | "grok" | "cline" | "kilo" | "amp" | "muse" | "qwen" | "acp";
+export type EngineTool = "claude" | "codex" | "cursor" | "copilot" | "opencode" | "gemini" | "antigravity" | "devin" | "junie" | "kiro" | "droid" | "grok" | "cline" | "kilo" | "amp" | "muse" | "qwen" | "pi" | "acp";
 
 /** What a person sees about a coding tool before and after it is on their machine. Its runner side is in runner/adapters.ts. */
 export interface ToolInfo {
@@ -309,6 +311,16 @@ export const TOOL_INFO: Record<EngineTool, ToolInfo> = {
     note: "macOS and Linux; on Windows, inside WSL.",
   },
   qwen: { name: "Qwen Code", blurb: "Qwen's coding agent", docs: "https://qwenlm.github.io/qwen-code-docs/en/users/", install: { npm: "@qwen-code/qwen-code" }, tint: "#615ced" },
+  // Mario Zechner's minimal coding agent, over its own RPC mode (runner/adapters.ts pi). It signs in inside itself, with /login.
+  pi: {
+    name: "Pi",
+    blurb: "A minimal open-source coding agent",
+    docs: "https://pi.dev",
+    install: { npm: "@mariozechner/pi-coding-agent" },
+    // Its mark is black on light and white on dark; where a mark is drawn in its tint, a grey that reads on both.
+    tint: "#71717a",
+    note: "Runs on your Claude, ChatGPT or Copilot plan, or any provider's API key: sign in inside Pi with /login. On Windows it needs Git Bash.",
+  },
   // Any other agent in the ACP registry (goose, Mistral Vibe, Auggie, Kimi...), by the command somebody sets on their computer.
   acp: {
     name: "Other ACP agent",
@@ -392,6 +404,8 @@ export interface RepoCall {
   only?: string[];
   /** For `publish`: open a pull request after pushing. */
   pr?: boolean;
+  /** For `publish` with `pr`: the session's parts (pr-body.ts PrParts, as JSON) to fill the repo's pull-request template with, when it has one. */
+  prParts?: string;
   path?: string;
   /** For `bgread` and `bgstop`: which background command, by id. */
   query?: string;
@@ -516,6 +530,8 @@ export const ENGINE_MODEL_INFO: Record<EngineTool, EngineModelInfo[]> = {
     { id: "ultra", label: "Ultra", blurb: "Its strongest, for the hardest tasks." },
   ],
   qwen: [],
+  // Pi lists the models of every provider it is signed in to, read from its first turn.
+  pi: [],
   acp: [],
 };
 
@@ -542,7 +558,7 @@ export const ENGINE_EFFORT_INFO: Record<EngineEffort, { label: string; blurb: st
  * rest have no such control, so nothing is guessed for them. The composer's effort pill offers these and no others.
  */
 // Codex's Ultra: offered for its Sol, Astra and Terra models in its own model list (`model/list`, codex-cli 0.166, November 11 2026).
-export const EFFORT_LEVELS: Partial<Record<EngineTool, readonly EngineEffort[]>> = { claude: BASE_EFFORTS, codex: ENGINE_EFFORTS, copilot: BASE_EFFORTS };
+export const EFFORT_LEVELS: Partial<Record<EngineTool, readonly EngineEffort[]>> = { claude: BASE_EFFORTS, codex: ENGINE_EFFORTS, copilot: BASE_EFFORTS, pi: ["low", "medium", "high", "xhigh"] };
 
 /** The level Codex is sent for a model: Ultra on a Luna model, which stops at Max, is Max. */
 export const codexEffort = (effort: string | undefined, model: string | undefined): string | undefined => (effort === "ultra" && /luna/i.test(model ?? "") ? "max" : effort);
@@ -928,7 +944,7 @@ export type EventBody =
   /** A person handed the pull request to Friday to see through to merge, or took it back. */
   | { type: "pr.shepherd"; on: boolean; prUrl: string }
   /** One thing Friday did on the way: handed over the checks or comments, pushed a fix, asked for review again. */
-  | { type: "pr.shepherd.step"; step: "checks" | "comments" | "pushed" | "rerequested"; text: string; sha?: string; count?: number; /** For comments: who wrote them, to ask again once they are addressed. */ who?: string[] }
+  | { type: "pr.shepherd.step"; step: "checks" | "comments" | "conflicts" | "pushed" | "rerequested"; text: string; sha?: string; count?: number; /** For comments: who wrote them, to ask again once they are addressed. */ who?: string[] }
   /** Friday stopped: merged, closed, or a person is needed. */
   | { type: "pr.shepherd.ended"; outcome: "merged" | "closed" | "stopped"; text: string }
   /** A file or folder the team keeps in front of the agent at the start of every run. */
@@ -1434,6 +1450,12 @@ export type EventBody =
   | { type: "resume.cancelled"; why?: string }
   /** An agent on this lane was briefed from the project brain: what the team learned on this repo in earlier sessions. */
   | { type: "brain.briefed"; repo: string; count: number; sessions: number; tools: string[] }
+  /**
+   * A run (or an agent's save_lesson) added to the repo's project memory: `entry` is the lesson in the brain, and `was` what it
+   * replaced when it only brought an older one up to date, so the quiet "Remembered: ... Undo" line can put it back (Arun, 2026-11-20:
+   * "when an agent's reply adds to memory, a quiet line").
+   */
+  | { type: "brain.remembered"; repo: string; repoName: string; entry: string; kind: string; text: string; was?: { text: string; kind: string } }
   /**
    * A mistake agents were corrected for here came back after they had been told about it (brain.ts offersCheck): Friday offers
    * the command that would catch it, run after every change in the repo. `entry` is the correction in project memory.

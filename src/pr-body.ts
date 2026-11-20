@@ -163,3 +163,56 @@ export function prBodyFor(state: SessionState, events: SessionEvent[], link?: st
   if (text.length > MAX_BODY) text = `${text.slice(0, MAX_BODY)}\n\n… (cut short)`;
   return link ? `${text}\n\n---\nOpened from a Friday session: ${link}` : text;
 }
+
+/**
+ * The parts of a pull request a repo's own template asks for, read from the session the same way prBodyFor reads it (Arun,
+ * 2026-11-19, wave 3: "PR descriptions … in your repo's style"). Sent to the computer the repo is on, where the template is
+ * (runner/pr-template-read.ts, pr-template.ts); a part with nothing behind it is empty, and the template's own text stays.
+ */
+export interface PrParts {
+  /** The ask, and the issue it closes. */
+  why: string;
+  /** The agent's own closing account of what it did. */
+  did: string;
+  /** Files, one line each. */
+  changes: string[];
+  decisions: string[];
+  /** Whether the session's own commands ran the tests, and the last test command. */
+  tests: "pass" | "fail" | "none";
+  testCmd: string;
+  /** Test files are among the changes. */
+  addedTests: boolean;
+  notDone: string[];
+}
+
+export function prPartsFor(state: SessionState, events: SessionEvent[]): PrParts {
+  const first = events.find((e) => e.body.type === "instruction" && e.actor.kind === "human");
+  const why = [state.options.issue ? `Closes ${state.options.issue.url}` : "", first && first.body.type === "instruction" ? clip(ownWords(first.body.text), 600) : ""].filter(Boolean).join("\n\n");
+  const changed = new Map<string, { a: number; d: number }>();
+  for (const e of events) if (e.body.type === "agent.diff") for (const f of e.body.files) changed.set(f.path, { a: f.additions, d: f.deletions });
+  const decisions = new Map<string, string>();
+  for (const e of events) if (e.body.type === "memory.saved") (e.body.text ? decisions.set(e.body.key, e.body.text) : decisions.delete(e.body.key));
+  const results = new Map<string, boolean | null>();
+  for (const e of events) if (e.body.type === "tool.result") results.set(e.body.callId, commandFailed(e.body));
+  const calls = events.flatMap((e) => (e.body.type === "agent.message" ? e.body.toolCalls : []));
+  const files = Object.values(state.diffs).flatMap((d) => d.files);
+  const answer = [...events].reverse().find((e) => e.body.type === "agent.message" && !e.body.toolCalls.length && e.body.text);
+  const text = answer?.body.type === "agent.message" ? answer.body.text : undefined;
+  const receipt = receiptOf({ calls, failed: (id) => results.get(id) ?? null, files, answer: text });
+  const failing = new Map<string, true>();
+  for (const e of events) if (e.body.type === "folder.ran") (e.body.isError ? failing.set(e.body.command, true) : failing.delete(e.body.command));
+  const notDone = [
+    ...state.threads.filter((t) => !t.resolved).slice(0, 5).map((t) => `Open comment on ${tick(`${t.path}:${t.line}`)}: “${clip(t.text, 140)}”`),
+    ...[...failing.keys()].slice(-3).map((c) => `${tick(clip(safeCmd(c), 80))} last failed`),
+  ];
+  return {
+    why,
+    did: text ? clip(text, 600) : "",
+    changes: [...changed].slice(0, 12).map(([p, c]) => `${tick(p)} (+${c.a} −${c.d})`).concat(changed.size > 12 ? [`…and ${changed.size - 12} more`] : []),
+    decisions: [...decisions].slice(-8).map(([k, v]) => `**${clip(k, 80)}**: ${clip(v, 240)}`),
+    tests: receipt.tests === "pass" ? "pass" : receipt.tests === "fail" ? "fail" : "none",
+    testCmd: receipt.commands.filter((c) => c.test).at(-1)?.command ? safeCmd(receipt.commands.filter((c) => c.test).at(-1)!.command) : "",
+    addedTests: [...changed.keys()].some((p) => /(^|\/)(tests?|__tests__|e2e|spec)\/|\.(test|spec)\.\w+$/i.test(p)),
+    notDone,
+  };
+}

@@ -11,6 +11,9 @@ import { awayFromApp, notificationsOn, chimeOn } from "./prefs.js";
 import { chime } from "./chime.js";
 import { setServerUnread } from "./unread.js";
 import { sayDone } from "./DoneToasts.js";
+import { getMode } from "./ide/mode.js";
+import { blocksAgent, holdPing, setHeldCheck, typingNow } from "./ide/quiet.js";
+import { codeChatOf, codeWhere, shownInCode, useCodeWatched, watchedSids } from "./ide/waiting.js";
 
 /**
  * Where you are the thing that is missing.
@@ -93,7 +96,7 @@ export function useNeedsCount(a: Pick<AttentionState, "needs" | "off">): number 
   return a.needs.length + (prs?.review ?? []).filter((p) => !a.off.has(`review~${p.url}`)).length;
 }
 
-export function useAttention(identity: Identity, recents: RecentSession[], withSummaries = false): AttentionState {
+export function useAttention(identity: Identity, recents: RecentSession[], withSummaries = false, withCode = false): AttentionState {
   const [summaries, setSummaries] = useState<Map<string, SessionSummary>>(new Map());
   const [items, setItems] = useState<Attention[]>([]);
   const [working, setWorking] = useState<Map<string, Working>>(new Map());
@@ -120,11 +123,25 @@ export function useAttention(identity: Identity, recents: RecentSession[], withS
   const lastText = useRef("");
   /** What was working at the last poll, so a session that stops working — and isn't waiting on anyone — is said to have finished. */
   const wasWorking = useRef(new Map<string, Working>());
+  // What is true now, for the pings held while you type: at release a wait answered or a run started again is dropped (ide/quiet.ts).
+  const heldLive = useRef({ waits: new Set<string>(), working: new Set<string>() });
+  useEffect(() => {
+    setHeldCheck((h) => {
+      if (h.kind === "waiting") return heldLive.current.waits.has(`${h.sid}:${h.seq}`);
+      // A run that began again has not finished; the session you are looking at says so in its own chat.
+      return !heldLive.current.working.has(h.sid) && !(getMode() !== "code" && new URLSearchParams(location.search).get("session") === h.sid) && !shownInCode(h.sid);
+    });
+    return () => setHeldCheck(null);
+  }, []);
 
   let more: string[] = [];
   // Every crew session too (Teammates.tsx), opened here or not: a room's teammate asking is said.
   more = useTeam(identity)?.hidden ?? [];
-  const sids = [...new Set([...recents.map((r) => r.sid), ...more])].join(",");
+  // And Code's own chats, asked about but never listed (ide/waiting.ts): what waits on you there says so here (Arun, 2026-11-19: "one Waiting on you").
+  // Opt-in: only the app's own window watches them; the menu bar panel does not know how to show a Code chat.
+  const watched = useCodeWatched();
+  const codeChats = useMemo(() => (withCode ? watched : []), [withCode, watched]);
+  const sids = watchedSids(recents.map((r) => r.sid), more, codeChats).join(",");
 
   const waitingNow = useRef(0);
   waitingNow.current = items.length;
@@ -151,6 +168,7 @@ export function useAttention(identity: Identity, recents: RecentSession[], withS
       if (text === lastText.current) return;
       lastText.current = text;
       setItems(got.items);
+      heldLive.current = { waits: new Set(got.items.map((it) => `${it.sid}:${it.seq}`)), working: new Set((got.working ?? []).map((w) => w.sid)) };
       setWorking(new Map((got.working ?? []).map((w) => [w.sid, w])));
       setPreviews(new Map((got.previews ?? []).map((p) => [p.sid, p])));
       setCrews(new Map((got.crews ?? []).map((c) => [c.sid, c])));
@@ -167,7 +185,8 @@ export function useAttention(identity: Identity, recents: RecentSession[], withS
         lastNeeds.current = key;
       }
       // What finished since you last looked, on any device: the unread marks (unread.ts).
-      if (got.unread) setServerUnread(got.unread);
+      // (Code chats have no row in Agents to show or clear a mark, so none is kept for them.)
+      if (got.unread) setServerUnread(got.unread.filter((sid) => !codeChatOf(sid)));
       if (got.gone?.length) setGone(got.gone);
       setLoaded(true);
 
@@ -187,16 +206,24 @@ export function useAttention(identity: Identity, recents: RecentSession[], withS
         let said = it;
         // A teammate asking: titled by who and where, not the team session's own title.
         said = teamAttention(it);
+        const inCode = codeChatOf(it.sid);
+        if (inCode) said = { ...said, title: codeWhere(inCode) };
         if (QUIET) continue;
+        // While you type in the IDE, pings wait for a pause (ide/quiet.ts); an approval or a question, which stops an agent, still shows, with no sound.
+        if (!blocksAgent(it.kind) && holdPing({ kind: "waiting", sid: it.sid, title: said.title, seq: it.seq })) continue;
         notify(said);
-        if (chimeOn()) chime();
+        // Not over the Code chat you are looking at: its own column shows the ask (each step of a Manual run would chime).
+        if (chimeOn() && !shownInCode(it.sid) && !typingNow()) chime();
       }
       const nowWorking = new Set((got.working ?? []).map((w) => w.sid));
       for (const [sid, w] of wasWorking.current) {
         if (nowWorking.has(sid) || got.items.some((it) => it.sid === sid)) continue;
+        // A Code chat finishing is said by its own column, not by a toast over Agents.
+        if (codeChatOf(sid)) continue;
         let title = recents.find((r) => r.sid === sid)?.title ?? "A session";
         title = teamDoneTitle(sid, title);
         if (QUIET) continue;
+        if (holdPing({ kind: "done", sid, title })) continue;
         notifyDone(title, w.what, sid);
         // In the window too: a soft sound and a toast, unless it is the session on screen (DoneToasts.tsx).
         sayDone({ sid, title, what: w.what });
@@ -241,7 +268,8 @@ export function useAttention(identity: Identity, recents: RecentSession[], withS
   }, []);
   // A session deleted or removed leaves at once, before the server is next asked.
   const here = useMemo(() => new Set(sids.split(",")), [sids]);
-  const needs = useMemo(() => (marks ? marks.needs.filter((n) => !n.putOff && (!n.sid || !gone.includes(n.sid))) : []), [marks, gone]);
+  // A wait in a Code chat is labelled by where it lives ("Code · folder"), wherever Agents lists it.
+  const needs = useMemo(() => (marks ? marks.needs.filter((n) => !n.putOff && (!n.sid || !gone.includes(n.sid))).map((n) => { const c = codeChatOf(n.sid); return c ? { ...n, title: codeWhere(c) } : n; }) : []), [marks, gone, codeChats]);
   const needSids = useMemo(() => new Set(needs.flatMap((n) => (n.sid ? [n.sid] : []))), [needs]);
   const off = useMemo(() => new Set(marks?.off ?? []), [marks]);
   useEffect(() => {
@@ -249,7 +277,7 @@ export function useAttention(identity: Identity, recents: RecentSession[], withS
     for (const l of sharedListeners) l();
   }, [needs, off]);
   // A session waits on you while the page lists something of it that isn't put off: its row, its ring and its toast follow that.
-  const shown = useMemo(() => items.filter((i) => here.has(i.sid) && (!marks || needSids.has(i.sid))), [items, here, marks, needSids]);
+  const shown = useMemo(() => items.filter((i) => here.has(i.sid) && (!marks || needSids.has(i.sid))).map((i) => { const c = codeChatOf(i.sid); return c ? { ...i, title: codeWhere(c) } : i; }), [items, here, marks, needSids, codeChats]);
   // No count on the dock icon: Needs you says it once (audit CODE-1 B). Cleared, in case an earlier build left one.
   useEffect(() => void (!QUIET && window.fridayDesktop?.setBadge?.(0)), []);
   return { items: shown, working, previews, crews, prs, facts, overlaps, summaries, since, loaded, gone, needs, needSids, off };
@@ -320,7 +348,7 @@ export const withCode = (text: string) => text.split("`").map((part, i) => (i % 
  */
 /** `viewing`: the session on screen, whose waits its own chat already shows. */
 export function WaitingOnYou({ items, recents, viewing }: { identity?: Identity; items: Attention[]; recents: RecentSession[]; onOpen?: (r: RecentSession) => void; viewing?: string }) {
-  const shown = items.filter((it) => it.sid !== viewing && recents.some((r) => r.sid === it.sid));
+  const shown = items.filter((it) => it.sid !== viewing && recents.some((r) => r.sid === it.sid) || codeChatOf(it.sid));
   // One line for what arrived, rather than the waits read out whole.
   const [said, setSaid] = useState("");
   const seen = useRef(new Set<string>());

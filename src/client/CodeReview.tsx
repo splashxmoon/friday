@@ -1,20 +1,23 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { AutopilotButton, PilotTimeline, pilotWords, useAutopilot } from "./autopilot-ui.js";
+import type { PilotPrRecord } from "../autopilot.js";
 import type { BoardCard } from "../board.js";
 import { commentFor, fixesOf, loadOf, matches, mergeFindings, pileOf, risksOf, shortDuration, sizeOf, stepsOf, waitedMs, type AgreedFinding, type Mark } from "../code-review.js";
 import type { PullRequest } from "../runner/workspace.js";
 import { riskOfPr, type Risk } from "../review-risk.js";
-import { QuickHeader, RiskChip, approveTogether } from "./reviewRisk.js";
+import { RiskChip } from "./reviewRisk.js";
 import { ENGINE_NAMES, ENGINE_TOOLS, type EngineTool, type ReviewFinding } from "../types.js";
 import { api } from "./api.js";
 import { EngineMark } from "./BrandMarks.js";
 import { FileIcon } from "./fileIcons.js";
 import { GitHubConnect, machineError, useGithub } from "./GitHubConnect.js";
+import { isLocal } from "./edition.js";
+import { reviewInIde } from "./ide/pr-review.js";
 import { Icon } from "./icons.js";
 import { RELEASES, connectThisComputer, hostApi, useMachine } from "./local.js";
 import { openOutside } from "./openOutside.js";
 import { refreshPrs, reviews, runReview, setAuto, useAuto, usePrs, useReviews } from "./prWatch.js";
 import { ReviewTour } from "./ReviewTour.js";
-import { IssuesInbox, useIssues } from "./Issues.js";
 import type { Identity, RecentSession } from "./storage.js";
 import { ConfirmDialog, SkeletonRows, isTyping, relTime, type Confirmation } from "./ui.js";
 import { CheckIcon, ChevronDownIcon, EllipsisIcon, ExternalLinkIcon, FolderIcon, GitBranchIcon, GitPullRequestIcon, RefreshCwIcon, SearchIcon, ShieldIcon, TriangleAlertIcon, UserIcon, XIcon } from "lucide-react";
@@ -27,7 +30,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { PageHeader } from "@/components/dass";
 import { EmptyState as DassEmpty } from "@/components/dass/EmptyState";
-import { Count, Dot, PageTabs, Tip, type DotState } from "@/components/dass/page-bits";
+import { Count, Dot, Tip, type DotState } from "@/components/dass/page-bits";
 
 /**
  * Code Review: your pull requests, as an inbox.
@@ -40,17 +43,27 @@ import { Count, Dot, PageTabs, Tip, type DotState } from "@/components/dass/page
  */
 
 const POLL_MS = 60_000;
-type Tab = "you" | "mine" | "repos" | "merged" | "issues";
-const TAB_KEY = "mpa.review.tab";
+/**
+ * One list of every pull request (Arun, 2026-11-20: "a complete redesign of the code review page, i only want to show PRs... with the
+ * most recent PRs decending order"): yours, the ones waiting on your review, your team's and yours merged lately, newest first,
+ * narrowed by a filter. It replaced five tabs (Needs you, Yours, Team, Merged, Issues).
+ */
+type Filter = "all" | "mine" | "review" | "team" | "merged";
+const FILTER_KEY = "friday.review.filter";
+const FILTERS: { value: Filter; label: string; tip: string }[] = [
+  { value: "all", label: "All", tip: "Every pull request here, newest first" },
+  { value: "mine", label: "Yours", tip: "Your open pull requests" },
+  { value: "review", label: "To review", tip: "Waiting on your review" },
+  { value: "team", label: "Team", tip: "Everyone else's in your repos" },
+  { value: "merged", label: "Merged", tip: "Yours merged this week" },
+];
+const filterOf = (kind: Kind): Filter => (kind === "review" ? "review" : kind === "team" ? "team" : kind === "merged" ? "merged" : "mine");
 // Kept for the visit, so coming back to the tab shows the last answer at once while a fresh one is fetched.
 let lastTeam: PullRequest[] | null = null;
 
 export type WorkOptions = { shepherd?: boolean };
 
 type Kind = "review" | "ready" | "fix" | "waiting" | "draft" | "team" | "merged";
-const PILES = { ready: "Ready to merge", fix: "Needs a fix", waiting: "Waiting on others", draft: "Drafts" } as const;
-/** The same piles as chips, short enough that all of them sit on one row of the list (Arun, 2026-11-17: "fix layout"); the full name is the chip's tip. */
-const PILE_CHIPS = { ready: "Ready", fix: "To fix", waiting: "Waiting", draft: "Drafts" } as const;
 /** A key pressed on the page, for the open pull request to carry out. `n` makes the same key twice two commands. */
 type Cmd = { key: "github" | "merge" | "approve"; n: number };
 
@@ -66,7 +79,8 @@ export function CodeReview({
   recents?: RecentSession[];
   /** A new session, its box filled with this: the pull request's link, and what to do with it. */
   onWork: (brief: string, opts?: WorkOptions) => void;
-  onOpen?: (sid: string) => void;
+  /** A session opened by its id, with its link when the page has it (autopilot's, which may not be on the sidebar). */
+  onOpen?: (sid: string, invite?: string) => void;
 }) {
   const { state: machine } = useMachine(identity);
   const linked = machine.mode === "local" || machine.mode === "linked";
@@ -74,24 +88,23 @@ export function CodeReview({
   const [team, setTeam] = useState<PullRequest[] | null>(lastTeam);
   const [teamError, setTeamError] = useState("");
   const [n, setN] = useState(0);
-  const [tab, setTabState] = useState<Tab | null>(() => {
+  const [filter, setFilterState] = useState<Filter>(() => {
     try {
-      return (localStorage.getItem(TAB_KEY) as Tab | null) ?? null;
+      const f = localStorage.getItem(FILTER_KEY) as Filter | null;
+      return f && FILTERS.some((x) => x.value === f) ? f : "all";
     } catch {
-      return null;
+      return "all";
     }
   });
-  const setTab = (t: Tab) => {
-    setTabState(t);
+  const setFilter = (f: Filter) => {
+    setFilterState(f);
     try {
-      localStorage.setItem(TAB_KEY, t);
+      localStorage.setItem(FILTER_KEY, f);
     } catch {
-      /* the tab is only for this visit */
+      /* the filter is only for this visit */
     }
   };
   const [query, setQuery] = useState("");
-  /** One pile of your own shown alone ("ready", "fix", …), or every pile. */
-  const [onlyPile, setOnlyPile] = useState<"" | "fix" | "ready" | "waiting" | "draft">("");
   const [repo, setRepo] = useState("");
   const [cards, setCards] = useState<BoardCard[]>([]);
   const gh = useGithub(identity, linked);
@@ -137,30 +150,43 @@ export function CodeReview({
     const asked = new Set((prs?.review ?? []).map((p) => p.repo));
     return [...new Set(all.filter((p) => !known || p.canPush || asked.has(p.repo)).map((p) => p.repo))];
   }, [prs]);
-  const shownTab: Tab = tab ?? ((prs?.review.length ?? 0) > 0 ? "you" : "mine");
-  // A failed read of the team's pull requests is the Team tab's to say, not every tab's (Arun's screenshots, 2026-11-19: "GitHub
-  // answered 502." over all five).
-  const error = prsError || (shownTab === "repos" ? teamError : "");
+  // A failed read of the team's pull requests is the Team filter's to say, not the whole page's (Arun's screenshots, 2026-11-19:
+  // "GitHub answered 502." over all five tabs).
+  const error = prsError || (filter === "team" ? teamError : "");
   useEffect(() => {
     // Your login too: every repo of yours is your team's, a pull request of yours there or not (an outside contributor's on
     // splashxmoon/friday never showed, Arun 2026-11-19). A runner from before that ignores it.
     const owner = prs?.account ?? "";
-    if (shownTab !== "repos" || !linked || (!repos.length && !owner)) return;
+    if (!linked || (!repos.length && !owner)) return;
     let live = true;
     hostApi<{ team: PullRequest[] }>(identity, `/api/runner/prs.team?repos=${encodeURIComponent(repos.join(","))}${owner ? `&owner=${encodeURIComponent(owner)}` : ""}`).then(
       (r) => live && (setTeam((lastTeam = r.team)), setTeamError("")),
       (e) => live && (setTeam((t) => t ?? []), setTeamError(machineError(e))),
     );
     return () => void (live = false);
-  }, [shownTab, linked, repos.join(","), prs?.account, n]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [linked, repos.join(","), prs?.account, n]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const list = (shownTab === "you" ? prs?.review : shownTab === "mine" ? prs?.mine : shownTab === "merged" ? prs?.merged : team) ?? [];
+  // Every pull request once, as what it is to you: one waiting on your review, one of yours by where it stands, one merged, a
+  // teammate's. Newest first: by when it last changed, a merged one by when it merged.
+  const all = useMemo(() => {
+    const seen = new Map<string, { pr: PullRequest; kind: Kind }>();
+    for (const pr of prs?.review ?? []) seen.set(pr.url, { pr, kind: "review" });
+    for (const pr of prs?.mine ?? []) if (!seen.has(pr.url)) seen.set(pr.url, { pr, kind: pileOf(pr) as Kind });
+    for (const pr of prs?.merged ?? []) if (!seen.has(pr.url)) seen.set(pr.url, { pr, kind: "merged" });
+    for (const pr of team ?? []) if (!seen.has(pr.url)) seen.set(pr.url, { pr, kind: "team" });
+    return [...seen.values()];
+  }, [prs, team]);
+  const whenOf = (i: { pr: PullRequest; kind: Kind }) => Date.parse(i.kind === "merged" ? (i.pr.mergedAt ?? i.pr.updatedAt) : i.pr.updatedAt) || 0;
+  const counts = Object.fromEntries(FILTERS.map((f) => [f.value, f.value === "all" ? all.length : all.filter((i) => filterOf(i.kind) === f.value).length])) as Record<Filter, number>;
+  const inFilter = all.filter((i) => filter === "all" || filterOf(i.kind) === filter);
+  const list = inFilter.map((i) => i.pr);
   const tabRepos = [...new Set(list.map((p) => p.repo))];
-  const shown = list.filter((p) => (!repo || p.repo === repo) && matches(p, query));
+  const shown = inFilter.filter((i) => (!repo || i.pr.repo === repo) && matches(i.pr, query)).sort((a, b) => whenOf(b) - whenOf(a));
   const refresh = () => setN((x) => x + 1);
   const tools = machine.tools.filter((t) => t.path && t.loggedIn !== false).map((t) => t.tool);
   const auto = useAuto();
   useReviews();
+  const pilots = useAutopilot(identity);
   const [confirm, setConfirm] = useState<Confirmation | null>(null);
 
   // How risky each is to wave through (review-risk.ts): GitHub's files and checks, what its session knows when an agent of
@@ -172,77 +198,17 @@ export function CodeReview({
     return riskOfPr(pr, card?.pr?.url === pr.url ? card.review : undefined, found);
   };
   const risks = new Map(list.map((p) => [p.url, riskFor(p)]));
-  const riskiest = (a: PullRequest, b: PullRequest) => risks.get(b.url)!.score - risks.get(a.url)!.score;
 
-  // The queue, in the order it is drawn: yours by what stands between each and merging, the riskiest first in each pile;
-  // somebody else's riskiest first (the longest wait first among equals), with the small safe ones gathered at the end.
-  const reviewable = (kind: Kind) => {
-    const sorted = [...shown].sort((a, b) => riskiest(a, b) || waitedMs(b) - waitedMs(a));
-    const quick = sorted.filter((p) => risks.get(p.url)!.quick);
-    return [
-      { title: "", items: sorted.filter((p) => !risks.get(p.url)!.quick).map((pr) => ({ pr, kind })) },
-      { title: "Quick to review", quick: true, items: quick.map((pr) => ({ pr, kind })) },
-    ].filter((g) => g.items.length);
-  };
-  // Your own, by pile: every pile, or one picked from the chips over the list (Arun, 2026-11-15: "add a better filter for like
-  // showing ready to merge and stuff because those can get hidden pretty quickly").
-  const allPiles = (["fix", "ready", "waiting", "draft"] as const).map((pile) => ({ pile, title: PILES[pile], items: shown.filter((p) => pileOf(p) === pile).sort(riskiest).map((pr) => ({ pr, kind: pile as Kind })) }));
-  const pileHere = onlyPile && allPiles.some((g) => g.pile === onlyPile && g.items.length) ? onlyPile : "";
-  const groups: { title: string; quick?: boolean; items: { pr: PullRequest; kind: Kind }[] }[] =
-    shownTab === "mine"
-      ? allPiles.filter((g) => g.items.length && (!pileHere || g.pile === pileHere)).map(({ title, items }) => ({ title, items }))
-      : shownTab === "you"
-        ? reviewable("review")
-        : shownTab === "repos"
-          ? // Everyone's, newest first, one list (Arun, 2026-11-19: "make they are in order of the most recent please"): it isn't a
-            // queue of yours to work through, so neither riskiest-first nor the small ones held back to the end.
-            [{ title: "", items: [...shown].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)).map((pr) => ({ pr, kind: "team" as Kind })) }]
-          : [{ title: "", items: shown.map((pr) => ({ pr, kind: "merged" as Kind })) }];
-  /** Approve the quick ones together, on GitHub as you: those not approved yet and not drafts. */
-  const approveQuick = (prs: PullRequest[]) => {
-    const list = prs.filter((p) => !p.draft && p.review !== "approved");
-    if (!list.length) return;
-    setConfirm({
-      title: `Approve ${list.length} pull request${list.length === 1 ? "" : "s"}?`,
-      body: `${list.length === 1 ? "It is" : "Each is"} small, touches nothing sensitive, and has nothing failing or found by a reviewer. ${list.length === 1 ? "It gets" : "They get"} your approval on GitHub: ${list.map((p) => `#${p.number} ${p.title}`).join(", ")}.`,
-      action: `Approve ${list.length}`,
-      danger: false,
-      onConfirm: () => approveTogether(identity, list.map((p) => ({ url: p.url, title: `#${p.number} ${p.title}`, head: p.head, id: p.id }))).finally(refresh),
-    });
-  };
-  // Each pile folds to its heading, and stays folded (Arun, 2026-11-15: "make the categories and stuff collapsable and better
-  // designed too"); the arrow keys move through the piles that are open.
-  const [shut, setShut] = useState<Set<string>>(() => {
-    try {
-      return new Set(JSON.parse(localStorage.getItem("friday.review.shut") ?? "[]") as string[]);
-    } catch {
-      return new Set();
-    }
-  });
-  const flipPile = (t: string) =>
-    setShut((x) => {
-      const n = new Set(x);
-      if (!n.delete(t)) n.add(t);
-      try {
-        localStorage.setItem("friday.review.shut", JSON.stringify([...n]));
-      } catch {
-        // Remembered for this visit only.
-      }
-      return n;
-    });
-  const order = groups.flatMap((g) => (g.title && !g.quick && shut.has(g.title) ? [] : g.items));
+  const order = shown;
   const [sel, setSel] = useState("");
-  // Every pull request, folded or not: the one picked stays open beside the list, and all piles folded is still a list (Arun,
-  // 2026-11-15: "if i collapse all of the categories everything disappears").
-  const every = groups.flatMap((g) => g.items);
-  /** Nothing in this tab and nothing filtered out: the page says so across its width. */
-  const blank = !every.length && !query && !repo && !(shownTab === "repos" && team === null);
-  const teamFailed = shownTab === "repos" && !!teamError && !team?.length;
-  const current = every.find((i) => i.pr.url === sel) ?? order[0] ?? every[0];
+  /** Nothing here and nothing filtered out: the page says so across its width. */
+  const blank = !shown.length && !query && !repo && !(filter === "team" && team === null);
+  const teamFailed = filter === "team" && !!teamError && !team?.length;
+  const current = shown.find((i) => i.pr.url === sel) ?? shown[0];
   const [cmd, setCmd] = useState<Cmd | null>(null);
   const search = useRef<HTMLInputElement>(null);
-  const keys = useRef({ order, current, tools, auto, setTab, refresh });
-  keys.current = { order, current, tools, auto, setTab, refresh };
+  const keys = useRef({ order, current, tools, auto, setFilter, refresh });
+  keys.current = { order, current, tools, auto, setFilter, refresh };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || isTyping(e.target) || document.querySelector(".overlay")) {
@@ -252,9 +218,9 @@ export function CodeReview({
       const k = keys.current;
       const at = k.order.findIndex((i) => i.pr.url === k.current?.pr.url);
       const send = (key: Cmd["key"]) => setCmd((c) => ({ key, n: (c?.n ?? 0) + 1 }));
-      const tab = ({ "1": "you", "2": "mine", "3": "repos", "4": "merged", "5": "issues" } as Record<string, Tab>)[e.key];
+      const f = ({ "1": "all", "2": "mine", "3": "review", "4": "team", "5": "merged" } as Record<string, Filter>)[e.key];
       if (e.key === "/") search.current?.focus();
-      else if (tab) k.setTab(tab);
+      else if (f) (k.setFilter(f), setSel(""));
       else if (e.key === "j" || e.key === "ArrowDown") setSel(k.order[Math.min(k.order.length - 1, at + 1)]?.pr.url ?? "");
       else if (e.key === "k" || e.key === "ArrowUp") setSel(k.order[Math.max(0, at - 1)]?.pr.url ?? "");
       else if (e.key === "g") send("github");
@@ -275,41 +241,27 @@ export function CodeReview({
   const ctx: Ctx = { identity, onWork, onOpen, sessionFor, refresh, tools };
 
   const ready = linked && !!prs?.available;
-  // The issues (GitHub by this computer, Linear by the server), read once the page can show them: the tab carries their count.
-  const issues = useIssues(identity, ready, n);
-  const issueCount = (issues.github?.assigned.length ?? 0) + (issues.linear?.issues.length ?? 0);
   const empty =
-    shownTab === "you"
-      ? query || repo
-        ? "Nothing waiting matches that."
-        : "Nobody is waiting on your review."
-      : shownTab === "mine"
-        ? query || repo
-          ? "None of yours match that."
-          : "You have no open pull requests."
-        : shownTab === "merged"
-          ? "Nothing of yours merged this week."
-          : repos.length || prs?.account
-            ? "Nobody else has a pull request open in your repos."
-            : "Your repos show here once you have a pull request in one.";
+    query || repo
+      ? "No pull request matches that."
+      : filter === "review"
+        ? "Nobody is waiting on your review."
+        : filter === "mine"
+          ? "You have no open pull requests."
+          : filter === "merged"
+            ? "Nothing of yours merged this week."
+            : filter === "team"
+              ? repos.length || prs?.account
+                ? "Nobody else has a pull request open in your repos."
+                : "Your repos show here once you have a pull request in one."
+              : "No pull requests yet. Ones you open, and ones you're asked to review, show here.";
 
   // The list and the pull request side by side: shown once the pull requests are read and there are some to show.
   const split = !!prs && !!prs.available && linked && !(error && !prs) && !(machine.mode === "checking" && !prs);
   // The page's own controls: which pull requests, refresh, and the way out to GitHub.
   const controls = ready && (
     <>
-            <PageTabs<Tab>
-              label="Pull requests and issues"
-              value={shownTab}
-              onChange={(t) => (setTab(t), setSel(""))}
-              options={[
-                { value: "you", label: <>Needs you{prs!.review.length > 0 && <Count n={prs!.review.length} needs />}</>, tip: "Waiting on your review", keys: "1" },
-                { value: "mine", label: <>Yours{prs!.mine.length > 0 && <Count n={prs!.mine.length} />}</>, tip: "Your open pull requests", keys: "2" },
-                { value: "repos", label: "Team", tip: "Everyone's in your repos", keys: "3" },
-                { value: "merged", label: "Merged", tip: "Yours merged this week", keys: "4" },
-                { value: "issues", label: <>Issues{issueCount > 0 && <Count n={issueCount} />}</>, tip: "Assigned to you in GitHub and Linear", keys: "5" },
-              ]}
-            />
+            <AutopilotButton identity={identity} tools={tools} {...(onOpen ? { onOpen } : {})} />
             <Tip label={busy ? "Checking…" : "Refresh"} keys="⇧R">
               <Button variant="ghost" size="icon-sm" aria-label="Refresh" disabled={busy} onClick={refresh} className="text-[var(--text-muted)] hover:text-[var(--ink)]">
                 <RefreshCwIcon className={busy ? "animate-spin" : ""} />
@@ -339,7 +291,7 @@ export function CodeReview({
         <PageHeader
           className="mb-0 shrink-0"
           title="Code Review"
-          subtitle="Your pull requests as an inbox, with what waits on you first."
+          subtitle="Every pull request of yours and your team's, newest first."
           // With the list showing, the tabs and buttons sit over the pull request, so the list can run up level with them.
           actions={ready && !split ? controls : undefined}
         />
@@ -379,23 +331,21 @@ export function CodeReview({
           <>
           {/* A narrow window stacks the list over the open one: the tabs go first, not down between the two (they sat mid-page). */}
           <div className="page-top mb-2 hidden shrink-0 flex-wrap items-center justify-end gap-2 max-[720px]:flex">{controls}</div>
-          {shownTab === "issues" ? (
-          <IssuesInbox data={issues} controls={controls} onWork={(brief) => onWork(brief)} query={query} setQuery={setQuery} search={search} />
-        ) : (
-          // A tab with nothing in it is said once, across the page: no list column standing empty beside it with a search box
+          {(
+          // A filter with nothing in it is said once, across the page: no list column standing empty beside it with a search box
           // for nothing (Arun, 2026-11-19: "fix the design of the code review pages").
           <div className={cn("rv-split gap-5!", blank ? "min-[721px]:grid-cols-1!" : "min-[721px]:grid-cols-[clamp(320px,30%,460px)_minmax(0,1fr)]!")}>
             {!blank && (
             <aside className="rv-queue" aria-label="Pull requests">
               <div className="page-top-in flex items-center gap-2 border-b border-[var(--border)] p-2">
                 <div className="relative min-w-0 flex-1">
-                  <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-[var(--text-muted)]" />
+                  <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-[var(--text-muted)]" />
                   <Input
                     ref={search}
                     value={query}
                     placeholder="Search"
                     aria-label="Search pull requests"
-                    className="h-8 border-[var(--border)] bg-[var(--bg)] pr-8 pl-8 text-[13px] shadow-none md:text-[13px]"
+                    className="h-8 rounded-[9px] border-[var(--border-strong)] bg-[var(--card)] pr-8 pl-8 text-[13px] shadow-none placeholder:text-[var(--text-muted)] focus-visible:border-[var(--border-focus)] focus-visible:ring-0 md:text-[13px]"
                     onChange={(e) => setQuery(e.target.value)}
                   />
                   <span className="absolute top-1/2 right-1.5 -translate-y-1/2">
@@ -430,57 +380,29 @@ export function CodeReview({
                   </DropdownMenu>
                 )}
               </div>
-              {shownTab === "mine" && allPiles.filter((g) => g.items.length).length > 1 && (
-                <div className="rv-piles" role="radiogroup" aria-label="Show a pile">
-                  <button type="button" role="radio" aria-checked={!pileHere} className="rv-pile-chip" onClick={() => setOnlyPile("")}>
-                    All <span>{allPiles.reduce((n, g) => n + g.items.length, 0)}</span>
+              {/* What to show: everything, or one kind, each with how many (Arun, 2026-11-20). Newest first in each. */}
+              <div className="rv-filters" role="radiogroup" aria-label="Show">
+                {FILTERS.map((f) => (
+                  <button key={f.value} type="button" role="radio" aria-checked={filter === f.value} title={f.tip} className="rv-filter" data-kind={f.value} onClick={() => (setFilter(f.value), setSel(""))}>
+                    {f.label}
+                    {counts[f.value] > 0 && <span className="rv-filter-n">{counts[f.value]}</span>}
                   </button>
-                  {allPiles
-                    .filter((g) => g.items.length)
-                    .map((g) => (
-                      <button key={g.pile} type="button" role="radio" aria-checked={pileHere === g.pile} aria-label={`${g.title}, ${g.items.length}`} title={g.title} className="rv-pile-chip" data-tone={g.pile} onClick={() => (setOnlyPile(pileHere === g.pile ? "" : g.pile), shut.has(g.title) && flipPile(g.title))}>
-                        <i aria-hidden="true" />
-                        {PILE_CHIPS[g.pile]} <span>{g.items.length}</span>
-                      </button>
-                    ))}
-                </div>
-              )}
+                ))}
+              </div>
               {error && <Stale error={error} busy={busy} onRetry={refresh} />}
-              {shownTab === "repos" && team && <Load prs={team} />}
+              {filter === "team" && team && <Load prs={team} />}
               <div className="rv-queue-list">
-                {shownTab === "repos" && team === null ? (
+                {filter === "team" && team === null ? (
                   <SkeletonRows rows={3} />
-                ) : every.length ? (
-                  groups.map((g) => (
-                    <div key={g.title || "all"} className="flex flex-col gap-px" role={g.quick ? "group" : undefined} aria-label={g.quick ? `Quick to review, ${g.items.length}` : undefined}>
-                      {g.quick ? (
-                        <QuickHeader n={g.items.length}>
-                          {g.items.some(({ pr }) => !pr.draft && pr.review !== "approved") && (
-                            <Tip label="Approve these on GitHub together">
-                              <Button variant="ghost" size="xs" className="h-6 text-[12px] text-[var(--ink-2)]" onClick={() => approveQuick(g.items.map((i) => i.pr))}>
-                                <CheckIcon /> Approve all
-                              </Button>
-                            </Tip>
-                          )}
-                        </QuickHeader>
-                      ) : g.title && (
-                        <h2 className="rv-pile m-0" data-tone={g.items[0]?.kind ?? ""}>
-                          <button type="button" className="rv-pile-btn" aria-expanded={!shut.has(g.title)} onClick={() => flipPile(g.title)}>
-                            <ChevronDownIcon className="rv-pile-chev" aria-hidden="true" />
-                            <i className="rv-pile-dot" aria-hidden="true" />
-                            <span className="rv-pile-name">{g.title}</span>
-                            <span className="rv-pile-n">{g.items.length}</span>
-                          </button>
-                        </h2>
-                      )}
-                      {!(g.title && !g.quick && shut.has(g.title)) && g.items.map(({ pr, kind }) => (
-                        <QueueItem key={pr.url} pr={pr} kind={kind} on={current?.pr.url === pr.url} working={ctx.sessionFor.get(pr.url)} risk={kind === "merged" || g.quick ? undefined : risks.get(pr.url)} onPick={() => setSel(pr.url)} />
-                      ))}
-                    </div>
-                  ))
+                ) : shown.length ? (
+                  <div className="flex flex-col gap-1">
+                    {shown.map(({ pr, kind }) => (
+                      <QueueItem key={pr.url} pr={pr} kind={kind} on={current?.pr.url === pr.url} working={ctx.sessionFor.get(pr.url)} pilot={kind === "merged" ? undefined : pilots?.prs.get(pr.url)} risk={kind === "merged" ? undefined : risks.get(pr.url)} when={whenOf({ pr, kind })} showKind={filter === "all"} onPick={() => setSel(pr.url)} />
+                    ))}
+                  </div>
                 ) : null /* Said once, in the pane beside it, with the way on. */}
               </div>
-              {shownTab === "you" && <AutoReview tools={tools} />}
+              {filter === "review" && <AutoReview tools={tools} />}
             </aside>
             )}
             <section className="rv-pane" aria-label="Pull request">
@@ -491,7 +413,7 @@ export function CodeReview({
               {blank && error && !teamFailed && <Stale error={error} busy={busy} onRetry={refresh} className="mx-auto w-full max-w-[440px] rounded-lg border" />}
               {current ? (
                 <Pane key={current.pr.url} pr={current.pr} kind={current.kind} ctx={ctx} cmd={cmd} risk={risks.get(current.pr.url)} />
-              ) : shownTab === "repos" && team === null ? null /* Still reading: "nobody has one open" said beside the loading rows wasn't true yet. */ : teamFailed ? (
+              ) : filter === "team" && team === null ? null /* Still reading: "nobody has one open" said beside the loading rows wasn't true yet. */ : teamFailed ? (
                 <DassEmpty className="mt-16" tone="bad" icon={<GitPullRequestIcon />} title="Couldn't read your team's pull requests" action={<Button variant="outline" size="sm" disabled={busy} onClick={refresh}>Try again</Button>}>
                   {said(teamError)}
                 </DassEmpty>
@@ -506,20 +428,19 @@ export function CodeReview({
                       <Button variant="outline" size="sm" onClick={() => (setQuery(""), setRepo(""))}>
                         Clear filters
                       </Button>
-                    ) : shownTab === "you" && (prs?.mine.length ?? 0) > 0 ? (
+                    ) : filter !== "all" && all.length > 0 ? (
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={() => {
-                          setTab("mine");
-                          // This button goes with the empty tab it sat in, so a keyboard user would be dropped on the page body:
-                          // focus follows them to the tab they just went to.
-                          requestAnimationFrame(() => [...document.querySelectorAll<HTMLElement>('.review-page [role="tab"][aria-selected="true"]')].find((t) => t.offsetParent)?.focus());
+                          setFilter("all");
+                          // The button goes with the empty filter it sat in: focus follows to the filter now chosen.
+                          requestAnimationFrame(() => document.querySelector<HTMLElement>('.review-page .rv-filter[aria-checked="true"]')?.focus());
                         }}
                       >
-                        See yours · {prs!.mine.length}
+                        See all · {all.length}
                       </Button>
-                    ) : shownTab === "mine" ? (
+                    ) : filter === "mine" || filter === "all" ? (
                       <Button size="sm" onClick={() => onWork("")}>
                         Start a session
                       </Button>
@@ -528,7 +449,7 @@ export function CodeReview({
                 />
               )}
               {/* Nobody waiting yet: whether your agents read each one first is the one thing to set here. */}
-              {blank && shownTab === "you" && !teamFailed && <AutoReview tools={tools} className="mx-auto mt-6 w-full max-w-[440px] rounded-lg border border-[var(--border)]" />}
+              {blank && filter === "review" && !teamFailed && <AutoReview tools={tools} className="mx-auto mt-6 w-full max-w-[440px] rounded-lg border border-[var(--border)]" />}
             </section>
           </div>
         )}
@@ -548,7 +469,7 @@ export function CodeReview({
               <span><kbd>J</kbd><kbd>K</kbd> Move</span>
               <span><kbd>A</kbd> Approve</span>
               <span><kbd>M</kbd> Merge</span>
-              <span><kbd>1</kbd>–<kbd>5</kbd> Tabs</span>
+              <span><kbd>1</kbd>–<kbd>5</kbd> Filters</span>
               <span><kbd>R</kbd> Agent review</span>
               <span><kbd>G</kbd> GitHub</span>
             </div>
@@ -590,7 +511,7 @@ function EmptyState({ title, body, actions, tone }: { title: string; body: strin
 type Ctx = {
   identity: Identity;
   onWork: (brief: string, opts?: WorkOptions) => void;
-  onOpen?: (sid: string) => void;
+  onOpen?: (sid: string, invite?: string) => void;
   sessionFor: Map<string, BoardCard>;
   refresh: () => void;
   /** The coding tools on this computer that can review: installed and signed in. */
@@ -647,14 +568,20 @@ function Diff({ add, del, className }: { add: number; del: number; className?: s
   );
 }
 
-function QueueItem({ pr, kind, on, working, risk, onPick }: { pr: PullRequest; kind: Kind; on: boolean; working?: BoardCard; risk?: Risk; onPick: () => void }) {
+/** What a pull request is to you, said on its row in the All list. */
+const KIND_WORD: Record<Kind, string> = { review: "To review", ready: "Yours", fix: "Yours", waiting: "Yours", draft: "Yours", team: "Team", merged: "Merged" };
+
+function QueueItem({ pr, kind, on, working, pilot, risk, when, showKind, onPick }: { pr: PullRequest; kind: Kind; on: boolean; working?: BoardCard; pilot?: PilotPrRecord | undefined; risk?: Risk; /** When it last changed (merged: when it merged), for its age on the row. */ when?: number; /** In the All list: whose it is, so the one list still says. */ showKind?: boolean; onPick: () => void }) {
   const root = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (on) root.current?.scrollIntoView({ block: "nearest" });
   }, [on]);
   const st = standing(pr, kind);
   const others = kind === "review" || kind === "team";
-  const dot = dotOf(st.tone, kind, working);
+  // Autopilot's word for it while it has the pull request (autopilot-ui.tsx), in place of where it stands on GitHub.
+  const ap = pilotWords(pilot);
+  const dot: DotState = ap ? (ap.tone === "working" ? "working" : ap.tone === "stopped" ? "bad" : "idle") : dotOf(st.tone, kind, working);
+  const word = ap?.text ?? (working?.shepherd ? "Friday is on it" : st.text);
   // Two lines (Arun, 2026-11-07, code review design A): the title, then where it lives, its size and where it stands, once.
   // What makes it worth a careful look is in its tooltip and the open pull request, no longer a second pill on the row.
   return (
@@ -664,22 +591,30 @@ function QueueItem({ pr, kind, on, working, risk, onPick }: { pr: PullRequest; k
       aria-current={on || undefined}
       onClick={onPick}
       title={risk && !risk.quick && risk.reasons.length ? `Worth a careful look: ${risk.reasons.join(", ")}` : undefined}
-      className="flex w-full min-w-0 flex-col gap-1.5 rounded-lg px-2.5 py-2 text-left transition-colors duration-[var(--dass-fast)] hover:bg-[var(--hover)] aria-[current=true]:bg-[var(--hover)] aria-[current=true]:shadow-[inset_0_0_0_1px_var(--border)]"
+      className="flex w-full min-w-0 flex-col gap-2 rounded-[10px] px-3 py-2.5 text-left transition-colors duration-[var(--dass-fast)] hover:bg-[var(--hover)] aria-[current=true]:bg-[var(--hover)] aria-[current=true]:shadow-[inset_0_0_0_1px_var(--border)]"
     >
-      <span className="line-clamp-2 min-w-0 text-[13px] leading-snug font-medium text-[var(--ink)]">{pr.title}</span>
+      <span className="flex min-w-0 items-start gap-2">
+        <span className="line-clamp-2 min-w-0 flex-1 text-[13.5px] leading-[1.4] font-medium text-[var(--ink)]">{pr.title}</span>
+        {when ? (
+          <time className="mt-px shrink-0 text-[11.5px] text-[var(--text-muted)] tabular-nums" dateTime={new Date(when).toISOString()} title={new Date(when).toLocaleString()}>
+            {relTime(when)}
+          </time>
+        ) : null}
+      </span>
       <span className="flex min-w-0 items-center gap-2 text-[12px] text-[var(--text-muted)]">
         {others && pr.avatar && <img className="size-3.5 shrink-0 rounded-full" src={pr.avatar} alt="" />}
         {/* Where it lives keeps its words; a long status gives way first (2026-11-07 release walk: "edge…" beside "Checks,
             conflicts, comments"). */}
+        {showKind && <span className="rv-kind shrink-0" data-kind={filterOf(kind)}>{KIND_WORD[kind]}</span>}
         <span className="max-w-[55%] min-w-0 shrink-0 truncate">
           {pr.repo.split("/")[1]} #{pr.number}
           {others && pr.author ? ` · ${pr.author}` : ""}
           {pr.base && !/^(main|master|trunk|develop)$/.test(pr.base) ? ` · stacked on ${pr.base}` : ""}
         </span>
         <Diff add={pr.additions} del={pr.deletions} />
-        <span className={cn("ml-auto inline-flex min-w-0 items-center gap-1.5 font-medium", TONE_TEXT[dot])} title={`${working?.shepherd ? "Friday is on it" : st.text} · ${sizeOf(pr)} change: ${pr.additions + pr.deletions} lines`}>
+        <span className={cn("ml-auto inline-flex min-w-0 items-center gap-1.5 font-medium", TONE_TEXT[dot])} title={`${ap ? `${ap.text}: ${pilot?.log.at(-1)?.text ?? ""}` : word} · ${sizeOf(pr)} change: ${pr.additions + pr.deletions} lines`}>
           <Dot state={dot} className="shrink-0" />
-          <span className="truncate">{working?.shepherd ? "Friday is on it" : st.text}</span>
+          <span className="truncate">{word}</span>
         </span>
       </span>
     </button>
@@ -785,6 +720,8 @@ function Section({ title, meta, children, className }: { title: ReactNode; meta?
 }
 
 function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: Ctx; cmd: Cmd | null; risk?: Risk }) {
+  const pilot = useAutopilot(ctx.identity)?.prs.get(pr.url);
+  const pilotLive = pilot?.state === "working" || pilot?.state === "watching";
   const [busy, setBusy] = useState("");
   const [tour, setTour] = useState(false);
   const [note, setNote] = useState<{ text: string; bad?: boolean } | null>(null);
@@ -800,6 +737,19 @@ function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: 
   // Of those, what the rest of the page doesn't say already: its size is beside the title, its checks in the card.
   const looks = risks.filter((r) => !/check|conflict|\b(lines|files)\b/i.test(r));
   const quiet = (p: Promise<unknown>) => void p.catch(() => {});
+  // Review in the IDE (Arun, 2026-11-19, wave 3): somebody else's pull request, checked out beside your own folder and read in Code.
+  const [inIde, setInIde] = useState(false);
+  const reviewHere = async () => {
+    setInIde(true);
+    setNote(null);
+    try {
+      await reviewInIde(ctx.identity, pr, ctx.tools[0]);
+    } catch (e) {
+      setNote({ text: machineError(e), bad: true });
+    } finally {
+      setInIde(false);
+    }
+  };
 
   const act = async (action: string, extra: Record<string, unknown> = {}) => {
     setBusy(action);
@@ -875,7 +825,8 @@ function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: 
     );
   // Each fix is on its own line in the card below (MergeRows), beside what it fixes; the card's one button sees it all through.
   if (kind === "fix") {
-    if (!session?.shepherd)
+    // Autopilot on it already: its own session sees it through (autopilot-ui.tsx), and a second one would race it.
+    if (!session?.shepherd && !pilotLive)
       buttons.push(
         <Tip key="t" label="A session fixes what's blocking it, then Friday keeps handing new red checks and review comments to the agent until it merges">
           <Button size="sm" className="h-8 text-[13px]" onClick={() => ctx.onWork(briefs.through(pr), { shepherd: true })}>
@@ -896,7 +847,7 @@ function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: 
   const nextDot: DotState = kind === "review" ? "needs" : kind === "merged" ? "done" : next.tone === "bad" ? "bad" : next.tone === "ok" ? "done" : "idle";
 
   return (
-    <div className="flex flex-col gap-7 px-1 pt-1 pb-8">
+    <div className="flex flex-col gap-8 px-2 pt-2 pb-12">
       <header className="flex flex-col gap-3">
         <div className="flex items-start gap-3">
           <h2 className="m-0 min-w-0 flex-1 text-[20px] leading-[28px] font-semibold tracking-[-0.015em] text-pretty text-[var(--ink)]" title={pr.title}>
@@ -909,6 +860,13 @@ function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: 
                 <ExternalLinkIcon />
               </Button>
             </Tip>
+            {others && !merged && isLocal() && (
+              <Tip label="Their branch checked out on the side, its diff and comments in the IDE, and an agent's first pass">
+                <Button variant="outline" size="sm" className="h-8 border-[var(--border)] bg-[var(--bg)] text-[13px] shadow-none" disabled={inIde} onClick={() => void reviewHere()}>
+                  {inIde ? "Opening…" : "Review in the IDE"}
+                </Button>
+              </Tip>
+            )}
             {!merged && (
               <Button variant="outline" size="sm" className="h-8 border-[var(--border)] bg-[var(--bg)] text-[13px] shadow-none" onClick={() => ctx.onWork(`${pr.url} `)}>
                 Open in a session
@@ -970,6 +928,8 @@ function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: 
           </div>
         )}
       </header>
+      {/* What autopilot did on it, in order, with its session to open or stop (autopilot-ui.tsx). */}
+      <PilotTimeline identity={ctx.identity} url={pr.url} {...(ctx.onOpen ? { onOpen: ctx.onOpen } : {})} />
 
       {/* What stands between it and merging, said once (Arun, 2026-11-07, code review design A): a heading, the one action
           that moves it forward, and a line for each of checks, review and merging with its own fix beside it. It was a card, then

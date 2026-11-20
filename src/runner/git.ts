@@ -67,7 +67,7 @@ function git(cwd: string, args: string[], okCodes = [0], timeout = 0): Promise<s
  * isn't a repository yet may become one.
  */
 const tops = new Map<string, string>();
-async function toplevel(cwd: string): Promise<string> {
+export async function toplevel(cwd: string): Promise<string> {
   const had = tops.get(cwd);
   if (had) return had;
   const root = (await git(cwd, ["rev-parse", "--show-toplevel"])).trim();
@@ -189,7 +189,16 @@ export async function trackBranch(cwd: string, name: string): Promise<void> {
  */
 // With what the coding tools and the Mac leave behind, which is nobody's work either: Claude Code's lock while its scheduled
 // tasks run, and Finder's .DS_Store (Arun, 2026-11-03: a teammate's changes listed `.claude/scheduled_tasks.lock`).
-const OURS = /^(friday-runner\.mjs|runner\.log|\.friday\/|\.claude\/scheduled_tasks\.lock$)|(^|\/)\.DS_Store$/;
+const OURS = /^(friday-runner\.mjs|runner\.log|\.friday\/(?!rules\.md$)|\.claude\/scheduled_tasks\.lock$)|(^|\/)\.DS_Store$/;
+/**
+ * The pathspecs that leave Friday's own .friday/ out of a commit or a copy's patch: everything in it but rules.md, which is the repo's
+ * (a rule saved in a chat travels with the team's commits; Arun, 2026-11-19: "correct the agent once ... it becomes a rule every tool
+ * follows"). A pathspec can't name "all but one", so each other entry is named.
+ */
+async function fridayExcludes(root: string): Promise<string[]> {
+  const names = await readdir(path.join(root, ".friday")).catch(() => [] as string[]);
+  return names.filter((n) => n !== "rules.md").map((n) => `:(exclude,literal).friday/${n}`);
+}
 
 /**
  * What never belongs in a snapshot of a folder nobody version-controlled.
@@ -465,6 +474,26 @@ const SPARE_BRANCH = "friday/spare-";
 /** The mark in a spare's own git folder (.git/worktrees/<name>), so the sweep knows a detached copy is a spare and nobody's work. */
 const SPARE_MARK = "friday-spare";
 const spareMark = async (dir: string): Promise<string> => path.join((await git(dir, ["rev-parse", "--absolute-git-dir"])).trim(), SPARE_MARK);
+/** Whether a copy is a spare (made ahead for a lane, nobody's work), by its mark or the branch older runners gave it (storage.ts). */
+export async function isSpareCopy(dir: string): Promise<boolean> {
+  const branch = (await git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]).catch(() => "")).trim();
+  if (branch.startsWith(SPARE_BRANCH)) return true;
+  return branch === "HEAD" && (await spareMark(dir).then((m) => access(m)).then(() => true, () => false));
+}
+/**
+ * Which Friday made a copy, in its own git folder: "local" for the app on this computer (storage.ts puts away its copies no session
+ * names any more). A linked Friday's runner shares the worktrees folder, and leaves what it made unmarked.
+ */
+const MADE_MARK = "friday-made";
+export async function markMadeHere(dir: string): Promise<void> {
+  await writeFile(path.join((await git(dir, ["rev-parse", "--absolute-git-dir"])).trim(), MADE_MARK), "local\n");
+}
+export async function madeHere(dir: string): Promise<boolean> {
+  const at = await git(dir, ["rev-parse", "--absolute-git-dir"]).then((s) => s.trim(), () => "");
+  return !!at && (await readFile(path.join(at, MADE_MARK), "utf8").then((t) => t.trim() === "local", () => false));
+}
+/** Whether a spare is one this process keeps ready, so the tidy leaves it (storage.ts). */
+export const inSparePool = (dir: string): boolean => [...spares.values()].flat().some((s) => path.resolve(s.dir) === path.resolve(dir));
 /** How long a spare waits for a lane before it goes. */
 export const SPARE_IDLE_MS = 30 * 60_000;
 /** How long an attach waits for a spare still being made before it makes its own copy. */
@@ -664,6 +693,9 @@ function ownTop(dir: string): string | null {
   const top = `${base}/${norm.slice(base.length + 1).split("/")[0]}`;
   return LANE_DIR.test(top) ? path.resolve(top) : null;
 }
+
+/** Whether `dir` is, or is inside, a checkout Friday made (a racer's copy, a lane's worktree): the only folders it opens as a repository for the IDE. */
+export const isOwnCheckout = (dir: string): boolean => path.isAbsolute(dir) && ownTop(dir) !== null;
 
 /**
  * What would be lost if this worktree went: files not committed, and commits on
@@ -1455,7 +1487,7 @@ export async function applyCopy(copy: string, base: string, into: string): Promi
   const { tree } = await snapshotTree(root);
   const files = (await git(root, ["diff", "--name-only", "--no-renames", "-z", base, tree])).split("\0").filter((f) => f && !OURS.test(f));
   if (!files.length) return { files, conflicts: [], tree };
-  const patch = await gitEnv(root, ["diff", "--binary", "--full-index", "--no-color", "--no-ext-diff", "--no-renames", base, tree, "--", ".", ":(exclude)friday-runner.mjs", ":(exclude)runner.log", ":(exclude).friday"], {});
+  const patch = await gitEnv(root, ["diff", "--binary", "--full-index", "--no-color", "--no-ext-diff", "--no-renames", base, tree, "--", ".", ":(exclude)friday-runner.mjs", ":(exclude)runner.log", ...(await fridayExcludes(root))], {});
   const plain = await gitEnv(dest, ["apply", "--whitespace=nowarn"], {}, { input: patch }).then(() => true, () => false);
   if (plain) return { files, conflicts: [], tree };
   // A copy is a worktree of the same repository, so every version of every file is readable from here.
@@ -1489,6 +1521,8 @@ export async function applyCopy(copy: string, base: string, into: string): Promi
 /** Never prompt: a push that wants a password fails at once instead of hanging a hidden terminal. */
 export const NO_PROMPT = { GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never" };
 
+/** A branch a pull request goes into: any legal name git and GitHub allow (`#`, `+`, `@` too), but nothing git could read as a flag, a range or a revision expression. */
+const SAFE_BASE = /^(?!-)(?!.*\.\.)(?!.*@\{)(?!.*\/\/)[^\s~^:?*[\\\x00-\x1f\x7f]{1,200}(?<![./])$/;
 const BRANCH_NAME = /^(?!-)(?!.*\.\.)(?!.*\/\/)[\w./-]{1,100}(?<![./])$/;
 
 export interface Committed {
@@ -1603,7 +1637,7 @@ export async function commitAll(cwd: string, message: string, branch?: string, o
       // Literal: `app/[id].tsx` is one file, not a pattern that also takes `app/i.tsx` along.
       await git(root, ["--literal-pathspecs", "add", "-A", "--", ...named]);
     } else {
-      await git(root, ["add", "-A", "--", ".", ":(exclude)friday-runner.mjs", ":(exclude)runner.log", ":(exclude).friday"]);
+      await git(root, ["add", "-A", "--", ".", ":(exclude)friday-runner.mjs", ":(exclude)runner.log", ...(await fridayExcludes(root))]);
     }
     const staged = (await git(root, ["diff", "--cached", "--name-only", "--no-renames", "-z"])).split("\0").filter(Boolean);
     if (!staged.length) throw new Error("There's nothing to commit — the folder matches the last commit.");
@@ -1743,7 +1777,7 @@ export async function publish(cwd: string, opts: { pr: boolean; title: string; b
   return { branch, pushed: true, ...onto, prUrl: `https://github.com/${slug}/compare/${encodeURIComponent(base)}...${encodeURIComponent(branch)}?expand=1`, prCreated: false, ...(why ? { prError: why } : {}) };
 }
 
-async function gh(cwd: string, args: string[]): Promise<string> {
+export async function gh(cwd: string, args: string[]): Promise<string> {
   const auth = await authEnv();
   return new Promise((resolve, reject) => {
     execFile("gh", args, { cwd, timeout: 30_000, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, ...auth, GH_PROMPT_DISABLED: "1" }, windowsHide: true }, (err, stdout, stderr) => {
@@ -2111,4 +2145,96 @@ export async function repoItems(cwd: string): Promise<{ issues: RepoItem[]; prs:
     const m = (e as Error).message;
     return { error: /ENOENT/.test(m) ? "The GitHub CLI (gh) isn't installed on this computer." : /no git remotes|not a git repository|none of the git remotes/i.test(m) ? "This folder isn't on GitHub." : /auth|login/i.test(m) ? "Sign in to GitHub with gh first." : m };
   }
+}
+
+// ── A teammate's pull request, checked out on the side (Arun, 2026-11-19, wave 3: "Review your teammates' pull requests in the IDE:
+// their branch checked out on the side") ─────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The pull request's head in a copy of its own, beside the person's checkout and never over it: `<repo>-pr<n>-<id>` under the
+ * worktrees folder, detached at the head GitHub has for it (`pull/<n>/head` works for a fork's too). Made once and used again:
+ * the next time it is brought to the pull request's newest head, unless the person has changed something in it. The base is
+ * fetched too, so the IDE can compare the head against it.
+ */
+export async function prCheckout(cwd: string, p: { name: string; number: number; base: string; url?: string }): Promise<{ dir: string; sha: string; reused: boolean }> {
+  const root = (await git(cwd, ["rev-parse", "--show-toplevel"])).trim();
+  const env = { ...NO_PROMPT, ...(await authEnv()) };
+  const number = Math.floor(p.number);
+  // Into refs of its own, read back by name: a shared FETCH_HEAD is overwritten by a second pull request opened at the same time.
+  const headRef = `refs/friday/pr/${number}`;
+  await gitEnv(root, ["fetch", "-q", "origin", `+pull/${number}/head:${headRef}`], env, { timeout: 120_000 });
+  const sha = (await git(root, ["rev-parse", "--verify", `${headRef}^{commit}`])).trim();
+  if (SAFE_BASE.test(p.base)) await gitEnv(root, ["fetch", "-q", "origin", `+refs/heads/${p.base}:refs/remotes/origin/${p.base}`], env, { timeout: 120_000 }).catch(() => {});
+  const common = await commonDir(root);
+  const want = p.url ? parsePrUrl(p.url) : null;
+  // A link that can't be read says nothing about which pull request a copy is of: no copy is taken as this one's then.
+  const names = p.url && !want ? [] : await readdir(worktreeRoot()).catch(() => [] as string[]);
+  for (const name of names.filter((n) => n.startsWith(`${p.name}-`) && LANE_DIR.test(n)).sort()) {
+    const dir = path.join(worktreeRoot(), name);
+    const here = (await git(dir, ["rev-parse", "HEAD"]).catch(() => "")).trim();
+    if (!here) continue;
+    // Only a copy of this very pull request in this very repository: a fork and its upstream, or two clones of one repository,
+    // each have a #5, and a folder is not this one's because its name starts alike.
+    if (want) {
+      const kept = await prKept(dir).then((j) => (j ? (JSON.parse(j) as { url?: string }) : null), () => null);
+      const had = kept?.url ? parsePrUrl(kept.url) : null;
+      if (!had || had.number !== want.number || had.owner.toLowerCase() !== want.owner.toLowerCase() || had.repo.toLowerCase() !== want.repo.toLowerCase()) continue;
+    }
+    if ((await commonDir(dir)) !== common) continue;
+    // Looked at and changed (a fix tried out, a file edited): left as the person has it. The IDE's own files in .vscode are not changes.
+    const dirty = (await git(dir, ["status", "--porcelain"]).catch(() => "")).split("\n").filter((l) => l && !/^\?\? "?\.vscode\//.test(l)).length;
+    if (here !== sha && !dirty) {
+      await showVscode(dir);
+      await git(dir, ["checkout", "-q", "--detach", sha], [0], 120_000);
+    }
+    await hideVscode(dir);
+    return { dir, sha: dirty ? here : sha, reused: true };
+  }
+  const dir = path.join(worktreeRoot(), `${p.name}-${randomUUID().slice(0, 8)}`);
+  await mkdir(worktreeRoot(), { recursive: true });
+  await worktreeAdd(root, ["-q", "--detach", dir, sha], 120_000);
+  await hideVscode(dir);
+  return { dir, sha, reused: false };
+}
+
+/** A repository's shared git folder, as one real path, to tell whether two folders are worktrees of the same repository. */
+async function commonDir(dir: string): Promise<string> {
+  const out = (await git(dir, ["rev-parse", "--git-common-dir"]).catch(() => "")).trim();
+  if (!out) return "";
+  const full = path.resolve(dir, out);
+  return realpath(full).catch(() => full);
+}
+
+/**
+ * The pull request's own `.vscode` is left out of its copy. The IDE runs with workspace trust off (vscode.ts), so a folder it opens
+ * has its workspace settings and tasks applied as it opens, and this folder is a stranger's. The files stay in git (marked so git
+ * does not call their absence a change) and come back when the copy moves to a newer head (showVscode).
+ */
+async function hideVscode(dir: string): Promise<void> {
+  const files = (await git(dir, ["ls-files", "-z", "--", ".vscode"]).catch(() => "")).split("\0").filter(Boolean);
+  for (let i = 0; i < files.length; i += 100) await git(dir, ["update-index", "--skip-worktree", "--", ...files.slice(i, i + 100)]).catch(() => {});
+  if (files.length) await rm(path.join(dir, ".vscode"), { recursive: true, force: true }).catch(() => {});
+}
+async function showVscode(dir: string): Promise<void> {
+  const files = (await git(dir, ["ls-files", "-z", "--", ".vscode"]).catch(() => "")).split("\0").filter(Boolean);
+  for (let i = 0; i < files.length; i += 100) await git(dir, ["update-index", "--no-skip-worktree", "--", ...files.slice(i, i + 100)]).catch(() => {});
+  if (files.length) await git(dir, ["checkout", "-q", "--", ".vscode"]).catch(() => {});
+}
+
+/** What a pull request's checkout is of (pr-ide.ts PrContext), kept in the copy's own git folder, where nothing else looks. */
+export async function prKeep(dir: string, json: string): Promise<void> {
+  if (!isOwnCheckout(dir)) throw new Error("That isn't a copy Friday made.");
+  await writeFile(path.join((await git(dir, ["rev-parse", "--absolute-git-dir"])).trim(), "friday-pr.json"), json);
+}
+export async function prKept(dir: string): Promise<string | null> {
+  if (!isOwnCheckout(dir)) return null;
+  const at = await git(dir, ["rev-parse", "--absolute-git-dir"]).then((s) => s.trim(), () => "");
+  return at ? readFile(path.join(at, "friday-pr.json"), "utf8").catch(() => null) : null;
+}
+
+/** The change a pull request makes, as git sees it in its copy: what the head has that the base's merge point doesn't. Read-only. */
+export async function prDiff(dir: string, base: string): Promise<string> {
+  if (!isOwnCheckout(dir)) throw new Error("That isn't a pull request copy of Friday's.");
+  if (!SAFE_BASE.test(base)) throw new Error(`Friday can't compare against a branch named "${base.slice(0, 60)}": it has characters git would read as something else.`);
+  return git(dir, ["diff", "--no-color", "--no-ext-diff", "-U3", `origin/${base}...HEAD`], [0], 60_000);
 }

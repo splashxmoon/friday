@@ -52,6 +52,11 @@ declare global {
       /** Whether the window is in full screen, as the window says it (an app built before it said nothing). */
       onFullScreen?(fn: (full: boolean) => void): () => void;
       pickFolder(): Promise<string | null>;
+      /** The system's open panel for a file, a folder, or either (an app from 0.3.6 on). */
+      pickPath?(what: "file" | "folder" | "any"): Promise<{ path: string; dir: boolean } | null>;
+      /** VS Code's menus in the Mac menu bar while Code shows, and what is picked from them (an app from 0.3.6 on). */
+      setCodeMenu?(on: boolean, recent?: string[]): void;
+      onVscMenu?(fn: (item: { command?: string; friday?: "open-folder" | "close-folder" | "agent" | "new-window" | "new-agent-window" | "open-recent"; path?: string }) => void): () => void;
       pathForFile(file: File): string;
       /** Link this computer to the Friday the window is showing; the app runs the runner. */
       link?(req: { server: string; token: string }): Promise<{ ok: boolean; error?: string }>;

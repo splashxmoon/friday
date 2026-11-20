@@ -48,6 +48,9 @@ const THEN_DO = /\b(and|then)\s+(please\s+)?(fix|change|implement|update|add|mak
 
 /** What a message to an agent calls for, or null when it doesn't say clearly enough to switch on. */
 export function reachForMessage(text: string): Reach | null {
+  // Text someone else wrote (a CI log, a comment: fenced as <untrusted>, with the note under it) says nothing of what is asked of the agent:
+  // "don't touch CI settings" in the note once read as "don't change anything" and put a Fix CI chat in Plan (Arun, 2026-11-19, CI in the IDE).
+  text = text.replace(/<untrusted\b[\s\S]*?<\/untrusted>/g, " ").replace(/Text inside <untrusted> tags[^\n]*/g, " ");
   const t = text.toLowerCase().replace(/\s+/g, " ").trim();
   if (!t || t.startsWith("/")) return null;
   if (HANDS_OFF.test(t)) return { mode: "plan", why: "you asked for no changes" };

@@ -50,8 +50,19 @@ test("the most room, prices, right-sizing and the 80% alert", () => {
   const codex: Win = { tool: "codex", key: "primary", label: "5h", minutes: 300, used: 8, resetsAt: inH(3) };
   const codexWeek: Win = { tool: "codex", key: "secondary", label: "Weekly", minutes: 10_080, used: 95, resetsAt: inH(30) };
   assert.deepEqual(mostRoom([five(60), codex]), { tool: "codex", left: 92 });
-  assert.deepEqual(mostRoom([five(60), codex, codexWeek]), { tool: "claude", left: 40 }, "not a tool whose week is nearly spent");
+  assert.deepEqual(mostRoom([five(60), codex, codexWeek]), { tool: "claude", left: 40 }, "a tool's figure is its fullest window: Codex's week is 5% left");
   assert.equal(mostRoom([five(60)]), null, "nothing to compare with one tool");
+  // v0.3.5's Usage page: the badge and the cards agree. Claude 22% left (its week), Codex 100%, Antigravity's fullest group 95%, Grok
+  // 47% with only a week: Codex has the most, though every five-hour window is at 0% used.
+  const w = (tool: Win["tool"], key: string, minutes: number, used: number, resetIn: number | null = 3): Win => ({ tool, key, label: minutes === 300 ? "5h" : "Weekly", minutes, used, resetsAt: resetIn === null ? null : inH(resetIn) });
+  const page = [w("claude", "five_hour", 300, 0), w("claude", "seven_day", 10_080, 78, 40), w("codex", "primary", 300, 0), w("antigravity", "gemini", 300, 0), w("antigravity", "claude-gpt", 300, 5), w("grok", "weekly", 10_080, 53, 60)];
+  assert.deepEqual(mostRoom(page), { tool: "codex", left: 100 });
+  // A tie: the one whose fullest window resets sooner refills first; unknown or the same, no badge.
+  assert.deepEqual(mostRoom([w("claude", "five_hour", 300, 10, 1), w("codex", "primary", 300, 10, 4)]), { tool: "claude", left: 90 });
+  assert.equal(mostRoom([w("claude", "five_hour", 300, 10, null), w("codex", "primary", 300, 10, 4)]), null);
+  assert.equal(mostRoom([w("claude", "five_hour", 300, 10, 2), w("codex", "primary", 300, 10, 2)]), null);
+  // Only a monthly or weekly window still counts: Cursor and Copilot can have the most room too.
+  assert.deepEqual(mostRoom([w("cursor", "monthly", 43_200, 20), w("claude", "five_hour", 300, 50)]), { tool: "cursor", left: 80 });
 
   assert.deepEqual(listPrice("claude", "Max"), { usd: 100, tier: "Max" });
   assert.deepEqual(listPrice("codex", "Plus"), { usd: 20, tier: "Plus" });

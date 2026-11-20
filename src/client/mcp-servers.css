@@ -62,6 +62,9 @@
    kind's name, the ones connected marked green. */
 /* The directory uses the page's width: four or five cards a row on a wide window. */
 .msv-page .msv { max-width: 1320px; }
+/* Its first row as high as the Agent Board's (Arun, 2026-11-19: "the same layout height as for example the agent board page"): the
+   page's own padding is the room above it, not this as well. */
+.msv-page .msv { padding-top: 0; }
 .mdir { display: flex; flex-direction: column; gap: 12px; }
 .mdir-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .mdir-head .msv-h2 { margin: 0; }
@@ -70,7 +73,7 @@
 .mdir-cc { display: inline-flex; flex: none; align-items: center; gap: 7px; height: 32px; padding: 0 6px 0 10px; border: 1px solid var(--border); border-radius: 9px; color: var(--ink-2); font-size: 12.5px; white-space: nowrap; cursor: pointer; transition: border-color var(--t-hover) var(--ease-out); }
 .mdir-cc:hover { border-color: var(--border-strong); }
 .mdir-custom-btn { height: 32px; border-radius: 9px; gap: 5px; }
-.mdir-search { display: flex; align-items: center; gap: 7px; width: 260px; height: 32px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--card); color: var(--text-muted); transition: border-color var(--t-hover) var(--ease-out); }
+.mdir-search { display: flex; align-items: center; gap: 7px; width: 340px; height: 32px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--card); color: var(--text-muted); transition: border-color var(--t-hover) var(--ease-out); }
 .mdir-search:focus-within { border-color: var(--border-focus); }
 .mdir-search > input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; background: transparent; color: var(--ink); font: inherit; font-size: 13px; outline: none; }
 .mdir-body { display: grid; grid-template-columns: 184px minmax(0, 1fr); align-items: start; gap: 20px; }

@@ -6,7 +6,7 @@ import { AGENT_DRAG } from "./agentNav.js";
 import { agentLook } from "./handoff-ui.js";
 import { tabState } from "./agent-tab.js";
 import { Icon } from "./icons.js";
-import { EngineMark, LinearMark, SlackMark } from "./BrandMarks.js";
+import { EngineMark } from "./BrandMarks.js";
 import { ContextMenu, type MenuItem } from "./ui.js";
 import { TabRing, useNow, type Presence } from "./presence.js";
 import { BranchButton } from "./Branches.js";
@@ -167,7 +167,6 @@ export function ThreadCard({ state, events, me, sid, invite, send, identity, onO
   return (
     <aside ref={ref} className={cn("tc", !c.wide && "over")} aria-label="This thread">
       <Place state={state} me={me} sid={sid} invite={invite} identity={identity} onOpen={onOpen} />
-      <Origin sid={sid} />
       <Git state={state} events={events} sid={sid} invite={invite} send={send} onOpen={onOpen} />
       <GoAheads state={state} events={events} me={me} sid={sid} identity={identity} />
       <Agents state={state} events={events} me={me} sid={sid} invite={invite} send={send} identity={identity} onConnect={onConnect} onChanges={() => onOpen("files")} />
@@ -327,39 +326,6 @@ function GoAheads({ state, events, me, sid, identity }: { state: SessionState; e
   );
 }
 
-/**
- * Where this thread was asked for, when it came from Slack or Linear (channels/, spec 08): one row that opens that thread or
- * issue, and who asked when it wasn't the person here.
- */
-function Origin({ sid }: { sid: string }) {
-  const [link, setLink] = useState<{ side: "slack" | "linear"; label: string; url: string | null; by: { name: string; me: boolean } } | null>(null);
-  useEffect(() => {
-    if (!isLocal()) return;
-    let live = true;
-    fetch(`/api/channels/link/${encodeURIComponent(sid)}`, { headers: { "x-friday-local": "1" } })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j: { link?: typeof link } | null) => live && setLink(j?.link ?? null))
-      .catch(() => {});
-    return () => {
-      live = false;
-    };
-  }, [sid]);
-  if (!link) return null;
-  const where = link.side === "slack" ? "Slack" : "Linear";
-  const go = () => link.url && (window.fridayDesktop?.openExternal ? void window.fridayDesktop.openExternal(link.url) : void window.open(link.url, "_blank", "noopener"));
-  return (
-    <div className="tc-sec">
-      <button type="button" className="tc-row" onClick={go} disabled={!link.url} title={link.url ? `Open in ${where}` : undefined}>
-        <span className="tc-ic">{link.side === "slack" ? <SlackMark size={13} /> : <LinearMark size={13} />}</span>
-        <span className="tc-text">
-          From {where}
-          {link.side === "linear" ? <span className="tc-dim"> · {link.label}</span> : null}
-          {!link.by.me ? <span className="tc-dim"> · asked by {link.by.name}</span> : null}
-        </span>
-      </button>
-    </div>
-  );
-}
 
 /** The branch (Branches: switch, new, rename), commit, push and pull request (the git menu), and the changes. */
 function Git({ state, events, sid, invite, send, onOpen }: { state: SessionState; events: SessionEvent[]; sid: string; invite: string; send: Send; onOpen: (tab: "files") => void }) {

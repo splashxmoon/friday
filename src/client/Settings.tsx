@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { StorageSection } from "./SettingsStorage.js";
 import { Callout, Choice, dangerOutline, Note, PageHeader, SettingsGroup, SettingsRow, StateBadge, surface } from "@/components/dass";
 import { useIntent } from "./intent.js";
 import { ENGINE_MODELS, ENGINE_NAMES, ENGINE_TOOLS } from "../types.js";
@@ -24,7 +25,7 @@ import {
   ShortcutsTab,
 } from "./SettingsPrefs.js";
 import { CodingToolsSection, ComputerSection } from "./SettingsComputer.js";
-import { ChannelsSection } from "./SettingsChannels.js";
+import { EditorSettings } from "./ide/VsCodeSettings.js";
 import type { WorkspaceUsage } from "./workspace-types.js";
 import { isLocal, planLimits, planNow, startTeam } from "./edition.js";
 import { GROUPS, SECTIONS, sectionsMatching, settingsSection, type Group, type SectionDef } from "./settings-sections.js";
@@ -128,11 +129,11 @@ export function SettingsPage({
           "integrations",
           "usage",
           ...(workspace?.personal !== false ? ["members"] : []),
-          ...(isLocal() ? [] : ["outside-agents", "other-computers", "voice", "channels"]),
+          ...(isLocal() ? [] : ["outside-agents", "other-computers", "voice", "channels", "storage"]),
         ]
       : isLocal()
         ? []
-        : ["outside-agents", "other-computers", "voice", "channels"],
+        : ["outside-agents", "other-computers", "voice", "channels", "storage"],
   );
   const sections = SECTIONS.filter((s) => !hidden.has(s.id));
   const current = sections.find((s) => s.id === section) ?? sections[0]!;
@@ -266,9 +267,13 @@ export function SettingsPage({
             {current.id === "computer" && <ComputerSection identity={identity} />}
             {current.id === "other-computers" && <ComputerSection identity={identity} part="others" />}
             {current.id === "github" && <ComputerSection identity={identity} part="github" />}
-            {current.id === "channels" && <ChannelsSection identity={identity} />}
             {current.id === "permissions" && <ComputerSection identity={identity} part="permissions" />}
-            {current.id === "coding-tools" && <CodingToolsSection identity={identity} />}
+            {current.id === "coding-tools" && (
+              <div className="flex flex-col gap-5">
+                <CodingToolsSection identity={identity} />
+                {isLocal() && <EditorSettings identity={identity} />}
+              </div>
+            )}
             {/* One Models section (UX audit F10, 2026-11-07): Friday's models, on a plan with Friday's agent, then your own. */}
             {current.id === "own-models" && (
               <div className="flex flex-col gap-5">
@@ -278,6 +283,7 @@ export function SettingsPage({
               </div>
             )}
             {current.id === "privacy" && <DataTab part="privacy" />}
+            {current.id === "storage" && <StorageSection identity={identity} />}
             {current.id === "data" && <DataTab part="backup" />}
             {current.id === "updates" && <AboutTab part="updates" />}
             {current.id === "help" && <AboutTab part="help" onReplayTour={() => window.dispatchEvent(new Event("friday:tour"))} />}

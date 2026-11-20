@@ -12,6 +12,8 @@ import { CodeEditor, CodeReader, QuickOpen } from "./Editor.js";
 import type { Send } from "./useSession.js";
 import { Icon, type IconName } from "./icons.js";
 import { ContextMenu, relTime } from "./ui.js";
+import { isLocal } from "./edition.js";
+import { openInCode } from "./ide/mode.js";
 import { useFocus } from "./focusStore.js";
 import { unnumbered } from "../project-rules.js";
 
@@ -410,6 +412,13 @@ export function TreePanel({
                 </button>
               </span>
             ))}
+            {/* This file, in Code, at the line it was opened at (Arun, 2026-11-19: "ensure code and agent platform can be interconnected
+                and streamlined for easy passing of work"). */}
+            {isLocal() && (
+              <button type="button" className="tree-list-toggle tree-open-code" title="Open in Code" aria-label="Open in Code" onClick={() => openInCode(pick, jumpTo === pick && jump?.line ? jump.line : undefined)}>
+                <Icon name="code" size={14} />
+              </button>
+            )}
             {/* The list of files folded away, the open file given the panel's whole width, and back (Arun, 2026-11-03: "be able to
                 collapse this too"); remembered on this computer. */}
             <button type="button" className="tree-list-toggle" aria-pressed={!listShut} title={listShut ? "Show the files" : "Hide the files"} aria-label={listShut ? "Show the files" : "Hide the files"} onClick={() => setListShut((v) => (keepListShut(!v), !v))}>

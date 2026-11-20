@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { AccountUsage } from "../runner/limits.js";
 import type { AccountChoice } from "./AgentModelPicker.js";
 import { ENGINE_NAMES, type EngineTool } from "../types.js";
@@ -246,7 +246,7 @@ export function useAccountActions(identity: Identity, tool: LocalTool, onChanged
   return { rows, preferred, pick, many, name, adding, setAdding, signing, setSigning, confirm, setConfirm, renaming, setRenaming, busy, err, signIn, signOut, remove, rename, menu };
 }
 
-export function AccountList({ identity, tool, onChanged }: { identity: Identity; tool: LocalTool; onChanged: () => void }) {
+export function AccountList({ identity, tool, onChanged, state }: { identity: Identity; tool: LocalTool; onChanged: () => void; /** The tool's "Signed in", said after "+ Account" and before its ⋯, so it lines up with the other tools' (Arun, 2026-11-19). */ state?: ReactNode }) {
   const usage = useAccountUsage(identity, tool.tool);
   const { rows, pick, many, name, adding, setAdding, signing, setSigning, confirm, setConfirm, renaming, setRenaming, busy, err, signIn, signOut, remove, rename, menu } = useAccountActions(identity, tool, onChanged);
   if (!ACCOUNT_TOOLS.includes(tool.tool) || !tool.path) return null;
@@ -280,13 +280,16 @@ export function AccountList({ identity, tool, onChanged }: { identity: Identity;
    */
   return (
     <>
-      {!adding && (
+      {(!adding || state) && (
         <span className="acct-tool-acts">
-          <button type="button" className="acct-add-btn" title={`Add ${many ? "another" : "a second"} ${name} account: a sign-in of its own, kept apart`} onClick={() => setAdding(true)}>
-            <Icon name="plus" size={12} />
-            Account
-          </button>
-          {!many && <MenuButton className="icon-btn tiny acct-menu" label={`${name}: more`} icon="more" end compact width={260} items={() => menu(rows[0]!)().filter(Boolean) as never} />}
+          {!adding && (
+            <button type="button" className="acct-add-btn" title={`Add ${many ? "another" : "a second"} ${name} account: a sign-in of its own, kept apart`} onClick={() => setAdding(true)}>
+              <Icon name="plus" size={12} />
+              Account
+            </button>
+          )}
+          {state}
+          {!adding && !many && <MenuButton className="icon-btn tiny acct-menu" label={`${name}: more`} icon="more" end compact width={260} items={() => menu(rows[0]!)().filter(Boolean) as never} />}
         </span>
       )}
       {(many || adding || signing || confirm || err) && (

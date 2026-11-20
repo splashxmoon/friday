@@ -174,6 +174,10 @@ async function belongs(dir: string | null, command: string, folder: string): Pro
   return !!a && a === b;
 }
 
+/** Set by dev-servers.ts: a server Friday keeps is stopped through its keeper, so it is not started again. Answers whether it was one. */
+let managedStop: ((pid: number, port: number) => Promise<boolean>) | null = null;
+export const onStopServer = (fn: (pid: number, port: number) => Promise<boolean>) => void (managedStop = fn);
+
 let cache: { at: number; folder: string; value: Promise<LocalServer[]> } | null = null;
 
 /** The servers for `folder`: this project's first, then other dev servers on the computer. Asked often, so kept for a moment. */
@@ -217,6 +221,7 @@ export async function stopServer(folder: string, port: number): Promise<{ stoppe
   const s = (await listServers(folder)).find((x) => x.port === port);
   if (!s) return { stopped: false, error: `Nothing Friday knows of is serving localhost:${port} any more.` };
   if (s.pid === process.pid || s.pid === process.ppid) return { stopped: false, error: "That's Friday itself." };
+  if (managedStop && (await managedStop(s.pid, s.port))) return (cache = null), { stopped: true };
   const alive = () => {
     try {
       process.kill(s.pid, 0);

@@ -5811,6 +5811,8 @@ html[data-band="page"] .main:not(:has(> .home)) { padding-top: var(--band); box-
 .feed-merged.slim .feed-merged-line { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; font-size: 12px; font-variant-numeric: tabular-nums; }
 .feed-merged-line code { max-width: 26ch; overflow: hidden; padding: 0 6px; border-radius: var(--r-sm); background: var(--hover); color: var(--ink-2); font: 11.5px/18px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
 .feed-merged.slim .feed-merged-actions { flex: none; margin-left: auto; flex-wrap: nowrap; gap: 4px; }
+.feed-merged-x { width: 28px; height: 28px; color: var(--text-muted); }
+.feed-merged-x:hover { color: var(--ink); }
 
 /* ── collaboration: thumbs with reasons, who is reading which line, the brief, the driving clock ── */
 .react-reason { display: flex; align-items: center; gap: 8px; margin: 8px 0 6px; }
@@ -8702,7 +8704,15 @@ html:not(.dark) .ctx-gauge .ctx-ring circle:first-child { stroke-opacity: .32; }
 .lh-card-head > b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .lh-roomy { flex: none; display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px; border-radius: var(--r-pill); background: color-mix(in oklab, var(--ready) 13%, transparent); color: var(--ready); font-size: 11.5px; font-weight: 500; }
 .lh-roomy::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
-.lh-card-plan { flex: none; margin-left: auto; color: var(--text-muted); font-size: 12px; font-weight: 500; }
+.lh-card-plan { flex: 0 1 auto; min-width: 0; margin-left: auto; overflow: hidden; color: var(--text-muted); font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+/* The tool's name keeps its width; the plan beside it gives way first (Arun, 2026-11-20), and on a card too narrow for both it goes
+   under the name, lined up with it, rather than cut to "Starte…". */
+.lh-card-head > b { flex: 0 0 auto; max-width: 60%; }
+.lh-card { container-type: inline-size; }
+@container (max-width: 340px) {
+  .lh-card-head { flex-wrap: wrap; row-gap: 2px; }
+  .lh-card-plan { flex: 0 0 100%; margin-left: 25px; }
+}
 .lh-hero { display: flex; flex-direction: column; gap: 4px; }
 .lh-hero p { margin: 0; }
 .lh-hero-n { display: flex; align-items: baseline; gap: 7px; }
@@ -11060,6 +11070,9 @@ html:not(.desktop) .shell:not(.with-panel) #main { padding-left: 44px; }
    tool's card. "+ Account" sits in the tool's row with its other actions; more than one account is a line each under the tool,
    lined up with its name (its mark is 30px, then 10px), flat as the sidebar's rows; the adding is one line in the same place. */
 .acct-tool-acts { display: flex; align-items: center; gap: 2px; margin-left: auto; flex: none; }
+/* "Signed in" between "+ Account" and the ⋯, as far from the ⋯ as the other tools' is (the row's 10px gap, less the 2px here). */
+.acct-tool-acts > .mb-tool-state { margin: 0 8px 0 6px; }
+.mb-card .acct-tool-acts > .mb-tool-state, .mb-modal .acct-tool-acts > .mb-tool-state { margin: 0 6px 0 4px; }
 .acct-add-btn { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border: 0; border-radius: 7px; background: none; color: var(--text-muted); font: 500 12px var(--font); cursor: pointer; transition: color var(--dass-fast, .12s), background-color var(--dass-fast, .12s); }
 .acct-add-btn:hover { color: var(--ink); background: var(--hover); }
 .acct-add-btn:focus-visible { outline: none; box-shadow: var(--dass-ring, 0 0 0 2px var(--accent)); }
@@ -13433,6 +13446,7 @@ html.dark .dass-panel .sb-dock.sb-tray { box-shadow: none !important; }
 .tree-split.open.list-shut > .tree-scroll { display: none; }
 .tree-tabs { align-items: flex-end; }
 .tree-list-toggle { flex: none; display: grid; place-items: center; align-self: center; width: 26px; height: 24px; margin-left: auto; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--text-muted); cursor: pointer; }
+.tree-open-code + .tree-list-toggle { margin-left: 0; }
 .tree-list-toggle:hover { background: var(--hover); color: var(--ink); }
 .tree-list-toggle[aria-pressed="true"] { color: var(--ink-2); }
 .tree-list-toggle:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 0; }
@@ -13809,6 +13823,14 @@ html.desktop .oss-rail::after { content: ""; position: absolute; top: 38px; righ
 }
 .oss-rail-btn:hover { color: var(--ink); background: var(--hover); }
 .oss-rail-btn[data-active] { color: var(--ink); background: var(--hover-strong); }
+/* More places (Sidebar.tsx morePlaces): the ⋯ is a rail button like the rest, lit while one of its places is open or its menu is. */
+.oss-rail-group > span:has(> .oss-rail-more-places) { display: contents; }
+.oss-rail-place { display: contents; }
+/* A line between a menu's places and its Customize rail (Sidebar.tsx OssRail). */
+.menu-node:has(> .rail-menu-sep) { padding: 4px 0; }
+.rail-menu-sep { display: block; height: 1px; margin: 0 6px; background: var(--border); }
+.oss-rail-btn.oss-rail-more-places { display: grid; place-items: center; border: 0; background: transparent; cursor: pointer; }
+.oss-rail-btn.oss-rail-more-places.is-here, .oss-rail-btn.oss-rail-more-places.on { color: var(--ink); background: var(--hover-strong); }
 .oss-rail-btn:focus-visible { outline: 2px solid var(--border-focus, var(--ink)); outline-offset: -2px; }
 .oss-rail-n {
   position: absolute; top: 2px; right: 1px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 999px;
@@ -14066,6 +14088,10 @@ html.desktop.rail-only .shell.with-panel::after { border-top-left-radius: 0 !imp
    runs up between the window's buttons and the sidebar button; the line between the rail and the page starts under the bar, where
    the page's own edge begins (Arun, 2026-11-16: "fix this vertical line thing at the top by the window buttons"). */
 html.desktop-mac.rail-only[data-band="session"] .shell.with-panel::after { border-left-color: transparent !important; }
+/* Every other rail page too, on the Mac and Windows: Settings, the Board, Code Review, Usage drew the same line from the window's top
+   edge down through the traffic lights (Arun, 2026-11-19: "fix this random line here whenever on any other page than new thread or
+   coding session or agents"). The page's own edge (border-left on .main, under the bar) is the line between it and the rail. */
+html.desktop.rail-only .shell.with-panel::after { border-left-color: transparent !important; }
 
 /* Every page sits under the window's row, as Friday Teams has it (Arun, 2026-11-14: "i said i wanted it like the production build
    UI layout"): the 2026-11-12 block that ran each page's header up into the window's bar, with clearances for its buttons, is
@@ -14439,8 +14465,29 @@ button.cd-row:hover, .cd-rw[data-open] > .cd-row { background: var(--hover); }
 .rv-pile-chip[data-tone="ready"] > i { background: var(--green); }
 .rv-pile-chip[data-tone="waiting"] > i { background: var(--amber); }
 .rv-pile-chip[aria-checked="true"] { background: var(--hover-strong); color: var(--ink); }
+/* Code Review given room (Arun, 2026-11-19: "i feel like everything feels cramped in general in the code review page"): a wider list
+   with taller rows a little apart, more air above each pile, and the pane further from the list with more between its parts. */
+.rv-split { grid-template-columns: minmax(320px, 420px) minmax(0, 1fr); }
+.rv-piles { gap: 4px; padding: 8px 6px 10px; }
+.rv-pile { padding: 16px 2px 6px; }
+.review-page .rv-pane { padding-left: 16px; }
+@media (max-width: 1100px) { .rv-split { grid-template-columns: minmax(300px, 360px) minmax(0, 1fr); } .review-page .rv-pane { padding-left: 4px; } }
 .rv-pile-chip[aria-checked="true"] > span { color: var(--ink-2); }
 .rv-pile-chip:focus-visible { outline: 2px solid var(--ink-2); outline-offset: -2px; }
+/* Code Review's filters over its one list (CodeReview.tsx; Arun, 2026-11-20: "a complete redesign ... i only want to show PRs"): All,
+   Yours, To review, Team, Merged, each with its count, as the pile chips were; on a row of the All list, whose it is in a word. */
+.rv-filters { display: flex; flex-wrap: nowrap; gap: 4px; padding: 8px 6px 10px; border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
+.rv-filters::-webkit-scrollbar { display: none; }
+.rv-filter { display: inline-flex; flex: none; align-items: center; gap: 5px; height: 26px; padding: 0 9px; border: 0; border-radius: var(--r-md); background: transparent; color: var(--ink-2); font: 500 12.5px var(--font); white-space: nowrap; cursor: pointer; transition: background-color var(--t-hover) var(--ease-out); }
+.rv-filter:hover { background: var(--hover); color: var(--ink); }
+.rv-filter[aria-checked="true"] { background: var(--hover-strong); color: var(--ink); }
+.rv-filter:focus-visible { outline: 2px solid var(--ink-2); outline-offset: -2px; }
+.rv-filter-n { color: var(--text-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.rv-filter[data-kind="review"] .rv-filter-n { color: var(--dass-needs); font-weight: 600; }
+.rv-filter[aria-checked="true"] .rv-filter-n { color: var(--ink-2); }
+.rv-kind { padding: 0 6px; border-radius: 5px; background: var(--hover); color: var(--ink-2); font-size: 11px; font-weight: 500; line-height: 17px; }
+.rv-kind[data-kind="review"] { background: color-mix(in srgb, var(--dass-needs) 14%, transparent); color: var(--dass-needs); }
+.rv-kind[data-kind="merged"] { background: color-mix(in srgb, #a855f7 14%, transparent); color: color-mix(in srgb, #a855f7 82%, var(--ink)); }
 /* A folder's + in the sidebar (threads.tsx): there on hover, where the folder's state was, so the two never overlap. */
 .sb-repo-group .sb-thr-add { opacity: 0; transition: opacity var(--t-hover) var(--ease-out); }
 .sb-repo-group .group\/label:hover .sb-thr-add, .sb-repo-group .sb-thr-add:focus-visible { opacity: 1; }
@@ -14564,7 +14611,7 @@ html.glass:not(.glass-native):not(.dark) body {
 }
 
 /* Whatever floats over the page is frosted on its own, firmer than what it lies on, with a lit top edge. */
-html.glass :is(.surface, .ctx-menu, [role="menu"], [role="listbox"]:not(.thr-from-rows):not(.tc-list), .shortcut-pop, .tm-pop, .tc-proof-pop, .stb-pop, .branch-card, .thr-pop, .pf-pop, [data-radix-popper-content-wrapper] > [role="dialog"], .modal, .dialog, [role="dialog"][aria-modal="true"] > div:first-child) {
+html.glass :is(.surface, .ctx-menu, [role="menu"], [role="listbox"]:not(.thr-from-rows):not(.tc-list):not(.skl-rows), .shortcut-pop, .tm-pop, .tc-proof-pop, .stb-pop, .branch-card, .thr-pop, .pf-pop, [data-radix-popper-content-wrapper] > [role="dialog"], .modal, .dialog, [role="dialog"][aria-modal="true"] > div:first-child) {
   background: var(--glass-float) !important;
   -webkit-backdrop-filter: blur(28px) saturate(1.6);
   backdrop-filter: blur(28px) saturate(1.6);
@@ -14763,8 +14810,8 @@ html.glass .shell.with-panel:has(.sb-rail-on) .sb-panel-inner.dass-panel { backg
    (Arun, 2026-11-16: "frosted still feels laggy", "background is bugging out"). There the page draws no blur of its own; what
    floats over it is near solid instead, so a menu still reads over the chat. */
 html.glass-native *, html.glass-native *::before, html.glass-native *::after { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
-html.glass-native.dark :is(.surface, .ctx-menu, [role="menu"], [role="listbox"]:not(.thr-from-rows):not(.tc-list), .shortcut-pop, .tm-pop, .tc-proof-pop, .stb-pop, .branch-card, .thr-pop, .pf-pop, [data-radix-popper-content-wrapper] > [role="dialog"], .modal, .dialog, [role="dialog"][aria-modal="true"] > div:first-child) { background: var(--float-solid) !important; }
-html.glass-native:not(.dark) :is(.surface, .ctx-menu, [role="menu"], [role="listbox"]:not(.thr-from-rows):not(.tc-list), .shortcut-pop, .tm-pop, .tc-proof-pop, .stb-pop, .branch-card, .thr-pop, .pf-pop, [data-radix-popper-content-wrapper] > [role="dialog"], .modal, .dialog, [role="dialog"][aria-modal="true"] > div:first-child) { background: var(--float-solid) !important; }
+html.glass-native.dark :is(.surface, .ctx-menu, [role="menu"], [role="listbox"]:not(.thr-from-rows):not(.tc-list):not(.skl-rows), .shortcut-pop, .tm-pop, .tc-proof-pop, .stb-pop, .branch-card, .thr-pop, .pf-pop, [data-radix-popper-content-wrapper] > [role="dialog"], .modal, .dialog, [role="dialog"][aria-modal="true"] > div:first-child) { background: var(--float-solid) !important; }
+html.glass-native:not(.dark) :is(.surface, .ctx-menu, [role="menu"], [role="listbox"]:not(.thr-from-rows):not(.tc-list):not(.skl-rows), .shortcut-pop, .tm-pop, .tc-proof-pop, .stb-pop, .branch-card, .thr-pop, .pf-pop, [data-radix-popper-content-wrapper] > [role="dialog"], .modal, .dialog, [role="dialog"][aria-modal="true"] > div:first-child) { background: var(--float-solid) !important; }
 /* "cut short" on one line beside the file's name, not broken over two and squeezing the name. */
 .rsp-diff-status { flex: none; white-space: nowrap; }
 
@@ -14887,7 +14934,7 @@ html.glass:not(.dark) .bench-panel.over { background: #fafaf9 !important; }
 html.glass-native.dark { --float-solid: rgb(42 42 46); }
 html.glass-native:not(.dark) { --float-solid: rgb(237 237 235); }
 html.glass-native :is(
-  [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]:not(.thr-from-rows):not(.tc-list), [role="tooltip"],
+  [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]:not(.thr-from-rows):not(.tc-list):not(.skl-rows), [role="tooltip"],
   [data-radix-popper-content-wrapper] > *, [class$="-pop"]:not(.quote-pop, .in-pop), [class*="-pop "]:not(.quote-pop, .in-pop), [class*="popover"], .amp, .ctx-menu, .surface
 ) {
   background: var(--float-solid) !important;
@@ -15121,6 +15168,17 @@ html.desktop :is(.composer, .composer-dock) :is(textarea, input, [contenteditabl
 html.dark .sb-filter-n:not([data-kind="needs"]):not([data-kind="working"]) { color: #141416; }
 html:not(.dark) .sb-filter-n[data-kind="needs"] { background: #eab308; }
 .sb-filter-n[data-kind="working"] { background: var(--live); color: #fff; }
+/* Its count beside the icon, on one line, centred with it (Arun, 2026-11-19: "line up the filter button with the number too"): the
+   button widens to hold both rather than the count hanging off its corner. */
+.sb-new-row .sb-filter-btn:has(> .sb-filter-n) { grid-auto-flow: column; gap: 6px; width: auto; min-width: 34px; padding: 0 8px; }
+.sb-new-row .sb-filter-btn > .sb-filter-n { position: static; align-self: center; }
+/* Its icon over the groups' counts (Arun, 2026-11-19: "line up the filter button with the numbers ... like the 1"): the row runs to
+   the list's edge, as the rows below do, and the icon sits at the button's end, centred where a count is (8px in from that edge). */
+.sb-new-row { margin-right: -4px; }
+/* A square tint centred on the icon (Arun, 2026-11-19: "fix the highlight"; the wider button left it lopsided): 28px, its middle at
+   the counts', so it reaches 4px past the rows' edge, inside the panel's own margin. */
+.sb-new-row .sb-filter-btn { width: 28px; height: 28px; margin-right: -4px; border-radius: 7px; }
+.sb-new-row .sb-filter-btn:has(> .sb-filter-n) { height: 28px; margin-right: 0; padding: 0 3px 0 8px; }
 .sb-filter-none { margin: 8px 10px; color: var(--text-muted); font-size: 12.5px; }
 
 /* Several picked (Sidebar.tsx PickBar; "Select several at once"): a picked row has the selected tint and a thin ring; the bar of

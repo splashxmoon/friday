@@ -1,7 +1,7 @@
 import { picturesIn, withoutPictures, type Picture } from "./tool-pictures.js";
 import { noteClaudeEvent } from "./limits.js";
 import { acpSignInState, wasProven } from "./acp-signin.js";
-import { access, mkdir, readdir, readFile, realpath, unlink, writeFile } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, realpath, stat, unlink, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { createRequire } from "node:module";
 import { devNull, homedir } from "node:os";
@@ -15,9 +15,9 @@ import { localEdition } from "../local-edition.js";
 import { mcpForAgent, type AcpMcpServer } from "./mcp-servers.js";
 import { reviewTarget } from "./tool-commands.js";
 import { ampConfig, claudeConfig, codexConfig, type FridayMcp } from "./friday-mcp.js";
-import { readFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 /**
  * Adapters for the coding CLIs people already have: Claude Code, Codex and
@@ -2880,7 +2880,380 @@ export const muse: Adapter = {
   },
 };
 
-export const ADAPTERS: Record<EngineTool, Adapter> = { claude, codex, cursor, copilot, opencode, gemini, antigravity, qwen, devin, junie, kiro, droid, grok, cline, kilo, amp, muse, acp: custom };
+/**
+ * Pi (Mario Zechner's minimal coding agent, `pi`, from @mariozechner/pi-coding-agent), over its own RPC mode (Arun, 2026-11-20:
+ * "can we look into adding PI agent support", then "Yes, build it"): `pi --mode rpc` takes commands as JSON lines on stdin and
+ * says what it does as JSON lines on stdout (its docs/rpc.md, checked on 0.73.1). One process a turn: what Friday asks it first
+ * (its state, its models, its commands) and the instruction are its first lines, its conversation is the session file it keeps
+ * (resumed with --session, that file's path being Friday's id for it), and stdin closes once `agent_end` says the turn is over.
+ *
+ * Pi never asks before it acts, by design ("No permission popups"). So Manual, Plan and a teammate's Auto load a small extension
+ * of Friday's (piGate) that asks Friday before each of its tool calls, over Pi's own extension UI, while the call waits: Manual
+ * lets reading and changes in the folder through and puts a command to a person, Plan gives Pi only its reading tools and bash
+ * and puts each command to a person, and a teammate's Auto is held to the go-ahead list by the runner. Your own Auto loads none,
+ * and Pi runs as it does on its own.
+ */
+const PI_GATE_MARK = "friday:tool";
+const PI_GATE_SOURCE = [
+  "// Written by Friday (its runner's adapters.ts, pi): asks Friday before each of Pi's tool calls, in Manual, Plan and a teammate's",
+  "// Auto. Friday loads it with -e for its own turns only; Pi on its own never reads it.",
+  "export default function (pi) {",
+  '  pi.on("tool_call", async (event, ctx) => {',
+  `    const said = await ctx.ui.input(${JSON.stringify(PI_GATE_MARK)}, JSON.stringify({ id: event.toolCallId, tool: event.toolName, input: event.input }));`,
+  '    if (said !== "yes") return { block: true, reason: said || "Not allowed from Friday." };',
+  "  });",
+  "}",
+  "",
+].join("\n");
+
+/** The gate's file, written once for this version of it (its name holds a hash of it), in Friday's own folder. */
+export function piGate(home = homedir()): string {
+  const file = path.join(home, ".friday", "pi", `friday-gate-${createHash("sha1").update(PI_GATE_SOURCE).digest("hex").slice(0, 10)}.js`);
+  if (!existsSync(file)) {
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, PI_GATE_SOURCE);
+  }
+  return file;
+}
+
+/** Pi's thinking levels for Friday's: it has none past xhigh, so Max and Ultra think as hard as it can. */
+const PI_THINKING: Record<string, string> = { low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "xhigh", ultra: "xhigh" };
+/** What Plan gives it: its reading tools, and bash, whose every command is put to a person. */
+const PI_PLAN_TOOLS = "read,grep,find,ls,bash";
+
+/** Its folder: PI_CODING_AGENT_DIR when set, as Pi reads it. */
+const piHome = (home = homedir()) => process.env.PI_CODING_AGENT_DIR || path.join(home, ".pi", "agent");
+/** The keys Pi reads from the environment, from its docs/providers.md (0.73). */
+const PI_KEYS = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "AZURE_OPENAI_API_KEY", "DEEPSEEK_API_KEY", "GEMINI_API_KEY", "MISTRAL_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY", "CLOUDFLARE_API_KEY", "XAI_API_KEY", "OPENROUTER_API_KEY", "AI_GATEWAY_API_KEY", "ZAI_API_KEY", "OPENCODE_API_KEY", "HF_TOKEN", "FIREWORKS_API_KEY", "KIMI_API_KEY", "MINIMAX_API_KEY", "XIAOMI_API_KEY", "AWS_PROFILE", "GOOGLE_CLOUD_PROJECT"];
+
+/**
+ * Signed in: a provider's key in the environment, a sign-in kept by its /login (auth.json holds more than `{}`: only its size is
+ * looked at, never what is in it), or providers of somebody's own in its models.json. None, and its first instruction would say
+ * "No API key found", so that is signed out.
+ */
+export async function piSignedIn(home = homedir()): Promise<boolean> {
+  if (PI_KEYS.some((k) => process.env[k])) return true;
+  const dir = piHome(home);
+  const size = await stat(path.join(dir, "auth.json")).then((s) => s.size, () => 0);
+  if (size > 4) return true;
+  return access(path.join(dir, "models.json")).then(() => true, () => false);
+}
+
+/**
+ * Pi's models as its RPC mode names them (`get_available_models`: the providers it is signed in to, each model with its own
+ * name). Ids are `provider/model`, as its --model takes them; a name two providers share says whose.
+ */
+export function piModelList(data: unknown): { id: string; label: string }[] {
+  const list: any[] = Array.isArray((data as any)?.models) ? (data as any).models : [];
+  const nameOf = (m: any) => str(m?.name) || str(m?.id);
+  const names = new Map<string, number>();
+  for (const m of list) names.set(nameOf(m), (names.get(nameOf(m)) ?? 0) + 1);
+  return list
+    .filter((m) => str(m?.id))
+    .map((m) => ({ id: `${str(m.provider) ? `${str(m.provider)}/` : ""}${str(m.id)}`, label: (names.get(nameOf(m)) ?? 0) > 1 && str(m.provider) ? `${nameOf(m)} · ${str(m.provider)}` : nameOf(m) }))
+    .slice(0, 600);
+}
+
+/** Pi's tools as the session's cards are named. */
+function piCard(tool: string, input: Record<string, unknown>): { name: string; args: Record<string, unknown> } {
+  const p = str(input.path) || str(input.file_path);
+  switch (tool) {
+    case "bash":
+      return { name: "shell", args: { command: str(input.command) } };
+    case "read":
+      return { name: "read", args: { path: p, ...(input.offset !== undefined ? { offset: input.offset } : {}), ...(input.limit !== undefined ? { limit: input.limit } : {}) } };
+    case "write":
+      return { name: "write", args: { path: p, content: cut(str(input.content), 2000) } };
+    case "edit":
+      return { name: "edit", args: { path: p, ...(input.oldText !== undefined ? { old_string: input.oldText, new_string: input.newText } : {}) } };
+    case "grep":
+    case "find":
+      return { name: "search", args: { pattern: str(input.pattern) || str(input.query), ...(p ? { path: p } : {}) } };
+    case "ls":
+      return { name: "search", args: { pattern: "", path: p || "." } };
+    default:
+      return { name: tool || "tool", args: input };
+  }
+}
+
+/** What a tool's result says, as text: its text blocks, with a picture named rather than dropped. */
+function piText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content.map((c) => (c && typeof c === "object" ? (c.type === "text" ? str(c.text) : c.type === "image" ? "[image]" : "") : "")).join("");
+}
+
+/** The id Friday keeps for one of Pi's conversations: the path of its session file, carried on only while that file is there. */
+const piSession = (id: string | null): string | null => (id && path.isAbsolute(id) && id.endsWith(".jsonl") && existsSync(id) ? id : null);
+
+export const pi: Adapter = {
+  tool: "pi",
+  bins: ["pi"],
+  // Its sign-in is its own /login, inside Pi: Friday opens Pi in a terminal for it.
+  login: [],
+  logout: [],
+  interactive: true,
+  perTurn: true,
+  status: () => piSignedIn(),
+  args(t) {
+    const session = t.ephemeral ? null : piSession(t.resumeId);
+    const thinking = t.effort ? PI_THINKING[t.effort] : undefined;
+    return [
+      "--mode",
+      "rpc",
+      ...(t.ephemeral ? ["--no-session"] : session ? [t.fork ? "--fork" : "--session", session] : []),
+      ...(t.model ? ["--model", t.model] : []),
+      ...(thinking ? ["--thinking", thinking] : []),
+      ...(t.mode === "plan" ? ["--tools", PI_PLAN_TOOLS] : []),
+      ...(t.mode !== "full" || t.guarded ? ["-e", piGate()] : []),
+    ];
+  },
+  // Not checking pi.dev for a newer version as each turn starts.
+  env: (): Record<string, string> => ({ PI_SKIP_VERSION_CHECK: "1" }),
+  stdin(t) {
+    const images: Record<string, unknown>[] = [];
+    for (const f of t.files ?? []) {
+      const mimeType = imageType(f);
+      if (!mimeType) continue;
+      try {
+        if (statSync(f).size <= IMAGE_MAX) images.push({ type: "image", mimeType, data: readFileSync(f).toString("base64") });
+      } catch {
+        // A file gone since it was attached: the prompt still names it.
+      }
+    }
+    const lines = [{ id: "state", type: "get_state" }, { id: "models", type: "get_available_models" }, { id: "commands", type: "get_commands" }, { id: "prompt", type: "prompt", message: notedPrompt(t), ...(images.length ? { images } : {}) }];
+    return lines.map((l) => `${JSON.stringify(l)}\n`).join("");
+  },
+  parser(t, io) {
+    if (!t || !io) return () => [];
+    const turn = t;
+    const wire = io;
+    const send = (m: Record<string, unknown>) => wire.write(`${JSON.stringify(m)}\n`);
+    let over = false;
+    let started = false;
+    let window = 0;
+    let model = "";
+    let lastError = "";
+    let used = { input: 0, cached: 0, output: 0, cacheWrite: 0 };
+    let context = 0;
+    /** Each call's card, by its id, so its result is drawn under the same name. */
+    const cards = new Map<string, { name: string; args: Record<string, unknown> }>();
+    const blocked: { scope: "commands" | "turn"; item: string }[] = [];
+    /** Questions waiting on an answer, by the id Pi gave them: answered null when the turn ends first. */
+    const open = new Map<string, (said: string | null) => void>();
+    const granted = (card: { name: string; args: Record<string, unknown> }) =>
+      turn.grant?.scope === "turn" || (turn.grant?.scope === "commands" && card.name === "shell" && turn.grant.items.includes(str(card.args.command)));
+    const inFolder = (p: string) => !p || [wire.cwd, ...(turn.dirs ?? [])].some((d) => contains(d, path.resolve(wire.cwd, p)));
+
+    const finish = (error?: string): AdapterOut[] => {
+      if (over) return [];
+      over = true;
+      for (const answer of [...open.values()]) answer(null);
+      wire.end();
+      const items = blocked.slice(0, 6);
+      return [
+        ...usage(used.input, used.cached, used.output, context ? { context, ...(window ? { window } : {}) } : undefined, { ...(used.cacheWrite ? { cacheWrite: used.cacheWrite } : {}), ...(model ? { model } : {}) }),
+        ...(items.length ? [{ kind: "blocked" as const, scope: items.every((b) => b.scope === "commands") ? ("commands" as const) : ("turn" as const), items: items.map((b) => b.item) }] : []),
+        { kind: "done", ...(error ? { error } : {}) },
+      ];
+    };
+
+    /** One of its tool calls, held by the gate until Friday answers: let through, refused, or put to a person. */
+    const gate = (id: string, raw: Record<string, any>): AdapterOut[] => {
+      const card = piCard(str(raw.tool), raw.input && typeof raw.input === "object" ? raw.input : {});
+      const answer = (said: string | null) => {
+        if (!open.delete(id)) return;
+        send(said === null ? { type: "extension_ui_response", id, cancelled: true } : { type: "extension_ui_response", id, value: said });
+      };
+      open.set(id, answer);
+      const reading = card.name === "read" || card.name === "search";
+      const changing = card.name === "edit" || card.name === "write";
+      const place = str(card.args.path);
+      // A teammate's Auto: everything is put to the runner, which lets most of it run by the go-ahead list.
+      const askRunner = turn.mode === "full";
+      if (!askRunner && (granted(card) || reading || (turn.mode === "edits" && changing && inFolder(place)))) {
+        answer("yes");
+        return [];
+      }
+      if (turn.mode === "plan" && changing) {
+        answer("Plan mode doesn't change files. Say what you would change instead.");
+        return [];
+      }
+      if (turn.ask) return [{ kind: "ask", requestId: id, tool: card.name, input: card.args, reply: (allow) => answer(allow ? "yes" : "The person said no to this in Friday. Don't try it another way; say what you needed it for.") }];
+      answer("This needs the person's go-ahead, and nobody can be asked during this turn: Friday asks them once it's over. Carry on without it, or stop and say what you need.");
+      blocked.push(askedItem(card.name, card.args));
+      return [];
+    };
+
+    /** A question from one of the person's own Pi extensions: a yes or no is theirs to give, anything else is passed by. */
+    const question = (m: Record<string, any>): AdapterOut[] => {
+      const id = str(m.id);
+      if (m.method !== "confirm") {
+        send({ type: "extension_ui_response", id, cancelled: true });
+        return [];
+      }
+      const answer = (yes: boolean | null) => {
+        if (!open.delete(id)) return;
+        send(yes === null ? { type: "extension_ui_response", id, cancelled: true } : { type: "extension_ui_response", id, confirmed: yes });
+      };
+      open.set(id, () => answer(null));
+      const card = { name: str(m.title) || "Pi extension", args: { message: str(m.message) } };
+      if (turn.mode === "full" && !turn.guarded) {
+        answer(true);
+        return [];
+      }
+      if (turn.ask) return [{ kind: "ask", requestId: id, tool: card.name, input: card.args, ...(card.args.message ? { why: card.args.message } : {}), reply: (allow) => answer(allow) }];
+      answer(false);
+      blocked.push(askedItem(card.name, card.args));
+      return [];
+    };
+
+    const assistant = (msg: Record<string, any>): AdapterOut[] => {
+      const content: any[] = Array.isArray(msg.content) ? msg.content : [];
+      const text = content.filter((c) => c?.type === "text").map((c) => str(c.text)).join("");
+      const reasoning = content.filter((c) => c?.type === "thinking").map((c) => str(c.thinking)).join("");
+      const toolCalls: ToolCall[] = [];
+      for (const c of content) {
+        if (c?.type !== "toolCall") continue;
+        const card = piCard(str(c.name), c.arguments && typeof c.arguments === "object" ? c.arguments : {});
+        cards.set(str(c.id), card);
+        toolCalls.push(call(str(c.id), card.name, card.args));
+      }
+      const u = msg.usage ?? {};
+      used = { input: used.input + count(u.input), cached: used.cached + count(u.cacheRead), output: used.output + count(u.output), cacheWrite: used.cacheWrite + count(u.cacheWrite) };
+      // How full its window is now: everything this answer was given and said.
+      const total = count(u.input) + count(u.cacheRead) + count(u.cacheWrite) + count(u.output);
+      if (total) context = total;
+      if (str(msg.model)) model = `${str(msg.provider)}/${str(msg.model)}`.replace(/^\//, "");
+      if (msg.stopReason === "error") lastError = str(msg.errorMessage) || "Pi's model request failed.";
+      if (!text && !reasoning && !toolCalls.length) return [];
+      return [{ kind: "message", text, toolCalls, ...(reasoning ? { reasoning } : {}) }];
+    };
+
+    const response = (m: Record<string, any>): AdapterOut[] => {
+      const d = m.data ?? {};
+      switch (m.id) {
+        case "state": {
+          window = count(d.model?.contextWindow);
+          if (d.model?.id) model = `${str(d.model.provider)}/${str(d.model.id)}`.replace(/^\//, "");
+          const file = str(d.sessionFile);
+          return !turn.ephemeral && file ? [{ kind: "session", id: file }] : [];
+        }
+        case "models": {
+          const list = piModelList(d);
+          return list.length ? [{ kind: "models", list }] : [];
+        }
+        case "commands": {
+          const list: any[] = Array.isArray(d.commands) ? d.commands : [];
+          const out = list.filter((c) => str(c.name)).map((c) => ({ name: str(c.name), description: firstLine(str(c.description)) }));
+          return out.length ? [{ kind: "commands", list: out }] : [];
+        }
+        case "prompt":
+          return m.success === false ? finish(str(m.error) || "Pi didn't take the instruction.") : [];
+        default:
+          return [];
+      }
+    };
+
+    /**
+     * A line cut in two: the runner reads lines as Node's readline does, which also ends one at U+2028 and U+2029, and Pi
+     * writes those inside its JSON as they are (its docs/rpc.md, Framing). The parts are put back together (with U+2028, which
+     * of the two it was is lost), so a reply holding one doesn't lose the turn's end with it.
+     */
+    let part: string | null = null;
+    const whole = (line: string): Record<string, any> | null => {
+      const raw = line.replace(/\r$/, "");
+      if (part === null) {
+        const m = json(raw);
+        if (m || !raw.startsWith("{")) return m;
+        part = raw;
+        return null;
+      }
+      const joined = `${part}\u2028${raw}`;
+      const m = json(joined);
+      if (m) {
+        part = null;
+        return m;
+      }
+      // Not the rest of it after all: a line of its own starts again.
+      const alone = json(raw);
+      if (alone) {
+        part = null;
+        return alone;
+      }
+      part = joined.length > 16_000_000 ? null : joined;
+      return null;
+    };
+
+    const parse = ((line: string): AdapterOut[] => {
+      const m = whole(line);
+      if (!m || over) return [];
+      switch (m.type) {
+        case "response":
+          return response(m);
+        case "agent_start":
+          started = true;
+          return [];
+        case "message_update": {
+          const e = m.assistantMessageEvent ?? {};
+          if (e.type === "text_delta" && str(e.delta)) return [{ kind: "delta", text: str(e.delta), channel: "text" }];
+          if (e.type === "thinking_delta" && str(e.delta)) return [{ kind: "delta", text: str(e.delta), channel: "reasoning" }];
+          return [];
+        }
+        case "message_end":
+          return m.message?.role === "assistant" ? assistant(m.message) : [];
+        case "tool_execution_end": {
+          const id = str(m.toolCallId);
+          const card = cards.get(id) ?? piCard(str(m.toolName), m.args && typeof m.args === "object" ? m.args : {});
+          return [result(id, card.name, piText(m.result?.content), !!m.isError)];
+        }
+        case "extension_ui_request": {
+          if (m.method === "input" && m.title === PI_GATE_MARK) {
+            const raw = json(str(m.placeholder));
+            if (raw) return gate(str(m.id), raw);
+            // Nothing Friday can read is let through.
+            send({ type: "extension_ui_response", id: str(m.id), value: "Friday couldn't read this tool call, so it wasn't run." });
+            return [];
+          }
+          if (m.method === "notify" && str(m.message)) return [{ kind: "delta", channel: "reasoning", text: `\n${str(m.message)}\n` }];
+          if (["select", "confirm", "input", "editor"].includes(str(m.method))) return question(m);
+          return [];
+        }
+        case "auto_retry_start":
+          return [{ kind: "delta", channel: "reasoning", text: `\nRetrying the request (${count(m.attempt)}/${count(m.maxAttempts)})${str(m.errorMessage) ? `: ${str(m.errorMessage)}` : ""}…\n` }];
+        case "compaction_end":
+          return m.result ? [{ kind: "message", text: "Compacted the conversation so far, to make room for what comes next.", toolCalls: [] }] : [];
+        case "extension_error":
+          return str(m.error) ? [{ kind: "note", text: `A Pi extension failed: ${str(m.error)}` }] : [];
+        case "agent_end": {
+          if (!started) return [];
+          const last = Array.isArray(m.messages) ? [...m.messages].reverse().find((x: any) => x?.role === "assistant") : null;
+          // Stopped from Friday: over, not failed.
+          if (last?.stopReason === "aborted") return finish();
+          return finish(lastError || undefined);
+        }
+        default:
+          return [];
+      }
+    }) as Parser;
+    parse.cancel = () => {
+      if (!over) send({ type: "abort" });
+    };
+    parse.steer = async (text: string) => {
+      if (over || !started) return false;
+      send({ type: "steer", message: text });
+      return true;
+    };
+    return parse;
+  },
+  explain(error) {
+    if (/No API key found|\/login|not logged in|unauthorized|401/i.test(error)) return "Pi isn't signed in to a provider on this computer: open Pi there, type /login and pick one (or set that provider's API key), then try again.";
+    if (/bash/i.test(error) && process.platform === "win32") return `${error}\n\nOn Windows Pi needs a bash shell: install Git for Windows, which brings Git Bash.`;
+    return error;
+  },
+};
+
+export const ADAPTERS: Record<EngineTool, Adapter> = { claude, codex, cursor, copilot, opencode, gemini, antigravity, qwen, devin, junie, kiro, droid, grok, cline, kilo, amp, muse, pi, acp: custom };
 
 // ── finding the executables ──────────────────────────────────────────
 

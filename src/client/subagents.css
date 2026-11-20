@@ -2,3 +2,11 @@
    2026-11-17: "fix this"). And a report's `code` as code, as the reply's own words show it. */
 .sub-stopped { display: block; width: 14px; height: 14px; color: var(--text-muted); }
 .sub-summary code { padding: 0 4px; border-radius: 4px; background: var(--hover-strong); font: 500 12px/1.4 var(--font-mono, ui-monospace, monospace); color: var(--ink); }
+
+/* Its head opens and folds the list (Subagents): folded once every subagent is back. */
+button.subs-head { width: 100%; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+button.subs-head:hover { background: var(--hover); }
+.subs-chev { flex: none; color: var(--text-muted); transition: transform 0.15s ease; }
+.subs[data-open="true"] .subs-chev { transform: rotate(180deg); }
+.subs[data-open="false"] .subs-head { border-bottom: 0; }
+@media (prefers-reduced-motion: reduce) { .subs-chev { transition: none; } }

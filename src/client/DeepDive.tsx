@@ -3,6 +3,7 @@ import type { Dive, DiveAsk, DivePage } from "../deep-dive.js";
 import type { FolderInfo } from "../runner/workspace.js";
 import { ENGINE_MODEL_INFO, ENGINE_NAMES, type EngineTool } from "../types.js";
 import { api } from "./api.js";
+import { isLocal } from "./edition.js";
 import { EngineMark } from "./BrandMarks.js";
 import { FileIcon } from "./fileIcons.js";
 import { Icon } from "./icons.js";
@@ -19,6 +20,8 @@ import { ChevronDownIcon } from "lucide-react";
 import { PageHeader } from "@/components/dass";
 import { EmptyState } from "@/components/dass/EmptyState";
 import "./deep-dive.css";
+import { openInCode, registerIdeTaker } from "./ide/mode.js";
+import { joinPath } from "./openIn.js";
 
 /**
  * Deep Dive (deep-dive.ts): a repo explained, page by page, by the person's own coding tool, with every claim pointing at the
@@ -341,12 +344,20 @@ function Repo({ identity, repo, onBack }: { identity: Identity; repo: string; on
     return () => clearInterval(t);
   }, [busy, load]);
 
+  // The repo's folder: a citation Shift-clicked (or "Open in the IDE" on the lines) opens the file in the IDE at its line, Code on
+  // the repo (Arun, 2026-11-20: "Every file mention opens in the IDE", Deep Dive citations among them).
+  const folder = detail?.dive.folder;
+  const folderRef = useRef(folder);
+  folderRef.current = folder;
   // A citation pressed in a page or an answer (AnswerParts FileChip), or a file in its list: its lines, read from this computer.
   useEffect(() => {
     const on = (e: Event) => {
-      const d = (e as CustomEvent<{ path: string; line?: number }>).detail;
+      const d = (e as CustomEvent<{ path: string; line?: number; ide?: boolean; outside?: boolean; taken?: boolean }>).detail;
       if (!d?.path) return;
+      // The IDE on the repo's folder; one that another page already opened it in (a chat kept in Code's column) is not opened twice.
+      if (d.ide && !d.outside && d.taken) return;
       e.preventDefault();
+      if (d.ide && !d.outside && folderRef.current) return void ((d.taken = true), openInCode(joinPath(folderRef.current, d.path), d.line, { folder: folderRef.current }));
       const start = d.line ?? 1;
       const end = rangeEnd(texts.current, d.path, start);
       void api<{ file: string; from: number; lines: string[]; total: number }>(identity, `/api/deepdive/code?key=${q}&file=${encodeURIComponent(d.path)}&start=${start}&end=${end}`).then(
@@ -355,7 +366,8 @@ function Repo({ identity, repo, onBack }: { identity: Identity; repo: string; on
       );
     };
     addEventListener("friday:open-file", on);
-    return () => removeEventListener("friday:open-file", on);
+    const off = registerIdeTaker(() => isLocal() && !!folderRef.current);
+    return () => (removeEventListener("friday:open-file", on), off());
   }, [identity, q]);
   useEffect(() => {
     if (!code) return;
@@ -584,7 +596,7 @@ function Repo({ identity, repo, onBack }: { identity: Identity; repo: string; on
           )}
           <AskBar key={dive.tool} name={dive.name} tool={dive.tool} writer={dive.writer} onAsk={asked} />
         </div>
-        {code ? <CodeView code={code} onClose={() => setCode(null)} /> : toc.length > 0 && <Outline key={current?.id} headings={toc} />}
+        {code ? <CodeView code={code} folder={folder} onClose={() => setCode(null)} /> : toc.length > 0 && <Outline key={current?.id} headings={toc} />}
       </div>
     </div>
   );
@@ -1079,7 +1091,7 @@ function Outline({ headings }: { headings: string[] }) {
   );
 }
 
-function CodeView({ code, onClose }: { code: Code; onClose: () => void }) {
+function CodeView({ code, folder, onClose }: { code: Code; folder?: string; onClose: () => void }) {
   const hit = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLPreElement>(null);
   // The cited lines brought into view inside the panel only: scrollIntoView moved the whole page under it too.
@@ -1096,6 +1108,11 @@ function CodeView({ code, onClose }: { code: Code; onClose: () => void }) {
           {code.file.slice(cut + 1)}
         </span>
         {"start" in code && <span className="dd-code-range">{code.start === code.end ? `line ${code.start}` : `lines ${code.start}–${code.end}`}</span>}
+        {folder && isLocal() && !("error" in code) && (
+          <button type="button" className="icon-btn tiny" aria-label="Open in the IDE" title="Open in the IDE" onClick={() => openInCode(joinPath(folder, code.file), code.start, { folder })}>
+            <Icon name="code" size={14} />
+          </button>
+        )}
         <button type="button" className="icon-btn tiny" aria-label="Close the code" onClick={onClose}>
           <Icon name="x" size={14} />
         </button>

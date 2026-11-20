@@ -180,7 +180,7 @@ export function crewCarry(d: CarryDeps) {
   };
 
   /** The words the crew mate starts from, from what the person ticked. */
-  const briefOf = (state: SessionState, events: SessionEvent[], lane: string, me: Person, carry: ReturnType<typeof cleanCarry>, note: string, ask: AskKey[], copied: boolean): { text: string; carried: string[] } => {
+  const briefOf = (state: SessionState, events: SessionEvent[], lane: string, me: Person, carry: ReturnType<typeof cleanCarry>, note: string, ask: AskKey[], copied: boolean, packet = ""): { text: string; carried: string[] } => {
     const s = standing(state, events, lane);
     const said = events.filter((x) => (x.lane ?? MAIN_LANE) === lane && (x.body.type === "instruction" || (x.body.type === "agent.message" && x.body.text.trim())));
     const conversation = carry.conversation ? said.slice(-40).map((x) => `${x.actor.name}: ${"text" in x.body ? String(x.body.text).slice(0, 600) : ""}`).join("\n\n").slice(-14_000) : "";
@@ -192,6 +192,7 @@ export function crewCarry(d: CarryDeps) {
       ...(carry.branch && (s.branch || s.files.length) ? { branch: { ...(s.branch ? { name: s.branch } : {}), files: s.files, copied } } : {}),
       ...(carry.question && s.question ? { question: s.question } : {}),
       ...(conversation ? { conversation } : {}),
+      ...(packet ? { packet } : {}),
       ask,
     });
     const carried = [carry.leftOff && s.open.length ? `${s.open.length} still open` : "", carry.branch && s.branch ? s.branch : "", carry.branch && s.files.length ? `${s.files.length} file${s.files.length === 1 ? "" : "s"}` : ""].filter(Boolean);
@@ -222,7 +223,8 @@ export function crewCarry(d: CarryDeps) {
     } catch (e) {
       throw new CarryError((e as { status?: number }).status ?? 400, (e as Error).message);
     }
-    const { text, carried } = briefOf(state, events, lane, me, carry, note, ask, true);
+    // A Code chat's hand-off packet (crewhand; Arun, 2026-11-20: "the ask, what's done, the branch, changed files, open questions, the repo's rules and memory"): its own field, so the line the chat shows stays the person's words.
+    const { text, carried } = briefOf(state, events, lane, me, carry, note, ask, true, str(b.packet, 12_000));
     const from = await d.post(place.sid, me, text, place.lane);
     const job = randomBytes(5).toString("hex");
     await putLink({ sid, lane, job, jobLane: place.lane, jobSid: place.sid, mate: t.id, thread: place.thread, from, by: me, ask, mateName: t.name });

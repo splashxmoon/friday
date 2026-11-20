@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
+import { cloneElement, isValidElement, lazy, Suspense, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { ACCOUNT_TOOLS, AccountList } from "./Accounts.js";
 import { ToolUpdateButton, useToolUpdates } from "./tool-updates.js";
 import { ENGINE_NAMES, ENGINE_TOOLS, type EngineTool } from "../types.js";
@@ -954,6 +954,16 @@ function ToolRow({
                         : "Signed in"
                       : // Found, its sign-in not something the tool lets us check: said as found, not promised as ready.
                         "Installed";
+  const stateText = (
+    <span className="mb-tool-state" title={state === "missing" ? (found?.app ? `${name} is installed, but Friday needs its command-line agent` : info.blurb) : state === "unavailable" ? found?.unavailable : undefined}>
+      {acting && <span className="spinner tiny" aria-hidden />}
+      {state === "missing" && !acting ? (custom ? (settings ? "Any agent that speaks ACP, by its command" : "Not set up") : found?.app ? "Needs its command-line agent" : settings ? info.blurb : "Not installed") : word}
+      {state === "in" && !acting && !justIn && left && <span className="mb-tool-left"> · {left}</span>}
+    </span>
+  );
+  // A tool with accounts of its own says "Signed in" between its "+ Account" and its ⋯ (Arun, 2026-11-19: "swap the placement of
+  // the +account and signed in"), so every tool's "Signed in" sits in one column, just before the row's ⋯.
+  const stateInAccounts = state === "in" && !acting && isValidElement(accounts);
   return (
     <li ref={row} className={`mb-tool ${state} ${acting ? "acting" : ""} ${justIn ? "just-in" : ""}`}>
       <span className="mb-tool-line">
@@ -962,11 +972,7 @@ function ToolRow({
         </span>
         <span className="mb-tool-id">
           <span className="mb-tool-name">{name}</span>
-          <span className="mb-tool-state" title={state === "missing" ? (found?.app ? `${name} is installed, but Friday needs its command-line agent` : info.blurb) : state === "unavailable" ? found?.unavailable : undefined}>
-            {acting && <span className="spinner tiny" aria-hidden />}
-            {state === "missing" && !acting ? (custom ? (settings ? "Any agent that speaks ACP, by its command" : "Not set up") : found?.app ? "Needs its command-line agent" : settings ? info.blurb : "Not installed") : word}
-            {state === "in" && !acting && !justIn && left && <span className="mb-tool-left"> · {left}</span>}
-          </span>
+          {!stateInAccounts && stateText}
         </span>
       </span>
 
@@ -1016,7 +1022,7 @@ function ToolRow({
         />
       ) : null}
 
-      {state === "in" && !acting && accounts}
+      {stateInAccounts ? cloneElement(accounts as ReactElement<{ state?: ReactNode }>, { state: stateText }) : state === "in" && !acting && accounts}
       {(loginCmd || loginShell || loginUrl || loginPage) && (
         // Only while a sign-in waits, so its own chunk (SignInNotes.tsx), loaded then: the first screen doesn't carry it.
         <Suspense fallback={null}>

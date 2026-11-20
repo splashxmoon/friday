@@ -9,7 +9,9 @@ import path from "node:path";
 import { ENGINE_NAMES, ENGINE_TOOLS, TOOL_INFO, toolList, type EngineMode, type EngineTool } from "../types.js";
 import { ADAPTERS, ANTIGRAVITY_MODELS, antigravityModels, childEnv, findBin, formatCommandLine, isClaudeAppBundled, launcher, loginStatus, noteSignInStarted, readCustomAcp, runCli, saveCustomAcp } from "./adapters.js";
 import { discoverAgentFiles, parseModelList } from "./agent-files.js";
-import { addWorktree, branchesOf, dropSpares, dropWorktree, fetchBranch, primeSpares, remoteBranchesOf, repoInfo, repoItems, startRepo, worktreeState } from "./git.js";
+import { appStarted, clearBrowserCaches, dropShots, emptyTrash, measure, retireCopy, retireOlder, tidy } from "./storage.js";
+import { worktreeRoot } from "./git.js";
+import { addWorktree, branchesOf, dropSpares, dropWorktree, markMadeHere, fetchBranch, primeSpares, remoteBranchesOf, repoInfo, repoItems, startRepo, worktreeState } from "./git.js";
 import { listCliSessions } from "./imports.js";
 import { installFromRegistry, registryRows } from "./acp-registry.js";
 import { acpSignInState, callbackFromElsewhere, cancelAcpSignIn, forgetProof, settleSignIn, startAcpSignIn } from "./acp-signin.js";
@@ -21,19 +23,26 @@ import { addConnection, claudeCodeServers, fillDraft, nameFrom, parseConnection,
 import { askCli } from "./ask.js";
 import { findWork, shownFile, workKind, workType } from "../work-files.js";
 import { installSkill } from "./tool-commands.js";
+import { ideOp } from "./ide-ops.js";
+import { stackOp } from "./stack-pr.js";
+import { copyIn, duplicateSkill, readLibrary, readSkill, readSkillAt, readSkillFile, removeAt, removeSkill, saveSkill, writeFolders } from "./skill-library.js";
 import { listBackground, startBackground, stopBackground } from "./background.js";
 import { listServers, stopServer } from "./ports.js";
+import { lookAtPage, planCheck } from "./preview-check.js";
 import { fetchPreview, NOT_LISTENING, previewOptions, previewStatusLive, startPreview, stopPreview } from "./preview.js";
 import { iosInput, iosRun, iosScreen, iosStatus, iosStop, type IosInput } from "./ios.js";
 import { iosLiveUrl } from "./ios-live.js";
+import { readRules, writeRules, type RulesOp } from "./repo-rules.js";
 import { folderSetup, saveEnvironment } from "./environment.js";
 import { cancelLogin, finishLogin, openInTerminal, shellLine, startLogin } from "./terminal.js";
 import { accountEnv, addAccount, DEFAULT_ACCOUNT, getAccount, hasAccounts, isOut, listAccounts, removeAccount, renameAccount, type AccountTool } from "./accounts.js";
 import { browse, cloneRepo, defaultCloneRoot, describe, findByName, ghBin, githubRepos, issues, pullRequests, recentReposCached, teamPullRequests } from "./workspace.js";
 import { githubCancel, githubConnect, githubDisconnect, githubStatus } from "./github.js";
+import { prOpen } from "./pr-ide.js";
 import { githubItem, localRepo, prAct, prFiles, prReview, type DraftComment, type PrAction } from "./pr-actions.js";
 import { savedDirs, startDirs } from "./extra-dirs.js";
 import { readRepo } from "./repo-read.js";
+import { stopVscode, vscodeCancel, vscodeCommand, vscodeInstall, vscodeMarketplace, vscodeOpen, vscodeRemove, vscodeSetMarketplace, vscodeStart, vscodeStatus, vscodeTheme } from "./vscode.js";
 import { changedSince, citedLines, lineCounts, readForPage, surveyRepo } from "./dive.js";
 import { addOwnModels, detectLocal, discoverModels, listOwnModels, ownComplete, ownVision, removeOwnModel, saveOwnModel, testOwnModel } from "./own-models.js";
 
@@ -98,6 +107,7 @@ export const HOST_METHODS = [
   "prs.team",
   "issues",
   "pr.act",
+  "pr.ide",
   "pr.review",
   // A pull request's files with their diffs, for Code Review's guided tour.
   "pr.files",
@@ -119,6 +129,17 @@ export const HOST_METHODS = [
   "models.own.vision",
   "llm.complete",
   "skills.install",
+  // The Skills page (skill-library.ts): the person's skills in ~/.agents/skills, and each coding tool's to copy from.
+  "skills.library",
+  "skills.read",
+  "skills.save",
+  "skills.remove",
+  "skills.removeAt",
+  "skills.copy",
+  "skills.write",
+  "skills.readAt",
+  "skills.file",
+  "skills.duplicate",
   "sessions",
   "acp.get",
   "acp.set",
@@ -160,6 +181,13 @@ export const HOST_METHODS = [
   "dirs",
   "worktree.drop",
   "worktree.state",
+  // What Friday keeps on this computer, and keeping it from piling up (storage.ts).
+  "storage.measure",
+  "storage.tidy",
+  "storage.retire",
+  "storage.retireOlder",
+  "storage.emptyTrash",
+  "storage.clearCache",
   "agents.discover",
   "models",
   "preview.options",
@@ -175,22 +203,43 @@ export const HOST_METHODS = [
   "ios.input",
   // The simulator live, on a page this runner serves on 127.0.0.1 (ios-live.ts).
   "ios.live",
+  // A repo's rules, .friday/rules.md (repo-rules.ts): read for the chat's "Save as a rule" card, changed by it.
+  "rules.read",
+  "rules.write",
   // A session's environment on this computer (environment.ts): what is kept for a folder, and its setup run now.
   "env.save",
   "env.setup",
   "background.list",
   "servers.list",
   "servers.stop",
+  // A preview check after a run (preview-check.ts): which pages its files are and where they are served, then one page's pictures.
+  "preview.check.plan",
+  "preview.check.look",
   "background.stop",
   // One command an agent of yours is running, stopped from the Tasks tab (stop-command.ts).
   "command.stop",
   "usage",
   // A picture, video or sound shown in a hosted session's chat, read a piece at a time (app.ts mediaFromComputer).
   "workFile",
+  // Real VS Code in Code mode, an optional download (vscode.ts).
+  "vscode.status",
+  "vscode.install",
+  "vscode.cancel",
+  "vscode.start",
+  "vscode.stop",
+  "vscode.remove",
+  "vscode.open",
+  "vscode.theme",
+  "vscode.command",
+  "vscode.marketplace",
 ] as const;
 export type HostMethod = (typeof HOST_METHODS)[number];
 
 const str = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+/** A list of absolute paths from the server, or null when it sent none. */
+const paths = (v: unknown): Set<string> | null => (Array.isArray(v) ? new Set(v.filter((x): x is string => typeof x === "string" && path.isAbsolute(x)).slice(0, 20_000).map((x) => path.resolve(x))) : null);
+/** The folders this computer's agents work in now: never touched by a clean-up. */
+const working = (ctx: HostContext): Set<string> => new Set([...ctx.runners.values()].map((r) => path.resolve(r.opts.cwd)));
 
 /**
  * A directory for an agent that was not given one.
@@ -314,6 +363,11 @@ export async function callHost(method: string, params: Record<string, unknown> =
   const at = (p: unknown) => path.resolve(str(p, 600).replace(/^~(?=$|[\\/])/, home) || home);
   const isDir = (p: string) => stat(p).then((s) => s.isDirectory(), () => false);
 
+  // Code, the built-in IDE (src/ide-contract.ts): its files, search and source control, all by `ide.<name>` (ide-ops.ts).
+  if (method.startsWith("ide.")) return ideOp(method, params);
+  // Stacked pull requests (src/stack-plan.ts): the card's preview and "Make the stack", and the IDE's Stack view (stack-pr.ts).
+  if (method.startsWith("stack.")) return stackOp(method, params);
+
   switch (method) {
     case "tools": {
       // `tool`: just that one, for a start that only needs to know about the agent it is starting.
@@ -420,6 +474,9 @@ export async function callHost(method: string, params: Record<string, unknown> =
       });
     case "pr.files":
       return prFiles({ url: str(params.url, 300) });
+    // Review in the IDE (pr-ide.ts): the pull request's head in a copy of its own, for Code to open.
+    case "pr.ide":
+      return prOpen({ url: str(params.url, 300), folder: str(params.folder, 600), tool: str(params.tool, 20), title: str(params.title, 300) });
     case "pr.review":
       return prReview({ url: str(params.url, 300), tool: str(params.tool, 20), model: str(params.model, 60) || undefined });
     case "github.status":
@@ -505,6 +562,26 @@ export async function callHost(method: string, params: Record<string, unknown> =
       if (!name || !instructions || !tools.length) throw new Error("Which skill, and which of your tools?");
       return installSkill({ name, description: str(params.description, 300), instructions }, tools);
     }
+    case "skills.library":
+      return readLibrary();
+    case "skills.read":
+      return readSkill(params.folder);
+    case "skills.save":
+      return { skill: await saveSkill(params) };
+    case "skills.remove":
+      return removeSkill(params.folder);
+    case "skills.removeAt":
+      return removeAt(params.dir);
+    case "skills.copy":
+      return { skill: await copyIn(params.dir) };
+    case "skills.write":
+      return writeFolders(params.folders);
+    case "skills.readAt":
+      return readSkillAt(params.dir);
+    case "skills.file":
+      return readSkillFile(params.dir, params.path);
+    case "skills.duplicate":
+      return { skill: await duplicateSkill(params.folder) };
     case "sessions": {
       const tool = str(params.tool, 20) as EngineTool;
       return listCliSessions({ tools: ENGINE_TOOLS.includes(tool) ? [tool] : undefined });
@@ -821,6 +898,9 @@ export async function callHost(method: string, params: Record<string, unknown> =
           throw new Error(on ? `Couldn't make a separate copy on ${on.branch}: ${e.message}` : `Couldn't make a separate copy to race in: ${e.message}`);
         });
         cwd = w.path;
+        // Made by Friday on this computer, so its clean-up may put it away once no session here names it (storage.ts); a linked
+        // Friday's runner shares the folder, and its copies are its own.
+        if (process.env.FRIDAY_EDITION === "local") await markMadeHere(w.path).catch(() => undefined);
         raceBranch = w.branch;
         made = w;
       }
@@ -1012,6 +1092,10 @@ export async function callHost(method: string, params: Record<string, unknown> =
     // Its stop button in the same menu.
     case "servers.stop":
       return await stopServer(at(params.cwd), Number(params.port) || 0);
+    case "preview.check.plan":
+      return planCheck(at(params.cwd), Array.isArray(params.files) ? params.files.filter((f): f is string => typeof f === "string").map((f) => f.slice(0, 500)) : []);
+    case "preview.check.look":
+      return lookAtPage(str(params.url, 2000));
     case "background.stop": {
       const stopped = await stopBackground(at(params.cwd), str(params.id, 20));
       return { task: stopped ? { ...stopped, log: stopped.log.slice(-30) } : null };
@@ -1023,6 +1107,10 @@ export async function callHost(method: string, params: Record<string, unknown> =
         if (params.probe === true && e.message === NOT_LISTENING) return { status: 0, type: "", body: "" };
         throw e;
       });
+    case "rules.read":
+      return readRules(at(params.cwd));
+    case "rules.write":
+      return writeRules(at(params.cwd), params.op as RulesOp);
     case "ios.status":
       return { ios: await iosStatus(at(params.cwd)) };
     case "ios.run":
@@ -1048,6 +1136,25 @@ export async function callHost(method: string, params: Record<string, unknown> =
       return iosInput(str(params.udid, 60), (params.input ?? {}) as IosInput);
     case "worktree.drop":
       return { dropped: await dropWorktree(str(params.path, 600), params.force !== false) };
+    case "storage.measure":
+      return await measure(paths(params.referenced), working(ctx));
+    case "storage.tidy":
+      return await tidy({ inUse: working(ctx), referenced: paths(params.referenced), liveSids: Array.isArray(params.liveSids) ? new Set(params.liveSids.filter((x): x is string => typeof x === "string")) : null, since: appStarted });
+    case "storage.retire": {
+      // A deleted session's copies (its lanes' folders under the worktrees folder only), and its screenshots.
+      const own = (paths(params.paths) ?? new Set<string>()).values();
+      const root = worktreeRoot();
+      const out: Record<string, string> = {};
+      for (const p of own) if (p.startsWith(root + path.sep) && !working(ctx).has(p)) out[p] = await retireCopy(p);
+      const shots = str(params.sid, 40) ? await dropShots(str(params.sid, 40)) : 0;
+      return { copies: out, shots };
+    }
+    case "storage.retireOlder":
+      return await retireOlder(paths(params.referenced), working(ctx));
+    case "storage.emptyTrash":
+      return { freed: await emptyTrash() };
+    case "storage.clearCache":
+      return { freed: await clearBrowserCaches() };
     case "agents.discover": {
       // The person's own agent files, and those of the folders they have worked in: nothing else is looked at.
       const roots = Array.isArray(params.roots) ? params.roots.slice(0, 12).map((r) => at(r)) : [];
@@ -1123,6 +1230,31 @@ export async function callHost(method: string, params: Record<string, unknown> =
       const command = str(params.command, 4000);
       if (!command) throw new Error("Say which command.");
       return { stopped: await r.stopCommand(command) };
+    }
+    case "vscode.status":
+      return vscodeStatus({ sizes: params.sizes === true, root: typeof params.root === "string" ? params.root : undefined });
+    case "vscode.install":
+      return vscodeInstall();
+    case "vscode.cancel":
+      return vscodeCancel();
+    case "vscode.start":
+      // No folder: VS Code's own empty window (Code opens there; a folder is chosen in it, or from the menus).
+      return vscodeStart(typeof params.root === "string" && params.root.trim() ? at(params.root) : "", ctx.serverUrl);
+    case "vscode.stop":
+      return stopVscode();
+    case "vscode.remove":
+      return vscodeRemove(params.all === true);
+    case "vscode.theme":
+      return vscodeTheme(params.dark === true);
+    case "vscode.command":
+      return vscodeCommand(str(params.name, 40), typeof params.root === "string" ? params.root : undefined, params.review, typeof params.arg === "string" ? params.arg : undefined);
+    case "vscode.marketplace":
+      if (params.reset === true) return vscodeSetMarketplace(null);
+      if (params.serviceUrl !== undefined || params.itemUrl !== undefined) return vscodeSetMarketplace({ serviceUrl: params.serviceUrl, itemUrl: params.itemUrl });
+      return vscodeMarketplace();
+    case "vscode.open": {
+      const line = typeof params.line === "number" ? params.line : undefined;
+      return vscodeOpen(str(params.path, 1000), line, typeof params.root === "string" ? params.root : undefined, typeof params.end === "number" ? params.end : undefined, params.side === true);
     }
     case "stop": {
       const key = `${str(params.sid, 64)}|${str(params.lane, 40) || "main"}`;

@@ -1,5 +1,5 @@
 import { stepKind } from "../run-strip.js";
-import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { Fragment, useContext, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Orb } from "@/components/aicss/Orb";
 import { currentTheme } from "./storage.js";
 import { ENGINE_NAMES, type EngineTool, type ToolCall } from "../types.js";
@@ -11,6 +11,9 @@ import { Shine } from "./shine.js";
 import { stepsSummary } from "../step-summary.js";
 import { Check } from "./ui.js";
 import { plainLine } from "./team-room.js";
+import { IdeChatContext, ideHint, useIdeRoot } from "./ide/mode.js";
+import { relativeTo } from "./ide/util.js";
+import { FileIcon } from "./fileIcons.js";
 
 /**
  * The pieces an agent's response is drawn with.
@@ -122,6 +125,8 @@ export interface Step {
   detail?: ReactNode;
   /** What the team raised at this step, and the way to raise something: drawn under the row. */
   raise?: ReactNode;
+  /** The file a read, edit or write was done to, whole (target is its name alone): Code's column opens it from the step. */
+  file?: string;
   /** Tests this step's command reported as failing, by name. */
   fails?: string[];
   /** The first lines an edit took out and put in, so the change is visible without opening anything. */
@@ -294,18 +299,38 @@ export function StepList({ steps, shown: picked, onShown }: { steps: Step[]; sho
   const setShown = (id: string | null) => (onShown ? onShown(id) : setOwn(id));
   /** The step whose reasoning is open. */
   const [why, setWhy] = useState<string | null>(null);
+  // In Code's column a step's file is a chip that opens it in the IDE (Arun, 2026-11-19: "streamlined for code").
+  const inColumn = useContext(IdeChatContext) !== null;
+  const ideRoot = useIdeRoot();
+  // Only a file inside the open folder gets the chip: the column opens nothing else, so any other keeps its plain mark.
+  const chipFile = (s: Step) => (inColumn && s.file && s.target && ideRoot && relativeTo(ideRoot, s.file) !== null ? s.file : undefined);
   return (
     <ol className="rsp-steps">
       {steps.map((s) => (
-        <li key={s.id} id={`step-${s.id}`} className={`rsp-step ${s.state}`}>
+        <li key={s.id} id={`step-${s.id}`} className={`rsp-step ${s.state}${chipFile(s) ? " file" : ""}`}>
           <div className="rsp-step-line">
             <button type="button" className="rsp-step-row" disabled={!s.detail} aria-expanded={shown === s.id} onClick={() => setShown(shown === s.id ? null : s.id)}>
               <StepMark mark={s.mark} />
               <Shine on={s.state === "running"} className="rsp-verb">{s.state === "waiting" ? askedVerb(s.verb) : s.verb}</Shine>
-              {s.target && <code className="rsp-chip">{clip(s.target, 72)}</code>}
+              {s.target && !chipFile(s) && <code className="rsp-chip">{clip(s.target, 72)}</code>}
               {s.state === "failed" && <span className="rsp-step-flag">failed</span>}
               {s.state === "waiting" && <span className="rsp-step-flag quiet" title="Asked for, but the turn ended before it ran: stopped, out of usage, or still waiting for a yes">didn't run</span>}
             </button>
+            {chipFile(s) && (
+              <button
+                type="button"
+                className="rsp-file"
+                title={`Open ${s.file} in the editor${ideHint()}`}
+                onClick={(e) => {
+                  // Whose step it is: its path is in that agent's folder (as the code blocks and file chips in the words say).
+                  const said = e.currentTarget.closest<HTMLElement>("[data-lane]")?.dataset.lane;
+                  window.dispatchEvent(new CustomEvent("friday:open-file", { detail: { path: s.file, ...(said && said !== "main" ? { lane: said } : {}) }, cancelable: true }));
+                }}
+              >
+                <FileIcon path={s.file!} size={13} />
+                <span>{s.target}</span>
+              </button>
+            )}
             {(s.thought || s.onAsk) && (
               <button type="button" className="rsp-why" aria-expanded={why === s.id} title="Why did it do that?" onClick={() => setWhy(why === s.id ? null : s.id)}>
                 Why?

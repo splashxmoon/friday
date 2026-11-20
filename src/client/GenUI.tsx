@@ -5,6 +5,7 @@ import type { SessionState } from "../session/projection.js";
 import { MAIN_LANE, type SessionEvent } from "../types.js";
 import { answerText, fieldProblem, filled, pickText, testCounts, type ChangedFile, type CompareSide, type FormField, type LinkItem, type StatTile, type Tone, type UiAction, type UiCard } from "../gen-ui-model.js";
 import { FileIcon } from "./fileIcons.js";
+import { ideHint } from "./ide/mode.js";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { DecisionCard } from "./decision-card.js";
@@ -376,7 +377,7 @@ function Changes({ card, lane, answer, sender }: CardProps) {
                   </span>
                 </button>
                 <span className="ch-acts">
-                  <button type="button" className="ch-act" onClick={() => openFile(f)} title="Open it in the file view">
+                  <button type="button" className="ch-act" onClick={() => openFile(f)} title={`Open it in the file view${ideHint()}`}>
                     <ArrowUpRightIcon aria-hidden="true" />
                     Open
                   </button>
@@ -1277,7 +1278,7 @@ function FileCard({ card, lane }: CardProps) {
             {copied ? "Copied" : "Copy"}
           </button>
           {card.path && (
-            <button type="button" className="ch-act" onClick={open}>
+            <button type="button" className="ch-act" onClick={open} title={`Open it in the file view${ideHint()}`}>
               <ArrowUpRightIcon aria-hidden="true" />
               Open
             </button>

@@ -9,7 +9,7 @@ import { WorkBar, WorkRail } from "./WorkRail.js";
 import { isWorkSid, markWorkSession } from "./WorkMode.js";
 import { SessionMenu } from "./SessionMenu.js";
 import { EmptyState } from "@/components/dass/EmptyState";
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { shortcut } from "./Shortcuts.js";
 import { createPortal } from "react-dom";
 import { tabRing, tabState } from "./agent-tab.js";
@@ -22,7 +22,7 @@ let faviconText: Promise<string | null> | null = null;
 const faviconSvg = () => (faviconText ??= fetch("/favicon.svg").then((r) => (r.ok ? r.text() : null)).catch(() => null));
 import { AgentState, agentNameFor, jumpTo } from "./Activity.js";
 import { leftOff } from "../left-off.js";
-import { project } from "../session/projection.js";
+import { project, sessionPr } from "../session/projection.js";
 import type { Plan } from "../plan-types.js";
 import type { McpPublic } from "../mcp-types.js";
 import { can, questionsTo, requestsTo, runOf, type SessionState } from "../session/projection.js";
@@ -52,7 +52,9 @@ import { md } from "./markdown.js";
 /** This session's workspace, Solo or Team (Team.tsx): the hosted Friday's question. Every session in the local edition is Solo. */
 const sessionWorkspace: { useSessionPlan: (sid: string, invite?: string, member?: string) => SessionPlan | null } = { useSessionPlan: () => null };
 import type { Identity, RecentSession, RepoUse } from "./storage.js";
-import { Check, ActionNote, InlineEdit, MenuButton, Segmented, SessionSkeleton, ShownText, Switch, isTyping, onBand, useConfirm, useDismiss, type MenuItem } from "./ui.js";
+import { Check, ActionNote, InlineEdit, MenuButton, Segmented, SessionSkeleton, ShownText, Switch, inBand, isTyping, onBand, useConfirm, useDismiss, type MenuItem } from "./ui.js";
+import { getMode, IdeChatContext, openInCode, registerIdeTaker } from "./ide/mode.js";
+import { visibleComposer } from "./prefill.js";
 import { useSession, type Send } from "./useSession.js";
 import type { Focus } from "../focus.js";
 import { CLASS_LABEL, COMMAND_CLASSES, type CommandClass } from "../command-class.js";
@@ -61,6 +63,8 @@ import { MateHeaderTitle, mateOn, RoomMenu, TeamFaces, teamTitle } from "./Teamm
 import { setMateTab, useMateTab } from "./mate-tab.js";
 const TeamPlan = lazy(() => import("./TeamPlan.js"));
 const RememberOffer = lazy(() => import("./RememberOffer.js"));
+// Rewind in Code's column (ide/rewind-column.tsx): only mounted there.
+const ColumnRewind = lazy(() => import("./ide/rewind-column.js"));
 import { TeamHeaderControls } from "./TeamControls.js";
 import { taskCount } from "./task-count.js";
 import TaskBoard from "./TaskBoard.js";
@@ -128,12 +132,17 @@ export function SessionView({
   /** Connected MCPs, so the composer can offer one per slash command. */
   connections: McpPublic[];
 }) {
+  // In Code's column (IdeChatContext) while Agents is showing, this screen is kept but out of sight: it leaves the window's title and
+  // keys to the one in view (Code's chats are kept apart from Agents, Arun 2026-11-19).
+  const inCodeColumn = useContext(IdeChatContext) !== null;
+  const offstage = () => inCodeColumn && getMode() !== "code";
   const s = useSession(sid, invite, identity);
   // Where this session's coding tools run, among your computers (open-source edition): what it asks of a computer goes there.
   useSessionMachine(isLocal() && s.state && !s.state.options.team ? sessionComputer(s.state.engines) : null);
   /** The latest state, for listeners added once. */
   const stateRef = useRef(s.state);
   stateRef.current = s.state;
+  const rootEl = useRef<HTMLDivElement>(null);
   const eventsRef = useRef(s.events);
   eventsRef.current = s.events;
   // Solo or Team, for this session's own workspace: on Solo nobody else steers and Friday's own agent isn't there.
@@ -268,11 +277,26 @@ export function SessionView({
   useEffect(() => void (!bench && setFileLane(null)), [bench]);
   useEffect(() => {
     const on = (e: Event) => {
-      const { path, line, outside, lane } = (e as CustomEvent<{ path: string; line?: number; outside?: boolean; lane?: string }>).detail;
+      const d = (e as CustomEvent<{ path: string; line?: number; outside?: boolean; lane?: string; ide?: boolean; from?: Element | null; taken?: boolean }>).detail;
+      const { path, line, outside, lane, ide } = d;
+      // Shift-click, or "Open in the IDE" on a mention (ide/file-links.ts; Arun, 2026-11-20: "Every file mention opens in the IDE"): Code on
+      // the session's folder, the file at its line. Only the session the mention is in takes it: not the chat Code keeps in its column
+      // out of sight, not a neighbour's, and not a Work session (its files are documents: the rail opens them, as for a plain click).
+      const work = !!stateRef.current?.options.work;
+      if (ide && !outside && !work && isLocal()) {
+        if (d.taken || inCodeColumn || getMode() !== "agents" || (d.from && rootEl.current && !rootEl.current.contains(d.from))) return;
+        const folder = stateRef.current?.engines[lane ?? MAIN_LANE]?.cwd ?? (stateRef.current?.engines[MAIN_LANE] ?? Object.values(stateRef.current?.engines ?? {})[0])?.cwd;
+        if (folder) {
+          e.preventDefault();
+          d.taken = true;
+          // The lane's own folder when it has one (a Crew teammate's), and Code goes there if the session's linked folder isn't it.
+          return void openInCode(joinPath(folder, path), line, { dir: folder });
+        }
+      }
       e.preventDefault();
       // A Work session's files are its pieces: one named in the chat opens as a document in the rail, not as code (WorkRail).
       // The Browser makes way, or the rail it opens in is hidden behind it until the Browser is closed.
-      if (stateRef.current?.options.work && !outside) return void (setBench(false), dispatchEvent(new CustomEvent("friday:work-open", { detail: { path } })));
+      if (work && !outside) return void (setBench(false), dispatchEvent(new CustomEvent("friday:work-open", { detail: { path } })));
       // ⌘-click: in your own editor, at the line, when the session's folder is on this computer (desktop-native.ts).
       const dir = (stateRef.current?.engines[MAIN_LANE] ?? Object.values(stateRef.current?.engines ?? {})[0])?.cwd;
       if (outside && dir && window.fridayDesktop?.openIn) {
@@ -298,7 +322,12 @@ export function SessionView({
       setHistory(false);
     };
     window.addEventListener("friday:open-file", on);
-    return () => window.removeEventListener("friday:open-file", on);
+    // The IDE is on offer for a file named here when this is the session in view and has a folder (the chip's menu reads it).
+    const off = registerIdeTaker(() => {
+      const st = stateRef.current;
+      return isLocal() && !inCodeColumn && !st?.options.work && !!Object.values(st?.engines ?? {}).some((x) => x.cwd) && getMode() === "agents" && !!rootEl.current?.getClientRects().length;
+    });
+    return () => (window.removeEventListener("friday:open-file", on), off());
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // A room's side thread opens as the side panel's Thread tab (Teammates.tsx openThread, open-source edition).
   useEffect(() => {
@@ -330,9 +359,13 @@ export function SessionView({
   }, []);
   const [racing, setRacing] = useState(false);
   // Once a pull request exists, ask GitHub about it now and then; when it merges, the session gets its last card.
-  const prUrl = useMemo(() => [...s.events].reverse().find((e) => e.body.type === "folder.committed" && !e.body.error && !!e.body.prUrl)?.body, [s.events.length]); // eslint-disable-line react-hooks/exhaustive-deps
-  const [merged, setMerged] = useState<{ url: string; at: number } | null>(null);
-  const [closed, setClosed] = useState(false);
+  // The newest one: a pull request an agent opened itself (`gh pr create`) after an earlier one merged is the one asked about, and
+  // the earlier one's merged card goes (Arun, 2026-11-20: "i opened a pull request but it is stuck at the merged thing").
+  const prUrl = useMemo(() => sessionPr(s.events)?.url ?? "", [s.events.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [mergedAs, setMerged] = useState<{ url: string; at: number } | null>(null);
+  const [closedAs, setClosed] = useState("");
+  const merged = mergedAs && mergedAs.url === prUrl ? mergedAs : null;
+  const closed = !!prUrl && closedAs === prUrl;
   useEffect(() => {
     if (!prUrl || merged || closed) return;
     let live = true;
@@ -344,7 +377,7 @@ export function SessionView({
           const st = d.pr?.status?.state;
           // When GitHub says it merged; from a runner older than that, when it was seen to.
           if (st === "merged") setMerged({ url: d.pr!.url, at: d.pr!.status!.mergedAt ?? Date.now() });
-          else if (st === "closed") setClosed(true);
+          else if (st === "closed") setClosed(d.pr!.url);
         })
         .catch(() => {});
     void ask();
@@ -353,7 +386,7 @@ export function SessionView({
       live = false;
       clearInterval(t);
     };
-  }, [sid, invite, !!prUrl, merged, closed]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sid, invite, prUrl, !!merged, closed]); // eslint-disable-line react-hooks/exhaustive-deps
   // Agents' chats side by side: two on a laptop, three on a wide screen (Arun, 2026-10-18). Which ones is part of the page's
   // one agent choice (agentFocus.ts): the column in use is the agent in view, and the panels beside them follow it.
   const cols = useColumns(sid);
@@ -465,8 +498,8 @@ export function SessionView({
         Object.keys(s.state.approvals).filter((lane) => (lane === MAIN_LANE ? s.state!.driver : s.state!.laneDrivers[lane])?.id === s.me!.id).length
       : 0;
   useEffect(() => {
-    if (title) document.title = `${attention ? `(${attention}) ` : ""}${title} · Friday`;
-  }, [title, attention]);
+    if (title && !inCodeColumn) document.title = `${attention ? `(${attention}) ` : ""}${title} · Friday`;
+  }, [title, attention, inCodeColumn]);
   // A wait here answered or asked (in this chat, from a toast, on another device): the Waiting on you toasts are read
   // again now, rather than at their next look a quarter of a minute later, so one answered in the chat goes at once.
   // Each agent starting or stopping too: the sidebar went on saying "working" for up to 15 seconds after a Stop (Arun, 2026-10-28:
@@ -571,8 +604,8 @@ export function SessionView({
   // "/" jumps to the message box.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "/" && !e.metaKey && !e.ctrlKey && !isTyping(e.target)) {
-        const el = document.getElementById("composer-input") as HTMLTextAreaElement | null;
+      if (e.key === "/" && !e.metaKey && !e.ctrlKey && !isTyping(e.target) && !offstage()) {
+        const el = visibleComposer();
         if (el && !el.disabled) {
           e.preventDefault();
           el.focus();
@@ -625,7 +658,7 @@ export function SessionView({
     }
   };
   useEffect(() => {
-    const on = (e: KeyboardEvent) => panelKeys.current(e);
+    const on = (e: KeyboardEvent) => !offstage() && panelKeys.current(e);
     addEventListener("keydown", on);
     return () => removeEventListener("keydown", on);
   }, []);
@@ -656,7 +689,7 @@ export function SessionView({
     }
   };
   useEffect(() => {
-    const on = (e: KeyboardEvent) => agentKeys.current(e);
+    const on = (e: KeyboardEvent) => !offstage() && agentKeys.current(e);
     addEventListener("keydown", on);
     return () => removeEventListener("keydown", on);
   }, []);
@@ -698,7 +731,7 @@ export function SessionView({
     // The whole session as Markdown (session-markdown.ts), for a pull request, an issue or a file of its own.
     act("md-copy", "Copy this session as Markdown", "copy", () => void exportMarkdown("copy"));
     act("md-save", "Save this session as Markdown", "download", () => void exportMarkdown("save"));
-    act("ask", "Write to the agent", "message", () => document.getElementById("composer-input")?.focus(), "/");
+    act("ask", "Write to the agent", "message", () => visibleComposer()?.focus(), "/");
     // The header's two, by name: its terminal switch, and the settings its gear used to open.
     if (isLocal() && !st.options.work && !st.options.team) {
       act("tui", tuiIsOn() ? "Back to chat view" : "Terminal view", "terminalSquare", () => setTuiOn(!tuiIsOn()));
@@ -904,7 +937,7 @@ export function SessionView({
   return (
     <AgentsContext.Provider value={agentsHere}>
     <FocusContext.Provider value={focusValue}>
-    <div className={`session-view${focus ? " focus" : ""}`} data-slot="session">
+    <div ref={rootEl} className={`session-view${focus ? " focus" : ""}`} data-slot="session">
       <TopBar
         sessionPlan={sessionPlan}
         solo={solo}
@@ -1022,6 +1055,8 @@ export function SessionView({
           {/* Banners are about now, so they go when the feed does. */}
           {/* No "While you were away" card (Arun, 2026-10-21: "get rid of this too"): the feed's "New since you looked" line marks where you left off. */}
           {!replaying && <Banners state={state} me={me} send={send} />}
+          {/* In Code's column: the chat's checkpoints and rewind, for the column's bar and history menu (Arun, 2026-11-19, wave 4). */}
+          {inCodeColumn && !replaying && <Suspense fallback={null}><ColumnRewind sid={sid} invite={invite} events={s.events} state={state} me={me} send={send} notify={s.notify} identity={identity} /></Suspense>}
           {!replaying && <HandoverBanner state={state} me={me} />}
           {/* "Remember these for Kit?": a crew mate's decisions offered to its memory once its run is over (Code and Crew, connected,
               2026-11-13). Loaded only when something here was marked as decided. */}
@@ -1136,7 +1171,10 @@ export function SessionView({
           bench={bench}
         >
           <Workbench
-            open={bench}
+            // Never in Code's chat column: Code has its own files and diffs, and the panel, opening by itself once an agent changed a
+            // file, covered the column and left the chat inert under it, unscrollable and unclickable (Arun, 2026-11-19: "scroll doesnt
+            // work in the agent chat").
+            open={bench && !inCodeColumn}
             {...(fileLane && bench ? { lane: fileLane } : split ? { lane: activeLane } : focused !== ALL ? { lane: focused } : roomLane ? { lane: roomLane } : {})}
             state={state}
             events={s.events}
@@ -1757,7 +1795,13 @@ function TopBar({
   // page starts at the conversation. In a browser there is no band, and this is the
   // header it always was.
   const [band, setBand] = useState<{ left: HTMLElement; right: HTMLElement } | null>(null);
+  // Code's chat column (ide/AgentPanel.tsx) is a session screen too, kept alive while Code is hidden: it never takes the window's
+  // band, or its changes, terminal and side panel buttons showed at the top right of every page after Code was opened (Arun,
+  // 2026-11-19: "why are the buttons from the coding session appearing in the header on the right when not in the coding
+  // session"), and the page laid itself out under a session's band. In Code the band was hidden anyway.
+  const embedded = useContext(IdeChatContext) !== null;
   useLayoutEffect(() => {
+    if (embedded) return;
     // When the band comes (ui.tsx onBand): after a reload the window's stylesheet arrives after this has opened.
     const off = onBand(() => {
       const left = document.getElementById("band-left");
@@ -1773,7 +1817,9 @@ function TopBar({
       delete document.documentElement.dataset.band;
       for (const id of ["band-left", "band-slot"]) document.getElementById(id)?.removeAttribute("data-slot");
     };
-  }, []);
+  }, [embedded]);
+  // In the desktop app Code's chat has no header of its own (the band it would use is Code's); in a browser it keeps the inline one.
+  if (embedded && inBand()) return null;
   if (band) {
     return (
       <>
@@ -1858,7 +1904,9 @@ export function reposOf(state: SessionState | null | undefined): RepoUse[] {
     // The folder itself, so a new thread in the project can start there; the main lane's when it has one.
     const path = lane === MAIN_LANE || !had?.path ? (e.copyOf ?? e.cwd) : had.path;
     const worktree = lane === MAIN_LANE || !had ? !!e.copyOf : !!had.worktree;
-    if (!had || lane === MAIN_LANE) by.set(name, { name, branch: lane === MAIN_LANE || !had ? e.branch : had.branch, live: !!had?.live || e.online, ...(made || had?.made ? { made: true } : {}), path, ...(worktree ? { worktree: true } : {}) });
+    // Where that lane really edits (the worktree), for Code, whose folder must be the one the agent's changes land in.
+    const cwd = lane === MAIN_LANE || !had?.cwd ? e.cwd : had.cwd;
+    if (!had || lane === MAIN_LANE) by.set(name, { name, branch: lane === MAIN_LANE || !had ? e.branch : had.branch, live: !!had?.live || e.online, ...(made || had?.made ? { made: true } : {}), path, ...(worktree ? { worktree: true, cwd } : {}) });
     else had.live = had.live || e.online;
   }
   return [...by.values()];

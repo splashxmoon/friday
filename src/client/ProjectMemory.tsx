@@ -103,7 +103,8 @@ export function ProjectMemory({ identity }: { identity: Identity }) {
                       )}
                       <div className="mem-meta">
                         {e.from.tool === "person" ? `Added by ${e.from.name}` : `Learned by ${e.from.name}`}
-                        {e.from.title ? ` in “${e.from.title}”` : ""} · {relTime(e.at) === "now" ? "just now" : `${relTime(e.at)} ago`}
+                        {e.from.title ? ` in “${e.from.title}”` : ""}
+                        {e.from.surface ? ` (${e.from.surface === "code" ? "Code" : "Agents"})` : ""} · {relTime(e.at) === "now" ? "just now" : `${relTime(e.at)} ago`}
                         {e.uses ? ` · told ${e.uses} time${e.uses === 1 ? "" : "s"}` : ""}
                       </div>
                       {e.kind === "correction" &&

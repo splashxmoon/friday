@@ -1,0 +1,52 @@
+/* The refactor plan card and its closing line: quiet and flush, in Friday's own variables, both themes (RefactorPlanCard.tsx). */
+.rfp-card { margin: 10px 0; padding: 4px 14px 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); color: var(--ink); font: 400 13px/1.45 var(--font); }
+.rfp-head { display: flex; align-items: center; gap: 8px; padding: 10px 0 6px; min-width: 0; }
+.rfp-head b { font-weight: 600; font-size: 13.5px; }
+.rfp-mark { display: grid; place-items: center; color: var(--ink-2); }
+.rfp-counts { color: var(--text-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rfp-counts i { font-style: normal; margin-right: 6px; }
+.rfp-summary { margin: 0 0 8px; color: var(--ink-2); overflow-wrap: anywhere; }
+.rfp-files { list-style: none; margin: 0; padding: 0; }
+/* Reset against the answer's own list styles (padding, markers and margins on ul and li: Code's column sets them at the same weight), which leaked in: the rows start flush, as their rules do. */
+.rfp-card.rfp-card.rfp-card :is(ul, li) { list-style: none; margin: 0; padding-left: 0; }
+.rfp-card.rfp-card.rfp-card li::marker { content: none; }
+.rfp-file { display: flex; flex-direction: column; gap: 1px; padding: 8px 0; border-top: 1px solid var(--border); min-width: 0; }
+.rfp-path { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 8px; max-width: 100%; margin: 0 -4px; padding: 0 4px; border: 0; border-radius: 4px; background: transparent; color: var(--ink); font: 500 12.5px/20px var(--mono, ui-monospace, monospace); text-align: left; cursor: pointer; }
+.rfp-path:hover { background: var(--hover); }
+.rfp-name { overflow-wrap: anywhere; }
+.rfp-dir { color: var(--text-muted); font-weight: 400; font-size: 11.5px; overflow-wrap: anywhere; }
+.rfp-change { color: var(--text-muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.rfp-more { margin: 2px 0 4px; padding: 4px 0; border: 0; border-top: 1px solid var(--border); width: 100%; background: transparent; color: var(--ink-2); font: 500 12px/1 var(--font); text-align: left; cursor: pointer; }
+.rfp-more:hover { color: var(--ink); }
+.rfp-sec { padding-top: 8px; border-top: 1px solid var(--border); margin-top: 2px; }
+.rfp-label { color: var(--text-muted); font: 600 10.5px/1 var(--font); text-transform: uppercase; letter-spacing: 0.04em; padding-bottom: 6px; }
+.rfp-risks { margin: 0 0 6px; color: var(--ink-2); }
+.rfp-card.rfp-card.rfp-card .rfp-risks li { position: relative; padding: 1px 0 1px 12px; overflow-wrap: anywhere; }
+.rfp-risks li::before { content: ""; position: absolute; left: 1px; top: 0.72em; width: 5px; height: 5px; border-radius: 50%; background: var(--amber); }
+.rfp-checks { display: flex; flex-wrap: wrap; gap: 6px; padding-bottom: 6px; }
+.rfp-checks code { padding: 1px 7px; border-radius: 6px; background: var(--hover); color: var(--ink-2); font: 400 11.5px/18px var(--mono, ui-monospace, monospace); overflow-wrap: anywhere; }
+.rfp-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-top: 12px; border-top: 1px solid var(--border); }
+.rfp-btn { height: 28px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--ink); font: 500 12.5px/1 var(--font); cursor: pointer; white-space: nowrap; }
+.rfp-btn:hover { background: var(--hover); }
+.rfp-btn.on { background: var(--ink); border-color: var(--ink); color: var(--bg, #fff); }
+.rfp-btn.on:hover { background: var(--ink); opacity: 0.88; }
+.rfp-btn:focus-visible, .rfp-path:focus-visible, .rfp-more:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.rfp-said { color: var(--text-muted); font-size: 12px; }
+.rfp-writing { margin: 8px 0; color: var(--text-muted); font-size: 12.5px; }
+/* The closing line: one compact row. */
+.rfp-done { display: flex; align-items: center; gap: 10px; margin: 10px 0; padding: 8px 10px 8px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); color: var(--ink); font: 400 13px/1.4 var(--font); }
+.rfp-done-ico { flex: none; display: grid; place-items: center; width: 16px; align-self: flex-start; margin-top: 2px; color: var(--green); }
+.rfp-done[data-checks="failed"] .rfp-done-ico { color: var(--amber); }
+/* Checks only the agent speaks for: not the green of a check Friday saw. */
+.rfp-done[data-checks="unseen"] .rfp-done-ico { color: var(--text-muted); }
+.rfp-done-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.rfp-done-body b { font-weight: 600; white-space: nowrap; }
+/* The title never breaks: its link drops under it when the column has no room for both. */
+.rfp-done-top { display: flex; flex-wrap: wrap; align-items: center; gap: 0 12px; }
+.rfp-link { padding: 0; border: 0; background: transparent; color: var(--ink-2); font: 500 12.5px/20px var(--font); text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--border); cursor: pointer; white-space: nowrap; }
+.rfp-link:hover { color: var(--ink); text-decoration-color: currentColor; }
+.rfp-link:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; border-radius: 3px; }
+/* "Go ahead with the plan" as the person's message: the long instruction a press away. */
+.rfp-told { margin-left: 10px; font-size: 12px; opacity: 0.7; }
+.rfp-told-text { display: block; margin-top: 6px; font-size: 12px; opacity: 0.75; white-space: pre-wrap; }
+.rfp-done-note { color: var(--text-muted); font-size: 12.5px; overflow-wrap: anywhere; }

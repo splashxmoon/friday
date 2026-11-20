@@ -1,0 +1,28 @@
+/* Settings › Storage (SettingsStorage.tsx): the total and a clean-up on a tray, a bar of what it is made of, then a row per kind. */
+.sto-sum { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
+.sto-sum-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.sto-total { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.sto-total > b { color: var(--ink); font-size: 24px; font-weight: 600; letter-spacing: -.015em; line-height: 30px; font-variant-numeric: tabular-nums; }
+.sto-total > span { overflow: hidden; color: var(--text-muted); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+.sto-total code { font: 12px var(--mono); color: var(--ink-2); }
+.sto-bar { display: flex; gap: 2px; height: 10px; overflow: hidden; border-radius: 5px; background: var(--hover); }
+.sto-bar > i { min-width: 3px; height: 100%; }
+.sto-bar > i:first-child { border-radius: 5px 0 0 5px; }
+.sto-bar > i:last-child { border-radius: 0 5px 5px 0; }
+.sto-sum-note { margin: 0; color: var(--text-muted); font-size: 12.5px; line-height: 18px; text-wrap: pretty; }
+.sto-label { display: inline-flex; align-items: center; gap: 8px; }
+.sto-label > i { flex: none; width: 8px; height: 8px; border-radius: 2px; }
+.sto-size { min-width: 64px; color: var(--ink); font-size: 13px; font-variant-numeric: tabular-nums; text-align: right; }
+.sto-when { color: var(--text-muted); }
+.sto-sum-acts { display: flex; flex: none; align-items: center; gap: 6px; }
+/* The first measurement's rows, in the shape of the real ones. */
+.sto-sk { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 14px 0; }
+.sto-sk > div { display: flex; flex: 1; flex-direction: column; gap: 7px; min-width: 0; }
+@media (max-width: 560px) {
+  .sto-sum-top { flex-direction: column; align-items: stretch; }
+  .sto-sum-acts { justify-content: flex-end; }
+  .sto-total > span { white-space: normal; }
+  .sto-size { text-align: left; }
+}
+.sto-done:empty { display: none; }
+.sto-done { color: var(--ink); font-weight: 500; }

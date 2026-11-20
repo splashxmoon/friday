@@ -46,6 +46,14 @@ export function needsCatchUp(events: SessionEvent[], lane: string, hostId: strin
 }
 
 /**
+ * Whether the turn `turnId` is this host's first on the lane. `events` may be the store's own live array (the local store hands that
+ * out), which already holds this turn's delivery, so the turn's own delivery is left out: it never makes a first turn look like a second.
+ */
+export function isFirstTurn(events: SessionEvent[], lane: string, hostId: string, turnId: string): boolean {
+  return needsCatchUp(events.filter((e) => !(e.body.type === "instructions.delivered" && e.body.turn === turnId)), lane, hostId);
+}
+
+/**
  * The catch-up, or "" when there is nothing before this turn to catch up on.
  *
  * Empty matters as much as full: the first instruction of a brand-new session

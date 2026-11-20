@@ -9,6 +9,7 @@ export async function carryReq<T>(path: string, init: RequestInit = {}): Promise
     throw new Error("Couldn't reach Friday. Try again.");
   }
   const body = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (!res.ok) throw new Error(body.error ?? (res.status === 404 ? "Not there yet." : "Couldn't reach Friday. Try again."));
+  // The status rides on the error for a caller that must tell "gone" (404) from "try again".
+  if (!res.ok) throw Object.assign(new Error(body.error ?? (res.status === 404 ? "Not there yet." : "Couldn't reach Friday. Try again.")), { status: res.status });
   return body;
 }

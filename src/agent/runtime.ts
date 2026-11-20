@@ -124,6 +124,11 @@ export interface RuntimeOptions {
   saveMemory?: (workspaceId: string, user: { id: string; name: string }, text: string, scope: "personal" | "workspace") => Promise<{ ok: true } | { ok: false; reason: string }>;
   /** The skills this person has added themselves, for the built-in agent to use alongside its own. */
   userSkills?: (workspaceId: string, userId: string) => Promise<SkillBrief[]>;
+  /**
+   * The skills on this computer go to a saved agent too, after the ones picked for it: the open-source edition's (its crew's teammates
+   * on your own models), where they are the computer's, not a library a team shares.
+   */
+  everyAgentSkills?: boolean;
   /** The brief of one skill that is fetched on use, as the person who owns it. */
   skillBrief?: (workspaceId: string, id: string, owner: string, collection?: string) => Promise<string | null>;
   /** Bring skills in from a GitHub repository for the person driving. */
@@ -489,9 +494,10 @@ export class AgentRuntime {
    */
   private async skillsForRun(state: SessionState, agent?: AgentSnapshot | null): Promise<SkillBrief[]> {
     const base = skillsFor(state, agent);
-    if (agent ?? state.options.agent) return base;
-    if (!this.opts.userSkills || !state.workspaceId) return base;
-    const mine = await this.opts.userSkills(state.workspaceId, state.driver?.id ?? state.ownerId).catch(() => []);
+    if ((agent ?? state.options.agent) && !this.opts.everyAgentSkills) return base;
+    // The computer's skills need no workspace (a session of the open-source edition may have none).
+    if (!this.opts.userSkills || !(state.workspaceId || this.opts.everyAgentSkills)) return base;
+    const mine = await this.opts.userSkills(state.workspaceId ?? "", state.driver?.id ?? state.ownerId).catch(() => []);
     const have = new Set(base.map((b) => b.name.toLowerCase()));
     return [...base, ...mine.filter((m) => !have.has(m.name.toLowerCase()))];
   }

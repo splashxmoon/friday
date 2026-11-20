@@ -1,0 +1,76 @@
+/* Race in Code's column (race-column.tsx, RaceButton.tsx): one row per racer, quiet, flush with the chat. Friday's variables only,
+   so both themes follow. The card measures its own width, not the window's: the column is 280px to 640px. */
+.rcol { container-type: inline-size; margin: 0; border: 1px solid var(--border); border-radius: 10px; background: var(--card); overflow: hidden; }
+.rcol-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; padding: 9px 10px 9px 12px; border-bottom: 1px solid var(--border); }
+.rcol-title { display: inline-flex; flex: none; align-items: center; gap: 6px; color: var(--ink); font: 600 12.5px/1 var(--font); }
+.rcol-title svg { color: var(--text-muted); }
+.rcol-sub { flex: 1 1 100%; order: 3; min-width: 0; color: var(--text-muted); font: 400 12px/1.4 var(--font); }
+.rcol-end { flex: none; margin-left: auto; height: 22px; padding: 0 7px; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); font: 500 11.5px/1 var(--font); cursor: pointer; transition: background-color var(--t-hover, 120ms) ease, color var(--t-hover, 120ms) ease; }
+.rcol-end:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
+.rcol-end:disabled { opacity: .5; cursor: default; }
+.rcol-rows { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.rcol-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 10px 12px; }
+.rcol-row + .rcol-row { border-top: 1px solid var(--border); }
+.rcol-row.lean { background: color-mix(in srgb, var(--ink) 3%, transparent); }
+.rcol-who { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.rcol-mark { display: grid; place-items: center; flex: none; width: 18px; height: 18px; }
+.rcol-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font: 600 13px/1.2 var(--font); }
+.rcol-chip { display: inline-flex; flex: none; align-items: center; gap: 5px; margin-left: auto; padding: 3px 8px; border-radius: 999px; background: var(--hover); color: var(--ink-2); font: 500 11px/1 var(--font); white-space: nowrap; }
+.rcol-chip.running { color: var(--ink); }
+.rcol-chip.error, .rcol-chip.waiting_for_human { color: var(--ink); background: var(--hover-strong); }
+.rcol-chip.lean { background: var(--ink); color: var(--bg); }
+.rcol-dot { width: 6px; height: 6px; border-radius: 999px; background: var(--live, currentColor); animation: rcol-pulse 1.4s ease-in-out infinite; }
+@keyframes rcol-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .rcol-dot { animation: none; } }
+.rcol-facts { display: flex; flex-wrap: wrap; gap: 2px 10px; padding-left: 26px; color: var(--text-muted); font: 400 12px/1.45 var(--font); font-variant-numeric: tabular-nums; }
+.rcol-facts .ok { color: var(--ink-2); }
+.rcol-facts .bad { color: var(--ink); font-weight: 500; }
+.rcol-flag { display: flex; align-items: flex-start; gap: 6px; padding-left: 26px; color: var(--ink-2); font: 400 12px/1.4 var(--font); }
+.rcol-flag svg { flex: none; margin-top: 2px; }
+.rcol-acts { display: flex; gap: 6px; padding-left: 26px; }
+.rcol-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 26px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--card); color: var(--ink); font: 500 12px/1 var(--font); white-space: nowrap; cursor: pointer; transition: background-color var(--t-hover, 120ms) ease, border-color var(--t-hover, 120ms) ease; }
+.rcol-btn:hover:not(:disabled) { background: var(--hover); }
+.rcol-btn:active:not(:disabled) { background: var(--hover-strong); }
+.rcol-btn.primary { border-color: var(--ink); background: var(--ink); color: var(--bg); }
+.rcol-btn.primary:hover:not(:disabled) { background: var(--ink); opacity: .88; }
+.rcol-btn:disabled { opacity: .45; cursor: default; }
+.rcol-btn:focus-visible, .rcol-end:focus-visible, .rcol-note-x:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.rcol-verdict { margin: 0; padding: 9px 12px 10px; border-top: 1px solid var(--border); color: var(--text-muted); font: 400 11.5px/1.5 var(--font); text-wrap: pretty; }
+.rcol-verdict.leans { color: var(--ink-2); }
+/* Wide enough, the buttons sit at the row's right, level with the facts. */
+@container (min-width: 460px) {
+  .rcol-row { grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; align-items: center; }
+  .rcol-who, .rcol-facts, .rcol-flag { grid-column: 1; }
+  .rcol-acts { grid-column: 2; grid-row: 1 / span 2; padding-left: 0; }
+}
+.rcol-note { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--card); color: var(--ink-2); font: 400 12px/1.45 var(--font); }
+.rcol-note svg { flex: none; margin-top: 2px; color: var(--text-muted); }
+.rcol-note span { flex: 1 1 0; min-width: 0; }
+.rcol-note.bad { border-color: var(--border-strong); color: var(--ink); }
+.rcol .rcol-note { margin: 0; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; }
+.rcol-note-x { display: grid; place-items: center; flex: none; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--text-muted); cursor: pointer; }
+.rcol-note-x:hover { background: var(--hover-strong); color: var(--ink); }
+
+/* The Race control beside Send (RaceButton.tsx): a small icon button, and the list of tools it opens. */
+.race-trig { display: grid; place-items: center; flex: none; width: 28px; height: 30px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); cursor: pointer; transition: background-color var(--t-hover, 120ms) ease, color var(--t-hover, 120ms) ease; }
+.race-trig:hover:not(:disabled), .race-trig.on { background: var(--hover); color: var(--ink); }
+.race-trig:disabled { opacity: .4; cursor: default; }
+.race-trig:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.race-pop { position: fixed; z-index: 400; box-sizing: border-box; width: 300px; max-width: calc(100vw - 24px); padding: 12px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--card); color: var(--ink); box-shadow: var(--shadow-md, 0 8px 28px rgb(0 0 0 / .18)); }
+.race-pop h3 { margin: 0 0 2px; font: 600 13px/1.3 var(--font); }
+.race-pop p { margin: 0 0 10px; color: var(--text-muted); font: 400 12px/1.45 var(--font); text-wrap: pretty; }
+.race-pop-list { display: flex; flex-direction: column; gap: 2px; margin: 0 0 10px; padding: 0; list-style: none; }
+.race-opt { display: flex; align-items: center; gap: 9px; width: 100%; height: 34px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font: 500 12.5px/1 var(--font); text-align: left; cursor: pointer; transition: background-color var(--t-hover, 120ms) ease; }
+.race-opt:hover:not(:disabled) { background: var(--hover); }
+.race-opt:disabled { opacity: .45; cursor: default; }
+.race-opt:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
+.race-opt .name { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.race-opt .hint { flex: none; color: var(--text-muted); font-weight: 400; font-size: 11.5px; }
+.race-opt .box { display: grid; place-items: center; flex: none; width: 16px; height: 16px; border: 1px solid var(--border-strong); border-radius: 5px; color: var(--bg); }
+.race-opt[aria-checked="true"] .box { border-color: var(--ink); background: var(--ink); }
+.race-go { width: 100%; justify-content: center; }
+.race-pop .race-why { margin: 8px 0 0; font-size: 11.5px; }
+/* At the column's narrowest the box's pickers are already giving up room (agent-panel.css): with Race beside them the mode keeps its
+   name, and the tool's name is the one cut short. */
+.ide-agent .composer-bar:has(.race-trig) > .mode-pill { flex: none !important; max-width: none; }
+.ide-agent .composer-bar:has(.race-trig) > .mode-pill span { overflow: visible; }

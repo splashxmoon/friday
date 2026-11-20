@@ -1,0 +1,57 @@
+/* The stack-of-pull-requests card: quiet and flush, in Friday's own variables, both themes (StackCard.tsx). */
+.stk-card { margin: 10px 0; padding: 4px 14px 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); color: var(--ink); font: 400 13px/1.45 var(--font); }
+.stk-head { display: flex; align-items: center; gap: 8px; padding: 10px 0 4px; min-width: 0; }
+.stk-head b { font-weight: 600; font-size: 13.5px; white-space: nowrap; }
+.stk-mark { display: grid; place-items: center; color: var(--ink-2); }
+.stk-counts { color: var(--text-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stk-counts i { font-style: normal; margin-right: 6px; }
+.stk-lead { margin: 0 0 6px; padding: 0; color: var(--text-muted); font-size: 12.5px; }
+.stk-card.stk-card.stk-card :is(ol, ul, li, p) { list-style: none; margin: 0; padding-left: 0; }
+.stk-card.stk-card.stk-card li::marker { content: none; }
+.stk-card.stk-card.stk-card .stk-lead { margin-bottom: 6px; }
+.stk-parts { display: flex; flex-direction: column; }
+/* The rail the numbers sit on: each part is based on the one above it in the list. */
+.stk-part { position: relative; display: flex; align-items: flex-start; gap: 10px; padding: 7px 0 13px; min-width: 0; }
+.stk-part::before { content: ""; position: absolute; left: 9.5px; top: 31px; bottom: -3px; width: 1px; background: var(--border); }
+.stk-part:last-child::before { display: none; }
+.stk-n { position: relative; flex: none; display: grid; place-items: center; width: 20px; height: 20px; margin-top: 1px; border: 1px solid var(--border); border-radius: 50%; background: var(--card); color: var(--ink-2); font: 600 11px/1 var(--font); }
+.stk-body { flex: 1; min-width: 0; }
+.stk-title { color: var(--ink); font-weight: 500; font-size: 13.5px; overflow-wrap: anywhere; }
+.stk-why { margin-top: 1px; color: var(--text-muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.stk-files { display: inline-flex; align-items: center; gap: 3px; margin: 3px 0 0 -4px; padding: 0 4px; border: 0; border-radius: 4px; background: transparent; color: var(--ink-2); font: 500 12px/20px var(--font); cursor: pointer; }
+.stk-files:hover { background: var(--hover); color: var(--ink); }
+.stk-car { transition: transform 0.12s; }
+.stk-files[aria-expanded="true"] .stk-car { transform: rotate(90deg); }
+.stk-list { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; margin: 2px 0 2px; min-width: 0; max-width: 100%; }
+.stk-file { display: block; max-width: 100%; padding: 0 4px; margin-left: -4px; border: 0; border-radius: 4px; background: transparent; color: var(--ink-2); font: 400 12px/20px var(--mono, ui-monospace, monospace); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.stk-file:hover { background: var(--hover); color: var(--ink); }
+.stk-tools { flex: none; display: flex; align-items: center; gap: 1px; margin-top: -1px; }
+.stk-tool { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); cursor: pointer; }
+.stk-tool:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
+.stk-tool:disabled { opacity: 0.35; cursor: default; }
+.stk-note { margin: 8px 0 0; color: var(--text-muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.stk-note code { padding: 0 4px; border-radius: 5px; background: var(--hover); color: var(--ink-2); font: 400 11.5px/18px var(--mono, ui-monospace, monospace); }
+.stk-warn { color: var(--amber); }
+.stk-plan { padding-top: 8px; border-top: 1px solid var(--border); margin-top: 2px; }
+.stk-plan .stk-note:first-child { margin-top: 0; }
+.stk-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.stk-btn { height: 28px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--ink); font: 500 12.5px/1 var(--font); cursor: pointer; white-space: nowrap; }
+.stk-btn:hover:not(:disabled) { background: var(--hover); }
+.stk-btn:disabled { opacity: 0.45; cursor: default; }
+.stk-btn.on { background: var(--ink); border-color: var(--ink); color: var(--bg, #fff); }
+.stk-btn.on:hover:not(:disabled) { background: var(--ink); opacity: 0.88; }
+.stk-btn.plain { border-color: transparent; padding: 0 6px; color: var(--ink-2); }
+.stk-btn:focus-visible, .stk-files:focus-visible, .stk-file:focus-visible, .stk-tool:focus-visible, .stk-links a:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.stk-said { color: var(--text-muted); font-size: 12px; }
+.stk-bad { color: var(--red); }
+.stk-writing { margin: 8px 0; color: var(--text-muted); font-size: 12.5px; }
+/* What came of it: a row per part with its pull request. */
+.stk-made { margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--border); }
+.stk-made-head { display: flex; align-items: center; gap: 6px; color: var(--ink); font-weight: 500; }
+.stk-made-head svg { color: var(--green); }
+.stk-links { margin: 6px 0 0; }
+.stk-links li { display: flex; align-items: center; gap: 10px; padding: 2px 0; min-width: 0; }
+.stk-ln { flex: none; width: 20px; text-align: center; color: var(--text-muted); font: 600 11px/1 var(--font); }
+.stk-links a { display: inline-flex; align-items: baseline; gap: 8px; min-width: 0; color: var(--ink); font-weight: 500; text-decoration: underline; text-decoration-color: var(--border); text-underline-offset: 2px; }
+.stk-links a:hover { text-decoration-color: currentColor; }
+.stk-lb { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font: 400 11.5px/1.4 var(--mono, ui-monospace, monospace); }

@@ -68,7 +68,7 @@ export function tailLog(log: string, max = 6000): string {
 }
 
 /** What the agent is told: each failed check, its log where there is one, and what is being asked of it. */
-export function checksText(failures: CheckFailure[], prUrl: string): string {
+export function checksText(failures: CheckFailure[], prUrl: string, more: string[] = []): string {
   // A check's name is the workflow author's, and on a fork's pull request that is anyone: one line, no heading marks of its own.
   const one = (s: string) => s.replace(/\s+/g, " ").replace(/^#+\s*/, "").trim().slice(0, 80);
   const parts = failures.map((f) => {
@@ -76,6 +76,8 @@ export function checksText(failures: CheckFailure[], prUrl: string): string {
     // A log prints whatever the code under test printed, which on a fork's pull request is anyone's: fenced like a comment.
     return f.log ? `${head}\n${untrusted(`log of ${f.name}`, f.log)}` : `${head}\n(No log could be read for this one.)`;
   });
-  const n = failures.length;
-  return `[ci] ${n} check${n === 1 ? "" : "s"} failing on the pull request (${prUrl}):\n\n${parts.join("\n\n")}\n\nFind out why each one failed and fix the cause. If a failure isn't from this change, say so instead of working around it.\n\n${UNTRUSTED_NOTE}`;
+  // Failures the caller left out (too many to read the log of): said, so the count and the agent's picture are the true ones.
+  const n = failures.length + more.length;
+  const rest = more.length ? `\n\nAnd ${more.length} more failing, not read here: ${more.map(one).join(", ")}.` : "";
+  return `[ci] ${n} check${n === 1 ? "" : "s"} failing on the pull request (${prUrl}):\n\n${parts.join("\n\n")}${rest}\n\nFind out why each one failed and fix the cause. If a failure isn't from this change, say so instead of working around it.\n\n${UNTRUSTED_NOTE}`;
 }

@@ -4,7 +4,7 @@
  * GitHub Actions (.github/workflows/release.yml).
  */
 import { execFile } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, powerMonitor, session, shell, systemPreferences } from "electron";
@@ -18,9 +18,11 @@ import { registerScreen } from "../desktop-screen.js";
 import { registerTerminal, stopTerminals } from "../desktop-terminal.js";
 import { registerUpdates } from "../desktop-update.js";
 import { killTools } from "../runner/spawn-cli.js";
+import { setBrowserCaches, sizeOf } from "../runner/storage.js";
 import { watchBorrowed } from "./borrowed.js";
 import { isOwnUrl } from "./own-url.js";
 import { startLocal, type Started } from "./start.js";
+import { VSCODE_HELP, VSCODE_MENUS, type VsMenuItem } from "../vscode-menu.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // The page as built ahead (scripts/build-local-desktop.mts), so the app needs no bundler.
@@ -156,6 +158,29 @@ function open(url: string) {
     prefs.contextIsolation = true;
     delete prefs.preload;
   });
+  // Friday's own keys while focus is inside Code's VS Code (a frame of another origin that keeps its keys from the page): ⌘E is the
+  // Agents/Code switch and ⌘⌥B the agent column. before-input-event hears subframes too, so they are caught here and sent to the page
+  // as the keys Code's handlers already know. Only while a subframe has focus: on the page itself its own handlers run.
+  win.webContents.on("before-input-event", (e, input) => {
+    if (input.type !== "keyDown" || input.isAutoRepeat || input.shift) return;
+    const mac = process.platform === "darwin";
+    const mod = mac ? input.meta && !input.control : input.control && !input.meta;
+    if (!mod) return;
+    const key = input.key.toLowerCase();
+    const wantMode = key === "e" && !input.alt;
+    const wantAgent = input.alt && (input.code === "KeyB" || key === "b");
+    if (!wantMode && !wantAgent) return;
+    const wc = win?.webContents;
+    const focused = wc?.focusedFrame;
+    if (!wc || !focused || focused === wc.mainFrame) return;
+    e.preventDefault();
+    const code = wantMode ? "KeyE" : "KeyB";
+    void wc
+      .executeJavaScript(
+        `window.dispatchEvent(new KeyboardEvent("keydown",{code:${JSON.stringify(code)},key:${JSON.stringify(code === "KeyE" ? "e" : "b")},metaKey:${mac},ctrlKey:${!mac},altKey:${wantAgent},bubbles:true,cancelable:true}))`,
+      )
+      .catch(() => {});
+  });
   win.once("ready-to-show", () => win?.show());
   // Whether the window is in full screen, where macOS hides its buttons (preload.ts onFullScreen): the page guessed it from its
   // size, and a window that filled the screen or had just left full screen kept the guess, its back and forward buttons under
@@ -284,6 +309,32 @@ async function begin(): Promise<boolean> {
   return true;
 }
 
+/**
+ * The browser's caches, the app's own and the Preview's, kept small (Arun, 2026-11-19: "proper storage management so it doesnt pile
+ * up"): Chromium let them grow to 1.8 GB, the Preview's mostly, from the dev servers it shows. Held to CACHE_MB each from here,
+ * trimmed at the start when one is already over, and cleared from Settings › Storage (runner/storage.ts).
+ */
+const CACHE_MB = 256;
+app.commandLine.appendSwitch("disk-cache-size", String(CACHE_MB * 1024 * 1024));
+function keepCachesSmall(): void {
+  const data = app.getPath("userData");
+  const dirs = ["", path.join("Partitions", "preview")].flatMap((p) => [path.join(data, p, "Cache"), path.join(data, p, "Code Cache")]);
+  const jars = () => [session.defaultSession, session.fromPartition("persist:preview")];
+  const clear = async () => {
+    for (const s of jars()) {
+      await s.clearCache();
+      await s.clearCodeCaches({});
+    }
+  };
+  setBrowserCaches({ dirs, clear });
+  // Over twice the cap (what grew before it, or the compiled scripts' cache, which it doesn't hold): cleared, a minute on.
+  setTimeout(() => {
+    void sizeOf(dirs)
+      .then((b) => (b.reduce((a, x) => a + x, 0) > 2 * CACHE_MB * 1024 * 1024 ? clear() : undefined))
+      .catch(() => undefined);
+  }, 60_000).unref?.();
+}
+
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
   // Whether the window is in full screen, asked once by the page as it starts (preload.ts onFullScreen); open() says when it changes.
@@ -293,6 +344,23 @@ else {
     if (!win || !fromApp(e)) return null;
     const r = await dialog.showOpenDialog(win, { title: "Choose the folder your coding agent works in", properties: ["openDirectory", "createDirectory"] });
     return r.canceled ? null : (r.filePaths[0] ?? null);
+  });
+  // VS Code's own Open, Open File and Open Folder in Code (vscode-skin.ts nativePickers): the system's picker, as VS Code's desktop
+  // app has (Arun, 2026-11-19: "the VScode native open folder needs to open up finder, like we still need to have native controls").
+  ipcMain.handle("friday:pick-path", async (e, what: unknown) => {
+    if (!win || !fromApp(e)) return null;
+    const kind = what === "file" ? "file" : what === "folder" ? "folder" : "any";
+    const properties: ("openFile" | "openDirectory" | "createDirectory")[] = kind === "file" ? ["openFile"] : kind === "folder" ? ["openDirectory", "createDirectory"] : ["openFile", "openDirectory"];
+    const r = await dialog.showOpenDialog(win, { title: kind === "folder" ? "Open Folder" : "Open", properties });
+    const picked = r.canceled ? null : (r.filePaths[0] ?? null);
+    if (!picked) return null;
+    let dir = kind === "folder";
+    try {
+      dir = statSync(picked).isDirectory();
+    } catch {
+      // Gone already: said as what was asked for.
+    }
+    return { path: picked, dir };
   });
   // Real shells for the terminal panel (desktop-terminal.ts), as in the product app.
   registerTerminal(fromApp);
@@ -336,13 +404,51 @@ else {
     }
     setGlass(win, on === true, lastTheme());
   });
+  // The Mac menu bar: Friday's own, or VS Code's while Code is showing (preload.ts setCodeMenu; src/vscode-menu.ts). A VS Code item
+  // goes to the page (friday:vsc-menu), which has VS Code run it; its shortcut is shown, not taken, so keys work as they did.
+  const feedback = { label: "Send Feedback…", click: () => void shell.openExternal(feedbackUrl({ version: app.getVersion(), os: osName(process.platform), app: true })) };
+  const send = (item: { command?: string; friday?: string; path?: string }) => win && !win.isDestroyed() && win.webContents.send("friday:vsc-menu", item);
+  // Open Recent's folders: the ones Friday knows, sent by the page with the switch to Code.
+  let recentFolders: string[] = [];
+  const toPage = (i: VsMenuItem): Electron.MenuItemConstructorOptions[] => {
+    if ("sep" in i) return [{ type: "separator" }];
+    if ("role" in i) return [{ role: i.role }];
+    if ("recent" in i)
+      return recentFolders.length
+        ? recentFolders.slice(0, 10).map((p) => ({ label: p.replace(/^\/(Users|home)\/[^/]+/, "~"), click: () => send({ friday: "open-recent", path: p }) }))
+        : [{ label: "No recent folders", enabled: false }];
+    if ("submenu" in i) return [{ label: i.label, submenu: i.submenu.flatMap(toPage) }];
+    const item = "command" in i ? { command: i.command } : { friday: i.friday };
+    return [{ label: i.label, ...(i.key ? { accelerator: i.key, registerAccelerator: false } : {}), click: () => send(item) }];
+  };
+  let codeMenu: string | null = null;
+  const setMenus = (code: boolean, recent: string[] = []) => {
+    // Built again when Code's recent folders change too, so Open Recent is current.
+    const sig = code ? JSON.stringify(recent) : "";
+    if (process.platform !== "darwin" || codeMenu === sig) return;
+    codeMenu = sig;
+    recentFolders = recent;
+    const template: Electron.MenuItemConstructorOptions[] = code
+      ? [
+          { role: "appMenu" },
+          ...VSCODE_MENUS.map((m) => ({ label: m.label, submenu: m.items.flatMap(toPage) })),
+          { role: "windowMenu" },
+          { role: "help", submenu: [...VSCODE_HELP.flatMap(toPage), { type: "separator" }, feedback] },
+        ]
+      : [{ role: "appMenu" }, { role: "editMenu" }, { role: "viewMenu" }, { role: "windowMenu" }, { role: "help", submenu: [feedback] }];
+    Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  };
+  ipcMain.on("friday:code-menu", (e, on: unknown, recent: unknown) => {
+    if (!win || e.sender !== win.webContents) return;
+    setMenus(on === true, Array.isArray(recent) ? recent.filter((p): p is string => typeof p === "string" && p.length < 2000).slice(0, 10) : []);
+  });
   app.on("second-instance", () => friday && open(friday.url));
   app.whenReady().then(async () => {
     // Help › Send feedback: a GitHub issue started with this version and system (feedback.ts), in the person's own browser.
-    const help = { role: "help" as const, submenu: [{ label: "Send Feedback…", click: () => void shell.openExternal(feedbackUrl({ version: app.getVersion(), os: osName(process.platform), app: true })) }] };
-    if (process.platform === "darwin") Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: "appMenu" }, { role: "editMenu" }, { role: "viewMenu" }, { role: "windowMenu" }, help]));
+    setMenus(false);
     lockPreview();
     allowMicrophone();
+    keepCachesSmall();
     await loginPath;
     if (!(await begin()) || !friday) return;
     open(friday.url);
