@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { localServers } from "../src/client/Preview.js";
-import { listServers, parseLsof, parseNetstat, shortCommand, stopServer } from "../src/runner/ports.js";
+import { listServers, NETSTAT_ARGS, parseLsof, parseNetstat, parseWinProcesses, shortCommand, stopServer, winDescendants } from "../src/runner/ports.js";
 
 /** Dev servers found from the computer's open ports (runner/ports.ts), not only the ones Friday started. */
 
@@ -15,8 +15,23 @@ test("lsof and netstat rows: local listeners only, with their ports and processe
   assert.deepEqual(parseLsof(lsof).map((r) => [r.pid, r.name, r.port]), [[101, "node", 5173], [101, "node", 5174], [202, "postgres", 5432]], "one bound to another address isn't reachable on localhost");
   const netstat = ["  Proto  Local Address          Foreign Address        State           PID", "  TCP    0.0.0.0:3000           0.0.0.0:0              LISTENING       4120", "  TCP    127.0.0.1:9229         0.0.0.0:0              LISTENING       4121", "  TCP    10.0.0.2:139           0.0.0.0:0              LISTENING       4", "  TCP    127.0.0.1:3000         127.0.0.1:50000        ESTABLISHED     4120"].join("\r\n");
   assert.deepEqual(parseNetstat(netstat).map((r) => [r.pid, r.port]), [[4120, 3000], [4121, 9229]]);
+  // Node's listen(port) is listed only as IPv6 on Windows; and the state's word is in the system's language.
+  const both = ["  TCP    [::]:5173              [::]:0                 LISTENING       700", "  TCP    [::1]:5174             [::]:0                 ABHÖREN         701", "  TCP    [::1]:5174             [::1]:50001            HERGESTELLT     701", "  TCP    [fe80::1%5]:139        [::]:0                 LISTENING       4", "  UDP    0.0.0.0:500            *:*                                    800"].join("\r\n");
+  assert.deepEqual(parseNetstat(both).map((r) => [r.pid, r.port]), [[700, 5173], [701, 5174]]);
   assert.equal(shortCommand("/usr/local/bin/node /Users/ada/shop/node_modules/.bin/vite --port 5173"), "node …/node_modules/.bin/vite --port 5173");
   assert.equal(shortCommand('"C:\\Program Files\\nodejs\\node.exe" server.js'), "node server.js");
+});
+
+test("Windows: netstat is asked for IPv6 too, and a process tree is walked by parent ids without following a reused id", () => {
+  assert.ok(!NETSTAT_ARGS.includes("-p"), "-p TCP is IPv4 alone");
+  const table = parseWinProcesses(["10 1 1000", "11 10 1100", "12 11 1200", "13 12 1300", "14 10 900", "15 99 1250", "16 4 ", "garbage", "4 0 0"].join("\r\n"));
+  assert.deepEqual(table.find((r) => r.pid === 16), { pid: 16, ppid: 4, created: 0 });
+  assert.equal(table.length, 8);
+  // 14 names 10 as its parent but is older than it: its real parent had 10 before, and died.
+  assert.deepEqual([...winDescendants(table, 10)].sort((a, b) => a - b), [10, 11, 12, 13]);
+  // A root that has already ended still leads to what it started.
+  assert.deepEqual([...winDescendants(table.filter((r) => r.pid !== 10), 10)].sort((a, b) => a - b), [10, 11, 12, 13, 14]);
+  assert.deepEqual([...winDescendants(table, 77)], [77]);
 });
 
 test("a server Friday's list never had: found once it answers HTTP, as this project's when it runs in a folder inside it", { skip: process.platform === "win32" && "Windows has no working folder to read" }, async () => {

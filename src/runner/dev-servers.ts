@@ -8,7 +8,7 @@ import { childEnv } from "./adapters.js";
 import { killTree, NON_INTERACTIVE, shellLine } from "./background.js";
 import { folderVars } from "./environment.js";
 import { own } from "./owned.js";
-import { listServers, onStopServer, parseLsof, parseNetstat, stopServer, type LocalServer } from "./ports.js";
+import { listServers, NETSTAT_ARGS, onStopServer, parseLsof, parseNetstat, stopServer, winDescendants, winProcesses, type LocalServer } from "./ports.js";
 import { reachableAt, stripAnsi } from "./preview.js";
 
 /**
@@ -103,10 +103,7 @@ const run = (cmd: string, args: string[]) => new Promise<string>((resolve) => ex
  * null when the system can't say (no lsof or ps): the caller falls back to looking at the ports it has a guess for.
  */
 async function treeOf(pid: number): Promise<{ pids: Set<number>; ports: number[] } | null> {
-  if (process.platform === "win32") {
-    const rows = parseNetstat(await run("netstat", ["-ano", "-p", "TCP"]));
-    return { pids: new Set([pid]), ports: [...new Set(rows.filter((r) => r.pid === pid).map((r) => r.port))] };
-  }
+  if (process.platform === "win32") return winTreeOf(pid);
   const ps = await run("ps", ["-A", "-o", "pid=,ppid=,pgid="]);
   const procs = ps.split("\n").map((l) => l.trim().split(/\s+/).map(Number)).filter((c) => c.length === 3 && c.every(Number.isFinite));
   if (!procs.length) return null;
@@ -118,6 +115,52 @@ async function treeOf(pid: number): Promise<{ pids: Set<number>; ports: number[]
   }
   const open = parseLsof(await run("lsof", ["-nP", "-iTCP", "-sTCP:LISTEN", "-Fpcn"]));
   return { pids, ports: [...new Set(open.filter((r) => pids.has(r.pid)).map((r) => r.port))].sort((a, b) => a - b) };
+}
+
+/**
+ * Windows has no process groups: the server (npm's node under cmd under the shell) is found by walking parent ids down from the
+ * process Friday started, and its ports from netstat. The process table comes from PowerShell, which is slow to start, so it is
+ * asked again only when something listens that this server's last look didn't place (a worker listening on nothing asks once).
+ */
+const winSeen = new Map<number, { mine: Set<number>; others: Set<number> }>();
+async function winTreeOf(pid: number): Promise<{ pids: Set<number>; ports: number[] } | null> {
+  const open = parseNetstat(await run("netstat", NETSTAT_ARGS));
+  const listening = new Set(open.map((r) => r.pid));
+  const seen = winSeen.get(pid) ?? { mine: new Set([pid]), others: new Set<number>() };
+  // A process that stopped listening is forgotten, so an id given out again is looked at afresh.
+  for (const p of seen.others) if (!listening.has(p)) seen.others.delete(p);
+  if ([...listening].some((p) => !seen.mine.has(p) && !seen.others.has(p))) {
+    const table = await winProcesses();
+    if (!table) return null;
+    seen.mine = winDescendants(table, pid);
+    seen.others = new Set([...listening].filter((p) => !seen.mine.has(p)));
+  }
+  winSeen.set(pid, seen);
+  return { pids: seen.mine, ports: [...new Set(open.filter((r) => seen.mine.has(r.pid)).map((r) => r.port))].sort((a, b) => a - b) };
+}
+
+/**
+ * Windows, before a stop: what taskkill's walk from the process Friday started could miss. Its own walk, as above, and whatever
+ * still listens on the server's port that began after the server did: a Git Bash (a Procfile line) hands a command on to a new
+ * process and ends the old one, which leaves what runs under it with a parent nobody can follow.
+ */
+async function winStragglers(e: Entry, pid: number): Promise<number[]> {
+  const [table, open] = await Promise.all([winProcesses(), e.port ? run("netstat", NETSTAT_ARGS).then(parseNetstat) : []]);
+  const out = table ? winDescendants(table, pid) : new Set<number>();
+  const born = new Map((table ?? []).map((r) => [r.pid, r.created]));
+  const since = (e.startedAt ?? 0) - 5_000;
+  for (const r of open) if (r.port === e.port && since > 0 && (born.get(r.pid) ?? 0) >= since) out.add(r.pid);
+  out.delete(pid);
+  out.delete(process.pid);
+  return [...out];
+}
+
+/** How a server's command is run. An npm script on Windows goes through cmd, as npm runs scripts there itself: Git Bash hands
+ * each command to a new Windows process and lets the old one end, so neither taskkill's walk nor ours could find the server
+ * under it. A Procfile line is written for sh, so it keeps the shell any command gets (background.ts shellLine). */
+export function serverShell(def: Pick<ServerDef, "kind" | "command">, platform: NodeJS.Platform = process.platform): { bin: string; args: string[]; verbatim: boolean } {
+  if (platform === "win32" && def.kind === "script") return { bin: process.env.ComSpec || "cmd.exe", args: ["/d", "/s", "/c", `"${def.command}"`], verbatim: true };
+  return { ...shellLine(def.command), verbatim: false };
 }
 const exists = (p: string) => stat(p).then(() => true, () => false);
 const COMPOSE_FILES = ["compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"];
@@ -215,7 +258,7 @@ async function launch(e: Entry): Promise<void> {
   // Stopped while looking at the port: nothing was started and nothing should be.
   if (e.gen !== gen) return;
   say(e, `$ ${e.def.command}`);
-  const { bin, args } = shellLine(e.def.command);
+  const { bin, args, verbatim } = serverShell(e.def);
   const win = process.platform === "win32";
   const env: NodeJS.ProcessEnv = { ...childEnv(), ...folder };
   if (!folder.PORT) delete env.PORT;
@@ -226,6 +269,7 @@ async function launch(e: Entry): Promise<void> {
       cwd: e.root,
       env: { ...env, ...NON_INTERACTIVE, BROWSER: "none", NPM_CONFIG_UPDATE_NOTIFIER: "false", NO_COLOR: "1", FORCE_COLOR: "0" },
       windowsHide: true,
+      windowsVerbatimArguments: verbatim,
       detached: !win,
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -246,7 +290,7 @@ async function launch(e: Entry): Promise<void> {
       }
     };
     const off = own({ alive, signal: (sig) => killTree(child, sig) });
-    child.once("close", () => !alive() && off());
+    child.once("close", () => (winSeen.delete(pid), !alive() && off()));
   }
   const idle: { out?: ReturnType<typeof setTimeout>; err?: ReturnType<typeof setTimeout> } = {};
   const note = (stream: "out" | "err") => (d: string) => {
@@ -364,7 +408,11 @@ async function stopNow(root: string, id: string): Promise<ManagedInfo | null> {
   if (child && live(e)) {
     e.stoppedByUser = true;
     const gone = new Promise<void>((r) => child.once("close", () => r()));
-    killTree(child, "SIGTERM");
+    // Windows: taskkill /T from the process Friday started, and, outright, what that walk would not reach (winStragglers).
+    const stragglers = process.platform === "win32" && child.pid ? await winStragglers(e, child.pid) : [];
+    // Once it has exited, its id on Windows may already be another process's.
+    if (process.platform !== "win32" || child.exitCode === null) killTree(child, "SIGTERM");
+    await Promise.all(stragglers.map((p) => run("taskkill", ["/pid", String(p), "/T", "/F"])));
     const hard = setTimeout(() => {
       if (process.platform !== "win32" || child.exitCode === null) killTree(child, "SIGKILL");
       child.stdout?.destroy();

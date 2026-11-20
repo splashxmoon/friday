@@ -183,7 +183,7 @@ test("a crew mate's list_skills and use_skill have the person's own skills too, 
   assert.match(list.output, /The person's own, on this computer[^\n]*\nreview-pr: Reviewing a pull request against our standards\./);
   const used = await tools.call("s", "l", "use_skill", { name: "review", inputs: "PR #42" });
   assert.equal(used.isError, undefined);
-  assert.match(used.output, /The person's skill “review-pr”, from .*review-pr\/SKILL\.md/);
+  assert.match(used.output, /The person's skill “review-pr”, from .*review-pr[\\/]SKILL\.md/); // the file's own path: backslashes on Windows
   assert.match(used.output, /This time: PR #42/);
   assert.match(used.output, /1\. Read the linked issue\./);
   // Without the person's skills (the hosted service), as before.

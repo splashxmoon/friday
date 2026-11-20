@@ -7,7 +7,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { addRule, detectRule, editRule, parseRules, removeRule, rulesNote, setRuleOn } from "../src/repo-rules.js";
 import { commitAll, diffSince } from "../src/runner/git.js";
-import { readRules, repoOf, rulesNoteFor, rulesRoot, writeRules } from "../src/runner/repo-rules.js";
+import { mainFolderOf, readRules, repoOf, rulesNoteFor, rulesRoot, writeRules } from "../src/runner/repo-rules.js";
 
 const twin = createRequire(import.meta.url)("../src/vscode-ext/friday/rules.js");
 const view = createRequire(import.meta.url)("../src/vscode-ext/friday/rules-view.js");
@@ -141,8 +141,11 @@ test("the day is the person's own, not UTC's", () => {
 
 async function repo(): Promise<string> {
   const r = await realpath(await mkdtemp(path.join(tmpdir(), "friday-rules-repo-")));
-  const g = (...a: string[]) => execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...a], { cwd: r, stdio: "ignore" });
+  const g = (...a: string[]) => execFileSync("git", a, { cwd: r, stdio: "ignore" });
   g("init", "-q");
+  // CI machines have no global identity, and Friday's own Commit runs plain git: the repo carries one.
+  g("config", "user.email", "t@t");
+  g("config", "user.name", "t");
   await writeFile(path.join(r, "a.txt"), "hi\n");
   g("add", "-A");
   g("commit", "-qm", "init");
@@ -175,6 +178,17 @@ test("a .git file with a Windows gitdir resolves to the repository's folder", as
   assert.equal(repoOf(rel), main);
   await writeFile(path.join(fake, ".git"), "gitdir: C:\\Users\\a\\proj\\.git\\worktrees\\w\n");
   assert.equal(repoOf(fake), fake, "a main folder that isn't there leaves the folder itself");
+});
+
+test("a worktree's main folder is spelled as Windows spells it, though git writes the gitdir with forward slashes", () => {
+  const w = path.win32;
+  for (const of of [mainFolderOf, view.mainFolderOf as typeof mainFolderOf]) {
+    assert.equal(of("C:\\t\\copy", "gitdir: C:/Users/runneradmin/AppData/Local/Temp/rules-repo/.git/worktrees/lane\n", w), "C:\\Users\\runneradmin\\AppData\\Local\\Temp\\rules-repo");
+    assert.equal(of("C:\\t\\copy", "gitdir: C:\\repo\\.git\\worktrees\\lane\r\n", w), "C:\\repo");
+    assert.equal(of("C:\\t\\copy", "gitdir: ../../repo/.git/worktrees/lane\n", w), "C:\\repo");
+    assert.equal(of("/t/copy", "gitdir: /repo/.git/worktrees/lane\n", path.posix), "/repo");
+    assert.equal(of("/t/copy", "gitdir: /repo/.git\n", path.posix), "", "a submodule's .git file names no worktree");
+  }
 });
 
 test("the home folder is never where rules live, and a rule there doesn't reach the repos beneath", async () => {

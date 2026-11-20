@@ -190,7 +190,8 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, readFileSync } from "node:fs";
 import { ciCheckLog, ciFixText, ciOverview, forgetCi } from "../src/runner/ci-checks.js";
 
-test("the overview, a failed check's log and the words for the agent come from gh, by folder", async () => {
+// On Windows execFile("gh") runs only a gh.exe off the PATH, so the installed gh would answer instead of the stand-in.
+test("the overview, a failed check's log and the words for the agent come from gh, by folder", { skip: process.platform === "win32" && "a stand-in gh can't be put on PATH on Windows" }, async () => {
   const work = mkdtempSync(path.join(os.tmpdir(), "ci-gh-"));
   const bin = path.join(work, "bin");
   const fake = path.join(work, "gh");

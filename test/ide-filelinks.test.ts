@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { reviewArg } from "../src/runner/vscode.js";
+import { reviewArg, rootKey } from "../src/runner/vscode.js";
 
 test("a review request may name the IDE's own folder, with the base of the pull request and its tab's name", () => {
   const root = path.join(os.homedir(), "Documents", "widgets");
@@ -21,8 +21,14 @@ test("a review request may name the IDE's own folder, with the base of the pull 
 
 test("a review request names the IDE's own folder only as the bridge reads folders, and carries the branch it is for", () => {
   const root = path.join(os.homedir(), "Documents", "widgets");
-  // On a case-sensitive file system a folder that differs in case is another folder.
-  assert.equal(reviewArg({ dir: path.join(os.homedir(), "Documents", "Widgets"), base: "origin/main" }, root), undefined);
+  // A folder that differs in case is another folder where paths have no drive letter (macOS, Linux), and the same one on a
+  // drive or a share, where Windows ignores case: as rootKey, the name the bridge gives a folder, reads it.
+  const other = path.join(os.homedir(), "Documents", "Widgets");
+  if (process.platform === "win32") assert.deepEqual(reviewArg({ dir: other, base: "origin/main" }, root), { dir: other, base: "origin/main" });
+  else assert.equal(reviewArg({ dir: other, base: "origin/main" }, root), undefined);
+  assert.equal(rootKey("C:\\Users\\Me\\Documents\\Widgets\\"), rootKey("c:/users/me/documents/widgets"));
+  assert.equal(rootKey("\\\\server\\Share\\Widgets"), rootKey("\\\\SERVER\\share\\widgets"));
+  assert.notEqual(rootKey("/Users/me/Documents/Widgets"), rootKey("/Users/me/Documents/widgets"));
   // Branch names with # + @ are fine, a reflog spelling or a leading dash is not.
   assert.deepEqual(reviewArg({ dir: root, base: "origin/feat#12+x@y", head: "fix/a@b", strict: true }, root), { dir: root, base: "origin/feat#12+x@y", head: "fix/a@b", strict: true });
   assert.deepEqual(reviewArg({ dir: root, base: "origin/main", head: "@{-1}", strict: "yes" }, root), { dir: root, base: "origin/main" });

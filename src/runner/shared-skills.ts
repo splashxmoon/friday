@@ -124,7 +124,10 @@ export async function skillsNote(tool: EngineTool, cwd: string, home = homedir()
   }
   if (!found.length) return "";
   // By folder, each named once: a plugin's folder is a long path, and fifty of its skills repeated it fifty times.
-  const at = (f: string) => (f === cwd || f.startsWith(cwd + path.sep) ? `.${f.slice(cwd.length)}` : f.startsWith(home + path.sep) ? `~${f.slice(home.length)}` : f);
+  // Short forms with forward slashes on every system, as the note's own ~/.agents/skills and <folder>/<skill>/SKILL.md are:
+  // on Windows "~\.agents\skills" mixed both, and Git Bash (Claude Code's shell there) reads only ~/.agents/skills.
+  const tail = (rest: string) => rest.split(path.sep).join("/");
+  const at = (f: string) => (f === cwd || f.startsWith(cwd + path.sep) ? `.${tail(f.slice(cwd.length))}` : f.startsWith(home + path.sep) ? `~${tail(f.slice(home.length))}` : f);
   const shown = found.slice(0, MAX_SKILLS);
   const byDir = new Map<string, MachineSkill[]>();
   for (const s of shown) {

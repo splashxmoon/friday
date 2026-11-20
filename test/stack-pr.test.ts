@@ -7,6 +7,7 @@ import { after, before, test } from "node:test";
 import { make, preview, restack, status } from "../src/runner/stack-pr.js";
 
 const win = process.platform === "win32";
+const noFakeGh = win && "a stand-in gh can't be put on PATH on Windows";
 // Real git against a bare "origin" on disk, and a stand-in gh (e2e/fixtures/fake-gh.mjs) that remembers every call.
 // A folder name with a space in it: nothing in the runner may rely on paths without one.
 const sandbox = realpathSync(mkdtempSync(path.join(tmpdir(), "friday stack ")));
@@ -17,10 +18,9 @@ before(() => {
   mkdirSync(path.join(sandbox, "bin"), { recursive: true });
   mkdirSync(home, { recursive: true });
   const fake = path.resolve(import.meta.dirname, "..", "e2e", "fixtures", "fake-gh.mjs");
-  if (win) {
-    // Windows finds gh.cmd on the PATH: the same stand-in behind a batch file.
-    writeFileSync(path.join(sandbox, "bin", "gh.cmd"), `@echo off\r\n"${process.execPath}" "${fake}" %*\r\n`);
-  } else {
+  // Not on Windows: execFile("gh") there runs only a gh.exe (or gh.com) off the PATH, never a script or a gh.cmd, so the
+  // installed gh would answer instead. The tests that need the stand-in's pull requests are skipped there (noFakeGh).
+  if (!win) {
     const gh = path.join(sandbox, "bin", "gh");
     writeFileSync(gh, `#!/bin/sh\nexec "${process.execPath}" "${fake}" "$@"\n`);
     chmodSync(gh, 0o755);
@@ -65,7 +65,7 @@ function repo(name: string) {
 }
 const PLAN = { parts: [{ title: "Change a", why: "The base.", files: ["a.txt"] }, { title: "Change b, add d", why: "On top.", files: ["b.txt", "d.txt"] }, { title: "Drop c", why: "Last.", files: ["c.txt"] }] };
 
-test("making the stack builds each branch on the one below without touching the person's checkout, then pushes and opens the pull requests in order", async () => {
+test("making the stack builds each branch on the one below without touching the person's checkout, then pushes and opens the pull requests in order", { skip: noFakeGh }, async () => {
   const { origin, work } = repo("make");
   writeFileSync(ghState, JSON.stringify({ prs: [], calls: [] }));
   const before = { head: git(work, "rev-parse", "HEAD"), branch: git(work, "branch", "--show-current"), status: git(work, "status", "--porcelain") };
@@ -162,7 +162,7 @@ test("a push the remote refuses on the first branch leaves no branches behind", 
   assert.equal((await status({ root: work })).stacks.length, 0);
 });
 
-test("restack: a changed bottom moves every part above it, a conflict stops and hands over, a merged part drops out", async () => {
+test("restack: a changed bottom moves every part above it, a conflict stops and hands over, a merged part drops out", { skip: noFakeGh }, async () => {
   const { origin, work } = repo("restack");
   writeFileSync(ghState, JSON.stringify({ prs: [], calls: [] }));
   await make({ root: work, plan: PLAN });
@@ -353,7 +353,7 @@ test("a push that fails after the first part keeps the stack, and Restack finish
   assert.equal(gh().prs.length, 3);
 });
 
-test("a pull request that gh could not open once is opened by the next restack", async () => {
+test("a pull request that gh could not open once is opened by the next restack", { skip: noFakeGh }, async () => {
   const { work } = repo("late-pr");
   fresh();
   process.env.FAKE_GH_AUTH = "no";

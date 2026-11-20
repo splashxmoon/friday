@@ -68,12 +68,17 @@ export function parseLsof(out: string): Raw[] {
   return rows;
 }
 
-/** Windows: netstat's TCP table, the LISTENING rows, with the process id in the last column. */
+/**
+ * Windows: netstat's TCP table, the listening rows, with the process id in the last column. Asked for every protocol, not
+ * `-p TCP`, which is IPv4 alone: Node listening on no address in particular (`listen(3000)`) is listed only as "[::]:3000".
+ * A listening row is known by its foreign address ending in ":0" too, as the state's word is in the system's language.
+ */
+export const NETSTAT_ARGS = ["-ano"];
 export function parseNetstat(out: string): Raw[] {
   const rows: Raw[] = [];
   for (const line of out.split(/\r?\n/)) {
     const cols = line.trim().split(/\s+/);
-    if (cols[0] !== "TCP" || !/LISTEN/i.test(cols[3] ?? "")) continue;
+    if (cols[0] !== "TCP" || cols.length < 5 || !(/LISTEN/i.test(cols[3] ?? "") || /:0$/.test(cols[2] ?? ""))) continue;
     const local = cols[1] ?? "";
     const at = local.lastIndexOf(":");
     const port = Number(local.slice(at + 1));
@@ -82,6 +87,51 @@ export function parseNetstat(out: string): Raw[] {
     if (pid && port && LOCAL.test(host)) rows.push({ pid, name: "", host, port });
   }
   return rows;
+}
+
+/** Windows: one process, its parent and when it began (ms since 1970, as Date.now(); 0 when the system doesn't say). */
+export interface WinProc {
+  pid: number;
+  ppid: number;
+  created: number;
+}
+
+/** "pid ppid created" a line, as winProcesses asks PowerShell for them. */
+export function parseWinProcesses(out: string): WinProc[] {
+  const rows: WinProc[] = [];
+  for (const line of out.split(/\r?\n/)) {
+    const m = /^\s*(\d+)\s+(\d+)\s+(\d*)\s*$/.exec(line);
+    if (m) rows.push({ pid: Number(m[1]), ppid: Number(m[2]), created: Number(m[3]) || 0 });
+  }
+  return rows;
+}
+
+/**
+ * Every process started under `root`, `root` included, by the parent each was started from. Windows keeps a dead parent's
+ * id on its children and gives ids out again, so a process older than the one its parent id now names is not its child.
+ */
+export function winDescendants(rows: WinProc[], root: number): Set<number> {
+  const born = new Map(rows.map((r) => [r.pid, r.created]));
+  const kids = new Map<number, WinProc[]>();
+  for (const r of rows) if (r.pid !== r.ppid) kids.set(r.ppid, [...(kids.get(r.ppid) ?? []), r]);
+  const out = new Set<number>([root]);
+  for (const queue = [root]; queue.length; ) {
+    const p = queue.pop()!;
+    const since = born.get(p) ?? 0;
+    for (const k of kids.get(p) ?? []) {
+      if (out.has(k.pid) || (since && k.created && k.created < since)) continue;
+      out.add(k.pid);
+      queue.push(k.pid);
+    }
+  }
+  return out;
+}
+
+/** Windows' process table, each with its parent and start, or null when PowerShell can't say. */
+export async function winProcesses(): Promise<WinProc[] | null> {
+  const ps = "Get-CimInstance Win32_Process | ForEach-Object { $t = 0; if ($_.CreationDate) { $t = [DateTimeOffset]::new($_.CreationDate).ToUnixTimeMilliseconds() }; '{0} {1} {2}' -f $_.ProcessId, $_.ParentProcessId, $t }";
+  const rows = parseWinProcesses(await run("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", ps], 10_000));
+  return rows.length ? rows : null;
 }
 
 /** A shorter command line for a list: the program's name rather than its whole path, and no more than a line. */
@@ -191,7 +241,7 @@ export function listServers(folder: string): Promise<LocalServer[]> {
 
 async function scan(folder: string): Promise<LocalServer[]> {
   const win = process.platform === "win32";
-  const raw = win ? parseNetstat(await run("netstat", ["-ano", "-p", "TCP"])) : parseLsof(await run("lsof", ["-nP", "-iTCP", "-sTCP:LISTEN", "-Fpcn"]));
+  const raw = win ? parseNetstat(await run("netstat", NETSTAT_ARGS)) : parseLsof(await run("lsof", ["-nP", "-iTCP", "-sTCP:LISTEN", "-Fpcn"]));
   // Friday's own ports (this runner's local API, its live views) aren't the person's servers.
   const rows = raw.filter((r) => r.pid !== process.pid);
   const byPort = new Map<number, Raw>();

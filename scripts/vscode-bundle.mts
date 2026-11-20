@@ -85,7 +85,10 @@ async function bundle(target: string) {
   if (existsSync(path.join(built, "node_modules"))) await rename(path.join(built, "node_modules"), path.join(built, "out", "node_modules"));
   const bin = path.join(built, "bin", process.platform === "win32" && target.startsWith("win") ? "code-server.cmd" : "code-server");
   if (target === `${process.platform === "darwin" ? "mac" : process.platform === "win32" ? "win" : "linux"}-${process.arch}`) {
-    execFileSync(bin, ["--version"], { stdio: "pipe", timeout: 60_000 });
+    // A .cmd runs only through the shell on Windows: Node refuses to spawn it directly (EINVAL), which failed v0.4.0's Windows build.
+    // As the runner starts it (src/runner/vscode.ts).
+    if (bin.endsWith(".cmd")) execFileSync(`"${bin}"`, ["--version"], { stdio: "pipe", timeout: 60_000, shell: true });
+    else execFileSync(bin, ["--version"], { stdio: "pipe", timeout: 60_000 });
   }
   await writeFile(path.join(built, ".friday-bundle"), `${want}\n`);
   await rm(dest, { recursive: true, force: true });

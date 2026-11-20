@@ -1782,7 +1782,7 @@ export async function gh(cwd: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile("gh", args, { cwd, timeout: 30_000, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, ...auth, GH_PROMPT_DISABLED: "1" }, windowsHide: true }, (err, stdout, stderr) => {
       // The stdout rides along with the error: `gh pr checks` exits non-zero to say a check failed, with the JSON still there.
-      if (err) reject(Object.assign(new Error(String(stderr).trim().split("\n").slice(-2).join(" ") || err.message), { stdout: String(stdout) }));
+      if (err) reject(Object.assign(new Error(String(stderr).trim().split(/\r?\n/).slice(-2).join(" ") || err.message), { stdout: String(stdout) }));
       else resolve(stdout);
     });
   });

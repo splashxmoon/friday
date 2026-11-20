@@ -13,6 +13,11 @@ const dir = path.resolve(import.meta.dirname, "..", "src", "vscode-ext", "friday
 const parse = require(path.join(dir, "todo-parse.js"));
 const todos = require(path.join(dir, "todos.js"));
 const pkg = require(path.join(dir, "package.json"));
+/**
+ * A test folder removed, waiting out a git the view started (an author being read) that still has it as its working folder: Windows
+ * won't remove a folder a running program is in (EBUSY). The view never removes folders, so this is only the test's own cleanup.
+ */
+const rmTmp = (p: string) => rmSync(p, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
 
 const scan = (text: string, file: string) => parse.scanText(text, file).map((h: { line: number; tag: string; who: string; text: string }) => `${h.line} ${h.tag}${h.who ? `(${h.who})` : ""} ${h.text}`);
 
@@ -120,7 +125,7 @@ test("a folder: git's list (ignored files left out), files.exclude, per file hit
       writeFileSync(path.join(plain, "m.js"), "// TODO: mine\n");
       assert.deepEqual((await parse.scanFolder(plain)).map((f: { rel: string }) => f.rel), ["m.js"]);
     } finally {
-      rmSync(plain, { recursive: true, force: true });
+      rmTmp(plain);
     }
     // The caps.
     const many = Array.from({ length: 30 }, (_, i) => `// TODO: n${i}`).join("\n");
@@ -129,7 +134,7 @@ test("a folder: git's list (ignored files left out), files.exclude, per file hit
     assert.ok(capped.reduce((n: number, f: { hits: unknown[] }) => n + f.hits.length, 0) <= 10 + 4, "stops reading once it has enough");
     assert.ok(parse.ago(Date.now() - 3 * 86400_000) === "3 days ago" && parse.ago(Date.now() - 86400_000) === "1 day ago" && parse.ago(Date.now()) === "just now");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmTmp(root);
   }
 });
 
@@ -207,7 +212,7 @@ test("the extension's wiring: the commands the package declares, the lens, the a
     assert.ok(pkg.contributes.views.friday.some((v: { id: string }) => v.id === "friday.todos"));
     assert.ok(pkg.contributes.viewsWelcome.some((v: { view: string }) => v.view === "friday.todos"));
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmTmp(root);
   }
 });
 
@@ -237,7 +242,7 @@ test("caps are reported, and code is read before prose", async () => {
     assert.deepEqual(all.capped, { files: false, hits: false });
     assert.equal((await parse.scanFolder(root, { maxHits: 1 })).capped.hits, true);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmTmp(root);
   }
 });
 
@@ -323,7 +328,7 @@ test("the view follows the disk: no badge, an agent's edit takes the row away, a
     assert.deepEqual(state.provider!.getChildren().map((n) => n.file?.rel).filter(Boolean), ["b.ts"], "only the new, wanted file");
     assert.equal(api.state().length, 1);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmTmp(root);
   }
 });
 
@@ -349,7 +354,7 @@ test("a save keeps the authors; the view says when the first look is not done, a
     assert.deepEqual(api.capped(), { files: false, hits: false });
     assert.equal(state.provider!.getChildren().some((n) => n.note), false);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmTmp(root);
   }
 });
 

@@ -15,9 +15,7 @@ export function repoOf(cwd: string): string | null {
     if (!existsSync(git)) continue;
     try {
       if (statSync(git).isFile()) {
-        const g = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(git, "utf8"))?.[1];
-        const abs = g && /^(?:[a-zA-Z]:[\\/]|[\\/])/.test(g) ? g : g ? path.resolve(d, g) : "";
-        const main = /^(.*?)[\\/]\.git[\\/]worktrees[\\/]/.exec(abs)?.[1];
+        const main = mainFolderOf(d, readFileSync(git, "utf8"));
         if (main && existsSync(main)) return main;
       }
     } catch {
@@ -26,6 +24,17 @@ export function repoOf(cwd: string): string | null {
     return d;
   }
   return null;
+}
+
+/**
+ * The main folder a worktree's .git file names (its text given), or "" when it names none. Spelled as this system spells paths:
+ * git on Windows writes "gitdir: C:/repo/.git/worktrees/name" with forward slashes, and the folder is "C:\\repo" everywhere else.
+ */
+export function mainFolderOf(dir: string, gitFile: string, pm: typeof path = path): string {
+  const g = /^gitdir:\s*(.+?)\s*$/m.exec(gitFile)?.[1];
+  const abs = g && /^(?:[a-zA-Z]:[\\/]|[\\/])/.test(g) ? g : g ? pm.resolve(dir, g) : "";
+  const main = /^(.*?)[\\/]\.git[\\/]worktrees[\\/]/.exec(abs)?.[1];
+  return main ? pm.normalize(main) : "";
 }
 
 /**

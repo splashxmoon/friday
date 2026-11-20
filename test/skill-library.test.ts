@@ -151,7 +151,8 @@ test("a skill from GitHub comes in whole: its SKILL.md as written, its scripts a
   assert.deepEqual(w.added.map((a) => a.folder), ["tdd", "bad"]);
   const lib = path.join(h, ".agents", "skills");
   assert.equal(await readFile(path.join(lib, "tdd", "scripts", "run.py"), "utf8"), "print(1)");
-  assert.deepEqual(await readdir(path.join(lib, "bad")), ["SKILL.md", "ok"], "nothing written outside the skill's folder");
+  // Sorted here: Windows lists a folder without regard to case ("ok" before "SKILL.md"), macOS and Linux by code point.
+  assert.deepEqual((await readdir(path.join(lib, "bad"))).sort(), ["SKILL.md", "ok"], "nothing written outside the skill's folder");
   assert.equal(await exists(path.join(h, "escape.txt")), false);
   // Brought again: the one already there is left as it is.
   const again = await writeFolders(r.folders, h);

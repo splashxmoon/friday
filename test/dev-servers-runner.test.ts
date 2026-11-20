@@ -4,7 +4,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { serversOp } from "../src/runner/dev-servers.js";
+import { serverShell, serversOp } from "../src/runner/dev-servers.js";
 import { listManaged, readManagedLog, restartManaged, reusableServer, startManaged, stopAllManaged, stopManaged } from "../src/runner/dev-servers.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -73,6 +73,17 @@ test("a server that crashes is started again and the log says so; stopping ends 
     assert.equal((await find(dir, "script:start")).phase, "stopped", "nothing restarts after a stop");
   } finally {
     stopAllManaged();
+  }
+});
+
+test("on Windows an npm script runs through cmd, as npm runs scripts there; elsewhere, and a Procfile line, through the usual shell", () => {
+  const win = serverShell({ kind: "script", command: "npm run dev" }, "win32");
+  assert.match(win.bin, /cmd(\.exe)?$/i);
+  assert.deepEqual(win.args, ["/d", "/s", "/c", '"npm run dev"']);
+  assert.equal(win.verbatim, true);
+  if (process.platform !== "win32") {
+    assert.deepEqual(serverShell({ kind: "script", command: "npm run dev" }, "darwin"), { bin: "/bin/sh", args: ["-c", "npm run dev"], verbatim: false });
+    assert.deepEqual(serverShell({ kind: "procfile", command: "bundle exec puma" }), { bin: "/bin/sh", args: ["-c", "bundle exec puma"], verbatim: false });
   }
 });
 

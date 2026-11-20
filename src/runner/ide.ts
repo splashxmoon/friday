@@ -49,9 +49,17 @@ const TRASH_KEEP_MS = 30 * 24 * 3600 * 1000;
 
 const toPosix = (p: string) => (path.sep === "/" ? p : p.split(path.sep).join("/"));
 
-function isInside(root: string, p: string): boolean {
-  const rel = path.relative(root, p);
-  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+function isInside(root: string, p: string, pm: typeof path = path): boolean {
+  const rel = pm.relative(root, p);
+  return rel === "" || (!rel.startsWith("..") && !pm.isAbsolute(rel));
+}
+
+/**
+ * Whether moving `from` to `to` puts a folder inside itself: only a place below it counts. Windows' path.relative ignores letter
+ * case, so a case-only rename (other.txt to Other.txt) is the same place there, and that is a rename, not a move into itself.
+ */
+export function movesIntoItself(from: string, to: string, pm: typeof path = path): boolean {
+  return pm.relative(from, to) !== "" && isInside(from, to, pm);
 }
 
 /** The folder's real path, or an error when it is not an absolute, existing folder. The real path (symlinks resolved) is what every later check compares against. */

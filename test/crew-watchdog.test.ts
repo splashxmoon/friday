@@ -9,13 +9,26 @@ import { createApp } from "../src/app.js";
 import { localKV } from "../src/local/kv.js";
 import { NO_MODELS } from "../src/local/no-models.js";
 
+/**
+ * One hook, in order: the app and its store closed first, then the folder removed. Two hooks ran the removal first (node:test
+ * runs after hooks in the order they're added), while the app still wrote into the folder: ENOTEMPTY on CI, and the app left
+ * open kept the file running until its 10-minute timeout.
+ */
+async function closeThenRemove(app: { close: () => Promise<unknown> }, kv: { close: () => Promise<unknown> }, home: string) {
+  try {
+    await app.close();
+    await kv.close();
+  } finally {
+    await rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+}
+
 /** A crew mate quiet mid-turn is said in its chat once a quiet spell, and asked once how it stands (app.ts watchQuiet). */
 test("the watchdog: a crew mate quiet mid-turn is said once and nudged once; one waiting on a command it ran is said, not nudged", async (t) => {
   const home = await mkdtemp(path.join(tmpdir(), "friday-quiet-"));
-  t.after(() => rm(home, { recursive: true, force: true }));
   const kv = await localKV(home);
   const app = await createApp({ port: 0, redisUrl: "", prefix: "friday:", secret: "s", driverGraceMs: 15_000, llm: NO_MODELS, dataDir: path.join(home, "uploads"), local: { redis: kv.redis, sub: kv.sub, user: { id: "local", name: "Me" } }, teammatesHome: home });
-  t.after(async () => (await app.close(), await kv.close()));
+  t.after(() => closeThenRemove(app, kv, home));
   const call = async (p: string, method = "GET", json?: unknown) => (await fetch(`${app.url}${p}`, { method, headers: { "Content-Type": "application/json", "x-friday-local": "1" }, ...(json === undefined ? {} : { body: JSON.stringify(json) }) })).json() as Promise<any>;
   await call("/api/teammates", "POST", { name: "Sage", tool: "claude", folder: path.join(home, "Sage") });
   await call("/api/teammates", "POST", { name: "Ivy", tool: "claude", folder: path.join(home, "Ivy") });
@@ -49,10 +62,9 @@ test("the watchdog: a crew mate quiet mid-turn is said once and nudged once; one
 
 test("trust that grows: a go-ahead of a kind its crew mate is trusted with is said yes to, with a receipt; another kind still waits", async (t) => {
   const home = await mkdtemp(path.join(tmpdir(), "friday-trust-"));
-  t.after(() => rm(home, { recursive: true, force: true }));
   const kv = await localKV(home);
   const app = await createApp({ port: 0, redisUrl: "", prefix: "friday:", secret: "s", driverGraceMs: 15_000, llm: NO_MODELS, dataDir: path.join(home, "uploads"), local: { redis: kv.redis, sub: kv.sub, user: { id: "local", name: "Me" } }, teammatesHome: home });
-  t.after(async () => (await app.close(), await kv.close()));
+  t.after(() => closeThenRemove(app, kv, home));
   const call = async (p: string, method = "GET", json?: unknown) => (await fetch(`${app.url}${p}`, { method, headers: { "Content-Type": "application/json", "x-friday-local": "1" }, ...(json === undefined ? {} : { body: JSON.stringify(json) }) })).json() as Promise<any>;
   await call("/api/teammates", "POST", { name: "Kit", tool: "claude", folder: path.join(home, "Kit") });
   const team = await call("/api/teammates");

@@ -19,11 +19,8 @@ function repoOf(start) {
     if (!fs.existsSync(git)) continue;
     try {
       if (fs.statSync(git).isFile()) {
-        const m = /^gitdir:\s*(.+?)\s*$/m.exec(fs.readFileSync(git, "utf8"));
-        const g = m && m[1];
-        const abs = g && /^(?:[a-zA-Z]:[\\/]|[\\/])/.test(g) ? g : g ? path.resolve(d, g) : "";
-        const main = /^(.*?)[\\/]\.git[\\/]worktrees[\\/]/.exec(abs);
-        if (main && fs.existsSync(main[1])) return main[1];
+        const main = mainFolderOf(d, fs.readFileSync(git, "utf8"));
+        if (main && fs.existsSync(main)) return main;
       }
     } catch {
       // A .git it can't read: the folder is the repo.
@@ -31,6 +28,15 @@ function repoOf(start) {
     return d;
   }
   return null;
+}
+
+/** The main folder a worktree's .git file names, spelled as this system spells paths (git on Windows writes "C:/repo/..."); "" for none. */
+function mainFolderOf(dir, gitFile, pm = path) {
+  const m = /^gitdir:\s*(.+?)\s*$/m.exec(gitFile);
+  const g = m && m[1];
+  const abs = g && /^(?:[a-zA-Z]:[\\/]|[\\/])/.test(g) ? g : g ? pm.resolve(dir, g) : "";
+  const main = /^(.*?)[\\/]\.git[\\/]worktrees[\\/]/.exec(abs);
+  return main ? pm.normalize(main[1]) : "";
 }
 
 /**
@@ -198,4 +204,4 @@ function register(context, vscode) {
   return { refresh, file };
 }
 
-module.exports = { register, rulesRoot, repoOf, detail, full, when, toolsLabel };
+module.exports = { register, rulesRoot, repoOf, mainFolderOf, detail, full, when, toolsLabel };

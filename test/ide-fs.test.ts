@@ -4,7 +4,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import test from "node:test";
-import { IDE_FS } from "../src/runner/ide.js";
+import { IDE_FS, movesIntoItself } from "../src/runner/ide.js";
 
 /** Code's files and search (src/runner/ide.ts): folder escapes, line endings, conflicts, the trash, git marks, search with and without ripgrep, replace. */
 const H = IDE_FS as Required<typeof IDE_FS>;
@@ -232,6 +232,20 @@ test("create and rename", async () => {
   await rejects(H.rename({ root, from: "x", to: "x/y/inside" }), /itself/);
   await H.rename({ root, from: "other.txt", to: "Other.txt" });
   assert.ok(fs.readdirSync(root).includes("Other.txt"));
+});
+
+test("a case-only rename is not a move into itself, on Windows paths too", () => {
+  const w = path.win32;
+  // Windows' path.relative ignores case: other.txt and Other.txt are the same place there, which is a rename.
+  assert.equal(movesIntoItself("C:\\Users\\RUNNER~1\\Temp\\r\\other.txt", "C:\\Users\\RUNNER~1\\Temp\\r\\Other.txt", w), false);
+  assert.equal(movesIntoItself("C:\\r\\x", "C:\\r\\x", w), false);
+  assert.equal(movesIntoItself("C:\\r\\x", "C:\\r\\x\\y\\inside", w), true);
+  assert.equal(movesIntoItself("C:\\r\\X", "c:\\r\\x\\inside", w), true, "below it in any letter case");
+  assert.equal(movesIntoItself("C:\\r\\x", "C:\\r\\xy", w), false, "a sibling that starts the same");
+  const p = path.posix;
+  assert.equal(movesIntoItself("/r/other.txt", "/r/Other.txt", p), false);
+  assert.equal(movesIntoItself("/r/x", "/r/x/y/inside", p), true);
+  assert.equal(movesIntoItself("/r/x", "/r/xy", p), false);
 });
 
 test("delete moves to the trash folder and keeps the content", async () => {
