@@ -150,8 +150,8 @@ export const SECTIONS: SectionDef[] = [
     blurb: "The GitHub login your agents clone, push and open pull requests with.",
     keywords: "github git login sign in pull request pr repos clone push token gh",
   },
-  // Slack and Linear on your own computer (SettingsChannels.tsx, spec 08): kept out of the open-source edition (Arun, 2026-11-20:
-  // "remove the linear and slack integration too").
+  // Slack and Linear on your own computer (SettingsChannels.tsx, specs 08 and 11): in Arun's own build only, out of the open-source
+  // edition (Arun, 2026-11-20: "remove the linear and slack integration too"; 2026-11-24: "no open source build yet").
 
   // ── Workspace: the team, and what it pays ──
 

@@ -22,6 +22,7 @@ import { setBrowserCaches, sizeOf } from "../runner/storage.js";
 import { watchBorrowed } from "./borrowed.js";
 import { isOwnUrl } from "./own-url.js";
 import { startLocal, type Started } from "./start.js";
+import { setWindowOpener } from "./window-opener.js";
 import { capturePreview, recordClip } from "../desktop-capture.js";
 import { useInProcessCapture } from "../runner/screenshot.js";
 import { VSCODE_HELP, VSCODE_MENUS, type VsMenuItem } from "../vscode-menu.js";
@@ -387,6 +388,17 @@ else {
       return win && !win.isDestroyed() ? win : null;
     },
     trusted: fromApp,
+  });
+  // A thread asked for from outside the window (window-opener.ts: Slack's Open in Friday): the window comes forward on it.
+  setWindowOpener((sid) => {
+    if (!friday) return false;
+    open(friday.url);
+    if (!win || win.isDestroyed()) return false;
+    const main = win;
+    const go = () => void main.webContents.executeJavaScript(`dispatchEvent(new CustomEvent("friday:open-session", { detail: ${JSON.stringify({ sid: sid.slice(0, 80) })} }))`).catch(() => {});
+    if (main.webContents.isLoading()) main.webContents.once("did-finish-load", go);
+    else go();
+    return true;
   });
   // The page's light or dark choice (preload.ts setTheme): the window buttons and background follow it where the OS draws them.
   ipcMain.on("friday:theme", (e, theme: unknown, choice: unknown) => {
