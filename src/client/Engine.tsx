@@ -21,6 +21,9 @@ import { AlsoWorksIn, WorkspacePill, type Picked } from "./Workspace.js";
 import { BranchButton } from "./Branches.js";
 import { ShipFlow } from "./ShipFlow.js";
 import { isLocal } from "./edition.js";
+import { isOwnModel } from "../own-model-id.js";
+import { mayAddModelLane, modelLaneName, OwnHostMark } from "./model-lane-add.js";
+import { useOwnModels } from "./ownModelStore.js";
 
 /**
  * Bring your own coding agent: the session's view of lanes that run on
@@ -80,6 +83,18 @@ export function ConnectDialog({
   const [mode, setMode] = useState<EngineMode>(existing?.handMode ?? existing?.mode ?? "full");
   const [moreTools, setMoreTools] = useState(false);
   const [model, setModel] = useState(existing?.model ?? "");
+  /**
+   * One of your own models (Settings › Models), picked as the agent: Friday's agent on that model, working in the folder, as Add an
+   * agent's "Your models" rows have it (model-lane-add.tsx). The message box offered these, this dialog didn't (splashxmoon/friday#32).
+   * Only the session owner's, as the runtime runs no one else's; "" when a coding tool (or Friday Code) is the agent.
+   */
+  const ownModels = useOwnModels(identity);
+  const mayOwn = mayAddModelLane(state, me, me.role === "owner" || can(state, me.id, "control")) && ownModels.length > 0;
+  const ownWas = existing && !existing.tool ? (isOwnModel(existing.model) ? existing.model : lane === MAIN_LANE && isOwnModel(state.options.model) ? state.options.model : "") : "";
+  const [ownModel, setOwnModel] = useState<string>(initialTool === undefined || initialTool === "" ? (ownWas ?? "") : "");
+  const ownPicked = mayOwn && ownModel ? (ownModels.find((m) => m.choice === ownModel) ?? null) : null;
+  const pickTool = (t: EngineTool | "") => (setTool(t), setOwnModel(""));
+  const pickOwn = (choice: string) => (setTool(""), setOwnModel(choice));
   // Which of the tool's accounts on the computer: the one it was on, else "" for the one new sessions use (Accounts.tsx
   // preferredAccount, the tool's own sign-in until another is picked).
   const [account, setAccount] = useState(existing?.account?.id ?? "");
@@ -207,7 +222,7 @@ export function ConnectDialog({
     }
   };
 
-  const target = where === "new" ? { newLane: tool ? ENGINE_NAMES[tool] : "Your folder" } : { lane: where };
+  const target = where === "new" ? { newLane: tool ? ENGINE_NAMES[tool] : ownPicked ? modelLaneName(ownPicked) : "Your folder" } : { lane: where };
   const found = hasMachine && tool ? (machine.tools.find((t) => t.tool === tool) ?? null) : null;
   // Nothing to install, nothing to log into: a folder is ready the moment a
   // machine is connected.
@@ -226,7 +241,8 @@ export function ConnectDialog({
           ...(tool ? { tool } : {}),
           // A folder somebody else is editing is joined as a reader, rather than refused: one writer per folder.
           mode: clash ? "plan" : mode,
-          ...(model.trim() ? { model: model.trim() } : {}),
+          // An own model is the lane's model; a coding tool's is that tool's.
+          ...(ownPicked ? { model: ownPicked.choice } : tool && model.trim() ? { model: model.trim() } : {}),
           ...((ac) => (tool && ac !== "default" && found?.accounts?.some((a) => a.id === ac) ? { account: ac } : {}))(account || (tool && found ? preferredAccount(tool, found.accounts) : "default")),
           ...(folder ? { cwd: folder.path } : { noFolder: true }),
           ...(folder && tool && dirs ? { dirs } : {}),
@@ -241,6 +257,9 @@ export function ConnectDialog({
         }),
       });
       if (folder) saveRecentFolder(folder.path);
+      // The main agent runs on the session's model (state.options.model), not on what its runner was started with: set it too, as the
+      // message box's picker does, or the lane would go on with whatever model the session had (#32).
+      if (ownPicked && where === MAIN_LANE && state.options.model !== ownPicked.choice) send({ type: "settings.update", model: ownPicked.choice });
       onClose();
     } catch (e) {
       setErr((e as Error).message);
@@ -342,26 +361,33 @@ export function ConnectDialog({
               {row(
                 "agent",
                 "Agent",
-                <>
-                  <EngineMark tool={tool} size={15} />
-                  {tool ? ENGINE_NAMES[tool] : "Friday Code"}
-                  {accountLabel && <span className="cd-dim">{accountLabel}</span>}
-                </>,
+                ownPicked ? (
+                  <>
+                    <Icon name="key" size={14} />
+                    <span className="cd-v-text" title={`${ownPicked.model} · ${ownPicked.local ? "on this computer" : "your key"}`}>{modelLaneName(ownPicked)}</span>
+                  </>
+                ) : (
+                  <>
+                    <EngineMark tool={tool} size={15} />
+                    {tool ? ENGINE_NAMES[tool] : "Friday Code"}
+                    {accountLabel && <span className="cd-dim">{accountLabel}</span>}
+                  </>
+                ),
                 <>
                   <div className="cd-opts" role="radiogroup" aria-label="Coding agent">
                     {/* Not in the open-source edition, which has no agent of its own (2026-11-04 QA). */}
                     {!isLocal() && (
-                      <button type="button" role="radio" aria-checked={tool === ""} className="cd-opt" onClick={() => (setTool(""), setOpen(""))}>
+                      <button type="button" role="radio" aria-checked={tool === "" && !ownPicked} className="cd-opt" onClick={() => (pickTool(""), setOpen(""))}>
                         <EngineMark tool="" size={16} />
                         <span className="cd-opt-name">Friday Code</span>
-                        {tool === "" && tick}
+                        {tool === "" && !ownPicked && tick}
                       </button>
                     )}
                     {[...tools.here, ...(moreTools ? tools.away : [])].map((t) => {
                       const st = stateOf(t);
                       const ok = st.tone === "ok";
                       return (
-                        <button key={t} type="button" role="radio" aria-checked={tool === t} className="cd-opt" data-off={!ok || undefined} onClick={() => (setTool(t), ok && setOpen(""))}>
+                        <button key={t} type="button" role="radio" aria-checked={tool === t} className="cd-opt" data-off={!ok || undefined} onClick={() => (pickTool(t), ok && setOpen(""))}>
                           <EngineMark tool={t} size={16} />
                           <span className="cd-opt-name">{ENGINE_NAMES[t]}</span>
                           {ok ? <span className="sr-only">Ready</span> : <span className={`cd-opt-r ${st.tone}`}>{st.text}</span>}
@@ -369,6 +395,30 @@ export function ConnectDialog({
                         </button>
                       );
                     })}
+                    {/* Your own models: one entry saying which it runs on, and, once it is picked, each of them under it (#32). */}
+                    {mayOwn && (
+                      <>
+                        <button type="button" role="radio" aria-checked={!!ownPicked} className="cd-opt" onClick={() => (pickOwn(ownPicked?.choice ?? ownModels[0]!.choice), ownModels.length === 1 && setOpen(""))}>
+                          <Icon name="key" size={15} />
+                          <span className="cd-opt-name">Your keys and local models</span>
+                          <span className="cd-opt-r">{ownPicked ? modelLaneName(ownPicked) : ownModels.length === 1 ? modelLaneName(ownModels[0]!) : `${ownModels.length} set up`}</span>
+                          {/* With its models listed under it, the tick is the model's. */}
+                          {ownPicked && ownModels.length === 1 && tick}
+                        </button>
+                        {ownPicked && ownModels.length > 1 && (
+                          <div className="cd-opts cd-opts-sub" role="radiogroup" aria-label="Your keys and local models">
+                            {ownModels.map((m) => (
+                              <button key={m.choice} type="button" role="radio" aria-checked={m.choice === ownPicked.choice} className="cd-opt" title={`${m.model} · ${m.local ? "on this computer" : "your key"}`} onClick={() => (pickOwn(m.choice), setOpen(""))}>
+                                <OwnHostMark provider={m.provider} size={14} />
+                                <span className="cd-opt-name">{modelLaneName(m)}</span>
+                                <span className="cd-opt-r">{m.local ? "on this computer" : "your key"}</span>
+                                {m.choice === ownPicked.choice && tick}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    )}
                     <MoreTools open={moreTools} count={tools.away.length} onToggle={() => setMoreTools((v) => !v)} className="cd-opt cd-opt-more" />
                   </div>
                   {found?.path && found.loggedIn !== false && <AccountPicker identity={identity} tool={found} value={account} onChange={setAccount} onChanged={refresh} />}
@@ -402,7 +452,7 @@ export function ConnectDialog({
                   </div>
                   <div className="cd-opts cd-opts-more">
                     {/* Resuming belongs to a CLI's own history; lending a folder has none. */}
-                    <WorkspacePill className="cd-opt cd-opt-more" text="Choose a folder…" identity={identity} tool={tool || "claude"} value={folder} resume={tool ? picked?.resume : undefined} onPick={chose} onTool={setTool} />
+                    <WorkspacePill className="cd-opt cd-opt-more" text="Choose a folder…" identity={identity} tool={tool || "claude"} value={folder} resume={tool ? picked?.resume : undefined} onPick={chose} onTool={pickTool} />
                     {/* The way in from a second computer: the session's code is on the first one. */}
                     {!folder && repo && (
                       <button type="button" className="cd-opt cd-opt-more" disabled={cloning} onClick={() => void cloneHere()} title={`Clone ${repo.name} onto this computer`}>
@@ -411,7 +461,7 @@ export function ConnectDialog({
                       </button>
                     )}
                     {/* A blank space, not the session's code: for an agent that reads, plans and answers. */}
-                    {tool && (
+                    {(tool || ownPicked) && (
                       <button type="button" role="radio" aria-checked={noFolder} className="cd-opt cd-opt-more" onClick={() => (setNoFolder(true), setPicked(null), setOpen(""))}>
                         <Icon name="agent" size={14} />
                         <span className="cd-opt-name">No folder</span>

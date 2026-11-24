@@ -14312,6 +14312,8 @@ button.cd-row:hover, .cd-rw[data-open] > .cd-row { background: var(--hover); }
 .cd-opt-r.warn { color: var(--amber); }
 .cd-opt-r.off { color: var(--text-muted); }
 .cd-opt-tick { color: var(--accent); }
+/* Your own models, under their entry once it is picked (#32). */
+.cd-opts-sub { margin-left: 24px; padding-left: 6px; border-left: 1px solid var(--border); }
 .cd-opt-more, .cd-opt-more .cd-opt-name, .cd-pop .more-tools { color: var(--text-muted); }
 .cd-pop .more-tools { justify-content: space-between; margin: 0; border: 0; }
 .cd-pop .cd-folder { min-height: 40px; padding: 4px 9px; }
