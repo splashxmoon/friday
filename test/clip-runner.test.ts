@@ -12,7 +12,9 @@ import { previewStatus, startPreview, stopPreview } from "../src/runner/preview.
 // copy of the code at the last commit, served by a second server and cleaned up after. Chrome through playwright-core records here (the
 // desktop app does it in the real Friday), so these run only where its Chromium is installed.
 
-const chromium = await import("playwright-core").then((m) => (m as { chromium: { executablePath(): string } }).chromium.executablePath(), () => "");
+// By a name in a variable: the public repo's typecheck runs without playwright-core installed (v0.4.0 and v0.4.1 failed on it).
+const pw = "playwright-core";
+const chromium = await import(pw).then((m) => (m as { chromium: { executablePath(): string } }).chromium.executablePath(), () => "");
 const canRecord = !!chromium && existsSync(chromium);
 
 const PAGE = (extra: string) => `<!doctype html><html><head><meta charset="utf-8"><title>Acme</title>
