@@ -187,6 +187,8 @@ export class BackdropStore {
   private trash: string;
   private skills: string | null;
   private watcher: FSWatcher | null = null;
+  /** Closed: a start still on its way makes no watcher (a Friday closed at once left one open, and Windows kept the process alive). */
+  private closed = false;
   private soon: ReturnType<typeof setTimeout> | null = null;
   private listeners = new Set<(version: number) => void>();
   version = 0;
@@ -212,6 +214,7 @@ export class BackdropStore {
   /** Made and watched: a saved change is told 250 ms after the last write of a burst. */
   async start(): Promise<void> {
     await this.ensure().catch((e) => console.error("[backdrops]", (e as Error).message));
+    if (this.closed) return;
     try {
       this.watcher = watch(this.root, { recursive: true, persistent: false }, (_, file) => {
         if (file && /^AGENTS\.md$/i.test(String(file))) return;
@@ -228,6 +231,7 @@ export class BackdropStore {
   }
 
   close(): void {
+    this.closed = true;
     this.watcher?.close();
     this.watcher = null;
     if (this.soon) clearTimeout(this.soon);

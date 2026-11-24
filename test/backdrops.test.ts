@@ -174,3 +174,17 @@ test("the page is told when the folder changes", async () => {
     await r.close();
   }
 });
+
+test("closed before its start has finished, a backdrop store makes no watcher (a Friday closed at once hung Windows CI, v0.4.1)", async () => {
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { default: path } = await import("node:path");
+  const { BackdropStore } = await import("../src/backdrops.js");
+  const dir = await mkdtemp(path.join(tmpdir(), "friday-bd-close-"));
+  const store = new BackdropStore({ root: path.join(dir, "backdrops"), trash: path.join(dir, "trash") });
+  const started = store.start();
+  store.close();
+  await started;
+  assert.equal((store as unknown as { watcher: unknown }).watcher, null);
+  await rm(dir, { recursive: true, force: true });
+});

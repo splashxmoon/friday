@@ -38,6 +38,9 @@ function run(cwd: string, bin: string, args: string[], o: { env?: Env; input?: B
       if (code === 0) resolve(text);
       else reject(new Error((Buffer.concat(err).toString() || text || `${bin} exited ${code}`).trim()));
     });
+    // A git that exits before reading what it is given (most take nothing) closes the pipe: its exit code says how it went, and the
+    // write's EPIPE was an uncaught error that took the runner down (v0.4.1's CI, on Linux and macOS).
+    child.stdin.on("error", () => {});
     child.stdin.end(o.input ?? "");
   });
 }

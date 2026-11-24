@@ -276,6 +276,9 @@ test("a server a crash left behind is ended by the next start; one nobody uses e
 
     // Nobody calls status: the idle window ends it.
     await until(async () => !(await reachable(origin)), 12000);
+    // Its key goes once the stop has waited for the server to end, a moment after it stops answering (v0.4.1's Linux CI caught it
+    // in between).
+    await until(() => vs.vscodeToken() === null, 5000);
     assert.equal(vs.vscodeToken(), null);
   } finally {
     await vs.stopVscode();
