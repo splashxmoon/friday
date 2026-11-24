@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { hasUiChange, isUiFile, mergeErrors, MAX_PAGES, oneError, pagesFor, routeOf, type Layout } from "../src/preview-check.js";
+import { CLIP, clipLength, clipName, clipScrollScript, hasUiChange, isUiFile, mergeErrors, MAX_PAGES, oneError, pagesFor, routeOf, webmWithDuration, type Layout } from "../src/preview-check.js";
 
 const layout = (deps: string[] = [], has: string[] = []): Layout => ({ deps: new Set(deps), has: (p) => has.includes(p) });
 const next = layout(["next", "react"], ["app/layout.tsx"]);
@@ -118,4 +118,56 @@ test("console lines: one line each, shortened, each once", () => {
 test("pages to check: a pages/ folder without a file router is not a list of routes", () => {
   assert.deepEqual(pagesFor(["src/pages/about/styles.css", "src/pages/Home.module.css"], vite), ["/"]);
   assert.deepEqual(pagesFor(["src/app/foo/foo.component.html"], layout()), ["/"]);
+});
+
+// ── Proof clips (Arun, 2026-11-21: "1. Speed baseline, Today with Tonight, and proof clips.") ──
+
+test("a clip scrolls a tall page and holds a short one, and is named for its page", () => {
+  assert.equal(clipLength(3000, 800), CLIP.holdStart + CLIP.scrollMs + CLIP.holdEnd);
+  assert.equal(clipLength(820, 800), CLIP.holdShort, "a few pixels taller has nothing below worth a scroll");
+  assert.equal(clipLength(800, 800), CLIP.holdShort);
+  assert.equal(clipName("/"), "clip-home.webm");
+  assert.equal(clipName("/checkout"), "clip-checkout.webm");
+  assert.equal(clipName("/settings/billing/"), "clip-settings-billing.webm");
+  assert.match(clipScrollScript(1000), /\/ 1000\)/);
+  assert.ok(CLIP.holdStart + CLIP.scrollMs + CLIP.holdEnd <= 12_000, "a clip stays short enough to watch at a glance");
+});
+
+/** EBML: an id's bytes as written, a size as a one-byte variable-length integer (or the eight-byte "unknown"). */
+const el = (id: number[], body: number[]) => [...id, 0x80 | body.length, ...body];
+const UNKNOWN = [0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
+const webm = (info: number[], segSize: number[] = UNKNOWN) => {
+  const header = el([0x1a, 0x45, 0xdf, 0xa3], el([0x42, 0x82], [0x77, 0x65, 0x62, 0x6d]));
+  const infoEl = el([0x15, 0x49, 0xa9, 0x66], info);
+  const cluster = [0x1f, 0x43, 0xb6, 0x75, 0x83, 1, 2, 3];
+  return new Uint8Array([...header, 0x18, 0x53, 0x80, 0x67, ...segSize, ...infoEl, ...cluster]);
+};
+const durationOf = (b: Uint8Array): number | null => {
+  for (let i = 0; i + 11 <= b.length; i++) if (b[i] === 0x44 && b[i + 1] === 0x89 && b[i + 2] === 0x88) return new DataView(b.buffer, b.byteOffset + i + 3, 8).getFloat64(0);
+  return null;
+};
+
+test("a clip's WebM gets its length written into its Info, the rest untouched", () => {
+  const scale = el([0x2a, 0xd7, 0xb1], [0x0f, 0x42, 0x40]); // 1,000,000: milliseconds
+  const before = webm(scale);
+  const after = webmWithDuration(before, 6637);
+  assert.equal(after.length, before.length + 11);
+  assert.equal(durationOf(after), 6637);
+  // The Info's size grew by the Duration's eleven bytes; the cluster after it is byte for byte the same.
+  assert.deepEqual([...after.slice(-8)], [...before.slice(-8)]);
+  assert.equal(webmWithDuration(after, 1).length, after.length, "one that already says its length is left alone");
+});
+
+test("a clip's length is counted in the file's own time scale, and a Segment of known size grows with it", () => {
+  const micro = el([0x2a, 0xd7, 0xb1], [0x03, 0xe8]); // 1,000 ns: microseconds
+  const known = webm(micro, [0x80 | (5 + 3 + 8)]);
+  const after = webmWithDuration(known, 2000);
+  assert.equal(durationOf(after), 2_000_000);
+  assert.equal(after[16]! & 0x7f, 5 + 3 + 8 + 11, "the Segment's own size says it holds eleven bytes more");
+});
+
+test("a file that isn't a WebM comes back as it was", () => {
+  const junk = new Uint8Array([1, 2, 3, 4, 5]);
+  assert.equal(webmWithDuration(junk, 1000), junk);
+  assert.equal(webmWithDuration(new Uint8Array(), 1000).length, 0);
 });

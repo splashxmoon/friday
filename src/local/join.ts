@@ -135,6 +135,12 @@ export class JoinHub {
     }
   }
 
+  /** The certificate of the Friday this computer is used from, if it's paired with one (nearby.ts says so when asked). */
+  async hubCertificate(): Promise<string | null> {
+    const h = await this.saved();
+    return h && !h.removed ? (h.fingerprint ?? null) : null;
+  }
+
   async state(): Promise<JoinState> {
     const h = await this.saved();
     const linked = this.connectedAt !== null;

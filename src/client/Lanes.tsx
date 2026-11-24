@@ -14,6 +14,7 @@ import { startTeam } from "./edition.js";
 import { Dialog } from "./AgentDialogs.js";
 import { raceBase } from "./Race.js";
 import { useCrewAddRows } from "./crew-add-local.js";
+import { useModelLaneRows } from "./model-lane-add.js";
 import type { Send } from "./useSession.js";
 
 /** The most lanes one session can run, as the server enforces it: it said 6 while the server takes 12 (SESSION_LANES). */
@@ -82,7 +83,10 @@ export function Lanes({
   onConnect,
   onRace,
   solo,
+  invite = "",
 }: {
+  /** The session's invite, for adding an agent on one of your own models (model-lane-add.tsx). */
+  invite?: string;
   state: SessionState;
   me: Member;
   agents: AgentView[];
@@ -102,6 +106,8 @@ export function Lanes({
   const bringOwn = !owner && me.role !== "viewer" && can(state, me.id, "control");
   /** Your crew mates, first in the menu: each a lane of its own here, with its role and memory (crew-add-local.tsx). */
   const crewRows = useCrewAddRows(state, me, identity);
+  /** Your own models, after the coding tools (model-lane-add.tsx). */
+  const modelRows = useModelLaneRows(state, me, identity, invite);
   if (lanes.length === 0 && !owner && !bringOwn && !state.engines[MAIN_LANE]) return null;
 
 
@@ -141,6 +147,7 @@ export function Lanes({
       // Full, it says so here rather than in a setup that opens only to be refused.
       const full = lanes.length >= MAX_LANES;
       for (const t of ENGINE_TOOLS) rows.push({ label: ENGINE_NAMES[t], mark: <EngineMark tool={t} size={14} />, ...(full ? { hint: `${MAX_LANES} is the most`, disabled: true } : {}), onSelect: () => onConnect(t) });
+      if (invite) rows.push(...modelRows());
       // The tools first, a line each; the rest after them, a line each too, with no second lines to read through.
       const more: MenuItem[] = [
         // Two agents on one task, each in a copy of its own; needs a connected git folder.

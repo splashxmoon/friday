@@ -117,10 +117,28 @@ export const PHONE_ROUTES: [string, RegExp][] = [
   ["POST", /^\/api\/sessions$/],
   ["GET", /^\/api\/sessions\/[\w-]{4,40}\/history$/],
   ["POST", /^\/api\/sessions\/[\w-]{4,40}\/(answer|instruct)$/],
+  // A session's work handed on to a crew mate or room from the phone's @ menu ("Hand it on"; crew-carry.ts): the phone offered it,
+  // and the computer turned it away, so every "@Kit finish this" failed (found in the 2026-11-21 phone audit).
+  ["POST", /^\/api\/sessions\/[\w-]{4,40}\/keep-going$/],
+  // Commit from the phone (Arun, 2026-11-21: the phone caught up with the desktop's Commit on ready work): the message drafted as
+  // the desktop's commit dialog drafts it, and where the folder pushes to. The commit itself is folder.commit (app.ts PHONE_COMMANDS).
+  ["GET", /^\/api\/sessions\/[\w-]{4,40}\/commit-message$/],
   // Photos and screenshots sent with a message, and seeing them again (Arun, 2026-11-17: the phone app "on par with t3, orca"):
   // a file into the session's own store, the same check as the page's (an invite, upload permission, the kinds Friday reads).
   ["POST", /^\/api\/sessions\/[\w-]{4,40}\/files$/],
   ["GET", /^\/api\/sessions\/[\w-]{4,40}\/files\/[\w-]{1,80}$/],
+  // A session's task board (app.ts /api/sessions/:id/board; Arun, 2026-11-22: "the task board isn't appearing on mobile").
+  ["GET", /^\/api\/sessions\/[\w-]{4,40}\/board$/],
+  // A session's proof clips: how it takes them, and recording one now (app.ts; Arun, 2026-11-22: "lets be customizable with this").
+  ["GET", /^\/api\/sessions\/[\w-]{4,40}\/proof-clips$/],
+  ["PUT", /^\/api\/sessions\/[\w-]{4,40}\/proof-clips$/],
+  ["POST", /^\/api\/sessions\/[\w-]{4,40}\/proof-clip\/record$/],
+  // Today (today.ts): last night's queue with each run's proof clip, for Home's Since you left (Arun, 2026-11-21: "add clips to PRs and
+  // the phone too"). Read only; found work and Tonight are the desktop's.
+  ["GET", /^\/api\/today$/],
+  // A session renamed, marked unread, or deleted from the phone's Sessions (Arun, 2026-11-21: "build the next ones too", from the phone
+  // audit): the same checks as the desktop's (a member may rename and mark unread; only its owner deletes, and the phone asks first).
+  ["POST", /^\/api\/sessions\/[\w-]{4,40}\/(title|unread|delete)$/],
   ["POST", /^\/api\/attention$/],
   ["GET", /^\/api\/morning$/],
   ["POST", /^\/api\/board$/],
@@ -128,6 +146,9 @@ export const PHONE_ROUTES: [string, RegExp][] = [
   // Which tools and folders are here, for a new session, and each tool's limits (the 5-hour and weekly windows the session's
   // usage ring shows): read only. Never the runner's other calls.
   ["POST", /^\/api\/runner\/(tools|folders|usage)$/],
+  // Your own models, for the phone's Add an agent (Arun, 2026-11-21: the phone caught up with the desktop's "Your models"): their
+  // names, providers and addresses, never a key (own-models.ts OwnModelView).
+  ["POST", /^\/api\/runner\/models\.own\.list$/],
   // The desktop's folder finder (client/Workspace.tsx): a folder found by name, a folder's own folders, your GitHub repositories
   // and one cloned to start in, for the phone's Where (Arun, 2026-11-17: "fetch and find ... repos, folders").
   ["POST", /^\/api\/runner\/(find|browse|describe|github|clone)$/],
@@ -139,6 +160,9 @@ export const PHONE_ROUTES: [string, RegExp][] = [
   // access (app.ts holds a phone's to edits or plan, and every command it runs asks first).
   ["POST", /^\/api\/runner\/start$/],
   ["GET", /^\/api\/teammates(\/since)?$/],
+  // What the crew cost this week, and the goals it works toward: read only, for the phone's Spend and Goals.
+  ["GET", /^\/api\/teammates\/spend$/],
+  ["GET", /^\/api\/goals$/],
   // The crew from the phone: away, pause, stop all, lift holds, and a room run on its own or stopped (Arun, 2026-10-31: "so i can
   // watch and manage the crew pages too").
   ["POST", /^\/api\/teammates\/(away|stop-all|pause|lift|selfrun)$/],
@@ -158,6 +182,8 @@ export const PHONE_ROUTES: [string, RegExp][] = [
   ["POST", /^\/api\/automations$/],
   ["POST", /^\/api\/automations\/[\w-]{4,40}\/run$/],
   ["PATCH", /^\/api\/automations\/[\w-]{4,40}$/],
+  // An automation deleted from the phone, asked first (its owner's alone, as on the desktop).
+  ["DELETE", /^\/api\/automations\/[\w-]{4,40}$/],
   // A session's live feed.
   ["GET", /^\/ws$/],
 ];

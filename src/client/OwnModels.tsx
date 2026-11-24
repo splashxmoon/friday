@@ -2,10 +2,10 @@ import { seesByName } from "../own-vision.js";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { isOwnModel } from "../own-model-id.js";
 import { api } from "./api.js";
-import { EngineMark, ModelHostMark, VendorMark } from "./BrandMarks.js";
 import { machineError } from "./GitHubConnect.js";
 import { Icon } from "./icons.js";
 import { NoMachine, hostApi, useMachine } from "./local.js";
+import { OwnHostMark, ownHostMarked } from "./model-lane-add.js";
 import { groupOwn } from "./own-groups.js";
 import { loadOwnModels, useOwnModels, type OwnChoice } from "./ownModelStore.js";
 import type { Identity } from "./storage.js";
@@ -38,10 +38,7 @@ const PRESETS: { id: string; name: string; baseUrl: string; key: boolean | "opti
   { id: "custom", name: "Another server", baseUrl: "", key: "optional", hint: "Anything that speaks the OpenAI chat API" },
 ];
 const presetOf = (id?: string) => PRESETS.find((p) => p.id === id);
-const LOGO: Record<string, string> = { openai: "OpenAI", anthropic: "Anthropic", google: "Google", deepseek: "DeepSeek" };
 const LOCAL_IDS = new Set(["ollama", "lmstudio"]);
-/** Their own marks, not letters (audit REST-25). */
-const HOST_MARKS = new Set(["groq", "mistral", "together", "ollama", "lmstudio"]);
 
 /**
  * A provider's mark: its logo where the app has one, else its initial; each in the same small tile, so a list of them reads as
@@ -52,7 +49,8 @@ function ProviderMark({ id, size = 15 }: { id?: string; size?: number }) {
   const inner = Math.round(size * 0.75);
   return (
     <span className="own-mono" style={{ width: size + 3, height: size + 3 }} aria-hidden>
-      {id && LOGO[id] ? <VendorMark vendor={LOGO[id]} size={inner} /> : id && HOST_MARKS.has(id) ? <ModelHostMark id={id} size={inner} /> : id === "xai" ? <EngineMark tool="grok" size={inner} /> : id === "custom" || !p ? <Icon name="globe" size={inner} /> : p.name[0]}
+      {/* The mark Add an agent's Your models rows show too; a letter for a preset with none of its own. */}
+      {!p || id === "custom" || ownHostMarked(id) ? <OwnHostMark provider={id} size={inner} /> : p.name[0]}
     </span>
   );
 }
@@ -189,7 +187,7 @@ export function OwnModelsSection({ identity, workspace }: { identity: Identity; 
           <div className="set-text">
             <div className="set-label">Use your own key, or a model on this computer</div>
             <div className="muted small">
-              For Friday Code, picked in the message box. Keys stay on this computer.
+              For Friday Code, picked in the message box, or added to a session as an agent of its own. Keys stay on this computer.
             </div>
           </div>
           {!draft && (

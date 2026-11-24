@@ -31,10 +31,13 @@ watchChunkErrors();
 // Pickers and menus over a dialog scroll (scroll-free.ts).
 freeScrollInPopups();
 
-
 // The menu bar's panel (desktop-tray.ts): its own small page, never the whole app a second time.
 const TrayRoot = lazy(() => import("./TrayPanel.js").then((m) => ({ default: m.TrayRoot })));
 const tray = new URLSearchParams(location.search).get("view") === "tray";
+// The backdrop behind the app (backdrop.tsx), never the menu bar's panel: loaded on its own, so the first draw doesn't wait on it.
+// A backdrop decides light or dark: the one it last had, from the first draw, not the theme's for a moment first.
+try { const t = localStorage.getItem("friday.backdrop.tone"); if (!tray && localStorage.getItem("friday.mode") !== "code" && (t === "dark" || t === "light")) document.documentElement.classList.toggle("dark", t === "dark"); } catch {}
+if (!tray) void import("./backdrop.js").then((m) => m.mountBackdrop());
 
 createRoot(document.getElementById("root")!, {
   onUncaughtError: (error, info) => {

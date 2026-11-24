@@ -1,5 +1,6 @@
-import { lazy, Suspense, useContext, useState, type ReactNode } from "react";
-import { commandFailed, TEST_CMD, type Receipt } from "../receipt.js";
+import { lazy, Suspense, useContext, useEffect, useState, type ReactNode } from "react";
+import { CARD_ASK, takeCardAsk } from "./card-ask.js";
+import { commandFailed, keyOf as commandKey, TEST_CMD, type Receipt } from "../receipt.js";
 import type { DiffFile, ReviewFinding, SessionEvent } from "../types.js";
 import { driverOf, type SessionState } from "../session/projection.js";
 import { MAIN_LANE, type Member } from "../types.js";
@@ -63,7 +64,7 @@ export function testsIn(calls: CallLike[], failed: (callId: string) => boolean |
     if (!command || !TEST_CMD.test(command)) continue;
     const f = failed(c.id);
     if (f === null) continue;
-    last.set(command, { status: f ? "fail" : "pass", command });
+    last.set(commandKey(command), { status: f ? "fail" : "pass", command });
   }
   const all = [...last.values()];
   if (!all.length) return null;
@@ -430,6 +431,18 @@ export function ReviewCard({
   const [more, setMore] = useState(false);
   /** The commit dialog, open at where the commit goes. */
   const [ship, setShip] = useState<Dest | null>(null);
+  // The Agent Board's Commit or Review on this lane's ready card (card-ask.ts): the newest card, uncommitted, takes it.
+  useEffect(() => {
+    const take = () => {
+      if (!latest || lastCommitSeq > endSeq) return;
+      const what = takeCardAsk(sid, lane);
+      if (what === "commit") setShip("here");
+      else if (what === "review") onReview?.();
+    };
+    take();
+    addEventListener(CARD_ASK, take);
+    return () => removeEventListener(CARD_ASK, take);
+  }, [latest, lastCommitSeq, endSeq, sid, lane, onReview]);
   const [, redraw] = useState(0);
   // "Split into a stack" (Arun, 2026-11-19, wave 3): asked of this chat's agent, and what came of the press.
   const [stackSaid, setStackSaid] = useState("");

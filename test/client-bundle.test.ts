@@ -119,6 +119,7 @@ for (const edition of ["hosted", "local"] as const) {
     // rule card, the self-review, bisect and refactor blocks' wiring (their cards load when an answer has one: fence-cards.tsx) and a
     // race's rows in Code (race-column.tsx loads when one is on screen). 1026.0 hosted, 1023.7 local, 2026-11-20.
     // To 1030 for the same wave 4 pings that wait while you type (1028.1 hosted, 2026-11-20).
-    assert.ok(session.kb < 1030, `a session screen's first load is ${session.kb.toFixed(0)} KB brotli, over the 1030 KB budget`);
+    // To 1040 for proof clips, Test it and Today in the session's chat (1037.4 hosted, 2026-11-23, before v0.4.1).
+    assert.ok(session.kb < 1040, `a session screen's first load is ${session.kb.toFixed(0)} KB brotli, over the 1040 KB budget`);
   });
 }

@@ -438,6 +438,9 @@ export function teammateNote(t: Teammate, team: readonly Pick<Teammate, "name" |
     "Finish the whole request before you stop. Never end by asking whether to go on, and never end on what you are about to do (\"I'll now run the tests\") without doing it.",
     "When you finish, lead with the verdict, then the key facts, then anything you couldn't check. Say done only once you have checked the result; otherwise say where it stands (drafted, waiting, blocked) and why.",
     "Ask the person only what you can't find out yourself: one question at a time, with the likely answers to pick from.",
+    // Recurring work is a routine of its own, run here (Arun, 2026-11-23: Ivy, asked to track the downloads daily, made a Code
+    // automation, which ran as a coding session apart from its chat).
+    "When the person asks you to do something regularly (every day, each morning, weekly), make it one of your routines with Friday's manage_routine: it runs here, in your chat, and you report here. Not an automation, unless they ask for one.",
     "Before anything leaves this computer (an email, a message, a post, a comment, a release, a deploy, a payment), show it with Friday's propose_send and wait for the person's answer. Never send it on your own.",
     "If the person writes while you are working, answer a question in one line, take in a correction, and carry on from where you are without starting over.",
     "When you hand work to a teammate, write the message so it stands on its own: the goal, what they need to know, what they may do, and what finished looks like. What a teammate reports is theirs: check it before you pass it on as yours, or say it is unverified. In a room, speak when you are addressed or have something useful to add.",

@@ -21,7 +21,7 @@ import { CodingToolLimits, RailRing, useRailLimits } from "./gauge.js";
 import { AccountGlance } from "./account-glance.js";
 import type { McpPublic } from "../mcp-types.js";
 import { Avatar, Icon, type IconName } from "./icons.js";
-import { hiddenOf, isDefaultRail, moveInRail, readRail, saveRail, setShown, shownOf, useRailLayout, type RailPlace } from "./rail-layout.js";
+import { isDefaultRail, moveInRail, readRail, saveRail, setShown, shownOf, useRailLayout, type RailPlace } from "./rail-layout.js";
 import type { AgentView, PersonListing } from "../agents.js";
 import { useNeedsCount, withCode, type AttentionState } from "./Attention.js";
 import type { Attention } from "../attention.js";
@@ -129,6 +129,8 @@ export interface SidebarProps {
   /** MCP servers for every coding tool on this computer (McpServers.tsx). */
   onOpenMcp?: () => void;
   onOpenSkills?: () => void;
+  /** MCP servers and Skills as one page of two tabs, from the open-source rail (Customize). */
+  onOpenCustomize?: () => void;
   onOpenReview: () => void;
   /** The Needs you queue (NeedsYou.tsx). */
   onOpenNeeds?: () => void;
@@ -627,7 +629,6 @@ function PlaceIcons({ p }: { p: SidebarProps }) {
  */
 function OssRail({ p }: { p: SidebarProps }) {
   const [crew] = useTeamTab();
-  const waiting = useNeedsCount(p.attention);
   const [usageCard, setUsageCard] = useState(false);
   const t = useTeam(p.identityForApi);
   const mates = t ? ownOf(t) : [];
@@ -804,23 +805,25 @@ function OssRail({ p }: { p: SidebarProps }) {
   const add = (o: Omit<Place, "render" | "on"> & { on?: boolean; render?: () => React.ReactNode }) => all.push({ on: p.view === o.id, render: () => item({ id: o.id, icon: o.icon, label: o.label, on: p.view === o.id, go: o.go, warm: o.id as SidebarProps["view"] }), ...o } as Place);
   add({ id: "sessions", icon: "chat", label: "Sessions", go: () => go("code"), on: !crew && !onPage, render: () => item({ id: "sessions", icon: "chat", label: "Sessions", on: !crew && !onPage, go: () => go("code"), n: [...p.attention.needSids].filter((sid) => !isTeamSid(sid) && !isCodeChat(sid)).length || undefined, needs: true }) });
   add({ id: "agents", icon: "agent", label: "Agents", go: () => go("team"), on: crew && !onPage, render: () => item({ id: "agents", icon: "agent", label: "Agents", tour: "Crew", on: crew && !onPage, go: () => go("team"), n: mateNeeds || undefined, needs: true, dot: agentsDot }) });
-  if (p.onOpenNeeds) {
-    const open = p.onOpenNeeds;
-    add({ id: "needs", icon: "hand", label: "Needs you", go: open, render: () => item({ id: "needs", icon: "hand", label: "Needs you", on: p.view === "needs", go: open, warm: "needs", n: waiting || undefined, needs: true }) });
-  }
   add({ id: "automations", icon: "zap", label: "Automations", go: p.onOpenAutomations, on: p.view === "automations" || p.view === "agents", render: () => item({ id: "automations", icon: "zap", label: "Automations", on: p.view === "automations" || p.view === "agents", go: p.onOpenAutomations, warm: "automations" }) });
   add({ id: "review", icon: "gitPullRequest", label: "Code Review", go: p.onOpenReview, render: () => item({ id: "review", icon: "gitPullRequest", label: "Code Review", on: p.view === "review", go: p.onOpenReview, warm: "review", n: p.reviewsWaiting || undefined, needs: true }) });
-  add({ id: "board", icon: "board", label: "Agent Board", go: p.onOpenBoard });
+  // What waits on you that no session row counts (a workflow at its Your OK, a crew mate's ask): on the Agent Board, where it is
+  // answered, now there is no Needs you button to count it (Arun, 2026-11-20). Not a coding session's ask: Sessions counts those.
+  const boardWaits = p.attention.needs.filter((n) => !n.sid || isTeamSid(n.sid) || isCodeChat(n.sid)).length;
+  add({ id: "board", icon: "board", label: "Agent Board", go: p.onOpenBoard, render: () => item({ id: "board", icon: "board", label: "Agent Board", on: p.view === "board", go: p.onOpenBoard, warm: "board", n: boardWaits || undefined, needs: true }) });
   if (p.onOpenDeepDive) add({ id: "deepdive", icon: "puzzle", label: "Deep Dive", go: p.onOpenDeepDive });
-  if (p.onOpenMcp) add({ id: "mcp", icon: "wrench", label: "MCP servers", go: p.onOpenMcp });
-  if (p.onOpenSkills) add({ id: "skills", icon: "book", label: "Skills", go: p.onOpenSkills });
+  // MCP servers and Skills, one place with a tab each (Arun, 2026-11-20): lit on either.
+  if (p.onOpenCustomize) {
+    const open = p.onOpenCustomize;
+    const here = p.view === "mcp" || p.view === "skills";
+    add({ id: "customize", icon: "sliders", label: "Customize", go: open, on: here, render: () => item({ id: "customize", icon: "sliders", label: "Customize", on: here, go: open, warm: "mcp" }) });
+  }
   const placeOf = (id: RailPlace) => all.find((x) => x.id === id);
-  // Which sit on the rail, in what order, and which behind the ⋯: yours to choose (rail-layout.ts; Customize rail, from the ⋯ or a
-  // right-click on the rail).
+  // Which sit on the rail and in what order: yours to choose (rail-layout.ts), in Customize rail from a right-click anywhere on the
+  // rail; the ⋯ that held the rest is gone (Arun, 2026-11-21).
   const layout = useRailLayout();
   const offered = (id: RailPlace) => !!placeOf(id);
   const onRail = shownOf(layout, offered);
-  const more = hiddenOf(layout, offered).map((id) => placeOf(id)!);
   const [customize, setCustomize] = useState<DOMRect | null>(null);
   const [railCtx, setRailCtx] = useState<{ x: number; y: number; id?: RailPlace } | null>(null);
   const navRef = useRef<HTMLElement>(null);
@@ -837,7 +840,7 @@ function OssRail({ p }: { p: SidebarProps }) {
         ? ([
             { label: "Move up", icon: "arrowUp", disabled: at <= 0, onSelect: () => saveRail(moveInRail(readRail(), place.id, -1, offered)) },
             { label: "Move down", icon: "arrowDown", disabled: at < 0 || at >= onRail.length - 1, onSelect: () => saveRail(moveInRail(readRail(), place.id, 1, offered)) },
-            place.id !== "sessions" && { label: "Hide from rail", icon: "more", onSelect: () => saveRail(setShown(readRail(), place.id, false)) },
+            place.id !== "sessions" && { label: "Hide from rail", icon: "eye", onSelect: () => saveRail(setShown(readRail(), place.id, false)) },
             { node: <i className="rail-menu-sep" />, height: 9 },
           ] as MenuItem[])
         : []),
@@ -845,23 +848,6 @@ function OssRail({ p }: { p: SidebarProps }) {
       !isDefaultRail(layout) && { label: "Reset rail", icon: "refresh", onSelect: () => saveRail(null) },
     ];
   };
-  const moreHere = more.find((m) => p.view === m.id);
-  const morePlaces = (
-    <span key="more-places" onPointerEnter={() => more.forEach((m) => p.onWarm?.(m.id as SidebarProps["view"]))}>
-      <MenuButton
-        beside
-        label={moreHere ? `More places: ${moreHere.label}` : "More places"}
-        className={`oss-rail-btn oss-rail-more-places${moreHere ? " is-here" : ""}`}
-        items={() => [
-          ...more.map((m) => ({ label: m.label, icon: m.icon, checked: p.view === m.id, onSelect: m.go })),
-          ...(more.length ? [{ node: <i className="rail-menu-sep" />, height: 9 }] : []),
-          { label: "Customize rail", icon: "sidebar" as const, onSelect: () => openCustomize(navRef.current?.querySelector(".oss-rail-more-places")?.getBoundingClientRect().top ?? 200) },
-        ]}
-      >
-        <Icon name="more" size={20} />
-      </MenuButton>
-    </span>
-  );
   return (
     <nav
       ref={navRef}
@@ -882,7 +868,6 @@ function OssRail({ p }: { p: SidebarProps }) {
             {placeOf(s)!.render()}
           </span>
         ))}
-        {morePlaces}
       </div>
       <div className="oss-rail-foot">
         <UpdateRailButton />

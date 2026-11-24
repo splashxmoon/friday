@@ -25,7 +25,9 @@ import {
   ShortcutsTab,
 } from "./SettingsPrefs.js";
 import { CodingToolsSection, ComputerSection } from "./SettingsComputer.js";
+import { ProofClipsSettings } from "./ProofClipsSettings.js";
 import { EditorSettings } from "./ide/VsCodeSettings.js";
+import { BackdropSection } from "./SettingsBackdrop.js";
 import type { WorkspaceUsage } from "./workspace-types.js";
 import { isLocal, planLimits, planNow, startTeam } from "./edition.js";
 import { GROUPS, SECTIONS, sectionsMatching, settingsSection, type Group, type SectionDef } from "./settings-sections.js";
@@ -272,6 +274,7 @@ export function SettingsPage({
               <div className="flex flex-col gap-5">
                 <CodingToolsSection identity={identity} />
                 {isLocal() && <EditorSettings identity={identity} />}
+                {isLocal() && <ProofClipsSettings identity={identity} />}
               </div>
             )}
             {/* One Models section (UX audit F10, 2026-11-07): Friday's models, on a plan with Friday's agent, then your own. */}
@@ -282,6 +285,7 @@ export function SettingsPage({
                 </SettingsGroup>
               </div>
             )}
+            {current.id === "backdrop" && <BackdropSection identity={identity} />}
             {current.id === "privacy" && <DataTab part="privacy" />}
             {current.id === "storage" && <StorageSection identity={identity} />}
             {current.id === "data" && <DataTab part="backup" />}

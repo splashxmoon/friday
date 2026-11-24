@@ -24,6 +24,8 @@ import type { AutoCtl } from "./ide/auto-tool.js";
 import { keepAuto, reachForMessage } from "./smartReach.js";
 import type { Plan } from "../plan-types.js";
 import { isLocal, ownModel, planLimits } from "./edition.js";
+import { repoKey } from "../placement.js";
+import { Today } from "./Today.js";
 import { AlsoWorksIn, FolderCard, folderName, useResumeLink, type Picked } from "./Workspace.js";
 import { FolderPill, type BranchChoice } from "./FolderMenu.js";
 import { branchName, branchRef, FolderBranchPick, type FolderBranch } from "./Branches.js";
@@ -44,6 +46,7 @@ const RaceButton = lazy(() => import("./ide/RaceButton.js").then((m) => ({ defau
 // The message box is this page's state, so every keystroke draws the page again. These take nothing that changes as you type,
 // so they are left as they were. The template shelf is not among them: it is given what is in the box.
 const Badge = memo(MachineBadge);
+const TodayCard = memo(Today);
 
 /** What was being typed here, kept for this tab, so going to a session and back doesn't lose a half-written task. */
 const DRAFT = "mpa.draft.home";
@@ -930,7 +933,7 @@ export function Code({
             design A: nothing over the box). */}
         {/* Which computer it runs on, on its own line above the box (Computers.tsx RunsOn; Arun, 2026-11-07: "Move the machine
             selector to above the input chat"): its folders and tools are the ones the box offers. */}
-        {isLocal() && <RunsOn onPick={() => (setPicked(null), setBranch(""), setNewBranch(true), setPickBranch(""))} />}
+        {isLocal() && <RunsOn ask={{ tool: engine || undefined, repo: picked ? repoKey(picked.folder.remote, picked.folder.name) : undefined }} onPick={() => (setPicked(null), setBranch(""), setNewBranch(true), setPickBranch(""))} />}
       </div>
       <form
         className="composer-card"
@@ -1370,6 +1373,8 @@ export function Code({
 
       {/* Someone new: the things that show what Friday is for, one press each (GettingStarted.tsx). In both editions, the hosted
           service following the local build (Arun, 2026-11-04); "Since you left" below still says what happened while away. */}
+      {/* Today (Today.tsx): last night's queue, work found in your repos, and Tonight, with the box's coding tool. Local edition only: it runs on this computer. */}
+      {isLocal() && <TodayCard identity={identity} tool={engine || ""} mode={mode} fullAccess={access === "bypass"} model={model} box={{ account, accounts: tool?.accounts, effort, levels: effortLevels }} />}
       <GettingStarted recents={recents} onPickFolder={() => setTimeout(() => document.querySelector<HTMLButtonElement>(".cw-drop")?.click(), 0)} />
       {/* The morning brief or evening wrap-up across everything, then what happened in each session while you were away. */}
       <DailyBriefCard />

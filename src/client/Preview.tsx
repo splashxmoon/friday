@@ -741,6 +741,9 @@ export function PreviewPanel({
     if (work && !url) requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".bench-panel .browser-url")?.focus());
   };
   const closeTab = (id: string) => {
+    // The last tab closes the browser, as a browser window does (Arun, 2026-11-22: "be able to close this browser without having to
+    // open another tab").
+    if (tabs.length === 1 && tabs[0]?.id === id) return onClose();
     views.current.delete(id);
     setTabs((t) => {
       const left = t.filter((x) => x.id !== id);
@@ -887,11 +890,9 @@ export function PreviewPanel({
                       label(addressOf(t.seen ?? t.url))
                     }
                   </button>
-                  {tabs.length > 1 && (
-                    <button type="button" className="bw-tab-x" aria-label={`Close ${label(addressOf(t.seen ?? t.url))}`} onClick={() => closeTab(t.id)}>
-                      <Icon name="x" size={10} />
-                    </button>
-                  )}
+                  <button type="button" className="bw-tab-x" aria-label={`Close ${label(addressOf(t.seen ?? t.url))}`} onClick={() => closeTab(t.id)}>
+                    <Icon name="x" size={10} />
+                  </button>
                 </span>
               ))}
               <button type="button" className="icon-btn tiny" title="Open a new tab" aria-label="Open a new tab" onClick={() => openTab()}>

@@ -28,7 +28,8 @@ import { stackOp } from "./stack-pr.js";
 import { copyIn, duplicateSkill, readLibrary, readSkill, readSkillAt, readSkillFile, removeAt, removeSkill, saveSkill, writeFolders } from "./skill-library.js";
 import { listBackground, startBackground, stopBackground } from "./background.js";
 import { listServers, stopServer } from "./ports.js";
-import { lookAtPage, planCheck } from "./preview-check.js";
+import { clipBefore, clipPage, lookAtPage, planCheck } from "./preview-check.js";
+import { prProof } from "./pr-proof.js";
 import { fetchPreview, NOT_LISTENING, previewOptions, previewStatusLive, startPreview, stopPreview } from "./preview.js";
 import { iosInput, iosRun, iosScreen, iosStatus, iosStop, type IosInput } from "./ios.js";
 import { iosLiveUrl } from "./ios-live.js";
@@ -43,7 +44,7 @@ import { githubItem, localRepo, prAct, prFiles, prReview, type DraftComment, typ
 import { savedDirs, startDirs } from "./extra-dirs.js";
 import { readRepo } from "./repo-read.js";
 import { stopVscode, vscodeCancel, vscodeCommand, vscodeInstall, vscodeMarketplace, vscodeOpen, vscodeRemove, vscodeSetMarketplace, vscodeStart, vscodeStatus, vscodeTheme } from "./vscode.js";
-import { changedSince, citedLines, lineCounts, readForPage, surveyRepo } from "./dive.js";
+import { changedSince, citedLines, codeGraph, lineCounts, readForPage, surveyRepo } from "./dive.js";
 import { addOwnModels, detectLocal, discoverModels, listOwnModels, ownComplete, ownVision, removeOwnModel, saveOwnModel, testOwnModel } from "./own-models.js";
 
 /**
@@ -106,6 +107,8 @@ export const HOST_METHODS = [
   "prs",
   "prs.team",
   "issues",
+  // Work found for you, for Today (found-work.ts).
+  "today.find",
   "pr.act",
   "pr.ide",
   "pr.review",
@@ -215,6 +218,11 @@ export const HOST_METHODS = [
   // A preview check after a run (preview-check.ts): which pages its files are and where they are served, then one page's pictures.
   "preview.check.plan",
   "preview.check.look",
+  // A proof clip of a page the check looked at, walked through what changed, and the same page before the change (runner/preview-check.ts).
+  "preview.check.clip",
+  "preview.check.before",
+  // A proof clip's GIF into a pull request's description, kept on the repository's friday-proof branch (runner/pr-proof.ts).
+  "pr.proof",
   "background.stop",
   // One command an agent of yours is running, stopped from the Tasks tab (stop-command.ts).
   "command.stop",
@@ -407,6 +415,9 @@ export async function callHost(method: string, params: Record<string, unknown> =
       const running = [...ctx.runners.values()].map((r) => ({ sid: r.opts.session, lane: r.lane, tool: r.opts.tool, cwd: r.opts.cwd }));
       return { tools, home, machine: machineInfo(), running };
     }
+    // What this computer is and has now, for placement and the map of your computers (machine-facts.ts, placement.ts).
+    case "machine.facts":
+      return (await import("./machine-facts.js")).machineFacts(ctx.runners.size);
     case "folders":
       return { home, cloneRoot: defaultCloneRoot(), recent: await recentReposCached() };
     // Computer use on this computer (computer.ts): off until its owner turns it on, and what the system still needs for it.
@@ -459,6 +470,8 @@ export async function callHost(method: string, params: Record<string, unknown> =
       return pullRequests();
     case "issues":
       return issues();
+    case "today.find":
+      return (await import("./found-work.js")).findWork({ skip: Array.isArray(params.skip) ? params.skip.filter((x: unknown): x is string => typeof x === "string").slice(0, 200) : [], fresh: params.fresh === true });
     case "prs.team":
       return teamPullRequests((Array.isArray(params.repos) ? params.repos : String(params.repos ?? "").split(",")).map((r) => str(r, 140)).filter(Boolean), str(params.owner, 40));
     // Code Review's buttons: each one something the person pressed, done as them through this computer's GitHub login.
@@ -1051,6 +1064,11 @@ export async function callHost(method: string, params: Record<string, unknown> =
       if (!(await isDir(p))) throw new Error(`There's no folder at ${p}.`);
       return { survey: await surveyRepo(p) };
     }
+    case "dive.graph": {
+      const p = at(params.path);
+      if (!(await isDir(p))) throw new Error(`There's no folder at ${p}.`);
+      return { graph: await codeGraph(p) };
+    }
     case "dive.lines": {
       const p = at(params.path);
       if (!(await isDir(p))) throw new Error(`There's no folder at ${p}.`);
@@ -1096,6 +1114,25 @@ export async function callHost(method: string, params: Record<string, unknown> =
       return planCheck(at(params.cwd), Array.isArray(params.files) ? params.files.filter((f): f is string => typeof f === "string").map((f) => f.slice(0, 500)) : []);
     case "preview.check.look":
       return lookAtPage(str(params.url, 2000));
+    case "pr.proof":
+      return prProof({
+        cwd: at(params.cwd),
+        pr: { url: str((params.pr as { url?: unknown } | undefined)?.url, 300) },
+        page: str(params.page, 200),
+        ...(Array.isArray(params.marks) ? { marks: (params.marks as { atMs?: unknown; label?: unknown }[]).slice(0, 12).map((m) => ({ atMs: Number(m?.atMs) || 0, label: str(m?.label, 200) })) } : {}),
+        gifs: { after: typeof (params.gifs as { after?: unknown })?.after === "string" ? String((params.gifs as { after: string }).after) : "", ...(typeof (params.gifs as { before?: unknown })?.before === "string" ? { before: String((params.gifs as { before: string }).before) } : {}) },
+      });
+    case "preview.check.clip":
+    case "preview.check.before": {
+      const ask = {
+        url: str(params.url, 2000),
+        ...(typeof params.cwd === "string" && params.cwd ? { cwd: at(params.cwd) } : {}),
+        files: Array.isArray(params.files) ? params.files.filter((f): f is string => typeof f === "string").map((f) => f.slice(0, 500)) : [],
+        width: params.width === "phone" ? ("phone" as const) : ("laptop" as const),
+        ...(Array.isArray(params.stops) ? { stops: params.stops.map(Number).filter(Number.isFinite).slice(0, 3) } : {}),
+      };
+      return method === "preview.check.before" ? clipBefore(ask) : clipPage(ask);
+    }
     case "background.stop": {
       const stopped = await stopBackground(at(params.cwd), str(params.id, 20));
       return { task: stopped ? { ...stopped, log: stopped.log.slice(-30) } : null };

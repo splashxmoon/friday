@@ -36,6 +36,10 @@
 .pck-thumb.phone { width: 64px; height: 138px; }
 .pck-cap { position: absolute; left: 4px; bottom: 4px; padding: 2px 5px; border-radius: 4px; background: color-mix(in srgb, var(--bg) 82%, transparent); color: var(--ink-2); font: 500 10px/1 var(--font); pointer-events: none; }
 @container (min-width: 460px) { .pck-thumb.wide { width: 260px; height: 163px; } .pck-thumb.phone { width: 75px; height: 163px; } }
+/* The proof clip leads the page: as wide as the column allows, at the laptop's shape, above the still pictures. */
+.pck-thumb.pck-clip { width: 100%; max-width: 440px; height: auto; aspect-ratio: 16 / 10; }
+.pck-thumb.pck-clip video { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top left; }
+.pck-clip .pck-cap { display: inline-flex; align-items: center; gap: 4px; }
 .pck-none { color: var(--text-muted); font: 400 12px/1.4 var(--font); }
 .pck-errors { display: flex; flex-direction: column; gap: 8px; padding: 0 12px 12px; }
 .pck-e { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
@@ -45,3 +49,24 @@
 .pck-note { margin: 0; padding: 0 12px 10px; color: var(--text-muted); font: 400 11.5px/1.5 var(--font); text-wrap: pretty; }
 /* Narrow, what it found goes under its title rather than being cut off beside it. */
 @container (max-width: 340px) { .pck-sum { order: 9; flex: 1 1 100%; padding-left: 20px; margin-top: -4px; padding-bottom: 4px; } }
+
+/* Proof clips, advanced (Arun, 2026-11-21: "i want this proof clips to be very advanced.... and can be toggled on or off"): the clip
+   shown leads the card, After / Before / Phone above it when there are several, and what it shows as a step list under it. */
+.pck-clipbox { display: flex; flex-direction: column; gap: 8px; padding: 0 12px 12px; }
+.pck-seg { align-self: flex-start; }
+.pck-thumb.pck-clip.phone { width: 150px; aspect-ratio: 390 / 844; }
+.pck-steps { display: flex; flex-direction: column; gap: 1px; max-width: 440px; margin: 0; padding: 0; list-style: none; }
+.pck-step { display: flex; align-items: baseline; gap: 8px; width: 100%; min-height: 26px; padding: 3px 6px; margin-left: -6px; border: 0; border-radius: 6px; background: none; color: var(--ink-2); font: 400 12px/1.4 var(--font); text-align: left; cursor: pointer; transition: background-color var(--t-hover, 120ms) ease, color var(--t-hover, 120ms) ease; }
+.pck-step:hover { background: var(--hover); color: var(--ink); }
+.pck-step:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.pck-step-t { flex: none; min-width: 30px; color: var(--text-muted); font: 500 11px/1.4 var(--font-mono, ui-monospace, monospace); font-variant-numeric: tabular-nums; }
+.pck-step-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Large: one clip, or before and after side by side, in step. */
+.pck-big-row { display: flex; align-items: flex-start; justify-content: center; gap: 16px; width: 100%; max-height: 100%; min-height: 0; }
+.pck-big-fig { display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 0; margin: 0; }
+.pck-big-fig video { display: block; max-width: min(92vw, 100%); max-height: calc(100vh - 140px); border-radius: 10px; background: #000; box-shadow: 0 24px 70px rgb(0 0 0 / .55); }
+.pck-big-row.two .pck-big-fig { flex: 1 1 0; }
+.pck-big-row.two .pck-big-fig video { width: 100%; max-width: 100%; }
+.pck-big-row.phone .pck-big-fig video { max-height: calc(100vh - 140px); width: auto; }
+.pck-big-fig figcaption { color: rgb(255 255 255 / .82); font: 500 12.5px/1.2 var(--font); }
+@media (max-width: 760px) { .pck-big-row.two { flex-direction: column; align-items: stretch; } }

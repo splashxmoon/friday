@@ -32,6 +32,7 @@ import { envNamesOnly } from "../runner/git.js";
 import type { AppendGuard, SessionStore } from "../session/store.js";
 import { hideSecretsIn, withShieldNote } from "../secrets.js";
 import { localEdition } from "../local-edition.js";
+import { isOwnModel, ownModelParts } from "../own-model-id.js";
 import {
   CLI_ID,
   engineName,
@@ -743,6 +744,10 @@ export class EngineHub {
     let lane = p.lane || MAIN_LANE;
     // On Solo only a session's owner brings an agent into it: a teammate's agent working beside them is Team.
     if (roleOf(state, p.me.id) !== "owner" && !(await this.core.collaborates(state))) return reject(4003, "This workspace is on Solo: only the session's owner can bring an agent. Working together needs Team.");
+    // An agent on one of the person's own models, Friday Code on it in this folder (model-lane.ts): the session owner's own model, added
+    // by them, as the runtime runs no other. Like a coding tool's, its lane is the person's own and no plan limits it.
+    const ownModel = !tool && isOwnModel(p.model) ? p.model : "";
+    if (ownModel && (p.me.id !== state.ownerId || ownModelParts(ownModel)?.owner !== p.me.id)) return reject(4003, "Only the session's owner can add an agent on their own model.");
     // Who is already editing this folder, on any lane but `skip`: see "One writer per folder" below.
     // Compared by machine and the repository the folder is in, links resolved on that machine (two subfolders of one
     // checkout share its files and its git index), and counting a Friday lane writing through a lent folder there too.
@@ -776,7 +781,7 @@ export class EngineHub {
       const laneName = owner ? p.newLane.slice(0, 40) : `${p.me.name.split(" ")[0]}'s ${p.newLane}`.slice(0, 40);
       // A coding tool's lane is the person's own, any number of them; a folder lent with no tool is a lane for Friday's agent,
       // which the plan limits like any other (it used to be counted as a tool, and went past the plan's limit).
-      const r = await this.core.handle(p.sid, p.me, { type: "lane.add", name: laneName, control: { kind: "open" }, engine: !!tool, ...(owner ? {} : { own: true }) });
+      const r = await this.core.handle(p.sid, p.me, { type: "lane.add", name: laneName, control: { kind: "open" }, engine: !!tool || !!ownModel, ...(owner ? {} : { own: true }) });
       if (!r.ok) return reject(4000, r.error);
       state = await this.store.state(p.sid);
       lane = state.lanes.at(-1)!.id;
@@ -2176,6 +2181,10 @@ function threadOn(root: SessionEvent | undefined): string {
   return `${root.body.type === "agent.message" ? "your" : `${root.actor.name}'s`} message "${text.length > 240 ? `${text.slice(0, 240)}…` : text}"`;
 }
 
+/** A message asked as a task board: split first, onto the shared board, then work through it. */
+const BOARD_ASK = (who: string) =>
+  `[Friday] ${who} asked for this as a task board. Before anything else, split it into self-contained tasks and post them all at once with the friday post_tasks tool: a one-line title each, what done looks like, the files each owns, which wait on which, and a check (the command that proves it). Don't ask first and don't start editing before the board is posted. Free agents here take ready tasks at once; work through the rest yourself, marking each done as you go.`;
+
 export function promptFor(events: SessionEvent[], seqs: number[], updates: MeshPost[] = [], lead = "", back = ""): { prompt: string; attachments: Attachment[] } {
   const bySeq = new Map(events.map((e) => [e.seq, e]));
   const attachments: Attachment[] = [];
@@ -2210,7 +2219,7 @@ export function promptFor(events: SessionEvent[], seqs: number[], updates: MeshP
             ? `${meshHead(b.mesh)}\n\n${b.text}`
           : b.thread
             ? `${ev.actor.name}, in a side thread on ${threadOn(bySeq.get(b.thread.root))}: ${b.text}${files}\n\n(Answer here briefly, about this alone: it stays in the thread, beside the room's main work.)`
-            : `${ev.actor.name}${via}: ${b.text}${files}`,
+            : `${ev.actor.name}${via}: ${b.text}${files}${b.board ? `\n\n${BOARD_ASK(ev.actor.name)}` : ""}`,
     );
   }
   // An undo since this CLI last heard from the room. Its own memory still has

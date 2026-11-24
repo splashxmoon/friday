@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { MenuButton, relTime, useDismiss } from "./ui.js";
 import { pickMachine, pickedMachine } from "./local.js";
 import { Icon } from "./icons.js";
+import { bestComputer, rankComputers, toolName, type MachineFacts, type PlaceAsk } from "../placement.js";
 
 /**
  * Your other computers, for the open-source edition (Arun, 2026-10-30: "lets also add support for multi machine for coding and
@@ -24,6 +25,9 @@ export interface LinkedComputer {
   version?: string;
   /** Why it can't link, when this computer can tell: only pairing it again fixes it. */
   problem?: string;
+  /** What it is and has now (placement.ts), from a Friday that answers `machine.facts`. */
+  facts?: MachineFacts | null;
+  address?: string;
 }
 /** Why this computer can't link to the one it is used from (join.ts JoinProblem). */
 export interface JoinProblem {
@@ -33,6 +37,8 @@ export interface JoinProblem {
   repair: boolean;
 }
 export interface State {
+  /** This computer: its name, the coding tools signed in here, and what it is and has now. */
+  here?: { name: string; platform: string; tools: { tool: string; name: string; loggedIn?: boolean | null }[]; facts: MachineFacts | null };
   computers: LinkedComputer[];
   joined: { hub: { name: string; connected: boolean; address?: string; since?: number; tried?: number; problem?: JoinProblem; version?: string } | null; version?: string; error?: string } | null;
   /** The Friday this computer runs. */
@@ -90,10 +96,13 @@ export function computerLine(c: Pick<LinkedComputer, "connected" | "seen" | "too
  * in there, the rest greyed with when they were last seen. The pick is this browser's (local.ts pickMachine), so the folders and
  * tools offered in the box are that computer's. `onPick`: the folder picked was the other computer's, so it goes.
  */
-export function RunsOn({ onPick }: { onPick?: () => void }) {
+export function RunsOn({ onPick, ask }: { onPick?: () => void; /** What the run needs, as far as the page knows: placement weighs it. */ ask?: PlaceAsk }) {
   const [state, setState] = useState<State | null>(null);
   const [on, setOn] = useState(pickedMachine);
   const [adding, setAdding] = useState(false);
+  const [mapping, setMapping] = useState(false);
+  /** Picked as "Best": the computer placement chose, and why, said on the line (spec 09 step 1). */
+  const [bestWhy, setBestWhy] = useState<string>("");
   /** A computer picked that isn't connected now, so the work runs here: said beside the line until another is picked. */
   const [fellBack, setFellBack] = useState("");
   const [n, setN] = useState(0);
@@ -120,8 +129,30 @@ export function RunsOn({ onPick }: { onPick?: () => void }) {
   }, [on, state]);
   const computers = state?.computers ?? [];
   const current = computers.find((c) => c.id === on);
-  const choose = (id: string) => {
+  // Each of your computers for this run, ranked (placement.ts): this one is "" and named "This computer".
+  const candidates = state ? [{ id: "", name: "This computer", connected: true, tools: state.here?.tools ?? [], facts: state.here?.facts ?? null }, ...computers.map((c) => ({ id: c.id, name: c.name, connected: c.connected, tools: c.tools, facts: c.facts ?? null }))] : [];
+  const ranked = rankComputers(candidates, ask ?? {});
+  const best = bestComputer(candidates, ask ?? {});
+  const whyOf = (id: string) => ranked.find((r) => r.id === id);
+  // One short line per computer in the menu (Arun, 2026-11-21: "design this better"): what it's doing, the picked tool's limit,
+  // the repo there, and battery only when it's on one. Never more than three, so it never wraps.
+  const shortLine = (id: string): string | undefined => {
+    const c = candidates.find((x) => x.id === id);
+    const f = c?.facts;
+    const r = whyOf(id);
+    if (!c || !f || !r?.ok) return undefined;
+    const lim = ask?.tool ? f.limits[ask.tool] : undefined;
+    const here = r.why.find((w) => w.endsWith(" is here"));
+    return [
+      f.agents ? `${f.agents} running` : "Idle",
+      lim ? `${toolName(ask!.tool!)} ${Math.round(lim.usedPercent)}%` : "",
+      here ?? "",
+      f.power === "battery" ? `battery ${f.batteryPercent ?? "?"}%` : "",
+    ].filter(Boolean).slice(0, 3).join(" · ");
+  };
+  const choose = (id: string, why = "") => {
     setFellBack("");
+    setBestWhy(why);
     if (id === on) return;
     pickMachine(id);
     onPick?.();
@@ -137,10 +168,14 @@ export function RunsOn({ onPick }: { onPick?: () => void }) {
         width={320}
         items={() => [
           { heading: "Runs on" },
-          { label: "This computer", icon: "server", checked: !on, onSelect: () => choose("") },
+          // Placement's pick, when there's more than one computer to pick from: it chooses now, and the line says why.
+          ...(computers.length && best
+            ? [{ label: `Best: ${best.name}`, sub: shortLine(best.id) ?? "Ready", icon: "zap" as const, onSelect: () => choose(best.id, best.why.slice(0, 3).join(", ")) }]
+            : []),
+          { label: "This computer", sub: shortLine(""), icon: "server", checked: !on, onSelect: () => choose("") },
           ...computers.map((c) => ({
             label: c.name,
-            sub: computerLine(c, state?.version),
+            sub: (c.connected && shortLine(c.id)) || computerLine(c, state?.version),
             title: [c.detail, versions(c.version, state?.version)].filter(Boolean).join(" · "),
             icon: "server" as const,
             checked: c.id === on,
@@ -148,9 +183,12 @@ export function RunsOn({ onPick }: { onPick?: () => void }) {
             disabled: !c.connected,
             onSelect: () => choose(c.id),
           })),
-          { label: "Add a computer…", sub: "Over SSH, a command, or its Friday app", icon: "plus", onSelect: () => setAdding(true) },
+          ...(computers.length ? [{ label: "See your computers…", sub: "What each has now, and how they link", icon: "server" as const, onSelect: () => setMapping(true) }] : []),
+          { label: "Add a computer…", sub: "Nearby, over SSH, a command or a link", icon: "plus", onSelect: () => setAdding(true) },
         ]}
       />
+      {bestWhy && <span className="cw-runs-note">Best: {bestWhy}.</span>}
+      {mapping && state && <MapDialog state={state} onClose={() => setMapping(false)} onAdd={() => (setMapping(false), setAdding(true))} />}
       {fellBack && <span className="cw-runs-note">{fellBack} isn't connected, so this runs here.</span>}
       {adding && <AddComputer onClose={() => (setAdding(false), setN((x) => x + 1))} />}
     </div>
@@ -160,6 +198,32 @@ export function RunsOn({ onPick }: { onPick?: () => void }) {
 // Settings › Computer › Your computers is ComputersSettings.tsx, loaded with Settings or when Runs on › Add a computer… opens:
 // the new-session page draws RunsOn and the Crew useComputers with the first screen, and the page (about 15 KB) came with them.
 const ComputersSettings = lazy(() => import("./ComputersSettings.js").then((m) => ({ default: m.ComputersSettings })));
+
+const MachinesMap = lazy(() => import("./MachinesMap.js").then((m) => ({ default: m.MachinesMap })));
+
+/** Runs on › See your computers…: the map of them, in a dialog over the new-session page. */
+function MapDialog({ state, onClose, onAdd }: { state: State; onClose: () => void; onAdd: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useDismiss(ref, onClose);
+  return (
+    <div className="overlay">
+      <div ref={ref} className="modal runs-map" role="dialog" aria-modal="true" aria-label="Your computers">
+        <div className="pop-head">
+          <div>
+            <h2>Your computers</h2>
+            <p className="muted small">What each one has now, and how it links to this one.</p>
+          </div>
+          <button className="icon-btn tiny" type="button" aria-label="Close" onClick={onClose}>
+            <Icon name="x" size={14} />
+          </button>
+        </div>
+        <Suspense fallback={null}>
+          <MachinesMap state={state} onAdd={onAdd} />
+        </Suspense>
+      </div>
+    </div>
+  );
+}
 
 /** Runs on › Add a computer…: Settings' own way of adding one, in a dialog over the new-session page. */
 function AddComputer({ onClose }: { onClose: () => void }) {
@@ -171,7 +235,7 @@ function AddComputer({ onClose }: { onClose: () => void }) {
         <div className="pop-head">
           <div>
             <h2>Add a computer</h2>
-            <p className="muted small">Run agents on another of your computers, over Wi-Fi or Tailscale.</p>
+            <p className="muted small">Link another of your computers, and agents can run there too.</p>
           </div>
           <button className="icon-btn tiny" type="button" aria-label="Close" onClick={onClose}>
             <Icon name="x" size={14} />

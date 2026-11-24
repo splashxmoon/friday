@@ -43,6 +43,7 @@ import { GitMergeIcon,
   Undo2Icon,
   FlagIcon,
   UnplugIcon,
+  RotateCwIcon,
   MessageSquareIcon,
   PauseIcon,
   PencilIcon,
@@ -203,6 +204,8 @@ import { runnableQueue } from "../held.js";
 import { FridayTui } from "./Tui.js";
 import { isLocal, startTeam } from "./edition.js";
 import { useCrewAddRows, visitOn } from "./crew-add-local.js";
+import { useModelLaneRows } from "./model-lane-add.js";
+import { laneOwnModel } from "../model-lane.js";
 import { groupAt, laneAt } from "./lane-at.js";
 import { askWheel, handStraight, KeepGoingAction, mentionCrew, openKeepGoing, useCrewTargets } from "./crew-at.js";
 import { lazy, Suspense } from "react";
@@ -237,6 +240,11 @@ const MergedCard = lazy(() => import("./MergedCard.js").then((m) => ({ default: 
 import { isCodeChat } from "./ide/code-chats.js";
 import { IdeChatContext, ideHint } from "./ide/mode.js";
 import { agentNameFor, laneNamesFrom } from "./agent-name.js";
+import { ProofClipCard, ProofStatusCard } from "./ProofClipCard.js";
+import { TestProofCard } from "./TestProofCard.js";
+import { keyOf as commandKey } from "../test-proof.js";
+import { recordProofClip, testWork, useClipMode } from "./proof-clips.js";
+import { hasUiChange } from "../preview-check.js";
 import { agentState, lowerWord, phaseRing, plainError, PHASE_WORD, saysItAll, type AgentRing } from "../agent-state.js";
 import { askIosPreview, isLocalUrl, lookOf, openInPreview, pageAppears, servedUrlIn } from "./previewBus.js";
 import { failedWords, latestTests, prefillComposer, ReviewCard, secondReviewOf, testsIn, type TestRun } from "./RunReview.js";
@@ -503,6 +511,9 @@ function setupLine(ev: SessionEvent): boolean {
 }
 
 const HIDDEN = new Set<string>([
+  // What an agent saved to the project's memory ("Remembered: … · Undo"): kept in Memory, not a row in the chat each time (Arun,
+  // 2026-11-20: "get rid of this").
+  "brain.remembered",
   // The terminal view switched on and off: how an agent is looked at, not something that happened (Arun, 2026-10-30).
   "lane.terminal",
   // A second opinion on a turn is drawn under that turn (Asides), question and answer together.
@@ -845,6 +856,11 @@ export function group(events: SessionEvent[], streaming: boolean | ReadonlySet<s
     // A card the agent draws as it works, or its update, closes nothing: its turn goes on in the same block, steps and all, and the
     // card is drawn in that reply, under its words (Arun, 2026-11-17: "make sure everything is lined up properly"). One drawn with no
     // turn open is a row of its own.
+    // A proof clip Friday recorded after the run (ProofClipCard.tsx): a row of its own, under the work it shows.
+    if (t === "proof.clip" || t === "proof.status" || t === "proof.tests") {
+      items.push({ kind: "event", ev });
+      continue;
+    }
     if (t === "ui.card") {
       const open = runs.get(lane);
       if (open) (open.drawn ??= []).push(ev);
@@ -1219,6 +1235,8 @@ export function Activity({
   const [addMenu, setAddMenu] = useState<{ x: number; y: number } | null>(null);
   /** Your crew mates, first in the add menu (crew-add-local.tsx; Code and Crew, connected). */
   const crewAddRows = useCrewAddRows(state, me, identity);
+  /** Your own models, after the coding tools: each a lane of its own here, Friday Code on that model (model-lane-add.tsx). */
+  const modelAddRows = useModelLaneRows(state, me, identity, invite);
   /** The agent tab menu, and which agent it is for: the one in view, or the tab right-clicked. */
   const [kindMenu, setKindMenu] = useState<{ x: number; y: number; lane?: string } | null>(null);
   // An agent's menu asked for from the thread card (ThreadCard.tsx): this chat's own, where it was pressed.
@@ -2099,6 +2117,7 @@ export function Activity({
               // The ones on this computer first: a tool that isn't installed has nothing to join with.
               ...splitTools(installedOn(identity)).here.map((t) => ({ label: ENGINE_NAMES[t], mark: <EngineMark tool={t} size={14} />, onSelect: () => onConnect("", t) })),
               { label: "Other agents…", icon: "plus" as const, onSelect: () => onConnect("") },
+              ...modelAddRows(),
             ]}
           />
         )}
@@ -4126,6 +4145,11 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   const since = active ? liveSince(ctx.sid, lane, item.startedTs ?? msgs[0]?.ts) : undefined;
   // An older run: the facts that decide whether to open it, on one line. Before the steps, the receipt and the hand-off are
   // worked out, since none of them are shown: a long session is mostly folded runs.
+  // The proof clip's hooks, here above the folded run's early return: below it, a run folding as a newer one arrived drew fewer hooks
+  // than before and took the whole app down (React #300, Arun's video harness session, 2026-11-22).
+  const laneDiff = ctx.state.diffs?.[lane];
+  const clipMode = useClipMode(ctx.sid, ctx.invite);
+  const [recording, setRecording] = useState(false);
   // What the agent drew as it worked, in its reply under its words (and still there when the reply is folded).
   let drawn: ReactNode = null;
   drawn = item.drawn?.length ? <div className={cn("rsp-drawn", folded && !unfolded && "folded")}>{item.drawn.map((ev) => <Suspense key={ev.seq} fallback={null}><GenCard ev={ev} state={ctx.state} events={ctx.events} send={ctx.send} sid={ctx.sid} invite={ctx.invite} /></Suspense>)}</div> : null;
@@ -4174,6 +4198,8 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   const steps: Step[] = [];
   /** What it wrote by name, done: a file it made outside its folder's diff (its own folder while it works in a project). */
   const wrote: { path: string; lines: number }[] = [];
+  /** Every file this turn's own steps edited or wrote (a patch's files too): a crew mate's reply credits only these (made below). */
+  const touched = new Set<string>();
   /** Pictures its steps gave back (a screenshot, an image it read), on the computer its tool runs on (runner/tool-pictures.ts). */
   const pictures: { path: string; name: string }[] = [];
   type Work = { kind: "work"; id: string; steps: Step[] };
@@ -4277,6 +4303,13 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
       for (const path of result?.body.pictures ?? []) pictures.push({ path, name: `${d.verb}${d.target ? ` ${d.target}` : ""}` });
       if (/^(edit|edit_file|write|write_file)$/.test(call.name)) step.preview = editPreview(args) ?? undefined;
       if (/^(read|read_file|edit|edit_file|write|write_file)$/.test(call.name)) step.file = (typeof args.file_path === "string" ? args.file_path : typeof args.path === "string" ? args.path : "") || undefined;
+      if (/^(edit|edit_file|multiedit|write|write_file|create_file|str_replace|str_replace_based_edit_tool|notebookedit|apply_patch)$/i.test(call.name) && !failed) {
+        const one = typeof args.file_path === "string" ? args.file_path : typeof args.path === "string" ? args.path : typeof args.notebook_path === "string" ? args.notebook_path : "";
+        if (one) touched.add(one);
+        // A patch names its files in its own lines ("*** Update File: src/a.ts", "+++ b/src/a.ts").
+        const patch = typeof args.patch === "string" ? args.patch : typeof args.input === "string" ? args.input : "";
+        for (const m of patch.matchAll(/^\*\*\* (?:Update|Add) File: (.+)$|^\+\+\+ b\/(.+)$/gm)) touched.add((m[1] ?? m[2] ?? "").trim());
+      }
       if (/^(write|write_file|create_file)$/i.test(call.name) && result && !failed) {
         const at = typeof args.file_path === "string" ? args.file_path : typeof args.path === "string" ? args.path : "";
         if (at) wrote.push({ path: at, lines: typeof args.content === "string" ? args.content.split("\n").length : 0 });
@@ -4648,9 +4681,29 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
       ...(rooms.length ? [{ heading: "To a crew room" } as MenuItem, ...rooms.map((r): MenuItem => ({ label: r.name, icon: "users", sub: "As a message to its lead", onSelect: () => void toRoom(r) }))] : []),
     ];
   };
+  // Test it, offered under finished work as Devin does (Arun, 2026-11-22: "Devin's way, in chat"): the tests it ran, or the project's
+  // own, and a proof clip when it changed a page. Shown on the latest run that changed something, until proof of it is in the chat.
+  const endSeq = item.ended?.seq ?? 0;
+  const proven = ctx.events.some((e) => e.seq > endSeq && (e.lane ?? MAIN_LANE) === lane && (e.body.type === "proof.tests" || e.body.type === "proof.clip" || e.body.type === "proof.status"));
+  const clipable = isLocal() && latest && !active && !!item.ended && ended?.outcome === "done" && clipMode !== "off" && !!laneDiff?.files.length && !proven;
   const nextActions =
-    changed.length > 0 || stillFailing.length > 0 || rewindIcon || (keepGoing && !handBar) || roomActs || againable || sendable ? (
+    changed.length > 0 || stillFailing.length > 0 || rewindIcon || (keepGoing && !handBar) || roomActs || againable || sendable || clipable ? (
       <>
+        {clipable && (
+          <button
+            type="button"
+            className="test-it"
+            data-tip={hasUiChange(laneDiff!.files) ? "Friday shows the tests this ran (or runs the project's), then records the page it changed" : "Friday shows the tests this ran, or runs the project's"}
+            disabled={recording}
+            onClick={() => {
+              setRecording(true);
+              void testWork(ctx.sid, ctx.invite, lane).catch((e: Error) => (setRecording(false), ctx.notify(e.message)));
+            }}
+          >
+            <Icon name="check" size={13} />
+            {recording ? "Testing…" : "Test it"}
+          </button>
+        )}
         {roomActs && <RoomReplyActions sid={ctx.sid} lane={lane} root={finalMsg!.seq} events={ctx.events} done={!!item.ended && ended?.outcome === "done"} />}
         {/* Its work taken on elsewhere (Arun, 2026-11-15: "add easy bring it in to other coding sessions or crew rooms too from
             crews/crew rooms"): into a coding session, looked at first there (Bring it in), or to another room as a message to its lead. */}
@@ -4721,7 +4774,11 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
   // Every reply's work as one line (Friday Teams 566e73d9; Arun, 2026-11-14, direction A): the step under way while it works, one
   // summary once it's done.
   const hasWork = blocks.some((x) => x.kind === "work" || x.kind === "think");
-  const made = chatty ? withNamed(madeFilesOf(turnFiles, wrote), named) : [];
+  // Only what this reply's own steps changed (Arun, 2026-11-22: "fix the crew mates always sending files when i didnt even ask for it"):
+  // its folder's diff holds whatever else changed there too (another session's work in a shared folder showed 55 files under a reply
+  // about download numbers). A file it named that changed in its turn still shows (useNamedFiles), however it wrote it.
+  const mine = (path: string) => [...touched].some((t) => t === path || t.endsWith(`/${path}`) || path.endsWith(`/${t}`));
+  const made = chatty ? withNamed(madeFilesOf(turnFiles.filter((f) => mine(f.path)), wrote), named) : [];
   const doing = doingKind(blocks, active && !waitsOnPerson(ctx.state, lane));
   const sayBlock = (x: { key: string; note: string }) => (
     <div key={x.key} className="rsp-say">
@@ -4906,7 +4963,14 @@ const RunBlock = memo(function RunBlock({ item, ctx, active, latest, typing, fol
           limit is said by its note instead, with what to do; an older run's limit is history, said in a line, not in red. */}
       {/* Said in a line, "stopped · error", whose press shows what the tool said (audit CODE-4 C, Arun 2026-11-04: a five-line raw
           stack trace in red sat in the chat). */}
-      {ended?.outcome === "error" && !planLimitHit(ended.error) && !out && <ErrorLine name={name} error={ended.error ?? ""} />}
+      {/* Cut short by Friday restarting (an update, a reinstall): the turn is put back and carries on by itself once the runner is back,
+          in about 13 seconds in Arun's logs (86 of 87 did, 2026-11-21). Not an error of the work, so said quietly, not in red. */}
+      {ended?.outcome === "error" && RESTART_CUT.test(ended.error ?? "") && !out && (
+        <p className="rsp-restart" role="note">
+          <RotateCwIcon className="size-3.5" aria-hidden /> {latest ? `Friday restarted here. ${name} carries on from where it was as soon as it's back.` : `Friday restarted here, and ${name} carried on below.`}
+        </p>
+      )}
+      {ended?.outcome === "error" && !RESTART_CUT.test(ended.error ?? "") && !planLimitHit(ended.error) && !out && <ErrorLine name={name} error={ended.error ?? ""} />}
       {out && <SignedOutNote ctx={ctx} lane={lane} latest={latest} />}
       {!active && limit && !onBackup && <LimitNote ctx={ctx} lane={lane} resetsAt={limit.resetsAt} canSteer={via === "instruct"} pass={passTo} />}
       {!active && hit && !limit && (
@@ -5489,6 +5553,9 @@ const backAtOf = (line: string): string => /\buntil ([^·]+?)\s*(?:·|$)/.exec(l
  * Why a turn stopped, as a status line: "stopped · error", which opens what the tool said, whole and copyable, in a small card
  * under it (audit CODE-4 C, Arun 2026-11-04). The words stay out of the chat: a raw stack trace there was five red lines.
  */
+/** A run's end written when Friday restarted in the middle of it (engine/hub.ts): its turn carries on once the runner is back. */
+const RESTART_CUT = /server restarted in the middle of|lost its connection when the server restarted/i;
+
 function ErrorLine({ error, name }: { error: string; /** Whose error: the line reads "Rio hit an error · too many requests". */ name: string }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -5700,7 +5767,8 @@ export function failingCommands(messages: Ev<"agent.message">[], results: Map<st
       } catch {
         continue;
       }
-      if (command) last.set(command, { command, output: r.body.output, failed });
+      // The same command run again (only its output trimmed: "| tail -40") is the same one: its last try is what stands.
+      if (command) last.set(commandKey(command), { command, output: r.body.output, failed });
     }
   return [...last.values()].filter((c) => c.failed).map(({ command, output }) => ({ command, output }));
 }
@@ -5868,6 +5936,7 @@ export function DiffCard({
     }
   };
   const [expand, setExpand] = useState({ open: false, n: 0 });
+  const [sending, setSending] = useState(false);
   const list = useRef<HTMLDivElement>(null);
   // Worked out once per change set, not on every draw: an 80-file diff took ~12ms a card, and the feed draws on every event.
   const { ordered, linesOf } = useMemo(() => ({ ordered: reviewOrder(files), linesOf: new Map(files.map((f) => [f, patchLines(f.patch)])) }), [files]);
@@ -5934,7 +6003,6 @@ export function DiffCard({
   const paths = new Set(files.map((f) => f.path));
   const live = threads.filter((t) => !t.resolved && paths.has(t.path));
   const pending = live.filter((t) => !t.sent && t.by.id === me && !t.ask);
-  const [sending, setSending] = useState(false);
 
   // Your notes, together, as one instruction (threads.send marks each as with the agent); a suggester's go to the driver as words.
   const sendReview = async () => {
@@ -6906,6 +6974,12 @@ const EventItem = memo(function EventItem({ ev, ctx }: { ev: SessionEvent; ctx: 
             return state.options.team && isWorkflowBoard(ev) ? <FlowBoard ev={ev} ctx={ctx} fallback={<BoardCard ev={ev} state={state} stamp={<Stamp ev={ev} />} />} /> : <BoardCard ev={ev} state={state} stamp={<Stamp ev={ev} />} />;
     case "mesh.posted":
       return <AgentUpdateCard ev={ev} state={state} stamp={<Stamp ev={ev} />} />;
+    case "proof.clip":
+      return <ProofClipCard ev={ev} sid={ctx.sid} invite={ctx.invite} />;
+    case "proof.tests":
+      return <TestProofCard ev={ev} sid={ctx.sid} by={agentNameFor(state, ev.lane ?? MAIN_LANE)} />;
+    case "proof.status":
+      return <ProofStatusCard ev={ev} events={ctx.events} sid={ctx.sid} invite={ctx.invite} onRetry={(lane) => void recordProofClip(ctx.sid, ctx.invite, lane).catch((e: Error) => ctx.notify(e.message))} />;
     case "ui.card": return <Suspense fallback={null}><GenCard ev={ev} state={state} events={ctx.events} send={ctx.send} sid={ctx.sid} invite={ctx.invite} /></Suspense>;
     case "teammate.folders":
       return <FoldersGiven ev={ev} stamp={<Stamp ev={ev} />} />;
@@ -9305,6 +9379,8 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
   let soloFriday: MenuItem[] = [];
   /** Your crew mates, offered where you add an agent here too (crew-add-local.tsx; Code and Crew, connected). */
   const crewRows = useCrewAddRows(state, me, ctx.identity);
+  /** Your own models, after the coding tools (model-lane-add.tsx). */
+  const modelRows = useModelLaneRows(state, me, ctx.identity, ctx.invite);
   const targetItems = (): MenuItem[] => [
     { heading: "Send to" },
     ...targets.map((id) => {
@@ -9345,6 +9421,7 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
             .here.filter((t) => !targets.some((id) => state.engines[id]?.tool === t))
             .map((t) => ({ label: ENGINE_NAMES[t], mark: <EngineMark tool={t} size={15} />, onSelect: () => ctx.onConnect?.("", t) })),
           { label: "Other agents…", mark: <Icon name="plus" size={15} />, onSelect: () => ctx.onConnect?.("") },
+          ...modelRows(),
         ]
       : []),
     // Talking to the people here without steering anything: @name tells someone.
@@ -9377,7 +9454,8 @@ function Composer({ ctx, lane = MAIN_LANE, locked = false, onLane, onPin, plan, 
   // button's tooltip still says how to send now.
   const liveHint = mode === "drive" && running && state.openQuestions[lane]?.to !== me.id && interrupt ? "Cuts the current step short" : "";
   // Friday Code on Solo is only Team's when it isn't running on somebody's own model.
-  const fridayHere = !state.engines[lane]?.tool && !isOwnModel(state.options.model);
+  // An agent added on one of the person's own models runs on its lane's (model-lane.ts), whatever the session's is.
+  const fridayHere = !state.engines[lane]?.tool && !isOwnModel(laneOwnModel(state, lane) ?? state.options.model);
   // A team's chats have no agent menu below the box: a teammate's tool is set in its details (2026-10-27 audit).
   let noPicker = false;
   noPicker = !!state.options.team;

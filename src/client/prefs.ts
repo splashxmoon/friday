@@ -128,6 +128,8 @@ export function applyGlass(on = glassOn()): void {
   const root = document.documentElement;
   root.classList.toggle("glass", on);
   root.classList.toggle("glass-native", on && !!window.fridayDesktop?.glassNative);
+  // A backdrop behind the app (backdrop.tsx): every surface frosted over it, and the page's own blur, not the system's.
+  if (root.classList.contains("backdrop")) root.classList.add("glass"), root.classList.remove("glass-native");
   window.fridayDesktop?.setGlass?.(on);
 }
 export function chooseGlass(on: boolean): void {
@@ -185,6 +187,7 @@ function followSystemTheme(): void {
   const light = matchMedia("(prefers-color-scheme: light)");
   const sync = () => {
     if (themeChoice() !== "system" || readTheme()) return;
+    if (document.documentElement.classList.contains("backdrop")) return; // A backdrop decides light or dark (backdrop.tsx).
     if (document.documentElement.classList.contains("dark") === light.matches) chooseTheme("system");
   };
   light.addEventListener("change", sync);

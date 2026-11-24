@@ -18,9 +18,11 @@ import { RELEASES, connectThisComputer, hostApi, useMachine } from "./local.js";
 import { openOutside } from "./openOutside.js";
 import { refreshPrs, reviews, runReview, setAuto, useAuto, usePrs, useReviews } from "./prWatch.js";
 import { ReviewTour } from "./ReviewTour.js";
-import type { Identity, RecentSession } from "./storage.js";
+import { loadRecents, type Identity, type RecentSession } from "./storage.js";
+import { PrProof } from "./PrProof.js";
 import { ConfirmDialog, SkeletonRows, isTyping, relTime, type Confirmation } from "./ui.js";
 import { CheckIcon, ChevronDownIcon, EllipsisIcon, ExternalLinkIcon, FolderIcon, GitBranchIcon, GitPullRequestIcon, RefreshCwIcon, SearchIcon, ShieldIcon, TriangleAlertIcon, UserIcon, XIcon } from "lucide-react";
+import { TabRing } from "./presence.js";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -728,9 +730,14 @@ function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: 
   const [confirm, setConfirm] = useState<Confirmation | null>(null);
   const [asking, setAsking] = useState(false);
   const [changes, setChanges] = useState("");
-  const merged = kind === "merged";
+  // Merged from here: shown as merged at once, where GitHub's search can still list it open for a while (it said "GitHub is still
+  // checking" over "Merged."; Arun, 2026-11-22). The lists are asked again over the next half minute until they agree.
+  const [mergedNow, setMergedNow] = useState(false);
+  useEffect(() => setMergedNow(false), [pr.url]);
+  const merged = kind === "merged" || mergedNow;
   const others = kind === "review" || kind === "team";
   const session = ctx.sessionFor.get(pr.url);
+  const proofInvite = session ? (loadRecents().find((r) => r.sid === session.sid)?.invite ?? "") : "";
   const files = pr.files ?? [];
   // Why it is where it is in the queue, weightiest first: the paths it touches, its tests and checks, what a reviewer found.
   const risks = kind === "merged" ? risksOf(pr) : (risk?.reasons ?? risksOf(pr));
@@ -759,6 +766,11 @@ function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: 
       setNote({ text: r.note ?? "Done." });
       if (r.url) openOutside(r.url);
       ctx.refresh();
+      if (action === "merge") {
+        // Only one that merged: a merge set to happen once checks pass is still open.
+        if (/^merged\b/i.test((r.note ?? "").trim())) setMergedNow(true);
+        for (const ms of [4000, 12_000, 30_000]) setTimeout(() => ctx.refresh(), ms);
+      }
     } catch (e) {
       setNote({ text: machineError(e), bad: true });
       throw e;
@@ -844,7 +856,9 @@ function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: 
   if (kind === "team") buttons.push(quietBtn("s", "Review in a session", () => ctx.onWork(briefs.review(pr))));
 
   const risky = new Set(files.filter((f) => risksOf({ files: [f] }).length).map((f) => f.path));
-  const nextDot: DotState = kind === "review" ? "needs" : kind === "merged" ? "done" : next.tone === "bad" ? "bad" : next.tone === "ok" ? "done" : "idle";
+  // Checks under way, or GitHub still working out whether it merges: the heading's mark turns too (Arun, 2026-11-22: "add status ring
+  // too the checks when it is running", "also add status ring for the merge").
+  const nextDot: DotState = kind === "review" ? "needs" : kind === "merged" ? "done" : next.tone === "bad" ? "bad" : next.tone === "ok" ? "done" : stepsOf(pr).checks === "wait" || (stepsOf(pr).merge === "wait" && pr.mergeState !== "behind") ? "working" : "idle";
 
   return (
     <div className="flex flex-col gap-8 px-2 pt-2 pb-12">
@@ -969,6 +983,9 @@ function Pane({ pr, kind, ctx, cmd, risk }: { pr: PullRequest; kind: Kind; ctx: 
         )}
       </section>
 
+      {/* Proof (Arun, 2026-11-22: "how do i see the proof for the merge???"): the clip from the session of yours that opened it. */}
+      {isLocal() && session && proofInvite && <PrProof sid={session.sid} invite={proofInvite} merged={merged} />}
+
       {(files.length > 0 || !merged) && (
         <section className="flex flex-col gap-3">
           {/* The change itself is the page's body; your agents' review is a small control over it, its findings under it. */}
@@ -1043,7 +1060,14 @@ function nextStep(pr: PullRequest, kind: Kind): { title: string; body: string; t
 }
 
 /** A part's state as a small round mark: filled when done, red when it stops the merge, dashed while it waits. */
-function StepMark({ mark }: { mark: Mark }) {
+function StepMark({ mark, live = false }: { mark: Mark; /** Running now (checks under way): the app's own working ring, turning, rather than a dashed wait. */ live?: boolean }) {
+  // Checks running (Arun, 2026-11-22: "add status ring too the checks when it is running"): the same ring a working agent wears.
+  if (live && mark === "wait")
+    return (
+      <span className="grid size-4 shrink-0 place-items-center" title="Running">
+        <TabRing state="working" />
+      </span>
+    );
   return (
     <span
       aria-hidden
@@ -1120,7 +1144,7 @@ function MergeRows({ pr, mine, ctx, act, busy }: { pr: PullRequest; mine: boolea
     <ul className="m-0 flex list-none flex-col border-t border-[var(--border)] p-0" aria-label="Before it can merge">
       {rows.map((r) => (
         <li key={r.key} className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-[var(--border)] px-4 py-2.5 text-[13px] last:border-b-0">
-          <StepMark mark={r.mark} />
+          <StepMark mark={r.mark} live={r.key === "checks" || (r.key === "merge" && !behind && s.merge === "wait")} />
           <span className="min-w-0 flex-1 basis-48">
             <span className="font-medium text-[var(--ink)]">{r.name}</span>
             <span className="text-[var(--text-muted)]"> · {r.detail}</span>

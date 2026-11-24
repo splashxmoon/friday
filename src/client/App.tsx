@@ -1,4 +1,5 @@
 import "./awake.js";
+import { PageTabs } from "@/components/dass/page-bits";
 import { leaving, leavingByHistory } from "./leave-guard.js";
 import { AgentImport } from "./AgentImport.js";
 import { askPage } from "./intent.js";
@@ -66,7 +67,7 @@ const CodeReview = lazy(() => pages.review().then((m) => ({ default: m.CodeRevie
 const NeedsYouPage = lazy(() => pages.needs().then((m) => ({ default: m.NeedsYou })));
 import { WindowNav } from "./WindowNav.js";
 import { folderOf, foldersOf, getMode, ideKey, IdeChatContext, restoredIdeRoot, setIdeRoot, setMode as setViewMode, swapMode, toggleMode, useIdeRoot, useMode, wantReview, type IdeChat } from "./ide/mode.js";
-import { addCodeChat, codeChatFor, dropLinkedChat, isCodeChat, linkCodeChat, loadCodeChats, showCodeChat, updateCodeChat } from "./ide/code-chats.js";
+import { addCodeChat, codeChatFor, codeChatSids, dropLinkedChat, isCodeChat, linkCodeChat, loadCodeChats, onCodeChatsChange, showCodeChat, updateCodeChat } from "./ide/code-chats.js";
 import { toolName } from "../ready.js";
 import { askToShowDiff } from "./focusDiff.js";
 import { AgentForm } from "./AgentDialogs.js";
@@ -84,6 +85,7 @@ import type { WorkspaceUsage } from "./workspace-types.js";
 import { Icon } from "./icons.js";
 import { Setup } from "./Setup.js";
 import { WhatsNew } from "./WhatsNew.js";
+import { LinkOffers } from "./NearbyLink.js";
 import { KeepGoingHost } from "./crew-carry-open.js";
 import { QuickPrompt } from "./QuickPrompt.js";
 import { quickText, sendQuickTo, startQuick } from "./quick-send.js";
@@ -150,6 +152,22 @@ function readRoute(): Route {
 }
 
 /** The page an app address (its query) names. */
+/**
+ * Where what waits on you is answered. The open-source edition has no Needs you page (Arun, 2026-11-20: "removing the needs you
+ * button and page too"): the Agent Board, whose Needs you column holds the same, is where those links land instead.
+ */
+const needsPage = (): Route => (isLocal() ? { kind: "board" } : { kind: "needs" });
+
+/** Customize's tab last open (MCP servers or Skills), where its rail button goes back to. */
+const CUSTOMIZE_TAB = "friday.customize.tab";
+const customizeTab = (): "mcp" | "skills" => {
+  try {
+    return localStorage.getItem(CUSTOMIZE_TAB) === "skills" ? "skills" : "mcp";
+  } catch {
+    return "mcp";
+  }
+};
+
 function parseRoute(search: string): Route {
   const p = new URLSearchParams(search);
   // No Connections page any more (Arun, 2026-10-22: "the coding tools already have the mcps connected on their own coding
@@ -166,7 +184,7 @@ function parseRoute(search: string): Route {
   if (p.get("view") === "mcp") return { kind: "mcp" };
   if (p.get("view") === "skills") return { kind: "skills" };
   if (p.get("view") === "review") return { kind: "review" };
-  if (p.get("view") === "needs") return { kind: "needs" };
+  if (p.get("view") === "needs") return needsPage();
   if (p.get("view") === "settings") return { kind: "settings", section: settingsSection(p.get("section")) };
   if (p.get("view") === "usage") return { kind: "usage" };
   if (p.get("view") === "new-teammate") return { kind: "new-teammate" };
@@ -266,7 +284,24 @@ export function App() {
     return () => removeEventListener("storage", heard);
   }, []);
   // Sessions you are in on the server that this browser has never opened: another machine's, or one a schedule started.
-  type Mine = { sessions: { sid: string; title: string; role: Role; invite: string; at: number; later?: boolean }[] };
+  type Mine = { sessions: { sid: string; title: string; role: Role; invite: string; at: number; later?: boolean; code?: boolean }[] };
+  // Which sessions are Code's chats, told to the server whenever Code's list changes, so the phone (and any other device) can keep
+  // them out of its sessions as this window does (app.ts /api/sessions/code-chats; Arun, 2026-11-21: "ensure we arent showing IDE
+  // session chats"). Only when the list differs from the last one sent.
+  useEffect(() => {
+    if (!authed) return;
+    let last = "";
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const tell = () => {
+      const sids = codeChatSids().sort();
+      const said = sids.join(",");
+      if (said === last) return;
+      void api(identity, "/api/sessions/code-chats", { method: "POST", body: JSON.stringify({ sids }) }).then(() => (last = said), () => {});
+    };
+    tell();
+    const off = onCodeChatsChange(() => (clearTimeout(timer), (timer = setTimeout(tell, 800))));
+    return () => (off(), clearTimeout(timer));
+  }, [authed, identity.id]);
   const reloadMine = useCallback(
     (first = false) =>
       // The page asked already, while the app loaded; if that came back empty-handed (it asked before knowing who you were), ask again.
@@ -275,7 +310,7 @@ export function App() {
         .then((r) =>
           setRecents((prev) => {
             const known = new Set(prev.map((x) => x.sid));
-            const add = r.sessions.filter((s) => !known.has(s.sid) && !isCodeChat(s.sid) && !s.later).map((s) => ({ sid: s.sid, title: s.title, invite: s.invite, role: s.role, openedAt: s.at }));
+            const add = r.sessions.filter((s) => !known.has(s.sid) && !isCodeChat(s.sid) && !s.code && !s.later).map((s) => ({ sid: s.sid, title: s.title, invite: s.invite, role: s.role, openedAt: s.at }));
             // A session renamed somewhere else (a teammate, another computer) takes its new title here too, over a sidebar name.
             const title = new Map(r.sessions.map((s) => [s.sid, s.title]));
             let renamed = false;
@@ -377,6 +412,11 @@ export function App() {
     history.replaceState(null, "", routeUrl(tidy));
     setRoute(tidy);
   }, [route, authed]);
+  // An old Needs you link in the open-source edition shows the Agent Board (needsPage): its address says so too, so a reload or a
+  // copied link is the board's.
+  useEffect(() => {
+    if (isLocal() && route.kind === "board" && new URLSearchParams(location.search).get("view") === "needs") history.replaceState(null, "", routeUrl(route));
+  }, [route]);
   // Pull requests waiting on this person's review, kept current by the watch below, for the mark on Code Review's button.
   const { prs: reviewPrs } = usePrs();
   const [shortcuts, setShortcuts] = useState(false);
@@ -835,7 +875,7 @@ export function App() {
       if (r.kind !== "session" && parseRoute(location.search).kind === r.kind) dispatchEvent(new CustomEvent("friday:same-page", { detail: r.kind }));
       history.pushState(null, "", routeUrl(r));
       setRoute(r);
-      if (r.kind !== "session") document.title = r.kind === "connections" ? "Connections · Friday" : r.kind === "agents" ? "Saved agents · Friday" : r.kind === "automations" ? "Automations · Friday" : r.kind === "settings" ? "Settings · Friday" : r.kind === "usage" ? "Usage · Friday" : r.kind === "new-teammate" ? "New agent · Friday" : r.kind === "review" ? "Code Review · Friday" : r.kind === "needs" ? "Needs you · Friday" : r.kind === "board" ? "Agent Board · Friday" : r.kind === "deepdive" ? "Deep Dive · Friday" : r.kind === "mcp" ? "MCP servers · Friday" : r.kind === "skills" ? "Skills · Friday" : r.kind === "library" ? "Library · Friday" : r.kind === "people" ? "People · Friday" : (r.kind as string) === "crew" ? "Crew · Friday" : "Friday";
+      if (r.kind !== "session") document.title = r.kind === "connections" ? "Connections · Friday" : r.kind === "agents" ? "Saved agents · Friday" : r.kind === "automations" ? "Automations · Friday" : r.kind === "settings" ? "Settings · Friday" : r.kind === "usage" ? "Usage · Friday" : r.kind === "new-teammate" ? "New agent · Friday" : r.kind === "review" ? "Code Review · Friday" : r.kind === "needs" ? "Needs you · Friday" : r.kind === "board" ? "Agent Board · Friday" : r.kind === "deepdive" ? "Deep Dive · Friday" : r.kind === "mcp" ? "Plugins · Friday" : r.kind === "skills" ? "Skills · Friday" : r.kind === "library" ? "Library · Friday" : r.kind === "people" ? "People · Friday" : (r.kind as string) === "crew" ? "Crew · Friday" : "Friday";
       if (isNarrow(innerWidth)) setLayout({ sidebarCollapsed: true });
     },
     [setLayout],
@@ -1043,7 +1083,7 @@ export function App() {
         return;
       }
       // ⌘⇧Y: everything waiting on you, in one queue (NeedsYou.tsx).
-      if (mod && e.shiftKey && !e.altKey && k === "y") {
+      if (mod && e.shiftKey && !e.altKey && k === "y" && !isLocal()) {
         e.preventDefault();
         navigate({ kind: "needs" });
         return;
@@ -1061,7 +1101,7 @@ export function App() {
             const sids = [...new Set([...needs.flatMap((n) => (n.where.sid ? [n.where.sid] : [])), ...items.map((i) => i.sid)])].filter((sid) => listed.some((r) => r.sid === sid));
             if (sids.length) return void go(sids[(sids.indexOf(here) + 1) % sids.length]);
             // Waiting, but not in a session of the list (a teammate's ask, a review): the page that has it.
-            if (needs.length) return navigate({ kind: "needs" });
+            if (needs.length) return navigate(needsPage());
             dispatchEvent(new CustomEvent("friday:notice", { detail: "Nothing is waiting on you" }));
           });
         return;
@@ -1181,7 +1221,7 @@ export function App() {
     };
     window.addEventListener("friday:open-session", on);
     // Something waiting on you that isn't a session of the list (Home's row for a workflow at its Your OK): where it is answered.
-    const needs = () => navigate({ kind: "needs" });
+    const needs = () => navigate(needsPage());
     window.addEventListener("friday:open-needs", needs);
     return () => (window.removeEventListener("friday:open-session", on), window.removeEventListener("friday:open-needs", needs));
   }, [navigate]);
@@ -1748,7 +1788,8 @@ export function App() {
           onOpenMcp={isLocal() ? () => navigate({ kind: "mcp" }) : undefined}
           onOpenSkills={isLocal() ? () => navigate({ kind: "skills" }) : undefined}
           onOpenReview={() => navigate({ kind: "review" })}
-          onOpenNeeds={() => navigate({ kind: "needs" })}
+          onOpenNeeds={isLocal() ? undefined : () => navigate({ kind: "needs" })}
+          onOpenCustomize={isLocal() ? () => navigate({ kind: customizeTab() }) : undefined}
           reviewsWaiting={reviewPrs?.available ? reviewPrs.review.length : 0}
           onOpenSettings={() => (askPage("settings-search"), navigate({ kind: "settings", section: route.kind === "settings" ? route.section : lastSettings.current }))}
           onOpenUsage={() => navigate({ kind: "usage" })}
@@ -1781,6 +1822,8 @@ export function App() {
         {identity.id && <WhatsNew userId={identity.id} />}
         {/* "Keep this going" (crew-carry-open.tsx): the hand-off sheet, the wheel's question and Bring it in, from anywhere. */}
         {identity.id && isLocal() && <KeepGoingHost />}
+        {/* Another of your computers asking to link this one (local/nearby.ts): Allow or not, with its check number. */}
+        {identity.id && isLocal() && <LinkOffers />}
         {/* A new account's workspace on no paid plan: the plans, in front of everything but a shared session, which stays free to watch. */}
 
         {/* A page opened before its code has arrived shows its shape, not a blank. */}
@@ -1869,7 +1912,7 @@ export function App() {
               const r = recents.find((x) => x.sid === sid);
               // Not a session of the list (a workflow waiting on your OK, a review): the Needs you page, where it is answered.
               if (r) navigate({ kind: "session", sid, invite: r.invite });
-              else navigate({ kind: "needs" });
+              else navigate(needsPage());
             }}
             onNew={() => toNewSession()}
             onReview={() => navigate({ kind: "review" })}
@@ -1877,9 +1920,9 @@ export function App() {
         ) : route.kind === "deepdive" ? (
           <DeepDivePage identity={identity} />
         ) : route.kind === "mcp" ? (
-          <McpServersPage identity={identity} />
+          <McpServersPage identity={identity} tabs={isLocal() ? <CustomizeTabs tab="mcp" onTab={(tab) => navigate({ kind: tab })} /> : undefined} />
         ) : route.kind === "skills" ? (
-          <SkillsPage identity={identity} onUse={(brief) => (setPreset({ brief }), toNewSession({ kind: "home" }, true))} />
+          <SkillsPage identity={identity} tabs={isLocal() ? <CustomizeTabs tab="skills" onTab={(tab) => navigate({ kind: tab })} /> : undefined} onUse={(brief) => (setPreset({ brief }), toNewSession({ kind: "home" }, true))} />
         ) : route.kind === "review" ? (
           <CodeReview
             identity={identity}
@@ -2037,5 +2080,33 @@ function LibraryGate({ state, what, retry, children }: { state: string; what: st
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Customize's two tabs, MCP servers and Skills, at the left of whichever is open's own toolbar (Arun, 2026-11-20: "add a button
+ * called customize, this will house the MCPS and Skills"). Each is still its own page and address; the tab picked is remembered
+ * for the rail's button.
+ */
+function CustomizeTabs({ tab, onTab }: { tab: "mcp" | "skills"; onTab: (tab: "mcp" | "skills") => void }) {
+  useEffect(() => {
+    try {
+      localStorage.setItem(CUSTOMIZE_TAB, tab);
+    } catch {
+      /* Remembered for this window only. */
+    }
+  }, [tab]);
+  return (
+    <PageTabs<"mcp" | "skills">
+      label="Customize"
+      value={tab}
+      onChange={onTab}
+      className="customize-tabs"
+      size="lg"
+      options={[
+        { value: "mcp", label: (<><Icon name="plug" size={15} /> Plugins</>) },
+        { value: "skills", label: (<><Icon name="book" size={15} /> Skills</>) },
+      ]}
+    />
   );
 }

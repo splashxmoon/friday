@@ -81,3 +81,6 @@ html.tray-view .tp :is(button, a, [role="button"], .tp-row, .tp-btn, .tp-pick, .
 html.tray-view .tp .tp-new input { cursor: text !important; }
 /* A row's ring is the session tab's (presence.tsx TabRing), centred in its column. */
 .tp-ring-slot { display: grid; place-items: center; justify-self: center; }
+/* A Done row's proof clip (TrayPanel.tsx), between its words and its time: the grid gains a column only when a row has one. */
+.tp-row:has(.tp-clip) { grid-template-columns: 18px minmax(0, 1fr) 56px auto; }
+.tp-clip { width: 56px; height: 35px; border: 1px solid var(--border); border-radius: 6px; background: var(--hover); object-fit: cover; object-position: top; }

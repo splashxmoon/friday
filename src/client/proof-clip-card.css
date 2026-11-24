@@ -1,0 +1,104 @@
+/* A proof clip in the chat (ProofClipCard.tsx): the result card, its clip the preview on top. */
+.pcc { width: 100%; max-width: 540px; margin: 10px 0 4px; overflow: hidden; border: 1px solid var(--border); border-radius: 16px; background: var(--card); }
+
+/* The clip, in a rounded frame inset in the card, on a soft tint so a white page doesn't melt into a light card. */
+.pcc-frame { margin: 8px 8px 0; padding: 0; overflow: hidden; border-radius: 12px; background: color-mix(in srgb, var(--ink) 6%, var(--card)); }
+.pcc-media { position: relative; display: block; width: 100%; aspect-ratio: 16 / 10; padding: 0; overflow: hidden; border: 0; border-radius: 12px 12px 0 0; background: transparent; cursor: zoom-in; }
+.pcc-frame.is-phone .pcc-media { aspect-ratio: 9 / 13; max-height: 420px; }
+.pcc-media video { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top; }
+.pcc-frame.is-phone .pcc-media video { object-fit: contain; object-position: center; background: #000; }
+.pcc-media:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+.pcc-chip { position: absolute; bottom: 8px; display: inline-flex; align-items: center; gap: 4px; max-width: 60%; height: 20px; padding: 0 7px; overflow: hidden; border-radius: 999px; background: rgb(12 12 14 / .66); color: #fff; font-size: 11px; font-variant-numeric: tabular-nums; line-height: 20px; text-overflow: ellipsis; white-space: nowrap; backdrop-filter: blur(6px); }
+.pcc-page { left: 8px; }
+.pcc-len { right: 8px; }
+.pcc-expand { position: absolute; top: 8px; right: 8px; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; background: rgb(12 12 14 / .58); color: #fff; opacity: 0; transition: opacity .15s ease; }
+.pcc-media:hover .pcc-expand, .pcc-media:focus-visible .pcc-expand { opacity: 1; }
+
+/* The line under the clip: played so far, a tick at each step (lit once passed). A taller hit area than it looks. */
+.pcc-line { position: relative; height: 14px; margin: 0 10px; cursor: pointer; }
+.pcc-line::before { position: absolute; inset: 6px 0 auto; height: 2px; border-radius: 2px; background: color-mix(in srgb, var(--ink) 14%, transparent); content: ""; }
+.pcc-fill { position: absolute; top: 6px; left: 0; height: 2px; border-radius: 2px; background: var(--ink); transition: width .25s linear; }
+.pcc-tick { position: absolute; top: 4px; width: 6px; height: 6px; margin-left: -3px; border: 1.5px solid var(--card); border-radius: 50%; background: color-mix(in srgb, var(--ink) 35%, var(--card)); }
+.pcc-tick.on { background: var(--ink); }
+.pcc-line:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 4px; }
+@media (prefers-reduced-motion: reduce) { .pcc-fill { transition: none; } }
+
+.pcc-body { display: flex; flex-direction: column; gap: 6px; padding: 10px 14px 12px; }
+.pcc-title { display: flex; align-items: center; gap: 7px; margin: 0; overflow: hidden; color: var(--ink); font-size: 14px; font-weight: 600; line-height: 20px; text-overflow: ellipsis; white-space: nowrap; }
+.pcc-badge { display: grid; flex: none; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--ink); color: var(--bg); }
+.pcc-badge svg { margin-left: 1px; }
+.pcc-summary { margin: 0; color: var(--ink); font-size: 13.5px; line-height: 20px; text-wrap: pretty; }
+.pcc-facts { margin: 0; overflow: hidden; color: var(--text-muted); font-size: 12px; line-height: 17px; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The walk's steps: a numbered row each, the one the clip is at lit; a press seeks. */
+.pcc-steps { display: flex; flex-direction: column; gap: 1px; margin: 2px 0 0; padding: 0; list-style: none; }
+.pcc-steps button { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 9px; width: 100%; padding: 4px 6px; border: 0; border-radius: 8px; background: none; color: var(--ink-2, var(--ink)); font: inherit; font-size: 12.5px; line-height: 18px; text-align: left; cursor: pointer; transition: background .15s ease, color .15s ease; }
+.pcc-steps button:hover { background: var(--hover); }
+.pcc-steps button.on { background: var(--hover); color: var(--ink); }
+.pcc-n { display: grid; place-items: center; width: 18px; height: 18px; border: 1px solid var(--border-strong); border-radius: 50%; color: var(--text-muted); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.pcc-steps button.on .pcc-n { border-color: var(--ink); background: var(--ink); color: var(--bg); }
+.pcc-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pcc-at { color: var(--text-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+
+.pcc-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; }
+.pcc-btn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: 999px; background: none; color: var(--ink); font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer; }
+.pcc-btn:hover { background: var(--hover); }
+.pcc-btn.primary { border-color: var(--ink); background: var(--ink); color: var(--bg); }
+.pcc-btn.primary:hover { background: color-mix(in srgb, var(--ink) 86%, var(--bg)); }
+.pcc-seg { display: inline-flex; padding: 2px; border-radius: 999px; background: var(--hover); }
+.pcc-seg button { height: 24px; padding: 0 10px; border: 0; border-radius: 999px; background: none; color: var(--text-muted); font: inherit; font-size: 12px; cursor: pointer; }
+.pcc-seg button.on { background: var(--card); color: var(--ink); box-shadow: 0 0 0 1px var(--border); }
+
+@media (max-width: 560px) { .pcc { max-width: none; } }
+
+/* A proof clip being made (ProofStatusCard): the working ring, the step, a counting clock; why, when it couldn't be. */
+.pcs { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 10px; max-width: 540px; margin: 8px 0 4px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); }
+.pcs-mark { display: grid; place-items: center; width: 18px; height: 18px; }
+.pcs.is-failed .pcs-mark { border-radius: 50%; background: color-mix(in srgb, var(--red) 16%, transparent); color: var(--red); }
+.pcs-text { display: flex; flex-direction: column; min-width: 0; }
+.pcs-title { color: var(--ink); font-size: 13px; font-weight: 500; line-height: 18px; }
+.pcs-sub { overflow: hidden; color: var(--text-muted); font-size: 12.5px; line-height: 17px; text-overflow: ellipsis; white-space: nowrap; }
+.pcs.is-failed .pcs-sub { white-space: normal; }
+.pcs-clock { color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+.pcc-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.pcc-head .pcc-title { flex: 1; min-width: 0; }
+.pcc-x { display: grid; flex: none; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 7px; background: none; color: var(--text-muted); cursor: pointer; }
+.pcc-x:hover { background: var(--hover); color: var(--ink); }
+/* A clip put away: one quiet line that brings it back. */
+.pcc-folded { display: flex; align-items: center; gap: 8px; max-width: 540px; margin: 6px 0; color: var(--text-muted); font-size: 12.5px; line-height: 18px; }
+.pcc-folded > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Test proof (TestProofCard.tsx): the clip card's body, its badge green or red, each command with its counts, failures, its output. */
+/* Test proof (TestProofCard.tsx): one slim line, a line per command under it when there are several. */
+.tpc { width: 100%; max-width: 540px; margin: 8px 0 4px; padding: 6px 6px 6px 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
+.tpc-head { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 24px; }
+.tpc-badge { display: grid; flex: none; place-items: center; width: 16px; height: 16px; border-radius: 50%; color: #fff; }
+.tpc.is-ok .tpc-badge { background: var(--green); }
+.tpc.is-bad .tpc-badge { background: var(--red); }
+.tpc-title { flex: none; color: var(--ink); font-size: 13px; font-weight: 600; line-height: 18px; }
+.tpc-cmd { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--ink-2, var(--ink)); font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.tpc-counts { flex: none; color: var(--text-muted); font-size: 12px; line-height: 18px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tpc.is-bad .tpc-head .tpc-counts, .tpc-runs > li.bad .tpc-counts { color: var(--red); }
+.tpc-tag { flex: none; padding: 0 6px; border-radius: 6px; background: var(--hover); color: var(--text-muted); font-size: 11.5px; line-height: 18px; white-space: nowrap; }
+.tpc-sp { flex: 1; min-width: 4px; }
+.tpc-tog { display: inline-flex; flex: none; align-items: center; gap: 3px; height: 24px; padding: 0 6px 0 8px; border: 0; border-radius: 7px; background: none; color: var(--text-muted); font: inherit; font-size: 12px; cursor: pointer; }
+.tpc-tog:hover, .tpc-tog[aria-expanded="true"] { background: var(--hover); color: var(--ink); }
+.tpc-chev { transition: transform 0.15s ease; }
+.tpc-chev.open { transform: rotate(180deg); }
+.tpc-x { width: 24px; height: 24px; }
+.tpc-runs { display: flex; flex-direction: column; gap: 2px; margin: 4px 0 2px; padding: 0 0 0 24px; list-style: none; }
+.tpc-run { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tpc-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+.tpc-runs > li.bad .tpc-dot { background: var(--red); }
+.tpc-failing { display: flex; flex-direction: column; margin: 1px 0 0; padding: 0; list-style: none; }
+.tpc-failing li { overflow: hidden; color: var(--red); font-family: var(--font-mono, ui-monospace, monospace); font-size: 11.5px; line-height: 17px; text-overflow: ellipsis; white-space: nowrap; }
+.tpc-failing li::before { content: "✕ "; }
+.tpc-out { max-height: 240px; margin: 6px 4px 2px 0; padding: 8px 10px; overflow: auto; border-radius: 8px; background: var(--hover); color: var(--ink-2, var(--ink)); font-family: var(--font-mono, ui-monospace, monospace); font-size: 11.5px; line-height: 17px; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: reduce) { .tpc-chev { transition: none; } }
+
+/* Test it (Activity.tsx): the offer under finished work, as Devin's "Test the app" (Arun, 2026-11-22: "Devin's way, in chat"). */
+.test-it { display: inline-flex; align-items: center; gap: 5px; height: 26px; margin-right: 4px; padding: 0 10px 0 8px; border: 1px solid var(--border-strong); border-radius: 999px; background: none; color: var(--ink); font: inherit; font-size: 12.5px; font-weight: 500; white-space: nowrap; cursor: pointer; }
+.test-it:hover { background: var(--hover); }
+.test-it:disabled { color: var(--ink-3, var(--muted-foreground)); cursor: default; }
+.test-it:disabled:hover { background: none; }

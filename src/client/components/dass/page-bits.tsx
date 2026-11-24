@@ -58,15 +58,18 @@ export function PageTabs<T extends string>({
   options,
   label,
   className,
+  size,
 }: {
   value: T;
   onChange: (v: T) => void;
   options: readonly { value: T; label: ReactNode; /** Said in the tooltip, with the shortcut. */ tip?: string; keys?: string }[];
   label: string;
   className?: string;
+  /** "lg": a page's own top-level switch (Customize's MCP servers and Skills), larger than a filter's. */
+  size?: "lg";
 }) {
   return (
-    <Tabs value={value} onValueChange={(v) => onChange(v as T)} className={cn("gap-0", className)}>
+    <Tabs value={value} onValueChange={(v) => onChange(v as T)} className={cn("gap-0", size === "lg" && "page-tabs-lg", className)}>
       {/* Never wider than its column: on a phone the last tab ran off the screen ("Only Run now", 2026-10-27 audit); it scrolls. */}
       <TabsList aria-label={label} className="h-8 group-data-[orientation=horizontal]/tabs:h-8 max-w-full justify-start gap-0.5 overflow-x-auto rounded-lg bg-[var(--hover)] p-[3px] [scrollbar-width:none]">
         {options.map((o) => {

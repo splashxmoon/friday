@@ -3,7 +3,7 @@ import { ENGINE_NAMES, ENGINE_TOOLS, type EngineTool } from "../types.js";
 import type { Need } from "../needs-rank.js";
 import { doingWords } from "../step-words.js";
 import { useAttention } from "./Attention.js";
-import { api } from "./api.js";
+import { api, fileUrl } from "./api.js";
 import { EngineMark } from "./BrandMarks.js";
 import { FridayMark, Icon } from "./icons.js";
 import { useMachine } from "./local.js";
@@ -105,6 +105,7 @@ function TrayPanel({ identity }: { identity: Identity }) {
   // Working, less what waits on you: that one is in Needs you, with its answer, not twice.
   const waitingSids = new Set(needs.flatMap((n) => (n.where.sid ? [n.where.sid] : [])));
   const working = [...a.working.values()].filter((w) => !waitingSids.has(w.sid) && !a.needSids.has(w.sid)).sort((x, y) => (a.since.get(x.sid) ?? 0) - (a.since.get(y.sid) ?? 0));
+  const still = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
   const done = recents.filter((r) => unread.has(r.sid) && !a.working.has(r.sid) && !a.needSids.has(r.sid)).slice(0, 3);
 
   // The menu bar's mark and its count follow what this reads.
@@ -297,6 +298,12 @@ function TrayPanel({ identity }: { identity: Identity }) {
                   </span>
                   <span className="tp-step ok">{pr ? `${pr.merged ? "Merged" : "Pull request"} #${pr.url.split("/").pop()}` : "Finished while you were away"}</span>
                 </span>
+                {/* Its proof clip, playing quietly: what the work looks like, before opening it (Arun, 2026-11-16's approved mock had a
+                    clip on each Done row; 2026-11-21: "add clips… see where else we can intergrate it"). */}
+                {(() => {
+                  const clip = a.facts.get(r.sid)?.clip;
+                  return clip ? <video className="tp-clip" src={fileUrl(r.sid, r.invite, clip.file)} muted loop playsInline autoPlay={!still} preload="metadata" aria-hidden="true" /> : null;
+                })()}
                 <span className="tp-time">{a.since.get(r.sid) ? `${relTime(a.since.get(r.sid)!)} ago` : ""}</span>
               </button>
             );

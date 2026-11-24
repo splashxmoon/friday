@@ -195,3 +195,7 @@ html.dark .mdir-mark.mdir-own { background: color-mix(in srgb, var(--ink) 8%, va
 .mdir-foot { margin: 4px 0 0; color: var(--text-muted); font-size: 11.5px; line-height: 16px; }
 @media (max-width: 860px) { .mdir-head { flex-wrap: wrap; } .mdir-head-acts { flex-wrap: wrap; width: 100%; } .mdir-search { flex: 1 1 180px; width: auto; } }
 @media (max-width: 640px) { .mdir-cc > span { display: none; } }
+
+/* Customize's switch, MCP servers or Skills (App.tsx CustomizeTabs): the page's own top row, above its toolbar, larger than any
+   filter so which of the two you're in reads first (Arun, 2026-11-20: "make the MCP and Skills toggle more visible"). */
+.customize-bar { display: flex; align-items: center; margin: 0; }

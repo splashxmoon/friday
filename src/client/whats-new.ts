@@ -17,14 +17,14 @@ export interface WhatsNewNotes {
 }
 
 export const WHATS_NEW: WhatsNewNotes = {
-  version: "0.4.0",
-  title: "Friday IDE",
-  summary: "Code is a full IDE now, with your agents in it: they edit in place, check their own work, and pass work to Agents and back.",
+  version: "0.4.1",
+  title: "Backdrops and proof",
+  summary: "Put a scene behind Friday, see finished work proven with a clip or its tests, and find what's worth doing on Home.",
   items: [
-    { icon: "code", title: "A full IDE", line: "Your editor, terminal and extensions, with Friday's chat beside them and one status bar under both." },
-    { icon: "zap", title: "Agents in your editor", line: "⌘K changes the lines you select in place, with Keep and Undo; Explain, Test, Fix and Refactor sit above every function." },
-    { icon: "shield", title: "Work that checks itself", line: "A self-review before the pull request, find the commit that broke it, race tools, and CI failures at the failing line." },
-    { icon: "users", title: "Code and Agents as one", line: "One Waiting on you, one search, one task board and one project memory; ⌘E and Send to Agents move work between them." },
+    { icon: "image", title: "Backdrops", line: "A scene, a picture or a video behind the whole app, or describe one and an agent makes it. Settings › Backdrop." },
+    { icon: "play", title: "Proof clips and Test it", line: "A short clip walking through the page that changed, before and after, a GIF in the pull request, and the tests the agent ran." },
+    { icon: "sun", title: "Today on Home", line: "Broken CI, audit warnings, your issues and old TODOs, each a click to start, or queued for Tonight while you sleep." },
+    { icon: "diagram", title: "Code map", line: "Deep Dive draws your repo top to bottom: where it starts, what it rests on, and everything one part touches." },
   ],
 };
 

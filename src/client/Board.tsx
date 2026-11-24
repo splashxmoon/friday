@@ -7,7 +7,9 @@ import { api } from "./api.js";
 import { EngineMark, FridayMark } from "./BrandMarks.js";
 import { Avatar, Icon } from "./icons.js";
 import { teamCards, teamFace } from "./Teammates.js";
-import { PresenceRing, type Presence } from "./presence.js";
+import { PresenceRing, useNow, type Presence } from "./presence.js";
+import { askCard } from "./card-ask.js";
+import { Shine } from "./shine.js";
 import { openOutside } from "./openOutside.js";
 import type { Identity, Project, RecentSession } from "./storage.js";
 import { ConfirmDialog, isTyping, relTime, type Confirmation } from "./ui.js";
@@ -157,6 +159,15 @@ function sizeOf(card: BoardCard): { files: number; add?: number; del?: number } 
 /** The one thing a card offers besides opening it: its pull request, its failing checks, Merge, or a review to do. */
 type CardAction = { label: string; title: string; primary?: boolean; icon?: boolean; run: () => void };
 
+/** How long a run has been going, counted up in place: "14s", "2m 14s", "1h 5m". */
+export function runClock(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${s % 60}s`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
 /**
  * One agent: its mark, its piece of work and how long since it moved; one live line (what it is doing, or where its pull request
  * stands, with a dot only when that means something: running, failing, ready); who and which branch, how big its change is, and
@@ -177,12 +188,29 @@ function Card({ card, onOpen, solo, focused, onFocus, action, where }: { card: B
   // The mark's ring and the lane already say running or ready; a dot on the line is kept for what the lane can't say: failing.
   const lineDot: DotState | null = failing ? "bad" : null;
   const size = card.column === "needs" ? null : sizeOf(card);
+  // The card as a working clock (Arun, 2026-11-21: "Add this", of the audit's mock): a working card counts how long its run has
+  // gone and offers Open; a ready one says when it finished and, with changes and no pull request yet, Review and Commit, the
+  // session's own (card-ask.ts: the session opens on its commit dialog, or its Changes).
+  const running = card.column === "working" && !!card.since;
+  const now = useNow(running ? 1_000 : 30_000);
+  const when = running ? runClock(now - card.since!) : card.column === "ready" ? (relTime(card.at) === "now" ? "done just now" : `done ${relTime(card.at)} ago`) : relTime(card.at);
+  const whenTitle = running ? `Working since ${new Date(card.since!).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : new Date(card.at).toLocaleString();
+  const quick: CardAction[] =
+    card.column === "working"
+      ? [{ label: "Open", title: "Open the session", run: () => onOpen(card.sid) }]
+      : card.column === "ready" && !where && !action && !card.pr && card.files > 0 && (card.mine || solo)
+        ? [
+            { label: "Review", title: "Open the session at its changes", run: () => (askCard(card.sid, card.lane, "review"), onOpen(card.sid)) },
+            { label: "Commit", title: "Commit these changes: the session's commit, its message drafted", primary: true, run: () => (askCard(card.sid, card.lane, "commit"), onOpen(card.sid)) },
+          ]
+        : [];
   const sizeEl = size ? (
     <span className="shrink-0 text-[12px] text-[var(--text-muted)] tabular-nums" title={`${size.files} file${size.files === 1 ? "" : "s"} changed${size.add !== undefined ? `, ${size.add} lines added and ${size.del} taken away` : ""}`}>
       {size.add !== undefined && (size.add || size.del) ? (
         <>
           <span className="text-[var(--green)]">+{size.add}</span> <span className="text-[var(--red)]">−{size.del}</span>
-          <span> in {size.files} file{size.files === 1 ? "" : "s"}</span>
+          {/* The words go on a narrow card, to keep room for its buttons. */}
+          <span className="hidden @min-[22rem]:inline"> in {size.files} file{size.files === 1 ? "" : "s"}</span>
         </>
       ) : (
         `${size.files} file${size.files === 1 ? "" : "s"}`
@@ -197,7 +225,7 @@ function Card({ card, onOpen, solo, focused, onFocus, action, where }: { card: B
     // over the Board's status bar as the cards scrolled under it).
     <article
       className={cn(
-        "board-card group/card relative isolate flex cursor-pointer flex-col gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 pt-2.5 pb-2.5 transition-[border-color,box-shadow] duration-[var(--dass-fast)] ease-[var(--dass-ease)] hover:border-[var(--border-strong)] hover:shadow-[0_1px_2px_rgb(0_0_0/0.04)]",
+        "board-card group/card @container relative isolate flex cursor-pointer flex-col gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 pt-2.5 pb-2.5 transition-[border-color,box-shadow] duration-[var(--dass-fast)] ease-[var(--dass-ease)] hover:border-[var(--border-strong)] hover:shadow-[0_1px_2px_rgb(0_0_0/0.04)]",
         "has-[[data-open]:focus-visible]:border-[var(--border-focus)] has-[[data-open]:focus-visible]:shadow-[var(--dass-ring)]",
         needsYou && "border-[color-mix(in_srgb,var(--dass-needs)_45%,var(--border))] hover:border-[color-mix(in_srgb,var(--dass-needs)_70%,var(--border))]",
       )}
@@ -219,15 +247,18 @@ function Card({ card, onOpen, solo, focused, onFocus, action, where }: { card: B
           {card.title}
         </button>
         {card.at > 0 && (
-          <span className="shrink-0 text-[12px] text-[var(--text-muted)] tabular-nums" title={new Date(card.at).toLocaleString()}>
-            {relTime(card.at)}
+          <span className="shrink-0 text-[12px] text-[var(--text-muted)] tabular-nums" title={whenTitle}>
+            {when}
           </span>
         )}
       </div>
       {/* One live line: the question when it waits on you, in ink; otherwise what it is doing, or where its pull request stands. */}
       <p className={cn("m-0 flex min-w-0 items-start gap-1.5 pl-8 text-[13px] leading-[18px]", needsYou ? "text-[var(--ink)]" : failing ? "text-[var(--red)]" : "text-[var(--ink-2)]")} title={card.detail || undefined}>
         {lineDot && <Dot state={lineDot} className="mt-[5px] shrink-0" />}
-        <span className="line-clamp-2 min-w-0">{card.detail ? shortPaths(card.detail) : card.status}</span>
+        {/* At work, the step shines as a reply's step does (shine.tsx). */}
+        <Shine on={card.column === "working" && !!card.detail} className="line-clamp-2 min-w-0">
+          {card.detail ? shortPaths(card.detail) : card.status}
+        </Shine>
       </p>
       <div className="flex min-h-6 min-w-0 items-center gap-2 pl-8 text-[12px] text-[var(--text-muted)]">
         {where && (
@@ -235,7 +266,8 @@ function Card({ card, onOpen, solo, focused, onFocus, action, where }: { card: B
             Code
           </span>
         )}
-        <span className="min-w-0 truncate" title={`${agent}${card.branch ? ` · ${card.branch}` : ""}`}>
+        {/* On a narrow card with buttons, the name gives way: the card's mark already says which tool it is. */}
+        <span className={cn("min-w-0 truncate", quick.length > 1 && "hidden @min-[22rem]:inline")} title={`${agent}${card.branch ? ` · ${card.branch}` : ""}`}>
           {where && where.folder ? `${folderName(where.folder)} · ` : ""}
           {agent}
           {card.branch && (
@@ -272,6 +304,14 @@ function Card({ card, onOpen, solo, focused, onFocus, action, where }: { card: B
               </Button>
             </Tip>
           )}
+          {quick.map((a) => (
+            <Tip key={a.label} label={a.title}>
+              <Button variant={a.primary ? "default" : "outline"} size="sm" className={cn("ml-1 h-[26px] gap-1.5 rounded-md px-2.5 text-[13px]", !a.primary && "border-[var(--border-strong)] bg-[var(--card)] text-[var(--ink)] shadow-none")} onClick={a.run}>
+                {a.label === "Commit" && <Icon name="commit" size={13} />}
+                {a.label}
+              </Button>
+            </Tip>
+          ))}
         </span>
       </div>
       {/* The card's one action, on its own line with how big the change is: a pull request, its failing checks, or Merge. */}
@@ -337,7 +377,7 @@ function firstChoice(n: Need): string | null {
  * holds up; the question in full, a command to run as code; the suggested answer and why; its answers as buttons, the suggested
  * one first in weight; Reply for words of your own; and the session, for what can only be answered there.
  */
-function NeedCard({ need, card, busy, error, solo, onAnswer, onOpen }: { need: Need; card?: BoardCard; busy: boolean; error: string; solo: boolean; onAnswer: (value: string, edited?: boolean) => void; onOpen: () => void }) {
+function NeedCard({ need, card, busy, error, solo, onAnswer, onOpen, where }: { need: Need; card?: BoardCard; busy: boolean; error: string; solo: boolean; onAnswer: (value: string, edited?: boolean) => void; onOpen: () => void; /** One of Code's chats: marked "Code" as its card is, opening in Code. */ where?: { folder: string } | undefined }) {
   const [replying, setReplying] = useState(false);
   const [draft, setDraft] = useState("");
   const agent = card ? (solo ? card.agent.replace(/^[^']+'s /, "") : card.agent) : need.who;
@@ -354,6 +394,12 @@ function NeedCard({ need, card, busy, error, solo, onAnswer, onOpen }: { need: N
         <button type="button" className="link-btn min-w-0 flex-1 truncate text-left text-[13px] font-medium text-[var(--ink)]" onClick={onOpen} title={`Open “${need.where.title}”`}>
           {need.where.title}
         </button>
+        {/* A Code chat's wait says so, as the Needs you page said "in Code · folder" (2026-11-23, before v0.4.1). */}
+        {where && (
+          <span className="shrink-0 rounded-[5px] border border-[var(--border)] px-1.5 text-[11px] leading-4 text-[var(--ink-2)]" title={`${codeWhere(where)}: opens in Code`} data-where="code">
+            Code
+          </span>
+        )}
         <span className="shrink-0 text-[12px] text-[var(--text-muted)] tabular-nums" title={need.why || undefined}>
           {holds ? `${holds} · ` : ""}waited {relTime(need.since)}
         </span>
@@ -819,7 +865,7 @@ export function Board({ identity, recents, projects, onOpen: openAgents, onNew, 
                 ) : (
                   <div className="grid grid-cols-1 items-start gap-2 @min-[720px]:grid-cols-2 @min-[1180px]:grid-cols-3">
                     {open.map((n) => (
-                      <NeedCard key={n.id} need={n} card={cardOf(n.where.sid)} solo={solo} busy={answering === n.id} error={needError?.id === n.id ? needError.text : ""} onAnswer={(v, edited) => void answer(n, v, edited)} onOpen={() => onOpen(n.where.sid ?? "")} />
+                      <NeedCard key={n.id} need={n} card={cardOf(n.where.sid)} solo={solo} busy={answering === n.id} error={needError?.id === n.id ? needError.text : ""} onAnswer={(v, edited) => void answer(n, v, edited)} onOpen={() => onOpen(n.where.sid ?? "")} where={codeBySid.get(n.where.sid ?? "")} />
                     ))}
                     {rest.map((c) => (
                       <Card key={c.id} card={c} onOpen={onOpen} solo={solo} focused={focus === c.id} onFocus={() => setFocus(c.id)} action={codeBySid.has(c.sid) ? null : actionOf(c)} where={codeBySid.get(c.sid)} />

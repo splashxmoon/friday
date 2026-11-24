@@ -56,6 +56,8 @@ export interface BoardCard {
   shepherd?: string;
   /** When this agent last did or was asked something. */
   at: number;
+  /** Working: when its run began, so the card's clock counts how long it has been at it (Arun, 2026-11-21, the board's live clock). */
+  since?: number;
   /** Whether it is waiting on this person in particular: exactly when the Needs you page lists it, and it isn't put off. */
   you: boolean;
   /** The Needs you items it waits on (needs-you.ts ids), so one put off there leaves the Board's count too (putOffCards). */
@@ -310,9 +312,11 @@ export function boardCards(state: SessionState, events: SessionEvent[], meId: st
     // Only for work that is handed over or about to be: a running agent's half-done change has nothing to score yet.
     // The last diff outlives the commit that took it, so "files to commit" can be the committed work: then that is what is up.
     const review = pr || files > 0 || commitBody ? ((files > 0 && reviewFacts(mine, true)) || (commitBody ? reviewFacts(mine, false) : null)) : null;
+    // The run's start: the event it began at, else its first event after.
+    const since = column === "working" ? (events.find((e) => e.seq >= run.sinceSeq)?.ts ?? undefined) : undefined;
     out.push({
       id: `${state.id}|${lane}`, sid: state.id, lane, title: state.title || "Untitled session", task, agent, tool, column, status, detail, branch, files, pr,
-      ...(prFrom ? { prFrom } : {}), ...(shepherd ? { shepherd } : {}), at, you, ...(you ? { waits: waitIds.get(lane) } : {}), mine: driverIsMe,
+      ...(prFrom ? { prFrom } : {}), ...(shepherd ? { shepherd } : {}), at, ...(since ? { since } : {}), you, ...(you ? { waits: waitIds.get(lane) } : {}), mine: driverIsMe,
       ...(review ? { review, risk: riskOf(review) } : {}),
     });
   }

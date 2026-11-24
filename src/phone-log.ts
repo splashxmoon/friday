@@ -5,12 +5,13 @@ import { MAIN_LANE, type SessionEvent } from "./types.js";
  *
  * A long session's log is tens of megabytes, and the phone read every byte of it before it drew the first message (2026-10-20:
  * "it is taking a while to load"). The phone's feed shows only what people said, the agent's answers, its tool steps as one
- * line each with a short gist and the first 400 characters of their output, how a run ended, commits, and who took the wheel:
+ * line each with a short gist and the first 400 characters of their output, how a run ended, commits, who took the wheel, and
+ * the cards agents draw (ui.card; Arun, 2026-11-21: "generative ui ... in the chat"):
  * the rest of the log (diffs, file trees, reviews, previews) is drawn from the state, which is sent whole, or not at all.
  * So it gets the newest `perLane` of those per lane, with the bulky fields cut to what it shows: a screenful, so the session
  * opens at once, and the rest a page at a time as the person scrolls up (`phonePage`, `GET /api/sessions/:sid/history`).
  */
-export const PHONE_TYPES = new Set(["instruction", "suggestion", "agent.message", "tool.result", "run.ended", "folder.committed", "control.granted", "agent.task", "run.pause", "run.cancel", "mesh.posted", "peer.sent", "peer.held", "chat"]);
+export const PHONE_TYPES = new Set(["instruction", "suggestion", "agent.message", "tool.result", "run.ended", "folder.committed", "control.granted", "agent.task", "run.pause", "run.cancel", "mesh.posted", "peer.sent", "peer.held", "chat", "ui.card", "proof.clip", "proof.status", "proof.tests", "board.posted"]);
 /** Subagents and background commands (the phone's Background tasks sheet) and stops, kept apart from the per-lane count so a busy tray never pushes the chat out. */
 const SIDE_TYPES = new Set(["agent.task", "run.pause", "run.cancel"]);
 const SIDE_PER_LANE = 80;

@@ -866,8 +866,7 @@ export function Workbench({
                       {t === "overview" && badges?.tasks && <i className="bench-tab-n" title={`Team tasks: ${badges.tasks.replace("/", " of ")} done`}>{badges.tasks}</i>}
                     </button>
                   )}
-                  {tabs.length > 1 &&
-                    (
+                  {tabs.length > 1 && (
                     <button type="button" className="bench-tab-x" aria-label={`Close ${TAB_LABEL[t]}`} title={`Close ${TAB_LABEL[t]}`} onClick={() => closeTab(t)}>
                       <Icon name="x" size={11} />
                     </button>
@@ -1095,8 +1094,11 @@ export function Workbench({
     // An uploaded folder has no path on anybody's machine, so the session
     // is what names it. Passing the prose "12 files uploaded to this
     // session" as a cwd is what used to happen, and it previewed nothing.
-    if (which === "preview" && work) return <PreviewPanel headSlot={which === tab ? headSlot : which === second ? secondSlot : null} shown={on} identity={identity} cwd={null} sid={sid} invite={invite} send={send} onClose={onClose} bare asNote={me.role === "viewer" || !canDrive} work suggest={sourcesIn(events, state).flatMap((x) => (x.url ? [{ url: x.url, title: x.title ?? "" }] : []))} />;
-    if (which === "preview") return <PreviewPanel headSlot={which === tab ? headSlot : which === second ? secondSlot : null} shown={on} identity={identity} cwd={facts.uploaded ? null : (facts.repo?.path ?? null)} iosElsewhere={iosElsewhere} sid={sid} invite={invite} send={send} onClose={onClose} bare onOutput={() => onTab("overview")} asNote={me.role === "viewer" || !canDrive} />;
+    // Its last page's × closes the Browser panel, not the whole side panel (Arun, 2026-11-22: "be able to close this browser without
+    // having to open another tab"): in Work, as the Browser tab's own × does; else as closing its tab.
+    const closeBrowser = () => (work ? (setBrowserOpen(false), onPick?.(tabs.includes("tree") ? "tree" : roomHere ? "room" : "mate")) : tabs.includes("preview") ? closeTab("preview") : onClose());
+    if (which === "preview" && work) return <PreviewPanel headSlot={which === tab ? headSlot : which === second ? secondSlot : null} shown={on} identity={identity} cwd={null} sid={sid} invite={invite} send={send} onClose={closeBrowser} bare asNote={me.role === "viewer" || !canDrive} work suggest={sourcesIn(events, state).flatMap((x) => (x.url ? [{ url: x.url, title: x.title ?? "" }] : []))} />;
+    if (which === "preview") return <PreviewPanel headSlot={which === tab ? headSlot : which === second ? secondSlot : null} shown={on} identity={identity} cwd={facts.uploaded ? null : (facts.repo?.path ?? null)} iosElsewhere={iosElsewhere} sid={sid} invite={invite} send={send} onClose={closeBrowser} bare onOutput={() => onTab("overview")} asNote={me.role === "viewer" || !canDrive} />;
     return (
       <TerminalPanel
         events={laneEvents}

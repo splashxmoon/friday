@@ -7,8 +7,7 @@
  */
 import { useMemo, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import type { TodoStep } from "@/components/aicss/TodoList";
-import { laneLabel } from "../left-off.js";
-import { laneOf, type BoardTask, type SessionState } from "../session/projection.js";
+import { laneOf, uniqueLaneName, type BoardTask, type SessionState } from "../session/projection.js";
 import { MAIN_LANE } from "../types.js";
 import { teamTasks } from "./AgentTalk.js";
 import { liveTasks } from "./task-count.js";
@@ -104,7 +103,7 @@ export default function TaskBoard({ state, send, notify, jump, readOnly }: { sta
   const all = liveTasks(listed);
   const board = state.board;
   const bt = (t: TodoStep): BoardTask | undefined => (t.id.startsWith("b:") ? board?.tasks.find((x) => x.id === t.id.slice(2)) : undefined);
-  const agents = [MAIN_LANE, ...state.lanes.map((l) => l.id)].filter((l) => laneOf(state, l)?.control.kind !== "standing").map((l) => ({ id: l, name: laneLabel(state, l), mark: agentLook(state, l, 13).mark }));
+  const agents = [MAIN_LANE, ...state.lanes.map((l) => l.id)].filter((l) => laneOf(state, l)?.control.kind !== "standing").map((l) => ({ id: l, name: uniqueLaneName(state, l), mark: agentLook(state, l, 13).mark }));
   if (state.options.team) return null;
   // Nothing on it and nobody to add one: no section at all, as the empty Tasks tab says what shows there.
   if (!all.length && !can) return null;
@@ -128,7 +127,10 @@ export default function TaskBoard({ state, send, notify, jump, readOnly }: { sta
       open && { label: "Edit", icon: "pencil" as const, onSelect: () => setEditing(b.id) },
       (b.status === "blocked" || b.status === "cancelled") && { label: "Try again", icon: "refresh" as const, onSelect: () => steer({ action: "retry", id: b.id }) },
       open && others.length > 0 && { heading: b.status === "open" ? "Give it to" : "Hand it to" },
-      ...(open ? others.map((a) => ({ label: a.name, mark: agentLook(state, a.id, 13).mark, checked: b.status === "open" && b.next === a.name, onSelect: () => steer({ action: "reassign", id: b.id, to: a.name }) })) : []),
+      // The agents by the names they go by (uniqueLaneName: "Claude Code", "Claude Code 2"), handed a task by lane id: left-off's laneLabel
+      // said "arundass's Claude Code" for an unnamed agent, and the board found nobody by that name (Arun, 2026-11-22: "it says
+      // arundass's claude code instead of just claude code and i cannot send it to it").
+      ...(open ? others.map((a) => ({ label: a.name, mark: agentLook(state, a.id, 13).mark, checked: b.status === "open" && b.next === a.name, onSelect: () => steer({ action: "reassign", id: b.id, to: a.id }) })) : []),
       open && { heading: "This task" },
       open && (b.held ? { label: "Let it go", icon: "play" as const, onSelect: () => steer({ action: "resume", id: b.id }) } : { label: b.status === "open" ? "Hold it back" : "Stop and hold it", icon: "pause" as const, onSelect: () => steer({ action: "hold", id: b.id }) }),
       open && { label: "Mark done", icon: "check" as const, onSelect: () => steer({ action: "done", id: b.id }) },

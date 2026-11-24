@@ -255,7 +255,7 @@ export function baseActions(p: {
   stateOf?: (sid: string) => SessionState | null;
   open: (r: RecentSession) => void;
   newSession: () => void;
-  goto: (where: "connections" | "agents" | "automations" | "people" | "board" | "review" | "needs" | "usage" | "settings") => void;
+  goto: (where: "connections" | "agents" | "automations" | "people" | "board" | "review" | "needs" | "mcp" | "skills" | "usage" | "settings") => void;
   toggleSidebar: () => void;
   showShortcuts: () => void;
   search?: () => void;
@@ -275,7 +275,13 @@ export function baseActions(p: {
     ...(p.invite && p.team !== false ? [{ id: "invite", label: "Invite someone by email", icon: "mail" as const, group: "Create", run: p.invite }] : []),
     { id: "board", label: "Agent Board", icon: "board", group: "Go to", run: () => p.goto("board") },
     { id: "review", label: "Code Review", icon: "gitPullRequest", group: "Go to", run: () => p.goto("review") },
-    { id: "needs", label: "Needs you", icon: "hand", group: "Go to", run: () => p.goto("needs") },
+    // No Needs you page in the open-source edition (Arun, 2026-11-20); Customize holds MCP servers and Skills, found by any of the names.
+    ...(isLocal()
+      ? [
+          { id: "mcp", label: "Plugins", hint: "Customize", icon: "sliders" as const, group: "Go to", run: () => p.goto("mcp") },
+          { id: "skills", label: "Skills", hint: "Customize", icon: "sliders" as const, group: "Go to", run: () => p.goto("skills") },
+        ]
+      : [{ id: "needs", label: "Needs you", icon: "hand" as const, group: "Go to", run: () => p.goto("needs") }]),
     // One list of automations, the coding tools' and the crew's workflows (the "Why Crew" plan, 2026-11-13): found by either name.
     { id: "automations", label: "Automations", icon: "zap", group: "Go to", run: () => p.goto("automations") },
     { id: "workflows", label: "Crew workflows", icon: "zap", group: "Go to", run: openWorkflows },

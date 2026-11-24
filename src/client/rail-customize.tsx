@@ -6,7 +6,8 @@ import "./rail-customize.css";
 
 /**
  * Customize rail (Arun, 2026-11-19: "add the option to customize what tabs can be on the rail", then "very simple and clean please
- * not extra BS"): every place in its order, a switch for whether it's on the rail (off, it's behind the ⋯), dragged by its handle
+ * not extra BS"): every place in its order, a switch for whether it's on the rail (off, it's off it: the palette still has it; the ⋯
+ * that once held them is gone, Arun 2026-11-21), dragged by its handle
  * or moved with ↑ ↓. The rail beside it changes as you go.
  */
 export interface RailPlaceInfo {
@@ -37,7 +38,7 @@ export function RailCustomize({ places, anchor, onClose }: { places: RailPlaceIn
     const l = readRail();
     const off = l.hidden.includes(id);
     const group = l.order.filter((p) => has(p) && l.hidden.includes(p) === off);
-    return `${group.indexOf(id) + 1} of ${group.length} ${off ? "in More" : "on the rail"}`;
+    return `${group.indexOf(id) + 1} of ${group.length} ${off ? "off the rail" : "on the rail"}`;
   };
 
   // Dragging: the row under the pointer gives up its place to the held one, so the rail shows the order as it forms. The list
@@ -99,8 +100,8 @@ export function RailCustomize({ places, anchor, onClose }: { places: RailPlaceIn
               </button>
               <Icon name={p.icon} size={16} className="rc-ic" />
               <span className="rc-name">{p.label}</span>
-              <span title={id === "sessions" ? "Sessions stays on the rail" : on ? "On the rail" : "In the ⋯ menu"}>
-                <Switch on={on} disabled={id === "sessions"} label={`Show ${p.label} on the rail`} onChange={(v) => (saveRail(setShown(readRail(), id, v)), setSay(`${p.label} ${v ? "on the rail" : "in More"}`))} />
+              <span title={id === "sessions" ? "Sessions stays on the rail" : on ? "On the rail" : "Off the rail"}>
+                <Switch on={on} disabled={id === "sessions"} label={`Show ${p.label} on the rail`} onChange={(v) => (saveRail(setShown(readRail(), id, v)), setSay(`${p.label} ${v ? "on the rail" : "off the rail"}`))} />
               </span>
             </li>
           );

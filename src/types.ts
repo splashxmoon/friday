@@ -406,6 +406,11 @@ export interface RepoCall {
   pr?: boolean;
   /** For `publish` with `pr`: the session's parts (pr-body.ts PrParts, as JSON) to fill the repo's pull-request template with, when it has one. */
   prParts?: string;
+  /**
+   * For `publish` with `pr`: the session's latest proof clip, as JSON { page, marks?, gifs: { after, before? } } with the GIFs in base64.
+   * Once the pull request is open, its GIFs go onto friday-proof and its description gets the proof block (runner/pr-proof.ts).
+   */
+  proof?: string;
   path?: string;
   /** For `bgread` and `bgstop`: which background command, by id. */
   query?: string;
@@ -1037,6 +1042,24 @@ export type EventBody =
   | { type: "proof.posted"; id?: string; done: string; checked: string; unsure: string; page?: string }
   | { type: "ui.card"; id: string; card: import("./gen-ui-model.js").UiCard } // A card an agent drew in the chat (gen-ui.ts).
   | { type: "proof.shot"; proof: number; url: string; file: string; width?: number; height?: number }
+  /**
+   * A proof clip (Arun, 2026-11-21: "add clips to PRs and the phone too also see where else we can intergrate it"): a few seconds of
+   * the page a change touched, walked to what it added (preview-check.ts). `file` (WebM), `before`, `phone` and `gif` (for a pull
+   * request's description) are files of the session; `marks` are the walk's captions with their moments. `by`: the preview check's
+   * card, or Friday by itself after queued work. Shown in the chat, on the phone, on Today and in the pull request.
+   */
+  /**
+   * A proof clip being made, as it goes (Arun, 2026-11-22: "add some status after you click show proof"): finding the dev server, walking
+   * the page, keeping it; or why it couldn't be. The proof.clip that follows replaces it on screen.
+   */
+  /**
+   * Proof for a change that draws nothing: the tests that ran on it (test-proof.ts; Arun, 2026-11-22: "how do we show proofs for tests ran"),
+   * each command's last attempt, its counts, its failing tests and the end of its output. `by`: the agent's own runs, or Friday's run of
+   * a check the reply only claimed. `run`: the run.ended it is about.
+   */
+  | { type: "proof.tests"; run: number; by: "agent" | "friday"; runs: import("./test-proof.js").TestRun[] }
+  | { type: "proof.status"; stage: "testing" | "server" | "recording" | "saving" | "failed"; why?: string; asked?: true; /** About the tests Test it runs, not a clip; `command` is the one running. */ tests?: true; command?: string }
+  | { type: "proof.clip"; page: string; file: string; durationMs: number; marks?: { atMs: number; label: string }[]; before?: string; phone?: string; gif?: string; /** The page before the change, as a GIF, for the pull request's side by side. */ gifBefore?: string; /** The same clips as MP4 (H.264), which an iPhone plays where WebM doesn't. */ mp4?: string; mp4Before?: string; mp4Phone?: string; /** What was changed, in the agent's words (clip-summary.ts), and the files it touched. */ summary?: string; files?: string[]; by: "check" | "queued" }
   /** An agent given a name of its own ("Reviewer" for the second Claude Code); the main lane's too. */
   | { type: "lane.renamed"; laneId: string; name: string }
   /** A crew mate's home chat deleted by the person (TeammatePage.tsx): its lane's conversation up to here is gone from view, and its coding tool starts a fresh one. */
@@ -1070,7 +1093,7 @@ export type EventBody =
   | { type: "member.removed"; userId: string; name: string; workspace?: true }
   | { type: "link.updated"; role: LinkRole; enabled: boolean; version: number }
   // Human → agent. Only the driver can append these.
-  | { type: "instruction"; text: string; interrupt: boolean; /** The people it @-mentions, by id (mentions.ts). */ mentions?: string[]; fromSuggestion?: number; attachments?: Attachment[]; handoff?: Handoff; /** A message from another session's agent (peers.ts). */ peer?: PeerNote; /** A message from another agent in this session (agent-mesh.ts). */ mesh?: MeshNote; /** Answers an `engine.approval`: the driver said yes or no to it. `task`: yes to commands like these for the rest of this run too (a teammate's "Allow for this task"). */ approval?: { id: string; approve: boolean; task?: true }; /** An edit of a message still queued: this one takes its place in the queue, and that one is taken back. */ replaces?: number; /** Friday telling a coding tool whose turn ended short of its task to carry on (keep-going.ts). */ keepGoing?: true; /** A reply in a side thread on an earlier message (by its seq): its answer stays in the thread, not the room's main flow. */ thread?: { root: number }; /** Posted by an app on the person's behalf (Friday's token API or MCP, `sessions:write`), not typed by them: capped like a teammate's (Security R3). */ via?: "api"; /** Friday's own message carrying on what agents set going (a wake, a carry-on): how many agent-to-agent steps led to it, so the turn it starts counts on from there rather than from nothing (agent-mesh behindRun). */ hop?: number; /** A turn of its own: never handed to a turn under way, since its answer is read from the turn it starts. */ ownTurn?: true; /** Friday's: a check the project added (brain.ts) failed after this agent's change; the command. */ check?: string; /** A press on a card an agent drew in the chat: which card, which button, what was filled in. */ card?: CardPress }
+  | { type: "instruction"; text: string; interrupt: boolean; /** The people it @-mentions, by id (mentions.ts). */ mentions?: string[]; fromSuggestion?: number; attachments?: Attachment[]; handoff?: Handoff; /** A message from another session's agent (peers.ts). */ peer?: PeerNote; /** A message from another agent in this session (agent-mesh.ts). */ mesh?: MeshNote; /** Answers an `engine.approval`: the driver said yes or no to it. `task`: yes to commands like these for the rest of this run too (a teammate's "Allow for this task"). */ approval?: { id: string; approve: boolean; task?: true }; /** An edit of a message still queued: this one takes its place in the queue, and that one is taken back. */ replaces?: number; /** Friday telling a coding tool whose turn ended short of its task to carry on (keep-going.ts). */ keepGoing?: true; /** A reply in a side thread on an earlier message (by its seq): its answer stays in the thread, not the room's main flow. */ thread?: { root: number }; /** Posted by an app on the person's behalf (Friday's token API or MCP, `sessions:write`), not typed by them: capped like a teammate's (Security R3). */ via?: "api"; /** Friday's own message carrying on what agents set going (a wake, a carry-on): how many agent-to-agent steps led to it, so the turn it starts counts on from there rather than from nothing (agent-mesh behindRun). */ hop?: number; /** A turn of its own: never handed to a turn under way, since its answer is read from the turn it starts. */ ownTurn?: true; /** Friday's: a check the project added (brain.ts) failed after this agent's change; the command. */ check?: string; /** A press on a card an agent drew in the chat: which card, which button, what was filled in. */ card?: CardPress; /** Asked as a task board (the phone's "Split into tasks", Arun, 2026-11-22: "No way for me to start the task board on mobile"): the agent splits it into tasks on the shared board (agent-mesh post_tasks) before starting. */ board?: true }
   /**
    * An agent in Manual mode wants to do something it may not do unasked.
    *

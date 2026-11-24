@@ -1,4 +1,4 @@
-import { commandFailed, receiptOf, type ReceiptFlag } from "./receipt.js";
+import { commandFailed, keyOf, receiptOf, type ReceiptFlag } from "./receipt.js";
 import { MAIN_LANE, type DiffFile, type SessionEvent } from "./types.js";
 
 /**
@@ -132,7 +132,8 @@ function proofIn(events: readonly SessionEvent[], s: Stretch): Proof {
     answer: said?.body.type === "agent.message" ? said.body.text : "",
   });
   const self = new Map<string, ProofCheck>();
-  for (const c of receipt.commands) if (CHECK_CMD.test(c.command)) self.set(c.command, { command: c.command, ok: c.ok, by: "self" });
+  // Keyed as one however it was piped: `npm test 2>&1 | tail -40` failing, then `npm test` passing, is a check that passes now.
+  for (const c of receipt.commands) if (CHECK_CMD.test(c.command)) self.set(keyOf(c.command), { command: c.command, ok: c.ok, by: "self" });
   // Friday's own check of a board task, run in its folder once it was handed in: the one that counts, so first.
   const checked = s.task ? after.findLast((e) => e.body.type === "board.checked" && e.body.id === s.task) : undefined;
   const friday: ProofCheck[] = checked?.body.type === "board.checked" ? [{ command: checked.body.command, ok: checked.body.ok, by: "friday", ...(checked.body.skipped ? { skipped: true } : {}), ...(checked.body.pre?.length ? { pre: checked.body.pre.length } : {}), ...(!checked.body.ok && !checked.body.skipped ? { output: checked.body.output.slice(-600) } : {}) }] : [];

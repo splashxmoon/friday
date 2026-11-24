@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { contains } from "../folder-key.js";
+import { aliasOf, CODE_FILE, importsIn, resolveContext, resolveImport, TEST_FILE, type Alias, type CodeGraph } from "../code-graph.js";
 import { remoteOf } from "./git.js";
 
 /**
@@ -125,6 +126,56 @@ export async function surveyRepo(root: string): Promise<Survey> {
     branch: remote.branch,
     remote: { url: remote.url, github: remote.github },
     docs,
+  };
+}
+
+/**
+ * Which file uses which (code-graph.ts), for Deep Dive's code map: every code file's imports, resolved to the repo's own files, and
+ * each one's lines. Only paths, counts and links leave this computer.
+ */
+export async function codeGraph(root: string): Promise<CodeGraph> {
+  const base = path.resolve(root);
+  if (!(await stat(base).then((s) => s.isDirectory(), () => false))) throw new Error(`There's no folder at ${base}.`);
+  const listed = await listFiles(base);
+  const code = listed.filter((f) => CODE_FILE.test(f) && !SECRET.test(f) && !/\.d\.ts$/.test(f) && !/(^|\/)(__generated__|generated|gen)\//.test(f));
+  const all = code.filter((f) => !TEST_FILE.test(f));
+  const files = all.slice(0, MAX_FILES);
+  const index = new Map(files.map((f, i) => [f, i]));
+  const goMod = await readFile(path.join(base, "go.mod"), "utf8").catch(() => "");
+  // Each package's import aliases (tsconfig.json, jsconfig.json), so `@/x` in a web app nested in the repo finds its file.
+  const configs = listed.filter((f) => /(^|\/)[tj]sconfig(\.[\w-]+)?\.json$/.test(f)).slice(0, 40);
+  const aliases = (await Promise.all(configs.map(async (f) => aliasOf(f, await readFile(path.join(base, f), "utf8").catch(() => ""))))).filter((a): a is Alias => !!a);
+  const ctx = resolveContext(files, goMod, aliases);
+  const lines = new Array<number>(files.length).fill(0);
+  const edges = new Map<string, number>();
+  for (let i = 0; i < files.length; i += 64) {
+    await Promise.all(
+      files.slice(i, i + 64).map(async (f, j) => {
+        const at = i + j;
+        const s = await stat(path.join(base, f)).catch(() => null);
+        if (!s || s.size > MAX_BYTES) return;
+        const text = await readFile(path.join(base, f), "utf8").catch(() => "");
+        lines[at] = countLines(text);
+        for (const spec of importsIn(f, text))
+          for (const to of resolveImport(f, spec, ctx)) {
+            const t = index.get(to);
+            if (t === undefined || t === at) continue;
+            const k = `${at}>${t}`;
+            edges.set(k, (edges.get(k) ?? 0) + 1);
+          }
+      }),
+    );
+  }
+  return {
+    files,
+    lines,
+    edges: [...edges].map(([k, n]) => {
+      const [a, b] = k.split(">");
+      return [Number(a), Number(b), n] as [number, number, number];
+    }),
+    more: all.length > files.length,
+    tests: code.length - all.length,
+    head: (await run(base, ["rev-parse", "HEAD"])).trim(),
   };
 }
 

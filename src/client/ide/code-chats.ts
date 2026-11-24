@@ -274,6 +274,10 @@ export const sameFolder = (a: string, b: string): boolean => key(a) === key(b);
 
 const subscribe = (l: () => void) => (listeners.add(l), () => void listeners.delete(l));
 /** The chats, kept current wherever they change. */
+/** Every session Code counts as its own, for the server (app.ts /api/sessions/code-chats), and a call on each change. */
+export const codeChatSids = (): string[] => [...loadSids()];
+export const onCodeChatsChange = (l: () => void): (() => void) => subscribe(l);
+
 export const useCodeChats = (): CodeChat[] => useSyncExternalStore(subscribe, loadCodeChats, () => []);
 /** Re-reads what a folder shows when anything changes. */
 export const useCodeChatFor = (folder: string): CodeChat | null =>

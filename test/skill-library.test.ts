@@ -159,3 +159,24 @@ test("a skill from GitHub comes in whole: its SKILL.md as written, its scripts a
   assert.deepEqual(again.skipped.map((s) => s.folder), ["tdd"]);
   await assert.rejects(readSkillFolders(gh, "acme/skills", []), /Choose at least one/);
 });
+
+test("a skill Friday writes in the shared folder is Friday's, on a shelf of its own, not among the person's", async (t) => {
+  const h = await home(t);
+  const { BackdropStore } = await import("../src/backdrops.js");
+  const store = new BackdropStore({ root: path.join(h, ".friday", "backdrops"), trash: path.join(h, ".friday", "trash", "backdrops"), skills: path.join(h, ".agents", "skills") });
+  await store.start();
+  store.close();
+  await saveSkill({ name: "Ship it", description: "Releasing", body: "1. Tag." }, h);
+  const lib = await readLibrary(h);
+  assert.deepEqual(lib.mine.map((s) => s.folder), ["ship-it"], "only what the person wrote");
+  const ours = lib.shelves.find((s) => s.kind === "friday");
+  assert.equal(ours?.label, "Friday");
+  assert.deepEqual(ours?.skills.map((s) => [s.folder, s.friday]), [["friday-backdrop", true]]);
+  assert.equal(lib.shelves.at(-1), ours, "last, after the tools' and projects'");
+  // Once the person takes the line out to keep their own changes, it's theirs.
+  const file = path.join(h, ".agents", "skills", "friday-backdrop", "SKILL.md");
+  await writeFile(file, (await readFile(file, "utf8")).replace(/<!-- Friday writes this file\.[^\n]*-->\n?/, ""));
+  const after = await readLibrary(h);
+  assert.deepEqual(after.mine.map((s) => s.folder).sort(), ["friday-backdrop", "ship-it"]);
+  assert.equal(after.shelves.find((s) => s.kind === "friday"), undefined);
+});

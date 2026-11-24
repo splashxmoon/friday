@@ -257,6 +257,13 @@ export interface SessionState {
    * "stopped at 3 of 5" as the Work rail does, not "done" over a plan left short (QA, 2026-10-28; Arun: "TEST EVERYTHING").
    */
   planDone?: Record<string, { done: number; of: number }>;
+  /** Each lane's last words to the person, a line of them: what the phone's lock screen says once its work is done (attention.ts). */
+  said?: Record<string, string>;
+  /**
+   * Each lane's latest proof clip (types.ts proof.clip), for the places that list finished work without reading the log: Ready to
+   * ship, Code Review, the menu bar, the phone. `seq` says which change it shows: a clip older than the lane's diff is of an earlier one.
+   */
+  clips?: Record<string, { file: string; page: string; durationMs: number; seq: number; gif?: string; before?: string; phone?: string }>;
   /** The most recent instruction: the session's current intent, for people joining cold. */
   lastInstruction: { seq: number; text: string; by: string } | null;
   /**
@@ -1121,6 +1128,9 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
     case "lane.cleared":
       (s.cleared ??= {})[b.laneId] = ev.seq;
       break;
+    case "proof.clip":
+      (s.clips ??= {})[lane] = { file: b.file, page: b.page, durationMs: b.durationMs, seq: ev.seq, ...(b.gif ? { gif: b.gif } : {}), ...(b.before ? { before: b.before } : {}), ...(b.phone ? { phone: b.phone } : {}) };
+      break;
     case "lane.renamed":
       if (b.laneId === MAIN_LANE) s.mainName = b.name;
       else s.lanes = s.lanes.map((l) => (l.id === b.laneId ? { ...l, name: b.name } : l));
@@ -1521,6 +1531,8 @@ export function apply(s: SessionState, ev: SessionEvent): SessionState {
       break;
     }
     case "agent.message":
+      // What it said, kept short (a lock screen's two lines); the last that said anything.
+      if (b.text?.trim()) (s.said ??= {})[lane] = b.text.replace(/\s+/g, " ").trim().slice(0, 300);
       // Its latest call is what it is doing now, until its next one or its run ends.
       {
         const last = b.toolCalls.at(-1);

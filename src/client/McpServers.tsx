@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { ConnectionView, Draft } from "../runner/connections.js";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -24,7 +24,7 @@ type List = { servers: ConnectionView[]; claudeCode: boolean; claudeCodeNames: s
 const call = <T,>(identity: Identity, op: string, body?: unknown) =>
   hostApi<T>(identity, `/api/runner/${op}`, body === undefined ? undefined : { method: "POST", body: JSON.stringify(body) });
 
-export function McpServersPage({ identity }: { identity: Identity }) {
+export function McpServersPage({ identity, tabs }: { identity: Identity; /** Customize's tabs, at the toolbar's left (App.tsx). */ tabs?: ReactNode }) {
   const [list, setList] = useState<List | null>(null);
   const [failed, setFailed] = useState("");
   const load = useCallback(
@@ -39,7 +39,8 @@ export function McpServersPage({ identity }: { identity: Identity }) {
   return (
     <div className="page conns-page msv-page px-6! max-[640px]:px-4!">
       <div className="page-inner">
-        <PageHeader title="MCP servers" />
+        <PageHeader title="Plugins" />
+        {tabs && <div className="customize-bar">{tabs}</div>}
         <div className="msv">
           <Directory
             identity={identity}
@@ -55,7 +56,7 @@ export function McpServersPage({ identity }: { identity: Identity }) {
           />
           {failed && (
             <p className="msv-error" role="alert">
-              Couldn't read your MCP servers: {failed}
+              Couldn't read your plugins: {failed}
             </p>
           )}
         </div>

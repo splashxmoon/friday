@@ -1,0 +1,64 @@
+/* Today on Home (Today.tsx): the same card as Get started (getting-started.css), its rows a little denser. */
+.td-card { width: 100%; max-width: 656px; margin-top: 28px; }
+.td-head { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; }
+.td-head:not(:first-child) { margin-top: 18px; }
+.td-head h2 { margin: 0; color: var(--ink); font-size: 13px; font-weight: 600; }
+.td-count { overflow: hidden; color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.td-link { margin-left: auto; padding: 2px 6px; border: 0; border-radius: var(--r-sm, 6px); background: none; color: var(--text-muted); font: inherit; font-size: 12px; cursor: pointer; }
+.td-link:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
+.td-link:disabled { cursor: default; }
+.td-list { display: flex; flex-direction: column; margin: 0; padding: 4px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); list-style: none; }
+.td-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 52px; padding: 8px 10px; border-radius: 10px; }
+.td-found { grid-template-columns: 22px minmax(0, 1fr) auto auto; }
+.td-row + .td-row { border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent); border-radius: 0; }
+.td-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.td-title { overflow: hidden; color: var(--ink); font-size: 13.5px; font-weight: 500; line-height: 19px; text-overflow: ellipsis; white-space: nowrap; }
+.td-title a { color: inherit; text-decoration: none; }
+.td-title a:hover { text-decoration: underline; text-underline-offset: 2px; }
+.td-meta { overflow: hidden; color: var(--text-muted); font-size: 12.5px; line-height: 17px; text-overflow: ellipsis; white-space: nowrap; }
+
+/* A finding's kind and a queued task's clock: a quiet glyph in a round well. */
+.td-kind { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 999px; background: var(--hover); color: var(--text-muted); }
+.td-found[data-kind="broken"] .td-kind { background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--red); }
+.td-found[data-kind="advisory"] .td-kind { background: color-mix(in srgb, var(--amber, #d98404) 16%, transparent); color: var(--amber, #d98404); }
+
+/* Last night's rows: a dot in the state's colour, as the goals' rows have. */
+.td-dot { display: grid; place-items: center; justify-self: center; width: 14px; height: 14px; border-radius: 50%; background: var(--faint); color: var(--bg); }
+.td-row[data-state="ready"] .td-dot, .td-row[data-state="pr"] .td-dot, .td-row[data-state="merged"] .td-dot { background: var(--green); }
+.td-row[data-state="needs"] .td-dot { background: var(--amber, #d98404); }
+.td-row[data-state="failed"] .td-dot { background: var(--red); }
+.td-row[data-state="working"] .td-dot { background: var(--accent-blue, #4c8dff); animation: td-pulse 1.6s ease-in-out infinite; }
+.td-row[data-state="needs"] .td-meta { color: var(--ink-2); }
+@keyframes td-pulse { 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .td-row[data-state="working"] .td-dot { animation: none; } }
+
+/* A night's proof clip leads its row (result cards: a preview tile, then the words). */
+.td-row:has(.td-clip) { grid-template-columns: 72px minmax(0, 1fr) auto; }
+.td-clip { position: relative; width: 72px; height: 45px; padding: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: var(--hover); cursor: zoom-in; }
+.td-clip video { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top; }
+.td-clip-cap { position: absolute; right: 3px; bottom: 3px; padding: 0 4px; border-radius: 4px; background: rgb(0 0 0 / .6); color: #fff; font-size: 10px; font-variant-numeric: tabular-nums; line-height: 14px; }
+.td-clip:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.td-size { min-width: 26px; padding: 1px 6px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-muted); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: center; }
+.td-acts { display: flex; align-items: center; gap: 6px; }
+.td-go { display: inline-flex; align-items: center; height: 28px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: 999px; background: none; color: var(--ink); font: inherit; font-size: 12.5px; font-weight: 500; text-decoration: none; white-space: nowrap; cursor: pointer; }
+.td-go:hover:not(:disabled) { background: var(--hover); }
+.td-go.primary { border-color: var(--ink); background: var(--ink); color: var(--bg); }
+.td-go.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--ink) 86%, var(--bg)); }
+.td-go:disabled { opacity: .5; cursor: default; }
+.td-x { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 999px; background: none; color: var(--text-muted); opacity: 0; cursor: pointer; }
+.td-row:hover .td-x, .td-row:focus-within .td-x, .td-x.shown { opacity: 1; }
+.td-x:hover { background: var(--hover); color: var(--ink); }
+@media (hover: none) { .td-x { opacity: 1; } }
+
+.td-empty, .td-note { margin: 0; padding: 10px 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); color: var(--text-muted); font-size: 12.5px; line-height: 18px; text-wrap: pretty; }
+.td-note { margin-top: 6px; padding: 0 4px; border: 0; background: none; }
+.td-err { margin: 8px 4px 0; color: var(--red); font-size: 12.5px; }
+
+/* Narrow: the size chip goes, and the row's actions sit under its words. */
+@media (max-width: 560px) {
+  .td-found { grid-template-columns: 22px minmax(0, 1fr); }
+  .td-found .td-size { display: none; }
+  .td-found .td-acts { grid-column: 2; }
+}
+/* A finished row that offers Record a proof clip: its button before the row's action. */
+.td-row[data-state]:has(> .td-x) { grid-template-columns: 22px minmax(0, 1fr) auto auto; }

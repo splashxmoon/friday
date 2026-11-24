@@ -160,6 +160,15 @@ export function AppearanceTab() {
         })}
       </div>
       {custom && <p className="set-note -mt-3 mb-0 text-[12px] text-[var(--text-muted)]">{custom.name} is on, from More themes. Picking System, Light or Dark goes back to Friday's own.</p>}
+      {/* A backdrop on (backdrop.tsx): it decides light or dark while it shows, so the pick here waits until it is off. */}
+      {document.documentElement.classList.contains("backdrop") && (
+        <p className="set-note -mt-3 mb-0 text-[12px] text-[var(--text-muted)]">
+          A backdrop is on, so it decides light or dark. This applies again with no backdrop, and in Code.{" "}
+          <button type="button" className="underline underline-offset-2 text-[var(--ink)]" onClick={() => dispatchEvent(new CustomEvent("friday:settings", { detail: { tab: "backdrop" } }))}>
+            Backdrop
+          </button>
+        </p>
+      )}
       <SettingsGroup title="Look">
         <Row label="Accent" hint={custom ? `${custom.name} brings its own accent; this one is Friday's.` : "The primary button and what is chosen in a menu. Friday's own is ink."}>
           <div className="accent-picks" role="radiogroup" aria-label="Accent">

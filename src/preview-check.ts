@@ -126,3 +126,103 @@ export function mergeErrors(lists: ReadonlyArray<readonly string[]>, max = 6): s
   for (const l of lists) for (const e of l) if (e && seen.size < max) seen.add(oneError(e));
   return [...seen].filter(Boolean);
 }
+
+/**
+ * A proof clip's walk (Arun, 2026-11-21: "1. Speed baseline, Today with Tonight, and proof clips.", spec 10 C), the same whoever records
+ * it (the desktop app's offscreen window, desktop/capture.ts, or Chrome from a runner run from source, runner/preview-check.ts): the
+ * page as it loads held a moment, then scrolled to the bottom and held again; a page no taller than its window is held instead. At a
+ * laptop's width, the first of VIEWS.
+ */
+export const CLIP = { holdStart: 1200, scrollMs: 4200, holdEnd: 1200, holdShort: 3500, fps: 15, maxBytes: 6_000_000 } as const;
+/** Taller than the window by more than this, a page is scrolled through; less is held, since there is nothing much below to show. */
+export const CLIP_SCROLL_OVER = 40;
+/** The scroll, eased so it starts and lands gently, run in the page; it resolves when the bottom is reached. */
+export const clipScrollScript = (ms: number = CLIP.scrollMs): string =>
+  `new Promise((done) => { const to = Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0) - innerHeight; const t0 = performance.now(); const ease = (x) => x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; const step = (now) => { const x = Math.min(1, (now - t0) / ${Math.max(0, Math.round(ms))}); window.scrollTo({ top: to * ease(x), behavior: "instant" }); x < 1 ? requestAnimationFrame(step) : done(); }; requestAnimationFrame(step); })`;
+/** How long a page's clip runs: the scroll's beats for a tall one, the single hold for a short one. */
+export const clipLength = (tall: number, height: number): number => (tall > height + CLIP_SCROLL_OVER ? CLIP.holdStart + CLIP.scrollMs + CLIP.holdEnd : CLIP.holdShort);
+/** The clip's file name: "clip-checkout.webm" for /checkout, "clip-home.webm" for /. */
+export const clipName = (page: string): string => `clip${page.replace(/[^\w]+/g, "-").replace(/-+$/, "") || "-home"}.webm`;
+
+/**
+ * A WebM from MediaRecorder with its length written in. Chromium streams the file and never goes back to say how long it is, so a
+ * player's bar can't seek and its clock counts up from nothing; this adds the Duration to the file's Info as a muxer would. Anything
+ * not shaped as expected (already has one, an odd layout) comes back as it was: a clip without a length still plays.
+ */
+export function webmWithDuration(b: Uint8Array, ms: number): Uint8Array {
+  // An element's id keeps its length marker; its size doesn't. Both are "variable-length integers": the first byte's leading zeros say how many follow.
+  const width = (x: number) => (x === 0 ? 0 : 8 - Math.floor(Math.log2(x)));
+  const id = (at: number) => {
+    const w = width(b[at] ?? 0);
+    if (!w || w > 4) return null;
+    let v = 0;
+    for (let i = 0; i < w; i++) v = v * 256 + b[at + i]!;
+    return { v, w };
+  };
+  const size = (at: number) => {
+    const w = width(b[at] ?? 0);
+    if (!w) return null;
+    let v = b[at]! & (0xff >> w);
+    let unknown = v === 0xff >> w;
+    for (let i = 1; i < w; i++) (v = v * 256 + b[at + i]!), (unknown &&= b[at + i] === 0xff);
+    return { v, w, unknown };
+  };
+  const vint = (v: number, w: number) => {
+    const out = new Uint8Array(w);
+    for (let i = w - 1; i >= 0; i--) (out[i] = v % 256), (v = Math.floor(v / 256));
+    out[0]! |= 0x80 >> (w - 1);
+    return out;
+  };
+  const fits = (v: number, w: number) => v < 2 ** (7 * w) - 1;
+  const head = id(0);
+  const headSize = head && size(head.w);
+  if (!head || head.v !== 0x1a45dfa3 || !headSize || headSize.unknown) return b;
+  const seg = headSize.w + head.w + headSize.v;
+  const segId = id(seg);
+  const segSize = segId && size(seg + segId.w);
+  if (!segId || segId.v !== 0x18538067 || !segSize) return b;
+  // The Segment's children, until its Info.
+  let at = seg + segId.w + segSize.w;
+  for (let n = 0; n < 16 && at < b.length; n++) {
+    const e = id(at);
+    const s = e && size(at + e.w);
+    if (!e || !s || s.unknown) return b;
+    const body = at + e.w + s.w;
+    if (e.v !== 0x1549a966) {
+      at = body + s.v;
+      continue;
+    }
+    // In the Info: no Duration yet, and the scale its times are counted in (a millionth of a second unless it says otherwise).
+    let scale = 1_000_000;
+    for (let c = body; c < body + s.v; ) {
+      const ce = id(c);
+      const cs = ce && size(c + ce.w);
+      if (!ce || !cs) return b;
+      if (ce.v === 0x4489) return b;
+      if (ce.v === 0x2ad7b1) {
+        let v = 0;
+        for (let i = 0; i < cs.v; i++) v = v * 256 + b[c + ce.w + cs.w + i]!;
+        if (v > 0) scale = v;
+      }
+      c += ce.w + cs.w + cs.v;
+    }
+    const dur = new Uint8Array(11);
+    dur.set([0x44, 0x89, 0x88]);
+    new DataView(dur.buffer).setFloat64(3, (ms * 1_000_000) / scale);
+    const grown = s.v + dur.length;
+    const w = fits(grown, s.w) ? s.w : 8;
+    const extra = dur.length + (w - s.w);
+    // A Segment of known size grows with it, written back in its own width; Chromium's is "unknown", which needs nothing.
+    const segBytes = segSize.unknown ? null : fits(segSize.v + extra, segSize.w) ? vint(segSize.v + extra, segSize.w) : undefined;
+    if (segBytes === undefined) return b;
+    const out = new Uint8Array(b.length + extra);
+    out.set(b.subarray(0, at + e.w), 0);
+    if (segBytes) out.set(segBytes, seg + segId.w);
+    out.set(vint(grown, w), at + e.w);
+    out.set(b.subarray(body, body + s.v), at + e.w + w);
+    out.set(dur, at + e.w + w + s.v);
+    out.set(b.subarray(body + s.v), at + e.w + w + s.v + dur.length);
+    return out;
+  }
+  return b;
+}

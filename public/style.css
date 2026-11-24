@@ -3260,6 +3260,8 @@ svg.fi { stroke-width: var(--fi-sw, 1.4px); }
 /* Why a turn stopped, as a line that opens what the tool said (audit CODE-4 C). */
 .rsp-err { position: relative; }
 .rsp-err-line { display: inline-flex; align-items: center; gap: 6px; min-height: 24px; padding: 2px 0; border: 0; background: none; color: var(--red); font: 400 13px/18px var(--font); cursor: pointer; }
+/* Friday restarted mid-run (Activity.tsx RESTART_CUT): a quiet note, the run carries on by itself. */
+.rsp-restart { display: flex; align-items: center; gap: 6px; margin: 4px 0 0; color: var(--text-muted); font: 400 13px/18px var(--font); }
 .rsp-err-line svg { color: var(--text-muted); }
 .rsp-err-more { margin-left: 2px; color: var(--ink-3); font-size: 12px; }
 .rsp-err-line:hover svg, .rsp-err-line[aria-expanded="true"] svg { color: var(--ink); }
@@ -6514,7 +6516,7 @@ html.desktop-mac.lights-low[data-band="session"] #band-slot { top: calc(var(--li
 /* A session's header on that same line, not 56px tall with its row 5 to 8px below the buttons (Arun, 2026-11-16: "move everything
    up slightly here for mac.... and also look into windows and linux too"). It starts 1px down, so twice its centre less 2px tall. */
 html.desktop-mac.lights-low .session-view > .topbar { min-height: calc(2 * var(--lights-cy, 23px) - 2px); padding-top: 3px; padding-bottom: 3px; }
-/* Windows and Linux: the window's own buttons are drawn over a 40px band (desktop.ts titleBarOverlay), centred 20px down, as the
+/* Windows and Linux: the window's own buttons are drawn over the 38px top row (desktop.ts titleBarOverlay), centred in it, as the
    toolbar is (.win-nav); the header's row was 28px down and its bar ran 16px past the band. Now it is the band's height. */
 html.desktop:not(.desktop-mac) .session-view > .topbar { min-height: 38px; padding-top: 3px; padding-bottom: 3px; }
 /* Full screen hides the traffic lights (App.tsx sets .win-full): the toolbar takes their place and the header beside it follows,
@@ -12127,8 +12129,23 @@ html:not(.dark) .subs-pop { box-shadow: 0 16px 40px -16px rgb(0 0 0 / .18); }
 .ans-code-head, :root:not(.dark) .rsp .ans-code-head { background: transparent !important; border-bottom: 1px solid var(--border) !important; }
 .ans-code-body { margin: 0 !important; border-radius: 0 !important; background: transparent !important; }
 
-.activity-main div:has(> table) { border-radius: var(--tray-r) !important; border: 1px solid var(--tray-edge) !important; background: var(--tray) !important; padding: 0; overflow: hidden; }
-.activity-main div:has(> table) > table { border-radius: 0; overflow: hidden; background: transparent; }
+/* A table in the chat scrolls sideways when it is wider than the column (Arun, 2026-11-22: "fix the tables in the coding sessions"): it
+   was clipped (overflow hidden), the last column cut to "Te" in the narrow Code column. A soft shadow at an edge says there is more
+   that way (the scroll-shadow backgrounds: the "local" covers ride with the content and hide the "scroll" shadows at the ends). Columns
+   keep their natural width; only long text wraps, at a readable measure. */
+.activity-main div:has(> table) {
+  border-radius: var(--tray-r) !important; border: 1px solid var(--tray-edge) !important; padding: 0; overflow-x: auto !important; overflow-y: hidden !important;
+  background:
+    linear-gradient(to right, var(--tray) 40%, transparent) left center / 28px 100% no-repeat local,
+    linear-gradient(to left, var(--tray) 40%, transparent) right center / 28px 100% no-repeat local,
+    linear-gradient(to right, color-mix(in srgb, var(--ink) 14%, transparent), transparent) left center / 10px 100% no-repeat scroll,
+    linear-gradient(to left, color-mix(in srgb, var(--ink) 14%, transparent), transparent) right center / 10px 100% no-repeat scroll,
+    var(--tray) !important;
+  scrollbar-width: thin;
+}
+.activity-main div:has(> table) > table { width: max-content; min-width: 100%; border-radius: 0; overflow: visible; background: transparent; }
+.activity-main div:has(> table) > table :is(th, td:first-child) { white-space: nowrap; }
+.activity-main div:has(> table) > table td { max-width: 340px; overflow-wrap: anywhere; }
 .activity-main div:has(> table) > table thead { background: transparent; }
 
 .agent-question { border-radius: var(--tray-r) !important; border: 1px solid var(--tray-edge) !important; background: var(--tray) !important; box-shadow: none !important; }
@@ -12988,6 +13005,48 @@ body.resizing-panel { cursor: col-resize; user-select: none; }
 .cw-runs-on .menu-pill:hover, .cw-runs-on .menu-pill.on { background: var(--surface-hover); color: var(--ink); }
 .cw-runs-note { padding-left: 6px; color: var(--ink-3); font-size: 12px; }
 .runs-add { width: min(620px, 100%); }
+/* Add a computer (Computers.tsx AddComputer; Arun, 2026-11-21: "the modal is jumping all over the place... design this better").
+   It never moves as its four ways are picked: a flex row centres it (a grid track grew to a long command's width and pushed it
+   right), its width is fixed, it sits a fixed way below the top rather than centred on its height, and each way's body has the
+   room of the tallest. The tabs run the full width, evenly; the close button is the only way out. */
+.overlay:has(> .runs-add), .overlay:has(> .runs-map) { display: flex; align-items: flex-start; justify-content: center; padding-top: min(16vh, 140px); }
+.overlay > .runs-add { flex: 0 0 auto; width: min(560px, calc(100vw - 48px)); min-width: 0; padding: 20px 22px 22px; gap: 0; }
+.runs-add .pop-head { margin-bottom: 16px; }
+.runs-add .pop-head h2 { font-size: 17px; }
+.runs-add .computers-adding { display: flex; flex-direction: column; gap: 0; min-width: 0; }
+.runs-add .computers-add { gap: 14px; padding: 0; border-top: 0; min-width: 0; }
+.runs-add .computers-add-head { display: block; }
+.runs-add .computers-add-how { display: flex; width: 100%; }
+.runs-add .computers-add-how > button { flex: 1 1 0; justify-content: center; text-align: center; }
+.runs-add .computers-add-body { min-height: 152px; min-width: 0; gap: 10px; }
+.runs-add .computers-add-body > p { margin: 0; line-height: 1.5; }
+.runs-add .computers-link-row { min-width: 0; }
+.runs-add .computers-link-text { min-width: 0; }
+.runs-add .computers-foot { margin-top: auto; }
+.runs-add .computers-said { margin: 0; }
+.runs-map { width: min(760px, calc(100vw - 48px)); max-height: calc(100vh - 2 * min(16vh, 140px)); overflow: auto; }
+/* Add a computer › Nearby, and the Allow prompt on the other computer (NearbyLink.tsx). */
+.nearby-list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; border: 1px solid var(--border); border-radius: 8px; }
+.nearby-list li { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 8px 0 11px; border-top: 1px solid var(--border); color: var(--ink-2); }
+.nearby-list li:first-child { border-top: 0; }
+.nearby-name { color: var(--ink); font-size: 13px; font-weight: 550; }
+.nearby-list li > :last-child { margin-left: auto; }
+.nearby-done { color: var(--green); }
+.nearby-empty { gap: 9px; }
+.nearby-pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--green); animation: nearby-pulse 1.6s ease-in-out infinite; }
+@keyframes nearby-pulse { 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .nearby-pulse { animation: none; } }
+.nearby-asked { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.nearby-asked p { margin: 0; }
+.nearby-check { padding: 6px 14px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--card-2); color: var(--ink); font: 600 22px/1.2 var(--mono); letter-spacing: .08em; }
+.nearby-over { z-index: 1100; }
+.nearby-offer { width: min(420px, 100%); }
+.nearby-offer h2 { margin: 0; font-size: 17px; }
+.nearby-offer p { margin: 0; line-height: 1.45; }
+.nearby-offer .nearby-check { align-self: flex-start; }
+.nearby-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.nearby-toast { position: fixed; right: 18px; bottom: 18px; z-index: 96; padding: 9px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--card); color: var(--ink); box-shadow: 0 8px 24px rgb(0 0 0 / .16); }
+.runs-map { width: min(760px, 100%); max-height: calc(100vh - 2 * min(18vh, 160px)); overflow: auto; }
 .runs-add .pop-head p { margin: 4px 0 0; font-weight: 400; color: var(--ink-3); line-height: 1.5; }
 .runs-add .pop-head { margin-bottom: 14px; }
 .runs-add .computers-adding { display: flex; flex-direction: column; gap: 12px; }
@@ -13823,14 +13882,10 @@ html.desktop .oss-rail::after { content: ""; position: absolute; top: 38px; righ
 }
 .oss-rail-btn:hover { color: var(--ink); background: var(--hover); }
 .oss-rail-btn[data-active] { color: var(--ink); background: var(--hover-strong); }
-/* More places (Sidebar.tsx morePlaces): the ⋯ is a rail button like the rest, lit while one of its places is open or its menu is. */
-.oss-rail-group > span:has(> .oss-rail-more-places) { display: contents; }
 .oss-rail-place { display: contents; }
-/* A line between a menu's places and its Customize rail (Sidebar.tsx OssRail). */
+/* A line in the rail's right-click menu, before Customize rail (Sidebar.tsx OssRail). */
 .menu-node:has(> .rail-menu-sep) { padding: 4px 0; }
 .rail-menu-sep { display: block; height: 1px; margin: 0 6px; background: var(--border); }
-.oss-rail-btn.oss-rail-more-places { display: grid; place-items: center; border: 0; background: transparent; cursor: pointer; }
-.oss-rail-btn.oss-rail-more-places.is-here, .oss-rail-btn.oss-rail-more-places.on { color: var(--ink); background: var(--hover-strong); }
 .oss-rail-btn:focus-visible { outline: 2px solid var(--border-focus, var(--ink)); outline-offset: -2px; }
 .oss-rail-n {
   position: absolute; top: 2px; right: 1px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 999px;
@@ -14611,7 +14666,7 @@ html.glass:not(.glass-native):not(.dark) body {
 }
 
 /* Whatever floats over the page is frosted on its own, firmer than what it lies on, with a lit top edge. */
-html.glass :is(.surface, .ctx-menu, [role="menu"], [role="listbox"]:not(.thr-from-rows):not(.tc-list):not(.skl-rows), .shortcut-pop, .tm-pop, .tc-proof-pop, .stb-pop, .branch-card, .thr-pop, .pf-pop, [data-radix-popper-content-wrapper] > [role="dialog"], .modal, .dialog, [role="dialog"][aria-modal="true"] > div:first-child) {
+html.glass :is(.surface, .ctx-menu, [role="menu"], [role="listbox"]:not(.thr-from-rows):not(.tc-list):not(.skl-rows), .shortcut-pop, .tm-pop, .tc-proof-pop, .stb-pop, .branch-card, .thr-pop, .pf-pop, [data-radix-popper-content-wrapper] > [role="dialog"], .modal, .dialog, [role="dialog"][aria-modal="true"]:not(.modal) > div:first-child) {
   background: var(--glass-float) !important;
   -webkit-backdrop-filter: blur(28px) saturate(1.6);
   backdrop-filter: blur(28px) saturate(1.6);
@@ -14722,6 +14777,9 @@ html.desktop:not(.rail-only) .sb-panel-inner.sb-rail-on::before { border-color: 
    to the bottom of the line and the row grew 5px. The pin's head sits high in its glyph: 1px down, level with the ⋯ beside it. */
 .sb-row:is(:hover, :focus-visible, :has(:focus-visible), [data-menu="true"]) .sb-row-end .dass-row-time { display: block !important; visibility: hidden; }
 .sb-row .sb-row-pin svg { transform: translateY(1px); }
+/* Its name cut short before the pin and ⋯ as the pointer passes, not run under them (Arun, 2026-11-20: "the session title needs to
+   be cut shorter like we have been doing"): the slot widens to hold both buttons and a little air, and the name's ellipsis moves in. */
+.sb-row:is(:hover, :focus-visible, :has(:focus-visible), [data-menu="true"]) .sb-row-end { width: 60px; }
 /* Room for the unread dot (Arun, 2026-11-16: "add some space between the blue dot and text please looks so squished"): a row's
    name starts 4px further in, and the dot sits 5px clear of it and 4px in from the row's edge, rather than 2px from both. */
 .sb-row { padding-left: 14px !important; }
@@ -15195,3 +15253,12 @@ html .sb-scroll .sb-row.dass-row[data-picked]:not(:focus-visible) { background: 
 .sb-row[data-jump] { position: relative; }
 .sb-row[data-jump] .sb-lead > * { visibility: hidden; }
 .sb-row[data-jump]::before { content: attr(data-jump); position: absolute; top: 7px; left: 8px; display: grid; place-items: center; width: 16px; height: 16px; border: 1px solid var(--border); border-radius: 4px; background: var(--card); color: var(--ink); font: 500 10.5px/1 var(--mono); }
+
+/* PageTabs size="lg" (page-bits.tsx): a page's own top-level switch, Customize's MCP servers and Skills (Arun, 2026-11-20: "make
+   the MCP and Skills toggle more visible"). The same track and lifted tab as every page's tabs, a size up, an icon each. */
+.page-tabs-lg [role="tablist"] { height: 40px !important; padding: 4px !important; gap: 2px; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--border); }
+.page-tabs-lg [role="tab"] { height: 32px !important; padding: 0 14px !important; gap: 7px !important; border-radius: 9px !important; font-size: 14px !important; }
+.page-tabs-lg [role="tab"] svg { opacity: .8; }
+.page-tabs-lg [role="tab"][aria-selected="true"] svg { opacity: 1; }
+/* The one you're in stands clear of the track in both themes: the card's colour, a firm edge, the label heavier. */
+.page-tabs-lg [role="tab"][aria-selected="true"] { background: var(--card) !important; font-weight: 600 !important; box-shadow: 0 1px 2px rgb(0 0 0 / .1), 0 0 0 1px var(--border-strong) !important; }

@@ -12,6 +12,9 @@ import { quickConnect } from "./quickConnect.js";
 import type { Identity } from "./storage.js";
 import { MoreTools, placeCard, useDismiss } from "./ui.js";
 import { splitTools } from "./engines.js";
+import { laneOwnModel } from "../model-lane.js";
+import { isOwnModel } from "../own-model-id.js";
+import { ownName } from "./ownModelStore.js";
 
 /**
  * Who works in this folder, changed in one press.
@@ -187,7 +190,7 @@ function Switch({ state, me, identity, sid, invite, lane, events = [], notify, o
         method: "POST",
         body: JSON.stringify({ sid, invite, ...(tool ? { tool } : {}), cwd: engine.cwd, mode: engine.mode, lane, ...(model ? { model } : {}), ...(engine.shared ? { share: true } : {}) }),
       });
-      notify(`Now working with ${tool ? ENGINE_NAMES[tool] : "Friday Code"}${model ? ` · ${model}` : ""}`);
+      notify(!tool && isOwnModel(model) ? `Now on ${ownName(model)}` : `Now working with ${tool ? ENGINE_NAMES[tool] : "Friday Code"}${model ? ` · ${model}` : ""}`);
     } catch (e) {
       notify(`Couldn't switch: ${(e as Error).message}`);
     } finally {
@@ -236,6 +239,10 @@ function Switch({ state, me, identity, sid, invite, lane, events = [], notify, o
 
   // The agent a lane carries keeps its name; a bare Friday lane is Friday Code.
   const fridayName = (lane === MAIN_LANE ? state.options.agent?.name : state.lanes.find((l) => l.id === lane)?.agent?.name) ?? "Friday Code";
+  // An agent added on one of your own models (model-lane.ts): its model is its lane's, and another of yours is swapped in on the same
+  // folder and lane, never the session's model changed under the other agents.
+  const laneModel = laneOwnModel(state, lane);
+  const onLaneModel = (id: string) => (running ? wait() : id !== laneModel && isOwnModel(id) ? void swap("", id) : undefined);
 
   return (
     <AgentModelPicker
@@ -243,8 +250,8 @@ function Switch({ state, me, identity, sid, invite, lane, events = [], notify, o
       onEngine={choose}
       model={engine?.model ?? ""}
       onModel={(m) => (running ? wait() : m !== (engine?.model ?? "") && void swap(current, m))}
-      fridayModelId={state.options.model ?? ""}
-      onFridayModel={onFridayModel}
+      fridayModelId={laneModel ?? state.options.model ?? ""}
+      onFridayModel={laneModel ? onLaneModel : onFridayModel}
       fridayName={fridayName}
       plan={plan}
       identity={identity}

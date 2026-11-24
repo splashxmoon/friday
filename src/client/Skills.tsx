@@ -74,7 +74,7 @@ function lit(text: string, needle: string): ReactNode {
 
 /** A shelf's mark: its tool's, or a folder for a project's skills, which every tool working there reads. */
 function ShelfMark({ shelf, size }: { shelf: Shelf; size: number }) {
-  return shelf.kind === "project" || !shelf.tool ? <Icon name="folder" size={size} /> : <EngineMark tool={shelf.tool} size={size} />;
+  return shelf.kind === "friday" ? <Icon name="skills" size={size} /> : shelf.kind === "project" || !shelf.tool ? <Icon name="folder" size={size} /> : <EngineMark tool={shelf.tool} size={size} />;
 }
 
 /** Where a tool's skill comes from, when not its own folder. */
@@ -104,7 +104,7 @@ function putKey(key: string, push: boolean) {
 
 const typing = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
 
-export function SkillsPage({ identity, onUse }: { identity: Identity; /** A new session, its box filled with this (App.tsx, as Code Review hands one over). */ onUse?: (brief: string) => void }) {
+export function SkillsPage({ identity, onUse, tabs }: { identity: Identity; /** Customize's tabs, at the toolbar's left (App.tsx). */ tabs?: ReactNode; /** A new session, its box filled with this (App.tsx, as Code Review hands one over). */ onUse?: (brief: string) => void }) {
   const [lib, setLib] = useState<Library | null>(null);
   const [failed, setFailed] = useState("");
   const [view, setView] = useState<View>("mine");
@@ -249,6 +249,7 @@ export function SkillsPage({ identity, onUse }: { identity: Identity; /** A new 
     <div className="page conns-page msv-page skl-page px-6! max-[640px]:px-4!">
       <div className="page-inner">
         <PageHeader title="Skills" />
+        {tabs && <div className="customize-bar">{tabs}</div>}
         <div className="msv">
           <section className="mdir" aria-label="Skills">
             <div className="mdir-head skl-head">
@@ -279,7 +280,7 @@ export function SkillsPage({ identity, onUse }: { identity: Identity; /** A new 
                 {shelves.map((s) => filter(s.id, s.label, s.skills.filter((x) => matches(x, s)).length, <ShelfMark shelf={s} size={14} />))}
               </nav>
               {empty ? (
-                <EmptyMine onNew={() => setCreating(true)} onImport={() => setImporting(true)} shelf={shelves[0] ?? null} onShelf={(id) => setView(id)} />
+                <EmptyMine onNew={() => setCreating(true)} onImport={() => setImporting(true)} shelf={shelves.find((s) => s.kind !== "friday") ?? null} onShelf={(id) => setView(id)} />
               ) : (
                 <>
                   <div className="skl-listcol" ref={listRef}>
@@ -429,7 +430,7 @@ export function SkillsPage({ identity, onUse }: { identity: Identity; /** A new 
       {creating && (
         <NewSkill
           identity={identity}
-          shelves={shelves}
+          shelves={shelves.filter((s) => s.kind !== "friday")}
           onClose={() => setCreating(false)}
           onImport={() => (setCreating(false), setImporting(true))}
           onShelf={(id) => (setCreating(false), setView(id))}
@@ -558,7 +559,9 @@ function SkillDetail({ identity, item, have, onBack, onOpenMine, onChanged, onUs
   const brief = `Use the ${name} skill (${item.row.dir}/SKILL.md): `;
   // A tool's own or a project's (Arun, 2026-11-20: "also allow for deleting of skills too"); not one that comes with its tool, a
   // plugin's, a synced set's or a managed one, which are theirs (skill-library.ts removeAt).
-  const deletable = !mine && !!item.shelf && item.shelf.kind !== "plugins" && !item.row.from;
+  // Nor one Friday writes (skill-library.ts FRIDAY_WRITES): it would be back the next time Friday starts.
+  const ours = item.shelf?.kind === "friday";
+  const deletable = !mine && !!item.shelf && item.shelf.kind !== "plugins" && !ours && !item.row.from;
   return (
     <div className="skl-detail-in">
       <button type="button" className="skl-back skl-back-narrow" onClick={onBack}>
@@ -585,7 +588,7 @@ function SkillDetail({ identity, item, have, onBack, onOpenMine, onChanged, onUs
             <Button type="button" variant="outline" size="sm" onClick={onOpenMine}>
               Open yours
             </Button>
-          ) : (
+          ) : ours ? null : (
             <Button
               type="button"
               variant="outline"
@@ -684,7 +687,9 @@ function SkillDetail({ identity, item, have, onBack, onOpenMine, onChanged, onUs
       </section>
       {item.shelf && !have && (
         <p className="mdir-note skl-tool-note">
-          {item.shelf.kind === "project"
+          {ours
+            ? "Friday writes it and keeps it up to date, and every coding tool reads it."
+            : item.shelf.kind === "project"
             ? `Every coding tool working in ${item.shelf.label} reads it. Copy it to your skills to use it everywhere.`
             : `${item.shelf.label} loads it by itself, and Friday tells the other coding tools it's here. Copy it to your skills to change it.`}
         </p>

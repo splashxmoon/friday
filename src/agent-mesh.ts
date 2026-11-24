@@ -566,6 +566,35 @@ export const TEAMMATE_TOOL: MeshToolDef = {
 };
 
 /**
+ * A crew mate's routines, from any session (Arun, 2026-11-23: asked to track the downloads every day, the crew mate Ivy could only
+ * make a Code automation, which ran as a coding session of its own instead of in its chat): the work it does on its own on a
+ * schedule, in its own chat or a new thread of its own each time, with its report there (teammate-checkins.ts). Offered where
+ * manage_teammate is.
+ */
+export const ROUTINE_TOOL: MeshToolDef = {
+  name: "manage_routine",
+  description:
+    "A crew mate's routines: work it does by itself on a schedule (every day at 9, weekday mornings, every few hours), in its own chat or a new thread of its own each time, reporting there. When the person asks a crew mate (you, if you are one) to do something regularly, make it that crew mate's routine with this: manage_automation is for scheduled Code sessions, and only when the person asks for one. list: its routines and when each runs next. create: a name, what it is asked each run (a complete instruction: what to do, where, and what to report), and when. update: change what it does, when, or where. pause / resume / delete. run: run it now. teammate: whose, by name; yours if you are a crew mate and leave it out.",
+  inputSchema: obj(
+    {
+      action: { type: "string", enum: ["list", "create", "update", "pause", "resume", "delete", "run"] },
+      teammate: { type: "string", description: "The crew mate whose routines these are, by name. Yours if you are a crew mate and leave it out." },
+      routine: { type: "string", description: "Which routine (update, pause, resume, delete, run): its name or id from list." },
+      name: { type: "string", description: "A short name, as the person would call it (create; update renames it)." },
+      does: { type: "string", description: "What the crew mate is asked each run, as a complete instruction (create, update)." },
+      every: { type: "string", enum: ["hourly", "every", "daily", "weekdays", "weekly"], description: "How often (create, update): every is every `hours` hours; weekly is on `days`. Daily if left out on create." },
+      hours: { type: "number", enum: [2, 3, 4, 6, 8, 12], description: "With every: how many hours apart." },
+      at: { type: "string", description: "24-hour HH:MM, this computer's time (all but hourly and every). 09:00 if left out." },
+      days: { type: "array", items: { type: "string", enum: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] }, description: "With weekly: which days." },
+      where: { type: "string", enum: ["chat", "thread"], description: "Where it runs: the crew mate's own chat (the default), or a new thread of its own each time." },
+      quiet: { type: "boolean", description: "true (the default): a run with nothing new since the last says nothing. false: it always reports." },
+    },
+    ["action"],
+  ),
+  annotations: { destructiveHint: false, openWorldHint: false },
+};
+
+/**
  * Project memory on purpose (org memory, 2026-10-31): the project brain (brain.ts) learns from each finished run by itself;
  * these let any agent keep a lesson the moment it learns it, and look one up mid-task (a past fix for the error in front of
  * it), for the repository this session works in. In both editions since 2026-11-02, where the brain now is too.
@@ -790,6 +819,8 @@ export class AgentMesh {
   proofFiles: ((sid: string, data: Buffer, type: string) => Promise<string>) | null = null;
   /** manage_teammate (TEAMMATE_TOOL): where it is offered, and the call. Set by the app. */
   teammateTool: { offered(sid: string): Promise<boolean>; call(sid: string, lane: string, args: Record<string, unknown>): Promise<MeshResult> } | null = null;
+  /** manage_routine (ROUTINE_TOOL): a crew mate's routines, offered where manage_teammate is. Set by the app. */
+  routineTool: { call(sid: string, lane: string, args: Record<string, unknown>): Promise<MeshResult> } | null = null;
   /**
    * What the lead is told besides the reports when all the work it gave out is done, in a team: the goal again and how to land it
    * (merge, test, one PR, the morning brief) while the person is away. Set by the app; null or "" adds nothing.
@@ -856,7 +887,7 @@ export class AgentMesh {
     // The computer, when its owner turned it on there (the runner says, with its OS).
     if (computerOs) l = { tools: [...l.tools, computerTool(computerOs)], instructions: `${l.instructions} The computer tool sees and uses this computer's screen, mouse and keyboard, for desktop apps and what nothing else reaches; the person is asked once and watches.` };
     if (this.appTools) l = { tools: [...l.tools, ...APP_TOOLS], instructions: `${l.instructions}${APP_INSTRUCTIONS}` };
-    if (this.teammateTool && (await this.teammateTool.offered(sid).catch(() => false))) l = { ...l, tools: [...l.tools, TEAMMATE_TOOL] };
+    if (this.teammateTool && (await this.teammateTool.offered(sid).catch(() => false))) l = { ...l, tools: [...l.tools, TEAMMATE_TOOL, ...(this.routineTool ? [ROUTINE_TOOL] : [])] };
     if (this.skillTools && (await this.skillTools.offered(sid).catch(() => false))) l = { ...l, tools: [...l.tools, ...SKILL_TOOLS] };
     if (this.lessons) l = { ...l, tools: [...l.tools, ...LESSON_TOOLS] };
     if (this.genUi) l = { tools: [...l.tools, ...this.genUi.tools], instructions: `${l.instructions}${this.genUi.instructions}` };
@@ -1002,6 +1033,7 @@ export class AgentMesh {
         case "browser": return await browserCall(sid, args, signal, lane);
         case "save_lesson": case "search_lessons": return this.lessons ? await this.lessons.call(sid, lane, name, args) : { output: "There's no project memory here.", isError: true };
         case "manage_teammate": return this.teammateTool ? await this.teammateTool.call(sid, lane, args) : { output: "There's no crew here.", isError: true };
+        case "manage_routine": return this.routineTool ? await this.routineTool.call(sid, lane, args) : { output: "There's no crew here.", isError: true };
         case "list_skills": case "use_skill": case "save_skill": return this.skillTools ? await this.skillTools.call(sid, lane, name, args) : { output: "There's no crew here.", isError: true };
         case "search_sessions": case "start_session": case "manage_automation": return this.appTools ? await this.appTools.call(sid, lane, name, args) : { output: "That isn't available here.", isError: true };
         case "show_ui": return this.genUi ? await this.genUi.call(sid, lane, args) : { output: "That isn't available here.", isError: true };

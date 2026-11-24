@@ -1,0 +1,272 @@
+/* Backdrops (backdrop.tsx). The layer sits fixed behind the whole app; while it shows, html.backdrop
+   turns every surface to frosted glass (prefs.ts applyGlass) so the backdrop reads through the sidebar and the page. */
+
+#friday-backdrop { position: fixed; inset: 0; z-index: -1; pointer-events: none; }
+.bd-layer { position: absolute; inset: 0; overflow: hidden; contain: strict; }
+.bd-slot { position: absolute; inset: 0; opacity: 0; transition: opacity .45s var(--ease-out, ease-out); }
+.bd-slot[data-ready] { opacity: 1; }
+html.reduce-motion .bd-slot { transition: none; }
+.bd-fill { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.bd-media { object-fit: cover; }
+.bd-frame { border: 0; background: transparent; }
+/* A page: the screen's size, centred, so a window being resized never lays it out again (backdrop.tsx screenSize). Never smaller
+   than the window, a window across two screens included. */
+.bd-layer .bd-fill.bd-frame {
+  inset: auto; left: 50%; top: 50%; transform: translate(-50%, -50%) scale(var(--bd-scale, 1));
+  width: max(100%, calc(var(--bd-sw, 100vw) / var(--ui-zoom, 1))); height: max(100%, calc(var(--bd-sh, 100vh) / var(--ui-zoom, 1)));
+}
+/* A page in a thumbnail: laid out at four times the box and shown at a quarter, so it draws as it would in a window. */
+.bd-frame-thumb { position: absolute; left: 0; top: 0; width: 400%; height: 400%; border: 0; transform: scale(.25); transform-origin: 0 0; pointer-events: none; }
+/* The dim: the theme's own ground over the backdrop, as strong as Settings says. */
+.bd-scrim { position: absolute; inset: 0; background: #f6f6f4; transition: opacity .2s var(--ease-out, ease-out); }
+html.dark .bd-scrim { background: #0b0b0e; }
+
+/* Under the layer, before it has drawn: a plain ground of the theme's, not the frosted look's own gradient. That one is fixed to
+   the window, and Chrome paints a fixed ground over a layer behind the page, so it has to go, not just be covered. */
+html.backdrop.glass:not(.dark):not(.bd-x) body { background: #f6f6f4 !important; background-attachment: scroll !important; }
+html.backdrop.glass.dark:not(.bd-x) body { background: #0b0b0e !important; background-attachment: scroll !important; }
+
+/* Surfaces a step clearer than the frosted look's, so the backdrop's colour comes through them, not washed out under a veil (Arun,
+   2026-11-20: "how do we make it less dimmier"); cards and panels stay firmer, where most words are. */
+html.backdrop.glass:not(.dark) {
+  --bg: rgb(252 252 251 / .38);
+  --sidebar: rgb(248 248 246 / .34);
+  --panel: rgb(255 255 255 / .7);
+  --card: rgb(255 255 255 / .76);
+  --bg-frost: rgb(250 250 249 / .62);
+}
+/* Cards firmer in dark too: the frosted look's 5% white was all but clear over a picture (2026-11-20 audit: Usage's rows washed
+   into a sunset). */
+html.backdrop.glass.dark {
+  --bg: rgb(20 20 24 / .42);
+  --sidebar: rgb(12 12 15 / .36);
+  --panel: rgb(26 26 30 / .7);
+  --card: rgb(30 30 35 / .66);
+  --card-2: rgb(44 44 50 / .6);
+  --bg-frost: rgb(18 18 22 / .62);
+}
+
+/* Pages full of content (the Board, Skills, MCP, Code review, Usage, Settings and the rest: App.tsx fullBleed sets data-band
+   "page") stand on frosted glass, the picture blurred under them, so their lists and words read over it (Arun, 2026-11-20: "some
+   components are too transparent"). Home and a chat keep the picture clear. */
+html.backdrop.glass[data-band="page"] .main { background: transparent !important; isolation: isolate; }
+html.backdrop.glass[data-band="page"] .main::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; border-radius: inherit;
+  background: var(--bg-frost);
+  -webkit-backdrop-filter: blur(30px) saturate(1.5); backdrop-filter: blur(30px) saturate(1.5);
+}
+/* A chat's reading column (Arun, 2026-11-22: "some things are too hard to see with various different types of backdrop creations"):
+   the conversation stands on a band of frosted glass the width of its column, the picture softened under the words and clear either
+   side of it. It runs from the top of the chat down behind the message box to the window's foot ("do something about the bottom of
+   it rather than sitting above the input box"), its sides fading into the picture ("cleaner and smoother"), and it holds still while
+   the chat scrolls. A coding session and a crew room alike; not the terminal view. With the thread card docked, the band keeps to
+   the chat's side of it (thread-card.css --tc-side). */
+html.backdrop.glass:not([data-band="page"]) .activity-main:not(.is-tui) { position: relative; isolation: isolate; }
+html.backdrop.glass:not([data-band="page"]) .activity-main:not(.is-tui)::before {
+  content: ""; position: absolute; top: 0; bottom: 0; z-index: -1; pointer-events: none;
+  left: var(--glass-l, 0px); right: var(--glass-r, 0px); margin-inline: auto;
+  /* The reply column's own width, in every chat (a coding session, a crew room, a mate's chat) and with the sidebar open or closed
+     (Arun, 2026-11-22: "consistent across both of them plus same size and try to make it the same length as chat responses width",
+     "for both open and closed side bars"). Its solid part is the column (--read-w: the replies and the message box, with the
+     column's own margin either side), its soft edges just outside it, so no word ever sits on the fade. A fixed width once made it
+     fill the whole chat in a smaller window with the sidebar open and a strip with it closed; now it narrows only as the column
+     does. */
+  --fade: 36px;
+  width: min(calc(100% - var(--glass-l, 0px) - var(--glass-r, 0px)), calc(var(--read-w, 860px) + 2 * var(--fade)));
+  background: var(--read-glass);
+  /* Light enough that the picture is still a picture under the words ("slightly less blurred"); no saturation boost, which turned
+     its small bright things into coloured blots. */
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  /* Eased, not a straight ramp: a straight one crossfades the sharp picture into the blurred one and draws a ghost line. */
+  -webkit-mask-image: linear-gradient(90deg, transparent, rgb(0 0 0 / .18) calc(var(--fade) * .35), rgb(0 0 0 / .62) calc(var(--fade) * .7), #000 var(--fade), #000 calc(100% - var(--fade)), rgb(0 0 0 / .62) calc(100% - var(--fade) * .7), rgb(0 0 0 / .18) calc(100% - var(--fade) * .35), transparent);
+  mask-image: linear-gradient(90deg, transparent, rgb(0 0 0 / .18) calc(var(--fade) * .35), rgb(0 0 0 / .62) calc(var(--fade) * .7), #000 var(--fade), #000 calc(100% - var(--fade)), rgb(0 0 0 / .62) calc(100% - var(--fade) * .7), rgb(0 0 0 / .18) calc(100% - var(--fade) * .35), transparent);
+}
+html.backdrop.glass .sv-main.tc-docked .activity-main { --glass-l: var(--tc-side); --glass-r: calc(var(--tc-side) + 324px); }
+html.backdrop.glass:not(.dark) { --read-glass: rgb(250 250 248 / .64); }
+html.backdrop.glass.dark { --read-glass: rgb(14 14 18 / .6); }
+
+/* What floats and isn't in the frosted look's list: the agent and model picker, and the welcome and What's new sheet. */
+html.backdrop.glass :is(.amp, .wn) {
+  background: var(--glass-float) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(1.6); backdrop-filter: blur(28px) saturate(1.6);
+  border-color: var(--glass-edge) !important;
+}
+/* The rail and the bar above the sidebar are clear, the picture itself, as the frosted look has them (Arun, 2026-11-20: "get rid of
+   the dim thing here in the rail and above the side bar panel"). Only the thread list under the bar is tinted, so its words read
+   over the picture, its tint running on to the page's edge. */
+/* Frosted, not only tinted (Arun, 2026-11-20: "fix the side bar blurr"): the picture blurred under it as the frosted look's
+   desktop is, on a layer of its own under the list (a blur on the list itself would hold its menus inside it), from the rail's
+   edge to the page's, so no strip of the bare picture shows either side. */
+html.backdrop.glass .sb-panel-inner.sb-rail-on > .sb-list { position: relative; isolation: isolate; }
+html.backdrop.glass .sb-panel-inner.sb-rail-on > .sb-list::before {
+  content: ""; position: absolute; inset: 0 -10px; z-index: -1; pointer-events: none;
+  /* Its corner rounded as the list's frame is (style.css .sb-panel-inner.sb-rail-on::before), where it meets the clear bar and
+     rail (Arun, 2026-11-20: "needs to be curved"). */
+  border-top-left-radius: var(--r-shell, 14px);
+  background: var(--sidebar);
+  -webkit-backdrop-filter: blur(26px) saturate(1.5); backdrop-filter: blur(26px) saturate(1.5);
+}
+
+/* ── Friday's own ───────────────────────────────────────────────────────────────────────────────────────────────────────── */
+.bd-b-dusk {
+  background:
+    radial-gradient(90% 60% at 72% 112%, rgb(214 122 90 / .5), transparent 62%),
+    radial-gradient(70% 50% at 12% 104%, rgb(146 82 122 / .42), transparent 66%),
+    radial-gradient(80% 60% at 40% -10%, rgb(70 76 140 / .35), transparent 70%),
+    linear-gradient(180deg, #0e0f1d 0%, #191729 46%, #2a2134 76%, #432836 100%);
+}
+.bd-b-tide {
+  background:
+    radial-gradient(80% 60% at 18% 12%, rgb(44 122 140 / .5), transparent 62%),
+    radial-gradient(70% 70% at 88% 82%, rgb(32 74 126 / .55), transparent 64%),
+    radial-gradient(50% 40% at 55% 55%, rgb(28 96 110 / .18), transparent 70%),
+    linear-gradient(160deg, #061118 0%, #0a1b24 52%, #09131e 100%);
+}
+.bd-b-aurora { background: #090c13; overflow: hidden; }
+.bd-b-aurora i {
+  position: absolute; width: 78%; aspect-ratio: 1; border-radius: 50%; opacity: .5; filter: blur(90px); will-change: transform;
+  animation: bd-drift 56s ease-in-out infinite alternate;
+}
+.bd-b-aurora i:nth-child(1) { left: -18%; top: -30%; background: #2b9d86; }
+.bd-b-aurora i:nth-child(2) { right: -24%; top: 4%; background: #4554c9; animation-duration: 71s; animation-delay: -20s; }
+.bd-b-aurora i:nth-child(3) { left: 18%; bottom: -46%; background: #8a46b4; opacity: .38; animation-duration: 83s; animation-delay: -41s; }
+@keyframes bd-drift {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(9%, 7%, 0) scale(1.08); }
+  100% { transform: translate3d(-7%, 11%, 0) scale(.96); }
+}
+.bd-b-aurora[data-still] i, html.reduce-motion .bd-b-aurora i { animation: none; }
+.bd-b-fog {
+  background:
+    radial-gradient(70% 60% at 14% 0%, #ffffff 0%, transparent 70%),
+    radial-gradient(60% 50% at 100% 100%, rgb(190 199 212 / .7), transparent 72%),
+    radial-gradient(50% 40% at 70% 30%, rgb(226 220 208 / .6), transparent 70%),
+    linear-gradient(180deg, #edebe6 0%, #dddbd4 100%);
+}
+.bd-b-paper {
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .36 0 0 0 0 .3 0 0 0 0 .22 0 0 0 .16 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),
+    radial-gradient(80% 70% at 30% 10%, rgb(255 252 244 / .8), transparent 70%),
+    linear-gradient(180deg, #ebe2cf 0%, #ddd0b4 100%);
+}
+
+/* ── Settings › Backdrop (SettingsBackdrop.tsx) ─────────────────────────────────────────────────────────────────────────── */
+.bd-make {
+  display: flex; flex-direction: column; gap: 8px; max-width: 680px; padding: 12px 10px 10px 14px;
+  border: 1px solid var(--border-strong); border-radius: 16px; background: var(--card);
+  box-shadow: 0 1px 2px rgb(0 0 0 / .04);
+  transition: border-color var(--t-hover) var(--ease-out), box-shadow var(--t-hover) var(--ease-out);
+}
+.bd-make:focus-within { border-color: var(--border-hover); }
+.bd-make textarea {
+  width: 100%; min-height: 44px; max-height: 160px; padding: 0 4px 0 0; border: 0; outline: none; resize: none; background: none;
+  color: var(--ink); font: 400 14px/21px var(--font);
+}
+.bd-make textarea::placeholder { color: var(--faint); }
+/* As the message box's bar: who does it on the left, the arrow on the right. */
+.bd-make-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; margin-left: -6px; }
+.bd-make-foot .send { margin-left: auto; }
+/* Changing one of yours: which, at the top of the box, put back to making a new one with its ×. */
+.bd-editing { display: flex; align-items: center; gap: 8px; min-width: 0; margin: -2px 0 2px; }
+.bd-editing-thumb { position: relative; flex: none; width: 34px; height: 22px; overflow: hidden; border-radius: 5px; box-shadow: 0 0 0 1px var(--border-strong); }
+.bd-editing-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font: 500 13px/18px var(--font); }
+/* Ideas, under the box: every one whole, wrapping, none cut off. */
+.bd-ideas { display: flex; flex-wrap: wrap; gap: 6px; max-width: 680px; margin-top: -14px; }
+.bd-idea {
+  height: 28px; padding: 0 11px; border: 1px solid var(--border); border-radius: 999px; background: var(--card);
+  color: var(--text-muted); font: 500 12.5px/26px var(--font); white-space: nowrap; cursor: pointer;
+  transition: color var(--t-hover) var(--ease-out), border-color var(--t-hover) var(--ease-out), background var(--t-hover) var(--ease-out);
+}
+.bd-idea:hover { color: var(--ink); border-color: var(--border-hover); background: var(--hover); }
+.bd-made { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; max-width: 680px; margin: -10px 0 0; color: var(--text-muted); font: 400 13px/18px var(--font); }
+.bd-made button { padding: 0; border: 0; background: none; color: var(--ink); font: 500 13px/18px var(--font); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--border-strong); }
+.bd-made button:hover { text-decoration-color: currentColor; }
+
+/* A backdrop an agent is making or changing (backdrop-jobs.tsx): the session, as a card under the box. The tile is the backdrop as
+   soon as a first save lands, a slow sheen with the tool's mark until then; one line of where it stands, coloured by it, what it is
+   doing now and for how long; what to do next on the right. */
+.bd-jobs { display: flex; flex-direction: column; gap: 8px; max-width: 680px; margin-top: -10px; }
+.bd-job {
+  --job: var(--st-working);
+  display: flex; align-items: center; gap: 12px; min-width: 0; padding: 8px 10px 8px 8px;
+  border: 1px solid var(--border-strong); border-radius: 14px; background: var(--card);
+  box-shadow: 0 1px 2px rgb(0 0 0 / .04);
+}
+.bd-job[data-kind="starting"] { --job: var(--faint); }
+.bd-job[data-kind="needs"] { --job: var(--amber); border-color: color-mix(in srgb, var(--amber) 55%, var(--border-strong)); }
+.bd-job[data-kind="ready"] { --job: var(--st-done); }
+.bd-job[data-kind="empty"], .bd-job[data-kind="stopped"] { --job: var(--red); }
+.bd-job-tile { position: relative; flex: none; width: 88px; height: 56px; overflow: hidden; border-radius: 9px; background: var(--hover); box-shadow: inset 0 0 0 1px var(--border); }
+.bd-job-tile > :not(.bd-job-wait) { position: absolute; inset: 0; }
+.bd-job-wait { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text-muted); }
+/* At work: a slow sheen across it, the thing being made. */
+.bd-job:is([data-kind="starting"], [data-kind="working"]) .bd-job-wait::before {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(110deg, transparent 30%, color-mix(in srgb, var(--ink) 9%, transparent) 50%, transparent 70%) 0 0 / 250% 100%;
+  animation: bd-sheen 2.2s var(--ease-out, ease) infinite;
+}
+.bd-job[data-kind="needs"] .bd-job-wait { background: var(--amber-soft); color: var(--amber); }
+.bd-job:is([data-kind="empty"], [data-kind="stopped"]) .bd-job-wait { background: var(--red-soft); color: var(--red); }
+@keyframes bd-sheen { from { background-position: 100% 0; } to { background-position: -50% 0; } }
+.bd-job-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.bd-job-title { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font: 500 13.5px/19px var(--font); }
+.bd-job-status { display: flex; align-items: center; gap: 7px; min-width: 0; margin: 0; color: var(--text-muted); font: 400 12.5px/17px var(--font); }
+.bd-job-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--job); }
+/* Breathing as the rail's working dot does (working-dot.css). */
+.bd-job:is([data-kind="starting"], [data-kind="working"]) .bd-job-dot { animation: wk-breathe 1.8s ease-in-out infinite; }
+.bd-job-word { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bd-job[data-kind="needs"] .bd-job-word { color: var(--ink); }
+.bd-job-clock { flex: none; font-variant-numeric: tabular-nums; color: var(--faint); }
+.bd-job-clock::before { content: "·"; margin-right: 7px; color: var(--faint); }
+.bd-job-acts { flex: none; display: flex; align-items: center; gap: 6px; }
+.bd-job-acts svg { flex: none; }
+.bd-job-x { margin-left: 2px; color: var(--faint); }
+@media (max-width: 560px) {
+  .bd-job { flex-wrap: wrap; }
+  .bd-job-acts { width: 100%; justify-content: flex-end; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bd-job .bd-job-wait::before, .bd-job .bd-job-dot { animation: none !important; }
+}
+/* Its unfinished folder in the picks: being made, a press opens the session. */
+.bd-thumb[data-making] { flex-direction: column; align-items: center; justify-content: center; gap: 5px; overflow: hidden; background: var(--hover); color: var(--text-muted); font: 500 12px/16px var(--font); box-shadow: inset 0 0 0 1px var(--border-strong); }
+.bd-thumb[data-making]::before {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(110deg, transparent 30%, color-mix(in srgb, var(--ink) 9%, transparent) 50%, transparent 70%) 0 0 / 250% 100%;
+  animation: bd-sheen 2.2s var(--ease-out, ease) infinite;
+}
+@media (prefers-reduced-motion: reduce) { .bd-thumb[data-making]::before { animation: none; } }
+
+.bd-picks { max-width: 680px; }
+.bd-pick { position: relative; min-width: 0; }
+.bd-pick .look-pick { width: 100%; }
+.bd-pick .look-pick-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bd-thumb { background: var(--card); }
+.bd-thumb .bd-b-aurora i { filter: blur(16px); }
+.bd-none { display: flex; align-items: center; justify-content: center; color: var(--faint); }
+/* Made, not finished: an agent part way through one. */
+.bd-thumb[data-unfinished] { align-items: center; justify-content: center; box-shadow: inset 0 0 0 1px var(--border-strong); background: none; color: var(--faint); font: 500 12px/16px var(--font); }
+.bd-add .look-thumb { align-items: center; justify-content: center; background: none; color: var(--text-muted); box-shadow: inset 0 0 0 1px var(--border-strong); }
+.bd-add .look-thumb { background-image: repeating-linear-gradient(135deg, transparent 0 7px, var(--muted) 7px 8px); }
+.bd-add:hover .look-thumb { color: var(--ink); }
+.bd-picks[data-over] .bd-add .look-thumb { box-shadow: inset 0 0 0 2px var(--ink); color: var(--ink); }
+.bd-add input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.bd-add:focus-within .look-thumb { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--focus-ring); }
+/* Its own menu, over the thumbnail's corner while you are on it. */
+.bd-more { position: absolute; top: 6px; right: 6px; opacity: 0; transition: opacity var(--t-hover) var(--ease-out); }
+.bd-pick:hover .bd-more, .bd-more:focus-within, .bd-more[data-open] { opacity: 1; }
+.bd-more .menu-btn, .bd-more > button {
+  width: 24px; height: 24px; border-radius: 7px; background: var(--glass-float, var(--card)); color: var(--ink);
+  box-shadow: 0 0 0 1px var(--border-strong); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+}
+@media (hover: none) { .bd-more { opacity: 1; } }
+.bd-folder { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.bd-folder code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font: 400 12px/16px var(--font-mono); }
+
+/* The first-run tour's card floats over the page like a menu does: frosted on its own over a backdrop, so the page under it doesn't
+   read through its words. */
+html.backdrop.glass .tour-card {
+  background: var(--glass-float) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(1.6); backdrop-filter: blur(28px) saturate(1.6);
+  border-color: var(--glass-edge) !important;
+}

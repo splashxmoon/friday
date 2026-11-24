@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { doingNow } from "../activity-line.js";
 import { MAIN_LANE, type AgentTaskStatus, type Member, type SessionEvent } from "../types.js";
-import { driverOf, runOf, type SessionState } from "../session/projection.js";
+import { driverOf, runOf, uniqueLaneName, type SessionState } from "../session/projection.js";
 import type { PreviewInfo } from "../runner/preview.js";
 import type { BackgroundTask } from "./Preview.js";
 import { Icon, type IconName } from "./icons.js";
@@ -343,7 +343,8 @@ export function TasksPanel({
       // No output yet is a command still running: the result lands as its own
       // event when it ends.
       status: c.output === undefined ? "running" : c.isError ? "error" : "done",
-      sub: `${crewWho(c.lane) ? c.by.replace(/^[^']+'s /, "") : c.by}${ago(c.ts)}${c.output === undefined ? ` · ${duration(now - c.ts)}` : c.endTs && c.endTs - c.ts >= 1000 ? ` · took ${duration(c.endTs - c.ts)}` : ""}`,
+      // The agent by the name it goes by ("Claude Code 2"), not its actor's "arundass's Claude Code" (Arun, 2026-11-22).
+      sub: `${crewWho(c.lane) ? c.by.replace(/^[^']+'s /, "") : uniqueLaneName(state, c.lane ?? MAIN_LANE)}${ago(c.ts)}${c.output === undefined ? ` · ${duration(now - c.ts)}` : c.endTs && c.endTs - c.ts >= 1000 ? ` · took ${duration(c.endTs - c.ts)}` : ""}`,
       copy: c.command,
       // Still running, on this computer: it can be stopped on its own, the agent carrying on (Arun, 2026-11-18: "be able to stop any task").
       ...(c.output === undefined && mayStopCommand(c.lane) ? { stop: () => onStopCommand!(c.lane, c.command) } : {}),
@@ -401,11 +402,11 @@ export function TasksPanel({
         name: command ? asTyped(t.description) : t.description,
         ...(command ? { mono: true, copy: t.description } : {}),
         status,
-        sub: `${kind} of ${t.by}${type}${status === "running" ? "" : ` · ${look.label}`}${took}`,
+        sub: `${kind} of ${uniqueLaneName(state, t.lane)}${type}${status === "running" ? "" : ` · ${look.label}`}${took}`,
         ...(t.summary ? { output: t.summary } : {}),
         // A background command stops on its own; a subagent can't be stopped apart from the task that started it, so its stop is
         // its agent's (Arun, 2026-11-18: "be able to stop any task").
-        ...(status === "running" ? (command ? (mayStopCommand(t.lane) ? { stop: () => onStopCommand!(t.lane, t.description) } : {}) : mayStop(t.lane) ? { stop: () => void send!({ type: "run.cancel", ...(t.lane !== MAIN_LANE ? { lane: t.lane } : {}) }), stopTip: `Stop ${t.by}'s task: its subagents stop with it` } : {}) : {}),
+        ...(status === "running" ? (command ? (mayStopCommand(t.lane) ? { stop: () => onStopCommand!(t.lane, t.description) } : {}) : mayStop(t.lane) ? { stop: () => void send!({ type: "run.cancel", ...(t.lane !== MAIN_LANE ? { lane: t.lane } : {}) }), stopTip: `Stop ${uniqueLaneName(state, t.lane)}'s task: its subagents stop with it` } : {}) : {}),
       };
     });
   const items = [...dev, ...bg, ...lanes, ...subs, ...commands].filter((i) => !cleared.has(i.id));

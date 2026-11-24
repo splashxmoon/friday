@@ -22,6 +22,8 @@ import { setBrowserCaches, sizeOf } from "../runner/storage.js";
 import { watchBorrowed } from "./borrowed.js";
 import { isOwnUrl } from "./own-url.js";
 import { startLocal, type Started } from "./start.js";
+import { capturePreview, recordClip } from "../desktop-capture.js";
+import { useInProcessCapture } from "../runner/screenshot.js";
 import { VSCODE_HELP, VSCODE_MENUS, type VsMenuItem } from "../vscode-menu.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -68,13 +70,14 @@ setInterval(() => void syncAwake(), 30_000).unref();
 
 /**
  * The window's own buttons: on Windows and Linux the title bar is hidden and its minimise, maximise and close drawn over the page's
- * top right, 40px tall to fit the page's header (macOS keeps its traffic lights, set into the header). On the top bar's colour (the
- * sidebar's, style.css .session-view > .topbar), so they sit in the bar rather than in a block of their own (Arun, 2026-11-16:
- * "audit the layout and stuff for windows and linux too"; they were the page's colour, #1c1c1c on #141414 and white on #f3f3f1).
+ * top right (macOS keeps its traffic lights, set into the header). 38px tall, the height of the window's top row, so they sit in
+ * that row and end where the page's panel begins: at 40 they ran 2px over its top edge and onto its rounded corner (Arun,
+ * 2026-11-21: "it should sit flush with the header.... and not overlap it"). Clear, so behind them is the row itself in every look,
+ * Frosted and a backdrop included, rather than a block of one colour; the symbols in the theme's ink.
  */
 const OVERLAY = {
-  dark: { color: "#141414", symbolColor: "#ededed", height: 40 },
-  light: { color: "#f3f3f1", symbolColor: "#18181b", height: 40 },
+  dark: { color: "#00000000", symbolColor: "#ededed", height: 38 },
+  light: { color: "#00000000", symbolColor: "#18181b", height: 38 },
 } as const;
 /** The window's own colour before the page paints: the page's (--bg). */
 const WINDOW_BG = { dark: "#1c1c1c", light: "#fafaf9" } as const;
@@ -213,6 +216,9 @@ function open(url: string) {
   // what it read to anywhere in its address (Arun, 2026-10-28: "iron everything and ensure we are good… any logic errors").
   win.webContents.on("will-frame-navigate", (e) => {
     if (e.isMainFrame || /^about:/i.test(e.url)) return;
+    // A backdrop's page (backdrop.tsx): a frame sandboxed from the start has no origin either, so its first load, of Friday's own
+    // walled-off backdrop file, was refused and it stayed blank. Only that path; anywhere else is still refused.
+    if (own(e.url) && new URL(e.url).pathname.startsWith("/api/local/backdrops/f/")) return;
     const f = e.frame;
     if (f && (f.url === "about:srcdoc" || f.origin === "null")) e.preventDefault();
   });
@@ -287,6 +293,9 @@ async function begin(): Promise<boolean> {
   // Friday not starting (its folder can't be written, a disk full) left an app with no window and nothing to say why.
   try {
     // Using this computer (any input in the last two minutes): what an agent needs shows here, and the phone isn't buzzed too.
+    // The preview check's pictures and proof clips, taken by this app's own offscreen windows: Friday's runner runs in this process, so
+    // it is handed them rather than asking over a channel (runner/screenshot.ts; Arun, 2026-11-21: "not working....").
+    useInProcessCapture({ capture: (shot) => capturePreview(shot), clip: (ask) => recordClip(ask) });
     friday = await startLocal({ atComputer: () => powerMonitor.getSystemIdleTime() < 120 });
   } catch (e) {
     dialog.showErrorBox("Friday couldn't start", e instanceof Error ? e.message : String(e));

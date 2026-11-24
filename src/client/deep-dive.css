@@ -378,3 +378,12 @@ html.glass.dark .dd-askbar { background: #232327; }
 .dd-stale { align-items: center; }
 .dd-refresh { display: inline-flex; align-items: center; gap: 6px; flex: none; height: 26px; margin-left: auto; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--panel); color: var(--ink); font: 500 12px/1 var(--font); cursor: pointer; }
 .dd-refresh:hover { background: var(--hover); }
+
+/* The code map's place in the list (CodeMap.tsx), above the pages: its icon where a page has its number. */
+.dd-side-map { margin-top: 2px; }
+.dd-side-map > svg { flex: none; color: var(--text-muted); }
+.dd-side-map[aria-current] > svg { color: var(--ink); }
+.dd-side-map .dd-side-name { flex: 1; min-width: 0; }
+/* The map takes the page's whole middle and right: no outline beside it. */
+.dd-repo.is-map:not(.with-code) .dd-grid { grid-template-columns: 232px minmax(0, 1fr); }
+@media (max-width: 760px) { .dd-repo.is-map .dd-grid { grid-template-columns: 1fr; } }

@@ -1,5 +1,8 @@
 import type { DiffFile } from "./types.js";
 
+/** A command as one, however its output was piped or trimmed: `npm test 2>&1 | tail -40` is `npm test`. */
+export const keyOf = (c: string) => c.replace(/\s*2>&1/g, "").replace(/\s*\|\s*(tail|head|grep|less|cat)\b.*$/, "").replace(/\s+/g, " ").trim();
+
 /**
  * What a run can show for itself.
  *
@@ -152,8 +155,9 @@ export function receiptOf(input: {
     commands.push({ command, ok: !f, test: TEST_CMD.test(command) });
   }
 
+  // One command however it was piped: `npm test 2>&1 | tail -40` failing, then `npm test` passing, is tests that pass now.
   const lastByCommand = new Map<string, boolean>();
-  for (const c of commands) if (c.test) lastByCommand.set(c.command, c.ok);
+  for (const c of commands) if (c.test) lastByCommand.set(keyOf(c.command), c.ok);
   const latest = [...lastByCommand.values()];
   const tests = !latest.length ? "none" : latest.includes(false) ? "fail" : "pass";
 

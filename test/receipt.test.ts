@@ -18,6 +18,11 @@ test("a test that failed and was then fixed counts as passing, and both attempts
   assert.deepEqual(r.commands.map((c) => c.ok), [false, true]);
 });
 
+test("the same tests run piped and then plain are one command: a failure under `| tail` then a pass is passing", () => {
+  const r = receiptOf({ calls: [run("a", "npm test 2>&1 | tail -40"), run("b", "npm test")], failed: (id) => id === "a", files: [] });
+  assert.equal(r.tests, "pass");
+});
+
 test("claiming success with no test command is flagged, and so is claiming it over a failure", () => {
   const none = receiptOf({ calls: [], failed: () => false, files: [file("src/a.ts")], answer: "All tests pass now." });
   assert.equal(none.tests, "none");

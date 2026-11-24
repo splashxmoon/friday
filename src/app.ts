@@ -26,6 +26,8 @@ import { callHost } from "./runner/local-api.js";
 import { stackOp } from "./runner/stack-pr.js";
 import { serversOp } from "./runner/dev-servers.js";
 import { readLibrary } from "./runner/skill-library.js";
+import { BackdropStore, backdropsHttp } from "./backdrops.js";
+import { libraryDir } from "./runner/skill-library.js";
 import { usageCounts } from "./usage.js";
 import { readRepo as readFolder } from "./runner/repo-read.js";
 import { cleanFolders, readFolders } from "./crew-folders.js";
@@ -55,6 +57,17 @@ import { fetchIssue, fetchPr, issueRef, parseIssueUrl, parsePrLink, prRef } from
 import { hookPayload, hookUrlOk, NotifyHooks, postHook } from "./notify-hook.js";
 import { cleanLater, isNightAt, laterDue, laterWantsAwake, LATER_MAX, MISSED_NOTE, STARTING_STUCK_MS, type LaterTask } from "./later.js";
 import { LaterStore } from "./later-store.js";
+import { clipName, hasUiChange } from "./preview-check.js";
+import { changedFiles, changeSummary } from "./clip-summary.js";
+import type { CodeGraph } from "./code-graph.js";
+import { tailOf, testCounts, testRunsIn } from "./test-proof.js";
+import { landedRow, LANDED_MS, minutesFor, QUEUED_AHEAD_MS, sortLanded, TONIGHT_MS, type LandedRow, type Today } from "./today.js";
+import type { FoundSize } from "./found-work.js";
+/** The person's proof clips (client/proof-clips.ts): on at all; `auto`, recorded by Friday after work nobody watched (else only when asked). */
+type ProofClipsSetting = { on: boolean; auto: boolean; before: boolean; phone: boolean; pr: boolean };
+/** How one session takes them: as Settings say, or its own word. */
+type ClipMode = "auto" | "ask" | "off";
+import type { FoundWork } from "./runner/found-work.js";
 import { AutomationStore, cleanAutomation, describeWhen, describeWho, dueAutomation, promptFor as automationPrompt, WAIT_FOR_COMPUTER_MS, type Automation, type AutomationRun } from "./automations.js";
 import { ProviderError, type LLM } from "./agent/llm.js";
 import { OwnModelLLM } from "./agent/own-model.js";
@@ -71,6 +84,7 @@ import { AgentMesh } from "./agent-mesh.js";
 import { CHECK_SECONDS, checkVerdict, type RepoCheck } from "./agent-mesh.js";
 import { Hubs } from "./hubs.js";
 import type { Limits } from "./runner/limits.js";
+import type { MachineFacts } from "./placement.js";
 import type { MachineTool, SessionOptionsPatch } from "./types.js";
 import type { ToolOption, ToolWindow } from "./routing.js";
 import { breaches as ruleBreaches, breachText, draftRule, DRAFT_SYSTEM, globsOf, parseDraft, STANDING, type RuleCheck } from "./rules.js";
@@ -122,6 +136,8 @@ import { SessionStore, WorkspaceClosing } from "./session/store.js";
 import type { ImportedTurn, Member, PresenceMember, RepoCall, SessionEvent } from "./types.js";
 import { NoLinks } from "./local/no-links.js";
 import { computerDetail, LocalLinks } from "./local/computers.js";
+import { parseComputerLink } from "./local/join.js";
+import { checkNumber } from "./local/nearby.js";
 import { handOff } from "./hand-off-run.js";
 import { reattachAll } from "./reattach.js";
 import { backBrief as backBriefOf, TeamLooks } from "./team-views.js";
@@ -139,7 +155,7 @@ import type { PeerNote } from "./types.js";
 import { ago as agoOf, LocalPeers, LOOK_AT as SESSIONS_LOOKED_AT, MODE_RANK, newId, placeOf as placeOfSession, scheduleOf } from "./app-tools.js";
 import { genUiTool } from "./gen-ui.js";
 import { branchesAt, branchRef, cleanProject, isFolderProject, parseLsRemote, projectNote, repoAt, repoKey, repoName, resolveMember, type MemberRepo, type RoomProject } from "./room-project.js";
-import { backAt, backupText, offBackup, onBackup, backupOf, backupsOf, cleanBackups, checkInDue, checkInText, missedSlot, quietCheckIns, type CheckIn, cleanRoom, cleanTrust, cleanTeammate, MEMORY_FILE, MEMORY_MAX, memoryText, defaultFolder, makeFolder, MAX_ROOMS, MAX_TEAMMATES, MAX_THREADS, NEW_THREAD, onOwnModel, projectsOf, roomKeep, runsOnName, teammateNote, TeammateStore, worktreeHolding, type Room, type Teammate, type TeammateView } from "./teammates.js";
+import { backAt, backupText, offBackup, onBackup, backupOf, backupsOf, cleanBackups, checkInDue, checkInText, cleanCheckIn, describeCheckIn, MAX_CHECKINS, missedSlot, quietCheckIns, type CheckIn, cleanRoom, cleanTrust, cleanTeammate, MEMORY_FILE, MEMORY_MAX, memoryText, defaultFolder, makeFolder, MAX_ROOMS, MAX_TEAMMATES, MAX_THREADS, NEW_THREAD, onOwnModel, projectsOf, roomKeep, runsOnName, teammateNote, TeammateStore, worktreeHolding, type Room, type Teammate, type TeammateView } from "./teammates.js";
 import { limitHit, planLimitHit } from "./limit-reset.js";
 import { RESUME_NUDGE } from "./limit-handoff.js";
 import { noteRunEnd } from "./limited.js";
@@ -156,7 +172,7 @@ import { movedSince, NUDGE_GAP_MS, QUIET_MS, saysGoalReached, selfRunAnswer, sel
 import { awayAnswer, awayNote, briefLine, briefWorthPosting, clockOf, endsOnQuestion, roomNews, runsIn, teamBrief as awayBrief, usageOf, type LaneRun, type Place } from "./team-away.js";
 import { boardBusy, sessionPr, verifiedAt } from "./session/projection.js";
 import { localSkillBriefs, localSkillText } from "./runner/skill-library.js";
-import { saysNoUpdate } from "./teammate-checkins.js";
+import { nextRun, saysNoUpdate } from "./teammate-checkins.js";
 import type { MateNote } from "./engine/hub.js";
 import { visitKeep, visitNote, visitRefusal, visitStore, type Visit } from "./crew-code.js";
 import { decisionsOf, offeredStore, withDecisions } from "./decision-memory.js";
@@ -408,10 +424,19 @@ export interface AppOptions {
       join(link: string): Promise<unknown>;
       leave(): Promise<unknown>;
     };
+    /** Your other Fridays on this network, found and offered a link in two clicks (local/nearby.ts). */
+    nearby?: {
+      find(ms?: number): Promise<{ id: string; name: string; platform: string; version: string; address: string; pairedWith: string | null }[]>;
+      offer(to: { id: string; name: string; platform: string; version: string; address: string; pairedWith: string | null }, link: string): Promise<void>;
+      pending(): { from: string; name: string; check: string; until: number }[];
+      take(from: string): { link: string; name: string } | null;
+    };
     /** Agents outside Friday, over its MCP server (outside-agents.ts): this install's token, and the script they start (local/outside-mcp.ts). */
     outside?: { token: string; shim: string };
     /** Where voice input's model is kept once downloaded (voice-models.ts): `<FRIDAY_HOME>/models`. Without it, no voice routes. */
     models?: string;
+    /** The folder backdrops are kept in (backdrops.ts): `<FRIDAY_HOME>/backdrops`. Without it, none. */
+    backdrops?: string;
     /**
      * Keep this computer's coding tools up to date by themselves (tool-updates.ts): the app on a person's own computer, never a
      * test's server, and never with FRIDAY_NO_TOOL_UPDATES set.
@@ -471,9 +496,11 @@ export async function createApp(o: AppOptions) {
     if (o.decisionLog) void learnFromRun(sid, lane).catch((e) => console.warn(`[brain] couldn't learn from ${sid}/${lane}: ${errorHead(String((e as Error)?.message ?? e))}`));
     if (o.decisionLog) void checkAfterRun(sid, lane).catch((e) => closingOr("[checks]", e));
     // A crew mate's "the tests pass", checked against its turn, and run when nothing in it backs the claim (claims.ts).
-    if (o.local && teammates) void checkClaim(sid, lane).catch((e) => closingOr("[claims]", e));
+    if (o.local) void checkClaim(sid, lane).catch((e) => closingOr("[claims]", e));
     // Its own failing tests, against the commit its copy started from: which were already failing there (baseline.ts).
     void testsAfterRun(sid, lane).catch((e) => closingOr("[baseline]", e));
+    // The tests it ran, as proof of its work (test-proof.ts): the chat's, the phone's and Code Review's test card.
+    void testProofAfterRun(sid, lane).catch((e) => closingOr("[test proof]", e));
     // A hub's task, or the main lane's conflict work for one (hubs.ts): the hub moves on.
     void hubs.onRunEnded(sid, lane).catch((e) => closingOr("[hub]", e));
     // A question another agent asked this one, answered with what it said last (agent-mesh.ts).
@@ -708,6 +735,10 @@ export async function createApp(o: AppOptions) {
 
   /** Automations hearing a session's events (set below, once the automations are). */
   let automationsHear: ((sid: string, ev: Pick<SessionEvent, "lane" | "body">) => void) | null = null;
+  /** A queued task's run ending: its proof clip, for Today (set where Run later is). */
+  let laterHear: ((sid: string, ev: Pick<SessionEvent, "lane" | "body">) => void) | null = null;
+  /** A proof clip landing in a session that has a pull request open: it goes in the description (set where Run later is). */
+  let clipToPr: ((sid: string, ev: SessionEvent) => void) | null = null;
   /** The teammates hearing their sessions' events (set below, with the teammates): away mode, its answers, retries. */
   let teamHear: ((sid: string, ev: SessionEvent) => void) | null = null;
   /** Code and Crew, connected, hearing every session (crew-code.ts, crew-carry.ts): set below, with the teammates. */
@@ -746,6 +777,8 @@ export async function createApp(o: AppOptions) {
     // Every edition's: the open-source one runs automations too, and with this left out of it its runs stayed "Running" for good
     // and "An agent finishes" never fired (2026-10-27 QA).
     if (ev.body.type === "run.ended") automationsHear?.(sid, ev);
+    if (ev.body.type === "run.ended") laterHear?.(sid, ev);
+    if (ev.body.type === "proof.clip") clipToPr?.(sid, ev as SessionEvent);
     // Who is out of usage, whichever session said it, for every session's hand-offs (limited.ts).
     if (ev.body.type === "run.ended") void store.state(sid).then((s) => noteRunEnd(s.engines[ev.lane ?? MAIN_LANE], { ts: Date.now(), body: ev.body }), () => {});
     // A plan naming a file another agent is on: said in the feed now, before either writes it (collisions.ts plannedOverlapsFor).
@@ -1080,6 +1113,8 @@ export async function createApp(o: AppOptions) {
    * Deep Dive's calls to the computer a repo is on (deep-dive.ts): a person's own, through their link to it, or this one when
    * Friday runs here. Never this server's own disk when it is somebody else's server: it has no repo of theirs to read.
    */
+  /** Deep Dive's code maps, a few minutes each (the /api/deepdive/map route). */
+  const diveMaps = new Map<string, { at: number; graph: CodeGraph }>();
   const diveHost =
     (userId: string): DiveHost =>
     async (method, params, ms) => {
@@ -1398,13 +1433,79 @@ export async function createApp(o: AppOptions) {
    * rule that is run rather than read ("back up your rules with scripts"). At most AFTER_RUN_TRIES in a row before it's left to
    * the person, who sees each failure in the session.
    */
+  /** The project's own command for `kind` in the lane's folder (claims.ts commandFor): "" when it has none, or nothing can run it. */
+  async function projectCommand(sid: string, lane: string, kind: Parameters<typeof commandFor>[0]): Promise<string> {
+    if (!mesh.repo) return "";
+    const read = async (file: string) => {
+      const out = await mesh.repo!(sid, lane, { op: "read", path: file, raw: true } as RepoCall).catch(() => null);
+      return out && !readFailed(out) ? out : null;
+    };
+    const tree = (await mesh.repo(sid, lane, { op: "tree", path: "" } as RepoCall).catch(() => "")) ?? "";
+    const top = new Set(tree.split("\n").map((l) => l.trim().replace(/^\.\//, "")).filter((l) => l && !l.includes("/")));
+    return commandFor(kind, await read("package.json"), (f) => top.has(f));
+  }
+  /** One test command Friday ran, as a test proof's line: its counts, the tests that failed, the end of its output. */
+  const testRunOf = (command: string, out: string, ok: boolean) => {
+    const names = ok ? [] : (failingTests(out) ?? []).slice(0, 8);
+    return { command, ok, ...testCounts(out), ...(names.length ? { failing: names } : {}), tail: tailOf(out) };
+  };
+  /** How a session takes proof (its own word, else its owner's Settings): "auto" when pre-approved, "ask" offers Test it, "off". */
+  async function proofModeOf(sid: string): Promise<ClipMode> {
+    const st = await store.state(sid);
+    const ownerId = Object.entries(st.members).find(([, m]) => m.role === "owner" && !m.removed)?.[0] ?? o.local?.user.id;
+    return ownerId ? (await sessionClipsOf(sid, ownerId)).mode : "ask";
+  }
+  /**
+   * Test it (Arun, 2026-11-22: "Devin's way, in chat"): proof of a lane's finished work, asked for. The tests its last run ran, or the
+   * project's own when it ran none (said as it runs), then a proof clip when the work changed a page. Each lands in the chat as it does.
+   */
+  async function testWork(j: { sid: string; lane: string; owner: { id: string; name: string }; folder: string; key: string | null }): Promise<void> {
+    const { sid, lane } = j;
+    const events = await store.events(sid);
+    const onLane = (e: SessionEvent) => (e.lane ?? MAIN_LANE) === lane;
+    const end = events.findLast((e) => onLane(e) && e.body.type === "run.ended");
+    const start = end ? (events.findLast((e) => e.seq < end.seq && onLane(e) && e.body.type === "run.started")?.seq ?? 0) : 0;
+    const ran = end ? testRunsIn(events, lane, start, end.seq) : [];
+    const ui = hasUiChange((await store.state(sid)).diffs?.[lane]?.files ?? []);
+    const status = (stage: "testing" | "failed", extra: { why?: string; command?: string }) => store.append(sid, FRIDAY, { type: "proof.status", stage, tests: true, asked: true, ...extra }, { lane }).catch(() => {});
+    if (ran.length) await store.append(sid, FRIDAY, { type: "proof.tests", run: end!.seq, by: "agent", runs: ran }, { lane });
+    else {
+      const command = await projectCommand(sid, lane, "tests");
+      if (command) {
+        await status("testing", { command });
+        const out = (await mesh.repo!(sid, lane, { op: "shell", command, timeoutSec: CHECK_SECONDS } as RepoCall).catch((e: Error) => `Couldn't run it: ${e.message}`)) ?? "";
+        const verdict = checkVerdict(out);
+        if (verdict === "skipped") await status("failed", { command, why: clipText(out, 200) || `\`${command}\` couldn't run here.` });
+        else await store.append(sid, FRIDAY, { type: "proof.tests", run: end?.seq ?? 0, by: "friday", runs: [testRunOf(command, out, verdict === "passed")] }, { lane });
+      } else if (!ui) await status("failed", { why: "This project has no test command Friday knows (a test script in package.json, pytest, go test or cargo test), and the change draws nothing to record." });
+    }
+    if (ui) await proveRun({ ...j, asked: true });
+  }
+
+  /** A finished run's own test commands, as its test proof (test-proof.ts): once per run, only when it ran any. */
+  async function testProofAfterRun(sid: string, lane: string): Promise<void> {
+    const events = await store.events(sid);
+    const onLane = (e: SessionEvent) => (e.lane ?? MAIN_LANE) === lane;
+    const end = events.findLast((e) => onLane(e) && e.body.type === "run.ended");
+    if (!end || end.body.type !== "run.ended" || end.body.cut || end.body.outcome === "waiting") return;
+    const start = events.findLast((e) => e.seq < end.seq && onLane(e) && e.body.type === "run.started")?.seq ?? 0;
+    const runs = testRunsIn(events, lane, start, end.seq);
+    if (!runs.length) return;
+    // Offered (Test it on the finished work), unless proof is pre-approved for this session (Arun, 2026-11-22: "Devin's way, in chat").
+    if ((await proofModeOf(sid)) !== "auto") return;
+    if (!(await redis.set(`${o.prefix}test-proof:${sid}:${end.seq}`, "1", "EX", 3600, "NX"))) return;
+    await store.append(sid, FRIDAY, { type: "proof.tests", run: end.seq, by: "agent", runs }, { lane });
+  }
+
   /**
    * "Done", checked rather than claimed (Arun, 2026-11-15): a crew mate's answer that says the tests (build, linter, types) pass is
    * read against its turn. A command it ran backs it or contradicts it; with none, Friday runs the project's own in its folder and
    * says how it went. Said once a turn, under the answer; a contradicted claim goes back to the crew mate to fix, once.
    */
   async function checkClaim(sid: string, lane: string): Promise<void> {
-    if (!(await mateLane(sid, lane))) return;
+    // A crew mate's claim that turns out wrong goes back to it to fix; in a coding session it is checked and shown, not sent back:
+    // a fix there is the person's call (Arun, 2026-11-22: test proof, "Friday would run them itself").
+    const mate = await mateLane(sid, lane);
     const events = await store.events(sid);
     const onLane = (e: SessionEvent) => (e.lane ?? MAIN_LANE) === lane;
     const end = events.findLast((e) => onLane(e) && e.body.type === "run.ended");
@@ -1416,6 +1517,7 @@ export async function createApp(o: AppOptions) {
     if (!(await redis.set(`${o.prefix}claim:${sid}:${end.seq}`, "1", "EX", 3600, "NX"))) return;
     const note = (verdict: "backed" | "checked" | "contradicted" | "unverified", command?: string) => store.append(sid, FRIDAY, { type: "claim.checked", run: end.seq, claim: claim.words, kind: claim.kind, verdict, ...(command ? { command } : {}) }, { lane });
     const tell = async (command: string, output: string) => {
+      if (!mate) return;
       const sent = await store.append(sid, FRIDAY, { type: "instruction", text: `[Friday] You said ${claimWords(claim.kind)}, but \`${command}\` failed:\n\n${clipText(output, 3000)}\n\nFix it and run it again, then say plainly where it stands.`, interrupt: false, check: command }, { lane });
       if (sent.ok) void bus.wake(sid, lane);
     };
@@ -1425,19 +1527,15 @@ export async function createApp(o: AppOptions) {
       return;
     }
     // Nothing in its turn checked it: the project's own command, run where it works.
-    if (!mesh.repo) return void (await note("unverified"));
-    const read = async (file: string) => {
-      const out = await mesh.repo!(sid, lane, { op: "read", path: file, raw: true } as RepoCall).catch(() => null);
-      return out && !readFailed(out) ? out : null;
-    };
-    const tree = (await mesh.repo(sid, lane, { op: "tree", path: "" } as RepoCall).catch(() => "")) ?? "";
-    const top = new Set(tree.split("\n").map((l) => l.trim().replace(/^\.\//, "")).filter((l) => l && !l.includes("/")));
-    const command = commandFor(claim.kind, await read("package.json"), (f) => top.has(f));
+    const command = await projectCommand(sid, lane, claim.kind);
     if (!command) return void (await note("unverified"));
-    const out = await mesh.repo(sid, lane, { op: "shell", command, timeoutSec: CHECK_SECONDS } as RepoCall).catch((e: Error) => `Couldn't run it: ${e.message}`);
+    const out = await mesh.repo!(sid, lane, { op: "shell", command, timeoutSec: CHECK_SECONDS } as RepoCall).catch((e: Error) => `Couldn't run it: ${e.message}`);
     const verdict = checkVerdict(out);
     if (verdict === "skipped") return void (await note("unverified", command));
     await store.append(sid, FRIDAY, { type: "repo.checked", run: end.seq, command, ok: verdict === "passed", ...(verdict === "failed" ? { output: clipText(out ?? "", 3000) } : {}) }, { lane });
+    // Friday's run of it, as the turn's test proof: the reply said so, nothing in it checked, so this is what shows (when proof is
+    // pre-approved; otherwise the row above says it, and Test it shows the card).
+    if (claim.kind === "tests" && (await proofModeOf(sid)) === "auto") await store.append(sid, FRIDAY, { type: "proof.tests", run: end.seq, by: "friday", runs: [testRunOf(command, out ?? "", verdict === "passed")] }, { lane });
     await note(verdict === "passed" ? "checked" : "contradicted", command);
     if (verdict === "failed") await tell(command, out ?? "");
   }
@@ -1908,6 +2006,30 @@ export async function createApp(o: AppOptions) {
   const localHost = () => process.env.FRIDAY_LOCAL_RUNNER === "1" || (process.env.FRIDAY_LOCAL_RUNNER !== "0" && /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(selfUrl));
   const hostCtx = (user: { id: string; name: string }) => ({ serverUrl: selfUrl, user, runners: localRunners, log: (l: string) => console.log(`[runner] ${l}`) });
   /**
+   * What each of your computers is and has now (placement.ts MachineFacts), for "Best" in Runs on and the map of your computers
+   * (spec 09 step 1). Asked of a linked computer over its link (`machine.facts`), of this one in process; kept 15 seconds, and
+   * an older Friday that doesn't know the question is remembered as having no facts for 10 minutes rather than asked again.
+   */
+  const factsKept = new Map<string, { at: number; facts: MachineFacts | null; asking?: Promise<void> }>();
+  const factsOf = async (id: string, ask: () => Promise<unknown>, waitMs = 1500): Promise<MachineFacts | null> => {
+    const k = factsKept.get(id);
+    const fresh = k && Date.now() - k.at < (k.facts ? 15_000 : 600_000);
+    if (k && (fresh || k.asking)) return k.facts;
+    const entry = k ?? { at: 0, facts: null };
+    entry.asking = ask().then(
+      (f) => {
+        entry.facts = f && typeof f === "object" && (f as MachineFacts).v === 1 ? (f as MachineFacts) : null;
+        entry.at = Date.now();
+      },
+      () => {
+        entry.at = Date.now();
+      },
+    ).finally(() => (entry.asking = undefined));
+    factsKept.set(id, entry);
+    await Promise.race([entry.asking, new Promise((r) => setTimeout(r, waitMs))]);
+    return entry.facts;
+  };
+  /**
    * The coding tools on a person's machine, with how much of each is left, as the router weighs them (routing.ts): from the
    * machine linked to this Friday, or this machine when Friday runs on it.
    */
@@ -1984,6 +2106,9 @@ export async function createApp(o: AppOptions) {
       for (const t of await teammates.list()) if (t.mode && t.mode !== "full") await teammates.update(t.id, (cur) => ({ ...cur, mode: undefined }));
       await redis.set(done, "1");
     })().catch((e) => console.error("[teammates] full access:", e));
+  // ── Backdrops (backdrops.ts): what fills the window behind the app, on this computer ─────────────────────────────────────
+  const backdrops = o.local?.backdrops ? new BackdropStore({ root: o.local.backdrops, trash: path.join(path.dirname(o.local.backdrops), "trash", "backdrops"), skills: libraryDir() }) : null;
+  void backdrops?.start();
   /**
    * The "Needs you" queue (needs-you.ts): what waits on each person across their sessions, Crew rooms and teammates, ranked, each
    * with a suggested answer. The suggestion is the person's own work: on Friday's model where their plan has one (counted against
@@ -3500,6 +3625,99 @@ export async function createApp(o: AppOptions) {
         }
       },
     };
+    // A crew mate's routines from any session (agent-mesh.ts ROUTINE_TOOL; Arun, 2026-11-23: Ivy, asked to track the downloads
+    // every day, could only make a Code automation, so it ran as a coding session of its own, not in Ivy's chat). The same routines
+    // its page keeps (MateRoutines.tsx), run by the same clock (runCheckIns); what an agent may change is what it may do itself, as
+    // manage_teammate has it.
+    mesh.routineTool = {
+      call: async (sid, lane, args) => {
+        const here = await store.state(sid);
+        if (!ownerIn(here)) return { output: "This session has nobody to answer to.", isError: true };
+        const arg = (k: string) => (typeof args[k] === "string" ? (args[k] as string).trim() : "");
+        const action = arg("action");
+        const list = await teammates.list();
+        const named = arg("teammate").replace(/^@/, "").toLowerCase();
+        const place = await placeOf(sid, lane);
+        const t = named ? list.find((x) => x.name.toLowerCase() === named) : place ? list.find((x) => x.id === place.id) : undefined;
+        if (!t)
+          return {
+            output: named ? `There's no crew mate called ${arg("teammate")}. The crew: ${list.map((x) => x.name).join(", ") || "nobody yet"}.` : `Say whose routines: teammate, by name (${list.map((x) => x.name).join(", ") || "the crew has nobody yet"}).`,
+            isError: true,
+          };
+        const askerMode: EngineMode = here.engines[lane]?.mode ?? "edits";
+        if (action !== "list") {
+          if (askerMode === "plan") return { output: "You're in plan mode: you can list routines, not add, change or run them. Say what you'd set up, and let the person do it.", isError: true };
+          if (await agentStarted(sid)) return { output: "This session was started by another agent, and doesn't change routines. Tell the agent that started it what you'd set up.", isError: true };
+          // Its own routines are a crew mate's to keep; another's only when that one may do no more than the asker.
+          if (place?.id !== t.id && MODE_RANK[t.mode ?? "full"] > MODE_RANK[askerMode]) return { output: `${t.name} may do more than you may (${t.mode ?? "full"}, you ${askerMode}), so its routines are the person's to change.`, isError: true };
+        }
+        const routines = t.checkins ?? [];
+        const nextOf = (c: CheckIn) => {
+          const at = nextRun(c);
+          return at ? at.toLocaleString("en-US", { timeZone: c.tz, weekday: "short", hour: "numeric", minute: "2-digit" }) : "";
+        };
+        const line = (c: CheckIn) =>
+          `- ${c.name || "Routine"} [id ${c.id}] · ${c.off ? "paused" : `on, next ${nextOf(c)}`} · ${describeCheckIn(c)} · in ${c.where === "thread" ? "a new thread each time" : "its own chat"}${c.quiet === false ? " · always reports" : ""}\n  Does: ${c.text.slice(0, 200)}${c.text.length > 200 ? "…" : ""}`;
+        if (action === "list") return { output: routines.length ? `${t.name}'s routines:\n${routines.map(line).join("\n")}` : `${t.name} has no routines yet.` };
+        // What was given for when and where, as its page sends it (cleanCheckIn checks it).
+        const DAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+        const given: Record<string, unknown> = {};
+        if (arg("name")) given.name = arg("name");
+        if (arg("does")) given.text = arg("does");
+        if (arg("every")) given.every = arg("every");
+        if (typeof args.hours === "number") given.hours = args.hours;
+        if (arg("at")) given.at = arg("at").padStart(5, "0");
+        if (Array.isArray(args.days)) {
+          given.days = args.days.map((d) => DAYS.indexOf(String(d).slice(0, 3).toLowerCase())).filter((d) => d >= 0);
+          if (!given.every) given.every = "weekly";
+        }
+        if (arg("where")) given.where = arg("where") === "thread" ? "thread" : undefined;
+        if (typeof args.quiet === "boolean") given.quiet = args.quiet ? undefined : false;
+        if (given.at !== undefined && !/^([01]\d|2[0-3]):[0-5]\d$/.test(given.at as string)) return { output: `"${arg("at")}" isn't a time: give it as 24-hour HH:MM, like 09:00.`, isError: true };
+        const save = async (fn: (cs: CheckIn[]) => CheckIn[]) => {
+          const next = await teammates.update(t.id, (cur) => ({ ...cur, checkins: fn(cur.checkins ?? []) }));
+          return next ? null : { output: `${t.name} isn't in the crew any more.`, isError: true };
+        };
+        if (action === "create") {
+          if (!given.name || !given.text) return { output: "Give the routine a name and what it does.", isError: true };
+          if (routines.length >= MAX_CHECKINS) return { output: `${t.name} has ${MAX_CHECKINS} routines, as many as a crew mate keeps. Change or delete one first.`, isError: true };
+          const same = routines.find((c) => (c.name ?? "").toLowerCase() === (given.name as string).toLowerCase());
+          if (same) return { output: `${t.name} already has a routine called "${same.name}" [id ${same.id}]: change it with update.`, isError: true };
+          const c = cleanCheckIn({ every: "daily", tz: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", ...given }, `r${Date.now().toString(36)}${randomBytes(2).toString("hex")}`);
+          if (!c) return { output: "That isn't a routine: give what it does and how often.", isError: true };
+          const failed = await save((cs) => [...cs, c]);
+          if (failed) return failed;
+          return { output: `Made ${t.name}'s routine "${c.name}" [id ${c.id}]: ${describeCheckIn(c)}, in ${c.where === "thread" ? "a new thread each time" : `${t.name}'s own chat`}, next ${nextOf(c)}. It shows on ${t.name}'s Routines; run it now with action run.` };
+        }
+        const want = arg("routine").toLowerCase();
+        const c = routines.find((x) => x.id === arg("routine")) ?? routines.find((x) => (x.name ?? "").toLowerCase() === want) ?? (want && routines.filter((x) => (x.name ?? "").toLowerCase().includes(want) || x.text.toLowerCase().includes(want)).length === 1 ? routines.find((x) => (x.name ?? "").toLowerCase().includes(want) || x.text.toLowerCase().includes(want)) : undefined);
+        if (!c) return { output: `${t.name} has no routine "${arg("routine")}".${routines.length ? ` It has: ${routines.map((x) => `"${x.name || x.text.slice(0, 40)}" [id ${x.id}]`).join(", ")}.` : ""}`, isError: true };
+        const put = (to: CheckIn) => save((cs) => cs.map((x) => (x.id === c.id ? to : x)));
+        if (action === "update") {
+          const next = cleanCheckIn({ ...c, ...given }, c.id);
+          if (!next) return { output: "That leaves the routine without what it does.", isError: true };
+          // Its schedule changed: the slot it last ran in no longer says anything about the new one.
+          const failed = await put(next.every === c.every && next.at === c.at && next.days.join() === c.days.join() && next.hours === c.hours ? next : { ...next, last: undefined });
+          if (failed) return failed;
+          return { output: `Changed ${t.name}'s routine "${next.name || "Routine"}": ${describeCheckIn(next)}, in ${next.where === "thread" ? "a new thread each time" : "its own chat"}${next.off ? ", paused" : `, next ${nextOf(next)}`}.` };
+        }
+        if (action === "pause" || action === "resume") {
+          const failed = await put(action === "pause" ? { ...c, off: true } : { ...c, off: undefined });
+          if (failed) return failed;
+          return { output: `${t.name}'s routine "${c.name || "Routine"}" is ${action === "pause" ? "paused" : `on again, next ${nextOf({ ...c, off: undefined })}`}.` };
+        }
+        if (action === "delete") {
+          const failed = await save((cs) => cs.filter((x) => x.id !== c.id));
+          if (failed) return failed;
+          return { output: `Deleted ${t.name}'s routine "${c.name || "Routine"}".` };
+        }
+        if (action === "run") {
+          const said = await routineNow(t.id, c.id);
+          return said ? { output: said, isError: true } : { output: `${t.name}'s routine "${c.name || "Routine"}" is running now, in ${c.where === "thread" ? "a new thread" : `${t.name}'s own chat`}.` };
+        }
+        return { output: "Say which: list, create, update, pause, resume, delete or run.", isError: true };
+      },
+    };
     mesh.teamSwitch = async (sid, lane) => {
       const place = await placeOf(sid, lane);
       if (!place) return false;
@@ -4489,6 +4707,217 @@ export async function createApp(o: AppOptions) {
     const teamAwake = awake;
     awake = async () => laterWantsAwake(await later.list().catch(() => [] as LaterTask[]), Date.now()) || (await teamAwake());
   }
+  /**
+   * A proof clip for a queued task that changed a page (Arun, 2026-11-21: "1. Speed baseline, Today with Tonight, and proof clips."):
+   * when its first run ends having changed something that draws, Friday finds the project's dev server (starting it as the preview check
+   * does), records the first changed page (preview.check.clip) and keeps it as a file of the chat, so Today's Last night row leads with it.
+   * Once a task; what went wrong is kept too, said on the row, and never stops anything. Only tasks queued ahead (Tonight), not Start.
+   */
+  /** A session's own word on Friday's clips (the route above), kept when it differs from Settings: "auto", "ask" or "off". */
+  const sessionClipsKey = (sid: string) => `${o.prefix}proofclips:session:${sid}`;
+  const clipModeOf = (set: ProofClipsSetting): ClipMode => (!set.on ? "off" : set.auto ? "auto" : "ask");
+  const sessionClipsOf = async (sid: string, who: string): Promise<{ mode: ClipMode; settings: ClipMode; own: boolean }> => {
+    const settings = clipModeOf(await proofClipsOf(who));
+    const kept = await redis.get(sessionClipsKey(sid)).catch(() => null);
+    const own = kept === "auto" || kept === "ask" || kept === "off";
+    return { mode: own ? (kept as ClipMode) : settings, settings, own };
+  };
+  /** The least time between two clips Friday records by itself in one session: a busy agent's every turn isn't a clip. */
+  const AUTO_CLIP_GAP_S = 10 * 60;
+  /** A proof clip's event, checked: every file named is this session's, the marks are a short list of words and moments. Null if not. */
+  const proofClipBody = async (sid: string, b: Record<string, unknown>, by: "check" | "queued", lane = MAIN_LANE): Promise<Extract<SessionEvent["body"], { type: "proof.clip" }> | null> => {
+    const id = (v: unknown) => (typeof v === "string" && /^[\w-]{1,64}$/.test(v) ? v : "");
+    const file = id(b.file);
+    if (!file || !(await files.get(sid, file))) return null;
+    const extra: Record<string, string> = {};
+    for (const k of ["before", "phone", "gif", "gifBefore", "mp4", "mp4Before", "mp4Phone"] as const) {
+      const f = id(b[k]);
+      if (f && (await files.get(sid, f))) extra[k] = f;
+    }
+    const marks = Array.isArray(b.marks)
+      ? (b.marks as { atMs?: unknown; label?: unknown }[]).filter((m) => typeof m?.atMs === "number" && typeof m.label === "string").slice(0, 12).map((m) => ({ atMs: Math.max(0, Math.round(m.atMs as number)), label: String(m.label).slice(0, 140) }))
+      : [];
+    const page = typeof b.page === "string" && b.page.startsWith("/") ? b.page.slice(0, 300) : "/";
+    // What was changed (Arun, 2026-11-22: "add like a description what was changed"): the agent's own account of it, its last words in
+    // the lane, and the files its change touched, read here once for every place that shows the clip (clip-summary.ts).
+    const [events, st] = await Promise.all([store.events(sid), store.state(sid)]);
+    const summary = changeSummary(events, lane);
+    const changed = changedFiles(st.diffs?.[lane]?.files ?? []);
+    return { type: "proof.clip", page, file, durationMs: Math.max(0, Math.round(Number(b.durationMs) || 0)), ...(marks.length ? { marks } : {}), ...extra, ...(summary ? { summary } : {}), ...(changed.length ? { files: changed } : {}), by };
+  };
+  const clipKey = (sid: string) => `${o.prefix}today:clip:${sid}`;
+  /** The person's proof clips setting (client/proof-clips.ts): on, with before-and-after and the phone width off, until they say. */
+  const proofClipsOf = async (who: string): Promise<ProofClipsSetting> => {
+    const raw = await redis.get(`${o.prefix}proofclips:${who}`).catch(() => null);
+    const v = raw ? (JSON.parse(raw) as Partial<ProofClipsSetting> & { v?: number }) : {};
+    // Proof is offered, not made by itself, unless pre-approved (Arun, 2026-11-22: "Devin's way, in chat"): `auto` counts only once
+    // the person chose it under this rule (v: 2); the earlier default of on is read as off.
+    return { on: v.on !== false, auto: v.v === 2 && v.auto === true, before: v.before === true, phone: v.phone === true, pr: v.pr !== false };
+  };
+  /**
+   * Who a clip is for and where it was made: the session, the lane that worked, its person (whose Settings decide), and the folder.
+   * `key` is where Today keeps it (a queued task's chat) or null for a clip only the chat shows.
+   */
+  type ClipJob = { sid: string; lane: string; owner: { id: string; name: string }; folder: string; key: string | null; /** Pressed for (Record a proof clip): made whatever the mode, but off. */ asked?: boolean; /** A team's board finished: the lead sends it, saying what the team did. */ team?: { lead: string; name: string; summary: string; files: string[] } };
+  const proveRun = async (j: ClipJob): Promise<void> => {
+    // Off in Settings: nothing recorded (and nothing kept, so turning it back on later doesn't leave a hole saying why).
+    // How the session takes clips: off records nothing; "when I ask" only what was asked for (j.asked: Record a proof clip); automatic,
+    // at most one every ten minutes in a session by itself (a queued task's own clip, for Today, isn't held back by that).
+    const mode = (await sessionClipsOf(j.sid, j.owner.id)).mode;
+    if (mode === "off") return;
+    // Pre-approved, or asked for (Test it); a queued task's own, for Today, either way: nobody was there to press anything.
+    if (!j.asked && !j.key && mode !== "auto") return;
+    if (!j.asked && !j.key && !(await redis.set(`${o.prefix}clip-recent:${j.sid}`, "1", "EX", AUTO_CLIP_GAP_S, "NX"))) return;
+    const k = j.key ?? `${o.prefix}clip-made:${j.sid}:${j.lane}:${(await store.state(j.sid)).diffs?.[j.lane]?.seq ?? 0}`;
+    // One clip a change: asked for again, it is made again (one that failed, or to see it once more); by itself, only once.
+    if (j.asked) await redis.set(k, JSON.stringify({ making: true }), "EX", 8 * 24 * 3600);
+    else if (!(await redis.set(k, JSON.stringify({ making: true }), "EX", 8 * 24 * 3600, "NX"))) return;
+    // Said in the chat as it goes, so the person who asked (or anyone watching) sees it working, not a button that did nothing.
+    let said = false;
+    const say = (stage: "server" | "recording" | "saving" | "failed", why?: string) => {
+      said = true;
+      return store.append(j.sid, { id: "friday", name: "Friday", kind: "system" }, { type: "proof.status", stage, ...(why ? { why: why.slice(0, 200) } : {}), ...(j.asked ? { asked: true as const } : {}) }, { lane: j.lane }).catch(() => {});
+    };
+    const keep = async (v: object) => {
+      if ("failed" in v && said) await say("failed", String((v as { failed: string }).failed));
+      return redis.set(k, JSON.stringify(v), "EX", 8 * 24 * 3600);
+    };
+    try {
+      const state = await store.state(j.sid);
+      const diff = state.diffs?.[j.lane];
+      const changed = diff ? [...diff.files] : [];
+      if (!hasUiChange(changed)) return void (await redis.del(k));
+      const owner = j.owner;
+      const cwd = state.engines[j.lane]?.cwd || j.folder;
+      if (!cwd) return void (await redis.del(k));
+      const token = links.tokenFor(owner.id);
+      const ask = (op: string, params: Record<string, unknown>, ms: number): Promise<unknown> => (token ? links.call(token, op, params, ms) : callHost(op, params, hostCtx(owner)));
+      await say("server");
+      type Plan = { pages: string[]; url: string | null; error?: string };
+      let plan: Plan | null = null;
+      // The dev server may still be coming up after the first ask, as the card's check finds: asked again a few times.
+      for (let i = 0; i < 10; i++) {
+        plan = (await ask("preview.check.plan", { cwd, files: changed.filter((f) => f.status !== "deleted").map((f) => f.path) }, 60_000).catch(() => null)) as Plan | null;
+        if (plan?.url || plan?.error) break;
+        await new Promise((r) => setTimeout(r, 3000));
+      }
+      const page = plan?.pages[0];
+      if (!plan?.url || !page) return void (await keep({ failed: plan?.error || "No dev server came up to record." }));
+      // The walk goes to what the change added on the page (its files' diff, read on the computer), points it out and clicks it.
+      const paths = changed.filter((f) => f.status !== "deleted").map((f) => f.path);
+      const pageUrl = plan.url.replace(/\/$/, "") + page;
+      type Rec = { data?: string; gif?: string; mp4?: string; durationMs?: number; marks?: { atMs: number; label: string }[]; errors?: string[]; stops?: number[]; error?: string };
+      const record = async (op: string, params: Record<string, unknown>, name: string): Promise<{ file: string; gif?: string; mp4?: string; durationMs: number; marks?: Rec["marks"]; stops?: number[] } | { failed: string }> => {
+        const rec = (await ask(op, params, 3 * 60_000).catch((e: Error) => ({ error: e.message }))) as Rec;
+        if (!rec.data) return { failed: rec.error || "The clip couldn't be made." };
+        const f = await files.save(j.sid, { name, type: "video/webm", data: Buffer.from(rec.data, "base64"), uploadedBy: owner.id });
+        // The same walk as a GIF, for the pull request's description (GitHub plays only videos uploaded on its own site).
+        const g = rec.gif ? await files.save(j.sid, { name: name.replace(/\.webm$/, ".gif"), type: "image/gif", data: Buffer.from(rec.gif, "base64"), uploadedBy: owner.id }) : null;
+        // And as MP4 where the computer can make one: an iPhone plays it (iOS 26's WebKit doesn't play the WebM).
+        const m = rec.mp4 ? await files.save(j.sid, { name: name.replace(/\.webm$/, ".mp4"), type: "video/mp4", data: Buffer.from(rec.mp4, "base64"), uploadedBy: owner.id }) : null;
+        return { file: f.id, ...(g ? { gif: g.id } : {}), ...(m ? { mp4: m.id } : {}), durationMs: rec.durationMs ?? 0, ...(rec.marks?.length ? { marks: rec.marks.slice(0, 12) } : {}), ...(rec.stops?.length ? { stops: rec.stops.slice(0, 20) } : {}) };
+      };
+      const setting = await proofClipsOf(owner.id);
+      await say("recording");
+      const after = await record("preview.check.clip", { url: pageUrl, cwd, files: paths }, clipName(page));
+      if ("failed" in after) return void (await keep({ failed: after.failed }));
+      // Before and after, and the phone's width, only when asked for in Settings: each starts or takes longer, and a failure of either leaves the clip of the change as it is.
+      // The page before the change is walked to the same places as the clip of the change (its stops), so the two line up side by side.
+      const before = setting.before ? await record("preview.check.before", { cwd, url: pageUrl, files: paths, ...(after.stops?.length ? { stops: after.stops } : {}) }, clipName(page).replace(/^clip/, "clip-before")) : null;
+      const phone = setting.phone ? await record("preview.check.clip", { url: pageUrl, cwd, files: paths, width: "phone" }, clipName(page).replace(/^clip/, "clip-phone")) : null;
+      await say("saving");
+      const { stops: _stops, ...kept } = after;
+      void _stops;
+      const done = { ...kept, page, ...(before && "file" in before ? { before: before.file, ...(before.gif ? { gifBefore: before.gif } : {}), ...(before.mp4 ? { mp4Before: before.mp4 } : {}) } : {}), ...(phone && "file" in phone ? { phone: phone.file, ...(phone.mp4 ? { mp4Phone: phone.mp4 } : {}) } : {}) };
+      await keep(done);
+      // Said in the chat too, so the phone, the session, Today and the pull request show it (types.ts proof.clip).
+      const ev = await proofClipBody(j.sid, done, "queued", j.lane);
+      // A team's: from its lead, in the lead's lane, with what the whole team did rather than the last agent's words.
+      if (ev && j.team) await store.append(j.sid, { id: `agent:${j.team.lead}`, name: j.team.name, kind: "agent" }, { ...ev, summary: j.team.summary, ...(j.team.files.length ? { files: j.team.files } : {}) }, { lane: j.team.lead });
+      else if (ev) await store.append(j.sid, { id: "friday", name: "Friday", kind: "system" }, ev, { lane: j.lane });
+    } catch (e) {
+      await keep({ failed: (e as Error).message || "The clip couldn't be made." });
+    }
+  };
+  /**
+   * A proof clip in the pull request (Arun, 2026-11-21: "add clips to PRs"): when a clip with a GIF lands in a session whose pull
+   * request is open and the person's Settings allow it, the runner puts the GIF on the repository's friday-proof branch and writes the
+   * description's Proof block (pr.proof). A clip made before the pull request goes in as Friday opens it (the PR's body), not here.
+   */
+  core.proofForPr = async (sid) => {
+    const state = await store.state(sid);
+    const ownerId = Object.entries(state.members).find(([, m]) => m.role === "owner" && !m.removed)?.[0] ?? o.local?.user.id;
+    if (!ownerId || !(await proofClipsOf(ownerId)).pr) return null;
+    const ev = (await store.events(sid)).findLast((e) => e.body.type === "proof.clip" && !!e.body.gif);
+    if (ev?.body.type !== "proof.clip" || !ev.body.gif) return null;
+    const after = await files.get(sid, ev.body.gif);
+    if (!after) return null;
+    const before = ev.body.gifBefore ? await files.get(sid, ev.body.gifBefore) : null;
+    return JSON.stringify({ page: ev.body.page, marks: ev.body.marks ?? [], ...(ev.body.summary ? { summary: ev.body.summary } : {}), ...(ev.body.files?.length ? { files: ev.body.files } : {}), gifs: { after: after.data.toString("base64"), ...(before ? { before: before.data.toString("base64") } : {}) } });
+  };
+  clipToPr = (sid, ev) => {
+    const b = ev.body;
+    if (b.type !== "proof.clip" || !b.gif) return;
+    const gif = b.gif;
+    void (async () => {
+      const state = await store.state(sid);
+      if (!state.pr || state.pr.merged) return;
+      const ownerId = Object.entries(state.members).find(([, m]) => m.role === "owner" && !m.removed)?.[0] ?? o.local?.user.id;
+      if (!ownerId || !(await proofClipsOf(ownerId)).pr) return;
+      const lane = ev.lane ?? MAIN_LANE;
+      const cwd = state.engines[lane]?.cwd || state.engines[MAIN_LANE]?.cwd;
+      if (!cwd) return;
+      const after = await files.get(sid, gif);
+      if (!after) return;
+      const beforeGif = b.gifBefore ? await files.get(sid, b.gifBefore) : null;
+      const owner = { id: ownerId, name: state.members[ownerId]?.name ?? o.local?.user.name ?? "you" };
+      const token = links.tokenFor(owner.id);
+      const params = { cwd, pr: { url: state.pr.url }, page: b.page, marks: b.marks ?? [], ...(b.summary ? { summary: b.summary } : {}), ...(b.files?.length ? { files: b.files } : {}), gifs: { after: after.data.toString("base64"), ...(beforeGif ? { before: beforeGif.data.toString("base64") } : {}) } };
+      const r = (await (token ? links.call(token, "pr.proof", params, 3 * 60_000) : callHost("pr.proof", params, hostCtx(owner)))) as { ok?: boolean; error?: string };
+      if (r?.error) console.error(`[clips] pull request: ${r.error}`);
+    })().catch((e) => console.error("[clips] pull request:", e));
+  };
+  /**
+   * When Friday records a clip by itself (Arun, 2026-11-21: "what about for like crews or like automated tasks if the user steps away"):
+   * work nobody was watching, as its run ends having changed a page. Tonight's queue (kept for Today), an automation's run, a crew
+   * mate's turn in a Crew room, and any agent's run that ends while its person is away from the computer (the desktop app's idle time,
+   * else no page of theirs open on the session). Someone watching presses the preview check if they want one.
+   */
+  laterHear = (sid, ev) => {
+    if (ev.body.type !== "run.ended" || ev.body.cut || ev.body.outcome !== "done") return;
+    const lane = ev.lane ?? MAIN_LANE;
+    void (async () => {
+      const state = await store.state(sid);
+      const ownerId = Object.entries(state.members).find(([, m]) => m.role === "owner" && !m.removed)?.[0] ?? o.local?.user.id;
+      const owner = ownerId ? { id: ownerId, name: state.members[ownerId]?.name ?? o.local?.user.name ?? "you" } : null;
+      if (!owner) return;
+      const job = (key: string | null, folder = ""): ClipJob => ({ sid, lane, owner: { id: owner.id, name: owner.name }, folder, key });
+      const queued = lane === MAIN_LANE && later ? (await later.list()).find((x) => x.sid === sid && x.at - x.created >= (Number(process.env.FRIDAY_TODAY_AHEAD_MS) || QUEUED_AHEAD_MS)) : undefined;
+      if (queued) return proveRun(job(clipKey(sid), queued.folder));
+      // A team working through a board (Arun, 2026-11-22: "if it was ran by a team... we can have the lead agent send it at the end of
+      // everything"): no clip for each agent's turn; one when the whole board is done and nobody is still working, of the last task
+      // that changed a page, sent by the lead with what the team did. Once a board (its posting).
+      const tasks = state.board?.tasks ?? [];
+      if (tasks.length) {
+        const running = state.run.status === "running" || Object.values(state.laneRuns ?? {}).some((r) => r.status === "running");
+        if (boardBusy(state) || running || !tasks.some((t) => t.status === "done")) return;
+        const done = tasks.filter((t) => t.status === "done");
+        const shows = [...done].reverse().find((t) => t.lane && hasUiChange(state.diffs?.[t.lane]?.files ?? []));
+        if (!shows?.lane) return;
+        const posted = (await store.events(sid)).findLast((e) => e.body.type === "board.posted")?.seq ?? 0;
+        if (!(await redis.set(`${o.prefix}clip-board:${sid}:${posted}`, "1", "EX", 30 * 24 * 3600, "NX"))) return;
+        const lead = state.lead ?? MAIN_LANE;
+        const files = [...new Set(done.flatMap((t) => (t.lane ? (state.diffs?.[t.lane]?.files ?? []).map((f) => f.path) : [])))].slice(0, 6);
+        const summary = `The team finished ${done.length} task${done.length === 1 ? "" : "s"}: ${done.slice(0, 4).map((t) => t.title).join("; ")}${done.length > 4 ? `; and ${done.length - 4} more` : ""}.`;
+        return proveRun({ ...job(null), lane: shows.lane, team: { lead, name: laneName(state, lead), summary: summary.slice(0, 280), files } });
+      }
+      const automated = lane === MAIN_LANE && !!(await redis.get(automations.runOfKey(sid)).catch(() => null));
+      const crew = !!state.options.team;
+      const on = await store.presence(sid).catch(() => ({}) as Record<string, number>);
+      const away = o.local ? (o.local.atComputer ? !o.local.atComputer() : (on[owner.id] ?? 0) === 0) : false;
+      if (automated || crew || away) await proveRun(job(null));
+    })().catch((e) => console.error("[clips]", e));
+  };
   const laterLoop = later ? setInterval(() => void tickLater().catch((e) => console.error("[later]", e)), Number(process.env.FRIDAY_LATER_TICK_MS) || 15_000) : null;
   laterLoop?.unref?.();
   void tickLater().catch(() => {});
@@ -5176,6 +5605,83 @@ export async function createApp(o: AppOptions) {
       return json(res, 405, { error: "Not that." });
     }
 
+    // Proof clips on or off (client/proof-clips.ts; Arun, 2026-11-21: "i want this proof clips to be very advanced.... and can be toggled
+    // on or off"): kept here, not in the page, so the clips Friday records by itself after Tonight's work follow it too.
+    if (url.pathname === "/api/proof-clips" && o.local && localEdition()) {
+      const me = await identity(req);
+      if (!me) return json(res, 401, { error: "Not signed in." });
+      if (req.method === "GET") return json(res, 200, await proofClipsOf(me.id));
+      if (req.method !== "PUT") return json(res, 405, { error: "GET or PUT." });
+      const b = (await readJson(req).catch(() => ({}))) as Partial<Record<keyof ProofClipsSetting, unknown>>;
+      const was = await proofClipsOf(me.id);
+      const next: ProofClipsSetting = { on: typeof b.on === "boolean" ? b.on : was.on, auto: typeof b.auto === "boolean" ? b.auto : was.auto, before: typeof b.before === "boolean" ? b.before : was.before, phone: typeof b.phone === "boolean" ? b.phone : was.phone, pr: typeof b.pr === "boolean" ? b.pr : was.pr };
+      await redis.set(`${o.prefix}proofclips:${me.id}`, JSON.stringify({ ...next, v: 2 }));
+      return json(res, 200, next);
+    }
+
+    // Today (today.ts, found-work.ts; Arun, 2026-11-21: "1. Speed baseline, Today with Tonight, and proof clips."): what landed from
+    // last night's queue, the work found in the person's repos, and Tonight, which is Run later's queue for the night. GET reads it all;
+    // POST /api/today/skip puts a found row away for good (dismissed, or queued: then with the task it became, for Tonight's estimate).
+    if ((url.pathname === "/api/today" || url.pathname === "/api/today/skip") && later && o.local && localEdition()) {
+      const me = await identity(req);
+      if (!me) return json(res, 401, { error: "Not signed in." });
+      const skipKey = `${o.prefix}today:skip:${me.id}`;
+      const foundKey = `${o.prefix}today:found:${me.id}`;
+      if (url.pathname === "/api/today/skip") {
+        if (req.method !== "POST") return json(res, 405, { error: "POST." });
+        const b = (await readJson(req).catch(() => ({}))) as { id?: unknown; task?: unknown; size?: unknown };
+        const id = typeof b.id === "string" && /^[a-z]+-[0-9a-z]{1,10}$/.test(b.id) ? b.id : "";
+        if (!id) return json(res, 400, { error: "Which row?" });
+        await redis.sadd(skipKey, id);
+        await redis.expire(skipKey, 60 * 24 * 3600);
+        if (typeof b.task === "string" && /^[0-9a-f]{10}$/.test(b.task) && (b.size === "XS" || b.size === "S" || b.size === "M")) {
+          await redis.hset(foundKey, b.task, b.size);
+          await redis.expire(foundKey, 60 * 24 * 3600);
+        }
+        return json(res, 200, { ok: true });
+      }
+      if (req.method !== "GET") return json(res, 405, { error: "GET." });
+      const now = Date.now();
+      const tasks = (await later.list()).filter((t) => t.ownerId === me.id);
+      const sizes = (await redis.hgetall(foundKey).catch(() => ({}))) as Record<string, string>;
+      const landed = await Promise.all(
+        tasks
+          // Only what was queued for a time: a task started with Start is a chat the person opened then, not something waiting for them.
+          // (FRIDAY_TODAY_AHEAD_MS lets a walk queue one a minute ahead; a person never sets it.)
+          .filter((t) => t.at - t.created >= (Number(process.env.FRIDAY_TODAY_AHEAD_MS) || QUEUED_AHEAD_MS))
+          .filter((t) => (t.status === "running" && t.startedAt && now - t.startedAt <= LANDED_MS) || ((t.status === "missed" || t.status === "failed") && now - t.at <= LANDED_MS))
+          .map(async (t) => {
+            const st = t.sid ? await store.state(t.sid).catch(() => null) : null;
+            const row = landedRow(t, st);
+            const clip = t.sid ? (JSON.parse((await redis.get(clipKey(t.sid)).catch(() => null)) ?? "null") as LandedRow["clip"] | null) : null;
+            if (clip && (clip.file || clip.making)) return { ...row, clip };
+            // No clip of its change (clips set to When I ask, or one that failed): offered, when the change drew a page.
+            const d = st?.diffs?.[MAIN_LANE];
+            const clipable = !!d && hasUiChange(d.files) && (st?.clips?.[MAIN_LANE]?.seq ?? 0) < d.seq && (row.state === "ready" || row.state === "pr");
+            return { ...row, ...(clip?.failed ? { clip } : {}), ...(clipable ? { clipable: true as const } : {}) };
+          }),
+      );
+      const tonight = tasks
+        .filter((t) => t.status === "queued" && t.at - now <= TONIGHT_MS)
+        .sort((a, b) => a.at - b.at)
+        .map((t) => ({ id: t.id, title: t.title, folder: t.folder, tool: t.tool, at: t.at, minutes: minutesFor(t, sizes[t.id] ? { size: sizes[t.id] as FoundSize } : null) }));
+      // Found work is looked for on the person's own computer; a look takes a few seconds the first time, then an hour's answer is kept there.
+      let found: FoundWork = { items: [], looked: [], at: 0 };
+      let foundError: string | undefined;
+      if (!computerHere(me.id)) foundError = "Your computer isn't connected.";
+      else {
+        const skip = await redis.smembers(skipKey).catch(() => [] as string[]);
+        const params = { skip, fresh: url.searchParams.get("fresh") === "1" };
+        const token = links.tokenFor(me.id);
+        found = await (token ? links.call(token, "today.find", params, 90_000) : callHost("today.find", params, hostCtx(me))).then(
+          (r) => r as FoundWork,
+          (e) => ((foundError = (e as Error).message || "Couldn't look through your repos."), found),
+        );
+      }
+      const body: Today = { landed: sortLanded(landed), tonight, found: found.items, looked: found.looked, foundAt: found.at, ...(foundError ? { foundError } : {}) };
+      return json(res, 200, body);
+    }
+
     // The files the IDE has unsaved edits in (vscode-dirty.ts): the extension posts them (its token), Friday's page reads them before it
     // asks to rewind a chat, so the confirm can say which of the files going back the person is still typing in.
     if (url.pathname === "/api/vscode/dirty" && o.local && localEdition()) {
@@ -5706,7 +6212,7 @@ export async function createApp(o: AppOptions) {
         // agent attaches. Told "didn't answer in time" at 30 seconds, the person set it up again while the first one joined.
         // Everything else is quick.
         // An agent review is one of the person's own CLIs reading a whole pull request: minutes, not seconds.
-        const value = (await links.call(token, method, params, method === "clone" || method === "start" ? 10 * 60_000 : method === "pr.review" ? 6 * 60_000 : 30_000)) as object;
+        const value = (await links.call(token, method, params, method === "clone" || method === "start" ? 10 * 60_000 : method === "pr.review" ? 6 * 60_000 : method === "preview.check.clip" ? 2 * 60_000 : method === "preview.check.before" ? 3 * 60_000 : 30_000)) as object;
         // Another of your computers is called what you call it here (Settings › Your computers), as everywhere else on the page.
         const named = method === "tools" && localLinks?.label(token) ? { machine: { ...((value as { machine?: object }).machine ?? {}), name: localLinks.label(token) } } : {};
         return json(res, ok, method === "tools" ? { ...value, ...named, where: "linked" } : value);
@@ -5891,6 +6397,126 @@ export async function createApp(o: AppOptions) {
       }
     }
 
+    // A session's task board for the phone (Arun, 2026-11-22: "the task board isn't appearing on mobile"): each task with where it
+    // stands, who has it, what it waits on, and its checks and review, as the desktop's board card reads them (projection.ts board).
+    const boardRoute = url.pathname.match(/^\/api\/sessions\/([\w-]+)\/board$/);
+    if (boardRoute && req.method === "GET") {
+      const sid = boardRoute[1]!;
+      const inv = verifyInvite(o.secret, url.searchParams.get("invite"));
+      if (!inv || inv.sid !== sid) return json(res, 403, { error: "Invalid invite for this session" });
+      if (!(await memberOnly(req, res, sid))) return;
+      const st = await store.state(sid);
+      const tasks = (st.board?.tasks ?? []).map((t) => ({
+        id: t.id,
+        title: t.title,
+        detail: t.detail.slice(0, 600),
+        status: t.status,
+        after: t.after,
+        ...(t.lane ? { lane: t.lane, name: t.name ?? "" } : {}),
+        ...(t.reviewer ? { reviewer: t.reviewer.name } : {}),
+        ...(t.review ? { review: { ok: t.review.ok, note: (t.review.note ?? "").slice(0, 300), auto: !!t.review.auto } } : {}),
+        ...(t.checks ? { checks: { ok: t.checks.ok, running: !!t.checks.running, command: t.checks.command } } : {}),
+        rounds: t.rounds,
+        ...(t.report ? { report: t.report.slice(0, 600) } : {}),
+      }));
+      return json(res, 200, { tasks, title: st.title });
+    }
+    // Proof clips for one session (Arun, 2026-11-22: "be smart when we show these clips… toggle them in a session… i dont want people to
+    // burn through their usage limits"): on (as Settings say) or off, for the clips Friday records by itself in it. Pressing the preview
+    // check still records one: that is asking. GET says how it stands; PUT { mode: "auto" | "ask" | "off" | "settings" } changes it for
+    // everyone in the session ("settings": back to what Settings say).
+    const sessionClipsRoute = url.pathname.match(/^\/api\/sessions\/([\w-]+)\/proof-clips$/);
+    if (sessionClipsRoute && (req.method === "GET" || req.method === "PUT")) {
+      const sid = sessionClipsRoute[1]!;
+      const inv = verifyInvite(o.secret, url.searchParams.get("invite"));
+      if (!inv || inv.sid !== sid) return json(res, 403, { error: "Invalid invite for this session" });
+      const me = await memberOnly(req, res, sid);
+      if (!me) return;
+      if (req.method === "PUT") {
+        const b = (await readJson(req).catch(() => ({}))) as { mode?: unknown };
+        if (b.mode === "settings") await redis.del(sessionClipsKey(sid));
+        else if (b.mode === "auto" || b.mode === "ask" || b.mode === "off") await redis.set(sessionClipsKey(sid), b.mode);
+        else return json(res, 400, { error: "Automatic, when asked, or off?" });
+      }
+      return json(res, 200, await sessionClipsOf(sid, me.id));
+    }
+    // A session's latest proof clip, how one being made stands, and whether one can be made now: Code Review's Proof section (Arun,
+    // 2026-11-22: "how do i see the proof for the merge???"), for the pull request that session opened.
+    const sessionClipRoute = url.pathname.match(/^\/api\/sessions\/([\w-]+)\/proof-clip$/);
+    if (sessionClipRoute && req.method === "GET") {
+      const sid = sessionClipRoute[1]!;
+      const inv = verifyInvite(o.secret, url.searchParams.get("invite"));
+      if (!inv || inv.sid !== sid) return json(res, 403, { error: "Invalid invite for this session" });
+      const me = await memberOnly(req, res, sid);
+      if (!me) return;
+      const [events, st] = await Promise.all([store.events(sid), store.state(sid)]);
+      const clipEv = events.findLast((e) => e.body.type === "proof.clip");
+      const statusEv = events.findLast((e) => e.body.type === "proof.status");
+      const status = statusEv && (!clipEv || statusEv.seq > clipEv.seq) && statusEv.body.type === "proof.status" ? { ...statusEv.body, lane: statusEv.lane ?? MAIN_LANE, at: statusEv.ts } : null;
+      // One can be made of a lane whose change draws a page and has no clip of it yet, unless clips are off here.
+      const off = (await sessionClipsOf(sid, me.id)).mode === "off";
+      const lane = [MAIN_LANE, ...st.lanes.map((l) => l.id)].find((l) => {
+        const d = st.diffs?.[l];
+        return !!d && hasUiChange(d.files) && (st.clips?.[l]?.seq ?? 0) < d.seq;
+      });
+      const testsEv = events.findLast((e) => e.body.type === "proof.tests");
+      const tests = testsEv?.body.type === "proof.tests" ? { ...testsEv.body, lane: testsEv.lane ?? MAIN_LANE, seq: testsEv.seq, at: testsEv.ts } : null;
+      return json(res, 200, { tests, clip: clipEv?.body.type === "proof.clip" ? { ...clipEv.body, lane: clipEv.lane ?? MAIN_LANE, seq: clipEv.seq, at: clipEv.ts } : null, status, recordable: !off && lane ? { lane } : null });
+    }
+    // Record a proof clip now (Arun, 2026-11-22: "an option where the user can either click to see the proof after the task was done"):
+    // for a lane whose finished work changed a page. It comes back as a proof.clip in the chat, in a few seconds; this only starts it.
+    const recordRoute = url.pathname.match(/^\/api\/sessions\/([\w-]+)\/proof-clip\/record$/);
+    if (recordRoute && req.method === "POST") {
+      const sid = recordRoute[1]!;
+      const inv = verifyInvite(o.secret, url.searchParams.get("invite"));
+      if (!inv || inv.sid !== sid) return json(res, 403, { error: "Invalid invite for this session" });
+      const me = await memberOnly(req, res, sid);
+      if (!me) return;
+      const b = (await readJson(req).catch(() => ({}))) as { lane?: unknown };
+      const lane = typeof b.lane === "string" && /^[\w-]{1,40}$/.test(b.lane) ? b.lane : MAIN_LANE;
+      const st = await store.state(sid);
+      if (!hasUiChange(st.diffs?.[lane]?.files ?? [])) return json(res, 400, { error: "This agent's work changed no page, so there is nothing to record." });
+      if ((await sessionClipsOf(sid, me.id)).mode === "off") return json(res, 400, { error: "Proof clips are off for this session." });
+      const queued = later ? (await later.list()).find((x) => x.sid === sid) : undefined;
+      void proveRun({ sid, lane, owner: { id: me.id, name: me.name }, folder: queued?.folder ?? "", key: queued && lane === MAIN_LANE ? clipKey(sid) : null, asked: true }).catch((e) => console.error("[clips]", e));
+      return json(res, 202, { ok: true });
+    }
+    // Test it (Arun, 2026-11-22: "Devin's way, in chat"): proof of a lane's finished work, offered under it rather than made by
+    // itself. The tests it ran (or the project's own), and a proof clip when it changed a page, each in the chat as it lands.
+    const testRoute = url.pathname.match(/^\/api\/sessions\/([\w-]+)\/proof\/test$/);
+    if (testRoute && req.method === "POST") {
+      const sid = testRoute[1]!;
+      const inv = verifyInvite(o.secret, url.searchParams.get("invite"));
+      if (!inv || inv.sid !== sid) return json(res, 403, { error: "Invalid invite for this session" });
+      const me = await memberOnly(req, res, sid);
+      if (!me) return;
+      const b = (await readJson(req).catch(() => ({}))) as { lane?: unknown };
+      const lane = typeof b.lane === "string" && /^[\w-]{1,40}$/.test(b.lane) ? b.lane : MAIN_LANE;
+      const st = await store.state(sid);
+      if (!st.diffs?.[lane]?.files.length) return json(res, 400, { error: "This agent's work changed nothing yet, so there is nothing to test." });
+      if ((await sessionClipsOf(sid, me.id)).mode === "off") return json(res, 400, { error: "Proof is off for this session." });
+      const queued = later ? (await later.list()).find((x) => x.sid === sid) : undefined;
+      void testWork({ sid, lane, owner: { id: me.id, name: me.name }, folder: queued?.folder ?? "", key: queued && lane === MAIN_LANE ? clipKey(sid) : null }).catch((e) => console.error("[test it]", e));
+      return json(res, 202, { ok: true });
+    }
+    // A proof clip, said in the session's log (types.ts proof.clip): the preview check's card says what it recorded, so the chat, the
+    // phone, Today and the pull request all show it from one place. Its files have to be this session's already.
+    const clipRoute = url.pathname.match(/^\/api\/sessions\/([\w-]+)\/proof-clip$/);
+    if (clipRoute && req.method === "POST") {
+      const sid = clipRoute[1]!;
+      const inv = verifyInvite(o.secret, url.searchParams.get("invite"));
+      if (!inv || inv.sid !== sid) return json(res, 403, { error: "Invalid invite for this session" });
+      const who = await identity(req);
+      if (!who) return json(res, 401, { error: "Sign in first." });
+      if (!can(await store.state(sid), who.id, "upload")) return json(res, 403, { error: "You can't add to this session." });
+      const b = (await readJson(req).catch(() => ({}))) as Record<string, unknown>;
+      const lane = typeof b.lane === "string" && /^[\w-]{1,40}$/.test(b.lane) ? b.lane : MAIN_LANE;
+      const clip = await proofClipBody(sid, b, "check", lane);
+      if (!clip) return json(res, 400, { error: "That clip isn't one of this session's files." });
+      const r = await store.append(sid, { id: who.id, name: who.name, kind: "human" }, clip, { lane });
+      if (!r.ok) return json(res, 409, { error: "It couldn't be kept: the session moved on." });
+      return json(res, 201, { ok: true });
+    }
     const fileRoute = url.pathname.match(/^\/api\/sessions\/([\w-]+)\/files(?:\/([\w-]+))?$/);
     if (fileRoute) {
       const sid = fileRoute[1]!;
@@ -5931,13 +6557,28 @@ export async function createApp(o: AppOptions) {
         // Never render uploaded markup on our own origin. An SVG is a picture, served as one so it draws in the chat (audit CODE-7),
         // under a policy that runs nothing in it and loads nothing from it, even opened on its own (files.ts uploadedFileHeaders).
         const head = uploadedFileHeaders(f.meta.type);
-        res.writeHead(200, {
+        const common = {
           ...head,
-          "Content-Length": f.data.length,
+          "Accept-Ranges": "bytes",
           "X-Content-Type-Options": "nosniff",
           "Content-Disposition": `${head["Content-Type"] === "application/octet-stream" ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(f.meta.name)}`,
           "Cache-Control": "private, max-age=3600",
-        });
+        };
+        // A byte range when asked (one range, as a video player asks): a clip or video can then be skipped through, which it can't from a
+        // whole answer (Arun, 2026-11-21, proof clips: a step in the clip's list seeks to its moment).
+        const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ""));
+        if (range && (range[1] || range[2])) {
+          const size = f.data.length;
+          const start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]));
+          const end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+          if (start >= size || start > end) {
+            res.writeHead(416, { "Content-Range": `bytes */${size}` });
+            return res.end();
+          }
+          res.writeHead(206, { ...common, "Content-Range": `bytes ${start}-${end}/${size}`, "Content-Length": end - start + 1 });
+          return res.end(f.data.subarray(start, end + 1));
+        }
+        res.writeHead(200, { ...common, "Content-Length": f.data.length });
         return res.end(f.data);
       }
       return json(res, 405, { error: "Method not allowed" });
@@ -6113,6 +6754,17 @@ export async function createApp(o: AppOptions) {
           await dives.saveAsk(key, ask);
           void answerAsk(dives, diveHost(ctx.me.id), model ? { ...d, model } : d, ask);
           return json(res, 202, { ask });
+        }
+        // The code map (code-graph.ts; Arun, 2026-11-22: "visualizing or making a web of connections or showing how your code
+        // works for the deep dive"): which file uses which, read on the computer the repo is on. Kept a few minutes per repo and
+        // commit, so switching views or coming back doesn't read the repo again; ?fresh=1 reads it now.
+        if (req.method === "GET" && url.pathname === "/api/deepdive/map") {
+          const kept = diveMaps.get(d.key);
+          if (kept && Date.now() - kept.at < 5 * 60_000 && url.searchParams.get("fresh") !== "1") return json(res, 200, { graph: kept.graph });
+          const { graph } = (await diveHost(ctx.me.id)("dive.graph", { path: d.folder }, 120_000)) as { graph: CodeGraph };
+          diveMaps.set(d.key, { at: Date.now(), graph });
+          if (diveMaps.size > 20) diveMaps.delete(diveMaps.keys().next().value!);
+          return json(res, 200, { graph });
         }
         if (req.method === "GET" && url.pathname === "/api/deepdive/code") {
           const start = Number(url.searchParams.get("start")) || 1;
@@ -6371,14 +7023,23 @@ export async function createApp(o: AppOptions) {
       const rows = await store.mine(me.id);
       // The chats Run later started are Code's (Code's history takes them in, marked): Agents' list leaves them out, the phone's shows them.
       const ranLater = new Set(((await later?.list().catch(() => [] as LaterTask[])) ?? []).flatMap((l) => (l.sid ? [l.sid] : [])));
+      // Code's own chats, as the desktop said (POST below): kept out of the phone's list and every other Agents list.
+      const codeChats = new Set(await redis.smembers(`${o.prefix}code-chats:${me.id}`).catch(() => [] as string[]));
       const sessions = (
         await Promise.all(
           rows.map(async ({ sid, at }) => {
+            // Deleted: off every list, though its line in the person's list outlived it.
+            if (await store.buried(sid).catch(() => false)) return null;
             const state = await store.state(sid).catch(() => null);
             const m = state?.members[me.id];
             if (!state || !m || m.removed) return null;
             const row: Record<string, unknown> = { sid, title: state.title, role: m.role, invite: linkToken(sid, state, m.role), at };
             if (ranLater.has(sid)) row.later = true;
+            if (codeChats.has(sid)) row.code = true;
+            // How many agents it has: none is a session with nothing left on any computer (its log expired, or no agent was ever
+            // added), which the phone leaves out (Arun, 2026-11-21: "only the ones active on the machine... not past ones that were
+            // deleted or gone").
+            row.agents = Object.keys(state.engines ?? {}).length;
             if (state.options.work) row.work = true; // the sidebar's Work list (client/WorkMode.tsx)
             // Its project and coding tools, for the phone's Sessions filters (Arun, 2026-11-17: "add filters and stuff like status,
             // projects"): the first agent's repository or folder name, and each tool once.
@@ -6448,6 +7109,23 @@ export async function createApp(o: AppOptions) {
 
 
 
+    /**
+     * Which sessions are Code's chats (client/ide/code-chats.ts), told by the desktop whenever its list changes: Code keeps them in
+     * this browser, so nothing else could tell them from Agents' sessions, and the phone listed every one (Arun, 2026-11-21: "ensure
+     * we arent showing IDE session chats"). The whole list each time: a chat sent back to Agents leaves it.
+     */
+    if (req.method === "POST" && url.pathname === "/api/sessions/code-chats") {
+      const me = await identity(req);
+      if (!me) return json(res, 401, { error: "Not signed in." });
+      const { sids } = (await readJson(req).catch(() => ({}))) as { sids?: unknown };
+      if (!Array.isArray(sids)) return json(res, 400, { error: "Which sessions?" });
+      const list = [...new Set(sids.filter((x): x is string => typeof x === "string" && /^[\w-]{4,40}$/.test(x)))].slice(-5000);
+      const key = `${o.prefix}code-chats:${me.id}`;
+      await redis.del(key);
+      if (list.length) await redis.sadd(key, ...list);
+      return json(res, 200, { ok: true, count: list.length });
+    }
+
     // A chat taken off the list stays off it, here and on their other devices, until they open it again.
     if (req.method === "POST" && url.pathname === "/api/sessions/mine/forget") {
       const me = await identity(req);
@@ -6470,7 +7148,9 @@ export async function createApp(o: AppOptions) {
     if (req.method === "POST" && deleteSessionRoute) {
       const me = await identity(req);
       if (!me) return json(res, 401, { error: "Not signed in." });
-      if (!req.headers.origin || crossSite(req)) return json(res, 403, { error: "Not from Friday." });
+      // From a page, it must be Friday's own; from the paired phone (only the phone listener sets x-friday-via, and it drops the
+      // phone's Origin), it is the person's own phone, which asked them first.
+      if (!(o.local && req.headers["x-friday-via"] === "phone") && (!req.headers.origin || crossSite(req))) return json(res, 403, { error: "Not from Friday." });
       const sid = deleteSessionRoute[1]!;
       // A session whose history is gone (lost from Redis before the archive kept it): nothing is left to delete but its place
       // on this person's list, so that goes, and the delete is done. It said "No such session" and stayed on the list.
@@ -6829,7 +7509,10 @@ export async function createApp(o: AppOptions) {
         }
         if (req.method === "PATCH" && !one[2]) {
           const patch = (await readJson(req)) as Record<string, unknown>;
-          if (viaPhoneHere && (Object.keys(patch).some((k) => k !== "on") || typeof patch.on !== "boolean")) return json(res, 403, { error: "From your phone an automation can only be turned on or off." });
+          // From the phone (Arun, 2026-11-21: "build the next ones too"): on or off, its name, what it does, and when it runs, on a
+          // schedule or when you press Run now, as one made there. Who runs it, where and with what access stay the computer's.
+          const fromPhoneOk = (["on", "name", "does", "when"] as const).some((k) => k in patch) && Object.keys(patch).every((k) => ["on", "name", "does", "when"].includes(k)) && (!("on" in patch) || typeof patch.on === "boolean") && (!("when" in patch) || ["schedule", "manual"].includes(String((patch.when as { kind?: unknown } | null)?.kind)));
+          if (viaPhoneHere && !fromPhoneOk) return json(res, 403, { error: "From your phone an automation's name, what it does and when it runs can change. The rest is on your computer." });
           const next: Automation = { ...a, ...(await inSession(cleanAutomation(patch, a))) };
           // Its owner, back in the workspace, turning it on again: no longer paused for having left.
           if (next.on && next.paused) delete next.paused;
@@ -7846,6 +8529,8 @@ export async function createApp(o: AppOptions) {
     // Voice input (voice-server.ts): its model, downloaded once and served from here, the runtime's .wasm, and a recording made
     // into words on a server of your own. From this computer's own page only.
     if (voiceModels && (url.pathname.startsWith("/api/voice/") || url.pathname.startsWith("/voice/")) && (await voiceHttp(voiceModels, req, res, url))) return;
+    // Backdrops (backdrops.ts): listed, watched, served walled off, added and put away, from this computer's own page only.
+    if (backdrops && url.pathname.startsWith("/api/local/backdrops") && (await backdropsHttp(backdrops, req, res, url))) return;
     if (o.local && localLinks && (url.pathname === "/api/computers" || url.pathname.startsWith("/api/computers/"))) {
       const join = o.local.join;
       type Paired = { id: string; name: string; kind?: string; at: number; seen: number; host?: string; platform?: string; address?: string; version?: string; fp?: string; port?: number };
@@ -7861,7 +8546,17 @@ export async function createApp(o: AppOptions) {
           if (d.port && st.computers?.port && d.port !== st.computers.port) return `It was paired on port ${d.port}, and this computer now listens on ${st.computers.port}. Pair it again.`;
           return undefined;
         };
+        // What each is and has now, asked of all at once (factsOf waits a moment for a first answer, then serves what it kept).
+        const factsBy = new Map(await Promise.all([...live.keys()].map(async (id) => [id, await factsOf(id, () => localLinks.call(id, "machine.facts", {}, 8_000))] as const)));
+        const self = o.local!.user;
+        const [hereFacts, hereTools] = localHost()
+          ? await Promise.all([
+              factsOf("", () => callHost("machine.facts", {}, hostCtx(self))),
+              (callHost("tools", {}, hostCtx(self)) as Promise<{ tools?: MachineTool[] }>).then((r) => (r.tools ?? []).filter((t) => !!t.path).map((t) => ({ tool: t.tool, name: t.name, loggedIn: t.loggedIn })), () => []),
+            ])
+          : [null, []];
         return {
+          here: { name: process.env.FRIDAY_MACHINE_NAME || hostname().replace(/\.local$/i, ""), platform: process.platform, tools: hereTools, facts: hereFacts },
           computers: st.devices
             .filter((d) => d.kind === "computer")
             .map((d) => {
@@ -7869,7 +8564,7 @@ export async function createApp(o: AppOptions) {
               const problem = why(d);
               const version = localLinks.version(d.id) ?? d.version;
               const platform = c?.platform || d.platform || "", host = c?.host || d.host || "", address = c?.address || d.address || "";
-              return { id: d.id, name: d.name, at: d.at, seen: c ? Date.now() : d.seen, connected: !!c, tools: c?.tools ?? [], platform, host, address, detail: computerDetail({ name: d.name, platform, host, address }), ...(version ? { version } : {}), ...(problem ? { problem } : {}) };
+              return { id: d.id, name: d.name, at: d.at, seen: c ? Date.now() : d.seen, connected: !!c, tools: c?.tools ?? [], platform, host, address, detail: computerDetail({ name: d.name, platform, host, address }), facts: c ? (factsBy.get(d.id) ?? null) : null, ...(version ? { version } : {}), ...(problem ? { problem } : {}) };
             }),
           joined,
           ...(joined?.version ? { version: joined.version } : {}),
@@ -7948,6 +8643,33 @@ export async function createApp(o: AppOptions) {
         const tail = (said.length ? said : lines).slice(-2).join(" / ").slice(0, 400);
         const at = where?.addresses.length ? ` at ${where.addresses.join(", ")}${where.port ? ` (port ${where.port})` : ""}` : "";
         return json(res, 200, { ok: false, error: `${host} is set up, but it can't reach this computer${at}. Both need to be on the same network, or both on Tailscale.${tail ? ` Its log: ${tail}` : ""}` });
+      }
+      // Nearby (local/nearby.ts): the Fridays on this network, a link offered to one, and the offers waiting here for a yes.
+      const nearby = o.local.nearby;
+      if (nearby && req.method === "GET" && url.pathname === "/api/computers/nearby") {
+        const st = (phone ? await phone.state() : {}) as { computers?: { fingerprint?: string } };
+        const mine = st.computers?.fingerprint ?? null;
+        const found = await nearby.find(1200);
+        return json(res, 200, { found: found.map((f) => ({ id: f.id, name: f.name, platform: f.platform, version: f.version, address: f.address, linked: !!mine && f.pairedWith === mine, usedFromAnother: !!f.pairedWith && f.pairedWith !== mine })) });
+      }
+      if (nearby && phone && req.method === "POST" && url.pathname === "/api/computers/nearby/link") {
+        const b = (await readJson(req)) as { id?: unknown };
+        const found = (await nearby.find(1200)).find((f) => f.id === b.id);
+        if (!found) return json(res, 404, { error: "It isn't answering on this network now. Is Friday open there?" });
+        const code = (await phone.pairCode("computer")) as { link?: string; until?: number; error?: string };
+        if (!code.link) return json(res, 400, { error: code.error ?? "This computer can't take another one now." });
+        await nearby.offer(found, code.link);
+        const fp = parseComputerLink(code.link)?.hub.fingerprint ?? "";
+        return json(res, 200, { name: found.name, check: checkNumber(fp), until: code.until });
+      }
+      if (nearby && req.method === "GET" && url.pathname === "/api/computers/offers") return json(res, 200, { offers: nearby.pending() });
+      const answer = /^\/api\/computers\/offers\/([0-9a-f]{8,64})$/.exec(url.pathname);
+      if (nearby && join && req.method === "POST" && answer) {
+        const b = (await readJson(req)) as { allow?: unknown };
+        const offer = nearby.take(answer[1]!);
+        if (!offer) return json(res, 410, { error: "That offer has run out. Press Link there again." });
+        if (b.allow !== true) return json(res, 200, { ok: true });
+        return json(res, 200, await join.join(offer.link));
       }
       if (url.pathname === "/api/computers/join" && join) {
         if (req.method === "POST") {
@@ -8364,10 +9086,37 @@ export async function createApp(o: AppOptions) {
       send({ kind: "invites", invites: mayInvite(st, me.id) ? invitesFor(sid, st, await watchOn(st)) : null });
     };
 
+    /**
+     * The phone folds only a few things from events itself (its runs, questions, plan), so everything else the session's state holds
+     * (its agents and their tools, title, pull request, board, options) stood as it was when it opened (Arun, 2026-11-22: "Make sure
+     * everything in the chat is dynamic like the tasks and stuff… reliable"). A page asking as the phone is sent the state again
+     * shortly after events land: once things have settled for 400ms, and at least once every 1.5s while they keep coming.
+     */
+    const forPhone = url.searchParams.get("view") === "phone";
+    let stateTimer: NodeJS.Timeout | null = null;
+    let stateSentAt = 0;
+    const pushState = () => {
+      stateTimer = null;
+      stateSentAt = Date.now();
+      void store.state(sid).then(
+        // Without the change sets: their patches are most of a state's size, and the phone keeps its own from agent.diff events.
+        (st) => joined && send({ kind: "state", state: { ...st, diffs: {} }, upTo: st.lastSeq }),
+        () => {},
+      );
+    };
+    const stateSoon = () => {
+      if (!forPhone || !joined) return;
+      if (stateTimer) clearTimeout(stateTimer);
+      const late = Date.now() - stateSentAt >= 1500;
+      stateTimer = setTimeout(pushState, late ? 0 : 400);
+      stateTimer.unref?.();
+    };
+    ws.on("close", () => stateTimer && clearTimeout(stateTimer));
     const sendEvent = (event: SessionEvent, raw: string) => {
       if (event.seq <= lastSent) return;
       lastSent = event.seq;
       pass(raw);
+      stateSoon();
       const b = event.body;
       if (b.type === "member.removed" && b.userId === me.id) {
         closeSaying(ws, 4003, "You were removed from this session");
@@ -8727,6 +9476,7 @@ export async function createApp(o: AppOptions) {
     async close() {
       unlistenBurn();
       closing = true;
+      backdrops?.close();
       clearInterval(presenceLoop);
       clearTimeout(usageFirst);
       clearInterval(usageLoop);
@@ -8783,7 +9533,11 @@ export function forkKind(state: SessionState, mine: boolean): { options: Session
 
 /** This server's version, from its package.json, read once. */
 /** What a session's socket takes from your phone (local/phone.ts): talking, answering, and starting, stopping or steering a run. */
-const PHONE_COMMANDS = new Set(["instruct", "suggest", "say", "react", "approval.answer", "plan.approve", "run.pause", "run.resume", "run.cancel", "run.interrupt", "instruction.withdraw", "control.request", "control.claim", "control.yield", "control.deny", "resume.at", "resume.cancel", "thread.reply", "thread.send"]);
+// folder.commit: the person's own commit, pressed on the phone's Changes (Arun, 2026-11-21), as the desktop's commit dialog sends it:
+// only the agent's files, pushed or with a pull request only when they chose it. A merge was already the phone's (pr.act).
+// board.task: the person's say over the task board (start a proposed team, or have the lead do it all; hand on, retry, drop a task),
+// as the desktop's board gives it (Arun, 2026-11-22: "See no thing is appearing for me to start the team").
+const PHONE_COMMANDS = new Set(["board.task", "folder.commit", "instruct", "suggest", "say", "react", "approval.answer", "plan.approve", "run.pause", "run.resume", "run.cancel", "run.interrupt", "instruction.withdraw", "control.request", "control.claim", "control.yield", "control.deny", "resume.at", "resume.cancel", "thread.reply", "thread.send", "thread.open", "thread.resolve", "thread.reopen"]);
 
 let appVersion: Promise<string> | undefined;
 /** This Friday's version, as its package.json says. */

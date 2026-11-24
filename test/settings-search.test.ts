@@ -32,10 +32,10 @@ test("every thing on a Settings page is found by its own word (audit e2e, Arun 2
   for (const q of ["phone", "iPhone"]) assert.deepEqual(ids(q), [], q);
   assert.deepEqual(ids("Tailscale"), ["other-computers"], "Tailscale");
   assert.deepEqual(ids("feedback"), ["help"]);
-  // Widgets and slash commands find nothing in the hosted and public editions; Arun's own build has a section for them,
-  // found by what it changes.
-  let custom: string[] = [];
-  for (const q of ["mods", "widget", "slash commands"]) assert.deepEqual(ids(q), custom, q);
+  // Backdrops find nothing in the hosted edition; the open-source one has a section for them (since v0.4.1), found by what it is.
+  for (const q of ["backdrop", "wallpaper"]) assert.deepEqual(ids(q), ["backdrop"], q);
+  // Mods are gone from every edition (Arun, 2026-11-20: "also get rid of the mods on my local build").
+  assert.deepEqual(ids("mods"), []);
 });
 
 test("old links land on the tab that holds them now, and the tabs are grouped by what you come to change (Arun, 2026-11-08)", async () => {

@@ -234,7 +234,7 @@ export const APP_TOOLS: MeshToolDef[] = [
   {
     name: "manage_automation",
     description:
-      "Friday's automations on this computer: a coding tool started on a schedule, by a webhook, or when a session's agent finishes, with a task. list: every one, when it runs and whether it is on. runs: one's latest runs. create: a new one when the person asks (a name, what it does, when: \"every weekday at 9:00\" as schedule {days, time}, or manual). update: change its task, schedule, tool or folder. pause / resume: turn it off or on. run: run it now.",
+      "Friday's automations on this computer: a coding tool started on a schedule, by a webhook, or when a session's agent finishes, with a task. list: every one, when it runs and whether it is on. runs: one's latest runs. create: a new one when the person asks (a name, what it does, when: \"every weekday at 9:00\" as schedule {days, time}, or manual). update: change its task, schedule, tool or folder. pause / resume: turn it off or on. run: run it now. Each run is a new Code session of its own: something a crew mate is asked to do regularly is that crew mate's routine (manage_routine), not an automation, unless the person asks for an automation.",
     inputSchema: obj(
       {
         action: { type: "string", enum: ["list", "runs", "create", "update", "pause", "resume", "run"] },
@@ -261,7 +261,7 @@ export const APP_TOOLS: MeshToolDef[] = [
 ];
 
 export const APP_INSTRUCTIONS =
-  " The whole app is yours to use for the person, from any session: list_sessions, read_session and search_sessions see every session on this computer (Code, the Crew room and its rooms) and what was said in them, so look there before working out again what another session already knows; message_session tells an agent in any of them something (a teammate in the Team room by its name, the agent in a Code session), ask_session asks one a question and waits for its answer, start_session starts a new Code session with a task and a coding tool, manage_automation lists, makes, changes, pauses and runs automations, and manage_teammate lists the team, adds a teammate the person asked for and changes one's role. Use these when the person asks, or when the work needs them; say what you did in your reply.";
+  " The whole app is yours to use for the person, from any session: list_sessions, read_session and search_sessions see every session on this computer (Code, the Crew room and its rooms) and what was said in them, so look there before working out again what another session already knows; message_session tells an agent in any of them something (a teammate in the Team room by its name, the agent in a Code session), ask_session asks one a question and waits for its answer, start_session starts a new Code session with a task and a coding tool, manage_automation lists, makes, changes, pauses and runs automations (scheduled Code sessions), manage_routine does the same for a crew mate's routines (what it does by itself on a schedule, in its own chat: what a crew mate asked for recurring work makes), and manage_teammate lists the team, adds a teammate the person asked for and changes one's role. Use these when the person asks, or when the work needs them; say what you did in your reply.";
 
 /** "every weekday at 9:00" as an automation's schedule (agents.ts AgentSchedule), from the tool's {days, time, every}. Null when none was given. */
 export function scheduleOf(raw: unknown, tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"): AgentSchedule | null {

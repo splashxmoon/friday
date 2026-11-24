@@ -65,3 +65,14 @@ test("a plan's steps reach the phone whole, each step's words cut short, for its
   assert.equal(a[0].content.length, 120);
   assert.deepEqual(JSON.parse(m.body.toolCalls[1].arguments).todos.map((t: any) => t.content), ["One", "Two"]);
 });
+
+test("the cards agents draw come too, and what a step gave back to look at (Arun, 2026-11-21: visuals in the phone's chat)", () => {
+  const log = [
+    ev(1, { type: "ui.card", id: "c1", card: { kind: "choices", title: "Which way?", options: [{ label: "A" }, { label: "B" }] } } as SessionEvent["body"]),
+    ev(2, { type: "tool.result", callId: "s", name: "Read", output: "x".repeat(900), isError: false, pictures: ["/tmp/shot.png"] } as SessionEvent["body"]),
+  ];
+  const got = phoneLog(log);
+  assert.deepEqual(got.map((e) => e.body.type), ["ui.card", "tool.result"]);
+  assert.deepEqual((got[1]!.body as { pictures?: string[] }).pictures, ["/tmp/shot.png"], "a step's pictures survive the cut");
+  assert.equal(phonePage(log, "main", Infinity).events.length, 2);
+});

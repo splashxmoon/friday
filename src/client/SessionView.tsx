@@ -7,6 +7,7 @@ import { openInPreview } from "./previewBus.js";
 import { pictureSession } from "./LiveBlock.js";
 import { WorkBar, WorkRail } from "./WorkRail.js";
 import { isWorkSid, markWorkSession } from "./WorkMode.js";
+import { ClipModeRow } from "./ClipModeRow.js";
 import { SessionMenu } from "./SessionMenu.js";
 import { EmptyState } from "@/components/dass/EmptyState";
 import { lazy, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
@@ -1203,7 +1204,7 @@ export function SessionView({
             badges={{ files: Object.values(state.diffs).reduce((n, d) => n + d.files.length, 0), working: state.run.status === "running" || Object.values(state.laneRuns).some((r) => r.status === "running"), tasks: taskCount(state) }}
             taskBoard={<TaskBoard state={state} send={send} notify={s.notify} jump={jumpTo} readOnly={me.role === "viewer"} />}
             headless={solo}
-            addAgent={<Lanes state={state} me={me} agents={agents} identity={identity} send={send} onConnect={(tool) => setConnect({ lane: "", ...(tool ? { tool } : {}) })} onRace={() => setRacing(true)} solo={solo} />}
+            addAgent={<Lanes state={state} me={me} agents={agents} identity={identity} send={send} invite={invite} onConnect={(tool) => setConnect({ lane: "", ...(tool ? { tool } : {}) })} onRace={() => setRacing(true)} solo={solo} />}
           />
         </BenchOrHistory>
       </div>
@@ -1743,7 +1744,7 @@ function TopBar({
         {isLocal() && !state.options.team && !state.options.work && <Suspense fallback={null}><ThreadCardToggle state={state} /></Suspense>}
         {/* The local edition's in its place: this session's settings, and the line about Friday Team (SessionMenu). */}
         {isLocal() && gear && (
-          <SessionMenu button={!!state.options.work} settings={owner ? <SettingsBody solo state={state} send={send} meter={{ on: meterOn, set: (v) => (setMeterOn(v), localStorage.setItem("mpa.meter", v ? "1" : "0")) }} /> : undefined}>
+          <SessionMenu button={!!state.options.work} settings={owner ? <SettingsBody solo invite={invite} state={state} send={send} meter={{ on: meterOn, set: (v) => (setMeterOn(v), localStorage.setItem("mpa.meter", v ? "1" : "0")) }} /> : undefined}>
             {/* A Code session's terminal switch, where its gear was: every agent as a terminal, or back to chat (Terminal.tsx). */}
             {!state.options.work && <HeaderTuiSwitch sid={sid} invite={invite} state={state} me={me} />}
           </SessionMenu>
@@ -1954,7 +1955,7 @@ function repoOf(state: SessionState): { name: string; branch?: string; path: str
 }
 
 /** The session's settings, as the second tab of the People panel: one button for the room and how it runs. */
-function SettingsBody({ state, send, meter, solo = false }: { state: SessionState; send: Send; meter: { on: boolean; set: (v: boolean) => void }; /** Solo: without what is about other people or Friday's own agent. */ solo?: boolean }) {
+function SettingsBody({ state, send, meter, solo = false, invite = "" }: { state: SessionState; send: Send; meter: { on: boolean; set: (v: boolean) => void }; /** Solo: without what is about other people or Friday's own agent. */ solo?: boolean; /** For this session's proof clips setting (ClipModeRow). */ invite?: string }) {
   const o = state.options;
   return (
     <div className="settings-body-pop">
@@ -1994,6 +1995,7 @@ function SettingsBody({ state, send, meter, solo = false }: { state: SessionStat
         </div>
         <Switch on={o.planFirst} label="Plan first" onChange={(v) => send({ type: "settings.update", planFirst: v })} />
       </div>
+      {isLocal() && !!invite && <ClipModeRow sid={state.id} invite={invite} />}
       {o.planFirst && !solo && (
         <div className="set-row">
           <div>

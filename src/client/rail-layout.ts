@@ -6,15 +6,25 @@ import { useSyncExternalStore } from "react";
  * please not extra BS"). One list, each place shown or not; kept in this browser, read live by the rail and the Customize panel.
  * Sessions is always shown: it is the way back to your work. Settings, Usage and the update button keep the rail's foot.
  */
-export type RailPlace = "sessions" | "agents" | "needs" | "automations" | "review" | "board" | "deepdive" | "mcp" | "skills";
+// MCP servers and Skills are one place, Customize, its two tabs; Needs you is gone (Arun, 2026-11-20: "add a button called
+// customize, this will house the MCPS and Skills... next thing is removing the needs you button and page too"). A layout kept
+// with those names loses them and gains Customize where it goes by default.
+//
+// No ⋯ any more (Arun, 2026-11-21: "take agent board out of the three dot thing.... and get rid of the three dot button also make
+// sure if you right click on the rail the customize option will appear"): every place is on the rail by default; one switched off
+// in Customize rail is off it, still in the palette. A layout kept before this (no `v`) has the Agent Board and Deep Dive, which
+// were behind the ⋯ by default, put back on the rail once.
+export type RailPlace = "sessions" | "agents" | "automations" | "review" | "board" | "customize" | "deepdive";
 export interface RailLayout {
   order: RailPlace[];
-  /** Behind the ⋯, in their order. */
+  /** Off the rail, in their order. */
   hidden: RailPlace[];
 }
 
-const PLACES: RailPlace[] = ["sessions", "agents", "needs", "automations", "review", "board", "deepdive", "mcp", "skills"];
-export const RAIL_DEFAULT: RailLayout = { order: [...PLACES], hidden: ["board", "deepdive", "mcp", "skills"] };
+const PLACES: RailPlace[] = ["sessions", "agents", "automations", "review", "board", "customize", "deepdive"];
+export const RAIL_DEFAULT: RailLayout = { order: [...PLACES], hidden: [] };
+/** The layout's version: 2 since the ⋯ went. */
+const V = 2;
 const KEY = "friday.rail.layout";
 
 const isPlace = (s: unknown): s is RailPlace => PLACES.includes(s as RailPlace);
@@ -31,6 +41,8 @@ export function normalizeRail(raw: unknown): RailLayout {
   const order: RailPlace[] = [];
   for (const s of listed) if (isPlace(s) && !order.includes(s)) order.push(s);
   const hidden = new Set(hiddenIn.filter(isPlace));
+  // Kept before the ⋯ went: what it held by default comes onto the rail.
+  if (r.v !== V) (hidden.delete("board"), hidden.delete("deepdive"));
   for (const p of PLACES) {
     if (order.includes(p)) continue;
     // After the place before it by default, where that one is.
@@ -42,11 +54,11 @@ export function normalizeRail(raw: unknown): RailLayout {
   return { order, hidden: order.filter((p) => hidden.has(p)) };
 }
 
-/** The places on the rail, and behind the ⋯, of those this window offers. */
+/** The places on the rail, and off it, of those this window offers. */
 export const shownOf = (l: RailLayout, has: (p: RailPlace) => boolean = () => true) => l.order.filter((p) => has(p) && !l.hidden.includes(p));
 export const hiddenOf = (l: RailLayout, has: (p: RailPlace) => boolean = () => true) => l.order.filter((p) => has(p) && l.hidden.includes(p));
 
-/** One step up or down among the places beside it (the rail's, or the ⋯'s). */
+/** One step up or down among the places beside it (on the rail, or off it). */
 export function moveInRail(l: RailLayout, id: RailPlace, by: -1 | 1, has?: (p: RailPlace) => boolean): RailLayout {
   const group = l.hidden.includes(id) ? hiddenOf(l, has) : shownOf(l, has);
   const other = group[group.indexOf(id) + by];
@@ -67,7 +79,7 @@ export function placeAt(l: RailLayout, id: RailPlace, at: RailPlace): RailLayout
   return { order, hidden: order.filter((p) => l.hidden.includes(p)) };
 }
 
-/** On the rail, or behind the ⋯. Sessions stays. */
+/** On the rail, or off it. Sessions stays. */
 export function setShown(l: RailLayout, id: RailPlace, shown: boolean): RailLayout {
   if (id === "sessions" && !shown) return l;
   const hidden = new Set(l.hidden);
@@ -97,7 +109,7 @@ export function readRail(): RailLayout {
 export function saveRail(next: RailLayout | null): void {
   cached = normalizeRail(next);
   try {
-    if (next && !isDefaultRail(cached)) localStorage.setItem(KEY, JSON.stringify(cached));
+    if (next && !isDefaultRail(cached)) localStorage.setItem(KEY, JSON.stringify({ ...cached, v: V }));
     else localStorage.removeItem(KEY);
   } catch {
     /* Kept for this window only. */

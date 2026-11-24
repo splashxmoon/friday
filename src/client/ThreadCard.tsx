@@ -15,6 +15,7 @@ import { changeTotals } from "./change-totals.js";
 import { EnvironmentPanel } from "./Environment.js";
 import { openIn, openInItems, openTargets, preferredEditor, type OpenTarget } from "./openIn.js";
 import { useCrewAddRows } from "./crew-add-local.js";
+import { useModelLaneRows } from "./model-lane-add.js";
 import { installedOn } from "./local.js";
 import { splitTools } from "./engines.js";
 import { useStarting } from "./quickConnect.js";
@@ -28,7 +29,6 @@ import type { Send } from "./useSession.js";
 import type { HubAgent } from "../agents-hub.js";
 import { isLocal } from "./edition.js";
 import { api } from "./api.js";
-import { GO_AHEAD_WORDS, type GoAhead } from "../guardrails.js";
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { fileUrl } from "./api.js";
 import { runProof, type Proof } from "../team-proof.js";
@@ -168,7 +168,6 @@ export function ThreadCard({ state, events, me, sid, invite, send, identity, onO
     <aside ref={ref} className={cn("tc", !c.wide && "over")} aria-label="This thread">
       <Place state={state} me={me} sid={sid} invite={invite} identity={identity} onOpen={onOpen} />
       <Git state={state} events={events} sid={sid} invite={invite} send={send} onOpen={onOpen} />
-      <GoAheads state={state} events={events} me={me} sid={sid} identity={identity} />
       <Agents state={state} events={events} me={me} sid={sid} invite={invite} send={send} identity={identity} onConnect={onConnect} onChanges={() => onOpen("files")} />
       <div className="tc-slot" ref={slot} />
     </aside>
@@ -234,94 +233,6 @@ function Place({ state, me, sid, invite, identity, onOpen }: { state: SessionSta
       {note && <p className="tc-note">{note}</p>}
       {menu && <ContextMenu at={menu} onClose={() => setMenu(null)} items={() => openInItems(targets, cwd, setNote).filter((x): x is MenuItem => !!x)} />}
       {env && <EnvironmentPanel anchor={row} close={() => setEnv(false)} state={state} me={me.id} sid={sid} invite={invite} identity={identity} lane={lane} onOpen={onOpen} />}
-    </div>
-  );
-}
-
-/**
- * What Auto did that the go-ahead list had a say in (Arun, 2026-11-18, as OpenBot's Activity and Claude Code's "Recently blocked"
- * keep it): each go-ahead asked and how it went (you allowed it, you said no, it went through on its own by a standing allowance,
- * still waiting), each step refused outright and why, and what is allowed for every session in this project, each taken back here.
- */
-function GoAheads({ state, events, me, sid, identity }: { state: SessionState; events: SessionEvent[]; me: Member; sid: string; identity: Identity }) {
-  const [open, setOpen] = useState(false);
-  const [project, setProject] = useState<{ folder: string; entries: string[] } | null>(null);
-  const lane = mainLane(state);
-  const mine = state.engines[lane]?.hostId === me.id && me.role === "owner";
-  const load = () =>
-    void api<{ folder: string; entries: string[] }>(identity, `/api/project-allow?sid=${encodeURIComponent(sid)}&lane=${encodeURIComponent(lane)}`)
-      .then(setProject)
-      .catch(() => setProject(null));
-  useEffect(() => {
-    if (mine) load();
-  }, [mine, sid, lane, open]);
-  const rows: { key: number; tag?: GoAhead; item: string; state: "allowed" | "auto" | "denied" | "refused" | "waiting"; note: string }[] = [];
-  for (const e of events) {
-    const b = e.body;
-    if (b.type === "guard.refused") rows.push({ key: e.seq, item: b.item, state: "refused", note: b.why });
-    if (b.type !== "engine.approval" || !b.guard) continue;
-    const said = events.find((x): x is SessionEvent & { body: { type: "instruction" } } => x.body.type === "instruction" && x.body.approval?.id === b.id);
-    const auto = said?.actor.id === "friday";
-    rows.push({
-      key: e.seq,
-      tag: b.guard as GoAhead,
-      item: b.items[0] ?? "",
-      state: !said ? "waiting" : said.body.approval!.approve ? (auto ? "auto" : "allowed") : "denied",
-      note: !said ? "Waiting on you" : auto ? said.body.text.replace(/:.*$/, "") : said.body.approval!.approve ? `Allowed by ${said.actor.id === me.id ? "you" : said.actor.name.split(/\s+/)[0]}` : `Denied by ${said.actor.id === me.id ? "you" : said.actor.name.split(/\s+/)[0]}`,
-    });
-  }
-  const entries = project?.entries ?? [];
-  if (!rows.length && !entries.length) return null;
-  const refused = rows.filter((r) => r.state === "refused").length;
-  const ICON = { allowed: "check", auto: "zap", denied: "x", refused: "x", waiting: "clock" } as const;
-  const remove = (entry: string) =>
-    void api<{ folder: string; entries: string[] }>(identity, "/api/project-allow", { method: "POST", body: JSON.stringify({ sid, lane, remove: entry }) })
-      .then(setProject)
-      .catch(() => {});
-  return (
-    <div className="tc-sec">
-      <button type="button" className="tc-row" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        <span className="tc-ic">
-          <Icon name="shield" size={14} />
-        </span>
-        <span className="tc-text">
-          Go-aheads
-          {rows.length > 0 && <span className="tc-dim"> · {rows.length - refused} asked</span>}
-          {refused > 0 && <span className="tc-dim"> · {refused} refused</span>}
-        </span>
-        <Icon name="chevronDown" size={14} className={cn("tc-chev", open && "tc-chev-open")} />
-      </button>
-      {open && (
-        <ul className="tc-ga" aria-label="Go-aheads in this thread">
-          {rows
-            .slice(-30)
-            .reverse()
-            .map((r) => (
-              <li key={r.key} data-state={r.state}>
-                <Icon name={ICON[r.state]} size={12} />
-                <span className="tc-ga-what">
-                  <code title={r.item}>{r.item}</code>
-                  <span className="tc-ga-note">
-                    {r.tag ? `${GO_AHEAD_WORDS[r.tag]} · ` : "Refused · "}
-                    {r.note}
-                  </span>
-                </span>
-              </li>
-            ))}
-          {entries.length > 0 && <li className="tc-ga-head">Always in this project</li>}
-          {entries.map((x) => (
-            <li key={x} data-state="auto">
-              <Icon name="zap" size={12} />
-              <span className="tc-ga-what">
-                <code title={x}>{x}</code>
-              </span>
-              <button type="button" className="link-btn tc-ga-remove" onClick={() => remove(x)}>
-                Remove
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
     </div>
   );
 }
@@ -406,6 +317,8 @@ function Agents({ state, events, me, sid, invite, send, identity, onConnect, onC
   const [folded, setFolded] = useState(() => read(FOLD_KEY, false));
   const [add, setAdd] = useState<{ x: number; y: number } | null>(null);
   const crewRows = useCrewAddRows(state, me, identity);
+  /** Your own models, after the coding tools (model-lane-add.tsx). */
+  const modelRows = useModelLaneRows(state, me, identity, invite);
   const working = agents.filter((a) => toneOf(a) === "work").length;
   const needs = agents.filter((a) => a.needsYou).length;
   const now = useNow(working ? 1000 : 30_000);
@@ -615,6 +528,7 @@ function Agents({ state, events, me, sid, invite, send, identity, onConnect, onC
             { heading: "Add an agent" },
             ...splitTools(installedOn(identity)).here.map((t) => ({ label: ENGINE_NAMES[t], mark: <EngineMark tool={t} size={14} />, onSelect: () => onConnect(t) })),
             { label: "Other agents…", icon: "plus" as const, onSelect: () => onConnect() },
+            ...modelRows(),
           ]}
         />
       )}

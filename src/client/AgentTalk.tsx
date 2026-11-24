@@ -2,9 +2,8 @@ import { useId, useState, type ReactNode } from "react";
 import { ArrowRightIcon, CheckIcon, KanbanSquareIcon, MegaphoneIcon, PauseIcon, ReplyIcon } from "lucide-react";
 import { TaskMark, type TaskMarkState } from "./TaskMark.js";
 import { cn } from "@/lib/utils";
-import { laneLabel } from "../left-off.js";
 import { agentLook } from "./handoff-ui.js";
-import { laneOf, meshOf, pendingFor, reviewApproved, runOf, type SessionState } from "../session/projection.js";
+import { laneOf, meshOf, pendingFor, reviewApproved, runOf, uniqueLaneName, type SessionState } from "../session/projection.js";
 import { MenuButton, type MenuItem } from "./ui.js";
 import type { TodoStep } from "@/components/aicss/TodoList";
 import { MAIN_LANE, type Member, type MeshNote, type SessionEvent } from "../types.js";
@@ -48,7 +47,7 @@ export function taskStatus(state: SessionState, m: MeshNote, lane: string): Talk
   const t = m.board ? state.board?.tasks.find((x) => x.id === m.board) : undefined;
   if (t) {
     if (t.status === "cancelled") return { word: "Dropped", how: "quiet" };
-    if (t.lane && t.lane !== lane && t.status !== "review") return { word: `Moved to ${t.name ?? laneLabel(state, t.lane)}`, how: "quiet" };
+    if (t.lane && t.lane !== lane && t.status !== "review") return { word: `Moved to ${t.name ?? uniqueLaneName(state, t.lane)}`, how: "quiet" };
     if (t.status === "open") return { word: t.next ? `Moved, waiting for ${t.next}` : "Back on the board", how: "quiet" };
     if (t.status === "done") return { word: reviewApproved(t.review) ? "Done and checked" : "Done", how: "done" };
     if (t.status === "blocked") return { word: "Stuck", how: "bad" };
@@ -121,7 +120,7 @@ export function AgentTalkCard({ ev, state, me, send, notify, delivered, stamp, t
   const to = agentLook(state, lane, 13);
   const kind = m.carriedFrom ? "Carried on" : team && team.length > 1 ? "To the team" : m.kind === "reply" && m.ofTask ? "Report" : m.board && m.review ? "Review" : KIND_WORD[m.kind];
   // Why it went to this agent, when Friday sent it: the one doing it ran out of usage partway (agent-mesh carryOn).
-  const why = m.carriedFrom ? `${laneLabel(state, m.carriedFrom)} ran out of usage partway through, so Friday gave the task to ${m.toName}, with what it had done.` : "";
+  const why = m.carriedFrom ? `${uniqueLaneName(state, m.carriedFrom)} ran out of usage partway through, so Friday gave the task to ${m.toName}, with what it had done.` : "";
   // Where it stands, in a word or two and its colour (style.css --st-*): queued, held, being worked on, read, answered.
   const status: TalkStatus | null = held
     ? { word: "Held: agent talk is paused", how: "hold" }
@@ -160,7 +159,7 @@ export function AgentTalkCard({ ev, state, me, send, notify, delivered, stamp, t
   const name = (n: string) => <b className="tk-name">{n}</b>;
   const who = m.carriedFrom ? (
     <>
-      {name(m.toName)} took over from {name(laneLabel(state, m.carriedFrom))}
+      {name(m.toName)} took over from {name(uniqueLaneName(state, m.carriedFrom))}
     </>
   ) : team && team.length > 1 ? (
     <>
@@ -226,7 +225,7 @@ export function AgentUpdateCard({ ev, state, stamp }: { ev: SessionEvent; state:
   const b = ev.body;
   const read = meshOf(state).readUpTo ?? {};
   const others = [MAIN_LANE, ...state.lanes.map((l) => l.id)].filter((l) => l !== b.fromLane);
-  const readers = others.filter((l) => (read[l] ?? 0) >= ev.seq).map((l) => laneLabel(state, l));
+  const readers = others.filter((l) => (read[l] ?? 0) >= ev.seq).map((l) => uniqueLaneName(state, l));
   const status = !others.length ? "" : readers.length === others.length ? (others.length === 1 ? `Read by ${readers[0]}` : "Read by every agent") : readers.length ? `Read by ${readers.join(", ")}` : "Not read yet";
   const look = agentLook(state, b.fromLane, 13);
   // A team (teammates.ts) reads it as a group chat: one teammate's word to the rest.
@@ -410,7 +409,7 @@ export function teamTasks(state: SessionState, jump: (seq: number) => void, cont
           </span>
         )}
         {/* The teammate's name as it is now, and never a lane's id for a name (a lane since taken away). */}
-        <span>{(lane && boardName(lane)) || (name && name !== lane ? name : lane ? laneLabel(state, lane) : "")}</span>
+        <span>{(lane && boardName(lane)) || (name && name !== lane ? name : lane ? uniqueLaneName(state, lane) : "")}</span>
       </>
     );
   };
@@ -481,7 +480,8 @@ function taskMenu(state: SessionState, t: NonNullable<SessionState["board"]>["ta
   if (t.status === "blocked" || t.status === "cancelled") items.push({ label: "Try again", icon: "refresh", onSelect: () => control(t.id, "retry") });
   if (t.status !== "done" && t.status !== "cancelled") {
     if (agents.length) items.push({ heading: t.status === "open" ? "Give it to" : "Hand it to" });
-    for (const l of agents) items.push({ label: laneLabel(state, l), mark: agentLook(state, l, 13).mark, onSelect: () => control(t.id, "reassign", laneLabel(state, l)) });
+    // Their own names, handed by lane id (as the Tasks panel: TaskBoard.tsx).
+    for (const l of agents) items.push({ label: uniqueLaneName(state, l), mark: agentLook(state, l, 13).mark, onSelect: () => control(t.id, "reassign", l) });
   }
   if (t.status === "done" || t.status === "review") items.push({ label: "Send back", icon: "rewind", onSelect: () => control(t.id, "sendback") });
   if (t.status !== "done" && t.status !== "cancelled") items.push({ label: "Drop it", icon: "x", danger: true, onSelect: () => control(t.id, "cancel") });

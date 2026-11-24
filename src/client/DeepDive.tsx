@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { Dive, DiveAsk, DivePage } from "../deep-dive.js";
 import type { FolderInfo } from "../runner/workspace.js";
 import { ENGINE_MODEL_INFO, ENGINE_NAMES, type EngineTool } from "../types.js";
@@ -20,6 +20,10 @@ import { ChevronDownIcon } from "lucide-react";
 import { PageHeader } from "@/components/dass";
 import { EmptyState } from "@/components/dass/EmptyState";
 import "./deep-dive.css";
+import type { CodeGraph } from "../code-graph.js";
+
+/** The code map, loaded when it is first opened: it is the one heavy view here. */
+const CodeMap = lazy(() => import("./CodeMap.js").then((m) => ({ default: m.CodeMap })));
 import { openInCode, registerIdeTaker } from "./ide/mode.js";
 import { joinPath } from "./openIn.js";
 
@@ -38,7 +42,7 @@ import { joinPath } from "./openIn.js";
 type Detail = { dive: Dive; pages: DivePage[]; asks: DiveAsk[] };
 type ToolRow = { tool: EngineTool; name: string; path: string | null; loggedIn: boolean | null; unavailable?: string };
 type Code = { file: string; from: number; lines: string[]; total: number; start: number; end: number } | { file: string; error: string };
-type Sel = { kind: "page"; id: string } | { kind: "ask"; id: string };
+type Sel = { kind: "page"; id: string } | { kind: "ask"; id: string } | { kind: "map" };
 
 const TOOL_KEY = "friday.deepdive.tool";
 const ORDER: EngineTool[] = ["claude", "codex", "cursor", "devin", "opencode"];
@@ -486,7 +490,7 @@ function Repo({ identity, repo, onBack }: { identity: Identity; repo: string; on
   };
   const toc = current?.status === "done" ? headingsOf(current.body) : [];
   return (
-    <div className={`dd-repo${code ? " with-code" : ""}${toc.length ? " with-toc" : ""}`} ref={top}>
+    <div className={`dd-repo${code ? " with-code" : ""}${toc.length ? " with-toc" : ""}${sel.kind === "map" ? " is-map" : ""}`} ref={top}>
       {confirm && <ConfirmDialog confirmation={confirm} onClose={() => setConfirm(null)} />}
       <header className="dd-top">
         <BackLink onBack={onBack} />
@@ -532,6 +536,12 @@ function Repo({ identity, repo, onBack }: { identity: Identity; repo: string; on
       {error && <p className="dd-error" role="alert">{error}</p>}
       <div className="dd-grid">
         <nav className="dd-side" aria-label="Deep Dive">
+          {/* The code map (Arun, 2026-11-22: "visualizing or making a web of connections or showing how your code works"): above
+              the pages, as the picture of what they explain. */}
+          <button type="button" className="dd-side-item dd-side-map" aria-current={sel.kind === "map" ? "page" : undefined} onClick={() => show({ kind: "map" })}>
+            <Icon name="diagram" size={14} />
+            <span className="dd-side-name">Code map</span>
+          </button>
           <p className="dd-side-label">Pages</p>
           {pages.length === 0 && dive.status === "building" && <SkeletonLines n={7} className="dd-skel-nav" />}
           <ul className="dd-side-list" aria-label="Pages">
@@ -580,7 +590,9 @@ function Repo({ identity, repo, onBack }: { identity: Identity; repo: string; on
           )}
         </nav>
         <div className="dd-main">
-          {ask ? (
+          {sel.kind === "map" ? (
+            <MapView identity={identity} repo={repo} pages={pages} onPage={(id) => show({ kind: "page", id })} />
+          ) : ask ? (
             <AnswerView a={ask} tool={dive.tool} writer={modelName(dive.tool, ask.model) ?? dive.writer} onDelete={() => drop(ask)} />
           ) : current ? (
             <>
@@ -594,11 +606,39 @@ function Repo({ identity, repo, onBack }: { identity: Identity; repo: string; on
               <span className="dd-spin" aria-hidden="true" /> {statusLine(dive)}
             </div>
           )}
-          <AskBar key={dive.tool} name={dive.name} tool={dive.tool} writer={dive.writer} onAsk={asked} />
+          {sel.kind !== "map" && <AskBar key={dive.tool} name={dive.name} tool={dive.tool} writer={dive.writer} onAsk={asked} />}
         </div>
         {code ? <CodeView code={code} folder={folder} onClose={() => setCode(null)} /> : toc.length > 0 && <Outline key={current?.id} headings={toc} />}
       </div>
     </div>
+  );
+}
+
+/** The code map's data (/api/deepdive/map: which file uses which, read on the repo's computer), then the map itself. */
+function MapView({ identity, repo, pages, onPage }: { identity: Identity; repo: string; pages: readonly DivePage[]; onPage: (id: string) => void }) {
+  const [graph, setGraph] = useState<CodeGraph | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let gone = false;
+    setError("");
+    api<{ graph: CodeGraph }>(identity, `/api/deepdive/map?key=${encodeURIComponent(repo)}`).then(
+      (r) => !gone && setGraph(r.graph),
+      (e: Error) => !gone && setError(e.message || "The map couldn't be read."),
+    );
+    return () => void (gone = true);
+  }, [identity, repo]);
+  const mapPages = useMemo(() => pages.map((p) => ({ id: p.id, title: p.title, purpose: p.purpose, files: p.files })), [pages]);
+  if (error) return <p className="dd-error" role="alert">{error}</p>;
+  const loading = (
+    <div className="dd-loading">
+      <span className="dd-spin" aria-hidden="true" /> Reading how the files connect…
+    </div>
+  );
+  if (!graph) return loading;
+  return (
+    <Suspense fallback={loading}>
+      <CodeMap graph={graph} pages={mapPages} onPage={onPage} />
+    </Suspense>
   );
 }
 

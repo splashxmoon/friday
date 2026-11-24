@@ -33,6 +33,8 @@ export interface ReadyItem {
   pr?: { url: string; merged: boolean };
   /** When its diff was last seen (the session's last event time stands in). */
   seq: number;
+  /** Its proof clip, when one shows this change (projection.ts clips). */
+  clip?: { file: string; page: string; durationMs: number };
   /** Waiting on the person (a question or an approval): it isn't finished, it needs them. */
   waiting: boolean;
 }
@@ -70,6 +72,7 @@ export function readyIn(state: SessionState): ReadyItem[] {
       ...(task?.review && !task.review.auto && !task.review.unclear ? { review: { ok: task.review.ok, by: task.review.by, note: task.review.note.slice(0, 200) } } : {}),
       ...(state.pr ? { pr: { url: state.pr.url, merged: !!state.pr.merged } } : {}),
       seq: d.seq,
+      ...(state.clips?.[lane] && state.clips[lane]!.seq >= d.seq ? { clip: { file: state.clips[lane]!.file, page: state.clips[lane]!.page, durationMs: state.clips[lane]!.durationMs } } : {}),
       waiting: run.status === "waiting_for_human",
     });
   }

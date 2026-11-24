@@ -32,7 +32,16 @@ export interface SkillRow {
   from?: SkillFrom;
   /** When its SKILL.md last changed, for the page's "Recently changed". */
   updated?: number;
+  /** Friday wrote it and keeps it current (FRIDAY_WRITES): not one of the person's own, though it sits in their folder. */
+  friday?: true;
 }
+
+/**
+ * The first words of a file Friday writes and keeps current (backdrops.ts GUIDE_MARK): a skill carrying it in the shared folder is
+ * Friday's, shown on a shelf of its own, not among the person's (2026-11-23: with backdrops in the open-source edition, everyone's
+ * Skills page opened on a friday-backdrop skill they never wrote, and never on its first-skill page).
+ */
+export const FRIDAY_WRITES = "<!-- Friday writes this file.";
 
 /** Where a tool's skill comes from, besides its own folder (Skills page, said under its name). */
 export type SkillFrom = "builtin" | "synced" | "vscode" | "plugin" | "managed";
@@ -41,7 +50,7 @@ export type SkillFrom = "builtin" | "synced" | "vscode" | "plugin" | "managed";
 export interface Shelf {
   id: string;
   label: string;
-  kind: "tool" | "plugins" | "project";
+  kind: "tool" | "plugins" | "project" | "friday";
   /** The tool it's for; a project's are for every tool. */
   tool?: EngineTool;
   dir: string;
@@ -88,7 +97,7 @@ async function rowsIn(dir: string): Promise<SkillRow[]> {
     if (text === null) continue;
     const d = described(text);
     const updated = await stat(path.join(at, "SKILL.md")).then((s) => s.mtimeMs, () => 0);
-    out.push({ folder: e.name, name: d.name || e.name, description: d.description.replace(/\s+/g, " ").trim(), dir: at, files: await countFiles(at), ...(updated ? { updated: Math.round(updated) } : {}) });
+    out.push({ folder: e.name, name: d.name || e.name, description: d.description.replace(/\s+/g, " ").trim(), dir: at, files: await countFiles(at), ...(updated ? { updated: Math.round(updated) } : {}), ...(text.includes(FRIDAY_WRITES) ? { friday: true as const } : {}) });
   }
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -239,7 +248,8 @@ async function projectShelves(home: string, taken: Set<string>): Promise<Shelf[]
 /** The person's own skills, each coding tool's that has any (its own, built in, synced), its plugins', and your projects'. */
 export async function readLibrary(home = homedir()): Promise<Library> {
   const dir = libraryDir(home);
-  const mine = await rowsIn(dir);
+  const all = await rowsIn(dir);
+  const mine = all.filter((r) => !r.friday);
   const shelves: Shelf[] = [];
   const seen = new Set([path.resolve(dir)]);
   for (const [tool, sources] of Object.entries(toolSources(home)) as [EngineTool, Source[]][]) {
@@ -265,6 +275,9 @@ export async function readLibrary(home = homedir()): Promise<Library> {
     shelves.push({ id: "claude-plugins", label: "Claude Code plugins", kind: "plugins", tool: "claude", dir: path.join(home, ".claude", "plugins"), skills: once.map((s) => ({ ...s, from: "plugin" as const })) });
   }
   shelves.push(...(await projectShelves(home, seen)));
+  // Friday's own, last: what it wrote for its agents (how to make a backdrop), read by every tool.
+  const ours = all.filter((r) => r.friday);
+  if (ours.length) shelves.push({ id: "friday", label: "Friday", kind: "friday", dir, skills: ours });
   return { dir, mine, shelves };
 }
 

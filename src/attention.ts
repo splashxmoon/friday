@@ -165,6 +165,8 @@ export interface Working {
   tool?: EngineTool;
   /** When the liveliest of them was last heard from (projection.ts heardAt), for "no update in 14m" once it has gone quiet. */
   heardAt?: number;
+  /** When the first of its runs now going began: the phone's Live Activity counts from it (Arun, 2026-11-21). */
+  startedAt?: number;
 }
 
 /** When a lane's agent was last heard from: its last event, or when its run began, whichever is later. */
@@ -188,7 +190,8 @@ export function workingIn(state: SessionState): Working | null {
   if (!live.length) return null;
   const lanesLive = [...(state.run.status === "running" ? [MAIN_LANE] : []), ...Object.entries(state.laneRuns).filter(([, r]) => r.status === "running").map(([id]) => id)];
   const heard = Math.max(0, ...lanesLive.map((l) => heardOf(state, l) ?? 0));
-  return { sid: state.id, lanes: live.length, what: live.join(", "), ...(tool ? { tool } : {}), ...(heard ? { heardAt: heard } : {}) };
+  const began = Math.min(...lanesLive.map((l) => runOf(state, l).sinceAt ?? Infinity));
+  return { sid: state.id, lanes: live.length, what: live.join(", "), ...(tool ? { tool } : {}), ...(heard ? { heardAt: heard } : {}), ...(Number.isFinite(began) ? { startedAt: began } : {}) };
 }
 
 /**
@@ -205,7 +208,7 @@ export interface Crew {
    * plan short ("short"). While it works, `doing` is its latest step and `heardAt` when it last said anything; stopped on an error,
    * `why` is the error's first line and `plain` what it means; out of usage, `until` when it lifts.
    */
-  agents: { lane: string; name: string; tool?: EngineTool; /** Friday's own agent's face (agent-face.ts), the same one its tab and its replies wear. */ face?: number; state: CrewState; word: string; /** Held up on the person asking: only then is it amber. */ you?: true; plan?: string; doing?: { name: string; target?: string }; heardAt?: number; why?: string; plain?: string; until?: number | null }[];
+  agents: { lane: string; name: string; tool?: EngineTool; /** Friday's own agent's face (agent-face.ts), the same one its tab and its replies wear. */ face?: number; state: CrewState; word: string; /** Held up on the person asking: only then is it amber. */ you?: true; plan?: string; /** Its plan, done of all, whatever state it is in (the phone's Live Activity bar). */ steps?: { done: number; of: number }; /** Its last words, once it isn't working. */ said?: string; doing?: { name: string; target?: string }; heardAt?: number; why?: string; plain?: string; until?: number | null }[];
   /** A crew mate has its work now (crew.handed): "Kit is on it", and the lanes it works on it in here, for one handed before it went to the crew mate's own thread (crew-carry.ts). */
   handed?: string;
   handedLanes?: string[];
@@ -234,7 +237,7 @@ export function crewOf(state: SessionState, hostUp?: (hostId: string) => boolean
     const doing = st === "working" ? state.doing?.[lane] : undefined;
     const heard = st === "working" ? heardOf(state, lane) : undefined;
     const why = now.error?.raw.trim().split(/\r?\n/)[0]?.slice(0, 160);
-    return { lane, name: laneName(state, lane), ...(engine?.tool ? { tool: engine.tool } : { face: faceIndex(state, lane) }), state: st, word: now.word, ...(now.needsYou ? { you: true as const } : {}), ...(st === "short" && plan ? { plan: `${plan.done} of ${plan.of}` } : {}), ...(doing ? { doing } : {}), ...(heard ? { heardAt: heard } : {}), ...(now.error ? { plain: now.error.plain, ...(why ? { why } : {}) } : {}), ...(now.until !== undefined ? { until: now.until } : {}) };
+    return { lane, name: laneName(state, lane), ...(engine?.tool ? { tool: engine.tool } : { face: faceIndex(state, lane) }), state: st, word: now.word, ...(now.needsYou ? { you: true as const } : {}), ...(st === "short" && plan ? { plan: `${plan.done} of ${plan.of}` } : {}), ...(plan && plan.of > 0 ? { steps: { done: plan.done, of: plan.of } } : {}), ...(st !== "working" && state.said?.[lane] ? { said: state.said[lane]!.slice(0, 200) } : {}), ...(doing ? { doing } : {}), ...(heard ? { heardAt: heard } : {}), ...(now.error ? { plain: now.error.plain, ...(why ? { why } : {}) } : {}), ...(now.until !== undefined ? { until: now.until } : {}) };
   });
   // A lane handed on to a crew mate: the row's own line says who has it, no badge of its own (Code and Crew, connected, 2026-11-13:
   // "The sidebar row says 'Kit is on it'").
@@ -279,6 +282,8 @@ export interface RowFacts {
   files: number;
   added: number;
   removed: number;
+  /** Its latest proof clip, when it shows the change as it is now (projection.ts clips): the menu bar's Done rows lead with it. */
+  clip?: { file: string; page: string; durationMs: number };
 }
 export function rowFactsOf(state: SessionState): RowFacts | null {
   let files = 0;
@@ -296,7 +301,11 @@ export function rowFactsOf(state: SessionState): RowFacts | null {
   const folder = at ? (at.split(/[\\/]/).filter(Boolean).pop() ?? "").replace(/-[0-9a-f]{8}$/, "") : (state.upload?.name ?? "");
   const branch = e?.branch ?? "";
   if (!folder && !files) return null;
-  return { sid: state.id, ...(folder ? { folder } : {}), ...(branch ? { branch } : {}), files, added, removed };
+  // A clip of a lane's change as it stands: made after its diff was last seen (a later edit makes it an earlier change's), newest first.
+  const clip = Object.entries(state.clips ?? {})
+    .filter(([lane, c]) => c.seq >= (state.diffs[lane]?.seq ?? 0))
+    .sort((x, y) => y[1].seq - x[1].seq)[0]?.[1];
+  return { sid: state.id, ...(folder ? { folder } : {}), ...(branch ? { branch } : {}), files, added, removed, ...(clip ? { clip: { file: clip.file, page: clip.page, durationMs: clip.durationMs } } : {}) };
 }
 
 export function prOf(state: SessionState): SessionPr | null {

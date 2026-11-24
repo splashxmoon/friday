@@ -35,6 +35,15 @@ export const SECTIONS: SectionDef[] = [
     keywords:
       "theme dark light mode color colour look system size zoom text font scale motion animation accent contrast layout session focus classic",
   },
+  // Backdrops behind the app (SettingsBackdrop.tsx), from this computer's own folder: the open-source edition's (the hosted one has none).
+  {
+    id: "backdrop",
+    label: "Backdrop",
+    group: "General",
+    icon: "image",
+    blurb: "What fills the window behind Friday: one of Friday's own, a picture or video of yours, or one an agent makes from a few words.",
+    keywords: "backdrop background wallpaper image picture photo video shader canvas animated aurora dim blur",
+  },
   {
     id: "notifications",
     label: "Notifications",
@@ -143,7 +152,6 @@ export const SECTIONS: SectionDef[] = [
   },
   // Slack and Linear on your own computer (SettingsChannels.tsx, spec 08): kept out of the open-source edition (Arun, 2026-11-20:
   // "remove the linear and slack integration too").
-
 
   // ── Workspace: the team, and what it pays ──
 

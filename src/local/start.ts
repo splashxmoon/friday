@@ -11,6 +11,7 @@ import { outsideToken, writeOutsideShim } from "./outside-mcp.js";
 import { PhoneAccess } from "./phone.js";
 import { relayBase } from "./reach.js";
 import { JoinHub } from "./join.js";
+import { Nearby } from "./nearby.js";
 import { endTools } from "../runner/spawn-cli.js";
 
 /**
@@ -170,6 +171,11 @@ export async function startLocal(o: { home?: string; port?: number; /** A link f
   // Known there by this install's own id (from its secret, so the same each time and nobody else's): pairing it again replaces its row.
   const machineId = createHash("sha256").update(`friday-machine:${secret}`).digest("hex").slice(0, 32);
   const join = new JoinHub({ kv: kv.redis, name: computerName(), log: (l) => console.log(`[computers] ${l}`), machineId, version, ...(o.onGone ? { onGone: o.onGone } : {}) });
+  // Your other Fridays on this network, found and offered a link in two clicks (nearby.ts). FRIDAY_NEARBY_PORT(S): two on one computer.
+  const nearbyPorts = (process.env.FRIDAY_NEARBY_PORTS ?? "").split(",").map(Number).filter((n) => n > 0 && n < 65536);
+  const myName = computerName();
+  const nearby = new Nearby({ id: machineId, name: () => process.env.FRIDAY_MACHINE_NAME || myName, version, pairedWith: () => join.hubCertificate(), ...(Number(process.env.FRIDAY_NEARBY_PORT) > 0 ? { port: Number(process.env.FRIDAY_NEARBY_PORT) } : {}), ...(nearbyPorts.length ? { ask: nearbyPorts } : {}), log: (l) => console.log(`[computers] ${l}`) });
+  await nearby.start();
   const app = await createApp({
     port,
     // Friday at 127.0.0.1, where the runner it starts connects back too; previews at localhost, which a browser counts as another
@@ -185,7 +191,8 @@ export async function startLocal(o: { home?: string; port?: number; /** A link f
     // Project memory (brain.ts): each finished run read by the coding tool that did it, on this computer, for what it taught.
     decisionLog: true,
     dataDir: path.join(home, "uploads"),
-    local: { redis: kv.redis, sub: kv.sub, user: { id: "local", name }, ...(o.atComputer ? { atComputer: o.atComputer } : {}), phone, outside, join, models: path.join(home, "models"),
+    local: { redis: kv.redis, sub: kv.sub, user: { id: "local", name }, ...(o.atComputer ? { atComputer: o.atComputer } : {}), phone, outside, join, nearby, models: path.join(home, "models"),
+      backdrops: path.join(home, "backdrops"), // Backdrops (backdrops.ts).
       // The coding tools on this computer kept up to date, a while after it starts and every six hours (tool-updates.ts).
       toolUpdates: true,
     },
@@ -214,6 +221,7 @@ export async function startLocal(o: { home?: string; port?: number; /** A link f
       (closed ??= (async () => {
         rmSync(runningFile, { force: true });
         await phone.stop().catch(() => {});
+        nearby.stop();
         join.stop();
         await app.close().catch(() => {});
         // The coding tools told to stop, given three seconds to, then killed: none outlives Friday (spawn-cli.ts endTools).

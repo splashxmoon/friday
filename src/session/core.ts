@@ -14,7 +14,7 @@ import { feedbackText, fromWriter, unseen, type PrComment } from "../pr-feedback
 import { checksText, type CheckFailure } from "../pr-checks.js";
 
 export type Command =
-  | { type: "instruct"; text: string; lane?: string; /** A reply in a side thread on this earlier message (its seq). */ thread?: unknown; /** From an app on the person's behalf (app.ts postMessage): its turn is capped (Security R3). */ via?: unknown; interrupt?: boolean; attachments?: Attachment[]; handoff?: { fromLane?: string; reason?: string; carried?: unknown }; approval?: { id?: unknown; approve?: unknown; task?: unknown }; replaces?: unknown; /** A press on a card an agent drew in the chat (cleanPress). */ card?: unknown }
+  | { type: "instruct"; text: string; lane?: string; /** A reply in a side thread on this earlier message (its seq). */ thread?: unknown; /** From an app on the person's behalf (app.ts postMessage): its turn is capped (Security R3). */ via?: unknown; interrupt?: boolean; attachments?: Attachment[]; handoff?: { fromLane?: string; reason?: string; carried?: unknown }; approval?: { id?: unknown; approve?: unknown; task?: unknown }; replaces?: unknown; /** A press on a card an agent drew in the chat (cleanPress). */ card?: unknown; /** Asked as a task board (the phone's "Split into tasks"): the agent splits it into tasks with post_tasks first. */ board?: unknown }
   | { type: "suggest"; text: string; lane?: string; attachments?: Attachment[]; at?: { call: string; step: string } }
   /** To the people here, not an agent: an aside no agent reads. */
   | { type: "say"; text: string; lane?: string }
@@ -271,6 +271,9 @@ export class SessionCore {
    * the readers are the repository's own people: a private repository, or any repository once the owner turned it on for
    * this session (prReplay). A public one, or one whose visibility can't be told, gets none.
    */
+  /** Set by the app: the session's latest proof clip for a pull request opened now, as the publish op's `proof` JSON, or null (no clip, no GIF, or Settings say no). */
+  proofForPr: ((sid: string) => Promise<string | null>) | null = null;
+
   private async replayForPr(sid: string, state: SessionState, folderAt: (req: RepoCall) => Promise<{ output: string }>): Promise<string | undefined> {
     const link = await this.replayLink(sid, state);
     if (!link || state.options.prReplay) return link;
@@ -415,7 +418,7 @@ export class SessionCore {
         const thread = Number.isInteger(root) && root > 0 ? { root } : undefined;
         if (answered && !(await claimOnce(answered))) return fail("That request was already answered.");
         const r = await append(
-          { type: "instruction", text, interrupt, ...withMentions(text), ...(cmd.via === "api" ? { via: "api" as const } : {}), ...(attachments.length ? { attachments } : {}), ...(handoff ? { handoff } : {}), ...(approval ? { approval } : {}), ...((c) => (c ? { card: c } : {}))(cleanPress(cmd.card)), ...(replaces !== undefined ? { replaces } : {}), ...(thread ? { thread } : {}) },
+          { type: "instruction", text, interrupt, ...withMentions(text), ...(cmd.via === "api" ? { via: "api" as const } : {}), ...(attachments.length ? { attachments } : {}), ...(handoff ? { handoff } : {}), ...(approval ? { approval } : {}), ...((c) => (c ? { card: c } : {}))(cleanPress(cmd.card)), ...(replaces !== undefined ? { replaces } : {}), ...(thread ? { thread } : {}), ...(cmd.board === true && !handoff && !approval ? { board: true as const } : {}) },
           { expectDriver: m.id, bumpEpoch: interrupt && laneRun.status === "running" },
         );
         if (!r.ok && answered) await release(answered);
@@ -836,7 +839,10 @@ export class SessionCore {
           const base = cmd.pr && typeof cmd.base === "string" && cmd.base.trim() && !cmd.base.startsWith("-") ? cmd.base.trim().slice(0, 100) : undefined;
           // The repo's own pull-request template, when it has one, is filled from the same session on the computer the repo is on.
           const prParts = cmd.pr ? JSON.stringify(prPartsFor(state, await this.store.events(sid))) : "";
-          const said = (await folderAt({ op: "publish", message: why ? `${message}\n\n${why}` : message, pr: !!cmd.pr, ...(prParts ? { prParts } : {}), approved: true, approvedBy: m.id, ...(base ? { base } : {}), ...(dir ? { dir } : {}) })).output;
+          // The session's latest proof clip, as GIFs, put in the pull request's description as it opens (proof-block.ts; Arun,
+          // 2026-11-21: "add clips to PRs"), when the person's Settings allow it.
+          const proof = cmd.pr && this.proofForPr ? await this.proofForPr(sid).catch(() => null) : null;
+          const said = (await folderAt({ op: "publish", message: why ? `${message}\n\n${why}` : message, pr: !!cmd.pr, ...(prParts ? { prParts } : {}), ...(proof ? { proof } : {}), approved: true, approvedBy: m.id, ...(base ? { base } : {}), ...(dir ? { dir } : {}) })).output;
           const p = parseJson<{ pushed?: boolean; prUrl?: string; prCreated?: boolean; prError?: string; error?: string; base?: string }>(said);
           if (p?.pushed) {
             Object.assign(body, { pushed: true, ...(p.prUrl ? { prUrl: p.prUrl, prCreated: !!p.prCreated, ...(p.base ? { base: p.base } : {}) } : {}) });

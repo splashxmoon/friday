@@ -35,6 +35,8 @@ type Got = { url: string; at: number; lane?: string; status: PrStatus | null; ch
 
 /** How often it asks while open: GitHub's answer is cached for a minute on the server anyway. */
 const EVERY_MS = 45_000;
+/** While a check is still running: often enough that "Running" turns to its result about when GitHub says so. */
+const BUSY_MS = 8_000;
 
 export function PrPanel({ state, events, sid, invite, send, me, shown, onTab }: { state: SessionState; events: readonly SessionEvent[]; sid: string; invite: string; send: Send; me: Member; /** Showing now: it only asks GitHub while it is. */ shown: boolean; onTab: (t: "files") => void }) {
   // The session's newest pull request: from its last commit, or one an agent opened itself with `gh pr create` (Arun,
@@ -56,19 +58,35 @@ export function PrPanel({ state, events, sid, invite, send, me, shown, onTab }: 
   const [busy, setBusy] = useState("");
   const [note, setNote] = useState("");
   const [shipping, setShipping] = useState(false);
+  // Asked again every 45s, and every 8s while anything on it is still running (Arun, 2026-11-22: "this needs to be dynamic and accurate
+  // for the checks thing"), and at once when the window comes back to the front.
   useEffect(() => {
     if (!shown || !prUrl) return;
     let live = true;
-    const ask = () =>
-      fetch(`/api/sessions/${encodeURIComponent(sid)}/pr?invite=${encodeURIComponent(invite)}&checks=1&detail=1&url=${encodeURIComponent(prUrl)}`, { credentials: "same-origin" })
+    let t: ReturnType<typeof setTimeout> | null = null;
+    const ask = () => {
+      if (t) clearTimeout(t);
+      return fetch(`/api/sessions/${encodeURIComponent(sid)}/pr?invite=${encodeURIComponent(invite)}&checks=1&detail=1&url=${encodeURIComponent(prUrl)}`, { credentials: "same-origin" })
         .then((r) => r.json() as Promise<{ pr: Got }>)
-        .then((d) => live && setGot(d.pr))
-        .catch(() => live && setGot((g) => g ?? null));
+        .then((d) => {
+          if (!live) return;
+          setGot(d.pr);
+          const running = d.pr?.status?.checks === "pending" || !!d.pr?.detail?.checks?.some((c) => c.state === "pending");
+          t = setTimeout(() => void ask(), running ? BUSY_MS : EVERY_MS);
+        })
+        .catch(() => {
+          if (!live) return;
+          setGot((g) => g ?? null);
+          t = setTimeout(() => void ask(), EVERY_MS);
+        });
+    };
     void ask();
-    const t = setInterval(ask, EVERY_MS);
+    const back = () => document.visibilityState === "visible" && void ask();
+    document.addEventListener("visibilitychange", back);
     return () => {
       live = false;
-      clearInterval(t);
+      if (t) clearTimeout(t);
+      document.removeEventListener("visibilitychange", back);
     };
   }, [shown, prUrl, sid, invite]);
 
@@ -135,6 +153,9 @@ export function PrPanel({ state, events, sid, invite, send, me, shown, onTab }: 
   const checks = [...(d?.checks ?? [])].sort((a, b) => CHECK_ORDER[a.state] - CHECK_ORDER[b.state] || a.name.localeCompare(b.name));
   const count = (k: PrCheckState) => checks.filter((c) => c.state === k).length;
   const tally = { pass: count("pass"), fail: count("fail"), pending: count("pending"), skip: count("skip") + count("neutral") };
+  // How the checks stand: from the list of checks when there is one, since the summary beside it can be from an earlier look (it said
+  // "still running" over four that had all passed); the summary when there's no list.
+  const checksNow: "passing" | "failing" | "pending" | "none" | undefined = checks.length ? (tally.fail ? "failing" : tally.pending ? "pending" : tally.pass ? "passing" : "none") : (st?.checks as "passing" | "failing" | "pending" | "none" | undefined);
   const tallyLine = [tally.pass && `${tally.pass} passed`, tally.fail && `${tally.fail} failed`, tally.pending && `${tally.pending} running`, tally.skip && `${tally.skip} skipped`].filter(Boolean).join(" · ");
 
   // Where it stands, in a line: what is in its way, if anything, the most pressing first.
@@ -144,13 +165,13 @@ export function PrPanel({ state, events, sid, invite, send, me, shown, onTab }: 
       ? ["Closed without merging", "none"]
       : !st
         ? null
-        : st.checks === "failing"
+        : checksNow === "failing"
           ? [`Blocked: ${(tally.fail || failures.length) > 1 ? `${tally.fail || failures.length} checks are` : "a check is"} failing`, "bad"]
           : st.review === "changes_requested"
             ? ["Blocked: changes were requested", "bad"]
             : st.mergeable === false
               ? ["Blocked: it conflicts with its base", "bad"]
-              : st.checks === "pending"
+              : checksNow === "pending"
                 ? ["Checks are still running", "wait"]
                 : st.review === "review_required"
                   ? ["Waiting on a review", "wait"]
@@ -162,11 +183,11 @@ export function PrPanel({ state, events, sid, invite, send, me, shown, onTab }: 
   const approvals = reviewers.filter((r) => r.state === "approved");
   const steps: { key: string; name: string; word: string; sub: string; tone: "ok" | "bad" | "wait" | "none" | "merged" }[] = st
     ? [
-        st.checks === "passing"
+        checksNow === "passing"
           ? { key: "checks", name: "Checks", word: "All passing", sub: tallyLine || "Every check GitHub ran on it passed.", tone: "ok" }
-          : st.checks === "failing"
+          : checksNow === "failing"
             ? { key: "checks", name: "Checks", word: `${tally.fail || failures.length || "Some"} failing`, sub: tallyLine || (pending ? `${pending} still running.` : "The rest passed."), tone: "bad" }
-            : st.checks === "pending"
+            : checksNow === "pending"
               ? { key: "checks", name: "Checks", word: "Running", sub: tallyLine || (pending ? `${pending} still to finish.` : "GitHub is running them."), tone: "wait" }
               : { key: "checks", name: "Checks", word: "None", sub: "This repository runs no checks on pull requests.", tone: "none" },
         st.review === "approved"

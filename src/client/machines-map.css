@@ -1,0 +1,97 @@
+/* The map of your computers (MachinesMap.tsx): a canvas of small tiles, this computer at the left, lines to the others; tiles
+   drag, the canvas resizes from its bottom edge, a click opens a tile's details. "cmap-": the page has a .mm of its own. */
+.cmap-frame { display: flex; flex-direction: column; gap: 6px; padding: 10px 0 6px; }
+.cmap-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 20px; }
+.cmap-bar-actions { display: inline-flex; gap: 12px; }
+.cmap {
+  position: relative;
+  min-height: 150px;
+  max-height: 640px;
+  overflow: hidden;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background:
+    radial-gradient(circle, color-mix(in srgb, var(--ink) 9%, transparent) 1px, transparent 1.2px) 0 0 / 18px 18px,
+    var(--card-2);
+  touch-action: none;
+}
+.cmap-lines { position: absolute; inset: 0; pointer-events: none; }
+.cmap-lines path { fill: none; stroke: var(--border-strong); stroke-width: 1.25; }
+.cmap-lines .on path { stroke: color-mix(in srgb, var(--green) 55%, var(--border-strong)); }
+.cmap-lines .off path { stroke-dasharray: 3 4; }
+.cmap-pulse { fill: var(--green); }
+@media (prefers-reduced-motion: reduce) { .cmap-pulse { display: none; } }
+.cmap-route {
+  position: absolute;
+  z-index: 1;
+  padding: 0 6px;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--ink-2);
+  font-size: 10.5px;
+  line-height: 16px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.cmap-route.off { color: var(--faint); }
+.cmap-tile {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  box-shadow: 0 1px 2px rgb(0 0 0 / .06);
+  cursor: grab;
+  user-select: none;
+}
+.cmap-tile:hover { border-color: var(--border-strong); }
+.cmap-tile:focus-visible { outline: 2px solid var(--border-focus, var(--ink-2)); outline-offset: 1px; }
+.cmap-tile.dragging { z-index: 4; cursor: grabbing; box-shadow: 0 6px 18px rgb(0 0 0 / .18); }
+.cmap-tile.open { border-color: var(--border-strong); }
+.cmap-tile.best { border-color: color-mix(in srgb, var(--green) 45%, var(--border)); }
+.cmap-tile.off { border-style: dashed; background: color-mix(in srgb, var(--card) 60%, transparent); }
+.cmap-l1 { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.cmap-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+.cmap-dot.on { background: var(--green); }
+.cmap-name { flex: 1; min-width: 0; overflow: hidden; color: var(--ink); font-size: 13px; line-height: 18px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.cmap-tile.off .cmap-name { color: var(--text-muted); }
+.cmap-best { flex: none; padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, var(--green) 14%, transparent); color: var(--green); font-size: 10px; line-height: 15px; }
+.cmap-l2 { overflow: hidden; line-height: 16px; padding-left: 13px; color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.cmap-info {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 11px 12px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+}
+.cmap-info-x { position: absolute; top: 8px; right: 8px; }
+.cmap-info-head { display: flex; flex-direction: column; gap: 1px; }
+.cmap-info-head b { color: var(--ink); font-size: 12.5px; font-weight: 600; }
+.cmap-gauges { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.cmap-gauge { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); font-size: 11.5px; }
+.cmap-bar-track { position: relative; width: 34px; height: 4px; overflow: hidden; border-radius: 2px; background: var(--card-2); box-shadow: inset 0 0 0 1px var(--border); }
+.cmap-bar-track i { position: absolute; inset: 0 auto 0 0; border-radius: 2px; background: var(--ink-2); }
+.cmap-gauge.warn .cmap-bar-track i { background: var(--amber); }
+.cmap-power { display: inline-flex; align-items: center; gap: 4px; color: var(--ink-2); font-size: 11.5px; }
+.cmap-power.batt { color: var(--amber); }
+.cmap-tools { display: flex; flex-wrap: wrap; gap: 5px 12px; }
+.cmap-tool { display: inline-flex; align-items: center; gap: 5px; color: var(--ink); font-size: 11.5px; }
+.cmap-tool-name { white-space: nowrap; }
+.cmap-lim { position: relative; width: 22px; height: 4px; overflow: hidden; border-radius: 2px; background: var(--card-2); box-shadow: inset 0 0 0 1px var(--border); }
+.cmap-lim i { position: absolute; inset: 0 auto 0 0; border-radius: 2px; background: var(--green); }
+.cmap-lim.warm i { background: var(--amber); }
+.cmap-lim.hot i { background: var(--red); }
+.cmap-has { display: flex; flex-wrap: wrap; gap: 4px; font-size: 11px; }
+.cmap-has span { padding: 0 6px; border: 1px solid var(--border); border-radius: 5px; color: var(--ink-2); line-height: 18px; }
+.cmap-why { color: var(--green); font-size: 11.5px; }

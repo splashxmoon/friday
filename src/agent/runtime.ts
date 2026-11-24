@@ -23,6 +23,7 @@ import { BOUNCE_WINDOW_MS, bouncesBetween, carriedFor, MAX_BOUNCES, resolveTarge
 import { handOff } from "../hand-off-run.js";
 import { isOwnModel } from "../own-model-id.js";
 import { ownModelParts } from "../own-model-id.js";
+import { ownLaneRun } from "../model-lane.js";
 import { isAuto, routeFriday, taskTier } from "../routing.js";
 import type { Learned } from "../route-learning.js";
 import type { AgentMesh } from "../agent-mesh.js";
@@ -674,7 +675,8 @@ export class AgentRuntime {
       // A coding tool's lane whose runner is still starting: what is typed meanwhile waits for it, as it would while offline.
       if (laneDef?.engine && !state.engines[lane]) return;
       // Its own model, only ever its owner's (as allowedModel has it for a session's): another person's is never run here.
-      if (laneRun === undefined) laneRun = lane !== MAIN_LANE && this.laneOwn ? await this.laneOwn(sid, lane).catch(() => null) : null;
+      // A teammate's first (the app's laneOwn); else an agent added on one of the person's own models, whose lent folder says which (model-lane.ts).
+      if (laneRun === undefined) laneRun = lane !== MAIN_LANE ? ((this.laneOwn ? await this.laneOwn(sid, lane).catch(() => null) : null) ?? ownLaneRun(state, lane)) : null;
       if (laneRun && !(isOwnModel(laneRun.model) && ownModelParts(laneRun.model)?.owner === state.ownerId)) laneRun = null;
       // In its own folder only: with its runner gone, another lane's lent folder would otherwise be borrowed (liveMachine), and its
       // work land in a teammate's folder. What it is given waits for it to be back, as a coding tool's does.

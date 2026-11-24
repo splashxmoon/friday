@@ -178,7 +178,6 @@ export function savedCommands(list: { name: string; hint: string; text: string; 
   return list.map((c) => ({ name: c.name, icon: "zap" as IconName, hint: `${c.scope === "workspace" ? "Team" : "Yours"} · ${c.hint}`, text: c.text }));
 }
 
-
 export interface SavedCommandRow {
   id: string;
   name: string;

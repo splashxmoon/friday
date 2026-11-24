@@ -4,17 +4,20 @@ import { CopyMark } from "./SettingsOutside.js";
 import { SettingsGroup, SettingsRow } from "@/components/dass";
 import { Button } from "@/components/ui/button";
 import { call, versions, type LinkedComputer, type State } from "./Computers.js";
+import { MachinesMap } from "./MachinesMap.js";
+import { NearbyLink } from "./NearbyLink.js";
 
 // Settings › Computer › Your computers, apart from Computers.tsx: the new session's Runs on line and the Crew draw RunsOn and
 // useComputers with the first screen, and this page (about 15 KB) only loads with Settings, or when Runs on › Add a computer… opens.
 
 /** Settings › Computer › Your computers. */
 /** How a computer is added (add-computer.ts): over SSH, with one command pasted there, or in its own Friday app. */
-type AddHow = "ssh" | "command" | "app";
+type AddHow = "nearby" | "ssh" | "command" | "app";
 const ADD_HOW: [AddHow, string][] = [
-  ["ssh", "Over SSH"],
-  ["command", "A command"],
-  ["app", "Its Friday app"],
+  ["nearby", "Nearby"],
+  ["ssh", "SSH"],
+  ["command", "Command"],
+  ["app", "Link"],
 ];
 
 export function ComputersSettings({ adding = false, onDone }: { /** Opened from Runs on › Add a computer: only the adding, started at once. */ adding?: boolean; onDone?: () => void } = {}) {
@@ -63,7 +66,7 @@ export function ComputersSettings({ adding = false, onDone }: { /** Opened from 
   useEffect(() => {
     if (!adding || !state || started.current) return;
     started.current = true;
-    addNow.current("ssh");
+    addNow.current("nearby");
   }, [adding, state]);
   if (!state) return null;
 
@@ -74,6 +77,8 @@ export function ComputersSettings({ adding = false, onDone }: { /** Opened from 
     setSetting({ busy: false });
     setLink(null);
     setLinked("");
+    // Nearby (NearbyLink) makes its code when Link is pressed, as Over SSH does when it runs: one made for another way stops now.
+    if (way === "nearby") return void call("/api/computers/code", { method: "DELETE" }).catch(() => {});
     // Over SSH makes its own code when it runs: one made for another way stops working now.
     if (way === "ssh") void call("/api/computers/code", { method: "DELETE" }).catch(() => {});
     if (way === "ssh") return void call<{ hosts: string[] }>("/api/computers/hosts").then((r) => (setHosts(r.hosts), setHost((h) => h || r.hosts[0] || "")), () => {});
@@ -150,8 +155,6 @@ export function ComputersSettings({ adding = false, onDone }: { /** Opened from 
     read();
   };
   const hub = state.joined?.hub ?? null;
-  // The ones ready to work there: signed in, not only installed.
-  const tools = (c: LinkedComputer) => c.tools.filter((t) => t.loggedIn === true).map((t) => t.name);
 
   return (
     // One group of Settings › Computer: your others, and this one used from another's (Arun, 2026-11-04: "design this better").
@@ -159,26 +162,32 @@ export function ComputersSettings({ adding = false, onDone }: { /** Opened from 
       {!adding && (
         <SettingsRow label="Your computers" hint="Run agents on your other computers over Wi-Fi or Tailscale.">
           {!how && (
-            <Button type="button" variant="outline" size="sm" onClick={() => void add("ssh")}>
+            <Button type="button" variant="outline" size="sm" onClick={() => void add("nearby")}>
               Add a computer
             </Button>
           )}
         </SettingsRow>
       )}
+      {/* The map of them: what each has now and how it links to this one (spec 09 step 1). */}
+      {!adding && !how && <MachinesMap state={state} />}
       {/* Three ways in (add-computer.ts): a machine Friday reaches over SSH is set up from here; any other takes one command, or
           the link in its own Friday app. */}
       {how && (
         <div className="computers-add">
           <div className="computers-add-head">
             <Segmented value={how} options={ADD_HOW} onChange={(w) => void add(w)} className="computers-add-how" />
-            <button type="button" className="link-btn small" onClick={done}>
-              {finished ? "Done" : "Cancel"}
-            </button>
+            {/* In the dialog its close button is the way out (Computers.tsx AddComputer); in Settings, this. */}
+            {!adding && (
+              <button type="button" className="link-btn small" onClick={done}>
+                {finished ? "Done" : "Cancel"}
+              </button>
+            )}
           </div>
           {linked && !setting.said && <p className="small computers-said ok">{linked} is linked. It's in the list below.</p>}
+          {how === "nearby" && <NearbyLink />}
           {how === "ssh" && (
             <div className="computers-add-body">
-              <p className="muted small">Friday connects with your own SSH (your ~/.ssh/config, keys and ssh-agent), installs Friday there in a folder of its own, and leaves it running as a service, linked to this computer. A Mac or Linux machine with Node.js 22 and git.</p>
+              <p className="muted small">For an always-on Mac or Linux machine. Friday signs in with your own SSH, installs itself there and keeps running as a service. It needs Node.js 22 and git.</p>
               <div className="computers-add-row">
                 {hosts.length > 0 && <Picker className="computers-host-pick" value={hosts.includes(host) ? host : ""} label="A host from your SSH config" placeholder="Your SSH hosts" onChange={(h) => setHost(h)} options={hosts.map((h) => ({ value: h, label: h }))} />}
                 <input className="input computers-host" value={host} placeholder="user@machine or an alias" spellCheck={false} aria-label="The machine, as ssh takes it" onChange={(e) => setHost(e.target.value)} onKeyDown={(e) => e.key === "Enter" && host.trim() && !setting.busy && void overSsh()} />
@@ -191,7 +200,7 @@ export function ComputersSettings({ adding = false, onDone }: { /** Opened from 
           )}
           {how === "command" && link?.unix && (
             <div className="computers-add-body">
-              <p className="muted small">Paste this in a terminal on the other machine. It needs Node.js 22, runs Friday there with nothing to open, and stays linked while it runs.</p>
+              <p className="muted small">Paste this in a terminal on the other machine. It runs Friday there with nothing to open, and stays linked while it runs. It needs Node.js 22.</p>
               <div className="computers-link-row">
                 <Segmented value={shell} options={[["unix", "Mac or Linux"], ["windows", "Windows"]]} onChange={setShell} className="computers-shell" />
               </div>
@@ -201,27 +210,24 @@ export function ComputersSettings({ adding = false, onDone }: { /** Opened from 
                 </code>
                 <CopyMark text={(shell === "unix" ? link.unix : link.windows) ?? ""} label="the command" />
               </div>
-              <span className="muted small">Its code works once, for ten minutes. To keep it running after a restart, add it over SSH instead.</span>
+              <span className="muted small computers-foot">Works once, for ten minutes. To keep it after a restart, use SSH.</span>
+            </div>
+          )}
+          {how === "app" && link && (
+            <div className="computers-add-body">
+              <p className="muted small">On the other computer, open Friday › Settings › Other computers, and paste this under “Use this computer from another Friday”.</p>
+              <div className="computers-link-row">
+                <code className="computers-link-text" title={link.link}>
+                  {link.link}
+                </code>
+                <CopyMark text={link.link} label="the link" />
+              </div>
+              <span className="muted small computers-foot">Works once, for ten minutes. It carries this computer's certificate, which the other one checks.</span>
             </div>
           )}
         </div>
       )}
-      {link && how === "app" && (
-        <div className="computers-link">
-          <ol className="computers-steps small">
-            <li>On the other computer, open Friday › Settings › Computer.</li>
-            <li>Under Your computers, paste this link where it says “Use this computer from another Friday”.</li>
-          </ol>
-          <div className="computers-link-row">
-            <code className="computers-link-text" title={link.link}>
-              {link.link}
-            </code>
-            <CopyMark text={link.link} label="the link" />
-          </div>
-          <span className="muted small">It works once, for ten minutes, and carries this computer's certificate, which the other one checks.</span>
-        </div>
-      )}
-      {state.computers.length > 0 && (
+      {!adding && state.computers.length > 0 && (
         <ul className="computers-list" aria-label="Your other computers">
           {state.computers.map((c) => (
             <li key={c.id}>
@@ -239,8 +245,9 @@ export function ComputersSettings({ adding = false, onDone }: { /** Opened from 
                   {[c.detail, c.connected ? "" : c.problem ? "" : `last seen ${relTime(c.seen) === "now" ? "just now" : `${relTime(c.seen)} ago`}`, c.version && c.version !== state.version ? versions(c.version, state.version) : ""].filter(Boolean).join(" · ")}
                 </span>
               </span>
+              {/* Its coding tools are on the map above; only what stops it is said here. */}
               <span className={`small computers-tools${c.problem ? " bad" : " muted"}`} title={c.problem ?? ""}>
-                {c.connected ? tools(c).join(" · ") || "No coding tool signed in" : (c.problem ?? "Not connected")}
+                {c.connected ? "" : (c.problem ?? "Not connected")}
               </span>
               <button type="button" className="link-btn small" onClick={() => setNaming({ id: c.id, name: c.name })} aria-label={`Rename ${c.name}`}>
                 Rename

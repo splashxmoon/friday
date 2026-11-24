@@ -10,6 +10,7 @@ import { describeEnvironment, folderVars } from "./environment.js";
 import { killTree, NON_INTERACTIVE, readBackground, shellLine, startBackground, stopBackground } from "./background.js";
 import { applyPatch, baseCopy, toplevel, treeOf, branchesOf, checkpoint, commitAll, compareOf, diffTrees, discardFiles, gitDiffOf, logOf, prDetailJson, prFailures, prFeedback, prStatusJson, publish, pullOf, renameBranchOf, remoteOf, restore, showOf, stageFiles, statusOf, switchTo, unstageFiles, dropBaseCopy } from "./git.js";
 import { templatedBody } from "./pr-template-read.js";
+import { prProof, type PrProofResult } from "./pr-proof.js";
 
 /**
  * Reading the folder a coding agent is working in, for everyone else.
@@ -256,7 +257,11 @@ export async function readRepo(root: string, req: RepoRequest): Promise<string> 
       if (req.op === "switch") return JSON.stringify(await switchTo(base, req.branch ?? "", !!req.create));
       if (req.op === "commit") return JSON.stringify(await commitAll(base, req.message ?? "", req.branch || undefined, req.only));
       const [title, ...rest] = (req.message ?? "").split("\n");
-      return JSON.stringify(await publish(base, { pr: !!req.pr, title: title ?? "", body: req.pr ? await templatedBody(base, rest.join("\n").trim(), req.prParts) : rest.join("\n").trim(), ...(req.base ? { base: req.base } : {}) }));
+      const published = await publish(base, { pr: !!req.pr, title: title ?? "", body: req.pr ? await templatedBody(base, rest.join("\n").trim(), req.prParts) : rest.join("\n").trim(), ...(req.base ? { base: req.base } : {}) });
+      // The session's proof clip in the description it was just opened with (Arun, 2026-11-21: "add clips to PRs"): its GIFs onto
+      // friday-proof and the proof block added. A clip that can't go in says why beside a pull request that opened all the same.
+      const proof = req.pr && req.proof && published.prCreated && published.prUrl ? await publishedProof(base, published.prUrl, req.proof) : undefined;
+      return JSON.stringify({ ...published, ...(proof ? { proof } : {}) });
     } catch (e) {
       return JSON.stringify({ error: (e as Error).message });
     }
@@ -642,4 +647,15 @@ Couldn't start the shell: ${err.message}`);
 ${body || "(no output)"}`);
     });
   });
+}
+
+/** A pull request just opened, given the session's proof clip (req.proof, JSON), or why it couldn't be. */
+async function publishedProof(cwd: string, url: string, raw: string): Promise<PrProofResult> {
+  try {
+    const p = JSON.parse(raw) as { page?: string; marks?: { atMs: number; label: string }[]; summary?: string; files?: string[]; gifs?: { after?: string; before?: string } };
+    if (!p?.gifs?.after) return { error: "The session's clip has no GIF." };
+    return await prProof({ cwd, pr: { url }, page: p.page ?? "/", ...(p.marks ? { marks: p.marks } : {}), ...(typeof p.summary === "string" && p.summary ? { summary: p.summary } : {}), ...(Array.isArray(p.files) ? { files: p.files.filter((f): f is string => typeof f === "string") } : {}), gifs: { after: p.gifs.after, ...(p.gifs.before ? { before: p.gifs.before } : {}) } });
+  } catch {
+    return { error: "The session's clip couldn't be read." };
+  }
 }

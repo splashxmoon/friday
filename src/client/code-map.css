@@ -1,0 +1,191 @@
+/* Deep Dive's code map (CodeMap.tsx), rebuilt 2026-11-23: a quiet diagram in Friday's own tokens, both themes. Parts are ink on
+   card; colour is kept for one job, a part's links: blue for what it uses, amber for what uses it. */
+
+.cm {
+  --cm-uses: var(--live); --cm-by: var(--amber);
+  --cm-ease: var(--ease-out, cubic-bezier(.2, .8, .2, 1));
+  display: flex; flex-direction: column; gap: 14px; height: calc(100cqh - 24px); min-height: 520px; padding-bottom: 12px;
+}
+
+/* Heading: the name, its size, and the sentence saying how the code runs. */
+.cm-head { display: flex; align-items: flex-start; gap: 16px; min-width: 0; }
+.cm-title { display: flex; flex: 1; flex-direction: column; gap: 4px; min-width: 0; }
+.cm-title h2 { display: flex; align-items: baseline; gap: 10px; margin: 0; color: var(--ink); font: 600 16px/22px var(--font); }
+.cm-title h2 span { overflow: hidden; color: var(--text-muted); font-size: 12.5px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.cm-title p { max-width: 96ch; margin: 0; color: var(--ink-2); font-size: 13.5px; line-height: 20px; text-wrap: balance; }
+.cm-tools { display: flex; flex: none; align-items: center; gap: 8px; }
+
+.cm-find { position: relative; display: flex; width: 210px; align-items: center; gap: 7px; height: 32px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--r-md); color: var(--text-muted); transition: border-color var(--t-hover); }
+.cm-find:focus-within { border-color: var(--border-focus); }
+.cm-find input { flex: 1; min-width: 0; border: 0; outline: none; background: none; color: var(--ink); font: 400 13px/18px var(--font); }
+.cm-find input::placeholder { color: var(--text-muted); }
+.cm-find-list { position: absolute; top: calc(100% + 4px); right: 0; left: 0; z-index: 6; margin: 0; padding: 4px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--glass-float, var(--card)); box-shadow: var(--shadow-pop); list-style: none; -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); }
+.cm-find-list button { display: flex; width: 100%; flex-direction: column; align-items: flex-start; padding: 5px 8px; border: 0; border-radius: 6px; background: none; color: var(--ink); font: 500 12.5px/17px var(--font); text-align: left; cursor: pointer; }
+.cm-find-list [aria-selected="true"] button, .cm-find-list button:hover { background: var(--hover); }
+
+/* Body: the stage, and the chosen part's panel beside it. */
+.cm-body { display: flex; flex: 1; gap: 12px; min-height: 0; }
+.cm-frame { position: relative; display: flex; flex: 1; min-width: 0; flex-direction: column; overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--panel); }
+.cm-stage { position: relative; flex: 1; min-height: 0; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.cm-plane { position: relative; min-width: 100%; }
+
+/* Layers: each band's name and what it means, a small arrow between bands showing which way the code runs. */
+.cm-band { position: absolute; z-index: 1; display: flex; align-items: baseline; gap: 6px; height: 22px; pointer-events: none; }
+.cm-band b, .cm-band span { padding: 0 4px; border-radius: 4px; background: var(--panel); }
+.cm-band b { margin-left: -4px; }
+.cm-band b { color: var(--ink); font: 600 12.5px/18px var(--font); }
+.cm-band span { min-width: 0; overflow: hidden; color: var(--text-muted); font-size: 12px; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.cm-band-down { position: absolute; top: -20px; left: 50%; color: var(--text-muted); opacity: .7; transform: translateX(-50%); }
+/* A ring of parts that use one another: one soft box round them, said in its corner. */
+.cm-ring { position: absolute; border-radius: 14px; background: color-mix(in srgb, var(--ink) 3.5%, transparent); pointer-events: none; }
+.cm-ring { z-index: 0; }
+.cm-ring span { position: absolute; z-index: 1; top: 5px; left: 8px; padding: 0 4px; border-radius: 4px; background: color-mix(in srgb, var(--ink) 3.5%, var(--panel)); color: var(--text-muted); font-size: 11.5px; line-height: 16px; }
+
+/* A part: a block in Layers, a chip when it stands apart, a pill in Web. One element, so it slides and reshapes between drawings. */
+.cm-part {
+  position: absolute; top: 0; left: 0; display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 10px 12px; overflow: visible;
+  border: 1px solid var(--border-strong); border-radius: 10px; background: var(--card); color: var(--ink); font: inherit; text-align: left; cursor: pointer;
+  box-shadow: 0 1px 2px rgb(0 0 0 / .04); transition: border-color var(--t-hover), background-color var(--t-hover), opacity .2s, box-shadow .2s;
+}
+.cm-stage.is-ready .cm-part { transition: transform .44s var(--cm-ease), width .44s var(--cm-ease), height .44s var(--cm-ease), border-radius .44s var(--cm-ease), padding .44s var(--cm-ease), border-color var(--t-hover), background-color var(--t-hover), opacity .2s, box-shadow .2s; }
+.cm-part:hover { border-color: var(--border-hover); }
+.cm-part:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+.cm-part-name { display: flex; align-items: center; gap: 7px; min-width: 0; font: 600 13px/18px var(--font); white-space: nowrap; }
+.cm-part-icon { flex: none; color: var(--text-muted); }
+.cm-part-dot { display: none; flex: none; width: var(--dot); height: var(--dot); border-radius: 50%; background: color-mix(in srgb, var(--ink) 26%, transparent); }
+.cm-part-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.cm-part-say { flex: none; display: -webkit-box; overflow: hidden; color: var(--ink-2); font-size: 12px; line-height: 16.5px; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.cm-part-meta { display: flex; justify-content: space-between; gap: 8px; margin-top: auto; color: var(--text-muted); font-size: 11.5px; line-height: 15px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.cm-part.is-block { justify-content: flex-start; }
+.cm-part.is-chip, .cm-part.is-pill { padding: 0 12px 0 10px; border-radius: 999px; }
+.cm-part.is-chip .cm-part-name, .cm-part.is-pill .cm-part-name { font-weight: 500; font-size: 12.5px; }
+.cm-part.is-pill .cm-part-icon { display: none; }
+.cm-part.is-pill .cm-part-dot { display: block; }
+.cm-part.is-pill .cm-part-name { gap: 8px; }
+
+/* Chosen, pointed at, and the parts at the other end of its links. */
+.cm-part.is-sel { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink), 0 6px 18px rgb(0 0 0 / .08); }
+.cm-part.is-focus:not(.is-sel) { border-color: var(--border-focus); box-shadow: 0 4px 14px rgb(0 0 0 / .07); }
+.cm-part.is-uses { border-color: color-mix(in srgb, var(--cm-uses) 55%, var(--border-strong)); background: color-mix(in srgb, var(--cm-uses) 6%, var(--card)); }
+.cm-part.is-by { border-color: color-mix(in srgb, var(--cm-by) 55%, var(--border-strong)); background: color-mix(in srgb, var(--cm-by) 6%, var(--card)); }
+.cm-part.is-uses.is-by { border-color: color-mix(in srgb, var(--cm-uses) 45%, var(--cm-by)); background: color-mix(in srgb, var(--cm-uses) 4%, color-mix(in srgb, var(--cm-by) 4%, var(--card))); }
+.cm-part.is-dim { opacity: .42; }
+.cm-web .cm-part.is-dim { opacity: .3; }
+.cm-part.is-peek { border-color: var(--ink); }
+/* How many imports run each way, on the part at the other end. */
+.cm-tags { position: absolute; top: -9px; right: 10px; display: flex; gap: 4px; pointer-events: auto; }
+.cm-tag { min-width: 20px; height: 18px; padding: 0 6px; border-radius: 999px; color: #fff; font: 600 11px/18px var(--font); text-align: center; font-variant-numeric: tabular-nums; }
+.cm-tag.uses { background: var(--cm-uses); }
+.cm-tag.by { background: var(--cm-by); }
+html.dark .cm-tag { color: #141414; }
+
+/* Lines: in Layers only a part's own, in Web all of them as faint threads with a part's own drawn firm. */
+.cm-lines { position: absolute; top: 0; left: 0; overflow: visible; pointer-events: none; transition: opacity .18s; }
+/* Layers' lines keep to the gutters (code-map.ts routeLayers), so they run under the blocks and their counts; where two cross, or
+   pass a band's name, each sits on a thin halo of the drawing's ground. */
+.cm-halo { fill: none; stroke: var(--panel); stroke-width: 5px; stroke-linecap: round; opacity: .9; }
+.cm-lines.is-settling { opacity: 0; transition: none; }
+.cm-line { fill: none; stroke: color-mix(in srgb, var(--ink) 14%, transparent); stroke-linecap: round; transition: stroke .15s, opacity .15s; }
+.cm-line.uses { stroke: var(--cm-uses); }
+.cm-line.by { stroke: var(--cm-by); }
+.cm-line.dim { opacity: .3; }
+.cm-head-uses { fill: var(--cm-uses); }
+.cm-head-by { fill: var(--cm-by); }
+.cm-layers .cm-line { stroke-width: 1.6px !important; }
+
+/* The line along the foot: what's shown, live. */
+.cm-status { display: flex; flex: none; align-items: center; gap: 14px; min-height: 36px; margin: 0; padding: 0 14px; overflow: hidden; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 12px; line-height: 16px; white-space: nowrap; }
+.cm-status b { overflow: hidden; color: var(--ink); font-weight: 600; text-overflow: ellipsis; }
+.cm-status-key { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.cm-status-say { min-width: 0; overflow: hidden; color: var(--text-muted); text-overflow: ellipsis; }
+.cm-status-esc { margin-left: auto; padding-left: 8px; }
+.cm-key { display: inline-block; flex: none; width: 14px; height: 2px; border-radius: 1px; }
+.cm-key.uses { background: var(--cm-uses); }
+.cm-key.by { background: var(--cm-by); }
+
+/* The chosen part, beside the drawing: who it is, then three tabs that are its numbers, then one ranked list. The tabs stay put while
+   the list scrolls under them. */
+.cm-panel { display: flex; width: 320px; flex: none; flex-direction: column; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--card); scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; animation: cm-panel-in .22s var(--cm-ease); }
+@keyframes cm-panel-in { from { opacity: 0; transform: translateX(8px); } }
+.cm-panel-head { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px 14px; }
+.cm-panel-title { display: flex; align-items: flex-start; gap: 8px; }
+.cm-panel-title h3 { flex: 1; min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--ink); font: 600 16px/22px var(--font); letter-spacing: -.005em; }
+.cm-panel-title .icon-btn { margin: -1px -6px 0 0; }
+/* Where it sits and how big, as one quiet line of small facts. */
+.cm-where { display: flex; flex-wrap: wrap; gap: 4px 0; margin: -6px 0 0; color: var(--text-muted); font-size: 12px; line-height: 17px; font-variant-numeric: tabular-nums; }
+.cm-where span + span::before { content: "·"; margin: 0 6px; opacity: .7; }
+.cm-where span:first-child { color: var(--ink-2); font-weight: 500; }
+.cm-purpose { margin: 0; color: var(--ink-2); font-size: 13px; line-height: 19.5px; text-wrap: pretty; }
+.cm-read { display: flex; align-items: center; gap: 8px; height: 32px; margin-top: 2px; padding: 0 10px; border: 0; border-radius: var(--r-md); background: var(--hover); color: var(--ink); font: 500 12.5px/18px var(--font); cursor: pointer; transition: background-color var(--t-hover); }
+.cm-read span { flex: 1; text-align: left; }
+.cm-read svg { flex: none; color: var(--text-muted); }
+.cm-read:hover { background: var(--hover-strong); }
+
+/* The tabs: each is a count and what it counts; the open one is underlined in its colour on the map. */
+.cm-tabs { position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: repeat(3, 1fr); flex: none; padding: 0 8px; border-block: 1px solid var(--border); background: var(--card); }
+.cm-tab { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 0; padding: 9px 8px 10px; border: 0; background: none; color: var(--text-muted); font: inherit; text-align: left; cursor: pointer; transition: color var(--t-hover); }
+.cm-tab b { color: var(--ink-2); font: 600 17px/22px var(--font); font-variant-numeric: tabular-nums; transition: color var(--t-hover); }
+.cm-tab span { font-size: 11.5px; line-height: 15px; white-space: nowrap; }
+.cm-tab::after { content: ""; position: absolute; right: 8px; bottom: -1px; left: 8px; height: 2px; border-radius: 2px 2px 0 0; background: var(--ink); opacity: 0; transform: scaleX(.6); transition: opacity .18s, transform .22s var(--cm-ease); }
+.cm-tab.uses::after { background: var(--cm-uses); }
+.cm-tab.by::after { background: var(--cm-by); }
+.cm-tab:hover:not(:disabled) b, .cm-tab:hover:not(:disabled) { color: var(--ink); }
+.cm-tab[aria-selected="true"] { color: var(--ink-2); }
+.cm-tab[aria-selected="true"] b { color: var(--ink); }
+.cm-tab[aria-selected="true"]::after { opacity: 1; transform: none; }
+.cm-tab:disabled { cursor: default; opacity: .45; }
+.cm-tab:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -4px; border-radius: 8px; }
+
+.cm-tabpanel { display: flex; flex-direction: column; gap: 8px; padding: 12px 10px 14px; }
+/* Light the whole chain on the map: a line of what it is, and a switch. */
+.cm-chain { display: flex; align-items: center; gap: 12px; margin: 0 0 4px; padding: 9px 10px 9px 12px; border: 1px solid var(--border); border-radius: 10px; cursor: pointer; transition: border-color var(--t-hover), background-color var(--t-hover); }
+.cm-chain > span { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 1px; }
+.cm-chain b { color: var(--ink); font: 500 12.5px/17px var(--font); font-variant-numeric: tabular-nums; }
+.cm-chain small { color: var(--text-muted); font-size: 11.5px; line-height: 15px; }
+.cm-chain:hover { border-color: var(--border-strong); }
+.cm-chain:has([aria-checked="true"]).uses { border-color: color-mix(in srgb, var(--cm-uses) 45%, var(--border)); background: color-mix(in srgb, var(--cm-uses) 5%, transparent); }
+.cm-chain:has([aria-checked="true"]).by { border-color: color-mix(in srgb, var(--cm-by) 45%, var(--border)); background: color-mix(in srgb, var(--cm-by) 5%, transparent); }
+.cm-list-head { display: flex; justify-content: space-between; gap: 12px; margin: 0; padding: 0 8px; color: var(--text-muted); font-size: 11.5px; line-height: 16px; }
+
+/* A ranked row: the row is its own bar, tinted the colour of its lines, the name over it and the count at its end. */
+.cm-rows, .cm-files { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.cm-row, .cm-file { position: relative; isolation: isolate; display: grid; width: 100%; align-items: center; column-gap: 10px; overflow: hidden; border: 0; border-radius: 7px; background: none; color: var(--ink); text-align: left; cursor: pointer; transition: background-color var(--t-hover); }
+.cm-row { grid-template-columns: minmax(0, 1fr) auto; height: 30px; padding: 0 8px; }
+.cm-row-bar { position: absolute; inset: 0 auto 0 0; z-index: -1; border-radius: 7px; background: color-mix(in srgb, var(--ink) 6%, transparent); transition: background-color var(--t-hover); }
+.cm-rows.uses .cm-row-bar { background: color-mix(in srgb, var(--cm-uses) 10%, transparent); }
+.cm-rows.by .cm-row-bar { background: color-mix(in srgb, var(--cm-by) 13%, transparent); }
+.cm-row:hover, .cm-file:hover { background: var(--hover); }
+.cm-rows.uses .cm-row:hover .cm-row-bar { background: color-mix(in srgb, var(--cm-uses) 18%, transparent); }
+.cm-rows.by .cm-row:hover .cm-row-bar { background: color-mix(in srgb, var(--cm-by) 21%, transparent); }
+.cm-row:focus-visible, .cm-file:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
+.cm-row-name { overflow: hidden; font: 500 12.5px/17px var(--font); text-overflow: ellipsis; white-space: nowrap; }
+.cm-row-n, .cm-file-n { color: var(--ink-2); font-size: 12px; line-height: 17px; text-align: right; font-variant-numeric: tabular-nums; }
+/* A file: its name, its folder after it in grey, and how many files use it. */
+.cm-list-head code { color: var(--ink-2); font: 500 11.5px/16px var(--mono); }
+.cm-file { grid-template-columns: auto minmax(0, 1fr) auto; height: 30px; padding: 0 8px; column-gap: 8px; }
+.cm-file.is-found { box-shadow: inset 0 0 0 1px var(--border-focus); }
+.cm-file-name { max-width: 190px; overflow: hidden; font: 500 12.5px/17px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.cm-file-dir { min-width: 0; overflow: hidden; color: var(--text-muted); font: 400 11.5px/16px var(--font); text-overflow: ellipsis; white-space: nowrap; }
+.cm-files .cm-row-bar { background: color-mix(in srgb, var(--ink) 5.5%, transparent); }
+/* On a dark ground the tints need more colour to read as blue and amber rather than grey and brown. */
+html.dark .cm-rows.uses .cm-row-bar { background: color-mix(in srgb, var(--cm-uses) 17%, transparent); }
+html.dark .cm-rows.by .cm-row-bar { background: color-mix(in srgb, var(--cm-by) 19%, transparent); }
+html.dark .cm-rows.uses .cm-row:hover .cm-row-bar { background: color-mix(in srgb, var(--cm-uses) 25%, transparent); }
+html.dark .cm-rows.by .cm-row:hover .cm-row-bar { background: color-mix(in srgb, var(--cm-by) 27%, transparent); }
+.cm-more { align-self: flex-start; margin-left: 8px; padding: 2px 0; border: 0; background: none; color: var(--text-muted); font: 500 12.5px/18px var(--font); cursor: pointer; }
+.cm-more:hover { color: var(--ink); }
+.cm-quiet { margin: 0; padding: 0 8px; color: var(--text-muted); font-size: 12.5px; line-height: 18px; }
+
+html.reduce-motion .cm-stage .cm-part, html.reduce-motion .cm-panel { transition: none; animation: none; }
+@media (prefers-reduced-motion: reduce) { .cm-stage .cm-part, .cm-stage.is-ready .cm-part, .cm-panel { transition: none; animation: none; } }
+
+/* Narrow: the tools under the heading, the chosen part as a sheet over the drawing's foot. */
+@media (max-width: 860px) {
+  .cm { height: auto; min-height: 0; }
+  .cm-head { flex-direction: column; gap: 10px; }
+  .cm-tools { width: 100%; }
+  .cm-find { flex: 1; width: auto; }
+  .cm-body { position: relative; height: 72vh; }
+  .cm-panel { position: absolute; right: 8px; bottom: 44px; left: 8px; z-index: 5; width: auto; max-height: 62%; box-shadow: var(--shadow-pop); }
+  .cm-status-esc { display: none; }
+}
