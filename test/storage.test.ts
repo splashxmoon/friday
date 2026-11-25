@@ -11,6 +11,7 @@ import test from "node:test";
 
 const home = mkdtempSync(path.join(tmpdir(), "friday-storage-"));
 process.env.HOME = home;
+process.env.USERPROFILE = home; // where Windows reads the home folder from
 process.env.FRIDAY_HOME = path.join(home, ".friday");
 process.env.FRIDAY_WORKTREES = path.join(home, ".friday", "worktrees");
 const { claudeKey, measure, retireCopy, retireOlder, shotSid, tidy } = await import("../src/runner/storage.js");

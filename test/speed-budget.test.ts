@@ -169,8 +169,11 @@ test("a new event costs about the same in a 20,000-event session as in a 1,000-e
     big!.ms <= budget,
     `A new event costs ${big!.ms.toFixed(1)} ms in a 20,000-event session against ${small!.ms.toFixed(1)} ms in a 1,000-event one (${times(big!.ms, small!.ms)}, budget 4×): something the feed does per event goes over the whole log. Measure with \`npx tsx --import ./test/css.mjs scripts/perf-feed.tsx\` and look at what Activity.tsx works out on each draw (log-memo.ts, the group carry in test/feed-group-carry.test.ts, agent-order.ts).`,
   );
-  // And never a long task by itself, however slow the machine: 60 ms is fifteen times what it costs on a laptop.
-  assert.ok(big!.ms < 60, `A new event costs ${big!.ms.toFixed(1)} ms in a 20,000-event session, over 60 ms even on a slow machine: see scripts/perf-feed.tsx.`);
+  // And never a long task by itself: 60 ms is fifteen times what it costs on a laptop. Held where the machine is of a laptop's speed
+  // (a 1,000-event feed under 10 ms); on one ten times slower, as GitHub's macOS runners are (40 ms at 1,000, 2026-11-25), the 4×
+  // budget above is what says the feed grew, and a fixed 60 ms would only say the machine is slow.
+  if (small!.ms < 10) assert.ok(big!.ms < 60, `A new event costs ${big!.ms.toFixed(1)} ms in a 20,000-event session, over 60 ms: see scripts/perf-feed.tsx.`);
+  else t.diagnostic(`a slow machine (${small!.ms.toFixed(1)} ms at 1,000 events): the 60 ms ceiling is left to the 4× budget`);
 });
 
 test("Friday starts on a long history about as fast as on none, holds little more of it in memory, and a 20,000-event session's opening message stays small", { timeout: 120_000 }, (t) => {

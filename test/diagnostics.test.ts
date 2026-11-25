@@ -171,10 +171,13 @@ test("a process with the log installed writes its errors there and carries on af
 test("Copy diagnostics: this computer's own page only, redacted, with the version, sessions and the last of the log", async (t) => {
   // Friday's data in a home of its own, as the e2e harness does: the report says it as ~.
   const fakeHome = path.join(sandbox, "person");
-  const realHome = process.env.HOME;
+  // HOME, and USERPROFILE for Windows, where the home folder is read from it.
+  const real = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
   process.env.HOME = fakeHome;
+  process.env.USERPROFILE = fakeHome;
   t.after(() => {
-    process.env.HOME = realHome;
+    for (const [k, v] of Object.entries(real)) if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
   });
   const home = path.join(fakeHome, ".friday");
   await mkdir(path.dirname(logPath(home)), { recursive: true });
@@ -191,15 +194,15 @@ test("Copy diagnostics: this computer's own page only, redacted, with the versio
   assert.match(b.text, /^Friday diagnostics\n/);
   assert.match(b.text, /Friday \d+\.\d+\.\d+ \(open source, from the command line\)/);
   assert.match(b.text, /System: (macOS|Windows|Linux) /);
-  assert.match(b.text, /Data folder: ~\/\.friday/);
+  assert.match(b.text, /Data folder: ~[\\/]\.friday/);
   assert.match(b.text, /Sessions: 0/);
-  assert.match(b.text, /Log file: ~\/\.friday\/diagnostics\/friday\.log/);
-  assert.match(b.text, /push failed with \[redacted\] for ~\/\.friday\/worktrees\/x/);
+  assert.match(b.text, /Log file: ~[\\/]\.friday[\\/]diagnostics[\\/]friday\.log/);
+  assert.match(b.text, /push failed with \[redacted\] for ~[\\/]\.friday\/worktrees\/x/);
   assert.ok(!b.text.includes(planted), "the planted token is gone");
   assert.ok(!b.text.includes(fakeHome), "the home folder never appears as it is");
 
   const where = (await (await fetch(`${friday.url}/api/local/diagnostics?path=1`)).json()) as { logFile: string; exists: boolean };
-  assert.deepEqual(where, { logFile: logPath(home), shown: "~/.friday/diagnostics/friday.log", exists: true });
+  assert.deepEqual(where, { logFile: logPath(home), shown: ["~", ".friday", "diagnostics", "friday.log"].join(path.sep), exists: true });
 
   // Another site's page, or a name that only resolves here (DNS rebinding): refused before anything is read.
   const port = new URL(friday.url).port;

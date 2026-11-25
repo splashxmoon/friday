@@ -25,7 +25,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/demo.gif" alt="A demo of Friday on a sample project: six coding agents share one session. Cursor tells Codex a route moved, Claude Code runs out of usage and Friday hands its task to Codex, which reruns the tests and finishes with changes ready to review" width="960" />
+  <img src="docs/assets/site/hero.png" alt="Friday on a sample storefront project: the checkout-v2 thread with a team of three, Amp and Claude Code 2 working while Codex answers whether 3-D Secure is covered by a test, and the Agents panel showing who is done and who is working" width="960" />
 </p>
 
 Think of it as a group chat and a task board for your AI coding agents.
@@ -38,14 +38,30 @@ And when one agent runs out of usage, another picks up its task with a record of
 
 <table>
 <tr>
-<td width="50%"><img src="docs/assets/agents-talk.png" alt="Codex telling Cursor about a rename, and Gemini asking Claude Code whether a discount comes off before or after tax" /></td>
-<td width="50%"><img src="docs/assets/task-board.png" alt="Claude Code's task board: the price maths moved and checked, Gemini on the tests, Cursor on the checkout page, the changelog waiting on them" /></td>
+<td width="50%"><img src="docs/assets/site/talk.png" alt="Claude Code asks Codex whether the 3-D Secure path on checkout-v2 is covered by a test, and Codex's answer comes back in the chat" /></td>
+<td width="50%"><img src="docs/assets/site/board.png" alt="Team tasks: Cursor and Kilo working on guest checkout and the 3-D Secure wait, four more up next, each waiting on the one before" /></td>
 </tr>
 <tr>
-<td width="50%" valign="top"><sub><b>They talk.</b> Codex tells Cursor what it renamed; Gemini asks Claude Code whether a discount comes off before or after tax.</sub></td>
-<td width="50%" valign="top"><sub><b>They split the work.</b> Claude Code splits the job; each task is checked before it counts as done.</sub></td>
+<td width="50%" valign="top"><sub><b>They talk.</b> One agent asks another what it found and gets the answer back in the chat.</sub></td>
+<td width="50%" valign="top"><sub><b>They split the work.</b> Every task, who has it and where it stands, on one board.</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/assets/site/review.png" alt="Friday IDE: a self-review of checkout.ts with the fixed bug as a note on line 12 and the review card: three fixed, one for you" /></td>
+<td width="50%"><img src="docs/assets/site/own-copy.png" alt="Adding Kilo to the storefront repo on its own worktree and branch" /></td>
+</tr>
+<tr>
+<td width="50%" valign="top"><sub><b>They check each other.</b> An agent reviews the change and leaves its findings on the lines before you read it.</sub></td>
+<td width="50%" valign="top"><sub><b>Each in its own copy.</b> Every agent gets its own worktree and branch, so nobody overwrites anybody.</sub></td>
 </tr>
 </table>
+
+### Friday IDE
+
+Your editor, terminal and extensions, with every agent's chat beside them. Edit in place with ⌘K, race two or three coding tools on one ask and keep the best, and get a self-review before the pull request.
+
+<p align="center">
+  <img src="docs/assets/site/ide.png" alt="Friday IDE: checkout.ts open in the editor, and three coding tools racing one ask in the chat beside it, each with Compare and Keep" width="960" />
+</p>
 
 ## Get started in five minutes
 
@@ -102,7 +118,7 @@ Friday is MIT licensed, has no account and no model of its own, and listens on `
 
 Keep AI teammates on your computer, each with a name, a role, a memory and its own folder, on one of your coding tools. Give the crew a goal and the lead plans it on a board, or `@` one of them. Rooms with side threads, access per teammate (Read only, Ask before changes, Full access), Away until a time (teammates note their assumptions and a brief waits for you; it works while your computer stays on and Friday is running), a backup tool when one runs out, and workflows drawn as steps.
 
-<img src="docs/assets/crew.png" alt="The Crew room: Maya gives the crew a goal, Nova the lead plans it and posts a board, Kit has fixed the bugs and Nova is checking them, and Juno is writing the release notes" width="960" />
+<img src="docs/assets/site/crew-room.png" alt="A crew room: Kit builds the pricing page and reports back to Nova in one card, and Nova sums up" width="960" />
 </details>
 
 <details>
